@@ -1275,6 +1275,20 @@ func (s *TranscodeSession) GetSegment(name string) (string, error) {
 
 // Close terminates the ffmpeg process and removes the temporary output directory.
 func (s *TranscodeSession) Close() error {
+	return s.shutdown(true)
+}
+
+// CloseProcess terminates the ffmpeg process but leaves the output directory in
+// place. It is used when another session owns the same output directory (e.g. a
+// concurrent reconstruct race loser): tearing down this duplicate must not wipe
+// the segments and init.mp4 the winning session is actively serving.
+func (s *TranscodeSession) CloseProcess() error {
+	return s.shutdown(false)
+}
+
+// shutdown kills the ffmpeg process and, when removeOutput is true, removes the
+// temporary output directory.
+func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	s.StopThrottler()
 	// Cancel the context to kill the process (no mutex needed for cancel).
 	if s.cancel != nil {
@@ -1295,7 +1309,7 @@ func (s *TranscodeSession) Close() error {
 	s.running = false
 
 	// Clean up temporary directory.
-	if s.outputDir != "" {
+	if removeOutput && s.outputDir != "" {
 		if err := os.RemoveAll(s.outputDir); err != nil {
 			return fmt.Errorf("remove output dir: %w", err)
 		}

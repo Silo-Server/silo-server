@@ -13,7 +13,11 @@ type playbackCommandRecord struct {
 	Name      playback.CommandName
 }
 
-func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session) error {
+// stopPlaybackSession stops a session. userInitiated must be true only for a
+// genuine user/admin stop (the recipe card is then deleted); false for system
+// teardown such as an ffmpeg-exit cleanup, where the card is kept so the client
+// can reconstruct.
+func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, userInitiated bool) error {
 	if h == nil || session == nil || session.ID == "" {
 		return playback.ErrSessionNotFound
 	}
@@ -21,11 +25,11 @@ func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *play
 	if err := h.sessionMgr.StopSession(session.ID); err != nil {
 		return err
 	}
-	h.finalizeSessionStop(ctx, session, true, "stop")
+	h.finalizeSessionStop(ctx, session, true, "stop", userInitiated)
 	return nil
 }
 
-func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID string) error {
+func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID string, userInitiated bool) error {
 	if h == nil || sessionID == "" {
 		return playback.ErrSessionNotFound
 	}
@@ -33,7 +37,7 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 	if err != nil {
 		return err
 	}
-	return h.stopPlaybackSession(ctx, session)
+	return h.stopPlaybackSession(ctx, session, userInitiated)
 }
 
 func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *playback.Session) error {

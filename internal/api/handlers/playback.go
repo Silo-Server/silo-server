@@ -136,10 +136,16 @@ type PlaybackHandler struct {
 	// playbackConfig(), which falls back to defaults when unset.
 	PlaybackConfig func() config.PlaybackConfig
 	FFmpegLogSink  playback.FFmpegLogSink
-	transcodeMu             sync.RWMutex
-	transcodes              map[string]*playback.TranscodeSession
-	realtimeCommandMu       sync.Mutex
-	realtimeCommands        map[string]playbackCommandRecord
+	// RecipeStore persists per-session "recipe cards" so a transcode can be
+	// reconstructed after a server restart. When nil or disabled (no Redis),
+	// reconstruct is off and behavior is identical to before.
+	RecipeStore       playback.RecipeStore
+	realtimeCommandMu sync.Mutex
+	realtimeCommands  map[string]playbackCommandRecord
+	// tm owns the transcode-session lifecycle (live map, recipe cards, and
+	// restart reconstruct) shared with the jellycompat handler. The handler
+	// delegates all transcode-session and recipe operations to it.
+	tm *playback.TranscodeManager
 }
 
 type PlaybackWatchScrobbler interface {
@@ -158,16 +164,52 @@ type sessionExpirationHookSetter interface {
 func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathResolver) *PlaybackHandler {
 	h := &PlaybackHandler{
 		sessionMgr:       sessionMgr,
-		transcodes:       make(map[string]*playback.TranscodeSession),
 		realtimeCommands: make(map[string]playbackCommandRecord),
+		tm:               playback.NewTranscodeManager(),
 	}
 	if len(opts) > 0 {
 		h.fileResolver = opts[0]
+	}
+	// Wire the shared transcode manager with closures so it reads the handler's
+	// (often late-set) config/store/secret fields lazily at call time, avoiding a
+	// field-ordering hazard during router setup.
+	h.tm.StoreFn = func() playback.RecipeStore { return h.RecipeStore }
+	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.LogSinkFn = func() playback.FFmpegLogSink { return h.FFmpegLogSink }
+	h.tm.Config = func() playback.TranscodeRuntimeConfig {
+		c := h.playbackConfig()
+		return playback.TranscodeRuntimeConfig{
+			TranscodeDir: c.TranscodeDir,
+			FFmpegPath:   c.FFmpegPath,
+			HWAccel:      c.HWAccel,
+			HWDevice:     c.HWDevice,
+		}
+	}
+	h.tm.StartThrottler = func(ctx context.Context, ts *playback.TranscodeSession) {
+		h.maybeStartThrottler(ctx, ts)
+	}
+	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string) {
+		// ffmpeg crash — system teardown, keep the card so a resume can respawn.
+		if err := h.stopPlaybackSessionByID(ctx, sessionID, false); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+			slog.Error("failed to stop playback after local transcode exit", "session", sessionID, "error", err, "playback_session_id", sessionID)
+		}
+	}
+	if reg, ok := sessionMgr.(interface {
+		RegisterReconstructed(s *playback.Session) *playback.Session
+	}); ok {
+		h.tm.Sessions = reg
 	}
 	if setter, ok := sessionMgr.(sessionExpirationHookSetter); ok {
 		setter.SetExpirationHook(h.handleExpiredSession)
 	}
 	return h
+}
+
+// TranscodeManager returns the shared transcode/reconstruct manager so sibling
+// handlers (e.g. StreamHandler) can reuse the same recipe-card store, live
+// transcode map, and reconstruct front door rather than wiring a second one.
+func (h *PlaybackHandler) TranscodeManager() *playback.TranscodeManager {
+	return h.tm
 }
 
 // SetProfileStaler configures an optional staleness trigger for taste profiles.
@@ -194,16 +236,10 @@ func (h *PlaybackHandler) playbackConfig() config.PlaybackConfig {
 }
 
 // CleanupOrphanedTranscodes removes stale per-session temp directories for
-// transcodes that are no longer tracked in memory.
+// transcodes that are no longer tracked in memory, sparing dirs whose recipe
+// card still exists. Delegates to the shared transcode manager.
 func (h *PlaybackHandler) CleanupOrphanedTranscodes() (int, error) {
-	h.transcodeMu.RLock()
-	active := make(map[string]struct{}, len(h.transcodes))
-	for sessionID := range h.transcodes {
-		active[sessionID] = struct{}{}
-	}
-	h.transcodeMu.RUnlock()
-
-	return playback.CleanupOrphanedTranscodeDirs(h.playbackConfig().TranscodeDir, active)
+	return h.tm.CleanupOrphanedTranscodes()
 }
 
 // playbackThresholds reads the playback.watched_threshold and
@@ -959,7 +995,7 @@ func (h *PlaybackHandler) touchSessionActivity(sessionID string) {
 	}
 }
 
-func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *playback.Session, syncNow bool, syncReason string) {
+func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, userInitiated bool) {
 	if h == nil || session == nil || session.ID == "" {
 		return
 	}
@@ -996,7 +1032,7 @@ func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *play
 		}
 	}
 
-	h.closeTranscodeSession(session.ID, session.TranscodeNodeURL)
+	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL, userInitiated)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1028,7 +1064,9 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 		}
 	}
 
-	h.closeTranscodeSession(session.ID, session.TranscodeNodeURL)
+	// Abort is a connection drop / non-terminal teardown — keep the recipe card
+	// so the client can reconstruct on reconnect.
+	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL, false)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1041,7 +1079,10 @@ func (h *PlaybackHandler) handleExpiredSession(session *playback.Session) {
 	sessionCopy := *session
 	go func() {
 		slog.Info("expired inactive playback session", "session", sessionCopy.ID, "playback_session_id", sessionCopy.ID)
-		h.finalizeSessionStop(context.Background(), &sessionCopy, false, "")
+		// Expiry is a liveness reap, not a user stop — keep the recipe card so a
+		// resume reconstructs under the same id (the card's own TTL reaps it if
+		// the session is truly abandoned).
+		h.finalizeSessionStop(context.Background(), &sessionCopy, false, "", false)
 	}()
 }
 
@@ -1371,6 +1412,19 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	}
 	h.maybeQueueLazyPlaybackMarkers(r.Context(), session, effectiveFile)
 
+	// Persist a recipe card so a direct-play or remux session can be reconstructed
+	// after a server restart (the client re-supplies its position). Transcode
+	// sessions get their card when the transcode actually starts
+	// (HandleStartTranscode). Best-effort; no-op without a recipe store.
+	switch session.PlayMethod {
+	case playback.PlayDirect:
+		h.tm.SaveCard(context.WithoutCancel(r.Context()),
+			playback.NewDirectRecipeCard(session.ID, session.UserID, session.ProfileID, session.MediaFileID))
+	case playback.PlayRemux:
+		h.tm.SaveCard(context.WithoutCancel(r.Context()),
+			playback.NewRemuxRecipeCard(session.ID, session.UserID, session.ProfileID, session.MediaFileID, session.TranscodeAudio, session.AudioTrackIndex))
+	}
+
 	resp := toPlaybackSessionResponse(session)
 	resp.DurationSeconds = fileDurationSeconds(effectiveFile)
 	resp.PlaybackInfo = buildPlaybackInfo(session, effectiveFile)
@@ -1628,7 +1682,7 @@ func (h *PlaybackHandler) HandleStopPlayback(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	err = h.stopPlaybackSession(r.Context(), session)
+	err = h.stopPlaybackSession(r.Context(), session, true)
 	if err != nil {
 		if errors.Is(err, playback.ErrSessionNotFound) {
 			writePlaybackSessionNotFound(w)
@@ -1755,7 +1809,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 
 	// Handle transcode restart.
 	if session.PlayMethod == playback.PlayTranscode {
-		if ts := h.getTranscodeSession(sessionID); ts != nil {
+		if ts := h.tm.GetTranscodeSession(sessionID); ts != nil {
 			ts.SetAudioTrackIndex(req.AudioTrackIndex)
 			seekSeconds := req.Position
 			startSegment := computeStartSegment(seekSeconds, ts.Opts().SegmentDuration)
@@ -1971,8 +2025,10 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// Check both local sessions AND remote node assignments — without the
 	// remote check, switching quality on a transcode node never sends DELETE,
 	// leaving the old ffmpeg running and its segments on disk.
-	if h.getTranscodeSession(req.SessionID) != nil || session.TranscodeNodeURL != "" {
-		h.closeTranscodeSession(req.SessionID, session.TranscodeNodeURL)
+	if h.tm.GetTranscodeSession(req.SessionID) != nil || session.TranscodeNodeURL != "" {
+		// Restarting the transcode under the SAME session id (quality/seek
+		// change) — keep the card; it is re-saved with the new opts below.
+		h.tm.CloseTranscodeSession(req.SessionID, session.TranscodeNodeURL, false)
 	}
 	abortCurrentSession := func(reason string, cause error) {
 		if abortErr := h.abortPlaybackSession(r.Context(), session); abortErr != nil && !errors.Is(abortErr, playback.ErrSessionNotFound) {
@@ -2132,6 +2188,26 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		}
 
 		manifestURL := h.buildProxyManifestURL(req.SessionID, session, tcNode.URL, plan.ProxyNode)
+		// Persist the recipe card for the remote transcode so the integrated
+		// server can re-bind and re-proxy the session after a restart. Node-side
+		// segment reconstruction is a follow-up (see spec multi-node section).
+		h.tm.SaveRecipeCard(context.WithoutCancel(r.Context()), session, tcNode.URL, playback.TranscodeOpts{
+			InputPath:          nodeReq.InputPath,
+			SessionID:          nodeReq.SessionID,
+			SourceVideoCodec:   nodeReq.SourceVideoCodec,
+			SeekSeconds:        nodeReq.SeekSeconds,
+			StartSegmentNumber: nodeReq.StartSegmentNumber,
+			TargetResolution:   nodeReq.TargetResolution,
+			TargetCodecVideo:   nodeReq.TargetCodecVideo,
+			TargetCodecAudio:   nodeReq.TargetCodecAudio,
+			TargetBitrateKbps:  nodeReq.TargetBitrateKbps,
+			SegmentDuration:    nodeReq.SegmentDuration,
+			HWAccel:            effectiveHWAccel,
+			AudioTrackIndex:    nodeReq.AudioTrackIndex,
+			SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
+			SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
+			TotalDuration:      nodeReq.TotalDuration,
+		})
 		h.finalizeTranscodeStart(r, transcodeStartState{
 			req:            req,
 			file:           file,
@@ -2188,12 +2264,14 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	h.transcodeMu.Lock()
-	h.transcodes[req.SessionID] = transcodeSession
-	h.transcodeMu.Unlock()
+	h.tm.RegisterTranscodeSession(req.SessionID, transcodeSession)
+
+	// Persist the recipe card so this local transcode can be reconstructed
+	// after a server restart. Best-effort; no-op without Redis.
+	h.tm.SaveRecipeCard(context.WithoutCancel(r.Context()), session, "", transcodeSession.Opts())
 
 	h.maybeStartThrottler(r.Context(), transcodeSession)
-	h.monitorLocalTranscodeExit(req.SessionID, transcodeSession)
+	h.tm.MonitorLocalTranscodeExit(req.SessionID, transcodeSession)
 
 	manifestURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", req.SessionID)
 	h.finalizeTranscodeStart(r, transcodeStartState{
@@ -2216,21 +2294,20 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 // still uses the same synthetic VOD path when the session duration is known.
 func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil {
-		if errors.Is(err, playback.ErrSessionNotFound) {
-			writePlaybackSessionNotFound(w)
-			return
-		}
+	session, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, apimw.GetUserID(r.Context()))
+	switch status {
+	case playback.SessionMissing:
+		writePlaybackSessionNotFound(w)
+		return
+	case playback.SessionLoadFailed:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
 		return
-	}
-	if userID := apimw.GetUserID(r.Context()); userID != 0 && session.UserID != userID {
+	case playback.SessionForbidden:
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return
 	}
 
-	transcodeSession := h.getTranscodeSession(sessionID)
+	transcodeSession := h.tm.GetTranscodeSession(sessionID)
 	if transcodeSession == nil {
 		// No local session — try proxying to remote transcode node.
 		if session.TranscodeNodeURL != "" {
@@ -2239,10 +2316,16 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 				"/transcode/"+sessionID+"/master.m3u8")
 			return
 		}
-		writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
-		return
+		// Local transcode whose process state was lost: reconstruct it. The
+		// manifest path has no segment context, so pass -1 (use card position).
+		transcodeSession = h.tm.ReconstructTranscode(r.Context(), sessionID, -1)
+		if transcodeSession == nil {
+			writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
+			return
+		}
 	}
 	h.touchSessionActivity(sessionID)
+	h.tm.RefreshRecipeCard(sessionID)
 
 	manifest, err := transcodeSession.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	if err != nil {
@@ -2262,21 +2345,20 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 // Auth is optional — the session UUID serves as an access token.
 func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil {
-		if errors.Is(err, playback.ErrSessionNotFound) {
-			writePlaybackSessionNotFound(w)
-			return
-		}
+	session, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, apimw.GetUserID(r.Context()))
+	switch status {
+	case playback.SessionMissing:
+		writePlaybackSessionNotFound(w)
+		return
+	case playback.SessionLoadFailed:
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
 		return
-	}
-	if userID := apimw.GetUserID(r.Context()); userID != 0 && session.UserID != userID {
+	case playback.SessionForbidden:
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return
 	}
 
-	transcodeSession := h.getTranscodeSession(sessionID)
+	transcodeSession := h.tm.GetTranscodeSession(sessionID)
 	if transcodeSession == nil {
 		if session.TranscodeNodeURL != "" {
 			h.touchSessionActivity(sessionID)
@@ -2285,10 +2367,21 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 				"/transcode/"+sessionID+"/segment/"+segmentName)
 			return
 		}
-		writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
-		return
+		// Resume near the segment the client is fetching so reconstruct does not
+		// restart from the original seek point and stall. A non-segment name
+		// (e.g. init.mp4) parses as negative and falls back to the card position.
+		requestedSegment := -1
+		if segNum, parseErr := playback.ParseSegmentNumber(chi.URLParam(r, "name")); parseErr == nil {
+			requestedSegment = segNum
+		}
+		transcodeSession = h.tm.ReconstructTranscode(r.Context(), sessionID, requestedSegment)
+		if transcodeSession == nil {
+			writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
+			return
+		}
 	}
 	h.touchSessionActivity(sessionID)
+	h.tm.RefreshRecipeCard(sessionID)
 
 	segmentName := chi.URLParam(r, "name")
 	segmentPath, err := transcodeSession.GetSegment(segmentName)
@@ -2377,7 +2470,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 						segNum,
 					); restartErr == nil {
 						h.maybeStartThrottler(r.Context(), transcodeSession)
-						h.monitorLocalTranscodeExit(sessionID, transcodeSession)
+						h.tm.MonitorLocalTranscodeExit(sessionID, transcodeSession)
 						segmentPath, err = transcodeSession.WaitForSegment(segmentName, 30*time.Second)
 						if err == nil && strings.EqualFold(transcodeSession.Opts().TargetCodecVideo, "copy") {
 							// Copy-mode seeks can resume as soon as the target segment
@@ -2414,85 +2507,6 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	w.Header().Set("Cache-Control", "no-store, max-age=0")
 	w.Header().Set("Pragma", "no-cache")
 	http.ServeFile(w, r, segmentPath)
-}
-
-func (h *PlaybackHandler) getTranscodeSession(sessionID string) *playback.TranscodeSession {
-	h.transcodeMu.RLock()
-	defer h.transcodeMu.RUnlock()
-	return h.transcodes[sessionID]
-}
-
-func (h *PlaybackHandler) monitorLocalTranscodeExit(sessionID string, session *playback.TranscodeSession) {
-	if h == nil || sessionID == "" || session == nil {
-		return
-	}
-
-	done := session.Done()
-	if done == nil {
-		return
-	}
-
-	go func() {
-		<-done
-		time.Sleep(2 * time.Second)
-
-		h.transcodeMu.RLock()
-		current := h.transcodes[sessionID]
-		h.transcodeMu.RUnlock()
-		if current != session {
-			return
-		}
-		if session.IsRunning() {
-			return
-		}
-
-		// When ffmpeg exits cleanly (no error), the segments are fully
-		// written and should remain servable until the client stops the
-		// session. This is critical for copy-mode where ffmpeg finishes
-		// writing all content much faster than real-time playback. Only
-		// tear down the session on error exits.
-		if session.WaitError() == nil {
-			return
-		}
-
-		if err := h.stopPlaybackSessionByID(context.Background(), sessionID); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.Error("failed to stop playback after local transcode exit", "session", sessionID, "error", err, "playback_session_id", sessionID)
-		}
-	}()
-}
-
-// closeTranscodeSession stops a transcode session. If transcodeNodeURL is non-empty,
-// sends DELETE to the remote transcode node. Otherwise closes the local session.
-func (h *PlaybackHandler) closeTranscodeSession(sessionID, transcodeNodeURL string) {
-	// Clean up local session if one exists (defensive).
-	h.transcodeMu.Lock()
-	session := h.transcodes[sessionID]
-	delete(h.transcodes, sessionID)
-	h.transcodeMu.Unlock()
-	if session != nil {
-		_ = session.Close()
-	}
-
-	// Send DELETE to remote transcode node if assigned (synchronous with timeout).
-	if transcodeNodeURL != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		deleteURL := transcodeNodeURL + "/transcode/" + sessionID
-		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)
-		if err != nil {
-			slog.Error("remote transcode delete: build request", "error", err, "session", sessionID, "playback_session_id", sessionID)
-			return
-		}
-		req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
-			return
-		}
-		resp.Body.Close()
-	}
 }
 
 // buildProxyManifestURL signs a stream token and builds the proxy-based

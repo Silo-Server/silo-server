@@ -1213,7 +1213,7 @@ func TestHandleStartTranscode_LocalPathPropagatesSelectedAudioTrack(t *testing.T
 		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
 	}
 
-	transcodeSession := handler.getTranscodeSession(startResp.SessionID)
+	transcodeSession := handler.tm.GetTranscodeSession(startResp.SessionID)
 	if transcodeSession == nil {
 		t.Fatal("expected local transcode session")
 	}
@@ -1264,7 +1264,7 @@ func TestHandleStartTranscode_MPEG2SeekedCopyRemainsCopyVideo(t *testing.T) {
 		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
 	}
 
-	transcodeSession := handler.getTranscodeSession(session.ID)
+	transcodeSession := handler.tm.GetTranscodeSession(session.ID)
 	if transcodeSession == nil {
 		t.Fatal("expected local transcode session")
 	}

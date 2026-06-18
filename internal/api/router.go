@@ -706,6 +706,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.UserStoreProvider != nil {
 			playbackHandler.StoreProvider = deps.UserStoreProvider
 		}
+		// Recipe-card store enables transcode reconstruct across restarts, backed
+		// by Postgres (no extra dependency; disabled/no-op only if the pool is
+		// nil). Must be set before the boot-time orphan cleanup below so surviving
+		// cards spare their dirs.
+		playbackHandler.RecipeStore = playback.NewPostgresRecipeStore(deps.DB)
 		playbackHandler.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		if scrobbler, ok := deps.WatchProviderService.(handlers.PlaybackWatchScrobbler); ok {
 			playbackHandler.WatchScrobbler = scrobbler
@@ -719,6 +724,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.SessionSyncer = deps.SessionSyncer
 		}
 		if streamHandler != nil {
+			// Share the playback handler's transcode/reconstruct manager so a
+			// direct/remux stream can rebuild its session from the recipe card
+			// after a restart (same store, same SessionManager).
+			streamHandler.TM = playbackHandler.TranscodeManager()
 			streamHandler.AdminStore = playbackAdminStore
 			streamHandler.EventsHub = deps.EventsHub
 			streamHandler.SessionSyncer = deps.SessionSyncer

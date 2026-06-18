@@ -221,6 +221,36 @@ func (m *SessionManager) StartSessionWithFilesContext(
 	return s, nil
 }
 
+// RegisterReconstructed re-inserts a session under an existing ID after the
+// in-memory state was lost (e.g. a server restart). Unlike StartSession* it
+// does NOT mint a new UUID and does NOT run admission/limit accounting: the
+// session already existed and was admitted before the restart, so counting it
+// again would be wrong. If a live session with the same ID already exists
+// (a concurrent reconstruct won the race), the existing one is returned and
+// the caller's copy is discarded.
+//
+// The caller is responsible for having re-bound s.UserID to the live
+// authenticated request before calling this — RegisterReconstructed performs
+// no authorization itself.
+func (m *SessionManager) RegisterReconstructed(s *Session) *Session {
+	if s == nil || s.ID == "" {
+		return s
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.sessions[s.ID]; ok {
+		return existing
+	}
+	now := time.Now()
+	if s.StartedAt.IsZero() {
+		s.StartedAt = now
+	}
+	s.UpdatedAt = now
+	s.LastActivityAt = now
+	m.sessions[s.ID] = s
+	return s
+}
+
 func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (SessionLimits, error) {
 	m.mu.RLock()
 	provider := m.limitProvider
