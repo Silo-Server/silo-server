@@ -225,3 +225,128 @@ func TestManagedEntryUniqueAndRevoke(t *testing.T) {
 		t.Fatalf("PATCH of revoked entry err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestManagedStatusTransitionGate verifies UpdateManagedStatus only advances an
+// artifact-ready entry into the client serve lifecycle: a 'preparing' (artifact
+// still encoding) or 'failed' entry can never be marked downloading/completed.
+func TestManagedStatusTransitionGate(t *testing.T) {
+	f := seedManagedFixture(t)
+	ctx := context.Background()
+	id := f.createManagedEntry(t) // created StatusReady
+
+	// ready -> completed is allowed.
+	now := time.Now()
+	if err := f.repo.UpdateManagedStatus(ctx, id, f.userID, f.profileA, f.deviceA, StatusCompleted, &now); err != nil {
+		t.Fatalf("ready->completed: %v", err)
+	}
+
+	// A preparing entry (artifact not yet encoded) is not patchable.
+	if _, err := f.pool.Exec(ctx, `UPDATE downloads SET status = 'preparing' WHERE id = $1`, id); err != nil {
+		t.Fatalf("set preparing: %v", err)
+	}
+	if err := f.repo.UpdateManagedStatus(ctx, id, f.userID, f.profileA, f.deviceA, StatusCompleted, &now); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("preparing->completed err = %v, want ErrNotFound", err)
+	}
+
+	// A failed entry is not patchable either.
+	if _, err := f.pool.Exec(ctx, `UPDATE downloads SET status = 'failed' WHERE id = $1`, id); err != nil {
+		t.Fatalf("set failed: %v", err)
+	}
+	if err := f.repo.UpdateManagedStatus(ctx, id, f.userID, f.profileA, f.deviceA, StatusDownloading, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("failed->downloading err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestReconcileLinkedDownloads verifies recovery repairs downloads stranded in
+// 'preparing' against a terminal artifact state: ready→ready (the crash window
+// between MarkReady and MarkLinkedDownloadsReady) and failed→failed, and that
+// re-running it is a no-op.
+func TestReconcileLinkedDownloads(t *testing.T) {
+	f := seedManagedFixture(t)
+	ctx := context.Background()
+
+	var present *string
+	if err := f.pool.QueryRow(ctx, `SELECT to_regclass('public.download_artifacts')::text`).Scan(&present); err != nil {
+		t.Fatalf("check download_artifacts: %v", err)
+	}
+	if present == nil {
+		t.Skip("download_artifacts migration has not been applied")
+	}
+	arepo := NewArtifactRepository(f.pool)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, f.fileID)
+	})
+
+	suffix := time.Now().UnixNano()
+
+	// A ready artifact whose linked (ephemeral) download is stuck 'preparing'.
+	readyArt := newArtifact(t, f.fileID, fmt.Sprintf("hash-recon-ready-%d", suffix))
+	if _, _, err := arepo.EnsureQueued(ctx, readyArt); err != nil {
+		t.Fatalf("ensure ready artifact: %v", err)
+	}
+	if _, err := arepo.ClaimNext(ctx, "w", time.Minute); err != nil {
+		t.Fatalf("claim ready artifact: %v", err)
+	}
+	if ok, err := arepo.MarkReady(ctx, readyArt.ID, "w", "/tmp/ready.mp4", 4242); err != nil || !ok {
+		t.Fatalf("MarkReady = (%v, %v)", ok, err)
+	}
+
+	// A failed artifact whose linked download is stuck 'preparing'.
+	failedArt := newArtifact(t, f.fileID, fmt.Sprintf("hash-recon-failed-%d", suffix))
+	if _, _, err := arepo.EnsureQueued(ctx, failedArt); err != nil {
+		t.Fatalf("ensure failed artifact: %v", err)
+	}
+	for i := 0; i < failedArt.MaxAttempts; i++ {
+		if _, err := arepo.ClaimNext(ctx, "w", time.Minute); err != nil {
+			t.Fatalf("claim failed artifact: %v", err)
+		}
+		if _, _, err := arepo.MarkFailedOrRetry(ctx, failedArt.ID, "w", "boom", time.Millisecond); err != nil {
+			t.Fatalf("MarkFailedOrRetry: %v", err)
+		}
+		_, _ = f.pool.Exec(ctx, `UPDATE download_artifacts SET next_retry_at = now() - interval '1 second' WHERE id = $1`, failedArt.ID)
+	}
+
+	now := time.Now()
+	mkPreparing := func(artID string) string {
+		id := fmt.Sprintf("dl-%s-%d", artID[:8], now.UnixNano())
+		if err := f.repo.Create(ctx, &Download{
+			ID: id, UserID: f.userID, MediaFileID: f.fileID, ContentID: f.contentID,
+			Kind: KindQueued, Status: StatusPreparing, Format: FormatTranscode, ArtifactID: artID,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("create preparing download: %v", err)
+		}
+		return id
+	}
+	readyDL := mkPreparing(readyArt.ID)
+	failedDL := mkPreparing(failedArt.ID)
+
+	ready, failed, err := f.repo.ReconcileLinkedDownloads(ctx)
+	if err != nil {
+		t.Fatalf("ReconcileLinkedDownloads: %v", err)
+	}
+	if len(ready) != 1 || ready[0].ID != readyDL || ready[0].FileSize != 4242 {
+		t.Fatalf("ready flipped = %+v, want one %s with size 4242", ready, readyDL)
+	}
+	if len(failed) != 1 || failed[0].ID != failedDL {
+		t.Fatalf("failed flipped = %+v, want one %s", failed, failedDL)
+	}
+
+	gotReady, err := f.repo.GetByID(ctx, readyDL)
+	if err != nil || gotReady.Status != StatusReady {
+		t.Fatalf("ready download status = %v (%v), want ready", gotReady.Status, err)
+	}
+	gotFailed, err := f.repo.GetByID(ctx, failedDL)
+	if err != nil || gotFailed.Status != StatusFailed {
+		t.Fatalf("failed download status = %v (%v), want failed", gotFailed.Status, err)
+	}
+
+	// Idempotent: nothing left in 'preparing', so a second pass flips nothing.
+	ready2, failed2, err := f.repo.ReconcileLinkedDownloads(ctx)
+	if err != nil {
+		t.Fatalf("second ReconcileLinkedDownloads: %v", err)
+	}
+	if len(ready2) != 0 || len(failed2) != 0 {
+		t.Fatalf("second reconcile flipped ready=%d failed=%d, want 0/0", len(ready2), len(failed2))
+	}
+}

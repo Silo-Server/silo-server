@@ -9,10 +9,14 @@ progress while offline and the server merges it on reconnect (last-write-wins). 
 in an admin-configurable **format** (original / remux / transcode), including server-side
 **transcode-to-a-single-file** for devices that can't play the source.
 
-**Status:** Design only (no implementation in this change). The work is gated behind the Silo v1
-scope process — scope is **not locked** (`docs/architecture/v1-scope.md`), so this capability needs a
-**v1 capability proposal** (template `.github/ISSUE_TEMPLATE/v1-capability-proposal.yml`) and triage
-before a feature PR opens. This document is the design input to that proposal.
+**Status:** Approved — implementing. This capability cleared the Silo v1 scope gate on
+2026-06-18 (via the **v1 capability proposal** triage; template
+`.github/ISSUE_TEMPLATE/v1-capability-proposal.yml`), and the offline-sync/downloads-v2 work is now
+being implemented phase by phase against this design. Per the decision below, the
+`/api/v1/downloads` contract is **reshaped, not just extended** — acceptable because the change lands
+**before** scope lock (`docs/architecture/v1-scope.md`) and **before** any mobile client ships against
+it. This document began as the design input to that proposal and now serves as the implementation
+reference; it is kept in sync as the implementation lands.
 
 Decisions locked with the requester:
 - **Replace** the existing `internal/download` package with a new unified package (`internal/downloads`)
@@ -475,15 +479,26 @@ The web app is updated in lockstep, so existing endpoints are reshaped rather th
 **Reshaped (existing):**
 ```
 POST   /downloads            body {content_id, episode_id?, file_id?, format?, series?};
-                             X-Silo-Device-Id present → managed entry; absent → ephemeral/web row
+                             X-Silo-Device-Id present → managed entry; absent → ephemeral/web row.
+                             `format` (remux/transcode) is honored for SINGLE-item requests only.
 GET    /downloads            managed entries for the CALLING device (device from header); ephemeral rows otherwise
 DELETE /downloads/{id}       remove a row owned by (user, profile, header device)
 GET    /downloads/{id}/file  serve original (source) or prepared artifact (Range/resume + throttle)
-GET|HEAD /direct-download    one-shot browser download; gains ?format= (browser-friendly, token-in-URL)
+GET|HEAD /direct-download    one-shot browser download, original-only (browser-friendly, token-in-URL)
 ```
 The response DTO gains `device_id`, `format`, `artifact_id`-derived readiness, and the new statuses.
 **`device_id` is authoritative only from the `X-Silo-Device-Id` header — never from the body or query**
 (a body/query value could only ever be a display hint, and is not accepted as authority).
+
+**Prepared formats (remux/transcode) are single-item only.** A series batch
+(`series:true`) and `/direct-download` are **original-only**: `/direct-download`
+streams synchronously and cannot wait on an async encode, and a series batch
+would otherwise fan out N encode jobs. A client that wants a prepared copy
+requests it per item via `POST /downloads`, which routes through the artifact
+pipeline. `Service.resolveFormat` enforces this (non-original → `ErrFormatUnavailable`
+→ HTTP 501) for both paths; the single-item `POST /downloads` uses the full
+`policy.Resolve`. Lifting this (e.g. per-episode series encodes) is a future
+capability, tracked separately, not part of this design.
 
 **New — capability / feature detection** (pattern from `internal/api/handlers/notifications.go:324`):
 ```

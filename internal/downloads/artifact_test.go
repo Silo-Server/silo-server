@@ -46,6 +46,28 @@ func TestArtifactOutputPathDeterministic(t *testing.T) {
 	}
 }
 
+func TestEffectiveArtifactDir(t *testing.T) {
+	// Explicit config wins verbatim.
+	if got := effectiveArtifactDir("/data/artifacts", "/tmp/silo-transcode"); got != "/data/artifacts" {
+		t.Fatalf("explicit dir = %q, want /data/artifacts", got)
+	}
+	// Unset: a sibling of the transcode dir, never inside it (the transcode
+	// cleanup sweep would otherwise delete a nested artifact dir) and never the
+	// process cwd (a relative/empty path).
+	got := effectiveArtifactDir("", "/var/lib/silo/transcode")
+	if got != "/var/lib/silo/silo-download-artifacts" {
+		t.Fatalf("default dir = %q, want sibling of transcode dir", got)
+	}
+	if strings.HasPrefix(got, "/var/lib/silo/transcode/") {
+		t.Fatalf("default dir %q is nested under the transcode dir", got)
+	}
+	// Unset transcode dir falls back to the absolute default root, not "".
+	fallback := effectiveArtifactDir("", "")
+	if !strings.HasPrefix(fallback, "/") {
+		t.Fatalf("fallback dir %q is not absolute", fallback)
+	}
+}
+
 type fakeUserRepo struct{ user *models.User }
 
 func (f fakeUserRepo) GetByID(context.Context, int) (*models.User, error) { return f.user, nil }

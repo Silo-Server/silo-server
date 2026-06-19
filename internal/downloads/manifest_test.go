@@ -49,6 +49,9 @@ func (f fakeFileResolver) GetByContentID(context.Context, string) ([]*models.Med
 func (f fakeFileResolver) GetByEpisodeID(context.Context, string) ([]*models.MediaFile, error) {
 	return nil, nil
 }
+func (f fakeFileResolver) ListByEpisodeIDs(context.Context, []string) (map[string][]*models.MediaFile, error) {
+	return nil, nil
+}
 
 // TestManifestBuilderDeniesRestrictedProfile is the Phase 2 acceptance criterion
 // at the source: when the requesting profile is denied content access,

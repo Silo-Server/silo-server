@@ -256,6 +256,56 @@ func (r *Repository) GetManagedEntry(ctx context.Context, userID int, profileID,
 	return scanDownload(r.pool.QueryRow(ctx, query, userID, profileID, deviceID, contentID, episodeID))
 }
 
+// InsertManagedEntryIfAbsent idempotently inserts a managed entry: it returns
+// the existing row for d's (user, profile, device, content, episode) identity if
+// one already exists, otherwise creates it. The device row must already exist
+// (composite FK). Used by subscription backfill and the auto-register worker,
+// which have not already checked for an existing row.
+func (r *Repository) InsertManagedEntryIfAbsent(ctx context.Context, d *Download) (*Download, error) {
+	existing, err := r.GetManagedEntry(ctx, d.UserID, d.ProfileID, d.DeviceID, d.ContentID, d.EpisodeID)
+	switch {
+	case err == nil:
+		return existing, nil
+	case !errors.Is(err, ErrNotFound):
+		return nil, err
+	}
+	return r.CreateManagedEntry(ctx, d)
+}
+
+// CreateManagedEntry inserts d and returns it, or — if a concurrent insert won
+// the race to the same managed identity — returns the existing winning row. The
+// interactive series flow calls this directly after it has already classified
+// the item as new, avoiding the redundant existence check in
+// InsertManagedEntryIfAbsent.
+func (r *Repository) CreateManagedEntry(ctx context.Context, d *Download) (*Download, error) {
+	if err := r.Create(ctx, d); err != nil {
+		if existing, gerr := r.GetManagedEntry(ctx, d.UserID, d.ProfileID, d.DeviceID, d.ContentID, d.EpisodeID); gerr == nil {
+			return existing, nil
+		}
+		return nil, err
+	}
+	return d, nil
+}
+
+// SumManagedFileSize returns the total file_size of a device's managed entries
+// that still count toward on-device storage (excluding revoked, failed, and
+// canceled rows). It backs the auto-download storage soft-gate; it is the server's
+// best-effort view, since the client is the source of truth for what is actually
+// on disk.
+func (r *Repository) SumManagedFileSize(ctx context.Context, userID int, profileID, deviceID string) (int64, error) {
+	var total int64
+	err := r.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(file_size), 0) FROM downloads
+		 WHERE user_id = $1 AND profile_id = $2 AND device_id = $3
+		   AND status NOT IN ('revoked', 'failed', 'cancelled')`,
+		userID, profileID, deviceID,
+	).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("summing managed download size: %w", err)
+	}
+	return total, nil
+}
+
 // GetManagedByID returns a managed download by id, authorized on
 // (user_id, profile_id, device_id). A mismatch yields ErrNotFound so the
 // endpoint never reveals the existence of another profile's/device's row.
@@ -300,12 +350,16 @@ func (r *Repository) ListEphemeral(ctx context.Context, userID int) ([]*Download
 }
 
 // UpdateManagedStatus sets a managed entry's status (client confirming local
-// state), authorized on (user, profile, device). A revoked entry cannot be
-// transitioned out of revoked. Returns ErrNotFound when nothing matches.
+// state), authorized on (user, profile, device). Only an artifact-ready entry
+// may be moved into the client-driven serve lifecycle, so the transition is
+// gated to source states ('ready','downloading','completed'); a 'preparing'
+// (artifact not yet encoded), 'failed', or 'revoked' row is never patchable to
+// downloading/completed. Returns ErrNotFound when nothing matches the gate.
 func (r *Repository) UpdateManagedStatus(ctx context.Context, id string, userID int, profileID, deviceID, status string, completedAt *time.Time) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE downloads SET status = $5, completed_at = $6, updated_at = now()
-		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4 AND status <> 'revoked'`,
+		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4
+		  AND status IN ('ready', 'downloading', 'completed')`,
 		id, userID, profileID, deviceID, status, completedAt,
 	)
 	if err != nil {
@@ -364,6 +418,52 @@ func (r *Repository) MarkLinkedDownloadsFailed(ctx context.Context, artifactID, 
 	}
 	defer rows.Close()
 	return scanDownloads(rows)
+}
+
+// ReconcileLinkedDownloads repairs downloads stranded in 'preparing' against a
+// terminal artifact state. It covers the crash window between an artifact's
+// MarkReady and its MarkLinkedDownloadsReady (the two are not one transaction),
+// and any preparing row whose artifact reached 'failed' without its links being
+// flipped. Two set-based updates (no per-artifact N+1): preparing→ready for rows
+// linked to a ready artifact (recording the artifact size), and preparing→failed
+// for rows linked to a failed artifact. Returns the rows it changed so the
+// caller can publish state events. Idempotent — only 'preparing' rows are
+// touched, so re-running it is a no-op.
+func (r *Repository) ReconcileLinkedDownloads(ctx context.Context) (ready []*Download, failed []*Download, err error) {
+	readyRows, err := r.pool.Query(ctx,
+		`UPDATE downloads SET status = 'ready',
+		     file_size = COALESCE((SELECT a.file_size FROM download_artifacts a WHERE a.id = downloads.artifact_id), file_size),
+		     updated_at = now()
+		 WHERE status = 'preparing' AND artifact_id IS NOT NULL
+		   AND artifact_id IN (SELECT id FROM download_artifacts WHERE status = 'ready')
+		 RETURNING `+downloadColumns,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reconciling ready downloads: %w", err)
+	}
+	ready, err = scanDownloads(readyRows)
+	readyRows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	failedRows, err := r.pool.Query(ctx,
+		`UPDATE downloads SET status = 'failed',
+		     error_message = COALESCE((SELECT NULLIF(a.error_message, '') FROM download_artifacts a WHERE a.id = downloads.artifact_id), 'artifact encode failed'),
+		     updated_at = now()
+		 WHERE status = 'preparing' AND artifact_id IS NOT NULL
+		   AND artifact_id IN (SELECT id FROM download_artifacts WHERE status = 'failed')
+		 RETURNING `+downloadColumns,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reconciling failed downloads: %w", err)
+	}
+	failed, err = scanDownloads(failedRows)
+	failedRows.Close()
+	if err != nil {
+		return nil, nil, err
+	}
+	return ready, failed, nil
 }
 
 func nilIfEmpty(s string) *string {

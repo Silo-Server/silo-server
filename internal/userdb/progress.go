@@ -47,7 +47,8 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 			duration_seconds = excluded.duration_seconds,
 			completed = CASE WHEN excluded.completed = 1
 				THEN 1 ELSE watch_progress.completed END,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err := db.Exec(query, profileID, mediaItemID, position, duration, completed, now, now, profileID, mediaItemID)
 	if err != nil {
@@ -81,7 +82,8 @@ func SetProgress(db *sql.DB, profileID, mediaItemID string, position, duration f
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
 			completed = watch_progress.completed OR excluded.completed,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err := db.Exec(query, profileID, mediaItemID, position, duration, completed, now, now, profileID, mediaItemID)
 	if err != nil {
@@ -119,7 +121,8 @@ func SetProgressAt(db *sql.DB, profileID, mediaItemID string, position, duration
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
 			completed = watch_progress.completed OR excluded.completed,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err = db.Exec(query, profileID, mediaItemID, position, duration, completed, updatedAtText)
 	if err != nil {
@@ -191,7 +194,8 @@ func MarkWatched(db *sql.DB, profileID, mediaItemID string, duration float64) er
 			position_seconds = 0,
 			duration_seconds = excluded.duration_seconds,
 			completed = 1,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err := db.Exec(query, profileID, mediaItemID, duration, now, now, profileID, mediaItemID)
 	if err != nil {

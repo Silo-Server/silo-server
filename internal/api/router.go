@@ -1358,6 +1358,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			// Prepare-to-file pipeline (Phase 3): remux/transcode-to-single-file.
 			downloadSvc.SetArtifactManager(deps.ArtifactManager)
 		}
+		// Series monitoring (auto-download subscriptions). The matching
+		// auto-register worker is started in cmd/silo/main.go.
+		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
 	} else {
 		downloadHandler = handlers.NewDownloadHandler(nil)
@@ -2137,6 +2140,13 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/capability", downloadHandler.HandleCapability)
 					r.Post("/", downloadHandler.HandleCreateDownload)
 					r.Get("/", downloadHandler.HandleListDownloads)
+					// Series monitoring (auto-download) subscriptions.
+					r.Post("/subscriptions", downloadHandler.HandleCreateSubscription)
+					r.Post("/subscriptions/sync", downloadHandler.HandleSyncSubscriptions)
+					r.Get("/subscriptions", downloadHandler.HandleListSubscriptions)
+					r.Get("/subscriptions/{id}", downloadHandler.HandleGetSubscription)
+					r.Patch("/subscriptions/{id}", downloadHandler.HandlePatchSubscription)
+					r.Delete("/subscriptions/{id}", downloadHandler.HandleDeleteSubscription)
 					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
 					r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)

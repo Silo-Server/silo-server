@@ -25,6 +25,7 @@ type FileResolver interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaFile, error)
 	GetByEpisodeID(ctx context.Context, episodeID string) ([]*models.MediaFile, error)
+	ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
 }
 
 // ItemResolver looks up media items.
@@ -32,9 +33,11 @@ type ItemResolver interface {
 	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 }
 
-// EpisodeResolver lists episodes for a series.
+// EpisodeResolver lists episodes for a series or one of its seasons.
 type EpisodeResolver interface {
 	ListBySeries(ctx context.Context, seriesID string) ([]*models.Episode, error)
+	ListBySeason(ctx context.Context, seriesID string, seasonNumber int) ([]*models.Episode, error)
+	ListSeasons(ctx context.Context, seriesID string) ([]catalog.SeasonSummary, error)
 }
 
 // UserResolver looks up users.
@@ -62,6 +65,12 @@ type Capability struct {
 	Formats              []string
 	TranscodeEnabled     bool
 	TranscodeUserAllowed bool
+	// SeasonDownload reports whether per-season series downloads are available;
+	// SeriesMonitoring reports whether auto-download subscriptions are available
+	// (and MonitoringModes the modes a client may request).
+	SeasonDownload   bool
+	SeriesMonitoring bool
+	MonitoringModes  []string
 }
 
 // Service orchestrates download permission checks, quota enforcement, format
@@ -88,6 +97,10 @@ type Service struct {
 	// Prepare-to-file pipeline (Phase 3); nil until SetArtifactManager wires it.
 	artifacts *ArtifactManager
 
+	// Series-monitoring subscriptions (auto-download); nil until SetSubscriptions
+	// wires the repo, in which case the subscription endpoints report unavailable.
+	subRepo *SubscriptionRepository
+
 	cfgMu       sync.RWMutex
 	cfg         config.DownloadConfig
 	cfgLoadedAt time.Time
@@ -111,6 +124,12 @@ func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, cli
 // transcode requests report unavailable (only `original` is servable).
 func (s *Service) SetArtifactManager(m *ArtifactManager) {
 	s.artifacts = m
+}
+
+// SetSubscriptions wires the series-monitoring (download subscription) repo.
+// When unset, the subscription endpoints report unavailable.
+func (s *Service) SetSubscriptions(subRepo *SubscriptionRepository) {
+	s.subRepo = subRepo
 }
 
 // Config returns the current (live, cache-refreshed) download config. Used by
@@ -237,6 +256,13 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 			if cfg.TranscodeEnabled && user.DownloadTranscodeAllowed {
 				c.Formats = append(c.Formats, FormatTranscode)
 			}
+		}
+		// Per-season download is always available when downloads are enabled;
+		// auto-download monitoring additionally requires the subscription repo.
+		c.SeasonDownload = true
+		if s.subRepo != nil {
+			c.SeriesMonitoring = true
+			c.MonitoringModes = []string{SubModeAll, SubModeFuture, SubModeLatestSeason, SubModeSpecificSeasons}
 		}
 	}
 	return c, nil
@@ -406,6 +432,27 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 // (req.DeviceID set) registers one idempotent managed entry per episode;
 // ephemeral queues them as before. Returns the rows and a shared batch ID.
 func (s *Service) CreateSeries(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter) ([]*Download, string, error) {
+	return s.createSeriesScoped(ctx, userID, req, filter, func(ctx context.Context) ([]*models.Episode, error) {
+		return s.episodeRepo.ListBySeries(ctx, req.ContentID)
+	})
+}
+
+// CreateSeason creates download records for every episode in a single season of
+// a series. It shares CreateSeries' managed/ephemeral behavior, shared batch ID,
+// and original-only restriction; only the episode set differs. Callers pass a
+// positive seasonNumber (the handler routes here only when one is supplied).
+func (s *Service) CreateSeason(ctx context.Context, userID int, req CreateRequest, seasonNumber int, filter catalog.AccessFilter) ([]*Download, string, error) {
+	return s.createSeriesScoped(ctx, userID, req, filter, func(ctx context.Context) ([]*models.Episode, error) {
+		return s.episodeRepo.ListBySeason(ctx, req.ContentID, seasonNumber)
+	})
+}
+
+// createSeriesScoped is the shared body of CreateSeries/CreateSeason: it runs the
+// permission/format/access checks, resolves the episode set via listEpisodes,
+// picks the best file per episode, and registers managed entries (device set) or
+// queues ephemeral rows under one shared batch ID. Series/season downloads are
+// original-only (enforced by resolveFormat).
+func (s *Service) createSeriesScoped(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter, listEpisodes func(context.Context) ([]*models.Episode, error)) ([]*Download, string, error) {
 	cfg, err := s.enabledConfig(ctx)
 	if err != nil {
 		return nil, "", err
@@ -433,21 +480,14 @@ func (s *Service) CreateSeries(ctx context.Context, userID int, req CreateReques
 		return nil, "", err
 	}
 
-	episodes, err := s.episodeRepo.ListBySeries(ctx, req.ContentID)
+	episodes, err := listEpisodes(ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("listing episodes: %w", err)
 	}
 
-	var items []managedItem
-	for _, ep := range episodes {
-		files, err := s.fileRepo.GetByEpisodeID(ctx, ep.ContentID)
-		if err != nil {
-			return nil, "", fmt.Errorf("resolving files for episode %s: %w", ep.ContentID, err)
-		}
-		if len(files) == 0 {
-			continue // skip episodes with no files
-		}
-		items = append(items, managedItem{file: pickBestFile(files), contentID: req.ContentID, episodeID: ep.ContentID})
+	items, err := s.episodeItems(ctx, req.ContentID, episodes)
+	if err != nil {
+		return nil, "", err
 	}
 	if len(items) == 0 {
 		return nil, "", fmt.Errorf("no downloadable episodes found")
@@ -467,13 +507,13 @@ func (s *Service) CreateSeries(ctx context.Context, userID int, req CreateReques
 	}
 
 	now := time.Now()
-	downloads := make([]*Download, 0, len(items))
+	dls := make([]*Download, 0, len(items))
 	for _, it := range items {
 		id, err := idgen.NextID()
 		if err != nil {
 			return nil, "", fmt.Errorf("generating download ID: %w", err)
 		}
-		downloads = append(downloads, &Download{
+		dls = append(dls, &Download{
 			ID:          id,
 			UserID:      userID,
 			MediaFileID: it.file.ID,
@@ -488,13 +528,40 @@ func (s *Service) CreateSeries(ctx context.Context, userID int, req CreateReques
 			UpdatedAt:   now,
 		})
 	}
-	if err := s.limiter.Check(ctx, userID, len(downloads)); err != nil {
+	if err := s.limiter.Check(ctx, userID, len(dls)); err != nil {
 		return nil, "", err
 	}
-	if err := s.repo.CreateBatch(ctx, downloads); err != nil {
+	if err := s.repo.CreateBatch(ctx, dls); err != nil {
 		return nil, "", err
 	}
-	return downloads, batchID, nil
+	return dls, batchID, nil
+}
+
+// episodeItems resolves the best downloadable file per episode into managedItems,
+// skipping episodes that have no file. It batches the file lookup into one query
+// (not one per episode) and preserves episode order. Shared by series/season
+// downloads and subscription backfill so file selection stays identical.
+func (s *Service) episodeItems(ctx context.Context, seriesID string, episodes []*models.Episode) ([]managedItem, error) {
+	if len(episodes) == 0 {
+		return nil, nil
+	}
+	episodeIDs := make([]string, len(episodes))
+	for i, ep := range episodes {
+		episodeIDs[i] = ep.ContentID
+	}
+	filesByEpisode, err := s.fileRepo.ListByEpisodeIDs(ctx, episodeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
+	}
+	items := make([]managedItem, 0, len(episodes))
+	for _, ep := range episodes {
+		files := filesByEpisode[ep.ContentID]
+		if len(files) == 0 {
+			continue // skip episodes with no files
+		}
+		items = append(items, managedItem{file: pickBestFile(files), contentID: seriesID, episodeID: ep.ContentID})
+	}
+	return items, nil
 }
 
 // managedItem pairs a resolved file with the (content, episode) identity its
@@ -537,40 +604,69 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 		return nil, err
 	}
 
-	now := time.Now()
 	for _, i := range newIdx {
-		it := items[i]
-		id, err := idgen.NextID()
+		d, err := buildManagedOriginal(userID, req.ProfileID, req.DeviceID, items[i], format, batchID)
 		if err != nil {
-			return nil, fmt.Errorf("generating download ID: %w", err)
-		}
-		d := &Download{
-			ID:          id,
-			UserID:      userID,
-			ProfileID:   req.ProfileID,
-			DeviceID:    req.DeviceID,
-			MediaFileID: it.file.ID,
-			ContentID:   it.contentID,
-			EpisodeID:   it.episodeID,
-			BatchID:     batchID,
-			Kind:        KindQueued,
-			Status:      StatusReady, // original is immediately servable
-			Format:      format,
-			FileSize:    it.file.FileSize,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		if err := s.repo.Create(ctx, d); err != nil {
-			// Lost a race with a concurrent register — return the winning row.
-			if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, it.contentID, it.episodeID); gerr == nil {
-				results[i] = existing
-				continue
-			}
 			return nil, err
 		}
-		results[i] = d
+		// These items were just classified absent above, so insert directly (with
+		// race recovery) rather than re-checking existence.
+		row, err := s.repo.CreateManagedEntry(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		results[i] = row
 	}
 	return results, nil
+}
+
+// buildManagedOriginal constructs a ready, original-format managed entry for one
+// item with a fresh ID. Shared by the interactive series flow, subscription
+// backfill, and the auto-register worker so every managed row is built the same.
+func buildManagedOriginal(userID int, profileID, deviceID string, it managedItem, format, batchID string) (*Download, error) {
+	id, err := idgen.NextID()
+	if err != nil {
+		return nil, fmt.Errorf("generating download ID: %w", err)
+	}
+	now := time.Now()
+	return &Download{
+		ID:          id,
+		UserID:      userID,
+		ProfileID:   profileID,
+		DeviceID:    deviceID,
+		MediaFileID: it.file.ID,
+		ContentID:   it.contentID,
+		EpisodeID:   it.episodeID,
+		BatchID:     batchID,
+		Kind:        KindQueued,
+		Status:      StatusReady, // original is immediately servable
+		Format:      format,
+		FileSize:    it.file.FileSize,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}, nil
+}
+
+// registerManagedItems idempotently registers each item as a ready original
+// managed entry for (userID, profileID, deviceID), skipping items that already
+// exist. The device row must already exist (composite FK). Unlike the interactive
+// ensureManaged path it does NOT consume the QuantityLimiter — the subscription
+// is the authorization — so it backs subscription backfill and the auto-register
+// worker. Returns the registered-or-existing rows.
+func registerManagedItems(ctx context.Context, repo *Repository, userID int, profileID, deviceID string, items []managedItem, batchID string) ([]*Download, error) {
+	out := make([]*Download, 0, len(items))
+	for _, it := range items {
+		d, err := buildManagedOriginal(userID, profileID, deviceID, it, FormatOriginal, batchID)
+		if err != nil {
+			return out, err
+		}
+		row, err := repo.InsertManagedEntryIfAbsent(ctx, d)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 // List returns the calling device's managed entries, or the user's

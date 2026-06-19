@@ -23,6 +23,13 @@ type DownloadService interface {
 	Capability(ctx context.Context, userID int) (downloads.Capability, error)
 	Create(ctx context.Context, userID int, req downloads.CreateRequest, filter catalog.AccessFilter) (*downloads.Download, error)
 	CreateSeries(ctx context.Context, userID int, req downloads.CreateRequest, filter catalog.AccessFilter) ([]*downloads.Download, string, error)
+	CreateSeason(ctx context.Context, userID int, req downloads.CreateRequest, seasonNumber int, filter catalog.AccessFilter) ([]*downloads.Download, string, error)
+	CreateSubscription(ctx context.Context, userID int, req downloads.SubscriptionRequest, filter catalog.AccessFilter) (*downloads.SubscriptionResult, error)
+	ListSubscriptions(ctx context.Context, userID int, profileID, deviceID string) ([]*downloads.Subscription, error)
+	GetSubscription(ctx context.Context, userID int, profileID, deviceID, id string) (*downloads.Subscription, error)
+	UpdateSubscription(ctx context.Context, userID int, profileID, deviceID, id string, patch downloads.SubscriptionPatch, filter catalog.AccessFilter) (*downloads.SubscriptionResult, error)
+	DeleteSubscription(ctx context.Context, userID int, profileID, deviceID, id string) error
+	SyncSubscriptions(ctx context.Context, userID int, profileID, deviceID string, filter catalog.AccessFilter) (int, error)
 	ServeDirect(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fileID int, format string, filter catalog.AccessFilter) error
 	ServeFile(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error
 	List(ctx context.Context, userID int, profileID, deviceID string) ([]*downloads.Download, error)
@@ -48,9 +55,10 @@ type downloadRequest struct {
 	ContentID string        `json:"content_id"`
 	EpisodeID string        `json:"episode_id,omitempty"`
 	FileID    int           `json:"file_id,omitempty"`
-	Format    string        `json:"format,omitempty"` // original (default) | remux | transcode
-	Series    bool          `json:"series,omitempty"` // if true, downloads all episodes
-	Caps      *downloadCaps `json:"caps,omitempty"`   // device decode capability (remux/transcode target)
+	Format    string        `json:"format,omitempty"`        // original (default) | remux | transcode
+	Series    bool          `json:"series,omitempty"`        // if true, downloads all episodes
+	Season    int           `json:"season_number,omitempty"` // with series=true, downloads only this season
+	Caps      *downloadCaps `json:"caps,omitempty"`          // device decode capability (remux/transcode target)
 }
 
 // downloadCaps mirrors playback.ClientCapabilities for the request body.
@@ -98,6 +106,9 @@ type downloadCapabilityResponse struct {
 	Formats              []string `json:"formats"`
 	TranscodeEnabled     bool     `json:"transcode_enabled"`
 	TranscodeUserAllowed bool     `json:"transcode_user_allowed"`
+	SeasonDownload       bool     `json:"season_download"`
+	SeriesMonitoring     bool     `json:"series_monitoring"`
+	MonitoringModes      []string `json:"monitoring_modes,omitempty"`
 }
 
 func toDownloadResponse(d *downloads.Download) downloadResponse {
@@ -155,6 +166,9 @@ func (h *DownloadHandler) HandleCapability(w http.ResponseWriter, r *http.Reques
 		Formats:              capInfo.Formats,
 		TranscodeEnabled:     capInfo.TranscodeEnabled,
 		TranscodeUserAllowed: capInfo.TranscodeUserAllowed,
+		SeasonDownload:       capInfo.SeasonDownload,
+		SeriesMonitoring:     capInfo.SeriesMonitoring,
+		MonitoringModes:      capInfo.MonitoringModes,
 	})
 }
 
@@ -205,7 +219,16 @@ func (h *DownloadHandler) HandleCreateDownload(w http.ResponseWriter, r *http.Re
 	}
 
 	if req.Series {
-		list, batchID, err := h.svc.CreateSeries(r.Context(), userID, createReq, filter)
+		var (
+			list    []*downloads.Download
+			batchID string
+			err     error
+		)
+		if req.Season > 0 {
+			list, batchID, err = h.svc.CreateSeason(r.Context(), userID, createReq, req.Season, filter)
+		} else {
+			list, batchID, err = h.svc.CreateSeries(r.Context(), userID, createReq, filter)
+		}
 		if err != nil {
 			h.writeDownloadError(w, err)
 			return
@@ -415,10 +438,12 @@ func (h *DownloadHandler) HandleDirectDownload(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// managedAssetIdentity validates a managed-only asset request (auth, service
-// configured, {id} present, device + profile headers) and returns the identity.
-// On failure it writes the response and returns ok=false.
-func (h *DownloadHandler) managedAssetIdentity(w http.ResponseWriter, r *http.Request) (userID int, profileID, deviceID, id string, ok bool) {
+// requireManaged validates a managed (device-scoped) request: authentication, a
+// configured service, and the device + profile identity (device_id from the
+// X-Silo-Device-Id header only, never the body). On failure it writes the error
+// response and returns ok=false. Shared by every managed-only endpoint — the
+// offline assets and the series-monitoring subscriptions.
+func (h *DownloadHandler) requireManaged(w http.ResponseWriter, r *http.Request) (userID int, profileID, deviceID, deviceName, devicePlatform string, ok bool) {
 	userID = apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -428,12 +453,7 @@ func (h *DownloadHandler) managedAssetIdentity(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Downloads not configured")
 		return
 	}
-	id = chi.URLParam(r, "id")
-	if id == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Download ID is required")
-		return
-	}
-	profileID, deviceID, _, _ = managedIdentity(r)
+	profileID, deviceID, deviceName, devicePlatform = managedIdentity(r)
 	if deviceID == "" {
 		writeError(w, http.StatusBadRequest, "device_id_required", "X-Silo-Device-Id header is required")
 		return
@@ -441,6 +461,21 @@ func (h *DownloadHandler) managedAssetIdentity(w http.ResponseWriter, r *http.Re
 	if profileID == "" {
 		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 		return
+	}
+	return userID, profileID, deviceID, deviceName, devicePlatform, true
+}
+
+// managedAssetIdentity is requireManaged plus the URL {id} param, for the offline
+// asset endpoints (manifest/artwork/subtitle).
+func (h *DownloadHandler) managedAssetIdentity(w http.ResponseWriter, r *http.Request) (userID int, profileID, deviceID, id string, ok bool) {
+	userID, profileID, deviceID, _, _, ok = h.requireManaged(w, r)
+	if !ok {
+		return userID, profileID, deviceID, "", false
+	}
+	id = chi.URLParam(r, "id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "Download ID is required")
+		return userID, profileID, deviceID, "", false
 	}
 	return userID, profileID, deviceID, id, true
 }

@@ -60,6 +60,7 @@ logs/
 .playwright-mcp/
 demo/
 docker-compose.dev.yml
+docker-compose.local.yml
 # Local-only deployment override (unpublishes bundled redis/postgres host
 # ports via `ports: !override []`). Kept out of git so a rebase from main
 # never disturbs it and it never lands in a PR; its absence once exposed

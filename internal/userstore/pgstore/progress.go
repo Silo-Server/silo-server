@@ -90,7 +90,8 @@ func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, media
 			duration_seconds = excluded.duration_seconds,
 			completed = CASE WHEN excluded.completed
 				THEN TRUE ELSE user_watch_progress.completed END,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, now,
 	)
 	if err != nil {
@@ -131,7 +132,8 @@ func (s *PostgresUserStore) SetProgress(ctx context.Context, profileID, mediaIte
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
 			completed = user_watch_progress.completed OR excluded.completed,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, now,
 	)
 	if err != nil {
@@ -168,7 +170,8 @@ func (s *PostgresUserStore) SetProgressAt(ctx context.Context, profileID, mediaI
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
 			completed = user_watch_progress.completed OR excluded.completed,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, updatedAt.UTC(),
 	)
 	if err != nil {
@@ -297,7 +300,8 @@ func (s *PostgresUserStore) MarkWatched(ctx context.Context, profileID, mediaIte
 			position_seconds = 0,
 			duration_seconds = excluded.duration_seconds,
 			completed = TRUE,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at`,
 		s.userID, profileID, mediaItemID, duration, now,
 	)
 	if err != nil {

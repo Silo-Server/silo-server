@@ -110,8 +110,8 @@ func TestArtifactQueueClaimAndLeaseRecovery(t *testing.T) {
 	if err != nil || claim2.ID != row.ID || claim2.Attempts != 2 {
 		t.Fatalf("reclaim ClaimNext = (%+v, %v), want attempts=2", claim2, err)
 	}
-	if err := repo.MarkReady(ctx, row.ID, claim2.OutputPath, 4242); err != nil {
-		t.Fatalf("MarkReady: %v", err)
+	if applied, err := repo.MarkReady(ctx, row.ID, "worker-2", claim2.OutputPath, 4242); err != nil || !applied {
+		t.Fatalf("MarkReady = (%v, %v), want (true, nil)", applied, err)
 	}
 	done, err := repo.GetByKey(ctx, fileID, "transcode", "hash-recovery")
 	if err != nil || done.Status != ArtifactReady || done.FileSize != 4242 {
@@ -138,9 +138,9 @@ func TestArtifactRetryUntilTerminal(t *testing.T) {
 		if claim.Attempts != attempt {
 			t.Fatalf("attempt %d: attempts = %d", attempt, claim.Attempts)
 		}
-		terminal, err := repo.MarkFailedOrRetry(ctx, row.ID, "boom", 30*time.Second)
-		if err != nil {
-			t.Fatalf("attempt %d MarkFailedOrRetry: %v", attempt, err)
+		terminal, applied, err := repo.MarkFailedOrRetry(ctx, row.ID, "worker", "boom", 30*time.Second)
+		if err != nil || !applied {
+			t.Fatalf("attempt %d MarkFailedOrRetry = (%v, %v, %v)", attempt, terminal, applied, err)
 		}
 		if attempt < 3 {
 			if terminal {
@@ -161,5 +161,41 @@ func TestArtifactRetryUntilTerminal(t *testing.T) {
 	failed, err := repo.GetByID(ctx, row.ID)
 	if err != nil || failed.Status != ArtifactFailed {
 		t.Fatalf("final status = %v (%v), want failed", failed.Status, err)
+	}
+}
+
+// TestArtifactMarkFencedByOwner verifies MarkReady/MarkFailedOrRetry only apply
+// for the worker that currently holds the lease, so a worker whose lease was
+// stolen (e.g. a slow encode reclaimed by another node) cannot flip a job it no
+// longer owns — the double-encode guard behind invariant 3.
+func TestArtifactMarkFencedByOwner(t *testing.T) {
+	repo, _, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-fence"))
+	if err != nil {
+		t.Fatalf("EnsureQueued: %v", err)
+	}
+	if _, err := repo.ClaimNext(ctx, "owner-1", time.Minute); err != nil {
+		t.Fatalf("ClaimNext: %v", err)
+	}
+
+	// A non-owner cannot mark the job ready or failed.
+	if applied, err := repo.MarkReady(ctx, row.ID, "owner-2", "/tmp/x.mp4", 10); err != nil || applied {
+		t.Fatalf("MarkReady(non-owner) = (%v, %v), want (false, nil)", applied, err)
+	}
+	if _, applied, err := repo.MarkFailedOrRetry(ctx, row.ID, "owner-2", "boom", time.Second); err != nil || applied {
+		t.Fatalf("MarkFailedOrRetry(non-owner) applied = %v (%v), want false", applied, err)
+	}
+
+	// The job remains claimable-state 'running' and untouched.
+	mid, err := repo.GetByID(ctx, row.ID)
+	if err != nil || mid.Status != ArtifactRunning {
+		t.Fatalf("status after fenced writes = %v (%v), want running", mid.Status, err)
+	}
+
+	// The real owner succeeds.
+	if applied, err := repo.MarkReady(ctx, row.ID, "owner-1", "/tmp/x.mp4", 10); err != nil || !applied {
+		t.Fatalf("MarkReady(owner) = (%v, %v), want (true, nil)", applied, err)
 	}
 }

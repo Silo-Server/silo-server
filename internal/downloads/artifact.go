@@ -54,6 +54,31 @@ func paramsHash(format, container, codecVideo, codecAudio, resolution string, au
 	return hex.EncodeToString(sum[:])
 }
 
+// defaultTranscodeDir mirrors config.go's TranscodeDir default and roots
+// prepared download artifacts when neither download.artifact_dir nor the
+// transcode dir is configured. Keeping it absolute avoids writing artifacts
+// relative to the process working directory.
+const defaultTranscodeDir = "/tmp/silo-transcode"
+
+// effectiveArtifactDir resolves where prepared artifacts are written: the
+// configured download.artifact_dir when set, otherwise a dedicated directory
+// alongside the transcode dir. The result is always rooted at a real volume,
+// never "" (which would land in the process cwd).
+//
+// Artifacts live as a SIBLING of the transcode dir, never inside it:
+// CleanupOrphanedTranscodeDirs deletes every non-active subdirectory of the
+// transcode dir, so an artifact dir nested under it would be wiped on the next
+// transcode sweep.
+func effectiveArtifactDir(artifactDir, transcodeDir string) string {
+	if artifactDir != "" {
+		return artifactDir
+	}
+	if transcodeDir == "" {
+		transcodeDir = defaultTranscodeDir
+	}
+	return filepath.Join(filepath.Dir(transcodeDir), "silo-download-artifacts")
+}
+
 // artifactOutputPath derives a deterministic output path from
 // (media_file_id, format, params_hash) so a reclaimed job targets the same file.
 func artifactOutputPath(dir string, mediaFileID int, format, hash string) string {

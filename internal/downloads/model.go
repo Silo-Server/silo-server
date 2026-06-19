@@ -66,6 +66,13 @@ var (
 	// cannot be fulfilled yet because the prepare-to-file pipeline (remux/
 	// transcode) is not wired until Phase 3. Phase 0 serves only `original`.
 	ErrFormatUnavailable = errors.New("requested download format is not available")
+
+	// Series-monitoring (download subscription) errors.
+	ErrSubscriptionNotFound     = errors.New("download subscription not found")
+	ErrSubscriptionsUnavailable = errors.New("download subscriptions are not available")
+	ErrInvalidSubscriptionMode  = errors.New("invalid subscription mode")
+	ErrSeasonsRequired          = errors.New("season_numbers is required for specific_seasons mode")
+	ErrNotSeries                = errors.New("content_id is not a series")
 )
 
 // Download represents a row in the downloads table. It carries both the

@@ -110,11 +110,24 @@ func (m *ArtifactManager) downloadConfig() config.DownloadConfig {
 	return config.DownloadConfig{}
 }
 
+// artifactDir resolves the effective output directory for prepared artifacts,
+// defaulting under the transcode dir when download.artifact_dir is unset so
+// encodes never write relative to the process working directory.
+func (m *ArtifactManager) artifactDir() string {
+	var artifactDir, transcodeDir string
+	if m.liveCfg != nil {
+		if c := m.liveCfg(); c != nil {
+			artifactDir = c.Download.ArtifactDir
+			transcodeDir = c.Playback.TranscodeDir
+		}
+	}
+	return effectiveArtifactDir(artifactDir, transcodeDir)
+}
+
 // Ensure deduplicates and (when new) enqueues an encode job for file in the
 // given format, returning the current artifact row. The deterministic
 // output_path keeps a reclaimed job idempotent.
 func (m *ArtifactManager) Ensure(ctx context.Context, file *models.MediaFile, format string, target playback.PrepareTarget) (*Artifact, error) {
-	cfg := m.downloadConfig()
 	hash := paramsHash(format, target.Container, target.CodecVideo, target.CodecAudio, target.Resolution, target.AudioTrackIndex, false)
 	id, err := idgen.NextID()
 	if err != nil {
@@ -130,7 +143,7 @@ func (m *ArtifactManager) Ensure(ctx context.Context, file *models.MediaFile, fo
 		CodecAudio:      target.CodecAudio,
 		Resolution:      target.Resolution,
 		AudioTrackIndex: target.AudioTrackIndex,
-		OutputPath:      artifactOutputPath(cfg.ArtifactDir, file.ID, format, hash),
+		OutputPath:      artifactOutputPath(m.artifactDir(), file.ID, format, hash),
 		MaxAttempts:     artifactMaxAttempts,
 	}
 	row, created, err := m.repo.EnsureQueued(ctx, a)
@@ -139,6 +152,18 @@ func (m *ArtifactManager) Ensure(ctx context.Context, file *models.MediaFile, fo
 	}
 	if row.Status == ArtifactReady {
 		_ = m.repo.TouchLastUsed(ctx, row.ID)
+		return row, nil
+	}
+	// A terminally-failed dedup row would otherwise strand every new download
+	// linked to it in 'preparing' forever (no drain is triggered for an existing
+	// row). Requeue it for a fresh attempt so the new download can resolve — or
+	// fail cleanly via reconciliation once the encode is exhausted again.
+	if row.Status == ArtifactFailed {
+		if err := m.repo.Requeue(ctx, row.ID); err != nil {
+			return nil, err
+		}
+		row.Status = ArtifactQueued
+		m.triggerDrain()
 		return row, nil
 	}
 	if created {
@@ -164,17 +189,30 @@ func (m *ArtifactManager) RunOnce(ctx context.Context) error {
 	return m.drain(ctx)
 }
 
-// recover is the startup sweep: reclaim expired-lease running rows, fail linked
-// downloads for terminal ones, and re-queue ready artifacts whose output file
-// is missing on disk.
+// recover repairs state a crash or lost lease can leave behind: it reclaims
+// expired-lease running rows (back to queued, or failed when attempts are
+// exhausted), reconciles linked downloads against terminal artifact states, and
+// re-queues ready artifacts whose output file is missing on disk. Safe to run
+// repeatedly (each step is idempotent).
 func (m *ArtifactManager) recover(ctx context.Context) {
-	reclaimed, err := m.repo.ReclaimExpiredLeases(ctx)
-	if err != nil {
+	if _, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
 		slog.Warn("download artifact lease reclaim failed", "error", err)
 	}
-	for _, rc := range reclaimed {
-		if rc.Terminal {
-			m.failLinkedDownloads(ctx, rc.ID, "encode exhausted retries")
+
+	// Reconcile downloads stranded in 'preparing' against their artifact's
+	// terminal state: this closes the non-transactional window between an
+	// artifact's MarkReady and its MarkLinkedDownloadsReady, and fails the links
+	// of any artifact that reached 'failed' (including the rows just reclaimed to
+	// failed above) so a download can never sit 'preparing' forever.
+	readyFlipped, failedFlipped, err := m.downloads.ReconcileLinkedDownloads(ctx)
+	if err != nil {
+		slog.Warn("reconciling linked downloads failed", "error", err)
+	} else {
+		for _, d := range readyFlipped {
+			m.publish(ctx, d)
+		}
+		for _, d := range failedFlipped {
+			m.publish(ctx, d)
 		}
 	}
 
@@ -208,19 +246,25 @@ func (m *ArtifactManager) drain(ctx context.Context) error {
 	sem := make(chan struct{}, maxConcurrent)
 	var wg sync.WaitGroup
 	for {
-		job, err := m.repo.ClaimNext(ctx, m.owner, artifactLease)
-		if errors.Is(err, ErrNoArtifactJob) {
-			break
-		}
-		if err != nil {
-			wg.Wait()
-			return err // includes context cancellation (pgx honors ctx)
-		}
+		// Acquire a worker slot BEFORE claiming. A claimed job is leased but only
+		// heartbeated once encodeOne runs; claiming first and then blocking for a
+		// slot would leave the job leased-but-unattended, so its lease could lapse
+		// while it waits — letting another node steal it and encode the same
+		// output path concurrently. Reserving the slot first closes that window.
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Wait()
 			return ctx.Err()
+		}
+		job, err := m.repo.ClaimNext(ctx, m.owner, artifactLease)
+		if err != nil {
+			<-sem // release the slot we reserved but won't use
+			if errors.Is(err, ErrNoArtifactJob) {
+				break
+			}
+			wg.Wait()
+			return err // includes context cancellation (pgx honors ctx)
 		}
 		wg.Add(1)
 		go func(a *Artifact) {
@@ -238,7 +282,10 @@ func (m *ArtifactManager) drain(ctx context.Context) error {
 func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	hbCtx, cancelHB := context.WithCancel(ctx)
 	defer cancelHB()
-	go m.heartbeatLoop(hbCtx, a.ID)
+	// heartbeatLoop cancels hbCtx if the lease is lost; PrepareFile runs on hbCtx
+	// so that cancellation aborts ffmpeg, ensuring we never keep writing the
+	// output path after another worker has taken the job.
+	go m.heartbeatLoop(hbCtx, cancelHB, a.ID)
 
 	file, err := m.fileRepo.GetByID(ctx, a.MediaFileID)
 	if err != nil || file == nil {
@@ -247,18 +294,37 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	}
 
 	opts := m.buildOpts(file, a)
-	if err := m.preparer.PrepareFile(ctx, opts, a.OutputPath); err != nil {
-		slog.Warn("download artifact encode failed", "artifact_id", a.ID, "error", err)
-		m.failJob(ctx, a, err.Error())
-		return
+	if err := m.preparer.PrepareFile(hbCtx, opts, a.OutputPath); err != nil {
+		switch {
+		case ctx.Err() != nil:
+			// Parent shutting down: leave the job 'running'; its lease expires and
+			// recovery (here or on another node) reclaims it.
+			return
+		case hbCtx.Err() != nil:
+			// We lost the lease mid-encode; another worker now owns the job.
+			slog.Warn("download artifact encode aborted; lease lost", "artifact_id", a.ID)
+			return
+		default:
+			slog.Warn("download artifact encode failed", "artifact_id", a.ID, "error", err)
+			m.failJob(ctx, a, err.Error())
+			return
+		}
 	}
 
 	var size int64
 	if fi, statErr := os.Stat(a.OutputPath); statErr == nil {
 		size = fi.Size()
 	}
-	if err := m.repo.MarkReady(ctx, a.ID, a.OutputPath, size); err != nil {
+	// Fenced on lease ownership: if we lost the lease between encode and commit,
+	// applied is false and the current owner is responsible for flipping links —
+	// do not flip them here or we would race/duplicate that owner's work.
+	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, a.OutputPath, size)
+	if err != nil {
 		slog.Error("marking artifact ready failed", "artifact_id", a.ID, "error", err)
+		return
+	}
+	if !applied {
+		slog.Warn("download artifact ready skipped; lease lost", "artifact_id", a.ID)
 		return
 	}
 	flipped, err := m.downloads.MarkLinkedDownloadsReady(ctx, a.ID, size)
@@ -272,9 +338,13 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 }
 
 func (m *ArtifactManager) failJob(ctx context.Context, a *Artifact, msg string) {
-	terminal, err := m.repo.MarkFailedOrRetry(ctx, a.ID, msg, backoffFor(a.Attempts))
+	terminal, applied, err := m.repo.MarkFailedOrRetry(ctx, a.ID, m.owner, msg, backoffFor(a.Attempts))
 	if err != nil {
 		slog.Error("marking artifact failed/retry errored", "artifact_id", a.ID, "error", err)
+		return
+	}
+	if !applied {
+		// Lease lost; the current owner is responsible for the job's outcome.
 		return
 	}
 	if terminal {
@@ -301,7 +371,11 @@ func (m *ArtifactManager) publish(ctx context.Context, d *Download) {
 	}
 }
 
-func (m *ArtifactManager) heartbeatLoop(ctx context.Context, id string) {
+// heartbeatLoop extends the job's lease until ctx is done. If the lease is lost
+// (another worker stole it, or the row is gone) it calls cancel to abort the
+// encode so two workers never write the same output path. A transient DB error
+// is retried on the next tick rather than aborting a healthy encode.
+func (m *ArtifactManager) heartbeatLoop(ctx context.Context, cancel context.CancelFunc, id string) {
 	ticker := time.NewTicker(artifactHeartbeat)
 	defer ticker.Stop()
 	for {
@@ -310,8 +384,15 @@ func (m *ArtifactManager) heartbeatLoop(ctx context.Context, id string) {
 			return
 		case <-ticker.C:
 			ok, err := m.repo.Heartbeat(ctx, id, m.owner, artifactLease)
-			if err != nil || !ok {
-				return // lost the lease (or row gone); stop heartbeating
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return // encode finished or shutting down
+			case err != nil:
+				slog.Warn("download artifact heartbeat errored", "artifact_id", id, "error", err)
+			case !ok:
+				slog.Warn("download artifact lease lost; aborting encode", "artifact_id", id)
+				cancel()
+				return
 			}
 		}
 	}

@@ -51,6 +51,23 @@ type fakeDownloadService struct {
 	gotSubtitleRef  string
 	gotDirectFormat string
 	gotDirectFileID int
+
+	// Season download + series-monitoring (subscription) fakes.
+	season       []*downloads.Download
+	seasonID     string
+	seasonErr    error
+	gotSeasonReq downloads.CreateRequest
+	gotSeasonNum int
+
+	subResult      *downloads.SubscriptionResult
+	subList        []*downloads.Subscription
+	sub            *downloads.Subscription
+	subErr         error
+	subDeleteErr   error
+	gotSubReq      downloads.SubscriptionRequest
+	gotSubPatch    downloads.SubscriptionPatch
+	gotSubIdent    identityCall
+	syncRegistered int
 }
 
 type identityCall struct {
@@ -78,6 +95,58 @@ func (f *fakeDownloadService) CreateSeries(_ context.Context, _ int, req downloa
 		return nil, "", f.seriesErr
 	}
 	return f.series, f.seriesID, nil
+}
+
+func (f *fakeDownloadService) CreateSeason(_ context.Context, _ int, req downloads.CreateRequest, seasonNumber int, _ catalog.AccessFilter) ([]*downloads.Download, string, error) {
+	f.gotSeasonReq = req
+	f.gotSeasonNum = seasonNumber
+	if f.seasonErr != nil {
+		return nil, "", f.seasonErr
+	}
+	return f.season, f.seasonID, nil
+}
+
+func (f *fakeDownloadService) CreateSubscription(_ context.Context, _ int, req downloads.SubscriptionRequest, _ catalog.AccessFilter) (*downloads.SubscriptionResult, error) {
+	f.gotSubReq = req
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return f.subResult, nil
+}
+
+func (f *fakeDownloadService) ListSubscriptions(_ context.Context, userID int, profileID, deviceID string) ([]*downloads.Subscription, error) {
+	f.gotSubIdent = identityCall{userID: userID, profileID: profileID, deviceID: deviceID}
+	return f.subList, f.subErr
+}
+
+func (f *fakeDownloadService) GetSubscription(_ context.Context, userID int, profileID, deviceID, id string) (*downloads.Subscription, error) {
+	f.gotSubIdent = identityCall{userID, profileID, deviceID, id}
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return f.sub, nil
+}
+
+func (f *fakeDownloadService) UpdateSubscription(_ context.Context, userID int, profileID, deviceID, id string, patch downloads.SubscriptionPatch, _ catalog.AccessFilter) (*downloads.SubscriptionResult, error) {
+	f.gotSubIdent = identityCall{userID, profileID, deviceID, id}
+	f.gotSubPatch = patch
+	if f.subErr != nil {
+		return nil, f.subErr
+	}
+	return f.subResult, nil
+}
+
+func (f *fakeDownloadService) DeleteSubscription(_ context.Context, userID int, profileID, deviceID, id string) error {
+	f.gotSubIdent = identityCall{userID, profileID, deviceID, id}
+	return f.subDeleteErr
+}
+
+func (f *fakeDownloadService) SyncSubscriptions(_ context.Context, userID int, profileID, deviceID string, _ catalog.AccessFilter) (int, error) {
+	f.gotSubIdent = identityCall{userID: userID, profileID: profileID, deviceID: deviceID}
+	if f.subErr != nil {
+		return 0, f.subErr
+	}
+	return f.syncRegistered, nil
 }
 
 func (f *fakeDownloadService) ServeDirect(_ context.Context, w http.ResponseWriter, _ *http.Request, _, fileID int, format string, _ catalog.AccessFilter) error {
@@ -529,6 +598,152 @@ func TestManagedSubtitleInvalidRef(t *testing.T) {
 		map[string]string{"id": "dl1", "ref": "bogus"})
 	rec := httptest.NewRecorder()
 	h.HandleSubtitle(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleCreateDownloadSeasonRoutes verifies that series=true + a season
+// number routes to CreateSeason (not CreateSeries) with the season threaded.
+func TestHandleCreateDownloadSeasonRoutes(t *testing.T) {
+	svc := &fakeDownloadService{
+		season:   []*downloads.Download{{ID: "dl1", ContentID: "s1", EpisodeID: "e1", Format: downloads.FormatOriginal}},
+		seasonID: "batch1",
+	}
+	h := NewDownloadHandler(svc)
+
+	body, _ := json.Marshal(downloadRequest{ContentID: "s1", Series: true, Season: 2})
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "pA", "devA"))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotSeasonNum != 2 {
+		t.Fatalf("season number = %d, want 2", svc.gotSeasonNum)
+	}
+	if svc.gotSeasonReq.ContentID != "s1" {
+		t.Fatalf("season content id = %q, want s1", svc.gotSeasonReq.ContentID)
+	}
+}
+
+func TestHandleCreateSubscriptionThreadsRequest(t *testing.T) {
+	svc := &fakeDownloadService{subResult: &downloads.SubscriptionResult{
+		Subscription: &downloads.Subscription{ID: "sub1", SeriesID: "s1", Mode: downloads.SubModeLatestSeason, Active: true},
+		Registered:   3,
+	}}
+	h := NewDownloadHandler(svc)
+
+	body, _ := json.Marshal(subscriptionRequest{SeriesID: "s1", Mode: downloads.SubModeLatestSeason, DeleteWatched: true, MaxStorageBytes: 1024})
+	rec := httptest.NewRecorder()
+	h.HandleCreateSubscription(rec, downloadTestRequest(http.MethodPost, "/downloads/subscriptions", body, 7, "pA", "devA"))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotSubReq.SeriesID != "s1" || svc.gotSubReq.Mode != downloads.SubModeLatestSeason {
+		t.Fatalf("subscription request = %+v", svc.gotSubReq)
+	}
+	if svc.gotSubReq.DeviceID != "devA" || svc.gotSubReq.ProfileID != "pA" {
+		t.Fatalf("subscription identity = profile %q device %q, want pA/devA", svc.gotSubReq.ProfileID, svc.gotSubReq.DeviceID)
+	}
+	if !svc.gotSubReq.DeleteWatched || svc.gotSubReq.MaxStorageBytes != 1024 {
+		t.Fatalf("subscription options not threaded: %+v", svc.gotSubReq)
+	}
+	var resp subscriptionResultResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Registered != 3 || resp.Subscription.ID != "sub1" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+// TestHandleCreateSubscriptionRequiresDevice enforces that monitoring is
+// device-scoped: a missing X-Silo-Device-Id header is a 400 even with a profile.
+func TestHandleCreateSubscriptionRequiresDevice(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloadService{})
+	body, _ := json.Marshal(subscriptionRequest{SeriesID: "s1", Mode: downloads.SubModeAll})
+	rec := httptest.NewRecorder()
+	h.HandleCreateSubscription(rec, downloadTestRequest(http.MethodPost, "/downloads/subscriptions", body, 7, "pA", ""))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleListSubscriptionsThreadsIdentity(t *testing.T) {
+	svc := &fakeDownloadService{subList: []*downloads.Subscription{{ID: "sub1", SeriesID: "s1", Mode: downloads.SubModeAll, Active: true}}}
+	h := NewDownloadHandler(svc)
+	rec := httptest.NewRecorder()
+	h.HandleListSubscriptions(rec, downloadTestRequest(http.MethodGet, "/downloads/subscriptions", nil, 7, "pA", "devA"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotSubIdent.profileID != "pA" || svc.gotSubIdent.deviceID != "devA" {
+		t.Fatalf("list identity = %+v, want profile pA device devA", svc.gotSubIdent)
+	}
+	var resp subscriptionsListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Subscriptions) != 1 || resp.Subscriptions[0].ID != "sub1" {
+		t.Fatalf("unexpected subscriptions: %+v", resp.Subscriptions)
+	}
+}
+
+func TestHandleSubscriptionErrorMapping(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		wantCode int
+	}{
+		{"not found", downloads.ErrSubscriptionNotFound, http.StatusNotFound},
+		{"unavailable", downloads.ErrSubscriptionsUnavailable, http.StatusServiceUnavailable},
+		{"invalid mode", downloads.ErrInvalidSubscriptionMode, http.StatusBadRequest},
+		{"seasons required", downloads.ErrSeasonsRequired, http.StatusBadRequest},
+		{"not series", downloads.ErrNotSeries, http.StatusBadRequest},
+		{"not allowed", downloads.ErrDownloadNotAllowed, http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewDownloadHandler(&fakeDownloadService{subErr: tc.err})
+			body, _ := json.Marshal(subscriptionRequest{SeriesID: "s1", Mode: downloads.SubModeAll})
+			rec := httptest.NewRecorder()
+			h.HandleCreateSubscription(rec, downloadTestRequest(http.MethodPost, "/downloads/subscriptions", body, 7, "pA", "devA"))
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandleSyncSubscriptionsThreadsIdentity(t *testing.T) {
+	svc := &fakeDownloadService{syncRegistered: 5}
+	h := NewDownloadHandler(svc)
+	rec := httptest.NewRecorder()
+	h.HandleSyncSubscriptions(rec, downloadTestRequest(http.MethodPost, "/downloads/subscriptions/sync", nil, 7, "pA", "devA"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotSubIdent.profileID != "pA" || svc.gotSubIdent.deviceID != "devA" {
+		t.Fatalf("sync identity = %+v, want profile pA device devA", svc.gotSubIdent)
+	}
+	var resp subscriptionSyncResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Registered != 5 {
+		t.Fatalf("registered = %d, want 5", resp.Registered)
+	}
+}
+
+func TestHandleSyncSubscriptionsRequiresDevice(t *testing.T) {
+	h := NewDownloadHandler(&fakeDownloadService{})
+	rec := httptest.NewRecorder()
+	// Profile present, no device header → 400 device_id_required.
+	h.HandleSyncSubscriptions(rec, downloadTestRequest(http.MethodPost, "/downloads/subscriptions/sync", nil, 7, "pA", ""))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400 (body: %s)", rec.Code, rec.Body.String())
 	}

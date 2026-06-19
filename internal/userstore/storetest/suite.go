@@ -15,7 +15,12 @@ import (
 // conformance test (invariant 1). It is exposed separately so a backend can
 // exercise the offline-sync behavior without the full suite.
 func RunProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
-	testProgressSince(t, newStore)
+	t.Run("DeltaCursor", func(t *testing.T) {
+		testProgressSince(t, newStore)
+	})
+	t.Run("OnlineWriteAdvancesEventAt", func(t *testing.T) {
+		testOnlineWriteAdvancesEventAt(t, newStore)
+	})
 }
 
 // RunSuite runs all conformance tests against a UserStore implementation.
@@ -29,6 +34,9 @@ func RunSuite(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	})
 	t.Run("ProgressSince", func(t *testing.T) {
 		testProgressSince(t, newStore)
+	})
+	t.Run("OnlineWriteAdvancesEventAt", func(t *testing.T) {
+		testOnlineWriteAdvancesEventAt(t, newStore)
 	})
 	t.Run("Favorites", func(t *testing.T) {
 		testFavorites(t, newStore)
@@ -909,6 +917,47 @@ func testProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserS
 	}
 	if cursorInt(t, cursorStale) != cursorInt(t, cursor3) {
 		t.Fatalf("stale write advanced the cursor: %q -> %q", cursor3, cursorStale)
+	}
+}
+
+// testOnlineWriteAdvancesEventAt locks in the LWW fix: a normal (online) write
+// must advance the event_at comparison key, so a later offline replay whose
+// client time predates the online write loses and cannot resurrect stale
+// progress. Before the fix, online writes updated updated_at but left event_at
+// frozen at the row's first write, letting almost any offline event win.
+func testOnlineWriteAdvancesEventAt(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	noThreshold := userstore.ProgressThresholds{}
+	base := time.Now().UTC().Add(-time.Hour)
+
+	// An offline event seeds the row with an old event_at.
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m1", 100, 1000, false, base); err != nil {
+		t.Fatalf("seed offline write: %v", err)
+	}
+	// A live online write (no client time) must stamp event_at = now, overtaking
+	// the seed's event_at.
+	if err := store.SetProgress(ctx, "p1", "m1", 500, 1000, noThreshold); err != nil {
+		t.Fatalf("online SetProgress: %v", err)
+	}
+	// A replayed offline event whose client time is newer than the seed but older
+	// than the online write must NOT win.
+	wrote, err := store.SetProgressIfNewer(ctx, "p1", "m1", 999, 1000, false, base.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("stale offline replay: %v", err)
+	}
+	if wrote {
+		t.Fatalf("stale offline replay reported a write; online event_at should have won")
+	}
+	got, err := store.GetProgress(ctx, "p1", "m1")
+	if err != nil || got == nil {
+		t.Fatalf("GetProgress: %+v (%v)", got, err)
+	}
+	if got.PositionSeconds != 500 {
+		t.Fatalf("stale offline replay won LWW: position = %v, want 500 (online write)", got.PositionSeconds)
 	}
 }
 

@@ -143,47 +143,56 @@ func (r *ArtifactRepository) Heartbeat(ctx context.Context, id, owner string, le
 	return tag.RowsAffected() > 0, nil
 }
 
-// MarkReady transitions a job to ready, records its size/path, and clears the lease.
-func (r *ArtifactRepository) MarkReady(ctx context.Context, id, outputPath string, fileSize int64) error {
-	_, err := r.pool.Exec(ctx,
+// MarkReady transitions a job to ready, records its size/path, and clears the
+// lease. The write is fenced on (lease_owner, status='running') so a worker that
+// lost its lease — e.g. a slow encode whose lease expired and was reclaimed by
+// another node — cannot flip a row it no longer owns. Returns false when the
+// fence rejected the write (the lease was lost); the caller must then NOT flip
+// linked downloads, leaving that to the current owner.
+func (r *ArtifactRepository) MarkReady(ctx context.Context, id, owner, outputPath string, fileSize int64) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
 		 SET status = 'ready', output_path = $2, file_size = $3, error_message = '',
 		     completed_at = now(), last_used_at = now(),
 		     lease_owner = NULL, lease_expires_at = NULL, next_retry_at = NULL
-		 WHERE id = $1`,
-		id, outputPath, fileSize,
+		 WHERE id = $1 AND lease_owner = $4 AND status = 'running'`,
+		id, outputPath, fileSize, owner,
 	)
 	if err != nil {
-		return fmt.Errorf("marking artifact ready: %w", err)
+		return false, fmt.Errorf("marking artifact ready: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 // MarkFailedOrRetry records a failed attempt. attempts was already incremented
 // at claim time, so attempts >= max_attempts means terminal (status=failed);
-// otherwise the row returns to queued behind a backoff gate. Returns true when
-// the job went terminal.
-func (r *ArtifactRepository) MarkFailedOrRetry(ctx context.Context, id, errMsg string, backoff time.Duration) (bool, error) {
+// otherwise the row returns to queued behind a backoff gate. The write is fenced
+// on (lease_owner, status='running'): terminal reports whether the job went
+// terminal, and applied is false when the fence rejected the write (lease lost),
+// in which case the caller must not fail linked downloads.
+func (r *ArtifactRepository) MarkFailedOrRetry(ctx context.Context, id, owner, errMsg string, backoff time.Duration) (terminal bool, applied bool, err error) {
 	backoffSecs := int(backoff.Seconds())
 	if backoffSecs <= 0 {
 		backoffSecs = 30
 	}
-	var terminal bool
-	err := r.pool.QueryRow(ctx,
+	err = r.pool.QueryRow(ctx,
 		`UPDATE download_artifacts
 		 SET status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'queued' END,
 		     error_message = $2,
 		     next_retry_at = CASE WHEN attempts >= max_attempts THEN NULL ELSE now() + make_interval(secs => $3) END,
 		     completed_at = CASE WHEN attempts >= max_attempts THEN now() ELSE NULL END,
 		     lease_owner = NULL, lease_expires_at = NULL
-		 WHERE id = $1
+		 WHERE id = $1 AND lease_owner = $4 AND status = 'running'
 		 RETURNING status = 'failed'`,
-		id, errMsg, backoffSecs,
+		id, errMsg, backoffSecs, owner,
 	).Scan(&terminal)
-	if err != nil {
-		return false, fmt.Errorf("marking artifact failed/retry: %w", err)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil // lease lost; the current owner resolves the job
 	}
-	return terminal, nil
+	if err != nil {
+		return false, false, fmt.Errorf("marking artifact failed/retry: %w", err)
+	}
+	return terminal, true, nil
 }
 
 // reclaimedArtifact reports a row recovered by the startup sweep.
