@@ -4,11 +4,19 @@ package storetest
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// RunProgressSince runs only the offline-sync progress-reconciliation
+// conformance test (invariant 1). It is exposed separately so a backend can
+// exercise the offline-sync behavior without the full suite.
+func RunProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	testProgressSince(t, newStore)
+}
 
 // RunSuite runs all conformance tests against a UserStore implementation.
 // The newStore function should return a fresh, empty store for each test.
@@ -18,6 +26,9 @@ func RunSuite(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	})
 	t.Run("Progress", func(t *testing.T) {
 		testProgress(t, newStore)
+	})
+	t.Run("ProgressSince", func(t *testing.T) {
+		testProgressSince(t, newStore)
 	})
 	t.Run("Favorites", func(t *testing.T) {
 		testFavorites(t, newStore)
@@ -811,6 +822,94 @@ func testHomeDismissals(t *testing.T, newStore func(t *testing.T) userstore.User
 
 func stringPtr(value string) *string {
 	return &value
+}
+
+func cursorInt(t *testing.T, cursor string) int64 {
+	t.Helper()
+	n, err := strconv.ParseInt(cursor, 10, 64)
+	if err != nil {
+		t.Fatalf("cursor %q is not a server token: %v", cursor, err)
+	}
+	return n
+}
+
+// testProgressSince exercises invariant 1: cross-device delta delivery is driven
+// only by the server-assigned synced_seq cursor, and a write that loses the
+// event_at LWW (which is exactly what a clamped future-dated client write
+// becomes — older than a later real write) never advances the cursor.
+func testProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	base := time.Now().UTC().Add(-time.Hour)
+
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m1", 100, 1000, false, base); err != nil {
+		t.Fatalf("write m1: %v", err)
+	}
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m2", 200, 1000, false, base.Add(time.Minute)); err != nil {
+		t.Fatalf("write m2: %v", err)
+	}
+
+	// Full delta from an empty cursor returns both rows + a non-zero server token.
+	all, cursor, err := store.ListProgressSince(ctx, "p1", "")
+	if err != nil {
+		t.Fatalf("ListProgressSince(empty): %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("full delta = %d rows, want 2", len(all))
+	}
+	if cursorInt(t, cursor) <= 0 {
+		t.Fatalf("next cursor = %q, want a positive server token", cursor)
+	}
+
+	// No further changes → empty delta, cursor unchanged.
+	none, cursor2, err := store.ListProgressSince(ctx, "p1", cursor)
+	if err != nil {
+		t.Fatalf("ListProgressSince(cursor): %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("empty delta = %d rows, want 0", len(none))
+	}
+	if cursorInt(t, cursor2) != cursorInt(t, cursor) {
+		t.Fatalf("cursor advanced with no change: %q -> %q", cursor, cursor2)
+	}
+
+	// A new winning write appears in the delta and advances the cursor.
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m3", 300, 1000, false, base.Add(2*time.Minute)); err != nil {
+		t.Fatalf("write m3: %v", err)
+	}
+	delta, cursor3, err := store.ListProgressSince(ctx, "p1", cursor)
+	if err != nil {
+		t.Fatalf("ListProgressSince(after new): %v", err)
+	}
+	if len(delta) != 1 || delta[0].MediaItemID != "m3" {
+		t.Fatalf("delta = %+v, want [m3]", delta)
+	}
+	if cursorInt(t, cursor3) <= cursorInt(t, cursor) {
+		t.Fatalf("cursor did not advance: %q -> %q", cursor, cursor3)
+	}
+
+	// invariant 1: a stale write (older event_at) loses LWW AND never advances
+	// the cursor — the same fate a clamped future-dated client write meets.
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m3", 999, 1000, false, base); err != nil {
+		t.Fatalf("stale write m3: %v", err)
+	}
+	got, err := store.GetProgress(ctx, "p1", "m3")
+	if err != nil || got == nil || got.PositionSeconds != 300 {
+		t.Fatalf("stale write won LWW: %+v (%v), want position 300", got, err)
+	}
+	stale, cursorStale, err := store.ListProgressSince(ctx, "p1", cursor3)
+	if err != nil {
+		t.Fatalf("ListProgressSince(after stale): %v", err)
+	}
+	if len(stale) != 0 {
+		t.Fatalf("stale write delivered a delta: %+v", stale)
+	}
+	if cursorInt(t, cursorStale) != cursorInt(t, cursor3) {
+		t.Fatalf("stale write advanced the cursor: %q -> %q", cursor3, cursorStale)
+	}
 }
 
 func testFavorites(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {

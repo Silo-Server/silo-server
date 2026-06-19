@@ -32,7 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/download"
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
@@ -131,8 +131,9 @@ type Dependencies struct {
 	ActivityLogRepo              *activitylog.Repo
 	OpsLogRepo                   *opslog.Repo
 	FFmpegLogSink                playback.FFmpegLogSink
-	RedisClient                  *redis.Client            // for session listing (may be nil)
-	TaskManager                  *taskmanager.TaskManager // task manager (may be nil)
+	RedisClient                  *redis.Client              // for session listing (may be nil)
+	TaskManager                  *taskmanager.TaskManager   // task manager (may be nil)
+	ArtifactManager              *downloads.ArtifactManager // download prepare-to-file pipeline (may be nil)
 	AdminJobCancelRegistry       *adminjob.CancelRegistry
 	IntroRepository              *intromarkers.Repository
 	IntroAnalyzer                *intromarkers.Analyzer
@@ -1320,18 +1321,18 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build download handler.
 	var downloadHandler *handlers.DownloadHandler
 	if deps.DB != nil && deps.FileRepo != nil && deps.Config != nil {
-		downloadRepo := download.NewRepository(deps.DB)
-		downloadBandwidth := download.NewBandwidthManager(
+		downloadRepo := downloads.NewRepository(deps.DB)
+		downloadBandwidth := downloads.NewBandwidthManager(
 			deps.Config.Download.ServerBandwidthBPS,
 			deps.Config.Download.UserBandwidthBPS,
 		)
-		downloadLimiter := download.NewQuantityLimiter(
+		downloadLimiter := downloads.NewQuantityLimiter(
 			downloadRepo,
 			deps.Config.Download.MaxConcurrentPerUser,
 			deps.Config.Download.MaxPerPeriod,
 			deps.Config.Download.PeriodDuration,
 		)
-		downloadSvc := download.NewService(
+		downloadSvc := downloads.NewService(
 			downloadRepo,
 			downloadBandwidth,
 			downloadLimiter,
@@ -1343,6 +1344,20 @@ func NewRouter(deps Dependencies) chi.Router {
 			settingsRepo,
 			&deps.Config.Download,
 		)
+		if detailSvc != nil {
+			// Offline manifest + artwork/subtitle proxies (Phase 2). subtitleManager
+			// may be nil when subtitles are unconfigured; pass a nil interface so the
+			// downloaded-subtitle path reports unavailable instead of panicking.
+			var subtitleSource downloads.SubtitleSource
+			if subtitleManager != nil {
+				subtitleSource = subtitleManager
+			}
+			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+		}
+		if deps.ArtifactManager != nil {
+			// Prepare-to-file pipeline (Phase 3): remux/transcode-to-single-file.
+			downloadSvc.SetArtifactManager(deps.ArtifactManager)
+		}
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
 	} else {
 		downloadHandler = handlers.NewDownloadHandler(nil)
@@ -2119,10 +2134,15 @@ func NewRouter(deps Dependencies) chi.Router {
 
 				// Download routes.
 				r.Route("/downloads", func(r chi.Router) {
+					r.Get("/capability", downloadHandler.HandleCapability)
 					r.Post("/", downloadHandler.HandleCreateDownload)
 					r.Get("/", downloadHandler.HandleListDownloads)
+					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
 					r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)
+					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
+					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
+					r.Get("/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle)
 				})
 				r.Get("/direct-download", downloadHandler.HandleDirectDownload)
 				r.Head("/direct-download", downloadHandler.HandleDirectDownload)

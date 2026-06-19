@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -197,21 +198,76 @@ func (s *PostgresUserStore) SetProgressIfNewer(ctx context.Context, profileID, m
 	if suppressed {
 		return false, nil
 	}
+	// event_at is the LWW comparison key (the clamped client event time); the
+	// synced_seq cursor is stamped server-side by the user_watch_progress trigger.
 	tag, err := s.pool.Exec(ctx, `
-		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at, event_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
 				position_seconds = EXCLUDED.position_seconds,
 				duration_seconds = EXCLUDED.duration_seconds,
 				completed = user_watch_progress.completed OR EXCLUDED.completed,
-				updated_at = EXCLUDED.updated_at
-			WHERE EXCLUDED.updated_at > user_watch_progress.updated_at`,
+				updated_at = EXCLUDED.updated_at,
+				event_at = EXCLUDED.event_at
+			WHERE EXCLUDED.event_at > user_watch_progress.event_at`,
 		s.userID, profileID, mediaItemID, position, duration, completed, updatedAt.UTC(),
 	)
 	if err != nil {
 		return false, fmt.Errorf("setting newer progress: %w", err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// ListProgressSince returns user_watch_progress rows whose server cursor
+// (synced_seq) exceeds cursor, in cursor order, with the next cursor to resume
+// from. Delta delivery is driven only by synced_seq, never a client clock.
+func (s *PostgresUserStore) ListProgressSince(ctx context.Context, profileID, cursor string) ([]userstore.WatchProgress, string, error) {
+	c, _ := strconv.ParseInt(cursor, 10, 64) // empty/invalid cursor → 0 (full delta)
+	const limit = 500
+	rows, err := s.pool.Query(ctx, `
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at, synced_seq,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+		FROM user_watch_progress
+		WHERE user_id = $1 AND profile_id = $2 AND synced_seq IS NOT NULL AND synced_seq > $3
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM user_history_hidden_items hhi
+			WHERE hhi.user_id = user_watch_progress.user_id
+			  AND hhi.profile_id = user_watch_progress.profile_id
+			  AND hhi.media_item_id = user_watch_progress.media_item_id
+			  AND user_watch_progress.updated_at <= hhi.hidden_before
+		  )
+		ORDER BY synced_seq ASC
+		LIMIT $4`,
+		s.userID, profileID, c, limit,
+	)
+	if err != nil {
+		return nil, cursor, fmt.Errorf("listing progress since: %w", err)
+	}
+	defer rows.Close()
+
+	next := c
+	var results []userstore.WatchProgress
+	for rows.Next() {
+		var wp userstore.WatchProgress
+		var updatedAt time.Time
+		var seq int64
+		if err := rows.Scan(
+			&wp.ProfileID, &wp.MediaItemID, &wp.PositionSeconds, &wp.DurationSeconds, &wp.Completed, &updatedAt, &seq,
+			&wp.LastFileID, &wp.LastResolution, &wp.LastHDR, &wp.LastCodecVideo, &wp.LastEditionKey,
+		); err != nil {
+			return nil, cursor, fmt.Errorf("scanning progress since row: %w", err)
+		}
+		wp.UpdatedAt = timeToString(updatedAt)
+		if seq > next {
+			next = seq
+		}
+		results = append(results, wp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, cursor, fmt.Errorf("iterating progress since rows: %w", err)
+	}
+	return results, strconv.FormatInt(next, 10), nil
 }
 
 func (s *PostgresUserStore) MarkWatched(ctx context.Context, profileID, mediaItemID string, duration float64) error {

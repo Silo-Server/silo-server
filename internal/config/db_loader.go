@@ -565,5 +565,30 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.MaxPerPeriod = maxPerPeriod
 	cfg.Download.PeriodDuration = periodDuration
 
+	// Downloads v2 (offline sync). Default-off; the prepare-to-file pipeline that
+	// consumes these ships in Phase 3.
+	downloadTranscodeEnabled, err := boolOr(m, "download.transcode_enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	maxConcurrentPrepares, err := intOr(m, "download.max_concurrent_prepares", 2)
+	if err != nil {
+		return nil, err
+	}
+	artifactMaxBytes, err := int64Or(m, "download.artifact_max_bytes", 0)
+	if err != nil {
+		return nil, err
+	}
+	if maxConcurrentPrepares < 0 {
+		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.max_concurrent_prepares")
+	}
+	if artifactMaxBytes < 0 {
+		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.artifact_max_bytes")
+	}
+	cfg.Download.TranscodeEnabled = downloadTranscodeEnabled
+	cfg.Download.ArtifactDir = stringOr(m, "download.artifact_dir", "")
+	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
+	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
+
 	return cfg, nil
 }

@@ -3,14 +3,57 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// progressClockSkew bounds how far ahead of server time a client-supplied
+// progress event time may sit before it is clamped to "now".
+const progressClockSkew = 2 * time.Minute
+
+// parseClientEventTime parses an RFC3339 client event time, returning the zero
+// time on any error (which clampEventAt treats as "now").
+func parseClientEventTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
+}
+
+// clampEventAt bounds a client event time to at most now+skew: a value past the
+// window is clamped to now, so a skewed or malicious clock can at most claim
+// "now" for its own profile and never lock in a far-future LWW win (invariant 1).
+func clampEventAt(client, now time.Time) time.Time {
+	if client.IsZero() {
+		return now
+	}
+	if client.After(now.Add(progressClockSkew)) {
+		return now
+	}
+	return client
+}
+
+// offlineProgressState mirrors UpdateProgress's threshold handling for an
+// offline item: it returns the position to persist, the completed latch, and
+// whether the item is below the min-resume floor and should be skipped.
+func offlineProgressState(position, duration float64, t userstore.ProgressThresholds) (pos float64, completed, skip bool) {
+	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(t.MinResumePct) {
+		return position, false, true
+	}
+	completed = duration > 0 && position/duration > userstore.WatchedFraction(t.WatchedPct)
+	if completed {
+		position = 0
+	}
+	return position, completed, false
+}
 
 // ProgressLibraryLookup resolves which progress items belong to a library.
 type ProgressLibraryLookup interface {
@@ -57,6 +100,8 @@ type progressEntryResponse struct {
 
 type progressListResponse struct {
 	Progress []progressEntryResponse `json:"progress"`
+	// NextCursor is the opaque server token to resume a ?since= delta from.
+	NextCursor string `json:"next_cursor,omitempty"`
 }
 
 type syncProgressItem struct {
@@ -64,6 +109,9 @@ type syncProgressItem struct {
 	Position       float64 `json:"position"`
 	Duration       float64 `json:"duration"`
 	ForceOverwrite bool    `json:"force_overwrite"`
+	// UpdatedAt is the client EVENT time (RFC3339) for an offline-queued item.
+	// The server clamps it to now+skew and uses it only as the LWW key.
+	UpdatedAt *string `json:"updated_at,omitempty"`
 }
 
 type syncProgressRequest struct {
@@ -94,6 +142,7 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 	}
 
 	status := r.URL.Query().Get("status")
+	since := r.URL.Query().Get("since")
 	limit, offset := parsePagination(r)
 	libraryID, err := parseLibraryIDParam(r)
 	if err != nil {
@@ -101,7 +150,16 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	entries, err := store.ListProgress(r.Context(), profileID, status, limit, offset)
+	// A ?since= cursor switches to server-ordered delta delivery (rows changed
+	// elsewhere since the cursor), immune to client clock skew. Absent since →
+	// today's status/pagination listing.
+	var entries []userstore.WatchProgress
+	var nextCursor string
+	if since != "" {
+		entries, nextCursor, err = store.ListProgressSince(r.Context(), profileID, since)
+	} else {
+		entries, err = store.ListProgress(r.Context(), profileID, status, limit, offset)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
 		return
@@ -138,7 +196,8 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 	}
 
 	resp := progressListResponse{
-		Progress: make([]progressEntryResponse, 0, len(entries)),
+		Progress:   make([]progressEntryResponse, 0, len(entries)),
+		NextCursor: nextCursor,
 	}
 	for _, e := range entries {
 		resp.Progress = append(resp.Progress, progressEntryResponse{
@@ -280,9 +339,26 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 		}
 
 		var updateErr error
-		if item.ForceOverwrite {
+		switch {
+		case item.UpdatedAt != nil:
+			// Offline-queued event: clamp the client event time and merge
+			// last-write-wins on the bounded event_at. synced_seq (the cursor) is
+			// stamped server-side; completion still comes from the threshold logic,
+			// never the timestamp alone.
+			client := parseClientEventTime(*item.UpdatedAt)
+			now := time.Now()
+			eventAt := clampEventAt(client, now)
+			if !client.IsZero() && client.After(now.Add(progressClockSkew)) {
+				slog.Warn("clamped future-dated progress event time",
+					"profile_id", profileID, "media_item_id", item.MediaItemID)
+			}
+			pos, completed, skip := offlineProgressState(item.Position, item.Duration, thresholds)
+			if !skip {
+				_, updateErr = store.SetProgressIfNewer(r.Context(), profileID, item.MediaItemID, pos, item.Duration, completed, eventAt)
+			}
+		case item.ForceOverwrite:
 			updateErr = store.SetProgress(r.Context(), profileID, item.MediaItemID, item.Position, item.Duration, thresholds)
-		} else {
+		default:
 			updateErr = store.UpdateProgress(r.Context(), profileID, item.MediaItemID, item.Position, item.Duration, thresholds)
 		}
 

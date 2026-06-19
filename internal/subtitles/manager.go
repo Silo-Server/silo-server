@@ -358,6 +358,12 @@ func (m *Manager) GetSubtitleContent(ctx context.Context, id int) (*DownloadedSu
 	return sub, data, nil
 }
 
+// ListDownloadedSubtitles returns the downloaded subtitles stored for a media
+// file (used to enumerate offline subtitle assets).
+func (m *Manager) ListDownloadedSubtitles(ctx context.Context, mediaFileID int) ([]DownloadedSubtitle, error) {
+	return m.repo.ListDownloadedSubtitles(ctx, mediaFileID)
+}
+
 // DeleteSubtitle removes a downloaded subtitle from both DB and S3.
 func (m *Manager) DeleteSubtitle(ctx context.Context, id int) error {
 	sub, err := m.repo.DeleteDownloadedSubtitle(ctx, id)

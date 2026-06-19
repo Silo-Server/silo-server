@@ -1,0 +1,165 @@
+package downloads
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/idgen"
+)
+
+func newArtifactTestRepo(t *testing.T) (*ArtifactRepository, *pgxpool.Pool, int) {
+	t.Helper()
+	pool := newDownloadsTestPool(t)
+	ctx := context.Background()
+	var present *string
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.download_artifacts')::text`).Scan(&present); err != nil {
+		t.Fatalf("check download_artifacts: %v", err)
+	}
+	if present == nil {
+		t.Skip("download_artifacts migration has not been applied")
+	}
+
+	suffix := time.Now().UnixNano()
+	var folderID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name) VALUES ('movies', $1) RETURNING id`,
+		fmt.Sprintf("Artifacts Test %d", suffix),
+	).Scan(&folderID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	var fileID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_files (media_folder_id, file_path) VALUES ($1, $2) RETURNING id`,
+		folderID, fmt.Sprintf("/tmp/artifact-%d.mkv", suffix),
+	).Scan(&fileID); err != nil {
+		t.Fatalf("seed media file: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM download_artifacts WHERE media_file_id = $1`, fileID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+	return NewArtifactRepository(pool), pool, fileID
+}
+
+func newArtifact(t *testing.T, fileID int, hash string) *Artifact {
+	t.Helper()
+	id, err := idgen.NextID()
+	if err != nil {
+		t.Fatalf("id: %v", err)
+	}
+	return &Artifact{
+		ID: id, MediaFileID: fileID, Format: "transcode", ParamsHash: hash,
+		Container: "mp4", CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p",
+		AudioTrackIndex: -1, OutputPath: "/tmp/" + id + ".mp4", MaxAttempts: 3,
+	}
+}
+
+// TestArtifactQueueClaimAndLeaseRecovery is the Phase 3 / invariant-3 acceptance
+// test: a crash mid-encode (an expired lease) is recovered on the next sweep so
+// the job re-enqueues and reaches ready, and concurrent workers never claim the
+// same job twice (no double-encode).
+func TestArtifactQueueClaimAndLeaseRecovery(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+
+	a := newArtifact(t, fileID, "hash-recovery")
+	row, created, err := repo.EnsureQueued(ctx, a)
+	if err != nil || !created || row.Status != ArtifactQueued {
+		t.Fatalf("EnsureQueued = (%+v, created=%v, %v), want new queued row", row, created, err)
+	}
+
+	// Dedup: a second ensure for the same key returns the same row, not a new one.
+	dup, created2, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-recovery"))
+	if err != nil || created2 || dup.ID != row.ID {
+		t.Fatalf("dedup EnsureQueued = (%s, created=%v, %v), want existing %s", dup.ID, created2, err, row.ID)
+	}
+
+	// Worker 1 claims the job; worker 2 finds nothing (no double-encode).
+	claim, err := repo.ClaimNext(ctx, "worker-1", time.Minute)
+	if err != nil || claim.ID != row.ID || claim.Status != ArtifactRunning || claim.Attempts != 1 {
+		t.Fatalf("ClaimNext = (%+v, %v), want running attempts=1", claim, err)
+	}
+	if _, err := repo.ClaimNext(ctx, "worker-2", time.Minute); !errors.Is(err, ErrNoArtifactJob) {
+		t.Fatalf("second ClaimNext err = %v, want ErrNoArtifactJob", err)
+	}
+
+	// Simulate a crash: expire the lease, then run the startup sweep.
+	if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET lease_expires_at = now() - interval '1 minute' WHERE id = $1`, row.ID); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+	reclaimed, err := repo.ReclaimExpiredLeases(ctx)
+	if err != nil {
+		t.Fatalf("reclaim: %v", err)
+	}
+	if len(reclaimed) != 1 || reclaimed[0].ID != row.ID || reclaimed[0].Terminal {
+		t.Fatalf("reclaimed = %+v, want one non-terminal %s", reclaimed, row.ID)
+	}
+	back, err := repo.GetByID(ctx, row.ID)
+	if err != nil || back.Status != ArtifactQueued {
+		t.Fatalf("after reclaim status = %v (%v), want queued (no permanent running)", back.Status, err)
+	}
+
+	// Another worker reclaims and completes it.
+	claim2, err := repo.ClaimNext(ctx, "worker-2", time.Minute)
+	if err != nil || claim2.ID != row.ID || claim2.Attempts != 2 {
+		t.Fatalf("reclaim ClaimNext = (%+v, %v), want attempts=2", claim2, err)
+	}
+	if err := repo.MarkReady(ctx, row.ID, claim2.OutputPath, 4242); err != nil {
+		t.Fatalf("MarkReady: %v", err)
+	}
+	done, err := repo.GetByKey(ctx, fileID, "transcode", "hash-recovery")
+	if err != nil || done.Status != ArtifactReady || done.FileSize != 4242 {
+		t.Fatalf("final = (%+v, %v), want ready size=4242", done, err)
+	}
+}
+
+// TestArtifactRetryUntilTerminal verifies attempt counting and backoff: a job
+// retries behind its backoff gate until max_attempts, then goes terminal-failed.
+func TestArtifactRetryUntilTerminal(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+
+	row, _, err := repo.EnsureQueued(ctx, newArtifact(t, fileID, "hash-retry"))
+	if err != nil {
+		t.Fatalf("EnsureQueued: %v", err)
+	}
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		claim, err := repo.ClaimNext(ctx, "worker", time.Minute)
+		if err != nil {
+			t.Fatalf("attempt %d ClaimNext: %v", attempt, err)
+		}
+		if claim.Attempts != attempt {
+			t.Fatalf("attempt %d: attempts = %d", attempt, claim.Attempts)
+		}
+		terminal, err := repo.MarkFailedOrRetry(ctx, row.ID, "boom", 30*time.Second)
+		if err != nil {
+			t.Fatalf("attempt %d MarkFailedOrRetry: %v", attempt, err)
+		}
+		if attempt < 3 {
+			if terminal {
+				t.Fatalf("attempt %d went terminal too early", attempt)
+			}
+			// Behind the backoff gate the job is not yet claimable.
+			if _, err := repo.ClaimNext(ctx, "worker", time.Minute); !errors.Is(err, ErrNoArtifactJob) {
+				t.Fatalf("attempt %d: job claimable during backoff", attempt)
+			}
+			if _, err := pool.Exec(ctx, `UPDATE download_artifacts SET next_retry_at = now() - interval '1 second' WHERE id = $1`, row.ID); err != nil {
+				t.Fatalf("clear backoff: %v", err)
+			}
+		} else if !terminal {
+			t.Fatalf("final attempt should be terminal")
+		}
+	}
+
+	failed, err := repo.GetByID(ctx, row.ID)
+	if err != nil || failed.Status != ArtifactFailed {
+		t.Fatalf("final status = %v (%v), want failed", failed.Status, err)
+	}
+}

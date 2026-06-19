@@ -303,6 +303,13 @@ type DownloadConfig struct {
 	MaxConcurrentPerUser int           `yaml:"-"` // max simultaneous downloads per user (0 = unlimited)
 	MaxPerPeriod         int           `yaml:"-"` // max downloads per user per period (0 = unlimited)
 	PeriodDuration       time.Duration `yaml:"-"` // rolling window for MaxPerPeriod
+
+	// Downloads v2 (offline sync for mobile). The prepare-to-file pipeline that
+	// consumes these ships in Phase 3; they are parsed default-off from Phase 0.
+	TranscodeEnabled      bool   `yaml:"-"` // server gate for transcode-to-file (default false)
+	ArtifactDir           string `yaml:"-"` // prepared-artifact output volume ("" = default under the transcode dir)
+	MaxConcurrentPrepares int    `yaml:"-"` // encode/remux worker-pool size (default 2)
+	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
 }
 
 // MetadataConfig holds metadata pipeline settings.
