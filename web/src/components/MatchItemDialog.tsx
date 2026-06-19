@@ -92,9 +92,11 @@ export default function MatchItemDialog({ item, open, onOpenChange }: MatchItemD
 
   const handleSearch = useCallback(() => {
     setSelectedCandidate(null);
+    const normalizedYear = year.trim();
+    const parsedYear = normalizedYear === "" ? undefined : Number.parseInt(normalizedYear, 10);
     const request: ItemMatchSearchRequest = {
       title: title || undefined,
-      year: year ? parseInt(year, 10) : undefined,
+      year: parsedYear !== undefined && Number.isFinite(parsedYear) ? parsedYear : undefined,
       library_id: item.library_id,
     };
 
