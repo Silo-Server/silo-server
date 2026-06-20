@@ -1564,6 +1564,7 @@ func (h *LibraryCollectionHandler) HandleSyncAdminCollection(w http.ResponseWrit
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
+		slog.Error("collection sync failed", "collection_id", collectionID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to sync collection")
 		return
 	}
