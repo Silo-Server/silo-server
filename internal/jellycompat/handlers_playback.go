@@ -137,8 +137,10 @@ type PlaybackHandler struct {
 	SettingsRepo SettingsReader       // optional; reads watched threshold setting
 	// RecipeNodeStore hands a remote transcode's reconstruction recipe to the
 	// control-plane recipe store (Redis) so a dedicated transcode node that
-	// restarts can rebuild ffmpeg from it. Jellyfin clients cannot carry a native
-	// token, so the node cannot self-reconstruct from the hop token alone. Optional
+	// restarts can rebuild ffmpeg from it. The node-hop token is server-minted and
+	// could carry the recipe, but it is mutated in place and the client can't be
+	// driven to refresh a stale token, so the node reconstructs from this
+	// server-authoritative store instead (see internal/noderecipe). Optional
 	// (nil disables it — integrated/no-node deployments need no handoff).
 	RecipeNodeStore recipeNodePutter
 }
@@ -408,9 +410,10 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	}
 
 	// Mirror the byte-affecting opts sent to the node into a RecipeCard and persist
-	// it for restart resilience. The remote node holds no native token (Jellyfin
-	// clients cannot round-trip one), so without a persisted recipe a node or
-	// central restart cannot rebuild ffmpeg and segment serves 404.
+	// it for restart resilience. The node-hop token is identity-only by design (see
+	// internal/noderecipe), and central serves Jellyfin clients that carry no native
+	// token of their own, so without a persisted recipe a node or central restart
+	// cannot rebuild ffmpeg and segment serves 404.
 	opts := playback.TranscodeOpts{
 		SessionID:          upstreamSessionID,
 		InputPath:          reqBody.InputPath,
@@ -446,7 +449,8 @@ func (h *PlaybackHandler) startRemoteTranscode(
 // handed to the node recipe store (Redis) for dedicated transcode nodes. The node
 // URL is taken from the upstream session (bound before start on the remote path),
 // so it is "" for integrated transcodes and the node-store write is skipped.
-// Jellyfin clients cannot round-trip a native token, so the persisted recipe is
+// A Jellyfin client carries no native token of its own and the node-hop token is
+// deliberately identity-only (see internal/noderecipe), so the persisted recipe is
 // the only way a node or central restart can rebuild ffmpeg.
 //
 // Returns an error only when the compat-store Update fails; the caller owns

@@ -1,10 +1,14 @@
 // Package noderecipe is the recipe-handoff half of restart-resilient playback
 // for jellycompat on dedicated transcode nodes. A native transcode carries its
 // reconstruction recipe in the stream token, so a transcode node that restarts
-// can rebuild ffmpeg from the token the client re-presents. A Jellyfin client
-// cannot round-trip a native token, so the jellycompat node hop signs an
-// identity-only token and the recipe lives only in the central compat store —
-// out of the node's reach after the node restarts.
+// can rebuild ffmpeg from the token the client re-presents. The jellycompat
+// node-hop token is server-minted and could carry the recipe too, but it
+// deliberately does not: the recipe is mutated in place under a stable session id
+// (a Jellyfin audio/subtitle switch restarts ffmpeg without re-minting the
+// client's token), and a third-party Jellyfin client cannot be driven to refresh
+// a stale token — so a token snapshot could reconstruct a stale rendition. The
+// authoritative, mutable recipe therefore lives server-side (the central compat
+// store), out of a restarted node's reach (Postgres).
 //
 // This store bridges that gap over the same shared Redis the offload topology
 // already relies on (the session-deny lease and the node-session tracker):

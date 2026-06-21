@@ -104,9 +104,11 @@ func (s *Server) SetFFmpegLogSink(sink playback.FFmpegLogSink) {
 }
 
 // recipeStore reads a remote transcode's reconstruction recipe written by central
-// at transcode start. The jellycompat node hop token is identity-only (the recipe
-// lives in the central compat store, not the token), so on a node restart the node
-// fetches the recipe here instead of 404ing. *noderecipe.Store implements it.
+// at transcode start. The jellycompat node-hop token is identity-only by design —
+// not because a Jellyfin client can't round-trip it, but because the recipe is
+// mutated in place and the client can't be driven to refresh a stale token, so the
+// authoritative recipe lives server-side (see internal/noderecipe). On a node
+// restart the node fetches it here instead of 404ing. *noderecipe.Store implements it.
 type recipeStore interface {
 	Get(ctx context.Context, sessionID string) (*playback.RecipeCard, bool)
 	// Delete drops a session's recipe so a buffered/retrying request after a node
@@ -345,10 +347,10 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 		return nil
 	}
 	// A native token carries the full byte-affecting recipe. The jellycompat node
-	// hop signs an identity-only token (the recipe lives in the central compat
-	// store, not the token), so its card decodes with no encode parameters. For the
-	// jellycompat case the recipe is fetched from the control-plane recipe store
-	// below; without that store there is nothing to rebuild from, so 404.
+	// hop signs an identity-only token by design (see internal/noderecipe for why),
+	// so its card decodes with no encode parameters. For the jellycompat case the
+	// recipe is fetched from the control-plane recipe store below; without that
+	// store there is nothing to rebuild from, so 404.
 	tokenComplete := card.SegmentDuration > 0 && card.TargetCodecVideo != ""
 	if !tokenComplete && s.recipeStore == nil {
 		return nil
