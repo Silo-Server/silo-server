@@ -37,6 +37,10 @@ type StreamHandler struct {
 	// Session from the recipe card after a server restart instead of 404-ing.
 	// May be nil (tests / minimal setups) — reconstruct is then simply off.
 	TM *playback.TranscodeManager
+	// JWTSecret verifies the stream token carried on the serve URL (?st=), which
+	// is the reconstruction descriptor for direct/remux after a restart. Empty
+	// disables token-based reconstruct (tests / minimal setups).
+	JWTSecret string
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -88,9 +92,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	// miss (e.g. after a server restart) so a direct/remux stream resumes instead
 	// of 404-ing. The client re-supplies its position (HTTP Range for direct, the
 	// ?seek= query for remux), so no runtime beyond the Session needs rebuilding.
-	// A manager without a recipe store reconstructs nothing, collapsing to a plain
-	// GetSession + ownership check (legacy behavior).
-	session, status := h.TM.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, userID)
+	// Without a token (or signing secret) reconstruct is off, collapsing to a
+	// plain GetSession + ownership check.
+	card := streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	session, status := h.TM.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, userID, card)
 	switch status {
 	case playback.SessionMissing:
 		writePlaybackSessionNotFound(w)

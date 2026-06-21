@@ -1,8 +1,9 @@
 package playback
 
 import (
-	"context"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 // RecipeCard is the small, durable "recipe" needed to reconstruct a transcode
@@ -140,37 +141,78 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 	}
 }
 
-// RecipeStore persists RecipeCards so a transcode session can be reconstructed
-// after the in-memory state is lost. The Postgres-backed PostgresRecipeStore is
-// the production implementation; the interface remains so tests can inject a
-// fake. Implementations must be safe for concurrent use and must no-op
-// gracefully when persistence is unavailable so callers never need to
-// special-case a disabled store.
-type RecipeStore interface {
-	// Enabled reports whether persistence is actually wired. When false, every
-	// other method is a no-op and reconstruct is disabled (today's behavior).
-	Enabled() bool
-	// Save writes (or overwrites) the card and arms its TTL.
-	Save(ctx context.Context, card RecipeCard) error
-	// Get returns the card for sessionID. found is false when absent.
-	Get(ctx context.Context, sessionID string) (card RecipeCard, found bool, err error)
-	// Delete removes the card (clean session stop).
-	Delete(ctx context.Context, sessionID string) error
-	// Refresh re-arms the TTL for a still-live session.
-	Refresh(ctx context.Context, sessionID string) error
-	// ActiveSessionIDs lists every session that still has a card. Used by the
-	// segment-directory cleanup to spare dirs whose session is resumable.
-	ActiveSessionIDs(ctx context.Context) (map[string]struct{}, error)
-	// DeleteExpired physically removes lapsed rows and returns the count. Reads
-	// already filter on expiry, so this only bounds table growth; it runs on the
-	// janitor cadence and at boot cleanup.
-	DeleteExpired(ctx context.Context) (int64, error)
+// MaxTokenTTL is the absolute lifetime of a stream token, and therefore the
+// longest a session can remain reconstructable. Under token-carried
+// reconstruction there is no durable server-side card index, so segment-dir
+// cleanup spares a dir that is not live in memory only until this age elapses:
+// past it, no surviving token could still reconstruct the session, so the dir is
+// safe to reap. It must comfortably outlast any realistic restart outage.
+const MaxTokenTTL = 24 * time.Hour
+
+// ToClaims projects the reconstruction recipe into stream-token claims so the
+// card can travel with the client instead of a shared per-session store. The
+// environment-specific knobs (HWAccel/HWDevice) are intentionally NOT carried —
+// they are re-resolved from live config on reconstruct, so an operator's config
+// change applies to reconstructed sessions too.
+func (c RecipeCard) ToClaims() streamtoken.Claims {
+	return streamtoken.Claims{
+		SessionID:          c.SessionID,
+		MediaPath:          c.InputPath,
+		PlayMethod:         string(c.PlayMethod),
+		TranscodeAudio:     c.TranscodeAudio,
+		TranscodeNode:      c.TranscodeNodeURL,
+		TargetCodec:        c.TargetCodecVideo,
+		TargetRes:          c.TargetResolution,
+		AudioTrackIndex:    c.AudioTrackIndex,
+		UserID:             c.UserID,
+		ProfileID:          c.ProfileID,
+		MediaFileID:        c.MediaFileID,
+		SourceVideoCodec:   c.SourceVideoCodec,
+		SeekSeconds:        c.SeekSeconds,
+		SegmentDuration:    c.SegmentDuration,
+		StartSegmentNumber: c.StartSegmentNumber,
+		SubtitleTrackIndex: c.SubtitleTrackIndex,
+		SubtitleBurnIn:     c.SubtitleBurnIn,
+		TargetBitrateKbps:  c.TargetBitrateKbps,
+		TotalDuration:      c.TotalDuration,
+		FastStart:          c.FastStart,
+		TargetCodecAudio:   c.TargetCodecAudio,
+	}
 }
 
-const (
-	// recipeTTL is the idle/abandonment window for a recipe card. It is re-armed
-	// on activity (see PlaybackHandler refresh), so it caps how long an
-	// idle/paused/abandoned session stays reconstructable — not session length.
-	// It must comfortably outlast a paused-session grace window plus a restart.
-	recipeTTL = 30 * time.Minute
-)
+// RecipeCardFromClaims rebuilds the reconstruction recipe from verified
+// stream-token claims. HWAccel/HWDevice are deliberately absent (re-resolved
+// from live config by the reconstruct path). An empty PlayMethod decodes to
+// PlayTranscode for back-compat with any token minted before the discriminator.
+func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
+	if c == nil {
+		return RecipeCard{}
+	}
+	method := PlayMethod(c.PlayMethod)
+	if method == "" {
+		method = PlayTranscode
+	}
+	return RecipeCard{
+		SessionID:          c.SessionID,
+		UserID:             c.UserID,
+		ProfileID:          c.ProfileID,
+		MediaFileID:        c.MediaFileID,
+		TranscodeNodeURL:   c.TranscodeNode,
+		PlayMethod:         method,
+		TranscodeAudio:     c.TranscodeAudio,
+		InputPath:          c.MediaPath,
+		SourceVideoCodec:   c.SourceVideoCodec,
+		SeekSeconds:        c.SeekSeconds,
+		TargetResolution:   c.TargetRes,
+		TargetCodecVideo:   c.TargetCodec,
+		TargetCodecAudio:   c.TargetCodecAudio,
+		SegmentDuration:    c.SegmentDuration,
+		StartSegmentNumber: c.StartSegmentNumber,
+		SubtitleTrackIndex: c.SubtitleTrackIndex,
+		SubtitleBurnIn:     c.SubtitleBurnIn,
+		AudioTrackIndex:    c.AudioTrackIndex,
+		TargetBitrateKbps:  c.TargetBitrateKbps,
+		TotalDuration:      c.TotalDuration,
+		FastStart:          c.FastStart,
+	}
+}

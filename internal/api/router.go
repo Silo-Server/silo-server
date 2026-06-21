@@ -59,6 +59,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/streamauth"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
@@ -706,11 +707,6 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.UserStoreProvider != nil {
 			playbackHandler.StoreProvider = deps.UserStoreProvider
 		}
-		// Recipe-card store enables transcode reconstruct across restarts, backed
-		// by Postgres (no extra dependency; disabled/no-op only if the pool is
-		// nil). Must be set before the boot-time orphan cleanup below so surviving
-		// cards spare their dirs.
-		playbackHandler.RecipeStore = playback.NewPostgresRecipeStore(deps.DB)
 		playbackHandler.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 		if scrobbler, ok := deps.WatchProviderService.(handlers.PlaybackWatchScrobbler); ok {
 			playbackHandler.WatchScrobbler = scrobbler
@@ -725,9 +721,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if streamHandler != nil {
 			// Share the playback handler's transcode/reconstruct manager so a
-			// direct/remux stream can rebuild its session from the recipe card
-			// after a restart (same store, same SessionManager).
+			// direct/remux stream can rebuild its session from the token recipe
+			// after a restart (same manager, same SessionManager).
 			streamHandler.TM = playbackHandler.TranscodeManager()
+			if deps.Config != nil {
+				streamHandler.JWTSecret = deps.Config.Auth.JWTSecret
+			}
 			streamHandler.AdminStore = playbackAdminStore
 			streamHandler.EventsHub = deps.EventsHub
 			streamHandler.SessionSyncer = deps.SessionSyncer
@@ -742,6 +741,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
+		}
+		// An admin Stop/Terminate writes a session-deny marker so a node-served
+		// direct/remux stream (no producer to kill) is cut on its next request,
+		// regardless of the still-valid 24h token. This is the one revocation case
+		// the offloaded topology cannot otherwise cover.
+		if deps.RedisClient != nil {
+			playbackHandler.LeaseDenier = streamauth.NewStore(deps.RedisClient, 0)
 		}
 		if deps.Config != nil {
 			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {

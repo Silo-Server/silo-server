@@ -32,6 +32,15 @@ type SessionInfo struct {
 	Resolution  string `json:"resolution,omitempty"`
 	HWAccel     string `json:"hw_accel,omitempty"`
 	StartedAt   string `json:"started_at"`
+
+	// AuthUserID / ProfileID / MediaFileID are the numeric ownership keys the
+	// node copies from the verified stream token. They enrich the live admin
+	// "active streams" view (served by SCANning these records) so it can answer
+	// *who* is watching *what* on each node, not just session id + node + type;
+	// the string UserID/MediaItemID/MediaTitle fields remain the display labels.
+	AuthUserID  int    `json:"auth_user_id,omitempty"`
+	ProfileID   string `json:"profile_id,omitempty"`
+	MediaFileID int    `json:"media_file_id,omitempty"`
 }
 
 // Tracker manages session lifecycle in Redis for a single node.

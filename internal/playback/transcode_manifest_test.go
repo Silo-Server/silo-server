@@ -318,7 +318,11 @@ func TestRestartSeekTarget_CopyModeUsesManifestTimelineWhenAvailable(t *testing.
 	}
 }
 
-func TestRestartSeekTarget_CopyModeFallsBackToFixedDurationWhenSegmentOutsideManifest(t *testing.T) {
+func TestRestartSeekTarget_CopyModeReportsUnresolvedWhenSegmentOutsideManifest(t *testing.T) {
+	// Copy-mode fragments have variable durations, so a segment the manifest
+	// can't yet place must NOT fall back to fixed-duration seg×dur math (which
+	// would seek FFmpeg to the wrong source time and desync A/V). Instead it
+	// reports the seek target as unresolved (0, false, nil).
 	tempDir := t.TempDir()
 	manifest := strings.Join([]string{
 		"#EXTM3U",
@@ -349,11 +353,11 @@ func TestRestartSeekTarget_CopyModeFallsBackToFixedDurationWhenSegmentOutsideMan
 	if err != nil {
 		t.Fatalf("RestartSeekTarget: %v", err)
 	}
-	if !ok {
-		t.Fatal("RestartSeekTarget returned ok=false")
+	if ok {
+		t.Fatalf("RestartSeekTarget(50) returned ok=true (got %f); copy-mode should report unresolved, not seg×dur", got)
 	}
-	if got != 100 {
-		t.Fatalf("RestartSeekTarget(50) = %f, want 100", got)
+	if got != 0 {
+		t.Fatalf("RestartSeekTarget(50) = %f, want 0", got)
 	}
 }
 
@@ -377,8 +381,13 @@ func TestRestartSeekTarget_EncodedUsesFixedDurationMath(t *testing.T) {
 	}
 }
 
-func TestRestartSeekTarget_CopyModeFallsBackWhenManifestNotReady(t *testing.T) {
+func TestRestartSeekTarget_CopyModeReportsUnresolvedWhenManifestNotReady(t *testing.T) {
+	// A freshly reconstructed copy-mode window has a near-empty/absent manifest
+	// (ErrManifestNotReady). The seek target must be reported unresolved
+	// (0, false, nil) so the caller retries instead of seeking to a fabricated
+	// seg×dur position.
 	session := &TranscodeSession{
+		outputDir: t.TempDir(), // no stream.m3u8 written -> ErrManifestNotReady
 		opts: TranscodeOpts{
 			TargetCodecVideo: "copy",
 			SegmentDuration:  2,
@@ -389,11 +398,11 @@ func TestRestartSeekTarget_CopyModeFallsBackWhenManifestNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestartSeekTarget: %v", err)
 	}
-	if !ok {
-		t.Fatal("RestartSeekTarget returned ok=false")
+	if ok {
+		t.Fatalf("RestartSeekTarget(10) returned ok=true (got %f); copy-mode should report unresolved when manifest not ready", got)
 	}
-	if got != 20 {
-		t.Fatalf("RestartSeekTarget(10) = %f, want 20", got)
+	if got != 0 {
+		t.Fatalf("RestartSeekTarget(10) = %f, want 0", got)
 	}
 }
 

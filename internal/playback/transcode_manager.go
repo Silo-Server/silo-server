@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,8 +28,12 @@ type TranscodeRuntimeConfig struct {
 
 // sessionReconstructor is the SessionManager capability used to re-register a
 // session under an existing ID during reconstruct. *SessionManager implements it.
+// RegisterReconstructedWithLimits additionally enforces the per-user admission
+// caps so replaying a token cannot reconstruct past the concurrent stream /
+// transcode limits a fresh StartSession would reject.
 type sessionReconstructor interface {
 	RegisterReconstructed(s *Session) *Session
+	RegisterReconstructedWithLimits(ctx context.Context, s *Session) (*Session, error)
 }
 
 // TranscodeManager owns the transcode-session lifecycle shared by every playback
@@ -42,9 +47,6 @@ type sessionReconstructor interface {
 // Dependencies are injected as function fields so an embedding handler can wire
 // them lazily from its own (often late-set) fields without an ordering hazard.
 type TranscodeManager struct {
-	// StoreFn returns the recipe-card store, or nil when persistence is not
-	// wired (reconstruct disabled — behavior identical to before the feature).
-	StoreFn func() RecipeStore
 	// Sessions re-registers a reconstructed session under its existing id.
 	Sessions sessionReconstructor
 	// Config returns the current transcode runtime config (ffmpeg path, dir,
@@ -56,8 +58,11 @@ type TranscodeManager struct {
 	JWTSecretFn func() string
 	// OnFFmpegCrash is invoked when a reconstructed/local ffmpeg exits with an
 	// error so the embedding handler can tear down the playback session (keeping
-	// the card, so a resume can respawn). No-op when nil.
-	OnFFmpegCrash func(ctx context.Context, sessionID string)
+	// the card, so a resume can respawn). dead is the exact session that crashed;
+	// the handler passes it back through CloseTranscodeSessionIf so a successor
+	// reconstructed under the same id between the exit and teardown is not killed.
+	// No-op when nil.
+	OnFFmpegCrash func(ctx context.Context, sessionID string, dead *TranscodeSession)
 	// StartThrottler optionally starts the segment throttler for a (re)started
 	// transcode, reading the embedding handler's settings. No-op when nil.
 	StartThrottler func(ctx context.Context, ts *TranscodeSession)
@@ -65,8 +70,12 @@ type TranscodeManager struct {
 	transcodeMu sync.RWMutex
 	transcodes  map[string]*TranscodeSession
 
-	recipeRefreshMu sync.Mutex
-	recipeRefreshAt map[string]time.Time
+	// inFlightMu guards reconstructInFlight, the set of session ids whose ffmpeg
+	// is mid-reconstruct. Cleanup unions it with the live map so a dir being
+	// rebuilt right now is never reaped (token-carried reconstruction has no
+	// durable card index to consult instead).
+	inFlightMu          sync.Mutex
+	reconstructInFlight map[string]struct{}
 
 	// reconstructGroup single-flights transcode reconstruction per session id so
 	// concurrent manifest/segment requests for a lost session spawn exactly one
@@ -85,16 +94,9 @@ type TranscodeManager struct {
 // caller wires the dependency function fields before use.
 func NewTranscodeManager() *TranscodeManager {
 	return &TranscodeManager{
-		transcodes:      make(map[string]*TranscodeSession),
-		recipeRefreshAt: make(map[string]time.Time),
+		transcodes:          make(map[string]*TranscodeSession),
+		reconstructInFlight: make(map[string]struct{}),
 	}
-}
-
-func (m *TranscodeManager) store() RecipeStore {
-	if m.StoreFn == nil {
-		return nil
-	}
-	return m.StoreFn()
 }
 
 func (m *TranscodeManager) jwtSecret() string {
@@ -182,72 +184,23 @@ func (m *TranscodeManager) GetOrRegisterTranscodeSession(sessionID string, newSe
 	return newSession, true
 }
 
-// recipeEnabled reports whether transcode reconstruct persistence is wired.
-func (m *TranscodeManager) recipeEnabled() bool {
-	s := m.store()
-	return s != nil && s.Enabled()
-}
-
-// SaveRecipeCard persists the recipe card for a freshly started transcode so it
-// can be reconstructed after a restart. Best-effort: a store error must not fail
-// playback start.
-func (m *TranscodeManager) SaveRecipeCard(ctx context.Context, session *Session, transcodeNodeURL string, opts TranscodeOpts) {
-	if !m.recipeEnabled() || session == nil {
-		return
+// markReconstructing records that sessionID's ffmpeg is mid-reconstruct and
+// returns a release func to clear it. Cleanup unions this set with the live map
+// so a dir being rebuilt is never reaped before it registers.
+func (m *TranscodeManager) markReconstructing(sessionID string) func() {
+	if m == nil || sessionID == "" {
+		return func() {}
 	}
-	card := NewRecipeCard(session.UserID, session.ProfileID, session.MediaFileID, transcodeNodeURL, opts)
-	if err := m.store().Save(ctx, card); err != nil {
-		slog.Warn("persist transcode recipe card failed", "error", err, "session", opts.SessionID, "playback_session_id", opts.SessionID)
+	m.inFlightMu.Lock()
+	if m.reconstructInFlight == nil {
+		m.reconstructInFlight = make(map[string]struct{})
 	}
-}
-
-// SaveCard persists an already-built recipe card (used by callers that build a
-// non-transcode card, e.g. direct/remux). Best-effort.
-func (m *TranscodeManager) SaveCard(ctx context.Context, card RecipeCard) {
-	if !m.recipeEnabled() || card.SessionID == "" {
-		return
-	}
-	if err := m.store().Save(ctx, card); err != nil {
-		slog.Warn("persist recipe card failed", "error", err, "session", card.SessionID, "playback_session_id", card.SessionID)
-	}
-}
-
-// deleteRecipeCard removes the persisted card on a clean session stop.
-func (m *TranscodeManager) deleteRecipeCard(sessionID string) {
-	if !m.recipeEnabled() || sessionID == "" {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := m.store().Delete(ctx, sessionID); err != nil {
-		slog.Warn("delete transcode recipe card failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
-	}
-}
-
-// recipeRefreshThrottle bounds how often a card's TTL is re-armed so the
-// per-segment request path does not hammer the store. One refresh per minute per
-// session is enough given a 30-minute TTL.
-const recipeRefreshThrottle = time.Minute
-
-// RefreshRecipeCard re-arms a live session's card TTL, throttled in-memory so the
-// hot segment path issues at most one store write per minute per session.
-func (m *TranscodeManager) RefreshRecipeCard(sessionID string) {
-	if !m.recipeEnabled() || sessionID == "" {
-		return
-	}
-	now := time.Now()
-	m.recipeRefreshMu.Lock()
-	if last, ok := m.recipeRefreshAt[sessionID]; ok && now.Sub(last) < recipeRefreshThrottle {
-		m.recipeRefreshMu.Unlock()
-		return
-	}
-	m.recipeRefreshAt[sessionID] = now
-	m.recipeRefreshMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := m.store().Refresh(ctx, sessionID); err != nil {
-		slog.Warn("refresh transcode recipe card failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
+	m.reconstructInFlight[sessionID] = struct{}{}
+	m.inFlightMu.Unlock()
+	return func() {
+		m.inFlightMu.Lock()
+		delete(m.reconstructInFlight, sessionID)
+		m.inFlightMu.Unlock()
 	}
 }
 
@@ -275,21 +228,27 @@ const (
 // refused; reconstruct itself refuses a zero/mismatched caller — so this widens
 // no access. getSession is supplied by the caller (its SessionManager.GetSession)
 // so the manager needs no direct handle on the manager type.
-func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSession func(string) (*Session, error), sessionID string, requestUserID int) (*Session, SessionLoadStatus) {
+//
+// card is the reconstruction recipe the caller decoded from the verified stream
+// token the client presented (nil when the request carried no usable token).
+// Under token-carried reconstruction it is the sole descriptor source — there is
+// no shared per-session store to fall back on — so a not-found session with a nil
+// card is a genuine miss.
+func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSession func(string) (*Session, error), sessionID string, requestUserID int, card *RecipeCard) (*Session, SessionLoadStatus) {
 	session, err := getSession(sessionID)
 	if err != nil {
 		if !errors.Is(err, ErrSessionNotFound) {
 			return nil, SessionLoadFailed
 		}
-		// A nil manager (documented optional on StreamHandler) has no card store,
+		// A nil manager (documented optional on StreamHandler) cannot reconstruct,
 		// so a missing session is simply not-found rather than a panic.
-		if m == nil {
+		if m == nil || card == nil {
 			return nil, SessionMissing
 		}
-		// Lost the in-memory session (e.g. restart): rebuild it from the card.
-		// ReconstructSession re-binds ownership and refuses a zero/mismatched
-		// caller, so a nil result here is a genuine not-found.
-		session = m.ReconstructSession(ctx, sessionID, requestUserID)
+		// Lost the in-memory session (e.g. restart): rebuild it from the token's
+		// recipe. ReconstructSession re-binds ownership and refuses a
+		// zero/mismatched caller, so a nil result here is a genuine not-found.
+		session = m.ReconstructSession(ctx, sessionID, requestUserID, *card)
 		if session == nil {
 			return nil, SessionMissing
 		}
@@ -309,16 +268,13 @@ func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSess
 // to the live authenticated caller and refuses if ownership cannot be confirmed.
 // Returns the (re)registered session, or nil if reconstruct is not possible (no
 // card, ownership mismatch, or unsupported session manager).
-func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID string, requestUserID int) *Session {
-	if m == nil || !m.recipeEnabled() || m.Sessions == nil {
+func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID string, requestUserID int, card RecipeCard) *Session {
+	if m == nil || m.Sessions == nil {
 		return nil
 	}
-	card, found, err := m.store().Get(ctx, sessionID)
-	if err != nil {
-		slog.Warn("load transcode recipe card failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
-		return nil
-	}
-	if !found {
+	if card.SessionID == "" || card.SessionID != sessionID {
+		// The token's recipe must be for the session id in the URL; a mismatch is
+		// a forged or stale request.
 		return nil
 	}
 	// Re-bind ownership to the live caller. These routes run under RequireAuth, so
@@ -354,7 +310,17 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		TargetBitrateKbps: card.TargetBitrateKbps,
 		TranscodeHWAccel:  card.HWAccel,
 	}
-	session := m.Sessions.RegisterReconstructed(s)
+	// Enforce the same per-user concurrency caps a fresh StartSession would, so a
+	// replayed token cannot reconstruct past the user's limit. Reconstructing the
+	// user's own surviving sessions still succeeds up to the cap; only the over-cap
+	// replay is rejected.
+	session, err := m.Sessions.RegisterReconstructedWithLimits(ctx, s)
+	if err != nil {
+		slog.Warn("playback session reconstruct refused by admission cap",
+			"session", sessionID, "playback_session_id", sessionID,
+			"user", card.UserID, "method", method, "error", err)
+		return nil
+	}
 	slog.Info("playback session reconstructed from recipe card",
 		"session", sessionID, "playback_session_id", sessionID, "user", card.UserID, "method", method)
 	return session
@@ -388,9 +354,23 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 // the load balancer. Remote transcode-node sessions are unaffected: their
 // non-empty TranscodeNodeURL routes every front-end to the same ffmpeg via the
 // proxy path, so ReconstructTranscode is never reached for them.
+//
+// This constraint is currently documented, not enforced: a robust fix needs a
+// per-session owning-instance claim in a store shared across front-ends (e.g.
+// the streamauth lease Redis or the recipe store), so a front-end refuses to
+// reconstruct an integrated session it does not own. The TranscodeManager has no
+// such shared handle wired today — only per-process config/secret closures and
+// in-memory maps — so the claim cannot be made cheaply here. Until a topology
+// signal reaches the manager, deploy integrated transcode single-front-end or
+// behind sticky session affinity. See M8.
+// card is the reconstruction recipe decoded from the client's verified stream
+// token; it carries the encode parameters formerly read from the Postgres store.
 // Returns the live session, or nil if reconstruct was not possible.
-func (m *TranscodeManager) ReconstructTranscode(ctx context.Context, sessionID string, requestedSegment int) *TranscodeSession {
-	if m == nil || !m.recipeEnabled() {
+func (m *TranscodeManager) ReconstructTranscode(ctx context.Context, sessionID string, requestedSegment int, card RecipeCard) *TranscodeSession {
+	if m == nil {
+		return nil
+	}
+	if card.SessionID == "" || card.SessionID != sessionID {
 		return nil
 	}
 
@@ -401,7 +381,7 @@ func (m *TranscodeManager) ReconstructTranscode(ctx context.Context, sessionID s
 	}
 
 	v, err, _ := m.reconstructGroup.Do(sessionID, func() (interface{}, error) {
-		return m.doReconstructTranscode(ctx, sessionID, requestedSegment), nil
+		return m.doReconstructTranscode(ctx, sessionID, requestedSegment, card), nil
 	})
 	if err != nil || v == nil {
 		return nil
@@ -410,21 +390,47 @@ func (m *TranscodeManager) ReconstructTranscode(ctx context.Context, sessionID s
 	return session
 }
 
+// fastResumeSeek decides whether a reconstructed ffmpeg should be spawned at the
+// segment the client is actually requesting instead of the card's original
+// start. Resuming near requestedSegment avoids a wait-then-seek-restart stall
+// when the client has already played past the card position.
+//
+// The returned (segment, seekSeconds) maps via seg×SegmentDuration, which is
+// ONLY valid for ENCODED transcodes: their forced keyframes make every segment
+// exactly SegmentDuration long. COPY-mode segments inherit the source's variable
+// GOP boundaries, so seg×dur lands on the wrong source time and desyncs A/V after
+// a restart — so for copy-mode cards this returns ok=false and the caller keeps
+// the card's original start, letting the manifest-driven segment recovery
+// (RestartSeekTarget) seek forward once the rebuilt manifest exposes the real
+// per-segment timing. A negative requestedSegment (manifest path, no segment
+// context) and a non-advanced client also return ok=false.
+func fastResumeSeek(card RecipeCard, requestedSegment int) (segment int, seekSeconds float64, ok bool) {
+	if strings.EqualFold(card.TargetCodecVideo, "copy") {
+		return 0, 0, false
+	}
+	if requestedSegment > card.StartSegmentNumber && card.SegmentDuration > 0 {
+		return requestedSegment, float64(requestedSegment * card.SegmentDuration), true
+	}
+	return 0, 0, false
+}
+
 // doReconstructTranscode performs the actual rebuild for a single reconstruct
 // leader. It is only ever invoked inside reconstructGroup.Do, so it is the sole
 // writer racing to register sessionID for this session.
-func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID string, requestedSegment int) *TranscodeSession {
-	card, found, err := m.store().Get(ctx, sessionID)
-	if err != nil || !found {
-		return nil
-	}
+func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID string, requestedSegment int, card RecipeCard) *TranscodeSession {
 	// Only transcode cards drive ffmpeg reconstruction. Direct/remux sessions
 	// reconstruct without a runtime and must never reach here; guard so a
 	// direct/remux card ID cannot accidentally spawn an encode. An empty
-	// PlayMethod is a legacy card written before the discriminator (transcode).
+	// PlayMethod is back-compat for a token minted before the discriminator
+	// (transcode).
 	if card.PlayMethod != "" && card.PlayMethod != PlayTranscode {
 		return nil
 	}
+
+	// Mark in-flight for the whole rebuild so a concurrent cleanup never reaps the
+	// output dir between spawn and map registration.
+	release := m.markReconstructing(sessionID)
+	defer release()
 
 	cfg := m.runtimeConfig()
 	outputDir := filepath.Join(cfg.TranscodeDir, sessionID)
@@ -439,9 +445,10 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// old position forces a wait-then-seek-restart cycle (a visible stall). Seeking
 	// straight to requestedSegment avoids it. A negative requestedSegment (manifest
 	// path) carries no segment context, so the card position stands.
-	if requestedSegment > card.StartSegmentNumber && card.SegmentDuration > 0 {
-		opts.StartSegmentNumber = requestedSegment
-		opts.SeekSeconds = float64(requestedSegment * card.SegmentDuration)
+	//
+	if seg, seek, ok := fastResumeSeek(card, requestedSegment); ok {
+		opts.StartSegmentNumber = seg
+		opts.SeekSeconds = seek
 	}
 
 	// Pace the spawn so a post-restart wave of reconstructs does not launch a
@@ -515,9 +522,12 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 			return
 		}
 
-		// ffmpeg crash — system teardown, keep the card so a resume can respawn.
+		// ffmpeg crash — tear the session down; a client holding a valid token can
+		// reconstruct it on the next request. Pass the dead session so teardown is a
+		// compare-and-delete: a reconstruct that registered a successor under this id
+		// between the current!=session check above and teardown must not be killed.
 		if m.OnFFmpegCrash != nil {
-			m.OnFFmpegCrash(context.Background(), sessionID)
+			m.OnFFmpegCrash(context.Background(), sessionID, session)
 		}
 	}()
 }
@@ -526,13 +536,13 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 // non-empty, sends DELETE to the remote transcode node. Otherwise closes the
 // local session.
 //
-// deleteCard controls whether the persisted recipe card is also removed. Pass
-// true ONLY for a genuine, user/admin-initiated stop. For liveness-driven
-// teardown (idle/paused reap, ffmpeg crash, connection abort, transcode restart
-// under the same id) pass false: the in-memory session and ffmpeg are rebuildable,
-// and keeping the card lets the client reconstruct on resume. An abandoned card is
-// reaped by its own store TTL, so it never leaks a slot.
-func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL string, deleteCard bool) {
+// Under token-carried reconstruction there is no durable card to drop: a stopped
+// session simply stops being served, and its segment dir is reaped by the
+// in-memory-liveness + age cleanup once no live token could still reconstruct it
+// (see CleanupOrphanedTranscodes). A deliberate, sub-TTL kill of an abusive
+// stream additionally writes a deny lease (see the central revalidator) so the
+// node withholds bytes before the token expires.
+func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL string) {
 	// Clean up local session if one exists (defensive).
 	m.transcodeMu.Lock()
 	session := m.transcodes[sessionID]
@@ -542,19 +552,46 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 		_ = session.Close()
 	}
 
-	// Drop the throttle bookkeeping for this session so the map does not grow
-	// unbounded across the server's lifetime (one entry per distinct session id).
-	m.recipeRefreshMu.Lock()
-	delete(m.recipeRefreshAt, sessionID)
-	m.recipeRefreshMu.Unlock()
+	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+}
 
-	if deleteCard {
-		// Session is truly over — drop its recipe card so it is not reconstructed
-		// and so its segment dir becomes eligible for cleanup.
-		m.deleteRecipeCard(sessionID)
+// CloseTranscodeSessionIf tears down a transcode session only when the live map
+// still holds the exact session the caller observed dying (expected). This is
+// the crash path: between a local ffmpeg's error exit and this teardown, a
+// concurrent reconstruct can register a fresh successor under the same id. An
+// unconditional close would delete+Close() that live successor — and Close()
+// removes the shared output dir out from under it. Comparing under the same lock
+// that reconstruct registers through makes the swap atomic: a non-matching entry
+// is left untouched. The remote-DELETE still fires for the matched case (and is
+// skipped entirely when the local successor already won, since there is nothing
+// of ours to stop).
+//
+// Returns true iff the live entry still matched expected and was torn down;
+// false iff a different (successor) or nil session held the slot and was left
+// untouched. Callers MUST treat this return as the authoritative gate for any
+// further teardown (e.g. stopping the upstream playback session): when it is
+// false, a successor owns the id and must not be disturbed.
+func (m *TranscodeManager) CloseTranscodeSessionIf(sessionID string, expected *TranscodeSession, transcodeNodeURL string) bool {
+	m.transcodeMu.Lock()
+	current := m.transcodes[sessionID]
+	if current != expected {
+		// A successor (or an already-completed close) holds the slot; leave it.
+		m.transcodeMu.Unlock()
+		return false
+	}
+	delete(m.transcodes, sessionID)
+	m.transcodeMu.Unlock()
+	if expected != nil {
+		_ = expected.Close()
 	}
 
-	// Send DELETE to remote transcode node if assigned (synchronous with timeout).
+	m.deleteRemoteTranscode(sessionID, transcodeNodeURL)
+	return true
+}
+
+// deleteRemoteTranscode sends DELETE to the assigned transcode node if any
+// (synchronous with timeout). A no-op for local/integrated sessions.
+func (m *TranscodeManager) deleteRemoteTranscode(sessionID, transcodeNodeURL string) {
 	if transcodeNodeURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -581,39 +618,33 @@ func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL str
 }
 
 // CleanupOrphanedTranscodes removes stale per-session temp directories for
-// transcodes that are no longer tracked in memory. Dirs whose recipe card still
-// exists are spared (those sessions are reconstructable after a restart).
+// transcodes that are no longer reconstructable. Under token-carried
+// reconstruction there is no durable card index to consult, so the liveness
+// signal is: the in-process live transcode map, the set of sessions currently
+// mid-reconstruct, and directory age. A dir is reaped only when it is absent from
+// both sets AND older than the maximum token lifetime — past which no surviving
+// token could reconstruct it. Each process owns its own TranscodeDir, so there is
+// no cross-process enumeration-failure mode to fail safe against.
 func (m *TranscodeManager) CleanupOrphanedTranscodes() (int, error) {
+	// Snapshot the live map and the in-flight set under both locks held at once.
+	// A reconstruct registers into m.transcodes and clears m.reconstructInFlight
+	// at different moments; snapshotting the two sets separately could miss a
+	// session that migrated between them, leaving its live dir absent from active
+	// and exposed to reaping. inFlightMu is taken first to match the only other
+	// site that holds both (none nests the reverse order).
+	m.inFlightMu.Lock()
 	m.transcodeMu.RLock()
-	active := make(map[string]struct{}, len(m.transcodes))
+	active := make(map[string]struct{}, len(m.transcodes)+len(m.reconstructInFlight))
 	for sessionID := range m.transcodes {
 		active[sessionID] = struct{}{}
 	}
-	m.transcodeMu.RUnlock()
-
-	// Spare dirs whose recipe card still exists: those sessions are
-	// reconstructable after a restart, so their segments must not be wiped.
-	if m.recipeEnabled() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		// Reclaim physically-expired rows first (filter-on-read already hides them;
-		// this just bounds table growth). Best-effort.
-		if n, err := m.store().DeleteExpired(ctx); err != nil {
-			slog.Warn("recipe card expiry sweep failed", "error", err)
-		} else if n > 0 {
-			slog.Info("recipe card expiry sweep removed rows", "count", n)
-		}
-		if cardIDs, err := m.store().ActiveSessionIDs(ctx); err != nil {
-			// Fail safe: if we cannot enumerate cards, skip the wipe rather than
-			// risk deleting a live session's segments.
-			slog.Warn("recipe card enumeration failed; skipping orphan cleanup", "error", err)
-			return 0, nil
-		} else {
-			for id := range cardIDs {
-				active[id] = struct{}{}
-			}
-		}
+	// Spare sessions mid-reconstruct: their dir is being written right now but is
+	// not yet registered in the live map.
+	for sessionID := range m.reconstructInFlight {
+		active[sessionID] = struct{}{}
 	}
+	m.transcodeMu.RUnlock()
+	m.inFlightMu.Unlock()
 
-	return CleanupOrphanedTranscodeDirs(m.runtimeConfig().TranscodeDir, active)
+	return CleanupOrphanedTranscodeDirs(m.runtimeConfig().TranscodeDir, active, MaxTokenTTL)
 }

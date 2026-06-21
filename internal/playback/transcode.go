@@ -1682,6 +1682,15 @@ func (s *TranscodeSession) RestartSeekTarget(segNum int) (float64, bool, error) 
 		case err != nil && !errors.Is(err, ErrManifestNotReady):
 			return 0, false, err
 		}
+		// Copy-mode fragments have variable durations, so the encoded
+		// `seg×dur` math would seek FFmpeg to the wrong source time and
+		// desync A/V after restart. When the manifest can't resolve this
+		// segment yet (ok=false with no error, including ErrManifestNotReady
+		// in a freshly reconstructed window), report the seek target as
+		// unresolved (0, false, nil) rather than guessing. The caller treats
+		// this as a retryable miss so the session keeps producing manifest
+		// until real timing is available.
+		return 0, false, nil
 	}
 
 	segDuration := defaultSegmentDuration

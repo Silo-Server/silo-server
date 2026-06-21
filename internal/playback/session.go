@@ -251,6 +251,59 @@ func (m *SessionManager) RegisterReconstructed(s *Session) *Session {
 	return s
 }
 
+// RegisterReconstructedWithLimits is RegisterReconstructed plus the same per-user
+// admission caps StartSession enforces. Token-carried reconstruct replays a
+// signed recipe to rebuild a session lost to a restart; without a cap check a
+// client could replay one token repeatedly (or after legitimately reaching its
+// limit) and reconstruct past the per-user concurrent stream/transcode caps,
+// since RegisterReconstructed skips admission accounting.
+//
+// Legitimately reconstructing a user's own surviving sessions still succeeds:
+// the cap counts the user's *currently-live* sessions, and the one being rebuilt
+// is not yet in the map, so the first MaxStreams reconstructs admit. Only the
+// over-cap replay is refused (ErrTooManyStreams / ErrTooManyTranscodes). If an
+// identical session id is already live (a concurrent reconstruct won), it is
+// returned without re-counting. Caps are looked up via the same limit provider
+// as StartSession.
+func (m *SessionManager) RegisterReconstructedWithLimits(ctx context.Context, s *Session) (*Session, error) {
+	if s == nil || s.ID == "" {
+		return s, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	limits, err := m.limitsForUser(ctx, s.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if existing, ok := m.sessions[s.ID]; ok {
+		return existing, nil
+	}
+
+	// The session being reconstructed is not yet in the map, so the live counts
+	// reflect the user's *other* sessions; admitting one more must stay within cap.
+	if limits.MaxStreams > 0 && m.activeCountLocked(s.UserID) >= limits.MaxStreams {
+		return nil, ErrTooManyStreams
+	}
+	if s.PlayMethod == PlayTranscode && limits.MaxTranscodes > 0 &&
+		m.transcodeCountLocked(s.UserID) >= limits.MaxTranscodes {
+		return nil, ErrTooManyTranscodes
+	}
+
+	now := time.Now()
+	if s.StartedAt.IsZero() {
+		s.StartedAt = now
+	}
+	s.UpdatedAt = now
+	s.LastActivityAt = now
+	m.sessions[s.ID] = s
+	return s, nil
+}
+
 func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (SessionLimits, error) {
 	m.mu.RLock()
 	provider := m.limitProvider

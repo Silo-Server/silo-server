@@ -1,9 +1,10 @@
 package playback
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
 func TestRecipeCardRoundTripOpts(t *testing.T) {
@@ -85,28 +86,56 @@ func TestRecipeCardLegacyDecodeHasEmptyPlayMethod(t *testing.T) {
 	}
 }
 
-func TestPostgresRecipeStoreDisabledIsNoop(t *testing.T) {
-	// A nil pool yields a disabled, fully no-op store so callers never need to
-	// special-case an unavailable database.
-	store := NewPostgresRecipeStore(nil)
-	if store.Enabled() {
-		t.Fatal("store with nil pool should be disabled")
+// A transcode recipe must survive a full round trip through stream-token claims:
+// the token IS the durable descriptor under token-carried reconstruction, so any
+// dropped byte-affecting field would reconstruct a divergent encode. HWAccel and
+// HWDevice are deliberately excluded (re-resolved from live config), so they are
+// not asserted here.
+func TestRecipeCardClaimsRoundTrip(t *testing.T) {
+	card := NewRecipeCard(42, "profile-1", 77, "http://node:9000", TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		SessionID:          "abc",
+		SourceVideoCodec:   "hevc",
+		SeekSeconds:        900,
+		TargetResolution:   "1080p",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		StartSegmentNumber: 450,
+		SubtitleTrackIndex: 3,
+		SubtitleBurnIn:     true,
+		AudioTrackIndex:    1,
+		TargetBitrateKbps:  8000,
+		TotalDuration:      7200,
+		FastStart:          true,
+	})
+
+	claims := card.ToClaims()
+	got := RecipeCardFromClaims(&claims)
+
+	// Identity + routing.
+	if got.SessionID != card.SessionID || got.UserID != card.UserID ||
+		got.ProfileID != card.ProfileID || got.MediaFileID != card.MediaFileID ||
+		got.TranscodeNodeURL != card.TranscodeNodeURL || got.PlayMethod != card.PlayMethod {
+		t.Fatalf("identity/routing lost: %+v", got)
 	}
-	ctx := context.Background()
-	if err := store.Save(ctx, NewRecipeCard(1, "p", 2, "", TranscodeOpts{SessionID: "x"})); err != nil {
-		t.Errorf("disabled Save should be nil, got %v", err)
+	// Byte-affecting encode parameters.
+	if got.InputPath != card.InputPath || got.SourceVideoCodec != card.SourceVideoCodec ||
+		got.SeekSeconds != card.SeekSeconds || got.TargetResolution != card.TargetResolution ||
+		got.TargetCodecVideo != card.TargetCodecVideo || got.TargetCodecAudio != card.TargetCodecAudio ||
+		got.SegmentDuration != card.SegmentDuration || got.StartSegmentNumber != card.StartSegmentNumber ||
+		got.SubtitleTrackIndex != card.SubtitleTrackIndex || got.SubtitleBurnIn != card.SubtitleBurnIn ||
+		got.AudioTrackIndex != card.AudioTrackIndex || got.TargetBitrateKbps != card.TargetBitrateKbps ||
+		got.TotalDuration != card.TotalDuration || got.FastStart != card.FastStart {
+		t.Fatalf("encode parameters lost in round trip:\n have %+v\n want %+v", got, card)
 	}
-	if _, found, err := store.Get(ctx, "x"); err != nil || found {
-		t.Errorf("disabled Get should return (_, false, nil), got found=%v err=%v", found, err)
-	}
-	if err := store.Delete(ctx, "x"); err != nil {
-		t.Errorf("disabled Delete should be nil, got %v", err)
-	}
-	if err := store.Refresh(ctx, "x"); err != nil {
-		t.Errorf("disabled Refresh should be nil, got %v", err)
-	}
-	ids, err := store.ActiveSessionIDs(ctx)
-	if err != nil || len(ids) != 0 {
-		t.Errorf("disabled ActiveSessionIDs should be empty, got %v err=%v", ids, err)
+}
+
+// An empty-method token (direct/remux carry only identity) decodes to a usable
+// card; a transcode discriminator is restored for a token with no method.
+func TestRecipeCardFromClaimsEmptyMethodIsTranscode(t *testing.T) {
+	claims := &streamtoken.Claims{SessionID: "x", UserID: 1, MediaFileID: 2}
+	if got := RecipeCardFromClaims(claims); got.PlayMethod != PlayTranscode {
+		t.Fatalf("empty method should decode as transcode, got %q", got.PlayMethod)
 	}
 }

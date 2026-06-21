@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamauth"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
@@ -23,15 +24,20 @@ import (
 type Server struct {
 	watcher    *nodeconfig.Watcher
 	tracker    *nodesessions.Tracker
+	leases     *streamauth.Store
 	httpClient *http.Client
 	egress     *egressMeter
 }
 
-// NewServer creates a new proxy server backed by a config watcher and session tracker.
-func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
+// NewServer creates a new proxy server backed by a config watcher and session
+// tracker. leases is the TR-lease authorization store the node consults before
+// serving; pass nil (or a store over a nil client) to disable lease enforcement
+// (fail-open).
+func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker, leases *streamauth.Store) *Server {
 	return &Server{
 		watcher: watcher,
 		tracker: tracker,
+		leases:  leases,
 		// No overall timeout — stream bodies are long-lived. Hung nodes are
 		// bounded by the transport's response-header timeout instead.
 		httpClient: &http.Client{Transport: newStreamTransport()},
@@ -121,13 +127,26 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 	})
 }
 
-// verifyToken extracts and validates the stream token from the URL.
+// verifyToken extracts and validates the stream token from the URL, then
+// enforces the TR-lease authorization lease: a central-written deny (ban,
+// pulled access, admin kill) refuses the request with 403 and no bytes, even
+// though the token signature is still valid and unexpired. An absent lease fails
+// open (see streamauth.Store.Allowed).
 func (s *Server) verifyToken(w http.ResponseWriter, r *http.Request) *streamtoken.Claims {
 	cfg := s.watcher.Config()
 	tokenStr := chi.URLParam(r, "token")
 	claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return nil
+	}
+	// Allowed sits on the byte path of every segment/manifest/direct/remux
+	// request. The Store bounds its Redis GET with a short timeout and caches a
+	// positive result per session for a few seconds, so a segment-heavy stream
+	// does not pay a Redis round-trip per segment and a degraded Redis cannot add
+	// unbounded first-byte latency (it fails open).
+	if !s.leases.Allowed(r.Context(), claims.SessionID) {
+		http.Error(w, "stream access revoked", http.StatusForbidden)
 		return nil
 	}
 	return claims
@@ -139,13 +158,7 @@ func (s *Server) handleDirectPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info := nodesessions.SessionInfo{
-		SessionID: claims.SessionID,
-		NodeURL:   s.tracker.NodeURL(),
-		NodeName:  s.tracker.NodeName(),
-		Type:      "direct_play",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+	info := sessionInfo(s.tracker, claims, "direct_play")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
 
@@ -158,13 +171,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info := nodesessions.SessionInfo{
-		SessionID: claims.SessionID,
-		NodeURL:   s.tracker.NodeURL(),
-		NodeName:  s.tracker.NodeName(),
-		Type:      "remux",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+	info := sessionInfo(s.tracker, claims, "remux")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
 
@@ -201,13 +208,22 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 // short manifest/segment requests, so the session is tracked by recent
 // activity instead of request lifetime.
 func (s *Server) touchTranscodeSession(r *http.Request, claims *streamtoken.Claims) {
-	s.tracker.Touch(r.Context(), nodesessions.SessionInfo{
-		SessionID: claims.SessionID,
-		NodeURL:   s.tracker.NodeURL(),
-		NodeName:  s.tracker.NodeName(),
-		Type:      "transcode",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	})
+	s.tracker.Touch(r.Context(), sessionInfo(s.tracker, claims, "transcode"))
+}
+
+// sessionInfo builds the node-session tracker record for a verified token,
+// copying the numeric ownership keys the central lease revalidator needs.
+func sessionInfo(tr *nodesessions.Tracker, claims *streamtoken.Claims, kind string) nodesessions.SessionInfo {
+	return nodesessions.SessionInfo{
+		SessionID:   claims.SessionID,
+		NodeURL:     tr.NodeURL(),
+		NodeName:    tr.NodeName(),
+		Type:        kind,
+		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+		AuthUserID:  claims.UserID,
+		ProfileID:   claims.ProfileID,
+		MediaFileID: claims.MediaFileID,
+	}
 }
 
 func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +340,14 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
+	// Forward the verified stream token so the transcode node can self-reconstruct
+	// a lost session after its OWN restart: the token carries the full byte-affecting
+	// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
+	// of 404ing (the integrated server already does this from the same token). The
+	// node re-verifies the token independently before trusting it.
+	if token := chi.URLParam(r, "token"); token != "" {
+		req.Header.Set("X-Silo-Stream-Token", token)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {

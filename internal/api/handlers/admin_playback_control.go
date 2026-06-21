@@ -177,6 +177,14 @@ func (h *AdminPlaybackControlHandler) handleSessionCommand(w http.ResponseWriter
 	deadline := boundedPlaybackControlDeadline(req.DeadlineMS)
 	command.DeadlineMS = int(deadline / time.Millisecond)
 
+	// A Stop/Terminate must also cut node-served direct/remux, which has no
+	// producer to kill and is authorized by the still-valid signed token. Write an
+	// immediate deny lease so the node refuses the next request without waiting for
+	// the token to expire or the revalidator to run.
+	if name == playback.CommandStop || name == playback.CommandTerminate {
+		h.playback.denyStreamLease(r.Context(), sessionID)
+	}
+
 	fallback := func() {
 		h.playback.forgetRealtimeCommand(commandID)
 		_ = h.playback.stopPlaybackSessionByID(context.Background(), sessionID, true)

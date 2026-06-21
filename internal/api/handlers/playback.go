@@ -136,10 +136,10 @@ type PlaybackHandler struct {
 	// playbackConfig(), which falls back to defaults when unset.
 	PlaybackConfig func() config.PlaybackConfig
 	FFmpegLogSink  playback.FFmpegLogSink
-	// RecipeStore persists per-session "recipe cards" so a transcode can be
-	// reconstructed after a server restart. When nil or disabled, reconstruct is
-	// off and behavior is identical to before.
-	RecipeStore       playback.RecipeStore
+	// LeaseDenier writes an immediate deny stream lease so an admin Stop/Terminate
+	// of a node-served direct/remux stream is enforced on the next request instead
+	// of waiting for the revalidation cycle. Optional (nil = no Redis / single box).
+	LeaseDenier       StreamLeaseDenier
 	realtimeCommandMu sync.Mutex
 	realtimeCommands  map[string]playbackCommandRecord
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
@@ -173,7 +173,6 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	// Wire the shared transcode manager with closures so it reads the handler's
 	// (often late-set) config/store/secret fields lazily at call time, avoiding a
 	// field-ordering hazard during router setup.
-	h.tm.StoreFn = func() playback.RecipeStore { return h.RecipeStore }
 	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
 	h.tm.LogSinkFn = func() playback.FFmpegLogSink { return h.FFmpegLogSink }
 	h.tm.Config = func() playback.TranscodeRuntimeConfig {
@@ -188,14 +187,42 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	h.tm.StartThrottler = func(ctx context.Context, ts *playback.TranscodeSession) {
 		h.maybeStartThrottler(ctx, ts)
 	}
-	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string) {
-		// ffmpeg crash — system teardown, keep the card so a resume can respawn.
+	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
+		// ffmpeg crash — tear the session down; a client holding a valid stream
+		// token can reconstruct it on the next request.
+		//
+		// Compare-and-delete the dead transcode first: between ffmpeg's error exit
+		// and this teardown a reconstruct may have registered a fresh successor
+		// under the same id. CloseTranscodeSessionIf only removes (and Close()s, which
+		// reaps the shared output dir) the entry when it is still the dead session;
+		// if a successor won, it leaves the live one untouched and we must NOT tear
+		// down the reconstructed playback session that now backs it.
+		var nodeURL string
+		if s, err := h.sessionMgr.GetSession(sessionID); err == nil {
+			nodeURL = s.TranscodeNodeURL
+		}
+		if successor := h.tm.GetTranscodeSession(sessionID); successor != nil && successor != dead {
+			// A reconstruct already replaced the crashed process; the live successor
+			// and its session stand. Cheap fast-path only — the authoritative gate is
+			// the compare-and-delete result below.
+			return
+		}
+		// CloseTranscodeSessionIf is the authoritative gate: a successor may register
+		// under the same id between the pre-check above and here. We only tear down the
+		// upstream playback session when the compare-and-delete actually matched the
+		// dead transcode. When it returns false a successor owns the session — do
+		// nothing further, or finalizeSessionStop's unconditional CloseTranscodeSession
+		// would reap the live successor's output dir mid-serve.
+		if !h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
+			return
+		}
 		if err := h.stopPlaybackSessionByID(ctx, sessionID, false); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.Error("failed to stop playback after local transcode exit", "session", sessionID, "error", err, "playback_session_id", sessionID)
 		}
 	}
 	if reg, ok := sessionMgr.(interface {
 		RegisterReconstructed(s *playback.Session) *playback.Session
+		RegisterReconstructedWithLimits(ctx context.Context, s *playback.Session) (*playback.Session, error)
 	}); ok {
 		h.tm.Sessions = reg
 	}
@@ -389,7 +416,7 @@ type transcodeStartResponse struct {
 }
 
 // toPlaybackSessionResponse converts a playback.Session to an API response.
-func toPlaybackSessionResponse(s *playback.Session) playbackSessionResponse {
+func (h *PlaybackHandler) toPlaybackSessionResponse(s *playback.Session) playbackSessionResponse {
 	return playbackSessionResponse{
 		SessionID:       s.ID,
 		UserID:          s.UserID,
@@ -398,7 +425,7 @@ func toPlaybackSessionResponse(s *playback.Session) playbackSessionResponse {
 		PlayMethod:      string(semanticPlayMethod(s)),
 		Position:        s.Position,
 		IsPaused:        s.IsPaused,
-		StreamURL:       playbackStreamURL(s),
+		StreamURL:       h.playbackStreamURL(s),
 		AudioTrackIndex: s.AudioTrackIndex,
 	}
 }
@@ -473,14 +500,144 @@ func (h *PlaybackHandler) ensurePlaybackProbe(ctx context.Context, file *models.
 	return file
 }
 
-func playbackStreamURL(s *playback.Session) string {
+// streamTokenParam is the query parameter that carries the signed stream token
+// on the native integrated serve path. The token is the durable reconstruction
+// descriptor: a front-end that lost its in-memory session rebuilds from it. It
+// rides a query parameter (not a path segment) because the integrated server is
+// hit directly by the client — there is no query-stripping proxy hop in between,
+// and the transcode manifest rewriter already appends the request RawQuery to
+// every segment URI, so segment requests inherit the token for free. The
+// proxy/node path keeps the token in the URL path (see the proxy server).
+const streamTokenParam = "st"
+
+// signSessionToken mints a stream token carrying the session's full
+// reconstruction recipe. Returns "" when no signing secret is configured
+// (reconstruct effectively disabled, e.g. in tests).
+func (h *PlaybackHandler) signSessionToken(card playback.RecipeCard) string {
+	if h.JWTSecret == "" {
+		return ""
+	}
+	token, err := streamtoken.Sign(card.ToClaims(), h.JWTSecret, playback.MaxTokenTTL)
+	if err != nil {
+		slog.Warn("sign stream token failed", "error", err, "session", card.SessionID, "playback_session_id", card.SessionID)
+		return ""
+	}
+	return token
+}
+
+// streamCardFromQuery verifies the stream token in the request's ?st= parameter
+// and returns the decoded reconstruction recipe, or nil when the token is
+// absent, invalid/expired, or bound to a different session. A live session needs
+// no token (the result is simply nil); the recipe is consumed only on
+// reconstruct.
+func (h *PlaybackHandler) streamCardFromQuery(r *http.Request, sessionID string) *playback.RecipeCard {
+	return streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+}
+
+// loadTranscodeServeSession resolves the playback Session for the transcode
+// manifest/segment serve routes while keeping stream-token verification off the
+// hot path. The overwhelmingly common case is a live in-memory session, which
+// needs no token at all, so the cheap GetSession lookup runs first and the
+// (HMAC + JSON) token decode is performed only on a not-found miss where a
+// reconstruct is actually required. On that miss it delegates to the shared
+// LoadOrReconstructSession front door so reconstruct/ownership semantics stay
+// identical. The returned card (nil on the live-session path) is the decoded
+// recipe the caller's own reconstruct branch consumes.
+func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID string) (*playback.Session, playback.SessionLoadStatus, *playback.RecipeCard) {
+	requestUserID := apimw.GetUserID(r.Context())
+	session, err := h.sessionMgr.GetSession(sessionID)
+	if err == nil {
+		// Live session: enforce the same ownership rule as LoadOrReconstructSession
+		// (a zero caller is allowed; a non-zero mismatch is refused). No token
+		// verification on this hot path.
+		if requestUserID != 0 && session.UserID != requestUserID {
+			return nil, playback.SessionForbidden, nil
+		}
+		return session, playback.SessionLoaded, nil
+	}
+	if !errors.Is(err, playback.ErrSessionNotFound) {
+		return nil, playback.SessionLoadFailed, nil
+	}
+	// Genuine miss (e.g. after a restart): now — and only now — pay for the token
+	// decode so the recipe is available for reconstruction.
+	card := h.streamCardFromQuery(r, sessionID)
+	session, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, card)
+	return session, status, card
+}
+
+// StreamLeaseDenier writes an immediate deny authorization lease for a session
+// so the offload nodes refuse it on the next request. *streamauth.Store
+// satisfies it; the interface keeps the handler package free of that import.
+type StreamLeaseDenier interface {
+	Deny(ctx context.Context, sessionID string) error
+}
+
+// denyStreamLease best-effort writes a deny lease for an admin-killed session so
+// node-served direct/remux stops before the token TTL or the next revalidation.
+func (h *PlaybackHandler) denyStreamLease(ctx context.Context, sessionID string) {
+	if h.LeaseDenier == nil || sessionID == "" {
+		return
+	}
+	if err := h.LeaseDenier.Deny(ctx, sessionID); err != nil {
+		slog.Warn("write deny stream lease failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
+	}
+}
+
+// streamCardFromToken verifies a stream token and decodes its reconstruction
+// recipe, returning nil when the token is absent, unparseable/expired, or bound
+// to a different session id. Shared by the native serve handlers (PlaybackHandler
+// and StreamHandler).
+func streamCardFromToken(tokenStr, sessionID, secret string) *playback.RecipeCard {
+	if tokenStr == "" || secret == "" {
+		return nil
+	}
+	claims, err := streamtoken.Verify(tokenStr, secret)
+	if err != nil || claims.SessionID != sessionID {
+		return nil
+	}
+	card := playback.RecipeCardFromClaims(claims)
+	return &card
+}
+
+// appendStreamToken adds the ?st=<token> parameter to a native serve URL.
+func appendStreamToken(rawURL, token string) string {
+	if token == "" {
+		return rawURL
+	}
+	sep := "?"
+	if strings.ContainsRune(rawURL, '?') {
+		sep = "&"
+	}
+	return rawURL + sep + streamTokenParam + "=" + token
+}
+
+// playbackStreamURL builds the native serve URL for a session and appends an
+// identity stream token so a direct-play/remux session survives a restart (the
+// client re-supplies its byte position). Transcode sessions receive their
+// full-recipe manifest URL from HandleStartTranscode instead; the URL here is an
+// informational placeholder the client replaces with that manifest.
+func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 	if s == nil {
 		return ""
 	}
 	if s.PlayMethod == playback.PlayTranscode {
 		return fmt.Sprintf("/playback/transcode/%s/master.m3u8", s.ID)
 	}
-	return fmt.Sprintf("/stream/%s", s.ID)
+	card := identityRecipeCard(s)
+	return appendStreamToken(fmt.Sprintf("/stream/%s", s.ID), h.signSessionToken(card))
+}
+
+// identityRecipeCard builds the identity-only recipe for a direct-play or remux
+// session: reconstruction needs only ownership plus the audio selection, since
+// the bytes are served by HTTP Range / a re-spawned remux pipe at the
+// client-supplied position.
+func identityRecipeCard(s *playback.Session) playback.RecipeCard {
+	switch s.PlayMethod {
+	case playback.PlayRemux:
+		return playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex)
+	default:
+		return playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
+	}
 }
 
 func fileBitrateKbps(file *models.MediaFile) int {
@@ -1032,7 +1189,7 @@ func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *play
 		}
 	}
 
-	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL, userInitiated)
+	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1066,7 +1223,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 
 	// Abort is a connection drop / non-terminal teardown — keep the recipe card
 	// so the client can reconstruct on reconnect.
-	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL, false)
+	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1412,20 +1569,11 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	}
 	h.maybeQueueLazyPlaybackMarkers(r.Context(), session, effectiveFile)
 
-	// Persist a recipe card so a direct-play or remux session can be reconstructed
-	// after a server restart (the client re-supplies its position). Transcode
-	// sessions get their card when the transcode actually starts
-	// (HandleStartTranscode). Best-effort; no-op without a recipe store.
-	switch session.PlayMethod {
-	case playback.PlayDirect:
-		h.tm.SaveCard(context.WithoutCancel(r.Context()),
-			playback.NewDirectRecipeCard(session.ID, session.UserID, session.ProfileID, session.MediaFileID))
-	case playback.PlayRemux:
-		h.tm.SaveCard(context.WithoutCancel(r.Context()),
-			playback.NewRemuxRecipeCard(session.ID, session.UserID, session.ProfileID, session.MediaFileID, session.TranscodeAudio, session.AudioTrackIndex))
-	}
-
-	resp := toPlaybackSessionResponse(session)
+	// Direct-play and remux sessions reconstruct from the identity stream token
+	// carried on their serve URL (see playbackStreamURL); there is no server-side
+	// card to persist. Transcode sessions receive their full-recipe token from
+	// HandleStartTranscode.
+	resp := h.toPlaybackSessionResponse(session)
 	resp.DurationSeconds = fileDurationSeconds(effectiveFile)
 	resp.PlaybackInfo = buildPlaybackInfo(session, effectiveFile)
 
@@ -1444,8 +1592,11 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		proxyNode := plan.ProxyNode
 		if proxyNode != nil && (!needsTranscode || plan.TranscodeNode != nil) {
 			tokenClaims := streamtoken.Claims{
-				SessionID:  session.ID,
-				PlayMethod: string(session.PlayMethod),
+				SessionID:   session.ID,
+				PlayMethod:  string(session.PlayMethod),
+				UserID:      session.UserID,
+				ProfileID:   session.ProfileID,
+				MediaFileID: session.MediaFileID,
 			}
 
 			// Resolve media path if possible.
@@ -1461,7 +1612,7 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 				_ = h.sessionMgr.SetTranscodeNodeURL(session.ID, plan.TranscodeNode.URL)
 			}
 
-			token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, 24*time.Hour)
+			token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, playback.MaxTokenTTL)
 			if signErr == nil {
 				switch session.PlayMethod {
 				case playback.PlayDirect:
@@ -1833,28 +1984,33 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 	updatedSession.TargetAudioCodec = targetAudioCodec
 	updatedSession.TargetBitrateKbps = targetBitrateKbps
 
-	// Rewrite the recipe card to the new audio track / method so a post-restart
-	// reconstruct resumes with the switched audio instead of the stale state
-	// persisted at session start. Best-effort; no-op without a recipe store.
-	switch updatedSession.PlayMethod {
-	case playback.PlayDirect:
-		h.tm.SaveCard(context.WithoutCancel(r.Context()),
-			playback.NewDirectRecipeCard(updatedSession.ID, updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID))
-	case playback.PlayRemux:
-		h.tm.SaveCard(context.WithoutCancel(r.Context()),
-			playback.NewRemuxRecipeCard(updatedSession.ID, updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID, updatedSession.TranscodeAudio, updatedSession.AudioTrackIndex))
-	case playback.PlayTranscode:
+	// The switched recipe travels in the freshly minted stream token on the new
+	// serve URL below, so a post-restart reconstruct resumes with the switched
+	// audio/method. For transcode the full-recipe manifest URL is rebuilt further
+	// down (proxy or local); for direct/remux the identity token on StreamURL
+	// carries the new audio selection.
+	h.persistAudioPreference(r.Context(), userID, session.ProfileID, file, req.AudioTrackIndex)
+
+	// For a local transcode, playbackStreamURL returns the bare manifest URL
+	// without the full-recipe ?st= token, so a post-restart reconstruct would
+	// fall back to the stale pre-switch token. Rebuild the signed manifest URL
+	// from the live transcode opts, mirroring HandleStartTranscode. The proxy
+	// branch below overrides this when a node plan picks a proxy/transcode node.
+	streamURL := h.playbackStreamURL(&updatedSession)
+	if updatedSession.PlayMethod == playback.PlayTranscode {
 		if ts := h.tm.GetTranscodeSession(sessionID); ts != nil {
-			h.tm.SaveRecipeCard(context.WithoutCancel(r.Context()), &updatedSession, updatedSession.TranscodeNodeURL, ts.Opts())
+			card := playback.NewRecipeCard(updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID, updatedSession.TranscodeNodeURL, ts.Opts())
+			streamURL = appendStreamToken(
+				fmt.Sprintf("/playback/transcode/%s/master.m3u8", sessionID),
+				h.signSessionToken(card),
+			)
 		}
 	}
-
-	h.persistAudioPreference(r.Context(), userID, session.ProfileID, file, req.AudioTrackIndex)
 
 	resp := changeAudioResponse{
 		AudioTrackIndex: req.AudioTrackIndex,
 		PlayMethod:      string(newMethod),
-		StreamURL:       playbackStreamURL(&updatedSession),
+		StreamURL:       streamURL,
 		SwitchMode:      "reload",
 		PlaybackInfo:    buildPlaybackInfo(&updatedSession, file),
 	}
@@ -1873,12 +2029,15 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				MediaPath:       file.FilePath,
 				TranscodeAudio:  updatedSession.TranscodeAudio,
 				AudioTrackIndex: req.AudioTrackIndex,
+				UserID:          updatedSession.UserID,
+				ProfileID:       updatedSession.ProfileID,
+				MediaFileID:     updatedSession.MediaFileID,
 			}
 			if plan.TranscodeNode != nil {
 				tokenClaims.TranscodeNode = plan.TranscodeNode.URL
 				_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, plan.TranscodeNode.URL)
 			}
-			if token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, 24*time.Hour); signErr == nil {
+			if token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, playback.MaxTokenTTL); signErr == nil {
 				switch updatedSession.PlayMethod {
 				case playback.PlayRemux:
 					resp.StreamURL = proxyNode.URL + "/stream/remux/" + token
@@ -2045,7 +2204,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	if h.tm.GetTranscodeSession(req.SessionID) != nil || session.TranscodeNodeURL != "" {
 		// Restarting the transcode under the SAME session id (quality/seek
 		// change) — keep the card; it is re-saved with the new opts below.
-		h.tm.CloseTranscodeSession(req.SessionID, session.TranscodeNodeURL, false)
+		h.tm.CloseTranscodeSession(req.SessionID, session.TranscodeNodeURL)
 	}
 	abortCurrentSession := func(reason string, cause error) {
 		if abortErr := h.abortPlaybackSession(r.Context(), session); abortErr != nil && !errors.Is(abortErr, playback.ErrSessionNotFound) {
@@ -2204,11 +2363,11 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			effectiveHWAccel = strings.TrimSpace(nodeReq.HWAccel)
 		}
 
-		manifestURL := h.buildProxyManifestURL(req.SessionID, session, tcNode.URL, plan.ProxyNode)
-		// Persist the recipe card for the remote transcode so the integrated
-		// server can re-bind and re-proxy the session after a restart. Node-side
-		// segment reconstruction is a follow-up (see spec multi-node section).
-		h.tm.SaveRecipeCard(context.WithoutCancel(r.Context()), session, tcNode.URL, playback.TranscodeOpts{
+		// The remote transcode's full recipe rides the proxy manifest token so the
+		// integrated server can re-bind and re-proxy the session after a restart
+		// (and a node could someday self-reconstruct from it). Node-side segment
+		// reconstruction is a follow-up (see spec multi-node section).
+		card := playback.NewRecipeCard(session.UserID, session.ProfileID, session.MediaFileID, tcNode.URL, playback.TranscodeOpts{
 			InputPath:          nodeReq.InputPath,
 			SessionID:          nodeReq.SessionID,
 			SourceVideoCodec:   nodeReq.SourceVideoCodec,
@@ -2225,6 +2384,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
 			TotalDuration:      nodeReq.TotalDuration,
 		})
+		manifestURL := h.buildProxyManifestURL(card, plan.ProxyNode)
 		h.finalizeTranscodeStart(r, transcodeStartState{
 			req:            req,
 			file:           file,
@@ -2283,14 +2443,18 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 
 	h.tm.RegisterTranscodeSession(req.SessionID, transcodeSession)
 
-	// Persist the recipe card so this local transcode can be reconstructed
-	// after a server restart. Best-effort; no-op without a recipe store.
-	h.tm.SaveRecipeCard(context.WithoutCancel(r.Context()), session, "", transcodeSession.Opts())
-
 	h.maybeStartThrottler(r.Context(), transcodeSession)
 	h.tm.MonitorLocalTranscodeExit(req.SessionID, transcodeSession)
 
-	manifestURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", req.SessionID)
+	// The full reconstruction recipe rides the manifest token so this local
+	// transcode can be rebuilt after a server restart (the client re-presents the
+	// token on its next manifest/segment request). The token is carried as a
+	// query parameter; the manifest rewriter propagates it onto every segment URI.
+	card := playback.NewRecipeCard(session.UserID, session.ProfileID, session.MediaFileID, "", transcodeSession.Opts())
+	manifestURL := appendStreamToken(
+		fmt.Sprintf("/playback/transcode/%s/master.m3u8", req.SessionID),
+		h.signSessionToken(card),
+	)
 	h.finalizeTranscodeStart(r, transcodeStartState{
 		req:            req,
 		file:           file,
@@ -2311,7 +2475,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 // still uses the same synthetic VOD path when the session duration is known.
 func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	session, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, apimw.GetUserID(r.Context()))
+	session, status, card := h.loadTranscodeServeSession(r, sessionID)
 	switch status {
 	case playback.SessionMissing:
 		writePlaybackSessionNotFound(w)
@@ -2333,16 +2497,20 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 				"/transcode/"+sessionID+"/master.m3u8")
 			return
 		}
-		// Local transcode whose process state was lost: reconstruct it. The
-		// manifest path has no segment context, so pass -1 (use card position).
-		transcodeSession = h.tm.ReconstructTranscode(r.Context(), sessionID, -1)
+		// Local transcode whose process state was lost: reconstruct it from the
+		// token recipe. The manifest path has no segment context, so pass -1 (use
+		// the token's seek position).
+		if card == nil {
+			writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
+			return
+		}
+		transcodeSession = h.tm.ReconstructTranscode(r.Context(), sessionID, -1, *card)
 		if transcodeSession == nil {
 			writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
 			return
 		}
 	}
 	h.touchSessionActivity(sessionID)
-	h.tm.RefreshRecipeCard(sessionID)
 
 	manifest, err := transcodeSession.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	if err != nil {
@@ -2362,7 +2530,7 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 // Auth is optional — the session UUID serves as an access token.
 func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	session, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, apimw.GetUserID(r.Context()))
+	session, status, card := h.loadTranscodeServeSession(r, sessionID)
 	switch status {
 	case playback.SessionMissing:
 		writePlaybackSessionNotFound(w)
@@ -2386,19 +2554,22 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		}
 		// Resume near the segment the client is fetching so reconstruct does not
 		// restart from the original seek point and stall. A non-segment name
-		// (e.g. init.mp4) parses as negative and falls back to the card position.
+		// (e.g. init.mp4) parses as negative and falls back to the token position.
 		requestedSegment := -1
 		if segNum, parseErr := playback.ParseSegmentNumber(chi.URLParam(r, "name")); parseErr == nil {
 			requestedSegment = segNum
 		}
-		transcodeSession = h.tm.ReconstructTranscode(r.Context(), sessionID, requestedSegment)
+		if card == nil {
+			writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
+			return
+		}
+		transcodeSession = h.tm.ReconstructTranscode(r.Context(), sessionID, requestedSegment, *card)
 		if transcodeSession == nil {
 			writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
 			return
 		}
 	}
 	h.touchSessionActivity(sessionID)
-	h.tm.RefreshRecipeCard(sessionID)
 
 	segmentName := chi.URLParam(r, "name")
 	segmentPath, err := transcodeSession.GetSegment(segmentName)
@@ -2466,6 +2637,16 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					slog.Error("resolve transcode seek target", "error", seekErr, "segment", segmentName, "session", sessionID, "playback_session_id", sessionID)
 				}
 
+				// Copy-mode with an unresolved seek target (ok=false, no error)
+				// means the manifest can't place this segment yet. Don't restart
+				// at a fabricated position; surface ErrSegmentNotFound so the
+				// client retries while the session keeps producing manifest.
+				// Mirrors the transcode-node guard in
+				// internal/transcodenode/server.go.
+				if !ok && seekErr == nil && transcodeSession.IsCopyVideo() {
+					err = playback.ErrSegmentNotFound
+				}
+
 				if ok {
 					slog.Info("transcode seek restart",
 						"segment", segmentName,
@@ -2526,28 +2707,19 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 	http.ServeFile(w, r, segmentPath)
 }
 
-// buildProxyManifestURL signs a stream token and builds the proxy-based
-// manifest URL. proxyNode is the planner's pick for this session; when nil
-// the URL falls back to the API-local path.
-func (h *PlaybackHandler) buildProxyManifestURL(sessionID string, session *playback.Session, transcodeNodeURL string, proxyNode *nodepool.Node) string {
+// buildProxyManifestURL signs a stream token carrying the session's full
+// reconstruction recipe and builds the manifest URL. proxyNode is the planner's
+// pick; when nil the URL falls back to the API-local path, where the token rides
+// the ?st= query parameter so the integrated server can reconstruct from it.
+func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyNode *nodepool.Node) string {
+	token := h.signSessionToken(card)
+	localURL := fmt.Sprintf("/playback/transcode/%s/master.m3u8", card.SessionID)
 	if proxyNode == nil {
-		return fmt.Sprintf("/playback/transcode/%s/master.m3u8", sessionID)
+		return appendStreamToken(localURL, token)
 	}
-
-	tokenClaims := streamtoken.Claims{
-		SessionID:     sessionID,
-		PlayMethod:    string(playback.PlayTranscode),
-		TranscodeNode: transcodeNodeURL,
+	if token == "" {
+		return localURL
 	}
-	if session != nil {
-		tokenClaims.AudioTrackIndex = session.AudioTrackIndex
-	}
-
-	token, err := streamtoken.Sign(tokenClaims, h.JWTSecret, 24*time.Hour)
-	if err != nil {
-		return fmt.Sprintf("/playback/transcode/%s/master.m3u8", sessionID)
-	}
-
 	return proxyNode.URL + "/stream/transcode/" + token + "/master.m3u8"
 }
 
