@@ -221,7 +221,7 @@ func (h *PlaybackHandler) HandleMasterManifest(w http.ResponseWriter, r *http.Re
 					writeError(w, http.StatusInternalServerError, "ServerError", "Failed to bind transcode node")
 					return
 				}
-				if err := h.startRemoteTranscode(r.Context(), playSession.UpstreamSessionID, *source, file, playSession.InitialSeekSeconds, tcNode.URL); err != nil {
+				if err := h.startRemoteTranscode(r.Context(), playSession.ID, playSession.UpstreamSessionID, *source, file, playSession.InitialSeekSeconds, tcNode.URL); err != nil {
 					if errors.Is(err, errTranscode4KDisallowed) {
 						writeError(w, http.StatusForbidden, "Forbidden", "4K video transcoding is disabled on this server")
 						return
@@ -345,10 +345,11 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	name := chiURLParam(r, "segmentId")
 	ext := chiURLParam(r, "segmentContainer")
 
-	// Load the upstream native session, reconstructing it from the recipe card on
-	// a not-found miss (e.g. after a server restart). Ownership is re-bound to the
-	// Jellyfin caller's native user id (StreamAppUserID), matching the card owner.
-	upstreamSession, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, playSession.UpstreamSessionID, session.StreamAppUserID)
+	// Load the upstream native session, reconstructing it from the compat-stored
+	// recipe on a not-found miss (e.g. after a server restart). Ownership is
+	// re-bound to the Jellyfin caller's native user id (StreamAppUserID), matching
+	// the recipe owner.
+	upstreamSession, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, playSession.UpstreamSessionID, session.StreamAppUserID, playSession.Recipe)
 	switch status {
 	case playback.SessionMissing:
 		writeError(w, http.StatusNotFound, "NotFound", "Upstream session not found")
@@ -366,19 +367,18 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		// Local transcode whose process state was lost (restart): reconstruct it
 		// seeked to the requested segment. Remote-node sessions are served by the
 		// proxy, not here, so only reconstruct an integrated (no node URL) session.
-		if upstreamSession.TranscodeNodeURL == "" {
+		if upstreamSession.TranscodeNodeURL == "" && playSession.Recipe != nil {
 			requestedSegment := -1
 			if segNum, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
 				requestedSegment = segNum
 			}
-			transcodeSession = h.tm.ReconstructTranscode(r.Context(), playSession.UpstreamSessionID, requestedSegment)
+			transcodeSession = h.tm.ReconstructTranscode(r.Context(), playSession.UpstreamSessionID, requestedSegment, *playSession.Recipe)
 		}
 		if transcodeSession == nil {
 			writeError(w, http.StatusNotFound, "NotFound", "Transcode session not found")
 			return
 		}
 	}
-	h.tm.RefreshRecipeCard(playSession.UpstreamSessionID)
 
 	segmentFile := name + "." + ext
 	segmentPath, err := transcodeSession.GetSegment(segmentFile)
@@ -446,6 +446,16 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"session", playSession.UpstreamSessionID,
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
+				}
+
+				// Copy-mode with an unresolved seek target (ok=false, no error)
+				// means the manifest can't place this segment yet. Don't restart
+				// at a fabricated position; surface ErrSegmentNotFound so the
+				// client retries while the session keeps producing manifest.
+				// Mirrors the transcode-node guard in
+				// internal/transcodenode/server.go.
+				if !ok && seekErr == nil && transcodeSession.IsCopyVideo() {
+					err = playback.ErrSegmentNotFound
 				}
 
 				if ok {
@@ -764,9 +774,20 @@ func (h *PlaybackHandler) teardownPlaySession(playSession *PlaybackSession) {
 			transcodeNodeURL = upstreamSession.TranscodeNodeURL
 		}
 	}
-	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL, true)
+	h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL)
 	if h.sessionMgr != nil {
 		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
+	}
+	// Deliberate stop: drop the node recipe so a buffered/retrying request after
+	// a node restart cannot reconstruct a fresh ffmpeg for this stopped session.
+	// Best effort and bounded — never fail teardown on a recipe-store hiccup.
+	if h.RecipeNodeStore != nil {
+		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
+		defer cancel()
+		if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
+			slog.Warn("delete node transcode recipe failed", "error", err,
+				"playback_session_id", playSession.UpstreamSessionID)
+		}
 	}
 	h.playbackStore.Delete(playSession.ID)
 }
@@ -860,6 +881,20 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// upstreamRecipeCard returns the reconstruction recipe for a compat upstream
+// session. A transcode carries its full recipe in the compat store
+// (PlaybackSession.Recipe); direct/remux need only identity, rebuilt here from
+// the compat session and the negotiated source.
+func (h *PlaybackHandler) upstreamRecipeCard(ps *PlaybackSession, cs *Session, source PlaybackMediaSource, method string) playback.RecipeCard {
+	if ps != nil && ps.Recipe != nil {
+		return *ps.Recipe
+	}
+	if method == "remux" {
+		return playback.NewRemuxRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID, source.TranscodeAudio, compatAudioTrackIndexOrDefault(source))
+	}
+	return playback.NewDirectRecipeCard(ps.UpstreamSessionID, cs.StreamAppUserID, cs.ProfileID, source.FileID)
+}
+
 func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSession *Session, playSessionID string, source PlaybackMediaSource, method string) (*PlaybackSession, error) {
 	playSession, ok := h.playbackStore.Get(playSessionID)
 	if !ok {
@@ -877,7 +912,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 				return nil, err
 			}
 			if h.tm != nil {
-				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID); reconstructed != nil {
+				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, h.upstreamRecipeCard(playSession, compatSession, source, method)); reconstructed != nil {
 					_ = h.syncUpstreamAudioSelection(playSession, source)
 					return playSession, nil
 				}
@@ -911,12 +946,24 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}
 
 	if playSession.UpstreamSessionID != "" && playSession.UpstreamPlayMethod != "" && playSession.UpstreamPlayMethod != method {
+		oldUpstreamSessionID := playSession.UpstreamSessionID
 		transcodeNodeURL := ""
-		if current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
+		if current, err := h.sessionMgr.GetSession(oldUpstreamSessionID); err == nil {
 			transcodeNodeURL = current.TranscodeNodeURL
 		}
-		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
-		h.tm.CloseTranscodeSession(playSession.UpstreamSessionID, transcodeNodeURL, true)
+		_ = h.sessionMgr.StopSession(oldUpstreamSessionID)
+		h.tm.CloseTranscodeSession(oldUpstreamSessionID, transcodeNodeURL)
+		// Method switch discards the old upstream session: drop its node recipe so
+		// the abandoned id cannot reconstruct ffmpeg after a node restart. Best
+		// effort and bounded — never block the new method's start on a store hiccup.
+		if h.RecipeNodeStore != nil {
+			delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
+			if err := h.RecipeNodeStore.Delete(delCtx, oldUpstreamSessionID); err != nil {
+				slog.Warn("delete node transcode recipe failed", "error", err,
+					"playback_session_id", oldUpstreamSessionID)
+			}
+			cancel()
+		}
 	}
 
 	var session *playback.Session
@@ -993,12 +1040,16 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	if existing := h.tm.GetTranscodeSession(upstreamSessionID); existing != nil {
 		return existing, nil
 	}
-	// If a recipe card survived (e.g. a server restart), rebuild the transcode
-	// from it — at the card's position — rather than starting fresh at the
-	// original seek. On a first play there is no card yet, so this is a no-op and
-	// we fall through to the normal start below.
-	if reconstructed := h.tm.ReconstructTranscode(ctx, upstreamSessionID, -1); reconstructed != nil {
-		return reconstructed, nil
+	// If a recipe survived in the compat store (e.g. a server restart), rebuild
+	// the transcode from it — at the recipe's position — rather than starting
+	// fresh at the original seek. On a first play there is no recipe yet, so this
+	// is a no-op and we fall through to the normal start below.
+	if h.playbackStore != nil {
+		if ps, ok := h.playbackStore.Get(playSessionID); ok && ps.Recipe != nil {
+			if reconstructed := h.tm.ReconstructTranscode(ctx, upstreamSessionID, -1, *ps.Recipe); reconstructed != nil {
+				return reconstructed, nil
+			}
+		}
 	}
 	if !source.TranscodeAudio && is4KResolution(source.Version.Resolution) && !h.allow4KVideoTranscode(ctx) {
 		return nil, errTranscode4KDisallowed
@@ -1055,24 +1106,14 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 		return winner, nil
 	}
 
-	// Persist a recipe card keyed by the upstream session id (matching the native
-	// scheme) using the native session's identity so reconstruct's ownership
-	// re-bind matches the Jellyfin caller's StreamAppUserID. Best-effort.
-	if h.sessionMgr != nil {
-		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
-			h.tm.SaveRecipeCard(context.WithoutCancel(ctx), upstream, upstream.TranscodeNodeURL, opts)
-		}
-	}
+	// Register the exit monitor and persist the reconstruction recipe (shared with
+	// the remote path). On a failed compat-store write roll back this abandoned
+	// transcode rather than leaking it.
 	h.tm.MonitorLocalTranscodeExit(upstreamSessionID, transcodeSession)
 
-	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
-		current.TranscodeStarted = true
-		return nil
-	}); err != nil {
-		// Roll back: drop the transcode from the map and delete the card we just
-		// wrote (this start is being abandoned).
-		h.tm.CloseTranscodeSession(upstreamSessionID, "", true)
-		return nil, fmt.Errorf("update playback session: %w", err)
+	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
+		h.tm.CloseTranscodeSession(upstreamSessionID, "")
+		return nil, err
 	}
 
 	return transcodeSession, nil
@@ -1192,7 +1233,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 	if err != nil {
 		return false, err
 	}
-	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.UpstreamSessionID, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
+	if err := h.startRemoteTranscode(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, source, file, positionSeconds, upstreamSession.TranscodeNodeURL); err != nil {
 		return false, err
 	}
 	return true, nil

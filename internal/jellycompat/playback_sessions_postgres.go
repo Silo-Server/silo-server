@@ -47,14 +47,24 @@ func NewDurableCompatPlaybackStore(pool *pgxpool.Pool, ttl time.Duration, now fu
 	}
 }
 
-// Put writes through to both the cache and Postgres.
+// Put writes through to both the cache and Postgres. putNormalized returns the
+// stored copy carrying the timestamps the cache just assigned (CreatedAt /
+// UpdatedAt / ExpiresAt), so the persisted row matches the cache without a second
+// Get (extra lock + full struct copy) to recover them.
+//
+// The DB upsert is intentionally kept synchronous: restart resilience depends on
+// the just-negotiated session being durable before the client's next request
+// (which may arrive after a restart), and the codebase relies on read-your-write
+// across a fresh instance. The upsert itself is still best-effort (a DB failure
+// is logged, not propagated); the cache holds the authoritative in-process state.
 func (d *DurableCompatPlaybackStore) Put(session PlaybackSession) {
-	d.mem.Put(session)
-	// Re-read the cached copy so the persisted row carries the timestamps the
-	// in-memory store just normalized (CreatedAt/UpdatedAt/ExpiresAt).
-	if cached, ok := d.mem.Get(session.ID); ok {
-		d.upsert(*cached)
+	stored := d.mem.putNormalized(session)
+	if d.pool == nil {
+		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	d.upsert(ctx, stored)
 }
 
 // Get returns the cached session, falling back to Postgres on a miss (e.g. after
@@ -87,6 +97,15 @@ func (d *DurableCompatPlaybackStore) Delete(id string) {
 // Update modifies the session in place under the cache's lock (in-process
 // atomicity), then persists the result. The session is loaded from Postgres into
 // the cache first when absent so an update after a restart still applies.
+//
+// The DB persist is atomic against concurrent writers: it re-reads the
+// authoritative row under SELECT ... FOR UPDATE inside a transaction, re-applies
+// fn to that row, and upserts the result before committing. This stops two
+// processes (or a cache-evicted writer racing another) from clobbering each
+// other's JSON with a blind whole-document upsert — e.g. a transcode-recipe
+// write being lost to a concurrent upstream-session write. The DB step is still
+// best-effort for availability: a DB failure is logged and the in-memory mutation
+// stands, but a successful DB read-modify-write is never silently lost.
 func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession) error) error {
 	if _, ok := d.mem.Get(id); !ok {
 		if s, ok := d.load(id); ok {
@@ -96,10 +115,77 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 	if err := d.mem.Update(id, fn); err != nil {
 		return err
 	}
-	if s, ok := d.mem.Get(id); ok {
-		d.upsert(*s)
+	if committed, ok := d.updateDB(id, fn); ok {
+		// Refresh the cache from the DB-authoritative committed row so the cache
+		// reflects any concurrent writer's fields that fn merged on top of.
+		d.mem.Put(*committed)
 	}
 	return nil
+}
+
+// updateDB applies fn to the DB-authoritative row inside a transaction using
+// SELECT ... FOR UPDATE, then upserts and commits. It returns the committed
+// session when the round-trip succeeded. A nil pool, a missing/expired row, or
+// any DB error returns ok=false (logged, swallowed): the caller keeps the
+// in-memory mutation. fn is expected to be idempotent — it is applied to the
+// cache copy and again to the DB-authoritative copy.
+func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSession) error) (*PlaybackSession, bool) {
+	if d.pool == nil {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	tx, err := d.pool.Begin(ctx)
+	if err != nil {
+		slog.Warn("begin compat playback session update tx failed", "error", err, "play_session_id", id)
+		return nil, false
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var raw []byte
+	err = tx.QueryRow(ctx,
+		`SELECT data FROM jellycompat_playback_sessions WHERE id = $1 AND expires_at > $2 FOR UPDATE`,
+		id, d.now(),
+	).Scan(&raw)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("load compat playback session for update failed", "error", err, "play_session_id", id)
+		}
+		return nil, false
+	}
+
+	var session PlaybackSession
+	if err := json.Unmarshal(raw, &session); err != nil {
+		slog.Warn("unmarshal compat playback session for update failed", "error", err, "play_session_id", id)
+		return nil, false
+	}
+	if err := fn(&session); err != nil {
+		// The mutation itself rejected the authoritative row; surface nothing and
+		// let the cache mutation (already applied) stand.
+		slog.Warn("apply compat playback session update failed", "error", err, "play_session_id", id)
+		return nil, false
+	}
+	session.UpdatedAt = d.now()
+
+	data, err := json.Marshal(session)
+	if err != nil {
+		slog.Warn("marshal compat playback session for update failed", "error", err, "play_session_id", id)
+		return nil, false
+	}
+	expiresAt := session.ExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = d.now().Add(d.ttl)
+	}
+	if _, err := tx.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
+		slog.Warn("persist compat playback session update failed", "error", err, "play_session_id", id)
+		return nil, false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("commit compat playback session update failed", "error", err, "play_session_id", id)
+		return nil, false
+	}
+	return &session, true
 }
 
 // FindByRoute resolves a route id, checking the cache first and falling back to
@@ -107,6 +193,15 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 func (d *DurableCompatPlaybackStore) FindByRoute(compatToken, routeID string) (*PlaybackSession, *PlaybackMediaSource, bool) {
 	if s, src, ok := d.mem.FindByRoute(compatToken, routeID); ok {
 		return s, src, ok
+	}
+	// An empty compat token cannot be pushed into a bounded, indexed DB query, so
+	// the only DB fallback would be loading every live row and scanning it on this
+	// request goroutine — an O(table) cliff. The sole caller
+	// (resolvePlaybackRoute) always passes a non-empty compat token, so the
+	// empty-token DB fallback is never load-bearing for route resolution; return
+	// the in-memory result rather than incurring a full-table scan.
+	if compatToken == "" {
+		return nil, nil, false
 	}
 	d.loadByCompatToken(compatToken)
 	return d.mem.FindByRoute(compatToken, routeID)
@@ -118,14 +213,26 @@ func (d *DurableCompatPlaybackStore) DeleteExpired(ctx context.Context) (int64, 
 	if d.pool == nil {
 		return 0, nil
 	}
-	tag, err := d.pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE expires_at < now()`)
+	tag, err := d.pool.Exec(ctx, `DELETE FROM jellycompat_playback_sessions WHERE expires_at < $1`, d.now())
 	if err != nil {
 		return 0, err
 	}
 	return tag.RowsAffected(), nil
 }
 
-func (d *DurableCompatPlaybackStore) upsert(session PlaybackSession) {
+const upsertSessionQuery = `
+	INSERT INTO jellycompat_playback_sessions (id, compat_token, user_id, data, expires_at)
+	VALUES ($1, $2, $3, $4, $5)
+	ON CONFLICT (id) DO UPDATE SET
+		compat_token = EXCLUDED.compat_token,
+		user_id      = EXCLUDED.user_id,
+		data         = EXCLUDED.data,
+		expires_at   = EXCLUDED.expires_at`
+
+// upsert persists a session on the given context. It is best-effort: a DB
+// failure is logged and swallowed (the cache holds the authoritative in-process
+// state). Callers own the context and its timeout.
+func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session PlaybackSession) {
 	if d.pool == nil {
 		return
 	}
@@ -138,17 +245,7 @@ func (d *DurableCompatPlaybackStore) upsert(session PlaybackSession) {
 	if expiresAt.IsZero() {
 		expiresAt = d.now().Add(d.ttl)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	const q = `
-		INSERT INTO jellycompat_playback_sessions (id, compat_token, user_id, data, expires_at)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (id) DO UPDATE SET
-			compat_token = EXCLUDED.compat_token,
-			user_id      = EXCLUDED.user_id,
-			data         = EXCLUDED.data,
-			expires_at   = EXCLUDED.expires_at`
-	if _, err := d.pool.Exec(ctx, q, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
+	if _, err := d.pool.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
 		slog.Warn("persist compat playback session failed", "error", err, "play_session_id", session.ID)
 	}
 }
@@ -161,7 +258,7 @@ func (d *DurableCompatPlaybackStore) load(id string) (*PlaybackSession, bool) {
 	defer cancel()
 	var raw []byte
 	err := d.pool.QueryRow(ctx,
-		`SELECT data FROM jellycompat_playback_sessions WHERE id = $1 AND expires_at > now()`, id,
+		`SELECT data FROM jellycompat_playback_sessions WHERE id = $1 AND expires_at > $2`, id, d.now(),
 	).Scan(&raw)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -177,24 +274,19 @@ func (d *DurableCompatPlaybackStore) load(id string) (*PlaybackSession, bool) {
 	return &session, true
 }
 
-// loadByCompatToken loads all live rows for a compat token (or every live row
-// when the token is empty, matching the in-memory FindByRoute scan) into the
-// cache so a subsequent cache scan can resolve the route.
+// loadByCompatToken loads the live rows for a (non-empty) compat token into the
+// cache so a subsequent cache scan can resolve the route. The query is bounded by
+// the indexed compat_token predicate; FindByRoute never calls it with an empty
+// token (that would be an unbounded full-table load).
 func (d *DurableCompatPlaybackStore) loadByCompatToken(compatToken string) {
-	if d.pool == nil {
+	if d.pool == nil || compatToken == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	var (
-		rows pgx.Rows
-		err  error
-	)
-	if compatToken == "" {
-		rows, err = d.pool.Query(ctx, `SELECT data FROM jellycompat_playback_sessions WHERE expires_at > now()`)
-	} else {
-		rows, err = d.pool.Query(ctx, `SELECT data FROM jellycompat_playback_sessions WHERE compat_token = $1 AND expires_at > now()`, compatToken)
-	}
+	rows, err := d.pool.Query(ctx,
+		`SELECT data FROM jellycompat_playback_sessions WHERE compat_token = $1 AND expires_at > $2`,
+		compatToken, d.now())
 	if err != nil {
 		slog.Warn("load compat playback sessions by token failed", "error", err)
 		return

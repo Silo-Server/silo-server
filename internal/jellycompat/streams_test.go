@@ -179,6 +179,32 @@ func TestHandleDeleteActiveEncodings_StopsTranscodeAndDeletesSession(t *testing.
 	}
 }
 
+// TestTeardownPlaySession_DeletesNodeRecipe verifies the deliberate stop path
+// drops the node recipe keyed by the upstream session id, so a buffered/retrying
+// request after a node restart cannot resurrect ffmpeg for the stopped session.
+func TestTeardownPlaySession_DeletesNodeRecipe(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	recipeStore := &stubRecipeNodeStore{cards: map[string]playback.RecipeCard{
+		"upstream-1": {SessionID: "upstream-1"},
+	}}
+	h.RecipeNodeStore = recipeStore
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
+
+	playSession, ok := store.Get("ps-1")
+	if !ok {
+		t.Fatal("expected play session")
+	}
+	h.teardownPlaySession(playSession)
+
+	if _, ok := recipeStore.Get("upstream-1"); ok {
+		t.Fatal("node recipe should be deleted on deliberate teardown")
+	}
+	if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "upstream-1" {
+		t.Fatalf("expected StopSession(upstream-1); got %v", mgr.stopCalls)
+	}
+}
+
 // TestHandleDeleteActiveEncodings_MissingPlaySessionIdReturns204 verifies a
 // request with no PlaySessionId is a 204 no-op (no teardown).
 func TestHandleDeleteActiveEncodings_MissingPlaySessionIdReturns204(t *testing.T) {

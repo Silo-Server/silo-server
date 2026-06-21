@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 // PlaybackSession stores compat-owned playback negotiation state before the
@@ -20,9 +21,14 @@ type PlaybackSession struct {
 	UpstreamSessionID  string
 	UpstreamPlayMethod string
 	TranscodeStarted   bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	ExpiresAt          time.Time
+	// Recipe is the transcode reconstruction descriptor for this session. Jellyfin
+	// clients cannot round-trip a native stream token, so jellycompat carries the
+	// recipe in its own durable compat store (this struct, persisted as JSONB)
+	// rather than in the token. Nil until a transcode actually starts.
+	Recipe    *playback.RecipeCard
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	ExpiresAt time.Time
 }
 
 // PlaybackMediaSource stores one negotiated stream source within a compat play session.
@@ -74,7 +80,11 @@ func NewPlaybackSessionStore(ttl time.Duration, now func() time.Time) *PlaybackS
 		now = time.Now
 	}
 	if ttl <= 0 {
-		ttl = 6 * time.Hour
+		// Default the absolute session lifetime to the absolute stream-token TTL
+		// (playback.MaxTokenTTL, 24h) so a session never expires while its token
+		// is still valid. Absolute from creation, not sliding; mirrors the
+		// router default and is config-overridable.
+		ttl = playback.MaxTokenTTL
 	}
 	return &PlaybackSessionStore{
 		sessions: make(map[string]PlaybackSession),
@@ -85,6 +95,15 @@ func NewPlaybackSessionStore(ttl time.Duration, now func() time.Time) *PlaybackS
 
 // Put stores or replaces a compat playback session.
 func (s *PlaybackSessionStore) Put(session PlaybackSession) {
+	s.putNormalized(session)
+}
+
+// putNormalized stores or replaces a compat playback session and returns the
+// stored copy with normalized timestamps (CreatedAt/UpdatedAt/ExpiresAt). The
+// durable wrapper uses the return value to persist the same timestamps the cache
+// just assigned without a second Get (extra lock + copy). Put keeps the
+// no-return signature the CompatPlaybackStore interface requires.
+func (s *PlaybackSessionStore) putNormalized(session PlaybackSession) PlaybackSession {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -96,6 +115,7 @@ func (s *PlaybackSessionStore) Put(session PlaybackSession) {
 		session.ExpiresAt = session.CreatedAt.Add(s.ttl)
 	}
 	s.sessions[session.ID] = session
+	return session
 }
 
 // Get returns a playback session when it exists and is not expired.

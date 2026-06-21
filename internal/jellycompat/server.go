@@ -37,9 +37,13 @@ type Dependencies struct {
 	ImageCache       *ImageCache
 	DeviceProfiles   *DeviceProfileStore
 	PlaybackStore    CompatPlaybackStore
-	LoginResolver    loginResolver
-	Authenticator    *Authenticator
-	WebFS            fs.FS
+	// RecipeNodeStore hands remote-transcode reconstruction recipes to the
+	// control-plane recipe store (Redis) so a restarted transcode node can rebuild
+	// a jellycompat session. Optional; nil disables the handoff.
+	RecipeNodeStore recipeNodePutter
+	LoginResolver   loginResolver
+	Authenticator   *Authenticator
+	WebFS           fs.FS
 	// FrontendFS is the embedded Silo frontend asset filesystem (web/dist),
 	// used to serve app-relative artwork such as bundled collection-template
 	// posters that have no remote origin. Optional.

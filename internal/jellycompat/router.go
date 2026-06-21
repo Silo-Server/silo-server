@@ -98,10 +98,9 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
-	// Recipe-card store enables compat transcode reconstruct across restarts
-	// (shared Postgres table with the native path). Must be set before the
-	// boot-time orphan cleanup so surviving cards spare their segment dirs.
-	playbackHandler.RecipeStore = playback.NewPostgresRecipeStore(deps.DB)
+	// Compat transcode reconstruct is driven by the recipe carried in the durable
+	// compat playback store (jellycompat_playback_sessions); no separate native
+	// recipe table is needed.
 	if cleaned, err := playbackHandler.CleanupOrphanedTranscodes(); err != nil {
 		slog.Warn("jellycompat transcode cleanup failed", "dir", playbackHandler.TranscodeDir, "error", err)
 	} else if cleaned > 0 {
@@ -109,6 +108,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
+	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.S3Client = deps.S3Client
@@ -295,7 +295,13 @@ func withDefaults(deps Dependencies) Dependencies {
 		}
 		deps.ImageCache = NewImageCache(cacheTTL, deps.Now)
 	}
-	playbackTTL := 6 * time.Hour
+	// Align the compat playback session's absolute lifetime with the absolute
+	// stream-token TTL (playback.MaxTokenTTL, 24h). This is an ABSOLUTE window
+	// from creation, not sliding/idle: the session need not outlive its token
+	// while token re-mint is unimplemented, and at 6h long content (audiobooks,
+	// movies) and paused-overnight sessions expired mid-playback even though the
+	// stream token was still valid. Overridable per-deployment via config.
+	playbackTTL := playback.MaxTokenTTL
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL
 	}

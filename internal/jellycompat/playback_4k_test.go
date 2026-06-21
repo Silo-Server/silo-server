@@ -159,7 +159,7 @@ func TestStartRemoteTranscode4KGuard(t *testing.T) {
 		FileID:  1,
 		Version: catalog.FileVersion{FileID: 1, Resolution: "2160p", CodecVideo: "hevc"},
 	}
-	if err := h.startRemoteTranscode(context.Background(), "session", source, nil, 0, "http://node"); !errors.Is(err, errTranscode4KDisallowed) {
+	if err := h.startRemoteTranscode(context.Background(), "play", "session", source, nil, 0, "http://node"); !errors.Is(err, errTranscode4KDisallowed) {
 		t.Errorf("startRemoteTranscode() error = %v, want errTranscode4KDisallowed", err)
 	}
 }

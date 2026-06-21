@@ -288,9 +288,16 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 	}))
 	defer server.Close()
 
-	handler := &PlaybackHandler{JWTSecret: "secret"}
+	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+	handler := &PlaybackHandler{
+		JWTSecret:     "secret",
+		playbackStore: playbackStore,
+		tm:            playback.NewTranscodeManager(),
+	}
 	if err := handler.startRemoteTranscode(
 		context.Background(),
+		"play-1",
 		"upstream-1",
 		source,
 		&models.MediaFile{ID: version.FileID, FilePath: filePath},
