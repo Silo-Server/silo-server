@@ -10,21 +10,22 @@ import (
 )
 
 func TestParamsHashStableAndDistinct(t *testing.T) {
-	base := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, false)
+	base := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false)
 	if base == "" || len(base) != 64 {
 		t.Fatalf("params hash should be a 64-char sha256 hex, got %q", base)
 	}
 	// Deterministic for identical inputs (dedup key).
-	if again := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, false); again != base {
+	if again := paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, false); again != base {
 		t.Fatalf("params hash not stable: %q != %q", base, again)
 	}
 	// Distinct when any parameter differs.
 	for _, other := range []string{
-		paramsHash("remux", "mp4", "h264", "aac", "1080p", -1, false),
-		paramsHash("transcode", "mp4", "hevc", "aac", "1080p", -1, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "720p", -1, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", 1, false),
-		paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, true),
+		paramsHash("remux", "mp4", "h264", "aac", "1080p", -1, 10000, false),
+		paramsHash("transcode", "mp4", "hevc", "aac", "1080p", -1, 10000, false),
+		paramsHash("transcode", "mp4", "h264", "aac", "720p", -1, 10000, false),
+		paramsHash("transcode", "mp4", "h264", "aac", "1080p", 1, 10000, false),
+		paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 5000, false),
+		paramsHash("transcode", "mp4", "h264", "aac", "1080p", -1, 10000, true),
 	} {
 		if other == base {
 			t.Fatalf("params hash collision: %q", other)
@@ -72,7 +73,7 @@ type fakeUserRepo struct{ user *models.User }
 
 func (f fakeUserRepo) GetByID(context.Context, int) (*models.User, error) { return f.user, nil }
 
-func TestCapabilityFormatsGating(t *testing.T) {
+func TestCapabilityQualityPresetsGating(t *testing.T) {
 	newSvc := func(user *models.User, transcodeEnabled bool) *Service {
 		cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: transcodeEnabled}
 		return NewService(nil, nil, nil, nil, nil, nil, fakeUserRepo{user}, nil, nil, &cfg)
@@ -85,23 +86,23 @@ func TestCapabilityFormatsGating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(capInfo.Formats, ","); got != "original" {
-		t.Fatalf("formats without pipeline = %q, want original", got)
+	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
+		t.Fatalf("quality presets without pipeline = %q, want original", got)
 	}
 
-	// Pipeline wired + transcode server/user gates open → all three formats.
+	// Pipeline wired + transcode server/user gates open → full bitrate ladder.
 	svc = newSvc(allowAll, true)
 	svc.SetArtifactManager(&ArtifactManager{})
 	capInfo, _ = svc.Capability(context.Background(), 1)
-	if got := strings.Join(capInfo.Formats, ","); got != "original,remux,transcode" {
-		t.Fatalf("formats with pipeline = %q, want original,remux,transcode", got)
+	if got := strings.Join(capInfo.QualityPresets, ","); got != "original,20mbps,10mbps,5mbps,2mbps,1mbps" {
+		t.Fatalf("quality presets with pipeline = %q, want full ladder", got)
 	}
 
-	// Transcode gated off (user flag) → original + remux only.
+	// Transcode gated off (user flag) → original only.
 	svc = newSvc(&models.User{DownloadAllowed: true, DownloadTranscodeAllowed: false}, true)
 	svc.SetArtifactManager(&ArtifactManager{})
 	capInfo, _ = svc.Capability(context.Background(), 1)
-	if got := strings.Join(capInfo.Formats, ","); got != "original,remux" {
-		t.Fatalf("formats with transcode gated = %q, want original,remux", got)
+	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
+		t.Fatalf("quality presets with transcode gated = %q, want original", got)
 	}
 }

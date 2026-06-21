@@ -5,9 +5,10 @@ watch state consistent across reconnects. Three pillars: (1) a **device-scoped d
 the server tracks what each device has downloaded; (2) an **offline playback manifest** — one bundle
 giving the client everything it needs to play with no network (metadata, subtitle files, artwork,
 chapter + intro/credits markers); (3) **offline progress reconciliation** — the client queues watch
-progress while offline and the server merges it on reconnect (last-write-wins). Downloads are served
-in an admin-configurable **format** (original / remux / transcode), including server-side
-**transcode-to-a-single-file** for devices that can't play the source.
+progress while offline and the server merges it on reconnect (last-write-wins). Downloads are requested
+through an admin-gated **quality** ladder (`original`, then bitrate presets), with server-side
+**transcode-to-a-single-file** for bitrate requests and compatibility fallback for devices that cannot
+play the source directly.
 
 **Status:** Approved — implementing. This capability cleared the Silo v1 scope gate on
 2026-06-18 (via the **v1 capability proposal** triage; template
@@ -28,13 +29,20 @@ Decisions locked with the requester:
   API rule, which is acceptable here because the change lands **before** scope lock and **before** any
   mobile client ships against it — exactly the right time to reshape. The proposal must call this out so
   reviewers/clients know the download contract changed pre-lock.)
-- **Format is admin-configurable.** Original and remux are always available when downloads are enabled.
-  Transcode-to-file is gated by a server setting **and** the per-user `download_transcode_allowed` flag;
-  when an admin forces original and the device can't decode it, that is an acceptable failure.
+- **Quality is user-facing; delivery format is internal.** Clients request `quality` from the ordered
+  ladder `original > 20mbps > 10mbps > 5mbps > 2mbps > 1mbps`. `remux` is not a preset; it is a
+  server-selected `delivery_format` when `original` needs container/audio compatibility. Bitrate
+  presets are gated by a server setting **and** the per-user `download_transcode_allowed` flag.
 - **Transcode-to-single-file is in v1.** (Today's transcode pipeline only emits ephemeral HLS segments.)
 - **No expiry, no lease, no DRM.** Downloaded files persist on-device until the user deletes them; the
   server can only revoke *future* downloads via `users.download_allowed`.
 - **No cross-device visibility** in v1 (a device sees its own entries, not other devices').
+
+**Implementation update (2026-06-20):** the current client-facing contract is documented in
+`docs/downloads-api.md`. The public request field is `quality`, capabilities expose
+`quality_presets`, rows expose `quality`, `effective_quality`, `delivery_format`,
+`target_bitrate_kbps`, and `revision`, and batch manifests are implemented at
+`GET /api/v1/downloads/batches/{batch_id}/manifests`.
 
 > Commands and paths in this document are repository-relative; assume the repository root is the cwd.
 
@@ -77,19 +85,19 @@ whole downloads domain; everything below lives in it unless noted.
 ```
 internal/downloads/
   model.go         — Download (web + device, one type), Artifact, OfflineManifest,
-                     Format constants, status constants, sentinel errors
+                     quality/delivery constants, status constants, sentinel errors
   repo.go          — Postgres CRUD: downloads (reshaped), download_artifacts
-  service.go       — orchestration: permission + quota checks, format policy, create/list/serve
-  policy.go        — FormatPolicyResolver (original/remux/transcode decision + server/user gates)
+  service.go       — orchestration: permission + quota checks, quality policy, create/list/serve
+  policy.go        — DownloadQualityResolver (quality ladder + delivery decision + server/user gates)
   bandwidth.go     — BandwidthManager (ported from internal/download/bandwidth.go)
   limiter.go       — QuantityLimiter (ported from internal/download/limiter.go)
   manifest.go      — ManifestBuilder (assembles OfflineManifest; strips all presigned URLs)
   artifacts.go     — ArtifactManager (async prepare-to-file jobs: remux + transcode, dedup, cleanup)
-  serve.go         — file serving for original (source) and prepared (artifact) formats
+  serve.go         — file serving for original source and prepared artifacts
 ```
 
 **What it absorbs / reshapes** from `internal/download`: the `downloads` table and its endpoints, now
-reshaped to be device-aware and format-aware; `BandwidthManager`; `QuantityLimiter`; the `Service`
+reshaped to be device-aware and quality/delivery-aware; `BandwidthManager`; `QuantityLimiter`; the `Service`
 permission/quota/file-serving logic; and the `config.DownloadConfig` integration.
 
 **What stays out of the package (by design):**
@@ -102,7 +110,7 @@ permission/quota/file-serving logic; and the `config.DownloadConfig` integration
 
 **Cutover strategy:** because the web app is the only consumer and is updated in lockstep, Phase 0 is a
 *reshape*, not a verbatim port: move the logic into `internal/downloads`, reshape the table + endpoints
-(add `format`, device-awareness), update the web app's download hooks/components, delete
+(add device-awareness plus quality/delivery fields), update the web app's download hooks/components, delete
 `internal/download`. The handler `internal/api/handlers/downloads.go` already depends only on a narrow
 `DownloadService` interface, so the swap is mechanical; its request/response DTOs gain the new fields.
 
@@ -244,33 +252,44 @@ in `internal/config/db_loader.go`:
 the existing 30s-TTL cache (`internal/download/service.go:107` → ported), and the keys are registered as
 non-restart in `internal/config/restart_keys.go`.
 
-## Format policy
+## Quality policy
 
 Resolved in `internal/downloads/policy.go` at create time, for both web and device flows:
 
 ```go
-type Format string
 const (
-    FormatOriginal  Format = "original"
-    FormatRemux     Format = "remux"
-    FormatTranscode Format = "transcode"
+    QualityOriginal = "original"
+    Quality20Mbps   = "20mbps"
+    Quality10Mbps   = "10mbps"
+    Quality5Mbps    = "5mbps"
+    Quality2Mbps    = "2mbps"
+    Quality1Mbps    = "1mbps"
 )
 
-// Resolve returns the concrete format to record, or an error if the request is not permitted.
-// caps describes what the requesting device can decode; the resolver may DOWNGRADE a transcode
-// request to original when transcode is disallowed (the client then fails to play — accepted).
-func (r FormatPolicyResolver) Resolve(file *models.MediaFile, requested Format,
-    caps playback.ClientCapabilities, user *models.User, cfg config.DownloadConfig) (Format, error)
+type QualityDecision struct {
+    RequestedQuality  string
+    EffectiveQuality  string
+    DeliveryFormat    string // original | remux | transcode
+    TargetBitrateKbps int
+    RequiresArtifact  bool
+}
+
+func (DownloadQualityResolver) Resolve(requested string, user *models.User,
+    cfg config.DownloadConfig, file *models.MediaFile, caps playback.ClientCapabilities,
+    artifactsAvailable bool) (QualityDecision, error)
 ```
 
 Decision tree:
-1. `original` → allowed whenever downloads are enabled and `user.DownloadAllowed`.
-2. `remux` → allowed whenever downloads are enabled and `user.DownloadAllowed`.
-3. `transcode` → requires `cfg.TranscodeEnabled` (server) **and** `user.DownloadTranscodeAllowed`
-   (`internal/models/user.go:22`, already a column, currently inert — this is where it finally gets
-   enforced). Server gate off → `ErrTranscodeDisabled` (403). User flag off → `ErrDownloadNotAllowed` (403).
+1. Empty quality defaults to `original`.
+2. `original` direct-plays the source unless supplied device caps require a compatibility artifact.
+   Container/audio-only compatibility records `delivery_format=remux`; video transcode fallback records
+   `effective_quality=20mbps`, `delivery_format=transcode`.
+3. Bitrate presets require `cfg.TranscodeEnabled` (server), `user.DownloadTranscodeAllowed`, and an
+   available artifact pipeline. Server gate off → `ErrTranscodeDisabled` (403). User flag off →
+   `ErrDownloadNotAllowed` (403). Missing artifact pipeline → `ErrQualityUnavailable` (501).
+4. `remux` and `transcode` as request values are invalid public qualities.
 
-Target codec/resolution for remux/transcode is chosen by reusing `playback.Resolve` /
+Target codec/resolution for compatibility artifacts and bitrate transcodes is chosen by reusing `playback.Resolve` /
 `playback.SelectVersion` (`internal/playback/resolver.go:60`) against the device's declared capabilities
 and the admin transcode ceilings, so download encoding matches streaming decisions exactly (no
 duplicated codec logic).
@@ -333,7 +352,8 @@ process exit mid-encode cannot strand a download in `preparing` forever:
 
 **Cleanup:** an admin/cron job (mirroring `internal/playback/transcode_cleanup.go`) evicts `ready`
 artifacts whose `last_used_at` is older than a retention window or when the total exceeds
-`download.artifact_max_bytes` (LRU), but never one still linked by a non-`completed` download row.
+`download.artifact_max_bytes` (LRU), but never one still linked by an active managed download row,
+including completed rows that represent a device's local library state.
 Whatever is dropped is logged (no silent truncation).
 
 ## Offline playback manifest
@@ -345,13 +365,17 @@ Manifest + asset endpoints are only meaningful for managed device entries (`devi
 
 ```go
 type OfflineManifest struct {
-    DownloadID    string `json:"download_id"`
-    ContentID     string `json:"content_id"`
-    EpisodeID     string `json:"episode_id,omitempty"`
-    Type          string `json:"type"`            // movie | episode
-    Format        Format `json:"format"`
-    MediaFileID   int    `json:"media_file_id"`
-    FileSize      int64  `json:"file_size"`
+    DownloadID        string `json:"download_id"`
+    ContentID         string `json:"content_id"`
+    EpisodeID         string `json:"episode_id,omitempty"`
+    Type              string `json:"type"` // movie | episode
+    Revision          int    `json:"revision"`
+    Quality           string `json:"quality"`
+    EffectiveQuality  string `json:"effective_quality"`
+    DeliveryFormat    string `json:"delivery_format"`
+    TargetBitrateKbps int    `json:"target_bitrate_kbps"`
+    MediaFileID       int    `json:"media_file_id"`
+    FileSize          int64  `json:"file_size"`
 
     Title         string   `json:"title"`
     Year          int      `json:"year,omitempty"`
@@ -478,42 +502,42 @@ The web app is updated in lockstep, so existing endpoints are reshaped rather th
 
 **Reshaped (existing):**
 ```
-POST   /downloads            body {content_id, episode_id?, file_id?, format?, series?};
+POST   /downloads            body {content_id, episode_id?, file_id?, quality?, series?, caps?};
                              X-Silo-Device-Id present → managed entry; absent → ephemeral/web row.
-                             `format` (remux/transcode) is honored for SINGLE-item requests only.
+                             `quality` is original by default; bitrate presets are single-item only.
 GET    /downloads            managed entries for the CALLING device (device from header); ephemeral rows otherwise
 DELETE /downloads/{id}       remove a row owned by (user, profile, header device)
 GET    /downloads/{id}/file  serve original (source) or prepared artifact (Range/resume + throttle)
 GET|HEAD /direct-download    one-shot browser download, original-only (browser-friendly, token-in-URL)
 ```
-The response DTO gains `device_id`, `format`, `artifact_id`-derived readiness, and the new statuses.
+The response DTO gains `device_id`, `quality`, `effective_quality`, `delivery_format`,
+`target_bitrate_kbps`, `revision`, artifact-derived readiness, and the new statuses.
 **`device_id` is authoritative only from the `X-Silo-Device-Id` header — never from the body or query**
 (a body/query value could only ever be a display hint, and is not accepted as authority).
 
-**Prepared formats (remux/transcode) are single-item only.** A series batch
-(`series:true`) and `/direct-download` are **original-only**: `/direct-download`
-streams synchronously and cannot wait on an async encode, and a series batch
-would otherwise fan out N encode jobs. A client that wants a prepared copy
-requests it per item via `POST /downloads`, which routes through the artifact
-pipeline. `Service.resolveFormat` enforces this (non-original → `ErrFormatUnavailable`
-→ HTTP 501) for both paths; the single-item `POST /downloads` uses the full
-`policy.Resolve`. Lifting this (e.g. per-episode series encodes) is a future
-capability, tracked separately, not part of this design.
+**Bitrate qualities are single-item only.** A series batch (`series:true`) and
+`/direct-download` are **original-quality only**: `/direct-download` streams
+synchronously and cannot wait on an async encode, and a series batch would otherwise
+fan out N encode jobs. A client that wants prepared transcodes for a series requests
+each episode individually. `DownloadQualityResolver` rejects bulk bitrate requests
+with `ErrBulkQualityUnavailable` / HTTP 501.
 
 **New — capability / feature detection** (pattern from `internal/api/handlers/notifications.go:324`):
 ```
 GET /downloads/capability
 → { "enabled": bool, "download_allowed": bool,
-    "formats": ["original","remux"(,"transcode")],
-    "transcode_enabled": bool, "transcode_user_allowed": bool }
+    "quality_presets": ["original","20mbps","10mbps","5mbps","2mbps","1mbps"],
+    "transcode_enabled": bool, "transcode_user_allowed": bool,
+    "season_download": bool, "series_monitoring": bool }
 ```
 
 **New — managed-entry lifecycle + offline bundle:**
 ```
-PATCH /downloads/{id}                 body {status:"downloading"|"completed"} (client confirms local state)
-GET   /downloads/{id}/manifest        → OfflineManifest
-GET   /downloads/{id}/artwork/{kind}  → image bytes  (poster|backdrop|logo)
-GET   /downloads/{id}/subtitles/{ref} → subtitle bytes
+PATCH /downloads/{id}                         body {status:"downloading"|"completed"}
+GET   /downloads/{id}/manifest                → OfflineManifest
+GET   /downloads/batches/{batch_id}/manifests → {manifests:[OfflineManifest]}
+GET   /downloads/{id}/artwork/{kind}          → image bytes  (poster|backdrop|logo)
+GET   /downloads/{id}/subtitles/{ref}         → subtitle bytes
 ```
 
 **Progress reconciliation:** additive fields on existing `POST /sync/progress` and `GET /progress`
@@ -532,18 +556,18 @@ media by download id even if the row exists.
 
 ## Data flows
 
-**Ephemeral web download (reshaped existing flow, now format-aware)**
+**Ephemeral web download (reshaped existing flow, quality-aware)**
 ```
-POST /downloads {content_id, format:"remux"}            (no device id → ephemeral)
- → Resolve format · permission · quota
- → remux: ArtifactManager.Ensure → preparing|ready ; original: ready immediately
+POST /downloads {content_id, quality:"original", caps:{...}}            (no device id → ephemeral)
+ → Resolve quality/delivery · permission · quota
+ → compatibility artifact: ArtifactManager.Ensure → preparing|ready ; direct original: ready immediately
 client → GET /downloads/{id}/file → serveContent(source|artifact, Range, throttle)
 ```
 
-**Register a managed `transcode` download (mobile)**
+**Register a managed bitrate download (mobile)**
 ```
-POST /downloads {content_id, format:"transcode", <device caps>}  (+X-Silo-Device-Id, +X-Profile-Id)
- → Resolve: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed → transcode; pick target via playback.SelectVersion
+POST /downloads {content_id, quality:"5mbps", caps:{...}}  (+X-Silo-Device-Id, +X-Profile-Id)
+ → Resolve: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed → delivery_format=transcode
  → upsert downloads (device entry, status=preparing)
  → ArtifactManager.Ensure(media_file_id, params): ON CONFLICT dedup → enqueue encode if new
 encode worker → playback.PrepareFile(... -movflags +faststart) → rename → artifact=ready
@@ -563,10 +587,10 @@ client (on notify) → GET /downloads/{id}/file → serveContent(artifact, Range
 ## Phased build sequence (each phase independently shippable)
 
 - **Phase 0 — Reshape + scaffolding (coordinated web update).** Create `internal/downloads`; reshape the
-  `downloads` table (device/format columns, widened status) and the `/downloads` + `/direct-download`
-  endpoints to be format-aware; port `BandwidthManager`/`QuantityLimiter`/serving; extend
-  `config.DownloadConfig` (+ new keys, default-off); add `Format` constants + sentinel errors; add
-  `GET /downloads/capability`. Update the web app's download hooks/components
+  `downloads` table (device plus quality/delivery columns, widened status) and the `/downloads` +
+  `/direct-download` endpoints to be quality-aware; port `BandwidthManager`/`QuantityLimiter`/serving;
+  extend `config.DownloadConfig` (+ new keys, default-off); add quality/delivery constants + sentinel
+  errors; add `GET /downloads/capability`. Update the web app's download hooks/components
   (`web/src/hooks/queries/downloads.ts`, `web/src/components/DownloadVersionPicker.tsx`) to the reshaped
   DTOs. Delete `internal/download`.
 - **Phase 1 — Managed device entries.** Device-aware create/list/patch/delete; managed-entry serving for
@@ -605,7 +629,7 @@ depends on 1. Remux can ship in Phase 3 even if transcode stays admin-off.
   offline progress queue drained on reconnect. The manifest's markers/chapters reuse the types already
   used for online playback.
 - **Web (`web/`):** updated in lockstep in **Phase 0** — the download hooks/components move to the
-  reshaped `/downloads` DTOs (new `format` field, new statuses). New admin additions: a
+  reshaped `/downloads` DTOs (quality/effective quality/delivery fields, new statuses). New admin additions: a
   `download.transcode_enabled` toggle in admin settings, plus the existing per-user
   `download_transcode_allowed` switch in `web/src/pages/AdminUserDetail.tsx`. No offline-library UI on web.
 
@@ -664,15 +688,15 @@ the phase plan. They were hardened in response to an adversarial design review.
 ## Out of scope (deferred)
 
 Cross-device download visibility; download expiry/lease/DRM; cumulative per-user storage-byte quotas;
-push-to-client "your transcode is ready" beyond the existing events hub; batch manifest endpoint;
-server-initiated GC of artifacts on client-side delete.
+push-to-client "your transcode is ready" beyond the existing events hub; server-initiated deletion of
+client-side files.
 
 ## Appendix — proposal-ready summary (maps to the v1 capability template)
 
-- **Summary:** Mobile apps can download movies/episodes for fully offline playback — choosing (where the
-  admin allows) original, remux, or a server-transcoded copy sized for the device — and watch progress
-  stays consistent when the device reconnects. The web app's existing download feature is folded into the
-  same reshaped contract.
+- **Summary:** Mobile apps can download movies/episodes for fully offline playback — choosing original
+  or an admin-gated bitrate quality — and watch progress stays consistent when the device reconnects.
+  The web app's existing download feature is folded into the same reshaped contract. Remux remains an
+  internal delivery format, not a client-facing quality preset.
 - **User value / why v1:** Offline playback is table-stakes for mobile media clients (commutes, flights,
   spotty networks) and the client teams need the download + sync contract locked to build against.
   Reshaping the existing download contract now — before lock and before any mobile client ships against

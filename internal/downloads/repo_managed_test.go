@@ -39,12 +39,12 @@ func newDownloadsTestPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 
-	// Skip when the device/format reshape migration has not been applied.
+	// Skip when the managed downloads reshape migration has not been applied.
 	var col *string
 	err = pool.QueryRow(ctx, `SELECT column_name FROM information_schema.columns
 		WHERE table_schema = 'public' AND table_name = 'downloads' AND column_name = 'device_id'`).Scan(&col)
 	if errors.Is(err, pgx.ErrNoRows) || col == nil {
-		t.Skip("downloads device/format reshape migration has not been applied")
+		t.Skip("downloads managed reshape migration has not been applied")
 	}
 	if err != nil {
 		t.Fatalf("check downloads reshape: %v", err)

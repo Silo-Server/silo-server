@@ -11,7 +11,7 @@ import (
 )
 
 const artifactColumns = `id, media_file_id, format, params_hash, container, codec_video, codec_audio,
-	resolution, audio_track_index, output_path, file_size, status, error_message,
+	resolution, audio_track_index, target_bitrate_kbps, output_path, file_size, status, error_message,
 	attempts, max_attempts, lease_owner, lease_expires_at, next_retry_at,
 	created_at, completed_at, last_used_at`
 
@@ -31,7 +31,7 @@ func scanArtifact(row pgx.Row) (*Artifact, error) {
 	var leaseOwner *string
 	if err := row.Scan(
 		&a.ID, &a.MediaFileID, &a.Format, &a.ParamsHash, &a.Container, &a.CodecVideo, &a.CodecAudio,
-		&a.Resolution, &a.AudioTrackIndex, &a.OutputPath, &a.FileSize, &a.Status, &a.ErrorMessage,
+		&a.Resolution, &a.AudioTrackIndex, &a.TargetBitrateKbps, &a.OutputPath, &a.FileSize, &a.Status, &a.ErrorMessage,
 		&a.Attempts, &a.MaxAttempts, &leaseOwner, &a.LeaseExpiresAt, &a.NextRetryAt,
 		&a.CreatedAt, &a.CompletedAt, &a.LastUsedAt,
 	); err != nil {
@@ -48,11 +48,11 @@ func (r *ArtifactRepository) EnsureQueued(ctx context.Context, a *Artifact) (*Ar
 	tag, err := r.pool.Exec(ctx,
 		`INSERT INTO download_artifacts
 			(id, media_file_id, format, params_hash, container, codec_video, codec_audio,
-			 resolution, audio_track_index, output_path, status, max_attempts)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'queued', $11)
+			 resolution, audio_track_index, target_bitrate_kbps, output_path, status, max_attempts)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'queued', $12)
 		 ON CONFLICT (media_file_id, format, params_hash) DO NOTHING`,
 		a.ID, a.MediaFileID, a.Format, a.ParamsHash, a.Container, a.CodecVideo, a.CodecAudio,
-		a.Resolution, a.AudioTrackIndex, a.OutputPath, a.MaxAttempts,
+		a.Resolution, a.AudioTrackIndex, a.TargetBitrateKbps, a.OutputPath, a.MaxAttempts,
 	)
 	if err != nil {
 		return nil, false, fmt.Errorf("ensuring artifact: %w", err)
@@ -283,13 +283,15 @@ func (r *ArtifactRepository) TotalReadyBytes(ctx context.Context) (int64, error)
 	return total, nil
 }
 
-// HasActiveLink reports whether any non-terminal download row still references
-// the artifact (such an artifact must not be evicted).
+// HasActiveLink reports whether any valid managed download row still references
+// the artifact. Completed rows are retained because they remain re-downloadable
+// handles for a device.
 func (r *ArtifactRepository) HasActiveLink(ctx context.Context, artifactID string) (bool, error) {
 	var exists bool
 	if err := r.pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM downloads
-		 WHERE artifact_id = $1 AND status NOT IN ('completed','cancelled','failed','revoked'))`,
+		 WHERE artifact_id = $1 AND device_id IS NOT NULL
+		   AND status NOT IN ('cancelled','failed','revoked'))`,
 		artifactID,
 	).Scan(&exists); err != nil {
 		return false, fmt.Errorf("checking artifact links: %w", err)

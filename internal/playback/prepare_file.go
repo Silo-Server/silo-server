@@ -14,11 +14,12 @@ import (
 // PrepareTarget describes the concrete encode target for a prepared download
 // artifact (remux or transcode-to-file).
 type PrepareTarget struct {
-	Container       string
-	CodecVideo      string // "copy" for remux, else an encoder codec (e.g. "h264")
-	CodecAudio      string // "copy" or "aac"
-	Resolution      string // "" = keep source resolution (no scale)
-	AudioTrackIndex int
+	Container         string
+	CodecVideo        string // "copy" for remux, else an encoder codec (e.g. "h264")
+	CodecAudio        string // "copy" or "aac"
+	Resolution        string // "" = keep source resolution (no scale)
+	AudioTrackIndex   int
+	TargetBitrateKbps int // 0 = encoder default/CRF; >0 caps video bitrate
 }
 
 // ResolvePrepareTarget computes the encode target for a remux/transcode download

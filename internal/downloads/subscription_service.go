@@ -142,9 +142,9 @@ func (s *Service) UpdateSubscription(ctx context.Context, userID int, profileID,
 	if err := s.itemAccess.EnsureAccessible(ctx, sub.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	// Only a scope-affecting change (mode or season list) can newly bring existing
-	// episodes into range, so only those trigger a backfill pass.
 	scopeChanged := patch.Mode != nil || patch.SeasonNumbers != nil
+	wasActive := sub.Active
+	oldMaxStorageBytes := sub.MaxStorageBytes
 	modeChanged := false
 	if patch.Mode != nil {
 		if !ValidSubMode(*patch.Mode) {
@@ -182,7 +182,11 @@ func (s *Service) UpdateSubscription(ctx context.Context, userID int, profileID,
 	if err := s.subRepo.Update(ctx, sub); err != nil {
 		return nil, err
 	}
-	if !scopeChanged {
+	reactivated := patch.Active != nil && !wasActive && sub.Active
+	storageIncreased := patch.MaxStorageBytes != nil &&
+		oldMaxStorageBytes > 0 &&
+		(sub.MaxStorageBytes <= 0 || sub.MaxStorageBytes > oldMaxStorageBytes)
+	if !scopeChanged && !reactivated && !storageIncreased {
 		return &SubscriptionResult{Subscription: sub}, nil
 	}
 	registered, err := s.syncSubscription(ctx, sub)

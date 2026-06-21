@@ -128,23 +128,24 @@ func (m *ArtifactManager) artifactDir() string {
 // given format, returning the current artifact row. The deterministic
 // output_path keeps a reclaimed job idempotent.
 func (m *ArtifactManager) Ensure(ctx context.Context, file *models.MediaFile, format string, target playback.PrepareTarget) (*Artifact, error) {
-	hash := paramsHash(format, target.Container, target.CodecVideo, target.CodecAudio, target.Resolution, target.AudioTrackIndex, false)
+	hash := paramsHash(format, target.Container, target.CodecVideo, target.CodecAudio, target.Resolution, target.AudioTrackIndex, target.TargetBitrateKbps, false)
 	id, err := idgen.NextID()
 	if err != nil {
 		return nil, err
 	}
 	a := &Artifact{
-		ID:              id,
-		MediaFileID:     file.ID,
-		Format:          format,
-		ParamsHash:      hash,
-		Container:       target.Container,
-		CodecVideo:      target.CodecVideo,
-		CodecAudio:      target.CodecAudio,
-		Resolution:      target.Resolution,
-		AudioTrackIndex: target.AudioTrackIndex,
-		OutputPath:      artifactOutputPath(m.artifactDir(), file.ID, format, hash),
-		MaxAttempts:     artifactMaxAttempts,
+		ID:                id,
+		MediaFileID:       file.ID,
+		Format:            format,
+		ParamsHash:        hash,
+		Container:         target.Container,
+		CodecVideo:        target.CodecVideo,
+		CodecAudio:        target.CodecAudio,
+		Resolution:        target.Resolution,
+		AudioTrackIndex:   target.AudioTrackIndex,
+		TargetBitrateKbps: target.TargetBitrateKbps,
+		OutputPath:        artifactOutputPath(m.artifactDir(), file.ID, format, hash),
+		MaxAttempts:       artifactMaxAttempts,
 	}
 	row, created, err := m.repo.EnsureQueued(ctx, a)
 	if err != nil {
@@ -411,6 +412,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		TargetCodecVideo:   a.CodecVideo,
 		TargetCodecAudio:   a.CodecAudio,
 		TargetResolution:   a.Resolution,
+		TargetBitrateKbps:  a.TargetBitrateKbps,
 		AudioTrackIndex:    a.AudioTrackIndex,
 		SubtitleTrackIndex: -1,
 		FFmpegPath:         cfg.Playback.FFmpegPath,
@@ -421,7 +423,7 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 }
 
 // Cleanup evicts ready artifacts (LRU first) once the total exceeds the byte
-// budget, never removing one still linked by a non-terminal download.
+// budget, never removing one still linked by an active managed download row.
 func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 	budget := m.downloadConfig().ArtifactMaxBytes
 	if budget <= 0 {

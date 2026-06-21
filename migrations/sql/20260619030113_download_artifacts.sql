@@ -16,6 +16,7 @@ CREATE TABLE public.download_artifacts (
     codec_audio       text        NOT NULL DEFAULT '',
     resolution        text        NOT NULL DEFAULT '',
     audio_track_index integer     NOT NULL DEFAULT -1,
+    target_bitrate_kbps integer   NOT NULL DEFAULT 0,
     output_path       text        NOT NULL DEFAULT '', -- absolute path on the server's artifact volume
     file_size         bigint      NOT NULL DEFAULT 0,
     status            text        NOT NULL DEFAULT 'queued',

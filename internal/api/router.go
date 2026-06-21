@@ -2147,6 +2147,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/subscriptions/{id}", downloadHandler.HandleGetSubscription)
 					r.Patch("/subscriptions/{id}", downloadHandler.HandlePatchSubscription)
 					r.Delete("/subscriptions/{id}", downloadHandler.HandleDeleteSubscription)
+					r.Get("/batches/{batch_id}/manifests", downloadHandler.HandleBatchManifests)
 					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
 					r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)

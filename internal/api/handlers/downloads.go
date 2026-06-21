@@ -22,8 +22,8 @@ import (
 type DownloadService interface {
 	Capability(ctx context.Context, userID int) (downloads.Capability, error)
 	Create(ctx context.Context, userID int, req downloads.CreateRequest, filter catalog.AccessFilter) (*downloads.Download, error)
-	CreateSeries(ctx context.Context, userID int, req downloads.CreateRequest, filter catalog.AccessFilter) ([]*downloads.Download, string, error)
-	CreateSeason(ctx context.Context, userID int, req downloads.CreateRequest, seasonNumber int, filter catalog.AccessFilter) ([]*downloads.Download, string, error)
+	CreateSeries(ctx context.Context, userID int, req downloads.CreateRequest, filter catalog.AccessFilter) ([]*downloads.Download, string, []downloads.SkippedDownload, error)
+	CreateSeason(ctx context.Context, userID int, req downloads.CreateRequest, seasonNumber int, filter catalog.AccessFilter) ([]*downloads.Download, string, []downloads.SkippedDownload, error)
 	CreateSubscription(ctx context.Context, userID int, req downloads.SubscriptionRequest, filter catalog.AccessFilter) (*downloads.SubscriptionResult, error)
 	ListSubscriptions(ctx context.Context, userID int, profileID, deviceID string) ([]*downloads.Subscription, error)
 	GetSubscription(ctx context.Context, userID int, profileID, deviceID, id string) (*downloads.Subscription, error)
@@ -36,6 +36,7 @@ type DownloadService interface {
 	Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string) error
 	PatchStatus(ctx context.Context, userID int, profileID, deviceID, downloadID, status string) error
 	BuildManifest(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) (*downloads.OfflineManifest, error)
+	BuildBatchManifests(ctx context.Context, userID int, profileID, deviceID, batchID string, filter catalog.AccessFilter) ([]*downloads.OfflineManifest, error)
 	ServeArtwork(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID, kind string, filter catalog.AccessFilter) error
 	ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID, ref string, filter catalog.AccessFilter) error
 }
@@ -55,10 +56,10 @@ type downloadRequest struct {
 	ContentID string        `json:"content_id"`
 	EpisodeID string        `json:"episode_id,omitempty"`
 	FileID    int           `json:"file_id,omitempty"`
-	Format    string        `json:"format,omitempty"`        // original (default) | remux | transcode
+	Quality   string        `json:"quality,omitempty"`       // original (default) | 20mbps | 10mbps | 5mbps | 2mbps | 1mbps
 	Series    bool          `json:"series,omitempty"`        // if true, downloads all episodes
 	Season    int           `json:"season_number,omitempty"` // with series=true, downloads only this season
-	Caps      *downloadCaps `json:"caps,omitempty"`          // device decode capability (remux/transcode target)
+	Caps      *downloadCaps `json:"caps,omitempty"`          // device decode capability (original fallback / transcode target)
 }
 
 // downloadCaps mirrors playback.ClientCapabilities for the request body.
@@ -78,24 +79,33 @@ type patchDownloadRequest struct {
 
 // downloadResponse represents a download entry in API responses.
 type downloadResponse struct {
-	ID          string  `json:"id"`
-	ContentID   string  `json:"content_id"`
-	EpisodeID   string  `json:"episode_id,omitempty"`
-	BatchID     string  `json:"batch_id,omitempty"`
-	DeviceID    string  `json:"device_id,omitempty"`
-	MediaFileID int     `json:"media_file_id"`
-	FileSize    int64   `json:"file_size"`
-	BytesSent   int64   `json:"bytes_sent"`
-	Kind        string  `json:"kind"`
-	Status      string  `json:"status"`
-	Format      string  `json:"format"`
-	CreatedAt   string  `json:"created_at"`
-	CompletedAt *string `json:"completed_at,omitempty"`
+	ID                string  `json:"id"`
+	ContentID         string  `json:"content_id"`
+	EpisodeID         string  `json:"episode_id,omitempty"`
+	BatchID           string  `json:"batch_id,omitempty"`
+	DeviceID          string  `json:"device_id,omitempty"`
+	MediaFileID       int     `json:"media_file_id"`
+	FileSize          int64   `json:"file_size"`
+	BytesSent         int64   `json:"bytes_sent"`
+	Kind              string  `json:"kind"`
+	Status            string  `json:"status"`
+	Quality           string  `json:"quality"`
+	EffectiveQuality  string  `json:"effective_quality"`
+	DeliveryFormat    string  `json:"delivery_format"`
+	TargetBitrateKbps int     `json:"target_bitrate_kbps"`
+	Revision          int     `json:"revision"`
+	CreatedAt         string  `json:"created_at"`
+	CompletedAt       *string `json:"completed_at,omitempty"`
 }
 
 // downloadsListResponse wraps the downloads list for JSON serialization.
 type downloadsListResponse struct {
-	Downloads []downloadResponse `json:"downloads"`
+	Downloads []downloadResponse          `json:"downloads"`
+	Skipped   []downloads.SkippedDownload `json:"skipped,omitempty"`
+}
+
+type batchManifestsResponse struct {
+	Manifests []*downloads.OfflineManifest `json:"manifests"`
 }
 
 // downloadCapabilityResponse is the GET /downloads/capability payload clients
@@ -103,7 +113,7 @@ type downloadsListResponse struct {
 type downloadCapabilityResponse struct {
 	Enabled              bool     `json:"enabled"`
 	DownloadAllowed      bool     `json:"download_allowed"`
-	Formats              []string `json:"formats"`
+	QualityPresets       []string `json:"quality_presets"`
 	TranscodeEnabled     bool     `json:"transcode_enabled"`
 	TranscodeUserAllowed bool     `json:"transcode_user_allowed"`
 	SeasonDownload       bool     `json:"season_download"`
@@ -113,24 +123,42 @@ type downloadCapabilityResponse struct {
 
 func toDownloadResponse(d *downloads.Download) downloadResponse {
 	resp := downloadResponse{
-		ID:          d.ID,
-		ContentID:   d.ContentID,
-		EpisodeID:   d.EpisodeID,
-		BatchID:     d.BatchID,
-		DeviceID:    d.DeviceID,
-		MediaFileID: d.MediaFileID,
-		FileSize:    d.FileSize,
-		BytesSent:   d.BytesSent,
-		Kind:        d.Kind,
-		Status:      d.Status,
-		Format:      d.Format,
-		CreatedAt:   d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ID:                d.ID,
+		ContentID:         d.ContentID,
+		EpisodeID:         d.EpisodeID,
+		BatchID:           d.BatchID,
+		DeviceID:          d.DeviceID,
+		MediaFileID:       d.MediaFileID,
+		FileSize:          d.FileSize,
+		BytesSent:         d.BytesSent,
+		Kind:              d.Kind,
+		Status:            d.Status,
+		Quality:           effectiveDownloadQuality(d.Quality),
+		EffectiveQuality:  effectiveDownloadQuality(d.EffectiveQuality),
+		DeliveryFormat:    d.Format,
+		TargetBitrateKbps: d.TargetBitrateKbps,
+		Revision:          effectiveDownloadRevision(d.Revision),
+		CreatedAt:         d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if d.CompletedAt != nil {
 		s := d.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
 		resp.CompletedAt = &s
 	}
 	return resp
+}
+
+func effectiveDownloadQuality(q string) string {
+	if q == "" {
+		return downloads.QualityOriginal
+	}
+	return q
+}
+
+func effectiveDownloadRevision(revision int) int {
+	if revision <= 0 {
+		return 1
+	}
+	return revision
 }
 
 // managedIdentity returns the (profileID, deviceID) the request is acting as.
@@ -163,7 +191,7 @@ func (h *DownloadHandler) HandleCapability(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, downloadCapabilityResponse{
 		Enabled:              capInfo.Enabled,
 		DownloadAllowed:      capInfo.DownloadAllowed,
-		Formats:              capInfo.Formats,
+		QualityPresets:       capInfo.QualityPresets,
 		TranscodeEnabled:     capInfo.TranscodeEnabled,
 		TranscodeUserAllowed: capInfo.TranscodeUserAllowed,
 		SeasonDownload:       capInfo.SeasonDownload,
@@ -201,7 +229,7 @@ func (h *DownloadHandler) HandleCreateDownload(w http.ResponseWriter, r *http.Re
 		ContentID:      req.ContentID,
 		EpisodeID:      req.EpisodeID,
 		FileID:         req.FileID,
-		Format:         req.Format,
+		Quality:        req.Quality,
 		ProfileID:      profileID,
 		DeviceID:       deviceID,
 		DeviceName:     deviceName,
@@ -222,12 +250,13 @@ func (h *DownloadHandler) HandleCreateDownload(w http.ResponseWriter, r *http.Re
 		var (
 			list    []*downloads.Download
 			batchID string
+			skipped []downloads.SkippedDownload
 			err     error
 		)
 		if req.Season > 0 {
-			list, batchID, err = h.svc.CreateSeason(r.Context(), userID, createReq, req.Season, filter)
+			list, batchID, skipped, err = h.svc.CreateSeason(r.Context(), userID, createReq, req.Season, filter)
 		} else {
-			list, batchID, err = h.svc.CreateSeries(r.Context(), userID, createReq, filter)
+			list, batchID, skipped, err = h.svc.CreateSeries(r.Context(), userID, createReq, filter)
 		}
 		if err != nil {
 			h.writeDownloadError(w, err)
@@ -241,7 +270,7 @@ func (h *DownloadHandler) HandleCreateDownload(w http.ResponseWriter, r *http.Re
 			}
 			responses = append(responses, resp)
 		}
-		writeJSON(w, http.StatusAccepted, downloadsListResponse{Downloads: responses})
+		writeJSON(w, http.StatusAccepted, downloadsListResponse{Downloads: responses, Skipped: skipped})
 		return
 	}
 
@@ -412,7 +441,8 @@ func (h *DownloadHandler) HandleDownloadFile(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// HandleDirectDownload handles GET /direct-download?file_id=N&format=original.
+// HandleDirectDownload handles GET /direct-download?file_id=N. A legacy
+// format=original query is accepted, but direct downloads remain original-only.
 func (h *DownloadHandler) HandleDirectDownload(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
@@ -494,6 +524,26 @@ func (h *DownloadHandler) HandleManifest(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, manifest)
 }
 
+// HandleBatchManifests handles GET /downloads/batches/{batch_id}/manifests
+// (managed-only).
+func (h *DownloadHandler) HandleBatchManifests(w http.ResponseWriter, r *http.Request) {
+	userID, profileID, deviceID, _, _, ok := h.requireManaged(w, r)
+	if !ok {
+		return
+	}
+	batchID := chi.URLParam(r, "batch_id")
+	if batchID == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "Batch ID is required")
+		return
+	}
+	manifests, err := h.svc.BuildBatchManifests(r.Context(), userID, profileID, deviceID, batchID, requestAccessFilter(r))
+	if err != nil {
+		h.writeAssetError(w, "batch_manifests", batchID, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, batchManifestsResponse{Manifests: manifests})
+}
+
 // HandleArtwork handles GET /downloads/{id}/artwork/{kind} (managed-only).
 func (h *DownloadHandler) HandleArtwork(w http.ResponseWriter, r *http.Request) {
 	userID, profileID, deviceID, id, ok := h.managedAssetIdentity(w, r)
@@ -553,10 +603,16 @@ func (h *DownloadHandler) writeDownloadError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusForbidden, "forbidden", "You are not allowed to download")
 	case errors.Is(err, downloads.ErrTranscodeDisabled):
 		writeError(w, http.StatusForbidden, "transcode_disabled", "Download transcoding is disabled")
+	case errors.Is(err, downloads.ErrInvalidQuality):
+		writeError(w, http.StatusBadRequest, "invalid_quality", "Unknown download quality")
 	case errors.Is(err, downloads.ErrInvalidFormat):
 		writeError(w, http.StatusBadRequest, "invalid_format", "Unknown download format")
 	case errors.Is(err, downloads.ErrProfileRequired):
 		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
+	case errors.Is(err, downloads.ErrBulkQualityUnavailable):
+		writeError(w, http.StatusNotImplemented, "bulk_quality_unavailable", "Bitrate quality is not available for bulk downloads yet")
+	case errors.Is(err, downloads.ErrQualityUnavailable):
+		writeError(w, http.StatusNotImplemented, "quality_unavailable", "This download quality is not available")
 	case errors.Is(err, downloads.ErrFormatUnavailable):
 		writeError(w, http.StatusNotImplemented, "format_unavailable", "This download format is not available yet")
 	case errors.Is(err, downloads.ErrConcurrentLimitReached):

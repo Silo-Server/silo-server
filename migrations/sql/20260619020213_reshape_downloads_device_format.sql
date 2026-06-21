@@ -11,11 +11,23 @@
 ALTER TABLE public.downloads
     ADD COLUMN profile_id  text,                         -- NULL for ephemeral/web rows
     ADD COLUMN device_id   text,                         -- NULL = ephemeral; set = managed device entry
-    ADD COLUMN format      text NOT NULL DEFAULT 'original',
+    ADD COLUMN format      text NOT NULL DEFAULT 'original', -- internal delivery format
+    ADD COLUMN quality     text NOT NULL DEFAULT 'original', -- client-requested quality preset
+    ADD COLUMN effective_quality text NOT NULL DEFAULT 'original',
+    ADD COLUMN target_bitrate_kbps integer NOT NULL DEFAULT 0,
+    ADD COLUMN revision    integer NOT NULL DEFAULT 1,
     ADD COLUMN artifact_id text;                         -- set for remux/transcode once prepared
 
 ALTER TABLE public.downloads
     ADD CONSTRAINT downloads_format_check CHECK (format IN ('original','remux','transcode'));
+ALTER TABLE public.downloads
+    ADD CONSTRAINT downloads_quality_check CHECK (quality IN ('original','20mbps','10mbps','5mbps','2mbps','1mbps'));
+ALTER TABLE public.downloads
+    ADD CONSTRAINT downloads_effective_quality_check CHECK (effective_quality IN ('original','20mbps','10mbps','5mbps','2mbps','1mbps'));
+ALTER TABLE public.downloads
+    ADD CONSTRAINT downloads_target_bitrate_check CHECK (target_bitrate_kbps >= 0);
+ALTER TABLE public.downloads
+    ADD CONSTRAINT downloads_revision_check CHECK (revision >= 1);
 
 -- Widen the status enum to cover the managed-entry lifecycle alongside the existing serve states.
 ALTER TABLE public.downloads DROP CONSTRAINT downloads_status_check;
@@ -47,10 +59,21 @@ ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_device_fkey;
 DROP INDEX IF EXISTS downloads_artifact_idx;
 DROP INDEX IF EXISTS downloads_device_idx;
 DROP INDEX IF EXISTS downloads_device_entry_uidx;
+ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_revision_check;
+ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_target_bitrate_check;
+ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_effective_quality_check;
+ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_quality_check;
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_format_check;
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_status_check;
 ALTER TABLE public.downloads ADD  CONSTRAINT downloads_status_check
     CHECK (status IN ('queued','downloading','completed','failed','cancelled'));
 ALTER TABLE public.downloads
-    DROP COLUMN artifact_id, DROP COLUMN format, DROP COLUMN device_id, DROP COLUMN profile_id;
+    DROP COLUMN artifact_id,
+    DROP COLUMN revision,
+    DROP COLUMN target_bitrate_kbps,
+    DROP COLUMN effective_quality,
+    DROP COLUMN quality,
+    DROP COLUMN format,
+    DROP COLUMN device_id,
+    DROP COLUMN profile_id;
 -- +goose StatementEnd

@@ -3,43 +3,176 @@ package downloads
 import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-// FormatPolicyResolver decides whether a requested download format is permitted
-// and returns the concrete format to record.
-//
-// The decision tree (per the design):
-//  1. original  -> allowed whenever downloads are enabled and user.DownloadAllowed.
-//  2. remux     -> allowed whenever downloads are enabled and user.DownloadAllowed.
-//  3. transcode -> requires cfg.TranscodeEnabled (server) AND
-//     user.DownloadTranscodeAllowed; server gate off -> ErrTranscodeDisabled,
-//     user flag off -> ErrDownloadNotAllowed.
-//
-// The caller is responsible for the downloads-enabled and user.DownloadAllowed
-// checks before reaching create; Resolve enforces the per-format gates on top.
-//
-// Target codec/resolution selection for remux/transcode (via playback.SelectVersion
-// against device capabilities) lands with the prepare-to-file pipeline in Phase 3;
-// Resolve only classifies and gates the requested format here.
-type FormatPolicyResolver struct{}
+// QualityDecision is the resolved server-side target for a public download
+// quality request.
+type QualityDecision struct {
+	RequestedQuality  string
+	EffectiveQuality  string
+	DeliveryFormat    string
+	TargetBitrateKbps int
+	PrepareTarget     playback.PrepareTarget
+	RequiresArtifact  bool
+}
 
-// Resolve returns the concrete format to record, or an error if the request is
-// not permitted. An empty requested format defaults to original.
-func (FormatPolicyResolver) Resolve(requested string, user *models.User, cfg config.DownloadConfig) (string, error) {
-	switch requested {
-	case "", FormatOriginal:
-		return FormatOriginal, nil
-	case FormatRemux:
-		return FormatRemux, nil
-	case FormatTranscode:
-		if !cfg.TranscodeEnabled {
-			return "", ErrTranscodeDisabled
-		}
-		if !user.DownloadTranscodeAllowed {
-			return "", ErrDownloadNotAllowed
-		}
-		return FormatTranscode, nil
-	default:
-		return "", ErrInvalidFormat
+// DownloadQualityResolver validates a client-facing quality request and maps it
+// to the concrete delivery format and encode target the server should record.
+type DownloadQualityResolver struct{}
+
+// Resolve returns a concrete delivery decision for file. Empty quality defaults
+// to "original"; legacy user-facing delivery formats are intentionally rejected.
+func (DownloadQualityResolver) Resolve(
+	requested string,
+	user *models.User,
+	cfg config.DownloadConfig,
+	file *models.MediaFile,
+	caps playback.ClientCapabilities,
+	artifactsAvailable bool,
+) (QualityDecision, error) {
+	quality := normalizeQuality(requested)
+	if !ValidQuality(quality) {
+		return QualityDecision{}, ErrInvalidQuality
 	}
+
+	if quality != QualityOriginal {
+		if err := ensureTranscodeAllowed(user, cfg); err != nil {
+			return QualityDecision{}, err
+		}
+		if !artifactsAvailable {
+			return QualityDecision{}, ErrQualityUnavailable
+		}
+		bitrate := QualityBitrateKbps(quality)
+		target := playback.ResolvePrepareTarget(file, FormatTranscode, caps, playback.AdminSettings{
+			TranscodeEnabled: true,
+			Allow4KTranscode: true,
+		})
+		target.TargetBitrateKbps = bitrate
+		return QualityDecision{
+			RequestedQuality:  quality,
+			EffectiveQuality:  quality,
+			DeliveryFormat:    FormatTranscode,
+			TargetBitrateKbps: bitrate,
+			PrepareTarget:     target,
+			RequiresArtifact:  true,
+		}, nil
+	}
+
+	decision := playback.PlayDirect
+	if hasCapabilities(caps) {
+		playDecision := playback.Resolve(file, caps, playback.AdminSettings{
+			TranscodeEnabled: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed,
+			Allow4KTranscode: true,
+		})
+		decision = playDecision.Method
+	}
+
+	switch decision {
+	case playback.PlayDirect:
+		return QualityDecision{
+			RequestedQuality: QualityOriginal,
+			EffectiveQuality: QualityOriginal,
+			DeliveryFormat:   FormatOriginal,
+		}, nil
+	case playback.PlayRemux:
+		if !artifactsAvailable {
+			return QualityDecision{}, ErrQualityUnavailable
+		}
+		target := playback.ResolvePrepareTarget(file, FormatRemux, caps, playback.AdminSettings{
+			TranscodeEnabled: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed,
+			Allow4KTranscode: true,
+		})
+		return QualityDecision{
+			RequestedQuality: QualityOriginal,
+			EffectiveQuality: QualityOriginal,
+			DeliveryFormat:   FormatRemux,
+			PrepareTarget:    target,
+			RequiresArtifact: true,
+		}, nil
+	default:
+		if err := ensureTranscodeAllowed(user, cfg); err != nil {
+			return QualityDecision{}, err
+		}
+		if !artifactsAvailable {
+			return QualityDecision{}, ErrQualityUnavailable
+		}
+		target := playback.ResolvePrepareTarget(file, FormatTranscode, caps, playback.AdminSettings{
+			TranscodeEnabled: true,
+			Allow4KTranscode: true,
+		})
+		target.TargetBitrateKbps = QualityBitrateKbps(Quality20Mbps)
+		return QualityDecision{
+			RequestedQuality:  QualityOriginal,
+			EffectiveQuality:  Quality20Mbps,
+			DeliveryFormat:    FormatTranscode,
+			TargetBitrateKbps: QualityBitrateKbps(Quality20Mbps),
+			PrepareTarget:     target,
+			RequiresArtifact:  true,
+		}, nil
+	}
+}
+
+// PresetsFor returns the ordered quality list currently fulfillable for a user.
+func (DownloadQualityResolver) PresetsFor(user *models.User, cfg config.DownloadConfig, artifactsAvailable bool) []string {
+	if !cfg.Enabled || user == nil || !user.DownloadAllowed {
+		return nil
+	}
+	presets := []string{QualityOriginal}
+	if artifactsAvailable && cfg.TranscodeEnabled && user.DownloadTranscodeAllowed {
+		presets = append(presets, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps)
+	}
+	return presets
+}
+
+// ValidQuality reports whether q is a public download quality value.
+func ValidQuality(q string) bool {
+	switch q {
+	case QualityOriginal, Quality20Mbps, Quality10Mbps, Quality5Mbps, Quality2Mbps, Quality1Mbps:
+		return true
+	default:
+		return false
+	}
+}
+
+// QualityBitrateKbps returns the video bitrate cap for a bitrate preset. It is
+// zero for original and invalid inputs.
+func QualityBitrateKbps(q string) int {
+	switch q {
+	case Quality20Mbps:
+		return 20000
+	case Quality10Mbps:
+		return 10000
+	case Quality5Mbps:
+		return 5000
+	case Quality2Mbps:
+		return 2000
+	case Quality1Mbps:
+		return 1000
+	default:
+		return 0
+	}
+}
+
+func normalizeQuality(q string) string {
+	if q == "" {
+		return QualityOriginal
+	}
+	return q
+}
+
+func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error {
+	if !cfg.TranscodeEnabled {
+		return ErrTranscodeDisabled
+	}
+	if user == nil || !user.DownloadTranscodeAllowed {
+		return ErrDownloadNotAllowed
+	}
+	return nil
+}
+
+func hasCapabilities(caps playback.ClientCapabilities) bool {
+	return len(caps.CodecsVideo) > 0 || len(caps.CodecsAudio) > 0 ||
+		len(caps.AudioPassthroughCodecs) > 0 || len(caps.Containers) > 0 ||
+		caps.MaxResolution != "" || caps.HDR
 }

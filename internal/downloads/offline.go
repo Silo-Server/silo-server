@@ -47,6 +47,42 @@ func (s *Service) BuildManifest(ctx context.Context, userID int, profileID, devi
 	return s.manifest.Build(ctx, dl, filter)
 }
 
+// BuildBatchManifests returns the manifests for every managed entry in a batch
+// owned by the calling profile/device.
+func (s *Service) BuildBatchManifests(ctx context.Context, userID int, profileID, deviceID, batchID string, filter catalog.AccessFilter) ([]*OfflineManifest, error) {
+	if _, err := s.enabledConfig(ctx); err != nil {
+		return nil, err
+	}
+	if profileID == "" || deviceID == "" {
+		return nil, ErrProfileRequired
+	}
+	if s.manifest == nil {
+		return nil, ErrManifestUnavailable
+	}
+	rows, err := s.repo.ListManagedByBatch(ctx, userID, profileID, deviceID, batchID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, ErrNotFound
+	}
+	out := make([]*OfflineManifest, 0, len(rows))
+	for _, dl := range rows {
+		if dl.Status == StatusRevoked {
+			continue
+		}
+		m, err := s.manifest.Build(ctx, dl, filter)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	if len(out) == 0 {
+		return nil, ErrNotFound
+	}
+	return out, nil
+}
+
 // ServeArtwork streams poster/backdrop/logo bytes for a managed entry through
 // the image resolver (never a presigned redirect), re-checking per-profile
 // access via GetItemDetail before serving.

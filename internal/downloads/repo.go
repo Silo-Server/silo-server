@@ -11,13 +11,13 @@ import (
 )
 
 const downloadColumns = `id, user_id, profile_id, device_id, media_file_id, content_id, episode_id, batch_id,
-	kind, status, format, artifact_id, file_size, bytes_sent, error_message,
+	kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
 	created_at, updated_at, completed_at`
 
 const insertDownloadSQL = `INSERT INTO downloads (id, user_id, profile_id, device_id, media_file_id, content_id,
-		episode_id, batch_id, kind, status, format, artifact_id, file_size, bytes_sent, error_message,
+		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
 		created_at, updated_at, completed_at)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`
+	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`
 
 // Repository provides CRUD operations for the downloads table.
 type Repository struct {
@@ -35,7 +35,7 @@ func scanInto(row pgx.Row, d *Download) error {
 	var profileID, deviceID, episodeID, batchID, artifactID *string
 	err := row.Scan(
 		&d.ID, &d.UserID, &profileID, &deviceID, &d.MediaFileID, &d.ContentID, &episodeID, &batchID,
-		&d.Kind, &d.Status, &d.Format, &artifactID, &d.FileSize, &d.BytesSent, &d.ErrorMessage,
+		&d.Kind, &d.Status, &d.Format, &d.Quality, &d.EffectiveQuality, &d.TargetBitrateKbps, &d.Revision, &artifactID, &d.FileSize, &d.BytesSent, &d.ErrorMessage,
 		&d.CreatedAt, &d.UpdatedAt, &d.CompletedAt,
 	)
 	if err != nil {
@@ -73,10 +73,27 @@ func scanDownloads(rows pgx.Rows) ([]*Download, error) {
 }
 
 func (r *Repository) insertArgs(d *Download) []any {
+	format := d.Format
+	if format == "" {
+		format = FormatOriginal
+	}
+	quality := d.Quality
+	if quality == "" {
+		quality = QualityOriginal
+	}
+	effectiveQuality := d.EffectiveQuality
+	if effectiveQuality == "" {
+		effectiveQuality = quality
+	}
+	revision := d.Revision
+	if revision <= 0 {
+		revision = 1
+	}
 	return []any{
 		d.ID, d.UserID, nilIfEmpty(d.ProfileID), nilIfEmpty(d.DeviceID), d.MediaFileID, d.ContentID,
-		nilIfEmpty(d.EpisodeID), nilIfEmpty(d.BatchID), d.Kind, d.Status, d.Format, nilIfEmpty(d.ArtifactID),
-		d.FileSize, d.BytesSent, d.ErrorMessage, d.CreatedAt, d.UpdatedAt, d.CompletedAt,
+		nilIfEmpty(d.EpisodeID), nilIfEmpty(d.BatchID), d.Kind, d.Status, format, quality, effectiveQuality,
+		d.TargetBitrateKbps, revision, nilIfEmpty(d.ArtifactID), d.FileSize, d.BytesSent, d.ErrorMessage,
+		d.CreatedAt, d.UpdatedAt, d.CompletedAt,
 	}
 }
 
@@ -287,6 +304,65 @@ func (r *Repository) CreateManagedEntry(ctx context.Context, d *Download) (*Down
 	return d, nil
 }
 
+// ReplaceManagedEntry updates an existing managed row to a new file/quality
+// target, incrementing its revision so clients can replace stale local bytes.
+func (r *Repository) ReplaceManagedEntry(ctx context.Context, existing *Download, replacement *Download) (*Download, error) {
+	query := `UPDATE downloads SET
+			media_file_id = $6,
+			batch_id = $7,
+			kind = $8,
+			status = $9,
+			format = $10,
+			quality = $11,
+			effective_quality = $12,
+			target_bitrate_kbps = $13,
+			artifact_id = $14,
+			file_size = $15,
+			bytes_sent = 0,
+			error_message = '',
+			completed_at = NULL,
+			revision = revision + 1,
+			updated_at = now()
+		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4 AND revision = $5
+		RETURNING ` + downloadColumns
+	row := r.pool.QueryRow(ctx, query,
+		existing.ID, existing.UserID, existing.ProfileID, existing.DeviceID, existing.Revision,
+		replacement.MediaFileID, nilIfEmpty(replacement.BatchID), replacement.Kind, replacement.Status,
+		replacement.Format, replacement.Quality, replacement.EffectiveQuality, replacement.TargetBitrateKbps,
+		nilIfEmpty(replacement.ArtifactID), replacement.FileSize,
+	)
+	d, err := scanDownload(row)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return r.GetManagedEntry(ctx, existing.UserID, existing.ProfileID, existing.DeviceID, existing.ContentID, existing.EpisodeID)
+		}
+		return nil, fmt.Errorf("replacing managed download: %w", err)
+	}
+	return d, nil
+}
+
+// UpdateManagedBatch moves an otherwise unchanged managed row into the latest
+// batch without incrementing revision or resetting local completion state.
+func (r *Repository) UpdateManagedBatch(ctx context.Context, existing *Download, batchID string) (*Download, error) {
+	query := `UPDATE downloads SET
+			batch_id = $6,
+			updated_at = now()
+		WHERE id = $1 AND user_id = $2 AND profile_id = $3 AND device_id = $4 AND revision = $5
+		RETURNING ` + downloadColumns
+	row := r.pool.QueryRow(ctx, query,
+		existing.ID, existing.UserID, existing.ProfileID, existing.DeviceID, existing.Revision,
+		nilIfEmpty(batchID),
+	)
+	d, err := scanDownload(row)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return r.GetManagedEntry(ctx, existing.UserID, existing.ProfileID, existing.DeviceID, existing.ContentID, existing.EpisodeID)
+		}
+		return nil, fmt.Errorf("updating managed download batch: %w", err)
+	}
+	return d, nil
+}
+
 // SumManagedFileSize returns the total file_size of a device's managed entries
 // that still count toward on-device storage (excluding revoked, failed, and
 // canceled rows). It backs the auto-download storage soft-gate; it is the server's
@@ -328,6 +404,24 @@ func (r *Repository) ListManaged(ctx context.Context, userID int, profileID, dev
 	result, err := scanDownloads(rows)
 	if err != nil {
 		return nil, fmt.Errorf("scanning managed download rows: %w", err)
+	}
+	return result, nil
+}
+
+// ListManagedByBatch returns managed entries in a batch for one authorized
+// device. It powers batch manifest fetches without revealing other devices' rows.
+func (r *Repository) ListManagedByBatch(ctx context.Context, userID int, profileID, deviceID, batchID string) ([]*Download, error) {
+	query := `SELECT ` + downloadColumns + ` FROM downloads
+		WHERE user_id = $1 AND profile_id = $2 AND device_id = $3 AND batch_id = $4
+		ORDER BY created_at ASC`
+	rows, err := r.pool.Query(ctx, query, userID, profileID, deviceID, batchID)
+	if err != nil {
+		return nil, fmt.Errorf("listing managed batch downloads: %w", err)
+	}
+	defer rows.Close()
+	result, err := scanDownloads(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scanning managed batch downloads: %w", err)
 	}
 	return result, nil
 }

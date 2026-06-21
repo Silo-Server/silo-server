@@ -20,37 +20,39 @@ import (
 // records the identity (user/profile/device) it was called with so tests can
 // assert the handler threads header-only device authority correctly.
 type fakeDownloadService struct {
-	capability  downloads.Capability
-	created     *downloads.Download
-	createErr   error
-	series      []*downloads.Download
-	seriesID    string
-	seriesErr   error
-	list        []*downloads.Download
-	listErr     error
-	deleteErr   error
-	patchErr    error
-	serveErr    error
-	directErr   error
-	manifest    *downloads.OfflineManifest
-	manifestErr error
-	artworkErr  error
-	subtitleErr error
+	capability     downloads.Capability
+	created        *downloads.Download
+	createErr      error
+	series         []*downloads.Download
+	seriesID       string
+	seriesErr      error
+	list           []*downloads.Download
+	listErr        error
+	deleteErr      error
+	patchErr       error
+	serveErr       error
+	directErr      error
+	manifest       *downloads.OfflineManifest
+	batchManifests []*downloads.OfflineManifest
+	manifestErr    error
+	artworkErr     error
+	subtitleErr    error
 
-	gotCreateReq    downloads.CreateRequest
-	gotSeriesReq    downloads.CreateRequest
-	gotList         identityCall
-	gotServe        identityCall
-	gotDelete       identityCall
-	gotPatch        identityCall
-	gotPatchStatus  string
-	gotManifest     identityCall
-	gotArtwork      identityCall
-	gotArtworkKind  string
-	gotSubtitle     identityCall
-	gotSubtitleRef  string
-	gotDirectFormat string
-	gotDirectFileID int
+	gotCreateReq     downloads.CreateRequest
+	gotSeriesReq     downloads.CreateRequest
+	gotList          identityCall
+	gotServe         identityCall
+	gotDelete        identityCall
+	gotPatch         identityCall
+	gotPatchStatus   string
+	gotManifest      identityCall
+	gotBatchManifest identityCall
+	gotArtwork       identityCall
+	gotArtworkKind   string
+	gotSubtitle      identityCall
+	gotSubtitleRef   string
+	gotDirectFormat  string
+	gotDirectFileID  int
 
 	// Season download + series-monitoring (subscription) fakes.
 	season       []*downloads.Download
@@ -89,21 +91,21 @@ func (f *fakeDownloadService) Create(_ context.Context, _ int, req downloads.Cre
 	return f.created, nil
 }
 
-func (f *fakeDownloadService) CreateSeries(_ context.Context, _ int, req downloads.CreateRequest, _ catalog.AccessFilter) ([]*downloads.Download, string, error) {
+func (f *fakeDownloadService) CreateSeries(_ context.Context, _ int, req downloads.CreateRequest, _ catalog.AccessFilter) ([]*downloads.Download, string, []downloads.SkippedDownload, error) {
 	f.gotSeriesReq = req
 	if f.seriesErr != nil {
-		return nil, "", f.seriesErr
+		return nil, "", nil, f.seriesErr
 	}
-	return f.series, f.seriesID, nil
+	return f.series, f.seriesID, nil, nil
 }
 
-func (f *fakeDownloadService) CreateSeason(_ context.Context, _ int, req downloads.CreateRequest, seasonNumber int, _ catalog.AccessFilter) ([]*downloads.Download, string, error) {
+func (f *fakeDownloadService) CreateSeason(_ context.Context, _ int, req downloads.CreateRequest, seasonNumber int, _ catalog.AccessFilter) ([]*downloads.Download, string, []downloads.SkippedDownload, error) {
 	f.gotSeasonReq = req
 	f.gotSeasonNum = seasonNumber
 	if f.seasonErr != nil {
-		return nil, "", f.seasonErr
+		return nil, "", nil, f.seasonErr
 	}
-	return f.season, f.seasonID, nil
+	return f.season, f.seasonID, nil, nil
 }
 
 func (f *fakeDownloadService) CreateSubscription(_ context.Context, _ int, req downloads.SubscriptionRequest, _ catalog.AccessFilter) (*downloads.SubscriptionResult, error) {
@@ -192,6 +194,14 @@ func (f *fakeDownloadService) BuildManifest(_ context.Context, userID int, profi
 	return f.manifest, nil
 }
 
+func (f *fakeDownloadService) BuildBatchManifests(_ context.Context, userID int, profileID, deviceID, batchID string, _ catalog.AccessFilter) ([]*downloads.OfflineManifest, error) {
+	f.gotBatchManifest = identityCall{userID, profileID, deviceID, batchID}
+	if f.manifestErr != nil {
+		return nil, f.manifestErr
+	}
+	return f.batchManifests, nil
+}
+
 func (f *fakeDownloadService) ServeArtwork(_ context.Context, w http.ResponseWriter, _ *http.Request, userID int, profileID, deviceID, downloadID, kind string, _ catalog.AccessFilter) error {
 	f.gotArtwork = identityCall{userID, profileID, deviceID, downloadID}
 	f.gotArtworkKind = kind
@@ -248,7 +258,7 @@ func TestHandleCapability(t *testing.T) {
 	svc := &fakeDownloadService{capability: downloads.Capability{
 		Enabled:              true,
 		DownloadAllowed:      true,
-		Formats:              []string{downloads.FormatOriginal},
+		QualityPresets:       []string{downloads.QualityOriginal},
 		TranscodeEnabled:     false,
 		TranscodeUserAllowed: true,
 	}}
@@ -267,8 +277,8 @@ func TestHandleCapability(t *testing.T) {
 	if !resp.Enabled || !resp.DownloadAllowed || resp.TranscodeEnabled || !resp.TranscodeUserAllowed {
 		t.Fatalf("unexpected capability flags: %+v", resp)
 	}
-	if len(resp.Formats) != 1 || resp.Formats[0] != downloads.FormatOriginal {
-		t.Fatalf("formats = %v, want [original]", resp.Formats)
+	if len(resp.QualityPresets) != 1 || resp.QualityPresets[0] != downloads.QualityOriginal {
+		t.Fatalf("quality presets = %v, want [original]", resp.QualityPresets)
 	}
 }
 
@@ -290,53 +300,55 @@ func TestHandleCapabilityNilService(t *testing.T) {
 	}
 }
 
-func TestHandleCreateDownloadThreadsFormat(t *testing.T) {
+func TestHandleCreateDownloadThreadsQuality(t *testing.T) {
 	svc := &fakeDownloadService{created: &downloads.Download{
 		ID: "dl1", ContentID: "c1", Status: downloads.StatusQueued, Format: downloads.FormatTranscode,
+		Quality: downloads.Quality5Mbps, EffectiveQuality: downloads.Quality5Mbps, TargetBitrateKbps: 5000, Revision: 2,
 	}}
 	h := NewDownloadHandler(svc)
 
-	body, _ := json.Marshal(downloadRequest{ContentID: "c1", Format: downloads.FormatTranscode})
+	body, _ := json.Marshal(downloadRequest{ContentID: "c1", Quality: downloads.Quality5Mbps})
 	rec := httptest.NewRecorder()
 	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
 	}
-	if svc.gotCreateReq.Format != downloads.FormatTranscode {
-		t.Fatalf("service received format %q, want transcode", svc.gotCreateReq.Format)
+	if svc.gotCreateReq.Quality != downloads.Quality5Mbps {
+		t.Fatalf("service received quality %q, want 5mbps", svc.gotCreateReq.Quality)
 	}
 	var resp downloadResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Format != downloads.FormatTranscode {
-		t.Fatalf("response format = %q, want transcode", resp.Format)
+	if resp.Quality != downloads.Quality5Mbps || resp.DeliveryFormat != downloads.FormatTranscode ||
+		resp.TargetBitrateKbps != 5000 || resp.Revision != 2 {
+		t.Fatalf("response = %+v, want quality/delivery/bitrate/revision", resp)
 	}
 }
 
-func TestHandleCreateDownloadSeriesThreadsFormat(t *testing.T) {
+func TestHandleCreateDownloadSeriesThreadsQuality(t *testing.T) {
 	svc := &fakeDownloadService{
-		series:   []*downloads.Download{{ID: "dl1", ContentID: "s1", Format: downloads.FormatOriginal}},
+		series:   []*downloads.Download{{ID: "dl1", ContentID: "s1", Format: downloads.FormatOriginal, Quality: downloads.QualityOriginal, EffectiveQuality: downloads.QualityOriginal, Revision: 1}},
 		seriesID: "batch1",
 	}
 	h := NewDownloadHandler(svc)
 
-	body, _ := json.Marshal(downloadRequest{ContentID: "s1", Series: true, Format: downloads.FormatRemux})
+	body, _ := json.Marshal(downloadRequest{ContentID: "s1", Series: true, Quality: downloads.QualityOriginal})
 	rec := httptest.NewRecorder()
 	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
 	}
-	if svc.gotSeriesReq.Format != downloads.FormatRemux {
-		t.Fatalf("series service received format %q, want remux", svc.gotSeriesReq.Format)
+	if svc.gotSeriesReq.Quality != downloads.QualityOriginal {
+		t.Fatalf("series service received quality %q, want original", svc.gotSeriesReq.Quality)
 	}
 }
 
 func TestHandleCreateDownloadMissingContentID(t *testing.T) {
 	h := NewDownloadHandler(&fakeDownloadService{})
-	body, _ := json.Marshal(downloadRequest{Format: downloads.FormatOriginal})
+	body, _ := json.Marshal(downloadRequest{Quality: downloads.QualityOriginal})
 	rec := httptest.NewRecorder()
 	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "", ""))
 	if rec.Code != http.StatusBadRequest {
@@ -353,6 +365,9 @@ func TestHandleCreateDownloadErrorMapping(t *testing.T) {
 		{"feature disabled", downloads.ErrFeatureDisabled, http.StatusForbidden},
 		{"not allowed", downloads.ErrDownloadNotAllowed, http.StatusForbidden},
 		{"transcode disabled", downloads.ErrTranscodeDisabled, http.StatusForbidden},
+		{"invalid quality", downloads.ErrInvalidQuality, http.StatusBadRequest},
+		{"quality unavailable", downloads.ErrQualityUnavailable, http.StatusNotImplemented},
+		{"bulk quality unavailable", downloads.ErrBulkQualityUnavailable, http.StatusNotImplemented},
 		{"invalid format", downloads.ErrInvalidFormat, http.StatusBadRequest},
 		{"format unavailable", downloads.ErrFormatUnavailable, http.StatusNotImplemented},
 		{"profile required", downloads.ErrProfileRequired, http.StatusBadRequest},
@@ -480,11 +495,11 @@ func TestManagedPatchThreadsIdentityAndStatus(t *testing.T) {
 	}
 }
 
-func TestHandleDirectDownloadThreadsFormat(t *testing.T) {
+func TestHandleDirectDownloadThreadsOriginalFormat(t *testing.T) {
 	svc := &fakeDownloadService{}
 	h := NewDownloadHandler(svc)
 	rec := httptest.NewRecorder()
-	h.HandleDirectDownload(rec, downloadTestRequest(http.MethodGet, "/direct-download?file_id=42&format=remux", nil, 7, "", ""))
+	h.HandleDirectDownload(rec, downloadTestRequest(http.MethodGet, "/direct-download?file_id=42&format=original", nil, 7, "", ""))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
@@ -492,8 +507,8 @@ func TestHandleDirectDownloadThreadsFormat(t *testing.T) {
 	if svc.gotDirectFileID != 42 {
 		t.Fatalf("file id = %d, want 42", svc.gotDirectFileID)
 	}
-	if svc.gotDirectFormat != downloads.FormatRemux {
-		t.Fatalf("direct format = %q, want remux", svc.gotDirectFormat)
+	if svc.gotDirectFormat != downloads.FormatOriginal {
+		t.Fatalf("direct format = %q, want original", svc.gotDirectFormat)
 	}
 }
 
@@ -537,6 +552,31 @@ func TestManagedManifestThreadsIdentity(t *testing.T) {
 	}
 	if svc.gotManifest != (identityCall{7, "pA", "devA", "dl1"}) {
 		t.Fatalf("manifest identity = %+v, want {7 pA devA dl1}", svc.gotManifest)
+	}
+}
+
+func TestManagedBatchManifestsThreadsIdentity(t *testing.T) {
+	svc := &fakeDownloadService{batchManifests: []*downloads.OfflineManifest{
+		{DownloadID: "dl1", Title: "Episode 1"},
+	}}
+	h := NewDownloadHandler(svc)
+	req := withChiParams(downloadTestRequest(http.MethodGet, "/downloads/batches/b1/manifests", nil, 7, "pA", "devA"),
+		map[string]string{"batch_id": "b1"})
+	rec := httptest.NewRecorder()
+	h.HandleBatchManifests(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if svc.gotBatchManifest != (identityCall{7, "pA", "devA", "b1"}) {
+		t.Fatalf("batch manifest identity = %+v, want {7 pA devA b1}", svc.gotBatchManifest)
+	}
+	var resp batchManifestsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Manifests) != 1 || resp.Manifests[0].DownloadID != "dl1" {
+		t.Fatalf("manifests = %+v, want one dl1 manifest", resp.Manifests)
 	}
 }
 

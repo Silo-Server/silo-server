@@ -2,15 +2,19 @@ package downloads
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 // manifestVersion is bumped whenever the OfflineManifest DTO shape changes.
-const manifestVersion = 1
+const manifestVersion = 2
 
 const apiDownloadsPrefix = "/api/v1/downloads/"
 
@@ -54,6 +58,19 @@ type OfflineSubtitle struct {
 	FileSize        int64  `json:"file_size,omitempty"`
 }
 
+// OfflineAudioTrack describes audio streams the client may expose offline.
+type OfflineAudioTrack struct {
+	Index      int    `json:"index"`
+	Title      string `json:"title,omitempty"`
+	Language   string `json:"language,omitempty"`
+	Codec      string `json:"codec,omitempty"`
+	Layout     string `json:"layout,omitempty"`
+	Channels   int    `json:"channels,omitempty"`
+	Bitrate    int    `json:"bitrate,omitempty"`
+	SampleRate int    `json:"sample_rate,omitempty"`
+	Default    bool   `json:"default"`
+}
+
 // OfflineIdentity mirrors userstore.WatchIdentity so a client can re-resolve
 // content_id after a server-side rescan.
 type OfflineIdentity struct {
@@ -64,16 +81,27 @@ type OfflineIdentity struct {
 	Episode           *int              `json:"episode,omitempty"`
 }
 
+// OfflineIntegrity gives clients stable metadata for local file validation.
+type OfflineIntegrity struct {
+	ExpectedBytes int64  `json:"expected_bytes"`
+	MediaFileHash string `json:"media_file_hash,omitempty"`
+	MetadataETag  string `json:"metadata_etag"`
+}
+
 // OfflineManifest is the stable, presigned-URL-free bundle a client stores to
 // play a managed download fully offline.
 type OfflineManifest struct {
-	DownloadID  string `json:"download_id"`
-	ContentID   string `json:"content_id"`
-	EpisodeID   string `json:"episode_id,omitempty"`
-	Type        string `json:"type"`
-	Format      string `json:"format"`
-	MediaFileID int    `json:"media_file_id"`
-	FileSize    int64  `json:"file_size"`
+	DownloadID        string `json:"download_id"`
+	ContentID         string `json:"content_id"`
+	EpisodeID         string `json:"episode_id,omitempty"`
+	Type              string `json:"type"`
+	Revision          int    `json:"revision"`
+	Quality           string `json:"quality"`
+	EffectiveQuality  string `json:"effective_quality"`
+	DeliveryFormat    string `json:"delivery_format"`
+	TargetBitrateKbps int    `json:"target_bitrate_kbps"`
+	MediaFileID       int    `json:"media_file_id"`
+	FileSize          int64  `json:"file_size"`
 
 	Title         string   `json:"title"`
 	Year          int      `json:"year,omitempty"`
@@ -96,12 +124,14 @@ type OfflineManifest struct {
 		Logo     string `json:"logo,omitempty"`
 	} `json:"artwork_urls"`
 
-	Container  string `json:"container"`
-	CodecVideo string `json:"codec_video"`
-	CodecAudio string `json:"codec_audio"`
-	Resolution string `json:"resolution"`
-	HDR        bool   `json:"hdr"`
-	Duration   int    `json:"duration_seconds"`
+	Container               string              `json:"container"`
+	CodecVideo              string              `json:"codec_video"`
+	CodecAudio              string              `json:"codec_audio"`
+	Resolution              string              `json:"resolution"`
+	HDR                     bool                `json:"hdr"`
+	Duration                int                 `json:"duration_seconds"`
+	SelectedAudioTrackIndex *int                `json:"selected_audio_track_index,omitempty"`
+	AudioTracks             []OfflineAudioTrack `json:"audio_tracks,omitempty"`
 
 	Chapters []OfflineChapter `json:"chapters,omitempty"`
 	Intro    *Marker          `json:"intro,omitempty"`
@@ -111,7 +141,8 @@ type OfflineManifest struct {
 
 	Subtitles []OfflineSubtitle `json:"subtitles"`
 
-	StableIdentity OfflineIdentity `json:"stable_identity"`
+	StableIdentity OfflineIdentity  `json:"stable_identity"`
+	Integrity      OfflineIntegrity `json:"integrity"`
 
 	ManifestVersion int    `json:"manifest_version"`
 	GeneratedAt     string `json:"generated_at"`
@@ -138,13 +169,24 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 	if err != nil {
 		return nil, err
 	}
+	file := b.lookupFile(ctx, dl.MediaFileID)
+	var seriesDetail *catalog.ItemDetail
+	if dl.EpisodeID != "" && detail.SeriesID != "" {
+		if sd, err := b.detail.GetItemDetail(ctx, detail.SeriesID, filter); err == nil {
+			seriesDetail = sd
+		}
+	}
 
 	m := &OfflineManifest{
 		DownloadID:        dl.ID,
 		ContentID:         dl.ContentID,
 		EpisodeID:         dl.EpisodeID,
 		Type:              detail.Type,
-		Format:            dl.Format,
+		Revision:          effectiveRevision(dl),
+		Quality:           effectiveQuality(dl.Quality),
+		EffectiveQuality:  effectiveQuality(dl.EffectiveQuality),
+		DeliveryFormat:    dl.Format,
+		TargetBitrateKbps: dl.TargetBitrateKbps,
 		MediaFileID:       dl.MediaFileID,
 		FileSize:          dl.FileSize,
 		Title:             detail.Title,
@@ -163,7 +205,8 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 		Credits:           toMarker(detail.Credits),
 		Recap:             toMarker(detail.Recap),
 		Preview:           toMarker(detail.Preview),
-		StableIdentity:    stableIdentity(dl, detail),
+		StableIdentity:    stableIdentity(dl, detail, seriesDetail),
+		Integrity:         buildIntegrity(dl, file),
 		ManifestVersion:   manifestVersion,
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
@@ -186,6 +229,8 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 		m.Resolution = v.Resolution
 		m.HDR = v.HDR
 		m.Duration = v.Duration
+		m.SelectedAudioTrackIndex = v.EffectiveAudioTrackIndex
+		m.AudioTracks = toOfflineAudioTracks(v.AudioTracks)
 		m.Chapters = toOfflineChapters(v.Chapters)
 	}
 
@@ -202,6 +247,10 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download) []Of
 	if b.fileRepo != nil {
 		if file, err := b.fileRepo.GetByID(ctx, dl.MediaFileID); err == nil && file != nil {
 			for i, ext := range file.ExternalSubtitles {
+				var size int64
+				if info, statErr := os.Stat(ext.Path); statErr == nil {
+					size = info.Size()
+				}
 				out = append(out, OfflineSubtitle{
 					Language:        ext.Language,
 					Format:          ext.Format,
@@ -209,6 +258,7 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download) []Of
 					HearingImpaired: ext.HearingImpaired,
 					External:        true,
 					FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("external:%d", i)),
+					FileSize:        size,
 				})
 			}
 		}
@@ -229,6 +279,17 @@ func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download) []Of
 	}
 
 	return out
+}
+
+func (b *ManifestBuilder) lookupFile(ctx context.Context, mediaFileID int) *models.MediaFile {
+	if b.fileRepo == nil || mediaFileID <= 0 {
+		return nil
+	}
+	file, err := b.fileRepo.GetByID(ctx, mediaFileID)
+	if err != nil {
+		return nil
+	}
+	return file
 }
 
 // manifestContentID resolves the item the manifest describes: the episode's own
@@ -284,17 +345,30 @@ func toOfflineChapters(chapters []catalog.VersionChapter) []OfflineChapter {
 	return out
 }
 
-func stableIdentity(dl *Download, detail *catalog.ItemDetail) OfflineIdentity {
+func toOfflineAudioTracks(tracks []models.AudioTrack) []OfflineAudioTrack {
+	if len(tracks) == 0 {
+		return nil
+	}
+	out := make([]OfflineAudioTrack, 0, len(tracks))
+	for i, t := range tracks {
+		out = append(out, OfflineAudioTrack{
+			Index:      i,
+			Title:      firstNonEmpty(t.Title, t.EmbeddedTitle),
+			Language:   t.Language,
+			Codec:      t.Codec,
+			Layout:     t.Layout,
+			Channels:   t.Channels,
+			Bitrate:    t.Bitrate,
+			SampleRate: t.SampleRate,
+			Default:    t.Default,
+		})
+	}
+	return out
+}
+
+func stableIdentity(dl *Download, detail, seriesDetail *catalog.ItemDetail) OfflineIdentity {
 	providerIDs := map[string]string{}
-	if detail.ImdbID != "" {
-		providerIDs["imdb"] = detail.ImdbID
-	}
-	if detail.TmdbID != "" {
-		providerIDs["tmdb"] = detail.TmdbID
-	}
-	if detail.TvdbID != "" {
-		providerIDs["tvdb"] = detail.TvdbID
-	}
+	addProviderIDs(providerIDs, detail)
 	id := OfflineIdentity{
 		StableType:  detail.Type,
 		ProviderIDs: providerIDs,
@@ -303,9 +377,71 @@ func stableIdentity(dl *Download, detail *catalog.ItemDetail) OfflineIdentity {
 	}
 	if dl.EpisodeID != "" {
 		id.StableType = "episode"
+		seriesProviderIDs := map[string]string{}
+		addProviderIDs(seriesProviderIDs, seriesDetail)
+		if len(seriesProviderIDs) > 0 {
+			id.SeriesProviderIDs = seriesProviderIDs
+		}
 	}
 	if len(providerIDs) == 0 {
 		id.ProviderIDs = nil
 	}
 	return id
+}
+
+func addProviderIDs(out map[string]string, detail *catalog.ItemDetail) {
+	if detail == nil {
+		return
+	}
+	if detail.ImdbID != "" {
+		out["imdb"] = detail.ImdbID
+	}
+	if detail.TmdbID != "" {
+		out["tmdb"] = detail.TmdbID
+	}
+	if detail.TvdbID != "" {
+		out["tvdb"] = detail.TvdbID
+	}
+}
+
+func buildIntegrity(dl *Download, file *models.MediaFile) OfflineIntegrity {
+	hash := ""
+	modified := ""
+	if file != nil {
+		hash = file.FileHash
+		if file.FileModifiedAt != nil {
+			modified = file.FileModifiedAt.UTC().Format(time.RFC3339Nano)
+		}
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s|%s|%s|%d|%d|%s",
+		dl.ID, effectiveRevision(dl), dl.Format, effectiveQuality(dl.Quality),
+		effectiveQuality(dl.EffectiveQuality), dl.TargetBitrateKbps, dl.FileSize, modified)))
+	return OfflineIntegrity{
+		ExpectedBytes: dl.FileSize,
+		MediaFileHash: hash,
+		MetadataETag:  hex.EncodeToString(sum[:]),
+	}
+}
+
+func effectiveRevision(dl *Download) int {
+	if dl.Revision <= 0 {
+		return 1
+	}
+	return dl.Revision
+}
+
+func effectiveQuality(q string) string {
+	if q == "" {
+		return QualityOriginal
+	}
+	return q
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
