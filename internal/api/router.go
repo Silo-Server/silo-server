@@ -59,7 +59,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
-	"github.com/Silo-Server/silo-server/internal/streamauth"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
@@ -741,13 +740,6 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.Config != nil && deps.Config.Auth.JWTSecret != "" {
 			playbackHandler.JWTSecret = deps.Config.Auth.JWTSecret
-		}
-		// An admin Stop/Terminate writes a session-deny marker so a node-served
-		// direct/remux stream (no producer to kill) is cut on its next request,
-		// regardless of the still-valid 24h token. This is the one revocation case
-		// the offloaded topology cannot otherwise cover.
-		if deps.RedisClient != nil {
-			playbackHandler.LeaseDenier = streamauth.NewStore(deps.RedisClient, 0)
 		}
 		if deps.Config != nil {
 			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {

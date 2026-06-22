@@ -134,12 +134,8 @@ type PlaybackHandler struct {
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig func() config.PlaybackConfig
-	FFmpegLogSink  playback.FFmpegLogSink
-	// LeaseDenier writes an immediate deny stream lease so an admin Stop/Terminate
-	// of a node-served direct/remux stream is enforced on the next request instead
-	// of waiting for the revalidation cycle. Optional (nil = no Redis / single box).
-	LeaseDenier       StreamLeaseDenier
+	PlaybackConfig    func() config.PlaybackConfig
+	FFmpegLogSink     playback.FFmpegLogSink
 	realtimeCommandMu sync.Mutex
 	realtimeCommands  map[string]playbackCommandRecord
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
@@ -563,24 +559,6 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 	card := h.streamCardFromQuery(r, sessionID)
 	session, status := h.tm.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, card)
 	return session, status, card
-}
-
-// StreamLeaseDenier writes an immediate deny authorization lease for a session
-// so the offload nodes refuse it on the next request. *streamauth.Store
-// satisfies it; the interface keeps the handler package free of that import.
-type StreamLeaseDenier interface {
-	Deny(ctx context.Context, sessionID string) error
-}
-
-// denyStreamLease best-effort writes a deny lease for an admin-killed session so
-// node-served direct/remux stops before the token TTL or the next revalidation.
-func (h *PlaybackHandler) denyStreamLease(ctx context.Context, sessionID string) {
-	if h.LeaseDenier == nil || sessionID == "" {
-		return
-	}
-	if err := h.LeaseDenier.Deny(ctx, sessionID); err != nil {
-		slog.Warn("write deny stream lease failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
-	}
 }
 
 // streamCardFromToken verifies a stream token and decodes its reconstruction

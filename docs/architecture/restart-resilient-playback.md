@@ -4,6 +4,17 @@ How Silo keeps playback alive across a server restart, reconnect, or partial
 stream — and how the design arrived at **TR-lease** (token-carried
 reconstruction + a server-side session-deny marker for revocation).
 
+> **Status: the revocation half is deferred to a future PR.** Only the
+> token-carried **reconstruction** core shipped in this PR. The **session-deny /
+> stream-revocation** mechanism described throughout (the `silo:streamauth:<sid>`
+> deny marker, the proxy's `Allowed()` enforcement, and the admin
+> Stop/Terminate deny write) is **not present in the current implementation**.
+> Admin Terminate and user Stop tear down the live in-memory session and the
+> ffmpeg producer, but they do **not** prevent a still-valid stream token from
+> reconstructing the session until its 24h TTL expires. Sections describing that
+> mechanism are kept for design continuity and are individually flagged as
+> deferred below.
+
 This document is the consolidated design record. It folds together four earlier
 working notes so a future engineer can see the full evolution, the options
 weighed, the issues raised across review rounds, the variables traded off, and
@@ -99,11 +110,17 @@ Every option is a point on a 2-D grid: **where the descriptor lives** (vertical)
 
 **TR-lease is a fourth point off this grid:** bottom row (token-carried, 24h),
 but the revocation column is replaced by a *server-side deny marker* — on an
-admin kill, central writes a per-session deny to Redis that the node enforces by
-withholding bytes. Revocation is decoupled from the token TTL and needs no client
-refresh. (An earlier iteration polled and re-resolved every stream on a timer;
-that was cut to the event-driven session-deny built here — see §7 and the §8
-design note.)
+admin kill, central would write a per-session deny to Redis that the node
+enforces by withholding bytes. Revocation is decoupled from the token TTL and
+needs no client refresh. (An earlier iteration polled and re-resolved every
+stream on a timer; that was cut to the event-driven session-deny — see §7 and
+the §8 design note.)
+
+> **Status: deferred to a future PR.** The deny-marker column described above is
+> the design target, not the current shipped behavior. As shipped, the
+> token-carried row offers no revocation tighter than the 24h token TTL on the
+> node path; admin Terminate and user Stop only tear down the live session and
+> ffmpeg producer.
 
 ---
 
@@ -156,14 +173,16 @@ Legend: ✓ meets · ✓\* minor asterisk · ~ partial · ✗ fails · ✓✓ be
 | G13 small signing-key blast radius | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ |
 | G14 cleanup correctness | ✓ | ✓✓ | ~ | ~ | ~ | ~ |
 
-The TTL/revocation strategies head-to-head:
+The TTL/revocation strategies head-to-head. **Note: the session-deny column is
+the deferred design target — see §7; as shipped, the node path has no revocation
+tighter than the 24h token TTL.**
 
 | Strategy | Revocation latency | Restart runway | Client refresh? | Central on refresh? |
 |----------|--------------------|----------------|-----------------|---------------------|
-| Re-resolve at reconstruct (RC) | instant on reconstruct; node hop ≤24h | 30 min | no | only on reconstruct |
+| Re-resolve at reconstruct (RC) | on reconstruct; node hop ≤24h | 30 min | no | only on reconstruct |
 | Leave 24h, expire only (TR-24h) | up to 24h | 24h | no | never |
 | Short TTL + refresh + denylist (RC-async / TR item B) | ≤~5 min | ~90 s grace | **yes** | every ~3.5 min/session |
-| 24h token + session-deny marker (TR-lease, as built) | instant on admin kill; passive ban = next-play / ≤24h | 24h | **no** | nothing on the serve path; one write per admin-kill event |
+| 24h token + session-deny marker (TR-lease — **deferred**) | *design target:* admin kill cuts node bytes on next serve; passive ban = next-play / ≤24h. *As shipped:* node path bounded by ≤24h token only | 24h | **no** | nothing on the serve path; one write per admin-kill event |
 
 ---
 
@@ -222,15 +241,27 @@ live authenticated caller and refuses `userID==0` / mismatch — the token's `ui
 is never trusted alone (a leaked URL is useless without the owner's auth session
 on the native path).
 
-**Revocation (session-deny marker).** The revocation surface was deliberately
-kept to the *one* case the offloaded topology cannot otherwise cover, rather than
-a periodic re-check of every stream. An admin Stop/Terminate writes
-`silo:streamauth:<sid> = deny` (TTL ≥ the 24h token lifetime); the offload node
-reads it (a node-local Redis GET, sub-ms) before serving any bytes and returns
-`403` with no bytes on a hit. Enforcement is **byte-withholding, not client
-cooperation** — a revoked client that ignores the 403 keeps hitting a wall.
+**Revocation (session-deny marker).**
 
-Why this is sufficient, and what it deliberately does *not* do:
+> **Status: deferred to a future PR.** Everything in this subsection (the
+> `silo:streamauth:<sid>` deny marker, the admin Stop/Terminate deny write, and
+> the node-side `Allowed()` enforcement) describes the design target and is **not
+> present in the current implementation**. As shipped, admin Terminate and user
+> Stop tear down the live in-memory session and the ffmpeg producer, but a
+> still-valid stream token can reconstruct the session until its 24h TTL expires;
+> there is no node-side byte-withholding and no guaranteed/instant revocation on
+> the node path. The design below is retained for when revocation lands.
+
+The revocation surface was deliberately
+kept to the *one* case the offloaded topology cannot otherwise cover, rather than
+a periodic re-check of every stream. An admin Stop/Terminate would write
+`silo:streamauth:<sid> = deny` (TTL ≥ the 24h token lifetime); the offload node
+would read it (a node-local Redis GET, sub-ms) before serving any bytes and
+return `403` with no bytes on a hit. Enforcement is **byte-withholding, not
+client cooperation** — a revoked client that ignores the 403 keeps hitting a
+wall.
+
+Why this would be sufficient, and what it deliberately does *not* do:
 
 - **New playback is already blocked at central** — `/playback/start` is
   `RequireAuth` + access check, so a ban/scope change always takes effect on the
@@ -239,8 +270,9 @@ Why this is sufficient, and what it deliberately does *not* do:
   can drop it + send a stop on a ban.
 - **The only thing needing a hard node-side cut** is the *explicit, session-scoped
   admin kill* of a *non-cooperative* client holding a valid token on a
-  node-served direct/remux stream (no producer to kill). That is exactly the
-  session-deny marker.
+  node-served direct/remux stream (no producer to kill). That is exactly what the
+  (deferred) session-deny marker would cover; until it lands this case is bounded
+  by the ≤24h token like the passive bans below.
 - **Not covered (accepted limitation):** a *passive* ban or *partial* access
   change (lost one library, lowered rating) does NOT hard-revoke an
   already-running, non-cooperative node stream. It is enforced at next play and
@@ -250,23 +282,28 @@ Why this is sufficient, and what it deliberately does *not* do:
   worth the machinery for a self-hosted server. A user-scoped deny was rejected
   too: it over-blocks content the viewer still legitimately has access to.
 
-**Fail-open on absence.** The normal case is *no* marker, which serves. A Redis
-error also serves. Only a present deny withholds bytes. This is a deliberate
-reliability-first choice: availability over revocation latency.
+**Fail-open on absence (deferred).** In the design, the normal case is *no*
+marker, which serves; a Redis error also serves; only a present deny withholds
+bytes. This is a deliberate reliability-first choice: availability over
+revocation latency.
 
 **Why this shape.** It keeps token-carried reconstruction's single-box and
-verify-anywhere properties and adds revocation with no client coordination (G12)
-and essentially no steady-state cost — the marker is written only on the rare
-admin-kill event, never on a timer. It is, in effect, **TR-24 plus a single
-session-scoped kill switch**.
+verify-anywhere properties and would add revocation with no client coordination
+(G12) and essentially no steady-state cost — the marker is written only on the
+rare admin-kill event, never on a timer. It is, in effect, **TR-24 plus a single
+session-scoped kill switch**. The kill switch is **deferred**; what shipped is
+TR-24 (token-carried reconstruction, ≤24h token, no node-side revocation).
 
 ---
 
 ## 8. What was implemented, and where
 
-Two commits stacked on the reconstruct core (PR #174):
+This PR ships **Commit 1 only** (token-carried reconstruction). **Commit 2 (the
+node session-deny marker) is deferred to a future PR** — the `internal/streamauth`
+package, the proxy `Allowed()` guard, and the admin deny write described below
+are **not present in the current implementation**.
 
-**Commit 1 — token-carried reconstruction; retire `transcode_recipes`.**
+**Commit 1 — token-carried reconstruction; retire `transcode_recipes`. (shipped)**
 - `streamtoken.Claims` gains the recipe + `uid/pid/mfid`
   (`internal/streamtoken/token.go`).
 - `playback.RecipeCard` projects to/from claims (`ToClaims` /
@@ -289,7 +326,14 @@ Two commits stacked on the reconstruct core (PR #174):
 - `PostgresRecipeStore`, the `RecipeStore` interface, and the unmerged
   `transcode_recipes` migration are deleted.
 
-**Commit 2 — node session-deny marker.**
+**Commit 2 — node session-deny marker. (DEFERRED — not in this PR)**
+
+> The items below describe the planned revocation commit. They were removed from
+> this PR and deferred to a future one; none of these symbols exist in the
+> current implementation. The admin Stop/Terminate path still tears down the live
+> session and ffmpeg producer, but writes no deny marker, so a valid token can
+> reconstruct until its 24h TTL expires.
+
 - `internal/streamauth`: a deny-only Redis `Store` — `Deny(sid)` (TTL ≥ token
   lifetime) and a fail-open `Allowed(sid)` reader. No poller, no allow-leases, no
   access re-resolver.
@@ -304,10 +348,11 @@ Two commits stacked on the reconstruct core (PR #174):
 - A single integrated box reads no marker and needs none — the producer-kill +
   session removal on Terminate is the stop there.
 
-> Design note: an earlier iteration of commit 2 added a central *revalidator*
-> that re-resolved access for every active stream every ~2 min and wrote
-> allow/deny leases. It was removed in favour of the event-driven session-deny
-> above: the poll re-derived, at a constant all-streams DB cost, signals the
+> Design note (about the deferred commit 2): an earlier iteration added a central
+> *revalidator* that re-resolved access for every active stream every ~2 min and
+> wrote allow/deny leases. It was dropped in favour of the event-driven
+> session-deny above: the poll re-derived, at a constant all-streams DB cost,
+> signals the
 > system already emits (new playback is gated at `/playback/start`; admin kill is
 > an explicit event), and its only unique coverage — sub-24h *passive* revocation
 > of an in-flight node stream — was judged not worth the machinery (see §7).
@@ -326,9 +371,11 @@ evolution:
   topology is dedicated `--mode=transcode` nodes (routed via `tnode`, no
   split-brain) + single-box / LB-session-affinity integrated transcode. The
   caveat is documented, not silently assumed.
-- **24h node-path token is unrevocable (P-2).** The session-deny marker makes the
-  explicit admin kill instant on the node path. Passive bans / partial access
-  changes remain bounded by next-play + the ≤24h token (accepted; see §7).
+- **24h node-path token is unrevocable (P-2).** The (deferred, see §7–§8)
+  session-deny marker would let the explicit admin kill cut node bytes on the next
+  serve. **Until that ships, this remains open:** the node-path token is
+  unrevocable, so admin kill and passive bans / partial access changes are all
+  bounded by next-play + the ≤24h token.
 - **Dedicated transcode-node restart (P-3 / tr-10). Fixed for both paths.**
   *Native:* the proxy forwards the verified stream token to the transcode node
   (`X-Silo-Stream-Token`); on a manifest/segment miss the node re-verifies the
@@ -343,8 +390,9 @@ evolution:
   rendition. Central instead writes the recipe to a shared Redis recipe store
   (`internal/noderecipe`) keyed by upstream session id and overwrites it on every
   switch, and the node (which cannot reach Postgres) reads the *current* recipe on
-  the reconstruct miss — over the same Redis the deny-lease and session tracker
-  already use, so no central URL is needed. The boot-time full segment-dir wipe
+  the reconstruct miss — over the same Redis the session tracker already uses (and
+  the deferred deny-lease would use), so no central URL is needed. The boot-time
+  full segment-dir wipe
   stands; reconstruct re-transcodes from the requested segment. See §10 for the
   full rationale (and why this is *not* a token-carryable case).
 - **`userID==0` tolerance / "auth optional" (P-5).** Reconstruct hard-rejects
@@ -370,11 +418,13 @@ evolution:
 
 ## 10. Residuals and follow-ups
 
-- **Passive revocation of an in-flight node stream.** A ban or partial access
-  change does not hard-cut an already-running, non-cooperative node-served stream
-  (it is enforced at next play, bounded by the ≤24h token). Closing it means a
-  per-content deny enumeration on the access-change event, or accepting it. See
-  §7.
+- **Revocation of an in-flight node stream (all cases, until deny-lease ships).**
+  Because the session-deny marker is deferred (§7–§8), *no* ban — admin kill,
+  passive ban, or partial access change — hard-cuts an already-running,
+  non-cooperative node-served stream; all are enforced at next play, bounded by
+  the ≤24h token. The future deny-lease closes the *admin-kill* case; passive
+  bans would still need a per-content deny enumeration on the access-change event,
+  or accepting it. See §7.
 - **Monitoring.** Two distinct questions:
   - *Live "who is watching what right now"* — covered. Every node serve writes a
     record to the Redis tracker (`silo:sessions:*`), now enriched with
@@ -389,8 +439,9 @@ evolution:
 - **Multiple viewers on one stream token.** The token is per playback session, so
   a shared/leaked stream URL lets several clients pull bytes under one session id.
   They **collapse to a single entry** in the tracker (one `sid`) — monitoring
-  cannot distinguish or count them — and a session-deny cuts them as a group, not
-  individually. Detecting/limiting this needs a per-account concurrency cap or
+  cannot distinguish or count them — and the (deferred) session-deny would cut
+  them as a group, not individually. Detecting/limiting this needs a per-account
+  concurrency cap or
   per-device session ids (device binding); deferred. Do not bind to client IP
   (mobile / CGNAT).
 - **Token in logs (tr-1).** Scrub the `?st=` token / path token from request
@@ -403,7 +454,8 @@ evolution:
   jellycompat (Redis recipe handoff via `internal/noderecipe`: central writes the
   recipe at remote-transcode start, the node reads it on a reconstruct miss).
   Precondition: central and the nodes share the same Redis (already required for
-  the deny-lease and session tracker). Residual: the recipe store is consulted
+  the session tracker, and for the deferred deny-lease). Residual: the recipe
+  store is consulted
   only for a jellycompat token, so a node restart still depends on the recipe key
   surviving (24h TTL, ≥ token lifetime).
   - *Why a server-side store and not the token here (the real rationale).* It is
@@ -456,6 +508,11 @@ ASCII blocks render anywhere.
 
 ### 12.1 Topology — where state lives
 
+> **Deferred:** the `silo:streamauth:<sid> = deny` marker, the "Admin
+> Stop/Terminate → write session-deny marker" arrow, and the node's "deny GET"
+> are the planned revocation path and are **not** in the current implementation.
+> The tracker (`silo:sessions:*`) and the recipe handoff are shipped.
+
 ```text
                          ┌─────────────────────────── CENTRAL (mode=server) ───────────────────────────┐
    Client                │  RequireAuth  /playback/start  /playback/transcode/start  (mint token)       │
@@ -474,12 +531,14 @@ ASCII blocks render anywhere.
                                                                   └── sub-ms, off Postgres                          ffmpeg /transcode/{sid}/…
 ```
 
-Descriptor location by route (the core change):
+Descriptor location by route (the core change). The "lease (node)" revocation
+column is the **deferred** design; as shipped, the node path has no revocation
+tighter than the ≤24h token:
 
 | route family | descriptor (how it reconstructs) | revocation |
 |--------------|----------------------------------|------------|
-| native (1–3) | the signed token the client re-presents | lease (node) / producer-kill (integrated) |
-| jellycompat (4–6) | `jellycompat_playback_sessions.data.Recipe` (token can't round-trip) | lease (node) / producer-kill |
+| native (1–3) | the signed token the client re-presents | *deferred:* lease (node) / shipped: producer-kill (integrated), ≤24h token (node) |
+| jellycompat (4–6) | `jellycompat_playback_sessions.data.Recipe` (token can't round-trip) | *deferred:* lease (node) / shipped: producer-kill, ≤24h token (node) |
 | ~~all~~ | ~~`transcode_recipes` Postgres row~~ — removed | — |
 
 ### 12.2 Where the token rides
@@ -527,6 +586,11 @@ hit. `?st` is verified only to decode a card if reconstruct is needed; a live
 session ignores it.
 
 ### 12.4 Normal playback — native, multi-node (offloaded)
+
+> **Deferred:** the `GET silo:streamauth:{sid}` lease guard and its `deny → 403`
+> branch are the planned revocation path, **not** in the current implementation.
+> As shipped the node verifies the token, tracks the session, and serves — there
+> is no deny check.
 
 ```mermaid
 sequenceDiagram
@@ -587,6 +651,14 @@ sequenceDiagram
 
 ### 12.6 Auth deny — the session-deny marker
 
+> **Status: deferred to a future PR.** The entire "Admin Stop/Terminate → write
+> deny marker" and "Offload node → GET deny → 403" flow below is the planned
+> revocation design and is **not** in the current implementation. As shipped,
+> admin Stop/Terminate does the "realtime WS stop + producer teardown" half only
+> (the right branch); it writes no marker, and the node performs no deny check, so
+> a valid token reconstructs until its ≤24h TTL. New playback is still gated at
+> `/playback/start` (the top subgraph is accurate).
+
 ```mermaid
 flowchart TD
     subgraph New["New playback (any topology)"]
@@ -638,18 +710,23 @@ sequenceDiagram
 Jellyfin clients cannot carry a native `?st` token, so the recipe is folded into
 the durable compat row (`PlaybackSession.Recipe`, persisted in the `data` JSONB)
 and written in the same `Update` that flips `TranscodeStarted`. The node hop
-(multi-node jellycompat) still uses a path token + lease exactly like native.
+(multi-node jellycompat) still uses a path token exactly like native (the lease
+guard is deferred along with the rest of the revocation path).
 
 ### 12.8 Hot-path cost per request
+
+The "lease" / "SET deny" Redis costs below are **deferred** (the revocation path
+is not shipped); as shipped the node does only the tracker write, and admin
+Stop/Terminate writes no Redis key:
 
 | request | Postgres | Redis | central CPU | reconstruct |
 |---------|----------|-------|-------------|-------------|
 | native segment, live, integrated | — | — | map hit | — |
-| native segment, live, node | — | 1 GET lease + track | — | — |
+| native segment, live, node | — | 1 track (+ deferred: GET lease) | — | — |
 | native segment, after restart, integrated | — | — | verify JWT + ffmpeg respawn (once, single-flight) | yes |
-| jellycompat segment, live | — | (node: lease) | map hit | — |
-| jellycompat segment, after restart | 1 Get (compat row) | (node: lease) | respawn | yes |
-| admin Stop/Terminate (event, not per-request) | — | 1 SET deny | one write | — |
+| jellycompat segment, live | — | track (+ deferred: lease) | map hit | — |
+| jellycompat segment, after restart | 1 Get (compat row) | track (+ deferred: lease) | respawn | yes |
+| admin Stop/Terminate (event, not per-request) | — | deferred: 1 SET deny | one write | — |
 
 ---
 

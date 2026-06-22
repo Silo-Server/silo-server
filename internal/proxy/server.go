@@ -16,7 +16,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/streamauth"
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
@@ -24,20 +23,16 @@ import (
 type Server struct {
 	watcher    *nodeconfig.Watcher
 	tracker    *nodesessions.Tracker
-	leases     *streamauth.Store
 	httpClient *http.Client
 	egress     *egressMeter
 }
 
 // NewServer creates a new proxy server backed by a config watcher and session
-// tracker. leases is the TR-lease authorization store the node consults before
-// serving; pass nil (or a store over a nil client) to disable lease enforcement
-// (fail-open).
-func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker, leases *streamauth.Store) *Server {
+// tracker.
+func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	return &Server{
 		watcher: watcher,
 		tracker: tracker,
-		leases:  leases,
 		// No overall timeout — stream bodies are long-lived. Hung nodes are
 		// bounded by the transport's response-header timeout instead.
 		httpClient: &http.Client{Transport: newStreamTransport()},
@@ -127,26 +122,13 @@ func (s *Server) requireBearer(next http.Handler) http.Handler {
 	})
 }
 
-// verifyToken extracts and validates the stream token from the URL, then
-// enforces the TR-lease authorization lease: a central-written deny (ban,
-// pulled access, admin kill) refuses the request with 403 and no bytes, even
-// though the token signature is still valid and unexpired. An absent lease fails
-// open (see streamauth.Store.Allowed).
+// verifyToken extracts and validates the stream token from the URL.
 func (s *Server) verifyToken(w http.ResponseWriter, r *http.Request) *streamtoken.Claims {
 	cfg := s.watcher.Config()
 	tokenStr := chi.URLParam(r, "token")
 	claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return nil
-	}
-	// Allowed sits on the byte path of every segment/manifest/direct/remux
-	// request. The Store bounds its Redis GET with a short timeout and caches a
-	// positive result per session for a few seconds, so a segment-heavy stream
-	// does not pay a Redis round-trip per segment and a degraded Redis cannot add
-	// unbounded first-byte latency (it fails open).
-	if !s.leases.Allowed(r.Context(), claims.SessionID) {
-		http.Error(w, "stream access revoked", http.StatusForbidden)
 		return nil
 	}
 	return claims
