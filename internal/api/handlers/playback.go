@@ -2705,6 +2705,10 @@ func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyN
 func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, transcodeNodeURL, path string) {
 	sessionID := chi.URLParam(r, "session_id")
 	targetURL := transcodeNodeURL + path
+	// Capture the signed stream token ("st") before stripping it from the URL.
+	// We forward it out-of-band as a header so the node can reconstruct after a
+	// self-restart, while keeping it out of the forwarded/logged URL.
+	stToken := r.URL.Query().Get("st")
 	// Strip the signed stream token ("st") before forwarding/logging: it is a
 	// 24h bearer reconstruction descriptor exposing media path + recipe claims.
 	// Other query params are preserved.
@@ -2720,6 +2724,18 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+	// Best-effort forward of the stream token as a header so the node's
+	// reconstruct path (X-Silo-Stream-Token) can rebuild after a self-restart.
+	// Verify at the API boundary and confirm it belongs to this session; an
+	// invalid or missing token never blocks the live proxy.
+	if stToken != "" && h.JWTSecret != "" {
+		claims, verifyErr := streamtoken.Verify(stToken, h.JWTSecret)
+		if verifyErr == nil && claims.SessionID == sessionID {
+			req.Header.Set("X-Silo-Stream-Token", stToken)
+		} else if verifyErr != nil {
+			slog.Warn("stream token not forwarded to transcode node", "error", verifyErr, "playback_session_id", sessionID)
+		}
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
