@@ -2001,26 +2001,136 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 		}
 		plan := h.NodePlanner.PlanSession(sessionID, session.TranscodeNodeURL, needsTranscode, estKbps)
 		if proxyNode := plan.ProxyNode; proxyNode != nil && (!needsTranscode || plan.TranscodeNode != nil) {
-			tokenClaims := streamtoken.Claims{
-				SessionID:       sessionID,
-				PlayMethod:      string(updatedSession.PlayMethod),
-				MediaPath:       file.FilePath,
-				TranscodeAudio:  updatedSession.TranscodeAudio,
-				AudioTrackIndex: req.AudioTrackIndex,
-				UserID:          updatedSession.UserID,
-				ProfileID:       updatedSession.ProfileID,
-				MediaFileID:     updatedSession.MediaFileID,
-			}
-			if plan.TranscodeNode != nil {
-				tokenClaims.TranscodeNode = plan.TranscodeNode.URL
-				_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, plan.TranscodeNode.URL)
-			}
-			if token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, playback.MaxTokenTTL); signErr == nil {
-				switch updatedSession.PlayMethod {
-				case playback.PlayRemux:
-					resp.StreamURL = proxyNode.URL + "/stream/remux/" + token
-				case playback.PlayTranscode:
-					resp.StreamURL = proxyNode.URL + "/stream/transcode/" + token + "/master.m3u8"
+			// Remote (offloaded) transcode: the API server owns no local
+			// TranscodeSession (the LOCAL restart block above was a no-op), so
+			// the node's ffmpeg is still serving the OLD audio track. POST a
+			// fresh /transcode/start with the new AudioTrackIndex — the node
+			// tears down the existing session for this ID and restarts ffmpeg
+			// (handleStart in internal/transcodenode/server.go), which IS the
+			// remote restart mechanism — then mint the replacement proxy URL
+			// from a FULL recipe card so a later node restart reconstructs with
+			// the switched audio (the lean identity-only claims used for remux
+			// below omit the byte-affecting encode fields and would 404).
+			isOffloaded := strings.TrimSpace(session.TranscodeNodeURL) != ""
+			if needsTranscode && plan.TranscodeNode != nil && isOffloaded {
+				nodeURL := plan.TranscodeNode.URL
+				_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, nodeURL)
+
+				seekSeconds := req.Position
+				// Embed a concrete segment duration (not 0): the node's recipe
+				// token treats SegmentDuration<=0 as "incomplete" and falls back
+				// to a recipe store that the native path never populates, so a 0
+				// here would 404 on a node restart — the exact resilience this
+				// path exists to provide. Send an explicit value so the node
+				// produces, and the token reconstructs, the same segment length.
+				segmentDuration := playback.DefaultSegmentDuration
+				startSegment := computeStartSegment(seekSeconds, segmentDuration)
+
+				// Derive the encode recipe the same way HandleStartTranscode
+				// does — from the durable session target fields plus the file —
+				// changing only the audio track. SourceVideoCodec/TotalDuration
+				// come from the file; the resolution/codec/bitrate targets and
+				// hwaccel come from the session's persisted stream state.
+				nodeReq := transcodenode.TranscodeStartRequest{
+					SessionID:          sessionID,
+					InputPath:          file.FilePath,
+					SourceVideoCodec:   file.CodecVideo,
+					SeekSeconds:        seekSeconds,
+					StartSegmentNumber: startSegment,
+					TargetResolution:   updatedSession.TargetResolution,
+					TargetCodecVideo:   updatedSession.TargetVideoCodec,
+					TargetCodecAudio:   updatedSession.TargetAudioCodec,
+					TargetBitrateKbps:  updatedSession.TargetBitrateKbps,
+					SegmentDuration:    segmentDuration,
+					HWAccel:            session.TranscodeHWAccel,
+					AudioTrackIndex:    req.AudioTrackIndex,
+					SubtitleTrackIndex: -1,
+					SubtitleBurnIn:     false,
+					TotalDuration:      float64(file.Duration),
+				}
+				if strings.TrimSpace(nodeReq.HWAccel) == "" {
+					nodeReq.HWAccel = h.playbackConfig().HWAccel
+				}
+
+				body, _ := json.Marshal(nodeReq)
+				ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+				defer cancel()
+				httpReq, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, nodeURL+"/transcode/start", bytes.NewReader(body))
+				if reqErr != nil {
+					slog.Error("failed to build remote transcode restart for audio switch", "session", sessionID, "node", nodeURL, "error", reqErr)
+					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build transcode request")
+					return
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				httpReq.Header.Set("Authorization", "Bearer "+h.JWTSecret)
+
+				nodeResp, doErr := http.DefaultClient.Do(httpReq)
+				if doErr != nil {
+					slog.Error("remote transcode restart for audio switch failed", "session", sessionID, "node", nodeURL, "error", doErr)
+					writeError(w, http.StatusBadGateway, "transcode_node_unavailable", "Transcode node is unavailable")
+					return
+				}
+				defer nodeResp.Body.Close()
+				if nodeResp.StatusCode != http.StatusAccepted {
+					slog.Error("remote transcode restart for audio switch rejected", "session", sessionID, "node", nodeURL, "status", nodeResp.StatusCode)
+					writeError(w, http.StatusBadGateway, "transcode_start_failed", "Transcode node rejected the request")
+					return
+				}
+
+				var startResp transcodenode.TranscodeStartResponse
+				if decErr := json.NewDecoder(nodeResp.Body).Decode(&startResp); decErr != nil {
+					slog.Warn("remote transcode restart response decode failed", "session", sessionID, "node", nodeURL, "error", decErr)
+				}
+				effectiveHWAccel := strings.TrimSpace(startResp.HWAccel)
+				if effectiveHWAccel == "" {
+					effectiveHWAccel = strings.TrimSpace(nodeReq.HWAccel)
+				}
+
+				card := playback.NewRecipeCard(updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID, nodeURL, playback.TranscodeOpts{
+					InputPath:          nodeReq.InputPath,
+					SessionID:          nodeReq.SessionID,
+					SourceVideoCodec:   nodeReq.SourceVideoCodec,
+					SeekSeconds:        nodeReq.SeekSeconds,
+					StartSegmentNumber: nodeReq.StartSegmentNumber,
+					TargetResolution:   nodeReq.TargetResolution,
+					TargetCodecVideo:   nodeReq.TargetCodecVideo,
+					TargetCodecAudio:   nodeReq.TargetCodecAudio,
+					TargetBitrateKbps:  nodeReq.TargetBitrateKbps,
+					SegmentDuration:    nodeReq.SegmentDuration,
+					HWAccel:            effectiveHWAccel,
+					AudioTrackIndex:    nodeReq.AudioTrackIndex,
+					SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
+					SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
+					TotalDuration:      nodeReq.TotalDuration,
+				})
+				resp.StreamURL = h.buildProxyManifestURL(card, proxyNode)
+			} else {
+				// Remux, or a non-offloaded (locally served) transcode: no remote
+				// node ffmpeg to restart, so carry the new audio selection on the
+				// identity claims of the proxy serve URL, exactly as before. A
+				// local transcode reconstructs from the API server's own state, so
+				// the lean token is sufficient here.
+				tokenClaims := streamtoken.Claims{
+					SessionID:       sessionID,
+					PlayMethod:      string(updatedSession.PlayMethod),
+					MediaPath:       file.FilePath,
+					TranscodeAudio:  updatedSession.TranscodeAudio,
+					AudioTrackIndex: req.AudioTrackIndex,
+					UserID:          updatedSession.UserID,
+					ProfileID:       updatedSession.ProfileID,
+					MediaFileID:     updatedSession.MediaFileID,
+				}
+				if plan.TranscodeNode != nil {
+					tokenClaims.TranscodeNode = plan.TranscodeNode.URL
+					_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, plan.TranscodeNode.URL)
+				}
+				if token, signErr := streamtoken.Sign(tokenClaims, h.JWTSecret, playback.MaxTokenTTL); signErr == nil {
+					switch updatedSession.PlayMethod {
+					case playback.PlayRemux:
+						resp.StreamURL = proxyNode.URL + "/stream/remux/" + token
+					case playback.PlayTranscode:
+						resp.StreamURL = proxyNode.URL + "/stream/transcode/" + token + "/master.m3u8"
+					}
 				}
 			}
 		}

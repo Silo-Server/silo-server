@@ -104,6 +104,13 @@ type SegmentRecoveryDecision struct {
 // segments (2s) allow the player to start quickly while still maintaining
 // efficient HTTP delivery. This matches the approach used by Plex.
 const defaultSegmentDuration = 2
+
+// DefaultSegmentDuration is the exported segment length used when a transcode
+// request does not specify one. Callers minting a reconstruct recipe must embed
+// a concrete (>0) value so the token passes the node's completeness gate and the
+// embedded length matches what the node actually produces.
+const DefaultSegmentDuration = defaultSegmentDuration
+
 const maxPersistedFFmpegLines = 2000
 const maxPersistedFFmpegBytes = 256 * 1024
 const maxPersistedFFmpegChars = 2000
