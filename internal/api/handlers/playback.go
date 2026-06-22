@@ -2705,8 +2705,13 @@ func (h *PlaybackHandler) buildProxyManifestURL(card playback.RecipeCard, proxyN
 func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, transcodeNodeURL, path string) {
 	sessionID := chi.URLParam(r, "session_id")
 	targetURL := transcodeNodeURL + path
-	if rawQuery := r.URL.RawQuery; rawQuery != "" {
-		targetURL += "?" + rawQuery
+	// Strip the signed stream token ("st") before forwarding/logging: it is a
+	// 24h bearer reconstruction descriptor exposing media path + recipe claims.
+	// Other query params are preserved.
+	query := r.URL.Query()
+	query.Del("st")
+	if encoded := query.Encode(); encoded != "" {
+		targetURL += "?" + encoded
 	}
 
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
