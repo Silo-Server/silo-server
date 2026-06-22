@@ -1213,6 +1213,16 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		if err := transcodeSession.Restart(context.WithoutCancel(ctx), positionSeconds, startSegment); err != nil {
 			return false, err
 		}
+		// Re-persist the durable recipe so reconstruct after a central restart
+		// rebuilds ffmpeg from the newly selected audio track rather than the
+		// stale original. SetAudioTrackIndex mutated the live opts, so read them
+		// back. Best-effort: a stale recipe only costs node-restart resilience,
+		// not the live stream.
+		opts := transcodeSession.Opts()
+		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
+			slog.Warn("persist audio-restarted transcode recipe", "error", err,
+				"playback_session_id", playSession.ID)
+		}
 		return true, nil
 	}
 
