@@ -246,8 +246,9 @@ func (m *TranscodeManager) LoadOrReconstructSession(ctx context.Context, getSess
 			return nil, SessionMissing
 		}
 		// Lost the in-memory session (e.g. restart): rebuild it from the token's
-		// recipe. ReconstructSession re-binds ownership and refuses a
-		// zero/mismatched caller, so a nil result here is a genuine not-found.
+		// recipe. ReconstructSession re-binds the session to the card owner and
+		// refuses a non-zero caller that mismatches it (a zero caller is allowed for
+		// the authless bearer routes), so a nil result here is a genuine not-found.
 		session = m.ReconstructSession(ctx, sessionID, requestUserID, *card)
 		if session == nil {
 			return nil, SessionMissing
@@ -277,10 +278,12 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		// a forged or stale request.
 		return nil
 	}
-	// Re-bind ownership to the live caller. These routes run under RequireAuth, so
-	// a real request carries a non-zero userID. Refuse if it is absent or does not
-	// match the card owner — never trust the card's user_id alone.
-	if requestUserID == 0 || requestUserID != card.UserID {
+	// Re-bind ownership to the card owner. A zero caller is allowed (the authless
+	// transcode delivery routes — HLS master.m3u8 / segment — treat the session
+	// UUID as the bearer credential when auth is optional); a non-zero caller that
+	// mismatches the card owner is refused. Either way the reconstructed session is
+	// bound to card.UserID, never to the request's user.
+	if requestUserID != 0 && requestUserID != card.UserID {
 		slog.Warn("transcode reconstruct ownership rejected",
 			"session", sessionID, "playback_session_id", sessionID,
 			"request_user", requestUserID, "card_user", card.UserID)
@@ -357,7 +360,7 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 //
 // This constraint is currently documented, not enforced: a robust fix needs a
 // per-session owning-instance claim in a store shared across front-ends (e.g.
-// the streamauth lease Redis or the recipe store), so a front-end refuses to
+// a shared Redis or the recipe store), so a front-end refuses to
 // reconstruct an integrated session it does not own. The TranscodeManager has no
 // such shared handle wired today — only per-process config/secret closures and
 // in-memory maps — so the claim cannot be made cheaply here. Until a topology

@@ -264,6 +264,43 @@ func TestReconstructSession_AdmissionCap(t *testing.T) {
 	}
 }
 
+// ReconstructSession ownership contract: the authless transcode delivery routes
+// (HLS master.m3u8 / segment) present no userID, so a zero caller must be allowed
+// and the rebuilt session bound to the card owner. A non-zero caller that does not
+// match the card owner is still refused.
+func TestReconstructSession_Ownership(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("zero caller -> reconstructed, bound to card owner", func(t *testing.T) {
+		reg := &fakeSessionRegistry{}
+		m := NewTranscodeManager()
+		m.Sessions = reg
+
+		card := NewDirectRecipeCard("s", 5, "p", 77)
+		got := m.ReconstructSession(ctx, "s", 0, card)
+		if got == nil {
+			t.Fatal("zero caller (UUID-as-bearer route) must reconstruct")
+		}
+		if got.UserID != 5 {
+			t.Fatalf("reconstructed session UserID = %d, want 5 (card owner)", got.UserID)
+		}
+		if _, err := reg.GetSession("s"); err != nil {
+			t.Fatalf("reconstructed session not registered: %v", err)
+		}
+	})
+
+	t.Run("non-zero mismatched caller -> refused", func(t *testing.T) {
+		reg := &fakeSessionRegistry{}
+		m := NewTranscodeManager()
+		m.Sessions = reg
+
+		card := NewDirectRecipeCard("s", 5, "p", 77)
+		if got := m.ReconstructSession(ctx, "s", 9, card); got != nil {
+			t.Fatal("non-zero caller mismatching the card owner must be refused")
+		}
+	})
+}
+
 // acquireReconstructSlot must bound concurrent reconstructs and let a caller
 // whose request is cancelled give up its place instead of queueing dead work.
 func TestAcquireReconstructSlot(t *testing.T) {
