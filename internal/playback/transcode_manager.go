@@ -557,9 +557,10 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 // Under token-carried reconstruction there is no durable card to drop: a stopped
 // session simply stops being served, and its segment dir is reaped by the
 // in-memory-liveness + age cleanup once no live token could still reconstruct it
-// (see CleanupOrphanedTranscodes). A deliberate, sub-TTL kill of an abusive
-// stream additionally writes a deny lease (see the central revalidator) so the
-// node withholds bytes before the token expires.
+// (see CleanupOrphanedTranscodes). A sub-TTL hard cut of an abusive stream
+// before the token expires depends on a node-side revocation mechanism that is
+// deferred to a future PR; today a stopped session can be reconstructed by a
+// still-valid token until it expires.
 func (m *TranscodeManager) CloseTranscodeSession(sessionID, transcodeNodeURL string) {
 	// Clean up local session if one exists (defensive).
 	m.transcodeMu.Lock()

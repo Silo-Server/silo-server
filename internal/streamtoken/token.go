@@ -15,9 +15,8 @@ import (
 // encode parameters (the former Postgres "recipe card"), so a front-end that has
 // lost its in-memory session can rebuild ffmpeg from the token the client
 // re-presents — no shared per-session store. The ownership claims (uid/pid/mfid)
-// are lookup keys re-resolved against the authority on reconstruct and read by
-// the central revalidator that maintains the per-session authorization lease;
-// they are never trusted on their own.
+// are lookup keys re-resolved against the authority on reconstruct; they are
+// never trusted on their own.
 type Claims struct {
 	SessionID       string `json:"sid"`
 	MediaPath       string `json:"path"`
@@ -30,8 +29,8 @@ type Claims struct {
 	AudioChannels   int    `json:"ach,omitempty"`
 	AudioTrackIndex int    `json:"ati,omitempty"`
 
-	// Ownership / authorization lookup keys (re-resolved at reconstruct; read by
-	// the central lease revalidator). Not trust assertions.
+	// Ownership / authorization lookup keys (re-resolved at reconstruct).
+	// Not trust assertions.
 	UserID      int    `json:"uid,omitempty"`
 	ProfileID   string `json:"pid,omitempty"`
 	MediaFileID int    `json:"mfid,omitempty"`

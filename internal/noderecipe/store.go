@@ -11,9 +11,9 @@
 // store), out of a restarted node's reach (Postgres).
 //
 // This store bridges that gap over the same shared Redis the offload topology
-// already relies on (the session-deny lease and the node-session tracker):
-// central writes the recipe keyed by the upstream session id when it starts a
-// remote transcode, and the transcode node reads it on a reconstruct miss. It is
+// already relies on (the node-session tracker): central writes the recipe keyed
+// by the upstream session id when it starts a remote transcode, and the
+// transcode node reads it on a reconstruct miss. It is
 // off the hot path — written once at start, read only after a node restart.
 package noderecipe
 
