@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -318,7 +319,11 @@ func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (Session
 	}
 	limits, err := provider(ctx, userID)
 	if err != nil {
-		return SessionLimits{}, fmt.Errorf("load session limits for user %d: %w", userID, err)
+		// Tag provider failures with ErrLimitProviderUnavailable so the
+		// reconstruct admission path can distinguish a transient limit-lookup
+		// failure (which it may fail open on) from a genuine over-cap rejection.
+		return SessionLimits{}, fmt.Errorf("load session limits for user %d: %w",
+			userID, errors.Join(ErrLimitProviderUnavailable, err))
 	}
 	return limits, nil
 }

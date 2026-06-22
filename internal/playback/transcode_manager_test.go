@@ -2,6 +2,8 @@ package playback
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -11,6 +13,12 @@ type fakeSessionRegistry struct {
 	// maxPerUser, when > 0, caps reconstructs per user via
 	// RegisterReconstructedWithLimits so the admission path can be tested.
 	maxPerUser int
+	// limitsErr, when non-nil, is returned by RegisterReconstructedWithLimits to
+	// simulate a limit-provider failure (e.g. a transient Postgres error). It
+	// takes precedence over the over-cap check so the fail-open admission path
+	// can be exercised. A real SessionManager surfaces such failures wrapped with
+	// ErrLimitProviderUnavailable.
+	limitsErr error
 }
 
 func (f *fakeSessionRegistry) GetSession(id string) (*Session, error) {
@@ -40,6 +48,9 @@ func (f *fakeSessionRegistry) RegisterReconstructedWithLimits(_ context.Context,
 	}
 	if existing, ok := f.sessions[s.ID]; ok {
 		return existing, nil
+	}
+	if f.limitsErr != nil {
+		return nil, f.limitsErr
 	}
 	if f.maxPerUser > 0 {
 		live := 0
@@ -262,6 +273,79 @@ func TestReconstructSession_AdmissionCap(t *testing.T) {
 	if got := m.ReconstructSession(ctx, "b", 7, card2); got != nil {
 		t.Fatal("over-cap reconstruct must be refused")
 	}
+}
+
+// A transient limit-PROVIDER failure during reconstruct (e.g. a Postgres error
+// in the post-restart wave) must NOT collapse into a permanent 404. The session
+// must be admitted (fail open) so a user within their limits keeps playing.
+func TestReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
+	ctx := context.Background()
+	reg := &fakeSessionRegistry{
+		limitsErr: fmt.Errorf("load session limits for user 7: %w",
+			errors.Join(ErrLimitProviderUnavailable, errors.New("db timeout"))),
+	}
+	m := NewTranscodeManager()
+	m.Sessions = reg
+
+	card := NewDirectRecipeCard("a", 7, "p", 100)
+	got := m.ReconstructSession(ctx, "a", 7, card)
+	if got == nil {
+		t.Fatal("limit-provider error must fail open and admit the reconstructed session, not refuse")
+	}
+	if got.ID != "a" || got.UserID != 7 {
+		t.Fatalf("admitted session wrong: %+v", got)
+	}
+	// The fail-open path must register the session so LoadOrReconstructSession
+	// yields SessionLoaded, not SessionMissing.
+	if _, err := reg.GetSession("a"); err != nil {
+		t.Fatalf("failed-open session not registered: %v", err)
+	}
+}
+
+// LoadOrReconstructSession must surface the fail-open admission as SessionLoaded
+// (not SessionMissing -> 404) when the limit provider is transiently unavailable.
+func TestLoadOrReconstructSession_ProviderErrorFailsOpen(t *testing.T) {
+	ctx := context.Background()
+	reg := &fakeSessionRegistry{
+		limitsErr: errors.Join(ErrLimitProviderUnavailable, errors.New("db timeout")),
+	}
+	m := NewTranscodeManager()
+	m.Sessions = reg
+
+	card := NewDirectRecipeCard("s", 5, "p", 77)
+	got, status := m.LoadOrReconstructSession(ctx, reg.GetSession, "s", 5, &card)
+	if status != SessionLoaded || got == nil {
+		t.Fatalf("provider error must yield SessionLoaded, got status=%v session=%+v", status, got)
+	}
+}
+
+// A genuine over-cap rejection must STILL refuse even after the fail-open change:
+// the ErrTooManyStreams / ErrTooManyTranscodes sentinels are not provider errors.
+func TestReconstructSession_OverCapStillRefused(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("too many streams", func(t *testing.T) {
+		reg := &fakeSessionRegistry{limitsErr: ErrTooManyStreams}
+		m := NewTranscodeManager()
+		m.Sessions = reg
+		card := NewDirectRecipeCard("a", 7, "p", 100)
+		if got := m.ReconstructSession(ctx, "a", 7, card); got != nil {
+			t.Fatal("ErrTooManyStreams over-cap must still be refused (nil)")
+		}
+		if _, err := reg.GetSession("a"); err == nil {
+			t.Fatal("over-cap reconstruct must not register the session")
+		}
+	})
+
+	t.Run("too many transcodes", func(t *testing.T) {
+		reg := &fakeSessionRegistry{limitsErr: ErrTooManyTranscodes}
+		m := NewTranscodeManager()
+		m.Sessions = reg
+		card := NewDirectRecipeCard("a", 7, "p", 100)
+		if got := m.ReconstructSession(ctx, "a", 7, card); got != nil {
+			t.Fatal("ErrTooManyTranscodes over-cap must still be refused (nil)")
+		}
+	})
 }
 
 // ReconstructSession ownership contract: the authless transcode delivery routes

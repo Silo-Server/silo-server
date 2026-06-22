@@ -319,10 +319,25 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 	// replay is rejected.
 	session, err := m.Sessions.RegisterReconstructedWithLimits(ctx, s)
 	if err != nil {
-		slog.Warn("playback session reconstruct refused by admission cap",
+		// A genuine over-cap rejection (the user is at their concurrent stream /
+		// transcode limit) must still refuse: a replayed token cannot reconstruct
+		// past the cap a fresh StartSession would enforce.
+		if errors.Is(err, ErrTooManyStreams) || errors.Is(err, ErrTooManyTranscodes) {
+			slog.Warn("playback session reconstruct refused by admission cap",
+				"session", sessionID, "playback_session_id", sessionID,
+				"user", card.UserID, "method", method, "error", err)
+			return nil
+		}
+		// Otherwise the limit provider itself could not be evaluated (e.g. a
+		// transient Postgres error during a post-restart reconstruct wave). Fail
+		// open and admit the session WITHOUT the limit gate: denying here would
+		// collapse a recoverable dependency error into a permanent 404 and stop
+		// playback for a user who is within their limits. The cap will re-apply on
+		// the next fresh StartSession once the provider recovers.
+		slog.Warn("playback session reconstruct admitting despite unevaluated limits (degraded; limit provider unavailable)",
 			"session", sessionID, "playback_session_id", sessionID,
 			"user", card.UserID, "method", method, "error", err)
-		return nil
+		session = m.Sessions.RegisterReconstructed(s)
 	}
 	slog.Info("playback session reconstructed from recipe card",
 		"session", sessionID, "playback_session_id", sessionID, "user", card.UserID, "method", method)
