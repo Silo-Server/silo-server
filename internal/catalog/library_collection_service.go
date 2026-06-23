@@ -225,7 +225,7 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 	case "smart":
 		return nil, ErrLibraryCollectionSyncUnsupported
 	case "mdblist_json":
-		return s.syncMDBListCollection(ctx, collection, source.URL, source.Limit, opts)
+		return s.syncMDBListCollection(ctx, collection, collectionutil.MDBListURLCandidates(source.URL, collection.SourceURL), source.Limit, opts)
 	case "tmdb_preset":
 		return s.syncTMDBPresetCollection(ctx, collection, source, opts)
 	case "tmdb_collection":
@@ -239,10 +239,20 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 	}
 }
 
-func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, collection *models.LibraryCollection, listURL string, limit *int, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
+func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, collection *models.LibraryCollection, listURLs []string, limit *int, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
 	startedAt := syncTimestamp()
 
-	entries, err := s.fetchMDBListEntries(ctx, listURL)
+	if len(listURLs) == 0 {
+		return nil, fmt.Errorf("mdblist sync: url is required")
+	}
+	var entries []mdblistEntry
+	var err error
+	for _, listURL := range listURLs {
+		entries, err = s.fetchMDBListEntries(ctx, listURL)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1167,6 +1177,7 @@ func traktCandidatesByPriority(lookup *ExternalIDLookup, entry TraktCollectionEn
 }
 
 func (s *LibraryCollectionService) fetchMDBListEntries(ctx context.Context, listURL string) ([]mdblistEntry, error) {
+	listURL = collectionutil.NormalizeMDBListURL(listURL)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating mdblist request: %w", err)

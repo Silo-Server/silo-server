@@ -1315,10 +1315,7 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 	// Smart / live-query collection: parse the query definition and use the
 	// filtered fetch path, mirroring resolveUserCollectionSource in catalog_resolver.
 	isSmartType := strings.EqualFold(strings.TrimSpace(collection.CollectionType), "smart")
-	hasQueryDef := len(strings.TrimSpace(collection.QueryDefinition)) > 0 &&
-		strings.TrimSpace(collection.QueryDefinition) != "{}" &&
-		strings.TrimSpace(collection.QueryDefinition) != "null"
-	if isSmartType || hasQueryDef {
+	if isSmartType {
 		var qd catalog.QueryDefinition
 		if err := json.Unmarshal([]byte(collection.QueryDefinition), &qd); err != nil {
 			return nil, 0, fmt.Errorf("parsing user collection query_definition: %w", err)
@@ -1338,7 +1335,7 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		return f.fetchFiltered(ctx, synth, libraryID, libraryIDs, filter)
 	}
 
-	// Manual collection: fetch stored items.
+	// Exact collection: fetch stored items.
 	collectionItems, err := store.ListCollectionItems(ctx, collectionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing user collection items: %w", err)
@@ -1347,13 +1344,8 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	limit := s.ItemLimit
-	if limit <= 0 || limit > len(collectionItems) {
-		limit = len(collectionItems)
-	}
-
-	contentIDs := make([]string, 0, limit)
-	for _, item := range collectionItems[:limit] {
+	contentIDs := make([]string, 0, len(collectionItems))
+	for _, item := range collectionItems {
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
 
@@ -1376,7 +1368,27 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		orderedItems = append(orderedItems, item)
 	}
 
-	return orderedItems, len(orderedItems), nil
+	orderedItems, err = catalog.FilterUserCollectionDisplayItems(ctx, store, orderedItems, catalog.UserCollectionDisplayFilterOptions{
+		ProfileID:     profileID,
+		WatchFilter:   collection.WatchFilter,
+		MediaFilter:   collection.MediaFilter,
+		EpisodeLister: catalog.NewEpisodeRepository(f.pool),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	orderedItems, total := limitUserCollectionSectionItems(orderedItems, s.ItemLimit)
+
+	return orderedItems, total, nil
+}
+
+func limitUserCollectionSectionItems(items []*models.MediaItem, limit int) ([]*models.MediaItem, int) {
+	total := len(items)
+	if limit > 0 && limit < len(items) {
+		return items[:limit], total
+	}
+	return items, total
 }
 
 func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {

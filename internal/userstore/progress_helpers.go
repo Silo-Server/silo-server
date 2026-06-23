@@ -124,7 +124,7 @@ func GetProgressWithCompletedHistory(ctx context.Context, store UserStore, profi
 // ListProgressWithCompletedHistory returns progress for mediaItemIDs with
 // completed history folded into the map. History is only queried for IDs that
 // are not already completed by a progress row.
-func ListProgressWithCompletedHistory(ctx context.Context, store UserStore, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error) {
+func ListProgressWithCompletedHistory(ctx context.Context, store ProgressCompletionStore, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error) {
 	mediaItemIDs = compactHistoryMediaItemIDs(mediaItemIDs)
 	if store == nil || profileID == "" || len(mediaItemIDs) == 0 {
 		return map[string]WatchProgress{}, nil
@@ -148,7 +148,7 @@ func ListProgressWithCompletedHistory(ctx context.Context, store UserStore, prof
 		return progressMap, nil
 	}
 
-	completed := CompletedHistoryItemMap(ctx, store, CompletedHistoryItemQuery{
+	completed := completedHistoryItemMapForProgress(ctx, store, CompletedHistoryItemQuery{
 		ProfileID:    profileID,
 		MediaItemIDs: candidates,
 	})
@@ -169,6 +169,27 @@ func ListProgressWithCompletedHistory(ctx context.Context, store UserStore, prof
 		}
 	}
 	return progressMap, nil
+}
+
+func completedHistoryItemMapForProgress(ctx context.Context, store ProgressCompletionStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
+	result := map[string]CompletedHistoryItem{}
+	if store == nil || query.ProfileID == "" {
+		return result
+	}
+	query.MediaItemIDs = compactHistoryMediaItemIDs(query.MediaItemIDs)
+	if len(query.MediaItemIDs) == 0 {
+		return result
+	}
+	items, err := store.ListCompletedHistoryItems(ctx, query)
+	if err != nil {
+		return result
+	}
+	for _, item := range items {
+		if item.MediaItemID != "" {
+			result[item.MediaItemID] = item
+		}
+	}
+	return result
 }
 
 func compactHistoryMediaItemIDs(mediaItemIDs []string) []string {

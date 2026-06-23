@@ -5,7 +5,9 @@ import type {
   ImportUserMDBListCollectionRequest,
   ImportUserTMDBCollectionRequest,
   ImportUserTraktCollectionRequest,
+  UserCollectionMediaFilter,
   UserCollectionSyncSchedule,
+  UserCollectionWatchFilter,
 } from "@/api/types";
 import {
   useImportUserMDBListCollection,
@@ -58,6 +60,18 @@ const SCHEDULE_OPTIONS: Array<{ value: ScheduleChoice; label: string }> = [
   { value: "monthly", label: "Monthly" },
 ];
 
+const WATCH_FILTER_OPTIONS: Array<{ value: UserCollectionWatchFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "unwatched", label: "Unwatched" },
+  { value: "watched", label: "Watched" },
+];
+
+const MEDIA_FILTER_OPTIONS: Array<{ value: UserCollectionMediaFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "movie", label: "Movies" },
+  { value: "series", label: "Shows" },
+];
+
 function scheduleChoiceToRequest(choice: ScheduleChoice): UserCollectionSyncSchedule {
   return choice === MANUAL_SCHEDULE ? "" : choice;
 }
@@ -90,6 +104,8 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const [isShared, setIsShared] = useState(false);
   const [mdblistUrl, setMdblistUrl] = useState(template.mdblist?.url ?? "");
   const [libraryIds, setLibraryIds] = useState<number[]>([]);
+  const [watchFilter, setWatchFilter] = useState<UserCollectionWatchFilter>("all");
+  const [mediaFilter, setMediaFilter] = useState<UserCollectionMediaFilter>("all");
   const [posterMode, setPosterMode] = useState<TemplatePosterMode>(() =>
     template.poster_path ? "default" : "custom",
   );
@@ -123,6 +139,8 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           ? customPosterUrl.trim() || undefined
           : template.poster_path || undefined,
       library_ids: libraryIds.length > 0 ? libraryIds : undefined,
+      watch_filter: watchFilter,
+      media_filter: mediaFilter,
     };
 
     if (template.source === "tmdb" && template.tmdb) {
@@ -238,6 +256,48 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           Leave empty to span every library you can see.
         </p>
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="user-template-watch-filter">Watch state</Label>
+          <Select
+            value={watchFilter}
+            onValueChange={(next) => setWatchFilter(next as UserCollectionWatchFilter)}
+          >
+            <SelectTrigger id="user-template-watch-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {WATCH_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="user-template-media-filter">Content</Label>
+          <Select
+            value={mediaFilter}
+            onValueChange={(next) => setMediaFilter(next as UserCollectionMediaFilter)}
+          >
+            <SelectTrigger id="user-template-media-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MEDIA_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-muted-foreground text-xs">
+        Uses the active profile&rsquo;s watched state. Shared profiles may see different results.
+      </p>
 
       {template.requires_profile ? (
         <p className="text-muted-foreground text-xs">

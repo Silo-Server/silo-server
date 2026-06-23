@@ -13,7 +13,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 )
 
 // NormalizeMDBListURL accepts either a list page URL
@@ -21,15 +22,7 @@ import (
 // canonical JSON URL. Trailing slashes are tolerated. Empty input is
 // returned unchanged so callers can keep their own validation.
 func NormalizeMDBListURL(url string) string {
-	url = strings.TrimSpace(url)
-	if url == "" {
-		return ""
-	}
-	url = strings.TrimRight(url, "/")
-	if !strings.HasSuffix(url, "/json") {
-		url += "/json"
-	}
-	return url
+	return collectionutil.NormalizeMDBListURL(url)
 }
 
 type SourceMode string

@@ -9,6 +9,12 @@ import {
   useUpdateCollection,
 } from "@/hooks/queries/collections";
 import { buildUserCollectionCatalogHref as buildCatalogHrefForUserCollection } from "@/pages/catalogSearchParams";
+import {
+  collectionMediaFilterLabel,
+  collectionWatchFilterLabel,
+  normalizeCollectionMediaFilter,
+  normalizeCollectionWatchFilter,
+} from "@/lib/collectionDisplayFilters";
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 import CollectionBuilder, {
   createCollectionBuilderValue,
@@ -44,11 +50,13 @@ export function toUserCollectionBuilderValue(
       allowed_profile_ids: collection?.allowed_profile_ids ?? [],
     },
     include_in_server_collections: collection?.include_in_server_collections ?? false,
+    watch_filter: normalizeCollectionWatchFilter(collection?.watch_filter),
+    media_filter: normalizeCollectionMediaFilter(collection?.media_filter),
   });
 }
 
 export function toCreateCollectionBody(value: CollectionBuilderValue): CreateCollectionRequest {
-  return {
+  const body: CreateCollectionRequest = {
     name: value.title,
     collection_type: value.collection_type,
     is_shared: value.access.is_shared,
@@ -57,10 +65,15 @@ export function toCreateCollectionBody(value: CollectionBuilderValue): CreateCol
     sort_config: value.collection_type === "smart" ? value.sort_config : undefined,
     include_in_server_collections: value.include_in_server_collections,
   };
+  if (value.collection_type === "manual") {
+    body.watch_filter = value.watch_filter;
+    body.media_filter = value.media_filter;
+  }
+  return body;
 }
 
 export function toUpdateCollectionBody(value: CollectionBuilderValue): UpdateCollectionRequest {
-  return {
+  const body: UpdateCollectionRequest = {
     name: value.title,
     is_shared: value.access.is_shared,
     allowed_profile_ids: value.access.allowed_profile_ids,
@@ -68,6 +81,11 @@ export function toUpdateCollectionBody(value: CollectionBuilderValue): UpdateCol
     sort_config: value.collection_type === "smart" ? value.sort_config : undefined,
     include_in_server_collections: value.include_in_server_collections,
   };
+  if (value.collection_type === "manual") {
+    body.watch_filter = value.watch_filter;
+    body.media_filter = value.media_filter;
+  }
+  return body;
 }
 
 export function isCollectionReadOnly(
@@ -112,6 +130,15 @@ function UserCollectionSummary({
       <CardContent className="space-y-4">
         <SummaryRow label="Mode" value={draft.collection_type === "smart" ? "Smart" : "Manual"} />
         <SummaryRow label="Libraries" value={librarySummary} />
+        {draft.collection_type === "manual" ? (
+          <>
+            <SummaryRow
+              label="Watch state"
+              value={collectionWatchFilterLabel(draft.watch_filter)}
+            />
+            <SummaryRow label="Content" value={collectionMediaFilterLabel(draft.media_filter)} />
+          </>
+        ) : null}
         <SummaryRow label="Shared" value={draft.access.is_shared ? "Yes" : "No"} />
         <SummaryRow label="Profiles" value={profileSummary} />
         <SummaryRow

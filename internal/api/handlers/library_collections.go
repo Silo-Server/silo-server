@@ -795,7 +795,8 @@ func (h *LibraryCollectionHandler) HandleListLibraryUserCollections(w http.Respo
 	}
 
 	userID := apimw.GetUserID(r.Context())
-	collections, err := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, libraryID)
+	profileID := apimw.GetProfileID(r.Context())
+	collections, err := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, profileID, libraryID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user collections")
 		return
@@ -833,6 +834,7 @@ func (h *LibraryCollectionHandler) HandleListLibraryCollections(w http.ResponseW
 	}
 
 	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
 	groups, err := h.GroupRepo.ListByLibrary(r.Context(), libraryID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load groups")
@@ -855,7 +857,7 @@ func (h *LibraryCollectionHandler) HandleListLibraryCollections(w http.ResponseW
 				continue
 			}
 			if !userCollectionsLoaded {
-				loadedUserCollections, loadErr := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, libraryID)
+				loadedUserCollections, loadErr := usercollections.ListServerVisibleByLibrary(r.Context(), h.UserCollectionPool, userID, profileID, libraryID)
 				if loadErr != nil {
 					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user collections")
 					return

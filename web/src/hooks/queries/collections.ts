@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type {
   Collection,
+  CollectionCapabilitiesResponse,
   CollectionGroup,
   CollectionItem,
   CollectionsListResponse,
@@ -48,6 +49,14 @@ export function useCollectionGroups() {
     queryKey: collectionKeys.list(),
     queryFn: fetchCollectionsList,
     select: (data) => data.groups,
+  });
+}
+
+export function useCollectionCapabilities() {
+  return useQuery({
+    queryKey: ["collections", "capabilities"],
+    queryFn: () => api<CollectionCapabilitiesResponse>("/collections/capabilities"),
+    staleTime: Number.POSITIVE_INFINITY,
   });
 }
 

@@ -6,12 +6,18 @@ import type {
   QueryDefinition,
   QueryDefinitionInput,
   SmartCollectionAccess,
+  UserCollectionMediaFilter,
+  UserCollectionWatchFilter,
 } from "@/api/types";
 import { createEmptyQueryDefinition, normalizeQueryDefinition } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  COLLECTION_MEDIA_FILTER_OPTIONS,
+  COLLECTION_WATCH_FILTER_OPTIONS,
+} from "@/lib/collectionDisplayFilters";
 import {
   Select,
   SelectContent,
@@ -46,6 +52,8 @@ export interface CollectionBuilderValue {
   sort_config: Record<string, unknown>;
   access: SmartCollectionAccess;
   include_in_server_collections: boolean;
+  watch_filter: UserCollectionWatchFilter;
+  media_filter: UserCollectionMediaFilter;
 }
 
 export interface CollectionBuilderProps {
@@ -88,6 +96,8 @@ export function createCollectionBuilderValue(
     sort_config: overrides?.sort_config ?? {},
     access: overrides?.access ?? { is_shared: false, allowed_profile_ids: [] },
     include_in_server_collections: overrides?.include_in_server_collections ?? false,
+    watch_filter: overrides?.watch_filter ?? "all",
+    media_filter: overrides?.media_filter ?? "all",
   };
 }
 
@@ -245,6 +255,62 @@ export default function CollectionBuilder({
       </section>
 
       {children}
+
+      {mode === "user" && value.collection_type === "manual" ? (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Display filters</h2>
+            <p className="text-muted-foreground mt-1 text-sm">
+              Uses the active profile&rsquo;s watched state. Shared profiles may see different
+              results.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor={`collection-watch-filter-${mode}`}>Watch state</Label>
+              <Select
+                value={value.watch_filter}
+                onValueChange={(next) =>
+                  onChange({ ...value, watch_filter: next as UserCollectionWatchFilter })
+                }
+                disabled={readOnly}
+              >
+                <SelectTrigger id={`collection-watch-filter-${mode}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COLLECTION_WATCH_FILTER_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={`collection-media-filter-${mode}`}>Content</Label>
+              <Select
+                value={value.media_filter}
+                onValueChange={(next) =>
+                  onChange({ ...value, media_filter: next as UserCollectionMediaFilter })
+                }
+                disabled={readOnly}
+              >
+                <SelectTrigger id={`collection-media-filter-${mode}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COLLECTION_MEDIA_FILTER_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {value.collection_type === "smart" ? (
         <>

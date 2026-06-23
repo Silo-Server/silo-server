@@ -43,6 +43,8 @@ type createCollectionRequest struct {
 	AllowedProfileIDs          []string        `json:"allowed_profile_ids"`
 	QueryDefinition            json.RawMessage `json:"query_definition"`
 	SortConfig                 json.RawMessage `json:"sort_config"`
+	WatchFilter                string          `json:"watch_filter"`
+	MediaFilter                string          `json:"media_filter"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterSourceURL            string          `json:"poster_source_url"`
 }
@@ -56,6 +58,9 @@ type updateCollectionRequest struct {
 	SortConfig                 json.RawMessage        `json:"sort_config"`
 	SourceURL                  *string                `json:"source_url"`
 	MaxItems                   *int                   `json:"max_items"`
+	LibraryIDs                 *[]int                 `json:"library_ids"`
+	WatchFilter                *string                `json:"watch_filter"`
+	MediaFilter                *string                `json:"media_filter"`
 	IncludeInServerCollections *bool                  `json:"include_in_server_collections"`
 	PosterSourceURL            *string                `json:"poster_source_url"`
 	GroupID                    optionalNullableString `json:"group_id"`
@@ -85,6 +90,8 @@ type collectionResponse struct {
 	LastSyncAt                 string          `json:"last_sync_at,omitempty"`
 	LastSyncStatus             string          `json:"last_sync_status,omitempty"`
 	LastSyncMessage            string          `json:"last_sync_message,omitempty"`
+	WatchFilter                string          `json:"watch_filter"`
+	MediaFilter                string          `json:"media_filter"`
 	ItemCount                  int             `json:"item_count"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterURL                  string          `json:"poster_url,omitempty"`
@@ -96,6 +103,11 @@ type collectionResponse struct {
 type collectionListResponse struct {
 	Collections []collectionResponse      `json:"collections"`
 	Groups      []collectionGroupResponse `json:"groups"`
+}
+
+type collectionCapabilitiesResponse struct {
+	WatchFilters []string `json:"watch_filters"`
+	MediaFilters []string `json:"media_filters"`
 }
 
 type collectionGroupResponse struct {
@@ -208,6 +220,14 @@ func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// HandleCapabilities exposes additive feature support for collection clients.
+func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, collectionCapabilitiesResponse{
+		WatchFilters: append([]string(nil), userstore.CollectionWatchFilterValues...),
+		MediaFilters: append([]string(nil), userstore.CollectionMediaFilterValues...),
+	})
+}
+
 // HandleCreateCollection handles POST /collections.
 func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
@@ -247,6 +267,16 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 	}
 	queryDefinition := string(queryDefinitionJSON)
 	sortConfig := string(defaultJSON(req.SortConfig))
+	watchFilter, ok := userstore.NormalizeCollectionWatchFilter(req.WatchFilter)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid watch_filter")
+		return
+	}
+	mediaFilter, ok := userstore.NormalizeCollectionMediaFilter(req.MediaFilter)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid media_filter")
+		return
+	}
 	collection, err := store.CreateCollection(r.Context(), userstore.CreateCollectionInput{
 		CreatorProfileID:           profileID,
 		Name:                       req.Name,
@@ -255,6 +285,8 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 		AllowedProfileIDs:          req.AllowedProfileIDs,
 		QueryDefinition:            queryDefinition,
 		SortConfig:                 sortConfig,
+		WatchFilter:                watchFilter,
+		MediaFilter:                mediaFilter,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	})
 	if err != nil {
@@ -306,6 +338,22 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		AllowedProfileIDs:          req.AllowedProfileIDs,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
+	if req.WatchFilter != nil {
+		watchFilter, ok := userstore.NormalizeCollectionWatchFilter(*req.WatchFilter)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid watch_filter")
+			return
+		}
+		input.WatchFilter = &watchFilter
+	}
+	if req.MediaFilter != nil {
+		mediaFilter, ok := userstore.NormalizeCollectionMediaFilter(*req.MediaFilter)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "bad_request", "Invalid media_filter")
+			return
+		}
+		input.MediaFilter = &mediaFilter
+	}
 	if len(req.QueryDefinition) > 0 {
 		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true)
 		if err != nil {
@@ -341,7 +389,7 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 	// Source URL and max items both live inside source_config (Limit / URL).
 	// Load the existing collection and re-marshal so the unaffected fields
 	// (preset, media_type, etc.) survive untouched.
-	if req.SourceURL != nil || req.MaxItems != nil {
+	if req.SourceURL != nil || req.MaxItems != nil || req.LibraryIDs != nil {
 		existing, err := store.GetCollection(r.Context(), collectionID)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
@@ -355,6 +403,21 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to parse source config")
 			return
+		}
+		if req.LibraryIDs != nil {
+			if !catalog.IsSyncableType(existing.CollectionType) {
+				writeError(w, http.StatusBadRequest, "bad_request", "library_ids can only be edited for imported collections")
+				return
+			}
+			for _, id := range *req.LibraryIDs {
+				if id <= 0 {
+					writeError(w, http.StatusBadRequest, "bad_request", "library_ids must contain positive IDs")
+					return
+				}
+			}
+			cfg.LibraryIDs = append([]int(nil), (*req.LibraryIDs)...)
+			emptyQuery := "{}"
+			input.QueryDefinition = &emptyQuery
 		}
 		if req.MaxItems != nil {
 			if *req.MaxItems < 0 {
@@ -798,6 +861,8 @@ func toCollectionResponse(c userstore.Collection) collectionResponse {
 		SourceURL:                  c.SourceURL,
 		LastSyncStatus:             c.LastSyncStatus,
 		LastSyncMessage:            c.LastSyncMessage,
+		WatchFilter:                firstNonEmptyCollection(c.WatchFilter, userstore.CollectionWatchFilterAll),
+		MediaFilter:                firstNonEmptyCollection(c.MediaFilter, userstore.CollectionMediaFilterAll),
 		ItemCount:                  c.ItemCount,
 		IncludeInServerCollections: c.IncludeInServerCollections,
 		PosterURL:                  c.PosterURL,

@@ -1242,6 +1242,8 @@ export interface EpisodesResponse {
 export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
 
 export type UserCollectionSyncStatus = "" | "running" | "success" | "failed" | "warning";
+export type UserCollectionWatchFilter = "all" | "unwatched" | "watched";
+export type UserCollectionMediaFilter = "all" | "movie" | "series";
 export type GroupSortMode = "manual" | "name_asc" | "name_desc" | "recent" | "most_items";
 export type LibraryCollectionGroupKind = "regular" | "user_collections";
 
@@ -1265,6 +1267,8 @@ export interface Collection {
   last_sync_at?: string;
   last_sync_status?: UserCollectionSyncStatus;
   last_sync_message?: string;
+  watch_filter: UserCollectionWatchFilter;
+  media_filter: UserCollectionMediaFilter;
   item_count?: number;
   include_in_server_collections?: boolean;
   poster_url?: string;
@@ -1304,6 +1308,11 @@ export interface CollectionGroup {
 export interface CollectionsListResponse {
   collections: Collection[];
   groups: CollectionGroup[];
+}
+
+export interface CollectionCapabilitiesResponse {
+  watch_filters: UserCollectionWatchFilter[];
+  media_filters: UserCollectionMediaFilter[];
 }
 
 export interface QueryRule {
@@ -1391,6 +1400,8 @@ export interface CreateCollectionRequest {
   allowed_profile_ids?: string[];
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
+  watch_filter?: UserCollectionWatchFilter;
+  media_filter?: UserCollectionMediaFilter;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
 }
@@ -1405,6 +1416,9 @@ export interface UpdateCollectionRequest {
   source_url?: string;
   /** 0 = unlimited; otherwise a positive cap. */
   max_items?: number;
+  library_ids?: number[];
+  watch_filter?: UserCollectionWatchFilter;
+  media_filter?: UserCollectionMediaFilter;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
   group_id?: string | null;
@@ -1636,6 +1650,8 @@ export interface UserImportSharedFields {
   sync_schedule?: UserCollectionSyncSchedule;
   is_shared?: boolean;
   poster_url?: string;
+  watch_filter?: UserCollectionWatchFilter;
+  media_filter?: UserCollectionMediaFilter;
   /** Restrict resolution to these libraries; omitted/empty = entire catalog the user can see. */
   library_ids?: number[];
 }

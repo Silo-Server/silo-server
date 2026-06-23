@@ -72,6 +72,8 @@ type userImportSharedFields struct {
 	IsShared     bool   `json:"is_shared"`
 	PosterURL    string `json:"poster_url"`
 	LibraryIDs   []int  `json:"library_ids,omitempty"`
+	WatchFilter  string `json:"watch_filter,omitempty"`
+	MediaFilter  string `json:"media_filter,omitempty"`
 }
 
 type userImportMDBListRequest struct {
@@ -200,10 +202,23 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if !validateOptionalLibraryIDs(cfg.LibraryIDs, w) {
+		return
+	}
 
 	sourceConfigJSON, err := usercollections.MarshalSourceConfig(cfg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to encode source config")
+		return
+	}
+	watchFilter, ok := userstore.NormalizeCollectionWatchFilter(shared.WatchFilter)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid watch_filter")
+		return
+	}
+	mediaFilter, ok := userstore.NormalizeCollectionMediaFilter(shared.MediaFilter)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid media_filter")
 		return
 	}
 
@@ -219,6 +234,8 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		SourceConfig:     sourceConfigJSON,
 		SyncSchedule:     schedule,
 		NextSyncAt:       usercollections.InitialNextSyncAt(schedule),
+		WatchFilter:      watchFilter,
+		MediaFilter:      mediaFilter,
 		PosterURL:        strings.TrimSpace(shared.PosterURL),
 	})
 	if err != nil {
@@ -422,6 +439,16 @@ func validateOptionalLimit(limit *int, w http.ResponseWriter) bool {
 	if *limit <= 0 || *limit > 200 {
 		writeError(w, http.StatusBadRequest, "bad_request", "limit must be between 1 and 200")
 		return false
+	}
+	return true
+}
+
+func validateOptionalLibraryIDs(libraryIDs []int, w http.ResponseWriter) bool {
+	for _, id := range libraryIDs {
+		if id <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "library_ids must contain positive IDs")
+			return false
+		}
 	}
 	return true
 }

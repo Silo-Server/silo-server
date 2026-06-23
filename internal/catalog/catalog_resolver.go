@@ -487,7 +487,7 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 		return nil, ErrCatalogSourceNotFound
 	}
 
-	if strings.EqualFold(strings.TrimSpace(collection.CollectionType), "smart") || catalogCollectionUsesLiveQuery([]byte(collection.QueryDefinition)) {
+	if IsLiveQueryType(collection.CollectionType) {
 		def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
 		if err != nil {
 			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
@@ -510,7 +510,20 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 	for _, item := range items {
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
-	return r.resolveExactOrderedItems(ctx, contentIDs, req, access)
+	mediaItems, err := r.fetchAccessibleItemsByID(ctx, contentIDs, req, access)
+	if err != nil {
+		return nil, err
+	}
+	mediaItems, err = FilterUserCollectionDisplayItems(ctx, store, mediaItems, UserCollectionDisplayFilterOptions{
+		ProfileID:     access.ProfileID,
+		WatchFilter:   collection.WatchFilter,
+		MediaFilter:   collection.MediaFilter,
+		EpisodeLister: NewEpisodeRepository(r.itemRepo.pool),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return r.resolveExactOrderedMediaItems(ctx, mediaItems, req, access)
 }
 
 func (r *CatalogResolver) resolvePersonalSource(ctx context.Context, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
@@ -552,7 +565,10 @@ func (r *CatalogResolver) resolveExactOrderedItems(ctx context.Context, contentI
 	if err != nil {
 		return nil, err
 	}
+	return r.resolveExactOrderedMediaItems(ctx, items, req, access)
+}
 
+func (r *CatalogResolver) resolveExactOrderedMediaItems(ctx context.Context, items []*models.MediaItem, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
 	items = filterCatalogSearchItems(items, req.SearchQuery)
 	items = filterCatalogNamePrefix(items, req.NamePrefix)
 	if req.UseSourceOrder {

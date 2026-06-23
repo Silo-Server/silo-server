@@ -12,11 +12,24 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import type { Collection, UpdateCollectionRequest, UserCollectionType } from "@/api/types";
+import type {
+  Collection,
+  UpdateCollectionRequest,
+  UserCollectionMediaFilter,
+  UserCollectionType,
+  UserCollectionWatchFilter,
+} from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import CollectionAccessEditor from "@/components/collections/CollectionAccessEditor";
 import { ImageUploadField } from "@/components/ImageUploadField";
@@ -30,6 +43,12 @@ import { useProfiles } from "@/hooks/queries/profiles";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
 import { libraryEligibilityForMediaKind } from "@/lib/collectionTemplates";
+import {
+  COLLECTION_MEDIA_FILTER_OPTIONS,
+  COLLECTION_WATCH_FILTER_OPTIONS,
+  normalizeCollectionMediaFilter,
+  normalizeCollectionWatchFilter,
+} from "@/lib/collectionDisplayFilters";
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 
 import { isCollectionReadOnly } from "./userCollectionsShared";
@@ -95,12 +114,15 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const initialMaxItems = readSourceConfigLimit(collection);
   const initialSourceUrl = collection.source_url ?? "";
   const initialDescription = collection.description ?? "";
+  const initialLibraryIds = readSourceConfigLibraryIDs(collection);
+  const initialWatchFilter = normalizeCollectionWatchFilter(collection.watch_filter);
+  const initialMediaFilter = normalizeCollectionMediaFilter(collection.media_filter);
 
   const [name, setName] = useState(collection.name);
   const [description, setDescription] = useState(initialDescription);
-  const [libraryIds, setLibraryIds] = useState<number[]>(
-    collection.query_definition.library_ids ?? [],
-  );
+  const [libraryIds, setLibraryIds] = useState<number[]>(initialLibraryIds);
+  const [watchFilter, setWatchFilter] = useState<UserCollectionWatchFilter>(initialWatchFilter);
+  const [mediaFilter, setMediaFilter] = useState<UserCollectionMediaFilter>(initialMediaFilter);
   const [isShared, setIsShared] = useState(collection.is_shared);
   const [allowedProfileIds, setAllowedProfileIds] = useState<string[]>(
     collection.allowed_profile_ids ?? [],
@@ -143,7 +165,9 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const dirtyParts = [
     name.trim() !== collection.name,
     descriptionDirty,
-    !arraysEqual(libraryIds, collection.query_definition.library_ids ?? []),
+    !arraysEqual(libraryIds, initialLibraryIds),
+    watchFilter !== initialWatchFilter,
+    mediaFilter !== initialMediaFilter,
     isShared !== collection.is_shared,
     !arraysEqual(allowedProfileIds, collection.allowed_profile_ids ?? []),
     includeOnServer !== (collection.include_in_server_collections ?? false),
@@ -163,10 +187,9 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
       name: name.trim() || collection.name,
       is_shared: isShared,
       allowed_profile_ids: allowedProfileIds,
-      query_definition: {
-        ...collection.query_definition,
-        library_ids: libraryIds,
-      },
+      library_ids: libraryIds,
+      watch_filter: watchFilter,
+      media_filter: mediaFilter,
       include_in_server_collections: includeOnServer,
       poster_source_url: trimmedPosterSource || undefined,
     };
@@ -193,7 +216,9 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   function handleDiscard() {
     setName(collection.name);
     setDescription(initialDescription);
-    setLibraryIds(collection.query_definition.library_ids ?? []);
+    setLibraryIds(initialLibraryIds);
+    setWatchFilter(initialWatchFilter);
+    setMediaFilter(initialMediaFilter);
     setIsShared(collection.is_shared);
     setAllowedProfileIds(collection.allowed_profile_ids ?? []);
     setIncludeOnServer(collection.include_in_server_collections ?? false);
@@ -282,6 +307,51 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
                 overwrite this.
               </p>
             </div>
+
+            <div className="grid gap-5 sm:grid-cols-2">
+              <div className="space-y-2">
+                <FieldLabel htmlFor="imported-collection-watch-filter">Watch state</FieldLabel>
+                <Select
+                  value={watchFilter}
+                  onValueChange={(next) => setWatchFilter(next as UserCollectionWatchFilter)}
+                  disabled={readOnly}
+                >
+                  <SelectTrigger id="imported-collection-watch-filter" className="h-11 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COLLECTION_WATCH_FILTER_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <FieldLabel htmlFor="imported-collection-media-filter">Content</FieldLabel>
+                <Select
+                  value={mediaFilter}
+                  onValueChange={(next) => setMediaFilter(next as UserCollectionMediaFilter)}
+                  disabled={readOnly}
+                >
+                  <SelectTrigger id="imported-collection-media-filter" className="h-11 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COLLECTION_MEDIA_FILTER_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Uses the active profile&rsquo;s watched state. Shared profiles may see different
+              results.
+            </p>
 
             <div className="space-y-2">
               <FieldLabel>Libraries</FieldLabel>
@@ -986,6 +1056,21 @@ function readSourceConfigLimit(collection: Collection): number | null {
     return Math.trunc(limit);
   }
   return null;
+}
+
+function readSourceConfigLibraryIDs(collection: Collection): number[] {
+  const cfg = collection.source_config;
+  if (cfg && typeof cfg === "object") {
+    const raw = (cfg as Record<string, unknown>).library_ids;
+    if (Array.isArray(raw)) {
+      const ids = raw
+        .filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
+        .map((id) => Math.trunc(id));
+      if (ids.length > 0) return Array.from(new Set(ids));
+      return [];
+    }
+  }
+  return collection.query_definition.library_ids ?? [];
 }
 
 function parseMaxItemsInput(value: string): number | null {

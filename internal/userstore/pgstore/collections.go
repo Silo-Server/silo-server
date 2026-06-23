@@ -14,7 +14,7 @@ import (
 
 const collectionSelectColumns = `id, profile_id, creator_profile_id, name, description, collection_type, is_shared,
 	query_definition, sort_config, source_url, source_config, sync_schedule, next_sync_at,
-	last_sync_at, last_sync_status, last_sync_message, item_count, include_in_server_collections,
+	last_sync_at, last_sync_status, last_sync_message, watch_filter, media_filter, item_count, include_in_server_collections,
 	poster_url, poster_thumbhash, sort_order, group_id, created_at, updated_at`
 
 func scanCollection(scanner interface{ Scan(dest ...any) error }) (*userstore.Collection, error) {
@@ -27,7 +27,7 @@ func scanCollection(scanner interface{ Scan(dest ...any) error }) (*userstore.Co
 	err := scanner.Scan(
 		&c.ID, &c.ProfileID, &c.CreatorProfileID, &c.Name, &c.Description, &c.CollectionType, &c.IsShared,
 		&c.QueryDefinition, &c.SortConfig, &c.SourceURL, &c.SourceConfig, &syncSchedule, &nextSyncAt,
-		&lastSyncAt, &c.LastSyncStatus, &c.LastSyncMessage, &c.ItemCount, &c.IncludeInServerCollections,
+		&lastSyncAt, &c.LastSyncStatus, &c.LastSyncMessage, &c.WatchFilter, &c.MediaFilter, &c.ItemCount, &c.IncludeInServerCollections,
 		&c.PosterURL, &c.PosterThumbhash, &c.SortOrder, &c.GroupID, &createdAt, &updatedAt,
 	)
 	if err != nil {
@@ -56,6 +56,16 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 	if input.SourceConfig == "" {
 		input.SourceConfig = "{}"
 	}
+	if value, ok := userstore.NormalizeCollectionWatchFilter(input.WatchFilter); ok {
+		input.WatchFilter = value
+	} else {
+		input.WatchFilter = userstore.CollectionWatchFilterAll
+	}
+	if value, ok := userstore.NormalizeCollectionMediaFilter(input.MediaFilter); ok {
+		input.MediaFilter = value
+	} else {
+		input.MediaFilter = userstore.CollectionMediaFilterAll
+	}
 	allowedProfiles := normalizeCollectionProfiles(input.CreatorProfileID, input.AllowedProfileIDs, input.IsShared)
 
 	tx, err := s.pool.Begin(ctx)
@@ -69,18 +79,18 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 		`INSERT INTO user_personal_collections (
 			id, user_id, profile_id, creator_profile_id, name, description, collection_type, is_shared,
 			query_definition, sort_config, source_url, source_config, sync_schedule, next_sync_at,
-			sort_order, include_in_server_collections, poster_url, created_at, updated_at
+			sort_order, watch_filter, media_filter, include_in_server_collections, poster_url, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
 			COALESCE((
 				SELECT MAX(sort_order) + 1
 				FROM user_personal_collections
 				WHERE user_id = $2 AND group_id IS NULL
-			), 0), $15, $16, $17, $18)
+			), 0), $15, $16, $17, $18, $19, $20)
 		RETURNING sort_order`,
 		id, s.userID, input.CreatorProfileID, input.CreatorProfileID, input.Name, input.Description,
 		input.CollectionType, input.IsShared, input.QueryDefinition, input.SortConfig,
 		input.SourceURL, input.SourceConfig, input.SyncSchedule, input.NextSyncAt,
-		input.IncludeInServerCollections, input.PosterURL, now, now,
+		input.WatchFilter, input.MediaFilter, input.IncludeInServerCollections, input.PosterURL, now, now,
 	).Scan(&sortOrder)
 	if err != nil {
 		return nil, fmt.Errorf("creating collection: %w", err)
@@ -112,6 +122,8 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 		SourceConfig:               input.SourceConfig,
 		SyncSchedule:               input.SyncSchedule,
 		NextSyncAt:                 input.NextSyncAt,
+		WatchFilter:                input.WatchFilter,
+		MediaFilter:                input.MediaFilter,
 		IncludeInServerCollections: input.IncludeInServerCollections,
 		PosterURL:                  input.PosterURL,
 		SortOrder:                  sortOrder,
@@ -180,7 +192,7 @@ func (s *PostgresUserStore) ListCollections(ctx context.Context, profileID strin
 		if err := rows.Scan(
 			&c.ID, &c.ProfileID, &c.CreatorProfileID, &c.Name, &c.Description, &c.CollectionType, &c.IsShared,
 			&c.QueryDefinition, &c.SortConfig, &c.SourceURL, &c.SourceConfig, &syncSchedule, &nextSyncAt,
-			&lastSyncAt, &c.LastSyncStatus, &c.LastSyncMessage, &c.ItemCount, &c.IncludeInServerCollections,
+			&lastSyncAt, &c.LastSyncStatus, &c.LastSyncMessage, &c.WatchFilter, &c.MediaFilter, &c.ItemCount, &c.IncludeInServerCollections,
 			&c.PosterURL, &c.PosterThumbhash, &c.SortOrder, &c.GroupID, &createdAt, &updatedAt, &allowed,
 		); err != nil {
 			return nil, fmt.Errorf("scanning collection row: %w", err)
@@ -254,6 +266,20 @@ func (s *PostgresUserStore) UpdateCollection(ctx context.Context, input userstor
 		add("next_sync_at", nil)
 	} else if input.NextSyncAt != nil {
 		add("next_sync_at", input.NextSyncAt)
+	}
+	if input.WatchFilter != nil {
+		value, ok := userstore.NormalizeCollectionWatchFilter(*input.WatchFilter)
+		if !ok {
+			return fmt.Errorf("invalid watch filter %q", *input.WatchFilter)
+		}
+		add("watch_filter", value)
+	}
+	if input.MediaFilter != nil {
+		value, ok := userstore.NormalizeCollectionMediaFilter(*input.MediaFilter)
+		if !ok {
+			return fmt.Errorf("invalid media filter %q", *input.MediaFilter)
+		}
+		add("media_filter", value)
 	}
 	if input.IncludeInServerCollections != nil {
 		add("include_in_server_collections", *input.IncludeInServerCollections)

@@ -29,6 +29,8 @@ describe("Collections helpers", () => {
           sort_config: {},
           sort_order: 0,
           group_id: null,
+          watch_filter: "all",
+          media_filter: "all",
           created_at: "",
           updated_at: "",
         },
