@@ -409,11 +409,8 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 				writeError(w, http.StatusBadRequest, "bad_request", "library_ids can only be edited for imported collections")
 				return
 			}
-			for _, id := range *req.LibraryIDs {
-				if id <= 0 {
-					writeError(w, http.StatusBadRequest, "bad_request", "library_ids must contain positive IDs")
-					return
-				}
+			if !validateOptionalLibraryIDs(*req.LibraryIDs, w) {
+				return
 			}
 			cfg.LibraryIDs = append([]int(nil), (*req.LibraryIDs)...)
 			emptyQuery := "{}"

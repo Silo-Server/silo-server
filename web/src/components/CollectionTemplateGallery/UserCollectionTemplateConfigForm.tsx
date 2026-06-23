@@ -15,6 +15,10 @@ import {
   useImportUserTraktCollection,
 } from "@/hooks/queries/userCollectionImports";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import {
+  COLLECTION_MEDIA_FILTER_OPTIONS,
+  COLLECTION_WATCH_FILTER_OPTIONS,
+} from "@/lib/collectionDisplayFilters";
 import { libraryEligibilityForMediaKind, mediaKindLabel } from "@/lib/collectionTemplates";
 import type { CollectionTemplate } from "@/lib/collectionTemplates";
 import {
@@ -58,18 +62,6 @@ const SCHEDULE_OPTIONS: Array<{ value: ScheduleChoice; label: string }> = [
   { value: "daily", label: "Daily" },
   { value: "weekly", label: "Weekly" },
   { value: "monthly", label: "Monthly" },
-];
-
-const WATCH_FILTER_OPTIONS: Array<{ value: UserCollectionWatchFilter; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "unwatched", label: "Unwatched" },
-  { value: "watched", label: "Watched" },
-];
-
-const MEDIA_FILTER_OPTIONS: Array<{ value: UserCollectionMediaFilter; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "movie", label: "Movies" },
-  { value: "series", label: "Shows" },
 ];
 
 function scheduleChoiceToRequest(choice: ScheduleChoice): UserCollectionSyncSchedule {
@@ -268,7 +260,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {WATCH_FILTER_OPTIONS.map((option) => (
+              {COLLECTION_WATCH_FILTER_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>
@@ -286,7 +278,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {MEDIA_FILTER_OPTIONS.map((option) => (
+              {COLLECTION_MEDIA_FILTER_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>

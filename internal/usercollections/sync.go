@@ -119,14 +119,9 @@ func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, co
 		return nil, nil, fmt.Errorf("mdblist sync: url is required")
 	}
 
-	var entries []mdblistEntry
-	var err error
-	for _, url := range urls {
-		entries, err = s.fetchMDBListEntries(ctx, url)
-		if err == nil {
-			break
-		}
-	}
+	entries, err := collectionutil.FetchMDBListWithFallback(urls, func(url string) ([]mdblistEntry, error) {
+		return s.fetchMDBListEntries(ctx, url)
+	})
 	if err != nil {
 		return nil, nil, err
 	}

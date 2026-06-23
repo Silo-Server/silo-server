@@ -64,7 +64,7 @@ func parseHistoryTimestamp(value string) time.Time {
 // CompletedHistoryItemMap returns the latest completed-history item row for a
 // scoped item query. Lookup failures degrade to an empty map so user-data
 // enrichment can keep returning progress rows.
-func CompletedHistoryItemMap(ctx context.Context, store UserStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
+func CompletedHistoryItemMap(ctx context.Context, store ProgressCompletionStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
 	result := map[string]CompletedHistoryItem{}
 	if store == nil || query.ProfileID == "" {
 		return result
@@ -148,7 +148,7 @@ func ListProgressWithCompletedHistory(ctx context.Context, store ProgressComplet
 		return progressMap, nil
 	}
 
-	completed := completedHistoryItemMapForProgress(ctx, store, CompletedHistoryItemQuery{
+	completed := CompletedHistoryItemMap(ctx, store, CompletedHistoryItemQuery{
 		ProfileID:    profileID,
 		MediaItemIDs: candidates,
 	})
@@ -169,27 +169,6 @@ func ListProgressWithCompletedHistory(ctx context.Context, store ProgressComplet
 		}
 	}
 	return progressMap, nil
-}
-
-func completedHistoryItemMapForProgress(ctx context.Context, store ProgressCompletionStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
-	result := map[string]CompletedHistoryItem{}
-	if store == nil || query.ProfileID == "" {
-		return result
-	}
-	query.MediaItemIDs = compactHistoryMediaItemIDs(query.MediaItemIDs)
-	if len(query.MediaItemIDs) == 0 {
-		return result
-	}
-	items, err := store.ListCompletedHistoryItems(ctx, query)
-	if err != nil {
-		return result
-	}
-	for _, item := range items {
-		if item.MediaItemID != "" {
-			result[item.MediaItemID] = item
-		}
-	}
-	return result
 }
 
 func compactHistoryMediaItemIDs(mediaItemIDs []string) []string {

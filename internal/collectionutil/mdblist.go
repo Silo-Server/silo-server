@@ -20,6 +20,23 @@ func NormalizeMDBListURL(url string) string {
 	return url
 }
 
+// FetchMDBListWithFallback tries each candidate URL in order and returns the
+// entries from the first successful fetch, recovering when source_config and
+// source_url drift. It returns the last error when every candidate fails.
+// Callers should guard against an empty url list beforehand; an empty list
+// yields a nil result and nil error.
+func FetchMDBListWithFallback[T any](urls []string, fetch func(string) ([]T, error)) ([]T, error) {
+	var entries []T
+	var err error
+	for _, url := range urls {
+		entries, err = fetch(url)
+		if err == nil {
+			return entries, nil
+		}
+	}
+	return entries, err
+}
+
 // MDBListURLCandidates returns unique canonical JSON URLs, preserving argument
 // order. It lets syncers recover when source_config and source_url drift.
 func MDBListURLCandidates(urls ...string) []string {

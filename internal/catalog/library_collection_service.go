@@ -245,14 +245,9 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	if len(listURLs) == 0 {
 		return nil, fmt.Errorf("mdblist sync: url is required")
 	}
-	var entries []mdblistEntry
-	var err error
-	for _, listURL := range listURLs {
-		entries, err = s.fetchMDBListEntries(ctx, listURL)
-		if err == nil {
-			break
-		}
-	}
+	entries, err := collectionutil.FetchMDBListWithFallback(listURLs, func(listURL string) ([]mdblistEntry, error) {
+		return s.fetchMDBListEntries(ctx, listURL)
+	})
 	if err != nil {
 		return nil, err
 	}
