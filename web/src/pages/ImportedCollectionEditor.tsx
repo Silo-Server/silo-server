@@ -1058,19 +1058,23 @@ function readSourceConfigLimit(collection: Collection): number | null {
   return null;
 }
 
+function sanitizeLibraryIDs(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const ids = raw
+    .filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
+    .map((id) => Math.trunc(id));
+  return Array.from(new Set(ids));
+}
+
 function readSourceConfigLibraryIDs(collection: Collection): number[] {
   const cfg = collection.source_config;
   if (cfg && typeof cfg === "object") {
     const raw = (cfg as Record<string, unknown>).library_ids;
     if (Array.isArray(raw)) {
-      const ids = raw
-        .filter((id): id is number => typeof id === "number" && Number.isFinite(id) && id > 0)
-        .map((id) => Math.trunc(id));
-      if (ids.length > 0) return Array.from(new Set(ids));
-      return [];
+      return sanitizeLibraryIDs(raw);
     }
   }
-  return collection.query_definition.library_ids ?? [];
+  return sanitizeLibraryIDs(collection.query_definition.library_ids);
 }
 
 function parseMaxItemsInput(value: string): number | null {
