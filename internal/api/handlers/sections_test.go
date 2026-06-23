@@ -390,6 +390,68 @@ func TestLibraryDefaultSectionsUsesFolderType(t *testing.T) {
 	}
 }
 
+func TestFilterResolvedSectionsByAccessHidesBlockedLibraryRows(t *testing.T) {
+	sectionsIn := []sections.ResolvedSection{
+		{
+			ID:          "continue",
+			SectionType: sections.SectionContinueWatching,
+			Title:       "Continue Watching",
+			Config:      sections.ContinueTypeConfig(sections.ContinueTypeWatching),
+		},
+		{
+			ID:          "allowed-library",
+			SectionType: sections.SectionRecentlyAdded,
+			Title:       "Recently Added in Allowed",
+			Config:      sections.GeneratedHomeLibraryRecentConfig(11),
+		},
+		{
+			ID:          "blocked-library",
+			SectionType: sections.SectionRecentlyAdded,
+			Title:       "Recently Added in Blocked",
+			Config:      sections.GeneratedHomeLibraryRecentConfig(42),
+		},
+	}
+
+	got := filterResolvedSectionsByAccess(sectionsIn, catalog.AccessFilter{
+		AllowedLibraryIDs: []int{11},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("filtered sections length = %d, want 2", len(got))
+	}
+	if got[0].ID != "continue" || got[1].ID != "allowed-library" {
+		t.Fatalf("filtered section ids = [%s %s], want [continue allowed-library]", got[0].ID, got[1].ID)
+	}
+}
+
+func TestFilterResolvedSectionsByAccessHidesDisabledOnlyRows(t *testing.T) {
+	sectionsIn := []sections.ResolvedSection{
+		{
+			ID:          "disabled-library",
+			SectionType: sections.SectionRecentlyReleased,
+			Title:       "Recently Released in Disabled",
+			Config:      sections.GeneratedHomeLibraryRecentConfig(42),
+		},
+		{
+			ID:          "mixed-libraries",
+			SectionType: sections.SectionRecentlyReleased,
+			Title:       "Mixed",
+			Config:      []byte(`{"filter_library_ids":[11,42]}`),
+		},
+	}
+
+	got := filterResolvedSectionsByAccess(sectionsIn, catalog.AccessFilter{
+		DisabledLibraryIDs: []int{42},
+	})
+
+	if len(got) != 1 {
+		t.Fatalf("filtered sections length = %d, want 1", len(got))
+	}
+	if got[0].ID != "mixed-libraries" {
+		t.Fatalf("filtered section id = %s, want mixed-libraries", got[0].ID)
+	}
+}
+
 func TestApplyDiversityFilterSkipsDuplicatesInLaterAvoidSection(t *testing.T) {
 	in := []sections.SectionWithItems{
 		{ResolvedSection: sections.ResolvedSection{ID: "ra", SectionType: sections.SectionRecentlyAdded}, Items: []*models.MediaItem{{ContentID: "abc"}}},
