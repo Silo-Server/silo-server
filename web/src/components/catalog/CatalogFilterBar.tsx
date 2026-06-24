@@ -29,6 +29,7 @@ interface CatalogFilterBarProps {
   resultCountLabel?: string;
   resultCountLoading?: boolean;
   sourceOrderLabel?: string;
+  allowEpisodeMediaScope?: boolean;
 }
 
 export const CATALOG_SOURCE_ORDER_SORT_FIELD = "__source_order";
@@ -55,8 +56,12 @@ export default function CatalogFilterBar({
   resultCountLabel,
   resultCountLoading = false,
   sourceOrderLabel,
+  allowEpisodeMediaScope = true,
 }: CatalogFilterBarProps) {
   const sortOptions = getCollectionSortOptions(allowPersonalizedSorts, sortRelevanceScope);
+  const mediaScopeOptions = allowEpisodeMediaScope
+    ? CATALOG_MEDIA_SCOPE_OPTIONS
+    : CATALOG_MEDIA_SCOPE_OPTIONS.filter((option) => option.value !== "episode");
   const usesSourceOrder = Boolean(
     sourceOrderLabel && state.sortField === CATALOG_SOURCE_ORDER_SORT_FIELD,
   );
@@ -103,7 +108,7 @@ export default function CatalogFilterBar({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {CATALOG_MEDIA_SCOPE_OPTIONS.map((option) => (
+            {mediaScopeOptions.map((option) => (
               <SelectItem key={option.value} value={option.value}>
                 {option.label}
               </SelectItem>
@@ -127,7 +132,7 @@ export default function CatalogFilterBar({
             sortField: v,
             sortOrder: getDefaultQuerySortOrder(v),
           };
-          if (showMediaScopeSelector && sortOption) {
+          if (showMediaScopeSelector && sortOption && allowEpisodeMediaScope) {
             const scopeTypes: Array<Exclude<QuerySortRelevanceScope, "all">> | null =
               state.mediaScope === "all"
                 ? null

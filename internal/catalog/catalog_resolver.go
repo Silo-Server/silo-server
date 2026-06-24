@@ -586,6 +586,7 @@ func (r *CatalogResolver) resolveExactOrderedItems(ctx context.Context, contentI
 }
 
 func (r *CatalogResolver) resolveExactOrderedMediaItems(ctx context.Context, items []*models.MediaItem, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
+	req = normalizeExactCollectionOverlayRequest(req, items)
 	items = filterCatalogSearchItems(items, req.SearchQuery)
 	items = filterCatalogNamePrefix(items, req.NamePrefix)
 	if req.UseSourceOrder {
@@ -604,6 +605,22 @@ func (r *CatalogResolver) resolveExactOrderedMediaItems(ctx context.Context, ite
 		}, nil
 	}
 	return r.resolveCandidateItemsWithQuery(ctx, req, access, items, false)
+}
+
+func normalizeExactCollectionOverlayRequest(req CatalogRequest, items []*models.MediaItem) CatalogRequest {
+	if req.Source != CatalogSourceLibraryCollection && req.Source != CatalogSourceUserCollection {
+		return req
+	}
+	if !isEpisodeCatalogScope(req.Query.MediaScope) {
+		return req
+	}
+	for _, item := range items {
+		if item != nil && item.Type == "episode" {
+			return req
+		}
+	}
+	req.Query.MediaScope = ""
+	return req
 }
 
 func (r *CatalogResolver) resolveCollectionQueryBaseItems(ctx context.Context, def QueryDefinition, access AccessFilter) ([]*models.MediaItem, error) {

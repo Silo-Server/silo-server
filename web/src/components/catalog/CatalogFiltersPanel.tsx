@@ -106,6 +106,7 @@ export default function CatalogFiltersPanel({
         resultCountLabel={resultCountLabel}
         resultCountLoading={resultCountLoading}
         sourceOrderLabel={isCollectionSource ? "Collection Order" : undefined}
+        allowEpisodeMediaScope={!isCollectionSource}
       />
 
       <ActiveFilterBadges badges={badges} onClear={update} />

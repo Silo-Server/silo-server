@@ -63,6 +63,10 @@ const overlaySources = new Set<CatalogSource>([
   "user_collection",
 ]);
 
+function isCollectionSource(source: CatalogSource): boolean {
+  return source === "library_collection" || source === "user_collection";
+}
+
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
   return overlaySources.has(source);
 }
@@ -136,18 +140,19 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
   const sort = normalizeQuerySortField(rawSort);
   const hasExplicitSort = Boolean(rawSort || rawOrder);
   const queryLimit = parsePositiveInt(searchParams.get("query_limit")) ?? undefined;
+  const mediaScope =
+    type === "movie" ||
+    type === "series" ||
+    type === "episode" ||
+    type === "audiobook" ||
+    type === "ebook" ||
+    type === "video"
+      ? type
+      : undefined;
 
   baseState.query_definition = normalizeQueryDefinition({
     library_ids: baseState.library_id ? [baseState.library_id] : [],
-    media_scope:
-      type === "movie" ||
-      type === "series" ||
-      type === "episode" ||
-      type === "audiobook" ||
-      type === "ebook" ||
-      type === "video"
-        ? type
-        : undefined,
+    media_scope: mediaScope === "episode" && isCollectionSource(source) ? undefined : mediaScope,
     match: searchParams.get("match") === "any" ? "any" : "all",
     groups: [...implicitGroups, ...groups],
     sort:
@@ -159,8 +164,7 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
         : undefined,
     limit: queryLimit,
   });
-  baseState.uses_source_order =
-    (source === "library_collection" || source === "user_collection") && !hasExplicitSort;
+  baseState.uses_source_order = isCollectionSource(source) && !hasExplicitSort;
 
   return baseState;
 }
@@ -299,9 +303,13 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
   if (state.q) {
     params.set("q", state.q);
   }
-  if (state.type_override) {
+  const stateIsCollectionSource = isCollectionSource(state.source);
+  if (state.type_override && !(stateIsCollectionSource && state.type_override === "episode")) {
     params.set("type", state.type_override);
-  } else if (state.query_definition.media_scope) {
+  } else if (
+    state.query_definition.media_scope &&
+    !(stateIsCollectionSource && state.query_definition.media_scope === "episode")
+  ) {
     params.set("type", state.query_definition.media_scope);
   }
   const effectiveLibraryID = state.library_id ?? state.query_definition.library_ids[0];
