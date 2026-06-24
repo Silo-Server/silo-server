@@ -195,7 +195,7 @@ func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID s
 		if !ok {
 			break
 		}
-		if active.StartedAt.IsZero() || s.now().Sub(active.StartedAt) <= manualSyncTimeout {
+		if !active.StartedAt.IsZero() && s.now().Sub(active.StartedAt) <= manualSyncTimeout {
 			return ManualSyncResult{Run: active}, nil
 		}
 		active.Status = string(SyncRunStatusFailed)

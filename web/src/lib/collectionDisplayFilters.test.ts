@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { QueryDefinition } from "@/api/types";
+import type { DisplayQueryDefinition } from "@/api/types";
 import {
   displayFiltersToQueryDefinition,
   queryDefinitionToDisplayFilters,
@@ -67,29 +67,29 @@ describe("queryDefinitionToDisplayFilters", () => {
   });
 
   it("defaults to all/all for a fragment with no recognized rules", () => {
-    const def = {
+    const def: DisplayQueryDefinition = {
       match: "all",
       groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "horror" }] }],
-    } as unknown as QueryDefinition;
+    };
     expect(queryDefinitionToDisplayFilters(def)).toEqual({ watch: "all", media: "all" });
   });
 
   it("reads watched=true / watched=false back to presets", () => {
-    const watched = {
+    const watched: DisplayQueryDefinition = {
       match: "all",
       groups: [{ match: "all", rules: [{ field: "watched", op: "is", value: true }] }],
-    } as unknown as QueryDefinition;
+    };
     expect(queryDefinitionToDisplayFilters(watched).watch).toBe("watched");
 
-    const unwatched = {
+    const unwatched: DisplayQueryDefinition = {
       match: "all",
       groups: [{ match: "all", rules: [{ field: "watched", op: "is", value: false }] }],
-    } as unknown as QueryDefinition;
+    };
     expect(queryDefinitionToDisplayFilters(unwatched).watch).toBe("unwatched");
   });
 
   it("reads rules in arbitrary order and across multiple groups", () => {
-    const def = {
+    const def: DisplayQueryDefinition = {
       match: "all",
       groups: [
         {
@@ -101,7 +101,7 @@ describe("queryDefinitionToDisplayFilters", () => {
           ],
         },
       ],
-    } as unknown as QueryDefinition;
+    };
     expect(queryDefinitionToDisplayFilters(def)).toEqual({ watch: "unwatched", media: "series" });
   });
 
@@ -117,7 +117,7 @@ describe("queryDefinitionToDisplayFilters", () => {
     const def = {
       match: "all",
       groups: [{ match: "all" }],
-    } as unknown as QueryDefinition;
+    } as unknown as DisplayQueryDefinition;
     expect(queryDefinitionToDisplayFilters(def)).toEqual({ watch: "all", media: "all" });
   });
 });

@@ -36,6 +36,7 @@ import { ImageUploadField } from "@/components/ImageUploadField";
 import {
   useDeleteCollection,
   useDeleteUserCollectionImage,
+  useCollectionCapabilities,
   useUpdateCollection,
 } from "@/hooks/queries/collections";
 import { useUserLibraries } from "@/hooks/queries/libraries";
@@ -44,8 +45,8 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useSyncUserCollection } from "@/hooks/queries/userCollectionImports";
 import { libraryEligibilityForMediaKind } from "@/lib/collectionTemplates";
 import {
-  COLLECTION_MEDIA_FILTER_OPTIONS,
-  COLLECTION_WATCH_FILTER_OPTIONS,
+  collectionMediaFilterOptionsFromPresets,
+  collectionWatchFilterOptionsFromPresets,
   displayFiltersToQueryDefinition,
   queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
@@ -108,6 +109,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const syncMutation = useSyncUserCollection();
   const { data: profiles = [] } = useProfiles();
   const { data: libraries = [] } = useUserLibraries();
+  const { data: collectionCapabilities } = useCollectionCapabilities();
   const { profile } = useCurrentProfile();
   const readOnly = isCollectionReadOnly(collection, profile?.id);
 
@@ -155,6 +157,18 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
     if (scope === "series") return libraryEligibilityForMediaKind("tv");
     return libraryEligibilityForMediaKind("mixed");
   }, [collection.query_definition.media_scope]);
+  const watchFilterOptions = useMemo(
+    () =>
+      collectionWatchFilterOptionsFromPresets(
+        collectionCapabilities?.display_filter_presets.watched,
+      ),
+    [collectionCapabilities],
+  );
+  const mediaFilterOptions = useMemo(
+    () =>
+      collectionMediaFilterOptionsFromPresets(collectionCapabilities?.display_filter_presets.media),
+    [collectionCapabilities],
+  );
 
   const isPending = updateMutation.isPending;
   const isSyncing = syncMutation.isPending;
@@ -322,7 +336,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {COLLECTION_WATCH_FILTER_OPTIONS.map((option) => (
+                    {watchFilterOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -341,7 +355,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {COLLECTION_MEDIA_FILTER_OPTIONS.map((option) => (
+                    {mediaFilterOptions.map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>

@@ -23,7 +23,11 @@ import {
   historyRemovalDialogTitle,
 } from "@/lib/historyRemoval";
 
-import { buildCatalogApiSearchParams, parseCatalogSearchParams } from "./catalogSearchParams";
+import {
+  buildCatalogApiSearchParams,
+  catalogSourceAllowsOverlay,
+  parseCatalogSearchParams,
+} from "./catalogSearchParams";
 
 function defaultCatalogTitle(source: string, searchQuery?: string) {
   if (source === "favorites") return "Favorites";
@@ -94,6 +98,7 @@ function CatalogResults({
   const isHistorySource = state.source === "history";
   const isCollectionSource =
     state.source === "library_collection" || state.source === "user_collection";
+  const allowPersonalizedOverlayControls = catalogSourceAllowsOverlay(state.source);
   const removeHistory = useRemoveHistory();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -264,8 +269,8 @@ function CatalogResults({
           }
         }}
         allowLibrarySelection={!isCollectionSource}
-        allowPersonalizedFilters={isCollectionSource}
-        allowPersonalizedSorts={isCollectionSource}
+        allowPersonalizedFilters={allowPersonalizedOverlayControls}
+        allowPersonalizedSorts={allowPersonalizedOverlayControls}
       />
 
       {isHistorySource && (

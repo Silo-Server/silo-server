@@ -61,8 +61,17 @@ func NormalizeDisplayQueryFragment(raw []byte) (string, error) {
 			if !displayFilterFields[field] {
 				return "", fmt.Errorf("display_query_definition does not support field %q", rule.Field)
 			}
+			rule.Field = field
+			if field == displayFilterFieldType {
+				if value, ok := rule.Value.(string); ok {
+					rule.Value = strings.ToLower(strings.TrimSpace(value))
+				}
+			}
 			if err := validateDisplayFilterValue(field, rule); err != nil {
 				return "", err
+			}
+			if field == displayFilterFieldType && rule.Value == "all" {
+				continue
 			}
 			rules = append(rules, rule)
 		}
@@ -101,8 +110,13 @@ func validateDisplayFilterValue(field string, rule QueryRule) error {
 		}
 	case displayFilterFieldType:
 		value, ok := rule.Value.(string)
-		if !ok || strings.TrimSpace(value) == "" {
+		if !ok || value == "" {
 			return fmt.Errorf("display_query_definition type value must be a non-empty string")
+		}
+		switch value {
+		case "all", "movie", "series":
+		default:
+			return fmt.Errorf("display_query_definition type value must be one of %q, %q, or %q", "all", "movie", "series")
 		}
 	}
 	return nil

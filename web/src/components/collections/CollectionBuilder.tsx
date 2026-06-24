@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import type {
   CollectionPreviewRequest,
+  DisplayQueryDefinition,
   QueryDefinition,
   QueryDefinitionInput,
   SmartCollectionAccess,
@@ -55,7 +56,7 @@ export interface CollectionBuilderValue {
   access: SmartCollectionAccess;
   include_in_server_collections: boolean;
   /** Filter-only QueryDefinition fragment for the display presets; undefined = no filter. */
-  display_query_definition?: QueryDefinition;
+  display_query_definition?: DisplayQueryDefinition;
 }
 
 export interface CollectionBuilderProps {

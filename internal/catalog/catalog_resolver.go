@@ -500,7 +500,7 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
 		}
 		def = ApplySmartCollectionItemLimit(def)
-		if catalogRequestHasOverlay(req) {
+		if catalogRequestHasOverlay(req) || strings.TrimSpace(collection.DisplayQueryDefinition) != "" {
 			items, err := r.resolveCollectionQueryBaseItems(ctx, def, access)
 			if err != nil {
 				return nil, err

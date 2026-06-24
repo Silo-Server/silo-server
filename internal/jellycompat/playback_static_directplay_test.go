@@ -133,14 +133,18 @@ func TestHandleVideoStream_StaticBypassesNegotiatedCapabilityRejection(t *testin
 		}},
 	})
 
-	rawQuery := "Static=true&PlaySessionId=play-1&MediaSourceId=" + url.QueryEscape(sourceID)
-	rec := serveStaticStream(handler, encodedID, rawQuery)
-
-	if rec.Code != 200 {
-		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	queries := []string{
+		"Static=true&PlaySessionId=play-1&MediaSourceId=" + url.QueryEscape(sourceID),
+		"static=true&PlaySessionId=play-1&MediaSourceId=" + url.QueryEscape(sourceID),
 	}
-	if got := rec.Body.String(); got != body {
-		t.Errorf("expected file content %q; got %q", body, got)
+	for _, rawQuery := range queries {
+		rec := serveStaticStream(handler, encodedID, rawQuery)
+		if rec.Code != 200 {
+			t.Fatalf("query %q: expected status 200; got %d, body=%s", rawQuery, rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); got != body {
+			t.Errorf("query %q: expected file content %q; got %q", rawQuery, body, got)
+		}
 	}
 }
 

@@ -1271,7 +1271,7 @@ export interface Collection {
   last_sync_status?: UserCollectionSyncStatus;
   last_sync_message?: string;
   /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */
-  display_query_definition?: QueryDefinition;
+  display_query_definition?: DisplayQueryDefinition;
   item_count?: number;
   include_in_server_collections?: boolean;
   poster_url?: string;
@@ -1330,6 +1330,11 @@ export interface QueryRule {
 export interface QueryGroup {
   match: "all" | "any";
   rules: QueryRule[];
+}
+
+export interface DisplayQueryDefinition {
+  match: "all" | "any";
+  groups: QueryGroup[];
 }
 
 export interface QuerySort {
@@ -1407,7 +1412,7 @@ export interface CreateCollectionRequest {
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
   /** Filter-only QueryDefinition fragment; omit for no display filter. */
-  display_query_definition?: QueryDefinition;
+  display_query_definition?: DisplayQueryDefinition;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
 }
@@ -1424,7 +1429,7 @@ export interface UpdateCollectionRequest {
   max_items?: number;
   library_ids?: number[];
   /** Filter-only QueryDefinition fragment; omit for no display filter. */
-  display_query_definition?: QueryDefinition;
+  display_query_definition?: DisplayQueryDefinition;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
   group_id?: string | null;
@@ -1657,7 +1662,7 @@ export interface UserImportSharedFields {
   is_shared?: boolean;
   poster_url?: string;
   /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */
-  display_query_definition?: QueryDefinition;
+  display_query_definition?: DisplayQueryDefinition;
   /** Restrict resolution to these libraries; omitted/empty = entire catalog the user can see. */
   library_ids?: number[];
 }

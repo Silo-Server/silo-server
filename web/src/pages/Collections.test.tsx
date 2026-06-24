@@ -65,9 +65,7 @@ describe("Collections helpers", () => {
           ],
         },
       ],
-      // library_ids / sort are required by the QueryDefinition type but absent
-      // on the real filter-only fragment; cast keeps the test focused.
-    } as never;
+    };
 
     const createBody = toCreateCollectionBody(builder);
     expect(createBody.display_query_definition).toEqual({

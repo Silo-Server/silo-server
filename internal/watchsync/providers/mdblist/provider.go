@@ -591,6 +591,7 @@ func (p *mdblistProgress) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &text); err != nil {
 		return errors.New("mdblist progress must be a number or numeric string")
 	}
+	text = strings.TrimSpace(text)
 	text = strings.TrimSpace(strings.TrimSuffix(text, "%"))
 	if text == "" {
 		*p = 0

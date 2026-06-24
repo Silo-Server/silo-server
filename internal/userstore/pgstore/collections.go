@@ -46,10 +46,15 @@ func scanCollection(scanner interface{ Scan(dest ...any) error }) (*userstore.Co
 // otherwise the canonical JSON fragment. An empty string must never be written
 // to a jsonb column.
 func displayQueryDefinitionArg(fragment string) any {
-	if strings.TrimSpace(fragment) == "" {
+	fragment = storedDisplayQueryDefinition(fragment)
+	if fragment == "" {
 		return nil
 	}
 	return fragment
+}
+
+func storedDisplayQueryDefinition(fragment string) string {
+	return strings.TrimSpace(fragment)
 }
 
 func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstore.CreateCollectionInput) (*userstore.Collection, error) {
@@ -123,7 +128,7 @@ func (s *PostgresUserStore) CreateCollection(ctx context.Context, input userstor
 		SourceConfig:               input.SourceConfig,
 		SyncSchedule:               input.SyncSchedule,
 		NextSyncAt:                 input.NextSyncAt,
-		DisplayQueryDefinition:     input.DisplayQueryDefinition,
+		DisplayQueryDefinition:     storedDisplayQueryDefinition(input.DisplayQueryDefinition),
 		IncludeInServerCollections: input.IncludeInServerCollections,
 		PosterURL:                  input.PosterURL,
 		SortOrder:                  sortOrder,
