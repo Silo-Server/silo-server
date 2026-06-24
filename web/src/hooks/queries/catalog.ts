@@ -27,6 +27,7 @@ function catalogParamsForKey(
     collection_id: state.collection_id,
     person_id: state.person_id,
     type: state.type_override ?? state.query_definition.media_scope,
+    uses_source_order: state.uses_source_order,
     query_fingerprint: JSON.stringify(state.query_definition),
     include_total: includeTotal,
     limit,

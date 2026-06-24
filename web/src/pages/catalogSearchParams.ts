@@ -22,6 +22,7 @@ export interface CatalogSearchState {
   collection_id?: string;
   person_id?: string;
   type_override?: string;
+  uses_source_order?: boolean;
   query_definition: QueryDefinition;
 }
 
@@ -130,8 +131,10 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
     });
   }
 
-  const sort = normalizeQuerySortField(readString(searchParams.get("sort")));
+  const rawSort = readString(searchParams.get("sort"));
   const rawOrder = readString(searchParams.get("order"));
+  const sort = normalizeQuerySortField(rawSort);
+  const hasExplicitSort = Boolean(rawSort || rawOrder);
   const queryLimit = parsePositiveInt(searchParams.get("query_limit")) ?? undefined;
 
   baseState.query_definition = normalizeQueryDefinition({
@@ -147,14 +150,17 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
         : undefined,
     match: searchParams.get("match") === "any" ? "any" : "all",
     groups: [...implicitGroups, ...groups],
-    sort: sort
-      ? {
-          field: sort,
-          order: rawOrder === "asc" || rawOrder === "desc" ? rawOrder : undefined,
-        }
-      : undefined,
+    sort:
+      sort || hasExplicitSort
+        ? {
+            field: sort ?? "added_at",
+            order: rawOrder === "asc" || rawOrder === "desc" ? rawOrder : undefined,
+          }
+        : undefined,
     limit: queryLimit,
   });
+  baseState.uses_source_order =
+    (source === "library_collection" || source === "user_collection") && !hasExplicitSort;
 
   return baseState;
 }
@@ -199,6 +205,7 @@ export function buildLibraryCollectionCatalogHref(collectionId: string, title?: 
     source: "library_collection",
     collection_id: collectionId,
     title,
+    uses_source_order: true,
     query_definition: createEmptyQueryDefinition(),
   });
 }
@@ -208,6 +215,7 @@ export function buildUserCollectionCatalogHref(collectionId: string, title?: str
     source: "user_collection",
     collection_id: collectionId,
     title,
+    uses_source_order: true,
     query_definition: createEmptyQueryDefinition(),
   });
 }
@@ -316,9 +324,12 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     params.set("sort", "relevance");
     params.set("order", state.query_definition.sort.order);
   } else if (
+    !state.uses_source_order &&
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
-      (state.source === "query" && effectiveLibraryID != null))
+      (state.source === "query" && effectiveLibraryID != null) ||
+      state.source === "library_collection" ||
+      state.source === "user_collection")
   ) {
     params.set("sort", state.query_definition.sort.field);
     if (state.query_definition.sort.order) {

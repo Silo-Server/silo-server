@@ -35,6 +35,7 @@ export interface CatalogParams {
   collection_id?: string;
   person_id?: string;
   type?: string;
+  uses_source_order?: boolean;
   query_fingerprint?: string;
   include_technical?: boolean;
   include_total?: boolean;
