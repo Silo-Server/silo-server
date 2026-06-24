@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -65,15 +66,14 @@ func (h *UserCollectionImportHandler) HandleListTemplates(w http.ResponseWriter,
 }
 
 type userImportSharedFields struct {
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Limit        *int   `json:"limit,omitempty"`
-	SyncSchedule string `json:"sync_schedule"`
-	IsShared     bool   `json:"is_shared"`
-	PosterURL    string `json:"poster_url"`
-	LibraryIDs   []int  `json:"library_ids,omitempty"`
-	WatchFilter  string `json:"watch_filter,omitempty"`
-	MediaFilter  string `json:"media_filter,omitempty"`
+	Title                  string          `json:"title"`
+	Description            string          `json:"description"`
+	Limit                  *int            `json:"limit,omitempty"`
+	SyncSchedule           string          `json:"sync_schedule"`
+	IsShared               bool            `json:"is_shared"`
+	PosterURL              string          `json:"poster_url"`
+	LibraryIDs             []int           `json:"library_ids,omitempty"`
+	DisplayQueryDefinition json.RawMessage `json:"display_query_definition,omitempty"`
 }
 
 type userImportMDBListRequest struct {
@@ -211,32 +211,26 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to encode source config")
 		return
 	}
-	watchFilter, ok := userstore.NormalizeCollectionWatchFilter(shared.WatchFilter)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid watch_filter")
-		return
-	}
-	mediaFilter, ok := userstore.NormalizeCollectionMediaFilter(shared.MediaFilter)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid media_filter")
+	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(shared.DisplayQueryDefinition)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
 	collection, err := store.CreateCollection(r.Context(), userstore.CreateCollectionInput{
-		CreatorProfileID: profileID,
-		Name:             strings.TrimSpace(shared.Title),
-		Description:      strings.TrimSpace(shared.Description),
-		CollectionType:   collectionType,
-		IsShared:         shared.IsShared,
-		QueryDefinition:  "{}",
-		SortConfig:       "{}",
-		SourceURL:        cfg.DisplayURL(),
-		SourceConfig:     sourceConfigJSON,
-		SyncSchedule:     schedule,
-		NextSyncAt:       usercollections.InitialNextSyncAt(schedule),
-		WatchFilter:      watchFilter,
-		MediaFilter:      mediaFilter,
-		PosterURL:        strings.TrimSpace(shared.PosterURL),
+		CreatorProfileID:       profileID,
+		Name:                   strings.TrimSpace(shared.Title),
+		Description:            strings.TrimSpace(shared.Description),
+		CollectionType:         collectionType,
+		IsShared:               shared.IsShared,
+		QueryDefinition:        "{}",
+		SortConfig:             "{}",
+		SourceURL:              cfg.DisplayURL(),
+		SourceConfig:           sourceConfigJSON,
+		SyncSchedule:           schedule,
+		NextSyncAt:             usercollections.InitialNextSyncAt(schedule),
+		DisplayQueryDefinition: displayQueryDefinition,
+		PosterURL:              strings.TrimSpace(shared.PosterURL),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create collection")

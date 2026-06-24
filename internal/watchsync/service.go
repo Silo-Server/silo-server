@@ -187,10 +187,22 @@ func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID s
 		return ManualSyncResult{}, fmt.Errorf("watch provider connection not found")
 	}
 
-	if active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID); err != nil {
-		return ManualSyncResult{}, err
-	} else if ok {
-		return ManualSyncResult{Run: active}, nil
+	for {
+		active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID)
+		if err != nil {
+			return ManualSyncResult{}, err
+		}
+		if !ok {
+			break
+		}
+		if active.StartedAt.IsZero() || s.now().Sub(active.StartedAt) <= manualSyncTimeout {
+			return ManualSyncResult{Run: active}, nil
+		}
+		active.Status = string(SyncRunStatusFailed)
+		active.Error = "watch provider sync timed out before completion"
+		if _, err := s.completeSyncRun(ctx, active); err != nil {
+			return ManualSyncResult{}, err
+		}
 	}
 
 	if latest, ok, err := s.repo.GetLatestSyncRun(ctx, conn.ID); err != nil {

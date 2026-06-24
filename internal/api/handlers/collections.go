@@ -43,8 +43,7 @@ type createCollectionRequest struct {
 	AllowedProfileIDs          []string        `json:"allowed_profile_ids"`
 	QueryDefinition            json.RawMessage `json:"query_definition"`
 	SortConfig                 json.RawMessage `json:"sort_config"`
-	WatchFilter                string          `json:"watch_filter"`
-	MediaFilter                string          `json:"media_filter"`
+	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterSourceURL            string          `json:"poster_source_url"`
 }
@@ -59,8 +58,7 @@ type updateCollectionRequest struct {
 	SourceURL                  *string                `json:"source_url"`
 	MaxItems                   *int                   `json:"max_items"`
 	LibraryIDs                 *[]int                 `json:"library_ids"`
-	WatchFilter                *string                `json:"watch_filter"`
-	MediaFilter                *string                `json:"media_filter"`
+	DisplayQueryDefinition     json.RawMessage        `json:"display_query_definition"`
 	IncludeInServerCollections *bool                  `json:"include_in_server_collections"`
 	PosterSourceURL            *string                `json:"poster_source_url"`
 	GroupID                    optionalNullableString `json:"group_id"`
@@ -90,8 +88,7 @@ type collectionResponse struct {
 	LastSyncAt                 string          `json:"last_sync_at,omitempty"`
 	LastSyncStatus             string          `json:"last_sync_status,omitempty"`
 	LastSyncMessage            string          `json:"last_sync_message,omitempty"`
-	WatchFilter                string          `json:"watch_filter"`
-	MediaFilter                string          `json:"media_filter"`
+	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty"`
 	ItemCount                  int             `json:"item_count"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterURL                  string          `json:"poster_url,omitempty"`
@@ -106,8 +103,16 @@ type collectionListResponse struct {
 }
 
 type collectionCapabilitiesResponse struct {
-	WatchFilters []string `json:"watch_filters"`
-	MediaFilters []string `json:"media_filters"`
+	// DisplayFilterFields are the catalog query fields a personal-collection
+	// display filter may use. Clients build a display_query_definition fragment
+	// from these rather than a bespoke enum.
+	DisplayFilterFields  []string                       `json:"display_filter_fields"`
+	DisplayFilterPresets collectionDisplayFilterPresets `json:"display_filter_presets"`
+}
+
+type collectionDisplayFilterPresets struct {
+	Watched []string `json:"watched"`
+	Media   []string `json:"media"`
 }
 
 type collectionGroupResponse struct {
@@ -223,8 +228,11 @@ func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http
 // HandleCapabilities exposes additive feature support for collection clients.
 func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, collectionCapabilitiesResponse{
-		WatchFilters: append([]string(nil), userstore.CollectionWatchFilterValues...),
-		MediaFilters: append([]string(nil), userstore.CollectionMediaFilterValues...),
+		DisplayFilterFields: []string{"type", "watched"},
+		DisplayFilterPresets: collectionDisplayFilterPresets{
+			Watched: []string{"all", "watched", "unwatched"},
+			Media:   []string{"all", "movie", "series"},
+		},
 	})
 }
 
@@ -267,14 +275,9 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 	}
 	queryDefinition := string(queryDefinitionJSON)
 	sortConfig := string(defaultJSON(req.SortConfig))
-	watchFilter, ok := userstore.NormalizeCollectionWatchFilter(req.WatchFilter)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid watch_filter")
-		return
-	}
-	mediaFilter, ok := userstore.NormalizeCollectionMediaFilter(req.MediaFilter)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid media_filter")
+	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 	collection, err := store.CreateCollection(r.Context(), userstore.CreateCollectionInput{
@@ -285,8 +288,7 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 		AllowedProfileIDs:          req.AllowedProfileIDs,
 		QueryDefinition:            queryDefinition,
 		SortConfig:                 sortConfig,
-		WatchFilter:                watchFilter,
-		MediaFilter:                mediaFilter,
+		DisplayQueryDefinition:     displayQueryDefinition,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	})
 	if err != nil {
@@ -338,21 +340,13 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		AllowedProfileIDs:          req.AllowedProfileIDs,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
-	if req.WatchFilter != nil {
-		watchFilter, ok := userstore.NormalizeCollectionWatchFilter(*req.WatchFilter)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid watch_filter")
+	if req.DisplayQueryDefinition != nil {
+		displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
-		input.WatchFilter = &watchFilter
-	}
-	if req.MediaFilter != nil {
-		mediaFilter, ok := userstore.NormalizeCollectionMediaFilter(*req.MediaFilter)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid media_filter")
-			return
-		}
-		input.MediaFilter = &mediaFilter
+		input.DisplayQueryDefinition = &displayQueryDefinition
 	}
 	if len(req.QueryDefinition) > 0 {
 		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true)
@@ -858,14 +852,15 @@ func toCollectionResponse(c userstore.Collection) collectionResponse {
 		SourceURL:                  c.SourceURL,
 		LastSyncStatus:             c.LastSyncStatus,
 		LastSyncMessage:            c.LastSyncMessage,
-		WatchFilter:                firstNonEmptyCollection(c.WatchFilter, userstore.CollectionWatchFilterAll),
-		MediaFilter:                firstNonEmptyCollection(c.MediaFilter, userstore.CollectionMediaFilterAll),
 		ItemCount:                  c.ItemCount,
 		IncludeInServerCollections: c.IncludeInServerCollections,
 		PosterURL:                  c.PosterURL,
 		PosterThumbhash:            c.PosterThumbhash,
 		CreatedAt:                  c.CreatedAt,
 		UpdatedAt:                  c.UpdatedAt,
+	}
+	if strings.TrimSpace(c.DisplayQueryDefinition) != "" {
+		resp.DisplayQueryDefinition = json.RawMessage(c.DisplayQueryDefinition)
 	}
 	if c.SourceConfig != "" && c.SourceConfig != "{}" {
 		resp.SourceConfig = json.RawMessage(c.SourceConfig)

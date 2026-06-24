@@ -202,9 +202,9 @@ func TestFetchProgressMapsPlaybackRows(t *testing.T) {
 				"tv_shows":{"playback":"2026-05-04T12:05:00Z"},
 				"anime":{"playback":"2026-05-04T12:10:00Z"}
 			}`))
-		case "/sync/playback/movie":
+		case "/sync/playback/movies":
 			_, _ = w.Write([]byte(`[{"id":123,"type":"movie","progress":45.5,"paused_at":"2026-05-04T12:00:00Z","movie":{"title":"Inception","year":2010,"ids":{"imdb":"tt1375666","tmdb":27205}}}]`))
-		case "/sync/playback/episode":
+		case "/sync/playback/episodes":
 			_, _ = w.Write([]byte(`[{"id":124,"type":"episode","progress":12.5,"paused_at":"2026-05-04T12:02:00Z","show":{"title":"Breaking Bad","year":2008,"ids":{"tvdb":81189}},"episode":{"title":"Pilot","season":1,"number":1,"tvdb_season":2,"tvdb_number":4}}]`))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.RequestURI())
@@ -227,7 +227,7 @@ func TestFetchProgressMapsPlaybackRows(t *testing.T) {
 		rows[1].SeasonNumber != 2 || rows[1].EpisodeNumber != 4 {
 		t.Fatalf("episode progress row = %+v", rows[1])
 	}
-	if seen["/sync/playback/movie"] != 1 || seen["/sync/playback/episode"] != 1 {
+	if seen["/sync/playback/movies"] != 1 || seen["/sync/playback/episodes"] != 1 {
 		t.Fatalf("typed playback endpoints were not fetched: %+v", seen)
 	}
 }
@@ -314,6 +314,85 @@ func TestExportHistorySendsSimklPayload(t *testing.T) {
 	}
 }
 
+func TestExportHistoryMapsSimklNotFoundItems(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/sync/history" {
+			t.Fatalf("path = %q, want /sync/history", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"not_found": {
+				"movies": [{
+					"title": "Missing Movie",
+					"year": 2026,
+					"watched_at": "2026-05-04T12:00:00Z",
+					"ids": {"imdb": "tt0000001"}
+				}],
+				"shows": [{
+					"title": "Missing Show",
+					"year": 2024,
+					"ids": {"tvdb": "12345"},
+					"seasons": [{
+						"number": 2,
+						"episodes": [{
+							"number": 3,
+							"watched_at": "2026-05-04T13:00:00Z",
+							"ids": {"tvdb": "67890"}
+						}]
+					}]
+				}],
+				"episodes": []
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	provider := NewProvider(server.Client(), server.URL)
+	result, err := provider.ExportHistory(context.Background(), watchsync.ServerConfig{
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+	}, watchsync.Connection{AccessToken: "token"}, []watchsync.LocalPlay{
+		{
+			HistoryID: "movie-ok",
+			Kind:      historyimport.KindMovie,
+			Title:     "Known Movie",
+			Year:      2010,
+			IMDbID:    "tt1375666",
+			WatchedAt: time.Date(2026, 5, 4, 11, 0, 0, 0, time.UTC),
+		},
+		{
+			HistoryID: "movie-missing",
+			Kind:      historyimport.KindMovie,
+			Title:     "Missing Movie",
+			Year:      2026,
+			IMDbID:    "tt0000001",
+			WatchedAt: time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			HistoryID:     "episode-missing",
+			Kind:          historyimport.KindEpisode,
+			SeriesTitle:   "Missing Show",
+			SeriesYear:    2024,
+			SeriesTVDBID:  "12345",
+			SeasonNumber:  2,
+			EpisodeNumber: 3,
+			TVDBID:        "67890",
+			WatchedAt:     time.Date(2026, 5, 4, 13, 0, 0, 0, time.UTC),
+		},
+	})
+	if err != nil {
+		t.Fatalf("ExportHistory: %v", err)
+	}
+	if !containsString(result.Sent, "movie-ok") || len(result.Sent) != 1 {
+		t.Fatalf("sent = %#v, want only movie-ok", result.Sent)
+	}
+	if !containsString(result.NotFound, "movie-missing") ||
+		!containsString(result.NotFound, "episode-missing") ||
+		len(result.NotFound) != 2 {
+		t.Fatalf("not found = %#v, want missing movie and episode", result.NotFound)
+	}
+}
+
 func TestStopTreatsCompletedConflictAsSuccess(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusConflict)
@@ -334,4 +413,13 @@ func TestStopTreatsCompletedConflictAsSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }

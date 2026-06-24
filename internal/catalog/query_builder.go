@@ -1116,24 +1116,80 @@ func (qb *QueryBuilder) buildReleaseDateClause(rule QueryRule) (string, error) {
 	}
 }
 
+// userStateCompletionClause emits a boolean predicate that is TRUE when the
+// current row is "played/read" for the active profile, matching the played
+// state surfaced by item user-data (internal/api/handlers/user_state.go). The
+// completion source is selected by item kind:
+//
+//   - movie / episode / audiobook / video leaf -> watch progress or completed
+//     history,
+//   - series / season -> every available child episode completed (rollup),
+//   - ebook -> reader progress at/above the finished threshold.
+//
+// For a query scoped to a single kind the matching branch is emitted directly.
+// For unscoped or "video" queries rows can mix kinds, so the kind is taken from
+// mi.type at run time via a CASE; this is what keeps the catalog `watched`
+// verdict in agreement with item user-data for mixed-media collections (notably
+// ebooks, which would otherwise be classified against the video source).
+//
+// Exactly one (user_id, profile_id) pair is bound regardless of branch: every
+// helper references the same two placeholders via base, so arg accounting stays
+// a constant +2.
 func (qb *QueryBuilder) userStateCompletionClause() string {
-	if qb.mediaScope == "ebook" {
-		return qb.ebookUserStateCompletionClause()
-	}
 	qb.args = append(qb.args, qb.userID, qb.profileID)
-	clause := fmt.Sprintf(`(
+	base := qb.argIdx
+	qb.argIdx += 2
+	rowID := qb.alias + ".content_id"
+
+	switch qb.mediaScope {
+	case "ebook":
+		return qb.ebookLeafCompletionSQL(rowID, base)
+	case "series":
+		return qb.episodeRollupCompletionSQL("series_id", qb.alias, base)
+	// No "season" case: season is not a valid media_scope, so a season-scoped
+	// query never reaches here. Season rows are encountered only under unscoped
+	// queries and are rolled up by the mi.type = 'season' branch below.
+	case "movie", "episode", "audiobook", "manga":
+		// Leaf kinds complete via watch progress / completed history. Manga has
+		// no dedicated read-state source yet; it stays on the leaf path until
+		// manga catalog filtering is finalized rather than getting a
+		// collection-only interpretation.
+		return qb.videoLeafCompletionSQL(rowID, base)
+	default:
+		return fmt.Sprintf(`(CASE
+		WHEN %[1]s.type = 'series' THEN %[2]s
+		WHEN %[1]s.type = 'season' THEN %[3]s
+		WHEN %[1]s.type = 'ebook' THEN %[4]s
+		ELSE %[5]s
+	END)`,
+			qb.alias,
+			qb.episodeRollupCompletionSQL("series_id", qb.alias, base),
+			qb.episodeRollupCompletionSQL("season_id", qb.alias, base),
+			qb.ebookLeafCompletionSQL(rowID, base),
+			qb.videoLeafCompletionSQL(rowID, base),
+		)
+	}
+}
+
+// videoLeafCompletionSQL returns the completed-progress-or-history predicate for
+// a single leaf row. contentExpr names the row's content id (e.g.
+// "mi.content_id" at the top level, or "episodes.content_id" inside a rollup).
+// It references the shared user/profile placeholders at base and base+1 and does
+// not append args or advance argIdx.
+func (qb *QueryBuilder) videoLeafCompletionSQL(contentExpr string, base int) string {
+	return fmt.Sprintf(`(
 		EXISTS (
 			SELECT 1
 			FROM user_watch_progress uwp
-			WHERE uwp.user_id = $%d
-			  AND uwp.profile_id = $%d
-			  AND uwp.media_item_id = %s.content_id
+			WHERE uwp.user_id = $%[1]d
+			  AND uwp.profile_id = $%[2]d
+			  AND uwp.media_item_id = %[3]s
 			  AND uwp.completed = TRUE
 			  AND NOT EXISTS (
 				SELECT 1
 				FROM user_history_hidden_items hhi
-				WHERE hhi.user_id = $%d
-				  AND hhi.profile_id = $%d
+				WHERE hhi.user_id = $%[1]d
+				  AND hhi.profile_id = $%[2]d
 				  AND hhi.media_item_id = uwp.media_item_id
 				  AND uwp.updated_at <= hhi.hidden_before
 			  )
@@ -1141,55 +1197,74 @@ func (qb *QueryBuilder) userStateCompletionClause() string {
 		OR EXISTS (
 			SELECT 1
 			FROM user_watch_history uwh
-			WHERE uwh.user_id = $%d
-			  AND uwh.profile_id = $%d
-			  AND uwh.media_item_id = %s.content_id
+			WHERE uwh.user_id = $%[1]d
+			  AND uwh.profile_id = $%[2]d
+			  AND uwh.media_item_id = %[3]s
 			  AND uwh.completed = TRUE
 			  AND NOT EXISTS (
 				SELECT 1
 				FROM user_history_hidden_items hhi
-				WHERE hhi.user_id = $%d
-				  AND hhi.profile_id = $%d
+				WHERE hhi.user_id = $%[1]d
+				  AND hhi.profile_id = $%[2]d
 				  AND hhi.media_item_id = uwh.media_item_id
 				  AND uwh.watched_at <= hhi.hidden_before
 			  )
 		)
-	)`,
-		qb.argIdx,
-		qb.argIdx+1,
-		qb.alias,
-		qb.argIdx,
-		qb.argIdx+1,
-		qb.argIdx,
-		qb.argIdx+1,
-		qb.alias,
-		qb.argIdx,
-		qb.argIdx+1,
-	)
-	qb.argIdx += 2
-	return clause
+	)`, base, base+1, contentExpr)
 }
 
-func (qb *QueryBuilder) ebookUserStateCompletionClause() string {
-	qb.args = append(qb.args, qb.userID, qb.profileID)
-	clause := fmt.Sprintf(`EXISTS (
+// ebookLeafCompletionSQL returns the reader-progress-finished predicate for a
+// single ebook row, with the same hidden-history guard as the video leaf.
+func (qb *QueryBuilder) ebookLeafCompletionSQL(contentExpr string, base int) string {
+	return fmt.Sprintf(`EXISTS (
 		SELECT 1
 		FROM ebook_reader_progress erp
-		WHERE erp.user_id = $%d
-		  AND erp.profile_id = $%d
-		  AND erp.content_id = %s.content_id
-		  AND erp.progress >= %s
+		WHERE erp.user_id = $%[1]d
+		  AND erp.profile_id = $%[2]d
+		  AND erp.content_id = %[3]s
+		  AND erp.progress >= %[4]s
 		  AND NOT EXISTS (
 			SELECT 1
 			FROM user_history_hidden_items hhi
-			WHERE hhi.user_id = $%d
-			  AND hhi.profile_id = $%d
+			WHERE hhi.user_id = $%[1]d
+			  AND hhi.profile_id = $%[2]d
 			  AND hhi.media_item_id = erp.content_id
 			  AND erp.updated_at <= hhi.hidden_before
 		  )
-	)`, qb.argIdx, qb.argIdx+1, qb.alias, EbookFinishedProgressThresholdSQL, qb.argIdx, qb.argIdx+1)
-	qb.argIdx += 2
-	return clause
+	)`, base, base+1, contentExpr, EbookFinishedProgressThresholdSQL)
+}
+
+// episodeRollupCompletionSQL returns the "every available child episode is
+// completed" predicate used for series and season rows. linkColumn is the
+// episodes column linking to the parent ("series_id" or "season_id") and alias
+// is the row alias holding the parent content id.
+//
+// The child-episode set MUST match the episode repository's listing
+// (ListBySeriesIDs / ListBySeasonIDs) so this verdict agrees with item
+// user-data. That set is "episodes with at least one library link", expressed by
+// episodeAvailabilityPredicate (internal/catalog/episode_repo.go) — embedded
+// verbatim here. If that predicate changes, this rollup must change with it.
+//
+// A row is complete only when at least one available child exists and no
+// available child is incomplete, matching allEpisodesCompleted's false-on-empty
+// behavior.
+func (qb *QueryBuilder) episodeRollupCompletionSQL(linkColumn, alias string, base int) string {
+	leaf := qb.videoLeafCompletionSQL("episodes.content_id", base)
+	return fmt.Sprintf(`(
+		EXISTS (
+			SELECT 1
+			FROM episodes
+			WHERE episodes.%[1]s = %[2]s.content_id
+			  AND %[3]s
+		)
+		AND NOT EXISTS (
+			SELECT 1
+			FROM episodes
+			WHERE episodes.%[1]s = %[2]s.content_id
+			  AND %[3]s
+			  AND NOT %[4]s
+		)
+	)`, linkColumn, alias, episodeAvailabilityPredicate, leaf)
 }
 
 // lastWatchedExpr returns the SQL expression the executor binds to the

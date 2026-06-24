@@ -1242,6 +1242,9 @@ export interface EpisodesResponse {
 export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
 
 export type UserCollectionSyncStatus = "" | "running" | "success" | "failed" | "warning";
+// UI-only presets for the two display-filter dropdowns. They no longer map to
+// dedicated API fields — the server stores the equivalent rules in
+// `display_query_definition` (a filter-only QueryDefinition fragment).
 export type UserCollectionWatchFilter = "all" | "unwatched" | "watched";
 export type UserCollectionMediaFilter = "all" | "movie" | "series";
 export type GroupSortMode = "manual" | "name_asc" | "name_desc" | "recent" | "most_items";
@@ -1267,8 +1270,8 @@ export interface Collection {
   last_sync_at?: string;
   last_sync_status?: UserCollectionSyncStatus;
   last_sync_message?: string;
-  watch_filter: UserCollectionWatchFilter;
-  media_filter: UserCollectionMediaFilter;
+  /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */
+  display_query_definition?: QueryDefinition;
   item_count?: number;
   include_in_server_collections?: boolean;
   poster_url?: string;
@@ -1311,8 +1314,11 @@ export interface CollectionsListResponse {
 }
 
 export interface CollectionCapabilitiesResponse {
-  watch_filters: UserCollectionWatchFilter[];
-  media_filters: UserCollectionMediaFilter[];
+  display_filter_fields: string[];
+  display_filter_presets: {
+    watched: UserCollectionWatchFilter[];
+    media: UserCollectionMediaFilter[];
+  };
 }
 
 export interface QueryRule {
@@ -1400,8 +1406,8 @@ export interface CreateCollectionRequest {
   allowed_profile_ids?: string[];
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
-  watch_filter?: UserCollectionWatchFilter;
-  media_filter?: UserCollectionMediaFilter;
+  /** Filter-only QueryDefinition fragment; omit for no display filter. */
+  display_query_definition?: QueryDefinition;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
 }
@@ -1417,8 +1423,8 @@ export interface UpdateCollectionRequest {
   /** 0 = unlimited; otherwise a positive cap. */
   max_items?: number;
   library_ids?: number[];
-  watch_filter?: UserCollectionWatchFilter;
-  media_filter?: UserCollectionMediaFilter;
+  /** Filter-only QueryDefinition fragment; omit for no display filter. */
+  display_query_definition?: QueryDefinition;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
   group_id?: string | null;
@@ -1650,8 +1656,8 @@ export interface UserImportSharedFields {
   sync_schedule?: UserCollectionSyncSchedule;
   is_shared?: boolean;
   poster_url?: string;
-  watch_filter?: UserCollectionWatchFilter;
-  media_filter?: UserCollectionMediaFilter;
+  /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */
+  display_query_definition?: QueryDefinition;
   /** Restrict resolution to these libraries; omitted/empty = entire catalog the user can see. */
   library_ids?: number[];
 }

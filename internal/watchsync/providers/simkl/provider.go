@@ -218,7 +218,7 @@ func (p *Provider) FetchProgressBatch(ctx context.Context, cfg watchsync.ServerC
 
 	moviePrevious := conn.SyncCursors[simklCursorProgressMovies]
 	if !shouldSkipSimklBucket(moviePrevious, activities.Movies.Playback) {
-		payload, err := p.fetchPlayback(ctx, cfg, conn, "/sync/playback/movie", moviePrevious)
+		payload, err := p.fetchPlayback(ctx, cfg, conn, "/sync/playback/movies", moviePrevious)
 		if err != nil {
 			return watchsync.ProgressImportBatch{}, err
 		}
@@ -239,7 +239,7 @@ func (p *Provider) FetchProgressBatch(ctx context.Context, cfg watchsync.ServerC
 		if !(showsChanged && showsPrevious == "") && !(animeChanged && animePrevious == "") {
 			dateFrom = oldestCursor(showsPrevious, animePrevious)
 		}
-		payload, err := p.fetchPlayback(ctx, cfg, conn, "/sync/playback/episode", dateFrom)
+		payload, err := p.fetchPlayback(ctx, cfg, conn, "/sync/playback/episodes", dateFrom)
 		if err != nil {
 			return watchsync.ProgressImportBatch{}, err
 		}
@@ -334,7 +334,8 @@ func (p *Provider) fetchActivities(ctx context.Context, cfg watchsync.ServerConf
 }
 
 func (p *Provider) sendHistory(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection, plays []watchsync.LocalPlay, path string, includeWatchedAt bool) (watchsync.ExportResult, error) {
-	payload := buildHistoryPayload(plays, includeWatchedAt)
+	request := buildHistoryRequest(plays, includeWatchedAt)
+	payload := request.Payload
 	if len(payload.Movies) == 0 && len(payload.Shows) == 0 && len(payload.Episodes) == 0 {
 		return watchsync.ExportResult{}, nil
 	}
@@ -346,11 +347,23 @@ func (p *Provider) sendHistory(ctx context.Context, cfg watchsync.ServerConfig, 
 	if err := p.do(ctx, http.MethodPost, path, cfg, conn.AccessToken, &body, &response); err != nil {
 		return watchsync.ExportResult{}, err
 	}
-	if response.hasNotFound() {
-		return watchsync.ExportResult{Failed: map[string]string{"batch": "simkl reported one or more items not found"}}, fmt.Errorf("simkl history export reported not found items")
+	notFound := response.notFoundHistoryIDs(request.HistoryIDsByKey)
+	notFoundSet := make(map[string]bool, len(notFound))
+	for _, historyID := range notFound {
+		notFoundSet[historyID] = true
 	}
-	result := watchsync.ExportResult{Sent: make([]string, 0, len(plays))}
+	result := watchsync.ExportResult{
+		Sent:     make([]string, 0, len(plays)-len(notFoundSet)),
+		NotFound: make([]string, 0, len(notFoundSet)),
+	}
 	for _, play := range plays {
+		if play.HistoryID == "" {
+			continue
+		}
+		if notFoundSet[play.HistoryID] {
+			result.NotFound = append(result.NotFound, play.HistoryID)
+			continue
+		}
 		result.Sent = append(result.Sent, play.HistoryID)
 	}
 	return result, nil
@@ -558,14 +571,36 @@ type simklHistoryEpisode struct {
 
 type simklHistoryResponse struct {
 	NotFound struct {
-		Movies   []any `json:"movies"`
-		Shows    []any `json:"shows"`
-		Episodes []any `json:"episodes"`
+		Movies   []simklHistoryMovie   `json:"movies"`
+		Shows    []simklHistoryShow    `json:"shows"`
+		Episodes []simklHistoryEpisode `json:"episodes"`
 	} `json:"not_found"`
 }
 
-func (r simklHistoryResponse) hasNotFound() bool {
-	return len(r.NotFound.Movies) > 0 || len(r.NotFound.Shows) > 0 || len(r.NotFound.Episodes) > 0
+func (r simklHistoryResponse) notFoundHistoryIDs(historyIDsByKey map[string][]string) []string {
+	seen := make(map[string]bool)
+	var historyIDs []string
+	addByKeys := func(keys []string) {
+		for _, key := range keys {
+			for _, historyID := range historyIDsByKey[key] {
+				if historyID == "" || seen[historyID] {
+					continue
+				}
+				seen[historyID] = true
+				historyIDs = append(historyIDs, historyID)
+			}
+		}
+	}
+	for _, movie := range r.NotFound.Movies {
+		addByKeys(historyMovieMatchKeys(movie))
+	}
+	for _, show := range r.NotFound.Shows {
+		addByKeys(historyShowMatchKeys(show))
+	}
+	for _, episode := range r.NotFound.Episodes {
+		addByKeys(historyStandaloneEpisodeMatchKeys(episode))
+	}
+	return historyIDs
 }
 
 func (p *Provider) addRemovedListWarning(
@@ -804,8 +839,15 @@ func oldestCursor(values ...string) string {
 	return oldest
 }
 
-func buildHistoryPayload(plays []watchsync.LocalPlay, includeWatchedAt bool) simklHistoryPayload {
-	var payload simklHistoryPayload
+type simklHistoryRequest struct {
+	Payload         simklHistoryPayload
+	HistoryIDsByKey map[string][]string
+}
+
+func buildHistoryRequest(plays []watchsync.LocalPlay, includeWatchedAt bool) simklHistoryRequest {
+	request := simklHistoryRequest{
+		HistoryIDsByKey: make(map[string][]string),
+	}
 	for _, play := range plays {
 		watchedAt := ""
 		if includeWatchedAt && !play.WatchedAt.IsZero() {
@@ -813,12 +855,14 @@ func buildHistoryPayload(plays []watchsync.LocalPlay, includeWatchedAt bool) sim
 		}
 		switch play.Kind {
 		case historyimport.KindMovie:
-			payload.Movies = append(payload.Movies, simklHistoryMovie{
+			movie := simklHistoryMovie{
 				Title:     play.Title,
 				Year:      play.Year,
 				WatchedAt: watchedAt,
 				IDs:       idsFromLocal(play.IMDbID, play.TMDBID, play.TVDBID),
-			})
+			}
+			request.Payload.Movies = append(request.Payload.Movies, movie)
+			request.addHistoryID(play.HistoryID, historyMovieMatchKeys(movie))
 		case historyimport.KindEpisode:
 			show := simklHistoryShow{
 				Title: play.SeriesTitle,
@@ -833,10 +877,129 @@ func buildHistoryPayload(plays []watchsync.LocalPlay, includeWatchedAt bool) sim
 					}},
 				}},
 			}
-			payload.Shows = append(payload.Shows, show)
+			request.Payload.Shows = append(request.Payload.Shows, show)
+			request.addHistoryID(play.HistoryID, historyShowRequestMatchKeys(show))
 		}
 	}
-	return payload
+	return request
+}
+
+func buildHistoryPayload(plays []watchsync.LocalPlay, includeWatchedAt bool) simklHistoryPayload {
+	return buildHistoryRequest(plays, includeWatchedAt).Payload
+}
+
+func (r simklHistoryRequest) addHistoryID(historyID string, keys []string) {
+	if historyID == "" {
+		return
+	}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		r.HistoryIDsByKey[key] = append(r.HistoryIDsByKey[key], historyID)
+	}
+}
+
+func historyMovieMatchKeys(movie simklHistoryMovie) []string {
+	var keys []string
+	watchedAt := strings.TrimSpace(movie.WatchedAt)
+	for _, idKey := range historyIDMatchKeys(movie.IDs) {
+		keys = appendHistoryWatchedVariants(keys, "movie:id:"+idKey, watchedAt)
+	}
+	if title := normalizedHistoryTitle(movie.Title); title != "" && movie.Year > 0 {
+		keys = appendHistoryWatchedVariants(keys, fmt.Sprintf("movie:title:%s:%d", title, movie.Year), watchedAt)
+	}
+	return keys
+}
+
+func historyShowMatchKeys(show simklHistoryShow) []string {
+	if len(show.Seasons) == 0 {
+		return historyShowOnlyMatchKeys(show)
+	}
+	return historyShowEpisodeMatchKeys(show)
+}
+
+func historyShowRequestMatchKeys(show simklHistoryShow) []string {
+	keys := historyShowOnlyMatchKeys(show)
+	return append(keys, historyShowEpisodeMatchKeys(show)...)
+}
+
+func historyShowOnlyMatchKeys(show simklHistoryShow) []string {
+	var keys []string
+	for _, showKey := range historyShowIdentityKeys(show) {
+		keys = append(keys, "show:"+showKey)
+	}
+	return keys
+}
+
+func historyShowEpisodeMatchKeys(show simklHistoryShow) []string {
+	var keys []string
+	showKeys := historyShowIdentityKeys(show)
+	for _, season := range show.Seasons {
+		for _, episode := range season.Episodes {
+			for _, showKey := range showKeys {
+				keys = append(keys, historyShowEpisodeIdentityKeys(showKey, season.Number, episode)...)
+			}
+			keys = append(keys, historyStandaloneEpisodeMatchKeys(episode)...)
+		}
+	}
+	return keys
+}
+
+func historyShowIdentityKeys(show simklHistoryShow) []string {
+	var keys []string
+	for _, idKey := range historyIDMatchKeys(show.IDs) {
+		keys = append(keys, "id:"+idKey)
+	}
+	if title := normalizedHistoryTitle(show.Title); title != "" && show.Year > 0 {
+		keys = append(keys, fmt.Sprintf("title:%s:%d", title, show.Year))
+	}
+	return keys
+}
+
+func historyShowEpisodeIdentityKeys(showKey string, seasonNumber int, episode simklHistoryEpisode) []string {
+	base := fmt.Sprintf("episode:show:%s:s%d:e%d", showKey, seasonNumber, episode.Number)
+	return appendHistoryWatchedVariants(nil, base, strings.TrimSpace(episode.WatchedAt))
+}
+
+func historyStandaloneEpisodeMatchKeys(episode simklHistoryEpisode) []string {
+	var keys []string
+	watchedAt := strings.TrimSpace(episode.WatchedAt)
+	for _, idKey := range historyIDMatchKeys(episode.IDs) {
+		keys = appendHistoryWatchedVariants(keys, "episode:id:"+idKey, watchedAt)
+	}
+	return keys
+}
+
+func appendHistoryWatchedVariants(keys []string, base string, watchedAt string) []string {
+	if base == "" {
+		return keys
+	}
+	if watchedAt != "" {
+		keys = append(keys, base+":watched:"+watchedAt)
+	}
+	return append(keys, base)
+}
+
+func historyIDMatchKeys(ids simklIDs) []string {
+	keys := make([]string, 0, 4)
+	if ids.IMDb != "" {
+		keys = append(keys, "imdb:"+ids.IMDb)
+	}
+	if ids.TMDB > 0 {
+		keys = append(keys, "tmdb:"+strconv.Itoa(ids.TMDB))
+	}
+	if ids.TVDB > 0 {
+		keys = append(keys, "tvdb:"+strconv.Itoa(ids.TVDB))
+	}
+	if ids.Simkl > 0 {
+		keys = append(keys, "simkl:"+strconv.Itoa(ids.Simkl))
+	}
+	return keys
+}
+
+func normalizedHistoryTitle(title string) string {
+	return strings.Join(strings.Fields(strings.ToLower(title)), " ")
 }
 
 func buildScrobblePayload(event watchsync.ScrobbleEvent) map[string]any {

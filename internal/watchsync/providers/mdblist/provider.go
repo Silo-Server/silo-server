@@ -218,7 +218,7 @@ func progressFromPlayback(providerKey string, item mdblistPlaybackItem) (watchsy
 			SeriesTVDBID:    intString(item.Show.IDs.TVDB),
 			SeasonNumber:    item.Episode.Season,
 			EpisodeNumber:   item.Episode.Number,
-			ProgressPercent: item.Progress,
+			ProgressPercent: float64(item.Progress),
 			PausedAt:        pausedAt,
 		}, true
 	}
@@ -235,7 +235,7 @@ func progressFromPlayback(providerKey string, item mdblistPlaybackItem) (watchsy
 		IMDbID:          item.Movie.IDs.IMDb,
 		TMDBID:          intString(item.Movie.IDs.TMDB),
 		TVDBID:          intString(item.Movie.IDs.TVDB),
-		ProgressPercent: item.Progress,
+		ProgressPercent: float64(item.Progress),
 		PausedAt:        pausedAt,
 	}, true
 }
@@ -565,13 +565,43 @@ type mdblistWatchedResponse struct {
 }
 
 type mdblistPlaybackItem struct {
-	Progress float64         `json:"progress"`
+	Progress mdblistProgress `json:"progress"`
 	PausedAt time.Time       `json:"paused_at"`
 	Type     string          `json:"type"`
 	Action   string          `json:"action"`
 	Movie    mdblistMovie    `json:"movie"`
 	Show     mdblistShow     `json:"show"`
 	Episode  *mdblistEpisode `json:"episode"`
+}
+
+type mdblistProgress float64
+
+func (p *mdblistProgress) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*p = 0
+		return nil
+	}
+	var value float64
+	if err := json.Unmarshal(data, &value); err == nil {
+		*p = mdblistProgress(value)
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err != nil {
+		return errors.New("mdblist progress must be a number or numeric string")
+	}
+	text = strings.TrimSpace(strings.TrimSuffix(text, "%"))
+	if text == "" {
+		*p = 0
+		return nil
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return fmt.Errorf("parse mdblist progress: %w", err)
+	}
+	*p = mdblistProgress(value)
+	return nil
 }
 
 // mdblistPlaybackResponse accepts both the live API shape (a flat array of

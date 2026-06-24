@@ -200,12 +200,12 @@ func (r *CatalogResolver) Resolve(ctx context.Context, req CatalogRequest, acces
 		}
 		return r.resolveSectionSource(ctx, req, access)
 	case CatalogSourceLibraryCollection:
-		if err := validateCatalogExactCollectionRequest(req); err != nil {
+		if err := validateCatalogCollectionRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		return r.resolveLibraryCollectionSource(ctx, req, access)
 	case CatalogSourceUserCollection:
-		if err := validateCatalogExactCollectionRequest(req); err != nil {
+		if err := validateCatalogCollectionRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
 			return nil, err
 		}
 		return r.resolveUserCollectionSource(ctx, req, access)
@@ -467,6 +467,13 @@ func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context
 		def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
 	}
 	def = ApplySmartCollectionItemLimit(def)
+	if catalogRequestHasOverlay(req) {
+		items, err := r.resolveCollectionQueryBaseItems(ctx, def, stripCatalogUserScope(access))
+		if err != nil {
+			return nil, err
+		}
+		return r.resolveExactOrderedMediaItems(ctx, items, req, access)
+	}
 	return r.resolveQuerySource(ctx, CatalogRequest{
 		Source:    CatalogSourceQuery,
 		Query:     def,
@@ -493,6 +500,17 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 			return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
 		}
 		def = ApplySmartCollectionItemLimit(def)
+		if catalogRequestHasOverlay(req) {
+			items, err := r.resolveCollectionQueryBaseItems(ctx, def, access)
+			if err != nil {
+				return nil, err
+			}
+			items, err = FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, items, collection.DisplayQueryDefinition, access)
+			if err != nil {
+				return nil, err
+			}
+			return r.resolveExactOrderedMediaItems(ctx, items, req, access)
+		}
 		return r.resolveQuerySource(ctx, CatalogRequest{
 			Source:    CatalogSourceQuery,
 			Query:     def,
@@ -510,16 +528,11 @@ func (r *CatalogResolver) resolveUserCollectionSource(ctx context.Context, req C
 	for _, item := range items {
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
-	mediaItems, err := r.fetchAccessibleItemsByID(ctx, contentIDs, req, access)
+	mediaItems, err := r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
 	if err != nil {
 		return nil, err
 	}
-	mediaItems, err = FilterUserCollectionDisplayItems(ctx, store, mediaItems, UserCollectionDisplayFilterOptions{
-		ProfileID:     access.ProfileID,
-		WatchFilter:   collection.WatchFilter,
-		MediaFilter:   collection.MediaFilter,
-		EpisodeLister: NewEpisodeRepository(r.itemRepo.pool),
-	})
+	mediaItems, err = FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, mediaItems, collection.DisplayQueryDefinition, access)
 	if err != nil {
 		return nil, err
 	}
@@ -561,7 +574,11 @@ func (r *CatalogResolver) resolvePersonSource(ctx context.Context, req CatalogRe
 }
 
 func (r *CatalogResolver) resolveExactOrderedItems(ctx context.Context, contentIDs []string, req CatalogRequest, access AccessFilter) (*CatalogResult, error) {
-	items, err := r.fetchAccessibleItemsByID(ctx, contentIDs, req, access)
+	fetchReq := req
+	if req.Source == CatalogSourceLibraryCollection || req.Source == CatalogSourceUserCollection {
+		fetchReq = catalogBaseCollectionRequest(req)
+	}
+	items, err := r.fetchAccessibleItemsByID(ctx, contentIDs, fetchReq, access)
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +589,11 @@ func (r *CatalogResolver) resolveExactOrderedMediaItems(ctx context.Context, ite
 	items = filterCatalogSearchItems(items, req.SearchQuery)
 	items = filterCatalogNamePrefix(items, req.NamePrefix)
 	if req.UseSourceOrder {
-		items = filterCatalogItems(items, req.Query)
+		var err error
+		items, err = r.filterExactSourceItemsByQuery(ctx, items, req.Query, access)
+		if err != nil {
+			return nil, err
+		}
 		total := len(items)
 		paged := paginateCatalogItems(items, req.Offset, req.Limit)
 		return &CatalogResult{
@@ -583,6 +604,67 @@ func (r *CatalogResolver) resolveExactOrderedMediaItems(ctx context.Context, ite
 		}, nil
 	}
 	return r.resolveCandidateItemsWithQuery(ctx, req, access, items, false)
+}
+
+func (r *CatalogResolver) resolveCollectionQueryBaseItems(ctx context.Context, def QueryDefinition, access AccessFilter) ([]*models.MediaItem, error) {
+	limit := DefaultSmartCollectionItemLimit
+	if def.Limit != nil && *def.Limit > 0 {
+		limit = *def.Limit
+	}
+	executor := r.queryExecutorForScope(def.MediaScope, nil)
+	items, _, err := executor.Preview(ctx, def, access, limit)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *CatalogResolver) filterExactSourceItemsByQuery(ctx context.Context, items []*models.MediaItem, def QueryDefinition, access AccessFilter) ([]*models.MediaItem, error) {
+	if !catalogQueryHasFilter(def) || len(items) == 0 {
+		return items, nil
+	}
+
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil && strings.TrimSpace(item.ContentID) != "" {
+			ids = append(ids, item.ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return []*models.MediaItem{}, nil
+	}
+
+	filterDef := def
+	filterDef.Sort = QuerySort{}
+	filterDef.Limit = nil
+	queryAccess := access
+	queryAccess.AllowedContentIDs = ids
+	executor := r.queryExecutorForScope(filterDef.MediaScope, nil)
+	matched, _, err := executor.Preview(ctx, filterDef, queryAccess, len(ids))
+	if err != nil {
+		return nil, err
+	}
+
+	matchedIDs := make(map[string]struct{}, len(matched))
+	for _, item := range matched {
+		if item != nil {
+			matchedIDs[item.ContentID] = struct{}{}
+		}
+	}
+
+	filtered := make([]*models.MediaItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if _, ok := matchedIDs[item.ContentID]; ok {
+			filtered = append(filtered, item)
+		}
+	}
+	if def.Limit != nil && *def.Limit > 0 && len(filtered) > *def.Limit {
+		filtered = filtered[:*def.Limit]
+	}
+	return filtered, nil
 }
 
 func (r *CatalogResolver) resolveCandidateItemsWithQuery(
@@ -714,6 +796,19 @@ func (r *CatalogResolver) ListFiltersWithOptions(ctx context.Context, req Catalo
 			return nil, err
 		}
 		filters.PersonID = req.PersonID
+	case CatalogSourceLibraryCollection, CatalogSourceUserCollection:
+		if err := validateCatalogCollectionRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
+			return nil, err
+		}
+		contentIDs, err := r.loadCollectionSourceIDs(ctx, req, access)
+		if err != nil {
+			return nil, err
+		}
+		filters, earlyEmpty, err = catalogBrowseFilters(req, access)
+		if err != nil {
+			return nil, err
+		}
+		filters.ContentIDs = contentIDs
 	default:
 		return nil, fmt.Errorf("%w: source %q is not supported", ErrInvalidCatalogRequest, req.Source)
 	}
@@ -805,6 +900,19 @@ func (r *CatalogResolver) SearchFacet(ctx context.Context, req CatalogRequest, a
 			return nil, err
 		}
 		filters.PersonID = req.PersonID
+	case CatalogSourceLibraryCollection, CatalogSourceUserCollection:
+		if err := validateCatalogCollectionRequest(req, strings.TrimSpace(access.ProfileID) != ""); err != nil {
+			return nil, err
+		}
+		contentIDs, err := r.loadCollectionSourceIDs(ctx, req, access)
+		if err != nil {
+			return nil, err
+		}
+		filters, earlyEmpty, err = catalogBrowseFilters(req, access)
+		if err != nil {
+			return nil, err
+		}
+		filters.ContentIDs = contentIDs
 	default:
 		return nil, fmt.Errorf("%w: source %q is not supported", ErrInvalidCatalogRequest, req.Source)
 	}
@@ -1102,6 +1210,27 @@ func validateCatalogExactCollectionRequest(req CatalogRequest) error {
 		return fmt.Errorf("%w: collection_id is required", ErrInvalidCatalogRequest)
 	}
 	return nil
+}
+
+func validateCatalogCollectionRequest(req CatalogRequest, allowPersonalizedSorts bool) error {
+	if err := validateCatalogExactCollectionRequest(req); err != nil {
+		return err
+	}
+	return validateCatalogOverlayQuery(req.SearchQuery, req.Query, catalogPersonalRuleFields, QuerySortFieldSet(allowPersonalizedSorts), false)
+}
+
+func catalogRequestHasOverlay(req CatalogRequest) bool {
+	return strings.TrimSpace(req.SearchQuery) != "" ||
+		strings.TrimSpace(req.NamePrefix) != "" ||
+		catalogQueryHasFilter(req.Query) ||
+		strings.TrimSpace(req.Query.Sort.Field) != ""
+}
+
+func catalogQueryHasFilter(def QueryDefinition) bool {
+	return strings.TrimSpace(def.MediaScope) != "" ||
+		len(def.LibraryIDs) > 0 ||
+		len(def.Groups) > 0 ||
+		def.Limit != nil
 }
 
 func validateCatalogOverlayQuery(searchQuery string, def QueryDefinition, ruleFields, sortFields map[string]bool, allowRelevance bool) error {
@@ -1516,6 +1645,105 @@ func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store users
 	default:
 		return nil, fmt.Errorf("%w: source %q is not a personal source", ErrInvalidCatalogRequest, req.Source)
 	}
+}
+
+func (r *CatalogResolver) loadCollectionSourceIDs(ctx context.Context, req CatalogRequest, access AccessFilter) ([]string, error) {
+	items, err := r.loadCollectionSourceBaseItems(ctx, req, access)
+	if err != nil {
+		return nil, err
+	}
+	return contentIDsFromMediaItems(items), nil
+}
+
+func (r *CatalogResolver) loadCollectionSourceBaseItems(ctx context.Context, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {
+	switch req.Source {
+	case CatalogSourceLibraryCollection:
+		collectionRepo := NewLibraryCollectionRepository(r.itemRepo.pool)
+		collection, err := collectionRepo.GetByID(ctx, req.CollectionID)
+		if err != nil || collection.Visibility != "visible" {
+			return nil, ErrCatalogSourceNotFound
+		}
+		if IsLiveQueryType(collection.CollectionType) || catalogCollectionUsesLiveQuery(collection.QueryDefinition) {
+			def, err := parseCatalogCollectionQueryDefinition(collection.QueryDefinition)
+			if err != nil {
+				return nil, fmt.Errorf("%w: parsing library collection query_definition: %v", ErrInvalidCatalogRequest, err)
+			}
+			if len(collection.LibraryIDs) > 0 {
+				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, collection.LibraryIDs)
+			} else if collection.LibraryID > 0 {
+				def.LibraryIDs = intersectCatalogDefinitionLibraries(def.LibraryIDs, []int{collection.LibraryID})
+			}
+			return r.resolveCollectionQueryBaseItems(ctx, ApplySmartCollectionItemLimit(def), stripCatalogUserScope(access))
+		}
+
+		collectionItems, err := collectionRepo.ListItems(ctx, collection.ID)
+		if err != nil {
+			return nil, err
+		}
+		contentIDs := make([]string, 0, len(collectionItems))
+		for _, item := range collectionItems {
+			contentIDs = append(contentIDs, item.MediaItemID)
+		}
+		return r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
+	case CatalogSourceUserCollection:
+		store, err := r.catalogStoreForAccess(ctx, access)
+		if err != nil {
+			return nil, err
+		}
+		collection, err := store.GetCollection(ctx, req.CollectionID)
+		if err != nil || !catalogProfileCanAccessCollection(collection, access.ProfileID) {
+			return nil, ErrCatalogSourceNotFound
+		}
+		var items []*models.MediaItem
+		if IsLiveQueryType(collection.CollectionType) {
+			def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
+			if err != nil {
+				return nil, fmt.Errorf("%w: parsing user collection query_definition: %v", ErrInvalidCatalogRequest, err)
+			}
+			items, err = r.resolveCollectionQueryBaseItems(ctx, ApplySmartCollectionItemLimit(def), access)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			collectionItems, err := store.ListCollectionItems(ctx, collection.ID)
+			if err != nil {
+				return nil, err
+			}
+			contentIDs := make([]string, 0, len(collectionItems))
+			for _, item := range collectionItems {
+				contentIDs = append(contentIDs, item.MediaItemID)
+			}
+			items, err = r.fetchAccessibleItemsByID(ctx, contentIDs, catalogBaseCollectionRequest(req), access)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return FilterCollectionItemsByDisplayQuery(ctx, r.itemRepo.pool, items, collection.DisplayQueryDefinition, access)
+	default:
+		return nil, fmt.Errorf("%w: source %q is not a collection source", ErrInvalidCatalogRequest, req.Source)
+	}
+}
+
+func catalogBaseCollectionRequest(req CatalogRequest) CatalogRequest {
+	return CatalogRequest{
+		Source:         req.Source,
+		CollectionID:   req.CollectionID,
+		Limit:          req.Limit,
+		Offset:         req.Offset,
+		SkipTotal:      req.SkipTotal,
+		UseSourceOrder: true,
+	}
+}
+
+func contentIDsFromMediaItems(items []*models.MediaItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil || strings.TrimSpace(item.ContentID) == "" {
+			continue
+		}
+		ids = append(ids, item.ContentID)
+	}
+	return ids
 }
 
 func (r *CatalogResolver) fetchAccessibleItemsByID(ctx context.Context, contentIDs []string, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {

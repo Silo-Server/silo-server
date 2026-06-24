@@ -58,6 +58,8 @@ const overlaySources = new Set<CatalogSource>([
   "watchlist",
   "history",
   "person",
+  "library_collection",
+  "user_collection",
 ]);
 
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
@@ -284,7 +286,6 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     if (state.title) {
       params.set("title", state.title);
     }
-    return params;
   }
 
   if (state.collection_id) {

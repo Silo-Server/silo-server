@@ -5,6 +5,7 @@ import {
   buildUserCollectionEditorPath,
   isCollectionReadOnly,
   toCreateCollectionBody,
+  toUpdateCollectionBody,
   toUserCollectionBuilderValue,
 } from "./userCollectionsShared";
 
@@ -29,8 +30,6 @@ describe("Collections helpers", () => {
           sort_config: {},
           sort_order: 0,
           group_id: null,
-          watch_filter: "all",
-          media_filter: "all",
           created_at: "",
           updated_at: "",
         },
@@ -49,6 +48,57 @@ describe("Collections helpers", () => {
       is_shared: true,
       allowed_profile_ids: ["profile-1"],
     });
+  });
+
+  it("sends a canonical display_query_definition fragment for manual collections", () => {
+    const builder = toUserCollectionBuilderValue(null);
+    builder.title = "Unwatched Movies";
+    builder.collection_type = "manual";
+    builder.display_query_definition = {
+      match: "all",
+      groups: [
+        {
+          match: "all",
+          rules: [
+            { field: "watched", op: "is", value: false },
+            { field: "type", op: "is", value: "movie" },
+          ],
+        },
+      ],
+      // library_ids / sort are required by the QueryDefinition type but absent
+      // on the real filter-only fragment; cast keeps the test focused.
+    } as never;
+
+    const createBody = toCreateCollectionBody(builder);
+    expect(createBody.display_query_definition).toEqual({
+      match: "all",
+      groups: [
+        {
+          match: "all",
+          rules: [
+            { field: "watched", op: "is", value: false },
+            { field: "type", op: "is", value: "movie" },
+          ],
+        },
+      ],
+    });
+    expect(createBody).not.toHaveProperty("watch_filter");
+    expect(createBody).not.toHaveProperty("media_filter");
+
+    const updateBody = toUpdateCollectionBody(builder);
+    expect(updateBody.display_query_definition).toEqual(createBody.display_query_definition);
+    expect(updateBody).not.toHaveProperty("watch_filter");
+    expect(updateBody).not.toHaveProperty("media_filter");
+  });
+
+  it("omits display_query_definition for manual collections with no display filter", () => {
+    const builder = toUserCollectionBuilderValue(null);
+    builder.collection_type = "manual";
+    builder.display_query_definition = undefined;
+
+    const createBody = toCreateCollectionBody(builder);
+    expect(createBody.display_query_definition).toBeUndefined();
+    expect(createBody).not.toHaveProperty("watch_filter");
   });
 
   it("builds the create route for user collections", () => {

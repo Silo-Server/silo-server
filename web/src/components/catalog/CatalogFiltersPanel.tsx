@@ -45,10 +45,7 @@ export default function CatalogFiltersPanel({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"guided" | "advanced">("guided");
 
-  const isLocked =
-    state.source === "section" ||
-    state.source === "library_collection" ||
-    state.source === "user_collection";
+  const isLocked = state.source === "section";
 
   const qd = state.query_definition ?? createEmptyQueryDefinition();
   const guidedState = useMemo(() => queryDefinitionToGuidedState(qd), [qd]);
@@ -62,7 +59,7 @@ export default function CatalogFiltersPanel({
   );
   const activeCount = useMemo(() => countActiveFilters(guidedState), [guidedState]);
 
-  // Locked sources don't support filtering
+  // Section surfaces are generated blocks and do not expose an overlay editor.
   if (isLocked) {
     return (
       <section className="bg-card space-y-2 rounded-lg border p-4">

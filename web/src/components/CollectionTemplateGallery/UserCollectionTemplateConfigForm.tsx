@@ -18,6 +18,7 @@ import { useUserLibraries } from "@/hooks/queries/libraries";
 import {
   COLLECTION_MEDIA_FILTER_OPTIONS,
   COLLECTION_WATCH_FILTER_OPTIONS,
+  displayFiltersToQueryDefinition,
 } from "@/lib/collectionDisplayFilters";
 import { libraryEligibilityForMediaKind, mediaKindLabel } from "@/lib/collectionTemplates";
 import type { CollectionTemplate } from "@/lib/collectionTemplates";
@@ -131,8 +132,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           ? customPosterUrl.trim() || undefined
           : template.poster_path || undefined,
       library_ids: libraryIds.length > 0 ? libraryIds : undefined,
-      watch_filter: watchFilter,
-      media_filter: mediaFilter,
+      display_query_definition: displayFiltersToQueryDefinition(watchFilter, mediaFilter),
     };
 
     if (template.source === "tmdb" && template.tmdb) {

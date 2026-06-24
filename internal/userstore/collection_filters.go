@@ -1,59 +1,13 @@
 package userstore
 
-import (
-	"context"
-	"strings"
-)
+import "context"
 
-const (
-	CollectionWatchFilterAll       = "all"
-	CollectionWatchFilterUnwatched = "unwatched"
-	CollectionWatchFilterWatched   = "watched"
-
-	CollectionMediaFilterAll    = "all"
-	CollectionMediaFilterMovie  = "movie"
-	CollectionMediaFilterSeries = "series"
-)
-
-var CollectionWatchFilterValues = []string{
-	CollectionWatchFilterAll,
-	CollectionWatchFilterUnwatched,
-	CollectionWatchFilterWatched,
-}
-
-var CollectionMediaFilterValues = []string{
-	CollectionMediaFilterAll,
-	CollectionMediaFilterMovie,
-	CollectionMediaFilterSeries,
-}
-
+// ProgressCompletionStore exposes the per-profile progress/history reads used
+// to derive played/read state. Personal-collection display filtering no longer
+// has its own watched evaluator — it routes through the catalog query executor
+// (see internal/catalog/display_query_filter.go) — but this interface is still
+// used by the shared progress helpers.
 type ProgressCompletionStore interface {
 	ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error)
 	ListCompletedHistoryItems(ctx context.Context, query CompletedHistoryItemQuery) ([]CompletedHistoryItem, error)
-}
-
-func NormalizeCollectionWatchFilter(raw string) (string, bool) {
-	value := strings.ToLower(strings.TrimSpace(raw))
-	if value == "" {
-		return CollectionWatchFilterAll, true
-	}
-	switch value {
-	case CollectionWatchFilterAll, CollectionWatchFilterUnwatched, CollectionWatchFilterWatched:
-		return value, true
-	default:
-		return "", false
-	}
-}
-
-func NormalizeCollectionMediaFilter(raw string) (string, bool) {
-	value := strings.ToLower(strings.TrimSpace(raw))
-	if value == "" {
-		return CollectionMediaFilterAll, true
-	}
-	switch value {
-	case CollectionMediaFilterAll, CollectionMediaFilterMovie, CollectionMediaFilterSeries:
-		return value, true
-	default:
-		return "", false
-	}
 }

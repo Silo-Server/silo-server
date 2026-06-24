@@ -1368,12 +1368,10 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		orderedItems = append(orderedItems, item)
 	}
 
-	orderedItems, err = catalog.FilterUserCollectionDisplayItems(ctx, store, orderedItems, catalog.UserCollectionDisplayFilterOptions{
-		ProfileID:     profileID,
-		WatchFilter:   collection.WatchFilter,
-		MediaFilter:   collection.MediaFilter,
-		EpisodeLister: catalog.NewEpisodeRepository(f.pool),
-	})
+	displayAccess := filter
+	displayAccess.UserID = userID
+	displayAccess.ProfileID = profileID
+	orderedItems, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, f.pool, orderedItems, collection.DisplayQueryDefinition, displayAccess)
 	if err != nil {
 		return nil, 0, err
 	}

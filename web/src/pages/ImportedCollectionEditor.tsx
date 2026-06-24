@@ -46,8 +46,8 @@ import { libraryEligibilityForMediaKind } from "@/lib/collectionTemplates";
 import {
   COLLECTION_MEDIA_FILTER_OPTIONS,
   COLLECTION_WATCH_FILTER_OPTIONS,
-  normalizeCollectionMediaFilter,
-  normalizeCollectionWatchFilter,
+  displayFiltersToQueryDefinition,
+  queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 
@@ -115,8 +115,11 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
   const initialSourceUrl = collection.source_url ?? "";
   const initialDescription = collection.description ?? "";
   const initialLibraryIds = readSourceConfigLibraryIDs(collection);
-  const initialWatchFilter = normalizeCollectionWatchFilter(collection.watch_filter);
-  const initialMediaFilter = normalizeCollectionMediaFilter(collection.media_filter);
+  const initialDisplayFilters = queryDefinitionToDisplayFilters(
+    collection.display_query_definition,
+  );
+  const initialWatchFilter = initialDisplayFilters.watch;
+  const initialMediaFilter = initialDisplayFilters.media;
 
   const [name, setName] = useState(collection.name);
   const [description, setDescription] = useState(initialDescription);
@@ -188,8 +191,7 @@ export function ImportedCollectionEditor({ collection, onClose }: ImportedCollec
       is_shared: isShared,
       allowed_profile_ids: allowedProfileIds,
       library_ids: libraryIds,
-      watch_filter: watchFilter,
-      media_filter: mediaFilter,
+      display_query_definition: displayFiltersToQueryDefinition(watchFilter, mediaFilter),
       include_in_server_collections: includeOnServer,
       poster_source_url: trimmedPosterSource || undefined,
     };

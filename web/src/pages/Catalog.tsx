@@ -92,6 +92,8 @@ function CatalogResults({
       : ([0, limit - 1] as [number, number]);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const isHistorySource = state.source === "history";
+  const isCollectionSource =
+    state.source === "library_collection" || state.source === "user_collection";
   const removeHistory = useRemoveHistory();
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -261,6 +263,9 @@ function CatalogResults({
             setSearchParams(nextSearchParams);
           }
         }}
+        allowLibrarySelection={!isCollectionSource}
+        allowPersonalizedFilters={isCollectionSource}
+        allowPersonalizedSorts={isCollectionSource}
       />
 
       {isHistorySource && (

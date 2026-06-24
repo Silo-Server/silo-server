@@ -12,8 +12,7 @@ import { buildUserCollectionCatalogHref as buildCatalogHrefForUserCollection } f
 import {
   collectionMediaFilterLabel,
   collectionWatchFilterLabel,
-  normalizeCollectionMediaFilter,
-  normalizeCollectionWatchFilter,
+  queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 import CollectionBuilder, {
@@ -50,8 +49,7 @@ export function toUserCollectionBuilderValue(
       allowed_profile_ids: collection?.allowed_profile_ids ?? [],
     },
     include_in_server_collections: collection?.include_in_server_collections ?? false,
-    watch_filter: normalizeCollectionWatchFilter(collection?.watch_filter),
-    media_filter: normalizeCollectionMediaFilter(collection?.media_filter),
+    display_query_definition: collection?.display_query_definition,
   });
 }
 
@@ -66,8 +64,7 @@ export function toCreateCollectionBody(value: CollectionBuilderValue): CreateCol
     include_in_server_collections: value.include_in_server_collections,
   };
   if (value.collection_type === "manual") {
-    body.watch_filter = value.watch_filter;
-    body.media_filter = value.media_filter;
+    body.display_query_definition = value.display_query_definition;
   }
   return body;
 }
@@ -82,8 +79,7 @@ export function toUpdateCollectionBody(value: CollectionBuilderValue): UpdateCol
     include_in_server_collections: value.include_in_server_collections,
   };
   if (value.collection_type === "manual") {
-    body.watch_filter = value.watch_filter;
-    body.media_filter = value.media_filter;
+    body.display_query_definition = value.display_query_definition;
   }
   return body;
 }
@@ -112,6 +108,10 @@ function UserCollectionSummary({
       ? `${draft.access.allowed_profile_ids.length} selected`
       : "All profiles";
 
+  const { watch: displayWatch, media: displayMedia } = queryDefinitionToDisplayFilters(
+    draft.display_query_definition,
+  );
+
   const selectedLibraryIDs = draft.query_definition.library_ids;
   const librarySummary =
     selectedLibraryIDs.length === 0
@@ -132,11 +132,8 @@ function UserCollectionSummary({
         <SummaryRow label="Libraries" value={librarySummary} />
         {draft.collection_type === "manual" ? (
           <>
-            <SummaryRow
-              label="Watch state"
-              value={collectionWatchFilterLabel(draft.watch_filter)}
-            />
-            <SummaryRow label="Content" value={collectionMediaFilterLabel(draft.media_filter)} />
+            <SummaryRow label="Watch state" value={collectionWatchFilterLabel(displayWatch)} />
+            <SummaryRow label="Content" value={collectionMediaFilterLabel(displayMedia)} />
           </>
         ) : null}
         <SummaryRow label="Shared" value={draft.access.is_shared ? "Yes" : "No"} />

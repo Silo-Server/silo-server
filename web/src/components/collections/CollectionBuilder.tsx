@@ -17,6 +17,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   COLLECTION_MEDIA_FILTER_OPTIONS,
   COLLECTION_WATCH_FILTER_OPTIONS,
+  displayFiltersToQueryDefinition,
+  queryDefinitionToDisplayFilters,
 } from "@/lib/collectionDisplayFilters";
 import {
   Select,
@@ -52,8 +54,8 @@ export interface CollectionBuilderValue {
   sort_config: Record<string, unknown>;
   access: SmartCollectionAccess;
   include_in_server_collections: boolean;
-  watch_filter: UserCollectionWatchFilter;
-  media_filter: UserCollectionMediaFilter;
+  /** Filter-only QueryDefinition fragment for the display presets; undefined = no filter. */
+  display_query_definition?: QueryDefinition;
 }
 
 export interface CollectionBuilderProps {
@@ -96,8 +98,7 @@ export function createCollectionBuilderValue(
     sort_config: overrides?.sort_config ?? {},
     access: overrides?.access ?? { is_shared: false, allowed_profile_ids: [] },
     include_in_server_collections: overrides?.include_in_server_collections ?? false,
-    watch_filter: overrides?.watch_filter ?? "all",
-    media_filter: overrides?.media_filter ?? "all",
+    display_query_definition: overrides?.display_query_definition,
   };
 }
 
@@ -257,59 +258,7 @@ export default function CollectionBuilder({
       {children}
 
       {mode === "user" && value.collection_type === "manual" ? (
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-lg font-semibold">Display filters</h2>
-            <p className="text-muted-foreground mt-1 text-sm">
-              Uses the active profile&rsquo;s watched state. Shared profiles may see different
-              results.
-            </p>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor={`collection-watch-filter-${mode}`}>Watch state</Label>
-              <Select
-                value={value.watch_filter}
-                onValueChange={(next) =>
-                  onChange({ ...value, watch_filter: next as UserCollectionWatchFilter })
-                }
-                disabled={readOnly}
-              >
-                <SelectTrigger id={`collection-watch-filter-${mode}`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {COLLECTION_WATCH_FILTER_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor={`collection-media-filter-${mode}`}>Content</Label>
-              <Select
-                value={value.media_filter}
-                onValueChange={(next) =>
-                  onChange({ ...value, media_filter: next as UserCollectionMediaFilter })
-                }
-                disabled={readOnly}
-              >
-                <SelectTrigger id={`collection-media-filter-${mode}`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {COLLECTION_MEDIA_FILTER_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </section>
+        <DisplayFilterControls mode={mode} value={value} onChange={onChange} readOnly={readOnly} />
       ) : null}
 
       {value.collection_type === "smart" ? (
@@ -474,6 +423,78 @@ export function SmartCollectionLimitField({
         }}
       />
     </div>
+  );
+}
+
+function DisplayFilterControls({
+  mode,
+  value,
+  onChange,
+  readOnly,
+}: {
+  mode: "admin" | "user";
+  value: CollectionBuilderValue;
+  onChange: (value: CollectionBuilderValue) => void;
+  readOnly?: boolean;
+}) {
+  const { watch, media } = queryDefinitionToDisplayFilters(value.display_query_definition);
+
+  function commit(nextWatch: UserCollectionWatchFilter, nextMedia: UserCollectionMediaFilter) {
+    onChange({
+      ...value,
+      display_query_definition: displayFiltersToQueryDefinition(nextWatch, nextMedia),
+    });
+  }
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Display filters</h2>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Uses the active profile&rsquo;s watched state. Shared profiles may see different results.
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor={`collection-watch-filter-${mode}`}>Watch state</Label>
+          <Select
+            value={watch}
+            onValueChange={(next) => commit(next as UserCollectionWatchFilter, media)}
+            disabled={readOnly}
+          >
+            <SelectTrigger id={`collection-watch-filter-${mode}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COLLECTION_WATCH_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor={`collection-media-filter-${mode}`}>Content</Label>
+          <Select
+            value={media}
+            onValueChange={(next) => commit(watch, next as UserCollectionMediaFilter)}
+            disabled={readOnly}
+          >
+            <SelectTrigger id={`collection-media-filter-${mode}`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COLLECTION_MEDIA_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    </section>
   );
 }
 
