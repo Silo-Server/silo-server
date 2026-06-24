@@ -287,15 +287,6 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     return params;
   }
 
-  if (state.source === "library_collection" || state.source === "user_collection") {
-    if (state.collection_id) {
-      params.set("collection_id", state.collection_id);
-    }
-    if (state.title) {
-      params.set("title", state.title);
-    }
-  }
-
   if (state.collection_id) {
     params.set("collection_id", state.collection_id);
   }
