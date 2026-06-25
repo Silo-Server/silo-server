@@ -258,6 +258,14 @@ type Dependencies struct {
 	// SocketIO is the Socket.io server mounted at /abs/socket.io/. May be nil;
 	// the route is only registered when a non-nil value is supplied.
 	SocketIO SocketIOServer
+	// NativeSessions mirrors ABS playback into Silo's native playback session
+	// manager so shared live-session views, limits, and stale-session cleanup
+	// see Audiobookshelf-compatible clients. May be nil; ABS playback still
+	// functions, but admin live-session visibility is unavailable.
+	NativeSessions PlaybackSessionManager
+	// NativeSessionSyncer flushes native session-manager state into the shared
+	// admin live-session table after ABS play/sync/close events.
+	NativeSessionSyncer PlaybackSessionSyncer
 	// CoverResolver translates a raw silo poster path (e.g.
 	// "local/audiobooks/.../original.webp") into a fully-qualified URL
 	// the ABS client can fetch. Optional; when nil, /api/items/{id}/cover

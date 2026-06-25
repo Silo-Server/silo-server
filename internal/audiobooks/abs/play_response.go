@@ -59,21 +59,45 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// currentTime seeds the audio element's initial position so cross-device
+	// resume works. Lookup is best-effort: any error returns position 0,
+	// which is always correct for a first listen.
+	//
+	// Note: we deliberately do NOT emit a "progress" (0.0-1.0) field on the
+	// play session response. The canonical continuum-plugin handler omits it
+	// too — "progress" belongs to /me/progress responses, not playbackSession.
+	// The spec's Phase 0 row mentioning "currentTime AND progress fields" was
+	// over-specified; matching the canonical wire shape is the load-bearing
+	// requirement.
+	var currentTime float64
+	currentTime, err = resolveResumeTime(r.Context(), h.deps.ProgressStore, a.UserID, a.ProfileID, contentID)
+	if err != nil {
+		slog.Debug("play: progress lookup failed", "user", a.UserID, "item", contentID, "err", err)
+		// currentTime is already 0 on error path; safe to continue.
+	}
+
 	// The {ino} parameter used by handleFileStream is a 0-based file index, but
 	// we want iOS clients to resolve it via the stable MD5 derivation. Emit inos
 	// that handleFileStream can reverse without a database lookup.
 	baseURL := h.absBaseURL(r)
 	sessionID := ulid.Make().String()
+	if nativeSession, err := h.startNativePlaybackSession(r, a, files, currentTime); err != nil {
+		writeNativePlaybackStartError(w, err)
+		return
+	} else if nativeSession != nil {
+		sessionID = nativeSession.ID
+	}
 
 	// Persist the session row so subsequent PATCH /session/{sid} heartbeats
 	// and POST /session/{sid}/close can find it. Without this, the session
 	// ID is returned to the client but every sync/close lookup 404s.
 	if h.deps.PlaybackSessionStore != nil {
 		sess := ABSPlaybackSession{
-			ID:        sessionID,
-			UserID:    a.UserID,
-			ProfileID: a.ProfileID,
-			ContentID: contentID,
+			ID:                     sessionID,
+			UserID:                 a.UserID,
+			ProfileID:              a.ProfileID,
+			ContentID:              contentID,
+			CurrentPositionSeconds: currentTime,
 		}
 		if len(files) > 0 {
 			fid := files[0].ID
@@ -110,23 +134,6 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	nowMs := now.UnixMilli()
 	dateStr := now.UTC().Format("2006-01-02")
 	dayOfWeek := now.UTC().Weekday().String()
-
-	// currentTime seeds the audio element's initial position so cross-device
-	// resume works. Lookup is best-effort: any error returns position 0,
-	// which is always correct for a first listen.
-	//
-	// Note: we deliberately do NOT emit a "progress" (0.0-1.0) field on the
-	// play session response. The canonical continuum-plugin handler omits it
-	// too — "progress" belongs to /me/progress responses, not playbackSession.
-	// The spec's Phase 0 row mentioning "currentTime AND progress fields" was
-	// over-specified; matching the canonical wire shape is the load-bearing
-	// requirement.
-	var currentTime float64
-	currentTime, err = resolveResumeTime(r.Context(), h.deps.ProgressStore, a.UserID, a.ProfileID, contentID)
-	if err != nil {
-		slog.Debug("play: progress lookup failed", "user", a.UserID, "item", contentID, "err", err)
-		// currentTime is already 0 on error path; safe to continue.
-	}
 
 	playbackSession := map[string]any{
 		"id":            sessionID,
