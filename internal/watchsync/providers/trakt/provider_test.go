@@ -1,6 +1,7 @@
 package trakt
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -320,5 +321,137 @@ func TestHistoryPayloadsIncludeTVDBOnlyMovieIDs(t *testing.T) {
 	removePayload := buildHistoryRemovePayload([]watchsync.LocalPlay{play})
 	if len(removePayload.Movies) != 1 || removePayload.Movies[0].IDs.TVDB != 12345 {
 		t.Fatalf("remove payload movie IDs = %#v, want TVDB 12345", removePayload.Movies)
+	}
+}
+
+func TestHistoryEpisodeWithEmptyIDsOmitsEpisodeIDsAndUsesShowFallback(t *testing.T) {
+	play := watchsync.LocalPlay{
+		HistoryID:     "history-episode-no-ids",
+		Kind:          historyimport.KindEpisode,
+		SeriesTMDBID:  "999",
+		SeasonNumber:  2,
+		EpisodeNumber: 5,
+		WatchedAt:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	}
+
+	addPayload := buildHistoryPayload([]watchsync.LocalPlay{play})
+	if len(addPayload.Episodes) != 1 {
+		t.Fatalf("add payload episodes = %#v, want 1", addPayload.Episodes)
+	}
+	addEp := addPayload.Episodes[0]
+	if addEp.IDs != nil {
+		t.Fatalf("add payload episode IDs = %#v, want nil", addEp.IDs)
+	}
+	if addEp.Show == nil || addEp.Show.IDs.TMDB != 999 {
+		t.Fatalf("add payload episode show = %#v, want show TMDB 999", addEp.Show)
+	}
+
+	addJSON, err := json.Marshal(addPayload)
+	if err != nil {
+		t.Fatalf("marshal add payload: %v", err)
+	}
+	assertNoZeroEpisodeIDs(t, addJSON, "add")
+
+	removePayload := buildHistoryRemovePayload([]watchsync.LocalPlay{play})
+	if len(removePayload.Episodes) != 1 {
+		t.Fatalf("remove payload episodes = %#v, want 1", removePayload.Episodes)
+	}
+	removeEp := removePayload.Episodes[0]
+	if removeEp.IDs != nil {
+		t.Fatalf("remove payload episode IDs = %#v, want nil", removeEp.IDs)
+	}
+	if removeEp.Show == nil || removeEp.Show.IDs.TMDB != 999 {
+		t.Fatalf("remove payload episode show = %#v, want show TMDB 999", removeEp.Show)
+	}
+
+	removeJSON, err := json.Marshal(removePayload)
+	if err != nil {
+		t.Fatalf("marshal remove payload: %v", err)
+	}
+	assertNoZeroEpisodeIDs(t, removeJSON, "remove")
+}
+
+func TestHistoryEpisodeWithRealIDsKeepsEpisodeIDs(t *testing.T) {
+	play := watchsync.LocalPlay{
+		HistoryID:     "history-episode-with-ids",
+		Kind:          historyimport.KindEpisode,
+		TVDBID:        "54321",
+		SeriesTMDBID:  "999",
+		SeasonNumber:  2,
+		EpisodeNumber: 5,
+		WatchedAt:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	}
+
+	addPayload := buildHistoryPayload([]watchsync.LocalPlay{play})
+	if len(addPayload.Episodes) != 1 {
+		t.Fatalf("add payload episodes = %#v, want 1", addPayload.Episodes)
+	}
+	addEp := addPayload.Episodes[0]
+	if addEp.IDs == nil || addEp.IDs.TVDB != 54321 {
+		t.Fatalf("add payload episode IDs = %#v, want TVDB 54321", addEp.IDs)
+	}
+	if addEp.Show != nil {
+		t.Fatalf("add payload episode show = %#v, want nil", addEp.Show)
+	}
+
+	addJSON, err := json.Marshal(addPayload)
+	if err != nil {
+		t.Fatalf("marshal add payload: %v", err)
+	}
+	if !bytes.Contains(addJSON, []byte(`"tvdb":54321`)) {
+		t.Fatalf("add payload JSON missing real episode id: %s", addJSON)
+	}
+
+	removePayload := buildHistoryRemovePayload([]watchsync.LocalPlay{play})
+	if len(removePayload.Episodes) != 1 {
+		t.Fatalf("remove payload episodes = %#v, want 1", removePayload.Episodes)
+	}
+	removeEp := removePayload.Episodes[0]
+	if removeEp.IDs == nil || removeEp.IDs.TVDB != 54321 {
+		t.Fatalf("remove payload episode IDs = %#v, want TVDB 54321", removeEp.IDs)
+	}
+	if removeEp.Show != nil {
+		t.Fatalf("remove payload episode show = %#v, want nil", removeEp.Show)
+	}
+
+	removeJSON, err := json.Marshal(removePayload)
+	if err != nil {
+		t.Fatalf("marshal remove payload: %v", err)
+	}
+	if !bytes.Contains(removeJSON, []byte(`"tvdb":54321`)) {
+		t.Fatalf("remove payload JSON missing real episode id: %s", removeJSON)
+	}
+}
+
+// assertNoZeroEpisodeIDs verifies the marshaled history payload does not contain
+// a top-level episode "ids" object (which would carry zero values) and does carry
+// the show fallback id. The legitimate show.ids object may contain zero members
+// (e.g. tvdb:0 when only tmdb is known); we only guard against an episode-level
+// "ids" key, which is what previously matched Trakt to the wrong series.
+func assertNoZeroEpisodeIDs(t *testing.T, payload []byte, label string) {
+	t.Helper()
+	var parsed struct {
+		Episodes []struct {
+			IDs  json.RawMessage `json:"ids"`
+			Show struct {
+				IDs traktIDs `json:"ids"`
+			} `json:"show"`
+		} `json:"episodes"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		t.Fatalf("%s payload unmarshal: %v (%s)", label, err, payload)
+	}
+	if len(parsed.Episodes) != 1 {
+		t.Fatalf("%s payload episodes = %d, want 1: %s", label, len(parsed.Episodes), payload)
+	}
+	if parsed.Episodes[0].IDs != nil {
+		t.Fatalf("%s payload JSON has top-level episode ids: %s", label, payload)
+	}
+	if parsed.Episodes[0].Show.IDs.TMDB != 999 {
+		t.Fatalf("%s payload JSON missing show fallback id: %s", label, payload)
+	}
+	// Belt-and-suspenders: the raw JSON must not carry an episode-level zero tmdb/tvdb.
+	if bytes.Contains(payload, []byte(`"ids":{"trakt":0,"slug":"","imdb":"","tmdb":0,"tvdb":0}`)) {
+		t.Fatalf("%s payload JSON contains a fully-zero ids object: %s", label, payload)
 	}
 }

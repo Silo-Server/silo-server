@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -783,8 +784,8 @@ type traktHistoryRemoveMovie struct {
 }
 
 type traktHistoryEpisode struct {
-	WatchedAt string   `json:"watched_at"`
-	IDs       traktIDs `json:"ids,omitempty"`
+	WatchedAt string    `json:"watched_at"`
+	IDs       *traktIDs `json:"ids,omitempty"`
 	Show      *struct {
 		IDs traktIDs `json:"ids"`
 	} `json:"show,omitempty"`
@@ -793,7 +794,7 @@ type traktHistoryEpisode struct {
 }
 
 type traktHistoryRemoveEpisode struct {
-	IDs  traktIDs `json:"ids,omitempty"`
+	IDs  *traktIDs `json:"ids,omitempty"`
 	Show *struct {
 		IDs traktIDs `json:"ids"`
 	} `json:"show,omitempty"`
@@ -823,8 +824,10 @@ func buildHistoryPayload(plays []watchsync.LocalPlay) traktHistoryPayload {
 			if play.TMDBID != "" {
 				ids.TMDB, _ = strconv.Atoi(play.TMDBID)
 			}
-			row := traktHistoryEpisode{WatchedAt: watchedAt, IDs: ids, Season: play.SeasonNumber, Number: play.EpisodeNumber}
-			if ids.TVDB == 0 && ids.TMDB == 0 && ids.IMDb == "" {
+			row := traktHistoryEpisode{WatchedAt: watchedAt, Season: play.SeasonNumber, Number: play.EpisodeNumber}
+			if ids.TVDB != 0 || ids.TMDB != 0 || ids.IMDb != "" {
+				row.IDs = &ids
+			} else {
 				showIDs := traktIDs{IMDb: play.SeriesIMDbID}
 				if play.SeriesTVDBID != "" {
 					showIDs.TVDB, _ = strconv.Atoi(play.SeriesTVDBID)
@@ -835,6 +838,9 @@ func buildHistoryPayload(plays []watchsync.LocalPlay) traktHistoryPayload {
 				row.Show = &struct {
 					IDs traktIDs `json:"ids"`
 				}{IDs: showIDs}
+				slog.Debug("trakt history export: episode has no episode ids, falling back to show",
+					"show_tmdb", showIDs.TMDB, "show_tvdb", showIDs.TVDB, "show_imdb", showIDs.IMDb,
+					"season", play.SeasonNumber, "number", play.EpisodeNumber)
 			}
 			payload.Episodes = append(payload.Episodes, row)
 		}
@@ -863,8 +869,10 @@ func buildHistoryRemovePayload(plays []watchsync.LocalPlay) traktHistoryRemovePa
 			if play.TMDBID != "" {
 				ids.TMDB, _ = strconv.Atoi(play.TMDBID)
 			}
-			row := traktHistoryRemoveEpisode{IDs: ids, Season: play.SeasonNumber, Number: play.EpisodeNumber}
-			if ids.TVDB == 0 && ids.TMDB == 0 && ids.IMDb == "" {
+			row := traktHistoryRemoveEpisode{Season: play.SeasonNumber, Number: play.EpisodeNumber}
+			if ids.TVDB != 0 || ids.TMDB != 0 || ids.IMDb != "" {
+				row.IDs = &ids
+			} else {
 				showIDs := traktIDs{IMDb: play.SeriesIMDbID}
 				if play.SeriesTVDBID != "" {
 					showIDs.TVDB, _ = strconv.Atoi(play.SeriesTVDBID)
@@ -875,6 +883,9 @@ func buildHistoryRemovePayload(plays []watchsync.LocalPlay) traktHistoryRemovePa
 				row.Show = &struct {
 					IDs traktIDs `json:"ids"`
 				}{IDs: showIDs}
+				slog.Debug("trakt history remove: episode has no episode ids, falling back to show",
+					"show_tmdb", showIDs.TMDB, "show_tvdb", showIDs.TVDB, "show_imdb", showIDs.IMDb,
+					"season", play.SeasonNumber, "number", play.EpisodeNumber)
 			}
 			payload.Episodes = append(payload.Episodes, row)
 		}
