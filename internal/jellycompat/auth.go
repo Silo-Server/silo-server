@@ -257,8 +257,10 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore *PlaybackSessionS
 			// the PlaybackSession negotiated for this item: a successful PlaybackInfo
 			// already authenticated the user and registered a session holding the
 			// CompatToken. Scope this strictly to the direct-play video stream routes
-			// (NOT /Items/{id}/Download) via the chi route pattern, and prefer
-			// matching on mediaSourceId when present to narrow which item is served.
+			// (NOT /Items/{id}/Download) via the chi route pattern, prefer matching
+			// on mediaSourceId when present, and require the matched session's
+			// RouteItemID to equal the requested item so a source id can't
+			// authorize a stream for a different item.
 			if playbackStore != nil {
 				switch chi.RouteContext(r.Context()).RoutePattern() {
 				case "/Videos/{id}/stream", "/Videos/{id}/stream.{container}":
@@ -269,7 +271,7 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore *PlaybackSessionS
 						if mediaSourceID != "" {
 							lookupID = mediaSourceID
 						}
-						if playSession, _, found := playbackStore.FindByRoute("", lookupID); found {
+						if playSession, _, found := playbackStore.FindByRoute("", lookupID); found && playSession.RouteItemID == routeItemID {
 							if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken); ok {
 								serveWithSession(next, w, r, session)
 								return
