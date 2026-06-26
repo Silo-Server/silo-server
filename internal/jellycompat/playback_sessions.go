@@ -27,17 +27,18 @@ type PlaybackSession struct {
 
 // PlaybackMediaSource stores one negotiated stream source within a compat play session.
 type PlaybackMediaSource struct {
-	ID                         string
-	FileID                     int
-	Version                    catalog.FileVersion
-	SupportsDirectPlay         bool
-	SupportsDirectStream       bool
-	SupportsTranscoding        bool
-	TranscodeAudio             bool
-	DefaultAudioStreamIndex    *int
-	SelectedAudioStreamIndex   *int
-	DefaultSubtitleStreamIndex *int
-	ETag                       string
+	ID                          string
+	FileID                      int
+	Version                     catalog.FileVersion
+	SupportsDirectPlay          bool
+	SupportsDirectStream        bool
+	SupportsTranscoding         bool
+	TranscodeAudio              bool
+	DefaultAudioStreamIndex     *int
+	SelectedAudioStreamIndex    *int
+	DefaultSubtitleStreamIndex  *int
+	SelectedSubtitleStreamIndex *int
+	ETag                        string
 }
 
 // PlaybackSessionStore keeps compat playback sessions in memory.
