@@ -30,6 +30,9 @@ func TestProviderIdentityAndCapabilities(t *testing.T) {
 		ImportProgress:   true,
 		ExportWatched:    true,
 		ExportUnwatched:  true,
+		ImportWatchlist:  true,
+		ExportWatchlist:  true,
+		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
 	}) {
 		t.Fatalf("capabilities = %#v", provider.Capabilities())

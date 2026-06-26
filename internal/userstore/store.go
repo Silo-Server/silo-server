@@ -51,10 +51,17 @@ type UserStore interface {
 	ListFavoritesByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	IsFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) error
 	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	// ReplaceWatchlistOrder mirrors a provider's watchlist order: the given ids
+	// get sort_index 0..N-1 in order; all other rows reset to added_at ordering.
+	ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error
 	ListWatchlist(ctx context.Context, profileID string, limit, offset int) ([]WatchlistEntry, error)
 	ListWatchlistByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	InWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// RemoveWatchedFromWatchlist reports the profile's preference for auto-removing
+	// fully-watched items from the watchlist (defaults true).
+	RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error)
 
 	// Collections
 	CreateCollection(ctx context.Context, input CreateCollectionInput) (*Collection, error)

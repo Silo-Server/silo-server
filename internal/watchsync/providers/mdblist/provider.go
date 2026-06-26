@@ -52,15 +52,18 @@ func (p *Provider) DisplayName() string {
 }
 
 func (p *Provider) Capabilities() watchsync.Capabilities {
+	// MDBList exposes a single list — its watchlist — so it binds to Silo's
+	// watchlist rather than favorites.
 	return watchsync.Capabilities{
-		ImportWatched:    true,
-		ImportProgress:   true,
-		ExportWatched:    true,
-		ExportUnwatched:  true,
-		ImportFavorites:  true,
-		ExportFavorites:  true,
-		RemoveFavorites:  true,
-		ScrobblePlayback: true,
+		ImportWatched:          true,
+		ImportProgress:         true,
+		ExportWatched:          true,
+		ExportUnwatched:        true,
+		ImportWatchlist:        true,
+		ExportWatchlist:        true,
+		RemoveWatchlist:        true,
+		ProvidesWatchlistOrder: true,
+		ScrobblePlayback:       true,
 	}
 }
 
@@ -305,7 +308,7 @@ func (p *Provider) sendWatched(ctx context.Context, conn watchsync.Connection, p
 	return result, nil
 }
 
-func (p *Provider) FetchFavorites(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemoteFavorite, error) {
+func (p *Provider) FetchWatchlist(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemoteFavorite, error) {
 	now := time.Now().UTC()
 	var rows []watchsync.RemoteFavorite
 	for offset := 0; ; {
@@ -365,12 +368,12 @@ func watchlistRowsFromPayload(providerKey string, payload mdblistWatchlistRespon
 	return rows
 }
 
-func (p *Provider) ExportFavorites(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, favorites []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
-	return p.sendWatchlist(ctx, conn, favorites, "/watchlist/items/add")
+func (p *Provider) ExportWatchlist(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, items []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, conn, items, "/watchlist/items/add")
 }
 
-func (p *Provider) RemoveFavorites(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, favorites []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
-	return p.sendWatchlist(ctx, conn, favorites, "/watchlist/items/remove")
+func (p *Provider) RemoveWatchlist(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, items []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, conn, items, "/watchlist/items/remove")
 }
 
 func (p *Provider) sendWatchlist(ctx context.Context, conn watchsync.Connection, favorites []watchsync.LocalFavorite, path string) (watchsync.ExportResult, error) {

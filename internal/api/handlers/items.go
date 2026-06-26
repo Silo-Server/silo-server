@@ -107,6 +107,15 @@ func NewItemsHandler(
 	}
 }
 
+// SetCompletionObserver wires an optional observer notified when a watch
+// completes (used to auto-remove fully-watched items from the watchlist).
+func (h *ItemsHandler) SetCompletionObserver(obs watchstate.CompletionObserver) {
+	if h == nil || h.watchState == nil || obs == nil {
+		return
+	}
+	h.watchState.WithCompletionObserver(obs)
+}
+
 // SetProfileStaler configures an optional staleness trigger for taste profiles.
 func (h *ItemsHandler) SetProfileStaler(ps ProfileStaler) {
 	h.profileStaler = ps

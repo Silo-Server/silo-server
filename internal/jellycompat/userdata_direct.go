@@ -31,14 +31,15 @@ func newDirectUserDataService(
 	resumeFilter *catalog.ContinueWatchingProgressFilter,
 	staler profileStaler,
 	requester profileRefreshRequester,
+	completionObserver watchstate.CompletionObserver,
 ) *directUserDataService {
 	return &directUserDataService{
 		storeProvider: storeProvider,
 		itemRepo:      itemRepo,
 		detailSvc:     detailSvc,
-		watchState: watchstate.NewService(storeProvider).WithStableIdentityResolver(
-			watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo),
-		),
+		watchState: watchstate.NewService(storeProvider).
+			WithStableIdentityResolver(watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)).
+			WithCompletionObserver(completionObserver),
 		resumeFilter:            resumeFilter,
 		profileStaler:           staler,
 		profileRefreshRequester: requester,

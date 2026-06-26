@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
     profile_id TEXT NOT NULL,
     media_item_id TEXT NOT NULL,
     added_at TEXT NOT NULL,
+    sort_index INTEGER,
     PRIMARY KEY (profile_id, media_item_id)
 );
 

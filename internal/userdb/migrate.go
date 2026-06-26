@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 11
+const schemaVersion = 12
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -115,7 +115,28 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 12 {
+		if err := migrateToV12(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 12"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 12: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV12 adds the nullable watchlist.sort_index column used to mirror a
+// provider's watchlist order. NULL means "use added_at ordering".
+func migrateToV12(tx *sql.Tx) error {
+	if columnExists(tx, "watchlist", "sort_index") {
+		return nil
+	}
+	if _, err := tx.Exec("ALTER TABLE watchlist ADD COLUMN sort_index INTEGER"); err != nil {
+		return fmt.Errorf("adding watchlist.sort_index: %w", err)
+	}
+	return nil
 }
 
 // migrateToV11 resets legacy completed watch_progress rows to

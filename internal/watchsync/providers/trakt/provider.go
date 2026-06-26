@@ -55,6 +55,9 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ImportFavorites:  true,
 		ExportFavorites:  true,
 		RemoveFavorites:  true,
+		ImportWatchlist:  true,
+		ExportWatchlist:  true,
+		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
 	}
 }
@@ -317,6 +320,30 @@ func (p *Provider) FetchFavorites(
 	if err := p.do(ctx, http.MethodGet, "/users/me/favorites/shows/added", cfg, conn.AccessToken, nil, &shows); err != nil {
 		return nil, err
 	}
+	return p.remoteListItems(movies, shows), nil
+}
+
+// FetchWatchlist pulls Trakt's watchlist — a distinct list from favorites. The
+// watchlist endpoints return the same item shape, so the mapping is shared.
+func (p *Provider) FetchWatchlist(
+	ctx context.Context,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+) ([]watchsync.RemoteFavorite, error) {
+	var movies []traktFavoriteMovie
+	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/movies", cfg, conn.AccessToken, nil, &movies); err != nil {
+		return nil, err
+	}
+	var shows []traktFavoriteShow
+	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/shows", cfg, conn.AccessToken, nil, &shows); err != nil {
+		return nil, err
+	}
+	return p.remoteListItems(movies, shows), nil
+}
+
+// remoteListItems maps Trakt movie/show list rows (favorites or watchlist) into
+// the kind-neutral RemoteFavorite carrier.
+func (p *Provider) remoteListItems(movies []traktFavoriteMovie, shows []traktFavoriteShow) []watchsync.RemoteFavorite {
 	rows := make([]watchsync.RemoteFavorite, 0, len(movies)+len(shows))
 	for _, item := range movies {
 		rows = append(rows, watchsync.RemoteFavorite{
@@ -344,7 +371,7 @@ func (p *Provider) FetchFavorites(
 			FavoritedAt:     item.ListedAt,
 		})
 	}
-	return rows, nil
+	return rows
 }
 
 func (p *Provider) FetchHistory(
@@ -453,6 +480,48 @@ func (p *Provider) RemoveFavorites(
 		return watchsync.ExportResult{}, err
 	}
 	return favoriteExportResult(favorites, response.NotFound), nil
+}
+
+// Trakt's watchlist accepts and returns the same {movies, shows} id payload as
+// favorites, so the payload builder and not-found parser are shared.
+func (p *Provider) ExportWatchlist(
+	ctx context.Context,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	items []watchsync.LocalFavorite,
+) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, "/sync/watchlist", cfg, conn, items)
+}
+
+func (p *Provider) RemoveWatchlist(
+	ctx context.Context,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	items []watchsync.LocalFavorite,
+) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, "/sync/watchlist/remove", cfg, conn, items)
+}
+
+func (p *Provider) sendWatchlist(
+	ctx context.Context,
+	path string,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	items []watchsync.LocalFavorite,
+) (watchsync.ExportResult, error) {
+	payload := buildFavoritesPayload(items)
+	if len(payload.Movies) == 0 && len(payload.Shows) == 0 {
+		return watchsync.ExportResult{}, nil
+	}
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(payload); err != nil {
+		return watchsync.ExportResult{}, fmt.Errorf("encode trakt watchlist payload: %w", err)
+	}
+	var response traktFavoritesResponse
+	if err := p.do(ctx, http.MethodPost, path, cfg, conn.AccessToken, &body, &response); err != nil {
+		return watchsync.ExportResult{}, err
+	}
+	return favoriteExportResult(items, response.NotFound), nil
 }
 
 func (p *Provider) RemoveHistory(

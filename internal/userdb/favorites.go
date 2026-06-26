@@ -2,6 +2,7 @@ package userdb
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"time"
 
@@ -115,9 +116,15 @@ func ListFavoritesByMediaItems(db *sql.DB, profileID string, mediaItemIDs []stri
 // AddToWatchlist adds a media item to a profile's watchlist.
 // If the item is already on the watchlist, the operation is a no-op.
 func AddToWatchlist(db *sql.DB, profileID, mediaItemID string) error {
+	return AddToWatchlistAt(db, profileID, mediaItemID, time.Now().UTC())
+}
+
+// AddToWatchlistAt adds a media item to a profile's watchlist with an explicit
+// added-at timestamp (used when importing from an external provider).
+func AddToWatchlistAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Time) error {
 	_, err := db.Exec(
 		`INSERT OR IGNORE INTO watchlist (profile_id, media_item_id, added_at) VALUES (?, ?, ?)`,
-		profileID, mediaItemID, nowUTC(),
+		profileID, mediaItemID, addedAt.UTC().Format(time.RFC3339),
 	)
 	return err
 }
@@ -131,12 +138,44 @@ func RemoveFromWatchlist(db *sql.DB, profileID, mediaItemID string) error {
 	return err
 }
 
-// ListWatchlist returns a paginated list of watchlist entries for a profile,
-// ordered by most-recently-added first.
+// ReplaceWatchlistOrder assigns sort_index 0..N-1 to the given ids in order and
+// clears sort_index on every other watchlist row for the profile. An empty
+// slice clears all synced ordering.
+func ReplaceWatchlistOrder(db *sql.DB, profileID string, orderedMediaItemIDs []string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin watchlist order tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.Exec(
+		`UPDATE watchlist SET sort_index = NULL WHERE profile_id = ? AND sort_index IS NOT NULL`,
+		profileID,
+	); err != nil {
+		return fmt.Errorf("clear watchlist order: %w", err)
+	}
+	for idx, mediaItemID := range orderedMediaItemIDs {
+		if _, err := tx.Exec(
+			`UPDATE watchlist SET sort_index = ? WHERE profile_id = ? AND media_item_id = ?`,
+			idx, profileID, mediaItemID,
+		); err != nil {
+			return fmt.Errorf("apply watchlist order: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit watchlist order: %w", err)
+	}
+	return nil
+}
+
+// ListWatchlist returns a paginated list of watchlist entries for a profile.
+// Items with a synced sort_index (mirrored from a provider) come first in that
+// order; locally-added items (sort_index NULL) fall back to newest-first.
 func ListWatchlist(db *sql.DB, profileID string, limit, offset int) ([]WatchlistEntry, error) {
 	rows, err := db.Query(
 		`SELECT profile_id, media_item_id, added_at FROM watchlist
-		 WHERE profile_id = ? ORDER BY added_at DESC LIMIT ? OFFSET ?`,
+		 WHERE profile_id = ?
+		 ORDER BY sort_index IS NULL, sort_index ASC, added_at DESC LIMIT ? OFFSET ?`,
 		profileID, limit, offset,
 	)
 	if err != nil {

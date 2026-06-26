@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 // Dependencies holds the pluggable pieces used by the compat server.
@@ -50,6 +51,10 @@ type Dependencies struct {
 	ContentService  ContentService
 	UserDataService UserDataService
 	AuthService     *auth.Service
+
+	// WatchCompletionObserver is notified when a Jellyfin-compat mark-played
+	// completes a watch, so fully-watched items leave the watchlist. Optional.
+	WatchCompletionObserver watchstate.CompletionObserver
 
 	// Autoscan / admin compatibility support.
 	APIKeyValidator  apiKeyValidator

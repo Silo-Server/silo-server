@@ -337,6 +337,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			catalog.NewContinueWatchingProgressFilter(pool),
 			staler,
 			deps.RecWorker,
+			deps.WatchCompletionObserver,
 		)
 	}
 

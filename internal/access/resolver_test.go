@@ -130,9 +130,18 @@ func (s stubStore) ListFavorites(context.Context, string, int, int) ([]userstore
 func (s stubStore) ListFavoritesByMediaItems(context.Context, string, []string) (map[string]bool, error) {
 	panic("unused")
 }
-func (s stubStore) IsFavorite(context.Context, string, string) (bool, error)  { panic("unused") }
-func (s stubStore) AddToWatchlist(context.Context, string, string) error      { panic("unused") }
+func (s stubStore) IsFavorite(context.Context, string, string) (bool, error) { panic("unused") }
+func (s stubStore) AddToWatchlist(context.Context, string, string) error     { panic("unused") }
+func (s stubStore) AddToWatchlistAt(context.Context, string, string, time.Time) error {
+	panic("unused")
+}
+func (s stubStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
+	return true, nil
+}
 func (s stubStore) RemoveFromWatchlist(context.Context, string, string) error { panic("unused") }
+func (s stubStore) ReplaceWatchlistOrder(context.Context, string, []string) error {
+	panic("unused")
+}
 func (s stubStore) ListWatchlist(context.Context, string, int, int) ([]userstore.WatchlistEntry, error) {
 	panic("unused")
 }

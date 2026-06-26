@@ -143,6 +143,7 @@ type Dependencies struct {
 	MarkerContributionStore      *markers.ContributionStore
 	MarkerContributionService    *markers.ContributionService
 	WatchProviderService         handlers.WatchProviderService
+	WatchCompletionObserver      watchstate.CompletionObserver
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy
 	PluginUserConfig             *plugins.UserConfigStore
@@ -523,6 +524,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalWatchEventDispatcher); ok {
 			itemsHandler.SetLocalWatchEventDispatcher(dispatcher)
 		}
+		if deps.WatchCompletionObserver != nil {
+			itemsHandler.SetCompletionObserver(deps.WatchCompletionObserver)
+		}
 		if ebookProgressStore != nil {
 			itemsHandler.SetEbookReaderProgressStore(ebookProgressStore)
 		}
@@ -638,8 +642,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		personalDataHandler.SetEpisodeRepo(episodeRepo)
 		personalDataHandler.SetSeasonRepo(seasonRepo)
 		personalDataHandler.EventsHub = deps.EventsHub
-		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalFavoriteEventDispatcher); ok {
-			personalDataHandler.SetLocalFavoriteEventDispatcher(dispatcher)
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalListEventDispatcher); ok {
+			personalDataHandler.SetLocalListEventDispatcher(dispatcher)
 		}
 		progressHandler = handlers.NewProgressHandler(deps.UserStoreProvider)
 		progressHandler.EventsHub = deps.EventsHub
@@ -734,6 +738,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.StoreProvider = deps.UserStoreProvider
 		}
 		playbackHandler.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
+		playbackHandler.CompletionObserver = deps.WatchCompletionObserver
 		if scrobbler, ok := deps.WatchProviderService.(handlers.PlaybackWatchScrobbler); ok {
 			playbackHandler.WatchScrobbler = scrobbler
 		}

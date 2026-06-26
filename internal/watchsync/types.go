@@ -9,15 +9,30 @@ import (
 )
 
 type Capabilities struct {
-	ImportWatched    bool `json:"import_watched"`
-	ImportProgress   bool `json:"import_progress"`
-	ExportWatched    bool `json:"export_watched"`
-	ExportUnwatched  bool `json:"export_unwatched"`
-	ImportFavorites  bool `json:"import_favorites"`
-	ExportFavorites  bool `json:"export_favorites"`
-	RemoveFavorites  bool `json:"remove_favorites"`
-	ScrobblePlayback bool `json:"scrobble_playback"`
+	ImportWatched   bool `json:"import_watched"`
+	ImportProgress  bool `json:"import_progress"`
+	ExportWatched   bool `json:"export_watched"`
+	ExportUnwatched bool `json:"export_unwatched"`
+	ImportFavorites bool `json:"import_favorites"`
+	ExportFavorites bool `json:"export_favorites"`
+	RemoveFavorites bool `json:"remove_favorites"`
+	ImportWatchlist bool `json:"import_watchlist"`
+	ExportWatchlist bool `json:"export_watchlist"`
+	RemoveWatchlist bool `json:"remove_watchlist"`
+	// ProvidesWatchlistOrder is true when the provider returns its watchlist in a
+	// user-configurable order that Silo can mirror locally.
+	ProvidesWatchlistOrder bool `json:"provides_watchlist_order"`
+	ScrobblePlayback       bool `json:"scrobble_playback"`
 }
+
+// ListKind identifies which personal list a sync operates on. The favorites and
+// watchlist pipelines share the same machinery, parameterized by this kind.
+type ListKind string
+
+const (
+	ListKindFavorites ListKind = "favorites"
+	ListKindWatchlist ListKind = "watchlist"
+)
 
 const (
 	AuthMethodDeviceCode = "device_code"
@@ -109,6 +124,26 @@ type FavoriteRemover interface {
 	RemoveFavorites(ctx context.Context, cfg ServerConfig, conn Connection, favorites []LocalFavorite) (ExportResult, error)
 }
 
+// Watchlist provider interfaces mirror the favorite ones but target the
+// provider's watchlist ("want to watch") list rather than its favorites. They
+// reuse the RemoteFavorite/LocalFavorite/FavoriteImportBatch carriers, which
+// hold only generic item identity (external ids, title, year, kind).
+type WatchlistImporter interface {
+	FetchWatchlist(ctx context.Context, cfg ServerConfig, conn Connection) ([]RemoteFavorite, error)
+}
+
+type WatchlistBatchImporter interface {
+	FetchWatchlistBatch(ctx context.Context, cfg ServerConfig, conn Connection) (FavoriteImportBatch, error)
+}
+
+type WatchlistExporter interface {
+	ExportWatchlist(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
+}
+
+type WatchlistRemover interface {
+	RemoveWatchlist(ctx context.Context, cfg ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error)
+}
+
 type Scrobbler interface {
 	Start(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
 	Pause(ctx context.Context, cfg ServerConfig, conn Connection, event ScrobbleEvent) error
@@ -129,32 +164,37 @@ func (c ServerConfig) Configured() bool {
 }
 
 type Connection struct {
-	ID                          string
-	Provider                    string
-	UserID                      int
-	ProfileID                   string
-	ProviderAccountID           string
-	ProviderUsername            string
-	AccessToken                 string
-	RefreshToken                string
-	TokenExpiresAt              *time.Time
-	ImportWatchedEnabled        bool
-	ImportProgressEnabled       bool
-	ExportWatchedEnabled        bool
-	ExportUnwatchedEnabled      bool
-	ImportFavoritesEnabled      bool
-	ExportFavoritesEnabled      bool
-	SyncFavoriteRemovalsEnabled bool
-	ScrobbleEnabled             bool
-	LastInboundSyncAt           *time.Time
-	LastProgressSyncAt          *time.Time
-	LastOutboundSyncAt          *time.Time
-	LastFavoritesSyncAt         *time.Time
-	LastScrobbleErrorAt         *time.Time
-	LastError                   string
-	SyncCursors                 map[string]string `json:"-"`
-	CreatedAt                   time.Time
-	UpdatedAt                   time.Time
+	ID                           string
+	Provider                     string
+	UserID                       int
+	ProfileID                    string
+	ProviderAccountID            string
+	ProviderUsername             string
+	AccessToken                  string
+	RefreshToken                 string
+	TokenExpiresAt               *time.Time
+	ImportWatchedEnabled         bool
+	ImportProgressEnabled        bool
+	ExportWatchedEnabled         bool
+	ExportUnwatchedEnabled       bool
+	ImportFavoritesEnabled       bool
+	ExportFavoritesEnabled       bool
+	SyncFavoriteRemovalsEnabled  bool
+	ImportWatchlistEnabled       bool
+	ExportWatchlistEnabled       bool
+	SyncWatchlistRemovalsEnabled bool
+	SyncWatchlistOrderEnabled    bool
+	ScrobbleEnabled              bool
+	LastInboundSyncAt            *time.Time
+	LastProgressSyncAt           *time.Time
+	LastOutboundSyncAt           *time.Time
+	LastFavoritesSyncAt          *time.Time
+	LastWatchlistSyncAt          *time.Time
+	LastScrobbleErrorAt          *time.Time
+	LastError                    string
+	SyncCursors                  map[string]string `json:"-"`
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
 }
 
 type SyncRun struct {
@@ -174,6 +214,11 @@ type SyncRun struct {
 	OutboundFavoritesFound   int        `json:"outbound_favorites_found"`
 	OutboundFavoritesSent    int        `json:"outbound_favorites_sent"`
 	FavoriteRemovalsSent     int        `json:"favorite_removals_sent"`
+	InboundWatchlistFound    int        `json:"inbound_watchlist_found"`
+	InboundWatchlistImported int        `json:"inbound_watchlist_imported"`
+	OutboundWatchlistFound   int        `json:"outbound_watchlist_found"`
+	OutboundWatchlistSent    int        `json:"outbound_watchlist_sent"`
+	WatchlistRemovalsSent    int        `json:"watchlist_removals_sent"`
 	Warning                  string     `json:"warning,omitempty"`
 	Error                    string     `json:"error,omitempty"`
 	StartedAt                time.Time  `json:"started_at"`
@@ -357,18 +402,22 @@ type LocalWatchEvent struct {
 	Plays     []LocalPlay
 }
 
-type LocalFavoriteEventKind string
+type ListChange string
 
 const (
-	LocalFavoriteEventAdded   LocalFavoriteEventKind = "favorite_added"
-	LocalFavoriteEventRemoved LocalFavoriteEventKind = "favorite_removed"
+	ListChangeAdded   ListChange = "added"
+	ListChangeRemoved ListChange = "removed"
 )
 
-type LocalFavoriteEvent struct {
-	Kind      LocalFavoriteEventKind
+// LocalListEvent reports that a profile's local list membership changed (an item
+// added or removed), so the watch providers bound to that list kind can mirror
+// the change. It serves both the favorites and watchlist lists via List.
+type LocalListEvent struct {
+	List      ListKind
+	Change    ListChange
 	UserID    int
 	ProfileID string
-	Favorites []LocalFavorite
+	Items     []LocalFavorite
 }
 
 type HistoryExport struct {
@@ -386,9 +435,14 @@ type HistoryExport struct {
 	UpdatedAt       time.Time
 }
 
-type FavoriteState struct {
+// ListItemState is the per-connection, per-list shadow record tracking whether
+// an item is present locally and/or remotely, used to drive incremental
+// export/removal reconciliation. It serves both the favorites and watchlist
+// lists, discriminated by ListKind.
+type ListItemState struct {
 	ID                  string
 	ConnectionID        string
+	ListKind            ListKind
 	MediaItemID         string
 	ProviderItemKey     string
 	Kind                string
@@ -524,36 +578,45 @@ type ProviderSummary struct {
 }
 
 type ConnectionStatus struct {
-	Provider                    string       `json:"provider"`
-	DisplayName                 string       `json:"display_name"`
-	Capabilities                Capabilities `json:"capabilities"`
-	AuthMethod                  string       `json:"auth_method"`
-	Connected                   bool         `json:"connected"`
-	ProviderUsername            string       `json:"provider_username,omitempty"`
-	ImportWatchedEnabled        bool         `json:"import_watched_enabled"`
-	ImportProgressEnabled       bool         `json:"import_progress_enabled"`
-	ExportWatchedEnabled        bool         `json:"export_watched_enabled"`
-	ExportUnwatchedEnabled      bool         `json:"export_unwatched_enabled"`
-	ImportFavoritesEnabled      bool         `json:"import_favorites_enabled"`
-	ExportFavoritesEnabled      bool         `json:"export_favorites_enabled"`
-	SyncFavoriteRemovalsEnabled bool         `json:"sync_favorite_removals_enabled"`
-	ScrobbleEnabled             bool         `json:"scrobble_enabled"`
-	CredentialsConfigured       bool         `json:"credentials_configured"`
-	LastInboundSyncAt           *time.Time   `json:"last_inbound_sync_at,omitempty"`
-	LastProgressSyncAt          *time.Time   `json:"last_progress_sync_at,omitempty"`
-	LastOutboundSyncAt          *time.Time   `json:"last_outbound_sync_at,omitempty"`
-	LastFavoritesSyncAt         *time.Time   `json:"last_favorites_sync_at,omitempty"`
-	LastScrobbleErrorAt         *time.Time   `json:"last_scrobble_error_at,omitempty"`
-	LastError                   string       `json:"last_error,omitempty"`
+	Provider                     string       `json:"provider"`
+	DisplayName                  string       `json:"display_name"`
+	Capabilities                 Capabilities `json:"capabilities"`
+	AuthMethod                   string       `json:"auth_method"`
+	Connected                    bool         `json:"connected"`
+	ProviderUsername             string       `json:"provider_username,omitempty"`
+	ImportWatchedEnabled         bool         `json:"import_watched_enabled"`
+	ImportProgressEnabled        bool         `json:"import_progress_enabled"`
+	ExportWatchedEnabled         bool         `json:"export_watched_enabled"`
+	ExportUnwatchedEnabled       bool         `json:"export_unwatched_enabled"`
+	ImportFavoritesEnabled       bool         `json:"import_favorites_enabled"`
+	ExportFavoritesEnabled       bool         `json:"export_favorites_enabled"`
+	SyncFavoriteRemovalsEnabled  bool         `json:"sync_favorite_removals_enabled"`
+	ImportWatchlistEnabled       bool         `json:"import_watchlist_enabled"`
+	ExportWatchlistEnabled       bool         `json:"export_watchlist_enabled"`
+	SyncWatchlistRemovalsEnabled bool         `json:"sync_watchlist_removals_enabled"`
+	SyncWatchlistOrderEnabled    bool         `json:"sync_watchlist_order_enabled"`
+	ScrobbleEnabled              bool         `json:"scrobble_enabled"`
+	CredentialsConfigured        bool         `json:"credentials_configured"`
+	LastInboundSyncAt            *time.Time   `json:"last_inbound_sync_at,omitempty"`
+	LastProgressSyncAt           *time.Time   `json:"last_progress_sync_at,omitempty"`
+	LastOutboundSyncAt           *time.Time   `json:"last_outbound_sync_at,omitempty"`
+	LastFavoritesSyncAt          *time.Time   `json:"last_favorites_sync_at,omitempty"`
+	LastWatchlistSyncAt          *time.Time   `json:"last_watchlist_sync_at,omitempty"`
+	LastScrobbleErrorAt          *time.Time   `json:"last_scrobble_error_at,omitempty"`
+	LastError                    string       `json:"last_error,omitempty"`
 }
 
 type ConnectionUpdate struct {
-	ImportWatchedEnabled        *bool `json:"import_watched_enabled,omitempty"`
-	ImportProgressEnabled       *bool `json:"import_progress_enabled,omitempty"`
-	ExportWatchedEnabled        *bool `json:"export_watched_enabled,omitempty"`
-	ExportUnwatchedEnabled      *bool `json:"export_unwatched_enabled,omitempty"`
-	ImportFavoritesEnabled      *bool `json:"import_favorites_enabled,omitempty"`
-	ExportFavoritesEnabled      *bool `json:"export_favorites_enabled,omitempty"`
-	SyncFavoriteRemovalsEnabled *bool `json:"sync_favorite_removals_enabled,omitempty"`
-	ScrobbleEnabled             *bool `json:"scrobble_enabled,omitempty"`
+	ImportWatchedEnabled         *bool `json:"import_watched_enabled,omitempty"`
+	ImportProgressEnabled        *bool `json:"import_progress_enabled,omitempty"`
+	ExportWatchedEnabled         *bool `json:"export_watched_enabled,omitempty"`
+	ExportUnwatchedEnabled       *bool `json:"export_unwatched_enabled,omitempty"`
+	ImportFavoritesEnabled       *bool `json:"import_favorites_enabled,omitempty"`
+	ExportFavoritesEnabled       *bool `json:"export_favorites_enabled,omitempty"`
+	SyncFavoriteRemovalsEnabled  *bool `json:"sync_favorite_removals_enabled,omitempty"`
+	ImportWatchlistEnabled       *bool `json:"import_watchlist_enabled,omitempty"`
+	ExportWatchlistEnabled       *bool `json:"export_watchlist_enabled,omitempty"`
+	SyncWatchlistRemovalsEnabled *bool `json:"sync_watchlist_removals_enabled,omitempty"`
+	SyncWatchlistOrderEnabled    *bool `json:"sync_watchlist_order_enabled,omitempty"`
+	ScrobbleEnabled              *bool `json:"scrobble_enabled,omitempty"`
 }

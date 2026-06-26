@@ -65,6 +65,9 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ImportProgress:   true,
 		ExportWatched:    true,
 		ExportUnwatched:  true,
+		ImportWatchlist:  true,
+		ExportWatchlist:  true,
+		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
 	}
 }
@@ -323,6 +326,91 @@ func (p *Provider) Stop(ctx context.Context, cfg watchsync.ServerConfig, conn wa
 		return nil
 	}
 	return err
+}
+
+// FetchWatchlist pulls Simkl's "plan to watch" list across movies, shows and
+// anime. Simkl has no separate favorites concept; plan-to-watch is its
+// watchlist.
+func (p *Provider) FetchWatchlist(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemoteFavorite, error) {
+	now := time.Now().UTC()
+	var rows []watchsync.RemoteFavorite
+
+	var movies simklAllItemsResponse
+	if err := p.do(ctx, http.MethodGet, "/sync/all-items/movies/plantowatch?extended=full", cfg, conn.AccessToken, nil, &movies); err != nil {
+		return nil, err
+	}
+	for _, movie := range movies.Movies {
+		key := movieKey(movie.Movie.IDs)
+		if key == "" {
+			continue
+		}
+		rows = append(rows, watchsync.RemoteFavorite{
+			Provider:        p.Key(),
+			ProviderItemKey: key,
+			Kind:            historyimport.KindMovie,
+			Title:           movie.Movie.Title,
+			Year:            movie.Movie.Year,
+			IMDbID:          movie.Movie.IDs.IMDb,
+			TMDBID:          intString(movie.Movie.IDs.TMDB),
+			TVDBID:          intString(movie.Movie.IDs.TVDB),
+			FavoritedAt:     now,
+		})
+	}
+
+	for _, path := range []string{
+		"/sync/all-items/shows/plantowatch?extended=full",
+		"/sync/all-items/anime/plantowatch?extended=full",
+	} {
+		var payload simklAllItemsResponse
+		if err := p.do(ctx, http.MethodGet, path, cfg, conn.AccessToken, nil, &payload); err != nil {
+			return nil, err
+		}
+		for _, show := range append(payload.Shows, payload.Anime...) {
+			key := showKey(show.Show.IDs)
+			if key == "" {
+				continue
+			}
+			rows = append(rows, watchsync.RemoteFavorite{
+				Provider:        p.Key(),
+				ProviderItemKey: key,
+				Kind:            historyimport.KindSeries,
+				Title:           show.Show.Title,
+				Year:            show.Show.Year,
+				IMDbID:          show.Show.IDs.IMDb,
+				TMDBID:          intString(show.Show.IDs.TMDB),
+				TVDBID:          intString(show.Show.IDs.TVDB),
+				FavoritedAt:     now,
+			})
+		}
+	}
+	return rows, nil
+}
+
+func (p *Provider) ExportWatchlist(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection, items []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
+	return p.sendListChange(ctx, "/sync/add-to-list", cfg, conn, items, "plantowatch")
+}
+
+func (p *Provider) RemoveWatchlist(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection, items []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
+	return p.sendListChange(ctx, "/sync/remove-from-list", cfg, conn, items, "")
+}
+
+func (p *Provider) sendListChange(ctx context.Context, path string, cfg watchsync.ServerConfig, conn watchsync.Connection, items []watchsync.LocalFavorite, to string) (watchsync.ExportResult, error) {
+	payload := buildSimklListPayload(items, to)
+	if len(payload.Movies) == 0 && len(payload.Shows) == 0 {
+		return watchsync.ExportResult{}, nil
+	}
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(payload); err != nil {
+		return watchsync.ExportResult{}, fmt.Errorf("encode simkl list payload: %w", err)
+	}
+	if err := p.do(ctx, http.MethodPost, path, cfg, conn.AccessToken, &body, nil); err != nil {
+		return watchsync.ExportResult{}, err
+	}
+	result := watchsync.ExportResult{Sent: make([]string, 0, len(items)*2)}
+	for _, item := range items {
+		result.Sent = append(result.Sent, item.MediaItemID, item.ProviderItemKey)
+	}
+	return result, nil
 }
 
 func (p *Provider) fetchActivities(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection) (simklActivities, error) {
@@ -1045,6 +1133,71 @@ func movieKey(ids simklIDs) string {
 		return "simkl:" + strconv.Itoa(ids.Simkl)
 	default:
 		return ""
+	}
+}
+
+func showKey(ids simklIDs) string {
+	switch {
+	case ids.TVDB > 0:
+		return "tvdb:" + strconv.Itoa(ids.TVDB)
+	case ids.TMDB > 0:
+		return "tmdb:" + strconv.Itoa(ids.TMDB)
+	case ids.IMDb != "":
+		return "imdb:" + ids.IMDb
+	case ids.Simkl > 0:
+		return "simkl:" + strconv.Itoa(ids.Simkl)
+	default:
+		return ""
+	}
+}
+
+type simklListPayload struct {
+	Movies []simklListItem `json:"movies,omitempty"`
+	Shows  []simklListItem `json:"shows,omitempty"`
+}
+
+type simklListItem struct {
+	To  string   `json:"to,omitempty"`
+	IDs simklIDs `json:"ids"`
+}
+
+func buildSimklListPayload(items []watchsync.LocalFavorite, to string) simklListPayload {
+	var payload simklListPayload
+	for _, item := range items {
+		ids := idsFromLocal(item.IMDbID, item.TMDBID, item.TVDBID)
+		if ids == (simklIDs{}) {
+			ids = idsFromProviderItemKey(item.ProviderItemKey)
+		}
+		if ids == (simklIDs{}) {
+			continue
+		}
+		ref := simklListItem{To: to, IDs: ids}
+		switch item.Kind {
+		case historyimport.KindMovie:
+			payload.Movies = append(payload.Movies, ref)
+		case historyimport.KindSeries:
+			payload.Shows = append(payload.Shows, ref)
+		}
+	}
+	return payload
+}
+
+func idsFromProviderItemKey(key string) simklIDs {
+	prefix, value, ok := strings.Cut(key, ":")
+	if !ok || value == "" {
+		return simklIDs{}
+	}
+	switch prefix {
+	case "imdb":
+		return simklIDs{IMDb: value}
+	case "tmdb":
+		return simklIDs{TMDB: parseInt(value)}
+	case "tvdb":
+		return simklIDs{TVDB: parseInt(value)}
+	case "simkl":
+		return simklIDs{Simkl: parseInt(value)}
+	default:
+		return simklIDs{}
 	}
 }
 

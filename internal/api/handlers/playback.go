@@ -103,6 +103,7 @@ type PlaybackHandler struct {
 	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
 	WatchScrobbler          PlaybackWatchScrobbler
 	StableIdentityResolver  *watchstate.StableIdentityResolver
+	CompletionObserver      watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
 	AdminStore              PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
@@ -826,7 +827,9 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 
 	duration := float64(file.Duration)
 	thresholds := h.playbackThresholds(ctx)
-	watchSvc := watchstate.NewService(h.StoreProvider).WithStableIdentityResolver(h.StableIdentityResolver)
+	watchSvc := watchstate.NewService(h.StoreProvider).
+		WithStableIdentityResolver(h.StableIdentityResolver).
+		WithCompletionObserver(h.CompletionObserver)
 	stoppedAt := time.Now().UTC()
 	result, err := watchSvc.RecordPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, userstore.VersionHints{
 		FileID:     file.ID,

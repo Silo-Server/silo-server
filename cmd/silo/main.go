@@ -95,6 +95,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 	watchmdblist "github.com/Silo-Server/silo-server/internal/watchsync/providers/mdblist"
@@ -1449,6 +1450,15 @@ func main() {
 			}
 		})
 	}
+	// Auto-remove fully-watched items from the watchlist (standalone behavior,
+	// default-on per profile), propagating removals to connected providers.
+	if itemRepo != nil && episodeRepo != nil && userStoreProvider != nil {
+		maintainer := watchlist.NewMaintainer(userStoreProvider, itemRepo, episodeRepo)
+		if watchProviderService != nil {
+			maintainer.WithListEventDispatcher(watchProviderService)
+		}
+		deps.WatchCompletionObserver = maintainer
+	}
 	deps.SessionMgr = sessionMgr
 	deps.PlaybackRealtimeHub = playback.NewRealtimeHub()
 	if chapterThumbService != nil && deps.S3Public != nil {
@@ -2172,6 +2182,7 @@ func main() {
 			compatDeps.FolderRepo = folderRepo
 			compatDeps.SessionMgr = sessionMgr
 			compatDeps.UserStoreProvider = userStoreProvider
+			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
 

@@ -177,8 +177,16 @@ func (s *SQLiteUserStore) AddToWatchlist(_ context.Context, profileID, mediaItem
 	return AddToWatchlist(s.db, profileID, mediaItemID)
 }
 
+func (s *SQLiteUserStore) AddToWatchlistAt(_ context.Context, profileID, mediaItemID string, addedAt time.Time) error {
+	return AddToWatchlistAt(s.db, profileID, mediaItemID, addedAt)
+}
+
 func (s *SQLiteUserStore) RemoveFromWatchlist(_ context.Context, profileID, mediaItemID string) error {
 	return RemoveFromWatchlist(s.db, profileID, mediaItemID)
+}
+
+func (s *SQLiteUserStore) ReplaceWatchlistOrder(_ context.Context, profileID string, orderedMediaItemIDs []string) error {
+	return ReplaceWatchlistOrder(s.db, profileID, orderedMediaItemIDs)
 }
 
 func (s *SQLiteUserStore) ListWatchlist(_ context.Context, profileID string, limit, offset int) ([]userstore.WatchlistEntry, error) {
@@ -191,6 +199,12 @@ func (s *SQLiteUserStore) ListWatchlistByMediaItems(_ context.Context, profileID
 
 func (s *SQLiteUserStore) InWatchlist(_ context.Context, profileID, mediaItemID string) (bool, error) {
 	return InWatchlist(s.db, profileID, mediaItemID)
+}
+
+// RemoveWatchedFromWatchlist defaults on for the embedded sqlite backend, which
+// does not persist the per-profile preference.
+func (s *SQLiteUserStore) RemoveWatchedFromWatchlist(_ context.Context, _ string) (bool, error) {
+	return true, nil
 }
 
 // --- Collections ---

@@ -2,9 +2,12 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -103,11 +106,15 @@ func (s *PostgresUserStore) ListFavoritesByMediaItems(ctx context.Context, profi
 // --- Watchlist ---
 
 func (s *PostgresUserStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error {
+	return s.AddToWatchlistAt(ctx, profileID, mediaItemID, time.Now().UTC())
+}
+
+func (s *PostgresUserStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) error {
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO user_watchlist (user_id, profile_id, media_item_id, added_at)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
-		s.userID, profileID, mediaItemID, nowUTC(),
+		s.userID, profileID, mediaItemID, addedAt.UTC(),
 	)
 	return err
 }
@@ -121,9 +128,12 @@ func (s *PostgresUserStore) RemoveFromWatchlist(ctx context.Context, profileID, 
 }
 
 func (s *PostgresUserStore) ListWatchlist(ctx context.Context, profileID string, limit, offset int) ([]userstore.WatchlistEntry, error) {
+	// Items with a synced sort_index (mirrored from a provider) come first in
+	// that order; locally-added items (sort_index NULL) fall back to newest-first.
 	rows, err := s.pool.Query(ctx,
 		`SELECT profile_id, media_item_id, added_at FROM user_watchlist
-		 WHERE user_id = $1 AND profile_id = $2 ORDER BY added_at DESC LIMIT $3 OFFSET $4`,
+		 WHERE user_id = $1 AND profile_id = $2
+		 ORDER BY sort_index ASC NULLS LAST, added_at DESC LIMIT $3 OFFSET $4`,
 		s.userID, profileID, limit, offset,
 	)
 	if err != nil {
@@ -151,6 +161,73 @@ func (s *PostgresUserStore) InWatchlist(ctx context.Context, profileID, mediaIte
 		s.userID, profileID, mediaItemID,
 	).Scan(&count)
 	return count > 0, err
+}
+
+// ReplaceWatchlistOrder mirrors a provider's watchlist order: the given media
+// item ids get sort_index 0..N-1 in order, and every other watchlist row for
+// the profile is reset to NULL (falling back to added_at ordering). Pass an
+// empty slice to clear all synced ordering.
+func (s *PostgresUserStore) ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error {
+	if len(orderedMediaItemIDs) == 0 {
+		// Clear all synced ordering — revert to added_at ordering.
+		if _, err := s.pool.Exec(ctx,
+			`UPDATE user_watchlist SET sort_index = NULL
+			 WHERE user_id = $1 AND profile_id = $2 AND sort_index IS NOT NULL`,
+			s.userID, profileID,
+		); err != nil {
+			return fmt.Errorf("clear watchlist order: %w", err)
+		}
+		return nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin watchlist order tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE user_watchlist SET sort_index = NULL
+		 WHERE user_id = $1 AND profile_id = $2 AND sort_index IS NOT NULL
+		   AND NOT (media_item_id = ANY($3))`,
+		s.userID, profileID, orderedMediaItemIDs,
+	); err != nil {
+		return fmt.Errorf("clear stale watchlist order: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE user_watchlist w
+		 SET sort_index = v.idx
+		 FROM (
+		   SELECT unnest($3::text[]) AS media_item_id,
+		          generate_subscripts($3::text[], 1) - 1 AS idx
+		 ) v
+		 WHERE w.user_id = $1 AND w.profile_id = $2 AND w.media_item_id = v.media_item_id`,
+		s.userID, profileID, orderedMediaItemIDs,
+	); err != nil {
+		return fmt.Errorf("apply watchlist order: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit watchlist order: %w", err)
+	}
+	return nil
+}
+
+func (s *PostgresUserStore) RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error) {
+	var enabled bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT remove_watched_from_watchlist FROM user_profiles WHERE user_id = $1 AND id = $2`,
+		s.userID, profileID,
+	).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Default-on when the profile row is unexpectedly absent.
+		return true, nil
+	}
+	if err != nil {
+		return true, fmt.Errorf("get remove_watched_from_watchlist: %w", err)
+	}
+	return enabled, nil
 }
 
 func (s *PostgresUserStore) ListWatchlistByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error) {
