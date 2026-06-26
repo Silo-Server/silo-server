@@ -246,6 +246,10 @@ type RecommendationsConfig struct {
 	TasteDecayHalfLifeDays float64 `yaml:"-"`
 	DiversityLambda        float64 `yaml:"-"`
 	CowatchCron            string  `yaml:"-"`
+	// EmbeddingsJobTimeout bounds a single embedding backfill run. A local
+	// CPU embedder over a large catalog needs hours, so this defaults to 24h
+	// (replacing a hardcoded 30m that truncated large first-run backfills).
+	EmbeddingsJobTimeout time.Duration `yaml:"-"`
 }
 
 // AIConfig holds the shared connection settings for Silo's AI features

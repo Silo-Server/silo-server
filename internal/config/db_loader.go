@@ -413,6 +413,10 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}())
 	cfg.Recommendations.EmbeddingAuthToken = stringOr(m, "recommendations.embedding_auth_token", stringOr(m, "recommendations.openai_api_key", ""))
 	cfg.Recommendations.EmbeddingsCron = stringOr(m, "recommendations.embeddings_cron", "0 3 * * *")
+	cfg.Recommendations.EmbeddingsJobTimeout, err = durationOr(m, "recommendations.embeddings_job_timeout", 24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
 	cfg.Recommendations.TasteProfilesCron = stringOr(m, "recommendations.taste_profiles_cron", "0 4 * * *")
 	cfg.Recommendations.RecommendationsCron = stringOr(m, "recommendations.recommendations_cron", "0 5 * * *")
 	tasteDecayHalfLife, err := floatOr(m, "recommendations.taste_decay_half_life_days", 180)

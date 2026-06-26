@@ -1521,6 +1521,7 @@ func main() {
 			cfg.Recommendations.TasteProfilesCron,
 			cfg.Recommendations.CowatchCron,
 			cfg.Recommendations.RecommendationsCron,
+			cfg.Recommendations.EmbeddingsJobTimeout,
 		)
 		if err != nil {
 			slog.Error("failed to create recommendation worker", "error", err)
