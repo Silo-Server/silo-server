@@ -430,14 +430,27 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		// advertising the streams, so the chosen subtitle is marked default and
 		// starts with playback (mirrors the audio-selection plumbing).
 		var downloaded []subtitles.DownloadedSubtitle
+		downloadedKnown := true
 		if h.SubtitleRepo != nil {
-			downloaded, _ = h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), source.Version.FileID)
+			var listErr error
+			downloaded, listErr = h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), source.Version.FileID)
+			if listErr != nil {
+				// Don't treat a lookup failure as "no downloaded subtitles": that
+				// would silently downgrade a valid downloaded selection to the
+				// media default. Resolution falls back to honoring the request.
+				downloaded = nil
+				downloadedKnown = false
+				slog.Warn("jellycompat downloaded subtitle lookup failed",
+					"file_id", source.Version.FileID,
+					"error", listErr,
+				)
+			}
 		}
 		var requestedSubtitleIndex *int
 		if req.SubtitleStreamIndex != nil {
 			requestedSubtitleIndex = intPtr(int(*req.SubtitleStreamIndex))
 		}
-		source.SelectedSubtitleStreamIndex = resolveSelectedSubtitleStreamIndex(source.Version, len(downloaded), requestedSubtitleIndex, source.DefaultSubtitleStreamIndex)
+		source.SelectedSubtitleStreamIndex = resolveSelectedSubtitleStreamIndex(source.Version, len(downloaded), downloadedKnown, requestedSubtitleIndex, source.DefaultSubtitleStreamIndex)
 
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
@@ -875,7 +888,14 @@ func isValidCompatSubtitleStreamIndex(version catalog.FileVersion, downloadedCou
 // media default; a negative request is preserved as an explicit "subtitles off"
 // (-1); a valid request is honored; an invalid request falls back to the media
 // default.
-func resolveSelectedSubtitleStreamIndex(version catalog.FileVersion, downloadedCount int, requested, mediaDefault *int) *int {
+//
+// downloadedKnown reports whether the downloaded-subtitle list was loaded
+// successfully. When it is false, an index that does not match an
+// embedded/external track is honored rather than downgraded, because it may be a
+// downloaded subtitle we could not enumerate — losing the user's choice on a
+// transient lookup failure is worse than echoing an index whose stream is
+// temporarily absent.
+func resolveSelectedSubtitleStreamIndex(version catalog.FileVersion, downloadedCount int, downloadedKnown bool, requested, mediaDefault *int) *int {
 	if requested == nil {
 		return mediaDefault
 	}
@@ -883,6 +903,9 @@ func resolveSelectedSubtitleStreamIndex(version catalog.FileVersion, downloadedC
 		return intPtr(-1)
 	}
 	if isValidCompatSubtitleStreamIndex(version, downloadedCount, *requested) {
+		return intPtr(*requested)
+	}
+	if !downloadedKnown {
 		return intPtr(*requested)
 	}
 	return mediaDefault

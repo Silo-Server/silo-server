@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -115,20 +116,32 @@ func TestResolveSelectedSubtitleStreamIndex(t *testing.T) {
 	mediaDefault := intPtr(2)
 
 	cases := []struct {
-		name      string
-		requested *int
-		want      *int
+		name            string
+		downloadedKnown bool
+		requested       *int
+		want            *int
 	}{
-		{"no request falls back to media default", nil, intPtr(2)},
-		{"explicit off", intPtr(-1), intPtr(-1)},
-		{"valid embedded selection", intPtr(2), intPtr(2)},
-		{"valid external selection", intPtr(3), intPtr(3)},
-		{"valid downloaded selection", intPtr(5), intPtr(5)},
-		{"invalid selection falls back to media default", intPtr(99), intPtr(2)},
+		{"no request falls back to media default", true, nil, intPtr(2)},
+		{"explicit off", true, intPtr(-1), intPtr(-1)},
+		{"valid embedded selection", true, intPtr(2), intPtr(2)},
+		{"valid external selection", true, intPtr(3), intPtr(3)},
+		{"valid downloaded selection", true, intPtr(5), intPtr(5)},
+		{"invalid selection falls back to media default", true, intPtr(99), intPtr(2)},
+		// When the downloaded list could not be loaded, an embedded/external
+		// selection still resolves, but an index we cannot validate is honored
+		// rather than downgraded to the media default.
+		{"lookup failure honors embedded selection", false, intPtr(3), intPtr(3)},
+		{"lookup failure honors unverifiable selection", false, intPtr(5), intPtr(5)},
+		{"lookup failure still respects off", false, intPtr(-1), intPtr(-1)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveSelectedSubtitleStreamIndex(version, downloadedCount, tc.requested, mediaDefault)
+			// A failed lookup yields no enumerable downloaded subtitles.
+			count := downloadedCount
+			if !tc.downloadedKnown {
+				count = 0
+			}
+			got := resolveSelectedSubtitleStreamIndex(version, count, tc.downloadedKnown, tc.requested, mediaDefault)
 			if (got == nil) != (tc.want == nil) {
 				t.Fatalf("resolveSelectedSubtitleStreamIndex = %v, want %v", ptrString(got), ptrString(tc.want))
 			}
@@ -286,6 +299,46 @@ func TestHandlePlaybackInfo_HonorsSelectedDownloadedSubtitle(t *testing.T) {
 	index, found := defaultSubtitleStreamFromResponse(t, resp)
 	if !found || index != 5 {
 		t.Fatalf("default subtitle stream = (%d, %v), want (5, true)", index, found)
+	}
+}
+
+// erroringSubtitleRepository simulates a transient failure of the downloaded
+// subtitle lookup while satisfying the rest of the repository interface.
+type erroringSubtitleRepository struct {
+	fakeSubtitleRepository
+}
+
+func (erroringSubtitleRepository) ListDownloadedSubtitles(context.Context, int) ([]subtitles.DownloadedSubtitle, error) {
+	return nil, errors.New("subtitle store unavailable")
+}
+
+func TestHandlePlaybackInfo_HonorsExternalSelectionWhenDownloadedLookupFails(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentID := "movie-1"
+	routeID := codec.EncodeStringID(EncodedIDItem, contentID)
+	handler := &PlaybackHandler{
+		content: &stubContentService{detail: &upstreamItemDetail{
+			ContentID: contentID,
+			Versions:  []catalog.FileVersion{subtitleSelectionVersion()},
+		}},
+		codec:          codec,
+		deviceProfiles: NewDeviceProfileStore(time.Hour, nil),
+		playbackStore:  NewPlaybackSessionStore(time.Hour, nil),
+		SubtitleRepo:   erroringSubtitleRepository{},
+	}
+
+	// A failed downloaded-subtitle lookup must not discard a valid
+	// embedded/external selection (the primary case for external SRT).
+	resp := postPlaybackInfo(t, handler, routeID, `{"SubtitleStreamIndex":3}`)
+	if resp.MediaSources[0].DefaultSubtitleStreamIndex == nil {
+		t.Fatal("expected DefaultSubtitleStreamIndex to be set")
+	}
+	if got := *resp.MediaSources[0].DefaultSubtitleStreamIndex; got != 3 {
+		t.Fatalf("DefaultSubtitleStreamIndex = %d, want 3", got)
+	}
+	index, found := defaultSubtitleStreamFromResponse(t, resp)
+	if !found || index != 3 {
+		t.Fatalf("default subtitle stream = (%d, %v), want (3, true)", index, found)
 	}
 }
 
