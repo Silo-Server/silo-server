@@ -110,6 +110,37 @@ func TestMergeStepPlaceholdersAreBounded(t *testing.T) {
 	}
 }
 
+func TestMergeStepsUseCurrentWatchProviderListItemsTable(t *testing.T) {
+	for _, step := range mediaItemMergeSteps {
+		if strings.Contains(step.sql, "watch_provider_favorite_items") {
+			t.Fatalf("merge step %q still references renamed watch provider table", step.name)
+		}
+	}
+
+	for _, want := range []string{
+		"merge watch provider list items by provider key",
+		"merge watch provider list items by connection",
+		"delete duplicate watch provider list items",
+	} {
+		var stepSQL string
+		for _, step := range mediaItemMergeSteps {
+			if step.name == want {
+				stepSQL = normalizeMergeStepSQL(step.sql)
+				break
+			}
+		}
+		if stepSQL == "" {
+			t.Fatalf("missing merge step %q", want)
+		}
+		if !strings.Contains(stepSQL, "watch_provider_list_items") {
+			t.Fatalf("merge step %q does not reference watch_provider_list_items", want)
+		}
+		if !strings.Contains(stepSQL, "src.list_kind = dest.list_kind") {
+			t.Fatalf("merge step %q must preserve per-list shadow state", want)
+		}
+	}
+}
+
 func TestMergeStepsPreserveEbookReaderProgress(t *testing.T) {
 	var hasMerge bool
 	var hasDelete bool
@@ -127,6 +158,10 @@ func TestMergeStepsPreserveEbookReaderProgress(t *testing.T) {
 	if !hasDelete {
 		t.Fatal("media item merge steps should delete source ebook_reader_progress rows")
 	}
+}
+
+func normalizeMergeStepSQL(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func TestBothCandidatesHaveContentDetectsRealUserData(t *testing.T) {
