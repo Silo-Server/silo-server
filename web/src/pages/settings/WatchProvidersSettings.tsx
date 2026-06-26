@@ -272,7 +272,13 @@ function APIKeyBlock({
 
 interface ConnectedRunInfo {
   imported: { watched: number; progress: number; favorites: number; watchlist: number };
-  exported: { watched: number; favorites: number; favoriteRemovals: number; watchlist: number };
+  exported: {
+    watched: number;
+    favorites: number;
+    favoriteRemovals: number;
+    watchlist: number;
+    watchlistRemovals: number;
+  };
   errorMessage?: string;
   errorHint?: string;
 }
@@ -292,6 +298,7 @@ function deriveRunInfo(
     favorites: latestRun?.outbound_favorites_sent ?? 0,
     favoriteRemovals: latestRun?.favorite_removals_sent ?? 0,
     watchlist: latestRun?.outbound_watchlist_sent ?? 0,
+    watchlistRemovals: latestRun?.watchlist_removals_sent ?? 0,
   };
   let errorMessage: string | undefined;
   let errorHint: string | undefined;
@@ -563,7 +570,7 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
               />
               <StatCell
                 label="Last exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.watchlist).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals).toLocaleString()} sent`}
               />
             </div>
             <div className="hidden grid-cols-5 gap-3 sm:grid">
@@ -585,7 +592,7 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
               />
               <StatCell
                 label="Exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.watchlist).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals).toLocaleString()} sent`}
               />
             </div>
           </div>

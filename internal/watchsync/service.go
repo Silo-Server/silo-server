@@ -191,28 +191,33 @@ func (s *Service) UpdateConnection(ctx context.Context, userID int, profileID st
 	if update.ScrobbleEnabled != nil {
 		conn.ScrobbleEnabled = *update.ScrobbleEnabled
 	}
+	// Turning order mirroring off reverts the watchlist to added_at ordering.
+	// Clear the stored order *before* persisting the disable so a failure leaves
+	// both the order and the toggle intact (retriable) rather than reporting
+	// "disabled" while sort_index ordering is still active.
+	if watchlistOrderDisabled {
+		if err := s.clearWatchlistOrder(ctx, conn); err != nil {
+			return ConnectionStatus{}, err
+		}
+	}
 	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
 		return ConnectionStatus{}, err
-	}
-	// Turning order mirroring off reverts the watchlist to added_at ordering.
-	if watchlistOrderDisabled {
-		s.clearWatchlistOrder(ctx, conn)
 	}
 	return s.GetConnectionStatus(ctx, userID, profileID, providerKey)
 }
 
-func (s *Service) clearWatchlistOrder(ctx context.Context, conn Connection) {
+func (s *Service) clearWatchlistOrder(ctx context.Context, conn Connection) error {
 	if s.storeProvider == nil {
-		return
+		return nil
 	}
 	store, err := s.storeProvider.ForUser(ctx, conn.UserID)
 	if err != nil {
-		slog.Warn("failed to open store to clear watchlist order", "provider", conn.Provider, "error", err)
-		return
+		return fmt.Errorf("open user store to clear watchlist order: %w", err)
 	}
 	if err := store.ReplaceWatchlistOrder(ctx, conn.ProfileID, nil); err != nil {
-		slog.Warn("failed to clear watchlist order", "provider", conn.Provider, "error", err)
+		return fmt.Errorf("clear watchlist order: %w", err)
 	}
+	return nil
 }
 
 func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID string, providerKey string) error {
@@ -1537,6 +1542,22 @@ func containsString(values []string, candidate string) bool {
 		}
 	}
 	return false
+}
+
+// exportFailureReason explains why an item was not confirmed sent, keyed by the
+// provider's failed/not-found result sets, so callers can record a per-item
+// error and let the pending queue advance.
+func exportFailureReason(result ExportResult, item LocalFavorite, kind ListKind) string {
+	if msg, ok := result.Failed[item.MediaItemID]; ok && msg != "" {
+		return msg
+	}
+	if msg, ok := result.Failed[item.ProviderItemKey]; ok && msg != "" {
+		return msg
+	}
+	if containsString(result.NotFound, item.MediaItemID) || containsString(result.NotFound, item.ProviderItemKey) {
+		return string(kind) + " item not found by provider"
+	}
+	return string(kind) + " item not confirmed by provider"
 }
 
 func historySourceForProvider(provider any) userstore.WatchHistorySource {

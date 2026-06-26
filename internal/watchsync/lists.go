@@ -418,13 +418,15 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 				result.Sent++
 				continue
 			}
-			if containsString(exportResult.NotFound, item.MediaItemID) || containsString(exportResult.NotFound, item.ProviderItemKey) {
-				msg := string(b.kind) + " item not found by provider"
-				if err := s.repo.MarkListItemError(ctx, conn.ID, b.kind, item.MediaItemID, msg); err != nil {
-					return result, err
-				}
-				result.Warnings = append(result.Warnings, msg+": "+item.MediaItemID)
+			// Anything not confirmed sent (not_found, failed, or omitted from the
+			// provider response) is marked with an error so it leaves the pending
+			// set this run; the next run's UpsertListItemStates clears the error
+			// and re-attempts, so transient failures still retry.
+			msg := exportFailureReason(exportResult, item, b.kind)
+			if err := s.repo.MarkListItemError(ctx, conn.ID, b.kind, item.MediaItemID, msg); err != nil {
+				return result, err
 			}
+			result.Warnings = append(result.Warnings, msg+": "+item.MediaItemID)
 		}
 	}
 	now := s.now()
@@ -440,16 +442,21 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 // dropped locally but still present remotely).
 func (s *Service) removePendingListItems(ctx context.Context, conn Connection, cfg ServerConfig, provider Provider, b listBinding) (int, error) {
 	removed := 0
+	// Removal failures intentionally do not set last_error (which would strand
+	// the row from ListPendingListItemRemovals, since there is no per-run upsert
+	// to clear it). Instead we track items attempted this run in memory so the
+	// loop terminates, and leave failed rows pending for the next scheduled run.
+	attempted := make(map[string]bool)
 	for {
 		pending, err := s.repo.ListPendingListItemRemovals(ctx, conn.ID, b.kind, 100)
 		if err != nil {
 			return removed, err
 		}
-		if len(pending) == 0 {
-			return removed, nil
-		}
 		items := make([]LocalFavorite, 0, len(pending))
 		for _, state := range pending {
+			if attempted[state.MediaItemID] {
+				continue
+			}
 			items = append(items, LocalFavorite{
 				MediaItemID:     state.MediaItemID,
 				ProviderItemKey: state.ProviderItemKey,
@@ -458,20 +465,25 @@ func (s *Service) removePendingListItems(ctx context.Context, conn Connection, c
 				Year:            state.Year,
 			})
 		}
+		if len(items) == 0 {
+			return removed, nil
+		}
 		result, ok, err := b.removeItems(ctx, cfg, conn, provider, items)
 		if !ok {
 			return removed, fmt.Errorf("provider %q does not implement %s removal", conn.Provider, b.kind)
 		}
 		if err != nil {
-			for _, item := range items {
-				_ = s.repo.MarkListItemError(ctx, conn.ID, b.kind, item.MediaItemID, err.Error())
-			}
+			// Leave the rows pending so the next scheduled run retries them.
 			return removed, err
 		}
 		now := s.now()
 		sent := exportResultSentSet(result)
 		for _, item := range items {
-			if sent[item.MediaItemID] || sent[item.ProviderItemKey] {
+			attempted[item.MediaItemID] = true
+			// Sent (removed) and NotFound (already absent remotely) both reconcile
+			// the row; true failures stay pending for the next run.
+			if sent[item.MediaItemID] || sent[item.ProviderItemKey] ||
+				containsString(result.NotFound, item.MediaItemID) || containsString(result.NotFound, item.ProviderItemKey) {
 				if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
 					return removed, err
 				}
@@ -603,15 +615,22 @@ func (s *Service) processLocalListEvent(ctx context.Context, event LocalListEven
 			if !b.removalsEnabled(conn) || !b.capRemove(provider.Capabilities()) {
 				continue
 			}
-			if _, ok, err := b.removeItems(ctx, cfg, conn, provider, event.Items); !ok {
+			result, ok, err := b.removeItems(ctx, cfg, conn, provider, event.Items)
+			if !ok {
 				continue
-			} else if err != nil {
+			}
+			if err != nil {
+				// Leave remote_present set so the scheduled reconcile retries.
 				s.recordLocalWatchEventError(ctx, conn, err)
 				continue
 			}
+			sent := exportResultSentSet(result)
 			for _, item := range event.Items {
-				if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
-					return err
+				if sent[item.MediaItemID] || sent[item.ProviderItemKey] ||
+					containsString(result.NotFound, item.MediaItemID) || containsString(result.NotFound, item.ProviderItemKey) {
+					if err := s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -621,6 +640,9 @@ func (s *Service) processLocalListEvent(ctx context.Context, event LocalListEven
 
 func (s *Service) exportLocalListItems(ctx context.Context, conn Connection, cfg ServerConfig, provider Provider, b listBinding, items []LocalFavorite) error {
 	states := make([]ListItemState, 0, len(items))
+	// toSend carries the normalized items (with a computed ProviderItemKey) so
+	// the provider receives the same keys we record in shadow state.
+	toSend := make([]LocalFavorite, 0, len(items))
 	for _, item := range items {
 		if item.ProviderItemKey == "" {
 			item.ProviderItemKey = providerItemKeyForLocalFavorite(item)
@@ -644,11 +666,12 @@ func (s *Service) exportLocalListItems(ctx context.Context, conn Connection, cfg
 			LocalPresent:    true,
 			LastSeenLocalAt: &listedAt,
 		})
+		toSend = append(toSend, item)
 	}
 	if err := s.repo.UpsertListItemStates(ctx, states); err != nil {
 		return err
 	}
-	result, ok, err := b.exportItems(ctx, cfg, conn, provider, items)
+	result, ok, err := b.exportItems(ctx, cfg, conn, provider, toSend)
 	if !ok {
 		return nil
 	}
@@ -657,7 +680,7 @@ func (s *Service) exportLocalListItems(ctx context.Context, conn Connection, cfg
 	}
 	now := s.now()
 	sent := exportResultSentSet(result)
-	for _, item := range items {
+	for _, item := range toSend {
 		if sent[item.MediaItemID] || sent[item.ProviderItemKey] {
 			if err := s.repo.MarkListItemExported(ctx, conn.ID, b.kind, item.MediaItemID, now); err != nil {
 				return err

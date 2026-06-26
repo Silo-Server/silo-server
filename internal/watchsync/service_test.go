@@ -346,10 +346,12 @@ func (r *serviceFakeRepo) markListItem(connectionID string, kind ListKind, media
 }
 
 func (r *serviceFakeRepo) MarkListItemExported(_ context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error {
+	// Mirror Postgres: successful transitions clear last_error.
 	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
 		s.RemotePresent = true
 		s.LocalPresent = true
 		s.LastExportedAt = &exportedAt
+		s.LastError = ""
 	})
 	return nil
 }
@@ -358,6 +360,7 @@ func (r *serviceFakeRepo) MarkListItemRemoteRemoved(_ context.Context, connectio
 	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
 		s.RemotePresent = false
 		s.LastRemovedRemoteAt = &removedAt
+		s.LastError = ""
 	})
 	return nil
 }
@@ -366,6 +369,7 @@ func (r *serviceFakeRepo) MarkListItemLocalRemoved(_ context.Context, connection
 	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
 		s.LocalPresent = false
 		s.LastRemovedLocalAt = &removedAt
+		s.LastError = ""
 	})
 	return nil
 }

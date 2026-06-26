@@ -205,3 +205,29 @@ func TestMaintainerDedupesEpisodesOfSameSeries(t *testing.T) {
 		t.Fatalf("series should be removed exactly once, got %d removals (%v)", got, store.removed)
 	}
 }
+
+type erroringItems struct{ err error }
+
+func (e erroringItems) GetByID(context.Context, string) (*models.MediaItem, error) {
+	return nil, e.err
+}
+
+type emptyEpisodes struct{}
+
+func (emptyEpisodes) GetByID(context.Context, string) (*models.Episode, error) { return nil, nil }
+func (emptyEpisodes) ListBySeries(context.Context, string) ([]*models.Episode, error) {
+	return nil, nil
+}
+
+func TestMaintainerPropagatesItemLookupError(t *testing.T) {
+	boom := errors.New("db down")
+	store := &fakeStore{removeWatched: true, watchlist: map[string]bool{}}
+	m := &Maintainer{
+		storeFor: func(context.Context, int) (maintainerStore, error) { return store, nil },
+		items:    erroringItems{err: boom},
+		episodes: emptyEpisodes{},
+	}
+	if err := m.process(context.Background(), 7, "profile-1", []string{"x"}); err == nil {
+		t.Fatal("a transient catalog lookup error must propagate, not be swallowed")
+	}
+}

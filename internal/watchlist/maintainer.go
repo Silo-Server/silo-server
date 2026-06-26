@@ -118,8 +118,16 @@ func (m *Maintainer) process(ctx context.Context, userID int, profileID string, 
 // resolveCandidate maps a completed media item id to the watchlist entry id to
 // clear, or ok=false when nothing should be removed.
 func (m *Maintainer) resolveCandidate(ctx context.Context, store maintainerStore, profileID, mediaItemID string) (string, bool, error) {
+	// A media-items miss is the normal path for episodes (they live in their own
+	// table), but a real repo error must not be silently swallowed — remember it
+	// and surface it if the episode path also can't resolve the id.
+	var itemLookupErr error
 	if m.items != nil {
-		if item, err := m.items.GetByID(ctx, mediaItemID); err == nil && item != nil {
+		item, err := m.items.GetByID(ctx, mediaItemID)
+		switch {
+		case err != nil:
+			itemLookupErr = err
+		case item != nil:
 			switch item.Type {
 			case "movie":
 				return item.ContentID, true, nil
@@ -136,11 +144,14 @@ func (m *Maintainer) resolveCandidate(ctx context.Context, store maintainerStore
 	// Not a catalog item — treat as an episode and clear the parent series once
 	// every episode has been watched.
 	if m.episodes == nil {
-		return "", false, nil
+		return "", false, itemLookupErr
 	}
 	episode, err := m.episodes.GetByID(ctx, mediaItemID)
-	if err != nil || episode == nil {
-		return "", false, nil
+	if err != nil {
+		return "", false, err
+	}
+	if episode == nil {
+		return "", false, itemLookupErr
 	}
 	return m.seriesCandidate(ctx, store, profileID, episode.SeriesID)
 }
