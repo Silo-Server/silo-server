@@ -90,7 +90,7 @@ func (r *ItemRepository) SetLocalPoster(ctx context.Context, contentID, posterPa
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE media_items
 		SET poster_path = $2,
-		    poster_thumbhash = NULLIF($3, ''),
+		    poster_thumbhash = $3,
 		    updated_at = NOW()
 		WHERE content_id = $1
 		  AND (poster_path IS NULL OR poster_path = '' OR poster_path LIKE $4 || '%')
@@ -1607,7 +1607,7 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 			UPDATE media_items
 			SET poster_path = $3,
 				poster_source_path = $2,
-				poster_thumbhash = NULLIF($4, ''),
+				poster_thumbhash = $4,
 				updated_at = NOW()
 			WHERE content_id = $1
 			  AND poster_source_path = $2`
@@ -1617,7 +1617,7 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 			UPDATE media_items
 			SET backdrop_path = $3,
 				backdrop_source_path = $2,
-				backdrop_thumbhash = NULLIF($4, ''),
+				backdrop_thumbhash = $4,
 				updated_at = NOW()
 			WHERE content_id = $1
 			  AND backdrop_source_path = $2`
