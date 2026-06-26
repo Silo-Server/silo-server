@@ -257,12 +257,10 @@ export function useLibraryForm({
   }
 
   function toggleLevelProvider(level: string, index: number) {
-    setLevelChains((prev) => {
-      const source = prev[level] ?? activeLevelChains[level] ?? [];
-      const updated = [...source];
-      updated[index] = { ...updated[index]!, enabled: !updated[index]!.enabled };
-      return { ...prev, [level]: updated };
-    });
+    const source = activeLevelChains[level] ?? [];
+    const updated = [...source];
+    updated[index] = { ...updated[index]!, enabled: !updated[index]!.enabled };
+    setLevelChains({ ...activeLevelChains, [level]: updated });
     setChainDirty(true);
   }
 
