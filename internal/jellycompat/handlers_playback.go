@@ -553,7 +553,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	allowVideoCopy := boolDefault(req.AllowVideoStreamCopy, true)
 	allowAudioCopy := boolDefault(req.AllowAudioStreamCopy, true)
 
-	audioIndex := defaultAudioStreamIndex(version)
+	audioIndex := preferredAudioStreamIndex(version, profile)
 	subtitleIndex := defaultSubtitleStreamIndex(version)
 	selectedAudioIndex := audioIndex
 	if req.AudioStreamIndex != nil && isValidCompatAudioStreamIndex(version, int(*req.AudioStreamIndex)) {
@@ -716,7 +716,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			Codec:                  strings.ToLower(track.Codec),
 			Language:               track.Language,
 			TimeBase:               "1/1000",
-			DisplayTitle:           firstNonEmpty(track.Title, track.EmbeddedTitle, track.Language, track.Codec),
+			DisplayTitle:           audioTrackDisplayTitle(track),
 			Title:                  firstNonEmpty(track.Title, track.EmbeddedTitle),
 			IsDefault:              isDefault,
 			IsExternal:             false,
@@ -786,6 +786,120 @@ func defaultAudioStreamIndex(version catalog.FileVersion) *int {
 	}
 	value := len(version.VideoTracks)
 	return &value
+}
+
+// losslessPassthroughCodecs are audio codecs that require dedicated hardware
+// passthrough (AV receiver or decoder chip) and cannot be decoded by
+// software-only players like ExoPlayer on most Android TV devices.
+var losslessPassthroughCodecs = map[string]bool{
+	"truehd": true,
+	"mlp":    true,
+}
+
+// compatFallbackCodecs are broadly supported audio codecs suitable for
+// software decoding. Lower index = higher preference.
+var compatFallbackCodecRank = map[string]int{
+	"eac3":     1,
+	"ac3":      2,
+	"dts":      3,
+	"aac":      4,
+	"flac":     5,
+	"opus":     6,
+	"vorbis":   7,
+	"mp3":      8,
+	"pcm_s16le": 9,
+	"pcm_s24le": 10,
+}
+
+// preferredAudioStreamIndex returns the best audio stream index for the given
+// device profile. When the default audio track is a lossless passthrough codec
+// (TrueHD, MLP) and the profile does not explicitly list that codec as
+// supported, it selects the most compatible fallback track (same language
+// preferred). This prevents Android TV and similar clients from receiving a
+// TrueHD stream they cannot decode when an AC3/EAC3 fallback is present.
+func preferredAudioStreamIndex(version catalog.FileVersion, profile DeviceProfile) *int {
+	defaultIdx := defaultAudioStreamIndex(version)
+	if defaultIdx == nil {
+		return defaultIdx
+	}
+
+	defaultTrackIdx := *defaultIdx - len(version.VideoTracks)
+	if defaultTrackIdx < 0 || defaultTrackIdx >= len(version.AudioTracks) {
+		return defaultIdx
+	}
+	defaultTrack := version.AudioTracks[defaultTrackIdx]
+	if !losslessPassthroughCodecs[normalizeCompatToken(defaultTrack.Codec)] {
+		return defaultIdx // not a passthrough codec; keep default
+	}
+
+	// Check whether the profile explicitly lists this lossless codec as
+	// supported in any DirectPlayProfile. An empty AudioCodec field is a
+	// wildcard that many clients use to mean "try anything" — but for
+	// lossless passthrough codecs we cannot assume the device can actually
+	// decode them, so we do not treat wildcard as explicit support.
+	defaultCodec := normalizeCompatToken(defaultTrack.Codec)
+	for _, p := range profile.DirectPlayProfiles {
+		if !matchesVideoType(p.Type) {
+			continue
+		}
+		if strings.TrimSpace(p.AudioCodec) == "" {
+			continue // wildcard — not explicit support for lossless
+		}
+		for part := range strings.SplitSeq(p.AudioCodec, ",") {
+			if normalizeCompatToken(part) == defaultCodec {
+				return defaultIdx // profile explicitly supports this lossless codec
+			}
+		}
+	}
+
+	// Profile does not explicitly support this lossless codec. Find the best
+	// compatible fallback with the same language as the default track.
+	defaultLang := strings.ToLower(strings.TrimSpace(defaultTrack.Language))
+
+	bestIdx := -1
+	bestRank := 0
+
+	for i, track := range version.AudioTracks {
+		rank, ok := compatFallbackCodecRank[normalizeCompatToken(track.Codec)]
+		if !ok {
+			continue
+		}
+		lang := strings.ToLower(strings.TrimSpace(track.Language))
+		sameLang := lang == defaultLang
+		// Prefer same-language tracks; within each group prefer lower rank number.
+		if bestIdx == -1 {
+			bestIdx = i
+			bestRank = rank
+			if sameLang {
+				bestRank = -rank // negative signals same-language preference
+			}
+		} else {
+			currentSameLang := bestRank < 0
+			if sameLang && !currentSameLang {
+				// Upgrade from cross-language to same-language.
+				bestIdx = i
+				bestRank = -rank
+			} else if sameLang == currentSameLang {
+				// Same language group — pick lower rank (higher quality).
+				effectiveRank := rank
+				effectiveBest := bestRank
+				if sameLang {
+					effectiveRank = -rank
+					effectiveBest = bestRank // already negative
+				}
+				if effectiveRank < effectiveBest {
+					bestIdx = i
+					bestRank = effectiveRank
+				}
+			}
+		}
+	}
+
+	if bestIdx >= 0 {
+		idx := len(version.VideoTracks) + bestIdx
+		return &idx
+	}
+	return defaultIdx
 }
 
 func effectiveCompatAudioStreamIndex(source PlaybackMediaSource) *int {
@@ -952,6 +1066,79 @@ func parseCompatFrameRate(raw string) float64 {
 		}
 	}
 	return 0
+}
+
+func audioTrackDisplayTitle(track models.AudioTrack) string {
+	lang := compatLanguageName(track.Language)
+	codec := audioCodecDisplayName(track.Codec)
+	channels := audioChannelsDisplayName(track.Channels)
+	title := strings.TrimSpace(codec + " " + channels)
+	if lang != "" {
+		title = lang + " - " + title
+	}
+	// Append embedded title only when it adds info beyond codec/channels (e.g. "Commentary").
+	embedded := strings.TrimSpace(firstNonEmpty(track.Title, track.EmbeddedTitle))
+	if !isGenericAudioLabel(embedded) {
+		title += " - " + embedded
+	}
+	return title
+}
+
+func audioCodecDisplayName(codec string) string {
+	switch normalizeCompatToken(codec) {
+	case "truehd":
+		return "TrueHD"
+	case "mlp":
+		return "MLP"
+	case "ac3":
+		return "AC3"
+	case "eac3":
+		return "EAC3"
+	case "dts":
+		return "DTS"
+	case "dtshd", "dtshd_ma":
+		return "DTS-HD MA"
+	case "aac":
+		return "AAC"
+	case "mp3":
+		return "MP3"
+	case "flac":
+		return "FLAC"
+	case "opus":
+		return "Opus"
+	case "vorbis":
+		return "Vorbis"
+	case "pcms16le", "pcms24le", "pcms32le", "pcmf32le":
+		return "PCM"
+	default:
+		return strings.ToUpper(strings.TrimSpace(codec))
+	}
+}
+
+func audioChannelsDisplayName(channels int) string {
+	switch channels {
+	case 1:
+		return "Mono"
+	case 2:
+		return "Stereo"
+	case 6:
+		return "5.1"
+	case 8:
+		return "7.1"
+	default:
+		if channels > 0 {
+			return fmt.Sprintf("%d ch", channels)
+		}
+		return ""
+	}
+}
+
+func isGenericAudioLabel(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "stereo", "mono", "5.1", "7.1", "surround", "5.1 surround", "7.1 surround":
+		return true
+	}
+	return false
 }
 
 func compatSubtitleDisplayTitle(track catalog.VersionSubtitleTrack) string {
