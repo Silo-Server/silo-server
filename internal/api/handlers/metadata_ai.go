@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -13,7 +14,26 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+type metadataAIItemAccess interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
+	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
+}
+
+type metadataAISeasonLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.Season, error)
+}
+
+type metadataAIEpisodeLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
+}
+
+type metadataAITarget struct {
+	kind            translation.TargetKind
+	accessContentID string
+}
 
 // MetadataAIHandler exposes AI translation of catalog descriptions into the
 // localization tables. The admin routes are mounted under the per-item
@@ -22,7 +42,11 @@ import (
 type MetadataAIHandler struct {
 	service *translation.Service
 	// ItemAccess authorizes the viewer-facing on-view route; nil disables it.
-	ItemAccess *catalog.ItemRepository
+	ItemAccess metadataAIItemAccess
+	// SeasonLookup and EpisodeLookup let the viewer route resolve non-item
+	// detail pages to the parent series for authorization.
+	SeasonLookup  metadataAISeasonLookup
+	EpisodeLookup metadataAIEpisodeLookup
 }
 
 // NewMetadataAIHandler creates a handler backed by the given service.
@@ -82,7 +106,16 @@ func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http
 		UserID:             scope.UserID,
 		ProfileID:          scope.ProfileID,
 	}
-	if err := h.ItemAccess.EnsureAccessible(r.Context(), contentID, filter); err != nil {
+	target, err := h.resolveTranslationTarget(r.Context(), contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize item")
+		return
+	}
+	if err := h.ItemAccess.EnsureAccessible(r.Context(), target.accessContentID, filter); err != nil {
 		if errors.Is(err, catalog.ErrItemNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
@@ -96,7 +129,7 @@ func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http
 		requestedBy = &userID
 	}
 
-	job, err := h.service.RequestOnView(r.Context(), contentID, req.TargetLanguage, requestedBy)
+	job, err := h.service.RequestOnView(r.Context(), target.kind, contentID, req.TargetLanguage, requestedBy)
 	if err != nil {
 		switch {
 		case errors.Is(err, translation.ErrNotConfigured):
@@ -113,6 +146,51 @@ func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{"job": job})
+}
+
+func (h *MetadataAIHandler) resolveTranslationTarget(ctx context.Context, contentID string) (metadataAITarget, error) {
+	if h.ItemAccess == nil {
+		return metadataAITarget{}, catalog.ErrItemNotFound
+	}
+
+	item, err := h.ItemAccess.GetByID(ctx, contentID)
+	switch {
+	case err == nil:
+		if item == nil {
+			return metadataAITarget{}, catalog.ErrItemNotFound
+		}
+		return metadataAITarget{kind: translation.TargetItem, accessContentID: contentID}, nil
+	case !errors.Is(err, catalog.ErrItemNotFound):
+		return metadataAITarget{}, err
+	}
+
+	if h.SeasonLookup != nil {
+		season, err := h.SeasonLookup.GetByID(ctx, contentID)
+		switch {
+		case err == nil:
+			if season == nil {
+				return metadataAITarget{}, catalog.ErrItemNotFound
+			}
+			return metadataAITarget{kind: translation.TargetSeason, accessContentID: season.SeriesID}, nil
+		case !errors.Is(err, catalog.ErrSeasonNotFound):
+			return metadataAITarget{}, err
+		}
+	}
+
+	if h.EpisodeLookup != nil {
+		episode, err := h.EpisodeLookup.GetByID(ctx, contentID)
+		switch {
+		case err == nil:
+			if episode == nil {
+				return metadataAITarget{}, catalog.ErrItemNotFound
+			}
+			return metadataAITarget{kind: translation.TargetEpisode, accessContentID: episode.SeriesID}, nil
+		case !errors.Is(err, catalog.ErrEpisodeNotFound):
+			return metadataAITarget{}, err
+		}
+	}
+
+	return metadataAITarget{}, catalog.ErrItemNotFound
 }
 
 type translateMetadataRequest struct {
@@ -134,9 +212,18 @@ func (h *MetadataAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "target_language is required")
 		return
 	}
-	includeChildren := true
+	target, err := h.resolveTranslationTarget(r.Context(), contentID)
+	if err != nil {
+		if errors.Is(err, catalog.ErrItemNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item")
+		return
+	}
+	includeChildren := target.kind == translation.TargetItem
 	if req.IncludeChildren != nil {
-		includeChildren = *req.IncludeChildren
+		includeChildren = *req.IncludeChildren && target.kind == translation.TargetItem
 	}
 
 	var requestedBy *int
@@ -145,7 +232,7 @@ func (h *MetadataAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 	}
 
 	job, err := h.service.Enqueue(r.Context(), translation.JobRequest{
-		TargetKind:      translation.TargetItem,
+		TargetKind:      target.kind,
 		ContentID:       contentID,
 		TargetLanguage:  req.TargetLanguage,
 		IncludeChildren: includeChildren,

@@ -7,6 +7,7 @@ import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
@@ -27,6 +28,8 @@ function seasonLabel(seasonNumber: number, title?: string) {
 }
 
 export default function SeasonContent({ item }: { item: ItemDetail & { type: "season" } }) {
+  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
+    useOnViewTranslation(item);
   const navigate = useNavigate();
   useAmbientColor(item.backdrop_thumbhash);
   const { user } = useAuth();
@@ -102,6 +105,8 @@ export default function SeasonContent({ item }: { item: ItemDetail & { type: "se
           />
         }
         overview={item.overview}
+        overviewTranslating={overviewTranslating}
+        onTranslateOverview={onTranslateOverview}
         actions={
           <ActionBar
             contentId={item.content_id}

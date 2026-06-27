@@ -683,6 +683,40 @@ func (s *DetailService) PendingTranslationLanguage(ctx context.Context, item *mo
 	return language
 }
 
+// PendingSeasonTranslationLanguage is the season-row equivalent of
+// PendingTranslationLanguage.
+func (s *DetailService) PendingSeasonTranslationLanguage(ctx context.Context, season *models.Season, filter AccessFilter) string {
+	if season == nil || strings.TrimSpace(season.Overview) == "" || s.seasonLocRepo == nil {
+		return ""
+	}
+	language, err := s.resolvePresentationLanguage(ctx, filter)
+	if err != nil || language == "" || sameMetadataLanguage(season.DefaultMetadataLanguage, language) {
+		return ""
+	}
+	loc, err := s.seasonLocRepo.Get(ctx, season.ContentID, language)
+	if err != nil || (loc != nil && loc.Overview != "") {
+		return ""
+	}
+	return language
+}
+
+// PendingEpisodeTranslationLanguage is the episode-row equivalent of
+// PendingTranslationLanguage.
+func (s *DetailService) PendingEpisodeTranslationLanguage(ctx context.Context, episode *models.Episode, filter AccessFilter) string {
+	if episode == nil || strings.TrimSpace(episode.Overview) == "" || s.episodeLocRepo == nil {
+		return ""
+	}
+	language, err := s.resolvePresentationLanguage(ctx, filter)
+	if err != nil || language == "" || sameMetadataLanguage(episode.DefaultMetadataLanguage, language) {
+		return ""
+	}
+	loc, err := s.episodeLocRepo.Get(ctx, episode.ContentID, language)
+	if err != nil || (loc != nil && loc.Overview != "") {
+		return ""
+	}
+	return language
+}
+
 func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentID string) error {
 	if filter.PresentationLibraryID == nil {
 		return nil
@@ -1755,6 +1789,7 @@ func clearSentinel(s string) string {
 }
 
 func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Season, filter AccessFilter) (*ItemDetail, error) {
+	pendingTranslation := s.PendingSeasonTranslationLanguage(ctx, season, filter)
 	localizedSeason, err := s.LocalizeSeasonModel(ctx, season, filter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing season detail: %w", err)
@@ -1790,22 +1825,23 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 	seasonNumber := season.SeasonNumber
 	castCredits, crewCredits := s.fetchCredits(ctx, season.SeriesID)
 	detail := &ItemDetail{
-		ContentID:         season.ContentID,
-		Type:              "season",
-		Title:             title,
-		Overview:          season.Overview,
-		PosterThumbhash:   season.PosterThumbhash,
-		BackdropThumbhash: series.BackdropThumbhash,
-		SeriesID:          season.SeriesID,
-		SeriesTitle:       series.Title,
-		SeasonNumber:      &seasonNumber,
-		EpisodeCount:      &episodeCount,
-		IsSpecials:        season.SeasonNumber == 0,
-		Cast:              castCredits,
-		Crew:              crewCredits,
-		Versions:          []FileVersion{},
-		PlaybackVariants:  []PlaybackVariant{},
-		Subtitles:         []SubtitleInfo{},
+		ContentID:                  season.ContentID,
+		Type:                       "season",
+		Title:                      title,
+		Overview:                   season.Overview,
+		PendingTranslationLanguage: pendingTranslation,
+		PosterThumbhash:            season.PosterThumbhash,
+		BackdropThumbhash:          series.BackdropThumbhash,
+		SeriesID:                   season.SeriesID,
+		SeriesTitle:                series.Title,
+		SeasonNumber:               &seasonNumber,
+		EpisodeCount:               &episodeCount,
+		IsSpecials:                 season.SeasonNumber == 0,
+		Cast:                       castCredits,
+		Crew:                       crewCredits,
+		Versions:                   []FileVersion{},
+		PlaybackVariants:           []PlaybackVariant{},
+		Subtitles:                  []SubtitleInfo{},
 	}
 	if season.AirDate != nil {
 		airDate := season.AirDate.Format("2006-01-02")
@@ -1818,6 +1854,7 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 }
 
 func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.Episode, seriesCtx *seriesDetailContext, filter AccessFilter) (*ItemDetail, error) {
+	pendingTranslation := s.PendingEpisodeTranslationLanguage(ctx, episode, filter)
 	localizedEpisode, err := s.LocalizeEpisodeModel(ctx, episode, filter)
 	if err != nil {
 		return nil, fmt.Errorf("localizing episode detail: %w", err)
@@ -1828,27 +1865,28 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 	seasonNumber := episode.SeasonNumber
 	episodeNumber := episode.EpisodeNumber
 	detail := &ItemDetail{
-		ContentID:         episode.ContentID,
-		Type:              "episode",
-		Title:             episode.Title,
-		Overview:          episode.Overview,
-		Runtime:           episode.Runtime,
-		RatingIMDB:        episode.RatingIMDB,
-		RatingTMDB:        episode.RatingTMDB,
-		ImdbID:            episode.ImdbID,
-		TmdbID:            episode.TmdbID,
-		TvdbID:            episode.TvdbID,
-		PosterThumbhash:   episode.StillThumbhash,
-		BackdropThumbhash: series.BackdropThumbhash,
-		SeriesID:          episode.SeriesID,
-		SeriesTitle:       series.Title,
-		SeasonNumber:      &seasonNumber,
-		EpisodeNumber:     &episodeNumber,
-		Cast:              seriesCtx.castCredits,
-		Crew:              seriesCtx.crewCredits,
-		Versions:          []FileVersion{},
-		PlaybackVariants:  []PlaybackVariant{},
-		Subtitles:         []SubtitleInfo{},
+		ContentID:                  episode.ContentID,
+		Type:                       "episode",
+		Title:                      episode.Title,
+		Overview:                   episode.Overview,
+		PendingTranslationLanguage: pendingTranslation,
+		Runtime:                    episode.Runtime,
+		RatingIMDB:                 episode.RatingIMDB,
+		RatingTMDB:                 episode.RatingTMDB,
+		ImdbID:                     episode.ImdbID,
+		TmdbID:                     episode.TmdbID,
+		TvdbID:                     episode.TvdbID,
+		PosterThumbhash:            episode.StillThumbhash,
+		BackdropThumbhash:          series.BackdropThumbhash,
+		SeriesID:                   episode.SeriesID,
+		SeriesTitle:                series.Title,
+		SeasonNumber:               &seasonNumber,
+		EpisodeNumber:              &episodeNumber,
+		Cast:                       seriesCtx.castCredits,
+		Crew:                       seriesCtx.crewCredits,
+		Versions:                   []FileVersion{},
+		PlaybackVariants:           []PlaybackVariant{},
+		Subtitles:                  []SubtitleInfo{},
 	}
 	if episode.AirDate != nil {
 		airDate := episode.AirDate.Format("2006-01-02")

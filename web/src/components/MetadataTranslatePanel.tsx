@@ -68,6 +68,13 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
   if (!enabled) return null;
 
   const busy = translateMutation.isPending || Boolean(activeJob);
+  const translatesChildren = item.type === "series";
+  const description =
+    item.type === "series"
+      ? "Translates the overview and tagline plus all season and episode overviews"
+      : item.type === "movie"
+        ? "Translates the overview and tagline"
+        : "Translates the overview";
 
   function start() {
     if (!targetLang) {
@@ -75,7 +82,7 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
       return;
     }
     translateMutation.mutate(
-      { target_language: targetLang, include_children: true, force },
+      { target_language: targetLang, include_children: translatesChildren, force },
       { onSuccess: () => setWatching(true) },
     );
   }
@@ -87,10 +94,8 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
         <span className="text-sm font-medium">Translate with AI</span>
       </div>
       <p className="text-muted-foreground text-xs">
-        Translates the overview and tagline
-        {item.type === "series" ? ", plus all season and episode overviews," : ""} into the chosen
-        language. Translations are served to libraries using that metadata language; provider data
-        replaces them when it becomes available.
+        {description} into the chosen language. Translations are served to libraries using that
+        metadata language; provider data replaces them when it becomes available.
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">

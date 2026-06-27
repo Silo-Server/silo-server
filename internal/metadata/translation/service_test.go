@@ -508,7 +508,7 @@ func TestRequestOnViewCooldownAndGating(t *testing.T) {
 	repo.jobs[failed.ID].UpdatedAt = time.Now().Add(-time.Minute)
 	repo.mu.Unlock()
 
-	job, err := svc.RequestOnView(context.Background(), "series1", "fr", nil)
+	job, err := svc.RequestOnView(context.Background(), TargetItem, "series1", "fr", nil)
 	if err != nil {
 		t.Fatalf("RequestOnView: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestRequestOnViewCooldownAndGating(t *testing.T) {
 	repo.mu.Lock()
 	repo.jobs[failed.ID].UpdatedAt = time.Now().Add(-2 * onViewFailureCooldown)
 	repo.mu.Unlock()
-	job, err = svc.RequestOnView(context.Background(), "series1", "fr", nil)
+	job, err = svc.RequestOnView(context.Background(), TargetItem, "series1", "fr", nil)
 	if err != nil {
 		t.Fatalf("RequestOnView after cooldown: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestRequestOnViewCooldownAndGating(t *testing.T) {
 	waitDone(t, repo)
 
 	// A different language is unaffected by the failure.
-	job2, err := svc.RequestOnView(context.Background(), "series1", "de", nil)
+	job2, err := svc.RequestOnView(context.Background(), TargetItem, "series1", "de", nil)
 	if err != nil || job2.ID == failed.ID {
 		t.Fatalf("other-language request blocked: job=%v err=%v", job2, err)
 	}
@@ -538,7 +538,44 @@ func TestRequestOnViewCooldownAndGating(t *testing.T) {
 
 	// OnView off (zero-value config) refuses viewer requests outright.
 	off := NewService(context.Background(), Config{Enabled: true, Configured: true, ChatModel: "m"}, repo, content, locs, chat.fn, nil, nil)
-	if _, err := off.RequestOnView(context.Background(), "series1", "fr", nil); err != ErrNotConfigured {
+	if _, err := off.RequestOnView(context.Background(), TargetItem, "series1", "fr", nil); err != ErrNotConfigured {
 		t.Errorf("on_view=off err = %v, want ErrNotConfigured", err)
+	}
+}
+
+func TestRequestOnViewUsesRequestedTargetKind(t *testing.T) {
+	repo, content, locs, chat := newFakeRepo(), seriesContent(), &fakeLocs{}, &upperChat{}
+	svc := testService(t, repo, content, locs, chat)
+
+	seasonJob, err := svc.RequestOnView(context.Background(), TargetSeason, "sea1", "fr", nil)
+	if err != nil {
+		t.Fatalf("RequestOnView season: %v", err)
+	}
+	waitDone(t, repo)
+	if final := repo.job(seasonJob.ID); final.TargetKind != TargetSeason || final.IncludeChildren {
+		t.Fatalf("season job = %+v, want target season without children", final)
+	}
+
+	episodeJob, err := svc.RequestOnView(context.Background(), TargetEpisode, "ep1", "fr", nil)
+	if err != nil {
+		t.Fatalf("RequestOnView episode: %v", err)
+	}
+	waitDone(t, repo)
+	if final := repo.job(episodeJob.ID); final.TargetKind != TargetEpisode || final.IncludeChildren {
+		t.Fatalf("episode job = %+v, want target episode without children", final)
+	}
+
+	writes := locs.allWrites()
+	var sawSeason, sawEpisode bool
+	for _, write := range writes {
+		if write.kind == TargetSeason && write.contentID == "sea1" && write.overview == "SEASON ONE." {
+			sawSeason = true
+		}
+		if write.kind == TargetEpisode && write.contentID == "ep1" && write.overview == "PILOT EPISODE." {
+			sawEpisode = true
+		}
+	}
+	if !sawSeason || !sawEpisode {
+		t.Fatalf("missing target-kind writes: %+v", writes)
 	}
 }

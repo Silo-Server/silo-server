@@ -29,6 +29,8 @@ export function useOnViewTranslation(item: ItemDetail | undefined) {
 
   const contentId = item?.content_id ?? "";
   const pendingLanguage = item?.pending_translation_language ?? "";
+  const seriesId = item?.series_id;
+  const seasonNumber = item?.season_number;
 
   const [translating, setTranslating] = useState(false);
   // Tracks which item+language we already fired for, so auto mode triggers
@@ -67,9 +69,14 @@ export function useOnViewTranslation(item: ItemDetail | undefined) {
       // Prefix invalidation covers the per-library detail key variants
       // (["catalog", "items", id, "detail", <libraryId|"default">]).
       void queryClient.invalidateQueries({ queryKey: ["catalog", "items", contentId] });
+      if (seriesId && typeof seasonNumber === "number") {
+        void queryClient.invalidateQueries({
+          queryKey: ["catalog", "series", seriesId, "seasons", seasonNumber],
+        });
+      }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [translating, contentId, queryClient]);
+  }, [translating, contentId, queryClient, seasonNumber, seriesId]);
 
   // The refetched detail no longer reports a missing language: done.
   useEffect(() => {
