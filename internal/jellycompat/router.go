@@ -310,6 +310,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.FolderRepo,
 			deps.UserStoreProvider,
 			deps.AccessFilterFn,
+			deps.CatalogSearchProvider,
 		)
 		if deps.PosterPresigner != nil {
 			svc.posterPresigner = deps.PosterPresigner

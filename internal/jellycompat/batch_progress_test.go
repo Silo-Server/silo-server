@@ -110,7 +110,7 @@ func (s *stubContentService) BrowseItems(context.Context, *Session, url.Values) 
 	panic("unused")
 }
 
-func (s *stubContentService) SearchItems(context.Context, *Session, string, []string, int, int, *int) (*upstreamBrowseResponse, error) {
+func (s *stubContentService) SearchItems(context.Context, *Session, SearchItemsOptions) (*upstreamBrowseResponse, error) {
 	panic("unused")
 }
 

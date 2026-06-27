@@ -147,7 +147,12 @@ func (h *PersonsHandler) shouldSuppressSearchPeople(ctx context.Context, session
 		return false
 	}
 
-	media, err := h.content.SearchItems(ctx, session, raw, []string{"movie", "series"}, 5, 0, nil)
+	media, err := h.content.SearchItems(ctx, session, SearchItemsOptions{
+		Query:     raw,
+		ItemTypes: []string{"movie", "series"},
+		Limit:     5,
+		SkipTotal: true,
+	})
 	if err != nil || media == nil || len(media.Items) == 0 {
 		return false
 	}

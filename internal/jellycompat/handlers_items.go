@@ -272,6 +272,29 @@ func itemTypesContain(itemTypes []string, target string) bool {
 	return false
 }
 
+func searchItemTypesForQuery(query itemsQuery) ([]string, bool) {
+	itemTypes := append([]string(nil), query.itemTypes...)
+	if !query.mediaTypesExplicit {
+		return itemTypes, query.hasItemTypeFilter && len(itemTypes) == 0
+	}
+	if !query.mediaTypesSet["video"] {
+		return nil, true
+	}
+	if len(itemTypes) == 0 {
+		if query.hasItemTypeFilter {
+			return nil, true
+		}
+		itemTypes = []string{"movie", "episode"}
+	}
+	filtered := itemTypes[:0]
+	for _, itemType := range itemTypes {
+		if jellyfinMediaType(itemType) == "Video" {
+			filtered = append(filtered, itemType)
+		}
+	}
+	return filtered, len(filtered) == 0
+}
+
 // HandleItem serves GET /Items/{id}.
 func (h *ItemsHandler) HandleItem(w http.ResponseWriter, r *http.Request) {
 	session := SessionFromContext(r.Context())
@@ -1605,7 +1628,10 @@ func (h *ItemsHandler) HandleSearchHints(w http.ResponseWriter, r *http.Request)
 	}
 
 	limit := parsePositiveInt(q.Get("Limit"), 20)
-	result, err := h.content.SearchItems(r.Context(), session, query, nil, limit, 0, nil)
+	result, err := h.content.SearchItems(r.Context(), session, SearchItemsOptions{
+		Query: query,
+		Limit: limit,
+	})
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -1864,7 +1890,24 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
-	result, err := h.content.SearchItems(r.Context(), session, query.searchTerm, query.itemTypes, query.limit, query.startIndex, libraryIDPtr(query.parentLibraryID))
+	itemTypes, noMatch := searchItemTypesForQuery(query)
+	if noMatch {
+		writeJSON(w, http.StatusOK, queryResultDTO{
+			Items:            []baseItemDTO{},
+			TotalRecordCount: 0,
+			StartIndex:       query.startIndex,
+		})
+		return
+	}
+
+	result, err := h.content.SearchItems(r.Context(), session, SearchItemsOptions{
+		Query:     query.searchTerm,
+		ItemTypes: itemTypes,
+		Limit:     query.limit,
+		Offset:    query.startIndex,
+		LibraryID: libraryIDPtr(query.parentLibraryID),
+		SkipTotal: !query.enableTotalRecordCount,
+	})
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return

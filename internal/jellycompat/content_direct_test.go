@@ -460,6 +460,44 @@ func (s *stubBrowseSource) ListGenres(_ context.Context, _ catalog.BrowseFilters
 	return nil, nil
 }
 
+type recordingCatalogSearchProvider struct {
+	requests []catalog.CatalogSearchRequest
+	result   *catalog.CatalogSearchResult
+}
+
+func (p *recordingCatalogSearchProvider) Search(_ context.Context, req catalog.CatalogSearchRequest) (*catalog.CatalogSearchResult, error) {
+	p.requests = append(p.requests, req)
+	if p.result != nil {
+		return p.result, nil
+	}
+	return &catalog.CatalogSearchResult{}, nil
+}
+
+type recordingItemAccessSource struct {
+	searchQueries []string
+	searchTypes   [][]string
+	searchLimits  []int
+	searchOffsets []int
+	items         []*models.MediaItem
+	total         int
+}
+
+func (s *recordingItemAccessSource) EnsureAccessible(context.Context, string, catalog.AccessFilter) error {
+	return nil
+}
+
+func (s *recordingItemAccessSource) Search(_ context.Context, query string, itemTypes []string, limit, offset int, _ catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	s.searchQueries = append(s.searchQueries, query)
+	s.searchTypes = append(s.searchTypes, append([]string(nil), itemTypes...))
+	s.searchLimits = append(s.searchLimits, limit)
+	s.searchOffsets = append(s.searchOffsets, offset)
+	return append([]*models.MediaItem(nil), s.items...), s.total, nil
+}
+
+func (s *recordingItemAccessSource) GetByIDs(context.Context, []string) ([]*models.MediaItem, error) {
+	return nil, nil
+}
+
 // newDirectContentServiceForTest builds a directContentService with stubbed
 // catalog dependencies. Useful for behavioral tests that don't need real
 // Postgres state.
@@ -467,6 +505,97 @@ func newDirectContentServiceForTest(browse browseSource, provider userstore.User
 	return &directContentService{
 		browseRepo:    browse,
 		storeProvider: provider,
+	}
+}
+
+func TestSearchItemsUsesCatalogSearchProviderWithCompatScope(t *testing.T) {
+	libraryID := 7
+	provider := &recordingCatalogSearchProvider{
+		result: &catalog.CatalogSearchResult{
+			Items: []*models.MediaItem{{
+				ContentID: "movie-1",
+				Type:      "movie",
+				Title:     "Dune",
+			}},
+			Total:   12,
+			HasMore: true,
+		},
+	}
+	svc := &directContentService{
+		searchProvider: provider,
+		accessFilter: func(context.Context, int, string) catalog.AccessFilter {
+			return catalog.AccessFilter{
+				AllowedLibraryIDs:  []int{1, 2},
+				ExcludedMediaTypes: []string{"ebook"},
+				MaxContentRating:   "PG-13",
+			}
+		},
+	}
+
+	result, err := svc.SearchItems(context.Background(), &Session{
+		StreamAppUserID: 22,
+		ProfileID:       "profile-1",
+	}, SearchItemsOptions{
+		Query:     "dune",
+		Limit:     5,
+		Offset:    10,
+		LibraryID: &libraryID,
+		SkipTotal: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchItems error: %v", err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider requests = %d, want 1", len(provider.requests))
+	}
+	req := provider.requests[0]
+	if req.Query != "dune" || req.Limit != 5 || req.Offset != 10 || !req.SkipTotal {
+		t.Fatalf("provider request shape = %#v", req)
+	}
+	if want := []string{"movie", "series", "episode"}; !slices.Equal(req.ItemTypes, want) {
+		t.Fatalf("ItemTypes = %#v, want %#v", req.ItemTypes, want)
+	}
+	if req.Access.PresentationLibraryID == nil || *req.Access.PresentationLibraryID != libraryID {
+		t.Fatalf("PresentationLibraryID = %#v, want %d", req.Access.PresentationLibraryID, libraryID)
+	}
+	for _, mediaType := range []string{"ebook", "audiobook", "podcast"} {
+		if !slices.Contains(req.Access.ExcludedMediaTypes, mediaType) {
+			t.Fatalf("ExcludedMediaTypes = %#v, missing %q", req.Access.ExcludedMediaTypes, mediaType)
+		}
+	}
+	if result.Total != 12 || !result.HasMore || len(result.Items) != 1 || result.Items[0].Title != "Dune" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestSearchItemsFallsBackToItemRepoWhenProviderMissing(t *testing.T) {
+	itemRepo := &recordingItemAccessSource{
+		items: []*models.MediaItem{{
+			ContentID: "movie-1",
+			Type:      "movie",
+			Title:     "Fallback",
+		}},
+		total: 3,
+	}
+	svc := &directContentService{itemRepo: itemRepo}
+
+	result, err := svc.SearchItems(context.Background(), &Session{}, SearchItemsOptions{
+		Query:     "fallback",
+		ItemTypes: []string{"MusicAlbum"},
+		Limit:     2,
+		Offset:    1,
+	})
+	if err != nil {
+		t.Fatalf("SearchItems error: %v", err)
+	}
+	if len(itemRepo.searchQueries) != 1 || itemRepo.searchQueries[0] != "fallback" {
+		t.Fatalf("search queries = %#v", itemRepo.searchQueries)
+	}
+	if want := []string{compatNoMatchType}; !slices.Equal(itemRepo.searchTypes[0], want) {
+		t.Fatalf("search types = %#v, want %#v", itemRepo.searchTypes[0], want)
+	}
+	if result.Total != 3 || !result.HasMore || len(result.Items) != 1 || result.Items[0].Title != "Fallback" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

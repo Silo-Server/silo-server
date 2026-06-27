@@ -2185,6 +2185,17 @@ func main() {
 			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
+			compatSearchService := catalog.NewCatalogSearchService(
+				appCtx,
+				settingsRepo,
+				itemRepo,
+				catalog.NewSearchIndexEventRepository(deps.DB),
+				deps.CatalogSearchVectorizer,
+			)
+			if compatSearchService != nil {
+				compatSearchService.StartCoverageRefresh(appCtx)
+				compatDeps.CatalogSearchProvider = compatSearchService.Provider()
+			}
 
 			if deps.S3Public != nil {
 				compatDeps.PosterPresigner = deps.S3Public

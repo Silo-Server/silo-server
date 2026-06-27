@@ -195,6 +195,7 @@ type episodeListSource interface {
 type directContentService struct {
 	browseRepo      browseSource
 	itemRepo        itemAccessSource
+	searchProvider  catalog.CatalogSearchProvider
 	seasonRepo      seasonListSource
 	episodeRepo     episodeListSource
 	detailSvc       *catalog.DetailService
@@ -214,16 +215,18 @@ func newDirectContentService(
 	folderRepo folderListSource,
 	storeProvider userstore.UserStoreProvider,
 	accessFilter AccessFilterResolver,
+	searchProvider catalog.CatalogSearchProvider,
 ) *directContentService {
 	return &directContentService{
-		browseRepo:    browseRepo,
-		itemRepo:      itemRepo,
-		seasonRepo:    seasonRepo,
-		episodeRepo:   episodeRepo,
-		detailSvc:     detailSvc,
-		folderRepo:    folderRepo,
-		storeProvider: storeProvider,
-		accessFilter:  accessFilter,
+		browseRepo:     browseRepo,
+		itemRepo:       itemRepo,
+		searchProvider: searchProvider,
+		seasonRepo:     seasonRepo,
+		episodeRepo:    episodeRepo,
+		detailSvc:      detailSvc,
+		folderRepo:     folderRepo,
+		storeProvider:  storeProvider,
+		accessFilter:   accessFilter,
 	}
 }
 
@@ -456,12 +459,37 @@ func parseContentIDParam(raw string) []string {
 	return ids
 }
 
-func (s *directContentService) SearchItems(ctx context.Context, session *Session, query string, itemTypes []string, limit, offset int, libraryID *int) (*upstreamBrowseResponse, error) {
-	filter := applyCompatPresentationLibrary(s.resolveFilter(ctx, session), libraryID)
+func (s *directContentService) SearchItems(ctx context.Context, session *Session, opts SearchItemsOptions) (*upstreamBrowseResponse, error) {
+	filter := applyCompatPresentationLibrary(s.resolveFilter(ctx, session), opts.LibraryID)
+	itemTypes := compatScopedSearchTypes(opts.ItemTypes)
 
-	items, total, err := s.itemRepo.Search(ctx, query, compatScopedSearchTypes(itemTypes), limit, offset, filter)
-	if err != nil {
-		return nil, fmt.Errorf("search items: %w", err)
+	var items []*models.MediaItem
+	var total int
+	var hasMore bool
+	if s.searchProvider != nil {
+		result, err := s.searchProvider.Search(ctx, catalog.CatalogSearchRequest{
+			Query:     opts.Query,
+			ItemTypes: itemTypes,
+			Limit:     opts.Limit,
+			Offset:    opts.Offset,
+			Access:    filter,
+			SkipTotal: opts.SkipTotal,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("search items: %w", err)
+		}
+		if result != nil {
+			items = result.Items
+			total = result.Total
+			hasMore = result.HasMore
+		}
+	} else {
+		var err error
+		items, total, err = s.itemRepo.Search(ctx, opts.Query, itemTypes, opts.Limit, opts.Offset, filter)
+		if err != nil {
+			return nil, fmt.Errorf("search items: %w", err)
+		}
+		hasMore = opts.Offset+len(items) < total
 	}
 
 	listItems := make([]upstreamListItem, 0, len(items))
@@ -478,7 +506,7 @@ func (s *directContentService) SearchItems(ctx context.Context, session *Session
 
 	return &upstreamBrowseResponse{
 		Total:   total,
-		HasMore: offset+len(listItems) < total,
+		HasMore: hasMore,
 		Items:   listItems,
 	}, nil
 }

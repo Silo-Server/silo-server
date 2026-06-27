@@ -62,13 +62,14 @@ type Dependencies struct {
 	ScanQueue        scantrigger.Queuer
 
 	// Catalog repos (for ContentService construction)
-	BrowseRepo     *catalog.BrowseRepository
-	ItemRepo       *catalog.ItemRepository
-	SeasonRepo     *catalog.SeasonRepository
-	EpisodeRepo    *catalog.EpisodeRepository
-	ProviderIDRepo *catalog.ProviderIDRepository
-	DetailSvc      *catalog.DetailService
-	FolderRepo     *catalog.FolderRepository
+	BrowseRepo            *catalog.BrowseRepository
+	ItemRepo              *catalog.ItemRepository
+	SeasonRepo            *catalog.SeasonRepository
+	EpisodeRepo           *catalog.EpisodeRepository
+	ProviderIDRepo        *catalog.ProviderIDRepository
+	DetailSvc             *catalog.DetailService
+	FolderRepo            *catalog.FolderRepository
+	CatalogSearchProvider catalog.CatalogSearchProvider
 
 	// Person repository
 	PersonRepo *catalog.PersonRepository

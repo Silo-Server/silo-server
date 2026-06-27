@@ -50,7 +50,7 @@ func (s *countingContentService) BrowseItems(context.Context, *Session, url.Valu
 	panic("unused")
 }
 
-func (s *countingContentService) SearchItems(context.Context, *Session, string, []string, int, int, *int) (*upstreamBrowseResponse, error) {
+func (s *countingContentService) SearchItems(context.Context, *Session, SearchItemsOptions) (*upstreamBrowseResponse, error) {
 	panic("unused")
 }
 
@@ -79,6 +79,20 @@ func (s *countingContentService) ListEpisodesBySeasonID(context.Context, *Sessio
 
 func (s *countingContentService) ListItemFilters(context.Context, *Session, url.Values) (*upstreamItemFiltersResponse, error) {
 	panic("unused")
+}
+
+type recordingSearchContentService struct {
+	countingContentService
+	options []SearchItemsOptions
+	result  *upstreamBrowseResponse
+}
+
+func (s *recordingSearchContentService) SearchItems(_ context.Context, _ *Session, opts SearchItemsOptions) (*upstreamBrowseResponse, error) {
+	s.options = append(s.options, opts)
+	if s.result != nil {
+		return s.result, nil
+	}
+	return &upstreamBrowseResponse{Items: []upstreamListItem{}}, nil
 }
 
 func TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons(t *testing.T) {
@@ -137,6 +151,126 @@ func TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons(t *testing.T) {
 	if item.ParentID != encodedSeriesID || item.SeriesID != encodedSeriesID {
 		t.Fatalf("ParentID/SeriesID = %q/%q, want %q/%q",
 			item.ParentID, item.SeriesID, encodedSeriesID, encodedSeriesID)
+	}
+}
+
+func TestHandleItemsSearchPropagatesEnableTotalRecordCount(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		querySuffix   string
+		wantSkipTotal bool
+	}{
+		{name: "default includes total", wantSkipTotal: false},
+		{name: "disabled skips total", querySuffix: "&EnableTotalRecordCount=false", wantSkipTotal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			contentSvc := &recordingSearchContentService{}
+			h := &ItemsHandler{
+				content:  contentSvc,
+				userData: &mockUserDataService{},
+				codec:    codec,
+				mapper:   newMapper(codec, &config.Config{}),
+				images:   NewImageCache(time.Hour, time.Now),
+			}
+
+			req := httptest.NewRequest("GET", "/Users/test/Items?SearchTerm=dune&Limit=5&StartIndex=2"+tc.querySuffix, nil)
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
+				StreamAppUserID: 1,
+				ProfileID:       "profile-1",
+			}))
+
+			rec := httptest.NewRecorder()
+			h.HandleItems(rec, req)
+
+			if rec.Code != 200 {
+				t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+			}
+			if len(contentSvc.options) != 1 {
+				t.Fatalf("SearchItems calls = %d, want 1", len(contentSvc.options))
+			}
+			opts := contentSvc.options[0]
+			if opts.Query != "dune" || opts.Limit != 5 || opts.Offset != 2 {
+				t.Fatalf("SearchItems options = %#v", opts)
+			}
+			if opts.SkipTotal != tc.wantSkipTotal {
+				t.Fatalf("SkipTotal = %v, want %v", opts.SkipTotal, tc.wantSkipTotal)
+			}
+		})
+	}
+}
+
+func TestHandleItemsSearchMediaTypesVideoExcludeMovieEpisodeReturnsEmpty(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentSvc := &recordingSearchContentService{}
+	h := &ItemsHandler{
+		content:  contentSvc,
+		userData: &mockUserDataService{},
+		codec:    codec,
+		mapper:   newMapper(codec, &config.Config{}),
+		images:   NewImageCache(time.Hour, time.Now),
+	}
+
+	req := httptest.NewRequest("GET", "/Items?SearchTerm=sponge+bob&Limit=100"+
+		"&ExcludeItemTypes=Movie&ExcludeItemTypes=Episode&ExcludeItemTypes=TvChannel"+
+		"&MediaTypes=Video&EnableTotalRecordCount=false", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
+		StreamAppUserID: 1,
+		ProfileID:       "profile-1",
+	}))
+
+	rec := httptest.NewRecorder()
+	h.HandleItems(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(contentSvc.options) != 0 {
+		t.Fatalf("SearchItems calls = %d, want 0", len(contentSvc.options))
+	}
+
+	var result queryResultDTO
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("result = total %d items %d, want empty", result.TotalRecordCount, len(result.Items))
+	}
+}
+
+func TestHandleItemsSearchSeriesScopeReachesProvider(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentSvc := &recordingSearchContentService{}
+	h := &ItemsHandler{
+		content:  contentSvc,
+		userData: &mockUserDataService{},
+		codec:    codec,
+		mapper:   newMapper(codec, &config.Config{}),
+		images:   NewImageCache(time.Hour, time.Now),
+	}
+
+	req := httptest.NewRequest("GET", "/Items?SearchTerm=spongebob&Limit=100"+
+		"&IncludeItemTypes=Series&EnableTotalRecordCount=false", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
+		StreamAppUserID: 1,
+		ProfileID:       "profile-1",
+	}))
+
+	rec := httptest.NewRecorder()
+	h.HandleItems(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(contentSvc.options) != 1 {
+		t.Fatalf("SearchItems calls = %d, want 1", len(contentSvc.options))
+	}
+	opts := contentSvc.options[0]
+	if opts.Query != "spongebob" || opts.Limit != 100 || !opts.SkipTotal {
+		t.Fatalf("SearchItems options = %#v", opts)
+	}
+	if len(opts.ItemTypes) != 1 || opts.ItemTypes[0] != "series" {
+		t.Fatalf("ItemTypes = %v, want [series]", opts.ItemTypes)
 	}
 }
 

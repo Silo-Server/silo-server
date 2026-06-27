@@ -9,13 +9,22 @@ import (
 type ContentService interface {
 	ListUserLibraries(ctx context.Context, session *Session) ([]upstreamUserLibrary, error)
 	BrowseItems(ctx context.Context, session *Session, params url.Values) (*upstreamBrowseResponse, error)
-	SearchItems(ctx context.Context, session *Session, query string, itemTypes []string, limit, offset int, libraryID *int) (*upstreamBrowseResponse, error)
+	SearchItems(ctx context.Context, session *Session, opts SearchItemsOptions) (*upstreamBrowseResponse, error)
 	GetItemDetail(ctx context.Context, session *Session, contentID string, libraryID *int) (*upstreamItemDetail, error)
 	ListSeasons(ctx context.Context, session *Session, seriesID string, libraryID *int) ([]upstreamSeason, error)
 	GetSeason(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) (*upstreamSeason, error)
 	ListEpisodes(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) ([]upstreamEpisode, error)
 	ListEpisodesBySeasonID(ctx context.Context, session *Session, seasonID string, libraryID *int) ([]upstreamEpisode, error)
 	ListItemFilters(ctx context.Context, session *Session, params url.Values) (*upstreamItemFiltersResponse, error)
+}
+
+type SearchItemsOptions struct {
+	Query     string
+	ItemTypes []string
+	Limit     int
+	Offset    int
+	LibraryID *int
+	SkipTotal bool
 }
 
 // UserDataService provides favorites/progress/watched operations.
