@@ -1378,6 +1378,21 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 		return leftSeason < rightSeason
 	})
 
+	// StartItemId: trim the list so it begins at the requested item.
+	// Jellyfin Android TV uses this to build a "play from here" queue via
+	// /Shows/{id}/Episodes?startItemId=X — the client trusts that item[0]
+	// is the episode the user selected. Without this trim, an unscoped
+	// request returns all seasons sorted by season_number ASC, so item[0]
+	// is always S0E1 (Specials), causing the wrong episode to play.
+	if query.startItemID != "" {
+		for i, item := range items {
+			if item.ID == query.startItemID {
+				items = items[i:]
+				break
+			}
+		}
+	}
+
 	total := len(items)
 	startIndex := 0
 	if page {
