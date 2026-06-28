@@ -272,27 +272,15 @@ func itemTypesContain(itemTypes []string, target string) bool {
 	return false
 }
 
-func searchItemTypesForQuery(query itemsQuery) ([]string, bool) {
+func searchItemTypesForQuery(query itemsQuery) []string {
 	itemTypes := append([]string(nil), query.itemTypes...)
-	if !query.mediaTypesExplicit {
-		return itemTypes, query.hasItemTypeFilter && len(itemTypes) == 0
+	if query.mediaTypesExplicit && !query.mediaTypesSet["video"] {
+		return []string{compatNoMatchType}
 	}
-	if !query.mediaTypesSet["video"] {
-		return nil, true
+	if query.hasItemTypeFilter && len(itemTypes) == 0 {
+		return []string{compatNoMatchType}
 	}
-	if len(itemTypes) == 0 {
-		if query.hasItemTypeFilter {
-			return nil, true
-		}
-		itemTypes = []string{"movie", "episode"}
-	}
-	filtered := itemTypes[:0]
-	for _, itemType := range itemTypes {
-		if jellyfinMediaType(itemType) == "Video" {
-			filtered = append(filtered, itemType)
-		}
-	}
-	return filtered, len(filtered) == 0
+	return itemTypes
 }
 
 // HandleItem serves GET /Items/{id}.
@@ -1890,19 +1878,9 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *ItemsHandler) handleSearchItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
-	itemTypes, noMatch := searchItemTypesForQuery(query)
-	if noMatch {
-		writeJSON(w, http.StatusOK, queryResultDTO{
-			Items:            []baseItemDTO{},
-			TotalRecordCount: 0,
-			StartIndex:       query.startIndex,
-		})
-		return
-	}
-
 	result, err := h.content.SearchItems(r.Context(), session, SearchItemsOptions{
 		Query:     query.searchTerm,
-		ItemTypes: itemTypes,
+		ItemTypes: searchItemTypesForQuery(query),
 		Limit:     query.limit,
 		Offset:    query.startIndex,
 		LibraryID: libraryIDPtr(query.parentLibraryID),

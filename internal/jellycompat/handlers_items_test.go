@@ -200,7 +200,7 @@ func TestHandleItemsSearchPropagatesEnableTotalRecordCount(t *testing.T) {
 	}
 }
 
-func TestHandleItemsSearchMediaTypesVideoExcludeMovieEpisodeReturnsEmpty(t *testing.T) {
+func TestHandleItemsSearchMediaTypesVideoExcludeMovieEpisodeSearchesSeries(t *testing.T) {
 	codec := NewResourceIDCodec()
 	contentSvc := &recordingSearchContentService{}
 	h := &ItemsHandler{
@@ -225,8 +225,15 @@ func TestHandleItemsSearchMediaTypesVideoExcludeMovieEpisodeReturnsEmpty(t *test
 	if rec.Code != 200 {
 		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
 	}
-	if len(contentSvc.options) != 0 {
-		t.Fatalf("SearchItems calls = %d, want 0", len(contentSvc.options))
+	if len(contentSvc.options) != 1 {
+		t.Fatalf("SearchItems calls = %d, want 1", len(contentSvc.options))
+	}
+	opts := contentSvc.options[0]
+	if opts.Query != "sponge bob" || opts.Limit != 100 || !opts.SkipTotal {
+		t.Fatalf("SearchItems options = %#v", opts)
+	}
+	if len(opts.ItemTypes) != 1 || opts.ItemTypes[0] != "series" {
+		t.Fatalf("ItemTypes = %v, want [series]", opts.ItemTypes)
 	}
 
 	var result queryResultDTO
