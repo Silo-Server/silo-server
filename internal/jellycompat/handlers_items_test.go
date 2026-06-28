@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // countingContentService is a ContentService double that returns a fixed
@@ -93,6 +94,105 @@ func (s *recordingSearchContentService) SearchItems(_ context.Context, _ *Sessio
 		return s.result, nil
 	}
 	return &upstreamBrowseResponse{Items: []upstreamListItem{}}, nil
+}
+
+func performEpisodesRequest(t *testing.T, h *ItemsHandler, target, seriesID string) queryResultDTO {
+	t.Helper()
+	req := httptest.NewRequest("GET", target, nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", seriesID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{
+		StreamAppUserID: 1,
+		ProfileID:       "profile-1",
+	})
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	h.HandleEpisodes(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var result queryResultDTO
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return result
+}
+
+func TestHandleEpisodes_StartItemIDTrimsPlayFromHereQueue(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	encodedStartItemID := codec.EncodeStringID(EncodedIDItem, "ep-2")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{
+			{ContentID: "season-0", SeasonNumber: 0, Title: "Specials", EpisodeCount: 1},
+			{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 3},
+		},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 0): {
+			{ContentID: "special-1", SeriesID: seriesContentID, SeasonID: "season-0", SeasonNumber: 0, EpisodeNumber: 1, Title: "Special"},
+		},
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Selected"},
+			{ContentID: "ep-3", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 3, Title: "After"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?startItemId="+encodedStartItemID, encodedSeriesID)
+	if result.TotalRecordCount != 2 || result.StartIndex != 0 {
+		t.Fatalf("TotalRecordCount/StartIndex = %d/%d, want 2/0", result.TotalRecordCount, result.StartIndex)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("len(Items) = %d, want 2: %+v", len(result.Items), result.Items)
+	}
+	if result.Items[0].Name != "Selected" || result.Items[1].Name != "After" {
+		t.Fatalf("unexpected queue order: %+v", result.Items)
+	}
+	if result.Items[0].ID != encodedStartItemID {
+		t.Fatalf("first item ID = %q, want %q", result.Items[0].ID, encodedStartItemID)
+	}
+}
+
+func TestHandleEpisodes_StartItemIDMissingReturnsEmptyQueue(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	missingStartItemID := codec.EncodeStringID(EncodedIDItem, "missing-episode")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?StartItemId="+missingStartItemID, encodedSeriesID)
+	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("expected empty queue for missing StartItemId, got total=%d items=%+v", result.TotalRecordCount, result.Items)
+	}
 }
 
 func TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons(t *testing.T) {
