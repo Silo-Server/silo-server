@@ -1294,6 +1294,7 @@ func (h *ItemsHandler) writeSeriesEpisodesResponse(w http.ResponseWriter, r *htt
 		}
 		return episodeModels[i].SeasonNumber < episodeModels[j].SeasonNumber
 	})
+	episodeModels = compactEpisodeModels(episodeModels)
 	episodeModels = trimEpisodesFromStartItem(episodeModels, query.startItemID, h.codec)
 
 	contentIDs := contentIDsFromEpisodes(episodeModels)
@@ -2393,6 +2394,18 @@ func (h *ItemsHandler) listSeriesEpisodes(ctx context.Context, session *Session,
 		}
 	}
 	return episodes, nil
+}
+
+func compactEpisodeModels(episodes []*models.Episode) []*models.Episode {
+	write := 0
+	for _, episode := range episodes {
+		if episode == nil {
+			continue
+		}
+		episodes[write] = episode
+		write++
+	}
+	return episodes[:write]
 }
 
 func trimEpisodesFromStartItem(episodes []*models.Episode, rawStartItemID string, codec *ResourceIDCodec) []*models.Episode {

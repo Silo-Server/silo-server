@@ -140,6 +140,7 @@ func TestHandleEpisodes_StartItemIDTrimsPlayFromHereQueue(t *testing.T) {
 			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
 			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Selected"},
 			{ContentID: "ep-3", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 3, Title: "After"},
+			nil,
 		},
 	}}
 	h := &ItemsHandler{
