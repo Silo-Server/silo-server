@@ -88,6 +88,22 @@ type TranscodeManager struct {
 	// reconstruct, just not all in the same instant. Lazily sized on first use.
 	reconstructSemOnce sync.Once
 	reconstructSem     chan struct{}
+
+	// lifecycleMu guards lifecycleLocks, the per-session mutexes that serialize
+	// every path which spawns ffmpeg into a session's output directory (fresh
+	// start, quality/audio restart, and reconstruct). reconstructGroup only
+	// single-flights reconstructs against each other; without this a reconstruct
+	// racing a fresh start could run two ffmpeg writers against the same dir.
+	lifecycleMu    sync.Mutex
+	lifecycleLocks map[string]*lifecycleLock
+}
+
+// lifecycleLock is a refcounted per-session mutex. The refcount lets the manager
+// drop the map entry once no path holds or waits on it, so the map does not grow
+// unbounded across the lifetime of a long-running server.
+type lifecycleLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // NewTranscodeManager returns a manager with its internal maps initialized. The
@@ -169,19 +185,35 @@ func (m *TranscodeManager) RegisterTranscodeSession(sessionID string, ts *Transc
 	m.transcodeMu.Unlock()
 }
 
-// GetOrRegisterTranscodeSession atomically returns the existing session for
-// sessionID, or registers and returns newSession when none exists. The bool
-// reports whether newSession was stored; false means an existing session won the
-// race and the caller should close newSession. This lets concurrent start paths
-// (e.g. multiple compat manifest requests) avoid registering duplicate ffmpegs.
-func (m *TranscodeManager) GetOrRegisterTranscodeSession(sessionID string, newSession *TranscodeSession) (*TranscodeSession, bool) {
-	m.transcodeMu.Lock()
-	defer m.transcodeMu.Unlock()
-	if existing := m.transcodes[sessionID]; existing != nil {
-		return existing, false
+// LockSessionLifecycle acquires the per-session lifecycle mutex and returns a
+// release func. Every path that spawns ffmpeg into a session's output directory
+// (fresh start, restart, reconstruct) must hold it across "check existing → spawn
+// → register" so two paths never run concurrent writers against the same dir. The
+// lock is refcounted: the map entry is dropped once the last holder/waiter
+// releases, so the map stays bounded.
+func (m *TranscodeManager) LockSessionLifecycle(sessionID string) func() {
+	m.lifecycleMu.Lock()
+	if m.lifecycleLocks == nil {
+		m.lifecycleLocks = make(map[string]*lifecycleLock)
 	}
-	m.transcodes[sessionID] = newSession
-	return newSession, true
+	lk := m.lifecycleLocks[sessionID]
+	if lk == nil {
+		lk = &lifecycleLock{}
+		m.lifecycleLocks[sessionID] = lk
+	}
+	lk.refs++
+	m.lifecycleMu.Unlock()
+
+	lk.mu.Lock()
+	return func() {
+		lk.mu.Unlock()
+		m.lifecycleMu.Lock()
+		lk.refs--
+		if lk.refs == 0 {
+			delete(m.lifecycleLocks, sessionID)
+		}
+		m.lifecycleMu.Unlock()
+	}
 }
 
 // markReconstructing records that sessionID's ffmpeg is mid-reconstruct and
@@ -477,20 +509,37 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	// Pace the spawn so a post-restart wave of reconstructs does not launch a
 	// thousand cold-start ffmpeg processes at once. A client that disconnects while
 	// waiting releases its place rather than queueing dead work.
-	release, ok := m.acquireReconstructSlot(ctx)
+	slotRelease, ok := m.acquireReconstructSlot(ctx)
 	if !ok {
 		return nil
 	}
+
+	// Serialize against every other spawn path (fresh start, restart) for this
+	// session so a reconstruct and a fresh start never run two ffmpeg writers
+	// against the same output dir. reconstructGroup only single-flights reconstructs
+	// against each other, not against starts.
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+
+	// Re-check under the lifecycle lock: a fresh start (or a reconstruct that ran
+	// just before us) may already have a live session. Yield to it instead of
+	// spawning a duplicate writer.
+	if existing := m.GetTranscodeSession(sessionID); existing != nil {
+		slotRelease()
+		return existing
+	}
+
 	transcodeSession, err := StartTranscode(context.WithoutCancel(ctx), opts)
-	release()
+	slotRelease()
 	if err != nil {
 		slog.Error("reconstruct transcode start failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil
 	}
 
-	// Insert under the map lock, yielding to a winner registered by another path
-	// (e.g. a fresh start). Close only the duplicate ffmpeg process here, never the
-	// shared output directory the winner is actively serving.
+	// Register under the map lock. The lifecycle lock guarantees no other path
+	// registered since the re-check above; the existing-check is kept as defensive
+	// belt-and-braces, closing only the duplicate ffmpeg process (never the shared
+	// output dir the winner serves) on the should-be-impossible race.
 	m.transcodeMu.Lock()
 	if existing := m.transcodes[sessionID]; existing != nil {
 		m.transcodeMu.Unlock()

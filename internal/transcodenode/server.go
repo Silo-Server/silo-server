@@ -77,9 +77,53 @@ type Server struct {
 	reconstructSemOnce sync.Once
 	reconstructSem     chan struct{}
 
+	// lifecycleMu guards lifecycleLocks, the per-session mutexes that serialize
+	// every path which spawns ffmpeg into a session's output dir (fresh start and
+	// reconstruct). reconstructGroup only single-flights reconstructs against each
+	// other; without this a reconstruct racing a fresh /transcode/start could run
+	// two ffmpeg writers against the same dir.
+	lifecycleMu    sync.Mutex
+	lifecycleLocks map[string]*sessionLifecycleLock
+
 	// recipeStore is the control-plane recipe store consulted when a forwarded
 	// token carries no recipe (the jellycompat node hop). Nil disables that path.
 	recipeStore recipeStore
+}
+
+// sessionLifecycleLock is a refcounted per-session mutex; the refcount lets the
+// node drop the map entry once no path holds or waits on it so the map stays
+// bounded over the node's lifetime.
+type sessionLifecycleLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockSessionLifecycle acquires the per-session lifecycle mutex and returns a
+// release func. Held across "check existing → spawn → register" so a fresh start
+// and a reconstruct never run concurrent ffmpeg writers for one session's dir.
+func (s *Server) lockSessionLifecycle(sessionID string) func() {
+	s.lifecycleMu.Lock()
+	if s.lifecycleLocks == nil {
+		s.lifecycleLocks = make(map[string]*sessionLifecycleLock)
+	}
+	lk := s.lifecycleLocks[sessionID]
+	if lk == nil {
+		lk = &sessionLifecycleLock{}
+		s.lifecycleLocks[sessionID] = lk
+	}
+	lk.refs++
+	s.lifecycleMu.Unlock()
+
+	lk.mu.Lock()
+	return func() {
+		lk.mu.Unlock()
+		s.lifecycleMu.Lock()
+		lk.refs--
+		if lk.refs == 0 {
+			delete(s.lifecycleLocks, sessionID)
+		}
+		s.lifecycleMu.Unlock()
+	}
 }
 
 // NewServer creates a new transcode server.
@@ -257,6 +301,11 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		opts.HWAccel = cfg.Playback.HWAccel
 	}
 
+	// Hold the per-session lifecycle lock across teardown → spawn → register so a
+	// concurrent reconstruct cannot run a second ffmpeg writer against this
+	// session's output dir while we replace it.
+	unlock := s.lockSessionLifecycle(req.SessionID)
+
 	// Defensively close any existing session for this ID so that a quality
 	// switch doesn't orphan the old ffmpeg process or leave stale segments.
 	s.mu.Lock()
@@ -281,6 +330,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	session, err := playback.StartTranscode(context.WithoutCancel(r.Context()), opts)
 	if err != nil {
+		unlock()
 		slog.Error("start transcode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
 		http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		return
@@ -289,6 +339,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.sessions[req.SessionID] = session
 	s.mu.Unlock()
+	unlock()
 	s.activeJobs.Add(1)
 
 	// Track session in Redis off the request path — the API server (and
@@ -398,6 +449,18 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return nil
 	}
 	defer release()
+
+	// Serialize against a concurrent fresh /transcode/start for this session so the
+	// two never run ffmpeg writers against the same dir. Re-check under the lock and
+	// yield to any live session rather than spawning a duplicate.
+	unlock := s.lockSessionLifecycle(sessionID)
+	defer unlock()
+	s.mu.RLock()
+	existing, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if ok {
+		return existing
+	}
 
 	cfg := s.watcher.Config()
 	outputDir := filepath.Join(cfg.Playback.TranscodeDir, sessionID)

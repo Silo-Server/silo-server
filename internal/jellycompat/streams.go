@@ -1094,17 +1094,24 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	}
 	opts.SegmentDuration = h.compatSegmentDuration()
 
+	// Hold the per-session lifecycle lock across "check existing → spawn →
+	// register" so a concurrent reconstruct (or another manifest request) cannot
+	// run a second ffmpeg writer against this session's output dir. Re-check under
+	// the lock and yield to any live session instead of spawning a duplicate.
+	unlock := h.tm.LockSessionLifecycle(upstreamSessionID)
+	if existing := h.tm.GetTranscodeSession(upstreamSessionID); existing != nil {
+		unlock()
+		return existing, nil
+	}
 	transcodeSession, err := playback.StartTranscode(context.WithoutCancel(ctx), opts)
 	if err != nil {
+		unlock()
 		return nil, err
 	}
-	// Register atomically; a concurrent request may have won the race, in which
-	// case close this duplicate ffmpeg and use the winner.
-	winner, stored := h.tm.GetOrRegisterTranscodeSession(upstreamSessionID, transcodeSession)
-	if !stored {
-		_ = transcodeSession.CloseProcess()
-		return winner, nil
-	}
+	// Safe under the lifecycle lock: the re-check above held, so no other path
+	// registered this session.
+	h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
+	unlock()
 
 	// Register the exit monitor and persist the reconstruction recipe (shared with
 	// the remote path). On a failed compat-store write roll back this abandoned

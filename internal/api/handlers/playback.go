@@ -2526,6 +2526,13 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Hold the per-session lifecycle lock across teardown → spawn → register so a
+	// concurrent reconstruct (or another fresh start) cannot run a second ffmpeg
+	// writer against this session's output directory. The in-lock close tears down
+	// any session a reconstruct rebuilt between the earlier close and here so the
+	// fresh ffmpeg is the sole writer.
+	unlock := h.tm.LockSessionLifecycle(req.SessionID)
+	h.tm.CloseTranscodeSession(req.SessionID, "")
 	transcodeSession, err := playback.StartTranscode(context.WithoutCancel(r.Context()), playback.TranscodeOpts{
 		InputPath:          file.FilePath,
 		OutputDir:          filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
@@ -2551,11 +2558,13 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		FFmpegLogSink:      h.FFmpegLogSink,
 	})
 	if err != nil {
+		unlock()
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start transcode session")
 		return
 	}
 
 	h.tm.RegisterTranscodeSession(req.SessionID, transcodeSession)
+	unlock()
 
 	h.maybeStartThrottler(r.Context(), transcodeSession)
 	h.tm.MonitorLocalTranscodeExit(req.SessionID, transcodeSession)

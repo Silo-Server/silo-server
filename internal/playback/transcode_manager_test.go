@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeSessionRegistry is a GetSession + RegisterReconstructed double.
@@ -409,4 +412,49 @@ func TestAcquireReconstructSlot(t *testing.T) {
 		t.Fatal("acquire should succeed after the slot is released")
 	}
 	release2()
+}
+
+func TestLockSessionLifecycle_MutualExclusionAndCleanup(t *testing.T) {
+	m := NewTranscodeManager()
+
+	// Two holders of the same key must be mutually exclusive.
+	var counter, maxConcurrent int32
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			unlock := m.LockSessionLifecycle("sess-a")
+			defer unlock()
+			c := atomic.AddInt32(&counter, 1)
+			if c > atomic.LoadInt32(&maxConcurrent) {
+				atomic.StoreInt32(&maxConcurrent, c)
+			}
+			time.Sleep(time.Millisecond)
+			atomic.AddInt32(&counter, -1)
+		}()
+	}
+	wg.Wait()
+	if maxConcurrent != 1 {
+		t.Fatalf("lifecycle lock allowed %d concurrent holders, want 1", maxConcurrent)
+	}
+
+	// Different keys do not block each other and the map drops entries once
+	// released.
+	u1 := m.LockSessionLifecycle("k1")
+	u2 := m.LockSessionLifecycle("k2")
+	m.lifecycleMu.Lock()
+	n := len(m.lifecycleLocks)
+	m.lifecycleMu.Unlock()
+	if n != 2 {
+		t.Fatalf("expected 2 live lifecycle locks, got %d", n)
+	}
+	u1()
+	u2()
+	m.lifecycleMu.Lock()
+	n = len(m.lifecycleLocks)
+	m.lifecycleMu.Unlock()
+	if n != 0 {
+		t.Fatalf("expected lifecycle lock map to drain to 0, got %d", n)
+	}
 }
