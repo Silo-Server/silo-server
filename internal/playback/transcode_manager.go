@@ -312,6 +312,11 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		TargetAudioCodec:  card.TargetCodecAudio,
 		TargetBitrateKbps: card.TargetBitrateKbps,
 		TranscodeHWAccel:  card.HWAccel,
+		// Preserve the byte-affecting recipe so an audio switch after a restart
+		// rebuilds the same stream (subtitles/cadence) instead of dropping them.
+		SubtitleTrackIndex: card.SubtitleTrackIndex,
+		SubtitleBurnIn:     card.SubtitleBurnIn,
+		SegmentDuration:    card.SegmentDuration,
 	}
 	// Enforce the same per-user concurrency caps a fresh StartSession would, so a
 	// replayed token cannot reconstruct past the user's limit. Reconstructing the

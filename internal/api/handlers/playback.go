@@ -1931,6 +1931,12 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 		TargetVideoCodec:  targetVideoCodec,
 		TargetAudioCodec:  targetAudioCodec,
 		TargetBitrateKbps: targetBitrateKbps,
+		// Carry the byte-affecting recipe forward: an audio switch changes only the
+		// audio selection, so subtitles and cadence must survive the state update
+		// (UpdateStreamState overwrites these fields unconditionally).
+		SubtitleTrackIndex: session.SubtitleTrackIndex,
+		SubtitleBurnIn:     session.SubtitleBurnIn,
+		SegmentDuration:    session.SegmentDuration,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update stream state")
 		return
@@ -2017,13 +2023,21 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, nodeURL)
 
 				seekSeconds := req.Position
-				// Embed a concrete segment duration (not 0): the node's recipe
-				// token treats SegmentDuration<=0 as "incomplete" and falls back
-				// to a recipe store that the native path never populates, so a 0
-				// here would 404 on a node restart — the exact resilience this
-				// path exists to provide. Send an explicit value so the node
-				// produces, and the token reconstructs, the same segment length.
-				segmentDuration := playback.DefaultSegmentDuration
+				// Restart from the FULL live recipe, not a partial re-derivation.
+				// An audio switch alters only audio selection — subtitle burn-in and
+				// the segment cadence must be preserved, or the node re-encodes a
+				// different byte stream (subtitles silently dropped, wrong cadence)
+				// and signs that altered recipe into the new token. The session
+				// retains these from the original start (finalizeTranscodeStart) or a
+				// post-restart reconstruct, so recover them here. Embed a concrete
+				// segment duration (not 0): the node's recipe token treats
+				// SegmentDuration<=0 as "incomplete" and would 404 on a node restart.
+				segmentDuration := session.SegmentDuration
+				if segmentDuration <= 0 {
+					segmentDuration = playback.DefaultSegmentDuration
+				}
+				subtitleTrackIndex := session.SubtitleTrackIndex
+				subtitleBurnIn := session.SubtitleBurnIn
 				startSegment := computeStartSegment(seekSeconds, segmentDuration)
 
 				// Derive the encode recipe the same way HandleStartTranscode
@@ -2044,8 +2058,8 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 					SegmentDuration:    segmentDuration,
 					HWAccel:            session.TranscodeHWAccel,
 					AudioTrackIndex:    req.AudioTrackIndex,
-					SubtitleTrackIndex: -1,
-					SubtitleBurnIn:     false,
+					SubtitleTrackIndex: subtitleTrackIndex,
+					SubtitleBurnIn:     subtitleBurnIn,
 					TotalDuration:      float64(file.Duration),
 				}
 				if strings.TrimSpace(nodeReq.HWAccel) == "" {
@@ -2234,18 +2248,30 @@ func (h *PlaybackHandler) finalizeTranscodeStart(r *http.Request, st transcodeSt
 		"transcode_audio", transcodeAudio,
 	)
 
+	// Persist the byte-affecting recipe (subtitles + segment cadence) so a later
+	// offloaded audio switch can rebuild the exact same stream. The session is the
+	// only recovery source for offloaded transcodes (no local ts.Opts()). Normalize
+	// the cadence to a concrete value so the restart never falls back to 0.
+	segmentDuration := st.req.SegmentDuration
+	if segmentDuration <= 0 {
+		segmentDuration = playback.DefaultSegmentDuration
+	}
+
 	if err := h.sessionMgr.UpdateStreamState(st.req.SessionID, playback.SessionStreamState{
-		PlayMethod:        playback.PlayTranscode,
-		BasePlayMethod:    baseMethod,
-		AudioTrackIndex:   st.session.AudioTrackIndex,
-		TranscodeAudio:    transcodeAudio,
-		ClientIP:          st.session.ClientIP,
-		StreamBitrateKbps: streamBitrateKbps,
-		TargetResolution:  st.req.TargetResolution,
-		TargetVideoCodec:  st.req.TargetCodecVideo,
-		TargetAudioCodec:  st.req.TargetCodecAudio,
-		TargetBitrateKbps: st.req.TargetBitrateKbps,
-		TranscodeHWAccel:  st.hwAccel,
+		PlayMethod:         playback.PlayTranscode,
+		BasePlayMethod:     baseMethod,
+		AudioTrackIndex:    st.session.AudioTrackIndex,
+		TranscodeAudio:     transcodeAudio,
+		ClientIP:           st.session.ClientIP,
+		StreamBitrateKbps:  streamBitrateKbps,
+		TargetResolution:   st.req.TargetResolution,
+		TargetVideoCodec:   st.req.TargetCodecVideo,
+		TargetAudioCodec:   st.req.TargetCodecAudio,
+		TargetBitrateKbps:  st.req.TargetBitrateKbps,
+		TranscodeHWAccel:   st.hwAccel,
+		SubtitleTrackIndex: st.req.SubtitleTrackIndex,
+		SubtitleBurnIn:     st.req.SubtitleBurnIn,
+		SegmentDuration:    segmentDuration,
 	}); err != nil {
 		slog.Error("failed to update transcode stream state", "session", st.req.SessionID, "error", err, "playback_session_id", st.req.SessionID)
 	}

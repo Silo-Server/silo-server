@@ -32,6 +32,14 @@ type Session struct {
 	TargetBitrateKbps int    // requested output bitrate cap for transcodes
 	TranscodeHWAccel  string // effective hardware acceleration mode for transcodes
 
+	// Byte-affecting transcode recipe fields the offloaded restart path needs to
+	// rebuild the exact same stream after an audio switch. Local transcodes read
+	// these from the live ts.Opts(); offloaded transcodes own no local runtime, so
+	// the session is the only place to recover them (see HandleChangeAudioTrack).
+	SubtitleTrackIndex int // -1 = no subtitles
+	SubtitleBurnIn     bool
+	SegmentDuration    int // HLS segment length in seconds (cadence)
+
 	Position                   float64
 	IsPaused                   bool
 	HasWebSocket               bool
@@ -58,6 +66,15 @@ type SessionStreamState struct {
 	TargetAudioCodec  string
 	TargetBitrateKbps int
 	TranscodeHWAccel  string
+
+	// Byte-affecting transcode recipe fields preserved so an offloaded restart
+	// (e.g. audio switch) can rebuild the exact same stream. SubtitleTrackIndex
+	// defaults to 0 on a zero-value state; callers that manage subtitles must set
+	// it explicitly (-1 for none) — burn-in is additionally gated by
+	// SubtitleBurnIn so a zero index never burns track 0 by accident.
+	SubtitleTrackIndex int
+	SubtitleBurnIn     bool
+	SegmentDuration    int
 }
 
 // SessionManager tracks active playback sessions and enforces stream limits.
@@ -391,6 +408,9 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	s.TargetAudioCodec = state.TargetAudioCodec
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
+	s.SubtitleTrackIndex = state.SubtitleTrackIndex
+	s.SubtitleBurnIn = state.SubtitleBurnIn
+	s.SegmentDuration = state.SegmentDuration
 	m.touchSessionLocked(s)
 	return nil
 }
