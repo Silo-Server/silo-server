@@ -54,6 +54,9 @@ func (a *ACLAuthorizer) loadInputs(ctx context.Context, userID int) (*models.Use
 	if err != nil {
 		return nil, nil, EffectivePolicy{}, err
 	}
+	if user == nil || !user.Enabled {
+		return user, nil, EffectivePolicy{}, nil
+	}
 
 	rules := []ACLRule{}
 	if a.rules != nil {
