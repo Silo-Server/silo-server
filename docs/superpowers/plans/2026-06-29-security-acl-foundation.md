@@ -1123,7 +1123,7 @@ git commit -m "Add ACL persistence foundation"
 - Consumes: `CompatibilityRulesForUser`
 - Consumes: `CompatibilityEffectivePolicyForUser`
 - Produces: `type Authorizer interface`
-- Produces: `func NewACLAuthorizer(repository *ACLRepository, users UserLoaderForACL) *ACLAuthorizer`
+- Produces: `func NewACLAuthorizer(rules ACLRuleLoader, users UserLoaderForACL) *ACLAuthorizer`
 - Produces: `func (a *ACLAuthorizer) Authorize(ctx context.Context, request AccessRequest) (AccessDecision, error)`
 - Produces: `func (a *ACLAuthorizer) Explain(ctx context.Context, request AccessRequest) (AccessExplanation, error)`
 
