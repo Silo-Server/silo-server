@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -115,23 +116,37 @@ func (d *DurableCompatPlaybackStore) Update(id string, fn func(*PlaybackSession)
 	if err := d.mem.Update(id, fn); err != nil {
 		return err
 	}
-	if committed, ok := d.updateDB(id, fn); ok {
+	committed, err := d.updateDB(id, fn)
+	if committed != nil {
 		// Refresh the cache from the DB-authoritative committed row so the cache
 		// reflects any concurrent writer's fields that fn merged on top of.
 		d.mem.Put(*committed)
+	}
+	if err != nil {
+		// The in-memory mutation stands (live state is correct), but the durable
+		// row was NOT updated: surface the failure so durability-sensitive callers
+		// (recipe/upstream-session writes that promise restart resilience) can roll
+		// back or fail rather than reporting a session as restart-safe when a later
+		// restart would reload a stale row or 404. A genuinely absent/expired row
+		// and a nil pool are not durability failures and return nil (best-effort,
+		// unchanged) — only real DB round-trip errors propagate.
+		return fmt.Errorf("durably persist compat playback session %s: %w", id, err)
 	}
 	return nil
 }
 
 // updateDB applies fn to the DB-authoritative row inside a transaction using
 // SELECT ... FOR UPDATE, then upserts and commits. It returns the committed
-// session when the round-trip succeeded. A nil pool, a missing/expired row, or
-// any DB error returns ok=false (logged, swallowed): the caller keeps the
-// in-memory mutation. fn is expected to be idempotent — it is applied to the
-// cache copy and again to the DB-authoritative copy.
-func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSession) error) (*PlaybackSession, bool) {
+// session when the round-trip succeeded. A nil pool or a genuinely
+// missing/expired row returns (nil, nil): there is no durable row to update, so
+// this is treated as best-effort (the caller keeps the in-memory mutation), not a
+// durability failure. A real DB round-trip error returns (nil, err) so the caller
+// can learn the session was not durably persisted. fn is expected to be
+// idempotent — it is applied to the cache copy and again to the DB-authoritative
+// copy.
+func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSession) error) (*PlaybackSession, error) {
 	if d.pool == nil {
-		return nil, false
+		return nil, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -139,7 +154,7 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
 		slog.Warn("begin compat playback session update tx failed", "error", err, "play_session_id", id)
-		return nil, false
+		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -149,29 +164,33 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 		id, d.now(),
 	).Scan(&raw)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("load compat playback session for update failed", "error", err, "play_session_id", id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No durable row to update (never persisted or already expired): not a
+			// durability failure — best-effort, the in-memory mutation stands.
+			return nil, nil
 		}
-		return nil, false
+		slog.Warn("load compat playback session for update failed", "error", err, "play_session_id", id)
+		return nil, err
 	}
 
 	var session PlaybackSession
 	if err := json.Unmarshal(raw, &session); err != nil {
 		slog.Warn("unmarshal compat playback session for update failed", "error", err, "play_session_id", id)
-		return nil, false
+		return nil, err
 	}
 	if err := fn(&session); err != nil {
-		// The mutation itself rejected the authoritative row; surface nothing and
-		// let the cache mutation (already applied) stand.
+		// The mutation itself rejected the authoritative row; the cache mutation
+		// (already applied) stands. This is a fn/data condition, not an
+		// infrastructure failure, so it is not surfaced as a durability error.
 		slog.Warn("apply compat playback session update failed", "error", err, "play_session_id", id)
-		return nil, false
+		return nil, nil
 	}
 	session.UpdatedAt = d.now()
 
 	data, err := json.Marshal(session)
 	if err != nil {
 		slog.Warn("marshal compat playback session for update failed", "error", err, "play_session_id", id)
-		return nil, false
+		return nil, err
 	}
 	expiresAt := session.ExpiresAt
 	if expiresAt.IsZero() {
@@ -179,13 +198,13 @@ func (d *DurableCompatPlaybackStore) updateDB(id string, fn func(*PlaybackSessio
 	}
 	if _, err := tx.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
 		slog.Warn("persist compat playback session update failed", "error", err, "play_session_id", id)
-		return nil, false
+		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		slog.Warn("commit compat playback session update failed", "error", err, "play_session_id", id)
-		return nil, false
+		return nil, err
 	}
-	return &session, true
+	return &session, nil
 }
 
 // FindByRoute resolves a route id, checking the cache first and falling back to
