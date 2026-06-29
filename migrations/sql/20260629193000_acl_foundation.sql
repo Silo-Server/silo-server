@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS public.acl_rules (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT acl_rules_effect_check CHECK (effect IN ('allow', 'deny')),
-    CONSTRAINT acl_rules_subject_type_check CHECK (subject_type IN ('user', 'group', 'builtin_role', 'everyone'))
+    CONSTRAINT acl_rules_subject_type_check CHECK (subject_type IN ('user', 'group', 'builtin_role', 'everyone')),
+    CONSTRAINT acl_rules_conditions_object_check CHECK (jsonb_typeof(conditions) = 'object')
 );
 
 CREATE INDEX IF NOT EXISTS acl_group_members_user_idx ON public.acl_group_members(user_id);

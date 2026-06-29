@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -29,10 +31,10 @@ type aclRuleRow struct {
 	Description  string
 }
 
-func (row aclRuleRow) toRule() ACLRule {
-	var conditions ACLCondition
-	if len(row.Conditions) > 0 {
-		_ = json.Unmarshal(row.Conditions, &conditions)
+func (row aclRuleRow) toRule() (ACLRule, error) {
+	conditions, err := decodeACLConditions(row.Conditions)
+	if err != nil {
+		return ACLRule{}, err
 	}
 	return ACLRule{
 		ID:           row.ID,
@@ -46,23 +48,41 @@ func (row aclRuleRow) toRule() ACLRule {
 		Priority:     row.Priority,
 		Name:         row.Name,
 		Description:  row.Description,
+	}, nil
+}
+
+func decodeACLConditions(raw []byte) (ACLCondition, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return ACLCondition{}, nil
 	}
+	if trimmed[0] != '{' {
+		return ACLCondition{}, fmt.Errorf("decoding acl conditions: expected object JSON, got %s", string(trimmed))
+	}
+
+	var conditions ACLCondition
+	if err := json.Unmarshal(trimmed, &conditions); err != nil {
+		return ACLCondition{}, fmt.Errorf("decoding acl conditions: %w", err)
+	}
+	return conditions, nil
 }
 
 func (r *ACLRepository) ListRulesForUser(ctx context.Context, userID int) ([]ACLRule, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, subject_type, subject_id, action, resource_type, resource_id, effect, conditions, priority, name, description
-		FROM public.acl_rules
-		WHERE (subject_type = 'user' AND subject_id = $1::text)
-		   OR (subject_type = 'group' AND subject_id IN (
+		SELECT r.id, r.subject_type, r.subject_id, r.action, r.resource_type, r.resource_id, r.effect, r.conditions, r.priority, r.name, r.description
+		FROM public.acl_rules r
+		JOIN public.users u ON u.id = $1
+		WHERE (r.subject_type = 'user' AND r.subject_id = u.id::text)
+		   OR (r.subject_type = 'group' AND r.subject_id IN (
 		       SELECT g.slug
 		       FROM public.acl_groups g
 		       JOIN public.acl_group_members gm ON gm.group_id = g.id
-		       WHERE gm.user_id = $2
+		       WHERE gm.user_id = u.id
 		   ))
-		   OR subject_type = 'everyone'
-		ORDER BY priority DESC, id ASC
-	`, userID, userID)
+		   OR (r.subject_type = 'builtin_role' AND r.subject_id = u.role)
+		   OR r.subject_type = 'everyone'
+		ORDER BY r.priority DESC, r.id ASC
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +94,11 @@ func (r *ACLRepository) ListRulesForUser(ctx context.Context, userID int) ([]ACL
 		if err := rows.Scan(&row.ID, &row.SubjectType, &row.SubjectID, &row.Action, &row.ResourceType, &row.ResourceID, &row.Effect, &row.Conditions, &row.Priority, &row.Name, &row.Description); err != nil {
 			return nil, err
 		}
-		rules = append(rules, row.toRule())
+		rule, err := row.toRule()
+		if err != nil {
+			return nil, err
+		}
+		rules = append(rules, rule)
 	}
 	return rules, rows.Err()
 }

@@ -16,7 +16,10 @@ func TestScanACLRuleFields(t *testing.T) {
 		Description:  "allows library playback",
 	}
 
-	rule := row.toRule()
+	rule, err := row.toRule()
+	if err != nil {
+		t.Fatalf("toRule() error = %v", err)
+	}
 	if rule.ID != 42 {
 		t.Fatalf("id = %d, want 42", rule.ID)
 	}
@@ -31,5 +34,48 @@ func TestScanACLRuleFields(t *testing.T) {
 	}
 	if rule.Effect != EffectAllow {
 		t.Fatalf("effect = %q, want %q", rule.Effect, EffectAllow)
+	}
+}
+
+func TestACLRuleConditionsDecodeObject(t *testing.T) {
+	row := aclRuleRow{
+		Conditions: []byte(`{"LibraryIDs":[10],"MediaTypes":["movie"]}`),
+	}
+
+	rule, err := row.toRule()
+	if err != nil {
+		t.Fatalf("toRule() error = %v", err)
+	}
+	if len(rule.Conditions.LibraryIDs) != 1 || rule.Conditions.LibraryIDs[0] != 10 {
+		t.Fatalf("library ids = %#v, want [10]", rule.Conditions.LibraryIDs)
+	}
+	if len(rule.Conditions.MediaTypes) != 1 || rule.Conditions.MediaTypes[0] != "movie" {
+		t.Fatalf("media types = %#v, want [movie]", rule.Conditions.MediaTypes)
+	}
+}
+
+func TestACLRuleConditionsRejectNonObject(t *testing.T) {
+	row := aclRuleRow{Conditions: []byte(`[]`)}
+
+	if _, err := row.toRule(); err == nil {
+		t.Fatalf("toRule() error = nil, want non-object conditions to fail")
+	}
+}
+
+func TestACLRuleBuiltInRoleMapping(t *testing.T) {
+	row := aclRuleRow{
+		SubjectType: "builtin_role",
+		SubjectID:   string(GroupAdmin),
+	}
+
+	rule, err := row.toRule()
+	if err != nil {
+		t.Fatalf("toRule() error = %v", err)
+	}
+	if rule.SubjectType != SubjectBuiltInRole {
+		t.Fatalf("subject type = %q, want %q", rule.SubjectType, SubjectBuiltInRole)
+	}
+	if rule.SubjectID != string(GroupAdmin) {
+		t.Fatalf("subject id = %q, want %q", rule.SubjectID, GroupAdmin)
 	}
 }
