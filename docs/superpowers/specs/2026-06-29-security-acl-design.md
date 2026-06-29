@@ -316,3 +316,7 @@ Every denied privileged request should return a stable error code and be logged 
 ## Open Decisions
 
 The initial design chooses full ACL internally, group-oriented UI externally, and incremental migration. The advanced rule-editor UI can be finalized during implementation planning because it does not change the core model.
+
+## Foundation Implementation Notes
+
+The first implementation pass adds the ACL data model, constants, evaluator, compatibility mapping, repository, and authorizer facade without converting existing route middleware. Current behavior remains controlled by the legacy role and permission paths until route-specific ACL checks are introduced in later PRs.
