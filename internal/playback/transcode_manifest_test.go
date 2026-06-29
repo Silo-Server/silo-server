@@ -746,3 +746,42 @@ func TestCleanStaleSegments(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendManifestQueryParam(t *testing.T) {
+	manifest := strings.Join([]string{
+		"#EXTM3U",
+		"#EXT-X-VERSION:7",
+		"#EXT-X-TARGETDURATION:2",
+		"#EXT-X-MAP:URI=\"segment/init.mp4\"",
+		"#EXTINF:2.000000,",
+		"segment/seg_00000.ts",
+		"#EXTINF:2.000000,",
+		"segment/seg_00001.ts?existing=1",
+		"",
+	}, "\n")
+
+	got := string(AppendManifestQueryParam([]byte(manifest), "st", "TOKEN"))
+	for _, want := range []string{
+		"#EXT-X-MAP:URI=\"segment/init.mp4?st=TOKEN\"",
+		"segment/seg_00000.ts?st=TOKEN",
+		"segment/seg_00001.ts?existing=1&st=TOKEN",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rewritten manifest missing %q:\n%s", want, got)
+		}
+	}
+	// Tags and EXTINF lines must be untouched.
+	if !strings.Contains(got, "#EXT-X-TARGETDURATION:2") || strings.Contains(got, "#EXT-X-TARGETDURATION:2?st") {
+		t.Fatalf("non-URI tag was rewritten:\n%s", got)
+	}
+}
+
+func TestAppendManifestQueryParam_NonManifestUnchanged(t *testing.T) {
+	body := []byte("not a manifest\nsegment/seg_00000.ts\n")
+	if got := AppendManifestQueryParam(body, "st", "TOKEN"); string(got) != string(body) {
+		t.Fatalf("non-manifest body should be unchanged, got:\n%s", got)
+	}
+	if got := AppendManifestQueryParam([]byte("#EXTM3U\nseg.ts\n"), "", "TOKEN"); !strings.Contains(string(got), "seg.ts\n") || strings.Contains(string(got), "seg.ts?") {
+		t.Fatalf("empty key should be a no-op, got:\n%s", got)
+	}
+}

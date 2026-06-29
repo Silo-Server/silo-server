@@ -1609,6 +1609,82 @@ func rewriteMapURI(line []byte, segPrefix, suffix string) ([]byte, error) {
 	return result, nil
 }
 
+// AppendManifestQueryParam appends a single "key=value" query parameter to every
+// segment and #EXT-X-MAP init URI in an HLS media playlist, preserving any query
+// the URI already carries (using "?" or "&" as appropriate). The value is
+// appended verbatim — callers must supply a URL-safe value (a signed stream token
+// is base64url and safe). A manifest without a valid #EXTM3U header is returned
+// unchanged so a non-manifest body is never corrupted.
+//
+// It exists for the API proxy boundary: a transcode node builds its manifest from
+// the forwarded request query, which deliberately omits the signed stream token
+// ("st") so the token never reaches the node URL or its logs. That leaves the
+// node-built segment URIs token-less, so a later segment fetch after a node/API
+// restart cannot reconstruct the session. Re-injecting the client-facing token
+// here keeps reconstruction working without ever exposing it to the node.
+func AppendManifestQueryParam(manifest []byte, key, value string) []byte {
+	if key == "" || validateManifestHeader(manifest) != nil {
+		return manifest
+	}
+	param := key + "=" + value
+	lines := bytes.Split(manifest, []byte("\n"))
+	for i, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		if bytes.HasPrefix(trimmed, []byte("#EXT-X-MAP:")) {
+			lines[i] = appendMapURIQueryParam(trimmed, param)
+			continue
+		}
+		if trimmed[0] == '#' {
+			continue
+		}
+		lines[i] = appendURIQueryParam(trimmed, param)
+	}
+	return bytes.Join(lines, []byte("\n"))
+}
+
+// appendURIQueryParam appends a "key=value" param to a bare URI line.
+func appendURIQueryParam(uri []byte, param string) []byte {
+	sep := []byte("?")
+	if bytes.IndexByte(uri, '?') >= 0 {
+		sep = []byte("&")
+	}
+	out := make([]byte, 0, len(uri)+len(sep)+len(param))
+	out = append(out, uri...)
+	out = append(out, sep...)
+	out = append(out, param...)
+	return out
+}
+
+// appendMapURIQueryParam appends a "key=value" param to the URI inside an
+// #EXT-X-MAP tag. A line without a well-formed URI attribute is returned
+// unchanged.
+func appendMapURIQueryParam(line []byte, param string) []byte {
+	uriStart := bytes.Index(line, []byte(`URI="`))
+	if uriStart < 0 {
+		return line
+	}
+	uriStart += 5 // skip past URI="
+	uriEnd := bytes.IndexByte(line[uriStart:], '"')
+	if uriEnd < 0 {
+		return line
+	}
+	uriEnd += uriStart
+
+	sep := []byte("?")
+	if bytes.IndexByte(line[uriStart:uriEnd], '?') >= 0 {
+		sep = []byte("&")
+	}
+	result := make([]byte, 0, len(line)+len(sep)+len(param))
+	result = append(result, line[:uriEnd]...)
+	result = append(result, sep...)
+	result = append(result, param...)
+	result = append(result, line[uriEnd:]...)
+	return result
+}
+
 func (s *TranscodeSession) manifestTimeoutError(timeout time.Duration) error {
 	s.mu.Lock()
 	running := s.running

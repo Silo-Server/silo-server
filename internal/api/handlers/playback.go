@@ -2837,11 +2837,15 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 	// Best-effort forward of the stream token as a header so the node's
 	// reconstruct path (X-Silo-Stream-Token) can rebuild after a self-restart.
 	// Verify at the API boundary and confirm it belongs to this session; an
-	// invalid or missing token never blocks the live proxy.
+	// invalid or missing token never blocks the live proxy. validToken is kept so
+	// the same verified token can be re-injected into the node's manifest segment
+	// URIs below.
+	var validToken string
 	if stToken != "" && h.JWTSecret != "" {
 		claims, verifyErr := streamtoken.Verify(stToken, h.JWTSecret)
 		if verifyErr == nil && claims.SessionID == sessionID {
 			req.Header.Set("X-Silo-Stream-Token", stToken)
+			validToken = stToken
 		} else if verifyErr != nil {
 			slog.Warn("stream token not forwarded to transcode node", "error", verifyErr, "playback_session_id", sessionID)
 		}
@@ -2854,6 +2858,34 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer resp.Body.Close()
+
+	// The node strips "st" from the request query (kept out of node URLs/logs),
+	// so the segment/init URIs in the manifest it builds carry no token. Without
+	// it, a segment fetched after a node or API restart cannot reconstruct the
+	// session and 404s. Re-inject the client-facing token into every URI at this
+	// boundary so the client's later segment requests carry "st" again. Only the
+	// manifest body is rewritten; segments stream through untouched.
+	if validToken != "" && resp.StatusCode == http.StatusOK && strings.HasSuffix(path, ".m3u8") {
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			slog.Error("read transcode node manifest", "error", readErr, "url", targetURL, "playback_session_id", sessionID)
+			http.Error(w, "transcode node unavailable", http.StatusBadGateway)
+			return
+		}
+		rewritten := playback.AppendManifestQueryParam(body, streamTokenParam, validToken)
+		for k, vv := range resp.Header {
+			if http.CanonicalHeaderKey(k) == "Content-Length" {
+				continue
+			}
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(rewritten)))
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(rewritten)
+		return
+	}
 
 	for k, vv := range resp.Header {
 		for _, v := range vv {
