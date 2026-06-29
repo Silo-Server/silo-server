@@ -89,11 +89,20 @@ func CompatibilityEffectivePolicyForUser(user *models.User) EffectivePolicy {
 		return EffectivePolicy{}
 	}
 	return EffectivePolicy{
-		LibraryIDs:                 append([]int(nil), user.LibraryIDs...),
+		LibraryIDs:                 cloneOptionalInts(user.LibraryIDs),
 		MaxPlaybackQuality:         user.MaxPlaybackQuality,
 		MaxStreams:                 user.MaxStreams,
 		MaxTranscodes:              user.MaxTranscodes,
 		DirectDownloadsAllowed:     user.DownloadAllowed,
 		TranscodedDownloadsAllowed: user.DownloadTranscodeAllowed,
 	}
+}
+
+func cloneOptionalInts(values []int) []int {
+	if values == nil {
+		return nil
+	}
+	out := make([]int, len(values))
+	copy(out, values)
+	return out
 }

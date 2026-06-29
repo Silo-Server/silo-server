@@ -74,3 +74,27 @@ func TestCompatibilityEffectivePolicyPreservesUserLimits(t *testing.T) {
 		t.Fatalf("transcoded downloads should not be allowed")
 	}
 }
+
+func TestCompatibilityEffectivePolicyPreservesLibraryIDNilness(t *testing.T) {
+	unrestrictedUser := &models.User{
+		ID:      8,
+		Enabled: true,
+	}
+	unrestrictedPolicy := CompatibilityEffectivePolicyForUser(unrestrictedUser)
+	if unrestrictedPolicy.LibraryIDs != nil {
+		t.Fatalf("unrestricted library ids = %#v, want nil", unrestrictedPolicy.LibraryIDs)
+	}
+
+	restrictedUser := &models.User{
+		ID:         9,
+		Enabled:    true,
+		LibraryIDs: []int{},
+	}
+	restrictedPolicy := CompatibilityEffectivePolicyForUser(restrictedUser)
+	if restrictedPolicy.LibraryIDs == nil {
+		t.Fatalf("restricted library ids is nil, want empty non-nil slice")
+	}
+	if len(restrictedPolicy.LibraryIDs) != 0 {
+		t.Fatalf("restricted library ids len = %d, want 0", len(restrictedPolicy.LibraryIDs))
+	}
+}
