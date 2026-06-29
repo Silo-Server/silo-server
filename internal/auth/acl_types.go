@@ -3,14 +3,20 @@ package auth
 import "time"
 
 type AccessRequest struct {
-	UserID         int
-	Action         ACLAction
-	ResourceType   ACLResourceType
-	ResourceID     string
-	LibraryIDs     []int
-	MediaType      string
-	ProfileID      string
-	PrimaryProfile bool
+	UserID                      int
+	Action                      ACLAction
+	ResourceType                ACLResourceType
+	ResourceID                  string
+	LibraryIDs                  []int
+	MediaType                   string
+	ProfileID                   string
+	PrimaryProfile              bool
+	PlaybackQuality             string
+	CurrentStreams              int
+	CurrentTranscodes           int
+	ContentRating               string
+	DirectDownloadRequested     bool
+	TranscodedDownloadRequested bool
 }
 
 type ACLRule struct {
