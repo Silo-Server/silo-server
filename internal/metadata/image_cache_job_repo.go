@@ -32,10 +32,9 @@ const (
 	ImageCacheStatusSucceeded = "succeeded"
 	ImageCacheStatusFailed    = "failed"
 
-	imageCacheLeaseDuration    = 15 * time.Minute
-	imageCacheMaxAttempts      = 8
-	imageCacheFailedRetryAfter = 6 * time.Hour
-	imageCacheDeferredRetry    = 7 * 24 * time.Hour
+	imageCacheLeaseDuration = 15 * time.Minute
+	imageCacheMaxAttempts   = 8
+	imageCacheDeferredRetry = 7 * 24 * time.Hour
 )
 
 type EnqueueImageCacheJobInput struct {
@@ -168,8 +167,6 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 			in.SeasonNumber, in.EpisodeNumber,
 		)
 	}
-	retryArg := len(args) + 1
-	args = append(args, intervalLiteral(imageCacheFailedRetryAfter))
 	requeueSucceededArg := len(args) + 1
 	args = append(args, requeueSucceeded)
 	fmt.Fprintf(&sql, `
@@ -185,7 +182,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN 'queued'
 				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN 'queued'
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -198,7 +195,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN 0
 				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN 0
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -209,7 +206,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN NOW()
 				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NOW()
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -220,7 +217,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN NULL
 				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NULL
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -231,7 +228,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN ''
 				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN ''
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -242,7 +239,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN ''
 				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN ''
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -253,7 +250,7 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.source_path IS DISTINCT FROM EXCLUDED.source_path
 					THEN NULL
 				WHEN metadata_image_cache_jobs.status = 'failed'
-					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 					THEN NULL
 				WHEN $%d::boolean
 					AND metadata_image_cache_jobs.status = 'succeeded'
@@ -265,20 +262,20 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 		   OR metadata_image_cache_jobs.status IN ('queued', 'running')
 		   OR (
 			   metadata_image_cache_jobs.status = 'failed'
-			   AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+			   AND metadata_image_cache_jobs.next_attempt_at <= NOW()
 		   )
 		   OR (
 			   $%d::boolean
 			   AND metadata_image_cache_jobs.status = 'succeeded'
 		   )`,
-		retryArg, requeueSucceededArg,
-		retryArg, requeueSucceededArg,
-		retryArg, requeueSucceededArg,
-		retryArg, requeueSucceededArg,
-		retryArg, requeueSucceededArg,
-		retryArg, requeueSucceededArg,
-		retryArg, requeueSucceededArg,
-		retryArg, requeueSucceededArg)
+		requeueSucceededArg,
+		requeueSucceededArg,
+		requeueSucceededArg,
+		requeueSucceededArg,
+		requeueSucceededArg,
+		requeueSucceededArg,
+		requeueSucceededArg,
+		requeueSucceededArg)
 
 	tag, err := r.pool.Exec(ctx, sql.String(), args...)
 	if err != nil {
@@ -751,7 +748,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			   OR j.status = 'succeeded'
 			   OR (
 				   j.status = 'failed'
-				   AND j.updated_at < NOW() - $2::interval
+				   AND j.next_attempt_at <= NOW()
 			   )
 			ORDER BY ac.target_type, ac.target_content_id, ac.target_language, ac.image_type
 			LIMIT $1
@@ -762,7 +759,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 		       COALESCE(tvdb_id, '') AS tvdb_id,
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
-	`, limit, intervalLiteral(imageCacheFailedRetryAfter))
+	`, limit)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)
 	}

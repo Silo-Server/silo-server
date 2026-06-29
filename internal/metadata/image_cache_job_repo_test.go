@@ -33,6 +33,25 @@ func TestImageCacheFailureRetryDelayDefersStableProviderFailures(t *testing.T) {
 	}
 }
 
+func TestImageCacheJobRediscoveryUsesNextAttemptAt(t *testing.T) {
+	body, err := os.ReadFile("image_cache_job_repo.go")
+	if err != nil {
+		t.Fatalf("read image_cache_job_repo.go: %v", err)
+	}
+	sql := string(body)
+	if strings.Contains(sql, "metadata_image_cache_jobs.updated_at < NOW()") || strings.Contains(sql, "j.updated_at < NOW()") {
+		t.Fatal("failed image cache job rediscovery must use next_attempt_at, not updated_at age")
+	}
+	for _, want := range []string{
+		"metadata_image_cache_jobs.next_attempt_at <= NOW()",
+		"j.next_attempt_at <= NOW()",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("image cache job rediscovery missing %q", want)
+		}
+	}
+}
+
 func TestNormalizeImageCacheJobInputSkipsNonProviderArtwork(t *testing.T) {
 	for _, sourcePath := range []string{
 		"",
