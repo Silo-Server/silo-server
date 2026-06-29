@@ -1,6 +1,9 @@
 package auth
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestScanACLRuleFields(t *testing.T) {
 	row := aclRuleRow{
@@ -77,5 +80,17 @@ func TestACLRuleBuiltInRoleMapping(t *testing.T) {
 	}
 	if rule.SubjectID != string(GroupAdmin) {
 		t.Fatalf("subject id = %q, want %q", rule.SubjectID, GroupAdmin)
+	}
+}
+
+func TestACLRepositoryListRulesForUserQueryUsesBuiltInMemberships(t *testing.T) {
+	if !strings.Contains(aclRulesForUserQuery, "subject_type = 'builtin_role'") {
+		t.Fatalf("query missing builtin role filter: %s", aclRulesForUserQuery)
+	}
+	if !strings.Contains(aclRulesForUserQuery, "g.built_in = true") {
+		t.Fatalf("query missing built-in group guard: %s", aclRulesForUserQuery)
+	}
+	if strings.Contains(aclRulesForUserQuery, "users.role") {
+		t.Fatalf("query still depends on users.role: %s", aclRulesForUserQuery)
 	}
 }

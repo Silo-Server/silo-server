@@ -67,8 +67,7 @@ func decodeACLConditions(raw []byte) (ACLCondition, error) {
 	return conditions, nil
 }
 
-func (r *ACLRepository) ListRulesForUser(ctx context.Context, userID int) ([]ACLRule, error) {
-	rows, err := r.db.Query(ctx, `
+const aclRulesForUserQuery = `
 		SELECT r.id, r.subject_type, r.subject_id, r.action, r.resource_type, r.resource_id, r.effect, r.conditions, r.priority, r.name, r.description
 		FROM public.acl_rules r
 		JOIN public.users u ON u.id = $1
@@ -79,10 +78,19 @@ func (r *ACLRepository) ListRulesForUser(ctx context.Context, userID int) ([]ACL
 		       JOIN public.acl_group_members gm ON gm.group_id = g.id
 		       WHERE gm.user_id = u.id
 		   ))
-		   OR (r.subject_type = 'builtin_role' AND r.subject_id = u.role)
+		   OR (r.subject_type = 'builtin_role' AND r.subject_id IN (
+		       SELECT g.slug
+		       FROM public.acl_groups g
+		       JOIN public.acl_group_members gm ON gm.group_id = g.id
+		       WHERE gm.user_id = u.id
+		         AND g.built_in = true
+		   ))
 		   OR r.subject_type = 'everyone'
 		ORDER BY r.priority DESC, r.id ASC
-	`, userID)
+`
+
+func (r *ACLRepository) ListRulesForUser(ctx context.Context, userID int) ([]ACLRule, error) {
+	rows, err := r.db.Query(ctx, aclRulesForUserQuery, userID)
 	if err != nil {
 		return nil, err
 	}
