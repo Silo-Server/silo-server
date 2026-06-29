@@ -16,6 +16,23 @@ func TestImageCacheRetryDelayCaps(t *testing.T) {
 	}
 }
 
+func TestImageCacheFailureRetryDelayDefersStableProviderFailures(t *testing.T) {
+	tests := []string{
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 403",
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 404",
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 410",
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 418",
+	}
+	for _, errText := range tests {
+		if got := imageCacheFailureRetryDelay(1, errText); got != 7*24*time.Hour {
+			t.Fatalf("imageCacheFailureRetryDelay(%q) = %s, want 7d", errText, got)
+		}
+	}
+	if got := imageCacheFailureRetryDelay(1, "temporary network error"); got != time.Minute {
+		t.Fatalf("transient failure delay = %s, want 1m", got)
+	}
+}
+
 func TestNormalizeImageCacheJobInputSkipsNonProviderArtwork(t *testing.T) {
 	for _, sourcePath := range []string{
 		"",

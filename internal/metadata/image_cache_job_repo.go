@@ -35,6 +35,7 @@ const (
 	imageCacheLeaseDuration    = 15 * time.Minute
 	imageCacheMaxAttempts      = 8
 	imageCacheFailedRetryAfter = 6 * time.Hour
+	imageCacheDeferredRetry    = 7 * 24 * time.Hour
 )
 
 type EnqueueImageCacheJobInput struct {
@@ -70,12 +71,30 @@ func imageCacheRetryDelay(attempt int) time.Duration {
 	return delay
 }
 
+func imageCacheFailureRetryDelay(attempt int, errText string) time.Duration {
+	if isStableProviderImageFailure(errText) {
+		return imageCacheDeferredRetry
+	}
+	return imageCacheRetryDelay(attempt)
+}
+
+func isStableProviderImageFailure(errText string) bool {
+	return strings.Contains(errText, "unexpected status 403") ||
+		strings.Contains(errText, "unexpected status 404") ||
+		strings.Contains(errText, "unexpected status 410") ||
+		strings.Contains(errText, "unexpected status 418")
+}
+
 func (r *ImageCacheJobRepository) Enqueue(ctx context.Context, in EnqueueImageCacheJobInput) error {
 	_, err := r.EnqueueBatch(ctx, []EnqueueImageCacheJobInput{in})
 	return err
 }
 
 func (r *ImageCacheJobRepository) EnqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput) (int, error) {
+	return r.enqueueBatch(ctx, inputs, false)
+}
+
+func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool) (int, error) {
 	if r == nil || r.pool == nil {
 		return 0, nil
 	}
@@ -97,7 +116,7 @@ func (r *ImageCacheJobRepository) EnqueueBatch(ctx context.Context, inputs []Enq
 		if end > len(valid) {
 			end = len(valid)
 		}
-		affected, err := r.enqueueBatchChunk(ctx, valid[start:end])
+		affected, err := r.enqueueBatchChunk(ctx, valid[start:end], requeueSucceeded)
 		if err != nil {
 			return total, err
 		}
@@ -124,7 +143,7 @@ func normalizeImageCacheJobInput(in EnqueueImageCacheJobInput) (EnqueueImageCach
 	return in, true
 }
 
-func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs []EnqueueImageCacheJobInput) (int, error) {
+func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs []EnqueueImageCacheJobInput, requeueSucceeded bool) (int, error) {
 	var sql strings.Builder
 	args := make([]any, 0, len(inputs)*11+1)
 	sql.WriteString(`
@@ -151,6 +170,8 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 	}
 	retryArg := len(args) + 1
 	args = append(args, intervalLiteral(imageCacheFailedRetryAfter))
+	requeueSucceededArg := len(args) + 1
+	args = append(args, requeueSucceeded)
 	fmt.Fprintf(&sql, `
 	ON CONFLICT (target_type, target_content_id, image_type, target_language) DO UPDATE SET
 		series_id = EXCLUDED.series_id,
@@ -166,6 +187,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
 					THEN 'queued'
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'succeeded'
+					THEN 'queued'
 				WHEN metadata_image_cache_jobs.status = 'succeeded'
 					THEN 'succeeded'
 				ELSE metadata_image_cache_jobs.status
@@ -176,6 +200,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
 					THEN 0
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'succeeded'
+					THEN 0
 				ELSE metadata_image_cache_jobs.attempt_count
 			END,
 			next_attempt_at = CASE
@@ -183,6 +210,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 					THEN NOW()
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					THEN NOW()
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN NOW()
 				ELSE metadata_image_cache_jobs.next_attempt_at
 			END,
@@ -192,6 +222,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
 					THEN NULL
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'succeeded'
+					THEN NULL
 				ELSE metadata_image_cache_jobs.locked_at
 			END,
 			locked_by = CASE
@@ -199,6 +232,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 					THEN ''
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					THEN ''
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN ''
 				ELSE metadata_image_cache_jobs.locked_by
 			END,
@@ -208,6 +244,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
 					THEN ''
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'succeeded'
+					THEN ''
 				ELSE metadata_image_cache_jobs.last_error
 			END,
 			completed_at = CASE
@@ -215,6 +254,9 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 					THEN NULL
 				WHEN metadata_image_cache_jobs.status = 'failed'
 					AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+					THEN NULL
+				WHEN $%d::boolean
+					AND metadata_image_cache_jobs.status = 'succeeded'
 					THEN NULL
 				ELSE metadata_image_cache_jobs.completed_at
 			END,
@@ -224,8 +266,19 @@ func (r *ImageCacheJobRepository) enqueueBatchChunk(ctx context.Context, inputs 
 		   OR (
 			   metadata_image_cache_jobs.status = 'failed'
 			   AND metadata_image_cache_jobs.updated_at < NOW() - $%d::interval
+		   )
+		   OR (
+			   $%d::boolean
+			   AND metadata_image_cache_jobs.status = 'succeeded'
 		   )`,
-		retryArg, retryArg, retryArg, retryArg, retryArg, retryArg, retryArg, retryArg)
+		retryArg, requeueSucceededArg,
+		retryArg, requeueSucceededArg,
+		retryArg, requeueSucceededArg,
+		retryArg, requeueSucceededArg,
+		retryArg, requeueSucceededArg,
+		retryArg, requeueSucceededArg,
+		retryArg, requeueSucceededArg,
+		retryArg, requeueSucceededArg)
 
 	tag, err := r.pool.Exec(ctx, sql.String(), args...)
 	if err != nil {
@@ -350,7 +403,7 @@ func (r *ImageCacheJobRepository) MarkFailed(ctx context.Context, id int64, atte
 	if nextAttempt >= imageCacheMaxAttempts {
 		status = ImageCacheStatusFailed
 	}
-	delay := imageCacheRetryDelay(nextAttempt)
+	delay := imageCacheFailureRetryDelay(nextAttempt, errText)
 
 	_, err := r.pool.Exec(ctx, `
 		UPDATE metadata_image_cache_jobs
@@ -695,6 +748,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			 AND j.target_language = ac.target_language
 			WHERE j.id IS NULL
 			   OR j.source_path IS DISTINCT FROM ac.source_path
+			   OR j.status = 'succeeded'
 			   OR (
 				   j.status = 'failed'
 				   AND j.updated_at < NOW() - $2::interval
@@ -743,7 +797,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 	if err := rows.Err(); err != nil {
 		return 0, fmt.Errorf("iterating existing provider artwork: %w", err)
 	}
-	return r.EnqueueBatch(ctx, inputs)
+	return r.enqueueBatch(ctx, inputs, true)
 }
 
 func imageCacheProviderIDFromSource(sourcePath, fallback string) string {

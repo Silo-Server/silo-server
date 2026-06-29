@@ -8,10 +8,13 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	"github.com/h2non/bimg"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
 )
@@ -32,6 +35,21 @@ func makeTestJPEG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
+func makeTestPNG(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			img.SetRGBA(x, y, color.RGBA{R: uint8(x % 255), G: uint8(y % 255), B: 180, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("makeTestPNG: encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
 // mockS3 records all PutObject calls for test assertions.
 type mockS3 struct {
 	mu                    sync.Mutex
@@ -39,12 +57,16 @@ type mockS3 struct {
 	bucket                string
 	putErr                error // if non-nil, returned for every PutObject call
 	failuresBeforeSuccess int
+	existing              map[string]bool
+	existsErr             error
+	existsCalls           []string
 }
 
 type putCall struct {
 	bucket string
 	key    string
 	size   int
+	data   []byte
 }
 
 func (m *mockS3) PutObject(_ context.Context, bucket, key string, data []byte) error {
@@ -57,11 +79,22 @@ func (m *mockS3) PutObject(_ context.Context, bucket, key string, data []byte) e
 	if m.putErr != nil {
 		return m.putErr
 	}
-	m.calls = append(m.calls, putCall{bucket: bucket, key: key, size: len(data)})
+	copied := append([]byte(nil), data...)
+	m.calls = append(m.calls, putCall{bucket: bucket, key: key, size: len(data), data: copied})
 	return nil
 }
 
 func (m *mockS3) Bucket() string { return m.bucket }
+
+func (m *mockS3) ObjectExists(_ context.Context, _ string, key string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.existsCalls = append(m.existsCalls, key)
+	if m.existsErr != nil {
+		return false, m.existsErr
+	}
+	return m.existing[key], nil
+}
 
 func (m *mockS3) keys() []string {
 	m.mu.Lock()
@@ -70,6 +103,25 @@ func (m *mockS3) keys() []string {
 	for i, c := range m.calls {
 		keys[i] = c.key
 	}
+	return keys
+}
+
+func (m *mockS3) objectData(key string) []byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, c := range m.calls {
+		if c.key == key {
+			return c.data
+		}
+	}
+	return nil
+}
+
+func (m *mockS3) checkedKeys() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	keys := make([]string, len(m.existsCalls))
+	copy(keys, m.existsCalls)
 	return keys
 }
 
@@ -147,6 +199,79 @@ func TestCache_Poster(t *testing.T) {
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
+	}
+}
+
+func TestCacheSkipsUploadingVariantsThatAlreadyExist(t *testing.T) {
+	jpeg := makeTestJPEG(t)
+	srv := startImageServer(t, jpeg, http.StatusOK)
+
+	wantBase := "tmdb/movies/550/poster"
+	s3 := &mockS3{
+		bucket: "media",
+		existing: map[string]bool{
+			wantBase + "/original.webp": true,
+			wantBase + "/w500.webp":     true,
+			wantBase + "/w300.webp":     true,
+		},
+	}
+	c := newWithHTTPClient(s3, srv.Client())
+
+	result, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:   srv.URL + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		t.Fatalf("Cache poster with existing variants: %v", err)
+	}
+	if result.BasePath != wantBase {
+		t.Fatalf("BasePath = %q, want %q", result.BasePath, wantBase)
+	}
+	if got := s3.keys(); len(got) != 0 {
+		t.Fatalf("uploaded keys = %v, want none when variants already exist", got)
+	}
+	if result.UploadedVariants != 0 || result.ExistingVariants != 3 {
+		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 0 existing 3", result.UploadedVariants, result.ExistingVariants)
+	}
+	for _, key := range []string{wantBase + "/original.webp", wantBase + "/w500.webp", wantBase + "/w300.webp"} {
+		if !hasKey(s3.checkedKeys(), key) {
+			t.Fatalf("ObjectExists was not checked for %q; checked %v", key, s3.checkedKeys())
+		}
+	}
+}
+
+func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
+	jpeg := makeTestJPEG(t)
+	srv := startImageServer(t, jpeg, http.StatusOK)
+
+	wantBase := "tmdb/movies/550/poster"
+	s3 := &mockS3{
+		bucket: "media",
+		existing: map[string]bool{
+			wantBase + "/original.webp": true,
+			wantBase + "/w500.webp":     true,
+		},
+	}
+	c := newWithHTTPClient(s3, srv.Client())
+
+	result, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:   srv.URL + "/poster.jpg",
+		ProviderID:  "tmdb",
+		ContentType: "movies",
+		ContentID:   "550",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		t.Fatalf("Cache poster with partial existing variants: %v", err)
+	}
+	if got := s3.keys(); len(got) != 1 || got[0] != wantBase+"/w300.webp" {
+		t.Fatalf("uploaded keys = %v, want only missing w300 variant", got)
+	}
+	if result.UploadedVariants != 1 || result.ExistingVariants != 2 {
+		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 1 existing 2", result.UploadedVariants, result.ExistingVariants)
 	}
 }
 
@@ -228,6 +353,76 @@ func TestCache_Logo(t *testing.T) {
 		if hasKey(keys, wantBase+"/"+forbidden+".webp") {
 			t.Errorf("logo should not have %s variant", forbidden)
 		}
+	}
+}
+
+func TestCache_ConvertsSVGLogo(t *testing.T) {
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400"><rect width="1200" height="400" fill="#111"/><text x="80" y="255" fill="#fff" font-family="Arial" font-size="180">SILO</text></svg>`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		_, _ = w.Write(svg)
+	}))
+	t.Cleanup(srv.Close)
+
+	s3 := &mockS3{bucket: "media"}
+	c := newWithHTTPClient(s3, srv.Client())
+
+	result, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:   srv.URL + "/logo.svg",
+		ProviderID:  "tmdb",
+		ContentType: "series",
+		ContentID:   "1396",
+		ImageType:   metadata.ImageLogo,
+	})
+	if err != nil {
+		t.Fatalf("Cache SVG logo: %v", err)
+	}
+	if result.Thumbhash == "" {
+		t.Fatal("Thumbhash is empty")
+	}
+	wantBase := "tmdb/series/1396/logo"
+	for _, variant := range []string{"original", "w500"} {
+		want := wantBase + "/" + variant + ".webp"
+		if !hasKey(s3.keys(), want) {
+			t.Errorf("missing S3 key %q in %v", want, s3.keys())
+		}
+	}
+}
+
+func TestCache_CapsLargeOriginalVariant(t *testing.T) {
+	pngData := makeTestPNG(t, 2600, 900)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(pngData)
+	}))
+	t.Cleanup(srv.Close)
+
+	s3 := &mockS3{bucket: "media"}
+	c := newWithHTTPClient(s3, srv.Client())
+
+	_, err := c.Cache(context.Background(), CacheRequest{
+		SourceURL:   srv.URL + "/logo.png",
+		ProviderID:  "tmdb",
+		ContentType: "series",
+		ContentID:   "1396",
+		ImageType:   metadata.ImageLogo,
+	})
+	if err != nil {
+		t.Fatalf("Cache large logo: %v", err)
+	}
+	original := s3.objectData("tmdb/series/1396/logo/original.webp")
+	if len(original) == 0 {
+		t.Fatal("missing original.webp upload")
+	}
+	size, err := bimg.NewImage(original).Size()
+	if err != nil {
+		t.Fatalf("reading original.webp size: %v", err)
+	}
+	if size.Width > 1920 {
+		t.Fatalf("original.webp width = %d, want <= 1920", size.Width)
+	}
+	if len(original) >= 10*1024*1024 {
+		t.Fatalf("original.webp size = %d bytes, want < 10 MiB", len(original))
 	}
 }
 

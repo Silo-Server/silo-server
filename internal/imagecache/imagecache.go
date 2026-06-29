@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	maxDownloadBytes = 10 * 1024 * 1024 // 10 MB
+	maxDownloadBytes = 25 * 1024 * 1024 // allow oversized provider originals; cached variants are dimension-capped
 	downloadTimeout  = 30 * time.Second
 )
 
@@ -27,6 +27,10 @@ const (
 type ObjectPutter interface {
 	PutObject(ctx context.Context, bucket, key string, data []byte) error
 	Bucket() string
+}
+
+type objectExister interface {
+	ObjectExists(ctx context.Context, bucket, key string) (bool, error)
 }
 
 // ImageURLResolver resolves plugin:// paths to HTTP URLs.
@@ -52,9 +56,11 @@ type CacheRequest struct {
 
 // CacheResult is returned by Cache on success.
 type CacheResult struct {
-	BasePath  string // S3 key prefix, e.g. "tmdb/movies/550/poster"
-	Thumbhash string // base64-encoded
-	Ext       string // file extension including dot (e.g. ".jpg", ".png")
+	BasePath         string // S3 key prefix, e.g. "tmdb/movies/550/poster"
+	Thumbhash        string // base64-encoded
+	Ext              string // file extension including dot (e.g. ".jpg", ".png")
+	UploadedVariants int
+	ExistingVariants int
 }
 
 // Cacher downloads and stores image variants to S3.
@@ -92,9 +98,11 @@ func (c *Cacher) CacheImage(ctx context.Context, req metadata.CacheImageRequest)
 		return nil, err
 	}
 	return &metadata.CacheImageResult{
-		BasePath:  result.BasePath,
-		Thumbhash: result.Thumbhash,
-		Ext:       result.Ext,
+		BasePath:         result.BasePath,
+		Thumbhash:        result.Thumbhash,
+		Ext:              result.Ext,
+		UploadedVariants: result.UploadedVariants,
+		ExistingVariants: result.ExistingVariants,
 	}, nil
 }
 
@@ -160,25 +168,18 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 	}
 	basePath := buildBasePath(req.ProviderID, req.ContentType, req.ContentID, req.ImageType, req.Language, req.SeasonNumber, req.EpisodeNumber)
 	bucket := c.s3.Bucket()
-	var wg sync.WaitGroup
-	uploadErrs := make([]error, len(result.Variants))
-	for i, v := range result.Variants {
-		wg.Add(1)
-		go func(idx int, variant imageutil.Variant) {
-			defer wg.Done()
-			key := basePath + "/" + variant.Key + result.Ext
-			if err := putObjectWithRetry(ctx, c.s3, bucket, key, variant.Data); err != nil {
-				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
-			}
-		}(i, v)
+
+	uploadStats, err := c.uploadVariants(ctx, bucket, basePath, result)
+	if err != nil {
+		return nil, err
 	}
-	wg.Wait()
-	for _, err := range uploadErrs {
-		if err != nil {
-			return nil, err
-		}
-	}
-	return &CacheResult{BasePath: basePath, Thumbhash: thumbhash, Ext: result.Ext}, nil
+	return &CacheResult{
+		BasePath:         basePath,
+		Thumbhash:        thumbhash,
+		Ext:              result.Ext,
+		UploadedVariants: uploadStats.uploaded,
+		ExistingVariants: uploadStats.existing,
+	}, nil
 }
 
 // Cache downloads the image at req.SourceURL, generates variants, computes a
@@ -232,31 +233,17 @@ func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, err
 	basePath := buildBasePath(req.ProviderID, req.ContentType, req.ContentID, req.ImageType, req.Language, req.SeasonNumber, req.EpisodeNumber)
 	bucket := c.s3.Bucket()
 
-	// Upload all variants concurrently.
-	var wg sync.WaitGroup
-	uploadErrs := make([]error, len(result.Variants))
-	for i, v := range result.Variants {
-		wg.Add(1)
-		go func(idx int, variant imageutil.Variant) {
-			defer wg.Done()
-			key := basePath + "/" + variant.Key + result.Ext
-			if err := putObjectWithRetry(ctx, c.s3, bucket, key, variant.Data); err != nil {
-				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
-			}
-		}(i, v)
-	}
-	wg.Wait()
-
-	for _, err := range uploadErrs {
-		if err != nil {
-			return nil, err
-		}
+	uploadStats, err := c.uploadVariants(ctx, bucket, basePath, result)
+	if err != nil {
+		return nil, err
 	}
 
 	return &CacheResult{
-		BasePath:  basePath,
-		Thumbhash: thumbhash,
-		Ext:       result.Ext,
+		BasePath:         basePath,
+		Thumbhash:        thumbhash,
+		Ext:              result.Ext,
+		UploadedVariants: uploadStats.uploaded,
+		ExistingVariants: uploadStats.existing,
 	}, nil
 }
 
@@ -276,6 +263,56 @@ func variantWidths(t metadata.ImageType) []int {
 	default:
 		return []int{500, 300}
 	}
+}
+
+type uploadVariantStats struct {
+	uploaded int
+	existing int
+}
+
+func (c *Cacher) uploadVariants(ctx context.Context, bucket, basePath string, result *imageutil.VariantResult) (uploadVariantStats, error) {
+	var wg sync.WaitGroup
+	uploadErrs := make([]error, len(result.Variants))
+	stats := make([]uploadVariantStats, len(result.Variants))
+	for i, v := range result.Variants {
+		wg.Add(1)
+		go func(idx int, variant imageutil.Variant) {
+			defer wg.Done()
+			key := basePath + "/" + variant.Key + result.Ext
+			if exists, err := objectExists(ctx, c.s3, bucket, key); err != nil {
+				uploadErrs[idx] = fmt.Errorf("imagecache: check existing %s: %w", key, err)
+				return
+			} else if exists {
+				stats[idx].existing = 1
+				return
+			}
+			if err := putObjectWithRetry(ctx, c.s3, bucket, key, variant.Data); err != nil {
+				uploadErrs[idx] = fmt.Errorf("imagecache: upload %s: %w", key, err)
+				return
+			}
+			stats[idx].uploaded = 1
+		}(i, v)
+	}
+	wg.Wait()
+	var total uploadVariantStats
+	for _, err := range uploadErrs {
+		if err != nil {
+			return total, err
+		}
+	}
+	for _, s := range stats {
+		total.uploaded += s.uploaded
+		total.existing += s.existing
+	}
+	return total, nil
+}
+
+func objectExists(ctx context.Context, putter ObjectPutter, bucket, key string) (bool, error) {
+	exister, ok := putter.(objectExister)
+	if !ok {
+		return false, nil
+	}
+	return exister.ObjectExists(ctx, bucket, key)
 }
 
 func putObjectWithRetry(ctx context.Context, putter ObjectPutter, bucket, key string, data []byte) error {

@@ -16,7 +16,11 @@ import (
 	"go.n16f.net/thumbhash"
 )
 
-const webpQuality = 90
+const (
+	webpQuality                = 90
+	maxCachedOriginalDimension = 1920
+	thumbhashSourceDimension   = 100
+)
 
 // Variant holds a named image variant (e.g. "original", "w500").
 type Variant struct {
@@ -39,18 +43,22 @@ func GenerateVariants(data []byte, widths []int) (*VariantResult, error) {
 	img := bimg.NewImage(data)
 
 	// Validate input by reading size.
-	if _, err := img.Size(); err != nil {
+	size, err := img.Size()
+	if err != nil {
 		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
 	}
 
 	variants := make([]Variant, 0, len(widths)+1)
 
-	// Original — re-encode as WebP, strip metadata, no resize.
-	original, err := bimg.NewImage(data).Process(bimg.Options{
+	// Original — re-encode as WebP, strip metadata, and cap very large provider
+	// artwork so cached originals do not preserve oversized source dimensions.
+	originalOptions := bimg.Options{
 		Type:          bimg.WEBP,
 		Quality:       webpQuality,
 		StripMetadata: true,
-	})
+	}
+	fitWithin(&originalOptions, size, maxCachedOriginalDimension)
+	original, err := bimg.NewImage(data).Process(originalOptions)
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: encode original: %w", err)
 	}
@@ -148,12 +156,51 @@ func GenerateSquareVariants(data []byte, sizes []int) (*VariantResult, error) {
 func Thumbhash(data []byte) (string, error) {
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return "", fmt.Errorf("imageutil: decode for thumbhash: %w", err)
+		normalized, normalizeErr := normalizeThumbhashSource(data)
+		if normalizeErr != nil {
+			return "", fmt.Errorf("imageutil: decode for thumbhash: %w", err)
+		}
+		img, _, err = image.Decode(bytes.NewReader(normalized))
+		if err != nil {
+			return "", fmt.Errorf("imageutil: decode normalized thumbhash source: %w", err)
+		}
 	}
 
 	scaled := scaleImage(img, 100)
 	hashBytes := thumbhash.EncodeImage(scaled)
 	return base64.StdEncoding.EncodeToString(hashBytes), nil
+}
+
+func normalizeThumbhashSource(data []byte) ([]byte, error) {
+	img := bimg.NewImage(data)
+	size, err := img.Size()
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: invalid image: %w", err)
+	}
+	opts := bimg.Options{
+		Type:          bimg.PNG,
+		StripMetadata: true,
+	}
+	fitWithin(&opts, size, thumbhashSourceDimension)
+	out, err := img.Process(opts)
+	if err != nil {
+		return nil, fmt.Errorf("imageutil: normalize thumbhash source: %w", err)
+	}
+	return out, nil
+}
+
+func fitWithin(opts *bimg.Options, size bimg.ImageSize, maxDim int) {
+	if opts == nil || maxDim <= 0 {
+		return
+	}
+	if size.Width <= maxDim && size.Height <= maxDim {
+		return
+	}
+	if size.Width >= size.Height {
+		opts.Width = maxDim
+		return
+	}
+	opts.Height = maxDim
 }
 
 // scaleImage scales src so its longest dimension does not exceed maxDim,
