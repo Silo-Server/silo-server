@@ -257,3 +257,50 @@ func TestACLEvaluatorConditionFactsIgnoreMissingRequestValues(t *testing.T) {
 		t.Fatalf("reason code = %q, want rule_allow", decision.ReasonCode)
 	}
 }
+
+func TestACLEvaluatorExplainSnapshotsRequestAndPolicySlices(t *testing.T) {
+	evaluator := NewACLEvaluator()
+
+	request := AccessRequest{
+		Action:       ActionPlaybackPlay,
+		ResourceType: ResourceLibrary,
+		ResourceID:   "10",
+		LibraryIDs:   []int{10},
+	}
+	basePolicy := EffectivePolicy{
+		LibraryIDs: []int{10},
+		MediaTypes: []string{"movie"},
+	}
+
+	explanation := evaluator.Explain(
+		request,
+		[]ACLRule{
+			{
+				ID:           30,
+				SubjectType:  SubjectGroup,
+				SubjectID:    "viewer",
+				Action:       ActionPlaybackPlay,
+				ResourceType: ResourceLibrary,
+				ResourceID:   "10",
+				Effect:       EffectAllow,
+				Priority:     10,
+			},
+		},
+		basePolicy,
+		true,
+	)
+
+	request.LibraryIDs[0] = 99
+	basePolicy.LibraryIDs[0] = 99
+	basePolicy.MediaTypes[0] = "series"
+
+	if len(explanation.Request.LibraryIDs) != 1 || explanation.Request.LibraryIDs[0] != 10 {
+		t.Fatalf("request library ids = %#v, want [10]", explanation.Request.LibraryIDs)
+	}
+	if len(explanation.Decision.EffectivePolicy.LibraryIDs) != 1 || explanation.Decision.EffectivePolicy.LibraryIDs[0] != 10 {
+		t.Fatalf("effective policy library ids = %#v, want [10]", explanation.Decision.EffectivePolicy.LibraryIDs)
+	}
+	if len(explanation.Decision.EffectivePolicy.MediaTypes) != 1 || explanation.Decision.EffectivePolicy.MediaTypes[0] != "movie" {
+		t.Fatalf("effective policy media types = %#v, want [movie]", explanation.Decision.EffectivePolicy.MediaTypes)
+	}
+}

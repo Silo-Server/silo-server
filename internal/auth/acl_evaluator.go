@@ -14,13 +14,13 @@ func NewACLEvaluator() *ACLEvaluator {
 
 func (e *ACLEvaluator) Authorize(request AccessRequest, rules []ACLRule, basePolicy EffectivePolicy, userEnabled bool) AccessDecision {
 	if !userEnabled {
-		return AccessDecision{Allowed: false, ReasonCode: "user_disabled", EffectivePolicy: basePolicy}
+		return AccessDecision{Allowed: false, ReasonCode: "user_disabled", EffectivePolicy: cloneEffectivePolicy(basePolicy)}
 	}
 
 	matched := matchingRules(request, rules)
 	sortMatchedRules(matched)
 	if len(matched) == 0 {
-		return AccessDecision{Allowed: false, ReasonCode: "default_deny", MatchedRules: matched, EffectivePolicy: basePolicy}
+		return AccessDecision{Allowed: false, ReasonCode: "default_deny", MatchedRules: matched, EffectivePolicy: cloneEffectivePolicy(basePolicy)}
 	}
 
 	winning := matched[0]
@@ -35,14 +35,14 @@ func (e *ACLEvaluator) Authorize(request AccessRequest, rules []ACLRule, basePol
 		ReasonCode:      reason,
 		WinningRule:     &winning,
 		MatchedRules:    matched,
-		EffectivePolicy: basePolicy,
+		EffectivePolicy: cloneEffectivePolicy(basePolicy),
 	}
 }
 
 func (e *ACLEvaluator) Explain(request AccessRequest, rules []ACLRule, basePolicy EffectivePolicy, userEnabled bool) AccessExplanation {
 	decision := e.Authorize(request, rules, basePolicy, userEnabled)
 	return AccessExplanation{
-		Request:        request,
+		Request:        cloneAccessRequest(request),
 		Decision:       decision,
 		EvaluatedRules: cloneACLRules(rules),
 	}
@@ -266,6 +266,25 @@ func cloneACLCondition(condition ACLCondition) ACLCondition {
 	}
 	if condition.MediaTypes != nil {
 		cloned.MediaTypes = append([]string(nil), condition.MediaTypes...)
+	}
+	return cloned
+}
+
+func cloneAccessRequest(request AccessRequest) AccessRequest {
+	cloned := request
+	if request.LibraryIDs != nil {
+		cloned.LibraryIDs = append([]int(nil), request.LibraryIDs...)
+	}
+	return cloned
+}
+
+func cloneEffectivePolicy(policy EffectivePolicy) EffectivePolicy {
+	cloned := policy
+	if policy.LibraryIDs != nil {
+		cloned.LibraryIDs = append([]int(nil), policy.LibraryIDs...)
+	}
+	if policy.MediaTypes != nil {
+		cloned.MediaTypes = append([]string(nil), policy.MediaTypes...)
 	}
 	return cloned
 }
