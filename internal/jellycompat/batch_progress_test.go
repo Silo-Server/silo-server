@@ -68,6 +68,10 @@ func (m *mockUserDataService) ListProgress(context.Context, *Session, string, in
 	panic("unused")
 }
 
+func (m *mockUserDataService) ListProgressFiltered(context.Context, *Session, string, []string, *int, int, int) ([]upstreamProgress, error) {
+	panic("unused")
+}
+
 func (m *mockUserDataService) FilterResumeProgress(_ context.Context, _ *Session, entries []upstreamProgress) ([]upstreamProgress, error) {
 	return entries, nil
 }
@@ -100,6 +104,18 @@ func (s *stubContentService) GetItemDetail(_ context.Context, _ *Session, conten
 		d.ContentID = contentID
 	}
 	return &d, nil
+}
+
+func (s *stubContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+	out := make(map[string]*upstreamItemDetail, len(contentIDs))
+	for _, id := range contentIDs {
+		detail, err := s.GetItemDetail(ctx, session, id, libraryID)
+		if err != nil || detail == nil {
+			continue
+		}
+		out[id] = detail
+	}
+	return out, nil
 }
 
 func (s *stubContentService) ListUserLibraries(context.Context, *Session) ([]upstreamUserLibrary, error) {

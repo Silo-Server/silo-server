@@ -1333,6 +1333,69 @@ func (r *ItemRepository) EnsureAccessible(ctx context.Context, contentID string,
 	return nil
 }
 
+// EnsureAccessibleIDs is the batch form of EnsureAccessible: it returns the set
+// of content IDs from the input that the viewer may access, applying the exact
+// same predicates (library allow/deny via the single JOIN form, max content
+// rating, excluded media types). An item is accessible iff at least one
+// media_items row — joined per library link when a library filter is active —
+// satisfies the predicates, matching EnsureAccessible's `LIMIT 1` semantics.
+// IDs absent from the returned map are not accessible (mirrors EnsureAccessible
+// returning ErrItemNotFound). Used by GetItemDetailsByIDs to avoid a per-item
+// EnsureAccessible fan-out.
+func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]bool, error) {
+	result := make(map[string]bool, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return result, nil
+	}
+	// An empty (non-nil) allowlist means "no libraries allowed" — nothing is
+	// accessible, exactly as EnsureAccessible returns ErrItemNotFound.
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return result, nil
+	}
+
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	fromClause := "media_items mi"
+	conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
+	args = append(args, contentIDs)
+	argIdx++
+
+	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
+	if filter.AllowedLibraryIDs != nil {
+		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
+		args = append(args, filter.AllowedLibraryIDs)
+		argIdx++
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
+		args = append(args, filter.DisabledLibraryIDs)
+		argIdx++
+	}
+	if needsLibJoin {
+		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
+	}
+
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+
+	query := fmt.Sprintf("SELECT DISTINCT mi.content_id FROM %s WHERE %s", fromClause, strings.Join(conditions, " AND "))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("checking items access: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning item access row: %w", err)
+		}
+		result[id] = true
+	}
+	return result, rows.Err()
+}
+
 // GetItemsInLibrary returns a membership map for the provided content IDs within
 // a single library. Episode content IDs are matched directly against
 // episode_libraries so compat callers can filter mixed item/episode batches.

@@ -31,6 +31,15 @@ type UserStore interface {
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
+	// ListProgressFiltered is ListProgress with an additional SQL pre-filter on
+	// the backing catalog item's type and/or library, so the watched-items path
+	// no longer scans the whole status set before discarding non-matching rows.
+	// types is matched case-insensitively against media_items.type ("episode"
+	// resolves through the separate episodes table); a nil libraryID drops the
+	// library predicate, and an empty types + nil libraryID degrades to the
+	// plain status listing. It is a coarse pre-filter: callers still apply
+	// access/parental exclusions over the returned rows.
+	ListProgressFiltered(ctx context.Context, profileID, status string, types []string, libraryID *int, limit, offset int) ([]WatchProgress, error)
 	ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error)
 	AddHistory(ctx context.Context, entry WatchHistoryEntry) error
 	AddHistoryIfMissing(ctx context.Context, entry WatchHistoryEntry) (bool, error)

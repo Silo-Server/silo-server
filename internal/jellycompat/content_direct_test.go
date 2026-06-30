@@ -229,6 +229,9 @@ func (s *progressCountingStore) GetProgress(context.Context, string, string) (*u
 func (s *progressCountingStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error {
 	panic("unused")
 }
@@ -430,14 +433,20 @@ func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context,
 // stubBrowseSource is a deterministic browseSource for testing
 // directContentService without a Postgres pool.
 type stubBrowseSource struct {
-	items []*models.MediaItem
-	total int
-	calls []stubBrowseCall
+	items            []*models.MediaItem
+	total            int
+	calls            []stubBrowseCall
+	crossLibraryCall []stubCrossLibraryCall
 }
 
 type stubBrowseCall struct {
 	filters      catalog.BrowseFilters
 	includeTotal bool
+}
+
+type stubCrossLibraryCall struct {
+	base       catalog.BrowseFilters
+	libraryIDs []int
 }
 
 func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error) {
@@ -452,6 +461,95 @@ func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseF
 	return &catalog.BrowseResult{
 		Items:   append([]*models.MediaItem(nil), s.items[start:end]...),
 		Total:   total,
+		HasMore: end < len(s.items),
+	}, nil
+}
+
+func TestBrowseItems_RecentlyAddedNoParentFansOutAcrossLibraries(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{
+			{ID: 1, Name: "Movies", Type: "movie"},
+			{ID: 3, Name: "TV", Type: "series"},
+		},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 1 {
+		t.Fatalf("cross-library calls = %d, want 1", got)
+	}
+	if got := len(browse.calls); got != 0 {
+		t.Fatalf("BrowsePage calls = %d, want 0 (fast path should not use it)", got)
+	}
+	if got := browse.crossLibraryCall[0].libraryIDs; len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("library IDs = %v, want [1 3]", got)
+	}
+}
+
+func TestBrowseItems_RecentlyAddedWithOffsetFallsBackToBrowsePage(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(40), total: 40}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{
+			{ID: 1, Name: "Movies", Type: "movie"},
+			{ID: 3, Name: "TV", Type: "series"},
+		},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("offset", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 0 {
+		t.Fatalf("cross-library calls = %d, want 0 for offset>0", got)
+	}
+	if got := len(browse.calls); got == 0 {
+		t.Fatal("BrowsePage calls = 0, want offset>0 to fall back to BrowsePage")
+	}
+}
+
+func TestBrowseItems_RecentlyAddedSingleLibraryUsesBrowsePage(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{{ID: 1, Name: "Movies", Type: "movie"}},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 0 {
+		t.Fatalf("cross-library calls = %d, want 0 with a single library", got)
+	}
+	if got := len(browse.calls); got == 0 {
+		t.Fatal("BrowsePage calls = 0, want single-library path to use BrowsePage")
+	}
+}
+
+func (s *stubBrowseSource) BrowseRecentlyAddedAcrossLibraries(_ context.Context, base catalog.BrowseFilters, libraryIDs []int) (*catalog.BrowseResult, error) {
+	s.crossLibraryCall = append(s.crossLibraryCall, stubCrossLibraryCall{base: base, libraryIDs: libraryIDs})
+	end := min(max(base.Limit, 0), len(s.items))
+	return &catalog.BrowseResult{
+		Items:   append([]*models.MediaItem(nil), s.items[:end]...),
+		Total:   s.total,
 		HasMore: end < len(s.items),
 	}, nil
 }

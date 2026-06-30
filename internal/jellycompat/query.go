@@ -46,6 +46,7 @@ type itemsQuery struct {
 	requestedFields        map[string]bool // parsed from Fields param
 	fieldsExplicit         bool            // true when Fields was in the request
 	startItemID            string          // raw encoded ID from StartItemId param
+	adjacentTo             string          // raw encoded ID from AdjacentTo param
 }
 
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
@@ -171,6 +172,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.needsDetailFields = requestedFieldsNeedDetail(result.requestedFields)
 
 	result.startItemID = strings.TrimSpace(q.Get("StartItemId"))
+	result.adjacentTo = strings.TrimSpace(q.Get("AdjacentTo"))
 
 	// Diagnostic: when the request stays on the list path, emit a Debug log
 	// listing any requested Fields that mapping.go's itemFromList does not

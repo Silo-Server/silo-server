@@ -95,6 +95,15 @@ func (s *SQLiteUserStore) ListProgress(_ context.Context, profileID, status stri
 	return ListProgress(s.db, profileID, status, limit, offset)
 }
 
+// ListProgressFiltered cannot push the type/library predicate down: the
+// per-user SQLite store has no catalog tables (media_items/episodes/
+// media_item_libraries live in the shared Postgres schema). It therefore
+// returns the status page unfiltered — a valid coarse superset — and relies on
+// the caller's in-memory type check and library-scoped hydration to narrow it.
+func (s *SQLiteUserStore) ListProgressFiltered(_ context.Context, profileID, status string, _ []string, _ *int, limit, offset int) ([]userstore.WatchProgress, error) {
+	return ListProgress(s.db, profileID, status, limit, offset)
+}
+
 func (s *SQLiteUserStore) ListProgressByMediaItems(_ context.Context, profileID string, mediaItemIDs []string) (map[string]userstore.WatchProgress, error) {
 	return ListProgressByMediaItems(s.db, profileID, mediaItemIDs)
 }

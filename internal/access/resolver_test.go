@@ -86,6 +86,9 @@ func (s stubStore) GetProgress(context.Context, string, string) (*userstore.Watc
 func (s stubStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s stubStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
 func (s stubStore) ListProgressByMediaItems(context.Context, string, []string) (map[string]userstore.WatchProgress, error) {
 	panic("unused")
 }

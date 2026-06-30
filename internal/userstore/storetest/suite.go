@@ -292,6 +292,18 @@ func testProgress(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 		t.Errorf("ListProgress returned %d items, want 3", len(all))
 	}
 
+	// ListProgressFiltered with no type/library predicate degrades to the plain
+	// status listing. Only this no-filter path is portable across backends: the
+	// per-user SQLite store has no catalog tables to push a type/library filter
+	// into, so the type/library branches are covered by the pgstore tests.
+	completedFiltered, err := store.ListProgressFiltered(ctx, "p1", "completed", nil, nil, 10, 0)
+	if err != nil {
+		t.Fatalf("ListProgressFiltered: %v", err)
+	}
+	if len(completedFiltered) != 1 || completedFiltered[0].MediaItemID != "movie-2" {
+		t.Errorf("ListProgressFiltered(completed, no filter) = %+v, want [movie-2]", completedFiltered)
+	}
+
 	// GetProgress non-existent
 	wp, err = store.GetProgress(ctx, "p1", "nonexistent")
 	if err != nil {
