@@ -2258,7 +2258,16 @@ func (h *ItemsHandler) loadResumeViaSections(ctx context.Context, session *Sessi
 
 	// FetchOne always scans from offset 0; over-fetch by StartIndex so a deep
 	// page can be sliced out of the capped result (Resume is normally offset 0).
+	// Clamp the fetch to maxResumeItems so a large client-supplied StartIndex
+	// can't inflate the fetcher's scan past the cap; a StartIndex at or beyond
+	// the cap can never land on a visible row, so return empty up front.
+	if query.startIndex >= maxResumeItems {
+		return []baseItemDTO{}, 0, nil
+	}
 	fetchLimit := pageSize + query.startIndex
+	if fetchLimit > maxResumeItems {
+		fetchLimit = maxResumeItems
+	}
 
 	filter := h.resolveAccessFilter(ctx, session)
 	resolved := sections.ResolvedSection{
