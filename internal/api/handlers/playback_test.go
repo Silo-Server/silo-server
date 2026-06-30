@@ -306,6 +306,7 @@ func TestHandleStartPlayback_RejectsWithoutPlaybackPlayGrant(t *testing.T) {
 		BaseType:      "movie",
 		FilePath:      writePlaybackTestMediaFile(t, "movie.mp4"),
 		Container:     "mp4",
+		Resolution:    "2160p",
 		Duration:      120,
 	}
 	authorizer := &fakeMediaConsumptionAuthorizer{
@@ -313,6 +314,7 @@ func TestHandleStartPlayback_RejectsWithoutPlaybackPlayGrant(t *testing.T) {
 	}
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.ItemLookup = stubMediaItemLookup{item: &models.MediaItem{ContentID: "movie-1", ContentRating: "TV-MA"}}
 	handler.AccessAuthorizer = authorizer
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(`{"file_id":42,"profile_id":"profile-1","play_method":"direct"}`))
@@ -338,6 +340,78 @@ func TestHandleStartPlayback_RejectsWithoutPlaybackPlayGrant(t *testing.T) {
 	}
 	if authorizer.request.MediaType != "movie" {
 		t.Fatalf("media type = %q, want movie", authorizer.request.MediaType)
+	}
+	if authorizer.request.PlaybackQuality != "2160p" {
+		t.Fatalf("playback quality = %q, want 2160p", authorizer.request.PlaybackQuality)
+	}
+	if authorizer.request.ContentRating != "TV-MA" {
+		t.Fatalf("content rating = %q, want TV-MA", authorizer.request.ContentRating)
+	}
+}
+
+func TestHandleStartTranscode_RejectsWithoutPlaybackTranscodeGrant(t *testing.T) {
+	file := &models.MediaFile{
+		ID:            42,
+		ContentID:     "movie-1",
+		MediaFolderID: 10,
+		BaseType:      "movie",
+		FilePath:      writePlaybackTestMediaFile(t, "movie.mp4"),
+		Container:     "mp4",
+		Resolution:    "1080p",
+		Duration:      120,
+		CodecVideo:    "h264",
+		CodecAudio:    "aac",
+	}
+	authorizer := &fakeMediaConsumptionAuthorizer{
+		decision: auth.AccessDecision{Allowed: true},
+		decisions: map[auth.ACLAction]auth.AccessDecision{
+			auth.ActionPlaybackTranscode: {Allowed: false, ReasonCode: "default_deny"},
+		},
+	}
+	sessionMgr := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.ItemLookup = stubMediaItemLookup{item: &models.MediaItem{ContentID: "movie-1", ContentRating: "PG-13"}}
+	handler.AccessAuthorizer = authorizer
+	handler.PlaybackConfig = playbackTestConfig("", t.TempDir())
+
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(`{"file_id":42,"profile_id":"profile-1","play_method":"direct"}`))
+	startReq = startReq.WithContext(newAuthorizedPlaybackContext())
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, startReq)
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("start playback status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var startResp playbackSessionResponse
+	if err := json.Unmarshal(startRR.Body.Bytes(), &startResp); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+
+	transcodeReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/transcode/start", strings.NewReader(`{"session_id":"`+startResp.SessionID+`","target_resolution":"720p","target_codec_video":"h264","target_codec_audio":"aac"}`))
+	transcodeReq = transcodeReq.WithContext(newAuthorizedPlaybackContext())
+	transcodeRR := httptest.NewRecorder()
+	handler.HandleStartTranscode(transcodeRR, transcodeReq)
+
+	if transcodeRR.Code != http.StatusForbidden {
+		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
+	}
+	foundTranscodeCheck := false
+	for _, request := range authorizer.requests {
+		if request.Action == auth.ActionPlaybackTranscode {
+			foundTranscodeCheck = true
+			if request.ResourceType != auth.ResourceMediaItem || request.ResourceID != "movie-1" {
+				t.Fatalf("transcode resource = %s/%q, want media_item/movie-1", request.ResourceType, request.ResourceID)
+			}
+			if request.PlaybackQuality != "720p" {
+				t.Fatalf("transcode playback quality = %q, want 720p", request.PlaybackQuality)
+			}
+			if request.ContentRating != "PG-13" {
+				t.Fatalf("transcode content rating = %q, want PG-13", request.ContentRating)
+			}
+		}
+	}
+	if !foundTranscodeCheck {
+		t.Fatal("transcode ACL authorizer was not called")
 	}
 }
 

@@ -535,6 +535,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				FileResolver:          deps.FileRepo,
 				ItemAccess:            itemRepo,
 				EpisodeLookup:         episodeRepo,
+				ItemLookup:            itemRepo,
 				ConsumptionAuthorizer: adminAuthorizer,
 			})
 			if ebookProgressStore != nil {
@@ -973,6 +974,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				FileResolver:  deps.FileRepo,
 				ItemAccess:    itemRepo,
 				EpisodeLookup: episodeRepo,
+				ItemLookup:    itemRepo,
 			}
 		}
 	}
@@ -2078,6 +2080,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							FileResolver:  deps.FileRepo,
 							ItemAccess:    itemRepo,
 							EpisodeLookup: episodeRepo,
+							ItemLookup:    itemRepo,
 						}
 						subtitleSearchHandler.FileAuthorizer = fileAuthorizer
 						if subtitleAIHandler != nil {
@@ -2112,6 +2115,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					playbackHandler.ItemAccess = itemRepo
 					playbackHandler.AccessAuthorizer = adminAuthorizer
 					playbackHandler.EpisodeLookup = episodeRepo
+					playbackHandler.ItemLookup = itemRepo
 					playbackHandler.OriginalLangLookup = itemRepo
 					playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
 

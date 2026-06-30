@@ -93,13 +93,23 @@ func TestACLFoundationSeedsDefaultUserFacingGrants(t *testing.T) {
 		"('standard_user', 'personal_lists.manage', 'media_item', 'User personal lists')",
 		"('standard_user', 'requests.create', 'request', 'User request creation')",
 		"('restricted_user', 'playback.play', 'media_item', 'Restricted user playback')",
-		"grant_subjects(subject_type) AS",
-		"('group'),",
-		"existing.subject_type = grant_subjects.subject_type",
+		"'group',",
+		"existing.subject_type = 'group'",
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(migration, snippet) {
 			t.Fatalf("ACL foundation migration missing default grant snippet:\n%s", snippet)
+		}
+	}
+
+	forbiddenSnippets := []string{
+		"grant_subjects(subject_type) AS",
+		"('builtin_role')",
+		"existing.subject_type = grant_subjects.subject_type",
+	}
+	for _, snippet := range forbiddenSnippets {
+		if strings.Contains(migration, snippet) {
+			t.Fatalf("ACL foundation migration still seeds hidden default grant snippet:\n%s", snippet)
 		}
 	}
 }
@@ -118,14 +128,25 @@ func TestACLRepairMigrationBackfillsMutableGroupSchema(t *testing.T) {
 		"ADD CONSTRAINT acl_groups_policy_object_check CHECK (jsonb_typeof(policy) = 'object')",
 		"('standard_user', 'User', 'Normal media access.', '{}'::jsonb, true, false)",
 		"('restricted_user', 'Restricted User', 'Media access with tighter limits.', '{}'::jsonb, true, false)",
-		"grant_subjects(subject_type) AS",
-		"('group'),",
-		"('builtin_role')",
-		"existing.subject_type = grant_subjects.subject_type",
+		"DELETE FROM public.acl_rules",
+		"subject_type = 'builtin_role'",
+		"'group',",
+		"existing.subject_type = 'group'",
 	}
 	for _, snippet := range requiredSnippets {
 		if !strings.Contains(migration, snippet) {
 			t.Fatalf("ACL repair migration missing schema/default snippet:\n%s", snippet)
+		}
+	}
+
+	forbiddenSnippets := []string{
+		"grant_subjects(subject_type) AS",
+		"('builtin_role')",
+		"existing.subject_type = grant_subjects.subject_type",
+	}
+	for _, snippet := range forbiddenSnippets {
+		if strings.Contains(migration, snippet) {
+			t.Fatalf("ACL repair migration still seeds hidden default grant snippet:\n%s", snippet)
 		}
 	}
 }

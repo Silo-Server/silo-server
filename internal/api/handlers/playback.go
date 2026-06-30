@@ -116,6 +116,7 @@ type PlaybackHandler struct {
 	ItemAccess              PlaybackItemAccessChecker // optional; enables file authorization checks
 	AccessAuthorizer        auth.Authorizer
 	EpisodeLookup           PlaybackEpisodeLookup // optional; resolves episode files to their series
+	ItemLookup              MediaItemLookup
 	OriginalLangLookup      PlaybackOriginalLanguageLookup
 	SettingsRepo            PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher      PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
@@ -1886,11 +1887,59 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 	if !catalog.FileAllowedByAccess(file, filter) {
 		return nil, catalog.ErrItemNotFound
 	}
-	if err := authorizeMediaConsumption(r, h.AccessAuthorizer, file, resourceID); err != nil {
+	contentRating, err := lookupMediaContentRating(r.Context(), h.ItemLookup, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorizeMediaPlaybackAction(r, h.AccessAuthorizer, file, resourceID, auth.ActionPlaybackPlay, "", contentRating); err != nil {
 		return nil, err
 	}
 
 	return file, nil
+}
+
+func (h *PlaybackHandler) playbackResourceID(ctx context.Context, file *models.MediaFile) (string, error) {
+	if file == nil {
+		return "", catalog.ErrItemNotFound
+	}
+	switch {
+	case file.EpisodeID != "":
+		if h.EpisodeLookup == nil {
+			return "", fmt.Errorf("episode lookup not configured")
+		}
+		episode, err := h.EpisodeLookup.GetByID(ctx, file.EpisodeID)
+		if err != nil {
+			return "", err
+		}
+		if episode == nil {
+			return "", catalog.ErrEpisodeNotFound
+		}
+		return episode.SeriesID, nil
+	case file.ContentID != "":
+		return file.ContentID, nil
+	default:
+		return "", catalog.ErrItemNotFound
+	}
+}
+
+func (h *PlaybackHandler) authorizeTranscodeStart(r *http.Request, file *models.MediaFile, targetResolution string) error {
+	resourceID, err := h.playbackResourceID(r.Context(), file)
+	if err != nil {
+		return err
+	}
+	contentRating, err := lookupMediaContentRating(r.Context(), h.ItemLookup, resourceID)
+	if err != nil {
+		return err
+	}
+	return authorizeMediaPlaybackAction(
+		r,
+		h.AccessAuthorizer,
+		file,
+		resourceID,
+		auth.ActionPlaybackTranscode,
+		targetResolution,
+		contentRating,
+	)
 }
 
 // computeStartSegment returns the HLS segment number corresponding to a seek
@@ -1995,13 +2044,6 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return
 	}
-	// Close any existing transcode so a new one can start at different quality.
-	// Check both local sessions AND remote node assignments — without the
-	// remote check, switching quality on a transcode node never sends DELETE,
-	// leaving the old ffmpeg running and its segments on disk.
-	if h.getTranscodeSession(req.SessionID) != nil || session.TranscodeNodeURL != "" {
-		h.closeTranscodeSession(req.SessionID, session.TranscodeNodeURL)
-	}
 	abortCurrentSession := func(reason string, cause error) {
 		if abortErr := h.abortPlaybackSession(r.Context(), session); abortErr != nil && !errors.Is(abortErr, playback.ErrSessionNotFound) {
 			slog.Error("failed to abort playback session",
@@ -2077,12 +2119,30 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			)
 		}
 	}
+	if err := h.authorizeTranscodeStart(r, file, req.TargetResolution); err != nil {
+		switch {
+		case errors.Is(err, errMediaConsumptionForbidden):
+			writeError(w, http.StatusForbidden, "forbidden", "Transcoding is not allowed")
+		case errors.Is(err, catalog.ErrItemNotFound), errors.Is(err, catalog.ErrEpisodeNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "Media file not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize transcode")
+		}
+		return
+	}
 	if err := preflightPlaybackFile(r.Context(), file, h.MissingMarker, h.EventsHub); err != nil {
 		if isPlaybackFileMissing(err) {
 			abortCurrentSession("preflight_file", err)
 		}
 		writePlaybackFilePreflightError(w, err)
 		return
+	}
+	// Close any existing transcode so a new one can start at different quality.
+	// Check both local sessions AND remote node assignments — without the
+	// remote check, switching quality on a transcode node never sends DELETE,
+	// leaving the old ffmpeg running and its segments on disk.
+	if h.getTranscodeSession(req.SessionID) != nil || session.TranscodeNodeURL != "" {
+		h.closeTranscodeSession(req.SessionID, session.TranscodeNodeURL)
 	}
 
 	// Determine whether to run locally or forward to a remote transcode node.

@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -17,7 +19,12 @@ type MediaFileAuthorizer struct {
 	FileResolver          FilePathResolver
 	ItemAccess            PlaybackItemAccessChecker
 	EpisodeLookup         PlaybackEpisodeLookup
+	ItemLookup            MediaItemLookup
 	ConsumptionAuthorizer auth.Authorizer
+}
+
+type MediaItemLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
 }
 
 // Authorize returns the media file when the caller may access it, or catalog.ErrItemNotFound.
@@ -63,7 +70,11 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 	if !catalog.FileAllowedByAccess(file, filter) {
 		return nil, catalog.ErrItemNotFound
 	}
-	if err := authorizeMediaConsumption(r, a.ConsumptionAuthorizer, file, resourceID); err != nil {
+	contentRating, err := lookupMediaContentRating(r.Context(), a.ItemLookup, resourceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := authorizeMediaPlaybackAction(r, a.ConsumptionAuthorizer, file, resourceID, auth.ActionPlaybackPlay, "", contentRating); err != nil {
 		return nil, err
 	}
 
@@ -73,6 +84,18 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 var errMediaConsumptionForbidden = errors.New("media consumption forbidden")
 
 func authorizeMediaConsumption(r *http.Request, authorizer auth.Authorizer, file *models.MediaFile, resourceID string) error {
+	return authorizeMediaPlaybackAction(r, authorizer, file, resourceID, auth.ActionPlaybackPlay, "", "")
+}
+
+func authorizeMediaPlaybackAction(
+	r *http.Request,
+	authorizer auth.Authorizer,
+	file *models.MediaFile,
+	resourceID string,
+	action auth.ACLAction,
+	playbackQuality string,
+	contentRating string,
+) error {
 	if authorizer == nil {
 		return nil
 	}
@@ -87,18 +110,44 @@ func authorizeMediaConsumption(r *http.Request, authorizer auth.Authorizer, file
 		libraryIDs = []int{file.MediaFolderID}
 	}
 	err := authorizeACLAction(r.Context(), authorizer, auth.AccessRequest{
-		UserID:       apimw.GetUserID(r.Context()),
-		ProfileID:    apimw.GetProfileID(r.Context()),
-		Action:       auth.ActionPlaybackPlay,
-		ResourceType: auth.ResourceMediaItem,
-		ResourceID:   resourceID,
-		LibraryIDs:   libraryIDs,
-		MediaType:    file.BaseType,
+		UserID:          apimw.GetUserID(r.Context()),
+		ProfileID:       apimw.GetProfileID(r.Context()),
+		Action:          action,
+		ResourceType:    auth.ResourceMediaItem,
+		ResourceID:      resourceID,
+		LibraryIDs:      libraryIDs,
+		MediaType:       file.BaseType,
+		PlaybackQuality: mediaPlaybackQuality(file, playbackQuality),
+		ContentRating:   strings.TrimSpace(contentRating),
 	})
 	if errors.Is(err, errACLActionDenied) {
 		return errMediaConsumptionForbidden
 	}
 	return err
+}
+
+func mediaPlaybackQuality(file *models.MediaFile, requestedQuality string) string {
+	if quality := strings.TrimSpace(requestedQuality); quality != "" {
+		return quality
+	}
+	if file == nil {
+		return ""
+	}
+	return strings.TrimSpace(file.Resolution)
+}
+
+func lookupMediaContentRating(ctx context.Context, lookup MediaItemLookup, resourceID string) (string, error) {
+	if lookup == nil || strings.TrimSpace(resourceID) == "" {
+		return "", nil
+	}
+	item, err := lookup.GetByID(ctx, resourceID)
+	if err != nil {
+		return "", err
+	}
+	if item == nil {
+		return "", nil
+	}
+	return strings.TrimSpace(item.ContentRating), nil
 }
 
 func mapMediaFileLookupError(err error) error {

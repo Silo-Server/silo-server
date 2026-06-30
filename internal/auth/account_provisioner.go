@@ -14,6 +14,10 @@ type AccountUserRepository interface {
 	Delete(ctx context.Context, id int) error
 }
 
+type AccountACLGroupAssigner interface {
+	ReplaceUserGroups(ctx context.Context, userID int, groupSlugs []string) error
+}
+
 type DefaultProfileOptions struct {
 	Enabled bool
 	Name    string
@@ -48,6 +52,17 @@ func (p *AccountProvisioner) CreateAccount(
 		return nil, err
 	}
 
+	if err := p.assignDefaultACLGroups(ctx, user, input.User.Role); err != nil {
+		if deleteErr := p.users.Delete(ctx, user.ID); deleteErr != nil {
+			return nil, fmt.Errorf(
+				"assign default ACL groups: %w (cleanup user: %v)",
+				err,
+				deleteErr,
+			)
+		}
+		return nil, fmt.Errorf("assign default ACL groups: %w", err)
+	}
+
 	if !input.DefaultProfile.Enabled {
 		return user, nil
 	}
@@ -64,6 +79,19 @@ func (p *AccountProvisioner) CreateAccount(
 	}
 
 	return user, nil
+}
+
+func (p *AccountProvisioner) assignDefaultACLGroups(ctx context.Context, user *models.User, inputRole string) error {
+	assigner, ok := p.users.(AccountACLGroupAssigner)
+	if !ok || user == nil {
+		return nil
+	}
+
+	role := strings.TrimSpace(user.Role)
+	if role == "" {
+		role = inputRole
+	}
+	return assigner.ReplaceUserGroups(ctx, user.ID, DefaultACLGroupSlugsForRole(role))
 }
 
 func (p *AccountProvisioner) createDefaultProfile(

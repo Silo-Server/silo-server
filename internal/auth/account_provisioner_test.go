@@ -10,8 +10,9 @@ import (
 )
 
 type stubAccountUsers struct {
-	createFn func(context.Context, models.CreateUserInput) (*models.User, error)
-	deleteFn func(context.Context, int) error
+	createFn        func(context.Context, models.CreateUserInput) (*models.User, error)
+	deleteFn        func(context.Context, int) error
+	replaceGroupsFn func(context.Context, int, []string) error
 }
 
 func (s stubAccountUsers) Create(ctx context.Context, input models.CreateUserInput) (*models.User, error) {
@@ -23,6 +24,13 @@ func (s stubAccountUsers) Delete(ctx context.Context, id int) error {
 		return nil
 	}
 	return s.deleteFn(ctx, id)
+}
+
+func (s stubAccountUsers) ReplaceUserGroups(ctx context.Context, id int, groupSlugs []string) error {
+	if s.replaceGroupsFn == nil {
+		return nil
+	}
+	return s.replaceGroupsFn(ctx, id, groupSlugs)
 }
 
 type stubStoreProvider struct {
@@ -106,6 +114,66 @@ func TestAccountProvisionerCreateAccount_CreatesDefaultProfile(t *testing.T) {
 	}
 	if !createdProfile.ShowForcedSubtitles {
 		t.Fatal("created profile should enable forced subtitles by default")
+	}
+}
+
+func TestAccountProvisionerCreateAccount_AssignsDefaultACLGroup(t *testing.T) {
+	var assignedUserID int
+	var assignedGroups []string
+	provisioner := NewAccountProvisioner(
+		stubAccountUsers{
+			createFn: func(context.Context, models.CreateUserInput) (*models.User, error) {
+				return &models.User{ID: 7, Username: "alex", Role: "user"}, nil
+			},
+			replaceGroupsFn: func(_ context.Context, userID int, groupSlugs []string) error {
+				assignedUserID = userID
+				assignedGroups = append([]string(nil), groupSlugs...)
+				return nil
+			},
+		},
+		nil,
+	)
+
+	_, err := provisioner.CreateAccount(context.Background(), CreateAccountInput{
+		User: models.CreateUserInput{Username: "alex", Role: "user"},
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount returned error: %v", err)
+	}
+	if assignedUserID != 7 {
+		t.Fatalf("assigned user id = %d, want 7", assignedUserID)
+	}
+	if len(assignedGroups) != 1 || assignedGroups[0] != string(GroupStandardUser) {
+		t.Fatalf("assigned groups = %#v, want [standard_user]", assignedGroups)
+	}
+}
+
+func TestAccountProvisionerCreateAccount_DeletesUserWhenDefaultACLGroupAssignmentFails(t *testing.T) {
+	var deletedUserID int
+	provisioner := NewAccountProvisioner(
+		stubAccountUsers{
+			createFn: func(context.Context, models.CreateUserInput) (*models.User, error) {
+				return &models.User{ID: 9, Username: "alex", Role: "user"}, nil
+			},
+			replaceGroupsFn: func(context.Context, int, []string) error {
+				return errors.New("groups unavailable")
+			},
+			deleteFn: func(_ context.Context, id int) error {
+				deletedUserID = id
+				return nil
+			},
+		},
+		nil,
+	)
+
+	_, err := provisioner.CreateAccount(context.Background(), CreateAccountInput{
+		User: models.CreateUserInput{Username: "alex", Role: "user"},
+	})
+	if err == nil {
+		t.Fatal("CreateAccount returned nil error, want failure")
+	}
+	if deletedUserID != 9 {
+		t.Fatalf("deletedUserID = %d, want 9", deletedUserID)
 	}
 }
 

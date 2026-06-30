@@ -47,6 +47,13 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: pool}
 }
 
+func (r *UserRepository) ReplaceUserGroups(ctx context.Context, userID int, groupSlugs []string) error {
+	if r == nil || r.pool == nil {
+		return fmt.Errorf("user repository is not configured")
+	}
+	return NewACLRepository(r.pool).ReplaceUserGroups(ctx, userID, groupSlugs)
+}
+
 // allColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanUser stays in sync.
 const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, permissions, enabled,

@@ -74,16 +74,21 @@ WITH built_in_user_grants(subject_id, action, resource_type, name) AS (
         ('restricted_user', 'personal_lists.manage', 'media_item', 'Restricted user personal lists'),
         ('restricted_user', 'requests.create', 'request', 'Restricted user request creation')
 ),
-grant_subjects(subject_type) AS (
-    VALUES
-        ('group'),
-        ('builtin_role')
+deleted_hidden_default_grants AS (
+    DELETE FROM public.acl_rules AS hidden
+    USING built_in_user_grants AS grant_row
+    WHERE hidden.subject_type = 'builtin_role'
+      AND hidden.subject_id = grant_row.subject_id
+      AND hidden.action = grant_row.action
+      AND hidden.resource_type = grant_row.resource_type
+      AND hidden.resource_id = '*'
+    RETURNING hidden.id
 )
 INSERT INTO public.acl_rules (
     subject_type, subject_id, action, resource_type, resource_id, effect, conditions, priority, name
 )
 SELECT
-    grant_subjects.subject_type,
+    'group',
     grant_row.subject_id,
     grant_row.action,
     grant_row.resource_type,
@@ -93,11 +98,10 @@ SELECT
     10,
     grant_row.name
 FROM built_in_user_grants AS grant_row
-CROSS JOIN grant_subjects
 WHERE NOT EXISTS (
     SELECT 1
     FROM public.acl_rules existing
-    WHERE existing.subject_type = grant_subjects.subject_type
+    WHERE existing.subject_type = 'group'
       AND existing.subject_id = grant_row.subject_id
       AND existing.action = grant_row.action
       AND existing.resource_type = grant_row.resource_type
