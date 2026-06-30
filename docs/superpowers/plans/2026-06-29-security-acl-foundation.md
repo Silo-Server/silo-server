@@ -99,7 +99,7 @@ func TestBuiltInGroupSlugsAreStable(t *testing.T) {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestACLActionConstantsCoverLegacyPermissions|TestBuiltInGroupSlugsAreStable'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestACLActionConstantsCoverLegacyPermissions|TestBuiltInGroupSlugsAreStable'
 ```
 
 Expected: FAIL with undefined identifiers such as `LegacyPermissionAction`, `ActionMarkersEdit`, and `GroupOwner`.
@@ -272,7 +272,7 @@ type EffectivePolicy struct {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestACLActionConstantsCoverLegacyPermissions|TestBuiltInGroupSlugsAreStable'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestACLActionConstantsCoverLegacyPermissions|TestBuiltInGroupSlugsAreStable'
 ```
 
 Expected: PASS.
@@ -387,7 +387,7 @@ func TestCompatibilityEffectivePolicyPreservesUserLimits(t *testing.T) {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestCompatibility'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestCompatibility'
 ```
 
 Expected: FAIL with undefined compatibility functions.
@@ -503,7 +503,7 @@ func CompatibilityEffectivePolicyForUser(user *models.User) EffectivePolicy {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestCompatibility'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestCompatibility'
 ```
 
 Expected: PASS.
@@ -609,7 +609,7 @@ func TestACLEvaluatorExplainIncludesMatchedRules(t *testing.T) {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestACLEvaluator'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestACLEvaluator'
 ```
 
 Expected: FAIL with undefined `NewACLEvaluator`.
@@ -777,7 +777,7 @@ func ruleRank(rule ACLRule) int {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestACLEvaluator'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestACLEvaluator'
 ```
 
 Expected: PASS.
@@ -852,7 +852,7 @@ func TestScanACLRuleFields(t *testing.T) {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestScanACLRuleFields'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestScanACLRuleFields'
 ```
 
 Expected: FAIL with undefined `aclRuleRow`.
@@ -1087,7 +1087,7 @@ func (r *ACLRepository) CurrentPolicyRevision(ctx context.Context) (int64, error
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestScanACLRuleFields'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestScanACLRuleFields'
 ```
 
 Expected: PASS.
@@ -1097,7 +1097,7 @@ Expected: PASS.
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth
 ```
 
 Expected: PASS.
@@ -1184,7 +1184,7 @@ func TestACLAuthorizerCombinesRepositoryAndCompatibilityRules(t *testing.T) {
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestACLAuthorizer'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestACLAuthorizer'
 ```
 
 Expected: FAIL with undefined `NewACLAuthorizer`.
@@ -1270,7 +1270,7 @@ func (a *ACLAuthorizer) loadInputs(ctx context.Context, userID int) (*models.Use
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth -run 'TestACLAuthorizer'
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth -run 'TestACLAuthorizer'
 ```
 
 Expected: PASS.
@@ -1280,7 +1280,7 @@ Expected: PASS.
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth
 ```
 
 Expected: PASS.
@@ -1320,7 +1320,7 @@ The first implementation pass adds the ACL data model, constants, evaluator, com
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth
 ```
 
 Expected: PASS.
@@ -1330,7 +1330,7 @@ Expected: PASS.
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/api/middleware
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/api/middleware
 ```
 
 Expected: PASS.
@@ -1340,7 +1340,7 @@ Expected: PASS.
 Run:
 
 ```bash
-GOWORK=off GOCACHE=/private/tmp/silo-go-build GOMODCACHE=/private/tmp/silo-go-mod go test ./internal/auth ./internal/api/middleware ./internal/api/handlers
+GOWORK=off GOCACHE=${SILO_GO_BUILD_CACHE:-.cache/go-build} GOMODCACHE=${SILO_GO_MOD_CACHE:-.cache/go-mod} go test ./internal/auth ./internal/api/middleware ./internal/api/handlers
 ```
 
 Expected: PASS.
