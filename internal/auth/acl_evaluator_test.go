@@ -304,3 +304,90 @@ func TestACLEvaluatorExplainSnapshotsRequestAndPolicySlices(t *testing.T) {
 		t.Fatalf("effective policy media types = %#v, want [movie]", explanation.Decision.EffectivePolicy.MediaTypes)
 	}
 }
+
+func TestACLEvaluatorExplainDeepCopiesPointerConditions(t *testing.T) {
+	evaluator := NewACLEvaluator()
+
+	primaryProfileRequired := true
+	maxStreams := 2
+	maxTranscodes := 1
+	directDownloadsAllowed := true
+	transcodedDownloadsAllowed := false
+
+	rules := []ACLRule{
+		{
+			ID:           31,
+			SubjectType:  SubjectUser,
+			SubjectID:    "7",
+			Action:       ActionPlaybackPlay,
+			ResourceType: ResourceLibrary,
+			ResourceID:   "10",
+			Effect:       EffectAllow,
+			Priority:     10,
+			Conditions: ACLCondition{
+				PrimaryProfileRequired:     &primaryProfileRequired,
+				MaxStreams:                 &maxStreams,
+				MaxTranscodes:              &maxTranscodes,
+				DirectDownloadsAllowed:     &directDownloadsAllowed,
+				TranscodedDownloadsAllowed: &transcodedDownloadsAllowed,
+			},
+		},
+	}
+
+	explanation := evaluator.Explain(
+		AccessRequest{
+			UserID:         7,
+			Action:         ActionPlaybackPlay,
+			ResourceType:   ResourceLibrary,
+			ResourceID:     "10",
+			LibraryIDs:     []int{10},
+			PrimaryProfile: true,
+		},
+		rules,
+		EffectivePolicy{},
+		true,
+	)
+
+	primaryProfileRequired = false
+	maxStreams = 9
+	maxTranscodes = 8
+	directDownloadsAllowed = false
+	transcodedDownloadsAllowed = true
+
+	evaluated := explanation.EvaluatedRules[0].Conditions
+	if evaluated.PrimaryProfileRequired == nil || !*evaluated.PrimaryProfileRequired {
+		t.Fatalf("evaluated primary profile required = %#v, want true", evaluated.PrimaryProfileRequired)
+	}
+	if evaluated.MaxStreams == nil || *evaluated.MaxStreams != 2 {
+		t.Fatalf("evaluated max streams = %#v, want 2", evaluated.MaxStreams)
+	}
+	if evaluated.MaxTranscodes == nil || *evaluated.MaxTranscodes != 1 {
+		t.Fatalf("evaluated max transcodes = %#v, want 1", evaluated.MaxTranscodes)
+	}
+	if evaluated.DirectDownloadsAllowed == nil || !*evaluated.DirectDownloadsAllowed {
+		t.Fatalf("evaluated direct downloads allowed = %#v, want true", evaluated.DirectDownloadsAllowed)
+	}
+	if evaluated.TranscodedDownloadsAllowed == nil || *evaluated.TranscodedDownloadsAllowed {
+		t.Fatalf("evaluated transcoded downloads allowed = %#v, want false", evaluated.TranscodedDownloadsAllowed)
+	}
+
+	matched := explanation.Decision.MatchedRules[0].Conditions
+	if matched.PrimaryProfileRequired == nil || !*matched.PrimaryProfileRequired {
+		t.Fatalf("matched primary profile required = %#v, want true", matched.PrimaryProfileRequired)
+	}
+	if matched.MaxStreams == nil || *matched.MaxStreams != 2 {
+		t.Fatalf("matched max streams = %#v, want 2", matched.MaxStreams)
+	}
+	if explanation.Decision.WinningRule == nil {
+		t.Fatalf("winning rule = nil, want rule snapshot")
+	}
+	if explanation.Decision.WinningRule.Conditions.MaxTranscodes == nil || *explanation.Decision.WinningRule.Conditions.MaxTranscodes != 1 {
+		t.Fatalf("winning rule max transcodes = %#v, want 1", explanation.Decision.WinningRule.Conditions.MaxTranscodes)
+	}
+	if explanation.Decision.WinningRule.Conditions.DirectDownloadsAllowed == nil || !*explanation.Decision.WinningRule.Conditions.DirectDownloadsAllowed {
+		t.Fatalf("winning rule direct downloads allowed = %#v, want true", explanation.Decision.WinningRule.Conditions.DirectDownloadsAllowed)
+	}
+	if explanation.Decision.WinningRule.Conditions.TranscodedDownloadsAllowed == nil || *explanation.Decision.WinningRule.Conditions.TranscodedDownloadsAllowed {
+		t.Fatalf("winning rule transcoded downloads allowed = %#v, want false", explanation.Decision.WinningRule.Conditions.TranscodedDownloadsAllowed)
+	}
+}

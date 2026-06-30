@@ -50,6 +50,7 @@ func TestCompatibilityEffectivePolicyPreservesUserLimits(t *testing.T) {
 		MaxPlaybackQuality:       "1080p",
 		MaxStreams:               3,
 		MaxTranscodes:            1,
+		MaxProfiles:              4,
 		DownloadAllowed:          true,
 		DownloadTranscodeAllowed: false,
 	}
@@ -66,6 +67,9 @@ func TestCompatibilityEffectivePolicyPreservesUserLimits(t *testing.T) {
 	}
 	if policy.MaxTranscodes != 1 {
 		t.Fatalf("max transcodes = %d, want 1", policy.MaxTranscodes)
+	}
+	if policy.MaxProfiles != 4 {
+		t.Fatalf("max profiles = %d, want 4", policy.MaxProfiles)
 	}
 	if !policy.DirectDownloadsAllowed {
 		t.Fatalf("direct downloads should be allowed")

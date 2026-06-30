@@ -79,7 +79,10 @@ func resourceMatches(request AccessRequest, rule ACLRule) bool {
 }
 
 func conditionsMatch(request AccessRequest, conditions ACLCondition) bool {
-	if len(conditions.LibraryIDs) > 0 {
+	if conditions.LibraryIDs != nil && requestNeedsLibraryScope(request) {
+		if len(conditions.LibraryIDs) == 0 {
+			return false
+		}
 		ok := false
 		for _, allowed := range conditions.LibraryIDs {
 			for _, requested := range request.LibraryIDs {
@@ -151,6 +154,19 @@ func conditionsMatch(request AccessRequest, conditions ACLCondition) bool {
 	}
 
 	return true
+}
+
+func requestNeedsLibraryScope(request AccessRequest) bool {
+	if len(request.LibraryIDs) > 0 {
+		return true
+	}
+
+	switch request.ResourceType {
+	case ResourceLibrary, ResourceMediaItem:
+		return true
+	default:
+		return false
+	}
 }
 
 func sortMatchedRules(rules []ACLRule) {
@@ -266,6 +282,26 @@ func cloneACLCondition(condition ACLCondition) ACLCondition {
 	}
 	if condition.MediaTypes != nil {
 		cloned.MediaTypes = append([]string(nil), condition.MediaTypes...)
+	}
+	if condition.PrimaryProfileRequired != nil {
+		value := *condition.PrimaryProfileRequired
+		cloned.PrimaryProfileRequired = &value
+	}
+	if condition.MaxStreams != nil {
+		value := *condition.MaxStreams
+		cloned.MaxStreams = &value
+	}
+	if condition.MaxTranscodes != nil {
+		value := *condition.MaxTranscodes
+		cloned.MaxTranscodes = &value
+	}
+	if condition.DirectDownloadsAllowed != nil {
+		value := *condition.DirectDownloadsAllowed
+		cloned.DirectDownloadsAllowed = &value
+	}
+	if condition.TranscodedDownloadsAllowed != nil {
+		value := *condition.TranscodedDownloadsAllowed
+		cloned.TranscodedDownloadsAllowed = &value
 	}
 	return cloned
 }

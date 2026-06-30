@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -61,8 +62,13 @@ func decodeACLConditions(raw []byte) (ACLCondition, error) {
 	}
 
 	var conditions ACLCondition
-	if err := json.Unmarshal(trimmed, &conditions); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&conditions); err != nil {
 		return ACLCondition{}, fmt.Errorf("decoding acl conditions: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return ACLCondition{}, fmt.Errorf("decoding acl conditions: unexpected trailing JSON")
 	}
 	return conditions, nil
 }

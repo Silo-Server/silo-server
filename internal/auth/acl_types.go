@@ -36,15 +36,15 @@ type ACLRule struct {
 }
 
 type ACLCondition struct {
-	LibraryIDs                 []int
-	MediaTypes                 []string
-	PrimaryProfileRequired     *bool
-	MaxPlaybackQuality         string
-	MaxStreams                 *int
-	MaxTranscodes              *int
-	DirectDownloadsAllowed     *bool
-	TranscodedDownloadsAllowed *bool
-	MaxContentRating           string
+	LibraryIDs                 []int    `json:"library_ids"`
+	MediaTypes                 []string `json:"media_types"`
+	PrimaryProfileRequired     *bool    `json:"primary_profile_required"`
+	MaxPlaybackQuality         string   `json:"max_playback_quality"`
+	MaxStreams                 *int     `json:"max_streams"`
+	MaxTranscodes              *int     `json:"max_transcodes"`
+	DirectDownloadsAllowed     *bool    `json:"direct_downloads_allowed"`
+	TranscodedDownloadsAllowed *bool    `json:"transcoded_downloads_allowed"`
+	MaxContentRating           string   `json:"max_content_rating"`
 }
 
 type AccessDecision struct {
@@ -67,6 +67,7 @@ type EffectivePolicy struct {
 	MaxPlaybackQuality         string
 	MaxStreams                 int
 	MaxTranscodes              int
+	MaxProfiles                int
 	DirectDownloadsAllowed     bool
 	TranscodedDownloadsAllowed bool
 	MaxContentRating           string

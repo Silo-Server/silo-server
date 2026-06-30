@@ -114,3 +114,74 @@ func TestACLAuthorizerExplainIncludesEvaluatedRules(t *testing.T) {
 		t.Fatalf("evaluated rule id = %d, want 77", explanation.EvaluatedRules[0].ID)
 	}
 }
+
+func TestACLAuthorizerLegacyMetadataCurationRespectsLibraryScope(t *testing.T) {
+	user := &models.User{
+		ID:          7,
+		Role:        "user",
+		Enabled:     true,
+		Permissions: []string{"metadata_curation"},
+		LibraryIDs:  []int{10},
+	}
+
+	authorizer := NewACLAuthorizer(fakeACLRuleLoader{}, fakeACLUserLoader{user: user})
+
+	allowedDecision, err := authorizer.Authorize(context.Background(), AccessRequest{
+		UserID:       7,
+		Action:       ActionMetadataCurate,
+		ResourceType: ResourceLibrary,
+		ResourceID:   "10",
+		LibraryIDs:   []int{10},
+	})
+	if err != nil {
+		t.Fatalf("authorize allowed request error: %v", err)
+	}
+	if !allowedDecision.Allowed {
+		t.Fatalf("expected in-scope library request to be allowed: %#v", allowedDecision)
+	}
+
+	deniedDecision, err := authorizer.Authorize(context.Background(), AccessRequest{
+		UserID:       7,
+		Action:       ActionMetadataCurate,
+		ResourceType: ResourceLibrary,
+		ResourceID:   "20",
+		LibraryIDs:   []int{20},
+	})
+	if err != nil {
+		t.Fatalf("authorize denied request error: %v", err)
+	}
+	if deniedDecision.Allowed {
+		t.Fatalf("expected out-of-scope library request to be denied: %#v", deniedDecision)
+	}
+	if deniedDecision.ReasonCode != "default_deny" {
+		t.Fatalf("reason code = %q, want default_deny", deniedDecision.ReasonCode)
+	}
+}
+
+func TestACLAuthorizerLegacyMetadataCurationDeniedWhenLibraryScopeEmpty(t *testing.T) {
+	user := &models.User{
+		ID:          7,
+		Role:        "user",
+		Enabled:     true,
+		Permissions: []string{"metadata_curation"},
+		LibraryIDs:  []int{},
+	}
+
+	authorizer := NewACLAuthorizer(fakeACLRuleLoader{}, fakeACLUserLoader{user: user})
+	decision, err := authorizer.Authorize(context.Background(), AccessRequest{
+		UserID:       7,
+		Action:       ActionMetadataCurate,
+		ResourceType: ResourceLibrary,
+		ResourceID:   "10",
+		LibraryIDs:   []int{10},
+	})
+	if err != nil {
+		t.Fatalf("authorize error: %v", err)
+	}
+	if decision.Allowed {
+		t.Fatalf("expected empty library scope to deny library request: %#v", decision)
+	}
+	if decision.ReasonCode != "default_deny" {
+		t.Fatalf("reason code = %q, want default_deny", decision.ReasonCode)
+	}
+}

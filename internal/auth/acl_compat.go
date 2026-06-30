@@ -36,6 +36,7 @@ func CompatibilityRulesForUser(user *models.User) []ACLRule {
 			ResourceType: ResourceServer,
 			ResourceID:   "*",
 			Effect:       EffectAllow,
+			Conditions:   legacyPermissionConditions(user, action),
 			Priority:     1000,
 			Name:         "legacy permission " + permission,
 		})
@@ -93,9 +94,20 @@ func CompatibilityEffectivePolicyForUser(user *models.User) EffectivePolicy {
 		MaxPlaybackQuality:         user.MaxPlaybackQuality,
 		MaxStreams:                 user.MaxStreams,
 		MaxTranscodes:              user.MaxTranscodes,
+		MaxProfiles:                user.MaxProfiles,
 		DirectDownloadsAllowed:     user.DownloadAllowed,
 		TranscodedDownloadsAllowed: user.DownloadTranscodeAllowed,
 	}
+}
+
+func legacyPermissionConditions(user *models.User, action ACLAction) ACLCondition {
+	switch action {
+	case ActionMarkersEdit, ActionMetadataCurate:
+		if user.LibraryIDs != nil {
+			return ACLCondition{LibraryIDs: cloneOptionalInts(user.LibraryIDs)}
+		}
+	}
+	return ACLCondition{}
 }
 
 func cloneOptionalInts(values []int) []int {
