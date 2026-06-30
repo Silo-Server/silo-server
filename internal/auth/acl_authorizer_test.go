@@ -156,6 +156,23 @@ func TestACLAuthorizerLegacyMetadataCurationRespectsLibraryScope(t *testing.T) {
 	if deniedDecision.ReasonCode != "default_deny" {
 		t.Fatalf("reason code = %q, want default_deny", deniedDecision.ReasonCode)
 	}
+
+	partialOverlapDecision, err := authorizer.Authorize(context.Background(), AccessRequest{
+		UserID:       7,
+		Action:       ActionMetadataCurate,
+		ResourceType: ResourceMediaItem,
+		ResourceID:   "item-1",
+		LibraryIDs:   []int{10, 20},
+	})
+	if err != nil {
+		t.Fatalf("authorize partial-overlap request error: %v", err)
+	}
+	if partialOverlapDecision.Allowed {
+		t.Fatalf("expected partially out-of-scope multi-library request to be denied: %#v", partialOverlapDecision)
+	}
+	if partialOverlapDecision.ReasonCode != "default_deny" {
+		t.Fatalf("partial-overlap reason code = %q, want default_deny", partialOverlapDecision.ReasonCode)
+	}
 }
 
 func TestACLAuthorizerLegacyMetadataCurationDeniedWhenLibraryScopeEmpty(t *testing.T) {

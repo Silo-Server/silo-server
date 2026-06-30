@@ -83,20 +83,17 @@ func conditionsMatch(request AccessRequest, conditions ACLCondition) bool {
 		if len(conditions.LibraryIDs) == 0 {
 			return false
 		}
-		ok := false
-		for _, allowed := range conditions.LibraryIDs {
-			for _, requested := range request.LibraryIDs {
-				if allowed == requested {
-					ok = true
-					break
-				}
-			}
-			if ok {
-				break
-			}
-		}
-		if !ok {
+		if len(request.LibraryIDs) == 0 {
 			return false
+		}
+		allowedSet := make(map[int]struct{}, len(conditions.LibraryIDs))
+		for _, allowed := range conditions.LibraryIDs {
+			allowedSet[allowed] = struct{}{}
+		}
+		for _, requested := range request.LibraryIDs {
+			if _, ok := allowedSet[requested]; !ok {
+				return false
+			}
 		}
 	}
 
