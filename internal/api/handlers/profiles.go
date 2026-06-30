@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -25,9 +26,10 @@ type ProfileHandler struct {
 	UserRepo       interface {
 		GetByID(ctx context.Context, id int) (*models.User, error)
 	}
-	ProfileTokens *access.ProfileTokenService
-	AvatarStore   profileAvatarStore
-	AvatarTTL     time.Duration
+	ProfileTokens    *access.ProfileTokenService
+	AvatarStore      profileAvatarStore
+	AvatarTTL        time.Duration
+	AccessAuthorizer auth.Authorizer
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -329,12 +331,13 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user")
 			return
 		}
-		if user != nil && user.MaxProfiles >= 1 && len(existingProfiles) >= user.MaxProfiles {
+		maxProfiles := h.effectiveMaxProfiles(r.Context(), user)
+		if maxProfiles >= 1 && len(existingProfiles) >= maxProfiles {
 			writeError(
 				w,
 				http.StatusConflict,
 				"profile_limit_reached",
-				fmt.Sprintf("This account has reached its profile limit (%d)", user.MaxProfiles),
+				fmt.Sprintf("This account has reached its profile limit (%d)", maxProfiles),
 			)
 			return
 		}
@@ -412,6 +415,29 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 	}
 
 	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), created))
+}
+
+func (h *ProfileHandler) effectiveMaxProfiles(ctx context.Context, user *models.User) int {
+	if user == nil {
+		return 0
+	}
+	maxProfiles := user.MaxProfiles
+	if h.AccessAuthorizer == nil {
+		return maxProfiles
+	}
+	decision, err := h.AccessAuthorizer.Authorize(ctx, auth.AccessRequest{
+		UserID:       user.ID,
+		Action:       auth.ActionProfilesManage,
+		ResourceType: auth.ResourceProfile,
+		ResourceID:   "*",
+	})
+	if err != nil {
+		return maxProfiles
+	}
+	if decision.EffectivePolicy.MaxProfiles > 0 {
+		return decision.EffectivePolicy.MaxProfiles
+	}
+	return maxProfiles
 }
 
 // HandleUpdateProfile handles PUT /profiles/{id}.

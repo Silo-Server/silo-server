@@ -25,6 +25,7 @@ type PermissionMiddleware struct {
 	users        PermissionUserLoader
 	libraries    MetadataTargetLibraryResolver
 	checkPrimary PrimaryProfileChecker // nil disables the acting-admin profile policy
+	Authorizer   auth.Authorizer
 }
 
 func NewPermissionMiddleware(
@@ -48,22 +49,24 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 			writeUnauthorized(w, "Authentication required")
 			return
 		}
+		actingAdmin := false
 		if claims.Role == "admin" {
 			var checkPrimary PrimaryProfileChecker
 			if m != nil {
 				checkPrimary = m.checkPrimary
 			}
-			actingAdmin, err := actingAdminAllowed(r, claims.UserID, checkPrimary)
+			allowed, err := actingAdminAllowed(r, claims.UserID, checkPrimary)
 			if err != nil {
 				writePermissionError(w, http.StatusInternalServerError, "internal_error", "Failed to verify active profile")
 				return
 			}
+			actingAdmin = allowed
 			if actingAdmin {
 				next.ServeHTTP(w, r)
 				return
 			}
 		}
-		if m == nil || m.users == nil || m.libraries == nil {
+		if m == nil || m.libraries == nil {
 			writeForbidden(w, "Metadata curation permission required")
 			return
 		}
@@ -71,6 +74,40 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 		contentID := chi.URLParam(r, "id")
 		if contentID == "" {
 			writePermissionError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
+			return
+		}
+
+		targetLibraries, err := m.libraries.ResolveMetadataTargetLibraryIDs(r.Context(), contentID)
+		if err != nil {
+			writePermissionError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item libraries")
+			return
+		}
+		if len(targetLibraries) == 0 {
+			writePermissionError(w, http.StatusNotFound, "not_found", "Item not found")
+			return
+		}
+		if m.Authorizer != nil {
+			decision, err := m.Authorizer.Authorize(r.Context(), auth.AccessRequest{
+				UserID:         claims.UserID,
+				Action:         auth.ActionMetadataCurate,
+				ResourceType:   auth.ResourceMediaItem,
+				ResourceID:     contentID,
+				LibraryIDs:     targetLibraries,
+				PrimaryProfile: actingAdmin,
+			})
+			if err != nil {
+				writePermissionError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize metadata curation")
+				return
+			}
+			if !decision.Allowed {
+				writeForbidden(w, "Metadata curation permission required")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+		if m.users == nil {
+			writeForbidden(w, "Metadata curation permission required")
 			return
 		}
 
@@ -88,16 +125,6 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 		}
 		if !hasPermission {
 			writeForbidden(w, "Metadata curation permission required")
-			return
-		}
-
-		targetLibraries, err := m.libraries.ResolveMetadataTargetLibraryIDs(r.Context(), contentID)
-		if err != nil {
-			writePermissionError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item libraries")
-			return
-		}
-		if len(targetLibraries) == 0 {
-			writePermissionError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
 		}
 		if !metadataTargetWithinUserLibraries(user.LibraryIDs, targetLibraries) {

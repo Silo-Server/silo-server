@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router";
 import { RefreshCw, Tv } from "lucide-react";
 import type { SwipeCard as SwipeCardType } from "@/hooks/queries/recommendations";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import SwipeCard, { CardActions } from "./SwipeCard";
@@ -47,6 +48,8 @@ export default function CardStack({
   const location = useLocation();
   const navigate = useNavigate();
   const playbackController = useWatchPlaybackController();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
 
   const visibleCards = cards.slice(topIndex, topIndex + 3);
   const isDone = visibleCards.length === 0 && !hasMore && !isFetching;
@@ -68,6 +71,7 @@ export default function CardStack({
   }, []);
 
   const handlePlay = useCallback(() => {
+    if (!canPlayback) return;
     const card = cards[topIndex];
     if (!card) return;
     onClose();
@@ -80,7 +84,16 @@ export default function CardStack({
       contentId: card.content_id,
       returnHref: `${location.pathname}${location.search}`,
     });
-  }, [cards, topIndex, onClose, playbackController, location.pathname, location.search, navigate]);
+  }, [
+    canPlayback,
+    cards,
+    topIndex,
+    onClose,
+    playbackController,
+    location.pathname,
+    location.search,
+    navigate,
+  ]);
 
   // Keyboard navigation.
   useEffect(() => {
@@ -89,14 +102,14 @@ export default function CardStack({
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         advance();
-      } else if (e.key === "ArrowRight") {
+      } else if (canPlayback && e.key === "ArrowRight") {
         e.preventDefault();
         handlePlay();
       }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [visibleCards.length, advance, handlePlay]);
+  }, [visibleCards.length, canPlayback, advance, handlePlay]);
 
   // Loading initial cards.
   if (cards.length === 0 && isFetching) {
@@ -169,7 +182,12 @@ export default function CardStack({
                 }}
                 transition={stackTransition}
               >
-                <SwipeCard card={card} isTop={isTop} onAccept={handlePlay} onReject={advance} />
+                <SwipeCard
+                  card={card}
+                  isTop={isTop}
+                  onAccept={canPlayback ? handlePlay : advance}
+                  onReject={advance}
+                />
               </motion.div>
             );
           })}
@@ -183,6 +201,7 @@ export default function CardStack({
           onAccept={handlePlay}
           onPlay={handlePlay}
           playLabel={visibleCards[0]?.type === "audiobook" ? "Listen now" : "Play now"}
+          canPlay={canPlayback}
         />
       )}
 

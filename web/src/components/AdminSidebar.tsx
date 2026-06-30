@@ -13,6 +13,8 @@ import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useBuildInfo } from "@/hooks/queries/admin/system";
+import { useAdminAccess } from "@/hooks/useAdminCapabilities";
+import { filterAdminNavSections } from "@/lib/adminCapabilities";
 
 interface SidebarItem extends AdminNavItem {
   badge?: ReactNode;
@@ -27,15 +29,18 @@ interface AdminSidebarProps {
   onNavigate?: () => void;
 }
 
-function useSessionCount() {
-  const { data: sessions = [] } = useAdminSessions();
+function useSessionCount(enabled: boolean) {
+  const { data: sessions = [] } = useAdminSessions(enabled);
   return sessions.length;
 }
 
 export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   const location = useLocation();
-  const sessionCount = useSessionCount();
-  const buildInfo = useBuildInfo();
+  const adminAccess = useAdminAccess();
+  const canViewServer = adminAccess.can("server.view");
+  const canViewPlugins = adminAccess.can(["plugins.view", "plugins.manage"]);
+  const sessionCount = useSessionCount(canViewServer);
+  const buildInfo = useBuildInfo(canViewServer);
   // Falls back to "dev build" when the binary carries no VCS/ldflags revision
   // (e.g. `go run` or an image built without BUILD_REVISION) rather than a stark
   // "unavailable".
@@ -50,7 +55,11 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
 
   const activityBadge =
     sessionCount > 0 ? <span className="live-badge">{sessionCount} live</span> : undefined;
-  const sections: SidebarSection[] = ADMIN_NAV_SECTIONS.map((section) => ({
+  const sections: SidebarSection[] = filterAdminNavSections(
+    ADMIN_NAV_SECTIONS,
+    adminAccess.actionSet,
+    adminAccess.actingAdmin,
+  ).map((section) => ({
     ...section,
     items: section.items.map((item) =>
       item.href === "/admin/activity" ? { ...item, badge: activityBadge } : item,
@@ -62,7 +71,7 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   // navigable route, which excludes admin-only plugins like arrproxy and
   // arrouter. The admin sidebar needs the full installation list to render
   // its "Plugin Apps" group.
-  const { data: adminInstallations } = useAdminPluginInstallations();
+  const { data: adminInstallations } = useAdminPluginInstallations(canViewPlugins);
   const adminPluginItems = buildAdminPluginNavItems(adminInstallations);
   if (adminPluginItems.length > 0) {
     sections.push({ label: "Plugin Apps", items: adminPluginItems });

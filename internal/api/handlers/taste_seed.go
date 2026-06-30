@@ -3,11 +3,13 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -134,6 +136,10 @@ func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
 
+	if !h.authorizeTasteSeed(w, r, userID, profileID) {
+		return
+	}
+
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
 	if err != nil || store == nil {
 		slog.Error("TasteSeed: failed to load user store", "user_id", userID, "error", err)
@@ -167,6 +173,25 @@ func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.
 	}
 
 	writeJSON(w, http.StatusOK, tasteSeedSubmitResponse{Added: added})
+}
+
+func (h *RecommendationsHandler) authorizeTasteSeed(w http.ResponseWriter, r *http.Request, userID int, profileID string) bool {
+	err := authorizeACLAction(r.Context(), h.Authorizer, auth.AccessRequest{
+		UserID:       userID,
+		ProfileID:    profileID,
+		Action:       auth.ActionPersonalListsManage,
+		ResourceType: auth.ResourceMediaItem,
+		ResourceID:   "*",
+	})
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, errACLActionDenied) {
+		writeError(w, http.StatusForbidden, "forbidden", "Personal list changes are not allowed")
+		return false
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize personal list change")
+	return false
 }
 
 // resolveTasteSeedUserStates returns the per-item user state map (favorite,

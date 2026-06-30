@@ -6,7 +6,7 @@ import { getProfileMenuSide, isSidebarExpanded } from "@/components/AppSidebar.l
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
-import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { useAdminAccess } from "@/hooks/useAdminCapabilities";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
@@ -171,7 +171,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
   const { theme, setTheme, previewTheme, resetPreviewTheme } = useTheme();
-  const showAdminNav = useIsActingAdmin();
+  const showAdminNav = useAdminAccess().canAccessAdmin;
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
   const { togglePin } = useToggleSidebarPin();

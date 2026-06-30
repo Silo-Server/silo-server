@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,24 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
+
+type fakeMediaConsumptionAuthorizer struct {
+	decision auth.AccessDecision
+	request  auth.AccessRequest
+	err      error
+	called   bool
+}
+
+func (f *fakeMediaConsumptionAuthorizer) Authorize(_ context.Context, request auth.AccessRequest) (auth.AccessDecision, error) {
+	f.called = true
+	f.request = request
+	return f.decision, f.err
+}
+
+func (f *fakeMediaConsumptionAuthorizer) Explain(_ context.Context, request auth.AccessRequest) (auth.AccessExplanation, error) {
+	decision, err := f.Authorize(context.Background(), request)
+	return auth.AccessExplanation{Request: request, Decision: decision}, err
+}
 
 func TestMediaFileAuthorizerMapsMissingFileToNotFound(t *testing.T) {
 	authorizer := &MediaFileAuthorizer{

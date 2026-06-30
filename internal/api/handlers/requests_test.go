@@ -20,6 +20,7 @@ type fakeRequestService struct {
 	listNetworksFn func() ([]mediarequests.DiscoverBrandCard, error)
 	listGenresFn   func() ([]mediarequests.DiscoverBrandCard, error)
 	browseFn       func(kind, slug string, mediaType mediarequests.MediaType, sort string, page int) (*mediarequests.DiscoverBrowseResponse, error)
+	createCalled   bool
 }
 
 func (f *fakeRequestService) ListStudios(context.Context, mediarequests.Viewer) ([]mediarequests.DiscoverBrandCard, error) {
@@ -72,6 +73,7 @@ func (f *fakeRequestService) GetDetail(context.Context, mediarequests.Viewer, me
 }
 
 func (f *fakeRequestService) CreateRequest(context.Context, mediarequests.Viewer, mediarequests.CreateRequestInput) (*mediarequests.Request, error) {
+	f.createCalled = true
 	return nil, nil
 }
 
@@ -245,5 +247,35 @@ func TestHandleBrowseGenreRequiresMediaType(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleCreateRejectsWithoutRequestCreateGrant(t *testing.T) {
+	svc := &fakeRequestService{}
+	authorizer := &fakeMediaConsumptionAuthorizer{
+		decision: auth.AccessDecision{Allowed: false, ReasonCode: "default_deny"},
+	}
+	h := NewRequestsHandler(svc)
+	h.Authorizer = authorizer
+
+	req := authedRequest("POST", "/api/v1/requests")
+	req.Body = http.NoBody
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/requests", strings.NewReader(`{"media_type":"movie","tmdb_id":123}`)).
+		WithContext(req.Context())
+	rec := httptest.NewRecorder()
+
+	h.HandleCreate(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if !authorizer.called {
+		t.Fatalf("request ACL authorizer was not called")
+	}
+	if authorizer.request.Action != auth.ActionRequestsCreate {
+		t.Fatalf("action = %q, want %q", authorizer.request.Action, auth.ActionRequestsCreate)
+	}
+	if svc.createCalled {
+		t.Fatalf("CreateRequest was called despite missing grant")
 	}
 }

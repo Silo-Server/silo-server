@@ -45,6 +45,16 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPluginInstallations: () => mockUseAdminPluginInstallations(),
 }));
 
+vi.mock("@/hooks/useAdminCapabilities", () => ({
+  useAdminAccess: () => ({
+    actingAdmin: true,
+    actionSet: new Set<string>(),
+    can: () => true,
+    canAccessAdmin: true,
+    isLoading: false,
+  }),
+}));
+
 function renderSidebar() {
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={["/admin"]}>

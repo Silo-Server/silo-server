@@ -26,6 +26,16 @@ vi.mock("@/pages/audiobooks/player/audiobookPlaybackContext", () => ({
   useAudiobookPlaybackController: () => playbackMocks.controller,
 }));
 
+vi.mock("@/hooks/useUserCapabilities", () => ({
+  USER_CAPABILITY_ACTIONS: {
+    playbackPlay: "playback.play",
+  },
+  useUserCapabilityAccess: () => ({
+    can: () => true,
+    isLoading: false,
+  }),
+}));
+
 function audiobookSlide() {
   return {
     content_id: "book-1",

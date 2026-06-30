@@ -19,6 +19,10 @@ type ACLRuleLoader interface {
 	ListRulesForUser(ctx context.Context, userID int) ([]ACLRule, error)
 }
 
+type ACLPolicyLoader interface {
+	ListPoliciesForUser(ctx context.Context, userID int) ([]ACLPolicy, error)
+}
+
 type ACLAuthorizer struct {
 	rules     ACLRuleLoader
 	users     UserLoaderForACL
@@ -67,6 +71,14 @@ func (a *ACLAuthorizer) loadInputs(ctx context.Context, userID int) (*models.Use
 		rules = append(rules, repositoryRules...)
 	}
 	rules = append(rules, CompatibilityRulesForUser(user)...)
+	policy := CompatibilityEffectivePolicyForUser(user)
+	if loader, ok := a.rules.(ACLPolicyLoader); ok {
+		policies, err := loader.ListPoliciesForUser(ctx, userID)
+		if err != nil {
+			return nil, nil, EffectivePolicy{}, err
+		}
+		policy = MergeACLPolicies(policy, policies)
+	}
 
-	return user, rules, CompatibilityEffectivePolicyForUser(user), nil
+	return user, rules, policy, nil
 }

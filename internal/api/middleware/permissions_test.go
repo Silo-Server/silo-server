@@ -30,6 +30,24 @@ func (f fakeTargetLibraryResolver) ResolveMetadataTargetLibraryIDs(context.Conte
 	return f.ids, f.err
 }
 
+type fakePermissionACLAuthorizer struct {
+	decision auth.AccessDecision
+	request  auth.AccessRequest
+	err      error
+	called   bool
+}
+
+func (f *fakePermissionACLAuthorizer) Authorize(_ context.Context, request auth.AccessRequest) (auth.AccessDecision, error) {
+	f.called = true
+	f.request = request
+	return f.decision, f.err
+}
+
+func (f *fakePermissionACLAuthorizer) Explain(_ context.Context, request auth.AccessRequest) (auth.AccessExplanation, error) {
+	decision, err := f.Authorize(context.Background(), request)
+	return auth.AccessExplanation{Request: request, Decision: decision}, err
+}
+
 func requestWithItemID(role string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-1/refresh-metadata", nil)
 	ctx := SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: role, TokenType: auth.TokenTypeAccess})
@@ -143,5 +161,91 @@ func TestRequireMetadataCurationForItem_NotFoundWhenTargetHasNoLibraries(t *test
 	code := runMetadataCurationMiddleware(user, nil, "user")
 	if code != http.StatusNotFound {
 		t.Fatalf("status = %d, want %d", code, http.StatusNotFound)
+	}
+}
+
+func TestRequireMetadataCurationForItem_AllowsCustomACLGrant(t *testing.T) {
+	user := &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: []int{1}, Permissions: nil}
+	acl := &fakePermissionACLAuthorizer{
+		decision: auth.AccessDecision{Allowed: true, ReasonCode: "rule_allow"},
+	}
+	mw := NewPermissionMiddleware(
+		fakePermissionUserLoader{user: user},
+		fakeTargetLibraryResolver{ids: []int{1, 2}},
+		nil,
+	)
+	mw.Authorizer = acl
+	next := mw.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	rec := httptest.NewRecorder()
+	next.ServeHTTP(rec, requestWithItemID("user"))
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if !acl.called {
+		t.Fatalf("ACL authorizer was not called")
+	}
+	if acl.request.Action != auth.ActionMetadataCurate || acl.request.ResourceType != auth.ResourceMediaItem || acl.request.ResourceID != "item-1" {
+		t.Fatalf("ACL request = %#v", acl.request)
+	}
+	if len(acl.request.LibraryIDs) != 2 || acl.request.LibraryIDs[0] != 1 || acl.request.LibraryIDs[1] != 2 {
+		t.Fatalf("ACL library ids = %#v, want [1 2]", acl.request.LibraryIDs)
+	}
+}
+
+func TestRequireMetadataCurationForItem_RejectsCustomACLDeny(t *testing.T) {
+	user := &models.User{ID: 7, Role: "user", Enabled: true, LibraryIDs: nil, Permissions: nil}
+	acl := &fakePermissionACLAuthorizer{
+		decision: auth.AccessDecision{Allowed: false, ReasonCode: "rule_deny"},
+	}
+	mw := NewPermissionMiddleware(
+		fakePermissionUserLoader{user: user},
+		fakeTargetLibraryResolver{ids: []int{1}},
+		nil,
+	)
+	mw.Authorizer = acl
+	next := mw.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	rec := httptest.NewRecorder()
+	next.ServeHTTP(rec, requestWithItemID("user"))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}
+
+func TestRequireMetadataCurationForItem_AdminNonPrimaryRequiresACLGrant(t *testing.T) {
+	admin := &models.User{ID: 7, Role: "admin", Enabled: true, LibraryIDs: nil, Permissions: nil}
+	acl := &fakePermissionACLAuthorizer{
+		decision: auth.AccessDecision{Allowed: false, ReasonCode: "default_deny"},
+	}
+	mw := NewPermissionMiddleware(
+		fakePermissionUserLoader{user: admin},
+		fakeTargetLibraryResolver{ids: []int{1}},
+		primaryChecker(false, true, nil),
+	)
+	mw.Authorizer = acl
+	next := mw.RequireMetadataCurationForItem(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := requestWithItemID("admin")
+	req.Header.Set("X-Profile-Id", "prof-2")
+
+	rec := httptest.NewRecorder()
+	next.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if !acl.called {
+		t.Fatalf("ACL authorizer was not called")
+	}
+	if acl.request.PrimaryProfile {
+		t.Fatalf("primary profile flag = true, want false")
 	}
 }

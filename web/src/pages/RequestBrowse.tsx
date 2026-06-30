@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useCreateMediaRequest, useRequestBrowse } from "@/hooks/queries/useRequests";
+import { useCanRequest } from "@/hooks/useCanRequest";
 import { requestInputFromMediaResult } from "@/lib/mediaRequests";
 import type {
   DiscoverBrowseKind,
@@ -46,6 +47,7 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
 
   const browse = useRequestBrowse({ kind, slug, mediaType, sort, page });
   const createRequest = useCreateMediaRequest();
+  const canRequest = useCanRequest();
   const pendingRequestKey = createRequest.variables
     ? mediaRequestKey(createRequest.variables.media_type, createRequest.variables.tmdb_id)
     : undefined;
@@ -75,6 +77,7 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
   }
 
   function submitRequest(item: RequestMediaResult) {
+    if (!canRequest.discoveryEnabled) return;
     createRequest.mutate(requestInputFromMediaResult(item));
   }
 
@@ -153,7 +156,7 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
                 key={`${item.media_type}-${item.tmdb_id}`}
                 variant="discover"
                 item={item}
-                onRequest={() => submitRequest(item)}
+                onRequest={canRequest.discoveryEnabled ? () => submitRequest(item) : undefined}
                 isSubmitting={
                   createRequest.isPending &&
                   pendingRequestKey === mediaRequestKey(item.media_type, item.tmdb_id)

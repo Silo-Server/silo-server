@@ -185,10 +185,11 @@ async function publishCatalogExportJob(id: string): Promise<AdminJob> {
   return (await res.json()) as AdminJob;
 }
 
-export function useAdminLibraries() {
+export function useAdminLibraries(enabled = true) {
   return useQuery({
     queryKey: adminKeys.libraries(),
     queryFn: () => api<Library[]>("/libraries").then((d) => d ?? []),
+    enabled,
     staleTime: ADMIN_STALE_TIME,
   });
 }

@@ -17,6 +17,7 @@ import {
   ScrollText,
   Send,
   Server,
+  ShieldCheck,
   SkipForward,
   SlidersHorizontal,
   Users,
@@ -149,6 +150,13 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
         keywords: ["accounts", "profiles", "roles", "permissions"],
         icon: Users,
         href: "/admin/users",
+      },
+      {
+        label: "Access Groups",
+        description: "Built-in and custom authorization groups.",
+        keywords: ["acl", "groups", "roles", "permissions", "access"],
+        icon: ShieldCheck,
+        href: "/admin/access-groups",
       },
       {
         label: "Devices",

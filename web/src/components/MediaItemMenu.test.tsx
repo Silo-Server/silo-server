@@ -142,6 +142,40 @@ describe("buildMediaItemMenuModel", () => {
     ).toBe(true);
   });
 
+  it("omits play from beginning when playback is not allowed", () => {
+    const model = buildMediaItemMenuModel({
+      mediaType: "episode",
+      hasPartialProgress: true,
+      userState: {
+        played: false,
+        is_favorite: false,
+        in_watchlist: false,
+      },
+      isAdmin: false,
+      canPlayback: false,
+    });
+
+    expect(
+      model.some((item) => item.kind === "action" && item.label === "Play from Beginning"),
+    ).toBe(false);
+  });
+
+  it("omits favorites and watchlist when personal list management is not allowed", () => {
+    const model = buildMediaItemMenuModel({
+      mediaType: "movie",
+      userState: {
+        played: false,
+        is_favorite: false,
+        in_watchlist: false,
+      },
+      isAdmin: false,
+      canManagePersonalLists: false,
+    });
+    const labels = model.filter((item) => item.kind === "action").map((item) => item.label);
+
+    expect(labels).toEqual(["Mark Watched"]);
+  });
+
   it("uses listening labels for audiobook state actions", () => {
     const model = buildMediaItemMenuModel({
       mediaType: "audiobook",

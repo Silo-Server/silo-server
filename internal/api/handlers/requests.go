@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 )
 
@@ -49,7 +50,8 @@ type RequestService interface {
 }
 
 type RequestsHandler struct {
-	service RequestService
+	service    RequestService
+	Authorizer auth.Authorizer
 }
 
 func NewRequestsHandler(service RequestService) *RequestsHandler {
@@ -238,6 +240,9 @@ func (h *RequestsHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.authorizeRequestCreate(w, r, viewer) {
+		return
+	}
 	var input mediarequests.CreateRequestInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
@@ -249,6 +254,25 @@ func (h *RequestsHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, req)
+}
+
+func (h *RequestsHandler) authorizeRequestCreate(w http.ResponseWriter, r *http.Request, viewer mediarequests.Viewer) bool {
+	err := authorizeACLAction(r.Context(), h.Authorizer, auth.AccessRequest{
+		UserID:       viewer.UserID,
+		ProfileID:    viewer.ProfileID,
+		Action:       auth.ActionRequestsCreate,
+		ResourceType: auth.ResourceRequest,
+		ResourceID:   "*",
+	})
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, errACLActionDenied) {
+		writeError(w, http.StatusForbidden, "forbidden", "Media requests are not allowed")
+		return false
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize media request")
+	return false
 }
 
 func (h *RequestsHandler) HandleListMine(w http.ResponseWriter, r *http.Request) {

@@ -27,6 +27,12 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
   }),
 }));
 
+vi.mock("@/hooks/useAdminCapabilities", () => ({
+  useAdminAccess: () => ({
+    canAccessAdmin: true,
+  }),
+}));
+
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => ({
     data: [{ id: 7, name: "Movies", type: "movies" }],

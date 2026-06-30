@@ -12,6 +12,17 @@ vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: () => ({ isLoading: true }),
 }));
 
+vi.mock("@/hooks/queries/admin/settings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/queries/admin/settings")>();
+  return {
+    ...actual,
+    useJellyfinCompatStatus: () => ({ data: null, isLoading: false }),
+    useInstallJellyfinCompatWeb: () => ({ isPending: false, mutate: vi.fn() }),
+    useRemoveJellyfinCompatWeb: () => ({ isPending: false, mutate: vi.fn() }),
+    useUpdateJellyfinCompatSettings: () => ({ isPending: false, mutate: vi.fn() }),
+  };
+});
+
 function renderLayout(search = "") {
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={[`/admin/settings${search}`]}>

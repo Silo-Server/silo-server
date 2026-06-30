@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -12,9 +14,10 @@ import (
 
 // MediaFileAuthorizer validates that the authenticated user can access a media file.
 type MediaFileAuthorizer struct {
-	FileResolver  FilePathResolver
-	ItemAccess    PlaybackItemAccessChecker
-	EpisodeLookup PlaybackEpisodeLookup
+	FileResolver          FilePathResolver
+	ItemAccess            PlaybackItemAccessChecker
+	EpisodeLookup         PlaybackEpisodeLookup
+	ConsumptionAuthorizer auth.Authorizer
 }
 
 // Authorize returns the media file when the caller may access it, or catalog.ErrItemNotFound.
@@ -32,6 +35,7 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 	}
 
 	filter := requestAccessFilter(r)
+	resourceID := file.ContentID
 	switch {
 	case file.EpisodeID != "":
 		if a.EpisodeLookup == nil {
@@ -44,6 +48,7 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 		if episode == nil {
 			return nil, catalog.ErrEpisodeNotFound
 		}
+		resourceID = episode.SeriesID
 		if err := a.ItemAccess.EnsureAccessible(r.Context(), episode.SeriesID, filter); err != nil {
 			return nil, err
 		}
@@ -58,8 +63,42 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 	if !catalog.FileAllowedByAccess(file, filter) {
 		return nil, catalog.ErrItemNotFound
 	}
+	if err := authorizeMediaConsumption(r, a.ConsumptionAuthorizer, file, resourceID); err != nil {
+		return nil, err
+	}
 
 	return file, nil
+}
+
+var errMediaConsumptionForbidden = errors.New("media consumption forbidden")
+
+func authorizeMediaConsumption(r *http.Request, authorizer auth.Authorizer, file *models.MediaFile, resourceID string) error {
+	if authorizer == nil {
+		return nil
+	}
+	if file == nil {
+		return catalog.ErrItemNotFound
+	}
+	if resourceID == "" {
+		return catalog.ErrItemNotFound
+	}
+	libraryIDs := []int(nil)
+	if file.MediaFolderID > 0 {
+		libraryIDs = []int{file.MediaFolderID}
+	}
+	err := authorizeACLAction(r.Context(), authorizer, auth.AccessRequest{
+		UserID:       apimw.GetUserID(r.Context()),
+		ProfileID:    apimw.GetProfileID(r.Context()),
+		Action:       auth.ActionPlaybackPlay,
+		ResourceType: auth.ResourceMediaItem,
+		ResourceID:   resourceID,
+		LibraryIDs:   libraryIDs,
+		MediaType:    file.BaseType,
+	})
+	if errors.Is(err, errACLActionDenied) {
+		return errMediaConsumptionForbidden
+	}
+	return err
 }
 
 func mapMediaFileLookupError(err error) error {

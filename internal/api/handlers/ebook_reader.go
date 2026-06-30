@@ -595,6 +595,8 @@ func mergeEbookReaderAnnotationPatch(
 
 func (h *EbookReaderHandler) writeReadError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errMediaConsumptionForbidden):
+		writeError(w, http.StatusForbidden, "forbidden", "Ebook reading is not allowed")
 	case errors.Is(err, catalog.ErrItemNotFound), errors.Is(err, catalog.ErrEpisodeNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Ebook file not found")
 	default:

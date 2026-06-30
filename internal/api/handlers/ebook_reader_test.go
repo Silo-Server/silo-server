@@ -202,6 +202,48 @@ func TestEbookReaderServesEbookInlineWithRangeSupport(t *testing.T) {
 	}
 }
 
+func TestEbookReaderRejectsReadWithoutPlaybackPlayGrant(t *testing.T) {
+	authorizer := &fakeMediaConsumptionAuthorizer{
+		decision: auth.AccessDecision{Allowed: false, ReasonCode: "default_deny"},
+	}
+	handler := NewEbookReaderHandler(&MediaFileAuthorizer{
+		FileResolver: stubMediaFileResolver{
+			file: &models.MediaFile{
+				ID:            42,
+				ContentID:     "ebook-1",
+				MediaFolderID: 10,
+				FilePath:      writePlaybackTestMediaFile(t, "book.epub"),
+				Container:     "epub",
+				BaseType:      "ebook",
+			},
+		},
+		ItemAccess:            stubItemAccessChecker{},
+		ConsumptionAuthorizer: authorizer,
+	})
+
+	req := newEbookReaderAuthRequest(http.MethodGet, "/ebooks/ebook-1/files/42/read")
+	req = withEbookReaderRouteParams(req, "ebook-1", "42")
+	rr := httptest.NewRecorder()
+
+	handler.HandleReadFile(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if !authorizer.called {
+		t.Fatalf("ebook read ACL authorizer was not called")
+	}
+	if authorizer.request.Action != auth.ActionPlaybackPlay {
+		t.Fatalf("action = %q, want %q", authorizer.request.Action, auth.ActionPlaybackPlay)
+	}
+	if authorizer.request.ResourceType != auth.ResourceMediaItem || authorizer.request.ResourceID != "ebook-1" {
+		t.Fatalf("resource = %s/%q, want media_item/ebook-1", authorizer.request.ResourceType, authorizer.request.ResourceID)
+	}
+	if authorizer.request.MediaType != "ebook" {
+		t.Fatalf("media type = %q, want ebook", authorizer.request.MediaType)
+	}
+}
+
 func TestEbookReaderServesContainerMimeForMismatchedExtension(t *testing.T) {
 	filePath := writePlaybackTestMediaFile(t, "book.txt")
 	if err := os.WriteFile(filePath, []byte("<html>not really</html>"), 0o644); err != nil {

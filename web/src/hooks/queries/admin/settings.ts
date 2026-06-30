@@ -72,10 +72,11 @@ export interface CatalogSearchStatus {
   }>;
 }
 
-export function useAdminServerSettings() {
+export function useAdminServerSettings(enabled = true) {
   return useQuery({
     queryKey: adminKeys.serverSettings(),
     queryFn: () => api<ServerSettings>("/admin/settings").then((d) => d ?? {}),
+    enabled,
     staleTime: 30_000,
   });
 }

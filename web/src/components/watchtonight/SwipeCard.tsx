@@ -309,6 +309,7 @@ interface CardActionsProps {
   onAccept: () => void;
   onPlay: () => void;
   playLabel?: string;
+  canPlay?: boolean;
   disabled?: boolean;
 }
 
@@ -317,6 +318,7 @@ export function CardActions({
   onAccept,
   onPlay,
   playLabel = "Play now",
+  canPlay = true,
   disabled,
 }: CardActionsProps) {
   return (
@@ -335,34 +337,38 @@ export function CardActions({
       >
         <X className="h-6 w-6" />
       </button>
-      <button
-        type="button"
-        data-action
-        onClick={onPlay}
-        disabled={disabled}
-        className={cn(
-          "flex h-16 w-16 items-center justify-center rounded-full border-2 transition-colors",
-          "border-primary/40 text-primary hover:border-primary hover:bg-primary/10",
-          "disabled:pointer-events-none disabled:opacity-40",
-        )}
-        aria-label={playLabel}
-      >
-        <Play className="ml-0.5 h-7 w-7" fill="currentColor" />
-      </button>
-      <button
-        type="button"
-        data-action
-        onClick={onAccept}
-        disabled={disabled}
-        className={cn(
-          "flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors",
-          "border-green-500/40 text-green-400 hover:border-green-500 hover:bg-green-500/10 hover:text-green-500",
-          "disabled:pointer-events-none disabled:opacity-40",
-        )}
-        aria-label="Like"
-      >
-        <Check className="h-6 w-6" />
-      </button>
+      {canPlay && (
+        <>
+          <button
+            type="button"
+            data-action
+            onClick={onPlay}
+            disabled={disabled}
+            className={cn(
+              "flex h-16 w-16 items-center justify-center rounded-full border-2 transition-colors",
+              "border-primary/40 text-primary hover:border-primary hover:bg-primary/10",
+              "disabled:pointer-events-none disabled:opacity-40",
+            )}
+            aria-label={playLabel}
+          >
+            <Play className="ml-0.5 h-7 w-7" fill="currentColor" />
+          </button>
+          <button
+            type="button"
+            data-action
+            onClick={onAccept}
+            disabled={disabled}
+            className={cn(
+              "flex h-14 w-14 items-center justify-center rounded-full border-2 transition-colors",
+              "border-green-500/40 text-green-400 hover:border-green-500 hover:bg-green-500/10 hover:text-green-500",
+              "disabled:pointer-events-none disabled:opacity-40",
+            )}
+            aria-label="Like"
+          >
+            <Check className="h-6 w-6" />
+          </button>
+        </>
+      )}
     </div>
   );
 }

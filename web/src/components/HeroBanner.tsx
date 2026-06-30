@@ -4,6 +4,7 @@ import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-r
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -81,6 +82,8 @@ export default function HeroBanner({
   const [loaded, setLoaded] = useState<Record<number, boolean>>({});
   const [paused, setPaused] = useState(false);
   const audiobookPlayback = useAudiobookPlaybackController();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
   // changes, or after the user unpauses. Used as part of the progress-rail key
   // so the CSS animation restarts in lockstep with the setInterval timer
@@ -151,6 +154,10 @@ export default function HeroBanner({
   });
 
   const handlePlayClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!canPlayback) {
+      event.preventDefault();
+      return;
+    }
     if (activeAudiobookPlaying == null) {
       return;
     }
@@ -250,20 +257,22 @@ export default function HeroBanner({
               </p>
             )}
             <div className="flex flex-wrap items-center gap-3">
-              <Link
-                to={playHref}
-                onClick={handlePlayClick}
-                className="pill pill-primary transition-colors duration-[--duration-fast]"
-              >
-                {current.type === "ebook" ? (
-                  <BookOpen className="h-4 w-4" />
-                ) : activeAudiobookPlaying ? (
-                  <Pause className="h-4 w-4 fill-current" />
-                ) : (
-                  <Play className="h-4 w-4 fill-current" />
-                )}
-                {playLabel}
-              </Link>
+              {canPlayback && (
+                <Link
+                  to={playHref}
+                  onClick={handlePlayClick}
+                  className="pill pill-primary transition-colors duration-[--duration-fast]"
+                >
+                  {current.type === "ebook" ? (
+                    <BookOpen className="h-4 w-4" />
+                  ) : activeAudiobookPlaying ? (
+                    <Pause className="h-4 w-4 fill-current" />
+                  ) : (
+                    <Play className="h-4 w-4 fill-current" />
+                  )}
+                  {playLabel}
+                </Link>
+              )}
               <Link
                 to={buildItemHref({ contentId: current.content_id, libraryId })}
                 className="pill pill-glass transition-colors duration-[--duration-fast]"

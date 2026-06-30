@@ -14,6 +14,7 @@ import type {
   RequestMediaResult,
 } from "@/api/types";
 import { useCreateMediaRequest, useRequestMediaDetail } from "@/hooks/queries/useRequests";
+import { useCanRequest } from "@/hooks/useCanRequest";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { cn } from "@/lib/utils";
 import {
@@ -30,6 +31,7 @@ export default function RequestDetail() {
 
   const detail = useRequestMediaDetail(mediaType, tmdbID);
   const createRequest = useCreateMediaRequest();
+  const canRequest = useCanRequest();
 
   useDocumentTitle(detail.data?.title ?? "Request");
 
@@ -76,7 +78,11 @@ export default function RequestDetail() {
             isSubmitting={
               createRequest.isPending && createRequest.variables?.tmdb_id === item.tmdb_id
             }
-            onRequest={() => createRequest.mutate(requestInputFromMediaResult(item))}
+            onRequest={
+              canRequest.discoveryEnabled
+                ? () => createRequest.mutate(requestInputFromMediaResult(item))
+                : undefined
+            }
           />
         }
       />
@@ -96,7 +102,11 @@ export default function RequestDetail() {
             recommendations={item.recommendations}
             pendingTMDBID={createRequest.variables?.tmdb_id}
             isSubmitting={createRequest.isPending}
-            onRequest={(rec) => createRequest.mutate(requestInputFromMediaResult(rec))}
+            onRequest={
+              canRequest.discoveryEnabled
+                ? (rec) => createRequest.mutate(requestInputFromMediaResult(rec))
+                : undefined
+            }
           />
         )}
       </div>
@@ -198,7 +208,7 @@ function RequestActions({
 }: {
   item: RequestMediaDetail;
   isSubmitting: boolean;
-  onRequest: () => void;
+  onRequest?: () => void;
 }) {
   const requestable = item.request.requestable;
   const statusLabel = item.request.status ? formatRequestStatus(item.request.status) : null;
@@ -209,23 +219,25 @@ function RequestActions({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {requestable ? (
-        <Button
-          onClick={onRequest}
-          disabled={isSubmitting}
-          className="h-11 rounded-full px-6 text-sm font-semibold"
-        >
-          {isSubmitting ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Submitting
-            </>
-          ) : (
-            <>
-              <Plus className="h-4 w-4 stroke-[2.5]" />
-              Request {item.media_type === "series" ? "series" : "movie"}
-            </>
-          )}
-        </Button>
+        onRequest ? (
+          <Button
+            onClick={onRequest}
+            disabled={isSubmitting}
+            className="h-11 rounded-full px-6 text-sm font-semibold"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Submitting
+              </>
+            ) : (
+              <>
+                <Plus className="h-4 w-4 stroke-[2.5]" />
+                Request {item.media_type === "series" ? "series" : "movie"}
+              </>
+            )}
+          </Button>
+        ) : null
       ) : availableInLibrary ? (
         <>
           <StatusBlock
@@ -335,7 +347,7 @@ function RecommendationsRow({
   recommendations: RequestMediaResult[];
   pendingTMDBID?: number;
   isSubmitting: boolean;
-  onRequest: (item: RequestMediaResult) => void;
+  onRequest?: (item: RequestMediaResult) => void;
 }) {
   return (
     <MediaCarousel title="More Like This">
@@ -345,7 +357,7 @@ function RecommendationsRow({
           variant="discover"
           item={item}
           isSubmitting={isSubmitting && pendingTMDBID === item.tmdb_id}
-          onRequest={() => onRequest(item)}
+          onRequest={onRequest ? () => onRequest(item) : undefined}
         />
       ))}
     </MediaCarousel>

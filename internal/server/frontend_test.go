@@ -31,6 +31,9 @@ func TestFrontendHandlerSetsSecurityHeadersOnSPAHTML(t *testing.T) {
 			if got := rr.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
 				t.Fatalf("content-type = %q", got)
 			}
+			if got := rr.Header().Get("Cache-Control"); got != "no-cache" {
+				t.Fatalf("cache-control = %q", got)
+			}
 			csp := rr.Header().Get("Content-Security-Policy")
 			if csp != frontendContentSecurityPolicy {
 				t.Fatalf("csp = %q", csp)

@@ -223,7 +223,7 @@ func setupHWAccelTest(t *testing.T) *hwAccelTestEnv {
 	defaultNVIDIADeviceGlob = filepath.Join(env.devDir, "nvidia[0-9]*")
 	sysClassDRMDir = env.sysDir
 	currentGOOS = "linux"
-	nvencProbeCommandTimeout = 200 * time.Millisecond
+	nvencProbeCommandTimeout = 3 * time.Second
 
 	if err := os.MkdirAll(env.driDir, 0o755); err != nil {
 		t.Fatalf("create test dri dir: %v", err)

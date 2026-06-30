@@ -109,6 +109,11 @@ export const historyKeys = {
   list: () => ["history", "list"] as const,
 };
 
+export const authKeys = {
+  all: ["auth"] as const,
+  capabilities: () => ["auth", "capabilities"] as const,
+};
+
 export const collectionKeys = {
   all: ["collections"] as const,
   list: () => ["collections", "list"] as const,
@@ -329,9 +334,13 @@ export const themeKeys = {
 };
 
 export const adminKeys = {
+  capabilities: () => ["admin", "capabilities"] as const,
   users: () => ["admin", "users"] as const,
+  accessGroups: () => ["admin", "accessGroups"] as const,
+  accessGroup: (slug: string) => ["admin", "accessGroups", slug] as const,
   serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
   userDetail: (userId: number) => ["admin", "users", userId] as const,
+  userAccessExplanation: (userId: number) => ["admin", "users", userId, "accessExplanation"] as const,
   userProfiles: (userId?: number) => ["admin", "users", userId, "profiles"] as const,
   userSettings: (userId: number) => ["admin", "users", userId, "settings"] as const,
   userSetting: (userId: number, key: string) =>

@@ -72,6 +72,7 @@ import {
   hasAssignedPermission,
   setAssignedPermission,
 } from "@/lib/permissions";
+import { useAdminAccess } from "@/hooks/useAdminCapabilities";
 import { RegistrySettingControl } from "@/components/settings/RegistrySettingControl";
 import { formatSettingValue, getSettingDefinition } from "@/lib/settingsManifest";
 import {
@@ -92,6 +93,7 @@ export default function AdminUserDetail() {
   const navigate = useNavigate();
   const { beginImpersonation } = useAuth();
   const { data: user, isLoading, error } = useAdminUser(userId);
+  const adminAccess = useAdminAccess();
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [confirmImpersonateOpen, setConfirmImpersonateOpen] = useState(false);
@@ -102,7 +104,11 @@ export default function AdminUserDetail() {
   if (error || !user)
     return <div className="page-shell text-destructive py-8">User not found.</div>;
 
-  const impersonationDisabled = user.role === "admin" || !user.enabled;
+  const canManageUsers = adminAccess.can("users.manage");
+  const canManageUserAccessPolicy = adminAccess.can("security.manage");
+  const canEditUser = canManageUsers && (user.role !== "admin" || canManageUserAccessPolicy);
+  const impersonationDisabled =
+    !adminAccess.can("users.impersonate") || user.role === "admin" || !user.enabled;
 
   function handleDelete() {
     setConfirmDeleteOpen(true);
@@ -148,7 +154,12 @@ export default function AdminUserDetail() {
           </Button>
           <Dialog open={editOpen} onOpenChange={setEditOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="flex-1 sm:flex-none">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 sm:flex-none"
+                disabled={!canEditUser}
+              >
                 <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
               </Button>
             </DialogTrigger>
@@ -164,7 +175,7 @@ export default function AdminUserDetail() {
             size="sm"
             className="flex-1 sm:flex-none"
             onClick={handleDelete}
-            disabled={deleteMutation.isPending}
+            disabled={!canEditUser || deleteMutation.isPending}
           >
             Delete
           </Button>
@@ -503,6 +514,7 @@ function IPHistoryTab({ userId }: { userId: number }) {
 }
 
 function UserSettingsTab({ userId }: { userId: number }) {
+  const canManageUsers = useAdminAccess().can("users.manage");
   const { data: settings = [], isLoading } = useAdminUserSettings(userId);
   const updateSetting = useUpdateAdminUserSetting();
   const deleteSetting = useDeleteAdminUserSetting();
@@ -540,7 +552,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
             <RegistrySettingControl
               definition={definition}
               value={entry.value}
-              disabled={updateSetting.isPending || deleteSetting.isPending}
+              disabled={!canManageUsers || updateSetting.isPending || deleteSetting.isPending}
               onChange={(value) =>
                 updateSetting.mutate({
                   userId,
@@ -553,7 +565,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
             <Input
               key={`${entry.key}:${entry.value}`}
               defaultValue={entry.value}
-              disabled={updateSetting.isPending || deleteSetting.isPending}
+              disabled={!canManageUsers || updateSetting.isPending || deleteSetting.isPending}
               className="w-full min-w-[180px] sm:w-[220px]"
               onBlur={(event) => {
                 if (event.currentTarget.value === entry.value) return;
@@ -570,7 +582,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
             size="sm"
             className="h-7 rounded-full px-2 text-xs"
             onClick={() => deleteSetting.mutate({ userId, key: entry.key })}
-            disabled={updateSetting.isPending || deleteSetting.isPending}
+            disabled={!canManageUsers || updateSetting.isPending || deleteSetting.isPending}
           >
             <RotateCcw className="mr-1 h-3 w-3" />
             Reset
@@ -609,6 +621,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
 }
 
 function DeviceOverridesTab({ userId }: { userId: number }) {
+  const canManageUsers = useAdminAccess().can("users.manage");
   const { data: settings = [], isLoading } = useAdminUserDeviceSettings(userId);
   const updateSetting = useUpdateAdminUserDeviceSetting();
   const deleteSetting = useDeleteAdminUserDeviceSetting();
@@ -739,6 +752,7 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
               </Button>
               <Button
                 size="sm"
+                disabled={!canManageUsers || updateSetting.isPending}
                 onClick={() => {
                   if (!jsonEditor) return;
                   updateSetting.mutate(
@@ -865,24 +879,26 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
                     }),
                   )}
                   onResetProfile={(profileId, profileName) =>
-                    setDeviceToReset({ deviceId, profileId, profileName })
+                    canManageUsers && setDeviceToReset({ deviceId, profileId, profileName })
                   }
                   onEditJson={(setting) => {
+                    if (!canManageUsers) return;
                     setJsonEditor(setting);
                     setJsonValue(setting.value);
                   }}
-                  onResetSetting={(setting) => setSettingToReset(setting)}
-                  onChangeSetting={(setting, value) =>
+                  onResetSetting={(setting) => canManageUsers && setSettingToReset(setting)}
+                  onChangeSetting={(setting, value) => {
+                    if (!canManageUsers) return;
                     updateSetting.mutate({
                       userId,
                       profileId: setting.profile_id,
                       deviceId: setting.device_id,
                       key: setting.key,
                       value,
-                    })
-                  }
-                  updatePending={updateSetting.isPending}
-                  resetPending={deleteDevice.isPending}
+                    });
+                  }}
+                  updatePending={!canManageUsers || updateSetting.isPending}
+                  resetPending={!canManageUsers || deleteDevice.isPending}
                 />
               </section>
             );
@@ -894,7 +910,9 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
 }
 
 function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void }) {
-  const { data: libraries = [] } = useAdminLibraries();
+  const adminAccess = useAdminAccess();
+  const canManageUserAccessPolicy = adminAccess.can("security.manage");
+  const { data: libraries = [] } = useAdminLibraries(canManageUserAccessPolicy);
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState("");
@@ -922,16 +940,18 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
       username,
       email,
       role,
-      permissions,
       enabled,
-      library_ids: libraryIDs,
-      max_streams: maxStreams,
-      max_transcodes: maxTranscodes,
-      max_profiles: maxProfiles,
-      max_playback_quality: playbackQualityValueFromPreset(maxPlaybackQualityPreset),
-      download_allowed: downloadAllowed,
-      download_transcode_allowed: downloadTranscodeAllowed,
     };
+    if (canManageUserAccessPolicy) {
+      body.permissions = permissions;
+      body.library_ids = libraryIDs;
+      body.max_streams = maxStreams;
+      body.max_transcodes = maxTranscodes;
+      body.max_profiles = maxProfiles;
+      body.max_playback_quality = playbackQualityValueFromPreset(maxPlaybackQualityPreset);
+      body.download_allowed = downloadAllowed;
+      body.download_transcode_allowed = downloadTranscodeAllowed;
+    }
     if (password) body.password = password;
     updateMutation.mutate({ id: user.id, body }, { onSuccess: onClose });
   }
@@ -943,12 +963,16 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
           <TabsTrigger value="account" className="flex-none px-1">
             Account
           </TabsTrigger>
-          <TabsTrigger value="access" className="flex-none px-1">
-            Access
-          </TabsTrigger>
-          <TabsTrigger value="limits" className="flex-none px-1">
-            Limits
-          </TabsTrigger>
+          {canManageUserAccessPolicy && (
+            <TabsTrigger value="access" className="flex-none px-1">
+              Access
+            </TabsTrigger>
+          )}
+          {canManageUserAccessPolicy && (
+            <TabsTrigger value="limits" className="flex-none px-1">
+              Limits
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -983,7 +1007,11 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    {(canManageUserAccessPolicy || role === "admin") && (
+                      <SelectItem value="admin" disabled={!canManageUserAccessPolicy}>
+                        Admin
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -1002,121 +1030,125 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
             </div>
           </TabsContent>
 
-          <TabsContent value="access" className="mt-0 space-y-4">
-            <LibraryAccessSelector
-              libraries={libraries}
-              value={libraryIDs}
-              onChange={setLibraryIDs}
-            />
-            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-              <div>
-                <Label htmlFor={markerEditId}>Marker Editing</Label>
-                <p className="text-muted-foreground text-xs">
-                  Edit intro, recap, credits, and preview markers within assigned libraries.
-                </p>
-              </div>
-              <Switch
-                id={markerEditId}
-                checked={hasAssignedPermission(permissions, PERMISSION_MARKER_EDIT)}
-                onCheckedChange={(checked) =>
-                  setPermissions((current) =>
-                    setAssignedPermission(current, PERMISSION_MARKER_EDIT, checked),
-                  )
-                }
+          {canManageUserAccessPolicy && (
+            <TabsContent value="access" className="mt-0 space-y-4">
+              <LibraryAccessSelector
+                libraries={libraries}
+                value={libraryIDs}
+                onChange={setLibraryIDs}
               />
-            </div>
-            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-              <div>
-                <Label htmlFor={metadataCurationId}>Metadata Curation</Label>
-                <p className="text-muted-foreground text-xs">
-                  Edit, refresh, and rematch metadata within assigned libraries.
-                </p>
-              </div>
-              <Switch
-                id={metadataCurationId}
-                checked={hasAssignedPermission(permissions, PERMISSION_METADATA_CURATION)}
-                onCheckedChange={(checked) =>
-                  setPermissions((current) =>
-                    setAssignedPermission(current, PERMISSION_METADATA_CURATION, checked),
-                  )
-                }
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
               <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-                <Label>Downloads Allowed</Label>
-                <Switch checked={downloadAllowed} onCheckedChange={setDownloadAllowed} />
-              </div>
-              <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-                <Label>Download Transcode Allowed</Label>
+                <div>
+                  <Label htmlFor={markerEditId}>Marker Editing</Label>
+                  <p className="text-muted-foreground text-xs">
+                    Edit intro, recap, credits, and preview markers within assigned libraries.
+                  </p>
+                </div>
                 <Switch
-                  checked={downloadTranscodeAllowed}
-                  onCheckedChange={setDownloadTranscodeAllowed}
+                  id={markerEditId}
+                  checked={hasAssignedPermission(permissions, PERMISSION_MARKER_EDIT)}
+                  onCheckedChange={(checked) =>
+                    setPermissions((current) =>
+                      setAssignedPermission(current, PERMISSION_MARKER_EDIT, checked),
+                    )
+                  }
                 />
               </div>
-            </div>
-          </TabsContent>
+              <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+                <div>
+                  <Label htmlFor={metadataCurationId}>Metadata Curation</Label>
+                  <p className="text-muted-foreground text-xs">
+                    Edit, refresh, and rematch metadata within assigned libraries.
+                  </p>
+                </div>
+                <Switch
+                  id={metadataCurationId}
+                  checked={hasAssignedPermission(permissions, PERMISSION_METADATA_CURATION)}
+                  onCheckedChange={(checked) =>
+                    setPermissions((current) =>
+                      setAssignedPermission(current, PERMISSION_METADATA_CURATION, checked),
+                    )
+                  }
+                />
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+                  <Label>Downloads Allowed</Label>
+                  <Switch checked={downloadAllowed} onCheckedChange={setDownloadAllowed} />
+                </div>
+                <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+                  <Label>Download Transcode Allowed</Label>
+                  <Switch
+                    checked={downloadTranscodeAllowed}
+                    onCheckedChange={setDownloadTranscodeAllowed}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+          )}
 
-          <TabsContent value="limits" className="mt-0 space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label>Max Streams</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={maxStreams}
-                  onChange={(e) => setMaxStreams(Number(e.target.value))}
-                />
-                <p className="text-muted-foreground text-xs">0 = unlimited</p>
+          {canManageUserAccessPolicy && (
+            <TabsContent value="limits" className="mt-0 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label>Max Streams</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={maxStreams}
+                    onChange={(e) => setMaxStreams(Number(e.target.value))}
+                  />
+                  <p className="text-muted-foreground text-xs">0 = unlimited</p>
+                </div>
+                <div className="space-y-1">
+                  <Label>Max Transcodes</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={maxTranscodes}
+                    onChange={(e) => setMaxTranscodes(Number(e.target.value))}
+                  />
+                  <p className="text-muted-foreground text-xs">0 = unlimited</p>
+                </div>
+                <div className="space-y-1">
+                  <Label>Max Profiles</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={maxProfiles}
+                    onChange={(e) => setMaxProfiles(Number(e.target.value))}
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label>Max Playback Quality</Label>
+                  <Select
+                    value={maxPlaybackQualityPreset}
+                    onValueChange={(value) =>
+                      setMaxPlaybackQualityPreset(value as PlaybackQualityPreset)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PLAYBACK_QUALITY_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    {
+                      PLAYBACK_QUALITY_OPTIONS.find(
+                        (option) => option.value === maxPlaybackQualityPreset,
+                      )?.description
+                    }
+                  </p>
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label>Max Transcodes</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={maxTranscodes}
-                  onChange={(e) => setMaxTranscodes(Number(e.target.value))}
-                />
-                <p className="text-muted-foreground text-xs">0 = unlimited</p>
-              </div>
-              <div className="space-y-1">
-                <Label>Max Profiles</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={maxProfiles}
-                  onChange={(e) => setMaxProfiles(Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label>Max Playback Quality</Label>
-                <Select
-                  value={maxPlaybackQualityPreset}
-                  onValueChange={(value) =>
-                    setMaxPlaybackQualityPreset(value as PlaybackQualityPreset)
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PLAYBACK_QUALITY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  {
-                    PLAYBACK_QUALITY_OPTIONS.find(
-                      (option) => option.value === maxPlaybackQualityPreset,
-                    )?.description
-                  }
-                </p>
-              </div>
-            </div>
-          </TabsContent>
+            </TabsContent>
+          )}
         </div>
       </Tabs>
 

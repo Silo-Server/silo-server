@@ -4,6 +4,7 @@ import { useLocation } from "react-router";
 import type { WatchTonightItem } from "@/hooks/queries/recommendations";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Badge } from "@/components/ui/badge";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
@@ -22,9 +23,12 @@ interface WatchTonightCardProps {
 export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
 
   const watchHref = buildMediaPlayHref({ contentId: item.content_id, type: item.type });
   const itemHref = buildItemHref({ contentId: item.content_id });
+  const thumbnailHref = canPlayback ? watchHref : itemHref;
   const source = item.watch_tonight_source ?? "";
   const isInProgress = source === "continue_watching";
   const isNextUp = source === "next_up";
@@ -51,6 +55,7 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
   const handlePlayClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
       if (
+        !canPlayback ||
         event.defaultPrevented ||
         event.button !== 0 ||
         event.metaKey ||
@@ -78,7 +83,7 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
         returnHref: `${location.pathname}${location.search}`,
       });
     },
-    [watchHref, location.pathname, location.search, playbackController, onPlay],
+    [canPlayback, watchHref, location.pathname, location.search, playbackController, onPlay],
   );
 
   const badgeLabel = sourceLabels[source];
@@ -87,9 +92,9 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
     <div className="group/card flex gap-5 rounded-xl p-3 transition-colors hover:bg-white/5">
       {/* Thumbnail */}
       <ViewTransitionLink
-        to={watchHref}
+        to={thumbnailHref}
         onClick={handlePlayClick}
-        aria-label={`${playVerb} ${heading}`}
+        aria-label={canPlayback ? `${playVerb} ${heading}` : `Open ${heading}`}
         className="group/play relative w-44 shrink-0"
       >
         <div className="relative aspect-video overflow-hidden rounded-lg">
@@ -114,15 +119,17 @@ export default function WatchTonightCard({ item, onPlay }: WatchTonightCardProps
           )}
 
           {/* Play overlay */}
-          <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover/card:bg-black/30 group-focus-visible/play:bg-black/30">
-            <div className="bg-primary text-primary-foreground flex h-10 w-10 items-center justify-center rounded-full opacity-0 shadow-lg transition-opacity group-hover/card:opacity-100 group-focus-visible/play:opacity-100">
-              {item.type === "ebook" ? (
-                <BookOpen className="h-4 w-4" />
-              ) : (
-                <Play className="ml-0.5 h-4 w-4" fill="currentColor" />
-              )}
+          {canPlayback && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover/card:bg-black/30 group-focus-visible/play:bg-black/30">
+              <div className="bg-primary text-primary-foreground flex h-10 w-10 items-center justify-center rounded-full opacity-0 shadow-lg transition-opacity group-hover/card:opacity-100 group-focus-visible/play:opacity-100">
+                {item.type === "ebook" ? (
+                  <BookOpen className="h-4 w-4" />
+                ) : (
+                  <Play className="ml-0.5 h-4 w-4" fill="currentColor" />
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Progress bar */}
           {isInProgress && progressPercent > 0 && (

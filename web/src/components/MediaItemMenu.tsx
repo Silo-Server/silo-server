@@ -8,6 +8,7 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
@@ -45,6 +46,8 @@ interface BuildMediaItemMenuModelOptions {
   userState?: MediaItemUserState;
   hasPartialProgress?: boolean;
   isAdmin: boolean;
+  canPlayback?: boolean;
+  canManagePersonalLists?: boolean;
   showCollectionActions?: boolean;
   dismissLabel?: string;
 }
@@ -66,6 +69,8 @@ export function buildMediaItemMenuModel({
   userState,
   hasPartialProgress = false,
   isAdmin,
+  canPlayback = true,
+  canManagePersonalLists = true,
   showCollectionActions = true,
   dismissLabel,
 }: BuildMediaItemMenuModelOptions): MediaItemMenuEntry[] {
@@ -73,7 +78,7 @@ export function buildMediaItemMenuModel({
   const isAudiobook = mediaType === "audiobook";
   const isLeaf = mediaType === "movie" || mediaType === "episode" || isAudiobook;
 
-  if (isLeaf && (hasPartialProgress || userState?.played === true)) {
+  if (canPlayback && isLeaf && (hasPartialProgress || userState?.played === true)) {
     entries.push({
       kind: "action",
       key: "playFromBeginning",
@@ -90,7 +95,7 @@ export function buildMediaItemMenuModel({
   }
 
   if (userState) {
-    if (showCollectionActions) {
+    if (showCollectionActions && canManagePersonalLists) {
       entries.push(
         {
           kind: "action",
@@ -162,6 +167,9 @@ export default function MediaItemMenu({
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const isAdmin = useIsActingAdmin();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
+  const canManagePersonalLists = userCapabilities.can(USER_CAPABILITY_ACTIONS.personalListsManage);
   const [currentUserState, setCurrentUserState] = useState(userState);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [filesDialogOpen, setFilesDialogOpen] = useState(false);
@@ -199,6 +207,8 @@ export default function MediaItemMenu({
     userState: currentUserState,
     hasPartialProgress,
     isAdmin,
+    canPlayback,
+    canManagePersonalLists,
     showCollectionActions,
     dismissLabel,
   });
@@ -219,6 +229,7 @@ export default function MediaItemMenu({
   async function handleAction(actionKey: Extract<MediaItemMenuEntry, { kind: "action" }>["key"]) {
     switch (actionKey) {
       case "playFromBeginning": {
+        if (!canPlayback) return;
         if (mediaType === "audiobook") {
           navigate(buildMediaPlayHref({ contentId, type: mediaType, libraryId, restart: true }));
           return;
@@ -238,13 +249,13 @@ export default function MediaItemMenu({
         return;
       }
       case "toggleFavorite": {
-        if (!currentUserState) return;
+        if (!currentUserState || !canManagePersonalLists) return;
         await favoriteMutation.mutateAsync(currentUserState.is_favorite);
         setCurrentUserState((prev) => (prev ? { ...prev, is_favorite: !prev.is_favorite } : prev));
         return;
       }
       case "toggleWatchlist": {
-        if (!currentUserState) return;
+        if (!currentUserState || !canManagePersonalLists) return;
         await watchlistMutation.mutateAsync(currentUserState.in_watchlist);
         setCurrentUserState((prev) =>
           prev ? { ...prev, in_watchlist: !prev.in_watchlist } : prev,

@@ -9,6 +9,7 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { formatListeningTimeLeft } from "@/lib/audiobooks/duration";
 import { upcomingBadgeClass, upcomingBadgeLabel } from "@/lib/upcomingEventPresentation";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { buildItemHref, buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
@@ -33,6 +34,8 @@ type ContinueWatchingCardProps = (
 export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
   const card =
     "sectionItem" in props && props.sectionItem
       ? {
@@ -123,6 +126,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   // Detail-page link target for the card's image and meta lines: manga
   // chapters head to the series page like the heading does.
   const detailHref = isMangaChapter ? headingHref : card.itemHref;
+  const progressHref = canPlayback && isMangaChapter ? card.watchHref : card.itemHref;
   const episodeLabel = hasEpisodeMeta
     ? `Season ${card.seasonNumber} Episode ${card.episodeNumber}`
     : null;
@@ -151,6 +155,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
   const handleWatchClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
       if (
+        !canPlayback ||
         event.defaultPrevented ||
         event.button !== 0 ||
         event.metaKey ||
@@ -179,7 +184,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         returnHref: `${location.pathname}${location.search}`,
       });
     },
-    [card.watchHref, location.pathname, location.search, playbackController],
+    [canPlayback, card.watchHref, location.pathname, location.search, playbackController],
   );
 
   const variant = props.variant ?? "wide";
@@ -259,18 +264,20 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             )}
           </div>
         </ViewTransitionLink>
-        <ViewTransitionLink
-          to={card.watchHref}
-          onClick={handleWatchClick}
-          aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
-          className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
-        >
-          {card.type === "ebook" ? (
-            <BookOpen className="h-5 w-5" />
-          ) : (
-            <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
-          )}
-        </ViewTransitionLink>
+        {canPlayback && (
+          <ViewTransitionLink
+            to={card.watchHref}
+            onClick={handleWatchClick}
+            aria-label={`${card.type === "ebook" ? "Read" : "Play"} ${heading}`}
+            className="bg-primary text-primary-foreground absolute top-1/2 left-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full opacity-100 shadow-lg transition-all duration-200 hover:scale-110 hover:shadow-xl hover:brightness-110 active:scale-95 pointer-fine:pointer-events-none pointer-fine:opacity-0 pointer-fine:group-hover/media:pointer-events-auto pointer-fine:group-hover/media:opacity-100 pointer-fine:focus-visible:pointer-events-auto pointer-fine:focus-visible:opacity-100"
+          >
+            {card.type === "ebook" ? (
+              <BookOpen className="h-5 w-5" />
+            ) : (
+              <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
+            )}
+          </ViewTransitionLink>
+        )}
         <MediaItemMenu
           contentId={
             "sectionItem" in props && props.sectionItem
@@ -300,7 +307,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
         </ViewTransitionLink>
         {episodeMeta && (
           <ViewTransitionLink
-            to={isMangaChapter ? card.watchHref : card.itemHref}
+            to={progressHref}
             className="text-muted-foreground block truncate text-xs hover:underline"
           >
             {episodeMeta}
@@ -322,7 +329,7 @@ export default function ContinueWatchingCard(props: ContinueWatchingCardProps) {
             <div className="text-muted-foreground text-xs">{timeLeftLabel}</div>
           ) : (
             <ViewTransitionLink
-              to={isMangaChapter ? card.watchHref : card.itemHref}
+              to={progressHref}
               className="text-muted-foreground block w-fit text-xs hover:underline"
             >
               {timeLeftLabel}

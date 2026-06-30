@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -113,7 +114,8 @@ type PlaybackHandler struct {
 	NodePlanner             nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
 	JWTSecret               string                    // needed for signing stream tokens
 	ItemAccess              PlaybackItemAccessChecker // optional; enables file authorization checks
-	EpisodeLookup           PlaybackEpisodeLookup     // optional; resolves episode files to their series
+	AccessAuthorizer        auth.Authorizer
+	EpisodeLookup           PlaybackEpisodeLookup // optional; resolves episode files to their series
 	OriginalLangLookup      PlaybackOriginalLanguageLookup
 	SettingsRepo            PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher      PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
@@ -1156,6 +1158,8 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	file, err := h.loadAuthorizedFile(r, req.FileID)
 	if err != nil {
 		switch {
+		case errors.Is(err, errMediaConsumptionForbidden):
+			writeError(w, http.StatusForbidden, "forbidden", "Playback is not allowed")
 		case errors.Is(err, catalog.ErrItemNotFound), errors.Is(err, catalog.ErrEpisodeNotFound):
 			writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		default:
@@ -1854,6 +1858,7 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 	}
 
 	filter := requestAccessFilter(r)
+	resourceID := file.ContentID
 	switch {
 	case file.EpisodeID != "":
 		if h.EpisodeLookup == nil {
@@ -1866,6 +1871,7 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 		if episode == nil {
 			return nil, catalog.ErrEpisodeNotFound
 		}
+		resourceID = episode.SeriesID
 		if err := h.ItemAccess.EnsureAccessible(r.Context(), episode.SeriesID, filter); err != nil {
 			return nil, err
 		}
@@ -1879,6 +1885,9 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 
 	if !catalog.FileAllowedByAccess(file, filter) {
 		return nil, catalog.ErrItemNotFound
+	}
+	if err := authorizeMediaConsumption(r, h.AccessAuthorizer, file, resourceID); err != nil {
+		return nil, err
 	}
 
 	return file, nil

@@ -46,6 +46,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -270,7 +271,11 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Admin authorization for routes: admin role, exercised through the
 	// account's primary household profile (see apimw.RequireActingAdmin).
+	var adminAuthorizer auth.Authorizer
 	requireActingAdmin := apimw.RequireActingAdmin(checkPrimaryProfile)
+	requireAdminCapability := func(action auth.ACLAction) func(http.Handler) http.Handler {
+		return apimw.RequireAdminCapability(adminAuthorizer, action, checkPrimaryProfile)
+	}
 
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings
@@ -299,6 +304,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var authMiddleware *apimw.AuthMiddleware
 	var viewerAccessMiddleware *apimw.ViewerAccessMiddleware
 	var permissionMiddleware *apimw.PermissionMiddleware
+	var aclRepo *auth.ACLRepository
 	var viewerResolver *access.Resolver
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
@@ -335,6 +341,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		deviceLoginService = auth.NewDeviceLoginService(deps.DB, userRepo, jwtService, sessionRepo)
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
+		authHandler.PrimaryProfileChecker = checkPrimaryProfile
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		if deps.UserStoreProvider != nil {
@@ -342,23 +349,20 @@ func NewRouter(deps Dependencies) chi.Router {
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
 		}
 		if deps.DB != nil {
+			aclRepo = auth.NewACLRepository(deps.DB)
+			adminAuthorizer = auth.NewACLAuthorizer(aclRepo, userRepo)
+			authHandler.AdminAuthorizer = adminAuthorizer
 			permissionMiddleware = apimw.NewPermissionMiddleware(
 				userRepo,
 				apimw.NewPGMetadataTargetLibraryResolver(deps.DB),
 				checkPrimaryProfile,
 			)
+			permissionMiddleware.Authorizer = adminAuthorizer
 		}
 	}
 	if deps.SessionMgr != nil && userRepo != nil {
 		deps.SessionMgr.SetLimitProvider(func(ctx context.Context, userID int) (playback.SessionLimits, error) {
-			user, err := userRepo.GetByID(ctx, userID)
-			if err != nil {
-				return playback.SessionLimits{}, err
-			}
-			return playback.SessionLimits{
-				MaxStreams:    user.MaxStreams,
-				MaxTranscodes: user.MaxTranscodes,
-			}, nil
+			return resolvePlaybackSessionLimits(ctx, userRepo, adminAuthorizer, userID)
 		})
 	}
 
@@ -528,9 +532,10 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.FileRepo != nil {
 			ebookReaderHandler = handlers.NewEbookReaderHandler(&handlers.MediaFileAuthorizer{
-				FileResolver:  deps.FileRepo,
-				ItemAccess:    itemRepo,
-				EpisodeLookup: episodeRepo,
+				FileResolver:          deps.FileRepo,
+				ItemAccess:            itemRepo,
+				EpisodeLookup:         episodeRepo,
+				ConsumptionAuthorizer: adminAuthorizer,
 			})
 			if ebookProgressStore != nil {
 				ebookReaderHandler.ProgressStore = ebookProgressStore
@@ -578,6 +583,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			requestSvc.SetLifecycleNotifier(lifecycle)
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
+		requestHandler.Authorizer = adminAuthorizer
 
 		autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && deps.PluginService != nil {
@@ -628,7 +634,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		profileHandler.ProfileTokens = profileTokenService
 		profileHandler.AvatarStore = deps.S3Private
 		profileHandler.SessionsReader = playbackSessionsLoader
+		profileHandler.AccessAuthorizer = adminAuthorizer
 		personalDataHandler = handlers.NewPersonalDataHandler(deps.UserStoreProvider, itemRepo)
+		personalDataHandler.Authorizer = adminAuthorizer
 		if detailSvc != nil {
 			personalDataHandler.SetDetailService(detailSvc)
 		}
@@ -854,6 +862,11 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.EventBus = deps.EventBus
 		adminHandler.EventsHub = deps.EventsHub
 		adminHandler.ImpersonationService = authService
+		adminHandler.AdminAuthorizer = adminAuthorizer
+		adminHandler.PrimaryProfileChecker = checkPrimaryProfile
+		if aclRepo != nil {
+			adminHandler.AccessGroups = aclRepo
+		}
 		adminHandler.StatsSource = deps.AdminStatsProvider
 		adminHandler.RealtimeHub = deps.RealtimeHub
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
@@ -1322,6 +1335,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			recsReader = recommendations.NewReader(recsRepo, ratingsRepo, deps.RecWorker, deps.UserStoreProvider)
 		}
 		recsHandler = handlers.NewRecommendationsHandler(deps.Recommender, recsReader, deps.UserStoreProvider, ratingsRepo, recsRepo, deps.Recommender != nil)
+		recsHandler.Authorizer = adminAuthorizer
 		if deps.DB != nil {
 			recsFetcher := sections.NewFetcher(deps.DB)
 			recsFetcher.StoreProvider = deps.UserStoreProvider
@@ -1538,6 +1552,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Post("/logout", authHandler.HandleLogout)
 						r.Post("/impersonation/end", authHandler.HandleEndImpersonation)
 						r.Get("/me", authHandler.HandleMe)
+						r.Get("/capabilities", authHandler.HandleCapabilities)
+						r.Get("/admin-capabilities", authHandler.HandleAdminCapabilities)
 						r.Get("/sessions", authHandler.HandleListSessions)
 						r.Delete("/sessions/{id}", authHandler.HandleDeleteSession)
 						r.Post("/device/approve", authHandler.HandleDeviceApprove)
@@ -1686,7 +1702,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// Library management routes (admin-only).
 				if libraryHandler != nil {
 					r.Group(func(r chi.Router) {
-						r.Use(requireActingAdmin)
+						r.Use(requireAdminCapability(auth.ActionLibrariesManage))
 
 						r.Route("/libraries", func(r chi.Router) {
 							r.Get("/", libraryHandler.HandleListLibraries)
@@ -2094,6 +2110,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// Playback routes.
 				if playbackHandler != nil {
 					playbackHandler.ItemAccess = itemRepo
+					playbackHandler.AccessAuthorizer = adminAuthorizer
 					playbackHandler.EpisodeLookup = episodeRepo
 					playbackHandler.OriginalLangLookup = itemRepo
 					playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
@@ -2240,27 +2257,75 @@ func NewRouter(deps Dependencies) chi.Router {
 						}
 
 						r.Group(func(r chi.Router) {
-							r.Use(requireActingAdmin)
+							r.Use(requireAdminCapability(auth.ActionSecurityManage))
+							r.Get("/access-groups", adminHandler.HandleListAccessGroups)
+							r.Post("/access-groups", adminHandler.HandleCreateAccessGroup)
+							r.Get("/access-groups/{slug}", adminHandler.HandleGetAccessGroup)
+							r.Put("/access-groups/{slug}", adminHandler.HandleUpdateAccessGroup)
+							r.Delete("/access-groups/{slug}", adminHandler.HandleDeleteAccessGroup)
+						})
 
+						r.Group(func(r chi.Router) {
+							r.Use(requireAdminCapability(auth.ActionUsersView))
 							r.Get("/users", adminHandler.HandleListUsers)
-							r.Post("/users", adminHandler.HandleCreateUser)
 							r.Get("/users/{id}", adminHandler.HandleGetUser)
-							r.Put("/users/{id}", adminHandler.HandleUpdateUser)
-							r.Delete("/users/{id}", adminHandler.HandleDeleteUser)
-							r.Post("/users/{id}/impersonate", adminHandler.HandleImpersonateUser)
+							r.Get("/users/{id}/access-explain", adminHandler.HandleGetUserAccessExplanation)
 							r.Get("/users/{id}/profiles", adminHandler.HandleListUserProfiles)
 							r.Get("/users/{id}/settings", adminHandler.HandleListUserSettings)
 							r.Get("/users/{id}/settings/{key}", adminHandler.HandleGetUserSetting)
-							r.Put("/users/{id}/settings/{key}", adminHandler.HandleUpdateUserSetting)
-							r.Delete("/users/{id}/settings/{key}", adminHandler.HandleDeleteUserSetting)
 							r.Get("/users/{id}/device-settings", adminHandler.HandleListUserDeviceSettings)
 							r.Get("/users/{id}/device-settings/{key}", adminHandler.HandleListUserDeviceSettingsByKey)
+							r.Get("/devices", adminHandler.HandleListDevices)
+							r.Get("/devices/{user_id}/{device_id}", adminHandler.HandleGetDevice)
+							if deps.ActivityLogRepo != nil {
+								adminIPHandler := handlers.NewAdminIPHandler(deps.ActivityLogRepo)
+								r.Get("/users/{id}/ips", adminIPHandler.HandleGetUserIPs)
+								r.Get("/ips", adminIPHandler.HandleGetIPUsers)
+							}
+						})
+
+						r.Group(func(r chi.Router) {
+							r.Use(requireAdminCapability(auth.ActionUsersManage))
+							r.Post("/users", adminHandler.HandleCreateUser)
+							r.Put("/users/{id}", adminHandler.HandleUpdateUser)
+							r.Delete("/users/{id}", adminHandler.HandleDeleteUser)
+							r.Put("/users/{id}/settings/{key}", adminHandler.HandleUpdateUserSetting)
+							r.Delete("/users/{id}/settings/{key}", adminHandler.HandleDeleteUserSetting)
 							r.Put("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleUpdateUserDeviceSetting)
 							r.Delete("/users/{id}/device-settings/{key}", adminHandler.HandleDeleteUserDeviceSettingsByKey)
 							r.Delete("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleDeleteUserDeviceSetting)
 							r.Delete("/users/{id}/profiles/{profile_id}/devices/{device_id}/settings", adminHandler.HandleDeleteAllUserDeviceSettings)
-							r.Get("/devices", adminHandler.HandleListDevices)
-							r.Get("/devices/{user_id}/{device_id}", adminHandler.HandleGetDevice)
+						})
+						r.With(requireAdminCapability(auth.ActionUsersImpersonate)).Post("/users/{id}/impersonate", adminHandler.HandleImpersonateUser)
+
+						if requestHandler != nil {
+							r.Group(func(r chi.Router) {
+								r.Use(requireAdminCapability(auth.ActionRequestsApprove))
+								r.Get("/requests", requestHandler.HandleAdminList)
+								r.Post("/requests/{id}/approve", requestHandler.HandleApprove)
+								r.Post("/requests/{id}/decline", requestHandler.HandleDecline)
+								r.Post("/requests/{id}/cancel", requestHandler.HandleCancel)
+								r.Post("/requests/{id}/retry", requestHandler.HandleRetry)
+							})
+							r.Group(func(r chi.Router) {
+								r.Use(requireAdminCapability(auth.ActionServerConfigure))
+								r.Get("/request-settings", requestHandler.HandleGetSettings)
+								r.Put("/request-settings", requestHandler.HandleUpdateSettings)
+								r.Get("/request-integrations", requestHandler.HandleListIntegrations)
+								r.Post("/request-integrations", requestHandler.HandleCreateIntegration)
+								r.Put("/request-integrations/{id}", requestHandler.HandleUpdateIntegration)
+								r.Delete("/request-integrations/{id}", requestHandler.HandleDeleteIntegration)
+								r.Post("/request-integrations/{id}/options", requestHandler.HandleLoadIntegrationOptions)
+							})
+							r.Group(func(r chi.Router) {
+								r.Use(requireAdminCapability(auth.ActionUsersManage))
+								r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
+								r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
+							})
+						}
+
+						r.Group(func(r chi.Router) {
+							r.Use(requireActingAdmin)
 
 							r.Get("/sessions", adminHandler.HandleListSessions)
 							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)
@@ -2572,23 +2637,6 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Put("/api-keys/{id}/tier", apiKeyHandler.HandleAdminUpdateTier)
 							}
 
-							if requestHandler != nil {
-								r.Get("/requests", requestHandler.HandleAdminList)
-								r.Post("/requests/{id}/approve", requestHandler.HandleApprove)
-								r.Post("/requests/{id}/decline", requestHandler.HandleDecline)
-								r.Post("/requests/{id}/cancel", requestHandler.HandleCancel)
-								r.Post("/requests/{id}/retry", requestHandler.HandleRetry)
-								r.Get("/request-settings", requestHandler.HandleGetSettings)
-								r.Put("/request-settings", requestHandler.HandleUpdateSettings)
-								r.Get("/request-users/{user_id}/limit", requestHandler.HandleGetUserLimit)
-								r.Put("/request-users/{user_id}/limit", requestHandler.HandleUpdateUserLimit)
-								r.Get("/request-integrations", requestHandler.HandleListIntegrations)
-								r.Post("/request-integrations", requestHandler.HandleCreateIntegration)
-								r.Put("/request-integrations/{id}", requestHandler.HandleUpdateIntegration)
-								r.Delete("/request-integrations/{id}", requestHandler.HandleDeleteIntegration)
-								r.Post("/request-integrations/{id}/options", requestHandler.HandleLoadIntegrationOptions)
-							}
-
 							if autoscanHandler != nil {
 								r.Get("/autoscan/settings", autoscanHandler.HandleGetSettings)
 								r.Put("/autoscan/settings", autoscanHandler.HandleUpdateSettings)
@@ -2609,11 +2657,6 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Get("/autoscan/status", autoscanHandler.HandleStatus)
 							}
 
-							if deps.ActivityLogRepo != nil {
-								adminIPHandler := handlers.NewAdminIPHandler(deps.ActivityLogRepo)
-								r.Get("/users/{id}/ips", adminIPHandler.HandleGetUserIPs)
-								r.Get("/ips", adminIPHandler.HandleGetIPUsers)
-							}
 							if deps.OpsLogRepo != nil && deps.ActivityLogRepo != nil {
 								adminLogsHandler := handlers.NewAdminLogsHandler(deps.OpsLogRepo, deps.ActivityLogRepo, deps.LogStreamHub)
 								r.Get("/logs/app", adminLogsHandler.HandleListOperationalLogs)
@@ -2655,6 +2698,44 @@ func NewRouter(deps Dependencies) chi.Router {
 // pgSubtitleMediaResolver implements handlers.SubtitleMediaResolver using a direct PG query.
 type pgSubtitleMediaResolver struct {
 	pool *pgxpool.Pool
+}
+
+type playbackLimitUserLoader interface {
+	GetByID(ctx context.Context, id int) (*models.User, error)
+}
+
+func resolvePlaybackSessionLimits(
+	ctx context.Context,
+	users playbackLimitUserLoader,
+	authorizer auth.Authorizer,
+	userID int,
+) (playback.SessionLimits, error) {
+	if authorizer != nil {
+		decision, err := authorizer.Authorize(ctx, auth.AccessRequest{
+			UserID:       userID,
+			Action:       auth.ActionPlaybackPlay,
+			ResourceType: auth.ResourceServer,
+			ResourceID:   "*",
+		})
+		if err != nil {
+			return playback.SessionLimits{}, err
+		}
+		if decision.EffectivePolicy.MaxStreams > 0 || decision.EffectivePolicy.MaxTranscodes > 0 {
+			return playback.SessionLimits{
+				MaxStreams:    decision.EffectivePolicy.MaxStreams,
+				MaxTranscodes: decision.EffectivePolicy.MaxTranscodes,
+			}, nil
+		}
+	}
+
+	user, err := users.GetByID(ctx, userID)
+	if err != nil {
+		return playback.SessionLimits{}, err
+	}
+	return playback.SessionLimits{
+		MaxStreams:    user.MaxStreams,
+		MaxTranscodes: user.MaxTranscodes,
+	}, nil
 }
 
 func (r *pgSubtitleMediaResolver) GetMediaFileWithMetadata(ctx context.Context, fileID int) (*handlers.MediaFileMetadata, error) {

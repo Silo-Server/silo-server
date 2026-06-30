@@ -181,8 +181,18 @@ func TestJWT_TamperedToken(t *testing.T) {
 		t.Fatalf("GenerateAccessToken() error: %v", err)
 	}
 
-	// Tamper with the token by modifying the last character of the signature.
-	tampered := token[:len(token)-1] + "X"
+	// Tamper with the token by modifying the first character of the payload.
+	// Avoid changing trailing base64url bits, which may decode to the same bytes.
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 JWT parts, got %d", len(parts))
+	}
+	replacement := "A"
+	if strings.HasPrefix(parts[1], replacement) {
+		replacement = "B"
+	}
+	parts[1] = replacement + parts[1][1:]
+	tampered := strings.Join(parts, ".")
 
 	_, err = svc.ValidateToken(tampered)
 	if err == nil {

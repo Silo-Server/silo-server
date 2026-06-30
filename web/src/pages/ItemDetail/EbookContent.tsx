@@ -10,6 +10,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useEbookReaderProgress } from "@/hooks/queries/ebookReaderProgress";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { RelatedRail } from "@/pages/audiobooks/components/RelatedRail";
 import {
   formatReaderProgress,
@@ -80,6 +81,12 @@ export default function EbookContent({
 }) {
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
+  const canUseDownloads = userCapabilities.can([
+    USER_CAPABILITY_ACTIONS.downloadsDirect,
+    USER_CAPABILITY_ACTIONS.downloadsTranscode,
+  ]);
   const { data: readerProgress } = useEbookReaderProgress(item.content_id);
   const watchedMutation = useWatchedStateMutation(item);
   const isRead = item.user_data?.played === true;
@@ -92,8 +99,10 @@ export default function EbookContent({
   const readVersion =
     (hasSavedProgress ? progressReadVersion(item.versions, readerProgress?.file_id) : undefined) ??
     preferredReadVersion(item.versions);
-  const canRead = Boolean(readVersion);
-  const canDownload = Boolean(user?.download_allowed && item.versions.length > 0);
+  const canRead = canPlayback && Boolean(readVersion);
+  const canDownload = Boolean(
+    canUseDownloads && user?.download_allowed && item.versions.length > 0,
+  );
   const readerParams = new URLSearchParams();
   if (readVersion) {
     readerParams.set("file_id", String(readVersion.file_id));

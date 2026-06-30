@@ -14,6 +14,8 @@ import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { useAdminAccess } from "@/hooks/useAdminCapabilities";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { CustomThemeProvider } from "@/contexts/CustomThemeProvider";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
@@ -46,6 +48,7 @@ import RequestDetail from "@/pages/RequestDetail";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminActivity from "@/pages/AdminActivity";
 import AdminLogs from "@/pages/AdminLogs";
+import AdminAccessGroups from "@/pages/AdminAccessGroups";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminRequests from "@/pages/AdminRequests";
 import AdminAutoscan from "@/pages/AdminAutoscan";
@@ -107,6 +110,7 @@ import {
   buildUserCollectionCatalogHref,
 } from "@/pages/catalogSearchParams";
 import { buildLegacyWebhookSyncRedirectTarget } from "@/lib/webhookSync";
+import { ADMIN_ROUTE_ACTIONS, firstAllowedAdminPath } from "@/lib/adminCapabilities";
 import { toast } from "sonner";
 
 /** Scrolls to top on pathname change (custom replacement for ScrollRestoration which requires data router). */
@@ -177,8 +181,38 @@ function RequireProfile({ children }: { children: ReactNode }) {
 }
 
 function RequireAdmin({ children }: { children: ReactNode }) {
-  const actingAdmin = useIsActingAdmin();
-  if (!actingAdmin) return <Navigate to="/" replace />;
+  const adminAccess = useAdminAccess();
+  if (adminAccess.isLoading) {
+    return (
+      <div className="p-8" role="status" aria-live="polite">
+        <span className="sr-only">Loading admin access</span>
+        Loading...
+      </div>
+    );
+  }
+  if (!adminAccess.canAccessAdmin) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+function RequireAdminAction({
+  actions,
+  children,
+}: {
+  actions: readonly string[];
+  children: ReactNode;
+}) {
+  const adminAccess = useAdminAccess();
+  if (adminAccess.isLoading) {
+    return (
+      <div className="p-8" role="status" aria-live="polite">
+        <span className="sr-only">Loading admin access</span>
+        Loading...
+      </div>
+    );
+  }
+  if (!adminAccess.can(actions)) {
+    return <Navigate to={firstAllowedAdminPath(adminAccess.actionSet)} replace />;
+  }
   return <>{children}</>;
 }
 
@@ -214,8 +248,11 @@ function RequireRequestsEnabled({ children }: { children: ReactNode }) {
  */
 function TasteSeedGate({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
+  const userCapabilities = useUserCapabilityAccess();
+  const canManagePersonalLists = userCapabilities.can(USER_CAPABILITY_ACTIONS.personalListsManage);
   const { data: favorites, isPending, isError } = useFavorites();
 
+  if (userCapabilities.isLoading || !canManagePersonalLists) return <>{children}</>;
   if (isPending || isError || !profile) return <>{children}</>;
 
   const hasFavorites = (favorites?.length ?? 0) > 0;
@@ -250,6 +287,7 @@ function QueryCacheManager() {
       qc.removeQueries({ queryKey: ["calendar"] });
       qc.removeQueries({ queryKey: ["requests"] });
       qc.removeQueries({ queryKey: ["notifications"] });
+      qc.removeQueries({ queryKey: ["auth"] });
       // Recommendation rows include per-profile user_state (is_favorite, etc.);
       // the taste-seed picker depends on this for pre-selection.
       qc.removeQueries({ queryKey: ["recommendations"] });
@@ -384,32 +422,222 @@ function AppRoutes() {
                     </RequireAdmin>
                   }
                 >
-                  <Route index element={<AdminDashboard />} />
-                  <Route path="activity" element={<AdminActivity />} />
-                  <Route path="logs" element={<AdminLogs />} />
-                  <Route path="libraries" element={<AdminLibraries />} />
-                  <Route path="maintenance" element={<AdminMaintenance />} />
-                  <Route path="collections" element={<AdminCollections />} />
-                  <Route path="collections/new" element={<AdminCollectionEditor />} />
-                  <Route path="collections/:id/edit" element={<AdminCollectionEditor />} />
-                  <Route path="requests" element={<AdminRequests />} />
-                  <Route path="autoscan" element={<AdminAutoscan />} />
-                  <Route path="history" element={<AdminPlaybackHistory />} />
-                  <Route path="marker-history" element={<AdminMarkerHistory />} />
-                  <Route path="history-import" element={<AdminHistoryImport />} />
-                  <Route path="users" element={<AdminUsers />} />
-                  <Route path="users/:id" element={<AdminUserDetail />} />
-                  <Route path="devices" element={<AdminDevices />} />
-                  <Route path="devices/:userId/:deviceId" element={<AdminDevices />} />
-                  <Route path="nodes" element={<AdminNodes />} />
-                  <Route path="sections" element={<AdminSections />} />
-                  <Route path="plugins" element={<AdminPlugins />} />
-                  <Route path="settings" element={<AdminSettingsLayout />} />
-                  <Route path="recommendations" element={<AdminRecommendations />} />
-                  <Route path="api-keys" element={<AdminApiKeys />} />
-                  <Route path="subtitles" element={<AdminSubtitles />} />
-                  <Route path="tasks" element={<AdminTasks />} />
-                  <Route path="tasks/:key" element={<AdminTaskDetail />} />
+                  <Route
+                    index
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.dashboard}>
+                        <AdminDashboard />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="activity"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.activity}>
+                        <AdminActivity />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="logs"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.logs}>
+                        <AdminLogs />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="libraries"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.libraries}>
+                        <AdminLibraries />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="maintenance"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.maintenance}>
+                        <AdminMaintenance />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="collections"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.collections}>
+                        <AdminCollections />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="collections/new"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.collections}>
+                        <AdminCollectionEditor />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="collections/:id/edit"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.collections}>
+                        <AdminCollectionEditor />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="requests"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.requests}>
+                        <AdminRequests />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="autoscan"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.autoscan}>
+                        <AdminAutoscan />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="history"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.history}>
+                        <AdminPlaybackHistory />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="marker-history"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.markerHistory}>
+                        <AdminMarkerHistory />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="history-import"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.historyImport}>
+                        <AdminHistoryImport />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="access-groups"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.accessGroups}>
+                        <AdminAccessGroups />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="users"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.users}>
+                        <AdminUsers />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="users/:id"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.users}>
+                        <AdminUserDetail />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="devices"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.devices}>
+                        <AdminDevices />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="devices/:userId/:deviceId"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.devices}>
+                        <AdminDevices />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="nodes"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.nodes}>
+                        <AdminNodes />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="sections"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.sections}>
+                        <AdminSections />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="plugins"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.plugins}>
+                        <AdminPlugins />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="settings"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.settings}>
+                        <AdminSettingsLayout />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="recommendations"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.recommendations}>
+                        <AdminRecommendations />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="api-keys"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.apiKeys}>
+                        <AdminApiKeys />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="subtitles"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.subtitles}>
+                        <AdminSubtitles />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="tasks"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.tasks}>
+                        <AdminTasks />
+                      </RequireAdminAction>
+                    }
+                  />
+                  <Route
+                    path="tasks/:key"
+                    element={
+                      <RequireAdminAction actions={ADMIN_ROUTE_ACTIONS.tasks}>
+                        <AdminTaskDetail />
+                      </RequireAdminAction>
+                    }
+                  />
                   <Route path="stats" element={<Navigate to="/admin" replace />} />
                   <Route path="*" element={<Navigate to="/admin" replace />} />
                 </Route>

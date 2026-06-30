@@ -103,6 +103,14 @@ export interface User {
   impersonation?: ImpersonationInfo | null;
 }
 
+export interface AdminCapabilities {
+  actions: string[];
+}
+
+export interface UserCapabilities {
+  actions: string[];
+}
+
 export interface AuthSession {
   id: string;
   device_name: string;
@@ -2201,6 +2209,7 @@ export interface AdminUser {
   email: string;
   role: string;
   permissions: string[];
+  access_groups: AdminAccessGroup[];
   enabled: boolean;
   library_ids: number[] | null;
   max_playback_quality: string;
@@ -2214,12 +2223,127 @@ export interface AdminUser {
   last_active_at?: string;
 }
 
+export interface AdminAccessGroup {
+  id: number;
+  slug: string;
+  name: string;
+  description: string;
+  policy: AdminACLPolicy;
+  built_in: boolean;
+  protected: boolean;
+  member_count: number;
+}
+
+export interface AdminAccessGroupMember {
+  user_id: number;
+  username: string;
+  email: string;
+  role: string;
+  enabled: boolean;
+}
+
+export interface AdminACLPolicy {
+  library_ids?: number[];
+  media_types?: string[];
+  max_playback_quality?: string;
+  max_streams?: number;
+  max_transcodes?: number;
+  max_profiles?: number;
+  direct_downloads_allowed?: boolean;
+  transcoded_downloads_allowed?: boolean;
+}
+
+export interface AdminACLCondition {
+  library_ids?: number[];
+  media_types?: string[];
+  primary_profile_required?: boolean;
+  max_playback_quality?: string;
+  max_streams?: number;
+  max_transcodes?: number;
+  direct_downloads_allowed?: boolean;
+  transcoded_downloads_allowed?: boolean;
+  max_content_rating?: string;
+}
+
+export interface AdminACLRule {
+  id: number;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  effect: "allow" | "deny";
+  conditions: AdminACLCondition;
+  priority: number;
+  name: string;
+  description: string;
+}
+
+export interface AdminACLRuleWriteRequest {
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  effect: "allow" | "deny";
+  conditions: AdminACLCondition;
+  priority: number;
+  name: string;
+  description: string;
+}
+
+export interface AdminAccessGroupDetail extends AdminAccessGroup {
+  members: AdminAccessGroupMember[];
+  rules: AdminACLRule[];
+}
+
+export interface AdminEffectivePolicy {
+  library_ids?: number[];
+  media_types?: string[];
+  max_playback_quality?: string;
+  max_streams: number;
+  max_transcodes: number;
+  max_profiles: number;
+  direct_downloads_allowed: boolean;
+  transcoded_downloads_allowed: boolean;
+  max_content_rating?: string;
+}
+
+export interface AdminACLExplanationSource {
+  type: string;
+  id?: string;
+  name?: string;
+}
+
+export interface AdminACLActionExplanation {
+  action: string;
+  resource_type: string;
+  allowed: boolean;
+  reason_code: string;
+  source: AdminACLExplanationSource;
+  winning_rule?: AdminACLRule;
+  matched_rules: AdminACLRule[];
+  evaluated_rules: AdminACLRule[];
+}
+
+export interface AdminUserAccessExplanation {
+  user: AdminUser;
+  groups: AdminAccessGroup[];
+  effective_policy: AdminEffectivePolicy;
+  actions: AdminACLActionExplanation[];
+}
+
+export interface AdminAccessGroupWriteRequest {
+  slug?: string;
+  name: string;
+  description?: string;
+  policy?: AdminACLPolicy;
+  rules: AdminACLRuleWriteRequest[];
+}
+
 export interface CreateUserRequest {
   username: string;
   email: string;
   password: string;
   role: string;
   permissions?: string[];
+  access_group_slugs?: string[];
   create_default_profile?: boolean;
   default_profile_name?: string;
   library_ids?: number[] | null;
@@ -2237,6 +2361,7 @@ export interface UpdateUserRequest {
   password?: string;
   role?: string;
   permissions?: string[];
+  access_group_slugs?: string[];
   enabled?: boolean;
   library_ids?: number[] | null;
   max_playback_quality?: string;

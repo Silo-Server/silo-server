@@ -9,13 +9,13 @@ func TestScanACLRuleFields(t *testing.T) {
 	row := aclRuleRow{
 		ID:           42,
 		SubjectType:  "group",
-		SubjectID:    "viewer",
+		SubjectID:    string(GroupStandardUser),
 		Action:       "playback.play",
 		ResourceType: "library",
 		ResourceID:   "10",
 		Effect:       "allow",
 		Priority:     5,
-		Name:         "viewer playback",
+		Name:         "user playback",
 		Description:  "allows library playback",
 	}
 
@@ -103,6 +103,34 @@ func TestACLRuleConditionsRejectUnknownKeys(t *testing.T) {
 
 	if _, err := row.toRule(); err == nil {
 		t.Fatalf("toRule() error = nil, want unknown condition keys to fail")
+	}
+}
+
+func TestACLPolicyDecodeObject(t *testing.T) {
+	policy, err := decodeACLPolicy([]byte(`{
+		"library_ids":[10],
+		"media_types":["movie"],
+		"max_playback_quality":"1080p",
+		"max_streams":5,
+		"max_transcodes":2,
+		"max_profiles":4,
+		"direct_downloads_allowed":true,
+		"transcoded_downloads_allowed":false
+	}`))
+	if err != nil {
+		t.Fatalf("decodeACLPolicy() error = %v", err)
+	}
+	if len(policy.LibraryIDs) != 1 || policy.LibraryIDs[0] != 10 {
+		t.Fatalf("library ids = %#v, want [10]", policy.LibraryIDs)
+	}
+	if policy.MaxProfiles == nil || *policy.MaxProfiles != 4 {
+		t.Fatalf("max profiles = %#v, want 4", policy.MaxProfiles)
+	}
+	if policy.MaxStreams == nil || *policy.MaxStreams != 5 {
+		t.Fatalf("max streams = %#v, want 5", policy.MaxStreams)
+	}
+	if policy.TranscodedDownloadsAllowed == nil || *policy.TranscodedDownloadsAllowed {
+		t.Fatalf("transcoded downloads allowed = %#v, want false", policy.TranscodedDownloadsAllowed)
 	}
 }
 

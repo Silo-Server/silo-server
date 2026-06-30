@@ -28,6 +28,17 @@ vi.mock("@/pages/audiobooks/player/audiobookPlaybackContext", () => ({
   useAudiobookPlaybackController: () => mocks.controller,
 }));
 
+vi.mock("@/hooks/useUserCapabilities", () => ({
+  USER_CAPABILITY_ACTIONS: {
+    playbackPlay: "playback.play",
+    personalListsManage: "personal_lists.manage",
+  },
+  useUserCapabilityAccess: () => ({
+    can: () => true,
+    isLoading: false,
+  }),
+}));
+
 vi.mock("@/components/AddToCollectionDialog", () => ({
   default: () => null,
 }));

@@ -17,6 +17,7 @@ import { audiobookFilesFromVersions } from "@/lib/audiobooks/files";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 import { coldResumePosition } from "@/pages/audiobooks/player/smartRewind";
 import { getAudiobookSmartRewind } from "@/pages/audiobooks/player/useAudiobookPrefs";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 
 function formatSeconds(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
@@ -75,6 +76,9 @@ export default function AudiobookContent({
   const handledPlayParamRef = useRef(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
   const audiobookPlayback = useAudiobookPlaybackController();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
+  const canManagePersonalLists = userCapabilities.can(USER_CAPABILITY_ACTIONS.personalListsManage);
 
   const files = useMemo<AudiobookFile[]>(
     () => audiobookFilesFromVersions(item.versions),
@@ -105,6 +109,7 @@ export default function AudiobookContent({
 
   const openPlayer = useCallback(
     (atSeconds: number) => {
+      if (!canPlayback) return;
       audiobookPlayback?.startPlayback({
         contentId: item.content_id,
         title: item.title,
@@ -115,10 +120,20 @@ export default function AudiobookContent({
         initialPositionSeconds: atSeconds,
       });
     },
-    [audiobookPlayback, author, files, item.content_id, item.poster_url, item.title, narrator],
+    [
+      audiobookPlayback,
+      author,
+      canPlayback,
+      files,
+      item.content_id,
+      item.poster_url,
+      item.title,
+      narrator,
+    ],
   );
 
   function handlePlayResume() {
+    if (!canPlayback) return;
     if (activePlayback) {
       audiobookPlayback?.toggleActivePlayback();
       return;
@@ -141,7 +156,12 @@ export default function AudiobookContent({
   }
 
   useEffect(() => {
-    if (handledPlayParamRef.current || searchParams.get("play") !== "1" || files.length === 0) {
+    if (
+      !canPlayback ||
+      handledPlayParamRef.current ||
+      searchParams.get("play") !== "1" ||
+      files.length === 0
+    ) {
       return;
     }
     handledPlayParamRef.current = true;
@@ -152,7 +172,7 @@ export default function AudiobookContent({
           ? coldResumePosition(resumeSeconds, getAudiobookSmartRewind())
           : 0,
     );
-  }, [files.length, hasProgress, openPlayer, resumeSeconds, searchParams]);
+  }, [canPlayback, files.length, hasProgress, openPlayer, resumeSeconds, searchParams]);
 
   return (
     <div>
@@ -206,9 +226,9 @@ export default function AudiobookContent({
         genres={item.genres}
         genreHref={(genre) => genreHref(genre, libraryId)}
         actions={
-          files.length > 0 && (
+          (files.length > 0 || canManagePersonalLists) && (
             <div className="flex max-w-md flex-col gap-3">
-              {hasProgress && durationTotal > 0 && (
+              {canPlayback && hasProgress && durationTotal > 0 && (
                 <div>
                   <div className="bg-muted h-1.5 w-full overflow-hidden rounded-full">
                     <div
@@ -223,25 +243,29 @@ export default function AudiobookContent({
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-3">
-                <Button onClick={handlePlayResume} size="lg" className="gap-2">
-                  {activePlayback?.playing ? (
-                    <Pause className="h-4 w-4 fill-current" />
-                  ) : (
-                    <Play className="h-4 w-4 fill-current" />
-                  )}
-                  {primaryPlaybackLabel()}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  onClick={() => setAddToCollectionOpen(true)}
-                  className="gap-2"
-                  title="Add to a manual collection"
-                >
-                  <FolderPlus className="h-4 w-4" />
-                  Add to Collection
-                </Button>
-                {hasProgress && (
+                {canPlayback && files.length > 0 && (
+                  <Button onClick={handlePlayResume} size="lg" className="gap-2">
+                    {activePlayback?.playing ? (
+                      <Pause className="h-4 w-4 fill-current" />
+                    ) : (
+                      <Play className="h-4 w-4 fill-current" />
+                    )}
+                    {primaryPlaybackLabel()}
+                  </Button>
+                )}
+                {canManagePersonalLists && (
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    onClick={() => setAddToCollectionOpen(true)}
+                    className="gap-2"
+                    title="Add to a manual collection"
+                  >
+                    <FolderPlus className="h-4 w-4" />
+                    Add to Collection
+                  </Button>
+                )}
+                {canPlayback && hasProgress && (
                   <Button variant="outline" size="lg" onClick={() => openPlayer(0)}>
                     Listen from Start
                   </Button>
@@ -298,11 +322,13 @@ export default function AudiobookContent({
           />
         )}
 
-        <ChaptersSection
-          files={files}
-          currentPositionSeconds={currentPlayerSeconds ?? (resumeSeconds || null)}
-          onSelect={(seconds) => openPlayer(seconds)}
-        />
+        {canPlayback && (
+          <ChaptersSection
+            files={files}
+            currentPositionSeconds={currentPlayerSeconds ?? (resumeSeconds || null)}
+            onSelect={(seconds) => openPlayer(seconds)}
+          />
+        )}
       </div>
     </div>
   );

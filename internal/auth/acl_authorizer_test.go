@@ -23,6 +23,19 @@ func (f fakeACLRuleLoader) ListRulesForUser(ctx context.Context, userID int) ([]
 	return f.rules, nil
 }
 
+type fakeACLPolicyRuleLoader struct {
+	rules    []ACLRule
+	policies []ACLPolicy
+}
+
+func (f fakeACLPolicyRuleLoader) ListRulesForUser(ctx context.Context, userID int) ([]ACLRule, error) {
+	return f.rules, nil
+}
+
+func (f fakeACLPolicyRuleLoader) ListPoliciesForUser(ctx context.Context, userID int) ([]ACLPolicy, error) {
+	return f.policies, nil
+}
+
 type trackingACLRuleLoader struct {
 	calls int
 	err   error
@@ -41,7 +54,7 @@ func TestACLAuthorizerCombinesRepositoryAndCompatibilityRules(t *testing.T) {
 	user := &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{"marker_edit"}, MaxStreams: 2}
 	ruleLoader := fakeACLRuleLoader{
 		rules: []ACLRule{
-			{ID: 99, SubjectType: SubjectGroup, SubjectID: "viewer", Action: ActionPlaybackPlay, ResourceType: ResourceLibrary, ResourceID: "10", Effect: EffectAllow, Priority: 1, Name: "viewer playback"},
+			{ID: 99, SubjectType: SubjectGroup, SubjectID: string(GroupStandardUser), Action: ActionPlaybackPlay, ResourceType: ResourceLibrary, ResourceID: "10", Effect: EffectAllow, Priority: 1, Name: "user playback"},
 			{ID: 100, SubjectType: SubjectUser, SubjectID: "7", Action: ActionMarkersEdit, ResourceType: ResourceServer, ResourceID: "*", Effect: EffectAllow, Priority: 2, Name: "repository marker edit"},
 		},
 	}
@@ -68,6 +81,56 @@ func TestACLAuthorizerCombinesRepositoryAndCompatibilityRules(t *testing.T) {
 	}
 	if !foundRepositoryRule {
 		t.Fatalf("matched rules = %#v, want repository rule 100 to be included", decision.MatchedRules)
+	}
+}
+
+func TestACLAuthorizerCascadesGroupPolicyByMostPermissiveValue(t *testing.T) {
+	maxProfiles := 4
+	fourStreams := 4
+	fiveStreams := 5
+	oneTranscode := 1
+	user := &models.User{
+		ID:                       7,
+		Role:                     "user",
+		Enabled:                  true,
+		MaxPlaybackQuality:       "1080p",
+		MaxStreams:               6,
+		MaxTranscodes:            2,
+		MaxProfiles:              5,
+		DownloadAllowed:          false,
+		DownloadTranscodeAllowed: false,
+	}
+	ruleLoader := fakeACLPolicyRuleLoader{
+		rules: []ACLRule{
+			{ID: 1, SubjectType: SubjectGroup, SubjectID: string(GroupStandardUser), Action: ActionServerView, ResourceType: ResourceServer, ResourceID: "*", Effect: EffectAllow},
+		},
+		policies: []ACLPolicy{
+			{MaxProfiles: &maxProfiles},
+			{MaxStreams: &fourStreams},
+			{MaxStreams: &fiveStreams, MaxTranscodes: &oneTranscode},
+		},
+	}
+
+	authorizer := NewACLAuthorizer(ruleLoader, fakeACLUserLoader{user: user})
+	decision, err := authorizer.Authorize(context.Background(), AccessRequest{UserID: 7, Action: ActionServerView, ResourceType: ResourceServer, ResourceID: "*"})
+	if err != nil {
+		t.Fatalf("authorize error: %v", err)
+	}
+
+	if !decision.Allowed {
+		t.Fatalf("server.view should be allowed: %#v", decision)
+	}
+	if decision.EffectivePolicy.MaxProfiles != 4 {
+		t.Fatalf("max profiles = %d, want 4", decision.EffectivePolicy.MaxProfiles)
+	}
+	if decision.EffectivePolicy.MaxStreams != 5 {
+		t.Fatalf("max streams = %d, want 5", decision.EffectivePolicy.MaxStreams)
+	}
+	if decision.EffectivePolicy.MaxTranscodes != 1 {
+		t.Fatalf("max transcodes = %d, want 1", decision.EffectivePolicy.MaxTranscodes)
+	}
+	if decision.EffectivePolicy.MaxPlaybackQuality != "1080p" {
+		t.Fatalf("max quality = %q, want legacy fallback 1080p", decision.EffectivePolicy.MaxPlaybackQuality)
 	}
 }
 

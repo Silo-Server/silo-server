@@ -134,6 +134,40 @@ func TestHandleCreateProfile_EnforcesUserProfileLimit(t *testing.T) {
 	}
 }
 
+func TestHandleCreateProfile_EnforcesACLProfileLimit(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+	handler.UserRepo = testProfileUserRepo{
+		user: &models.User{ID: 1, MaxProfiles: 5},
+	}
+	handler.AccessAuthorizer = &fakeHandlerAdminAuthorizer{
+		decision: auth.AccessDecision{
+			Allowed: true,
+			EffectivePolicy: auth.EffectivePolicy{
+				MaxProfiles: 1,
+			},
+		},
+	}
+
+	req := newAuthorizedProfileRequestWithRole(
+		http.MethodPost,
+		"/profiles",
+		`{"name":"Kids","max_playback_quality":"1080p"}`,
+		"admin",
+		"",
+	)
+	rr := httptest.NewRecorder()
+
+	handler.HandleCreateProfile(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "profile limit (1)") {
+		t.Fatalf("body = %s", rr.Body.String())
+	}
+}
+
 func TestHandleCreateProfile_AllowsNonAdminUpToCap(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})

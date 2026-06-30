@@ -5,10 +5,12 @@ CREATE TABLE IF NOT EXISTS public.acl_groups (
     slug text NOT NULL UNIQUE,
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
+    policy jsonb NOT NULL DEFAULT '{}'::jsonb,
     built_in boolean NOT NULL DEFAULT false,
     protected boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT acl_groups_policy_object_check CHECK (jsonb_typeof(policy) = 'object')
 );
 
 CREATE TABLE IF NOT EXISTS public.acl_group_members (
@@ -52,20 +54,83 @@ INSERT INTO public.acl_policy_revisions (id, revision)
 VALUES (true, 1)
 ON CONFLICT (id) DO NOTHING;
 
+ALTER TABLE public.users
+    ALTER COLUMN permissions SET DEFAULT '{}'::text[];
+
+UPDATE public.users
+SET permissions = array_remove(permissions, 'marker_edit'),
+    access_policy_revision = access_policy_revision + 1,
+    updated_at = now()
+WHERE COALESCE(role, 'user') <> 'admin'
+  AND 'marker_edit' = ANY (permissions);
+
 INSERT INTO public.acl_groups (slug, name, description, built_in, protected)
 VALUES
     ('owner', 'Owner', 'Full server ownership and security control.', true, true),
     ('admin', 'Admin', 'Broad operational administration.', true, true),
     ('library_manager', 'Library Manager', 'Library and scan management.', true, false),
     ('metadata_curator', 'Metadata Curator', 'Metadata, poster, marker, and provider curation.', true, false),
-    ('viewer', 'Viewer', 'Normal media playback access.', true, false),
-    ('restricted_viewer', 'Restricted Viewer', 'Playback access with tighter limits.', true, false)
+    ('standard_user', 'User', 'Normal media access.', true, false),
+    ('restricted_user', 'Restricted User', 'Media access with tighter limits.', true, false)
 ON CONFLICT (slug) DO UPDATE
 SET name = EXCLUDED.name,
     description = EXCLUDED.description,
     built_in = EXCLUDED.built_in,
     protected = EXCLUDED.protected,
     updated_at = now();
+
+WITH built_in_user_grants(subject_id, action, resource_type, name) AS (
+    VALUES
+        ('owner', 'playback.play', 'media_item', 'Owner playback'),
+        ('owner', 'playback.transcode', 'media_item', 'Owner transcoding'),
+        ('owner', 'profiles.manage', 'profile', 'Owner profile management'),
+        ('owner', 'personal_lists.manage', 'media_item', 'Owner personal lists'),
+        ('owner', 'requests.create', 'request', 'Owner request creation'),
+        ('admin', 'playback.play', 'media_item', 'Admin playback'),
+        ('admin', 'playback.transcode', 'media_item', 'Admin transcoding'),
+        ('admin', 'profiles.manage', 'profile', 'Admin profile management'),
+        ('admin', 'personal_lists.manage', 'media_item', 'Admin personal lists'),
+        ('admin', 'requests.create', 'request', 'Admin request creation'),
+        ('standard_user', 'playback.play', 'media_item', 'User playback'),
+        ('standard_user', 'playback.transcode', 'media_item', 'User transcoding'),
+        ('standard_user', 'profiles.manage', 'profile', 'User profile management'),
+        ('standard_user', 'personal_lists.manage', 'media_item', 'User personal lists'),
+        ('standard_user', 'requests.create', 'request', 'User request creation'),
+        ('restricted_user', 'playback.play', 'media_item', 'Restricted user playback'),
+        ('restricted_user', 'playback.transcode', 'media_item', 'Restricted user transcoding'),
+        ('restricted_user', 'profiles.manage', 'profile', 'Restricted user profile management'),
+        ('restricted_user', 'personal_lists.manage', 'media_item', 'Restricted user personal lists'),
+        ('restricted_user', 'requests.create', 'request', 'Restricted user request creation')
+),
+grant_subjects(subject_type) AS (
+    VALUES
+        ('group'),
+        ('builtin_role')
+)
+INSERT INTO public.acl_rules (
+    subject_type, subject_id, action, resource_type, resource_id, effect, conditions, priority, name
+)
+SELECT
+    grant_subjects.subject_type,
+    grant_row.subject_id,
+    grant_row.action,
+    grant_row.resource_type,
+    '*',
+    'allow',
+    '{}'::jsonb,
+    10,
+    grant_row.name
+FROM built_in_user_grants AS grant_row
+CROSS JOIN grant_subjects
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM public.acl_rules existing
+    WHERE existing.subject_type = grant_subjects.subject_type
+      AND existing.subject_id = grant_row.subject_id
+      AND existing.action = grant_row.action
+      AND existing.resource_type = grant_row.resource_type
+      AND existing.resource_id = '*'
+);
 
 WITH oldest_admin AS (
     SELECT id
@@ -100,12 +165,12 @@ WHERE users.enabled = true
   AND users.id NOT IN (SELECT id FROM oldest_admin)
 ON CONFLICT DO NOTHING;
 
-WITH viewer_group AS (
-    SELECT id FROM public.acl_groups WHERE slug = 'viewer'
+WITH standard_user_group AS (
+    SELECT id FROM public.acl_groups WHERE slug = 'standard_user'
 )
 INSERT INTO public.acl_group_members (group_id, user_id)
-SELECT viewer_group.id, users.id
-FROM public.users, viewer_group
+SELECT standard_user_group.id, users.id
+FROM public.users, standard_user_group
 WHERE users.enabled = true
   AND COALESCE(users.role, 'user') <> 'admin'
 ON CONFLICT DO NOTHING;

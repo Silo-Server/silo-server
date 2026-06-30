@@ -33,6 +33,7 @@ import {
   useRequestDiscovery,
   useRequestSearch,
 } from "@/hooks/queries/useRequests";
+import { useCanRequest } from "@/hooks/useCanRequest";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { cn } from "@/lib/utils";
 import { formatRequestStatus, requestInputFromMediaResult } from "@/lib/mediaRequests";
@@ -140,6 +141,7 @@ export default function Requests() {
   const search = useRequestSearch(mediaType, searchQuery, searchPage);
   const mine = useMyMediaRequests({ limit: 100 });
   const createRequest = useCreateMediaRequest();
+  const canRequest = useCanRequest();
   const pendingRequestKey = createRequest.variables
     ? mediaRequestKey(createRequest.variables.media_type, createRequest.variables.tmdb_id)
     : undefined;
@@ -232,6 +234,7 @@ export default function Requests() {
   }
 
   function submitRequest(item: RequestMediaResult) {
+    if (!canRequest.discoveryEnabled) return;
     createRequest.mutate(requestInputFromMediaResult(item));
   }
 
@@ -286,7 +289,7 @@ export default function Requests() {
               results={search.data?.results ?? []}
               pendingRequestKey={pendingRequestKey}
               isSubmitting={createRequest.isPending}
-              onRequest={submitRequest}
+              onRequest={canRequest.discoveryEnabled ? submitRequest : undefined}
             />
           ) : discovery.isLoading ? (
             <DiscoveryCarouselSkeleton />
@@ -303,7 +306,7 @@ export default function Requests() {
                   section={section}
                   pendingRequestKey={pendingRequestKey}
                   isSubmitting={createRequest.isPending}
-                  onRequest={submitRequest}
+                  onRequest={canRequest.discoveryEnabled ? submitRequest : undefined}
                 />
               ))}
               <BrandCarousel
@@ -535,7 +538,7 @@ function DiscoverySectionRow({
   section: RequestDiscoverySection;
   pendingRequestKey?: string;
   isSubmitting: boolean;
-  onRequest: (item: RequestMediaResult) => void;
+  onRequest?: (item: RequestMediaResult) => void;
 }) {
   const eyebrow = sectionEyebrow(section.key);
   return (
@@ -554,7 +557,7 @@ function DiscoverySectionRow({
             isSubmitting={
               isSubmitting && pendingRequestKey === mediaRequestKey(item.media_type, item.tmdb_id)
             }
-            onRequest={() => onRequest(item)}
+            onRequest={onRequest ? () => onRequest(item) : undefined}
           />
         ))}
       </MediaCarousel>
@@ -605,7 +608,7 @@ function SearchResultsView({
   results: RequestMediaResult[];
   pendingRequestKey?: string;
   isSubmitting: boolean;
-  onRequest: (item: RequestMediaResult) => void;
+  onRequest?: (item: RequestMediaResult) => void;
 }) {
   const typeLabel =
     mediaType === "series" ? "series" : mediaType === "movie" ? "movies" : "movies and series";
@@ -684,7 +687,7 @@ function SearchResultsView({
                   isSubmitting &&
                   pendingRequestKey === mediaRequestKey(item.media_type, item.tmdb_id)
                 }
-                onRequest={() => onRequest(item)}
+                onRequest={onRequest ? () => onRequest(item) : undefined}
                 fluid
               />
             ))}

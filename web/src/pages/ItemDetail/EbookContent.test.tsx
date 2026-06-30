@@ -15,6 +15,18 @@ vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
 }));
 
+vi.mock("@/hooks/useUserCapabilities", () => ({
+  USER_CAPABILITY_ACTIONS: {
+    playbackPlay: "playback.play",
+    downloadsDirect: "downloads.direct",
+    downloadsTranscode: "downloads.transcode",
+  },
+  useUserCapabilityAccess: () => ({
+    can: () => true,
+    isLoading: false,
+  }),
+}));
+
 vi.mock("@/hooks/queries/items", () => ({
   useWatchedStateMutation: mocks.useWatchedStateMutation,
 }));

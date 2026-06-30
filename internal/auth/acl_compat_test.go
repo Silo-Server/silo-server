@@ -13,8 +13,8 @@ func TestCompatibilityGroupsForAdminAndUser(t *testing.T) {
 	}
 
 	userGroups := CompatibilityGroupsForUser(&models.User{ID: 2, Role: "user", Enabled: true})
-	if len(userGroups) != 1 || userGroups[0] != GroupViewer {
-		t.Fatalf("user groups = %#v, want [%q]", userGroups, GroupViewer)
+	if len(userGroups) != 1 || userGroups[0] != GroupStandardUser {
+		t.Fatalf("user groups = %#v, want [%q]", userGroups, GroupStandardUser)
 	}
 }
 

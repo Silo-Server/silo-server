@@ -50,9 +50,9 @@ func TestHasEffectivePermission_UserRequiresAssignedPermission(t *testing.T) {
 	}
 }
 
-func TestDefaultUserPermissionsIncludesMarkerEditOnly(t *testing.T) {
+func TestDefaultUserPermissionsGrantNoSpecialAccess(t *testing.T) {
 	got := DefaultUserPermissions()
-	want := []string{"marker_edit"}
+	want := []string{}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("default permissions = %#v, want %#v", got, want)
 	}

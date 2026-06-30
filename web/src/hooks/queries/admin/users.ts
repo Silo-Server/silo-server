@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type {
+  AdminAccessGroup,
+  AdminAccessGroupDetail,
+  AdminAccessGroupWriteRequest,
+  AdminUserAccessExplanation,
   AdminDeviceDetail,
   AdminDeviceSummary,
   AdminSettingEntry,
@@ -54,6 +58,92 @@ export function useAdminUsers() {
   });
 }
 
+export function useAdminAccessGroups(enabled = true) {
+  return useQuery({
+    queryKey: adminKeys.accessGroups(),
+    queryFn: () => api<AdminAccessGroup[]>("/admin/access-groups").then((d) => d ?? []),
+    enabled,
+    staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+export function useAdminAccessGroup(slug: string | null, enabled = true) {
+  return useQuery({
+    queryKey: adminKeys.accessGroup(slug ?? ""),
+    queryFn: () => api<AdminAccessGroupDetail>(`/admin/access-groups/${slug}`),
+    enabled: enabled && Boolean(slug),
+    staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+export function useAdminUserAccessExplanation(userId: number | null, enabled = true) {
+  return useQuery({
+    queryKey: adminKeys.userAccessExplanation(userId ?? 0),
+    queryFn: () => api<AdminUserAccessExplanation>(`/admin/users/${userId}/access-explain`),
+    enabled: enabled && userId != null,
+    staleTime: ADMIN_STALE_TIME,
+  });
+}
+
+export function useCreateAdminAccessGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AdminAccessGroupWriteRequest) =>
+      api<AdminAccessGroupDetail>("/admin/access-groups", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (group) => {
+      toast.success("Access group created");
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroups() });
+      if (group?.slug)
+        queryClient.invalidateQueries({ queryKey: adminKeys.accessGroup(group.slug) });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to save access group");
+    },
+  });
+}
+
+export function useUpdateAdminAccessGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slug, body }: { slug: string; body: AdminAccessGroupWriteRequest }) =>
+      api<AdminAccessGroupDetail>(`/admin/access-groups/${slug}`, {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: (group, variables) => {
+      toast.success("Access group updated");
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroups() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroup(variables.slug) });
+      if (group?.slug && group.slug !== variables.slug) {
+        queryClient.invalidateQueries({ queryKey: adminKeys.accessGroup(group.slug) });
+      }
+      queryClient.invalidateQueries({ queryKey: adminKeys.users() });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to save access group");
+    },
+  });
+}
+
+export function useDeleteAdminAccessGroup() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => api(`/admin/access-groups/${slug}`, { method: "DELETE" }),
+    onSuccess: (_data, slug) => {
+      toast.success("Access group deleted");
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroups() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroup(slug) });
+      queryClient.invalidateQueries({ queryKey: adminKeys.users() });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to delete access group");
+    },
+  });
+}
+
 export function useAdminUser(id: number) {
   return useQuery({
     queryKey: adminKeys.userDetail(id),
@@ -73,6 +163,7 @@ export function useCreateUser() {
     onSuccess: () => {
       toast.success("User created");
       queryClient.invalidateQueries({ queryKey: adminKeys.users() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroups() });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save");
@@ -93,6 +184,7 @@ export function useUpdateUser() {
       queryClient.invalidateQueries({ queryKey: adminKeys.users() });
       queryClient.invalidateQueries({ queryKey: adminKeys.userDetail(variables.id) });
       queryClient.invalidateQueries({ queryKey: adminKeys.userProfiles(variables.id) });
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroups() });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save");

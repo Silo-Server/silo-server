@@ -52,6 +52,19 @@ type UserRepository interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
 
+type ACLGroupRepository interface {
+	ListGroups(ctx context.Context) ([]auth.ACLGroup, error)
+	GetGroup(ctx context.Context, slug string) (auth.ACLGroup, []auth.ACLRule, error)
+	CreateGroup(ctx context.Context, input auth.CreateACLGroupInput) (auth.ACLGroup, error)
+	UpdateGroup(ctx context.Context, slug string, input auth.UpdateACLGroupInput) (auth.ACLGroup, error)
+	DeleteGroup(ctx context.Context, slug string) error
+	ListGroupsByUserIDs(ctx context.Context, userIDs []int) (map[int][]auth.ACLGroup, error)
+	ListGroupMemberCounts(ctx context.Context) (map[string]int, error)
+	ListGroupMembers(ctx context.Context, slug string) ([]auth.ACLGroupMember, error)
+	ReplaceUserGroups(ctx context.Context, userID int, groupSlugs []string) error
+	ReplaceGroupRules(ctx context.Context, slug string, rules []auth.ACLRuleInput) ([]auth.ACLRule, error)
+}
+
 // ServerSettingsStore provides access to server-wide admin settings.
 type ServerSettingsStore interface {
 	Get(ctx context.Context, key string) (string, error)
@@ -95,6 +108,9 @@ type AdminHandler struct {
 	JobRepo                      AdminJobCreator
 	ItemRefreshResolver          ItemRefreshScopeResolver
 	ImpersonationService         ImpersonationService
+	AccessGroups                 ACLGroupRepository
+	AdminAuthorizer              auth.Authorizer
+	PrimaryProfileChecker        apimw.PrimaryProfileChecker
 	RealtimeHub                  *notifications.Hub
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
@@ -137,6 +153,7 @@ type createUserRequest struct {
 	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
 	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
+	AccessGroupSlugs         createStringSliceField `json:"access_group_slugs"`
 }
 
 type createStringSliceField struct {
@@ -212,26 +229,127 @@ type updateUserRequest struct {
 	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
 	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
+	AccessGroupSlugs         updateStringSliceField `json:"access_group_slugs,omitempty"`
 }
 
 // adminUserResponse represents a user in admin JSON responses.
 type adminUserResponse struct {
-	ID                       int        `json:"id"`
-	Username                 string     `json:"username"`
-	Email                    string     `json:"email"`
-	Role                     string     `json:"role"`
-	Permissions              []string   `json:"permissions"`
-	Enabled                  bool       `json:"enabled"`
-	LibraryIDs               []int      `json:"library_ids"`
-	MaxPlaybackQuality       string     `json:"max_playback_quality"`
-	MaxStreams               int        `json:"max_streams"`
-	MaxTranscodes            int        `json:"max_transcodes"`
-	MaxProfiles              int        `json:"max_profiles"`
-	DownloadAllowed          bool       `json:"download_allowed"`
-	DownloadTranscodeAllowed bool       `json:"download_transcode_allowed"`
-	CreatedAt                time.Time  `json:"created_at"`
-	UpdatedAt                time.Time  `json:"updated_at"`
-	LastActiveAt             *time.Time `json:"last_active_at,omitempty"`
+	ID                       int                     `json:"id"`
+	Username                 string                  `json:"username"`
+	Email                    string                  `json:"email"`
+	Role                     string                  `json:"role"`
+	Permissions              []string                `json:"permissions"`
+	Enabled                  bool                    `json:"enabled"`
+	LibraryIDs               []int                   `json:"library_ids"`
+	MaxPlaybackQuality       string                  `json:"max_playback_quality"`
+	MaxStreams               int                     `json:"max_streams"`
+	MaxTranscodes            int                     `json:"max_transcodes"`
+	MaxProfiles              int                     `json:"max_profiles"`
+	DownloadAllowed          bool                    `json:"download_allowed"`
+	DownloadTranscodeAllowed bool                    `json:"download_transcode_allowed"`
+	CreatedAt                time.Time               `json:"created_at"`
+	UpdatedAt                time.Time               `json:"updated_at"`
+	LastActiveAt             *time.Time              `json:"last_active_at,omitempty"`
+	AccessGroups             []adminACLGroupResponse `json:"access_groups"`
+}
+
+type adminACLGroupResponse struct {
+	ID          int64          `json:"id"`
+	Slug        string         `json:"slug"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Policy      auth.ACLPolicy `json:"policy"`
+	BuiltIn     bool           `json:"built_in"`
+	Protected   bool           `json:"protected"`
+	MemberCount int            `json:"member_count"`
+}
+
+type adminACLGroupDetailResponse struct {
+	ID          int64                         `json:"id"`
+	Slug        string                        `json:"slug"`
+	Name        string                        `json:"name"`
+	Description string                        `json:"description"`
+	Policy      auth.ACLPolicy                `json:"policy"`
+	BuiltIn     bool                          `json:"built_in"`
+	Protected   bool                          `json:"protected"`
+	MemberCount int                           `json:"member_count"`
+	Members     []adminACLGroupMemberResponse `json:"members"`
+	Rules       []adminACLRuleResponse        `json:"rules"`
+}
+
+type adminACLGroupMemberResponse struct {
+	UserID   int    `json:"user_id"`
+	Username string `json:"username"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+	Enabled  bool   `json:"enabled"`
+}
+
+type adminACLRuleResponse struct {
+	ID           int64                `json:"id"`
+	Action       auth.ACLAction       `json:"action"`
+	ResourceType auth.ACLResourceType `json:"resource_type"`
+	ResourceID   string               `json:"resource_id"`
+	Effect       auth.ACLEffect       `json:"effect"`
+	Conditions   auth.ACLCondition    `json:"conditions"`
+	Priority     int                  `json:"priority"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description"`
+}
+
+type adminUserAccessExplanationResponse struct {
+	User            adminUserResponse                   `json:"user"`
+	Groups          []adminACLGroupResponse             `json:"groups"`
+	EffectivePolicy adminEffectivePolicyResponse        `json:"effective_policy"`
+	Actions         []adminACLActionExplanationResponse `json:"actions"`
+}
+
+type adminEffectivePolicyResponse struct {
+	LibraryIDs                 []int    `json:"library_ids,omitempty"`
+	MediaTypes                 []string `json:"media_types,omitempty"`
+	MaxPlaybackQuality         string   `json:"max_playback_quality,omitempty"`
+	MaxStreams                 int      `json:"max_streams"`
+	MaxTranscodes              int      `json:"max_transcodes"`
+	MaxProfiles                int      `json:"max_profiles"`
+	DirectDownloadsAllowed     bool     `json:"direct_downloads_allowed"`
+	TranscodedDownloadsAllowed bool     `json:"transcoded_downloads_allowed"`
+	MaxContentRating           string   `json:"max_content_rating,omitempty"`
+}
+
+type adminACLActionExplanationResponse struct {
+	Action         auth.ACLAction                    `json:"action"`
+	ResourceType   auth.ACLResourceType              `json:"resource_type"`
+	Allowed        bool                              `json:"allowed"`
+	ReasonCode     string                            `json:"reason_code"`
+	Source         adminACLExplanationSourceResponse `json:"source"`
+	WinningRule    *adminACLRuleResponse             `json:"winning_rule,omitempty"`
+	MatchedRules   []adminACLRuleResponse            `json:"matched_rules"`
+	EvaluatedRules []adminACLRuleResponse            `json:"evaluated_rules"`
+}
+
+type adminACLExplanationSourceResponse struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
+type adminAccessGroupWriteRequest struct {
+	Slug        string                `json:"slug,omitempty"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	Policy      auth.ACLPolicy        `json:"policy"`
+	Rules       []adminACLRuleRequest `json:"rules"`
+}
+
+type adminACLRuleRequest struct {
+	Action       auth.ACLAction       `json:"action"`
+	ResourceType auth.ACLResourceType `json:"resource_type"`
+	ResourceID   string               `json:"resource_id"`
+	Effect       auth.ACLEffect       `json:"effect"`
+	Conditions   auth.ACLCondition    `json:"conditions"`
+	Priority     int                  `json:"priority"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description"`
 }
 
 type adminPlaybackHistoryRow struct {
@@ -295,7 +413,123 @@ func toAdminUserResponse(u *models.User) adminUserResponse {
 		DownloadTranscodeAllowed: u.DownloadTranscodeAllowed,
 		CreatedAt:                u.CreatedAt,
 		UpdatedAt:                u.UpdatedAt,
+		AccessGroups:             []adminACLGroupResponse{},
 	}
+}
+
+func toAdminACLGroupResponse(group auth.ACLGroup) adminACLGroupResponse {
+	return adminACLGroupResponse{
+		ID:          group.ID,
+		Slug:        group.Slug,
+		Name:        group.Name,
+		Description: group.Description,
+		Policy:      group.Policy,
+		BuiltIn:     group.BuiltIn,
+		Protected:   group.Protected,
+	}
+}
+
+func applyACLGroupMemberCounts(resp []adminACLGroupResponse, counts map[string]int) {
+	if len(counts) == 0 {
+		return
+	}
+	for i := range resp {
+		resp[i].MemberCount = counts[resp[i].Slug]
+	}
+}
+
+func toAdminACLGroupResponses(groups []auth.ACLGroup) []adminACLGroupResponse {
+	out := make([]adminACLGroupResponse, 0, len(groups))
+	for _, group := range groups {
+		out = append(out, toAdminACLGroupResponse(group))
+	}
+	return out
+}
+
+func toAdminACLGroupDetailResponse(group auth.ACLGroup, rules []auth.ACLRule, members []auth.ACLGroupMember) adminACLGroupDetailResponse {
+	return adminACLGroupDetailResponse{
+		ID:          group.ID,
+		Slug:        group.Slug,
+		Name:        group.Name,
+		Description: group.Description,
+		Policy:      group.Policy,
+		BuiltIn:     group.BuiltIn,
+		Protected:   group.Protected,
+		MemberCount: len(members),
+		Members:     toAdminACLGroupMemberResponses(members),
+		Rules:       toAdminACLRuleResponses(rules),
+	}
+}
+
+func toAdminACLGroupMemberResponses(members []auth.ACLGroupMember) []adminACLGroupMemberResponse {
+	out := make([]adminACLGroupMemberResponse, 0, len(members))
+	for _, member := range members {
+		out = append(out, adminACLGroupMemberResponse{
+			UserID:   member.UserID,
+			Username: member.Username,
+			Email:    member.Email,
+			Role:     member.Role,
+			Enabled:  member.Enabled,
+		})
+	}
+	return out
+}
+
+func toAdminACLRuleResponse(rule auth.ACLRule) adminACLRuleResponse {
+	return adminACLRuleResponse{
+		ID:           rule.ID,
+		Action:       rule.Action,
+		ResourceType: rule.ResourceType,
+		ResourceID:   rule.ResourceID,
+		Effect:       rule.Effect,
+		Conditions:   rule.Conditions,
+		Priority:     rule.Priority,
+		Name:         rule.Name,
+		Description:  rule.Description,
+	}
+}
+
+func toAdminACLRuleResponses(rules []auth.ACLRule) []adminACLRuleResponse {
+	out := make([]adminACLRuleResponse, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, toAdminACLRuleResponse(rule))
+	}
+	return out
+}
+
+func toAdminEffectivePolicyResponse(policy auth.EffectivePolicy) adminEffectivePolicyResponse {
+	return adminEffectivePolicyResponse{
+		LibraryIDs:                 append([]int(nil), policy.LibraryIDs...),
+		MediaTypes:                 append([]string(nil), policy.MediaTypes...),
+		MaxPlaybackQuality:         policy.MaxPlaybackQuality,
+		MaxStreams:                 policy.MaxStreams,
+		MaxTranscodes:              policy.MaxTranscodes,
+		MaxProfiles:                policy.MaxProfiles,
+		DirectDownloadsAllowed:     policy.DirectDownloadsAllowed,
+		TranscodedDownloadsAllowed: policy.TranscodedDownloadsAllowed,
+		MaxContentRating:           policy.MaxContentRating,
+	}
+}
+
+func (req adminACLRuleRequest) toInput() auth.ACLRuleInput {
+	return auth.ACLRuleInput{
+		Action:       req.Action,
+		ResourceType: req.ResourceType,
+		ResourceID:   req.ResourceID,
+		Effect:       req.Effect,
+		Conditions:   req.Conditions,
+		Priority:     req.Priority,
+		Name:         req.Name,
+		Description:  req.Description,
+	}
+}
+
+func adminACLRuleInputs(rules []adminACLRuleRequest) ([]auth.ACLRuleInput, error) {
+	inputs := make([]auth.ACLRuleInput, 0, len(rules))
+	for _, rule := range rules {
+		inputs = append(inputs, rule.toInput())
+	}
+	return auth.NormalizeACLRuleInputs(inputs)
 }
 
 func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) (map[int]time.Time, error) {
@@ -338,6 +572,164 @@ func applyLastActiveAt(resp *adminUserResponse, lastActive map[int]time.Time) {
 	}
 }
 
+func applyAccessGroups(resp *adminUserResponse, groups map[int][]auth.ACLGroup) {
+	if resp == nil {
+		return
+	}
+	resp.AccessGroups = toAdminACLGroupResponses(groups[resp.ID])
+}
+
+func (h *AdminHandler) loadUserAccessGroups(ctx context.Context, userIDs []int) (map[int][]auth.ACLGroup, error) {
+	if h == nil || h.AccessGroups == nil || len(userIDs) == 0 {
+		return map[int][]auth.ACLGroup{}, nil
+	}
+	return h.AccessGroups.ListGroupsByUserIDs(ctx, userIDs)
+}
+
+func (h *AdminHandler) validateAccessGroupSlugs(ctx context.Context, slugs []string) error {
+	if h == nil || h.AccessGroups == nil {
+		return nil
+	}
+	normalized, err := auth.NormalizeACLGroupSlugs(slugs)
+	if err != nil {
+		return err
+	}
+	groups, err := h.AccessGroups.ListGroups(ctx)
+	if err != nil {
+		return err
+	}
+	known := make(map[string]struct{}, len(groups))
+	for _, group := range groups {
+		known[group.Slug] = struct{}{}
+	}
+	for _, slug := range normalized {
+		if _, ok := known[slug]; !ok {
+			return auth.ErrUnknownACLGroup
+		}
+	}
+	return nil
+}
+
+func (h *AdminHandler) adminCapabilityAllowed(r *http.Request, action auth.ACLAction) (bool, error) {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil {
+		return false, nil
+	}
+
+	primaryProfile := claims.Role == "admin"
+	if h.PrimaryProfileChecker != nil {
+		profileID := apimw.GetProfileID(r.Context())
+		if profileID == "" {
+			profileID = r.Header.Get("X-Profile-Id")
+		}
+		if profileID != "" {
+			isPrimary, found, err := h.PrimaryProfileChecker(r.Context(), claims.UserID, profileID)
+			if err != nil {
+				return false, err
+			}
+			primaryProfile = found && isPrimary
+		}
+	}
+
+	if h.AdminAuthorizer == nil {
+		return claims.Role == "admin" && primaryProfile, nil
+	}
+
+	decision, err := h.AdminAuthorizer.Authorize(r.Context(), auth.AccessRequest{
+		UserID:         claims.UserID,
+		Action:         action,
+		ResourceType:   auth.ResourceServer,
+		ResourceID:     "*",
+		PrimaryProfile: primaryProfile,
+	})
+	if err != nil {
+		return false, err
+	}
+	return decision.Allowed, nil
+}
+
+func (h *AdminHandler) requireSecurityManage(w http.ResponseWriter, r *http.Request, message string) bool {
+	allowed, err := h.adminCapabilityAllowed(r, auth.ActionSecurityManage)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to verify security management permission")
+		return false
+	}
+	if !allowed {
+		writeError(w, http.StatusForbidden, "forbidden", message)
+		return false
+	}
+	return true
+}
+
+func (h *AdminHandler) requireSecurityManageForAccessGroups(w http.ResponseWriter, r *http.Request) bool {
+	return h.requireSecurityManage(w, r, "Security management permission is required to change access groups")
+}
+
+func (h *AdminHandler) requireSecurityManageForAdminRole(w http.ResponseWriter, r *http.Request) bool {
+	return h.requireSecurityManage(w, r, "Security management permission is required to manage admin users")
+}
+
+func (h *AdminHandler) requireSecurityManageForUserAccessPolicy(w http.ResponseWriter, r *http.Request) bool {
+	return h.requireSecurityManage(w, r, "Security management permission is required to change user access policy")
+}
+
+func isLegacyAdminRole(role string) bool {
+	return strings.EqualFold(strings.TrimSpace(role), "admin")
+}
+
+func createUserAccessPolicySet(req createUserRequest) bool {
+	return req.Permissions.Set ||
+		req.AccessGroupSlugs.Set ||
+		len(req.LibraryIDs) > 0 ||
+		strings.TrimSpace(req.MaxPlaybackQuality) != "" ||
+		req.MaxStreams != nil ||
+		req.MaxTranscodes != nil ||
+		req.MaxProfiles != nil ||
+		req.DownloadAllowed != nil ||
+		req.DownloadTranscodeAllowed != nil
+}
+
+func updateUserAccessPolicySet(req updateUserRequest) bool {
+	return req.Permissions.Set ||
+		req.AccessGroupSlugs.Set ||
+		req.LibraryIDs.Set ||
+		req.MaxPlaybackQuality != nil ||
+		req.MaxStreams != nil ||
+		req.MaxTranscodes != nil ||
+		req.MaxProfiles != nil ||
+		req.DownloadAllowed != nil ||
+		req.DownloadTranscodeAllowed != nil
+}
+
+func writeAccessGroupError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, auth.ErrUnknownACLGroup) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Unknown access group")
+		return true
+	}
+	if errors.Is(err, auth.ErrACLGroupExists) {
+		writeError(w, http.StatusConflict, "conflict", "Access group already exists")
+		return true
+	}
+	if errors.Is(err, auth.ErrProtectedACLGroup) {
+		writeError(w, http.StatusForbidden, "forbidden", "Built-in access groups cannot be changed")
+		return true
+	}
+	if errors.Is(err, auth.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "Access group not found")
+		return true
+	}
+	if strings.Contains(err.Error(), "ACL group name is required") ||
+		strings.Contains(err.Error(), "invalid ACL") {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return true
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Access group operation failed")
+	return true
+}
+
 // --- Handler methods ---
 
 // HandleListUsers handles GET /admin/users.
@@ -358,8 +750,13 @@ func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Warn("failed to load admin user last activity", "error", err)
 	}
+	accessGroups, err := h.loadUserAccessGroups(r.Context(), userIDs)
+	if err != nil {
+		slog.Warn("failed to load admin user access groups", "error", err)
+	}
 	for i := range resp {
 		applyLastActiveAt(&resp[i], lastActive)
+		applyAccessGroups(&resp[i], accessGroups)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -386,8 +783,283 @@ func (h *AdminHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("failed to load admin user last activity", "user_id", user.ID, "error", err)
 	}
 	applyLastActiveAt(&resp, lastActive)
+	accessGroups, err := h.loadUserAccessGroups(r.Context(), []int{user.ID})
+	if err != nil {
+		slog.Warn("failed to load admin user access groups", "user_id", user.ID, "error", err)
+	}
+	applyAccessGroups(&resp, accessGroups)
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleListAccessGroups handles GET /admin/access-groups.
+func (h *AdminHandler) HandleListAccessGroups(w http.ResponseWriter, r *http.Request) {
+	if h.AccessGroups == nil {
+		writeJSON(w, http.StatusOK, []adminACLGroupResponse{})
+		return
+	}
+	groups, err := h.AccessGroups.ListGroups(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list access groups")
+		return
+	}
+	counts, err := h.AccessGroups.ListGroupMemberCounts(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list access group members")
+		return
+	}
+	resp := toAdminACLGroupResponses(groups)
+	applyACLGroupMemberCounts(resp, counts)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandleGetAccessGroup handles GET /admin/access-groups/{slug}.
+func (h *AdminHandler) HandleGetAccessGroup(w http.ResponseWriter, r *http.Request) {
+	if h.AccessGroups == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are unavailable")
+		return
+	}
+	group, rules, err := h.AccessGroups.GetGroup(r.Context(), chi.URLParam(r, "slug"))
+	if writeAccessGroupError(w, err) {
+		return
+	}
+	members, err := h.AccessGroups.ListGroupMembers(r.Context(), group.Slug)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list access group members")
+		return
+	}
+	writeJSON(w, http.StatusOK, toAdminACLGroupDetailResponse(group, rules, members))
+}
+
+// HandleCreateAccessGroup handles POST /admin/access-groups.
+func (h *AdminHandler) HandleCreateAccessGroup(w http.ResponseWriter, r *http.Request) {
+	if h.AccessGroups == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are unavailable")
+		return
+	}
+	var req adminAccessGroupWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	rules, err := adminACLRuleInputs(req.Rules)
+	if writeAccessGroupError(w, err) {
+		return
+	}
+
+	group, err := h.AccessGroups.CreateGroup(r.Context(), auth.CreateACLGroupInput{
+		Slug:        req.Slug,
+		Name:        req.Name,
+		Description: req.Description,
+		Policy:      req.Policy,
+	})
+	if writeAccessGroupError(w, err) {
+		return
+	}
+
+	appliedRules := []auth.ACLRule{}
+	if len(rules) > 0 {
+		appliedRules, err = h.AccessGroups.ReplaceGroupRules(r.Context(), group.Slug, rules)
+		if writeAccessGroupError(w, err) {
+			return
+		}
+	}
+	writeJSON(w, http.StatusCreated, toAdminACLGroupDetailResponse(group, appliedRules, nil))
+}
+
+// HandleUpdateAccessGroup handles PUT /admin/access-groups/{slug}.
+func (h *AdminHandler) HandleUpdateAccessGroup(w http.ResponseWriter, r *http.Request) {
+	if h.AccessGroups == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are unavailable")
+		return
+	}
+	var req adminAccessGroupWriteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	rules, err := adminACLRuleInputs(req.Rules)
+	if writeAccessGroupError(w, err) {
+		return
+	}
+
+	slug := chi.URLParam(r, "slug")
+	group, err := h.AccessGroups.UpdateGroup(r.Context(), slug, auth.UpdateACLGroupInput{
+		Name:        req.Name,
+		Description: req.Description,
+		Policy:      req.Policy,
+	})
+	if writeAccessGroupError(w, err) {
+		return
+	}
+	appliedRules, err := h.AccessGroups.ReplaceGroupRules(r.Context(), group.Slug, rules)
+	if writeAccessGroupError(w, err) {
+		return
+	}
+	writeJSON(w, http.StatusOK, toAdminACLGroupDetailResponse(group, appliedRules, nil))
+}
+
+// HandleDeleteAccessGroup handles DELETE /admin/access-groups/{slug}.
+func (h *AdminHandler) HandleDeleteAccessGroup(w http.ResponseWriter, r *http.Request) {
+	if h.AccessGroups == nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are unavailable")
+		return
+	}
+	if err := h.AccessGroups.DeleteGroup(r.Context(), chi.URLParam(r, "slug")); writeAccessGroupError(w, err) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AdminHandler) HandleGetUserAccessExplanation(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
+		return
+	}
+	user, err := h.userRepo.GetByID(r.Context(), id)
+	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+
+	authorizer := h.AdminAuthorizer
+	if authorizer == nil {
+		authorizer = auth.NewACLAuthorizer(nil, h.userRepo)
+	}
+
+	userResp := toAdminUserResponse(user)
+	groupMap := map[string]auth.ACLGroup{}
+	if h.AccessGroups != nil {
+		groupsByUser, err := h.loadUserAccessGroups(r.Context(), []int{user.ID})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user access groups")
+			return
+		}
+		applyAccessGroups(&userResp, groupsByUser)
+		for _, group := range groupsByUser[user.ID] {
+			groupMap[group.Slug] = group
+		}
+	}
+
+	actions := make([]adminACLActionExplanationResponse, 0, len(auth.ExplainableCapabilityActions()))
+	var effectivePolicy adminEffectivePolicyResponse
+	policySet := false
+	for _, action := range auth.ExplainableCapabilityActions() {
+		resourceType := adminACLResourceTypeForAction(action)
+		explanation, err := authorizer.Explain(r.Context(), auth.AccessRequest{
+			UserID:         user.ID,
+			Action:         action,
+			ResourceType:   resourceType,
+			ResourceID:     "*",
+			PrimaryProfile: true,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to explain user access")
+			return
+		}
+		if !policySet {
+			effectivePolicy = toAdminEffectivePolicyResponse(explanation.Decision.EffectivePolicy)
+			policySet = true
+		}
+		actions = append(actions, adminACLActionExplanationResponse{
+			Action:         action,
+			ResourceType:   resourceType,
+			Allowed:        explanation.Decision.Allowed,
+			ReasonCode:     explanation.Decision.ReasonCode,
+			Source:         adminACLExplanationSource(explanation.Decision, groupMap),
+			WinningRule:    adminACLWinningRuleResponse(explanation.Decision.WinningRule),
+			MatchedRules:   toAdminACLRuleResponses(explanation.Decision.MatchedRules),
+			EvaluatedRules: toAdminACLRuleResponses(explanation.EvaluatedRules),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, adminUserAccessExplanationResponse{
+		User:            userResp,
+		Groups:          userResp.AccessGroups,
+		EffectivePolicy: effectivePolicy,
+		Actions:         actions,
+	})
+}
+
+func adminACLWinningRuleResponse(rule *auth.ACLRule) *adminACLRuleResponse {
+	if rule == nil {
+		return nil
+	}
+	resp := toAdminACLRuleResponse(*rule)
+	return &resp
+}
+
+func adminACLExplanationSource(decision auth.AccessDecision, groups map[string]auth.ACLGroup) adminACLExplanationSourceResponse {
+	if decision.WinningRule == nil {
+		if decision.ReasonCode == "user_disabled" {
+			return adminACLExplanationSourceResponse{Type: "user", Name: "Disabled user"}
+		}
+		return adminACLExplanationSourceResponse{Type: "default", Name: "Default deny"}
+	}
+	rule := decision.WinningRule
+	switch rule.SubjectType {
+	case auth.SubjectUser:
+		sourceType := "user"
+		if strings.HasPrefix(rule.Name, "legacy permission ") {
+			sourceType = "legacy_permission"
+		}
+		return adminACLExplanationSourceResponse{Type: sourceType, ID: rule.SubjectID, Name: rule.Name}
+	case auth.SubjectGroup:
+		name := rule.SubjectID
+		if group, ok := groups[rule.SubjectID]; ok {
+			name = group.Name
+		}
+		return adminACLExplanationSourceResponse{Type: "group", ID: rule.SubjectID, Name: name}
+	case auth.SubjectBuiltInRole:
+		name := rule.SubjectID
+		if group, ok := groups[rule.SubjectID]; ok {
+			name = group.Name
+		}
+		return adminACLExplanationSourceResponse{Type: "builtin_role", ID: rule.SubjectID, Name: name}
+	case auth.SubjectEveryone:
+		return adminACLExplanationSourceResponse{Type: "everyone", Name: "Everyone"}
+	default:
+		return adminACLExplanationSourceResponse{Type: string(rule.SubjectType), ID: rule.SubjectID, Name: rule.Name}
+	}
+}
+
+func adminACLResourceTypeForAction(action auth.ACLAction) auth.ACLResourceType {
+	switch action {
+	case auth.ActionPlaybackPlay,
+		auth.ActionPlaybackTranscode,
+		auth.ActionDownloadsDirect,
+		auth.ActionDownloadsTranscode,
+		auth.ActionPersonalListsManage,
+		auth.ActionMetadataCurate,
+		auth.ActionMarkersEdit:
+		return auth.ResourceMediaItem
+	case auth.ActionRequestsCreate, auth.ActionRequestsApprove:
+		return auth.ResourceRequest
+	case auth.ActionUsersView, auth.ActionUsersManage, auth.ActionUsersImpersonate:
+		return auth.ResourceUser
+	case auth.ActionLibrariesView, auth.ActionLibrariesManage:
+		return auth.ResourceLibrary
+	case auth.ActionTasksView, auth.ActionTasksRun:
+		return auth.ResourceTask
+	case auth.ActionLogsView:
+		return auth.ResourceLog
+	case auth.ActionPluginsView, auth.ActionPluginsManage:
+		return auth.ResourcePlugin
+	case auth.ActionNodesView, auth.ActionNodesManage:
+		return auth.ResourceRemoteNode
+	case auth.ActionProfilesManage:
+		return auth.ResourceProfile
+	case auth.ActionSecurityManage:
+		return auth.ResourceSecuritySettings
+	default:
+		return auth.ResourceServer
+	}
 }
 
 // HandleCreateUser handles POST /admin/users.
@@ -405,6 +1077,30 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "Username, email, password, and role are required")
 		return
 	}
+	if isLegacyAdminRole(req.Role) {
+		if !h.requireSecurityManageForAdminRole(w, r) {
+			return
+		}
+	}
+	if createUserAccessPolicySet(req) {
+		if !h.requireSecurityManageForUserAccessPolicy(w, r) {
+			return
+		}
+	}
+
+	accessGroupSlugs := auth.DefaultACLGroupSlugsForRole(req.Role)
+	if req.AccessGroupSlugs.Set {
+		accessGroupSlugs = req.AccessGroupSlugs.Value
+	}
+	normalizedAccessGroupSlugs, err := auth.NormalizeACLGroupSlugs(accessGroupSlugs)
+	if err != nil {
+		writeAccessGroupError(w, err)
+		return
+	}
+	if err := h.validateAccessGroupSlugs(r.Context(), normalizedAccessGroupSlugs); err != nil {
+		writeAccessGroupError(w, err)
+		return
+	}
 
 	maxPlaybackQuality, ok := access.ParsePlaybackQualityPreset(req.MaxPlaybackQuality)
 	if !ok {
@@ -419,7 +1115,7 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 	if req.Permissions.Set {
 		permissions = req.Permissions.Value
 	}
-	permissions, err := auth.NormalizePermissions(permissions)
+	permissions, err = auth.NormalizePermissions(permissions)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
@@ -449,9 +1145,21 @@ func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create user")
 		return
 	}
+	if h.AccessGroups != nil {
+		if err := h.AccessGroups.ReplaceUserGroups(r.Context(), user.ID, normalizedAccessGroupSlugs); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to assign access groups")
+			return
+		}
+	}
 	h.invalidateStats(r.Context(), cache.ChannelAdmin, cache.EventAdminStatsInvalidated, strconv.Itoa(user.ID))
 
-	writeJSON(w, http.StatusCreated, toAdminUserResponse(user))
+	resp := toAdminUserResponse(user)
+	accessGroups, err := h.loadUserAccessGroups(r.Context(), []int{user.ID})
+	if err != nil {
+		slog.Warn("failed to load created user access groups", "user_id", user.ID, "error", err)
+	}
+	applyAccessGroups(&resp, accessGroups)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 // HandleUpdateUser handles PUT /admin/users/{id}.
@@ -508,17 +1216,38 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed,
 	}
 
-	var currentUser *models.User
-	if updateMayRequireSessionRevocation(updateInput) {
-		currentUser, err = h.userRepo.GetByID(r.Context(), id)
-		if err != nil {
-			if auth.IsNotFound(err) {
-				writeError(w, http.StatusNotFound, "not_found", "User not found")
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+	currentUser, err := h.userRepo.GetByID(r.Context(), id)
+	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+	if isLegacyAdminRole(currentUser.Role) || (req.Role != nil && isLegacyAdminRole(*req.Role)) {
+		if !h.requireSecurityManageForAdminRole(w, r) {
+			return
+		}
+	}
+	if updateUserAccessPolicySet(req) {
+		if !h.requireSecurityManageForUserAccessPolicy(w, r) {
+			return
+		}
+	}
+
+	var normalizedAccessGroupSlugs []string
+	if req.AccessGroupSlugs.Set {
+		normalized, err := auth.NormalizeACLGroupSlugs(req.AccessGroupSlugs.Value)
+		if err != nil {
+			writeAccessGroupError(w, err)
+			return
+		}
+		if err := h.validateAccessGroupSlugs(r.Context(), normalized); err != nil {
+			writeAccessGroupError(w, err)
+			return
+		}
+		normalizedAccessGroupSlugs = normalized
 	}
 
 	err = h.userRepo.Update(r.Context(), id, updateInput)
@@ -530,7 +1259,21 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update user")
 		return
 	}
-	if updateRequiresSessionRevocation(currentUser, updateInput) {
+	if req.AccessGroupSlugs.Set && h.AccessGroups != nil {
+		if err := h.AccessGroups.ReplaceUserGroups(r.Context(), id, normalizedAccessGroupSlugs); err != nil {
+			if errors.Is(err, auth.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found", "User not found")
+				return
+			}
+			if errors.Is(err, auth.ErrUnknownACLGroup) {
+				writeError(w, http.StatusBadRequest, "bad_request", "Unknown access group")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update access groups")
+			return
+		}
+	}
+	if updateRequiresSessionRevocation(currentUser, updateInput) || req.AccessGroupSlugs.Set {
 		if err := h.revokeUserSessions(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to revoke updated user sessions")
 			return
@@ -543,7 +1286,13 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toAdminUserResponse(user))
+	resp := toAdminUserResponse(user)
+	accessGroups, err := h.loadUserAccessGroups(r.Context(), []int{user.ID})
+	if err != nil {
+		slog.Warn("failed to load updated user access groups", "user_id", user.ID, "error", err)
+	}
+	applyAccessGroups(&resp, accessGroups)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleDeleteUser handles DELETE /admin/users/{id}.
@@ -553,6 +1302,21 @@ func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid user ID")
 		return
+	}
+
+	user, err := h.userRepo.GetByID(r.Context(), id)
+	if err != nil {
+		if auth.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "not_found", "User not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch user")
+		return
+	}
+	if isLegacyAdminRole(user.Role) {
+		if !h.requireSecurityManageForAdminRole(w, r) {
+			return
+		}
 	}
 
 	err = h.userRepo.Delete(r.Context(), id)

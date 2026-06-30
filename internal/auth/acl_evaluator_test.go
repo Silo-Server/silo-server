@@ -51,7 +51,7 @@ func TestACLEvaluatorExplainIncludesMatchedRules(t *testing.T) {
 	evaluator := NewACLEvaluator()
 	request := AccessRequest{UserID: 7, Action: ActionPlaybackPlay, ResourceType: ResourceLibrary, ResourceID: "10"}
 	rules := []ACLRule{
-		{ID: 1, SubjectType: SubjectGroup, SubjectID: "viewer", Action: ActionPlaybackPlay, ResourceType: ResourceLibrary, ResourceID: "10", Effect: EffectAllow, Priority: 10, Name: "viewer playback"},
+		{ID: 1, SubjectType: SubjectGroup, SubjectID: string(GroupStandardUser), Action: ActionPlaybackPlay, ResourceType: ResourceLibrary, ResourceID: "10", Effect: EffectAllow, Priority: 10, Name: "user playback"},
 	}
 
 	explanation := evaluator.Explain(request, rules, EffectivePolicy{MaxStreams: 2}, true)
@@ -90,7 +90,7 @@ func TestACLEvaluatorConditionFactsBlockUnmetConstraints(t *testing.T) {
 			rule: ACLRule{
 				ID:           10,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionPlaybackPlay,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",
@@ -110,7 +110,7 @@ func TestACLEvaluatorConditionFactsBlockUnmetConstraints(t *testing.T) {
 			rule: ACLRule{
 				ID:           11,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionPlaybackPlay,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",
@@ -130,7 +130,7 @@ func TestACLEvaluatorConditionFactsBlockUnmetConstraints(t *testing.T) {
 			rule: ACLRule{
 				ID:           12,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionPlaybackTranscode,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",
@@ -150,7 +150,7 @@ func TestACLEvaluatorConditionFactsBlockUnmetConstraints(t *testing.T) {
 			rule: ACLRule{
 				ID:           13,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionDownloadsDirect,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",
@@ -170,7 +170,7 @@ func TestACLEvaluatorConditionFactsBlockUnmetConstraints(t *testing.T) {
 			rule: ACLRule{
 				ID:           14,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionDownloadsTranscode,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",
@@ -190,7 +190,7 @@ func TestACLEvaluatorConditionFactsBlockUnmetConstraints(t *testing.T) {
 			rule: ACLRule{
 				ID:           15,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionPlaybackPlay,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",
@@ -230,7 +230,7 @@ func TestACLEvaluatorConditionFactsIgnoreMissingRequestValues(t *testing.T) {
 			{
 				ID:           20,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionPlaybackPlay,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",
@@ -278,7 +278,7 @@ func TestACLEvaluatorExplainSnapshotsRequestAndPolicySlices(t *testing.T) {
 			{
 				ID:           30,
 				SubjectType:  SubjectGroup,
-				SubjectID:    "viewer",
+				SubjectID:    string(GroupStandardUser),
 				Action:       ActionPlaybackPlay,
 				ResourceType: ResourceLibrary,
 				ResourceID:   "10",

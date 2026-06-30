@@ -1,13 +1,21 @@
 import { useState, useId, useMemo } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { Link } from "react-router";
-import type { AdminUser, CreateUserRequest, UpdateUserRequest } from "@/api/types";
+import type {
+  AdminACLActionExplanation,
+  AdminUser,
+  CreateUserRequest,
+  UpdateUserRequest,
+} from "@/api/types";
 import {
+  useAdminAccessGroups,
+  useAdminUserAccessExplanation,
   useAdminUsers,
   useCreateUser,
   useUpdateUser,
   useDeleteUser,
 } from "@/hooks/queries/admin/users";
+import { useAdminAccess } from "@/hooks/useAdminCapabilities";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
@@ -43,6 +51,7 @@ import {
   ChevronDown,
   ChevronUp,
   History,
+  KeyRound,
   Plus,
   Pencil,
   Trash2,
@@ -65,6 +74,16 @@ import {
   hasAssignedPermission,
   setAssignedPermission,
 } from "@/lib/permissions";
+import {
+  ACCESS_GROUP_ACTION_CATEGORIES,
+  ACCESS_GROUP_ACTIONS,
+  accessGroupActionLabel,
+} from "./adminAccessGroupsModel";
+import {
+  accessExplanationReasonLabel,
+  accessExplanationSourceLabel,
+  policyLimitRows,
+} from "./adminAccessExplainModel";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -72,8 +91,12 @@ type SortDirection = "asc" | "desc";
 
 export default function AdminUsers() {
   const { data: users = [], isLoading } = useAdminUsers();
+  const adminAccess = useAdminAccess();
+  const canManageUsers = adminAccess.can("users.manage");
+  const canManageUserAccessPolicy = adminAccess.can("security.manage");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
+  const [accessUser, setAccessUser] = useState<AdminUser | null>(null);
   const [defaultsOpen, setDefaultsOpen] = useState(false);
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<AdminUser | null>(null);
   const deleteMutation = useDeleteUser();
@@ -139,6 +162,21 @@ export default function AdminUsers() {
           setConfirmDeleteUser(null);
         }}
       />
+      <Dialog
+        open={accessUser !== null}
+        onOpenChange={(open) => {
+          if (!open) setAccessUser(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>
+              {accessUser ? `${accessUser.username} Access` : "User Access"}
+            </DialogTitle>
+          </DialogHeader>
+          {accessUser && <UserAccessExplanationPanel user={accessUser} />}
+        </DialogContent>
+      </Dialog>
       <div className="page-header">
         <div className="space-y-3">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Users</h1>
@@ -147,44 +185,48 @@ export default function AdminUsers() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Dialog open={defaultsOpen} onOpenChange={setDefaultsOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Settings2 className="mr-1 h-4 w-4" /> User Defaults
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Default New User Settings</DialogTitle>
-              </DialogHeader>
-              <UserDefaultsForm onClose={() => setDefaultsOpen(false)} />
-            </DialogContent>
-          </Dialog>
-          <Dialog
-            open={dialogOpen}
-            onOpenChange={(open) => {
-              setDialogOpen(open);
-              if (!open) setEditingUser(null);
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-1 h-4 w-4" /> Add User
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>{editingUser ? "Edit User" : "Create User"}</DialogTitle>
-              </DialogHeader>
-              <UserForm
-                user={editingUser}
-                onClose={() => {
-                  setDialogOpen(false);
-                  setEditingUser(null);
-                }}
-              />
-            </DialogContent>
-          </Dialog>
+          {adminAccess.actingAdmin && (
+            <Dialog open={defaultsOpen} onOpenChange={setDefaultsOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Settings2 className="mr-1 h-4 w-4" /> User Defaults
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Default New User Settings</DialogTitle>
+                </DialogHeader>
+                <UserDefaultsForm onClose={() => setDefaultsOpen(false)} />
+              </DialogContent>
+            </Dialog>
+          )}
+          {canManageUsers && (
+            <Dialog
+              open={dialogOpen}
+              onOpenChange={(open) => {
+                setDialogOpen(open);
+                if (!open) setEditingUser(null);
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="mr-1 h-4 w-4" /> Add User
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-2xl">
+                <DialogHeader>
+                  <DialogTitle>{editingUser ? "Edit User" : "Create User"}</DialogTitle>
+                </DialogHeader>
+                <UserForm
+                  user={editingUser}
+                  onClose={() => {
+                    setDialogOpen(false);
+                    setEditingUser(null);
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       </div>
 
@@ -247,6 +289,7 @@ export default function AdminUsers() {
                   >
                     Role
                   </SortableUserHead>
+                  <TableHead>Access</TableHead>
                   <SortableUserHead
                     field="enabled"
                     activeField={sortField}
@@ -287,6 +330,9 @@ export default function AdminUsers() {
                       <Badge variant={u.role === "admin" ? "default" : "secondary"}>{u.role}</Badge>
                     </TableCell>
                     <TableCell>
+                      <AccessGroupBadges user={u} />
+                    </TableCell>
+                    <TableCell>
                       <Badge variant={u.enabled ? "outline" : "destructive"}>
                         {u.enabled ? "Active" : "Disabled"}
                       </Badge>
@@ -311,7 +357,19 @@ export default function AdminUsers() {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
+                          aria-label={`View ${u.username} access explanation`}
+                          onClick={() => setAccessUser(u)}
+                        >
+                          <KeyRound className="h-3 w-3" aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
                           aria-label={`Edit ${u.username}`}
+                          disabled={
+                            !canManageUsers || (u.role === "admin" && !canManageUserAccessPolicy)
+                          }
                           onClick={() => {
                             setEditingUser(u);
                             setDialogOpen(true);
@@ -324,6 +382,9 @@ export default function AdminUsers() {
                           size="icon"
                           className="h-7 w-7"
                           aria-label={`Delete ${u.username}`}
+                          disabled={
+                            !canManageUsers || (u.role === "admin" && !canManageUserAccessPolicy)
+                          }
                           onClick={() => handleDelete(u)}
                         >
                           <Trash2 className="h-3 w-3" aria-hidden="true" />
@@ -522,16 +583,196 @@ function formatRelativeTime(value?: string | null, fallback = "-") {
   return fallback;
 }
 
+function defaultAccessGroupSlugsForRole(role: string) {
+  return role === "admin" ? ["admin"] : ["standard_user"];
+}
+
+function defaultAccessGroupSlugForRole(role: string) {
+  return defaultAccessGroupSlugsForRole(role)[0] ?? "standard_user";
+}
+
+function accessGroupLabel(slug: string) {
+  switch (slug) {
+    case "owner":
+      return "Owner";
+    case "admin":
+      return "Admin";
+    case "library_manager":
+      return "Library Manager";
+    case "metadata_curator":
+      return "Metadata Curator";
+    case "standard_user":
+      return "User";
+    case "restricted_user":
+      return "Restricted User";
+    default:
+      return slug;
+  }
+}
+
+function AccessGroupBadges({ user }: { user: AdminUser }) {
+  const groups = user.access_groups ?? [];
+  if (groups.length === 0) {
+    return (
+      <Badge variant="secondary">
+        {accessGroupLabel(defaultAccessGroupSlugForRole(user.role))}
+      </Badge>
+    );
+  }
+  return (
+    <div className="flex max-w-64 flex-wrap gap-1">
+      {groups.map((group) => (
+        <Badge key={group.slug} variant={group.protected ? "default" : "secondary"}>
+          {group.name}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function UserAccessExplanationPanel({ user }: { user: AdminUser }) {
+  const { data, isLoading } = useAdminUserAccessExplanation(user.id);
+
+  if (isLoading || !data) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-20 w-full rounded-md" />
+        <Skeleton className="h-28 w-full rounded-md" />
+        <Skeleton className="h-48 w-full rounded-md" />
+      </div>
+    );
+  }
+
+  const actionsByName = new Map(data.actions.map((action) => [action.action, action]));
+  const catalogActionNames = new Set<string>(ACCESS_GROUP_ACTIONS.map((item) => item.action));
+  const uncategorizedActions = data.actions.filter(
+    (action) => !catalogActionNames.has(action.action),
+  );
+
+  return (
+    <div className="max-h-[72vh] space-y-5 overflow-y-auto pr-1">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <section className="border-border rounded-md border px-3 py-3">
+          <h3 className="text-sm font-semibold">Groups</h3>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {data.groups.length === 0 ? (
+              <Badge variant="secondary">
+                {accessGroupLabel(defaultAccessGroupSlugForRole(data.user.role))}
+              </Badge>
+            ) : (
+              data.groups.map((group) => (
+                <Badge key={group.slug} variant={group.protected ? "default" : "secondary"}>
+                  {group.name}
+                </Badge>
+              ))
+            )}
+          </div>
+        </section>
+        <section className="border-border rounded-md border px-3 py-3">
+          <h3 className="text-sm font-semibold">Effective Limits</h3>
+          <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+            {policyLimitRows(data.effective_policy).map(([label, value]) => (
+              <div key={label} className="min-w-0">
+                <dt className="text-muted-foreground text-xs">{label}</dt>
+                <dd className="truncate text-sm font-medium" title={value}>
+                  {value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      </div>
+
+      <section className="space-y-4">
+        {ACCESS_GROUP_ACTION_CATEGORIES.map((category) => {
+          const rows = ACCESS_GROUP_ACTIONS.filter((item) => item.category === category.id)
+            .map((item) => actionsByName.get(item.action))
+            .filter((action): action is AdminACLActionExplanation => Boolean(action));
+          if (rows.length === 0) return null;
+          return (
+            <div key={category.id} className="space-y-2">
+              <h3 className="text-sm font-semibold">{category.label}</h3>
+              <AccessExplanationTable rows={rows} />
+            </div>
+          );
+        })}
+        {uncategorizedActions.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Other</h3>
+            <AccessExplanationTable rows={uncategorizedActions} />
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function AccessExplanationTable({ rows }: { rows: AdminACLActionExplanation[] }) {
+  return (
+    <div className="border-border overflow-hidden rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Action</TableHead>
+            <TableHead>Decision</TableHead>
+            <TableHead>Source</TableHead>
+            <TableHead>Reason</TableHead>
+            <TableHead>Rule</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={`${row.resource_type}:${row.action}`}>
+              <TableCell>
+                <div className="font-medium">{accessGroupActionLabel(row.action)}</div>
+                <div className="text-muted-foreground font-mono text-xs">{row.action}</div>
+              </TableCell>
+              <TableCell>
+                <Badge variant={row.allowed ? "outline" : "destructive"}>
+                  {row.allowed ? "Allowed" : "Denied"}
+                </Badge>
+              </TableCell>
+              <TableCell>{accessExplanationSourceLabel(row.source)}</TableCell>
+              <TableCell>{accessExplanationReasonLabel(row)}</TableCell>
+              <TableCell className="max-w-56">
+                {row.winning_rule ? (
+                  <div
+                    className="truncate"
+                    title={row.winning_rule.name || row.winning_rule.action}
+                  >
+                    {row.winning_rule.name || row.winning_rule.action}
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">-</span>
+                )}
+                {row.matched_rules.length > 1 && (
+                  <div className="text-muted-foreground text-xs">
+                    {row.matched_rules.length} matching rules
+                  </div>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => void }) {
-  const { data: settings } = useAdminServerSettings();
-  const { data: libraries = [] } = useAdminLibraries();
+  const adminAccess = useAdminAccess();
+  const canManageUserAccessPolicy = adminAccess.can("security.manage");
+  const { data: settings } = useAdminServerSettings(canManageUserAccessPolicy);
+  const { data: libraries = [] } = useAdminLibraries(canManageUserAccessPolicy);
+  const { data: accessGroups = [] } = useAdminAccessGroups(canManageUserAccessPolicy);
   const [username, setUsername] = useState(user?.username ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState(user?.role ?? "user");
   const [enabled, setEnabled] = useState(user?.enabled ?? true);
-  const [permissions, setPermissions] = useState<string[]>(
-    user?.permissions ?? [PERMISSION_MARKER_EDIT],
+  const [permissions, setPermissions] = useState<string[]>(user?.permissions ?? []);
+  const [accessGroupSlugs, setAccessGroupSlugs] = useState<string[]>(
+    user?.access_groups?.map((group) => group.slug) ?? defaultAccessGroupSlugsForRole("user"),
   );
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(user?.library_ids ?? null);
   const [maxStreams, setMaxStreams] = useState<number>(
@@ -560,6 +801,7 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
   const passwordId = useId();
   const roleId = useId();
   const enabledId = useId();
+  const accessGroupsId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const downloadAllowedId = useId();
@@ -572,23 +814,37 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
   const updateMutation = useUpdateUser();
   const isPending = createMutation.isPending || updateMutation.isPending;
 
+  function toggleAccessGroup(slug: string, checked: boolean) {
+    setAccessGroupSlugs((current) => {
+      if (checked) {
+        return current.includes(slug) ? current : [...current, slug];
+      }
+      return current.filter((value) => value !== slug);
+    });
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    const selectedAccessGroups =
+      accessGroupSlugs.length > 0 ? accessGroupSlugs : defaultAccessGroupSlugsForRole(role);
     if (user) {
       const body: UpdateUserRequest = {
         username,
         email,
         role,
-        permissions,
         enabled,
-        library_ids: libraryIDs,
-        max_streams: maxStreams,
-        max_transcodes: maxTranscodes,
-        max_profiles: maxProfiles,
-        max_playback_quality: playbackQualityValueFromPreset(maxPlaybackQualityPreset),
-        download_allowed: downloadAllowed,
-        download_transcode_allowed: downloadTranscodeAllowed,
       };
+      if (canManageUserAccessPolicy) {
+        body.permissions = permissions;
+        body.access_group_slugs = selectedAccessGroups;
+        body.library_ids = libraryIDs;
+        body.max_streams = maxStreams;
+        body.max_transcodes = maxTranscodes;
+        body.max_profiles = maxProfiles;
+        body.max_playback_quality = playbackQualityValueFromPreset(maxPlaybackQualityPreset);
+        body.download_allowed = downloadAllowed;
+        body.download_transcode_allowed = downloadTranscodeAllowed;
+      }
       if (password) body.password = password;
       updateMutation.mutate({ id: user.id, body }, { onSuccess: onClose });
     } else {
@@ -597,16 +853,20 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
         email,
         password,
         role,
-        permissions,
         create_default_profile: true,
-        max_streams: maxStreams,
-        max_transcodes: maxTranscodes,
-        max_profiles: maxProfiles,
-        max_playback_quality: playbackQualityValueFromPreset(maxPlaybackQualityPreset) || undefined,
-        download_allowed: downloadAllowed,
-        download_transcode_allowed: downloadTranscodeAllowed,
       };
-      if (libraryIDs !== null) body.library_ids = libraryIDs;
+      if (canManageUserAccessPolicy) {
+        body.permissions = permissions;
+        body.access_group_slugs = selectedAccessGroups;
+        body.max_streams = maxStreams;
+        body.max_transcodes = maxTranscodes;
+        body.max_profiles = maxProfiles;
+        body.max_playback_quality =
+          playbackQualityValueFromPreset(maxPlaybackQualityPreset) || undefined;
+        body.download_allowed = downloadAllowed;
+        body.download_transcode_allowed = downloadTranscodeAllowed;
+        if (libraryIDs !== null) body.library_ids = libraryIDs;
+      }
       createMutation.mutate(body, { onSuccess: onClose });
     }
   }
@@ -618,12 +878,16 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
           <TabsTrigger value="account" className="flex-none px-1">
             Account
           </TabsTrigger>
-          <TabsTrigger value="access" className="flex-none px-1">
-            Access
-          </TabsTrigger>
-          <TabsTrigger value="limits" className="flex-none px-1">
-            Limits
-          </TabsTrigger>
+          {canManageUserAccessPolicy && (
+            <TabsTrigger value="access" className="flex-none px-1">
+              Access
+            </TabsTrigger>
+          )}
+          {canManageUserAccessPolicy && (
+            <TabsTrigger value="limits" className="flex-none px-1">
+              Limits
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <div className="min-h-0 flex-1 overflow-y-auto pr-1">
@@ -668,7 +932,11 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="user">User</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
+                    {(canManageUserAccessPolicy || role === "admin") && (
+                      <SelectItem value="admin" disabled={!canManageUserAccessPolicy}>
+                        Admin
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </div>
@@ -691,129 +959,166 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
             )}
           </TabsContent>
 
-          <TabsContent value="access" className="mt-0 space-y-4">
-            <LibraryAccessSelector
-              libraries={libraries}
-              value={libraryIDs}
-              onChange={setLibraryIDs}
-            />
-            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-              <div>
-                <Label htmlFor={markerEditId}>Marker Editing</Label>
-                <p className="text-muted-foreground text-xs">
-                  Edit intro, recap, credits, and preview markers within assigned libraries.
-                </p>
+          {canManageUserAccessPolicy && (
+            <TabsContent value="access" className="mt-0 space-y-4">
+              <div className="border-border rounded-md border px-3 py-3" id={accessGroupsId}>
+                <div className="mb-3 flex items-center justify-between">
+                  <Label>Access groups</Label>
+                  {accessGroupSlugs.length === 0 && (
+                    <Badge variant="secondary">
+                      {accessGroupLabel(defaultAccessGroupSlugForRole(role))}
+                    </Badge>
+                  )}
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {accessGroups.map((group) => (
+                    <div
+                      key={group.slug}
+                      className="border-border flex min-h-12 items-center justify-between rounded-md border px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <Label
+                          className="block truncate"
+                          htmlFor={`${accessGroupsId}-${group.slug}`}
+                        >
+                          {group.name}
+                        </Label>
+                        <div className="text-muted-foreground truncate text-xs">{group.slug}</div>
+                      </div>
+                      <Switch
+                        id={`${accessGroupsId}-${group.slug}`}
+                        checked={accessGroupSlugs.includes(group.slug)}
+                        onCheckedChange={(checked) => toggleAccessGroup(group.slug, checked)}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
-              <Switch
-                id={markerEditId}
-                checked={hasAssignedPermission(permissions, PERMISSION_MARKER_EDIT)}
-                onCheckedChange={(checked) =>
-                  setPermissions((current) =>
-                    setAssignedPermission(current, PERMISSION_MARKER_EDIT, checked),
-                  )
-                }
+              <LibraryAccessSelector
+                libraries={libraries}
+                value={libraryIDs}
+                onChange={setLibraryIDs}
               />
-            </div>
-            <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-              <div>
-                <Label htmlFor={metadataCurationId}>Metadata Curation</Label>
-                <p className="text-muted-foreground text-xs">
-                  Edit, refresh, and rematch metadata within assigned libraries.
-                </p>
-              </div>
-              <Switch
-                id={metadataCurationId}
-                checked={hasAssignedPermission(permissions, PERMISSION_METADATA_CURATION)}
-                onCheckedChange={(checked) =>
-                  setPermissions((current) =>
-                    setAssignedPermission(current, PERMISSION_METADATA_CURATION, checked),
-                  )
-                }
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
               <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-                <Label htmlFor={downloadAllowedId}>Downloads Allowed</Label>
+                <div>
+                  <Label htmlFor={markerEditId}>Marker Editing</Label>
+                  <p className="text-muted-foreground text-xs">
+                    Edit intro, recap, credits, and preview markers within assigned libraries.
+                  </p>
+                </div>
                 <Switch
-                  id={downloadAllowedId}
-                  checked={downloadAllowed}
-                  onCheckedChange={setDownloadAllowed}
+                  id={markerEditId}
+                  checked={hasAssignedPermission(permissions, PERMISSION_MARKER_EDIT)}
+                  onCheckedChange={(checked) =>
+                    setPermissions((current) =>
+                      setAssignedPermission(current, PERMISSION_MARKER_EDIT, checked),
+                    )
+                  }
                 />
               </div>
               <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
-                <Label htmlFor={downloadTranscodeAllowedId}>Download Transcode Allowed</Label>
+                <div>
+                  <Label htmlFor={metadataCurationId}>Metadata Curation</Label>
+                  <p className="text-muted-foreground text-xs">
+                    Edit, refresh, and rematch metadata within assigned libraries.
+                  </p>
+                </div>
                 <Switch
-                  id={downloadTranscodeAllowedId}
-                  checked={downloadTranscodeAllowed}
-                  onCheckedChange={setDownloadTranscodeAllowed}
+                  id={metadataCurationId}
+                  checked={hasAssignedPermission(permissions, PERMISSION_METADATA_CURATION)}
+                  onCheckedChange={(checked) =>
+                    setPermissions((current) =>
+                      setAssignedPermission(current, PERMISSION_METADATA_CURATION, checked),
+                    )
+                  }
                 />
               </div>
-            </div>
-          </TabsContent>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+                  <Label htmlFor={downloadAllowedId}>Downloads Allowed</Label>
+                  <Switch
+                    id={downloadAllowedId}
+                    checked={downloadAllowed}
+                    onCheckedChange={setDownloadAllowed}
+                  />
+                </div>
+                <div className="border-border flex items-center justify-between rounded-md border px-3 py-2">
+                  <Label htmlFor={downloadTranscodeAllowedId}>Download Transcode Allowed</Label>
+                  <Switch
+                    id={downloadTranscodeAllowedId}
+                    checked={downloadTranscodeAllowed}
+                    onCheckedChange={setDownloadTranscodeAllowed}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+          )}
 
-          <TabsContent value="limits" className="mt-0 space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor={maxStreamsId}>Max Streams</Label>
-                <Input
-                  id={maxStreamsId}
-                  type="number"
-                  min={0}
-                  value={maxStreams}
-                  onChange={(e) => setMaxStreams(Number(e.target.value))}
-                />
-                <p className="text-muted-foreground text-xs">0 = unlimited</p>
+          {canManageUserAccessPolicy && (
+            <TabsContent value="limits" className="mt-0 space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label htmlFor={maxStreamsId}>Max Streams</Label>
+                  <Input
+                    id={maxStreamsId}
+                    type="number"
+                    min={0}
+                    value={maxStreams}
+                    onChange={(e) => setMaxStreams(Number(e.target.value))}
+                  />
+                  <p className="text-muted-foreground text-xs">0 = unlimited</p>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor={maxTranscodesId}>Max Transcodes</Label>
+                  <Input
+                    id={maxTranscodesId}
+                    type="number"
+                    min={0}
+                    value={maxTranscodes}
+                    onChange={(e) => setMaxTranscodes(Number(e.target.value))}
+                  />
+                  <p className="text-muted-foreground text-xs">0 = unlimited</p>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor={maxProfilesId}>Max Profiles</Label>
+                  <Input
+                    id={maxProfilesId}
+                    type="number"
+                    min={1}
+                    value={maxProfiles}
+                    onChange={(e) => setMaxProfiles(Number(e.target.value))}
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <Label htmlFor={maxPlaybackQualityId}>Max Playback Quality</Label>
+                  <Select
+                    value={maxPlaybackQualityPreset}
+                    onValueChange={(value) =>
+                      setMaxPlaybackQualityPreset(value as PlaybackQualityPreset)
+                    }
+                  >
+                    <SelectTrigger id={maxPlaybackQualityId}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PLAYBACK_QUALITY_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-muted-foreground text-xs">
+                    {
+                      PLAYBACK_QUALITY_OPTIONS.find(
+                        (option) => option.value === maxPlaybackQualityPreset,
+                      )?.description
+                    }
+                  </p>
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label htmlFor={maxTranscodesId}>Max Transcodes</Label>
-                <Input
-                  id={maxTranscodesId}
-                  type="number"
-                  min={0}
-                  value={maxTranscodes}
-                  onChange={(e) => setMaxTranscodes(Number(e.target.value))}
-                />
-                <p className="text-muted-foreground text-xs">0 = unlimited</p>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={maxProfilesId}>Max Profiles</Label>
-                <Input
-                  id={maxProfilesId}
-                  type="number"
-                  min={1}
-                  value={maxProfiles}
-                  onChange={(e) => setMaxProfiles(Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1 sm:col-span-2">
-                <Label htmlFor={maxPlaybackQualityId}>Max Playback Quality</Label>
-                <Select
-                  value={maxPlaybackQualityPreset}
-                  onValueChange={(value) =>
-                    setMaxPlaybackQualityPreset(value as PlaybackQualityPreset)
-                  }
-                >
-                  <SelectTrigger id={maxPlaybackQualityId}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PLAYBACK_QUALITY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-muted-foreground text-xs">
-                  {
-                    PLAYBACK_QUALITY_OPTIONS.find(
-                      (option) => option.value === maxPlaybackQualityPreset,
-                    )?.description
-                  }
-                </p>
-              </div>
-            </div>
-          </TabsContent>
+            </TabsContent>
+          )}
         </div>
       </Tabs>
 

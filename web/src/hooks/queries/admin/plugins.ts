@@ -36,12 +36,13 @@ function invalidatePluginQueries(queryClient: ReturnType<typeof useQueryClient>)
 // useAdminPluginInstallations is a slim hook for callers (e.g. AdminSidebar)
 // that only need the installations list. Shares its cache key with
 // useAdminPlugins() so triggering a refetch in either keeps both in sync.
-export function useAdminPluginInstallations() {
+export function useAdminPluginInstallations(enabled = true) {
   return useQuery({
     queryKey: adminKeys.pluginInstallations(),
     queryFn: () =>
       api<PluginInstallation[]>("/admin/plugins/installations").then((data) => data ?? []),
     staleTime: ADMIN_STALE_TIME,
+    enabled,
   });
 }
 

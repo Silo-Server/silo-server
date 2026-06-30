@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Library } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -7,6 +8,7 @@ interface LibraryAccessSelectorProps {
   libraries: Library[];
   value: number[] | null;
   onChange: (value: number[] | null) => void;
+  labelAccessory?: ReactNode;
 }
 
 function sortByLibraryOrder(libraries: Library[], ids: number[]) {
@@ -14,7 +16,12 @@ function sortByLibraryOrder(libraries: Library[], ids: number[]) {
   return libraries.filter((library) => selected.has(library.id)).map((library) => library.id);
 }
 
-export function LibraryAccessSelector({ libraries, value, onChange }: LibraryAccessSelectorProps) {
+export function LibraryAccessSelector({
+  libraries,
+  value,
+  onChange,
+  labelAccessory,
+}: LibraryAccessSelectorProps) {
   const allLibraries = value === null;
 
   function handleAllLibrariesChange(checked: boolean) {
@@ -32,7 +39,10 @@ export function LibraryAccessSelector({ libraries, value, onChange }: LibraryAcc
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Label>Library Access</Label>
+        <div className="flex items-center gap-1.5">
+          <Label>Library Access</Label>
+          {labelAccessory}
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground text-xs">All libraries</span>
           <Switch checked={allLibraries} onCheckedChange={handleAllLibrariesChange} />

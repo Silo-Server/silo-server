@@ -13,7 +13,7 @@ func CompatibilityGroupsForUser(user *models.User) []BuiltInGroupSlug {
 	if user.Role == "admin" {
 		return []BuiltInGroupSlug{GroupAdmin}
 	}
-	return []BuiltInGroupSlug{GroupViewer}
+	return []BuiltInGroupSlug{GroupStandardUser}
 }
 
 func CompatibilityRulesForUser(user *models.User) []ACLRule {
@@ -43,6 +43,7 @@ func CompatibilityRulesForUser(user *models.User) []ACLRule {
 	}
 
 	if user.Role == "admin" {
+		primaryProfileRequired := true
 		for _, action := range []ACLAction{
 			ActionServerView,
 			ActionServerConfigure,
@@ -59,6 +60,8 @@ func CompatibilityRulesForUser(user *models.User) []ACLRule {
 			ActionPluginsManage,
 			ActionNodesView,
 			ActionNodesManage,
+			ActionRecommendationsView,
+			ActionRecommendationsManage,
 			ActionMetadataCurate,
 			ActionMarkersEdit,
 			ActionPlaybackPlay,
@@ -76,6 +79,7 @@ func CompatibilityRulesForUser(user *models.User) []ACLRule {
 				ResourceType: ResourceServer,
 				ResourceID:   "*",
 				Effect:       EffectAllow,
+				Conditions:   ACLCondition{PrimaryProfileRequired: &primaryProfileRequired},
 				Priority:     100,
 				Name:         "legacy admin grant",
 			})

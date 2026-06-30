@@ -4,6 +4,7 @@ import { Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useFavorites } from "@/hooks/queries/favorites";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import {
   isTasteSeedBannerDismissed,
   isTasteSeedDismissed,
@@ -25,9 +26,12 @@ import {
  */
 export default function TasteSeedBanner() {
   const { profile } = useAuth();
+  const userCapabilities = useUserCapabilityAccess();
+  const canManagePersonalLists = userCapabilities.can(USER_CAPABILITY_ACTIONS.personalListsManage);
   const { data: favorites, isPending } = useFavorites();
   const [hidden, setHidden] = useState(false);
 
+  if (userCapabilities.isLoading || !canManagePersonalLists) return null;
   if (!profile || isPending) return null;
   if ((favorites?.length ?? 0) > 0) return null;
   if (!isTasteSeedDismissed(profile.id)) return null;

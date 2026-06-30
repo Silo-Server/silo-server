@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -37,6 +38,7 @@ type PersonalDataHandler struct {
 	seasonRepo              *catalog.SeasonRepository
 	detailSvc               *catalog.DetailService
 	EventsHub               *evt.Hub
+	Authorizer              auth.Authorizer
 	localListDispatcher     LocalListEventDispatcher
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
@@ -203,6 +205,9 @@ func (h *PersonalDataHandler) HandleAddFavorite(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
 		return
 	}
+	if !h.authorizePersonalListMutation(w, r, itemID) {
+		return
+	}
 
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
 	if err != nil {
@@ -235,6 +240,9 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 
 	if itemID == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
+		return
+	}
+	if !h.authorizePersonalListMutation(w, r, itemID) {
 		return
 	}
 
@@ -359,6 +367,9 @@ func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
 		return
 	}
+	if !h.authorizePersonalListMutation(w, r, itemID) {
+		return
+	}
 
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
 	if err != nil {
@@ -393,6 +404,9 @@ func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r
 		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
 		return
 	}
+	if !h.authorizePersonalListMutation(w, r, itemID) {
+		return
+	}
 
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
 	if err != nil {
@@ -411,6 +425,25 @@ func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r
 		InWatchlist: boolPtr(false),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *PersonalDataHandler) authorizePersonalListMutation(w http.ResponseWriter, r *http.Request, itemID string) bool {
+	err := authorizeACLAction(r.Context(), h.Authorizer, auth.AccessRequest{
+		UserID:       apimw.GetUserID(r.Context()),
+		ProfileID:    apimw.GetProfileID(r.Context()),
+		Action:       auth.ActionPersonalListsManage,
+		ResourceType: auth.ResourceMediaItem,
+		ResourceID:   itemID,
+	})
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, errACLActionDenied) {
+		writeError(w, http.StatusForbidden, "forbidden", "Personal list changes are not allowed")
+		return false
+	}
+	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize personal list change")
+	return false
 }
 
 // --- History ---

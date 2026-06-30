@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -48,6 +49,7 @@ type RecommendationsHandler struct {
 	EpisodeRepo         *catalog.EpisodeRepository
 	WatchTonightFetcher watchTonightSectionFetcher
 	CastFetcher         cardsCastFetcher
+	Authorizer          auth.Authorizer
 	EbookProgress       EbookReaderProgressLister
 	// RecWorker enqueues asynchronous taste-profile refreshes after writes
 	// (taste seeding). Optional — when nil, refresh is simply skipped.

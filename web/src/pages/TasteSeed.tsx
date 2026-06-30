@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import type { SectionItem } from "@/api/types";
 import { useTasteSeedItems, useSubmitTasteSeed } from "@/hooks/queries/tasteSeed";
@@ -16,6 +17,8 @@ export default function TasteSeed() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
+  const userCapabilities = useUserCapabilityAccess();
+  const canManagePersonalLists = userCapabilities.can(USER_CAPABILITY_ACTIONS.personalListsManage);
   useDocumentTitle("Pick what you love");
 
   const isReturning = searchParams.get("from") === "settings";
@@ -26,8 +29,16 @@ export default function TasteSeed() {
   const [userToggles, setUserToggles] = useState<Map<string, boolean>>(new Map());
 
   const { data, fetchNextPage, hasNextPage, isFetching, isFetchingNextPage, isPending } =
-    useTasteSeedItems(true);
+    useTasteSeedItems(canManagePersonalLists);
   const submit = useSubmitTasteSeed();
+
+  useEffect(() => {
+    if (userCapabilities.isLoading || canManagePersonalLists) return;
+    if (profile) {
+      setTasteSeedDismissed(profile.id);
+    }
+    navigate(isReturning ? "/settings/playback" : "/", { replace: true });
+  }, [canManagePersonalLists, isReturning, navigate, profile, userCapabilities.isLoading]);
 
   // Flatten paginated pages into a single item list.
   const items = useMemo(() => data?.pages.flatMap((p) => p.items) ?? [], [data]);
@@ -86,6 +97,7 @@ export default function TasteSeed() {
   }, [navigate, profile, isReturning]);
 
   const handleSubmit = useCallback(async () => {
+    if (!canManagePersonalLists) return;
     if (selected.size < MIN_PICKS) {
       toast.error(`Pick at least ${MIN_PICKS} to continue`);
       return;
@@ -121,9 +133,9 @@ export default function TasteSeed() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save your picks");
     }
-  }, [selected, items, submit, navigate, profile, isReturning]);
+  }, [canManagePersonalLists, selected, items, submit, navigate, profile, isReturning]);
 
-  const submitDisabled = selected.size < MIN_PICKS || submit.isPending;
+  const submitDisabled = !canManagePersonalLists || selected.size < MIN_PICKS || submit.isPending;
 
   return (
     <div className="min-h-[100dvh]">

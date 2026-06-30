@@ -106,6 +106,7 @@ func FrontendHandler() http.Handler {
 		if Branding != nil {
 			indexBytes = branding.RenderIndexHTML(indexBytes, Branding.Load(r.Context()))
 		}
+		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", frontendContentSecurityPolicy)
 		w.WriteHeader(http.StatusOK)

@@ -42,6 +42,7 @@ import type {
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
 import { MarkerEditor } from "@/components/markers/MarkerEditor";
 import StarRating from "@/components/StarRating";
+import { USER_CAPABILITY_ACTIONS, useUserCapabilityAccess } from "@/hooks/useUserCapabilities";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import VersionDropdown from "./VersionDropdown";
@@ -154,6 +155,13 @@ export default function ActionBar({
   const navigate = useNavigate();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
+  const userCapabilities = useUserCapabilityAccess();
+  const canPlayback = userCapabilities.can(USER_CAPABILITY_ACTIONS.playbackPlay);
+  const canManagePersonalLists = userCapabilities.can(USER_CAPABILITY_ACTIONS.personalListsManage);
+  const canDownload = userCapabilities.can([
+    USER_CAPABILITY_ACTIONS.downloadsDirect,
+    USER_CAPABILITY_ACTIONS.downloadsTranscode,
+  ]);
   const [playChoiceOpen, setPlayChoiceOpen] = useState(false);
   const [refreshDialogOpen, setRefreshDialogOpen] = useState(false);
   const [addToCollectionOpen, setAddToCollectionOpen] = useState(false);
@@ -161,7 +169,7 @@ export default function ActionBar({
   const showMarkerEditor = canEditMarkers && !!contentId;
   const hasMultipleVersions = (playbackVariants?.length ?? 0) > 1 || (versions?.length ?? 0) > 1;
   const showPlayChoiceDialog =
-    !hasMultipleVersions && playLabel === "Resume" && !!playHref && !!restartHref;
+    canPlayback && !hasMultipleVersions && playLabel === "Resume" && !!playHref && !!restartHref;
   const displayedPlayLabel = showPlayChoiceDialog ? "Play" : playLabel;
 
   const progressOverlay =
@@ -200,6 +208,7 @@ export default function ActionBar({
   );
   const startPlaybackFromHref = useCallback(
     (href: string, restartOverride?: boolean) => {
+      if (!canPlayback) return;
       const parsed = parseWatchHref(href);
       if (!parsed) {
         navigate(href);
@@ -216,7 +225,14 @@ export default function ActionBar({
         }),
       );
     },
-    [buildPrePlayStartInput, currentHref, navigate, playbackController, selectedVersion?.file_id],
+    [
+      buildPrePlayStartInput,
+      canPlayback,
+      currentHref,
+      navigate,
+      playbackController,
+      selectedVersion?.file_id,
+    ],
   );
   const handleResumePlayback = () => {
     if (!playHref) return;
@@ -232,8 +248,13 @@ export default function ActionBar({
     setRefreshDialogOpen(false);
     onRefresh?.(mode);
   };
+  const hasCollectionAction = Boolean(contentId && canManagePersonalLists);
   const hasOverflowActions = Boolean(
-    restartHref || onToggleWatchlist || onDownload || onSearchSubtitles,
+    (canPlayback && restartHref) ||
+    (canManagePersonalLists && onToggleWatchlist) ||
+    (canDownload && onDownload) ||
+    onSearchSubtitles ||
+    hasCollectionAction,
   );
   const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectIntro));
   const hasMetadataActions = Boolean(
@@ -254,7 +275,7 @@ export default function ActionBar({
   // When a version is explicitly selected (multi-version), play it directly.
   const handleSelectedVersionPlay = useCallback(
     (restart: boolean) => {
-      if (!selectedVersion || !contentId) return;
+      if (!canPlayback || !selectedVersion || !contentId) return;
       playbackController.startPlayback(
         buildPrePlayStartInput({
           contentId,
@@ -264,10 +285,18 @@ export default function ActionBar({
         }),
       );
     },
-    [buildPrePlayStartInput, contentId, currentHref, playbackController, selectedVersion],
+    [
+      buildPrePlayStartInput,
+      canPlayback,
+      contentId,
+      currentHref,
+      playbackController,
+      selectedVersion,
+    ],
   );
 
   const hasStreamControls =
+    canPlayback &&
     selectedVersion &&
     ((versions && hasMultipleVersions) || (selectedVersion.audio_tracks?.length ?? 0) > 0 || true); // subs popover always shows when version is selected
 
@@ -276,48 +305,50 @@ export default function ActionBar({
       {/* ── Primary actions ──────────────────────────────────── */}
       <div className="flex flex-wrap items-center gap-3">
         {/* ── Play button ────────────────────────────────────── */}
-        {playHref ? (
-          showPlayChoiceDialog ? (
-            <Button
-              onClick={openPlayChoiceDialog}
-              className="relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md"
-            >
-              <Play className="size-[18px] fill-current" />
-              {displayedPlayLabel}
-              {progressOverlay}
-            </Button>
-          ) : selectedVersion ? (
-            <Button
-              onClick={() => handleSelectedVersionPlay(false)}
-              className="relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md"
-            >
-              <Play className="size-[18px] fill-current" />
-              {displayedPlayLabel}
-              {progressOverlay}
-            </Button>
+        {canPlayback ? (
+          playHref ? (
+            showPlayChoiceDialog ? (
+              <Button
+                onClick={openPlayChoiceDialog}
+                className="relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md"
+              >
+                <Play className="size-[18px] fill-current" />
+                {displayedPlayLabel}
+                {progressOverlay}
+              </Button>
+            ) : selectedVersion ? (
+              <Button
+                onClick={() => handleSelectedVersionPlay(false)}
+                className="relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md"
+              >
+                <Play className="size-[18px] fill-current" />
+                {displayedPlayLabel}
+                {progressOverlay}
+              </Button>
+            ) : (
+              <Button
+                onClick={() => startPlaybackFromHref(playHref)}
+                className="relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md"
+              >
+                <Play className="size-[18px] fill-current" />
+                {displayedPlayLabel}
+                {progressOverlay}
+              </Button>
+            )
           ) : (
             <Button
-              onClick={() => startPlaybackFromHref(playHref)}
-              className="relative h-11 gap-2.5 overflow-hidden rounded-full px-8 text-[15px] font-bold tracking-wide shadow-md"
+              disabled
+              className="h-11 gap-2.5 rounded-full px-8 text-[15px] font-bold tracking-wide"
             >
-              <Play className="size-[18px] fill-current" />
-              {displayedPlayLabel}
-              {progressOverlay}
+              {playLoading ? (
+                <Loader2 className="size-[18px] animate-spin" />
+              ) : (
+                <Play className="size-[18px] fill-current" />
+              )}
+              {playLabel}
             </Button>
           )
-        ) : (
-          <Button
-            disabled
-            className="h-11 gap-2.5 rounded-full px-8 text-[15px] font-bold tracking-wide"
-          >
-            {playLoading ? (
-              <Loader2 className="size-[18px] animate-spin" />
-            ) : (
-              <Play className="size-[18px] fill-current" />
-            )}
-            {playLabel}
-          </Button>
-        )}
+        ) : null}
 
         {/* ── Watched toggle ─────────────────────────────────── */}
         {watchedLabel && onToggleWatched && (
@@ -333,7 +364,7 @@ export default function ActionBar({
         )}
 
         {/* ── Icon action buttons ────────────────────────────── */}
-        {onToggleFavorite && (
+        {canManagePersonalLists && onToggleFavorite && (
           <Button
             variant="glass"
             size="icon-lg"
@@ -351,98 +382,100 @@ export default function ActionBar({
           <StarRating value={rating ?? null} onChange={onRatingChange} size={18} />
         )}
 
-        <DropdownMenu modal={false}>
-          <DropdownMenuTrigger asChild>
-            <Button variant="glass" size="icon-lg" title="More" className="size-11 rounded-full">
-              <MoreVertical className="size-[18px]" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            {restartHref && (
-              <DropdownMenuItem
-                onSelect={() => {
-                  handleRestartPlayback();
-                }}
-              >
-                <RotateCcw className="size-4" />
-                Play from Beginning
-              </DropdownMenuItem>
-            )}
-            {onToggleWatchlist && (
-              <DropdownMenuItem onSelect={onToggleWatchlist}>
-                {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
-                {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
-              </DropdownMenuItem>
-            )}
-            {contentId && (
-              <DropdownMenuItem onSelect={() => setAddToCollectionOpen(true)}>
-                <FolderPlus className="size-4" />
-                Add to Collection
-              </DropdownMenuItem>
-            )}
-            {onDownload && (
-              <DropdownMenuItem onSelect={onDownload}>
-                <Download className="size-4" />
-                Download
-              </DropdownMenuItem>
-            )}
-            {onSearchSubtitles && (
-              <DropdownMenuItem onSelect={onSearchSubtitles}>
-                <Captions className="size-4" />
-                Search Subtitles
-              </DropdownMenuItem>
-            )}
-            {(hasAdminActions || hasMetadataActions) && (
-              <>
-                {hasOverflowActions && <DropdownMenuSeparator />}
-                {isAdmin && contentId && (
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)
-                    }
-                  >
-                    View Play History
-                  </DropdownMenuItem>
-                )}
-                {canCurateMetadata && onRefresh && (
-                  <DropdownMenuItem
-                    disabled={isRefreshing}
-                    onSelect={() => {
-                      setRefreshDialogOpen(true);
-                    }}
-                  >
-                    {isRefreshing && <RefreshCw className="size-4 animate-spin" />}
-                    Refresh Metadata
-                  </DropdownMenuItem>
-                )}
-                {isAdmin && onRedetectIntro && (
-                  <DropdownMenuItem disabled={isRedetectingIntro} onSelect={onRedetectIntro}>
-                    <RefreshCw className={`size-4 ${isRedetectingIntro ? "animate-spin" : ""}`} />
-                    Re-detect Intro Markers
-                  </DropdownMenuItem>
-                )}
-                {canCurateMetadata && onEditMetadata && (
-                  <DropdownMenuItem onSelect={onEditMetadata}>
-                    <Pencil className="size-4" />
-                    Edit Metadata
-                  </DropdownMenuItem>
-                )}
-                {showMarkerEditor && (
-                  <DropdownMenuItem onSelect={() => setMarkerEditorOpen(true)}>
-                    <Tags className="size-4" />
-                    Edit Markers
-                  </DropdownMenuItem>
-                )}
-                {canCurateMetadata && onMatchItem && (
-                  <DropdownMenuItem onSelect={onMatchItem}>
-                    <Search className="size-4" />
-                    Match Item
-                  </DropdownMenuItem>
-                )}
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {(hasOverflowActions || hasAdminActions || hasMetadataActions) && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button variant="glass" size="icon-lg" title="More" className="size-11 rounded-full">
+                <MoreVertical className="size-[18px]" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {canPlayback && restartHref && (
+                <DropdownMenuItem
+                  onSelect={() => {
+                    handleRestartPlayback();
+                  }}
+                >
+                  <RotateCcw className="size-4" />
+                  Play from Beginning
+                </DropdownMenuItem>
+              )}
+              {canManagePersonalLists && onToggleWatchlist && (
+                <DropdownMenuItem onSelect={onToggleWatchlist}>
+                  {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
+                  {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
+                </DropdownMenuItem>
+              )}
+              {hasCollectionAction && (
+                <DropdownMenuItem onSelect={() => setAddToCollectionOpen(true)}>
+                  <FolderPlus className="size-4" />
+                  Add to Collection
+                </DropdownMenuItem>
+              )}
+              {canDownload && onDownload && (
+                <DropdownMenuItem onSelect={onDownload}>
+                  <Download className="size-4" />
+                  Download
+                </DropdownMenuItem>
+              )}
+              {onSearchSubtitles && (
+                <DropdownMenuItem onSelect={onSearchSubtitles}>
+                  <Captions className="size-4" />
+                  Search Subtitles
+                </DropdownMenuItem>
+              )}
+              {(hasAdminActions || hasMetadataActions) && (
+                <>
+                  {hasOverflowActions && <DropdownMenuSeparator />}
+                  {isAdmin && contentId && (
+                    <DropdownMenuItem
+                      onSelect={() =>
+                        navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)
+                      }
+                    >
+                      View Play History
+                    </DropdownMenuItem>
+                  )}
+                  {canCurateMetadata && onRefresh && (
+                    <DropdownMenuItem
+                      disabled={isRefreshing}
+                      onSelect={() => {
+                        setRefreshDialogOpen(true);
+                      }}
+                    >
+                      {isRefreshing && <RefreshCw className="size-4 animate-spin" />}
+                      Refresh Metadata
+                    </DropdownMenuItem>
+                  )}
+                  {isAdmin && onRedetectIntro && (
+                    <DropdownMenuItem disabled={isRedetectingIntro} onSelect={onRedetectIntro}>
+                      <RefreshCw className={`size-4 ${isRedetectingIntro ? "animate-spin" : ""}`} />
+                      Re-detect Intro Markers
+                    </DropdownMenuItem>
+                  )}
+                  {canCurateMetadata && onEditMetadata && (
+                    <DropdownMenuItem onSelect={onEditMetadata}>
+                      <Pencil className="size-4" />
+                      Edit Metadata
+                    </DropdownMenuItem>
+                  )}
+                  {showMarkerEditor && (
+                    <DropdownMenuItem onSelect={() => setMarkerEditorOpen(true)}>
+                      <Tags className="size-4" />
+                      Edit Markers
+                    </DropdownMenuItem>
+                  )}
+                  {canCurateMetadata && onMatchItem && (
+                    <DropdownMenuItem onSelect={onMatchItem}>
+                      <Search className="size-4" />
+                      Match Item
+                    </DropdownMenuItem>
+                  )}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {showPlayChoiceDialog && (
           <Dialog open={playChoiceOpen} onOpenChange={setPlayChoiceOpen}>
             <DialogContent className="max-w-xs gap-3 p-5">

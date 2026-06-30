@@ -17,10 +17,11 @@ export function useAdminStats() {
   });
 }
 
-export function useAdminSessions() {
+export function useAdminSessions(enabled = true) {
   return useQuery({
     queryKey: adminKeys.sessions(),
     queryFn: () => api<AdminSession[]>("/admin/sessions").then((d) => d ?? []),
     staleTime: ADMIN_STALE_TIME,
+    enabled,
   });
 }

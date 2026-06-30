@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -17,10 +18,12 @@ import (
 
 // AuthHandler handles authentication-related HTTP endpoints.
 type AuthHandler struct {
-	service              *auth.Service
-	jwt                  *auth.JWTService
-	device               *auth.DeviceLoginService
-	oauthRoutesAvailable bool
+	service               *auth.Service
+	jwt                   *auth.JWTService
+	device                *auth.DeviceLoginService
+	AdminAuthorizer       auth.Authorizer
+	PrimaryProfileChecker apimw.PrimaryProfileChecker
+	oauthRoutesAvailable  bool
 }
 
 // NewAuthHandler creates a new AuthHandler backed by the given auth, JWT,
@@ -147,6 +150,10 @@ type authProviderResponse struct {
 	Default        bool   `json:"default"`
 	IconURL        string `json:"icon_url,omitempty"`
 	InstallationID int    `json:"installation_id,omitempty"`
+}
+
+type adminCapabilitiesResponse struct {
+	Actions []string `json:"actions"`
 }
 
 // --- Handler methods ---
@@ -383,6 +390,114 @@ func (h *AuthHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, buildUserResponse(user, claims.ImpersonatorUserID, impersonator))
+}
+
+func (h *AuthHandler) HandleAdminCapabilities(w http.ResponseWriter, r *http.Request) {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil {
+		var err error
+		claims, err = h.extractClaims(r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
+			return
+		}
+	}
+
+	primaryProfile := claims.Role == "admin"
+	if h.PrimaryProfileChecker != nil {
+		profileID := apimw.GetProfileID(r.Context())
+		if profileID == "" {
+			profileID = r.Header.Get("X-Profile-Id")
+		}
+		if profileID != "" {
+			isPrimary, found, err := h.PrimaryProfileChecker(r.Context(), claims.UserID, profileID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load admin capabilities")
+				return
+			}
+			primaryProfile = found && isPrimary
+		}
+	}
+
+	actions := make([]string, 0)
+	for _, action := range auth.AdminCapabilityActions() {
+		if h.AdminAuthorizer == nil {
+			if claims.Role == "admin" && primaryProfile {
+				actions = append(actions, string(action))
+			}
+			continue
+		}
+
+		decision, err := h.AdminAuthorizer.Authorize(r.Context(), auth.AccessRequest{
+			UserID:         claims.UserID,
+			Action:         action,
+			ResourceType:   auth.ResourceServer,
+			ResourceID:     "*",
+			PrimaryProfile: primaryProfile,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load admin capabilities")
+			return
+		}
+		if decision.Allowed {
+			actions = append(actions, string(action))
+		}
+	}
+
+	writeJSON(w, http.StatusOK, adminCapabilitiesResponse{Actions: actions})
+}
+
+func (h *AuthHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil {
+		var err error
+		claims, err = h.extractClaims(r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "Invalid or missing authentication token")
+			return
+		}
+	}
+
+	profileID := apimw.GetProfileID(r.Context())
+	if profileID == "" {
+		profileID = r.Header.Get("X-Profile-Id")
+	}
+
+	actions := make([]string, 0)
+	for _, action := range auth.UserFacingCapabilityActions() {
+		if h.AdminAuthorizer == nil {
+			actions = append(actions, string(action))
+			continue
+		}
+
+		decision, err := h.AdminAuthorizer.Authorize(r.Context(), auth.AccessRequest{
+			UserID:       claims.UserID,
+			ProfileID:    profileID,
+			Action:       action,
+			ResourceType: userFacingCapabilityResourceType(action),
+			ResourceID:   "*",
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load capabilities")
+			return
+		}
+		if decision.Allowed {
+			actions = append(actions, string(action))
+		}
+	}
+
+	writeJSON(w, http.StatusOK, adminCapabilitiesResponse{Actions: actions})
+}
+
+func userFacingCapabilityResourceType(action auth.ACLAction) auth.ACLResourceType {
+	switch action {
+	case auth.ActionProfilesManage:
+		return auth.ResourceProfile
+	case auth.ActionRequestsCreate:
+		return auth.ResourceRequest
+	default:
+		return auth.ResourceMediaItem
+	}
 }
 
 // HandleListSessions handles GET /auth/sessions. Requires authentication.

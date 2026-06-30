@@ -298,6 +298,49 @@ func TestHandleStartPlayback_UsesExplicitZeroStartPositionInsteadOfStoredResume(
 	}
 }
 
+func TestHandleStartPlayback_RejectsWithoutPlaybackPlayGrant(t *testing.T) {
+	file := &models.MediaFile{
+		ID:            42,
+		ContentID:     "movie-1",
+		MediaFolderID: 10,
+		BaseType:      "movie",
+		FilePath:      writePlaybackTestMediaFile(t, "movie.mp4"),
+		Container:     "mp4",
+		Duration:      120,
+	}
+	authorizer := &fakeMediaConsumptionAuthorizer{
+		decision: auth.AccessDecision{Allowed: false, ReasonCode: "default_deny"},
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.AccessAuthorizer = authorizer
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(`{"file_id":42,"profile_id":"profile-1","play_method":"direct"}`))
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	rr := httptest.NewRecorder()
+
+	handler.HandleStartPlayback(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if !authorizer.called {
+		t.Fatalf("playback ACL authorizer was not called")
+	}
+	if authorizer.request.Action != auth.ActionPlaybackPlay {
+		t.Fatalf("action = %q, want %q", authorizer.request.Action, auth.ActionPlaybackPlay)
+	}
+	if authorizer.request.ResourceType != auth.ResourceMediaItem || authorizer.request.ResourceID != "movie-1" {
+		t.Fatalf("resource = %s/%q, want media_item/movie-1", authorizer.request.ResourceType, authorizer.request.ResourceID)
+	}
+	if len(authorizer.request.LibraryIDs) != 1 || authorizer.request.LibraryIDs[0] != 10 {
+		t.Fatalf("library ids = %#v, want [10]", authorizer.request.LibraryIDs)
+	}
+	if authorizer.request.MediaType != "movie" {
+		t.Fatalf("media type = %q, want movie", authorizer.request.MediaType)
+	}
+}
+
 func TestPlaybackSessionProgressPersistenceCanBeDisabled(t *testing.T) {
 	store := newPlaybackTestStore(t)
 	if err := store.SetProgress(context.Background(), "profile-1", "book-1", 500, 1200, userstore.ProgressThresholds{}); err != nil {

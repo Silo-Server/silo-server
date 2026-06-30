@@ -8,6 +8,16 @@ vi.mock("@/playback/watchPlaybackContext", () => ({
   useWatchPlaybackController: () => ({ startPlayback: vi.fn() }),
 }));
 
+vi.mock("@/hooks/useUserCapabilities", () => ({
+  USER_CAPABILITY_ACTIONS: {
+    playbackPlay: "playback.play",
+  },
+  useUserCapabilityAccess: () => ({
+    can: () => true,
+    isLoading: false,
+  }),
+}));
+
 describe("WatchTonightCard", () => {
   it("links ebook cards to the reader and shows percent read", () => {
     const markup = renderToStaticMarkup(
