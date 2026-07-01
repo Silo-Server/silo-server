@@ -61,6 +61,7 @@ type fakeDownloadService struct {
 	seasonErr    error
 	gotSeasonReq downloads.CreateRequest
 	gotSeasonNum int
+	seasonCalled bool
 
 	subResult      *downloads.SubscriptionResult
 	subList        []*downloads.Subscription
@@ -103,6 +104,7 @@ func (f *fakeDownloadService) CreateSeries(_ context.Context, _ int, req downloa
 func (f *fakeDownloadService) CreateSeason(_ context.Context, _ int, req downloads.CreateRequest, seasonNumber int, _ catalog.AccessFilter) ([]*downloads.Download, string, []downloads.SkippedDownload, error) {
 	f.gotSeasonReq = req
 	f.gotSeasonNum = seasonNumber
+	f.seasonCalled = true
 	if f.seasonErr != nil {
 		return nil, "", nil, f.seasonErr
 	}
@@ -644,6 +646,8 @@ func TestManagedSubtitleInvalidRef(t *testing.T) {
 	}
 }
 
+func intPtr(i int) *int { return &i }
+
 // TestHandleCreateDownloadSeasonRoutes verifies that series=true + a season
 // number routes to CreateSeason (not CreateSeries) with the season threaded.
 func TestHandleCreateDownloadSeasonRoutes(t *testing.T) {
@@ -653,7 +657,7 @@ func TestHandleCreateDownloadSeasonRoutes(t *testing.T) {
 	}
 	h := NewDownloadHandler(svc)
 
-	body, _ := json.Marshal(downloadRequest{ContentID: "s1", Series: true, Season: 2})
+	body, _ := json.Marshal(downloadRequest{ContentID: "s1", Series: true, Season: intPtr(2)})
 	rec := httptest.NewRecorder()
 	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "pA", "devA"))
 
@@ -665,6 +669,38 @@ func TestHandleCreateDownloadSeasonRoutes(t *testing.T) {
 	}
 	if svc.gotSeasonReq.ContentID != "s1" {
 		t.Fatalf("season content id = %q, want s1", svc.gotSeasonReq.ContentID)
+	}
+}
+
+// TestHandleCreateDownloadSpecialsSeason pins the Specials boundary: season 0
+// must route to CreateSeason(0), not silently broaden to a full-series
+// download, and negative seasons are rejected.
+func TestHandleCreateDownloadSpecialsSeason(t *testing.T) {
+	svc := &fakeDownloadService{
+		season:   []*downloads.Download{{ID: "dl1", ContentID: "s1", EpisodeID: "e1", Format: downloads.FormatOriginal}},
+		seasonID: "batch1",
+	}
+	h := NewDownloadHandler(svc)
+
+	body, _ := json.Marshal(downloadRequest{ContentID: "s1", Series: true, Season: intPtr(0)})
+	rec := httptest.NewRecorder()
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "pA", "devA"))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 (body: %s)", rec.Code, rec.Body.String())
+	}
+	if !svc.seasonCalled || svc.gotSeasonNum != 0 {
+		t.Fatalf("seasonCalled=%v num=%d, want CreateSeason(0)", svc.seasonCalled, svc.gotSeasonNum)
+	}
+	if svc.gotSeriesReq.ContentID != "" {
+		t.Fatal("season 0 must not fall through to CreateSeries")
+	}
+
+	rec = httptest.NewRecorder()
+	body, _ = json.Marshal(downloadRequest{ContentID: "s1", Series: true, Season: intPtr(-1)})
+	h.HandleCreateDownload(rec, downloadTestRequest(http.MethodPost, "/downloads", body, 7, "pA", "devA"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("negative season status = %d, want 400", rec.Code)
 	}
 }
 

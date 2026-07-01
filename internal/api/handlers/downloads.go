@@ -58,7 +58,7 @@ type downloadRequest struct {
 	FileID    int           `json:"file_id,omitempty"`
 	Quality   string        `json:"quality,omitempty"`       // original (default) | 20mbps | 10mbps | 5mbps | 2mbps | 1mbps
 	Series    bool          `json:"series,omitempty"`        // if true, downloads all episodes
-	Season    int           `json:"season_number,omitempty"` // with series=true, downloads only this season
+	Season    *int          `json:"season_number,omitempty"` // with series=true, downloads only this season (0 = Specials)
 	Caps      *downloadCaps `json:"caps,omitempty"`          // device decode capability (original fallback / transcode target)
 }
 
@@ -257,8 +257,13 @@ func (h *DownloadHandler) HandleCreateDownload(w http.ResponseWriter, r *http.Re
 			skipped []downloads.SkippedDownload
 			err     error
 		)
-		if req.Season > 0 {
-			list, batchID, skipped, err = h.svc.CreateSeason(r.Context(), userID, createReq, req.Season, filter)
+		// Dispatch on presence, not value: season 0 is the Specials season.
+		if req.Season != nil {
+			if *req.Season < 0 {
+				writeError(w, http.StatusBadRequest, "bad_request", "season_number must be >= 0")
+				return
+			}
+			list, batchID, skipped, err = h.svc.CreateSeason(r.Context(), userID, createReq, *req.Season, filter)
 		} else {
 			list, batchID, skipped, err = h.svc.CreateSeries(r.Context(), userID, createReq, filter)
 		}

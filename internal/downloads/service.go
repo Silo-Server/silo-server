@@ -447,8 +447,8 @@ func (s *Service) CreateSeries(ctx context.Context, userID int, req CreateReques
 
 // CreateSeason creates download records for every episode in a single season of
 // a series. It shares CreateSeries' managed/ephemeral behavior, shared batch ID,
-// and original-only restriction; only the episode set differs. Callers pass a
-// positive seasonNumber (the handler routes here only when one is supplied).
+// and original-only restriction; only the episode set differs. seasonNumber 0
+// is the Specials season (the handler routes here whenever one is supplied).
 func (s *Service) CreateSeason(ctx context.Context, userID int, req CreateRequest, seasonNumber int, filter catalog.AccessFilter) ([]*Download, string, []SkippedDownload, error) {
 	return s.createSeriesScoped(ctx, userID, req, filter, func(ctx context.Context) ([]*models.Episode, error) {
 		return s.episodeRepo.ListBySeason(ctx, req.ContentID, seasonNumber)
