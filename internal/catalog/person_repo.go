@@ -738,10 +738,16 @@ func (r *PersonRepository) resolveExternalIDConflict(
 
 	if !canMergePeople(*p, partner) {
 		// Not confidently the same human (contradictory ids, or names disagree):
-		// drop the conflicting id from this write so it commits instead of looping
-		// forever, rather than destructively deleting a possibly-distinct person.
-		clearExternalIDField(p, field)
-		slog.Warn("person merge: declining to merge, dropping conflicting id",
+		// restore the survivor's currently-persisted value for this field so the
+		// retried write becomes a no-op on that column. This lets the write commit
+		// instead of looping forever, without destructively deleting a
+		// possibly-distinct person and without blanking an id the survivor already
+		// held (blanking would silently drop a previously-valid provider id, e.g.
+		// on the admin PATCH path that mutates an existing id into a colliding one).
+		// Writing the row's own current value back can never violate the unique
+		// index, so this field will not re-trigger the conflict.
+		setExternalIDField(p, field, externalIDValue(people[p.ID], field))
+		slog.Warn("person merge: declining to merge, preserving survivor's existing id",
 			"person_id", p.ID, "partner_id", partnerID, "field", field, "value", value,
 			"person_name", p.Name, "partner_name", partner.Name)
 		return true, nil
@@ -836,17 +842,17 @@ func externalIDValue(p models.Person, field string) string {
 	}
 }
 
-// clearExternalIDField blanks the named external-id column on p.
-func clearExternalIDField(p *models.Person, field string) {
+// setExternalIDField sets the named external-id column on p to value.
+func setExternalIDField(p *models.Person, field, value string) {
 	switch field {
 	case "tmdb_id":
-		p.TmdbID = ""
+		p.TmdbID = value
 	case "imdb_id":
-		p.ImdbID = ""
+		p.ImdbID = value
 	case "tvdb_id":
-		p.TvdbID = ""
+		p.TvdbID = value
 	case "plex_guid":
-		p.PlexGUID = ""
+		p.PlexGUID = value
 	}
 }
 

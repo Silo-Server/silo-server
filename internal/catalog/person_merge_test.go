@@ -197,7 +197,7 @@ func TestMergePersonFields(t *testing.T) {
 	})
 }
 
-func TestExternalIDValueAndClear(t *testing.T) {
+func TestExternalIDValueAndSet(t *testing.T) {
 	p := models.Person{TmdbID: "111", ImdbID: "nm9", TvdbID: "5", PlexGUID: "g"}
 
 	for field, want := range map[string]string{
@@ -208,12 +208,23 @@ func TestExternalIDValueAndClear(t *testing.T) {
 		}
 	}
 
+	// Setting a field to a new value replaces only that column.
+	updated := p
+	setExternalIDField(&updated, "imdb_id", "nm12345")
+	if updated.ImdbID != "nm12345" {
+		t.Errorf("setExternalIDField did not set imdb_id: %q", updated.ImdbID)
+	}
+	if updated.TmdbID != "111" {
+		t.Errorf("setExternalIDField touched the wrong field: %q", updated.TmdbID)
+	}
+
+	// Setting a field to "" blanks it, matching the old clear behavior.
 	cleared := p
-	clearExternalIDField(&cleared, "imdb_id")
+	setExternalIDField(&cleared, "imdb_id", "")
 	if cleared.ImdbID != "" {
-		t.Errorf("clearExternalIDField did not blank imdb_id: %q", cleared.ImdbID)
+		t.Errorf("setExternalIDField did not blank imdb_id: %q", cleared.ImdbID)
 	}
 	if cleared.TmdbID != "111" {
-		t.Errorf("clearExternalIDField touched the wrong field: %q", cleared.TmdbID)
+		t.Errorf("setExternalIDField touched the wrong field: %q", cleared.TmdbID)
 	}
 }
