@@ -474,8 +474,10 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
 
-					if restartErr := transcodeSession.Restart(
+					if restartErr := h.tm.RestartSessionLocked(
 						context.WithoutCancel(r.Context()),
+						playSession.UpstreamSessionID,
+						transcodeSession,
 						seekSeconds,
 						segNum,
 					); restartErr == nil {
@@ -1217,7 +1219,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		if segmentDuration := transcodeSession.Opts().SegmentDuration; segmentDuration > 0 && positionSeconds > 0 {
 			startSegment = int(positionSeconds / float64(segmentDuration))
 		}
-		if err := transcodeSession.Restart(context.WithoutCancel(ctx), positionSeconds, startSegment); err != nil {
+		if err := h.tm.RestartSessionLocked(context.WithoutCancel(ctx), playSession.UpstreamSessionID, transcodeSession, positionSeconds, startSegment); err != nil {
 			return false, err
 		}
 		// Re-persist the durable recipe so reconstruct after a central restart

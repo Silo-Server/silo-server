@@ -216,6 +216,24 @@ func (m *TranscodeManager) LockSessionLifecycle(sessionID string) func() {
 	}
 }
 
+// RestartSessionLocked re-spawns ts under the per-session lifecycle lock so a
+// restart (audio-switch or segment-recovery) can never race a fresh start,
+// reconstruct, or another restart into the same output directory — the
+// concurrent-writer corruption the lifecycle lock exists to prevent. It holds
+// the lock only across the cancel→respawn transition inside Restart and
+// releases it before the caller waits on segments. Under the lock it confirms
+// ts is still the live mapped session; if a concurrent teardown or reconstruct
+// replaced it, the stale handle is not re-spawned and ErrSessionSuperseded is
+// returned.
+func (m *TranscodeManager) RestartSessionLocked(ctx context.Context, sessionID string, ts *TranscodeSession, seekSeconds float64, startSegment int) error {
+	unlock := m.LockSessionLifecycle(sessionID)
+	defer unlock()
+	if live := m.GetTranscodeSession(sessionID); live != ts {
+		return ErrSessionSuperseded
+	}
+	return ts.Restart(ctx, seekSeconds, startSegment)
+}
+
 // markReconstructing records that sessionID's ffmpeg is mid-reconstruct and
 // returns a release func to clear it. Cleanup unions this set with the live map
 // so a dir being rebuilt is never reaped before it registers.

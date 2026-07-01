@@ -12,6 +12,11 @@ var (
 	ErrTranscodeFailed   = errors.New("transcode process failed")
 	ErrSegmentNotFound   = errors.New("segment not found")
 	ErrManifestNotReady  = errors.New("manifest not ready")
+	// ErrSessionSuperseded means the session a restart was about to re-spawn is
+	// no longer the live mapped session (a concurrent teardown or reconstruct
+	// replaced it while the restart waited for the per-session lifecycle lock).
+	// The caller must not re-spawn ffmpeg for the stale handle.
+	ErrSessionSuperseded = errors.New("transcode session superseded")
 	// ErrLimitProviderUnavailable wraps a failure to load a user's admission
 	// limits from the limit provider (e.g. a transient Postgres error during a
 	// post-restart reconstruct wave). It is distinct from the genuine over-cap

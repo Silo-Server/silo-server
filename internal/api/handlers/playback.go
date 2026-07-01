@@ -1948,7 +1948,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 			ts.SetAudioTrackIndex(req.AudioTrackIndex)
 			seekSeconds := req.Position
 			startSegment := computeStartSegment(seekSeconds, ts.Opts().SegmentDuration)
-			if restartErr := ts.Restart(context.WithoutCancel(r.Context()), seekSeconds, startSegment); restartErr != nil {
+			if restartErr := h.tm.RestartSessionLocked(context.WithoutCancel(r.Context()), sessionID, ts, seekSeconds, startSegment); restartErr != nil {
 				slog.Error("failed to restart transcode for audio switch", "session", sessionID, "error", restartErr)
 			} else {
 				h.maybeStartThrottler(r.Context(), ts)
@@ -2785,8 +2785,10 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 						"session", sessionID,
 						"playback_session_id", sessionID,
 					)
-					if restartErr := transcodeSession.Restart(
+					if restartErr := h.tm.RestartSessionLocked(
 						context.WithoutCancel(r.Context()),
+						sessionID,
+						transcodeSession,
 						seekSeconds,
 						segNum,
 					); restartErr == nil {

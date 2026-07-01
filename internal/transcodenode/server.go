@@ -126,6 +126,25 @@ func (s *Server) lockSessionLifecycle(sessionID string) func() {
 	}
 }
 
+// restartSessionLocked re-spawns session under the per-session lifecycle lock so
+// a segment-recovery restart can never race a fresh start, reconstruct, or
+// another restart into the same output directory. It holds the lock only across
+// the cancel→respawn transition inside Restart and releases it before the caller
+// waits on segments. Under the lock it confirms session is still the live mapped
+// session; a concurrent teardown or reconstruct that replaced it yields
+// ErrSessionSuperseded rather than re-spawning the stale handle.
+func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, session *playback.TranscodeSession, seekSeconds float64, startSegment int) error {
+	unlock := s.lockSessionLifecycle(sessionID)
+	defer unlock()
+	s.mu.RLock()
+	live, ok := s.sessions[sessionID]
+	s.mu.RUnlock()
+	if !ok || live != session {
+		return playback.ErrSessionSuperseded
+	}
+	return session.Restart(ctx, seekSeconds, startSegment)
+}
+
 // NewServer creates a new transcode server.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	s := &Server{
@@ -714,8 +733,10 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 						"playback_session_id", sessionID,
 					)
 
-					if restartErr := session.Restart(
+					if restartErr := s.restartSessionLocked(
 						context.WithoutCancel(r.Context()),
+						sessionID,
+						session,
 						seekSeconds,
 						segNum,
 					); restartErr == nil {
