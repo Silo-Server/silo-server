@@ -48,15 +48,19 @@ func (r *StableIdentityResolver) ResolveHistoryIdentity(ctx context.Context, med
 	if r.episodes != nil {
 		episode, err := r.episodes.GetByID(ctx, mediaItemID)
 		if err == nil && episode != nil {
+			episodeIDs := episodeProviderIDs(episode)
 			seriesIDs := providerIDMap(r.loadProviderIDs(ctx, episode.SeriesID))
-			if len(seriesIDs) == 0 {
+			// Only require series IDs when the episode has no IDs of its own:
+			// an episode with its own IMDb/TMDB/TVDB ID is addressable on the
+			// flat episodes[].ids path without needing the nested show fallback.
+			if len(episodeIDs) == 0 && len(seriesIDs) == 0 {
 				return userstore.WatchIdentity{}
 			}
 			seasonNumber := episode.SeasonNumber
 			episodeNumber := episode.EpisodeNumber
 			return userstore.WatchIdentity{
 				StableType:        "episode",
-				ProviderIDs:       episodeProviderIDs(episode),
+				ProviderIDs:       episodeIDs,
 				SeriesProviderIDs: seriesIDs,
 				Season:            &seasonNumber,
 				Episode:           &episodeNumber,
