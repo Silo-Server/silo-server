@@ -2,6 +2,7 @@ package downloads
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +106,21 @@ func TestCapabilityQualityPresetsGating(t *testing.T) {
 	capInfo, _ = svc.Capability(context.Background(), 1)
 	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
 		t.Fatalf("quality presets with transcode gated = %q, want original", got)
+	}
+
+	// Download permission revoked → an EMPTY array, never nil: the capability
+	// contract documents quality_presets as an array, and a nil slice would
+	// serialize as JSON null and break typed clients.
+	svc = newSvc(&models.User{DownloadAllowed: false}, true)
+	capInfo, _ = svc.Capability(context.Background(), 1)
+	if capInfo.QualityPresets == nil {
+		t.Fatal("quality presets for a denied user must be an empty array, not nil")
+	}
+	if len(capInfo.QualityPresets) != 0 {
+		t.Fatalf("quality presets for a denied user = %v, want empty", capInfo.QualityPresets)
+	}
+	if b, err := json.Marshal(capInfo.QualityPresets); err != nil || string(b) != "[]" {
+		t.Fatalf("quality presets serialize to %s (%v), want []", b, err)
 	}
 }
 

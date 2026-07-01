@@ -113,10 +113,12 @@ func (DownloadQualityResolver) Resolve(
 	}
 }
 
-// PresetsFor returns the ordered quality list currently fulfillable for a user.
+// PresetsFor returns the ordered quality list currently fulfillable for a
+// user. Always non-nil: the capability contract documents quality_presets as
+// an array, and a nil slice would serialize as JSON null.
 func (DownloadQualityResolver) PresetsFor(user *models.User, cfg config.DownloadConfig, artifactsAvailable bool) []string {
 	if !cfg.Enabled || user == nil || !user.DownloadAllowed {
-		return nil
+		return []string{}
 	}
 	presets := []string{QualityOriginal}
 	if artifactsAvailable && cfg.TranscodeEnabled && user.DownloadTranscodeAllowed {
