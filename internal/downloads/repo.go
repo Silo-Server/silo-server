@@ -262,6 +262,24 @@ func (r *Repository) EnsureDevice(ctx context.Context, userID int, profileID, de
 	return nil
 }
 
+// PurgeProfileDevices removes a profile's device rows (cascading its managed
+// downloads and subscriptions via their composite FKs). Profiles may live
+// outside Postgres, so no FK cascade covers user_devices on profile deletion;
+// the profile-deletion handler calls this instead.
+func (r *Repository) PurgeProfileDevices(ctx context.Context, userID int, profileID string) error {
+	if profileID == "" {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM user_devices WHERE user_id = $1 AND profile_id = $2`,
+		userID, profileID,
+	)
+	if err != nil {
+		return fmt.Errorf("purging devices for profile %q: %w", profileID, err)
+	}
+	return nil
+}
+
 // GetManagedEntry returns the managed download uniquely identified by
 // (user, profile, device, content, episode), or ErrNotFound. episodeID "" maps
 // to the movie/no-episode slot via COALESCE(episode_id,”).

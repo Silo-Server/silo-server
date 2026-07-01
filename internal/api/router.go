@@ -1358,10 +1358,17 @@ func NewRouter(deps Dependencies) chi.Router {
 			// Prepare-to-file pipeline (Phase 3): remux/transcode-to-single-file.
 			downloadSvc.SetArtifactManager(deps.ArtifactManager)
 		}
-		// Series monitoring (auto-download subscriptions). The matching
-		// auto-register worker is started in cmd/silo/main.go.
+		// Series monitoring (auto-download subscriptions). Client-pull only:
+		// devices sync on app open / background refresh; there is no server
+		// background worker.
 		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
+		if profileHandler != nil {
+			// Profiles may live outside Postgres (sqlite userdb backend), so
+			// deleting one cannot FK-cascade the shared user_devices table;
+			// purge the device library (and its downloads) in-app instead.
+			profileHandler.DeviceLibraryPurger = downloadRepo
+		}
 	} else {
 		downloadHandler = handlers.NewDownloadHandler(nil)
 	}

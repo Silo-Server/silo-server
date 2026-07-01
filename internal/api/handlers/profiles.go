@@ -28,6 +28,12 @@ type ProfileHandler struct {
 	ProfileTokens *access.ProfileTokenService
 	AvatarStore   profileAvatarStore
 	AvatarTTL     time.Duration
+	// DeviceLibraryPurger removes a deleted profile's device rows (and, via
+	// cascade, its managed downloads and subscriptions). Profiles may live
+	// outside Postgres, so no FK cascade covers these shared tables.
+	DeviceLibraryPurger interface {
+		PurgeProfileDevices(ctx context.Context, userID int, profileID string) error
+	}
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -587,6 +593,13 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 	if isUploadedAvatarRef(profile.Avatar) {
 		if cleanupErr := deleteUploadedAvatarObjects(r.Context(), h.AvatarStore, userID, profileID); cleanupErr != nil {
 			slog.Warn("profile avatar cleanup failed after delete", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
+		}
+	}
+	if h.DeviceLibraryPurger != nil {
+		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
+		defer cancel()
+		if purgeErr := h.DeviceLibraryPurger.PurgeProfileDevices(purgeCtx, userID, profileID); purgeErr != nil {
+			slog.Warn("profile device-library purge failed after delete", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 
