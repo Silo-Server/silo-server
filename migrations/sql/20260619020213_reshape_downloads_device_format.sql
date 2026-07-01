@@ -33,7 +33,7 @@ ALTER TABLE public.downloads
 ALTER TABLE public.downloads DROP CONSTRAINT downloads_status_check;
 ALTER TABLE public.downloads ADD  CONSTRAINT downloads_status_check
     CHECK (status IN ('queued','downloading','completed','failed','cancelled',  -- existing
-                      'registered','preparing','ready','revoked'));             -- managed entries
+                      'preparing','ready','revoked'));                          -- managed entries
 
 -- One managed entry per (user, profile, device, content, episode). Ephemeral rows (NULL device_id)
 -- are exempt via the partial index. COALESCE(episode_id,'') collapses movies (NULL episode_id) to
@@ -65,6 +65,10 @@ ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_effective_quali
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_quality_check;
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_format_check;
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_status_check;
+-- Rollback must not fail validation: collapse managed-lifecycle rows to the
+-- legacy enum before re-narrowing the CHECK (data loss is expected on a
+-- reshape Down; a failing Down is not).
+UPDATE public.downloads SET status = 'cancelled' WHERE status IN ('preparing','ready','revoked');
 ALTER TABLE public.downloads ADD  CONSTRAINT downloads_status_check
     CHECK (status IN ('queued','downloading','completed','failed','cancelled'));
 ALTER TABLE public.downloads

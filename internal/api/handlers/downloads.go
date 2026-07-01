@@ -614,8 +614,6 @@ func (h *DownloadHandler) writeDownloadError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusForbidden, "transcode_disabled", "Download transcoding is disabled")
 	case errors.Is(err, downloads.ErrInvalidQuality):
 		writeError(w, http.StatusBadRequest, "invalid_quality", "Unknown download quality")
-	case errors.Is(err, downloads.ErrInvalidFormat):
-		writeError(w, http.StatusBadRequest, "invalid_format", "Unknown download format")
 	case errors.Is(err, downloads.ErrProfileRequired):
 		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 	case errors.Is(err, downloads.ErrBulkQualityUnavailable):

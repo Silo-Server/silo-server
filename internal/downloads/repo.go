@@ -150,6 +150,20 @@ func (r *Repository) ListByUser(ctx context.Context, userID int) ([]*Download, e
 	return result, nil
 }
 
+// PruneEphemeralOlderThan deletes ephemeral (device-less) rows not touched
+// since cutoff, regardless of status — they are convenience records for
+// one-shot web downloads, not managed library entries. Pruning bounds
+// GET /downloads growth for long-lived accounts and unpins artifacts
+// (HasActiveLink counts ephemeral links). Returns the number of rows removed.
+func (r *Repository) PruneEphemeralOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM downloads WHERE device_id IS NULL AND updated_at < $1`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("pruning ephemeral downloads: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // CountActiveByUser returns the number of active downloads for a user.
 // 'preparing' counts: an artifact-backed row holds encode work in flight, so
 // it must consume the concurrent quota like a live transfer does.

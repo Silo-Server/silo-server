@@ -262,11 +262,15 @@ func (r *ArtifactRepository) ListReady(ctx context.Context) ([]*Artifact, error)
 		return nil, fmt.Errorf("listing ready artifacts: %w", err)
 	}
 	defer rows.Close()
+	return scanArtifacts(rows)
+}
+
+func scanArtifacts(rows pgx.Rows) ([]*Artifact, error) {
 	var out []*Artifact
 	for rows.Next() {
 		a, err := scanArtifact(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scanning ready artifact: %w", err)
+			return nil, fmt.Errorf("scanning artifact row: %w", err)
 		}
 		out = append(out, a)
 	}
@@ -298,6 +302,35 @@ func (r *ArtifactRepository) HasActiveLink(ctx context.Context, artifactID strin
 		return false, fmt.Errorf("checking artifact links: %w", err)
 	}
 	return exists, nil
+}
+
+// ListFailedBefore returns terminally-failed artifacts cold since cutoff
+// (last_used_at). Their linked downloads were already flipped to 'failed' by
+// reconciliation, so the rows serve nothing and only block re-attempts.
+func (r *ArtifactRepository) ListFailedBefore(ctx context.Context, cutoff time.Time) ([]*Artifact, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+artifactColumns+` FROM download_artifacts
+		 WHERE status = 'failed' AND last_used_at < $1`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("listing failed artifacts: %w", err)
+	}
+	defer rows.Close()
+	return scanArtifacts(rows)
+}
+
+// ListUnlinkedReadyBefore returns ready artifacts referenced by NO download
+// row at all (every linking row deleted) and unused since cutoff. These are
+// pure orphans: nothing can ever serve them again.
+func (r *ArtifactRepository) ListUnlinkedReadyBefore(ctx context.Context, cutoff time.Time) ([]*Artifact, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+artifactColumns+` FROM download_artifacts a
+		 WHERE a.status = 'ready' AND a.last_used_at < $1
+		   AND NOT EXISTS (SELECT 1 FROM downloads d WHERE d.artifact_id = a.id)`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("listing unlinked artifacts: %w", err)
+	}
+	defer rows.Close()
+	return scanArtifacts(rows)
 }
 
 // DeleteArtifact removes an artifact row.

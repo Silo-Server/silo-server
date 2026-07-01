@@ -371,7 +371,6 @@ func TestHandleCreateDownloadErrorMapping(t *testing.T) {
 		{"invalid quality", downloads.ErrInvalidQuality, http.StatusBadRequest},
 		{"quality unavailable", downloads.ErrQualityUnavailable, http.StatusNotImplemented},
 		{"bulk quality unavailable", downloads.ErrBulkQualityUnavailable, http.StatusNotImplemented},
-		{"invalid format", downloads.ErrInvalidFormat, http.StatusBadRequest},
 		{"format unavailable", downloads.ErrFormatUnavailable, http.StatusNotImplemented},
 		{"profile required", downloads.ErrProfileRequired, http.StatusBadRequest},
 		{"concurrent limit", downloads.ErrConcurrentLimitReached, http.StatusTooManyRequests},

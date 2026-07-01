@@ -426,10 +426,24 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 	}
 }
 
-// Cleanup evicts ready artifacts (LRU first) once the total exceeds the byte
-// budget, never removing one still linked by any active download row (managed
-// or ephemeral) — only artifacts whose links are all terminal are evictable.
+// Hygiene retention windows. These remove only rows nothing can serve again —
+// terminally-failed jobs (linked downloads already flipped to failed by
+// reconciliation) and ready artifacts whose every referencing download row was
+// deleted — plus ephemeral web rows past their convenience-record lifetime.
+// The server-disk *quota* is download.artifact_max_bytes (see the download
+// limits & restrictions design); this sweep is not a quota.
+const (
+	failedArtifactRetention    = 24 * time.Hour
+	unlinkedArtifactRetention  = 30 * 24 * time.Hour
+	ephemeralDownloadRetention = 7 * 24 * time.Hour
+)
+
+// Cleanup runs the hygiene sweep, then evicts ready artifacts (LRU first) once
+// the total exceeds the byte budget, never removing one still linked by any
+// active download row (managed or ephemeral) — only artifacts whose links are
+// all terminal are evictable.
 func (m *ArtifactManager) Cleanup(ctx context.Context) error {
+	m.sweepStale(ctx)
 	budget := m.downloadConfig().ArtifactMaxBytes
 	if budget <= 0 {
 		return nil // unlimited
@@ -470,6 +484,53 @@ func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 		total -= a.FileSize
 	}
 	return nil
+}
+
+// sweepStale is the age-based hygiene pass: cold terminally-failed artifacts
+// (with their leftover .part files), orphaned ready artifacts no download row
+// references, and expired ephemeral download rows. Best-effort; every step
+// logs and continues.
+func (m *ArtifactManager) sweepStale(ctx context.Context) {
+	now := time.Now()
+	if failed, err := m.repo.ListFailedBefore(ctx, now.Add(-failedArtifactRetention)); err != nil {
+		slog.Warn("failed-artifact sweep list failed", "error", err)
+	} else {
+		for _, a := range failed {
+			m.removeArtifact(ctx, a, "failed")
+		}
+	}
+	if orphans, err := m.repo.ListUnlinkedReadyBefore(ctx, now.Add(-unlinkedArtifactRetention)); err != nil {
+		slog.Warn("unlinked-artifact sweep list failed", "error", err)
+	} else {
+		for _, a := range orphans {
+			m.removeArtifact(ctx, a, "unlinked")
+		}
+	}
+	if m.downloads != nil {
+		if n, err := m.downloads.PruneEphemeralOlderThan(ctx, now.Add(-ephemeralDownloadRetention)); err != nil {
+			slog.Warn("ephemeral download prune failed", "error", err)
+		} else if n > 0 {
+			slog.Info("pruned expired ephemeral downloads", "rows", n)
+		}
+	}
+}
+
+// removeArtifact deletes an artifact's output file, its .part leftover, and
+// its row. Used by the hygiene sweep for rows nothing can serve again.
+func (m *ArtifactManager) removeArtifact(ctx context.Context, a *Artifact, reason string) {
+	if a.OutputPath != "" {
+		if err := os.Remove(a.OutputPath); err != nil && !os.IsNotExist(err) {
+			slog.Warn("removing swept artifact file failed", "artifact_id", a.ID, "error", err)
+		}
+		if err := os.Remove(a.OutputPath + ".part"); err != nil && !os.IsNotExist(err) {
+			slog.Warn("removing swept artifact partial failed", "artifact_id", a.ID, "error", err)
+		}
+	}
+	if err := m.repo.DeleteArtifact(ctx, a.ID); err != nil {
+		slog.Warn("deleting swept artifact row failed", "artifact_id", a.ID, "error", err)
+		return
+	}
+	slog.Info("swept stale download artifact", "artifact_id", a.ID, "reason", reason, "bytes", a.FileSize)
 }
 
 // backoffFor returns the retry delay for the next attempt after a failure.

@@ -50,16 +50,15 @@ const (
 	StatusCancelled   = "cancelled" //nolint:misspell // persisted DB enum value (migration 042)
 
 	// Managed device-entry lifecycle (Phase 1+):
-	// registered -> [preparing ->] ready -> completed, plus revoked.
-	StatusRegistered = "registered"
-	StatusPreparing  = "preparing"
-	StatusReady      = "ready"
-	StatusRevoked    = "revoked"
+	// [preparing ->] ready -> completed, plus revoked (reserved for the
+	// admin revoke flow; see the download limits & restrictions design).
+	StatusPreparing = "preparing"
+	StatusReady     = "ready"
+	StatusRevoked   = "revoked"
 )
 
 // Download kind constants.
 const (
-	KindDirect = "direct"
 	KindQueued = "queued"
 )
 
@@ -73,7 +72,6 @@ var (
 	ErrDownloadNotActive      = errors.New("download is not in an active state")
 	ErrStatusConflict         = errors.New("download status transition conflict")
 	ErrTranscodeDisabled      = errors.New("download transcode is disabled")
-	ErrInvalidFormat          = errors.New("invalid download format")
 	ErrInvalidQuality         = errors.New("invalid download quality")
 	ErrProfileRequired        = errors.New("managed download requires a profile")
 	ErrInvalidStatus          = errors.New("invalid download status transition")
