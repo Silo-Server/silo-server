@@ -1621,9 +1621,12 @@ func (h *ItemsHandler) HandleSearchHints(w http.ResponseWriter, r *http.Request)
 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 	query := strings.TrimSpace(q.Get("SearchTerm"))
-	// Gate short type-ahead terms and cap results, matching the policy applied
-	// to every search path outside the Meilisearch-backed /Items media search.
-	if query == "" || auxSearchTermTooShort(query) {
+	// Search hints are served by the catalog search provider (the same
+	// Meilisearch-backed path as /Items media search), which does its own
+	// short-term handling and result bounding, so the aux short-term gate is
+	// intentionally NOT applied here — short titles ("Up", "It") stay
+	// discoverable through type-ahead. The result cap is still clamped below.
+	if query == "" {
 		writeJSON(w, http.StatusOK, searchHintResultDTO{})
 		return
 	}
