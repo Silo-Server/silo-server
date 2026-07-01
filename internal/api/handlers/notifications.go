@@ -388,7 +388,11 @@ func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.R
 		}
 	}
 	applePush := capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}}
-	if h.system.PushDevices != nil && h.system.PushDevices.Available() {
+	// Like web push above, availability requires both the wiring (cipher/store)
+	// and the admin delivery toggle: Available must mean "setup will actually
+	// deliver", not "the server could store a token".
+	if h.system.PushDevices != nil && h.system.PushDevices.Available() &&
+		h.system.Settings.ApplePushDeliveryEnabled(r.Context()) {
 		applePush = capabilityPush{
 			Available:      true,
 			Provider:       notifications.PushProviderSiloRelay,

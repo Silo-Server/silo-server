@@ -47,6 +47,22 @@ type PushDeliveryAttempt struct {
 	UpdatedAt              time.Time
 }
 
+// newPushDeliveryAttempts builds the pending outbox rows fanning one delivery
+// out to its profile's eligible devices. Shared by the fanout worker and
+// operational dispatch so both outbox paths enqueue identical rows.
+func newPushDeliveryAttempts(deliveryID string, devices []PushDevice) []PushDeliveryAttempt {
+	attempts := make([]PushDeliveryAttempt, 0, len(devices))
+	for _, device := range devices {
+		attempts = append(attempts, PushDeliveryAttempt{
+			ID:                     ulid.Make().String(),
+			NotificationDeliveryID: &deliveryID,
+			PushDeviceID:           device.ID,
+			TriggerType:            PushTriggerDelivery,
+		})
+	}
+	return attempts
+}
+
 const pushAttemptReturning = `
 		RETURNING id, notification_delivery_id, push_device_id, trigger_type, provider, platform,
 		          attempt_number, attempted_at, next_retry_at, outcome, relay_request_id,

@@ -2149,22 +2149,19 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		}
 		req.Value = strconv.FormatBool(enabled)
 	case notifications.SettingPushRelayURL:
-		value := strings.TrimRight(strings.TrimSpace(req.Value), "/")
-		if value != "" {
-			parsed, err := url.Parse(value)
-			if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-				writeError(w, http.StatusBadRequest, "bad_request", "notifications.push_relay_url must be an https URL")
-				return
-			}
-		}
-		req.Value = value
-	case notifications.SettingPushRelayDeploymentID:
-		value := strings.TrimSpace(req.Value)
-		if len(value) > 128 {
-			writeError(w, http.StatusBadRequest, "bad_request", "notifications.push_relay_deployment_id must be at most 128 characters")
+		value, err := normalizePushRelayURLValue(req.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "notifications.push_relay_url must be an https URL")
 			return
 		}
 		req.Value = value
+	case notifications.SettingPushRelayDeploymentID, notifications.SettingPushRelayAPIKey:
+		// The relay issues these as a pair during registration; a direct write
+		// desyncs the stored deployment id from the API key the relay minted
+		// for it (and feeds an arbitrary id into the next rotation request).
+		writeError(w, http.StatusBadRequest, "bad_request",
+			key+" is managed by the push relay registration flow; use POST /admin/notifications/push/relay/register")
+		return
 	case catalog.SearchSettingProvider:
 		switch strings.TrimSpace(strings.ToLower(req.Value)) {
 		case catalog.SearchProviderPostgres, catalog.SearchProviderMeilisearch:

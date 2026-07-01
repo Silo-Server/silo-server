@@ -110,8 +110,8 @@ func TestHandleApplePushDisplayDB(t *testing.T) {
 		t.Fatalf("decode response: %v", err)
 	}
 	if response.DeliveryID != "delivery-1" ||
-		response.Title != "New episode of Severance" ||
-		response.Body != "S2E1 - Hello, Ms. Cobel" ||
+		response.Title != "The latest episode of Severance S02E01 just dropped!" ||
+		response.Body != "Hello, Ms. Cobel" ||
 		response.ThreadID != "series:series-1" ||
 		response.Category != "episode_available" ||
 		response.URL != "/item/episode-1" {

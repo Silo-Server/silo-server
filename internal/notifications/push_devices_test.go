@@ -172,7 +172,11 @@ func TestPushDeviceAPNsTokenEncryptionUsesRowAAD(t *testing.T) {
 	}
 }
 
-func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
+// newPushDeviceTestRepo connects to SILO_TEST_DATABASE_URL (skipping when
+// unset) and shadows push_devices with a session-local temp table, pinning the
+// pool to one connection so every query sees it.
+func newPushDeviceTestRepo(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("set SILO_TEST_DATABASE_URL to run DB-backed push device repository test")
@@ -216,8 +220,12 @@ func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
 		) ON COMMIT PRESERVE ROWS`); err != nil {
 		t.Fatalf("create temp push_devices table: %v", err)
 	}
+	return NewPushDeviceRepository(pool), pool
+}
 
-	repo := NewPushDeviceRepository(pool)
+func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
+	ctx := context.Background()
+	repo, pool := newPushDeviceTestRepo(t)
 	cipher := testPushCipher(t)
 	registration := ApplePushDeviceRegistration{
 		UserID:          42,
@@ -269,5 +277,64 @@ func TestPushDeviceRepositoryUpsertApplePreservesStableIDs(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("row count = %d, want 1", count)
+	}
+}
+
+func TestPushDeviceRepositoryUpsertApplePurgesOtherProfiles(t *testing.T) {
+	ctx := context.Background()
+	repo, pool := newPushDeviceTestRepo(t)
+	cipher := testPushCipher(t)
+
+	registration := ApplePushDeviceRegistration{
+		UserID:          42,
+		ProfileID:       "profile-parent",
+		DeviceID:        "shared-phone",
+		APNsToken:       strings.Repeat("a", 64),
+		APNsEnvironment: APNsEnvironmentProd,
+		APNsTopic:       ApplePushTopicSilo,
+		PushMode:        PushModePrivatePush,
+	}
+	if _, err := repo.UpsertApple(ctx, registration, cipher); err != nil {
+		t.Fatalf("register under first profile: %v", err)
+	}
+
+	// A different install on another profile must be untouched by the purge.
+	other := registration
+	other.ProfileID = "profile-parent"
+	other.DeviceID = "other-phone"
+	if _, err := repo.UpsertApple(ctx, other, cipher); err != nil {
+		t.Fatalf("register unrelated device: %v", err)
+	}
+
+	// The shared phone switches profiles and re-registers: the old profile's
+	// row for that install must be gone, not left enabled.
+	registration.ProfileID = "profile-kid"
+	device, err := repo.UpsertApple(ctx, registration, cipher)
+	if err != nil {
+		t.Fatalf("register under second profile: %v", err)
+	}
+	if device.ProfileID != "profile-kid" {
+		t.Fatalf("profile = %q, want profile-kid", device.ProfileID)
+	}
+
+	rows, err := pool.Query(ctx, `SELECT profile_id, device_id FROM push_devices ORDER BY profile_id`)
+	if err != nil {
+		t.Fatalf("list rows: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]string{}
+	for rows.Next() {
+		var profileID, deviceID string
+		if err := rows.Scan(&profileID, &deviceID); err != nil {
+			t.Fatalf("scan row: %v", err)
+		}
+		got[profileID] = deviceID
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	want := map[string]string{"profile-kid": "shared-phone", "profile-parent": "other-phone"}
+	if len(got) != len(want) || got["profile-kid"] != want["profile-kid"] || got["profile-parent"] != want["profile-parent"] {
+		t.Fatalf("rows after reassignment = %v, want %v", got, want)
 	}
 }

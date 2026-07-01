@@ -253,14 +253,27 @@ func mapRelayRegistrationError(err error) (int, string, string) {
 	}
 }
 
-func normalizePushRelayURL(raw string) (string, error) {
+// normalizePushRelayURLValue trims a relay URL and enforces https with a
+// host. Empty input stays empty so callers choose their own default.
+func normalizePushRelayURLValue(raw string) (string, error) {
 	value := strings.TrimRight(strings.TrimSpace(raw), "/")
 	if value == "" {
-		value = "https://push.siloserver.org"
+		return "", nil
 	}
 	parsed, err := url.Parse(value)
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return "", errors.New("relay_url must be an https URL")
+	}
+	return value, nil
+}
+
+func normalizePushRelayURL(raw string) (string, error) {
+	value, err := normalizePushRelayURLValue(raw)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return notifications.DefaultPushRelayURL, nil
 	}
 	return value, nil
 }

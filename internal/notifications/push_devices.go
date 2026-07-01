@@ -211,6 +211,16 @@ func (r *PushDeviceRepository) UpsertApple(ctx context.Context, registration App
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// A device install registers for the profile it is currently signed into.
+	// Purge the same install's registrations under other profiles (attempts
+	// cascade with them) so a profile switch on a shared device doesn't leave
+	// the previous profile's notifications flowing to it.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM push_devices WHERE device_id = $1 AND platform = $2 AND profile_id <> $3`,
+		registration.DeviceID, PushPlatformApple, registration.ProfileID); err != nil {
+		return nil, fmt.Errorf("purge reassigned push device: %w", err)
+	}
+
 	device, err := r.selectAppleForUpdate(ctx, tx, registration.ProfileID, registration.DeviceID)
 	if err != nil {
 		return nil, err

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -248,100 +247,41 @@ func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, devi
 	}
 }
 
+// PushDispatcher implements the channel Dispatcher interface for Apple push
+// on top of the shared channelDispatcher core, with the retry/recovery sweep
+// integrated.
 type PushDispatcher struct {
-	sender *pushSender
-	queue  chan string
-	logger *slog.Logger
+	core channelDispatcher[PushDeliveryAttempt]
 }
 
 func newPushDispatcher(sender *pushSender) *PushDispatcher {
-	return &PushDispatcher{
-		sender: sender,
-		queue:  make(chan string, pushDispatchQueue),
-		logger: slog.Default().With("component", "notifications.apple_push.dispatch"),
-	}
+	return &PushDispatcher{core: channelDispatcher[PushDeliveryAttempt]{
+		channel:      "apple push",
+		queue:        make(chan string, pushDispatchQueue),
+		logger:       slog.Default().With("component", "notifications.apple_push.dispatch"),
+		claimPending: sender.devices.ClaimPendingPushForDelivery,
+		process: func(ctx context.Context, attempt PushDeliveryAttempt) {
+			sender.processAttempt(ctx, attempt)
+		},
+		enabled:    sender.settings.ApplePushDeliveryEnabled,
+		claimDue:   sender.devices.ClaimDuePushAttempts,
+		claimLimit: pushRetryClaimLimit,
+	}}
 }
 
+// Dispatch queues the delivery's Apple push attempts for immediate send.
 func (d *PushDispatcher) Dispatch(_ context.Context, delivery DeliveryRow) error {
 	if d == nil {
 		return nil
 	}
-	select {
-	case d.queue <- delivery.ID:
-	default:
-		d.logger.Warn("apple push dispatch queue full; deferring to retry worker", "delivery_id", delivery.ID)
-	}
+	d.core.dispatch(delivery.ID)
 	return nil
 }
 
+// Run consumes the dispatch queue and the retry/recovery sweep until ctx is
+// canceled.
 func (d *PushDispatcher) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-	for range webhookDispatchWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case deliveryID := <-d.queue:
-					d.processDelivery(ctx, deliveryID)
-				}
-			}
-		}()
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(webhookRetryInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-			if !d.sender.settings.ApplePushDeliveryEnabled(ctx) {
-				continue
-			}
-			for {
-				attempts, err := d.sender.devices.ClaimDuePushAttempts(ctx, pushRetryClaimLimit)
-				if err != nil {
-					if ctx.Err() == nil {
-						d.logger.Warn("apple push retry claim failed", "error", err)
-					}
-					break
-				}
-				if len(attempts) == 0 {
-					break
-				}
-				for _, attempt := range attempts {
-					if ctx.Err() != nil {
-						return
-					}
-					d.sender.processAttempt(ctx, attempt)
-				}
-			}
-		}
-	}()
-	wg.Wait()
-}
-
-func (d *PushDispatcher) processDelivery(ctx context.Context, deliveryID string) {
-	attempts, err := d.sender.devices.ClaimPendingPushForDelivery(ctx, deliveryID)
-	if err != nil {
-		if ctx.Err() == nil {
-			d.logger.Warn("apple push attempt claim failed", "delivery_id", deliveryID, "error", err)
-		}
-		return
-	}
-	for _, attempt := range attempts {
-		if ctx.Err() != nil {
-			return
-		}
-		d.sender.processAttempt(ctx, attempt)
-	}
+	d.core.run(ctx)
 }
 
 type ApplePushTestResult struct {

@@ -72,7 +72,9 @@ func BuildNotificationDisplay(row DeliveryRow) NotificationDisplay {
 		}
 		display.Body = "Your media request was declined."
 		if flags.Reason != "" {
-			display.Body = "Reason: " + flags.Reason
+			// Admin-typed free text with no upstream length cap; keep native
+			// notification bodies bounded.
+			display.Body = "Reason: " + truncateDisplayText(flags.Reason, displayBodyMaxLen)
 		}
 		display.ThreadID = requestThreadID(flags)
 	case DeliveryTypeWebhookAutoDisabled:
@@ -115,6 +117,18 @@ func episodeDisplayCode(row DeliveryRow) string {
 		return fmt.Sprintf("S%02dE%02d", *row.SeasonNumber, *row.EpisodeNumber)
 	}
 	return ""
+}
+
+// displayBodyMaxLen bounds free-text notification bodies; matches the varchar
+// caps used elsewhere in the delivery pipeline.
+const displayBodyMaxLen = 240
+
+func truncateDisplayText(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return strings.TrimSpace(string(runes[:max-1])) + "…"
 }
 
 func requestThreadID(flags RequestFlags) string {

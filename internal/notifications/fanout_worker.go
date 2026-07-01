@@ -374,15 +374,7 @@ func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserte
 	}
 	attempts := make([]PushDeliveryAttempt, 0, len(inserted))
 	for _, row := range inserted {
-		deliveryID := row.ID
-		for _, device := range devicesByProfile[row.ProfileID] {
-			attempts = append(attempts, PushDeliveryAttempt{
-				ID:                     ulid.Make().String(),
-				NotificationDeliveryID: &deliveryID,
-				PushDeviceID:           device.ID,
-				TriggerType:            PushTriggerDelivery,
-			})
-		}
+		attempts = append(attempts, newPushDeliveryAttempts(row.ID, devicesByProfile[row.ProfileID])...)
 	}
 	return w.pushDevices.EnqueuePushAttempts(ctx, tx, attempts)
 }

@@ -83,7 +83,9 @@ const (
 	// already passed, and the window is what keeps those visible.
 	defaultServerChannelsBatchSeconds = 300
 	minServerChannelsBatchSeconds     = 120
-	defaultPushRelayURL               = "https://push.siloserver.org"
+	// DefaultPushRelayURL is the public Silo relay origin used when no
+	// notifications.push_relay_url override is stored.
+	DefaultPushRelayURL = "https://push.siloserver.org"
 
 	settingsCacheTTL = 15 * time.Second
 )
@@ -353,8 +355,10 @@ func (s *Settings) ServerChannelsBatchWindow(ctx context.Context) time.Duration 
 		defaultServerChannelsBatchSeconds, minServerChannelsBatchSeconds, 3600)) * time.Second
 }
 
-// ApplePushDeliveryEnabled gates actual relay sends. Device registration stays
-// available independently so clients can prepare tokens before delivery is live.
+// ApplePushDeliveryEnabled gates relay sends and the capability endpoint's
+// apple_push availability, mirroring how web push advertises itself. The
+// device registration endpoint stays available independently so clients that
+// already hold tokens keep them fresh across admin toggles.
 func (s *Settings) ApplePushDeliveryEnabled(ctx context.Context) bool {
 	return s.boolSetting(ctx, SettingApplePushDeliveryEnabled, false)
 }
@@ -363,7 +367,7 @@ func (s *Settings) ApplePushDeliveryEnabled(ctx context.Context) bool {
 func (s *Settings) PushRelayURL(ctx context.Context) string {
 	value := strings.TrimRight(strings.TrimSpace(s.raw(ctx, SettingPushRelayURL)), "/")
 	if value == "" {
-		return defaultPushRelayURL
+		return DefaultPushRelayURL
 	}
 	return value
 }

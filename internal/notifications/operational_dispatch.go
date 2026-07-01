@@ -84,16 +84,7 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 		if err != nil {
 			return nil, err
 		}
-		deliveryID := row.ID
-		attempts := make([]PushDeliveryAttempt, 0, len(devicesByProfile[delivery.ProfileID]))
-		for _, device := range devicesByProfile[delivery.ProfileID] {
-			attempts = append(attempts, PushDeliveryAttempt{
-				ID:                     ulid.Make().String(),
-				NotificationDeliveryID: &deliveryID,
-				PushDeviceID:           device.ID,
-				TriggerType:            PushTriggerDelivery,
-			})
-		}
+		attempts := newPushDeliveryAttempts(row.ID, devicesByProfile[delivery.ProfileID])
 		if err := s.pushDeviceRepo.EnqueuePushAttempts(ctx, tx, attempts); err != nil {
 			return nil, err
 		}

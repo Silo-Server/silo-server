@@ -15,8 +15,8 @@ func TestApplePushDeliverySettings(t *testing.T) {
 	if settings.ApplePushDeliveryEnabled(ctx) {
 		t.Fatal("ApplePushDeliveryEnabled must default to false")
 	}
-	if got := settings.PushRelayURL(ctx); got != defaultPushRelayURL {
-		t.Fatalf("PushRelayURL default = %q, want %q", got, defaultPushRelayURL)
+	if got := settings.PushRelayURL(ctx); got != DefaultPushRelayURL {
+		t.Fatalf("PushRelayURL default = %q, want %q", got, DefaultPushRelayURL)
 	}
 
 	settings = NewSettings(mapSettingReader{
