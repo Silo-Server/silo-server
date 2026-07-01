@@ -370,9 +370,9 @@ func (s *PostgresUserStore) MarkProgressBatch(ctx context.Context, profileID str
 }
 
 // ClearProgressBatch resets every (user, profile, media_item_id) row to
-// `completed = FALSE, position_seconds = 0` in a single UPDATE. Used by the
-// jellycompat series mark-unplayed path. Rows that don't exist are silently
-// skipped — the matching DeleteHistoryBySource call handles removing history.
+// `completed = FALSE, position_seconds = 0` in a single UPDATE. Rows that
+// don't exist are silently skipped. (Mark-unplayed flows currently go through
+// RemoveHistoryItems; this remains on the interface for bulk resets.)
 func (s *PostgresUserStore) ClearProgressBatch(ctx context.Context, profileID string, mediaItemIDs []string, updatedAt time.Time) error {
 	mediaItemIDs = compactMediaItemIDs(mediaItemIDs)
 	if len(mediaItemIDs) == 0 {

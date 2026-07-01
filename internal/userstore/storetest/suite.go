@@ -21,6 +21,9 @@ func RunProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("OnlineWriteAdvancesEventAt", func(t *testing.T) {
 		testOnlineWriteAdvancesEventAt(t, newStore)
 	})
+	t.Run("BatchWritesAdvanceEventAt", func(t *testing.T) {
+		testBatchWritesAdvanceEventAt(t, newStore)
+	})
 }
 
 // RunSuite runs all conformance tests against a UserStore implementation.
@@ -37,6 +40,9 @@ func RunSuite(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	})
 	t.Run("OnlineWriteAdvancesEventAt", func(t *testing.T) {
 		testOnlineWriteAdvancesEventAt(t, newStore)
+	})
+	t.Run("BatchWritesAdvanceEventAt", func(t *testing.T) {
+		testBatchWritesAdvanceEventAt(t, newStore)
 	})
 	t.Run("Favorites", func(t *testing.T) {
 		testFavorites(t, newStore)
@@ -958,6 +964,84 @@ func testOnlineWriteAdvancesEventAt(t *testing.T, newStore func(t *testing.T) us
 	}
 	if got.PositionSeconds != 500 {
 		t.Fatalf("stale offline replay won LWW: position = %v, want 500 (online write)", got.PositionSeconds)
+	}
+}
+
+// testBatchWritesAdvanceEventAt extends the LWW guarantee to the batch write
+// paths (jellycompat series mark-played and mark-unplayed): they advance
+// updated_at without hand-setting event_at, so the stamping trigger must
+// advance the LWW key for them — a queued offline event older than the batch
+// write must lose. It also pins the inverse: a write that DOES set event_at
+// (offline sync's clamped client event time) keeps that value rather than
+// having the trigger clobber it with the server write time.
+func testBatchWritesAdvanceEventAt(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	base := time.Now().UTC().Add(-time.Hour)
+
+	// MarkProgressBatch (series mark-played) must advance event_at.
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m1", 100, 1000, false, base); err != nil {
+		t.Fatalf("seed m1: %v", err)
+	}
+	if err := store.MarkProgressBatch(ctx, "p1", []string{"m1"}, time.Time{}); err != nil {
+		t.Fatalf("MarkProgressBatch: %v", err)
+	}
+	wrote, err := store.SetProgressIfNewer(ctx, "p1", "m1", 999, 1000, false, base.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("stale replay after mark-played: %v", err)
+	}
+	if wrote {
+		t.Fatal("offline event older than a batch mark-played won LWW; MarkProgressBatch left event_at stale")
+	}
+	got, err := store.GetProgress(ctx, "p1", "m1")
+	if err != nil || got == nil {
+		t.Fatalf("GetProgress(m1): %+v (%v)", got, err)
+	}
+	if got.PositionSeconds != 0 || !got.Completed {
+		t.Fatalf("m1 = pos %v completed %v; stale replay must not disturb mark-played state", got.PositionSeconds, got.Completed)
+	}
+
+	// ClearProgressBatch (mark-unplayed) must advance event_at the same way.
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m2", 300, 1000, false, base); err != nil {
+		t.Fatalf("seed m2: %v", err)
+	}
+	if err := store.ClearProgressBatch(ctx, "p1", []string{"m2"}, time.Time{}); err != nil {
+		t.Fatalf("ClearProgressBatch: %v", err)
+	}
+	wrote, err = store.SetProgressIfNewer(ctx, "p1", "m2", 888, 1000, false, base.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("stale replay after clear: %v", err)
+	}
+	if wrote {
+		t.Fatal("offline event older than a batch clear won LWW; ClearProgressBatch left event_at stale")
+	}
+	got, err = store.GetProgress(ctx, "p1", "m2")
+	if err != nil || got == nil {
+		t.Fatalf("GetProgress(m2): %+v (%v)", got, err)
+	}
+	if got.PositionSeconds != 0 {
+		t.Fatalf("m2 position = %v; stale replay resurrected a cleared resume point", got.PositionSeconds)
+	}
+
+	// An explicitly-set client event time survives the trigger: a strictly
+	// newer offline event (still far in the past) must be accepted, which can
+	// only happen if the stored event_at is the client time, not server now.
+	evt := base.Add(10 * time.Minute)
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m3", 100, 1000, false, evt); err != nil {
+		t.Fatalf("seed m3: %v", err)
+	}
+	if _, err := store.SetProgressIfNewer(ctx, "p1", "m3", 200, 1000, false, evt.Add(time.Minute)); err != nil {
+		t.Fatalf("advance m3: %v", err)
+	}
+	wrote, err = store.SetProgressIfNewer(ctx, "p1", "m3", 300, 1000, false, evt.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("third m3 write: %v", err)
+	}
+	if !wrote {
+		t.Fatal("a strictly newer offline event was rejected; the trigger clobbered an explicitly-set event_at")
 	}
 }
 

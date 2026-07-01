@@ -296,9 +296,16 @@ func InitSchema(db *sql.DB) error {
 }
 
 // watchProgressSyncTriggers stamps the server-owned cursor (synced_seq) on every
-// watch_progress write and defaults event_at to the write time. With
-// recursive_triggers OFF (the userdb default) the trigger's own UPDATE does not
-// re-fire it. See the offline-sync design (invariant 1).
+// watch_progress write and owns the LWW key: event_at defaults to the write
+// time, and an UPDATE that changed updated_at without explicitly changing
+// event_at advances it too (else a queued offline event older than that write
+// would win SetProgressIfNewer's comparison and resurrect stale progress).
+// Writes that DO set event_at — offline sync's clamped client event time —
+// keep their value. With recursive_triggers OFF (the userdb default) the
+// trigger's own UPDATE does not re-fire it. See the offline-sync design
+// (invariant 1). CREATE TRIGGER IF NOT EXISTS never replaces an existing
+// trigger, so changing a body requires a migrate.go step dropping the old one
+// (see migrateToV12).
 const watchProgressSyncTriggers = `
 CREATE TRIGGER IF NOT EXISTS watch_progress_stamp_ins AFTER INSERT ON watch_progress
 BEGIN
@@ -311,7 +318,11 @@ CREATE TRIGGER IF NOT EXISTS watch_progress_stamp_upd AFTER UPDATE ON watch_prog
 BEGIN
     UPDATE watch_progress
     SET synced_seq = (SELECT COALESCE(MAX(synced_seq), 0) + 1 FROM watch_progress),
-        event_at = COALESCE(event_at, updated_at)
+        event_at = CASE
+            WHEN NEW.event_at IS NULL THEN NEW.updated_at
+            WHEN NEW.event_at IS OLD.event_at AND NEW.updated_at IS NOT OLD.updated_at THEN NEW.updated_at
+            ELSE NEW.event_at
+        END
     WHERE rowid = NEW.rowid;
 END;
 CREATE INDEX IF NOT EXISTS watch_progress_synced_idx ON watch_progress (profile_id, synced_seq);
