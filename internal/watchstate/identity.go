@@ -56,6 +56,7 @@ func (r *StableIdentityResolver) ResolveHistoryIdentity(ctx context.Context, med
 			episodeNumber := episode.EpisodeNumber
 			return userstore.WatchIdentity{
 				StableType:        "episode",
+				ProviderIDs:       episodeProviderIDs(episode),
 				SeriesProviderIDs: seriesIDs,
 				Season:            &seasonNumber,
 				Episode:           &episodeNumber,
@@ -117,6 +118,24 @@ func (r *StableIdentityResolver) loadProviderIDs(ctx context.Context, contentID 
 	ids, err := r.providerIDs.GetByContentID(ctx, contentID)
 	if err != nil {
 		return nil
+	}
+	return ids
+}
+
+// episodeProviderIDs extracts the episode's own external IDs (populated by
+// metadata enrichment on the episodes table). When present, exports can address
+// the play by a real episode ID via the flat Trakt episodes[] form; when absent,
+// the caller still carries SeriesProviderIDs + season/episode for the nested form.
+func episodeProviderIDs(episode *models.Episode) map[string]string {
+	ids := map[string]string{}
+	if v := strings.TrimSpace(episode.ImdbID); v != "" {
+		ids["imdb"] = v
+	}
+	if v := strings.TrimSpace(episode.TmdbID); v != "" {
+		ids["tmdb"] = v
+	}
+	if v := strings.TrimSpace(episode.TvdbID); v != "" {
+		ids["tvdb"] = v
 	}
 	return ids
 }
