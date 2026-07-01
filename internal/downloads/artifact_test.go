@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -105,4 +106,34 @@ func TestCapabilityQualityPresetsGating(t *testing.T) {
 	if got := strings.Join(capInfo.QualityPresets, ","); got != "original" {
 		t.Fatalf("quality presets with transcode gated = %q, want original", got)
 	}
+}
+
+// TestTriggerDrainDoesNotBlockCaller pins the async-dispatch contract:
+// Ensure runs on request goroutines and the kick drains the whole encode
+// queue (ffmpeg included), so triggerDrain must return without waiting on it.
+func TestTriggerDrainDoesNotBlockCaller(t *testing.T) {
+	m := &ArtifactManager{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	m.SetKick(func() {
+		close(started)
+		<-release
+	})
+
+	done := make(chan struct{})
+	go func() {
+		m.triggerDrain()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("triggerDrain blocked on the kick; it must dispatch asynchronously")
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("kick was never invoked")
+	}
+	close(release)
 }

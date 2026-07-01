@@ -178,7 +178,11 @@ func (m *ArtifactManager) triggerDrain() {
 	kick := m.kick
 	m.mu.Unlock()
 	if kick != nil {
-		kick()
+		// Ensure is called on request goroutines and the kick runs the encode
+		// task to completion (the task manager serializes concurrent runs), so
+		// it must never execute inline: a POST /downloads would otherwise block
+		// on the entire queue drain, ffmpeg encodes included.
+		go kick()
 	}
 }
 
