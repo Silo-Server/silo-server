@@ -34,6 +34,7 @@ type fakeDownloadService struct {
 	directErr      error
 	manifest       *downloads.OfflineManifest
 	batchManifests []*downloads.OfflineManifest
+	batchSkipped   []downloads.SkippedManifest
 	manifestErr    error
 	artworkErr     error
 	subtitleErr    error
@@ -194,12 +195,12 @@ func (f *fakeDownloadService) BuildManifest(_ context.Context, userID int, profi
 	return f.manifest, nil
 }
 
-func (f *fakeDownloadService) BuildBatchManifests(_ context.Context, userID int, profileID, deviceID, batchID string, _ catalog.AccessFilter) ([]*downloads.OfflineManifest, error) {
+func (f *fakeDownloadService) BuildBatchManifests(_ context.Context, userID int, profileID, deviceID, batchID string, _ catalog.AccessFilter) ([]*downloads.OfflineManifest, []downloads.SkippedManifest, error) {
 	f.gotBatchManifest = identityCall{userID, profileID, deviceID, batchID}
 	if f.manifestErr != nil {
-		return nil, f.manifestErr
+		return nil, nil, f.manifestErr
 	}
-	return f.batchManifests, nil
+	return f.batchManifests, f.batchSkipped, nil
 }
 
 func (f *fakeDownloadService) ServeArtwork(_ context.Context, w http.ResponseWriter, _ *http.Request, userID int, profileID, deviceID, downloadID, kind string, _ catalog.AccessFilter) error {

@@ -2,8 +2,10 @@ package downloads
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -47,40 +49,56 @@ func (s *Service) BuildManifest(ctx context.Context, userID int, profileID, devi
 	return s.manifest.Build(ctx, dl, filter)
 }
 
+// SkippedManifest reports a batch entry whose manifest could not be built —
+// one bad episode (revoked, deleted from the catalog, access-filtered) must
+// not make the rest of a season's manifests unfetchable.
+type SkippedManifest struct {
+	DownloadID string `json:"download_id"`
+	Reason     string `json:"reason"` // revoked | not_found | error
+}
+
 // BuildBatchManifests returns the manifests for every managed entry in a batch
-// owned by the calling profile/device.
-func (s *Service) BuildBatchManifests(ctx context.Context, userID int, profileID, deviceID, batchID string, filter catalog.AccessFilter) ([]*OfflineManifest, error) {
+// owned by the calling profile/device, plus the entries it had to skip.
+// Entries in one batch share a series, so the series detail is resolved once.
+func (s *Service) BuildBatchManifests(ctx context.Context, userID int, profileID, deviceID, batchID string, filter catalog.AccessFilter) ([]*OfflineManifest, []SkippedManifest, error) {
 	if _, err := s.enabledConfig(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if profileID == "" || deviceID == "" {
-		return nil, ErrProfileRequired
+		return nil, nil, ErrProfileRequired
 	}
 	if s.manifest == nil {
-		return nil, ErrManifestUnavailable
+		return nil, nil, ErrManifestUnavailable
 	}
 	rows, err := s.repo.ListManagedByBatch(ctx, userID, profileID, deviceID, batchID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(rows) == 0 {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 	out := make([]*OfflineManifest, 0, len(rows))
+	skipped := make([]SkippedManifest, 0)
+	seriesCache := make(map[string]*catalog.ItemDetail, 1)
 	for _, dl := range rows {
 		if dl.Status == StatusRevoked {
+			skipped = append(skipped, SkippedManifest{DownloadID: dl.ID, Reason: "revoked"})
 			continue
 		}
-		m, err := s.manifest.Build(ctx, dl, filter)
+		m, err := s.manifest.build(ctx, dl, filter, seriesCache)
 		if err != nil {
-			return nil, err
+			reason := "error"
+			if errors.Is(err, catalog.ErrItemNotFound) {
+				reason = "not_found"
+			} else {
+				slog.Warn("batch manifest build failed", "download_id", dl.ID, "batch_id", batchID, "error", err)
+			}
+			skipped = append(skipped, SkippedManifest{DownloadID: dl.ID, Reason: reason})
+			continue
 		}
 		out = append(out, m)
 	}
-	if len(out) == 0 {
-		return nil, ErrNotFound
-	}
-	return out, nil
+	return out, skipped, nil
 }
 
 // ServeArtwork streams poster/backdrop/logo bytes for a managed entry through

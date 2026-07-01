@@ -165,6 +165,13 @@ func NewManifestBuilder(detail ManifestSource, subs SubtitleSource, fileRepo Fil
 // requesting profile's content access (GetItemDetail returns
 // catalog.ErrItemNotFound when denied).
 func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalog.AccessFilter) (*OfflineManifest, error) {
+	return b.build(ctx, dl, filter, nil)
+}
+
+// build is Build with an optional per-batch series-detail cache: a season
+// batch shares one series, so the batch endpoint resolves its detail once
+// instead of once per episode.
+func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalog.AccessFilter, seriesCache map[string]*catalog.ItemDetail) (*OfflineManifest, error) {
 	detail, err := b.detail.GetItemDetail(ctx, manifestContentID(dl), filter)
 	if err != nil {
 		return nil, err
@@ -172,8 +179,13 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 	file := b.lookupFile(ctx, dl.MediaFileID)
 	var seriesDetail *catalog.ItemDetail
 	if dl.EpisodeID != "" && detail.SeriesID != "" {
-		if sd, err := b.detail.GetItemDetail(ctx, detail.SeriesID, filter); err == nil {
+		if cached, ok := seriesCache[detail.SeriesID]; ok {
+			seriesDetail = cached
+		} else if sd, err := b.detail.GetItemDetail(ctx, detail.SeriesID, filter); err == nil {
 			seriesDetail = sd
+			if seriesCache != nil {
+				seriesCache[detail.SeriesID] = sd
+			}
 		}
 	}
 
@@ -234,33 +246,32 @@ func (b *ManifestBuilder) Build(ctx context.Context, dl *Download, filter catalo
 		m.Chapters = toOfflineChapters(v.Chapters)
 	}
 
-	m.Subtitles = b.buildSubtitles(ctx, dl)
+	m.Subtitles = b.buildSubtitles(ctx, dl, file)
 	return m, nil
 }
 
 // buildSubtitles enumerates external (sidecar) + downloaded (S3) subtitle assets
-// for the download's media file. Embedded tracks live inside the downloaded
-// video file and need no separate fetch.
-func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download) []OfflineSubtitle {
+// for the download's media file (already loaded by build — no re-fetch).
+// Embedded tracks live inside the downloaded video file and need no separate
+// fetch.
+func (b *ManifestBuilder) buildSubtitles(ctx context.Context, dl *Download, file *models.MediaFile) []OfflineSubtitle {
 	out := []OfflineSubtitle{}
 
-	if b.fileRepo != nil {
-		if file, err := b.fileRepo.GetByID(ctx, dl.MediaFileID); err == nil && file != nil {
-			for i, ext := range file.ExternalSubtitles {
-				var size int64
-				if info, statErr := os.Stat(ext.Path); statErr == nil {
-					size = info.Size()
-				}
-				out = append(out, OfflineSubtitle{
-					Language:        ext.Language,
-					Format:          ext.Format,
-					Forced:          ext.Forced,
-					HearingImpaired: ext.HearingImpaired,
-					External:        true,
-					FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("external:%d", i)),
-					FileSize:        size,
-				})
+	if file != nil {
+		for i, ext := range file.ExternalSubtitles {
+			var size int64
+			if info, statErr := os.Stat(ext.Path); statErr == nil {
+				size = info.Size()
 			}
+			out = append(out, OfflineSubtitle{
+				Language:        ext.Language,
+				Format:          ext.Format,
+				Forced:          ext.Forced,
+				HearingImpaired: ext.HearingImpaired,
+				External:        true,
+				FetchURL:        subtitleProxyURL(dl.ID, fmt.Sprintf("external:%d", i)),
+				FileSize:        size,
+			})
 		}
 	}
 

@@ -36,7 +36,7 @@ type DownloadService interface {
 	Delete(ctx context.Context, userID int, profileID, deviceID, downloadID string) error
 	PatchStatus(ctx context.Context, userID int, profileID, deviceID, downloadID, status string) error
 	BuildManifest(ctx context.Context, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) (*downloads.OfflineManifest, error)
-	BuildBatchManifests(ctx context.Context, userID int, profileID, deviceID, batchID string, filter catalog.AccessFilter) ([]*downloads.OfflineManifest, error)
+	BuildBatchManifests(ctx context.Context, userID int, profileID, deviceID, batchID string, filter catalog.AccessFilter) ([]*downloads.OfflineManifest, []downloads.SkippedManifest, error)
 	ServeArtwork(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID, kind string, filter catalog.AccessFilter) error
 	ServeSubtitle(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID, ref string, filter catalog.AccessFilter) error
 }
@@ -106,6 +106,10 @@ type downloadsListResponse struct {
 
 type batchManifestsResponse struct {
 	Manifests []*downloads.OfflineManifest `json:"manifests"`
+	// Skipped lists batch entries whose manifest could not be built (revoked,
+	// deleted from the catalog, access-filtered); the rest of the batch is
+	// still delivered.
+	Skipped []downloads.SkippedManifest `json:"skipped,omitempty"`
 }
 
 // downloadCapabilityResponse is the GET /downloads/capability payload clients
@@ -536,12 +540,12 @@ func (h *DownloadHandler) HandleBatchManifests(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "bad_request", "Batch ID is required")
 		return
 	}
-	manifests, err := h.svc.BuildBatchManifests(r.Context(), userID, profileID, deviceID, batchID, requestAccessFilter(r))
+	manifests, skipped, err := h.svc.BuildBatchManifests(r.Context(), userID, profileID, deviceID, batchID, requestAccessFilter(r))
 	if err != nil {
 		h.writeAssetError(w, "batch_manifests", batchID, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, batchManifestsResponse{Manifests: manifests})
+	writeJSON(w, http.StatusOK, batchManifestsResponse{Manifests: manifests, Skipped: skipped})
 }
 
 // HandleArtwork handles GET /downloads/{id}/artwork/{kind} (managed-only).
