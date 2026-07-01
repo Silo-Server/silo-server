@@ -32,6 +32,8 @@ interface CreateDownloadRequest {
   file_id?: number;
   quality?: DownloadQuality;
   series?: boolean;
+  /** With series: true, restrict to one season; 0 is the Specials season. */
+  season_number?: number;
 }
 
 export interface DownloadCapability {

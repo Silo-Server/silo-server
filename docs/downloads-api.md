@@ -42,6 +42,10 @@ The `/downloads` family serves two lifecycles. The presence of
 
 Mobile clients should always send `X-Silo-Device-Id` and operate on managed entries.
 
+Ephemeral rows are one-shot convenience records: the server prunes them
+automatically about 7 days after their last update. Managed device entries are
+never auto-pruned.
+
 ### Quality vs delivery format
 
 Clients request a **quality preset**. The server records the concrete
@@ -120,6 +124,10 @@ device id.
 A managed call without `X-Silo-Device-Id` returns `400 device_id_required`; one
 without profile scope returns `400 profile_required`.
 
+> **Warning:** any client that sends `X-Silo-Device-Id` on download routes MUST
+> also send `X-Profile-Id`. A device header without a profile is rejected with
+> `400 profile_required`. The first-party web client sends both headers globally.
+
 ---
 
 ## 3. Feature detection
@@ -163,6 +171,10 @@ Response:
 | `series_monitoring`      | Auto-download subscriptions are available.                                        |
 | `monitoring_modes`       | Subscription modes the client may request.                                        |
 
+`quality_presets` is always an array — `[]` (never `null`) when downloads are
+disabled or the user lacks download permission — so clients can rely on
+`quality_presets.length === 0` meaning "downloads unavailable for this account."
+
 If `enabled` or `download_allowed` is false, hide download actions.
 
 ---
@@ -186,7 +198,7 @@ Request body:
 | `file_id`       | int    | Optional explicit media-file/version id.                                     |
 | `quality`       | string | `original` by default, or one of `quality_presets`.                          |
 | `series`        | bool   | `true` means download every episode of `content_id` at original quality.     |
-| `season_number` | int    | With `series: true`, restrict to one season.                                 |
+| `season_number` | int    | With `series: true`, restrict to one season. `0` is the Specials season; negative values are rejected with `400`. Dispatch is on field presence: omit the field entirely for a whole-series download. |
 | `caps`          | object | Device decode capabilities. Important for `original` compatibility fallback. |
 
 Capabilities mirror streaming playback caps:
@@ -312,10 +324,13 @@ client is responsible for deleting local files.
 
 ```http
 GET /api/v1/downloads/{id}/file
+HEAD /api/v1/downloads/{id}/file
 ```
 
 Streams either the source file or the prepared artifact. Range requests are
-supported for resumable/background downloads.
+supported for resumable/background downloads. `HEAD` is accepted like
+`/direct-download`: it returns the same headers with no body so clients can
+probe size and resumability before issuing ranged `GET`s.
 
 Common responses:
 
@@ -346,9 +361,23 @@ season batch owned by the calling device.
 {
   "manifests": [
     /* OfflineManifest */
-  ]
+  ],
+  "skipped": [{ "download_id": "dl_...", "reason": "not_found" }]
 }
 ```
+
+One unbuildable episode (deleted from the catalog, access-filtered, revoked)
+does not fail the whole batch: it lands in `skipped` and the remaining
+manifests are still delivered. `skipped` is omitted when empty.
+
+| Reason      | Meaning                                                             |
+| ----------- | -------------------------------------------------------------------- |
+| `revoked`   | The row is revoked and no longer servable.                            |
+| `not_found` | The row or its content is missing or outside profile access.          |
+| `error`     | The server failed to build this manifest; safe to retry later.        |
+
+Clients should drop or refresh local entries whose manifests come back
+`not_found`.
 
 Use this after a batch download if the client wants to fetch metadata for the
 whole batch in one request.
@@ -381,6 +410,13 @@ HEAD /api/v1/direct-download?file_id={id}
 Browser/web convenience path. It is synchronous and original-only. Mobile clients
 should use managed `POST /downloads` plus `/downloads/{id}/file`.
 
+For browser-friendly links, the endpoint accepts the session access token as a
+`?token=` query parameter in place of the `Authorization` header.
+
+> **Security note:** the query token is the session access token. Treat
+> direct-download URLs as secrets — they end up in browser history and proxy
+> logs. A short-lived download-scoped URL is a planned follow-up.
+
 ---
 
 ## 5. Download row shape
@@ -394,7 +430,7 @@ should use managed `POST /downloads` plus `/downloads/{id}/file`.
 | `device_id`           | string | Present on managed entries.                                            |
 | `media_file_id`       | int    | Selected media file/version.                                           |
 | `file_size`           | int64  | Bytes; may be an estimate while preparing.                             |
-| `bytes_sent`          | int64  | Server-side serve counter.                                             |
+| `bytes_sent`          | int64  | Set to `file_size` when an ephemeral row completes; not a live transfer counter. Managed rows report 0. |
 | `kind`                | string | `direct` or `queued`.                                                  |
 | `status`              | string | Lifecycle state.                                                       |
 | `quality`             | string | Requested public quality.                                              |
@@ -411,11 +447,15 @@ Managed lifecycle:
 original:              ready -> downloading -> completed
 compat/remux:          preparing -> ready -> downloading -> completed
 bitrate/transcode:     preparing -> ready -> downloading -> completed
-revoked:               any -> revoked
+revoked:               any -> revoked (reserved)
 failed artifact job:   preparing -> failed
 ```
 
-`downloading` and `completed` are set by the client via `PATCH`.
+Direct original rows are `ready` immediately; remux and transcode rows start at
+`preparing` and become `ready` when the artifact completes. `failed` means the
+artifact job exhausted its retries. `revoked` is reserved: nothing sets it
+today, but an admin revoke flow is planned in a separate effort, so clients
+must handle it. `downloading` and `completed` are set by the client via `PATCH`.
 
 ---
 
@@ -592,6 +632,11 @@ Response:
 
 Persist `next_cursor` and pass it as `since` next time. Treat it as opaque.
 
+Row deletions (for example, dismissing an item from Continue Watching) do not
+currently produce delta entries, so an offline device's cached resume point for
+a deleted row goes stale until a full (cursor-less) refetch; clients should
+treat the full snapshot as authoritative for removals.
+
 ---
 
 ## 8. Series monitoring
@@ -648,6 +693,10 @@ Registers newly in-scope episodes across this device's subscriptions.
 { "registered": 3 }
 ```
 
+`registered` counts only episodes newly registered by this sync call; a
+steady-state sync returns `{ "registered": 0 }`. Clients can skip refetching
+`GET /downloads` when it is `0`.
+
 ### 8.3 List, get, update, delete
 
 ```http
@@ -690,7 +739,7 @@ files or existing download rows.
 
 1. Call `GET /downloads/capability` and offer only `quality_presets`.
 2. User picks Download: `POST /downloads` with `quality`, `caps`, profile, and device headers.
-3. If the row is `preparing`, poll `GET /downloads` or listen on events until `ready`.
+3. If the row is `preparing`, poll `GET /downloads` or listen on events (see 9.4) until `ready`.
 4. Fetch and store `GET /downloads/{id}/manifest`.
 5. Fetch and store all `artwork_urls` and `subtitles[].fetch_url` assets.
 6. Download `GET /downloads/{id}/file` with Range/background support.
@@ -703,7 +752,8 @@ files or existing download rows.
 2. On reconnect, `POST /sync/progress`.
 3. `GET /progress?since=<saved_cursor>` and save the returned `next_cursor`.
 4. `POST /downloads/subscriptions/sync`.
-5. `GET /downloads` to find newly registered rows.
+5. If the sync response has `registered > 0`, `GET /downloads` to find the newly
+   registered rows.
 
 ### 9.3 Robustness rules
 
@@ -713,6 +763,31 @@ files or existing download rows.
 - If `revision` changes for an existing row, replace local media and manifest.
 - Enforce subscription storage caps locally; the server only soft-gates.
 - Treat `content_id` as rescan-sensitive; use `stable_identity` to recover.
+
+### 9.4 Ready/failed push events
+
+When an artifact completes or fails, the server publishes an event on the
+existing user-state events channel (the SSE/WebSocket events hub), scoped to
+the owning `(user, profile)`. The event type is `download` and the payload is:
+
+```json
+{
+  "download_id": "dl_...",
+  "status": "ready",
+  "media_item_id": "mv_123",
+  "format": "remux"
+}
+```
+
+| Field           | Meaning                                                      |
+| --------------- | ------------------------------------------------------------- |
+| `download_id`   | The download row id.                                          |
+| `status`        | `ready` or `failed`.                                          |
+| `media_item_id` | The row's content id.                                         |
+| `format`        | Delivery format: `original`, `remux`, or `transcode`.         |
+
+Clients that hold an events connection can use this instead of polling
+`GET /downloads` for `preparing` rows; polling remains the fallback.
 
 ---
 
@@ -817,6 +892,8 @@ For series or season download:
 3. Record `skipped` entries for user-visible diagnostics.
 4. Fetch `GET /downloads/batches/{batch_id}/manifests` after rows are ready, or
    fetch individual manifests if the client is processing rows one at a time.
+5. Handle `skipped` entries in the manifests response: drop or refresh local
+   entries whose reason is `not_found`; retry later for `error`.
 
 ### 10.6 Background transfers
 
@@ -898,7 +975,8 @@ On reconnect:
 3. `GET /progress?since=<saved_cursor>`.
 4. Apply remote deltas to local resume state and save `next_cursor`.
 5. `POST /downloads/subscriptions/sync`.
-6. `GET /downloads` to register new rows locally.
+6. If the sync response has `registered > 0`, `GET /downloads` to register the
+   new rows locally.
 
 ### 10.10 Retention and deletion
 
@@ -915,7 +993,132 @@ files playable but stop retrying server fetches for that row.
 
 ---
 
-## 11. Error code reference
+## 11. Android client implementation notes
+
+This section is the handoff checklist for `silo-android` across phone, tablet,
+and Android TV. Use the same HTTP contract above; these notes only pin the
+Android-side identity, storage, transfer, and playback choices. The required
+local state mirrors the Apple table in 10.1.
+
+### 11.1 Device identity and headers
+
+Every managed request must include:
+
+```http
+Authorization: Bearer <access_token>
+X-Profile-Id: <active_profile_id>
+X-Silo-Device-Id: <stable_install_id>
+X-Silo-Device-Name: <user_visible_device_name>
+X-Silo-Device-Platform: android
+```
+
+Recommended device id behavior:
+
+- Generate a UUID once on first launch and persist it in app-private storage
+  (DataStore or equivalent); do not derive it from hardware identifiers.
+- Remember the pairing rule from section 2: `X-Silo-Device-Id` without
+  `X-Profile-Id` is rejected with `400 profile_required`. Attach both headers to
+  every downloads call.
+- Do not send device id in JSON bodies or query strings; the server ignores it.
+
+### 11.2 Capability gating
+
+On login, profile switch, and app start:
+
+1. `GET /downloads/capability`.
+2. Hide download actions unless `enabled && download_allowed`.
+3. `quality_presets` is always an array; an empty array means downloads are
+   unavailable for this account, so hide the downloads UI.
+4. Offer only `quality_presets`, in the order returned, with the same labeling
+   rules as 10.3 (Original plus `N Mbps`; never expose Remux).
+
+### 11.3 Local storage
+
+Persist the same records as 10.1 as Room tables: download rows (server fields
+plus local paths and fetch status), per-download assets, queued progress events,
+and subscriptions. Recommendations:
+
+- Use the server `download_id` as the durable primary key. A larger `revision`
+  for the same `download_id` marks local media, manifest, artwork, and subtitles
+  stale.
+- Store the manifest JSON verbatim beside the media file instead of exploding
+  every field into columns; parse it at playback time.
+- Keep media, manifests, and cached assets in app-internal storage (`filesDir`),
+  never the cache directory, laid out per download id as in 10.7:
+
+```text
+offline_downloads/
+  <download_id>/
+    manifest.json
+    media.mp4
+    artwork/
+      poster
+      backdrop
+      logo
+    subtitles/
+      external-0.srt
+      downloaded-123.vtt
+```
+
+### 11.4 Download engine
+
+Run media transfers as WorkManager-scheduled foreground work (a foreground
+service with a progress notification), or the system `DownloadManager` if its
+constraints fit the app:
+
+1. `HEAD /downloads/{id}/file` first to probe size and resumability.
+2. Download with ranged `GET`s; after process death or network loss, resume from
+   the last persisted offset with a `Range` header.
+3. Verify the final byte count against the manifest's `integrity.expected_bytes`
+   before marking the row done locally.
+4. Fetch artwork and subtitle assets once at download time from the manifest's
+   `artwork_urls` and `subtitles[].fetch_url`.
+5. `PATCH` `downloading` when the media transfer starts and `completed` only
+   after the file and required assets are moved into durable storage.
+6. If auth expires while a transfer is queued, recreate the request with a fresh
+   token and resume.
+
+### 11.5 Offline playback
+
+Play the local media file with ExoPlayer (Media3) and build the detail and
+playback UI from the stored `manifest.json`, following the same field mapping as
+10.8:
+
+- Side-load cached subtitle files as local subtitle tracks; never call
+  `fetch_url` during offline playback.
+- `chapters`, `intro`, `credits`, `recap`, and `preview` drive the same skip and
+  chapter UI as online playback.
+- Thumbhash fields are placeholders while local artwork bytes load.
+
+### 11.6 Offline progress queue
+
+Queue watch events in Room whenever playback stops, pauses for a meaningful
+interval, or crosses the watched threshold, recording the client event time. On
+reconnect:
+
+1. `POST /sync/progress` with `updated_at` per item; delete events acknowledged
+   as `ok`.
+2. `GET /progress?since=<saved_cursor>` and persist `next_cursor` per profile.
+3. Per the caveat in 7.2, row deletions produce no delta entries; periodically
+   run a full cursor-less refetch and treat that snapshot as authoritative for
+   removals.
+
+### 11.7 Readiness: events and polling
+
+While the app holds an events connection, act on `download` events (9.4) to move
+rows out of `preparing`: start the transfer on `ready`, surface `failed` in the
+downloads UI. Without an events connection, poll `GET /downloads` per 9.1.
+
+### 11.8 Series monitoring
+
+Call `POST /downloads/subscriptions/sync` on app open and from a periodic
+WorkManager job. If the response has `registered > 0`, `GET /downloads` and
+enqueue the newly registered rows. Enforce `delete_watched` and
+`max_storage_bytes` locally; the server only soft-gates auto-registration (8.1).
+
+---
+
+## 12. Error code reference
 
 Errors use a flat envelope:
 
@@ -954,7 +1157,7 @@ file endpoints so ids do not reveal out-of-scope content.
 
 ---
 
-## 12. Out of scope for v1
+## 13. Out of scope for v1
 
 Cross-device download visibility, DRM/leases, cumulative per-user storage quotas,
 and server-initiated deletion of client files remain out of scope. Artifact garbage

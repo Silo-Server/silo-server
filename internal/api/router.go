@@ -2157,7 +2157,11 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/batches/{batch_id}/manifests", downloadHandler.HandleBatchManifests)
 					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
 					r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
+					// GET+HEAD: background download stacks probe with HEAD
+					// before issuing ranged GETs; http.ServeContent handles
+					// HEAD natively.
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)
+					r.Head("/{id}/file", downloadHandler.HandleDownloadFile)
 					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
 					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
 					r.Get("/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle)
