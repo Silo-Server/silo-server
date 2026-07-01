@@ -308,7 +308,7 @@ func TestReconcileLinkedDownloads(t *testing.T) {
 
 	now := time.Now()
 	mkPreparing := func(artID string) string {
-		id := fmt.Sprintf("dl-%s-%d", artID[:8], now.UnixNano())
+		id := fmt.Sprintf("dl-%s-%d", artID, now.UnixNano())
 		if err := f.repo.Create(ctx, &Download{
 			ID: id, UserID: f.userID, MediaFileID: f.fileID, ContentID: f.contentID,
 			Kind: KindQueued, Status: StatusPreparing, Format: FormatTranscode, ArtifactID: artID,
@@ -348,5 +348,107 @@ func TestReconcileLinkedDownloads(t *testing.T) {
 	}
 	if len(ready2) != 0 || len(failed2) != 0 {
 		t.Fatalf("second reconcile flipped ready=%d failed=%d, want 0/0", len(ready2), len(failed2))
+	}
+}
+
+// TestManagedEntryWithoutPostgresProfileRow is the dual-backend regression
+// test: with the sqlite userdb backend, profiles exist only in per-user SQLite
+// stores and public.user_profiles stays empty, so device registration and
+// managed creates must not depend on a Postgres profile row (the
+// user_devices_profile_fkey drop). Simulated here by never seeding
+// user_profiles for the user.
+func TestManagedEntryWithoutPostgresProfileRow(t *testing.T) {
+	ctx := context.Background()
+	pool := newDownloadsTestPool(t)
+
+	var fkExists bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_devices_profile_fkey')`,
+	).Scan(&fkExists); err != nil {
+		t.Fatalf("check profile fkey: %v", err)
+	}
+	if fkExists {
+		t.Skip("drop_user_devices_profile_fkey migration has not been applied")
+	}
+
+	suffix := time.Now().UnixNano()
+	var folderID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name) VALUES ('movies', $1) RETURNING id`,
+		fmt.Sprintf("Downloads SQLite Test %d", suffix),
+	).Scan(&folderID); err != nil {
+		t.Fatalf("seed media folder: %v", err)
+	}
+	contentID := fmt.Sprintf("dl-sqlite-content-%d", suffix)
+	var fileID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
+		 VALUES ($1, $2, $3, 1024) RETURNING id`,
+		contentID, folderID, fmt.Sprintf("/tmp/downloads-sqlite-test-%d.mp4", suffix),
+	).Scan(&fileID); err != nil {
+		t.Fatalf("seed media file: %v", err)
+	}
+	var userID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (username, role, download_allowed) VALUES ($1, 'user', true) RETURNING id`,
+		fmt.Sprintf("dlsqlite-%d", suffix),
+	).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM user_devices WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+
+	repo := NewRepository(pool)
+	profileID := fmt.Sprintf("sqlite-only-profile-%d", suffix)
+	deviceID := fmt.Sprintf("sqlite-dev-%d", suffix)
+	// No user_profiles row exists for profileID; this must still succeed.
+	if err := repo.EnsureDevice(ctx, userID, profileID, deviceID, "Phone", "android"); err != nil {
+		t.Fatalf("EnsureDevice without Postgres profile row: %v", err)
+	}
+	now := time.Now()
+	if _, err := repo.CreateManagedEntry(ctx, &Download{
+		ID: fmt.Sprintf("dl-sqlite-%d", suffix), UserID: userID, ProfileID: profileID,
+		DeviceID: deviceID, MediaFileID: fileID, ContentID: contentID, Kind: KindQueued,
+		Status: StatusReady, Format: FormatOriginal, FileSize: 1024,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateManagedEntry without Postgres profile row: %v", err)
+	}
+}
+
+// TestPurgeProfileDevices verifies the app-level replacement for the dropped
+// FK cascade: purging a profile removes its device rows and (via the
+// downloads composite FK) its managed downloads, leaving other profiles'
+// libraries untouched.
+func TestPurgeProfileDevices(t *testing.T) {
+	ctx := context.Background()
+	f := seedManagedFixture(t)
+	id := f.createManagedEntry(t)
+
+	if err := f.repo.PurgeProfileDevices(ctx, f.userID, f.profileA); err != nil {
+		t.Fatalf("PurgeProfileDevices: %v", err)
+	}
+
+	if _, err := f.repo.GetManagedByID(ctx, id, f.userID, f.profileA, f.deviceA); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("managed entry survived profile purge: err=%v", err)
+	}
+	var deviceRows int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM user_devices WHERE user_id = $1 AND profile_id = $2`,
+		f.userID, f.profileA,
+	).Scan(&deviceRows); err != nil || deviceRows != 0 {
+		t.Fatalf("profileA device rows = %d (%v), want 0", deviceRows, err)
+	}
+	var otherRows int
+	if err := f.pool.QueryRow(ctx,
+		`SELECT count(*) FROM user_devices WHERE user_id = $1 AND profile_id = $2`,
+		f.userID, f.profileB,
+	).Scan(&otherRows); err != nil || otherRows != 1 {
+		t.Fatalf("profileB device rows = %d (%v), want 1", otherRows, err)
 	}
 }
