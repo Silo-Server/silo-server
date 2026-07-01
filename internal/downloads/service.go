@@ -355,6 +355,26 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		return nil, ErrProfileRequired
 	}
 
+	// Resolve any existing managed entry first: replacing one doesn't add a
+	// row, so it stays quota-exempt. Every other path must pass the limiter
+	// BEFORE artifacts.Ensure — a rejected request must not leave an encode
+	// job behind (the worker would run it even though the caller saw 429).
+	var existing *Download
+	if managed {
+		ex, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
+		switch {
+		case err == nil:
+			existing = ex
+		case !errors.Is(err, ErrNotFound):
+			return nil, err
+		}
+	}
+	if existing == nil {
+		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+			return nil, err
+		}
+	}
+
 	artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
 	if err != nil {
 		return nil, err
@@ -367,19 +387,14 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 		size = artifact.FileSize
 	}
 
+	if existing != nil {
+		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
+		return s.reuseOrReplaceManaged(ctx, existing, replacement)
+	}
 	if managed {
-		if existing, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); err == nil {
-			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-			return s.reuseOrReplaceManaged(ctx, existing, replacement)
-		} else if !errors.Is(err, ErrNotFound) {
-			return nil, err
-		}
 		if err := s.repo.EnsureDevice(ctx, userID, req.ProfileID, req.DeviceID, req.DeviceName, req.DevicePlatform); err != nil {
 			return nil, err
 		}
-	}
-	if err := s.limiter.Check(ctx, userID, 1); err != nil {
-		return nil, err
 	}
 
 	id, err := idgen.NextID()

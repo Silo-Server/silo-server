@@ -148,11 +148,13 @@ func (r *Repository) ListByUser(ctx context.Context, userID int) ([]*Download, e
 	return result, nil
 }
 
-// CountActiveByUser returns the number of active (queued or downloading) downloads for a user.
+// CountActiveByUser returns the number of active downloads for a user.
+// 'preparing' counts: an artifact-backed row holds encode work in flight, so
+// it must consume the concurrent quota like a live transfer does.
 func (r *Repository) CountActiveByUser(ctx context.Context, userID int) (int, error) {
 	var count int
 	err := r.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading')`,
+		`SELECT COUNT(*) FROM downloads WHERE user_id = $1 AND status IN ('queued', 'downloading', 'preparing')`,
 		userID,
 	).Scan(&count)
 	if err != nil {
