@@ -1626,6 +1626,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
+					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
 					// Discord DM channel: the linked identity and mode hang off
 					// the login account, not a profile, so these stay outside
 					// the RequireProfile subrouter below (static paths coexist
@@ -1644,6 +1645,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/capability", notificationsHandler.HandleCapability)
 						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
+						r.Get("/push/apple/display/{delivery_id}", notificationsHandler.HandleApplePushDisplay)
 						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
 						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
 						r.Put("/email-preferences/address", notificationsHandler.HandleRequestEmailAddress)
@@ -2302,6 +2304,15 @@ func NewRouter(deps Dependencies) chi.Router {
 							}
 							if discordNotificationsHandler != nil {
 								r.Post("/notifications/discord/test", discordNotificationsHandler.HandleAdminTest)
+							}
+							if deps.Notifications != nil || settingsRepo != nil {
+								applePushHandler := handlers.NewAdminApplePushHandler(deps.Notifications, settingsRepo)
+								if deps.Notifications != nil {
+									r.Post("/notifications/push/apple/test", applePushHandler.HandleTest)
+								}
+								if settingsRepo != nil {
+									r.Post("/notifications/push/relay/register", applePushHandler.HandleRegisterRelay)
+								}
 							}
 							if deps.Notifications != nil && deps.Notifications.ServerChannels != nil {
 								serverChannelsHandler := handlers.NewAdminServerChannelsHandler(deps.Notifications)

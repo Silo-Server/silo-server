@@ -2141,6 +2141,30 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 				"subtitle_ai.transcribe_quota_period must be day, week, or month")
 			return
 		}
+	case notifications.SettingApplePushDeliveryEnabled:
+		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "notifications.apple_push_delivery_enabled must be true or false")
+			return
+		}
+		req.Value = strconv.FormatBool(enabled)
+	case notifications.SettingPushRelayURL:
+		value := strings.TrimRight(strings.TrimSpace(req.Value), "/")
+		if value != "" {
+			parsed, err := url.Parse(value)
+			if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+				writeError(w, http.StatusBadRequest, "bad_request", "notifications.push_relay_url must be an https URL")
+				return
+			}
+		}
+		req.Value = value
+	case notifications.SettingPushRelayDeploymentID:
+		value := strings.TrimSpace(req.Value)
+		if len(value) > 128 {
+			writeError(w, http.StatusBadRequest, "bad_request", "notifications.push_relay_deployment_id must be at most 128 characters")
+			return
+		}
+		req.Value = value
 	case catalog.SearchSettingProvider:
 		switch strings.TrimSpace(strings.ToLower(req.Value)) {
 		case catalog.SearchProviderPostgres, catalog.SearchProviderMeilisearch:

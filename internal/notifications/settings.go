@@ -51,6 +51,11 @@ const (
 	SettingServerChannelsBatchSeconds     = "notifications.server_channels.batch_seconds"
 	SettingServerChannelMentionRequesters = "notifications.server_channels.mention_requesters"
 
+	SettingApplePushDeliveryEnabled = "notifications.apple_push_delivery_enabled"
+	SettingPushRelayURL             = "notifications.push_relay_url"
+	SettingPushRelayDeploymentID    = "notifications.push_relay_deployment_id"
+	SettingPushRelayAPIKey          = "notifications.push_relay_api_key"
+
 	// Discord application credentials live under the discord.* namespace
 	// (admin-configured, alongside email.smtp_*). The secret and bot token
 	// are registered in catalog.SensitiveSettingKeys and encrypted at rest.
@@ -78,6 +83,7 @@ const (
 	// already passed, and the window is what keeps those visible.
 	defaultServerChannelsBatchSeconds = 300
 	minServerChannelsBatchSeconds     = 120
+	defaultPushRelayURL               = "https://push.siloserver.org"
 
 	settingsCacheTTL = 15 * time.Second
 )
@@ -345,6 +351,33 @@ func (s *Settings) ServerChannelMentionRequesters(ctx context.Context) bool {
 func (s *Settings) ServerChannelsBatchWindow(ctx context.Context) time.Duration {
 	return time.Duration(s.intSetting(ctx, SettingServerChannelsBatchSeconds,
 		defaultServerChannelsBatchSeconds, minServerChannelsBatchSeconds, 3600)) * time.Second
+}
+
+// ApplePushDeliveryEnabled gates actual relay sends. Device registration stays
+// available independently so clients can prepare tokens before delivery is live.
+func (s *Settings) ApplePushDeliveryEnabled(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingApplePushDeliveryEnabled, false)
+}
+
+// PushRelayURL is the public Silo relay origin.
+func (s *Settings) PushRelayURL(ctx context.Context) string {
+	value := strings.TrimRight(strings.TrimSpace(s.raw(ctx, SettingPushRelayURL)), "/")
+	if value == "" {
+		return defaultPushRelayURL
+	}
+	return value
+}
+
+// PushRelayAPIKey is the bearer credential for the Silo relay.
+func (s *Settings) PushRelayAPIKey(ctx context.Context) string {
+	return strings.TrimSpace(s.raw(ctx, SettingPushRelayAPIKey))
+}
+
+// PushRelayDeploymentID is the relay account identifier returned during
+// self-registration. The dispatcher does not need it; registration uses it for
+// subsequent key rotations.
+func (s *Settings) PushRelayDeploymentID(ctx context.Context) string {
+	return strings.TrimSpace(s.raw(ctx, SettingPushRelayDeploymentID))
 }
 
 // DiscordClientID is the Discord application's OAuth2 client ID.

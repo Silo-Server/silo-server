@@ -18,8 +18,8 @@ type OperationalDispatch struct {
 }
 
 // DispatchOperational durably creates one operational delivery. The inbox row
-// and the per-target webhook / web push outbox rows commit in a single
-// transaction — a crash afterwards delays channel sends instead of dropping
+// and the per-target webhook / web push / Apple push outbox rows commit in a
+// single transaction — a crash afterwards delays channel sends instead of dropping
 // them, because the retry workers recover pending outbox rows — then realtime
 // and channel dispatch run post-commit. Returns nil when the delivery deduped
 // away (the partial unique indexes make operational notices idempotent).
@@ -76,6 +76,25 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			})
 		}
 		if err := s.webPushRepo.EnqueueAttempts(ctx, tx, attempts); err != nil {
+			return nil, err
+		}
+	}
+	if s.pushDeviceRepo != nil && s.Settings.ApplePushDeliveryEnabled(ctx) {
+		devicesByProfile, err := s.pushDeviceRepo.ListEnabledAppleByProfiles(ctx, tx, []string{delivery.ProfileID})
+		if err != nil {
+			return nil, err
+		}
+		deliveryID := row.ID
+		attempts := make([]PushDeliveryAttempt, 0, len(devicesByProfile[delivery.ProfileID]))
+		for _, device := range devicesByProfile[delivery.ProfileID] {
+			attempts = append(attempts, PushDeliveryAttempt{
+				ID:                     ulid.Make().String(),
+				NotificationDeliveryID: &deliveryID,
+				PushDeviceID:           device.ID,
+				TriggerType:            PushTriggerDelivery,
+			})
+		}
+		if err := s.pushDeviceRepo.EnqueuePushAttempts(ctx, tx, attempts); err != nil {
 			return nil, err
 		}
 	}

@@ -51,70 +51,19 @@ type webPushPayload struct {
 
 // buildWebPushPayload renders a delivery for the service worker.
 func buildWebPushPayload(row DeliveryRow, posterURL string) ([]byte, error) {
+	display := BuildNotificationDisplay(row)
 	payload := webPushPayload{
-		Title:      "Silo",
-		URL:        "/notifications",
+		Title:      display.Title,
+		Body:       display.Body,
+		URL:        display.URL,
 		Tag:        row.ID,
 		DeliveryID: row.ID,
 	}
 	switch row.Type {
 	case DeliveryTypeEpisodeAvailable:
-		if row.SeriesTitle != "" {
-			payload.Title = "New episode of " + row.SeriesTitle
-		} else {
-			payload.Title = "New episode available"
-		}
-		var code string
-		if row.SeasonNumber != nil && row.EpisodeNumber != nil {
-			code = fmt.Sprintf("S%dE%d", *row.SeasonNumber, *row.EpisodeNumber)
-		}
-		switch {
-		case code != "" && row.EpisodeTitle != "":
-			payload.Body = code + " — " + row.EpisodeTitle
-		case code != "":
-			payload.Body = code
-		default:
-			payload.Body = row.EpisodeTitle
-		}
-		if row.EpisodeID != nil {
-			payload.URL = "/item/" + *row.EpisodeID
-		}
 		payload.Icon = posterURL
 	case DeliveryTypeRequestFulfilled:
-		if row.SeriesTitle != "" {
-			payload.Title = row.SeriesTitle + " is now available"
-		} else {
-			payload.Title = "Your request is now available"
-		}
-		payload.Body = "Your media request has arrived in the library."
-		if row.SeriesID != nil {
-			payload.URL = "/item/" + *row.SeriesID
-		}
 		payload.Icon = posterURL
-	case DeliveryTypeRequestApproved:
-		flags := parseRequestFlags(row.ReasonFlags)
-		payload.Title = "Your request was approved"
-		if flags.Title != "" {
-			payload.Title = flags.Title + " was approved"
-		}
-		payload.Body = "Your media request was approved."
-	case DeliveryTypeRequestDeclined:
-		flags := parseRequestFlags(row.ReasonFlags)
-		payload.Title = "Your request was declined"
-		if flags.Title != "" {
-			payload.Title = flags.Title + " was declined"
-		}
-		payload.Body = "Your media request was declined."
-		if flags.Reason != "" {
-			payload.Body = "Reason: " + flags.Reason
-		}
-	case DeliveryTypeWebhookAutoDisabled:
-		payload.Title = "A webhook stopped working"
-		payload.Body = "Open notification settings to fix it."
-		payload.URL = "/settings/notifications"
-	default:
-		// Unknown types render generically; the inbox has the details.
-		payload.Title = genericNotificationTitle
 	}
 	return json.Marshal(payload)
 }

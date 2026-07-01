@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   BookOpen,
@@ -9,10 +10,12 @@ import {
   Copy,
   ExternalLink,
   Inbox,
+  KeyRound,
   Loader2,
   Mail,
   Megaphone,
   MonitorSmartphone,
+  RadioTower,
   Rss,
   Send,
   TriangleAlert,
@@ -26,6 +29,7 @@ import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { adminKeys } from "@/hooks/queries/keys";
 import { useServerNotificationChannels } from "@/hooks/queries/admin/serverNotificationChannels";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { cn } from "@/lib/utils";
@@ -40,6 +44,9 @@ const KEYS = [
   "notifications.ui_enabled",
   "notifications.webhooks_enabled",
   "notifications.web_push_enabled",
+  "notifications.apple_push_delivery_enabled",
+  "notifications.push_relay_url",
+  "notifications.push_relay_deployment_id",
   "notifications.fanout.settle_seconds",
   "notifications.fanout.max_series_burst",
   "notifications.fanout.max_event_age_hours",
@@ -70,6 +77,17 @@ interface DiscordTestResult {
   duration_ms: number;
   message?: string;
 }
+
+interface AppleRelayRegisterResult {
+  relay_url: string;
+  deployment_id: string;
+  key_prefix: string;
+  api_key_configured: boolean;
+  relay_request_id?: string;
+  apns_topics?: string[];
+}
+
+const DEFAULT_PUSH_RELAY_URL = "https://push.siloserver.org";
 
 /**
  * Invite link for adding the bot to a Discord server. Membership alone is
@@ -407,6 +425,117 @@ function TestDiscordRow({ unsaved }: { unsaved: boolean }) {
   );
 }
 
+function RegisterRelayRow({
+  relayURL,
+  deploymentID,
+  unsaved,
+}: {
+  relayURL: string;
+  deploymentID: string;
+  unsaved: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState<AppleRelayRegisterResult | null>(null);
+
+  const configured = deploymentID.trim() !== "";
+
+  const registerRelay = async () => {
+    if (pending || unsaved) return;
+    setPending(true);
+    setResult(null);
+    try {
+      const response = await api<AppleRelayRegisterResult>(
+        "/admin/notifications/push/relay/register",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            relay_url: relayURL,
+          }),
+        },
+      );
+      setResult(response);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+        queryClient.invalidateQueries({
+          queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
+        }),
+      ]);
+      toast.success("Push relay registered");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Relay registration failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 py-3">
+      <SettingField
+        label="Deployment ID"
+        hint="Opaque relay account for this Silo server; created during registration"
+        type="text"
+        value={deploymentID}
+        onChange={() => {}}
+        disabled
+      />
+      <div className="flex flex-wrap items-center gap-2 py-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={pending || unsaved}
+          onClick={() => void registerRelay()}
+        >
+          {pending ? (
+            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+          )}
+          {configured ? "Rotate relay key" : "Register relay"}
+        </Button>
+      </div>
+      {unsaved && (
+        <div className="text-muted-foreground text-xs">
+          Save your push relay changes first; registration stores credentials immediately.
+        </div>
+      )}
+      {result && (
+        <div className="text-xs text-emerald-500">
+          Registered {result.deployment_id}
+          {result.key_prefix ? ` — key ${result.key_prefix}` : ""}
+          {result.relay_request_id ? ` — relay ${result.relay_request_id}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ApplePushPrivacyDisclosure() {
+  return (
+    <div className="space-y-2 py-3">
+      <div className="text-sm font-medium">Privacy disclosure</div>
+      <div className="text-muted-foreground space-y-2 text-xs leading-relaxed">
+        <p>
+          If you enable push notifications, your Silo Server sends a content-free request to Silo's
+          push relay so Silo can deliver notifications through Apple Push Notification service.
+        </p>
+        <p>
+          The relay does not receive notification titles, message bodies, media names, user names,
+          profile names, or your server URL. It does process technical metadata needed to deliver
+          and operate the service, including an opaque deployment identifier, push delivery timing,
+          request status, app topic, the IP address your self-hosted Silo Server uses to contact the
+          relay, and a hashed device push token. Apple may also process standard APNs delivery
+          metadata.
+        </p>
+        <p>
+          Push notifications are generic; the app fetches private content directly from your Silo
+          Server after receiving the push.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function NotificationsAdminSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const { data: serverChannels } = useServerNotificationChannels();
@@ -444,10 +573,20 @@ export default function NotificationsAdminSettings() {
   const webPushOn = isOn("notifications.web_push_enabled");
   const emailOn = isOn("notifications.email_enabled");
   const serverChannelsOn = isOn("notifications.server_channels_enabled");
-  // Discord and personal webhooks are opt-in (default off).
+  // Mobile push, Discord, and personal webhooks are opt-in (default off).
+  const applePushOn = form.getValue("notifications.apple_push_delivery_enabled") === "true";
   const discordOn = form.getValue("notifications.discord_enabled") === "true";
   const webhooksOn = form.getValue("notifications.webhooks_enabled") === "true";
 
+  const pushRelayURL = form.getValue("notifications.push_relay_url") || DEFAULT_PUSH_RELAY_URL;
+  const pushRelayDeploymentID = form.getValue("notifications.push_relay_deployment_id");
+  const pushRelayAPIKeyReady = form.sensitiveConfigured.includes(
+    "notifications.push_relay_api_key",
+  );
+  const applePushSettingsDirty = [
+    "notifications.apple_push_delivery_enabled",
+    "notifications.push_relay_url",
+  ].some(form.isDirty);
   const allowPrivate =
     form.getValue("notifications.webhooks.allow_private_destinations") === "true";
   // The test endpoint reads the SAVED credentials; testing with unsaved
@@ -463,7 +602,15 @@ export default function NotificationsAdminSettings() {
       (key) => form.getValue(key) !== "" || form.sensitiveConfigured.includes(key),
     );
 
-  const channelStates = [uiOn, webPushOn, emailOn, discordOn, webhooksOn, serverChannelsOn];
+  const channelStates = [
+    uiOn,
+    webPushOn,
+    applePushOn,
+    emailOn,
+    discordOn,
+    webhooksOn,
+    serverChannelsOn,
+  ];
   const enabledChannelCount = channelStates.filter(Boolean).length;
 
   const failingServerChannels = (serverChannels ?? []).filter(
@@ -564,6 +711,37 @@ export default function NotificationsAdminSettings() {
             enabled={webPushOn}
             onEnabledChange={setToggle("notifications.web_push_enabled")}
           />
+
+          <ChannelCard
+            icon={RadioTower}
+            title="Silo Push Relay"
+            description="Mobile push delivery through Silo's relay. Apple devices use APNs today; Android support will use the same relay when available."
+            enabled={applePushOn}
+            onEnabledChange={setToggle("notifications.apple_push_delivery_enabled")}
+            chips={
+              pushRelayAPIKeyReady ? (
+                <Chip tone="positive">Relay configured</Chip>
+              ) : (
+                <Chip tone={applePushOn ? "warning" : "neutral"}>Relay registration required</Chip>
+              )
+            }
+          >
+            <div className="divide-border divide-y">
+              <ApplePushPrivacyDisclosure />
+              <SettingField
+                label="Relay URL"
+                hint="Public relay endpoint used by this Silo server"
+                type="text"
+                value={pushRelayURL}
+                onChange={(v) => form.setValue("notifications.push_relay_url", v)}
+              />
+              <RegisterRelayRow
+                relayURL={pushRelayURL}
+                deploymentID={pushRelayDeploymentID}
+                unsaved={applePushSettingsDirty}
+              />
+            </div>
+          </ChannelCard>
 
           <ChannelCard
             icon={Mail}
