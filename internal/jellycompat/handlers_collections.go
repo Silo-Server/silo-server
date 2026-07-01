@@ -295,6 +295,14 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// Box-set/collection search is an in-memory filter over every collection
+	// (not the Meilisearch-backed /Items media search), so short type-ahead
+	// terms are gated before any rows are loaded.
+	if auxSearchTermTooShort(query.searchTerm) {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+
 	visible, err := h.visibleLibraryIDs(r.Context(), session)
 	if err != nil {
 		writeCompatUpstreamError(w, err)

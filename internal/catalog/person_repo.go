@@ -493,6 +493,13 @@ func (r *PersonRepository) GetByName(ctx context.Context, name string) (*models.
 }
 
 // Search finds persons by name substring (case-insensitive), ordered by name.
+//
+// The predicate is `name ILIKE '%term%'` rather than `LOWER(name) LIKE ...` so
+// the pg_trgm GIN index idx_people_name_trgm can serve it: for a rare 3+ char
+// term that index turns a ~300-400ms full name-index scan into a ~10ms bitmap
+// scan. ILIKE is itself case-insensitive, so this stays equivalent to the prior
+// LOWER(name) comparison (including its existing treatment of % and _ in the
+// term as LIKE wildcards).
 func (r *PersonRepository) Search(ctx context.Context, query string, limit int) ([]models.Person, error) {
 	if limit <= 0 {
 		limit = 20
@@ -500,7 +507,7 @@ func (r *PersonRepository) Search(ctx context.Context, query string, limit int) 
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, name, sort_name, bio, birth_date, death_date, birthplace, homepage,
 			photo_path, photo_source_path, photo_thumbhash, tmdb_id, imdb_id, tvdb_id, plex_guid, created_at, updated_at
-		FROM people WHERE LOWER(name) LIKE '%' || LOWER($1) || '%'
+		FROM people WHERE name ILIKE '%' || $1 || '%'
 		ORDER BY name LIMIT $2`, query, limit,
 	)
 	if err != nil {

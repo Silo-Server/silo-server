@@ -1621,12 +1621,14 @@ func (h *ItemsHandler) HandleSearchHints(w http.ResponseWriter, r *http.Request)
 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 	query := strings.TrimSpace(q.Get("SearchTerm"))
-	if query == "" {
+	// Gate short type-ahead terms and cap results, matching the policy applied
+	// to every search path outside the Meilisearch-backed /Items media search.
+	if query == "" || auxSearchTermTooShort(query) {
 		writeJSON(w, http.StatusOK, searchHintResultDTO{})
 		return
 	}
 
-	limit := parsePositiveInt(q.Get("Limit"), 20)
+	limit := clampAuxSearchLimit(parsePositiveInt(q.Get("Limit"), auxSearchMaxResults))
 	result, err := h.content.SearchItems(r.Context(), session, SearchItemsOptions{
 		Query: query,
 		Limit: limit,
