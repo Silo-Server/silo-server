@@ -75,7 +75,6 @@ describe("NotificationsAdminSettings", () => {
     expect(useSettingsFormMock).toHaveBeenCalledWith({
       keys: expect.arrayContaining([
         "notifications.apple_push_delivery_enabled",
-        "notifications.push_relay_url",
         "notifications.push_relay_deployment_id",
       ]),
     });
@@ -85,6 +84,9 @@ describe("NotificationsAdminSettings", () => {
     }
     const [options] = firstCall as [{ keys: string[] }];
     expect(options.keys).not.toContain("notifications.push_relay_api_key");
+    // The relay URL is persisted only via the registration endpoint, never
+    // through the settings form.
+    expect(options.keys).not.toContain("notifications.push_relay_url");
   });
 
   it("shows the Silo Push Relay channel status", async () => {

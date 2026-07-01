@@ -45,7 +45,9 @@ const KEYS = [
   "notifications.webhooks_enabled",
   "notifications.web_push_enabled",
   "notifications.apple_push_delivery_enabled",
-  "notifications.push_relay_url",
+  // notifications.push_relay_url is intentionally absent: the server rejects
+  // direct writes; the relay URL is persisted by the registration endpoint
+  // together with the deployment id and API key.
   "notifications.push_relay_deployment_id",
   "notifications.fanout.settle_seconds",
   "notifications.fanout.max_series_burst",
@@ -428,11 +430,13 @@ function TestDiscordRow({ unsaved }: { unsaved: boolean }) {
 function RegisterRelayRow({
   relayURL,
   deploymentID,
-  unsaved,
+  urlEdited,
+  onRegistered,
 }: {
   relayURL: string;
   deploymentID: string;
-  unsaved: boolean;
+  urlEdited: boolean;
+  onRegistered: () => void;
 }) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(false);
@@ -441,7 +445,7 @@ function RegisterRelayRow({
   const configured = deploymentID.trim() !== "";
 
   const registerRelay = async () => {
-    if (pending || unsaved) return;
+    if (pending) return;
     setPending(true);
     setResult(null);
     try {
@@ -461,6 +465,7 @@ function RegisterRelayRow({
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
       ]);
+      onRegistered();
       toast.success("Push relay registered");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Relay registration failed");
@@ -480,12 +485,7 @@ function RegisterRelayRow({
         disabled
       />
       <div className="flex flex-wrap items-center gap-2 py-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={pending || unsaved}
-          onClick={() => void registerRelay()}
-        >
+        <Button variant="outline" size="sm" disabled={pending} onClick={() => void registerRelay()}>
           {pending ? (
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
           ) : (
@@ -494,9 +494,9 @@ function RegisterRelayRow({
           {configured ? "Rotate relay key" : "Register relay"}
         </Button>
       </div>
-      {unsaved && (
+      {urlEdited && (
         <div className="text-muted-foreground text-xs">
-          Save your push relay changes first; registration stores credentials immediately.
+          The relay URL change is applied when you register; credentials are stored immediately.
         </div>
       )}
       {result && (
@@ -539,6 +539,8 @@ function ApplePushPrivacyDisclosure() {
 export default function NotificationsAdminSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const { data: serverChannels } = useServerNotificationChannels();
+  // Local draft for the relay URL; null means "show the saved value".
+  const [pushRelayURLDraft, setPushRelayURLDraft] = useState<string | null>(null);
 
   if (form.isLoading) {
     return (
@@ -578,15 +580,15 @@ export default function NotificationsAdminSettings() {
   const discordOn = form.getValue("notifications.discord_enabled") === "true";
   const webhooksOn = form.getValue("notifications.webhooks_enabled") === "true";
 
-  const pushRelayURL = form.getValue("notifications.push_relay_url") || DEFAULT_PUSH_RELAY_URL;
+  // The relay URL is not part of the settings form: the server only persists
+  // it through the registration endpoint, alongside the credentials it mints.
+  const savedPushRelayURL = form.getValue("notifications.push_relay_url") || DEFAULT_PUSH_RELAY_URL;
+  const pushRelayURL = pushRelayURLDraft ?? savedPushRelayURL;
+  const pushRelayURLEdited = pushRelayURL !== savedPushRelayURL;
   const pushRelayDeploymentID = form.getValue("notifications.push_relay_deployment_id");
   const pushRelayAPIKeyReady = form.sensitiveConfigured.includes(
     "notifications.push_relay_api_key",
   );
-  const applePushSettingsDirty = [
-    "notifications.apple_push_delivery_enabled",
-    "notifications.push_relay_url",
-  ].some(form.isDirty);
   const allowPrivate =
     form.getValue("notifications.webhooks.allow_private_destinations") === "true";
   // The test endpoint reads the SAVED credentials; testing with unsaved
@@ -730,15 +732,16 @@ export default function NotificationsAdminSettings() {
               <ApplePushPrivacyDisclosure />
               <SettingField
                 label="Relay URL"
-                hint="Public relay endpoint used by this Silo server"
+                hint="Public relay endpoint used by this Silo server; stored when you register"
                 type="text"
                 value={pushRelayURL}
-                onChange={(v) => form.setValue("notifications.push_relay_url", v)}
+                onChange={(v) => setPushRelayURLDraft(v)}
               />
               <RegisterRelayRow
                 relayURL={pushRelayURL}
                 deploymentID={pushRelayDeploymentID}
-                unsaved={applePushSettingsDirty}
+                urlEdited={pushRelayURLEdited}
+                onRegistered={() => setPushRelayURLDraft(null)}
               />
             </div>
           </ChannelCard>
