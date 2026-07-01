@@ -603,23 +603,27 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 		return nil, err
 	}
 
+	keys := make([]ManagedEntryKey, len(items))
+	for i, it := range items {
+		keys[i] = ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
+	}
+	existing, err := s.repo.GetManagedEntriesByKeys(ctx, userID, req.ProfileID, req.DeviceID, keys)
+	if err != nil {
+		return nil, err
+	}
 	results := make([]*Download, len(items))
 	var newIdx []int
 	for i, it := range items {
-		existing, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, it.contentID, it.episodeID)
-		switch {
-		case err == nil:
+		if ex, ok := existing[keys[i]]; ok {
 			replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, it, decision, batchID, StatusReady, it.file.FileSize, "")
-			row, err := s.reuseOrReplaceManaged(ctx, existing, replacement)
+			row, err := s.reuseOrReplaceManaged(ctx, ex, replacement)
 			if err != nil {
 				return nil, err
 			}
 			results[i] = row
-		case errors.Is(err, ErrNotFound):
-			newIdx = append(newIdx, i)
-		default:
-			return nil, err
+			continue
 		}
+		newIdx = append(newIdx, i)
 	}
 	if len(newIdx) == 0 {
 		return results, nil
@@ -628,14 +632,30 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 		return nil, err
 	}
 
+	toInsert := make([]*Download, 0, len(newIdx))
 	for _, i := range newIdx {
 		d, err := buildManagedOriginal(userID, req.ProfileID, req.DeviceID, items[i], decision, batchID)
 		if err != nil {
 			return nil, err
 		}
-		// These items were just classified absent above, so insert directly (with
-		// race recovery) rather than re-checking existence.
-		row, err := s.repo.CreateManagedEntry(ctx, d)
+		toInsert = append(toInsert, d)
+	}
+	inserted, err := s.repo.CreateManagedEntriesBatch(ctx, toInsert)
+	if err != nil {
+		return nil, err
+	}
+	byKey := make(map[ManagedEntryKey]*Download, len(inserted))
+	for _, d := range inserted {
+		byKey[ManagedEntryKey{ContentID: d.ContentID, EpisodeID: d.EpisodeID}] = d
+	}
+	for _, i := range newIdx {
+		if row, ok := byKey[keys[i]]; ok {
+			results[i] = row
+			continue
+		}
+		// A concurrent create won this identity between the fetch and the
+		// batch insert (ON CONFLICT skipped it); return the winning row.
+		row, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, items[i].contentID, items[i].episodeID)
 		if err != nil {
 			return nil, err
 		}
@@ -717,25 +737,37 @@ func sameManagedTarget(a, b *Download) bool {
 }
 
 // registerManagedItems idempotently registers each item as a ready original
-// managed entry for (userID, profileID, deviceID), skipping items that already
-// exist. The device row must already exist (composite FK). Unlike the interactive
-// ensureManaged path it does NOT consume the QuantityLimiter — the subscription
-// is the authorization — so it backs subscription backfill and the auto-register
-// worker. Returns the registered-or-existing rows.
+// managed entry for (userID, profileID, deviceID) with one batched fetch and
+// one batched insert, skipping items that already exist. The device row must
+// already exist (composite FK). Unlike the interactive ensureManaged path it
+// does NOT consume the QuantityLimiter — the subscription is the
+// authorization. Returns only the NEWLY registered rows: the sync response's
+// "registered" count is documented as new episodes, so a steady-state sync
+// must report 0, not the full in-scope set.
 func registerManagedItems(ctx context.Context, repo *Repository, userID int, profileID, deviceID string, items []managedItem, batchID string) ([]*Download, error) {
-	out := make([]*Download, 0, len(items))
-	for _, it := range items {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	keys := make([]ManagedEntryKey, len(items))
+	for i, it := range items {
+		keys[i] = ManagedEntryKey{ContentID: it.contentID, EpisodeID: it.episodeID}
+	}
+	existing, err := repo.GetManagedEntriesByKeys(ctx, userID, profileID, deviceID, keys)
+	if err != nil {
+		return nil, err
+	}
+	toInsert := make([]*Download, 0, len(items))
+	for i, it := range items {
+		if _, ok := existing[keys[i]]; ok {
+			continue
+		}
 		d, err := buildManagedOriginal(userID, profileID, deviceID, it, originalDecision(), batchID)
 		if err != nil {
-			return out, err
+			return nil, err
 		}
-		row, err := repo.InsertManagedEntryIfAbsent(ctx, d)
-		if err != nil {
-			return out, err
-		}
-		out = append(out, row)
+		toInsert = append(toInsert, d)
 	}
-	return out, nil
+	return repo.CreateManagedEntriesBatch(ctx, toInsert)
 }
 
 // List returns the calling device's managed entries, or the user's

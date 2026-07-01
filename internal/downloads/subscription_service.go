@@ -186,7 +186,11 @@ func (s *Service) UpdateSubscription(ctx context.Context, userID int, profileID,
 	storageIncreased := patch.MaxStorageBytes != nil &&
 		oldMaxStorageBytes > 0 &&
 		(sub.MaxStorageBytes <= 0 || sub.MaxStorageBytes > oldMaxStorageBytes)
-	if !scopeChanged && !reactivated && !storageIncreased {
+	// A paused subscription never syncs — including when this very patch
+	// paused it while also changing scope. SyncSubscriptions applies the same
+	// guard; registering episodes the user just stopped monitoring would make
+	// the device pull them anyway.
+	if !sub.Active || (!scopeChanged && !reactivated && !storageIncreased) {
 		return &SubscriptionResult{Subscription: sub}, nil
 	}
 	registered, err := s.syncSubscription(ctx, sub)
@@ -254,10 +258,11 @@ func (s *Service) SyncSubscriptions(ctx context.Context, userID int, profileID, 
 
 // syncSubscription registers the in-scope, available episodes a subscription
 // covers as managed downloads (idempotent — already-registered episodes are
-// skipped). Run at create/update time and on each client-triggered sync. One
+// skipped) and returns how many were NEWLY registered, so a steady-state sync
+// reports 0. Run at create/update time and on each client-triggered sync. One
 // ListBySeries + coversEpisode filter handles every mode, including latest_season
 // following new seasons (>= TargetSeason) and future-only excluding the back
-// catalog (air date after subscribe).
+// catalog (aired on/after the subscribe day).
 func (s *Service) syncSubscription(ctx context.Context, sub *Subscription) (int, error) {
 	episodes, err := s.episodeRepo.ListBySeries(ctx, sub.SeriesID)
 	if err != nil {

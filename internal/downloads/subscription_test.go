@@ -57,8 +57,19 @@ func TestSubscriptionCoversEpisodeFutureCutoff(t *testing.T) {
 	if !future.coversEpisode(&models.Episode{SeasonNumber: 1, AirDate: &after}) {
 		t.Errorf("future-only must cover an episode that aired after the subscription")
 	}
-	if future.coversEpisode(&models.Episode{SeasonNumber: 1, AirDate: nil}) {
-		t.Errorf("future-only must skip an episode with no air date")
+	// Same-day boundary: air_date is date-only (midnight), so an episode
+	// airing the day the user subscribed must still count as future.
+	sameDay := time.Date(2026, 6, 19, 0, 0, 0, 0, time.UTC)
+	if !future.coversEpisode(&models.Episode{SeasonNumber: 1, AirDate: &sameDay}) {
+		t.Errorf("future-only must cover an episode airing the same day as the subscription")
+	}
+
+	// No air date: fall back to the episode's ingest time.
+	if future.coversEpisode(&models.Episode{SeasonNumber: 1, AirDate: nil, CreatedAt: subscribedAt.Add(-time.Hour)}) {
+		t.Errorf("future-only must skip a no-air-date episode ingested before the subscription")
+	}
+	if !future.coversEpisode(&models.Episode{SeasonNumber: 1, AirDate: nil, CreatedAt: subscribedAt.Add(time.Hour)}) {
+		t.Errorf("future-only must cover a no-air-date episode ingested after the subscription")
 	}
 
 	// 'all' has no air-date cutoff: it covers in-season episodes regardless.

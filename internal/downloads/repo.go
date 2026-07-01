@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -293,27 +295,9 @@ func (r *Repository) GetManagedEntry(ctx context.Context, userID int, profileID,
 	return scanDownload(r.pool.QueryRow(ctx, query, userID, profileID, deviceID, contentID, episodeID))
 }
 
-// InsertManagedEntryIfAbsent idempotently inserts a managed entry: it returns
-// the existing row for d's (user, profile, device, content, episode) identity if
-// one already exists, otherwise creates it. The device row must already exist
-// (composite FK). Used by subscription backfill and the auto-register worker,
-// which have not already checked for an existing row.
-func (r *Repository) InsertManagedEntryIfAbsent(ctx context.Context, d *Download) (*Download, error) {
-	existing, err := r.GetManagedEntry(ctx, d.UserID, d.ProfileID, d.DeviceID, d.ContentID, d.EpisodeID)
-	switch {
-	case err == nil:
-		return existing, nil
-	case !errors.Is(err, ErrNotFound):
-		return nil, err
-	}
-	return r.CreateManagedEntry(ctx, d)
-}
-
 // CreateManagedEntry inserts d and returns it, or — if a concurrent insert won
-// the race to the same managed identity — returns the existing winning row. The
-// interactive series flow calls this directly after it has already classified
-// the item as new, avoiding the redundant existence check in
-// InsertManagedEntryIfAbsent.
+// the race to the same managed identity — returns the existing winning row.
+// Callers have already classified the item as new.
 func (r *Repository) CreateManagedEntry(ctx context.Context, d *Download) (*Download, error) {
 	if err := r.Create(ctx, d); err != nil {
 		if existing, gerr := r.GetManagedEntry(ctx, d.UserID, d.ProfileID, d.DeviceID, d.ContentID, d.EpisodeID); gerr == nil {
@@ -322,6 +306,93 @@ func (r *Repository) CreateManagedEntry(ctx context.Context, d *Download) (*Down
 		return nil, err
 	}
 	return d, nil
+}
+
+// ManagedEntryKey is the (content, episode) identity of a managed entry within
+// one device library. EpisodeID "" is the movie/no-episode slot.
+type ManagedEntryKey struct {
+	ContentID string
+	EpisodeID string
+}
+
+// GetManagedEntriesByKeys returns the device's existing managed rows for the
+// given identities in one query, keyed by ManagedEntryKey. The bulk
+// registration paths use this instead of a per-item GetManagedEntry loop (a
+// 300-episode series would otherwise issue 300 sequential lookups).
+func (r *Repository) GetManagedEntriesByKeys(ctx context.Context, userID int, profileID, deviceID string, keys []ManagedEntryKey) (map[ManagedEntryKey]*Download, error) {
+	out := make(map[ManagedEntryKey]*Download, len(keys))
+	if len(keys) == 0 {
+		return out, nil
+	}
+	contentIDs := make([]string, 0, len(keys))
+	episodeIDs := make([]string, 0, len(keys))
+	want := make(map[ManagedEntryKey]bool, len(keys))
+	for _, k := range keys {
+		contentIDs = append(contentIDs, k.ContentID)
+		episodeIDs = append(episodeIDs, k.EpisodeID)
+		want[k] = true
+	}
+	// ANY() on each column over-selects the cross product within this device's
+	// rows; the exact-pair filter below trims it.
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+downloadColumns+` FROM downloads
+		 WHERE user_id = $1 AND profile_id = $2 AND device_id = $3
+		   AND content_id = ANY($4) AND COALESCE(episode_id, '') = ANY($5)`,
+		userID, profileID, deviceID, contentIDs, episodeIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing managed entries by key: %w", err)
+	}
+	defer rows.Close()
+	list, err := scanDownloads(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range list {
+		k := ManagedEntryKey{ContentID: d.ContentID, EpisodeID: d.EpisodeID}
+		if want[k] {
+			out[k] = d
+		}
+	}
+	return out, nil
+}
+
+// CreateManagedEntriesBatch inserts managed rows in one statement, skipping
+// identities that already exist (including concurrent-insert races) via ON
+// CONFLICT DO NOTHING on the managed-entry unique index. Returns only the rows
+// actually inserted, so callers can report an honest newly-registered count.
+func (r *Repository) CreateManagedEntriesBatch(ctx context.Context, ds []*Download) ([]*Download, error) {
+	if len(ds) == 0 {
+		return nil, nil
+	}
+	const insertCols = 22
+	var sb strings.Builder
+	sb.WriteString(`INSERT INTO downloads (id, user_id, profile_id, device_id, media_file_id, content_id,
+		episode_id, batch_id, kind, status, format, quality, effective_quality, target_bitrate_kbps, revision, artifact_id, file_size, bytes_sent, error_message,
+		created_at, updated_at, completed_at) VALUES `)
+	args := make([]any, 0, len(ds)*insertCols)
+	for i, d := range ds {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteByte('(')
+		for j := 0; j < insertCols; j++ {
+			if j > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteByte('$')
+			sb.WriteString(strconv.Itoa(i*insertCols + j + 1))
+		}
+		sb.WriteByte(')')
+		args = append(args, r.insertArgs(d)...)
+	}
+	sb.WriteString(` ON CONFLICT (user_id, profile_id, device_id, content_id, (COALESCE(episode_id, ''))) WHERE device_id IS NOT NULL DO NOTHING RETURNING ` + downloadColumns)
+	rows, err := r.pool.Query(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("batch inserting managed entries: %w", err)
+	}
+	defer rows.Close()
+	return scanDownloads(rows)
 }
 
 // ReplaceManagedEntry updates an existing managed row to a new file/quality

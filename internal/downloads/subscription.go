@@ -80,13 +80,23 @@ func (s *Subscription) CoversSeason(seasonNumber int) bool {
 // coversEpisode reports whether a specific available episode is in scope for a
 // sync. It layers SubModeFuture's "only episodes that aired after I subscribed"
 // cutoff onto the season scope, so future-only never registers the back
-// catalog. An episode with no air date is out of scope for SubModeFuture only.
+// catalog. An episode with no air date falls back to its ingest time.
 func (s *Subscription) coversEpisode(ep *models.Episode) bool {
 	if !s.CoversSeason(ep.SeasonNumber) {
 		return false
 	}
 	if s.Mode == SubModeFuture {
-		return ep.AirDate != nil && ep.AirDate.After(s.CreatedAt)
+		// air_date is a date-only column (midnight), so a strict instant
+		// comparison against the subscribe timestamp would permanently exclude
+		// an episode airing the same day the user subscribed. Compare calendar
+		// days (UTC) instead; with no air date, a genuinely new episode still
+		// counts as future via its ingest time.
+		sc := s.CreatedAt.UTC()
+		cutoff := time.Date(sc.Year(), sc.Month(), sc.Day(), 0, 0, 0, 0, time.UTC)
+		if ep.AirDate != nil {
+			return !ep.AirDate.Before(cutoff)
+		}
+		return !ep.CreatedAt.Before(s.CreatedAt)
 	}
 	return true
 }
