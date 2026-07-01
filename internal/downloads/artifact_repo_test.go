@@ -199,3 +199,59 @@ func TestArtifactMarkFencedByOwner(t *testing.T) {
 		t.Fatalf("MarkReady(owner) = (%v, %v), want (true, nil)", applied, err)
 	}
 }
+
+// TestHasActiveLinkCoversEphemeralRows pins the eviction guard: an ephemeral
+// (device-less web) download row must protect its artifact from LRU cleanup
+// exactly like a managed row does, and terminal rows must not.
+func TestHasActiveLinkCoversEphemeralRows(t *testing.T) {
+	repo, pool, fileID := newArtifactTestRepo(t)
+	ctx := context.Background()
+
+	art := newArtifact(t, fileID, fmt.Sprintf("hash-link-%d", time.Now().UnixNano()))
+	if _, _, err := repo.EnsureQueued(ctx, art); err != nil {
+		t.Fatalf("ensure artifact: %v", err)
+	}
+
+	var userID int
+	if err := pool.QueryRow(ctx,
+		`INSERT INTO users (username, role, download_allowed) VALUES ($1, 'user', true) RETURNING id`,
+		fmt.Sprintf("linkuser-%d", time.Now().UnixNano()),
+	).Scan(&userID); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	contentID := fmt.Sprintf("link-content-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM downloads WHERE user_id = $1`, userID)
+		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+
+	dlRepo := NewRepository(pool)
+	now := time.Now()
+	dlID := fmt.Sprintf("dl-link-%d", now.UnixNano())
+	if err := dlRepo.Create(ctx, &Download{
+		ID: dlID, UserID: userID, MediaFileID: fileID, ContentID: contentID,
+		Kind: KindQueued, Status: StatusReady, Format: FormatTranscode,
+		ArtifactID: art.ID, FileSize: 1024, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create ephemeral download: %v", err)
+	}
+
+	active, err := repo.HasActiveLink(ctx, art.ID)
+	if err != nil {
+		t.Fatalf("HasActiveLink: %v", err)
+	}
+	if !active {
+		t.Fatal("ephemeral ready row must protect its artifact from eviction")
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE downloads SET status = 'cancelled' WHERE id = $1`, dlID); err != nil {
+		t.Fatalf("cancel download: %v", err)
+	}
+	active, err = repo.HasActiveLink(ctx, art.ID)
+	if err != nil {
+		t.Fatalf("HasActiveLink after cancel: %v", err)
+	}
+	if active {
+		t.Fatal("terminal-only links must not protect an artifact")
+	}
+}

@@ -283,14 +283,15 @@ func (r *ArtifactRepository) TotalReadyBytes(ctx context.Context) (int64, error)
 	return total, nil
 }
 
-// HasActiveLink reports whether any valid managed download row still references
-// the artifact. Completed rows are retained because they remain re-downloadable
-// handles for a device.
+// HasActiveLink reports whether any valid download row — managed or ephemeral
+// (device-less web) — still references the artifact. Completed rows are
+// retained because they remain re-downloadable handles; evicting an artifact a
+// live row references would 404 a download the API advertises as servable.
 func (r *ArtifactRepository) HasActiveLink(ctx context.Context, artifactID string) (bool, error) {
 	var exists bool
 	if err := r.pool.QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM downloads
-		 WHERE artifact_id = $1 AND device_id IS NOT NULL
+		 WHERE artifact_id = $1
 		   AND status NOT IN ('cancelled','failed','revoked'))`,
 		artifactID,
 	).Scan(&exists); err != nil {

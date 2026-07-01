@@ -427,7 +427,8 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 }
 
 // Cleanup evicts ready artifacts (LRU first) once the total exceeds the byte
-// budget, never removing one still linked by an active managed download row.
+// budget, never removing one still linked by any active download row (managed
+// or ephemeral) — only artifacts whose links are all terminal are evictable.
 func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 	budget := m.downloadConfig().ArtifactMaxBytes
 	if budget <= 0 {
