@@ -1015,8 +1015,17 @@ func (s *Service) persistRoomChangeLocked(
 	s.mu.Lock()
 
 	if persistErr != nil {
+		// This writer's optimistic increment never landed; undo it so a
+		// failed write cannot leave a phantom generation that makes every
+		// later CAS conflict. Concurrent writers' stacked increments are
+		// preserved because each writer undoes exactly its own.
+		live.room.Generation--
 		if errors.Is(persistErr, ErrRoomStateConflict) {
-			if refreshed != nil {
+			// Adopt the database row only if it is at least as new as the
+			// local copy — a concurrent writer may have advanced live.room
+			// while the lock was released, and a stale refresh must not
+			// overwrite that newer state.
+			if refreshed != nil && refreshed.Generation >= live.room.Generation {
 				live.room = *refreshed
 			}
 			return true, nil
@@ -1110,6 +1119,7 @@ func (s *Service) maybeResumeFromWaitingLocked(
 		return nil, nil
 	}
 
+	saved := live.room
 	live.room.AnchorPositionSeconds = math.Max(0, live.room.AnchorPositionSeconds)
 	live.room.AnchorUpdatedAt = s.now()
 	action := TransportActionPause
@@ -1121,12 +1131,25 @@ func (s *Service) maybeResumeFromWaitingLocked(
 		live.room.IsPaused = true
 		live.room.PlaybackState = RoomPlaybackStatePaused
 	}
-	s.disarmWaitingDeadlineLocked(live)
 
 	conflict, err := s.persistAnchorLocked(ctx, live)
-	if conflict || err != nil {
+	if err != nil {
+		// The transition never landed in the database. Restore the waiting
+		// state so snapshots keep matching persisted reality, and re-arm the
+		// deadline so the resume is retried instead of silently dropped.
+		live.room.AnchorPositionSeconds = saved.AnchorPositionSeconds
+		live.room.AnchorUpdatedAt = saved.AnchorUpdatedAt
+		live.room.IsPaused = saved.IsPaused
+		live.room.PlaybackState = saved.PlaybackState
+		s.armWaitingDeadlineLocked(live)
 		return s.prepareSnapshotDispatchesLocked(live), nil
 	}
+	if conflict {
+		// live.room now reflects the database row that won the race; if it is
+		// still waiting the armed deadline keeps covering it.
+		return s.prepareSnapshotDispatchesLocked(live), nil
+	}
+	s.disarmWaitingDeadlineLocked(live)
 	commandDispatches := s.transportCommandDispatchesLocked(
 		live,
 		action,

@@ -12,6 +12,9 @@ import (
 
 type stubRepo struct {
 	room Room
+	// anchorErr, when set, is returned from UpdateAnchor to simulate a
+	// database failure.
+	anchorErr error
 }
 
 func (s *stubRepo) CreateRoom(_ context.Context, room Room) (*Room, error) {
@@ -54,6 +57,9 @@ func (s *stubRepo) UpdateAnchor(
 	generation int64,
 	expectedGeneration int64,
 ) (*Room, error) {
+	if s.anchorErr != nil {
+		return nil, s.anchorErr
+	}
 	if s.room.Generation != expectedGeneration {
 		return nil, ErrRoomStateConflict
 	}
@@ -692,6 +698,73 @@ func TestPingIsClampedToMaxTransportLead(t *testing.T) {
 	}
 	if member.lastPingMS != maxTransportLead.Milliseconds() {
 		t.Fatalf("lastPingMS = %d, want %d", member.lastPingMS, maxTransportLead.Milliseconds())
+	}
+}
+
+func TestReadyPersistFailureKeepsWaitingState(t *testing.T) {
+	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
+	repo := &stubRepo{room: baseRoom(now)}
+	repo.room.PlaybackState = RoomPlaybackStateWaiting
+	repo.room.IsPaused = true
+	repo.room.ResumeOnReady = true
+	repo.anchorErr = errors.New("database unavailable")
+	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
+
+	hostConn := &recordingConn{}
+	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
+		userID:     7,
+		profileID:  "host",
+		sessionID:  "host-session",
+		connection: hostConn,
+	}
+
+	reg := registrationFor(repo.room.ID, 7, "host", hostConn)
+	snapshot, err := service.HandleReadyForConnection(context.Background(), reg, 7, "host", StateReport{
+		SessionID: "host-session",
+	})
+	if err != nil {
+		t.Fatalf("HandleReadyForConnection() error = %v", err)
+	}
+
+	if snapshot.PlaybackState != RoomPlaybackStateWaiting {
+		t.Fatalf("playback state = %q, want %q (resume must not be announced when persistence failed)",
+			snapshot.PlaybackState, RoomPlaybackStateWaiting)
+	}
+	live := service.rooms[repo.room.ID]
+	if live.room.Generation != repo.room.Generation {
+		t.Fatalf("live generation = %d, want %d (failed write must not leave a phantom generation)",
+			live.room.Generation, repo.room.Generation)
+	}
+	if live.waitingTimer == nil {
+		t.Fatal("waiting deadline should stay armed so the resume is retried")
+	}
+}
+
+func TestStaleLiveConflictAdoptsDatabaseRow(t *testing.T) {
+	now := time.Date(2026, 4, 10, 12, 0, 20, 0, time.UTC)
+	repo := &stubRepo{room: baseRoom(now)}
+	service := newServiceForTest(now, repo, &stubSessions{}, &stubFiles{}, nil)
+	// The database row has moved ahead of the cached live copy.
+	repo.room.Generation = 5
+
+	hostConn := &recordingConn{}
+	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{
+		userID:     7,
+		profileID:  "host",
+		sessionID:  "host-session",
+		connection: hostConn,
+	}
+
+	reg := registrationFor(repo.room.ID, 7, "host", hostConn)
+	snapshot, err := service.HandleTransportRequestForConnection(context.Background(), reg, 7, "host", TransportRequest{
+		Action: TransportActionPause,
+	})
+	if err != nil {
+		t.Fatalf("HandleTransportRequestForConnection() error = %v", err)
+	}
+
+	if snapshot.Generation != 5 {
+		t.Fatalf("snapshot generation = %d, want 5 (conflict must adopt the newer database row)", snapshot.Generation)
 	}
 }
 
