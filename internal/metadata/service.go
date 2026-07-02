@@ -856,6 +856,19 @@ func (s *MetadataService) prepareProcessRequest(ctx context.Context, req Process
 	if len(durableIDs) == 0 {
 		return req, nil
 	}
+	// Strip durable IDs already recorded as stale before merging them into
+	// the request. Without this, a manual rematch (ModeIdentify) re-injects
+	// the known-dead ID, the Phase-2 fetch 404s again, and the item is
+	// re-recorded in stale_media_ids instead of leaving the stale list.
+	// Only the injected set is filtered: IDs the caller supplied explicitly
+	// in req.ProviderIDs stay untouched, so an admin deliberately
+	// re-selecting a previously-stale ID still retries it.
+	if err := s.suppressRecordedStaleProviderIDs(ctx, req.ContentID, durableIDs); err != nil {
+		return req, err
+	}
+	if len(durableIDs) == 0 {
+		return req, nil
+	}
 	if req.ProviderIDs == nil {
 		req.ProviderIDs = make(map[string]string, len(durableIDs))
 	}
