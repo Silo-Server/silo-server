@@ -136,7 +136,10 @@ func (s *PlaybackSessionStore) FindByRoute(compatToken, routeID string) (*Playba
 		if compatToken != "" && session.CompatToken != compatToken {
 			continue
 		}
-		if session.RouteItemID == routeID {
+		// UUID-normalized comparison: playback reports echo the item id in
+		// whatever casing/dash format the client model uses, which may differ
+		// from the raw route param captured at stream time.
+		if mediaSourceIDsEqual(session.RouteItemID, routeID) {
 			cp := session
 			return &cp, nil, true
 		}

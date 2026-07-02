@@ -94,6 +94,8 @@ type SessionManagerInterface interface {
 	StopSession(sessionID string) error
 	GetSession(sessionID string) (*playback.Session, error)
 	SetTranscodeNodeURL(sessionID, url string) error
+	BeginTransport(sessionID string) error
+	EndTransport(sessionID string) error
 }
 
 type sessionStarterContext interface {
