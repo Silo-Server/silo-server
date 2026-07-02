@@ -50,7 +50,10 @@ func (t *PolicyDecisionLogCleanupTask) DefaultTriggers() []taskmanager.TriggerCo
 
 func (t *PolicyDecisionLogCleanupTask) Execute(ctx context.Context, progress taskmanager.ProgressReporter) error {
 	progress.Report(0, "Pruning policy decision logs")
-	deleted := policy.CleanupDecisionLogsOnce(ctx, t.pool, t.store, t.pm)
+	deleted, err := policy.CleanupDecisionLogsOnce(ctx, t.pool, t.store, t.pm)
+	if err != nil {
+		return fmt.Errorf("policy decision log cleanup (deleted %d rows): %w", deleted, err)
+	}
 	progress.Report(100, fmt.Sprintf("Pruned %d policy decision log rows", deleted))
 	return nil
 }
