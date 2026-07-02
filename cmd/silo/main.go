@@ -1973,6 +1973,8 @@ func main() {
 		var absScopeResolver scopeResolver
 		if policySystem != nil {
 			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore)
+		} else {
+			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore)
 		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,

@@ -284,12 +284,12 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 }
 
 func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) (*models.User, error) {
+	if user == nil {
+		return nil, nil
+	}
 	effective, err := access.EffectivePolicyForUser(ctx, user, s.groupProvider)
 	if err != nil {
 		return nil, err
-	}
-	if user == nil {
-		return nil, nil
 	}
 	out := *user
 	out.LibraryIDs = effective.LibraryIDs
