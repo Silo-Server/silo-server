@@ -1469,6 +1469,9 @@ func main() {
 				MaxTranscodes: user.MaxTranscodes,
 			}, nil
 		})
+		if policySystem != nil {
+			sessionMgr.SetAdmissionDecider(policy.NewPlaybackAdmissionDecider(policySystem.PDP()))
+		}
 	}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider

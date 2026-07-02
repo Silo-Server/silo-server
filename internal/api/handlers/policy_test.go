@@ -39,7 +39,7 @@ func TestPolicyCapabilityShape(t *testing.T) {
 	if !response.Enabled || !response.EditorAvailable {
 		t.Fatalf("capability = %#v, want enabled editor", response)
 	}
-	wantDecisionTypes := []string{policy.DomainPermission, policy.DomainScope}
+	wantDecisionTypes := []string{policy.DomainAction, policy.DomainPermission, policy.DomainScope}
 	if !reflect.DeepEqual(response.DecisionTypes, wantDecisionTypes) {
 		t.Fatalf("decision_types = %#v, want %#v", response.DecisionTypes, wantDecisionTypes)
 	}

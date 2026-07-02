@@ -78,16 +78,17 @@ type Capability struct {
 // policy, file resolution, and file serving for both ephemeral/account-level
 // rows (DeviceID == "") and managed device-library entries (DeviceID set).
 type Service struct {
-	repo        *Repository
-	policy      DownloadQualityResolver
-	bandwidth   *BandwidthManager
-	limiter     *QuantityLimiter
-	fileRepo    FileResolver
-	itemRepo    ItemResolver
-	episodeRepo EpisodeResolver
-	userRepo    UserResolver
-	itemAccess  ItemAccessChecker
-	settings    SettingsReader
+	repo          *Repository
+	policy        DownloadQualityResolver
+	actionDecider ActionDecider
+	bandwidth     *BandwidthManager
+	limiter       *QuantityLimiter
+	fileRepo      FileResolver
+	itemRepo      ItemResolver
+	episodeRepo   EpisodeResolver
+	userRepo      UserResolver
+	itemAccess    ItemAccessChecker
+	settings      SettingsReader
 
 	// Offline-manifest dependencies (Phase 2); nil until SetOfflineDeps wires them.
 	manifest       *ManifestBuilder
@@ -254,7 +255,11 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 		TranscodeEnabled:     cfg.TranscodeEnabled,
 		TranscodeUserAllowed: user.DownloadTranscodeAllowed,
 	}
-	c.QualityPresets = s.policy.PresetsFor(user, cfg, s.artifacts != nil)
+	if s.actionDecider != nil {
+		c.QualityPresets = s.policyPresetsFor(ctx, user, cfg, s.artifacts != nil)
+	} else {
+		c.QualityPresets = s.policy.PresetsFor(user, cfg, s.artifacts != nil)
+	}
 	if len(c.QualityPresets) > 0 {
 		// Per-season download is always available when downloads are enabled;
 		// auto-download monitoring additionally requires the subscription repo.
@@ -288,16 +293,9 @@ type CreateRequest struct {
 // ephemeral row unless compatibility requires a prepared artifact. Bitrate
 // qualities always prepare a transcode artifact before the row becomes ready.
 func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter) (*Download, error) {
-	cfg, err := s.enabledConfig(ctx)
+	cfg, user, err := s.downloadConfigForUser(ctx, userID, req.DeviceID)
 	if err != nil {
 		return nil, err
-	}
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("loading user: %w", err)
-	}
-	if !user.DownloadAllowed {
-		return nil, ErrDownloadNotAllowed
 	}
 	file, err := s.resolveFile(ctx, req)
 	if err != nil {
@@ -307,7 +305,7 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		return nil, err
 	}
 
-	decision, err := s.policy.Resolve(req.Quality, user, cfg, file, req.Caps, s.artifacts != nil)
+	decision, err := s.policy.Resolve(ctx, req.Quality, user, cfg, file, req.Caps, s.artifacts != nil)
 	if err != nil {
 		return nil, err
 	}
@@ -469,16 +467,9 @@ func (s *Service) CreateSeason(ctx context.Context, userID int, req CreateReques
 // queues ephemeral rows under one shared batch ID. Series/season downloads are
 // original-only.
 func (s *Service) createSeriesScoped(ctx context.Context, userID int, req CreateRequest, filter catalog.AccessFilter, listEpisodes func(context.Context) ([]*models.Episode, error)) ([]*Download, string, []SkippedDownload, error) {
-	cfg, err := s.enabledConfig(ctx)
+	cfg, user, err := s.downloadConfigForUser(ctx, userID, req.DeviceID)
 	if err != nil {
 		return nil, "", nil, err
-	}
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("loading user: %w", err)
-	}
-	if !user.DownloadAllowed {
-		return nil, "", nil, ErrDownloadNotAllowed
 	}
 	decision, err := s.resolveBulkQuality(req.Quality, user, cfg)
 	if err != nil {
@@ -793,15 +784,8 @@ func (s *Service) List(ctx context.Context, userID int, profileID, deviceID stri
 // ServeDirect validates permissions and serves a file directly for browser
 // download. No persistent download record is created.
 func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *http.Request, userID, fileID int, format string, filter catalog.AccessFilter) error {
-	if _, err := s.enabledConfig(ctx); err != nil {
+	if _, _, err := s.downloadConfigForUser(ctx, userID, ""); err != nil {
 		return err
-	}
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("loading user: %w", err)
-	}
-	if !user.DownloadAllowed {
-		return ErrDownloadNotAllowed
 	}
 	if format != "" && format != FormatOriginal {
 		return ErrFormatUnavailable
@@ -828,15 +812,8 @@ func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *htt
 // behavior. The ephemeral path never serves a managed row, and vice versa.
 func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.Request, userID int, profileID, deviceID, downloadID string, filter catalog.AccessFilter) error {
 	// Re-check policy — admin may have disabled downloads or revoked permission.
-	if _, err := s.enabledConfig(ctx); err != nil {
+	if _, _, err := s.downloadConfigForUser(ctx, userID, deviceID); err != nil {
 		return err
-	}
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("loading user: %w", err)
-	}
-	if !user.DownloadAllowed {
-		return ErrDownloadNotAllowed
 	}
 
 	if deviceID != "" {

@@ -390,6 +390,9 @@ func NewRouter(deps Dependencies) chi.Router {
 				MaxTranscodes: user.MaxTranscodes,
 			}, nil
 		})
+		if deps.PolicySystem != nil {
+			deps.SessionMgr.SetAdmissionDecider(policy.NewPlaybackAdmissionDecider(deps.PolicySystem.PDP()))
+		}
 	}
 
 	// Build demo guard middleware if server settings are available.
@@ -1402,6 +1405,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			settingsRepo,
 			&deps.Config.Download,
 		)
+		if deps.PolicySystem != nil {
+			downloadSvc.SetActionDecider(deps.PolicySystem.PDP())
+		}
 		if detailSvc != nil {
 			// Offline manifest + artwork/subtitle proxies (Phase 2). subtitleManager
 			// may be nil when subtitles are unconfigured; pass a nil interface so the

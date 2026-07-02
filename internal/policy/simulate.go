@@ -16,6 +16,7 @@ var ErrUnsupportedDomain = errors.New("unsupported policy domain")
 var domainDecisions = map[string]DecisionName{
 	DomainScope:      DecisionScope,
 	DomainPermission: DecisionPermission,
+	DomainAction:     DecisionAction,
 }
 
 // DecisionTypes returns policy domains with simulation support.

@@ -1,6 +1,7 @@
 package downloads
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -128,12 +129,13 @@ func TestDownloadQualityResolverResolve(t *testing.T) {
 	}
 
 	var resolver DownloadQualityResolver
+	ctx := context.Background()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			user := &models.User{DownloadAllowed: true, DownloadTranscodeAllowed: tc.userTranscode}
 			cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: tc.transcodeEnabled}
 
-			got, err := resolver.Resolve(tc.requested, user, cfg, tc.file, tc.caps, tc.artifactsAvailable)
+			got, err := resolver.Resolve(ctx, tc.requested, user, cfg, tc.file, tc.caps, tc.artifactsAvailable)
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("Resolve(%q) err = %v, want %v", tc.requested, err, tc.wantErr)

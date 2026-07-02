@@ -95,14 +95,15 @@ func ClientInfoFromContext(ctx context.Context) ClientInfo {
 
 // SessionManager tracks active playback sessions and enforces stream limits.
 type SessionManager struct {
-	sessions      map[string]*Session
-	mu            sync.RWMutex
-	maxStreams    int
-	maxTranscodes int
-	limitProvider SessionLimitProvider
-	activeGrace   time.Duration
-	pausedGrace   time.Duration
-	expireHook    func(*Session)
+	sessions         map[string]*Session
+	mu               sync.RWMutex
+	maxStreams       int
+	maxTranscodes    int
+	limitProvider    SessionLimitProvider
+	admissionDecider AdmissionDecider
+	activeGrace      time.Duration
+	pausedGrace      time.Duration
+	expireHook       func(*Session)
 }
 
 // SessionLimits stores per-user admission limits. Zero values mean unlimited.
@@ -113,6 +114,26 @@ type SessionLimits struct {
 
 // SessionLimitProvider returns the current admission limits for a user.
 type SessionLimitProvider func(ctx context.Context, userID int) (SessionLimits, error)
+
+// AdmissionRequest is the fact set passed to an optional policy admission
+// decider. Counts are computed by SessionManager from live in-memory sessions.
+type AdmissionRequest struct {
+	UserID                  int
+	Limits                  SessionLimits
+	CurrentActiveStreams    int
+	CurrentActiveTranscodes int
+	RequestedMethod         PlayMethod
+}
+
+// AdmissionDecision is the result of an optional policy admission decision.
+type AdmissionDecision struct {
+	Allowed bool
+	Reason  string
+}
+
+// AdmissionDecider can replace SessionManager's inline limit comparison while
+// keeping session counting in Go.
+type AdmissionDecider func(ctx context.Context, req AdmissionRequest) (AdmissionDecision, error)
 
 const (
 	// DefaultActiveSessionGrace is how long an unpaused session may go without
@@ -142,6 +163,14 @@ func (m *SessionManager) SetLimitProvider(provider SessionLimitProvider) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.limitProvider = provider
+}
+
+// SetAdmissionDecider installs an optional policy admission hook. A nil decider
+// keeps the legacy inline comparison.
+func (m *SessionManager) SetAdmissionDecider(decider AdmissionDecider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.admissionDecider = decider
 }
 
 // SetLivenessGracePeriods overrides the grace periods used by admission
@@ -229,22 +258,72 @@ func (m *SessionManager) StartSessionWithFilesContext(
 		return nil, err
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	for {
+		m.mu.Lock()
+		decider := m.admissionDecider
+		if decider == nil {
+			if err := m.inlineAdmissionErrorLocked(userID, method, limits); err != nil {
+				m.mu.Unlock()
+				return nil, err
+			}
+			s := newSession(ctx, userID, profileID, effectiveFileID, requestedFileID, method, transcodeAudio)
+			m.sessions[s.ID] = s
+			m.mu.Unlock()
+			return s, nil
+		}
+		activeStreams := m.activeCountLocked(userID)
+		activeTranscodes := m.transcodeCountLocked(userID)
+		m.mu.Unlock()
 
-	// Enforce stream limits.
+		decision, err := decider(ctx, AdmissionRequest{
+			UserID:                  userID,
+			Limits:                  limits,
+			CurrentActiveStreams:    activeStreams,
+			CurrentActiveTranscodes: activeTranscodes,
+			RequestedMethod:         method,
+		})
+		if err != nil {
+			return nil, admissionDenyError("")
+		}
+		if !decision.Allowed {
+			return nil, admissionDenyError(decision.Reason)
+		}
+
+		m.mu.Lock()
+		if activeStreams != m.activeCountLocked(userID) || activeTranscodes != m.transcodeCountLocked(userID) {
+			m.mu.Unlock()
+			continue
+		}
+		s := newSession(ctx, userID, profileID, effectiveFileID, requestedFileID, method, transcodeAudio)
+		m.sessions[s.ID] = s
+		m.mu.Unlock()
+		return s, nil
+	}
+}
+
+func (m *SessionManager) inlineAdmissionErrorLocked(userID int, method PlayMethod, limits SessionLimits) error {
 	if limits.MaxStreams > 0 && m.activeCountLocked(userID) >= limits.MaxStreams {
-		return nil, ErrTooManyStreams
+		return ErrTooManyStreams
 	}
 
-	// Enforce transcode limits.
 	if method == PlayTranscode && limits.MaxTranscodes > 0 && m.transcodeCountLocked(userID) >= limits.MaxTranscodes {
-		return nil, ErrTooManyTranscodes
+		return ErrTooManyTranscodes
 	}
+	return nil
+}
 
+func newSession(
+	ctx context.Context,
+	userID int,
+	profileID string,
+	effectiveFileID int,
+	requestedFileID int,
+	method PlayMethod,
+	transcodeAudio bool,
+) *Session {
 	now := time.Now()
 	clientInfo := ClientInfoFromContext(ctx)
-	s := &Session{
+	return &Session{
 		ID:                   uuid.New().String(),
 		UserID:               userID,
 		ProfileID:            profileID,
@@ -262,9 +341,13 @@ func (m *SessionManager) StartSessionWithFilesContext(
 		UpdatedAt:            now,
 		LastActivityAt:       now,
 	}
+}
 
-	m.sessions[s.ID] = s
-	return s, nil
+func admissionDenyError(reason string) error {
+	if reason == "max transcodes exceeded" {
+		return ErrTooManyTranscodes
+	}
+	return ErrTooManyStreams
 }
 
 func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (SessionLimits, error) {

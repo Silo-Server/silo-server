@@ -2,10 +2,13 @@ package playback_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/policy"
 )
 
 func TestSessionManager_StartStop(t *testing.T) {
@@ -300,6 +303,95 @@ func TestSessionManager_UserLimitProviderAppliesTranscodeLimitOnlyToTranscodes(t
 	}
 	if _, err := sm.StartSession(1, "profile-1", 102, playback.PlayDirect, false); err != nil {
 		t.Fatalf("StartSession direct while transcode limit hit: %v", err)
+	}
+}
+
+func TestSessionManager_PolicyAdmissionDeciderMatchesLegacy(t *testing.T) {
+	pdp := newPlaybackPolicyPDP(t)
+	ctx := context.Background()
+
+	for _, maxStreams := range []int{0, 1, 2} {
+		for _, maxTranscodes := range []int{0, 1, 2} {
+			for _, activeStreams := range []int{0, 1, 2} {
+				for _, activeTranscodes := range []int{0, 1, 2} {
+					if activeTranscodes > activeStreams {
+						continue
+					}
+					for _, method := range []playback.PlayMethod{playback.PlayDirect, playback.PlayTranscode} {
+						name := fmt.Sprintf("streams_%d_transcodes_%d_active_%d_%d_method_%s",
+							maxStreams, maxTranscodes, activeStreams, activeTranscodes, method)
+						t.Run(name, func(t *testing.T) {
+							limits := playback.SessionLimits{MaxStreams: maxStreams, MaxTranscodes: maxTranscodes}
+							legacy := seededSessionManager(t, activeStreams, activeTranscodes)
+							legacy.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+								return limits, nil
+							})
+							withPolicy := seededSessionManager(t, activeStreams, activeTranscodes)
+							withPolicy.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+								return limits, nil
+							})
+							withPolicy.SetAdmissionDecider(policy.NewPlaybackAdmissionDecider(pdp))
+
+							_, legacyErr := legacy.StartSessionWithContext(ctx, 1, "profile-1", 900, method, false)
+							_, policyErr := withPolicy.StartSessionWithContext(ctx, 1, "profile-1", 900, method, false)
+							if !sameAdmissionError(policyErr, legacyErr) {
+								t.Fatalf("policy admission error = %v, want legacy %v", policyErr, legacyErr)
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestSessionManager_AdmissionDeciderErrorDenies(t *testing.T) {
+	sm := playback.NewSessionManager(0, 0)
+	sm.SetAdmissionDecider(func(context.Context, playback.AdmissionRequest) (playback.AdmissionDecision, error) {
+		return playback.AdmissionDecision{}, errors.New("policy unavailable")
+	})
+
+	_, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if !errors.Is(err, playback.ErrTooManyStreams) {
+		t.Fatalf("StartSession with failing decider = %v, want ErrTooManyStreams", err)
+	}
+}
+
+func seededSessionManager(t *testing.T, activeStreams, activeTranscodes int) *playback.SessionManager {
+	t.Helper()
+	sm := playback.NewSessionManager(0, 0)
+	for i := 0; i < activeTranscodes; i++ {
+		if _, err := sm.StartSession(1, "profile-1", 100+i, playback.PlayTranscode, false); err != nil {
+			t.Fatalf("seed transcode %d: %v", i, err)
+		}
+	}
+	for i := activeTranscodes; i < activeStreams; i++ {
+		if _, err := sm.StartSession(1, "profile-1", 100+i, playback.PlayDirect, false); err != nil {
+			t.Fatalf("seed direct %d: %v", i, err)
+		}
+	}
+	return sm
+}
+
+func newPlaybackPolicyPDP(t *testing.T) *policy.PDP {
+	t.Helper()
+	engine, err := policy.NewEngine(context.Background())
+	if err != nil {
+		t.Fatalf("NewEngine() error: %v", err)
+	}
+	return policy.NewPDP(engine)
+}
+
+func sameAdmissionError(got, want error) bool {
+	switch {
+	case want == nil:
+		return got == nil
+	case errors.Is(want, playback.ErrTooManyStreams):
+		return errors.Is(got, playback.ErrTooManyStreams)
+	case errors.Is(want, playback.ErrTooManyTranscodes):
+		return errors.Is(got, playback.ErrTooManyTranscodes)
+	default:
+		return errors.Is(got, want)
 	}
 }
 

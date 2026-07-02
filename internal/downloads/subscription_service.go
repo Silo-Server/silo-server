@@ -27,15 +27,8 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, req Subscr
 	if s.subRepo == nil {
 		return nil, ErrSubscriptionsUnavailable
 	}
-	if _, err := s.enabledConfig(ctx); err != nil {
+	if _, _, err := s.downloadConfigForUser(ctx, userID, req.DeviceID); err != nil {
 		return nil, err
-	}
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("loading user: %w", err)
-	}
-	if !user.DownloadAllowed {
-		return nil, ErrDownloadNotAllowed
 	}
 	if req.ProfileID == "" || req.DeviceID == "" {
 		return nil, ErrProfileRequired
@@ -139,15 +132,8 @@ func (s *Service) UpdateSubscription(ctx context.Context, userID int, profileID,
 	// Same feature/permission gate as CreateSubscription and SyncSubscriptions:
 	// a patch can re-activate or widen a monitor and backfill managed rows, so
 	// it must not bypass an admin disabling downloads or revoking the user.
-	if _, err := s.enabledConfig(ctx); err != nil {
+	if _, _, err := s.downloadConfigForUser(ctx, userID, deviceID); err != nil {
 		return nil, err
-	}
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("loading user: %w", err)
-	}
-	if !user.DownloadAllowed {
-		return nil, ErrDownloadNotAllowed
 	}
 	sub, err := s.subRepo.GetByID(ctx, id, userID, profileID, deviceID)
 	if err != nil {
@@ -240,18 +226,15 @@ func (s *Service) SyncSubscriptions(ctx context.Context, userID int, profileID, 
 	if s.subRepo == nil {
 		return 0, ErrSubscriptionsUnavailable
 	}
-	if _, err := s.enabledConfig(ctx); err != nil {
+	cfg, err := s.downloadConfigForFeature(ctx, userID, deviceID)
+	if err != nil {
 		return 0, err
 	}
 	if profileID == "" || deviceID == "" {
 		return 0, ErrProfileRequired
 	}
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return 0, fmt.Errorf("loading user: %w", err)
-	}
-	if !user.DownloadAllowed {
-		return 0, ErrDownloadNotAllowed
+	if _, err := s.downloadUserForConfig(ctx, userID, cfg, deviceID); err != nil {
+		return 0, err
 	}
 	subs, err := s.subRepo.ListByDevice(ctx, userID, profileID, deviceID)
 	if err != nil {

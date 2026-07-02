@@ -55,6 +55,18 @@ func (p *PDP) CheckPermission(ctx context.Context, input PermissionInput) (Permi
 	return decision, meta, nil
 }
 
+// CheckAction evaluates a download, download-transcode, or playback admission gate.
+func (p *PDP) CheckAction(ctx context.Context, input ActionInput) (ActionDecision, Meta, error) {
+	var decision ActionDecision
+	meta, err := p.engine.Evaluate(ctx, DecisionAction, input, &decision)
+	if err != nil {
+		p.logActionDecision(ctx, input, nil, meta, err)
+		return ActionDecision{}, Meta{}, err
+	}
+	p.logActionDecision(ctx, input, decision, meta, nil)
+	return decision, meta, nil
+}
+
 func (p *PDP) logScopeDecision(ctx context.Context, input ScopeInput, result any, meta Meta, evalErr error) {
 	if p == nil || p.decisionLogger == nil {
 		return
@@ -89,6 +101,27 @@ func (p *PDP) logPermissionDecision(ctx context.Context, input PermissionInput, 
 		EvalTimeNS:       meta.EvalTimeNS,
 	}
 	if decision, ok := result.(PermissionDecision); ok {
+		entry.Allowed = boolPtr(decision.Allowed)
+	}
+	if evalErr != nil {
+		entry.Error = evalErr.Error()
+	}
+	p.decisionLogger.LogDecision(entry, input, result)
+}
+
+func (p *PDP) logActionDecision(ctx context.Context, input ActionInput, result any, meta Meta, evalErr error) {
+	if p == nil || p.decisionLogger == nil {
+		return
+	}
+
+	entry := Entry{
+		DecisionName:     DecisionAction,
+		PolicyGeneration: meta.Revision,
+		UserID:           intPtr(input.UserID),
+		RequestID:        chimiddleware.GetReqID(ctx),
+		EvalTimeNS:       meta.EvalTimeNS,
+	}
+	if decision, ok := result.(ActionDecision); ok {
 		entry.Allowed = boolPtr(decision.Allowed)
 	}
 	if evalErr != nil {

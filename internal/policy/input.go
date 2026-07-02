@@ -1,6 +1,18 @@
 package policy
 
 const (
+	// ActionDownload checks whether a user may create or serve original downloads.
+	ActionDownload = "download"
+	// ActionDownloadTranscode checks whether a user may request transcode-backed downloads.
+	ActionDownloadTranscode = "download_transcode"
+	// ActionPlaybackAdmission checks whether a playback session may be admitted.
+	ActionPlaybackAdmission = "playback_admission"
+
+	// RequestedActionDirectPlay is the playback admission fact for non-transcode playback.
+	RequestedActionDirectPlay = "direct_play"
+	// RequestedActionTranscode is the playback admission fact for transcode playback.
+	RequestedActionTranscode = "transcode"
+
 	// PermissionActingAdmin is the pseudo-permission used for acting-admin gates.
 	PermissionActingAdmin = "acting_admin"
 	// PermissionMarkerEdit mirrors auth.PermissionMarkerEdit.
@@ -90,4 +102,46 @@ type PermissionInput struct {
 type PermissionDecision struct {
 	Allowed bool   `json:"allowed"`
 	Reason  string `json:"reason"`
+}
+
+// ActionInput is the policy input document for download eligibility,
+// download-transcode eligibility, and playback admission.
+//
+// Go supplies all dynamic facts: live playback counts, user flags, and config
+// flags. Policy never reads server configuration or session state directly.
+type ActionInput struct {
+	SchemaVersion int `json:"schema_version"`
+
+	Action                   string `json:"action"`
+	UserID                   int    `json:"user_id"`
+	DownloadAllowed          bool   `json:"download_allowed"`
+	DownloadTranscodeAllowed bool   `json:"download_transcode_allowed"`
+	MaxStreams               int    `json:"max_streams"`
+	MaxTranscodes            int    `json:"max_transcodes"`
+
+	DownloadsEnabled   bool `json:"downloads_enabled"`
+	TranscodeEnabled   bool `json:"transcode_enabled"`
+	ArtifactsAvailable bool `json:"artifacts_available"`
+
+	CurrentActiveStreams    int    `json:"current_active_streams"`
+	CurrentActiveTranscodes int    `json:"current_active_transcodes"`
+	RequestedAction         string `json:"requested_action"`
+
+	RequestedQuality   string `json:"requested_quality"`
+	FileQuality        string `json:"file_quality"`
+	MaxPlaybackQuality string `json:"max_playback_quality"`
+	ContentRating      string `json:"content_rating"`
+	MaxContentRating   string `json:"max_content_rating"`
+
+	RequestTime string `json:"request_time"`
+	DeviceID    string `json:"device_id"`
+	ClientIP    string `json:"client_ip"`
+}
+
+// ActionDecision is the policy output document for action checks. QualityCeiling
+// is set only when a custom override narrows the input max_playback_quality.
+type ActionDecision struct {
+	Allowed        bool   `json:"allowed"`
+	Reason         string `json:"reason"`
+	QualityCeiling string `json:"quality_ceiling"`
 }

@@ -24,6 +24,8 @@ const (
 	DecisionScope DecisionName = "silo.scope.decision"
 	// DecisionPermission evaluates route-level permission gates.
 	DecisionPermission DecisionName = "silo.permission.decision"
+	// DecisionAction evaluates download and playback action gates.
+	DecisionAction DecisionName = "silo.action.decision"
 )
 
 // Meta describes one policy evaluation.
@@ -205,6 +207,7 @@ func decisionQueries() map[DecisionName]string {
 	return map[DecisionName]string{
 		DecisionScope:      "data.silo.scope.decision",
 		DecisionPermission: "data.silo.permission.decision",
+		DecisionAction:     "data.silo.action.decision",
 	}
 }
 
