@@ -32,6 +32,14 @@ func MinResumeFraction(pct int) float64 {
 // The single home of the rule shared by both store backends and the
 // offline-sync ingest; `completed` remains a one-way latch at the write site.
 func ResolveProgressState(position, duration float64, t ProgressThresholds) (pos float64, completed, skip bool) {
+	// Clamp malformed client input so negative values can never classify — or
+	// persist — as real progress on any backend.
+	if position < 0 {
+		position = 0
+	}
+	if duration < 0 {
+		duration = 0
+	}
 	if duration > 0 && position > 0 && position/duration < MinResumeFraction(t.MinResumePct) {
 		return position, false, true
 	}

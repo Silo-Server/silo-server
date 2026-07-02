@@ -18,14 +18,15 @@ import (
 // progress event time may sit before it is clamped to "now".
 const progressClockSkew = 2 * time.Minute
 
-// parseClientEventTime parses an RFC3339 client event time, returning the zero
-// time on any error (which clampEventAt treats as "now").
-func parseClientEventTime(s string) time.Time {
+// parseClientEventTime parses an RFC3339 client event time. Malformed values
+// are an error the caller must reject: treating them as "now" would let a
+// stale offline event win LWW as a fresh server-time write.
+func parseClientEventTime(s string) (time.Time, error) {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, err
 	}
-	return t.UTC()
+	return t.UTC(), nil
 }
 
 // clampEventAt bounds a client event time to at most now+skew: a value past the
@@ -331,7 +332,13 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 			// last-write-wins on the bounded event_at. synced_seq (the cursor) is
 			// stamped server-side; completion still comes from the threshold logic,
 			// never the timestamp alone.
-			client := parseClientEventTime(*item.UpdatedAt)
+			client, parseErr := parseClientEventTime(*item.UpdatedAt)
+			if parseErr != nil {
+				result.Status = "error"
+				result.Error = "updated_at must be RFC3339"
+				results = append(results, result)
+				continue
+			}
 			now := time.Now()
 			eventAt := clampEventAt(client, now)
 			if !client.IsZero() && client.After(now.Add(progressClockSkew)) {

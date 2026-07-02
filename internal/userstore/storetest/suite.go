@@ -932,38 +932,55 @@ func testProgressSince(t *testing.T, newStore func(t *testing.T) userstore.UserS
 // progress. Before the fix, online writes updated updated_at but left event_at
 // frozen at the row's first write, letting almost any offline event win.
 func testOnlineWriteAdvancesEventAt(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
-	ctx := context.Background()
-	store := newStore(t)
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
-		t.Fatalf("CreateProfile: %v", err)
-	}
 	noThreshold := userstore.ProgressThresholds{}
-	base := time.Now().UTC().Add(-time.Hour)
+	// SetProgress and UpdateProgress share the online-write contract: both must
+	// stamp event_at = now, so both are pinned here.
+	onlineWrites := []struct {
+		name  string
+		write func(ctx context.Context, store userstore.UserStore) error
+	}{
+		{"SetProgress", func(ctx context.Context, store userstore.UserStore) error {
+			return store.SetProgress(ctx, "p1", "m1", 500, 1000, noThreshold)
+		}},
+		{"UpdateProgress", func(ctx context.Context, store userstore.UserStore) error {
+			return store.UpdateProgress(ctx, "p1", "m1", 500, 1000, noThreshold)
+		}},
+	}
+	for _, tc := range onlineWrites {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newStore(t)
+			if err := store.CreateProfile(ctx, userstore.Profile{ID: "p1", Name: "Test"}); err != nil {
+				t.Fatalf("CreateProfile: %v", err)
+			}
+			base := time.Now().UTC().Add(-time.Hour)
 
-	// An offline event seeds the row with an old event_at.
-	if _, err := store.SetProgressIfNewer(ctx, "p1", "m1", 100, 1000, false, base); err != nil {
-		t.Fatalf("seed offline write: %v", err)
-	}
-	// A live online write (no client time) must stamp event_at = now, overtaking
-	// the seed's event_at.
-	if err := store.SetProgress(ctx, "p1", "m1", 500, 1000, noThreshold); err != nil {
-		t.Fatalf("online SetProgress: %v", err)
-	}
-	// A replayed offline event whose client time is newer than the seed but older
-	// than the online write must NOT win.
-	wrote, err := store.SetProgressIfNewer(ctx, "p1", "m1", 999, 1000, false, base.Add(5*time.Minute))
-	if err != nil {
-		t.Fatalf("stale offline replay: %v", err)
-	}
-	if wrote {
-		t.Fatalf("stale offline replay reported a write; online event_at should have won")
-	}
-	got, err := store.GetProgress(ctx, "p1", "m1")
-	if err != nil || got == nil {
-		t.Fatalf("GetProgress: %+v (%v)", got, err)
-	}
-	if got.PositionSeconds != 500 {
-		t.Fatalf("stale offline replay won LWW: position = %v, want 500 (online write)", got.PositionSeconds)
+			// An offline event seeds the row with an old event_at.
+			if _, err := store.SetProgressIfNewer(ctx, "p1", "m1", 100, 1000, false, base); err != nil {
+				t.Fatalf("seed offline write: %v", err)
+			}
+			// A live online write (no client time) must stamp event_at = now,
+			// overtaking the seed's event_at.
+			if err := tc.write(ctx, store); err != nil {
+				t.Fatalf("online %s: %v", tc.name, err)
+			}
+			// A replayed offline event whose client time is newer than the seed but
+			// older than the online write must NOT win.
+			wrote, err := store.SetProgressIfNewer(ctx, "p1", "m1", 999, 1000, false, base.Add(5*time.Minute))
+			if err != nil {
+				t.Fatalf("stale offline replay: %v", err)
+			}
+			if wrote {
+				t.Fatalf("stale offline replay reported a write; online event_at should have won")
+			}
+			got, err := store.GetProgress(ctx, "p1", "m1")
+			if err != nil || got == nil {
+				t.Fatalf("GetProgress: %+v (%v)", got, err)
+			}
+			if got.PositionSeconds != 500 {
+				t.Fatalf("stale offline replay won LWW: position = %v, want 500 (online write)", got.PositionSeconds)
+			}
+		})
 	}
 }
 
