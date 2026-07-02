@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"os/exec"
 	"testing"
 	"time"
 )
@@ -35,19 +36,26 @@ func TestSegmentRecoveryDecisionWaitsWhileRestarting(t *testing.T) {
 }
 
 // TestRestartInvokesRestartHook verifies that a successful Restart fires the
-// session's restart hook. The hook re-arms the throttler and the exit
-// monitor; firing it from Restart itself keeps every restart caller (web
-// segment recovery, audio switch, jellycompat seek) consistent instead of
-// each call site remembering to re-arm by hand.
+// session's restart hook. The API handler uses the hook to re-arm the
+// throttler and the exit monitor; firing it from Restart itself keeps every
+// restart caller of a hook-wired session (web segment recovery, audio
+// switch) consistent instead of each call site remembering to re-arm by
+// hand.
 func TestRestartInvokesRestartHook(t *testing.T) {
+	// `true` starts and exits cleanly, standing in for ffmpeg. Resolve it
+	// via PATH — it lives in /bin on Linux but /usr/bin on macOS.
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		t.Skipf("`true` not found in PATH: %v", err)
+	}
+
 	session := &TranscodeSession{
 		outputDir: t.TempDir(),
 		opts: TranscodeOpts{
 			TargetCodecVideo:   "h264",
 			SegmentDuration:    2,
 			StartSegmentNumber: 0,
-			// /bin/true starts and exits cleanly, standing in for ffmpeg.
-			FFmpegPath: "/bin/true",
+			FFmpegPath:         truePath,
 		},
 	}
 

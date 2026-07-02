@@ -2210,9 +2210,11 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	h.transcodes[req.SessionID] = transcodeSession
 	h.transcodeMu.Unlock()
 
-	// Re-arm the throttler and exit monitor after every restart, no matter
-	// which caller triggered it (web segment recovery, audio switch, or
-	// jellycompat seek — the compat path has no handler access at all).
+	// Re-arm the throttler and exit monitor after every Restart of this
+	// handler-created session, regardless of which code path triggers it
+	// (web segment recovery or an audio switch). Sessions created by
+	// jellycompat's own StartTranscode path live in a separate registry and
+	// never had throttler/exit-monitor wiring, so they are unaffected.
 	transcodeSession.SetRestartHook(func(ctx context.Context) {
 		h.maybeStartThrottler(ctx, transcodeSession)
 		h.monitorLocalTranscodeExit(req.SessionID, transcodeSession)
