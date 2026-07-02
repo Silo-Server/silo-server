@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -283,6 +284,10 @@ func (m *SessionManager) StartSessionWithFilesContext(
 			RequestedMethod:         method,
 		})
 		if err != nil {
+			// Fail closed, but make an engine outage distinguishable from a
+			// genuine concurrency-limit denial in the logs.
+			slog.Warn("playback admission decider error; denying session",
+				"user_id", userID, "method", method, "error", err)
 			return nil, admissionDenyError("")
 		}
 		if !decision.Allowed {
