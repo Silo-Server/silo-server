@@ -753,6 +753,11 @@ func (h *PlaybackHandler) teardownPlaySession(ctx context.Context, playSession *
 	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
 }
 
+// compatSessionSyncTimeout bounds the immediate session sync issued from
+// request paths, so a stalled database degrades to the periodic reconciler
+// tick instead of pinning request goroutines.
+const compatSessionSyncTimeout = 5 * time.Second
+
 // syncSessionsNow flushes the native-session snapshot to the shared admin
 // live-session table so compat start/stop events are visible immediately
 // instead of on the next reconciler tick.
@@ -760,6 +765,8 @@ func (h *PlaybackHandler) syncSessionsNow(ctx context.Context, reason string) {
 	if h == nil || h.SessionSyncer == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(ctx, compatSessionSyncTimeout)
+	defer cancel()
 	if err := h.SessionSyncer.SyncNow(ctx); err != nil {
 		slog.Error("jellycompat: failed to sync sessions", "reason", reason, "error", err)
 	}

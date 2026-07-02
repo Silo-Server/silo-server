@@ -273,16 +273,18 @@ func TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown(t *testing.T) {
 	}
 }
 
-// recordingSessionSyncer counts SyncNow calls and remembers the last context,
-// standing in for the reconciler's immediate-sync trigger.
+// recordingSessionSyncer counts SyncNow calls and records the context state at
+// call time, standing in for the reconciler's immediate-sync trigger.
 type recordingSessionSyncer struct {
-	calls   int
-	lastCtx context.Context
+	calls           int
+	lastCtxErr      error
+	lastHadDeadline bool
 }
 
 func (s *recordingSessionSyncer) SyncNow(ctx context.Context) error {
 	s.calls++
-	s.lastCtx = ctx
+	s.lastCtxErr = ctx.Err()
+	_, s.lastHadDeadline = ctx.Deadline()
 	return nil
 }
 
@@ -298,7 +300,10 @@ func TestHandleSessionPlayingStopped_TearsDownAndSyncsImmediately(t *testing.T) 
 	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
 
 	body := strings.NewReader(`{"PlaySessionId":"ps-1"}`)
+	// Cancel the request context up front to simulate the client dropping the
+	// connection right after firing the stop report — the sync must still run.
 	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	req := withCompatSession(httptest.NewRequest("POST", "/Sessions/Playing/Stopped", body).WithContext(ctx), "tok")
 	rec := httptest.NewRecorder()
 	h.HandleSessionPlayingStopped(rec, req)
@@ -315,11 +320,11 @@ func TestHandleSessionPlayingStopped_TearsDownAndSyncsImmediately(t *testing.T) 
 	if syncer.calls != 1 {
 		t.Fatalf("SyncNow calls = %d; want 1", syncer.calls)
 	}
-	// The sync must survive the client dropping the connection right after the
-	// stop report, so its context must be detached from request cancellation.
-	cancel()
-	if err := syncer.lastCtx.Err(); err != nil {
-		t.Fatalf("sync context canceled with request: %v", err)
+	if syncer.lastCtxErr != nil {
+		t.Fatalf("sync context canceled with request: %v", syncer.lastCtxErr)
+	}
+	if !syncer.lastHadDeadline {
+		t.Fatal("sync context must carry a deadline so a stalled DB cannot pin the request goroutine")
 	}
 }
 

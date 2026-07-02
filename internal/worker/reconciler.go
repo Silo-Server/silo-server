@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -74,6 +75,11 @@ type Reconciler struct {
 	EventBus        cache.EventBus
 	EventsHub       *evt.Hub
 	PreSync         PreSyncHook
+	// syncMu serializes SyncNow so concurrent callers (the periodic tick plus
+	// request-path start/stop triggers) cannot commit an older session snapshot
+	// after a newer one, which would resurrect stopped sessions or drop freshly
+	// started ones until a later sync repaired the table.
+	syncMu sync.Mutex
 }
 
 // NewReconciler creates a new Reconciler with sensible defaults. The default
@@ -436,11 +442,16 @@ func (r *Reconciler) tick() {
 
 // SyncNow runs one immediate session reconciliation using the current local
 // session snapshot. When nodeName is configured, an empty snapshot still
-// clears any rows previously reported by that node.
+// clears any rows previously reported by that node. Snapshot capture and
+// reconciliation happen under one lock so snapshots are applied in capture
+// order.
 func (r *Reconciler) SyncNow(ctx context.Context) error {
 	if r.sessionProvider == nil {
 		return nil
 	}
+
+	r.syncMu.Lock()
+	defer r.syncMu.Unlock()
 
 	sessions := r.sessionProvider()
 	if len(sessions) == 0 {
