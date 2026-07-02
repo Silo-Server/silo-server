@@ -1,3 +1,4 @@
+import { ArrowRight, PackageCheck, PenLine, ScrollText } from "lucide-react";
 import { useSearchParams } from "react-router";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -8,10 +9,53 @@ import { PolicyDecisionLogTable } from "./PolicyDecisionLogTable";
 import { PolicyDocumentList } from "./PolicyDocumentList";
 import { PolicyVendorViewer } from "./PolicyVendorViewer";
 
+// Tab ids are stable URL contract (?tab=); labels are presentation only.
 const POLICY_TABS = new Set(["documents", "vendor", "decisions"]);
 
 function resolveTab(value: string | null) {
   return value && POLICY_TABS.has(value) ? value : "documents";
+}
+
+const PIPELINE_STEPS = [
+  {
+    icon: PackageCheck,
+    title: "Silo decides the baseline",
+    detail: "Built-in rules ship with every release: profile restrictions, ratings, limits.",
+  },
+  {
+    icon: PenLine,
+    title: "Your overrides narrow it",
+    detail: "Custom rules can tighten the baseline — never grant more than it allows.",
+  },
+  {
+    icon: ScrollText,
+    title: "Every decision is logged",
+    detail: "Denials are always recorded; allowed requests are sampled.",
+  },
+] as const;
+
+function PolicyPipelineStrip() {
+  return (
+    <div className="surface-panel-subtle rounded-2xl p-4">
+      <ol className="grid gap-4 md:grid-cols-3">
+        {PIPELINE_STEPS.map((step, index) => (
+          <li key={step.title} className="relative flex items-start gap-3">
+            <step.icon aria-hidden className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{step.title}</p>
+              <p className="text-muted-foreground mt-0.5 text-xs leading-relaxed">{step.detail}</p>
+            </div>
+            {index < PIPELINE_STEPS.length - 1 && (
+              <ArrowRight
+                aria-hidden
+                className="text-muted-foreground/50 absolute top-1 -right-3 hidden size-4 md:block"
+              />
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
 }
 
 export default function AdminPolicyLayout() {
@@ -42,8 +86,7 @@ export default function AdminPolicyLayout() {
         <div className="space-y-3">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Policy</h1>
           <p className="page-subtitle text-sm sm:text-base">
-            Author custom narrowing policies, inspect vendor Rego, simulate decisions, and audit
-            policy outcomes.
+            Household access rules: what Silo allows by default, and where you tighten it.
           </p>
         </div>
       </div>
@@ -62,23 +105,27 @@ export default function AdminPolicyLayout() {
       )}
 
       {capability.data && !unavailable && (
-        <Tabs value={tab} onValueChange={setTab}>
-          <TabsList>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
-            <TabsTrigger value="vendor">Vendor</TabsTrigger>
-            <TabsTrigger value="decisions">Decision Log</TabsTrigger>
-          </TabsList>
+        <>
+          <PolicyPipelineStrip />
 
-          <TabsContent value="documents" className="space-y-5">
-            <PolicyDocumentList domains={capability.data.decision_types} />
-          </TabsContent>
-          <TabsContent value="vendor" className="space-y-5">
-            <PolicyVendorViewer />
-          </TabsContent>
-          <TabsContent value="decisions" className="space-y-5">
-            <PolicyDecisionLogTable domains={capability.data.decision_types} />
-          </TabsContent>
-        </Tabs>
+          <Tabs value={tab} onValueChange={setTab}>
+            <TabsList>
+              <TabsTrigger value="documents">Overrides</TabsTrigger>
+              <TabsTrigger value="vendor">Baseline</TabsTrigger>
+              <TabsTrigger value="decisions">Decision Log</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="documents" className="space-y-5">
+              <PolicyDocumentList domains={capability.data.decision_types} />
+            </TabsContent>
+            <TabsContent value="vendor" className="space-y-5">
+              <PolicyVendorViewer />
+            </TabsContent>
+            <TabsContent value="decisions" className="space-y-5">
+              <PolicyDecisionLogTable domains={capability.data.decision_types} />
+            </TabsContent>
+          </Tabs>
+        </>
       )}
     </div>
   );

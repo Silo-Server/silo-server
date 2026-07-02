@@ -110,11 +110,13 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                     v{version.version_number}
                     {isActive && (
                       <Badge variant="secondary" className="ml-2">
-                        Active
+                        Live
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell>{version.created_by_user_id ?? "—"}</TableCell>
+                  <TableCell>
+                    {version.created_by_user_id ? `User ${version.created_by_user_id}` : "—"}
+                  </TableCell>
                   <TableCell>{formatPolicyDate(version.created_at)}</TableCell>
                   <TableCell className="max-w-[260px] truncate">
                     {version.comment?.trim() || "—"}
@@ -136,7 +138,7 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                       }}
                     >
                       <RotateCcw className="size-4" />
-                      Rollback
+                      Make live
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -159,10 +161,12 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Activate policy version?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Make v{rollbackVersion?.version_number} the live policy?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This rollback is the go-live moment for v{rollbackVersion?.version_number}. New
-              decisions will use this version after the policy generation reloads.
+              New requests start using it immediately, on every server node. The version it replaces
+              stays in this history.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

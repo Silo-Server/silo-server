@@ -24,7 +24,9 @@ describe("PolicySimulatePanel", () => {
         return jsonResponse({
           decision: {
             schema_version: 1,
+            unrestricted: false,
             allowed_library_ids: [1, 2],
+            max_content_rating: "PG",
           },
           eval_time_ns: 14200,
           generation: 8,
@@ -47,6 +49,6 @@ describe("PolicySimulatePanel", () => {
 
     expect(await screen.findByText(/14.2 µs/)).toBeInTheDocument();
     expect(screen.getAllByText(/allowed_library_ids/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Generation: 8/)).toBeInTheDocument();
+    expect(screen.getByText(/rating ≤ PG/)).toBeInTheDocument();
   });
 });

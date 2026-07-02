@@ -1,10 +1,9 @@
-import { CheckCircle2, Save, ShieldCheck } from "lucide-react";
+import { Check, CheckCircle2, Play, Save, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import type {
   PolicyCompileIssue,
-  PolicyCreateVersionResult,
   PolicyDocument,
   PolicyValidateResult,
   PolicyVersion,
@@ -21,7 +20,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,16 +30,12 @@ import {
   usePolicyVersions,
   useValidatePolicy,
 } from "@/hooks/queries/admin/policy";
+import { cn } from "@/lib/utils";
 
 import { PolicySimulatePanel } from "./PolicySimulatePanel";
 import { PolicyVersionHistory } from "./PolicyVersionHistory";
-import {
-  compileIssuesFromError,
-  defaultPolicySource,
-  formatPolicyDate,
-  formatPolicyDomain,
-  messageFromError,
-} from "./policyPageUtils";
+import { compileIssuesFromError, defaultPolicySource, messageFromError } from "./policyPageUtils";
+import { PolicyStatusPill, policyDocumentStatus, policyDomainMeta } from "./policyPresentation";
 
 interface PolicyEditorPanelProps {
   documentId?: number;
@@ -52,6 +46,8 @@ interface PolicyEditorStateProps {
   document: PolicyDocument;
   domains: readonly string[];
   initialSource: string;
+  seedIsActive: boolean;
+  seedVersion?: PolicyVersion;
   versions: readonly PolicyVersionSummary[];
 }
 
@@ -65,14 +61,62 @@ interface ActivationTarget {
   version_number: number;
 }
 
+type LifecycleStep = "validate" | "save" | "activate" | "live";
+
+const LIFECYCLE_LABELS = ["Draft", "Validated", "Saved", "Live"] as const;
+
+function lifecycleProgress(step: LifecycleStep) {
+  // Index of the first label that is NOT yet reached.
+  switch (step) {
+    case "validate":
+      return 1;
+    case "save":
+      return 2;
+    case "activate":
+      return 3;
+    case "live":
+      return 4;
+  }
+}
+
+function LifecycleRail({ step, liveVersion }: { step: LifecycleStep; liveVersion?: number }) {
+  const reached = lifecycleProgress(step);
+  return (
+    <ol aria-label="Policy lifecycle" className="flex flex-wrap items-center gap-1.5">
+      {LIFECYCLE_LABELS.map((label, index) => {
+        const done = index < reached;
+        const current = index === reached;
+        return (
+          <li key={label} className="flex items-center gap-1.5">
+            {index > 0 && (
+              <span
+                aria-hidden
+                className={cn("h-px w-4", done ? "bg-emerald-400/60" : "bg-border")}
+              />
+            )}
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+                done && "bg-emerald-500/10 text-emerald-300",
+                current && "bg-secondary text-foreground",
+                !done && !current && "text-muted-foreground",
+              )}
+            >
+              {done && <Check aria-hidden className="size-3" />}
+              {label === "Live" && liveVersion !== undefined && step === "live"
+                ? `Live · v${liveVersion}`
+                : label}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function activationTargetFromVersion(version: PolicyVersionSummary | undefined) {
   if (!version || !version.compiled_ok) return undefined;
   return { id: version.id, version_number: version.version_number };
-}
-
-function activationTargetFromCreate(result: PolicyCreateVersionResult) {
-  if (!result.compiled_ok) return undefined;
-  return { id: result.id, version_number: result.version_number };
 }
 
 function issueKey(issue: PolicyCompileIssue, index: number) {
@@ -105,7 +149,7 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
   if (!documentId) {
     return (
       <div className="surface-panel-subtle text-muted-foreground rounded-2xl p-6 text-sm">
-        Select a policy document to edit its custom Rego source.
+        Select an override to edit its Rego source.
       </div>
     );
   }
@@ -123,6 +167,7 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
   }
 
   const initialSource = seedVersion?.source ?? defaultPolicySource(document.domain);
+  const seedIsActive = seedVersion !== undefined && seedVersion.id === document.active_version_id;
 
   return (
     <PolicyEditorState
@@ -130,28 +175,53 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
       document={document}
       domains={domains}
       initialSource={initialSource}
+      seedIsActive={seedIsActive}
+      seedVersion={seedVersion}
       versions={versionsQuery.data ?? []}
     />
   );
 }
 
-function PolicyEditorState({ document, domains, initialSource, versions }: PolicyEditorStateProps) {
+function PolicyEditorState({
+  document,
+  domains,
+  initialSource,
+  seedIsActive,
+  seedVersion,
+  versions,
+}: PolicyEditorStateProps) {
   const [draft, setDraft] = useState(initialSource);
   const [comment, setComment] = useState("");
   const [issues, setIssues] = useState<PolicyCompileIssue[]>([]);
   const [validation, setValidation] = useState<ValidationState | null>(null);
   const [message, setMessage] = useState("");
-  const [savedVersion, setSavedVersion] = useState<ActivationTarget | undefined>(undefined);
+  const [saved, setSaved] = useState<{ source: string; target: ActivationTarget } | undefined>();
   const [confirmActivate, setConfirmActivate] = useState(false);
   const validatePolicy = useValidatePolicy();
   const createVersion = useCreatePolicyVersion();
   const activateVersion = useActivatePolicyVersion();
-  const latestInactiveVersion = versions.find(
-    (version) => version.id !== document.active_version_id && version.compiled_ok,
-  );
-  const activateTarget = savedVersion ?? activationTargetFromVersion(latestInactiveVersion);
-  const validationMatchesDraft = validation?.source === draft;
-  const canSave = validationMatchesDraft && validation.result.compiled_ok;
+
+  const meta = policyDomainMeta(document.domain);
+  const validated = validation?.source === draft && validation.result.compiled_ok;
+
+  // An unedited seed from a compiled-but-inactive version is already "saved":
+  // the remaining step is activation (e.g. after a page reload mid-flow).
+  const seedSummary = versions.find((version) => version.id === seedVersion?.id);
+  const savedTarget =
+    saved?.source === draft
+      ? saved.target
+      : !seedIsActive && draft === initialSource
+        ? activationTargetFromVersion(seedSummary)
+        : undefined;
+
+  const liveInSync = seedIsActive && draft === initialSource && !saved;
+  const step: LifecycleStep = liveInSync
+    ? "live"
+    : savedTarget
+      ? "activate"
+      : validated
+        ? "save"
+        : "validate";
 
   async function validateDraft() {
     setMessage("");
@@ -163,7 +233,7 @@ function PolicyEditorState({ document, domains, initialSource, versions }: Polic
       });
       setValidation({ source: draft, result });
       setIssues(result.errors);
-      setMessage(result.compiled_ok ? "Validation passed." : "Validation failed.");
+      setMessage(result.compiled_ok ? "Validation passed — the draft compiles." : "");
     } catch (error) {
       const nextIssues = compileIssuesFromError(error);
       setIssues(nextIssues);
@@ -171,124 +241,134 @@ function PolicyEditorState({ document, domains, initialSource, versions }: Polic
         source: draft,
         result: { compiled_ok: false, errors: nextIssues },
       });
-      setMessage(
-        nextIssues.length > 0
-          ? "Validation failed."
-          : messageFromError(error, "Validation failed."),
-      );
+      setMessage(nextIssues.length > 0 ? "" : messageFromError(error, "Validation failed."));
     }
   }
 
   async function saveVersion() {
     setMessage("");
-    if (!canSave) {
-      setMessage("Validate the current draft successfully before saving a new version.");
-      return;
-    }
-
     try {
       const result = await createVersion.mutateAsync({
         documentId: document.id,
         source: draft,
         comment,
       });
-      const target = activationTargetFromCreate(result);
-      setSavedVersion(target);
+      if (result.compiled_ok) {
+        setSaved({
+          source: draft,
+          target: { id: result.id, version_number: result.version_number },
+        });
+      }
       setComment("");
-      toast.success(`Saved policy version v${result.version_number}`);
+      toast.success(`Saved v${result.version_number}`);
     } catch (error) {
       const nextIssues = compileIssuesFromError(error);
       setIssues(nextIssues);
       setMessage(
         nextIssues.length > 0
-          ? "Server rejected the policy compile."
+          ? "The server rejected this draft — fix the issues below."
           : messageFromError(error, "Failed to save policy version."),
       );
     }
   }
 
-  async function activateTargetVersion() {
-    if (!activateTarget) return;
-
+  async function activateSavedVersion() {
+    if (!savedTarget) return;
     try {
-      await activateVersion.mutateAsync({ documentId: document.id, version: activateTarget.id });
+      await activateVersion.mutateAsync({ documentId: document.id, version: savedTarget.id });
       setConfirmActivate(false);
-      setSavedVersion(undefined);
-      toast.success(`Activated policy version v${activateTarget.version_number}`);
+      setSaved(undefined);
+      toast.success(`v${savedTarget.version_number} is now live`);
     } catch (error) {
       toast.error(messageFromError(error, "Failed to activate policy version"));
     }
   }
+
+  const primaryAction = (() => {
+    switch (step) {
+      case "validate":
+        return (
+          <Button type="button" onClick={validateDraft} disabled={validatePolicy.isPending}>
+            <CheckCircle2 className="size-4" />
+            {validatePolicy.isPending ? "Validating..." : "Validate draft"}
+          </Button>
+        );
+      case "save":
+        return (
+          <Button type="button" onClick={saveVersion} disabled={createVersion.isPending}>
+            <Save className="size-4" />
+            {createVersion.isPending ? "Saving..." : "Save as version"}
+          </Button>
+        );
+      case "activate":
+        return (
+          <Button type="button" onClick={() => setConfirmActivate(true)}>
+            <ShieldCheck className="size-4" />
+            Activate v{savedTarget?.version_number}
+          </Button>
+        );
+      case "live":
+        return null;
+    }
+  })();
 
   return (
     <div className="space-y-5">
       <div className="surface-panel rounded-2xl border-0 p-4">
         <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
           <div className="min-w-0 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-xl font-semibold tracking-tight">{document.name}</h2>
-              <Badge variant="outline">{formatPolicyDomain(document.domain)}</Badge>
-              {document.enabled ? (
-                <Badge variant="secondary">Enabled</Badge>
-              ) : (
-                <Badge variant="outline">Disabled</Badge>
-              )}
-              {document.active_version_id && (
-                <Badge variant="secondary">Active ID {document.active_version_id}</Badge>
-              )}
+              <span className="text-muted-foreground text-sm">{meta.title}</span>
+              <PolicyStatusPill
+                status={policyDocumentStatus(document)}
+                versionNumber={document.active_version?.version_number}
+              />
             </div>
-            <p className="text-muted-foreground text-sm">
-              Last updated {formatPolicyDate(document.updated_at)}
-            </p>
+            <LifecycleRail step={step} liveVersion={document.active_version?.version_number} />
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={validateDraft}
-              disabled={validatePolicy.isPending}
-            >
-              <CheckCircle2 className="size-4" />
-              {validatePolicy.isPending ? "Validating..." : "Validate"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={saveVersion}
-              disabled={createVersion.isPending}
-            >
-              <Save className="size-4" />
-              {createVersion.isPending ? "Saving..." : "Save as new version"}
-            </Button>
-            <Button
-              type="button"
-              onClick={() => setConfirmActivate(true)}
-              disabled={!activateTarget || activateVersion.isPending}
-            >
-              <ShieldCheck className="size-4" />
-              {activateTarget ? `Activate v${activateTarget.version_number}` : "Activate"}
-            </Button>
+          <div className="flex shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+            {step !== "validate" && step !== "live" && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={validateDraft}
+                disabled={validatePolicy.isPending}
+              >
+                Re-validate
+              </Button>
+            )}
+            {primaryAction}
           </div>
         </div>
 
-        <div className="mt-4">
-          <Input
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            placeholder="Optional version comment"
-            aria-label="Policy version comment"
-          />
-        </div>
+        {step === "live" && (
+          <p className="text-muted-foreground mt-3 text-sm">
+            This source is what the live policy runs today. Edit it to start a new draft — nothing
+            changes until you activate the result.
+          </p>
+        )}
+        {!document.enabled && (
+          <p className="text-warning mt-3 text-sm">
+            This override is disabled: the Silo baseline applies unchanged until it is re-enabled
+            from the overrides list.
+          </p>
+        )}
+
+        {step === "save" && (
+          <div className="mt-4 max-w-lg">
+            <Input
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+              placeholder="What changed? (optional, shown in history)"
+              aria-label="Policy version comment"
+            />
+          </div>
+        )}
 
         {message && (
-          <div
-            className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
-              validationMatchesDraft && validation?.result.compiled_ok
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                : "border-warning/40 bg-warning/10 text-warning"
-            }`}
-          >
+          <div className="mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
             {message}
           </div>
         )}
@@ -321,16 +401,19 @@ function PolicyEditorState({ document, domains, initialSource, versions }: Polic
       <AlertDialog open={confirmActivate} onOpenChange={setConfirmActivate}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Activate policy version?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Make v{savedTarget?.version_number} the live policy?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This is the go-live moment for v{activateTarget?.version_number}. New decisions will
-              use this version after the policy generation reloads.
+              New requests start using it immediately, on every server node. You can roll back to
+              any earlier version from the history below.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={activateTargetVersion} disabled={activateVersion.isPending}>
-              Activate
+            <AlertDialogAction onClick={activateSavedVersion} disabled={activateVersion.isPending}>
+              <Play className="size-4" />
+              Go live
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

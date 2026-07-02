@@ -86,6 +86,13 @@ describe("PolicyEditorPanel", () => {
       );
     });
 
+    // The unedited live source shows no actions; editing starts a new draft
+    // and surfaces the Validate step.
+    expect(screen.queryByRole("button", { name: /validate/i })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Rego policy source"), {
+      target: { value: "package silo_custom.scope\n\nbad if {\n  y\n}\n" },
+    });
+
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: /validate/i }));
       await Promise.resolve();

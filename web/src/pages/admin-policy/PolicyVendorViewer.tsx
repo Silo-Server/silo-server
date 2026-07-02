@@ -26,6 +26,11 @@ export function PolicyVendorViewer() {
 
   return (
     <div className="space-y-5">
+      <p className="text-muted-foreground max-w-prose text-sm">
+        The baseline rules that ship with each Silo release — read-only. Your overrides receive the
+        baseline decision and can only narrow it; upgrading Silo updates these modules without
+        touching your overrides.
+      </p>
       {modules.map((module) => (
         <section key={module.path} className="space-y-2">
           <div className="flex items-center justify-between gap-3">
