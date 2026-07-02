@@ -2495,10 +2495,15 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 		)`
 	}
 
+	// Manga chapters carry their series' match state; the chapter rows
+	// themselves stay 'pending' and are resolved through the manga series,
+	// so they must not surface as actionable unmatched items here.
+	mangaChapterGuard := ` AND ` + catalog.MangaChapterExclusionWhere("mi")
+
 	countSQL := `
 		SELECT COUNT(*)
 		FROM media_items mi
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')`
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + mangaChapterGuard
 	countSQL += filter
 
 	var total int
@@ -2521,10 +2526,10 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 			WHERE mil.content_id = mi.content_id
 			LIMIT 1
 		) lib ON true
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s%s
 		ORDER BY mi.title ASC, mi.content_id ASC
 		LIMIT $%d OFFSET $%d
-	`, filter, len(filterArgs)+1, len(filterArgs)+2)
+	`, mangaChapterGuard, filter, len(filterArgs)+1, len(filterArgs)+2)
 
 	rows, err := h.pool.Query(r.Context(), listSQL, listArgs...)
 	if err != nil {
