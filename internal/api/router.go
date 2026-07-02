@@ -317,6 +317,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var authMiddleware *apimw.AuthMiddleware
 	var viewerAccessMiddleware *apimw.ViewerAccessMiddleware
 	var metadataCurationAccess func(http.Handler) http.Handler
+	var markerEditAccess func(http.Handler) http.Handler
 	var viewerResolver apimw.ViewerResolver
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
@@ -382,6 +383,22 @@ func NewRouter(deps Dependencies) chi.Router {
 					checkPrimaryProfile,
 				).RequireMetadataCurationForItem
 			}
+		}
+		if deps.PolicySystem != nil {
+			markerEditAccess = apimw.NewPolicyPermissionMiddleware(
+				userRepo,
+				nil, // marker gate does not resolve target libraries
+				checkPrimaryProfile,
+				permissionPDP,
+				accessGroupStore,
+			).RequireMarkerEdit
+		} else {
+			// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+			markerEditAccess = apimw.NewPermissionMiddleware(
+				userRepo,
+				nil,
+				checkPrimaryProfile,
+			).RequireMarkerEdit
 		}
 	}
 	if deps.SessionMgr != nil && userRepo != nil {
@@ -1002,7 +1019,6 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 		markersHandler.BaseContext = deps.AppContext
 		markersHandler.AuditHistory = deps.FileRepo
-		markersHandler.Users = userRepo
 		if itemRepo != nil {
 			markersHandler.Authorizer = &handlers.MediaFileAuthorizer{
 				FileResolver:  deps.FileRepo,
@@ -1759,18 +1775,22 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				// Marker read/write/clear for any authenticated viewer: users
-				// fix and create intro/recap/credits/preview markers from the
+				// Marker reads for any authenticated viewer; writes require the
+				// marker_edit permission, decided by the policy PDP. Users fix
+				// and create intro/recap/credits/preview markers from the
 				// player. Writes are stamped source="manual" and contributed to
 				// enabled providers in the background. Contribution + provider
 				// config stay admin-only (see the /admin group below).
-				if markersHandler != nil {
+				if markersHandler != nil && markerEditAccess != nil {
 					r.Route("/markers", func(r chi.Router) {
 						r.Get("/items/{id}", markersHandler.HandleGetItemMarkers)
-						r.Put("/items/{id}", markersHandler.HandleSetItemMarkers)
 						r.Get("/files/{fileId}", markersHandler.HandleGetFileMarkers)
-						r.Put("/files/{fileId}", markersHandler.HandleSetFileMarkers)
-						r.Delete("/files/{fileId}/{segment}", markersHandler.HandleClearFileSegment)
+						r.Group(func(r chi.Router) {
+							r.Use(markerEditAccess)
+							r.Put("/items/{id}", markersHandler.HandleSetItemMarkers)
+							r.Put("/files/{fileId}", markersHandler.HandleSetFileMarkers)
+							r.Delete("/files/{fileId}/{segment}", markersHandler.HandleClearFileSegment)
+						})
 					})
 				}
 

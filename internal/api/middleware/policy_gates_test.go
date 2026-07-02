@@ -153,6 +153,97 @@ func TestPolicyMetadataCurationMiddlewareAppliesGroupPermissionMask(t *testing.T
 	}
 }
 
+func TestPolicyMarkerEditMiddlewareParity(t *testing.T) {
+	pdp := newMiddlewarePolicyPDP(t)
+	userErr := errors.New("user store down")
+
+	editor := &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{policy.PermissionMarkerEdit}}
+	noPermission := &models.User{ID: 7, Role: "user", Enabled: true, Permissions: nil}
+	disabledEditor := &models.User{ID: 7, Role: "user", Enabled: false, Permissions: []string{policy.PermissionMarkerEdit}}
+	enabledAdmin := &models.User{ID: 7, Role: "admin", Enabled: true, Permissions: nil}
+
+	tests := []struct {
+		name    string
+		claims  *auth.Claims
+		user    *models.User
+		userErr error
+	}{
+		{name: "missing_claims"},
+		{name: "admin", claims: adminClaims(), user: enabledAdmin},
+		{name: "user_with_permission", claims: userClaims(), user: editor},
+		{name: "user_without_permission", claims: userClaims(), user: noPermission},
+		{name: "user_disabled", claims: userClaims(), user: disabledEditor},
+		{name: "user_loader_error", claims: userClaims(), userErr: userErr},
+		{name: "user_not_found", claims: userClaims(), user: nil},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			legacy := captureMarkerEditResponse(
+				NewPermissionMiddleware(
+					fakePermissionUserLoader{user: test.user, err: test.userErr},
+					nil,
+					nil,
+				),
+				test.claims,
+			)
+			policyBacked := captureMarkerEditResponse(
+				NewPolicyPermissionMiddleware(
+					fakePermissionUserLoader{user: test.user, err: test.userErr},
+					nil,
+					nil,
+					pdp,
+				),
+				test.claims,
+			)
+			assertMiddlewareResponsesEqual(t, policyBacked, legacy)
+		})
+	}
+}
+
+func TestPolicyMarkerEditMiddlewareAppliesGroupPermissionMask(t *testing.T) {
+	user := &models.User{
+		ID:          7,
+		Role:        "user",
+		Enabled:     true,
+		Permissions: []string{policy.PermissionMarkerEdit},
+	}
+	rec := captureMarkerEditResponse(
+		NewPolicyPermissionMiddleware(
+			fakePermissionUserLoader{user: user},
+			nil,
+			nil,
+			newMiddlewarePolicyPDP(t),
+			middlewareGroupProvider{group: &access.GroupPolicy{
+				AllowedPermissions:       []string{policy.PermissionMetadataCuration},
+				DownloadAllowed:          true,
+				DownloadTranscodeAllowed: true,
+				RequestsAllowed:          true,
+			}},
+		),
+		userClaims(),
+	)
+	if rec.code != http.StatusForbidden {
+		t.Fatalf("status = %d body = %s, want forbidden", rec.code, rec.body)
+	}
+}
+
+func TestPolicyMarkerEditMiddlewareEvalErrorIsInternal(t *testing.T) {
+	user := &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{policy.PermissionMarkerEdit}}
+	rec := captureMarkerEditResponse(
+		NewPolicyPermissionMiddleware(
+			fakePermissionUserLoader{user: user},
+			nil,
+			nil,
+			errorPermissionDecider{},
+		),
+		userClaims(),
+	)
+	if rec.code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body %s", rec.code, http.StatusInternalServerError, rec.body)
+	}
+}
+
 func newMiddlewarePolicyPDP(t *testing.T) *policy.PDP {
 	t.Helper()
 	engine, err := policy.NewEngine(context.Background())
@@ -215,6 +306,23 @@ func captureMetadataCurationResponse(
 	ctx = context.WithValue(ctx, chi.RouteCtxKey, routeCtx)
 	rec := httptest.NewRecorder()
 	next.ServeHTTP(rec, req.WithContext(ctx))
+	return middlewareResponse{code: rec.Code, body: rec.Body.String()}
+}
+
+type markerEditGate interface {
+	RequireMarkerEdit(http.Handler) http.Handler
+}
+
+func captureMarkerEditResponse(mw markerEditGate, claims *auth.Claims) middlewareResponse {
+	next := mw.RequireMarkerEdit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPut, "/markers/files/5", nil)
+	if claims != nil {
+		req = req.WithContext(SetClaims(req.Context(), claims))
+	}
+	rec := httptest.NewRecorder()
+	next.ServeHTTP(rec, req)
 	return middlewareResponse{code: rec.Code, body: rec.Body.String()}
 }
 

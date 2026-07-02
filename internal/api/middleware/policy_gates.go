@@ -17,6 +17,7 @@ const (
 	policyInternalErrorCode            = "internal_error"
 	activeProfileVerificationFailedMsg = "Failed to verify active profile"
 	metadataCurationRequiredMsg        = "Metadata curation permission required"
+	markerEditRequiredMsg              = "Marker editing permission required"
 )
 
 // PermissionDecider is the narrow policy decision interface used by route
@@ -217,6 +218,59 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 				return
 			}
 			writeForbidden(w, metadataCurationRequiredMsg)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireMarkerEdit gates manual marker writes through the policy PDP. Unlike
+// the legacy handler check, admins are not short-circuited: the decision runs
+// through the policy so group masks and custom overrides can tighten it.
+func (m *PolicyPermissionMiddleware) RequireMarkerEdit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := GetClaims(r.Context())
+		if claims == nil {
+			writeUnauthorized(w, "Authentication required")
+			return
+		}
+		if m == nil || m.users == nil || m.pdp == nil {
+			writeForbidden(w, markerEditRequiredMsg)
+			return
+		}
+
+		declaredProfileID, actingAsPrimary, err := resolveActingAdminFacts(r, claims.UserID, m.primaryChecker())
+		if err != nil {
+			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, activeProfileVerificationFailedMsg)
+			return
+		}
+		user, err := m.users.GetByID(r.Context(), claims.UserID)
+		if err != nil || user == nil || !user.Enabled {
+			writeForbidden(w, markerEditRequiredMsg)
+			return
+		}
+		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
+		if err != nil {
+			writeForbidden(w, markerEditRequiredMsg)
+			return
+		}
+
+		decision, err := m.checkPermission(r, policy.PermissionInput{
+			UserID:              user.ID,
+			Role:                user.Role,
+			UserEnabled:         user.Enabled,
+			AssignedPermissions: slices.Clone(effective.Permissions),
+			Permission:          policy.PermissionMarkerEdit,
+			DeclaredProfileID:   declaredProfileID,
+			ActingAsPrimary:     actingAsPrimary,
+		})
+		if err != nil {
+			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify marker edit permission")
+			return
+		}
+		if !decision.Allowed {
+			writeForbidden(w, markerEditRequiredMsg)
 			return
 		}
 

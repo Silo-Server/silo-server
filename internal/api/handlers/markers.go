@@ -16,7 +16,6 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -53,10 +52,6 @@ type MarkerAuditLister interface {
 	ListAllMarkerEditAudit(ctx context.Context, limit int) ([]scanner.MarkerEditAuditRow, error)
 }
 
-type MarkerPermissionUserLoader interface {
-	GetByID(ctx context.Context, id int) (*models.User, error)
-}
-
 // MarkersHandler serves the manual-marker + contribution API. The marker
 // read/write/clear routes are mounted for any authenticated viewer (users fix
 // and create markers from the player); the contribution + history routes stay
@@ -69,7 +64,6 @@ type MarkersHandler struct {
 	Contributions MarkerContributionLister
 	AuditHistory  MarkerAuditLister
 	Notifier      PlaybackMarkerUpdateNotifier
-	Users         MarkerPermissionUserLoader
 	// Authorizer enforces per-item access on file lookups so a viewer can only
 	// edit markers for content they can actually watch. When nil (tests) the
 	// handler falls back to an unchecked lookup.
@@ -282,27 +276,6 @@ func (h *MarkersHandler) loadItemPrimaryFile(w http.ResponseWriter, r *http.Requ
 	return nil, false
 }
 
-func (h *MarkersHandler) requireMarkerEdit(w http.ResponseWriter, r *http.Request) bool {
-	claims := apimw.GetClaims(r.Context())
-	if claims == nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return false
-	}
-	if claims.Role == "admin" {
-		return true
-	}
-	if h == nil || h.Users == nil {
-		writeError(w, http.StatusForbidden, "forbidden", "Marker editing permission required")
-		return false
-	}
-	user, err := h.Users.GetByID(r.Context(), claims.UserID)
-	if err != nil || user == nil || !auth.HasEffectivePermission(user, auth.PermissionMarkerEdit) {
-		writeError(w, http.StatusForbidden, "forbidden", "Marker editing permission required")
-		return false
-	}
-	return true
-}
-
 func (h *MarkersHandler) auditContext(r *http.Request) context.Context {
 	claims := apimw.GetClaims(r.Context())
 	if claims == nil {
@@ -347,9 +320,6 @@ func (h *MarkersHandler) HandleSetFileMarkers(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	if !h.requireMarkerEdit(w, r) {
-		return
-	}
 	h.setMarkersForFile(w, r, file)
 }
 
@@ -357,9 +327,6 @@ func (h *MarkersHandler) HandleSetFileMarkers(w http.ResponseWriter, r *http.Req
 func (h *MarkersHandler) HandleSetItemMarkers(w http.ResponseWriter, r *http.Request) {
 	file, ok := h.loadItemPrimaryFile(w, r)
 	if !ok {
-		return
-	}
-	if !h.requireMarkerEdit(w, r) {
 		return
 	}
 	h.setMarkersForFile(w, r, file)
@@ -433,9 +400,6 @@ func (h *MarkersHandler) HandleClearFileSegment(w http.ResponseWriter, r *http.R
 	}
 	if h.Writer == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker writing is not configured")
-		return
-	}
-	if !h.requireMarkerEdit(w, r) {
 		return
 	}
 	segment := chi.URLParam(r, "segment")

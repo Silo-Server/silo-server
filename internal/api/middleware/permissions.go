@@ -109,6 +109,33 @@ func (m *PermissionMiddleware) RequireMetadataCurationForItem(next http.Handler)
 	})
 }
 
+// RequireMarkerEdit is the legacy marker-write gate: admins pass by role,
+// everyone else needs the marker_edit permission on their account. Proxy/test
+// wiring only — production takes the PDP-backed gate.
+func (m *PermissionMiddleware) RequireMarkerEdit(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := GetClaims(r.Context())
+		if claims == nil {
+			writeUnauthorized(w, "Authentication required")
+			return
+		}
+		if claims.Role == "admin" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if m == nil || m.users == nil {
+			writeForbidden(w, "Marker editing permission required")
+			return
+		}
+		user, err := m.users.GetByID(r.Context(), claims.UserID)
+		if err != nil || user == nil || !auth.HasEffectivePermission(user, auth.PermissionMarkerEdit) {
+			writeForbidden(w, "Marker editing permission required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func metadataTargetWithinUserLibraries(allowed []int, target []int) bool {
 	if allowed == nil {
 		return true
