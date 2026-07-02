@@ -827,7 +827,10 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// causes an hls.js retry loop. Only act when the index actually changes.
 	if req.AudioStreamIndex != nil && audioSelectionChanged(playSession, req.MediaSourceID, int(*req.AudioStreamIndex)) {
 		selectedAudioStreamIndex := int(*req.AudioStreamIndex)
-		updatedPlaySession, updatedSource, updateErr := h.setSelectedAudioStream(req.PlaySessionID, req.MediaSourceID, selectedAudioStreamIndex)
+		// Key store mutations by the resolved session id: after an alias or
+		// route fallback, req.PlaySessionID is the client's own id and is not
+		// a store key.
+		updatedPlaySession, updatedSource, updateErr := h.setSelectedAudioStream(playSession.ID, req.MediaSourceID, selectedAudioStreamIndex)
 		if updateErr == nil {
 			playSession = updatedPlaySession
 			if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
@@ -835,7 +838,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			}
 			if syncErr := h.syncUpstreamAudioSelection(playSession, *updatedSource); syncErr != nil {
 				slog.Warn("jellycompat audio selection sync failed",
-					"play_session_id", req.PlaySessionID,
+					"play_session_id", playSession.ID,
 					"upstream_session_id", playSession.UpstreamSessionID,
 					"error", syncErr,
 				)
@@ -843,14 +846,14 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			restarted, restartErr := h.restartCompatTranscodeForAudioSelection(r.Context(), playSession, *updatedSource, positionSeconds)
 			if restartErr != nil {
 				slog.Warn("jellycompat audio selection restart failed",
-					"play_session_id", req.PlaySessionID,
+					"play_session_id", playSession.ID,
 					"upstream_session_id", playSession.UpstreamSessionID,
 					"error", restartErr,
 				)
 			}
 			audioRestarted = restarted
 			slog.Info("jellycompat audio selection updated",
-				"play_session_id", req.PlaySessionID,
+				"play_session_id", playSession.ID,
 				"media_source_id", updatedSource.ID,
 				"audio_stream_index", selectedAudioStreamIndex,
 				"audio_track_index", audioTrackIndex,

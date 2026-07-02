@@ -389,6 +389,38 @@ func TestEnsureUpstreamPlayback_ReviveClosesStaleTranscode(t *testing.T) {
 	}
 }
 
+// TestHandlePlaybackReport_AliasResolvedAudioSelectionApplies proves an
+// audio-track change carried by an alias-resolved report is applied: store
+// mutations must key on the resolved play session id, not the client's own
+// PlaySessionId (which is not a store key for Static direct play).
+func TestHandlePlaybackReport_AliasResolvedAudioSelectionApplies(t *testing.T) {
+	handler, mgr, _, sourceID := newReportLivenessHandler("upstream-1", true)
+	if err := handler.playbackStore.Update("play-1", func(current *PlaybackSession) error {
+		current.ClientPlaySessionID = "infuse-client-psid"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// testCompatSource pre-selects audio stream index 2; switch to index 1.
+	rec := postProgressReport(handler,
+		`{"PlaySessionId":"infuse-client-psid","MediaSourceId":"`+sourceID+`","AudioStreamIndex":1,"PositionTicks":600000000}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+
+	updated, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("expected play session in store")
+	}
+	if updated.MediaSources[0].SelectedAudioStreamIndex == nil || *updated.MediaSources[0].SelectedAudioStreamIndex != 1 {
+		t.Fatalf("SelectedAudioStreamIndex = %v, want 1 (audio change must apply to the resolved session)", updated.MediaSources[0].SelectedAudioStreamIndex)
+	}
+	if len(mgr.audioTrackCalls) != 1 {
+		t.Fatalf("upstream audio track calls = %d, want 1", len(mgr.audioTrackCalls))
+	}
+}
+
 // TestHandlePlaybackReport_DuplicateAliasFallsBackToRoute proves a client that
 // reuses one PlaySessionId across different items cannot misbind reports: the
 // ambiguous alias is skipped and the report resolves by ItemId route instead,
