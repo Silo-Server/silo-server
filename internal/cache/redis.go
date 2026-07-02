@@ -47,6 +47,7 @@ const (
 	EventUserDisabled                = "user_disabled"
 	EventUserDeleted                 = "user_deleted"
 	EventSettingsChanged             = "settings_changed"
+	EventPolicyChanged               = "policy_changed"
 	EventMarkerProviderConfigChanged = "marker_provider_config_changed"
 	EventNodePoolChanged             = "node_pool_changed"
 	EventOperationalLogAppended      = "operational_log_appended"

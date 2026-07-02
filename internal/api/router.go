@@ -51,6 +51,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
@@ -125,6 +126,7 @@ type Dependencies struct {
 	LogStreamHub                 *logstream.Hub
 	RealtimeHub                  *notifications.Hub
 	Notifications                *notifications.System // user-facing release notifications (may be nil)
+	PolicySystem                 *policy.System        // policy engine lifecycle (may be nil)
 	EventsHub                    *evt.Hub
 	ScanRegistry                 *evt.ScanRegistry
 	LibraryScanQueue             *scanqueue.Service

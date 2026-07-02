@@ -590,5 +590,12 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
 	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
 
+	// Policy
+	policyEvalTimeoutMS, err := intOr(m, "policy.eval_timeout_ms", 25)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.EvalTimeoutMS = policyEvalTimeoutMS
+
 	return cfg, nil
 }

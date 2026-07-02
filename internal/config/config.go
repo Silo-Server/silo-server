@@ -312,6 +312,11 @@ type DownloadConfig struct {
 	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
 }
 
+// PolicyConfig holds embedded policy engine settings.
+type PolicyConfig struct {
+	EvalTimeoutMS int `yaml:"-"` // per-decision evaluation timeout in milliseconds
+}
+
 // MetadataConfig holds metadata pipeline settings.
 type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
@@ -337,6 +342,7 @@ type Config struct {
 	SubtitleAI           SubtitleAIConfig           `yaml:"-"`
 	MetadataAI           MetadataAIConfig           `yaml:"-"`
 	Download             DownloadConfig             `yaml:"-"`
+	Policy               PolicyConfig               `yaml:"-"`
 	TMDBAPIKey           string                     `yaml:"-"`
 	MDBListAPIKey        string                     `yaml:"-"`
 }

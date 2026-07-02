@@ -76,6 +76,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -1373,6 +1374,23 @@ func main() {
 			slog.Info("user store initialized", "backend", "postgres")
 		}
 		defer userStoreProvider.Close()
+	}
+
+	if mode == "integrated" || mode == "api" {
+		policySystem := policy.NewSystem(
+			policy.NewPolicyStore(deps.DB),
+			deps.EventBus,
+			slog.Default(),
+			policy.WithSystemEvalTimeout(time.Duration(cfg.Policy.EvalTimeoutMS)*time.Millisecond),
+		)
+		if err := policySystem.Start(appCtx); err != nil {
+			log.Fatalf("policy system start: %v", err)
+		}
+		deps.PolicySystem = policySystem
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			policySystem.SetEvalTimeout(time.Duration(updated.Policy.EvalTimeoutMS) * time.Millisecond)
+		})
+		defer policySystem.Wait()
 	}
 
 	// User-facing release notifications. The system reads user state through
