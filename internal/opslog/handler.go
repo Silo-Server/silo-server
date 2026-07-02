@@ -50,7 +50,7 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 
 	component, _ := attrs["component"].(string)
 	if component == "" {
-		component = inferComponent(r.Message)
+		component = InferComponent(r.Message)
 	}
 	requestID, _ := attrs["request_id"].(string)
 	sessionID, _ := attrs["session_id"].(string)
@@ -163,7 +163,12 @@ func attrValue(v slog.Value) any {
 	}
 }
 
-func inferComponent(message string) string {
+// InferComponent derives a component name from a log message when no explicit
+// "component" attribute is present. It uses the text before the first ":" —
+// the same "subsystem:" prefix convention that logfilter's quiet list keys on
+// (e.g. "metadata: ...", "scanner: ..."). Shared with the file-routing log sink
+// so DB-persisted and file-persisted logs classify records identically.
+func InferComponent(message string) string {
 	if prefix, _, ok := strings.Cut(message, ":"); ok {
 		prefix = strings.TrimSpace(prefix)
 		if prefix != "" {

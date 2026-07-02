@@ -60,6 +60,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logfilter"
+	"github.com/Silo-Server/silo-server/internal/logsink"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/manga"
@@ -128,12 +129,68 @@ func resolvePluginCacheDir() string {
 	return filepath.Join(os.TempDir(), "silo-plugins")
 }
 
-func buildBaseHandler(format string, level slog.Leveler) slog.Handler {
-	opts := &slog.HandlerOptions{Level: level}
-	if strings.EqualFold(format, "json") {
-		return slog.NewJSONHandler(os.Stderr, opts)
+// buildBaseHandler constructs the process-wide base slog handler. It always
+// writes to stderr (the historical behaviour). When SILO_LOG_FILE is set it
+// additionally persists logs to rotating files via logsink, optionally split
+// per subsystem (SILO_LOG_SPLIT). The returned closer flushes/closes any file
+// writers and must be deferred by the caller.
+func buildBaseHandler(format string, level slog.Leveler) (slog.Handler, io.Closer) {
+	handler, closer, err := logsink.New(logSinkOptionsFromEnv(format, level))
+	if err != nil {
+		// Never let a logging-config problem take down the server: fall back to
+		// stderr-only and surface the failure through the standard logger.
+		log.Printf("file logging disabled: %v", err)
+		opts := &slog.HandlerOptions{Level: level}
+		if strings.EqualFold(format, "json") {
+			return slog.NewJSONHandler(os.Stderr, opts), noopLogCloser{}
+		}
+		return slog.NewTextHandler(os.Stderr, opts), noopLogCloser{}
 	}
-	return slog.NewTextHandler(os.Stderr, opts)
+	return handler, closer
+}
+
+type noopLogCloser struct{}
+
+func (noopLogCloser) Close() error { return nil }
+
+// logSinkOptionsFromEnv reads the file-logging knobs from the environment.
+// File logging is operational infrastructure that must be configurable before
+// (and independently of) the DB-backed settings, so it is env-driven like
+// SILO_NODE_NAME / SILO_PLUGIN_CACHE_DIR rather than a hot-reloadable setting.
+//
+//	SILO_LOG_FILE            combined log file path; empty disables file logging
+//	SILO_LOG_SPLIT           "1"/"true" to also write per-category files
+//	SILO_LOG_MAX_SIZE_MB     rotation size before rollover (default 50)
+//	SILO_LOG_MAX_BACKUPS     rotated files to retain (default 100)
+//	SILO_LOG_MAX_AGE_DAYS    max age of rotated files in days (default 30)
+//	SILO_LOG_COMPRESS        "0"/"false" to disable gzip of rotated files
+func logSinkOptionsFromEnv(format string, level slog.Leveler) logsink.Options {
+	rot := logsink.DefaultRotation
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("SILO_LOG_MAX_SIZE_MB"))); err == nil && v > 0 {
+		rot.MaxSizeMB = v
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("SILO_LOG_MAX_BACKUPS"))); err == nil && v >= 0 {
+		rot.MaxBackups = v
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("SILO_LOG_MAX_AGE_DAYS"))); err == nil && v >= 0 {
+		rot.MaxAgeDays = v
+	}
+	if v := strings.TrimSpace(os.Getenv("SILO_LOG_COMPRESS")); v != "" {
+		rot.Compress = !(v == "0" || strings.EqualFold(v, "false"))
+	}
+	return logsink.Options{
+		Stderr:   os.Stderr,
+		Format:   format,
+		Level:    level,
+		File:     strings.TrimSpace(os.Getenv("SILO_LOG_FILE")),
+		Split:    envIsTrue("SILO_LOG_SPLIT"),
+		Rotation: rot,
+	}
+}
+
+func envIsTrue(key string) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
 }
 
 func parseLogLevel(level string) slog.Level {
@@ -539,7 +596,12 @@ func main() {
 	// the config watcher in integrated mode.
 	logLevelVar := new(slog.LevelVar)
 	logLevelVar.Set(parseLogLevel(cfg.Server.LogLevel))
-	baseHandler := buildBaseHandler(cfg.Server.LogFormat, logLevelVar)
+	baseHandler, logCloser := buildBaseHandler(cfg.Server.LogFormat, logLevelVar)
+	defer func() {
+		if err := logCloser.Close(); err != nil {
+			log.Printf("close log files: %v", err)
+		}
+	}()
 	quietFilter := logfilter.New(baseHandler, cfg.Server.LogQuiet)
 	slog.SetDefault(slog.New(quietFilter))
 
