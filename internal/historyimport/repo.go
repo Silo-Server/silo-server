@@ -597,21 +597,21 @@ func (r *Repository) CreateRun(ctx context.Context, run Run) (*Run, error) {
 		INSERT INTO history_import_runs (
 			id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
-			fetched, matched, unmatched, progress_updated, history_created, skipped,
+			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
 			warnings, unmatched_samples, error_message
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7,
-			$8, $9, $10, $11, $12, $13,
-			$14, $15, NULLIF($16, '')
+			$8, $9, $10, $11, $12, $13, $14,
+			$15, $16, NULLIF($17, '')
 		)
 		RETURNING id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
-			fetched, matched, unmatched, progress_updated, history_created, skipped,
+			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
 			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at`,
 		run.ID, run.UserID, run.ProfileID, run.SourceType, run.ConnectionMode, run.Status,
 		run.MappingID,
-		run.Fetched, run.Matched, run.Unmatched, run.ProgressUpdated, run.HistoryCreated, run.Skipped,
+		run.Fetched, run.Matched, run.Unmatched, run.ProgressUpdated, run.HistoryCreated, run.WatchlistAdded, run.Skipped,
 		warningsJSON, unmatchedJSON, run.ErrorMessage,
 	)
 	created, err := scanRunWithMappingID(row)
@@ -667,15 +667,16 @@ func (r *Repository) CompleteRun(ctx context.Context, runID string, summary Exec
 			unmatched = $5,
 			progress_updated = $6,
 			history_created = $7,
-			skipped = $8,
-			warnings = $9,
-			unmatched_samples = $10,
+			watchlist_added = $8,
+			skipped = $9,
+			warnings = $10,
+			unmatched_samples = $11,
 			error_message = NULL,
 			completed_at = NOW(),
 			last_heartbeat_at = NOW()
 		WHERE id = $1`,
 		runID, RunStatusCompleted, summary.Fetched, summary.Matched, summary.Unmatched,
-		summary.ProgressUpdated, summary.HistoryCreated, summary.Skipped, warningsJSON, unmatchedJSON,
+		summary.ProgressUpdated, summary.HistoryCreated, summary.WatchlistAdded, summary.Skipped, warningsJSON, unmatchedJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("completing run %s: %w", runID, err)
@@ -703,17 +704,19 @@ func (r *Repository) UpdateRunProgress(ctx context.Context, runID string, summar
 			unmatched = $4,
 			progress_updated = $5,
 			history_created = $6,
-			skipped = $7,
-			warnings = $8,
-			unmatched_samples = $9,
+			watchlist_added = $7,
+			skipped = $8,
+			warnings = $9,
+			unmatched_samples = $10,
 			last_heartbeat_at = NOW()
-		WHERE id = $1 AND status = $10`,
+		WHERE id = $1 AND status = $11`,
 		runID,
 		summary.Fetched,
 		summary.Matched,
 		summary.Unmatched,
 		summary.ProgressUpdated,
 		summary.HistoryCreated,
+		summary.WatchlistAdded,
 		summary.Skipped,
 		warningsJSON,
 		unmatchedJSON,
@@ -767,15 +770,16 @@ func (r *Repository) FailRun(ctx context.Context, runID string, summary Executio
 			unmatched = $5,
 			progress_updated = $6,
 			history_created = $7,
-			skipped = $8,
-			warnings = $9,
-			unmatched_samples = $10,
-			error_message = NULLIF($11, ''),
+			watchlist_added = $8,
+			skipped = $9,
+			warnings = $10,
+			unmatched_samples = $11,
+			error_message = NULLIF($12, ''),
 			completed_at = NOW(),
 			last_heartbeat_at = NOW()
 		WHERE id = $1`,
 		runID, RunStatusFailed, summary.Fetched, summary.Matched, summary.Unmatched,
-		summary.ProgressUpdated, summary.HistoryCreated, summary.Skipped, warningsJSON, unmatchedJSON, errorMessage,
+		summary.ProgressUpdated, summary.HistoryCreated, summary.WatchlistAdded, summary.Skipped, warningsJSON, unmatchedJSON, errorMessage,
 	)
 	if err != nil {
 		return fmt.Errorf("failing run %s: %w", runID, err)
@@ -790,7 +794,7 @@ func (r *Repository) ListRunsForUser(ctx context.Context, userID, limit int) ([]
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
-			fetched, matched, unmatched, progress_updated, history_created, skipped,
+			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
 			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at
 		FROM history_import_runs
 		WHERE user_id = $1
@@ -807,7 +811,7 @@ func (r *Repository) GetRunForUser(ctx context.Context, userID int, runID string
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
-			fetched, matched, unmatched, progress_updated, history_created, skipped,
+			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
 			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at
 		FROM history_import_runs
 		WHERE id = $1 AND user_id = $2`, runID, userID)
@@ -825,7 +829,7 @@ func (r *Repository) ListActiveRunsForUser(ctx context.Context, userID int) ([]R
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			mapping_id,
-			fetched, matched, unmatched, progress_updated, history_created, skipped,
+			fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
 			warnings, unmatched_samples, COALESCE(error_message, ''), created_at, started_at, completed_at
 		FROM history_import_runs
 		WHERE user_id = $1
@@ -1101,7 +1105,7 @@ func scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	var unmatchedJSON []byte
 	if err := scanner.Scan(
 		&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.Status,
-		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.Skipped,
+		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.WatchlistAdded, &run.Skipped,
 		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt,
 	); err != nil {
 		return nil, err
@@ -1117,7 +1121,7 @@ func scanRunWithMappingID(scanner interface{ Scan(dest ...any) error }) (*Run, e
 	if err := scanner.Scan(
 		&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.Status,
 		&run.MappingID,
-		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.Skipped,
+		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.WatchlistAdded, &run.Skipped,
 		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt,
 	); err != nil {
 		return nil, err

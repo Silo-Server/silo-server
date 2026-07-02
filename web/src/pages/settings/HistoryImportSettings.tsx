@@ -840,6 +840,7 @@ function RunSummary({ run }: { run: HistoryImportRun | null }) {
         <MetricCard label="Unmatched" value={run.unmatched} accent="warning" />
         <MetricCard label="Progress" value={run.progress_updated} accent="positive" />
         <MetricCard label="History" value={run.history_created} accent="positive" />
+        <MetricCard label="Watchlist" value={run.watchlist_added} accent="positive" />
         <MetricCard label="Skipped" value={run.skipped} />
       </div>
 

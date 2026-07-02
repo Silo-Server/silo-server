@@ -17,12 +17,17 @@ const (
 	plexProduct          = "Silo"
 	plexVersion          = "1.0.0"
 	plexTVBaseURL        = "https://plex.tv"
-	plexPageSize         = 500
+	// plexDiscoverBaseURL hosts account-level metadata (the user's
+	// watchlist), which lives on plex.tv infrastructure rather than the PMS.
+	plexDiscoverBaseURL = "https://discover.provider.plex.tv"
+	plexPageSize        = 500
 )
 
 type PlexClient struct {
 	httpClient *http.Client
 	limiter    *upstreamRateLimiter
+	// discoverBaseURL is overridable for tests; empty means the real host.
+	discoverBaseURL string
 }
 
 type PlexAccount struct {
@@ -249,6 +254,41 @@ func (c *PlexClient) fetchSectionItems(ctx context.Context, baseURL, token, sect
 		var container plexMediaContainer
 		if err := c.doJSON(req, &container); err != nil {
 			return nil, fmt.Errorf("fetching Plex section items (section %s, type %d, offset %d): %w", sectionKey, mediaType, offset, err)
+		}
+		allItems = append(allItems, container.MediaContainer.Metadata...)
+		offset += len(container.MediaContainer.Metadata)
+		if offset >= container.MediaContainer.TotalSize || len(container.MediaContainer.Metadata) == 0 {
+			break
+		}
+	}
+	return allItems, nil
+}
+
+// FetchWatchlist pages through the user's account-level watchlist on the
+// Plex discover API. It authenticates with the plex.tv ACCOUNT token (from
+// the PIN/OAuth session), not a server access token: the watchlist belongs
+// to the account, not to any PMS.
+func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([]PlexItem, error) {
+	base := c.discoverBaseURL
+	if base == "" {
+		base = plexDiscoverBaseURL
+	}
+	var allItems []PlexItem
+	offset := 0
+	for {
+		query := url.Values{}
+		query.Set("includeGuids", "1")
+		query.Set("X-Plex-Container-Start", strconv.Itoa(offset))
+		query.Set("X-Plex-Container-Size", strconv.Itoa(plexPageSize))
+		reqURL := fmt.Sprintf("%s/library/sections/watchlist/all?%s", base, query.Encode())
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		c.setPlexHeaders(req, accountToken)
+		var container plexMediaContainer
+		if err := c.doJSON(req, &container); err != nil {
+			return nil, fmt.Errorf("fetching Plex watchlist (offset %d): %w", offset, err)
 		}
 		allItems = append(allItems, container.MediaContainer.Metadata...)
 		offset += len(container.MediaContainer.Metadata)

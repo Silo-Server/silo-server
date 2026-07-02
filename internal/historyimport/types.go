@@ -145,6 +145,7 @@ type Run struct {
 	Unmatched        int               `json:"unmatched"`
 	ProgressUpdated  int               `json:"progress_updated"`
 	HistoryCreated   int               `json:"history_created"`
+	WatchlistAdded   int               `json:"watchlist_added"`
 	Skipped          int               `json:"skipped"`
 	Warnings         []string          `json:"warnings"`
 	UnmatchedSamples []UnmatchedSample `json:"unmatched_samples"`
@@ -181,7 +182,11 @@ type Record struct {
 	LastPlayedAt    *time.Time
 	PositionSeconds float64
 	DurationSeconds float64
-	UpdatedAt       time.Time
+	// Watchlisted marks an entry from the source account's watchlist: the
+	// matched item is added to the importing profile's watchlist instead of
+	// receiving watch state.
+	Watchlisted bool
+	UpdatedAt   time.Time
 }
 
 type Match struct {
@@ -239,6 +244,7 @@ type ExecutionSummary struct {
 	Unmatched             int
 	ProgressUpdated       int
 	HistoryCreated        int
+	WatchlistAdded        int
 	Skipped               int
 	Warnings              []string
 	UnmatchedSamples      []UnmatchedSample
@@ -252,6 +258,10 @@ type localProgressRow struct {
 type plexAuth struct {
 	BaseURL string
 	Token   string
+	// AccountToken is the plex.tv account token (PIN/OAuth session token or
+	// the user-supplied token), used for account-level fetches such as the
+	// watchlist. May equal Token for manual-token imports.
+	AccountToken string
 }
 
 // --- Admin types ---

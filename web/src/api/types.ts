@@ -421,6 +421,7 @@ export interface HistoryImportRun {
   unmatched: number;
   progress_updated: number;
   history_created: number;
+  watchlist_added: number;
   skipped: number;
   warnings: string[];
   unmatched_samples: HistoryImportUnmatchedSample[];
