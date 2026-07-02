@@ -18,6 +18,11 @@ func TestUserRepositoryUpdateAccessGroupIDDB(t *testing.T) {
 	userID := insertAuthAccessGroupTestUser(t, ctx, pool, suffix)
 	users := NewUserRepository(pool)
 
+	before, err := users.GetByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetByID() before update error: %v", err)
+	}
+
 	if err := users.Update(ctx, userID, models.UpdateUserInput{
 		AccessGroupIDSet: true,
 		AccessGroupID:    &groupID,
@@ -31,6 +36,26 @@ func TestUserRepositoryUpdateAccessGroupIDDB(t *testing.T) {
 	if user.AccessGroupID == nil || *user.AccessGroupID != groupID {
 		t.Fatalf("AccessGroupID = %#v, want %d", user.AccessGroupID, groupID)
 	}
+	if user.AccessPolicyRevision != before.AccessPolicyRevision+1 {
+		t.Fatalf("AccessPolicyRevision = %d after group change, want %d",
+			user.AccessPolicyRevision, before.AccessPolicyRevision+1)
+	}
+
+	// Re-asserting the same group is a no-op for the policy revision.
+	if err := users.Update(ctx, userID, models.UpdateUserInput{
+		AccessGroupIDSet: true,
+		AccessGroupID:    &groupID,
+	}); err != nil {
+		t.Fatalf("Update(same access_group_id) error: %v", err)
+	}
+	unchanged, err := users.GetByID(ctx, userID)
+	if err != nil {
+		t.Fatalf("GetByID() after same-group update error: %v", err)
+	}
+	if unchanged.AccessPolicyRevision != user.AccessPolicyRevision {
+		t.Fatalf("AccessPolicyRevision = %d after same-group update, want unchanged %d",
+			unchanged.AccessPolicyRevision, user.AccessPolicyRevision)
+	}
 
 	if err := users.Update(ctx, userID, models.UpdateUserInput{AccessGroupIDSet: true}); err != nil {
 		t.Fatalf("Update(access_group_id null) error: %v", err)
@@ -41,6 +66,10 @@ func TestUserRepositoryUpdateAccessGroupIDDB(t *testing.T) {
 	}
 	if user.AccessGroupID != nil {
 		t.Fatalf("AccessGroupID = %#v, want nil", user.AccessGroupID)
+	}
+	if user.AccessPolicyRevision != unchanged.AccessPolicyRevision+1 {
+		t.Fatalf("AccessPolicyRevision = %d after ungrouping, want %d",
+			user.AccessPolicyRevision, unchanged.AccessPolicyRevision+1)
 	}
 }
 
@@ -61,6 +90,16 @@ func TestUserRepositoryCreateAssignsDefaultAccessGroupDB(t *testing.T) {
 	}
 	if created.AccessGroupID == nil || *created.AccessGroupID != defaultID {
 		t.Fatalf("AccessGroupID = %#v, want default group %d", created.AccessGroupID, defaultID)
+	}
+
+	adminInput := createAuthAccessGroupUserInput(suffix, "admin", nil)
+	adminInput.Role = "admin"
+	created, err = users.Create(ctx, adminInput)
+	if err != nil {
+		t.Fatalf("Create(admin) error: %v", err)
+	}
+	if created.AccessGroupID != nil {
+		t.Fatalf("AccessGroupID = %#v for admin, want nil (admins stay ungrouped)", created.AccessGroupID)
 	}
 
 	explicitID := insertAuthAccessGroupTestGroupWithLabel(t, ctx, pool, suffix, "explicit")

@@ -857,7 +857,8 @@ func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 		input.Role != nil ||
 		input.Enabled != nil ||
 		input.Permissions != nil ||
-		input.MaxPlaybackQuality != nil
+		input.MaxPlaybackQuality != nil ||
+		input.AccessGroupIDSet
 }
 
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
@@ -880,7 +881,17 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 		access.NormalizePlaybackQuality(*input.MaxPlaybackQuality) != access.NormalizePlaybackQuality(current.MaxPlaybackQuality) {
 		return true
 	}
+	if input.AccessGroupIDSet && !accessGroupIDEqual(input.AccessGroupID, current.AccessGroupID) {
+		return true
+	}
 	return false
+}
+
+func accessGroupIDEqual(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {

@@ -189,7 +189,10 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 	for i := range args {
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
-	if input.AccessGroupID == nil {
+	// Admins stay ungrouped: scope/action decisions are role-blind, so the
+	// default group's ceilings would cap the server owner (mirrors the
+	// exclusion in the assign_default_group_to_existing_users migration).
+	if input.AccessGroupID == nil && input.Role != "admin" {
 		cols = append(cols, "access_group_id")
 		placeholders = append(placeholders, "(SELECT id FROM access_groups WHERE is_default)")
 	}
@@ -325,6 +328,7 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	}
 	if input.AccessGroupIDSet {
 		setClauses = append(setClauses, fmt.Sprintf("access_group_id = $%d", argIndex))
+		accessPolicyPredicates = append(accessPolicyPredicates, fmt.Sprintf("access_group_id IS DISTINCT FROM $%d", argIndex))
 		args = append(args, input.AccessGroupID)
 		argIndex++
 	}
