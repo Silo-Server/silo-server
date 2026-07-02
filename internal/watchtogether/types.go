@@ -74,6 +74,16 @@ type Room struct {
 	ClosedAt              *time.Time
 }
 
+// MemberSummary describes one connected room member in a snapshot.
+type MemberSummary struct {
+	UserID      int    `json:"user_id"`
+	ProfileID   string `json:"profile_id"`
+	DisplayName string `json:"display_name"`
+	IsHost      bool   `json:"is_host"`
+	IsSelf      bool   `json:"is_self"`
+	Connected   bool   `json:"connected"`
+}
+
 type Snapshot struct {
 	RoomID                  string             `json:"room_id"`
 	Phase                   RoomPhase          `json:"phase"`
@@ -97,6 +107,7 @@ type Snapshot struct {
 	SelfIgnoreWait          bool               `json:"self_ignore_wait"`
 	AttachedSessionID       string             `json:"attached_session_id,omitempty"`
 	InvitePath              string             `json:"invite_path,omitempty"`
+	Members                 []MemberSummary    `json:"members,omitempty"`
 }
 
 type RoomJoinResult struct {

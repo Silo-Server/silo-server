@@ -54,7 +54,11 @@ import type {
   SubtitleMode,
 } from "../types";
 import { toMediaTime, toPlayerTime } from "../utils/mediaTimeline";
-import { buildWatchTogetherInviteUrl } from "@/lib/watchTogether";
+import {
+  copyWatchTogetherInvite,
+  endWatchTogetherRoom,
+  setWatchTogetherGuestControl,
+} from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
 
 // Reserved index for the in-progress live AI translation track. Sits well above
@@ -381,6 +385,7 @@ export function VideoPlayer({
   });
   const roomPlaybackActive = !!watchTogetherRoomId && !watchTogether.closedReason;
   const roomSyncWaiting = watchTogether.room?.playback_state === "waiting";
+  const watchTogetherRoomActive = watchTogether.room !== null;
 
   const showWatchTogetherNotice = useCallback((message: string, tone: "info" | "warning") => {
     setNotice({
@@ -1407,10 +1412,7 @@ export function VideoPlayer({
       setCurrentTime(toMediaTime(video.currentTime, streamOriginRef.current));
       setAwaitingFirstFrame(false);
       clearBuffering();
-      if (
-        watchTogether.room?.playback_state === "waiting" &&
-        watchTogetherSync.attachedSessionId === sessionId
-      ) {
+      if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
     };
@@ -1438,16 +1440,13 @@ export function VideoPlayer({
           bufferingTimerRef.current = null;
         }, 500);
       }
-      if (watchTogether.room && watchTogetherSync.attachedSessionId === sessionId) {
+      if (watchTogetherRoomActive && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportBuffering();
       }
     };
     const onCanPlay = () => {
       clearBuffering();
-      if (
-        watchTogether.room?.playback_state === "waiting" &&
-        watchTogetherSync.attachedSessionId === sessionId
-      ) {
+      if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
       }
     };
@@ -1456,7 +1455,7 @@ export function VideoPlayer({
       setAwaitingFirstFrame(false);
     };
     const onStalled = () => {
-      if (watchTogether.room && watchTogetherSync.attachedSessionId === sessionId) {
+      if (watchTogetherRoomActive && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportBuffering();
       }
     };
@@ -1507,7 +1506,10 @@ export function VideoPlayer({
       video.removeEventListener("error", onError);
       video.removeEventListener("ended", onVideoEnded);
     };
-  }, [pendingSeekTime, sessionId, watchTogether.room, watchTogetherSync]); // Listener behavior depends on pending seek reconciliation
+    // Listener behavior depends on pending seek reconciliation. Watch-together
+    // deps are intentionally narrowed to the primitives the handlers read so
+    // room snapshot churn doesn't re-subscribe every listener.
+  }, [pendingSeekTime, roomSyncWaiting, sessionId, watchTogetherRoomActive, watchTogetherSync]);
 
   // Apply persisted volume on mount (separate from listener effect).
   useEffect(() => {
@@ -2035,45 +2037,24 @@ export function VideoPlayer({
   }, [onReturnFromPostRoll]);
 
   const handleCopyWatchTogetherInvite = useCallback(async () => {
-    const inviteUrl = buildWatchTogetherInviteUrl(watchTogether.room?.invite_path);
-    if (!inviteUrl) {
+    const copied = await copyWatchTogetherInvite(
+      watchTogether.room?.invite_path,
+      watchTogether.room?.code,
+    );
+    if (!copied) {
       showWatchTogetherNotice("Invite link is not ready yet.", "info");
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-      toast.success(`Invite copied. Room code ${watchTogether.room?.code ?? ""}`.trim());
-    } catch {
-      toast.error("Failed to copy invite link");
     }
   }, [showWatchTogetherNotice, watchTogether.room]);
 
   const handleToggleGuestControl = useCallback(
     async (policy: "host_only" | "guest_play_pause") => {
-      try {
-        const nextRoom = await watchTogether.updatePolicy(policy);
-        if (nextRoom) {
-          toast.success(
-            nextRoom.guest_control_policy === "guest_play_pause"
-              ? "Guests can now pause and resume"
-              : "Room is now host controlled",
-          );
-        }
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to update room");
-      }
+      await setWatchTogetherGuestControl(watchTogether.updatePolicy, policy);
     },
     [watchTogether],
   );
 
   const handleEndRoom = useCallback(async () => {
-    try {
-      await watchTogether.closeRoom();
-      toast.success("Room ended");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to end room");
-    }
+    await endWatchTogetherRoom(watchTogether.closeRoom);
   }, [watchTogether]);
 
   // -- Render --

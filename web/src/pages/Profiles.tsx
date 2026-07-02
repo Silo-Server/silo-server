@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { Lock, Plus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -13,6 +13,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useAuth } from "@/hooks/useAuth";
 import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useProfiles } from "@/hooks/queries/profiles";
+import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 
 export default function Profiles() {
   const { data: profiles = [], isLoading: profilesLoading, avatarUploadEnabled } = useProfiles();
@@ -21,10 +22,16 @@ export default function Profiles() {
   const [pinProfile, setPinProfile] = useState<Profile | null>(null);
   const { selectProfile, verifyProfilePin, logout } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
 
   useDocumentTitle("Profiles");
 
   const isLoading = profilesLoading || librariesLoading;
+
+  function enterApp() {
+    navigate(redirectTarget ?? "/");
+  }
 
   function handleSelect(profile: Profile) {
     if (profile.has_pin) {
@@ -33,7 +40,7 @@ export default function Profiles() {
     }
 
     selectProfile(profile);
-    navigate("/");
+    enterApp();
   }
 
   async function handleCreateSuccess(
@@ -44,7 +51,7 @@ export default function Profiles() {
   ) {
     if (context.pin === "") {
       selectProfile(profile);
-      navigate("/");
+      enterApp();
       return;
     }
 
@@ -52,7 +59,7 @@ export default function Profiles() {
       const response = await verifyProfilePin(profile.id, context.pin);
       if (response.valid && response.profile_token) {
         selectProfile(profile, response.profile_token);
-        navigate("/");
+        enterApp();
         return;
       }
     } catch {
@@ -153,7 +160,7 @@ export default function Profiles() {
         onVerified={(profile, token) => {
           setPinProfile(null);
           selectProfile(profile, token);
-          navigate("/");
+          enterApp();
         }}
         verifyPin={verifyProfilePin}
       />

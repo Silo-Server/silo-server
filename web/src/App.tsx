@@ -142,8 +142,21 @@ function ScrollRestorationManager() {
   return null;
 }
 
+/**
+ * Builds a guard redirect target (e.g. "/login") that preserves the current
+ * location so the user returns to it after authenticating.
+ */
+function guardRedirectTarget(base: string, location: ReturnType<typeof useLocation>): string {
+  const destination = `${location.pathname}${location.search}`;
+  if (destination === "/" || destination === "") {
+    return base;
+  }
+  return `${base}?redirect=${encodeURIComponent(destination)}`;
+}
+
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading, setupLoading } = useAuth();
+  const location = useLocation();
   if (loading || setupLoading) {
     return (
       <div className="p-8" role="status" aria-live="polite">
@@ -152,7 +165,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to={guardRedirectTarget("/login", location)} replace />;
   return <>{children}</>;
 }
 
@@ -172,7 +185,8 @@ function SetupGate({ children }: { children: ReactNode }) {
 
 function RequireProfile({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
-  if (!profile) return <Navigate to="/profiles" replace />;
+  const location = useLocation();
+  if (!profile) return <Navigate to={guardRedirectTarget("/profiles", location)} replace />;
   return <>{children}</>;
 }
 
