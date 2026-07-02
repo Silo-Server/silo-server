@@ -51,8 +51,28 @@ type ArtifactManager struct {
 	liveCfg   func() *config.Config
 	notify    ArtifactNotifier
 
-	mu   sync.Mutex
-	kick func()
+	mu             sync.Mutex
+	kick           func()
+	lastDiskSweep  time.Time
+	lastStaleSweep time.Time
+}
+
+// maintenanceInterval spaces the disk-presence and stale-row sweeps: both are
+// O(cache size) (stats / extra queries) and their failure modes self-heal, so
+// running them on every 30s task tick is steady-state waste that grows with
+// the artifact cache. The first run after startup always executes.
+const maintenanceInterval = time.Hour
+
+// maintenanceDue reports whether the sweep guarded by last is due, advancing
+// the stamp when it is.
+func (m *ArtifactManager) maintenanceDue(last *time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !last.IsZero() && time.Since(*last) < maintenanceInterval {
+		return false
+	}
+	*last = time.Now()
+	return true
 }
 
 // NewArtifactManager constructs an ArtifactManager. liveCfg reads the current
@@ -221,6 +241,11 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 		}
 	}
 
+	// Disk-presence sweep: stats every ready file, so it runs on the startup
+	// pass and then hourly rather than on every tick.
+	if !m.maintenanceDue(&m.lastDiskSweep) {
+		return
+	}
 	ready, err := m.repo.ListReady(ctx)
 	if err != nil {
 		slog.Warn("download artifact ready scan failed", "error", err)
@@ -491,6 +516,9 @@ func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 // references, and expired ephemeral download rows. Best-effort; every step
 // logs and continues.
 func (m *ArtifactManager) sweepStale(ctx context.Context) {
+	if !m.maintenanceDue(&m.lastStaleSweep) {
+		return
+	}
 	now := time.Now()
 	if failed, err := m.repo.ListFailedBefore(ctx, now.Add(-failedArtifactRetention)); err != nil {
 		slog.Warn("failed-artifact sweep list failed", "error", err)

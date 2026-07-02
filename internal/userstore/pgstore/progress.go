@@ -53,15 +53,11 @@ func scanWatchHistoryEntry(scanner interface {
 }
 
 func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
 		return nil
 	}
 	now := time.Now().UTC()
-	completed := false
-	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
-		completed = true
-		position = 0 // match MarkWatched() — completed rows hold no resume point
-	}
 	// `completed` is a one-way watched latch; position resets to 0 on
 	// completion so `position_seconds > 0` means "has a resume point". A
 	// rewatch heartbeat on a completed row therefore re-enters Continue
@@ -102,15 +98,11 @@ func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, media
 
 // SetProgress bypasses the forward-only guard after the min-resume threshold.
 func (s *PostgresUserStore) SetProgress(ctx context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
 		return nil
 	}
 	now := time.Now().UTC()
-	completed := false
-	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
-		completed = true
-		position = 0 // match MarkWatched() — completed rows hold no resume point
-	}
 	_, err := s.pool.Exec(ctx, `
 		WITH visible AS (
 			SELECT

@@ -137,11 +137,11 @@ func toDownloadResponse(d *downloads.Download) downloadResponse {
 		BytesSent:         d.BytesSent,
 		Kind:              d.Kind,
 		Status:            d.Status,
-		Quality:           effectiveDownloadQuality(d.Quality),
-		EffectiveQuality:  effectiveDownloadQuality(d.EffectiveQuality),
+		Quality:           d.Quality,
+		EffectiveQuality:  d.EffectiveQuality,
 		DeliveryFormat:    d.Format,
 		TargetBitrateKbps: d.TargetBitrateKbps,
-		Revision:          effectiveDownloadRevision(d.Revision),
+		Revision:          d.Revision,
 		CreatedAt:         d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	if d.CompletedAt != nil {
@@ -149,20 +149,6 @@ func toDownloadResponse(d *downloads.Download) downloadResponse {
 		resp.CompletedAt = &s
 	}
 	return resp
-}
-
-func effectiveDownloadQuality(q string) string {
-	if q == "" {
-		return downloads.QualityOriginal
-	}
-	return q
-}
-
-func effectiveDownloadRevision(revision int) int {
-	if revision <= 0 {
-		return 1
-	}
-	return revision
 }
 
 // managedIdentity returns the (profileID, deviceID) the request is acting as.

@@ -127,20 +127,7 @@ func buildPrepareFileArgs(opts TranscodeOpts, outputPath string) []string {
 	args = appendAudioArgs(args, opts)
 
 	if !isVideoCopy {
-		switch {
-		case opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0:
-			args = appendSubtitleBurnInArgs(args, opts)
-		case opts.HWAccel == "qsv":
-			args = append(args, "-vf", qsvScaleFilter(opts.TargetResolution))
-		case opts.HWAccel == "vaapi":
-			args = append(args, "-vf", vaapiScaleFilter(opts.TargetResolution))
-		case opts.HWAccel == "nvenc":
-			args = append(args, "-vf", nvencScaleFilter(opts.TargetResolution))
-		case opts.TargetResolution != "":
-			if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-				args = append(args, "-vf", scale)
-			}
-		}
+		args = appendVideoFilterArgs(args, opts)
 	}
 
 	// One finalized MP4. +faststart relocates the moov atom in a finalization pass

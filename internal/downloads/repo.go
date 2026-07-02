@@ -133,23 +133,6 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*Download, error) 
 	return scanDownload(r.pool.QueryRow(ctx, query, id))
 }
 
-// ListByUser returns all downloads for a user, most recent first.
-func (r *Repository) ListByUser(ctx context.Context, userID int) ([]*Download, error) {
-	query := `SELECT ` + downloadColumns + ` FROM downloads
-		WHERE user_id = $1
-		ORDER BY created_at DESC`
-	rows, err := r.pool.Query(ctx, query, userID)
-	if err != nil {
-		return nil, fmt.Errorf("listing downloads for user: %w", err)
-	}
-	defer rows.Close()
-	result, err := scanDownloads(rows)
-	if err != nil {
-		return nil, fmt.Errorf("scanning download rows: %w", err)
-	}
-	return result, nil
-}
-
 // PruneEphemeralOlderThan deletes ephemeral (device-less) rows not touched
 // since cutoff, regardless of status — they are convenience records for
 // one-shot web downloads, not managed library entries. Pruning bounds

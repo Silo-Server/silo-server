@@ -194,9 +194,9 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 		ContentID:         dl.ContentID,
 		EpisodeID:         dl.EpisodeID,
 		Type:              detail.Type,
-		Revision:          effectiveRevision(dl),
-		Quality:           effectiveQuality(dl.Quality),
-		EffectiveQuality:  effectiveQuality(dl.EffectiveQuality),
+		Revision:          dl.Revision,
+		Quality:           dl.Quality,
+		EffectiveQuality:  dl.EffectiveQuality,
 		DeliveryFormat:    dl.Format,
 		TargetBitrateKbps: dl.TargetBitrateKbps,
 		MediaFileID:       dl.MediaFileID,
@@ -425,27 +425,13 @@ func buildIntegrity(dl *Download, file *models.MediaFile) OfflineIntegrity {
 		}
 	}
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%s|%s|%s|%d|%d|%s",
-		dl.ID, effectiveRevision(dl), dl.Format, effectiveQuality(dl.Quality),
-		effectiveQuality(dl.EffectiveQuality), dl.TargetBitrateKbps, dl.FileSize, modified)))
+		dl.ID, dl.Revision, dl.Format, dl.Quality,
+		dl.EffectiveQuality, dl.TargetBitrateKbps, dl.FileSize, modified)))
 	return OfflineIntegrity{
 		ExpectedBytes: dl.FileSize,
 		MediaFileHash: hash,
 		MetadataETag:  hex.EncodeToString(sum[:]),
 	}
-}
-
-func effectiveRevision(dl *Download) int {
-	if dl.Revision <= 0 {
-		return 1
-	}
-	return dl.Revision
-}
-
-func effectiveQuality(q string) string {
-	if q == "" {
-		return QualityOriginal
-	}
-	return q
 }
 
 func firstNonEmpty(values ...string) string {

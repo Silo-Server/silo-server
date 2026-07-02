@@ -134,12 +134,12 @@ type PlaybackHandler struct {
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig func() config.PlaybackConfig
-	FFmpegLogSink  playback.FFmpegLogSink
-	transcodeMu             sync.RWMutex
-	transcodes              map[string]*playback.TranscodeSession
-	realtimeCommandMu       sync.Mutex
-	realtimeCommands        map[string]playbackCommandRecord
+	PlaybackConfig    func() config.PlaybackConfig
+	FFmpegLogSink     playback.FFmpegLogSink
+	transcodeMu       sync.RWMutex
+	transcodes        map[string]*playback.TranscodeSession
+	realtimeCommandMu sync.Mutex
+	realtimeCommands  map[string]playbackCommandRecord
 }
 
 type PlaybackWatchScrobbler interface {

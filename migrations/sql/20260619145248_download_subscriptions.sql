@@ -36,12 +36,8 @@ CREATE TABLE public.download_subscriptions (
         REFERENCES public.user_devices(user_id, profile_id, device_id) ON DELETE CASCADE
 );
 
--- Worker lookup: which devices monitor this series?
-CREATE INDEX download_subscriptions_series_idx
-    ON public.download_subscriptions (series_id) WHERE active;
--- List a device's subscriptions.
-CREATE INDEX download_subscriptions_device_idx
-    ON public.download_subscriptions (user_id, profile_id, device_id);
+-- No separate device-listing index: the UNIQUE constraint's index on
+-- (user_id, profile_id, device_id, series_id) already serves that prefix.
 -- +goose StatementEnd
 
 -- +goose Down

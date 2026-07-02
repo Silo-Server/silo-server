@@ -302,7 +302,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "/usr/lib/jellyfin-ffmpeg/ffmpeg")
-	cfg.Playback.TranscodeDir = stringOr(m, "playback.transcode_dir", "/tmp/silo-transcode")
+	cfg.Playback.TranscodeDir = stringOr(m, "playback.transcode_dir", DefaultTranscodeDir)
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)

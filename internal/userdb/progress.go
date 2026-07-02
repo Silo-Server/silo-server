@@ -20,15 +20,11 @@ type WatchHistoryEntry = userstore.WatchHistoryEntry
 // The position is only updated if the new value is greater than the existing one.
 // The completed flag is set to true when position/duration exceeds the watched threshold.
 func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
 		return nil
 	}
 	now := nowUTC()
-	completed := false
-	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
-		completed = true
-		position = 0 // match MarkWatched() — completed rows hold no resume point
-	}
 	// Mirrors the Postgres pgstore UpdateProgress: `completed` is a one-way
 	// watched latch; position resets to 0 on completion so a rewatch
 	// heartbeat on a completed row re-enters Continue Watching through plain
@@ -61,15 +57,11 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 // after the min-resume threshold. The completed flag stays a one-way watched
 // latch: only ClearProgress/ClearProgressBatch (mark unwatched) release it.
 func SetProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
 		return nil
 	}
 	now := nowUTC()
-	completed := false
-	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
-		completed = true
-		position = 0 // match MarkWatched() — completed rows hold no resume point
-	}
 	query := `
 		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		SELECT ?, ?, ?, ?, ?, ` + visibleTimestampSQL + `

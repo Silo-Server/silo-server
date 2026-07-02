@@ -41,20 +41,6 @@ func clampEventAt(client, now time.Time) time.Time {
 	return client
 }
 
-// offlineProgressState mirrors UpdateProgress's threshold handling for an
-// offline item: it returns the position to persist, the completed latch, and
-// whether the item is below the min-resume floor and should be skipped.
-func offlineProgressState(position, duration float64, t userstore.ProgressThresholds) (pos float64, completed, skip bool) {
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(t.MinResumePct) {
-		return position, false, true
-	}
-	completed = duration > 0 && position/duration > userstore.WatchedFraction(t.WatchedPct)
-	if completed {
-		position = 0
-	}
-	return position, completed, false
-}
-
 // ProgressLibraryLookup resolves which progress items belong to a library.
 type ProgressLibraryLookup interface {
 	GetItemsInFolder(ctx context.Context, contentIDs []string, folderID int) (map[string]bool, error)
@@ -352,7 +338,7 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 				slog.Warn("clamped future-dated progress event time",
 					"profile_id", profileID, "media_item_id", item.MediaItemID)
 			}
-			pos, completed, skip := offlineProgressState(item.Position, item.Duration, thresholds)
+			pos, completed, skip := userstore.ResolveProgressState(item.Position, item.Duration, thresholds)
 			if !skip {
 				_, updateErr = store.SetProgressIfNewer(r.Context(), profileID, item.MediaItemID, pos, item.Duration, completed, eventAt)
 			}

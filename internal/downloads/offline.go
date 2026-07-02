@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
 // authorizeManagedAsset applies invariant-2 row authorization (user, profile,
@@ -236,18 +237,10 @@ func parseSubtitleRef(ref string) (kind string, value int, err error) {
 	}
 }
 
-// writeSubtitle writes subtitle bytes with a format-appropriate content type.
+// writeSubtitle writes subtitle bytes with a format-appropriate content type
+// (the shared subtitles mapping — no local copy to drift).
 func writeSubtitle(w http.ResponseWriter, format string, data []byte) {
-	switch strings.ToLower(format) {
-	case "vtt":
-		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	case "ass", "ssa":
-		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	case "srt":
-		w.Header().Set("Content-Type", "application/x-subrip; charset=utf-8")
-	default:
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	}
+	w.Header().Set("Content-Type", subtitles.SubtitleContentType(subtitles.SubtitleFormat(strings.ToLower(format))))
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	_, _ = w.Write(data)
 }

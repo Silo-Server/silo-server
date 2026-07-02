@@ -283,27 +283,8 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	args = appendAudioArgs(args, opts)
 
 	// Subtitle burn-in and resolution scaling — only when encoding video.
-	// When burn-in is active, the subtitle filter chain includes scaling
-	// (and hw download/upload for QSV/VAAPI). Otherwise, standalone scaling.
 	if !isVideoCopy {
-		if opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0 {
-			args = appendSubtitleBurnInArgs(args, opts)
-		} else if opts.HWAccel == "qsv" {
-			scale := qsvScaleFilter(opts.TargetResolution)
-			args = append(args, "-vf", scale)
-		} else if opts.HWAccel == "vaapi" {
-			scale := vaapiScaleFilter(opts.TargetResolution)
-			args = append(args, "-vf", scale)
-		} else if opts.HWAccel == "nvenc" {
-			scale := nvencScaleFilter(opts.TargetResolution)
-			args = append(args, "-vf", scale)
-		} else if opts.TargetResolution != "" {
-			scale := resolutionToScale(opts.TargetResolution)
-			if scale != "" {
-				args = append(args, "-vf", scale)
-			}
-		}
-
+		args = appendVideoFilterArgs(args, opts)
 		args = appendSegmentBoundaryArgs(args, opts)
 	}
 
@@ -579,6 +560,30 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		}
 	}
 
+	return args
+}
+
+// appendVideoFilterArgs appends the -vf selection for an encoding (non-copy)
+// video stream: the subtitle burn-in chain (which includes scaling and hw
+// download/upload for QSV/VAAPI) or the hwaccel-appropriate standalone scale
+// filter. The ONE home of this decision — the HLS builder and the single-file
+// prepare builder must always produce identical filter chains (a fix landing
+// in only one of them silently ships wrong cached artifacts).
+func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
+	switch {
+	case opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0:
+		return appendSubtitleBurnInArgs(args, opts)
+	case opts.HWAccel == "qsv":
+		return append(args, "-vf", qsvScaleFilter(opts.TargetResolution))
+	case opts.HWAccel == "vaapi":
+		return append(args, "-vf", vaapiScaleFilter(opts.TargetResolution))
+	case opts.HWAccel == "nvenc":
+		return append(args, "-vf", nvencScaleFilter(opts.TargetResolution))
+	case opts.TargetResolution != "":
+		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
+			return append(args, "-vf", scale)
+		}
+	}
 	return args
 }
 

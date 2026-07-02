@@ -12,8 +12,9 @@ import (
 const subscriptionColumns = `id, user_id, profile_id, device_id, series_id, mode,
 	season_numbers, target_season, delete_watched, max_storage_bytes, active, created_at, updated_at`
 
-// SubscriptionRepository provides CRUD for download_subscriptions and access to
-// the auto-register worker's release-event cursor.
+// SubscriptionRepository provides CRUD for download_subscriptions. Monitoring
+// is client-pull only: devices sync on app open / background refresh; there is
+// no server-side auto-register worker.
 type SubscriptionRepository struct {
 	pool *pgxpool.Pool
 }
@@ -105,21 +106,6 @@ func (r *SubscriptionRepository) ListByDevice(ctx context.Context, userID int, p
 	rows, err := r.pool.Query(ctx, q, userID, profileID, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("listing subscriptions: %w", err)
-	}
-	defer rows.Close()
-	return scanSubscriptions(rows)
-}
-
-// ListActiveBySeries returns every active subscription for a series across all
-// devices. Used by the auto-register worker when a new episode of that series
-// becomes available.
-func (r *SubscriptionRepository) ListActiveBySeries(ctx context.Context, seriesID string) ([]*Subscription, error) {
-	q := `SELECT ` + subscriptionColumns + ` FROM download_subscriptions
-		WHERE series_id = $1 AND active
-		ORDER BY created_at`
-	rows, err := r.pool.Query(ctx, q, seriesID)
-	if err != nil {
-		return nil, fmt.Errorf("listing subscriptions by series: %w", err)
 	}
 	defer rows.Close()
 	return scanSubscriptions(rows)

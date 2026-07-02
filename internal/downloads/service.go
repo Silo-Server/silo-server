@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -1047,26 +1048,13 @@ func pickBestFile(files []*models.MediaFile) *models.MediaFile {
 	}
 	best := files[0]
 	for _, f := range files[1:] {
-		if resolutionRank(f.Resolution) > resolutionRank(best.Resolution) {
+		// access.CompareQuality is the codebase's one resolution ordering
+		// (includes 4320p); download file selection must agree with playback.
+		if access.CompareQuality(f.Resolution, best.Resolution) > 0 {
 			best = f
 		}
 	}
 	return best
-}
-
-func resolutionRank(res string) int {
-	switch strings.ToLower(res) {
-	case "2160p":
-		return 4
-	case "1080p":
-		return 3
-	case "720p":
-		return 2
-	case "480p":
-		return 1
-	default:
-		return 0
-	}
 }
 
 func sanitizeFilename(name string) string {

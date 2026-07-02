@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // Artifact status constants (download_artifacts.status).
@@ -55,11 +57,11 @@ func paramsHash(format, container, codecVideo, codecAudio, resolution string, au
 	return hex.EncodeToString(sum[:])
 }
 
-// defaultTranscodeDir mirrors config.go's TranscodeDir default and roots
+// defaultTranscodeDir is config's TranscodeDir default and roots
 // prepared download artifacts when neither download.artifact_dir nor the
 // transcode dir is configured. Keeping it absolute avoids writing artifacts
 // relative to the process working directory.
-const defaultTranscodeDir = "/tmp/silo-transcode"
+const defaultTranscodeDir = config.DefaultTranscodeDir
 
 // effectiveArtifactDir resolves where prepared artifacts are written: the
 // configured download.artifact_dir when set, otherwise a dedicated directory

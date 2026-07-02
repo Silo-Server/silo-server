@@ -83,9 +83,7 @@ export default function Profiles() {
       <div className="auth-shell flex-col gap-6">
         <div className="relative z-10 flex flex-col items-center gap-6">
           <div className="w-full max-w-md space-y-3 text-center">
-            <h1 className="page-title text-[clamp(2.1rem,6vw,4rem)]">
-              Create your first profile
-            </h1>
+            <h1 className="page-title text-[clamp(2.1rem,6vw,4rem)]">Create your first profile</h1>
             <p className="text-muted-foreground text-sm">
               You need a profile before you can enter the app.
             </p>

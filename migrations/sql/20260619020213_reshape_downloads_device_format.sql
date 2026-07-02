@@ -42,7 +42,8 @@ CREATE UNIQUE INDEX downloads_device_entry_uidx
     ON public.downloads (user_id, profile_id, device_id, content_id, COALESCE(episode_id, ''))
     WHERE device_id IS NOT NULL;
 
-CREATE INDEX downloads_device_idx   ON public.downloads (user_id, profile_id, device_id) WHERE device_id IS NOT NULL;
+-- No separate (user_id, profile_id, device_id) index: downloads_device_entry_uidx
+-- already serves that prefix under the same partial predicate.
 CREATE INDEX downloads_artifact_idx ON public.downloads (artifact_id) WHERE artifact_id IS NOT NULL;
 
 -- Composite FK to user_devices. MATCH SIMPLE (the default) skips the check whenever any column is NULL,
@@ -57,7 +58,6 @@ ALTER TABLE public.downloads
 -- +goose StatementBegin
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_device_fkey;
 DROP INDEX IF EXISTS downloads_artifact_idx;
-DROP INDEX IF EXISTS downloads_device_idx;
 DROP INDEX IF EXISTS downloads_device_entry_uidx;
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_revision_check;
 ALTER TABLE public.downloads DROP CONSTRAINT IF EXISTS downloads_target_bitrate_check;

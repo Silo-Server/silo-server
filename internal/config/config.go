@@ -372,6 +372,10 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 	[]byte("https://silo.local/jellycompat"),
 ).String()
 
+// DefaultTranscodeDir is the fallback playback.transcode_dir; download
+// artifacts default to a sibling directory (see downloads.effectiveArtifactDir).
+const DefaultTranscodeDir = "/tmp/silo-transcode"
+
 const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
 const DefaultJellyfinWebVersion = "10.11.6"
 const DefaultJellyfinWebInstallDir = "/var/lib/silo/compat/jellyfin-web"
@@ -439,7 +443,7 @@ func setDefaults() *configRaw {
 		},
 		Playback: PlaybackConfig{
 			FFmpegPath:                   "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-			TranscodeDir:                 "/tmp/silo-transcode",
+			TranscodeDir:                 DefaultTranscodeDir,
 			HWAccel:                      "auto",
 			ChapterThumbnailWorkers:      1,
 			ChapterThumbnailExecution:    "local",
