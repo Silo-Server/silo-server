@@ -79,7 +79,12 @@ type Dependencies struct {
 	PresignTTL      time.Duration
 
 	// Playback
-	SessionMgr        SessionManagerInterface
+	SessionMgr SessionManagerInterface
+	// SessionSyncer flushes native session-manager state into the shared
+	// admin live-session table right after compat playback starts/stops, so
+	// the activity dashboard doesn't wait for the periodic reconciler tick.
+	// Optional.
+	SessionSyncer     PlaybackSessionSyncer
 	FileResolver      FilePathResolver
 	UserStoreProvider userstore.UserStoreProvider
 	AccessFilterFn    AccessFilterResolver

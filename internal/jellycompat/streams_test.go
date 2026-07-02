@@ -272,3 +272,132 @@ func TestHandleDeleteActiveEncodings_NotYetStartedNotTornDown(t *testing.T) {
 		t.Fatalf("expected no StopSession calls; got %v", mgr.stopCalls)
 	}
 }
+
+// recordingSessionSyncer counts SyncNow calls and records the context state at
+// call time, standing in for the reconciler's immediate-sync trigger.
+type recordingSessionSyncer struct {
+	calls           int
+	lastCtxErr      error
+	lastHadDeadline bool
+}
+
+func (s *recordingSessionSyncer) SyncNow(ctx context.Context) error {
+	s.calls++
+	s.lastCtxErr = ctx.Err()
+	_, s.lastHadDeadline = ctx.Deadline()
+	return nil
+}
+
+// TestHandleSessionPlayingStopped_TearsDownAndSyncsImmediately verifies the
+// Stopped report path removes the compat session AND flushes the live-session
+// snapshot right away, so the activity dashboard doesn't show a ghost stream
+// until the next reconciler tick (issue #205).
+func TestHandleSessionPlayingStopped_TearsDownAndSyncsImmediately(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	syncer := &recordingSessionSyncer{}
+	h.SessionSyncer = syncer
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
+
+	body := strings.NewReader(`{"PlaySessionId":"ps-1"}`)
+	// Cancel the request context up front to simulate the client dropping the
+	// connection right after firing the stop report — the sync must still run.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := withCompatSession(httptest.NewRequest("POST", "/Sessions/Playing/Stopped", body).WithContext(ctx), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleSessionPlayingStopped(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if _, ok := store.Get("ps-1"); ok {
+		t.Fatal("play session should be deleted")
+	}
+	if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "upstream-1" {
+		t.Fatalf("expected StopSession(upstream-1); got %v", mgr.stopCalls)
+	}
+	if syncer.calls != 1 {
+		t.Fatalf("SyncNow calls = %d; want 1", syncer.calls)
+	}
+	if syncer.lastCtxErr != nil {
+		t.Fatalf("sync context canceled with request: %v", syncer.lastCtxErr)
+	}
+	if !syncer.lastHadDeadline {
+		t.Fatal("sync context must carry a deadline so a stalled DB cannot pin the request goroutine")
+	}
+}
+
+// TestHandleSessionPlayingStopped_UnknownSessionDoesNotSync verifies a stop
+// report that tears nothing down doesn't trigger a sync round trip.
+func TestHandleSessionPlayingStopped_UnknownSessionDoesNotSync(t *testing.T) {
+	mgr := &testCompatSessionManager{}
+	h, _ := newActiveEncodingsHandler(mgr)
+	syncer := &recordingSessionSyncer{}
+	h.SessionSyncer = syncer
+
+	body := strings.NewReader(`{"PlaySessionId":"ps-missing"}`)
+	req := withCompatSession(httptest.NewRequest("POST", "/Sessions/Playing/Stopped", body), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleSessionPlayingStopped(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if syncer.calls != 0 {
+		t.Fatalf("SyncNow calls = %d; want 0", syncer.calls)
+	}
+}
+
+// TestHandleDeleteActiveEncodings_SyncsSessionsImmediately verifies the
+// explicit encoder-teardown path also flushes the live-session snapshot.
+func TestHandleDeleteActiveEncodings_SyncsSessionsImmediately(t *testing.T) {
+	mgr := &testCompatSessionManager{sessions: map[string]*playback.Session{"upstream-1": {ID: "upstream-1"}}}
+	h, store := newActiveEncodingsHandler(mgr)
+	syncer := &recordingSessionSyncer{}
+	h.SessionSyncer = syncer
+	store.Put(PlaybackSession{ID: "ps-1", UpstreamSessionID: "upstream-1", CompatToken: "tok"})
+
+	req := withCompatSession(httptest.NewRequest("DELETE", "/Videos/ActiveEncodings?PlaySessionId=ps-1", nil), "tok")
+	rec := httptest.NewRecorder()
+	h.HandleDeleteActiveEncodings(rec, req)
+
+	if rec.Code != 204 {
+		t.Fatalf("status = %d, body = %s; want 204", rec.Code, rec.Body.String())
+	}
+	if syncer.calls != 1 {
+		t.Fatalf("SyncNow calls = %d; want 1", syncer.calls)
+	}
+}
+
+// TestEnsureUpstreamPlayback_SyncsOnNewSession verifies a fresh upstream
+// session start flushes the live-session snapshot so the new stream appears in
+// the activity dashboard immediately.
+func TestEnsureUpstreamPlayback_SyncsOnNewSession(t *testing.T) {
+	mgr := &testCompatSessionManager{}
+	h, store := newActiveEncodingsHandler(mgr)
+	syncer := &recordingSessionSyncer{}
+	h.SessionSyncer = syncer
+	store.Put(PlaybackSession{ID: "ps-1", CompatToken: "tok"})
+
+	compatSession := &Session{Token: "tok", StreamAppUserID: 7, ProfileID: "prof-1"}
+	source := PlaybackMediaSource{ID: "src-1", FileID: 42}
+	playSession, err := h.ensureUpstreamPlayback(context.Background(), compatSession, "ps-1", source, "direct")
+	if err != nil {
+		t.Fatalf("ensureUpstreamPlayback: %v", err)
+	}
+	if playSession.UpstreamSessionID == "" {
+		t.Fatal("expected upstream session to be started")
+	}
+	if syncer.calls != 1 {
+		t.Fatalf("SyncNow calls = %d; want 1", syncer.calls)
+	}
+
+	// Re-entering with the same method reuses the session and must not sync again.
+	if _, err := h.ensureUpstreamPlayback(context.Background(), compatSession, "ps-1", source, "direct"); err != nil {
+		t.Fatalf("ensureUpstreamPlayback reuse: %v", err)
+	}
+	if syncer.calls != 1 {
+		t.Fatalf("SyncNow calls after reuse = %d; want 1", syncer.calls)
+	}
+}

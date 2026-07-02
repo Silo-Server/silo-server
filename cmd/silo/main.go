@@ -2183,6 +2183,7 @@ func main() {
 			JWTSecret:        cfg.Auth.JWTSecret,
 			RecWorker:        recWorker,
 			FrontendFS:       deps.FrontendFS,
+			SessionSyncer:    deps.SessionSyncer,
 		}
 
 		// Wire direct dependencies when DB is available.
