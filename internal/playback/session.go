@@ -119,8 +119,13 @@ const (
 	// observed playback activity before it stops counting toward limits.
 	DefaultActiveSessionGrace = 45 * time.Second
 
-	// DefaultPausedSessionGrace is the longer grace period for paused sessions.
-	DefaultPausedSessionGrace = 2 * time.Minute
+	// DefaultPausedSessionGrace is the longer grace period for paused
+	// sessions. It must comfortably cover an intentional pause (dinner
+	// break, phone call): reaping a paused session kills its transcode
+	// and there is currently no revival path, so a too-short grace makes
+	// pressing Play after a long pause freeze the client (issue #243).
+	// Keep in sync with pausedSessionGrace in internal/worker/cleanup.go.
+	DefaultPausedSessionGrace = 30 * time.Minute
 )
 
 // NewSessionManager creates a SessionManager with the given concurrency limits.

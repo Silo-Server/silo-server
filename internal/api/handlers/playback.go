@@ -1778,10 +1778,9 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 			ts.SetAudioTrackIndex(req.AudioTrackIndex)
 			seekSeconds := req.Position
 			startSegment := computeStartSegment(seekSeconds, ts.Opts().SegmentDuration)
+			// Throttler + exit monitor re-arm via the session's restart hook.
 			if restartErr := ts.Restart(context.WithoutCancel(r.Context()), seekSeconds, startSegment); restartErr != nil {
 				slog.Error("failed to restart transcode for audio switch", "session", sessionID, "error", restartErr)
-			} else {
-				h.maybeStartThrottler(r.Context(), ts)
 			}
 		}
 	}
@@ -2211,6 +2210,14 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	h.transcodes[req.SessionID] = transcodeSession
 	h.transcodeMu.Unlock()
 
+	// Re-arm the throttler and exit monitor after every restart, no matter
+	// which caller triggered it (web segment recovery, audio switch, or
+	// jellycompat seek — the compat path has no handler access at all).
+	transcodeSession.SetRestartHook(func(ctx context.Context) {
+		h.maybeStartThrottler(ctx, transcodeSession)
+		h.monitorLocalTranscodeExit(req.SessionID, transcodeSession)
+	})
+
 	h.maybeStartThrottler(r.Context(), transcodeSession)
 	h.monitorLocalTranscodeExit(req.SessionID, transcodeSession)
 
@@ -2395,8 +2402,8 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 						seekSeconds,
 						segNum,
 					); restartErr == nil {
-						h.maybeStartThrottler(r.Context(), transcodeSession)
-						h.monitorLocalTranscodeExit(sessionID, transcodeSession)
+						// Throttler + exit monitor re-arm via the session's
+						// restart hook.
 						segmentPath, err = transcodeSession.WaitForSegment(segmentName, 30*time.Second)
 						if err == nil && strings.EqualFold(transcodeSession.Opts().TargetCodecVideo, "copy") {
 							// Copy-mode seeks can resume as soon as the target segment

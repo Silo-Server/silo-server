@@ -74,6 +74,17 @@ type TranscodeSession struct {
 	restartCount         int
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
+	restartHook          func(context.Context)
+}
+
+// SetRestartHook registers a callback fired after every successful Restart.
+// The owning handler uses it to re-arm the transcode throttler and the exit
+// monitor; firing it from Restart itself keeps every restart caller (web
+// segment recovery, audio switch, jellycompat seek) consistent.
+func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
+	s.mu.Lock()
+	s.restartHook = fn
+	s.mu.Unlock()
 }
 
 // SegmentProgress describes the media ffmpeg has actually produced on disk.
@@ -1164,10 +1175,18 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	}
 
 	switch {
+	// Restarting must be checked before Running: the restart window runs
+	// with running=false, and a concurrent segment request must wait out
+	// the in-flight restart rather than trigger another one. Dueling
+	// restarts keep preempting the segment the player is blocked on,
+	// which surfaces as a seek/intro-skip freeze (issue #243).
+	case progress.Restarting:
+		decision.Wait = true
+		decision.WaitTimeout = activeSegmentWait
+		decision.RestartOnTimeout = false
+		decision.Reason = "transcode_restarting"
 	case !progress.Running:
 		decision.Reason = "transcode_not_running"
-	case progress.Restarting:
-		decision.Reason = "transcode_restarting"
 	case segNum < progress.StartSegmentNumber:
 		decision.Reason = "before_start_segment"
 	case segNum <= progress.ProducedHead:
@@ -1381,12 +1400,20 @@ func (s *TranscodeSession) cleanStaleSegments(startSegment int) {
 // copy-mode sessions, stale segments at or after the restart point are
 // cleaned to prevent serving data from the wrong timeline position.
 func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, startSegment int) error {
-	s.StopThrottler()
 	s.mu.Lock()
+	// Single-flight: a second caller arriving while a restart is in
+	// progress must not kill the process the first restart just started.
+	// It returns immediately and the caller falls through to
+	// WaitForSegment, which polls through the in-flight restart.
+	if s.restarting {
+		s.mu.Unlock()
+		return nil
+	}
 	s.restarting = true
 	cancelCurrent := s.cancel
 	done := s.done
 	s.mu.Unlock()
+	s.StopThrottler()
 
 	// Kill current process without removing output directory.
 	if cancelCurrent != nil {
@@ -1462,6 +1489,7 @@ func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, sta
 	s.stdinPipe = stdinPipe
 	s.lastRequestedSegment = startSegment
 	s.done = make(chan struct{})
+	hook := s.restartHook
 	s.mu.Unlock()
 
 	go func() {
@@ -1474,6 +1502,10 @@ func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, sta
 		s.logWaitResult(ctx, waitErr)
 		close(s.done)
 	}()
+
+	if hook != nil {
+		hook(ctx)
+	}
 
 	return nil
 }
