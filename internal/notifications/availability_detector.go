@@ -39,8 +39,9 @@ func (d *AvailabilityDetector) SetFanoutNudge(nudge func()) {
 // AvailabilityKinds selects which content kinds an ingest scope covers.
 // Each kind keeps its own seed marker and silent-seeding semantics.
 type AvailabilityKinds struct {
-	Episodes bool
-	Movies   bool
+	Episodes   bool
+	Movies     bool
+	Audiobooks bool
 }
 
 // availabilityKindOps abstracts the per-kind recording calls so episode and
@@ -82,6 +83,13 @@ func (d *AvailabilityDetector) HandleIngestCompleted(ctx context.Context, librar
 			kind:             EventKindMovie,
 			recordForLibrary: d.releases.RecordMovieAvailabilityForLibrary,
 			recordForPaths:   d.releases.RecordMovieAvailabilityForPaths,
+		})
+	}
+	if kinds.Audiobooks {
+		d.runKind(detectCtx, libraryID, fullLibrary, scopePaths, availabilityKindOps{
+			kind:             EventKindAudiobook,
+			recordForLibrary: d.releases.RecordAudiobookAvailabilityForLibrary,
+			recordForPaths:   d.releases.RecordAudiobookAvailabilityForPaths,
 		})
 	}
 }

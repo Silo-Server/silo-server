@@ -47,6 +47,7 @@ type ServerChannelInput struct {
 	Enabled                *bool
 	NotifyNewMovies        *bool
 	NotifyNewEpisodes      *bool
+	NotifyNewAudiobooks    *bool
 	NotifyRequestSubmitted *bool
 	NotifyRequestApproved  *bool
 	NotifyRequestDeclined  *bool
@@ -91,13 +92,17 @@ func (s *ServerChannelService) Create(ctx context.Context, createdByUserID int, 
 	}
 
 	ch := ServerChannel{
-		ID:                     ulid.Make().String(),
-		Name:                   name,
-		Type:                   channelType,
-		URLHost:                host,
-		Enabled:                boolOrDefault(input.Enabled, true),
-		NotifyNewMovies:        boolOrDefault(input.NotifyNewMovies, true),
-		NotifyNewEpisodes:      boolOrDefault(input.NotifyNewEpisodes, true),
+		ID:                ulid.Make().String(),
+		Name:              name,
+		Type:              channelType,
+		URLHost:           host,
+		Enabled:           boolOrDefault(input.Enabled, true),
+		NotifyNewMovies:   boolOrDefault(input.NotifyNewMovies, true),
+		NotifyNewEpisodes: boolOrDefault(input.NotifyNewEpisodes, true),
+		// Audiobook announcements are opt-in: most channels were configured
+		// before this kind existed, and video-only servers should not grow a
+		// new default-on toggle.
+		NotifyNewAudiobooks:    boolOrDefault(input.NotifyNewAudiobooks, false),
 		NotifyRequestSubmitted: boolOrDefault(input.NotifyRequestSubmitted, false),
 		NotifyRequestApproved:  boolOrDefault(input.NotifyRequestApproved, false),
 		NotifyRequestDeclined:  boolOrDefault(input.NotifyRequestDeclined, false),
@@ -177,6 +182,9 @@ func (s *ServerChannelService) Update(ctx context.Context, id string, input Serv
 	}
 	if input.NotifyNewEpisodes != nil {
 		ch.NotifyNewEpisodes = *input.NotifyNewEpisodes
+	}
+	if input.NotifyNewAudiobooks != nil {
+		ch.NotifyNewAudiobooks = *input.NotifyNewAudiobooks
 	}
 	if input.NotifyRequestSubmitted != nil {
 		ch.NotifyRequestSubmitted = *input.NotifyRequestSubmitted

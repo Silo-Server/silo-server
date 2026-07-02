@@ -33,6 +33,7 @@ type ServerChannel struct {
 	Enabled                 bool
 	NotifyNewMovies         bool
 	NotifyNewEpisodes       bool
+	NotifyNewAudiobooks     bool
 	NotifyRequestSubmitted  bool
 	NotifyRequestApproved   bool
 	NotifyRequestDeclined   bool
@@ -66,6 +67,8 @@ func (c ServerChannel) WantsContentKind(kind string) bool {
 		return c.NotifyNewEpisodes
 	case EventKindMovie:
 		return c.NotifyNewMovies
+	case EventKindAudiobook:
+		return c.NotifyNewAudiobooks
 	default:
 		return false
 	}

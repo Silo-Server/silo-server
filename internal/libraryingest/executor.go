@@ -366,10 +366,11 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	// serialized scan queue.
 	if e.availability != nil {
 		kinds := notifications.AvailabilityKinds{
-			Episodes: isTVLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
-			Movies:   isMovieLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
+			Episodes:   isTVLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
+			Movies:     isMovieLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
+			Audiobooks: isAudiobookLibraryType(folder.Type),
 		}
-		if kinds.Episodes || kinds.Movies {
+		if kinds.Episodes || kinds.Movies || kinds.Audiobooks {
 			go e.availability.HandleIngestCompleted(scanCtx, folder.ID, mode == scopeModeLibrary, matchScopes, kinds)
 		}
 	}
@@ -476,6 +477,17 @@ func isMixedLibraryType(libraryType string) bool {
 func isMovieLibraryType(libraryType string) bool {
 	switch strings.ToLower(strings.TrimSpace(libraryType)) {
 	case "movie", "movies":
+		return true
+	default:
+		return false
+	}
+}
+
+// isAudiobookLibraryType mirrors the scanner's audiobook library naming
+// (internal/scanner/scanner.go).
+func isAudiobookLibraryType(libraryType string) bool {
+	switch strings.ToLower(strings.TrimSpace(libraryType)) {
+	case "audiobook", "audiobooks":
 		return true
 	default:
 		return false

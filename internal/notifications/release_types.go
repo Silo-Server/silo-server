@@ -23,11 +23,13 @@ const SuppressedReasonSeriesBurst = "series_burst"
 const SuppressedReasonStale = "stale"
 
 // Release event kinds. Episode events carry the series/episode columns and
-// fan out to interested profiles; movie events carry ItemID only and exist
-// for the server-channel broadcast feed (no per-profile fanout in v1).
+// fan out to interested profiles; movie and audiobook events carry ItemID
+// only and exist for the server-channel broadcast feed (no per-profile
+// fanout in v1).
 const (
-	EventKindEpisode = "episode"
-	EventKindMovie   = "movie"
+	EventKindEpisode   = "episode"
+	EventKindMovie     = "movie"
+	EventKindAudiobook = "audiobook"
 )
 
 // normalizeEventKind treats an unset kind as episode — the single home of

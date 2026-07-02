@@ -75,10 +75,27 @@ func GroupContentEvents(events []ReleaseEvent, metas map[string]ContentMeta) []C
 	}
 	index := make(map[groupKey]int)
 	seenMovies := make(map[string]struct{})
+	seenAudiobooks := make(map[string]struct{})
 	groups := make([]ContentGroup, 0, len(events))
 
 	for _, event := range events {
 		switch normalizeEventKind(event.Kind) {
+		case EventKindAudiobook:
+			// Like movies: one group per item, deduped across libraries.
+			if _, dup := seenAudiobooks[event.ItemID]; dup {
+				continue
+			}
+			seenAudiobooks[event.ItemID] = struct{}{}
+			meta := metas[event.ItemID]
+			if meta.Title == "" {
+				meta.Title = "New audiobook"
+			}
+			groups = append(groups, ContentGroup{
+				Kind:      EventKindAudiobook,
+				LibraryID: event.LibraryID,
+				ItemID:    event.ItemID,
+				Meta:      meta,
+			})
 		case EventKindMovie:
 			// The same movie landing in two libraries (e.g. "Movies" and
 			// "Movies 4K") announces once.
@@ -149,7 +166,7 @@ func episodeRangeLabel(episodes []ReleaseEvent) string {
 // contentGroupTitle renders a group's display line.
 func contentGroupTitle(group ContentGroup) string {
 	switch group.Kind {
-	case EventKindMovie:
+	case EventKindMovie, EventKindAudiobook:
 		return titleWithYear(group.Meta.Title, group.Meta.Year)
 	default:
 		if len(group.Episodes) == 1 {
@@ -179,6 +196,8 @@ func BuildServerChannelDiscordContent(groups []ContentGroup, test bool) ([]byte,
 		author := "New episodes available on Silo"
 		if group.Kind == EventKindMovie {
 			author = "New movie available on Silo"
+		} else if group.Kind == EventKindAudiobook {
+			author = "New audiobook available on Silo"
 		} else if len(group.Episodes) == 1 {
 			author = "New episode available on Silo"
 		}
@@ -260,7 +279,7 @@ func BuildServerChannelGenericContent(groups []ContentGroup, channelID string, t
 			LibraryID: group.LibraryID,
 		}
 		switch group.Kind {
-		case EventKindMovie:
+		case EventKindMovie, EventKindAudiobook:
 			row.ItemID = group.ItemID
 			row.Title = group.Meta.Title
 			row.Year = group.Meta.Year

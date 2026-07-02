@@ -154,7 +154,51 @@ func (r *ReleaseRepository) RecordMovieAvailabilityForLibrary(ctx context.Contex
 		WHERE mil.media_folder_id = $1
 		ON CONFLICT (library_id, item_id) DO NOTHING
 		RETURNING item_id, available_at`
-	return r.recordMovieAvailability(ctx, libraryID, emitEvents, query, []any{libraryID})
+	return r.recordItemAvailability(ctx, libraryID, emitEvents, query, []any{libraryID}, EventKindMovie, MovieDedupeKey)
+}
+
+// RecordAudiobookAvailabilityForLibrary inserts availability rows for every
+// audiobook currently in the library (full-library pass) and optionally
+// creates release events for newly inserted rows (issue #270).
+func (r *ReleaseRepository) RecordAudiobookAvailabilityForLibrary(ctx context.Context, libraryID int, emitEvents bool) (int, int, error) {
+	query := `
+		INSERT INTO audiobook_availability (library_id, item_id)
+		SELECT mil.media_folder_id, mi.content_id
+		FROM media_item_libraries mil
+		JOIN media_items mi ON mi.content_id = mil.content_id AND mi.type = 'audiobook'
+		WHERE mil.media_folder_id = $1
+		ON CONFLICT (library_id, item_id) DO NOTHING
+		RETURNING item_id, available_at`
+	return r.recordItemAvailability(ctx, libraryID, emitEvents, query, []any{libraryID}, EventKindAudiobook, AudiobookDedupeKey)
+}
+
+// RecordAudiobookAvailabilityForPaths inserts availability rows for
+// audiobooks whose files live under the given scope paths (subtree ingest),
+// and optionally creates release events for newly inserted rows.
+func (r *ReleaseRepository) RecordAudiobookAvailabilityForPaths(ctx context.Context, libraryID int, scopePaths []string, emitEvents bool) (int, int, error) {
+	if len(scopePaths) == 0 {
+		return 0, 0, nil
+	}
+	args := []any{libraryID}
+	scopeConds := make([]string, 0, len(scopePaths))
+	for _, path := range scopePaths {
+		args = append(args, path)
+		idx := len(args)
+		scopeConds = append(scopeConds,
+			fmt.Sprintf("(mf.file_path = $%d OR starts_with(mf.file_path, $%d || '/'))", idx, idx))
+	}
+	query := `
+		INSERT INTO audiobook_availability (library_id, item_id)
+		SELECT DISTINCT mf.media_folder_id, mi.content_id
+		FROM media_files mf
+		JOIN media_items mi ON mi.content_id = mf.content_id AND mi.type = 'audiobook'
+		WHERE mf.media_folder_id = $1
+		  AND mf.missing_since IS NULL
+		  AND mf.content_id IS NOT NULL
+		  AND (` + strings.Join(scopeConds, " OR ") + `)
+		ON CONFLICT (library_id, item_id) DO NOTHING
+		RETURNING item_id, available_at`
+	return r.recordItemAvailability(ctx, libraryID, emitEvents, query, args, EventKindAudiobook, AudiobookDedupeKey)
 }
 
 // RecordMovieAvailabilityForPaths inserts availability rows for movies whose
@@ -184,38 +228,39 @@ func (r *ReleaseRepository) RecordMovieAvailabilityForPaths(ctx context.Context,
 		  AND (` + strings.Join(scopeConds, " OR ") + `)
 		ON CONFLICT (library_id, item_id) DO NOTHING
 		RETURNING item_id, available_at`
-	return r.recordMovieAvailability(ctx, libraryID, emitEvents, query, args)
+	return r.recordItemAvailability(ctx, libraryID, emitEvents, query, args, EventKindMovie, MovieDedupeKey)
 }
 
-// recordMovieAvailability is the movie counterpart of recordAvailability: insert
-// availability facts and the optional release events in one transaction.
-func (r *ReleaseRepository) recordMovieAvailability(ctx context.Context, libraryID int, emitEvents bool, query string, args []any) (int, int, error) {
+// recordItemAvailability is the item-level counterpart of recordAvailability
+// (movies, audiobooks): insert availability facts and the optional release
+// events of the given kind in one transaction.
+func (r *ReleaseRepository) recordItemAvailability(ctx context.Context, libraryID int, emitEvents bool, query string, args []any, kind string, dedupeKey func(int, string) string) (int, int, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("begin movie availability tx: %w", err)
+		return 0, 0, fmt.Errorf("begin %s availability tx: %w", kind, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return 0, 0, fmt.Errorf("insert movie availability: %w", err)
+		return 0, 0, fmt.Errorf("insert %s availability: %w", kind, err)
 	}
-	type newMovie struct {
+	type newItem struct {
 		ItemID      string
 		AvailableAt time.Time
 	}
-	inserted := make([]newMovie, 0, 16)
+	inserted := make([]newItem, 0, 16)
 	for rows.Next() {
-		var row newMovie
+		var row newItem
 		if err := rows.Scan(&row.ItemID, &row.AvailableAt); err != nil {
 			rows.Close()
-			return 0, 0, fmt.Errorf("scan inserted movie availability: %w", err)
+			return 0, 0, fmt.Errorf("scan inserted %s availability: %w", kind, err)
 		}
 		inserted = append(inserted, row)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("read inserted movie availability: %w", err)
+		return 0, 0, fmt.Errorf("read inserted %s availability: %w", kind, err)
 	}
 
 	events := 0
@@ -241,23 +286,23 @@ func (r *ReleaseRepository) recordMovieAvailability(ctx context.Context, library
 				eventArgs = append(eventArgs,
 					ulid.Make().String(),
 					libraryID,
-					EventKindMovie,
+					kind,
 					row.ItemID,
 					row.AvailableAt,
-					MovieDedupeKey(libraryID, row.ItemID),
+					dedupeKey(libraryID, row.ItemID),
 				)
 			}
 			sb.WriteString(" ON CONFLICT (dedupe_key) DO NOTHING")
 			tag, err := tx.Exec(ctx, sb.String(), eventArgs...)
 			if err != nil {
-				return 0, 0, fmt.Errorf("insert movie release events: %w", err)
+				return 0, 0, fmt.Errorf("insert %s release events: %w", kind, err)
 			}
 			events += int(tag.RowsAffected())
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, fmt.Errorf("commit movie availability tx: %w", err)
+		return 0, 0, fmt.Errorf("commit %s availability tx: %w", kind, err)
 	}
 	return len(inserted), events, nil
 }
@@ -274,6 +319,12 @@ func EpisodeDedupeKey(libraryID int, seriesID string, episodeKey int) string {
 // "movie:" prefix keeps the keyspace disjoint from episode keys.
 func MovieDedupeKey(libraryID int, itemID string) string {
 	return fmt.Sprintf("movie:%d:%s", libraryID, itemID)
+}
+
+// AudiobookDedupeKey composes the release_events dedupe key for an
+// audiobook, disjoint from movie and episode keyspaces.
+func AudiobookDedupeKey(libraryID int, itemID string) string {
+	return fmt.Sprintf("audiobook:%d:%s", libraryID, itemID)
 }
 
 type newAvailability struct {

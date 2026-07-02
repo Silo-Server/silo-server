@@ -466,6 +466,9 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 		{EventKindMovie,
 			`SELECT 1 FROM notification_content_seed_state seed WHERE seed.library_id = mf.id AND seed.kind = 'movie'`,
 			s.Releases.RecordMovieAvailabilityForLibrary},
+		{EventKindAudiobook,
+			`SELECT 1 FROM notification_content_seed_state seed WHERE seed.library_id = mf.id AND seed.kind = 'audiobook'`,
+			s.Releases.RecordAudiobookAvailabilityForLibrary},
 	}
 	for passIdx, pass := range passes {
 		rows, err := s.pool.Query(ctx, `

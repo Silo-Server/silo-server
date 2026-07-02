@@ -257,7 +257,7 @@ func loadContentMeta(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (map
 		}
 	}
 	for _, event := range events {
-		if event.Kind == EventKindMovie {
+		if event.Kind == EventKindMovie || event.Kind == EventKindAudiobook {
 			add(event.ItemID)
 		} else {
 			add(event.SeriesID)

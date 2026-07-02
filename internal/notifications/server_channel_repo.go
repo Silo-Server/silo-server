@@ -22,7 +22,7 @@ func NewServerChannelRepository(pool *pgxpool.Pool) *ServerChannelRepository {
 
 const serverChannelColumns = `
 	id, name, type, url_ciphertext, url_host, signing_secret_ciphertext, enabled,
-	notify_new_movies, notify_new_episodes,
+	notify_new_movies, notify_new_episodes, notify_new_audiobooks,
 	notify_request_submitted, notify_request_approved,
 	notify_request_declined, notify_request_fulfilled,
 	watermark_created_at, watermark_id,
@@ -35,7 +35,7 @@ func scanServerChannel(row pgx.Row) (*ServerChannel, error) {
 	err := row.Scan(
 		&ch.ID, &ch.Name, &ch.Type, &ch.URLCiphertext, &ch.URLHost,
 		&ch.SigningSecretCiphertext, &ch.Enabled,
-		&ch.NotifyNewMovies, &ch.NotifyNewEpisodes,
+		&ch.NotifyNewMovies, &ch.NotifyNewEpisodes, &ch.NotifyNewAudiobooks,
 		&ch.NotifyRequestSubmitted, &ch.NotifyRequestApproved,
 		&ch.NotifyRequestDeclined, &ch.NotifyRequestFulfilled,
 		&ch.WatermarkCreatedAt, &ch.WatermarkID,
@@ -122,13 +122,13 @@ func (r *ServerChannelRepository) InsertWithLimit(ctx context.Context, ch Server
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO notification_server_channels
 			(id, name, type, url_ciphertext, url_host, signing_secret_ciphertext, enabled,
-			 notify_new_movies, notify_new_episodes,
+			 notify_new_movies, notify_new_episodes, notify_new_audiobooks,
 			 notify_request_submitted, notify_request_approved,
 			 notify_request_declined, notify_request_fulfilled,
 			 created_by_user_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		ch.ID, ch.Name, ch.Type, ch.URLCiphertext, ch.URLHost, ch.SigningSecretCiphertext, ch.Enabled,
-		ch.NotifyNewMovies, ch.NotifyNewEpisodes,
+		ch.NotifyNewMovies, ch.NotifyNewEpisodes, ch.NotifyNewAudiobooks,
 		ch.NotifyRequestSubmitted, ch.NotifyRequestApproved,
 		ch.NotifyRequestDeclined, ch.NotifyRequestFulfilled,
 		ch.CreatedByUserID); err != nil {
@@ -153,13 +153,14 @@ func (r *ServerChannelRepository) Update(ctx context.Context, ch ServerChannel) 
 			name = $2, url_ciphertext = $3, url_host = $4,
 			signing_secret_ciphertext = $5, enabled = $6,
 			notify_new_movies = $7, notify_new_episodes = $8,
-			notify_request_submitted = $9, notify_request_approved = $10,
-			notify_request_declined = $11, notify_request_fulfilled = $12,
+			notify_new_audiobooks = $9,
+			notify_request_submitted = $10, notify_request_approved = $11,
+			notify_request_declined = $12, notify_request_fulfilled = $13,
 			updated_at = now()
 		WHERE id = $1`,
 		ch.ID, ch.Name, ch.URLCiphertext, ch.URLHost,
 		ch.SigningSecretCiphertext, ch.Enabled,
-		ch.NotifyNewMovies, ch.NotifyNewEpisodes,
+		ch.NotifyNewMovies, ch.NotifyNewEpisodes, ch.NotifyNewAudiobooks,
 		ch.NotifyRequestSubmitted, ch.NotifyRequestApproved,
 		ch.NotifyRequestDeclined, ch.NotifyRequestFulfilled)
 	if err != nil {
