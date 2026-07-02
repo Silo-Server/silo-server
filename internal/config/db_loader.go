@@ -596,6 +596,17 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Policy.EvalTimeoutMS = policyEvalTimeoutMS
+	cfg.Policy.DecisionLogVerbosity = stringOr(m, "policy.decision_log_verbosity", "digest")
+	policyDecisionLogScopeSampleRate, err := intOr(m, "policy.decision_log_scope_sample_rate", 50)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.DecisionLogScopeSampleRate = policyDecisionLogScopeSampleRate
+	policyDecisionLogRetentionDays, err := intOr(m, "policy.decision_log_retention_days", 14)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.DecisionLogRetentionDays = policyDecisionLogRetentionDays
 
 	return cfg, nil
 }

@@ -16,9 +16,10 @@ const defaultSystemPollInterval = 60 * time.Second
 // System owns the live policy engine, reloads it when policy documents change,
 // and exposes a stable PDP pointer for request-path adapters.
 type System struct {
-	store    *PolicyStore
-	eventBus cache.EventBus
-	logger   *slog.Logger
+	store          *PolicyStore
+	eventBus       cache.EventBus
+	logger         *slog.Logger
+	decisionLogger *DecisionLogger
 
 	pollInterval time.Duration
 	evalTimeout  time.Duration
@@ -51,6 +52,13 @@ func WithSystemEvalTimeout(timeout time.Duration) SystemOption {
 		if timeout > 0 {
 			system.evalTimeout = timeout
 		}
+	}
+}
+
+// WithSystemDecisionLogger configures the async logger used by the PDP.
+func WithSystemDecisionLogger(logger *DecisionLogger) SystemOption {
+	return func(system *System) {
+		system.decisionLogger = logger
 	}
 }
 
@@ -93,9 +101,13 @@ func (s *System) Start(ctx context.Context) error {
 		return errors.New("policy system already started")
 	}
 	s.engine = engine
-	s.pdp = NewPDP(engine)
+	s.pdp = NewPDP(engine, WithDecisionLogger(s.decisionLogger))
 	s.cancel = cancel
 	s.mu.Unlock()
+
+	if s.decisionLogger != nil {
+		s.decisionLogger.Start(runCtx)
+	}
 
 	if s.eventBus != nil {
 		if err := s.eventBus.Subscribe(runCtx, cache.ChannelAdmin, func(event cache.Event) {
@@ -126,6 +138,9 @@ func (s *System) Stop() {
 	if cancel != nil {
 		cancel()
 	}
+	if s.decisionLogger != nil {
+		s.decisionLogger.Stop()
+	}
 	s.Wait()
 }
 
@@ -133,6 +148,9 @@ func (s *System) Stop() {
 func (s *System) Wait() {
 	if s != nil {
 		s.wg.Wait()
+		if s.decisionLogger != nil {
+			s.decisionLogger.Wait()
+		}
 	}
 }
 
@@ -145,6 +163,14 @@ func (s *System) PDP() *PDP {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.pdp
+}
+
+// DecisionLogger returns the async decision logger attached to the System.
+func (s *System) DecisionLogger() *DecisionLogger {
+	if s == nil {
+		return nil
+	}
+	return s.decisionLogger
 }
 
 // SetEvalTimeout hot-updates the per-decision policy evaluation timeout.

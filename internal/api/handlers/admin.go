@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -2129,6 +2130,31 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 				"metadata_ai.on_view must be off, button, or auto")
 			return
 		}
+	case policy.SettingDecisionLogVerbosity:
+		switch strings.TrimSpace(strings.ToLower(req.Value)) {
+		case policy.DecisionLogVerbosityDigest, policy.DecisionLogVerbosityVerbose:
+			req.Value = strings.TrimSpace(strings.ToLower(req.Value))
+		default:
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"policy.decision_log_verbosity must be digest or verbose")
+			return
+		}
+	case policy.SettingDecisionLogScopeSampleRate:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"policy.decision_log_scope_sample_rate must be an integer greater than 0")
+			return
+		}
+		req.Value = strconv.Itoa(n)
+	case policy.SettingDecisionLogRetentionDays:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"policy.decision_log_retention_days must be an integer greater than 0")
+			return
+		}
+		req.Value = strconv.Itoa(n)
 	case "subtitle_ai.transcribe_quota_jobs":
 		if n, err := strconv.Atoi(req.Value); err != nil || n < 0 {
 			writeError(w, http.StatusBadRequest, "bad_request",

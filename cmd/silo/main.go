@@ -1377,11 +1377,19 @@ func main() {
 	}
 
 	if mode == "integrated" || mode == "api" {
+		policyDecisionLogger := policy.NewDecisionLogger(
+			deps.DB,
+			nodeID,
+			policy.WithDecisionLogLogger(slog.Default()),
+		)
+		policyDecisionLogger.SetVerbosity(cfg.Policy.DecisionLogVerbosity)
+		policyDecisionLogger.SetScopeSampleRate(cfg.Policy.DecisionLogScopeSampleRate)
 		policySystem := policy.NewSystem(
 			policy.NewPolicyStore(deps.DB),
 			deps.EventBus,
 			slog.Default(),
 			policy.WithSystemEvalTimeout(time.Duration(cfg.Policy.EvalTimeoutMS)*time.Millisecond),
+			policy.WithSystemDecisionLogger(policyDecisionLogger),
 		)
 		if err := policySystem.Start(appCtx); err != nil {
 			log.Fatalf("policy system start: %v", err)
@@ -1389,8 +1397,12 @@ func main() {
 		deps.PolicySystem = policySystem
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			policySystem.SetEvalTimeout(time.Duration(updated.Policy.EvalTimeoutMS) * time.Millisecond)
+			if logger := policySystem.DecisionLogger(); logger != nil {
+				logger.SetVerbosity(updated.Policy.DecisionLogVerbosity)
+				logger.SetScopeSampleRate(updated.Policy.DecisionLogScopeSampleRate)
+			}
 		})
-		defer policySystem.Wait()
+		defer policySystem.Stop()
 	}
 
 	// User-facing release notifications. The system reads user state through
@@ -1650,6 +1662,12 @@ func main() {
 		// back to the default partition and periodic cleanup retries.
 		slog.Warn("ensure activity log partitions; continuing in degraded mode", "error", err)
 	}
+	policyPM := partman.NewManager(pool, "policy_decisions", partman.Daily, 3)
+	if err := policyPM.EnsureFuturePartitions(appCtx); err != nil {
+		// Non-fatal: decision logs fall back to the default partition and
+		// periodic cleanup retries partition creation.
+		slog.Warn("ensure policy decision log partitions; continuing in degraded mode", "error", err)
+	}
 	var activityWriter activitylog.Writer
 	activityConsumer := activitylog.NewConsumer(pool, nil, logStreamHub)
 
@@ -1753,6 +1771,7 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		taskMgr.Register(tasks.NewPolicyDecisionLogCleanupTask(deps.DB, settingsRepo, policyPM))
 		if deps.FileRepo != nil {
 			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
 			// queue hosted on the task manager. Built here (before Start) and shared

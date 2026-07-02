@@ -161,17 +161,17 @@ func (e *Engine) Evaluate(ctx context.Context, name DecisionName, input any, out
 		Revision:     revision,
 	}
 	if err != nil {
-		return Meta{}, fmt.Errorf("%w: %w", ErrPolicyEvalFailed, err)
+		return meta, fmt.Errorf("%w: %w", ErrPolicyEvalFailed, err)
 	}
 	if len(resultSet) == 0 || len(resultSet[0].Expressions) == 0 {
-		return Meta{}, fmt.Errorf("%w: empty result for %s", ErrPolicyEvalFailed, name)
+		return meta, fmt.Errorf("%w: empty result for %s", ErrPolicyEvalFailed, name)
 	}
 	raw, err := json.Marshal(resultSet[0].Expressions[0].Value)
 	if err != nil {
-		return Meta{}, fmt.Errorf("%w: encoding result for %s: %w", ErrPolicyEvalFailed, name, err)
+		return meta, fmt.Errorf("%w: encoding result for %s: %w", ErrPolicyEvalFailed, name, err)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return Meta{}, fmt.Errorf("%w: decoding result for %s: %w", ErrPolicyEvalFailed, name, err)
+		return meta, fmt.Errorf("%w: decoding result for %s: %w", ErrPolicyEvalFailed, name, err)
 	}
 	return meta, nil
 }
