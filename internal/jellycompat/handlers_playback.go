@@ -110,6 +110,14 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
+// PlaybackSessionSyncer flushes the in-memory native-session snapshot into the
+// shared admin live-session table (playback_sessions_sync). Without it, compat
+// session starts and stops only become visible on the periodic reconciler
+// tick, leaving ghost rows in the activity dashboard for several seconds.
+type PlaybackSessionSyncer interface {
+	SyncNow(ctx context.Context) error
+}
+
 // PlaybackHandler serves Jellyfin playback negotiation endpoints.
 type PlaybackHandler struct {
 	cfg                     *config.Config
@@ -129,10 +137,11 @@ type PlaybackHandler struct {
 	TranscodeDir            string
 	transcodeMu             sync.RWMutex
 	transcodes              map[string]*playback.TranscodeSession
-	SubtitleRepo            subtitles.Repository // optional; enables downloaded subtitles
-	S3Client                subtitles.S3Client   // optional; for serving S3 subtitles
-	S3Bucket                string               // bucket for subtitle storage
-	SettingsRepo            SettingsReader       // optional; reads watched threshold setting
+	SubtitleRepo            subtitles.Repository  // optional; enables downloaded subtitles
+	S3Client                subtitles.S3Client    // optional; for serving S3 subtitles
+	S3Bucket                string                // bucket for subtitle storage
+	SettingsRepo            SettingsReader        // optional; reads watched threshold setting
+	SessionSyncer           PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
 }
 
 // playbackThresholds reads the playback.watched_threshold and
@@ -799,14 +808,14 @@ var losslessPassthroughCodecs = map[string]bool{
 // compatFallbackCodecs are broadly supported audio codecs suitable for
 // software decoding. Lower index = higher preference.
 var compatFallbackCodecRank = map[string]int{
-	"eac3":     1,
-	"ac3":      2,
-	"dts":      3,
-	"aac":      4,
-	"flac":     5,
-	"opus":     6,
-	"vorbis":   7,
-	"mp3":      8,
+	"eac3":      1,
+	"ac3":       2,
+	"dts":       3,
+	"aac":       4,
+	"flac":      5,
+	"opus":      6,
+	"vorbis":    7,
+	"mp3":       8,
 	"pcm_s16le": 9,
 	"pcm_s24le": 10,
 }

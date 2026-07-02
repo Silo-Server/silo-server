@@ -109,6 +109,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.JWTSecret = deps.JWTSecret
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
+	playbackHandler.SessionSyncer = deps.SessionSyncer
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.S3Client = deps.S3Client

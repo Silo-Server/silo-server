@@ -727,7 +727,7 @@ func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *
 		return
 	}
 
-	h.teardownPlaySession(playSession)
+	h.teardownPlaySession(r.Context(), playSession)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -736,7 +736,7 @@ func (h *PlaybackHandler) HandleDeleteActiveEncodings(w http.ResponseWriter, r *
 // play session from the store. Every step is idempotent, so it is safe to call
 // from both the explicit ActiveEncodings teardown and a Stopped playback report
 // (which may race). It is a no-op-safe teardown for an already-gone session.
-func (h *PlaybackHandler) teardownPlaySession(playSession *PlaybackSession) {
+func (h *PlaybackHandler) teardownPlaySession(ctx context.Context, playSession *PlaybackSession) {
 	transcodeNodeURL := ""
 	if h.sessionMgr != nil {
 		if upstreamSession, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
@@ -748,6 +748,21 @@ func (h *PlaybackHandler) teardownPlaySession(playSession *PlaybackSession) {
 		_ = h.sessionMgr.StopSession(playSession.UpstreamSessionID)
 	}
 	h.playbackStore.Delete(playSession.ID)
+	// Clients often drop the connection right after reporting a stop, so detach
+	// the sync from request cancellation to keep the admin view accurate.
+	h.syncSessionsNow(context.WithoutCancel(ctx), "compat_stop")
+}
+
+// syncSessionsNow flushes the native-session snapshot to the shared admin
+// live-session table so compat start/stop events are visible immediately
+// instead of on the next reconciler tick.
+func (h *PlaybackHandler) syncSessionsNow(ctx context.Context, reason string) {
+	if h == nil || h.SessionSyncer == nil {
+		return
+	}
+	if err := h.SessionSyncer.SyncNow(ctx); err != nil {
+		slog.Error("jellycompat: failed to sync sessions", "reason", reason, "error", err)
+	}
 }
 
 func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Request, stop bool) {
@@ -833,7 +848,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if stop {
-		h.teardownPlaySession(playSession)
+		h.teardownPlaySession(r.Context(), playSession)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -904,6 +919,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	if !ok {
 		return nil, ErrSessionNotFound
 	}
+	h.syncSessionsNow(ctx, "compat_start")
 	return updated, nil
 }
 
