@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -31,6 +32,10 @@ func TestHandleListUnmatchedItemsExcludesMangaChapters(t *testing.T) {
 	t.Cleanup(pool.Close)
 
 	suffix := time.Now().UnixNano()
+	// Embed a unique per-run tag in every seeded title and scope the search
+	// query to it, so concurrent or leftover rows in a shared test database
+	// cannot skew the exact-total assertion below.
+	tag := fmt.Sprintf("issue204-%d", suffix)
 	seriesID := fmt.Sprintf("manga-series-%d", suffix)
 	chapterID := fmt.Sprintf("manga-chapter-%d", suffix)
 	pendingID := fmt.Sprintf("pending-ebook-%d", suffix)
@@ -42,9 +47,9 @@ func TestHandleListUnmatchedItemsExcludesMangaChapters(t *testing.T) {
 	for _, row := range []struct {
 		id, typ, title, status string
 	}{
-		{seriesID, "manga", "Unmatched Test Series", "matched"},
-		{chapterID, "ebook", "Unmatched Test Series c001", "pending"},
-		{pendingID, "ebook", "Unmatched Test Plain Ebook", "pending"},
+		{seriesID, "manga", tag + " Series", "matched"},
+		{chapterID, "ebook", tag + " Series c001", "pending"},
+		{pendingID, "ebook", tag + " Plain Ebook", "pending"},
 	} {
 		if _, err := pool.Exec(ctx, `
 			INSERT INTO media_items (content_id, type, title, status, genres)
@@ -61,7 +66,7 @@ func TestHandleListUnmatchedItemsExcludesMangaChapters(t *testing.T) {
 	}
 
 	h := NewLibraryHandler(nil, nil, nil, pool, nil)
-	req := httptest.NewRequest(http.MethodGet, "/libraries/unmatched-items?q=Unmatched+Test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/libraries/unmatched-items?q="+url.QueryEscape(tag), nil)
 	rec := httptest.NewRecorder()
 	h.HandleListUnmatchedItems(rec, req)
 
