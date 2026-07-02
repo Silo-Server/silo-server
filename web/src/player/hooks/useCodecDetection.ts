@@ -185,8 +185,11 @@ export function useCodecDetection() {
     // Detect max resolution via reported screen dimensions.
     const max_resolution = detectMaxResolutionFromScreen(screen.width, screen.height);
 
-    // HDR detection (best effort).
-    const hdr = detectHDRFromMatchMedia(typeof matchMedia !== "undefined" ? matchMedia : undefined);
+    // HDR detection (best effort). Wrap matchMedia so it keeps its Window
+    // receiver — invoking a detached reference throws in some browsers.
+    const hdr = detectHDRFromMatchMedia(
+      typeof matchMedia !== "undefined" ? (query) => matchMedia(query) : undefined,
+    );
 
     return { codecs_video, codecs_audio, containers, max_resolution, hdr };
   }, []);
