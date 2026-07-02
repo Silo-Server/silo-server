@@ -16,6 +16,11 @@ type ModuleSource struct {
 	Source string
 }
 
+// VendorModules returns embedded vendor Rego modules excluding test modules.
+func VendorModules() ([]ModuleSource, error) {
+	return vendorModules(false)
+}
+
 func vendorModules(includeTests bool) ([]ModuleSource, error) {
 	var modules []ModuleSource
 	err := fs.WalkDir(vendorFS, "vendor", func(path string, entry fs.DirEntry, err error) error {

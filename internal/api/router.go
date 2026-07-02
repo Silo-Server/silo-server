@@ -1404,6 +1404,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		downloadHandler = handlers.NewDownloadHandler(nil)
 	}
 
+	var policyHandler *handlers.PolicyHandler
+	if deps.PolicySystem != nil && deps.DB != nil {
+		policyHandler = handlers.NewPolicyHandler(
+			deps.PolicySystem,
+			policy.NewPolicyStore(deps.DB),
+			policy.NewDecisionRepository(deps.DB),
+		)
+	}
+
 	var historyImportHandler *handlers.HistoryImportHandler
 	var historyImportSvc *historyimport.Service
 	if deps.DB != nil {
@@ -2179,6 +2188,9 @@ func NewRouter(deps Dependencies) chi.Router {
 				}
 
 				// Download routes.
+				if policyHandler != nil {
+					r.Get("/policy/capability", policyHandler.HandleCapability)
+				}
 				r.Route("/downloads", func(r chi.Router) {
 					r.Get("/capability", downloadHandler.HandleCapability)
 					r.Post("/", downloadHandler.HandleCreateDownload)
@@ -2314,6 +2326,24 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/stats", adminHandler.HandleGetStats)
 							r.Get("/server/status", adminHandler.HandleGetServerStatus)
 							r.Get("/catalog/search/status", adminHandler.HandleGetCatalogSearchStatus)
+							if policyHandler != nil {
+								r.Route("/policy", func(r chi.Router) {
+									r.Get("/vendor", policyHandler.HandleListVendor)
+									r.Get("/documents", policyHandler.HandleListDocuments)
+									r.Post("/documents", policyHandler.HandleCreateDocument)
+									r.Get("/documents/{id}", policyHandler.HandleGetDocument)
+									r.Delete("/documents/{id}", policyHandler.HandleDeleteDocument)
+									r.Get("/documents/{id}/versions", policyHandler.HandleListVersions)
+									r.Post("/documents/{id}/versions", policyHandler.HandleCreateVersion)
+									r.Get("/documents/{id}/versions/{version}", policyHandler.HandleGetVersion)
+									r.Post("/documents/{id}/versions/{version}/activate", policyHandler.HandleActivateVersion)
+									r.Post("/documents/{id}/enabled", policyHandler.HandleSetDocumentEnabled)
+									r.Post("/validate", policyHandler.HandleValidate)
+									r.Post("/simulate", policyHandler.HandleSimulate)
+									r.Get("/decisions", policyHandler.HandleListDecisions)
+									r.Get("/decisions/{id}", policyHandler.HandleGetDecision)
+								})
+							}
 							if literaryWorkHandler != nil {
 								r.Get("/literary-works/items/{content_id}/candidates", literaryWorkHandler.HandleListCandidates)
 								r.Post("/literary-works/link", literaryWorkHandler.HandleLinkItems)

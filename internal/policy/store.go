@@ -76,6 +76,8 @@ const documentColumns = `id, domain, name, enabled, active_version_id, created_a
 
 const versionColumns = `id, document_id, version_number, rego_source, source_sha256, compiled_ok, compile_error, created_by_user_id, comment, created_at`
 
+const versionMetadataColumns = `id, document_id, version_number, source_sha256, compiled_ok, compile_error, created_by_user_id, comment, created_at`
+
 // ListDocuments returns every policy document ordered by domain and id.
 func (s *PolicyStore) ListDocuments(ctx context.Context) ([]Document, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+documentColumns+` FROM policy_documents ORDER BY domain ASC, id ASC`)
@@ -171,6 +173,50 @@ func (s *PolicyStore) CreateVersion(ctx context.Context, documentID int64, regoS
 
 	if err := tx.Commit(ctx); err != nil {
 		return Version{}, fmt.Errorf("commit create policy version: %w", err)
+	}
+	return version, nil
+}
+
+// ListVersions returns metadata for every immutable version on a document,
+// newest first. Rego source is intentionally omitted for list views.
+func (s *PolicyStore) ListVersions(ctx context.Context, documentID int64) ([]Version, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+versionMetadataColumns+`
+		FROM policy_document_versions
+		WHERE document_id = $1
+		ORDER BY version_number DESC`,
+		documentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list policy versions: %w", err)
+	}
+	defer rows.Close()
+
+	var versions []Version
+	for rows.Next() {
+		version, err := scanVersionMetadata(rows)
+		if err != nil {
+			return nil, err
+		}
+		versions = append(versions, version)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate policy versions: %w", err)
+	}
+	return versions, nil
+}
+
+// GetVersion returns one immutable version, including its Rego source.
+func (s *PolicyStore) GetVersion(ctx context.Context, documentID, versionID int64) (Version, error) {
+	version, err := scanVersion(s.pool.QueryRow(ctx, `
+		SELECT `+versionColumns+`
+		FROM policy_document_versions
+		WHERE document_id = $1 AND id = $2`,
+		documentID,
+		versionID,
+	))
+	if err != nil {
+		return Version{}, err
 	}
 	return version, nil
 }
@@ -374,6 +420,27 @@ func scanVersion(row pgx.Row) (Version, error) {
 			return Version{}, ErrVersionNotFound
 		}
 		return Version{}, fmt.Errorf("scan policy version: %w", err)
+	}
+	return version, nil
+}
+
+func scanVersionMetadata(row pgx.Row) (Version, error) {
+	var version Version
+	if err := row.Scan(
+		&version.ID,
+		&version.DocumentID,
+		&version.VersionNumber,
+		&version.SourceSHA256,
+		&version.CompiledOK,
+		&version.CompileError,
+		&version.CreatedByUserID,
+		&version.Comment,
+		&version.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Version{}, ErrVersionNotFound
+		}
+		return Version{}, fmt.Errorf("scan policy version metadata: %w", err)
 	}
 	return version, nil
 }

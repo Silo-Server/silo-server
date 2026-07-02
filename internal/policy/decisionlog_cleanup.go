@@ -2,8 +2,9 @@ package policy
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -103,7 +104,9 @@ func deleteExpiredDecisionRowsBefore(ctx context.Context, pool *pgxpool.Pool, cu
 }
 
 func parsePositiveInt(s string) int {
-	var v int
-	fmt.Sscanf(s, "%d", &v)
+	v, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0
+	}
 	return v
 }

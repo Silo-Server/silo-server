@@ -173,6 +173,20 @@ func (s *System) DecisionLogger() *DecisionLogger {
 	return s.decisionLogger
 }
 
+// Generation returns the policy generation currently loaded in the live engine.
+func (s *System) Generation() int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	engine := s.engine
+	s.mu.RUnlock()
+	if engine == nil {
+		return 0
+	}
+	return engine.Revision()
+}
+
 // SetEvalTimeout hot-updates the per-decision policy evaluation timeout.
 func (s *System) SetEvalTimeout(timeout time.Duration) {
 	if s == nil || timeout <= 0 {
