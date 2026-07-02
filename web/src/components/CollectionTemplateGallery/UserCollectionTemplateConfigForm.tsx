@@ -5,7 +5,9 @@ import type {
   ImportUserMDBListCollectionRequest,
   ImportUserTMDBCollectionRequest,
   ImportUserTraktCollectionRequest,
+  UserCollectionMediaFilter,
   UserCollectionSyncSchedule,
+  UserCollectionWatchFilter,
 } from "@/api/types";
 import {
   useImportUserMDBListCollection,
@@ -13,6 +15,11 @@ import {
   useImportUserTraktCollection,
 } from "@/hooks/queries/userCollectionImports";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import {
+  COLLECTION_MEDIA_FILTER_OPTIONS,
+  COLLECTION_WATCH_FILTER_OPTIONS,
+  displayFiltersToQueryDefinition,
+} from "@/lib/collectionDisplayFilters";
 import { libraryEligibilityForMediaKind, mediaKindLabel } from "@/lib/collectionTemplates";
 import type { CollectionTemplate } from "@/lib/collectionTemplates";
 import {
@@ -90,6 +97,8 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
   const [isShared, setIsShared] = useState(false);
   const [mdblistUrl, setMdblistUrl] = useState(template.mdblist?.url ?? "");
   const [libraryIds, setLibraryIds] = useState<number[]>([]);
+  const [watchFilter, setWatchFilter] = useState<UserCollectionWatchFilter>("all");
+  const [mediaFilter, setMediaFilter] = useState<UserCollectionMediaFilter>("all");
   const [posterMode, setPosterMode] = useState<TemplatePosterMode>(() =>
     template.poster_path ? "default" : "custom",
   );
@@ -123,6 +132,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           ? customPosterUrl.trim() || undefined
           : template.poster_path || undefined,
       library_ids: libraryIds.length > 0 ? libraryIds : undefined,
+      display_query_definition: displayFiltersToQueryDefinition(watchFilter, mediaFilter),
     };
 
     if (template.source === "tmdb" && template.tmdb) {
@@ -238,6 +248,48 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
           Leave empty to span every library you can see.
         </p>
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="user-template-watch-filter">Watch state</Label>
+          <Select
+            value={watchFilter}
+            onValueChange={(next) => setWatchFilter(next as UserCollectionWatchFilter)}
+          >
+            <SelectTrigger id="user-template-watch-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COLLECTION_WATCH_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="user-template-media-filter">Content</Label>
+          <Select
+            value={mediaFilter}
+            onValueChange={(next) => setMediaFilter(next as UserCollectionMediaFilter)}
+          >
+            <SelectTrigger id="user-template-media-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {COLLECTION_MEDIA_FILTER_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-muted-foreground text-xs">
+        Uses the active profile&rsquo;s watched state. Shared profiles may see different results.
+      </p>
 
       {template.requires_profile ? (
         <p className="text-muted-foreground text-xs">

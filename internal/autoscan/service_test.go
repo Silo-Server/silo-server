@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,38 @@ func (fakeResolver) ResolveMissingSubtree(_ context.Context, subtreePath, trigge
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
 }
 
+type distinctFolderResolver struct{}
+
+func (distinctFolderResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if !strings.HasPrefix(req.Path, "/mnt/media/library-") {
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+	}
+	rest := strings.TrimPrefix(req.Path, "/mnt/media/library-")
+	idPart := rest
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		idPart = rest[:slash]
+	}
+	id, err := strconv.Atoi(idPart)
+	if err != nil {
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+	}
+	return &scantrigger.Target{
+		Folder:  &models.MediaFolder{ID: id},
+		Mode:    scantrigger.ModeFile,
+		Path:    req.Path,
+		Trigger: req.Trigger,
+	}, nil
+}
+
+func (distinctFolderResolver) ResolveMissingSubtree(_ context.Context, subtreePath, trigger string) (*scantrigger.Target, error) {
+	return &scantrigger.Target{
+		Folder:  &models.MediaFolder{ID: 1},
+		Mode:    scantrigger.ModeSubtree,
+		Path:    subtreePath,
+		Trigger: trigger,
+	}, nil
+}
+
 // unresolvableResolver treats every path as outside Silo's media folders,
 // returning a RequestError — the "none resolved → misconfiguration" signal.
 type unresolvableResolver struct{}
@@ -194,16 +227,19 @@ func (denySuppressor) Release(context.Context, string) error { return nil }
 
 type recordingQueuer struct {
 	enqueued       []scantrigger.Target
+	batches        [][]scantrigger.Target
 	autoscanEvents []int64
 	createdCount   *int
 	reusedCount    int
 }
 
 func (q *recordingQueuer) EnqueueScans(_ context.Context, targets []scantrigger.Target) error {
+	q.batches = append(q.batches, append([]scantrigger.Target(nil), targets...))
 	q.enqueued = append(q.enqueued, targets...)
 	return nil
 }
 func (q *recordingQueuer) EnqueueAutoscanScans(_ context.Context, targets []scantrigger.Target, eventID int64) (int, int, error) {
+	q.batches = append(q.batches, append([]scantrigger.Target(nil), targets...))
 	q.enqueued = append(q.enqueued, targets...)
 	q.autoscanEvents = append(q.autoscanEvents, eventID)
 	if q.createdCount != nil {
@@ -449,6 +485,87 @@ func TestPollOnceStructuredSubtreeChangeEnqueuesExactSubtree(t *testing.T) {
 	}
 	if _, ok := store.advanced["s1"]; !ok {
 		t.Fatalf("expected marker advanced for s1")
+	}
+}
+
+func TestPollOnceCollapsesLargeTargetBatchToLibraryScans(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+		}},
+	}
+	changes := make([]Change, 0, maxAutoscanTargetsPerPoll+1)
+	for i := 0; i <= maxAutoscanTargetsPerPoll; i++ {
+		changes = append(changes, Change{
+			SourcePath: "/mnt/media/Show/S01/Episode" + strconv.Itoa(i) + ".mkv",
+			Scope:      ChangeScopeFile,
+		})
+	}
+	prov := &fakeProvider{changes: map[string][]Change{"cephfs": changes}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected one collapsed library scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	target := q.enqueued[0]
+	if target.Folder == nil || target.Folder.ID != 7 || target.Mode != scantrigger.ModeLibrary || target.Path != "" {
+		t.Fatalf("unexpected collapsed target: %+v", target)
+	}
+	if got, ok := store.advanced["s1"]; !ok || got != "m1" {
+		t.Fatalf("marker must advance after collapsed enqueue, got %q ok=%v", got, ok)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.ChangesReturned != maxAutoscanTargetsPerPoll+1 || event.TargetsClaimed != maxAutoscanTargetsPerPoll+1 {
+		t.Fatalf("event should preserve original burst counts, got %+v", event)
+	}
+	if event.ScansCreated != 1 || event.ScansReused != 0 {
+		t.Fatalf("event should record collapsed scan counts, got %+v", event)
+	}
+}
+
+func TestPollOnceChunksCollapsedLibraryScansAtTargetCap(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+		}},
+	}
+	changes := make([]Change, 0, maxAutoscanTargetsPerPoll+1)
+	for i := 0; i <= maxAutoscanTargetsPerPoll; i++ {
+		changes = append(changes, Change{
+			SourcePath: "/mnt/media/library-" + strconv.Itoa(i+1) + "/Episode.mkv",
+			Scope:      ChangeScopeFile,
+		})
+	}
+	prov := &fakeProvider{changes: map[string][]Change{"cephfs": changes}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := NewService(store, prov, passthroughConnRes{}, distinctFolderResolver{}, q, allowSuppressor{}, nil)
+
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != maxAutoscanTargetsPerPoll+1 {
+		t.Fatalf("enqueued scans = %d, want %d", len(q.enqueued), maxAutoscanTargetsPerPoll+1)
+	}
+	if len(q.batches) != 2 {
+		t.Fatalf("queue batches = %d, want 2", len(q.batches))
+	}
+	if len(q.batches[0]) != maxAutoscanTargetsPerPoll {
+		t.Fatalf("first batch size = %d, want %d", len(q.batches[0]), maxAutoscanTargetsPerPoll)
+	}
+	if len(q.batches[1]) != 1 {
+		t.Fatalf("second batch size = %d, want 1", len(q.batches[1]))
+	}
+	if got, ok := store.advanced["s1"]; !ok || got != "m1" {
+		t.Fatalf("marker must advance after all chunks enqueue, got %q ok=%v", got, ok)
 	}
 }
 

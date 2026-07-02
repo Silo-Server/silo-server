@@ -56,14 +56,27 @@ func (h *FilesystemHandler) HandleBrowse(w http.ResponseWriter, r *http.Request)
 
 	result := make([]filesystemBrowseEntry, 0, len(entries))
 	for _, entry := range entries {
+		name := entry.Name()
+		full := filepath.Join(cleaned, name)
+
+		// os.ReadDir reports lstat semantics, so a symlink to a directory has
+		// IsDir() == false. Follow symlink entries with os.Stat and keep them only
+		// when the target is a directory; skip links whose target cannot be stat'd
+		// (broken or looping). Non-symlink, non-directory entries (regular files)
+		// are skipped without the extra stat so large media folders stay fast.
 		if !entry.IsDir() {
-			continue
+			if entry.Type()&os.ModeSymlink == 0 {
+				continue
+			}
+			target, err := os.Stat(full)
+			if err != nil || !target.IsDir() {
+				continue
+			}
 		}
 
-		name := entry.Name()
 		result = append(result, filesystemBrowseEntry{
 			Name: name,
-			Path: filepath.Join(cleaned, name),
+			Path: full,
 		})
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -65,13 +66,14 @@ func (h *UserCollectionImportHandler) HandleListTemplates(w http.ResponseWriter,
 }
 
 type userImportSharedFields struct {
-	Title        string `json:"title"`
-	Description  string `json:"description"`
-	Limit        *int   `json:"limit,omitempty"`
-	SyncSchedule string `json:"sync_schedule"`
-	IsShared     bool   `json:"is_shared"`
-	PosterURL    string `json:"poster_url"`
-	LibraryIDs   []int  `json:"library_ids,omitempty"`
+	Title                  string          `json:"title"`
+	Description            string          `json:"description"`
+	Limit                  *int            `json:"limit,omitempty"`
+	SyncSchedule           string          `json:"sync_schedule"`
+	IsShared               bool            `json:"is_shared"`
+	PosterURL              string          `json:"poster_url"`
+	LibraryIDs             []int           `json:"library_ids,omitempty"`
+	DisplayQueryDefinition json.RawMessage `json:"display_query_definition,omitempty"`
 }
 
 type userImportMDBListRequest struct {
@@ -200,26 +202,35 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	if !validateOptionalLibraryIDs(cfg.LibraryIDs, w) {
+		return
+	}
 
 	sourceConfigJSON, err := usercollections.MarshalSourceConfig(cfg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to encode source config")
 		return
 	}
+	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(shared.DisplayQueryDefinition)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 
 	collection, err := store.CreateCollection(r.Context(), userstore.CreateCollectionInput{
-		CreatorProfileID: profileID,
-		Name:             strings.TrimSpace(shared.Title),
-		Description:      strings.TrimSpace(shared.Description),
-		CollectionType:   collectionType,
-		IsShared:         shared.IsShared,
-		QueryDefinition:  "{}",
-		SortConfig:       "{}",
-		SourceURL:        cfg.DisplayURL(),
-		SourceConfig:     sourceConfigJSON,
-		SyncSchedule:     schedule,
-		NextSyncAt:       usercollections.InitialNextSyncAt(schedule),
-		PosterURL:        strings.TrimSpace(shared.PosterURL),
+		CreatorProfileID:       profileID,
+		Name:                   strings.TrimSpace(shared.Title),
+		Description:            strings.TrimSpace(shared.Description),
+		CollectionType:         collectionType,
+		IsShared:               shared.IsShared,
+		QueryDefinition:        "{}",
+		SortConfig:             "{}",
+		SourceURL:              cfg.DisplayURL(),
+		SourceConfig:           sourceConfigJSON,
+		SyncSchedule:           schedule,
+		NextSyncAt:             usercollections.InitialNextSyncAt(schedule),
+		DisplayQueryDefinition: displayQueryDefinition,
+		PosterURL:              strings.TrimSpace(shared.PosterURL),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create collection")
@@ -422,6 +433,16 @@ func validateOptionalLimit(limit *int, w http.ResponseWriter) bool {
 	if *limit <= 0 || *limit > 200 {
 		writeError(w, http.StatusBadRequest, "bad_request", "limit must be between 1 and 200")
 		return false
+	}
+	return true
+}
+
+func validateOptionalLibraryIDs(libraryIDs []int, w http.ResponseWriter) bool {
+	for _, id := range libraryIDs {
+		if id <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "library_ids must contain positive IDs")
+			return false
+		}
 	}
 	return true
 }

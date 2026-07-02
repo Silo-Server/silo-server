@@ -201,6 +201,10 @@ func (f *fakePluginClient) MetadataProvider(string) (*pluginhost.MetadataProvide
 	return nil, nil
 }
 
+func (f *fakePluginClient) ImageResolver(string) (*pluginhost.ImageResolverClient, error) {
+	return nil, nil
+}
+
 func (f *fakePluginClient) MarkerProvider(string) (*pluginhost.MarkerProviderClient, error) {
 	return nil, nil
 }

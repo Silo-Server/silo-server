@@ -567,6 +567,16 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	m.transcodes[sessionID] = transcodeSession
 	m.transcodeMu.Unlock()
 
+	// Mirror the handler's start path: re-arm the throttler and exit monitor
+	// after every Restart of this reconstructed session, so seek/audio-switch
+	// restarts keep the same wiring as a freshly started transcode.
+	transcodeSession.SetRestartHook(func(ctx context.Context) {
+		if m.StartThrottler != nil {
+			m.StartThrottler(ctx, transcodeSession)
+		}
+		m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
+	})
+
 	if m.StartThrottler != nil {
 		m.StartThrottler(ctx, transcodeSession)
 	}

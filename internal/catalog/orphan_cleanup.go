@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -114,8 +115,8 @@ const orphanedMediaItemSafetyConditions = `NOT EXISTS (
 	WHERE uwl.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
-	SELECT 1 FROM public.watch_provider_favorite_items wpfi
-	WHERE wpfi.media_item_id = mi.content_id
+	SELECT 1 FROM public.watch_provider_list_items wpli
+	WHERE wpli.media_item_id = mi.content_id
   )
   AND NOT EXISTS (
 	SELECT 1 FROM public.watch_provider_history_exports wphe
@@ -142,7 +143,21 @@ const orphanedProvisionalMediaItemConditions = `mi.status IN ('pending', 'unmatc
   AND ` + orphanedMediaItemSafetyConditions
 
 const orphanedProvisionalMediaItemPredicate = `
-WHERE ` + orphanedProvisionalMediaItemConditions
+	WHERE ` + orphanedProvisionalMediaItemConditions
+
+const deleteOrphanedProvisionalBatchSQL = `
+	WITH candidates AS (
+		SELECT mi.content_id
+		FROM public.media_items mi
+		` + orphanedProvisionalMediaItemPredicate + `
+		ORDER BY mi.content_id ASC
+		LIMIT $1
+	)
+	DELETE FROM public.media_items mi
+	USING candidates c
+	WHERE mi.content_id = c.content_id
+	RETURNING mi.content_id
+`
 
 type OrphanedProvisionalCleanupStats struct {
 	Candidates int
@@ -173,28 +188,40 @@ func (c *OrphanedProvisionalCleaner) Cleanup(ctx context.Context, batchSize int)
 	}
 
 	for {
-		tag, err := c.pool.Exec(ctx, `
-			WITH candidates AS (
-				SELECT mi.content_id
-				FROM public.media_items mi
-				`+orphanedProvisionalMediaItemPredicate+`
-				ORDER BY mi.content_id ASC
-				LIMIT $1
-			)
-			DELETE FROM public.media_items mi
-			USING candidates c
-			WHERE mi.content_id = c.content_id
-		`, batchSize)
+		deletedIDs, err := c.cleanupBatch(ctx, batchSize)
 		if err != nil {
 			return stats, fmt.Errorf("deleting orphaned provisional media items: %w", err)
 		}
 
-		deleted := int(tag.RowsAffected())
-		stats.Deleted += deleted
-		if deleted < batchSize {
+		stats.Deleted += len(deletedIDs)
+		if len(deletedIDs) < batchSize {
 			break
 		}
 	}
 
 	return stats, nil
+}
+
+func (c *OrphanedProvisionalCleaner) cleanupBatch(ctx context.Context, batchSize int) ([]string, error) {
+	tx, err := c.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, deleteOrphanedProvisionalBatchSQL, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting deleted orphaned provisional IDs: %w", err)
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return nil, fmt.Errorf("enqueueing catalog search orphaned provisional deletes: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return deletedIDs, nil
 }

@@ -12,10 +12,11 @@ import {
 import { useCollections, useAddItemToCollection } from "@/hooks/queries/collections";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useQueries } from "@tanstack/react-query";
-import { api } from "@/api/client";
-import { libraryCollectionKeys } from "@/hooks/queries/keys";
+import {
+  getLibraryCollectionList,
+  libraryCollectionsQueryOptions,
+} from "@/hooks/queries/libraryCollections";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
-import type { LibraryCollection } from "@/api/types";
 
 interface AddToCollectionDialogProps {
   open: boolean;
@@ -55,12 +56,8 @@ export default function AddToCollectionDialog({
   // manual collections too. Non-admins skip these queries entirely.
   const libraryQueries = useQueries({
     queries: (isAdmin ? (libraries ?? []) : []).map((lib) => ({
-      queryKey: libraryCollectionKeys.list(lib.id),
-      queryFn: () =>
-        api<{ collections: LibraryCollection[] }>(`/library/${lib.id}/collections`).then(
-          (data) => data.collections ?? [],
-        ),
-      enabled: Number.isFinite(lib.id) && lib.id > 0,
+      ...libraryCollectionsQueryOptions(lib.id),
+      select: getLibraryCollectionList,
     })),
   });
   const libraryLoading = isAdmin && libraryQueries.some((q) => q.isLoading);
@@ -76,11 +73,10 @@ export default function AddToCollectionDialog({
       for (let i = 0; i < libraries.length; i++) {
         const lib = libraries[i]!;
         const res = libraryQueries[i];
-        if (res?.data) {
-          for (const c of res.data) {
-            if (c.collection_type === "manual") {
-              out.push({ id: c.id, title: c.title, source: "library", group: lib.name });
-            }
+        const collections = Array.isArray(res?.data) ? res.data : [];
+        for (const c of collections) {
+          if (c.collection_type === "manual") {
+            out.push({ id: c.id, title: c.title, source: "library", group: lib.name });
           }
         }
       }

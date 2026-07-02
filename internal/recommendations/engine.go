@@ -11,6 +11,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+// embedder is the minimal embedding-client seam the Engine depends on. The
+// concrete *embeddings.Client satisfies it; tests substitute a fake so the
+// backfill loop (EmbedAll) and query-vector path can run without a real
+// embedding API.
+type embedder interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
 // Engine implements the Recommender interface.
 type Engine struct {
 	repo          *Repo
@@ -19,7 +27,7 @@ type Engine struct {
 	personRepo    *catalog.PersonRepository
 	storeProvider userstore.UserStoreProvider
 	signals       *SignalReader
-	embClient     *embeddings.Client
+	embClient     embedder
 	cfg           config.RecommendationsConfig
 	pool          *pgxpool.Pool
 }
@@ -52,6 +60,19 @@ func NewEngine(
 		cfg:           cfg,
 		pool:          pool,
 	}
+}
+
+// ActiveEmbeddingModel returns the embedding model currently locked for this
+// installation, or "" when no lock is established.
+func (e *Engine) ActiveEmbeddingModel(ctx context.Context) (string, error) {
+	lock, err := e.repo.GetEmbeddingLock(ctx)
+	if err != nil {
+		return "", err
+	}
+	if lock == nil {
+		return "", nil
+	}
+	return lock.Model, nil
 }
 
 func (e *Engine) watchedItemIDSet(ctx context.Context, userID int, profileID string) (map[string]struct{}, error) {

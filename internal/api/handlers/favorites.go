@@ -25,8 +25,8 @@ type personalDataItemRepository interface {
 	EnsureAccessible(ctx context.Context, contentID string, filter catalog.AccessFilter) error
 }
 
-type LocalFavoriteEventDispatcher interface {
-	HandleLocalFavoriteEvent(ctx context.Context, event watchsync.LocalFavoriteEvent) error
+type LocalListEventDispatcher interface {
+	HandleLocalListEvent(ctx context.Context, event watchsync.LocalListEvent) error
 }
 
 // PersonalDataHandler handles favorites, watchlist, and history endpoints.
@@ -37,7 +37,7 @@ type PersonalDataHandler struct {
 	seasonRepo              *catalog.SeasonRepository
 	detailSvc               *catalog.DetailService
 	EventsHub               *evt.Hub
-	localFavoriteDispatcher LocalFavoriteEventDispatcher
+	localListDispatcher     LocalListEventDispatcher
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
 	ebookProgressStore      EbookReaderProgressLister
@@ -78,8 +78,8 @@ func (h *PersonalDataHandler) SetSeasonRepo(repo *catalog.SeasonRepository) {
 	h.seasonRepo = repo
 }
 
-func (h *PersonalDataHandler) SetLocalFavoriteEventDispatcher(dispatcher LocalFavoriteEventDispatcher) {
-	h.localFavoriteDispatcher = dispatcher
+func (h *PersonalDataHandler) SetLocalListEventDispatcher(dispatcher LocalListEventDispatcher) {
+	h.localListDispatcher = dispatcher
 }
 
 // --- Response types ---
@@ -219,7 +219,7 @@ func (h *PersonalDataHandler) HandleAddFavorite(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	h.dispatchLocalFavoriteEvent(r.Context(), watchsync.LocalFavoriteEventAdded, userID, profileID, itemID)
+	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindFavorites, watchsync.ListChangeAdded, userID, profileID, itemID)
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
 	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite", userStateEventState{
 		IsFavorite: boolPtr(true),
@@ -249,7 +249,7 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 		return
 	}
 
-	h.dispatchLocalFavoriteEvent(r.Context(), watchsync.LocalFavoriteEventRemoved, userID, profileID, itemID)
+	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindFavorites, watchsync.ListChangeRemoved, userID, profileID, itemID)
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
 	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "favorite", userStateEventState{
 		IsFavorite: boolPtr(false),
@@ -257,15 +257,15 @@ func (h *PersonalDataHandler) HandleRemoveFavorite(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *PersonalDataHandler) dispatchLocalFavoriteEvent(ctx context.Context, kind watchsync.LocalFavoriteEventKind, userID int, profileID string, itemID string) {
-	if h == nil || h.localFavoriteDispatcher == nil || h.itemRepo == nil {
+func (h *PersonalDataHandler) dispatchLocalListEvent(ctx context.Context, list watchsync.ListKind, change watchsync.ListChange, userID int, profileID string, itemID string) {
+	if h == nil || h.localListDispatcher == nil || h.itemRepo == nil {
 		return
 	}
 	item, err := h.itemRepo.GetByID(ctx, itemID)
 	if err != nil || item == nil {
 		return
 	}
-	favorite := watchsync.LocalFavorite{
+	listItem := watchsync.LocalFavorite{
 		MediaItemID: item.ContentID,
 		Kind:        item.Type,
 		Title:       item.Title,
@@ -275,11 +275,12 @@ func (h *PersonalDataHandler) dispatchLocalFavoriteEvent(ctx context.Context, ki
 		TVDBID:      item.TvdbID,
 		FavoritedAt: time.Now().UTC(),
 	}
-	_ = h.localFavoriteDispatcher.HandleLocalFavoriteEvent(ctx, watchsync.LocalFavoriteEvent{
-		Kind:      kind,
+	_ = h.localListDispatcher.HandleLocalListEvent(ctx, watchsync.LocalListEvent{
+		List:      list,
+		Change:    change,
 		UserID:    userID,
 		ProfileID: profileID,
-		Favorites: []watchsync.LocalFavorite{favorite},
+		Items:     []watchsync.LocalFavorite{listItem},
 	})
 }
 
@@ -374,6 +375,7 @@ func (h *PersonalDataHandler) HandleAddToWatchlist(w http.ResponseWriter, r *htt
 		return
 	}
 
+	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindWatchlist, watchsync.ListChangeAdded, userID, profileID, itemID)
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
 	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", userStateEventState{
 		InWatchlist: boolPtr(true),
@@ -403,6 +405,7 @@ func (h *PersonalDataHandler) HandleRemoveFromWatchlist(w http.ResponseWriter, r
 		return
 	}
 
+	h.dispatchLocalListEvent(r.Context(), watchsync.ListKindWatchlist, watchsync.ListChangeRemoved, userID, profileID, itemID)
 	triggerProfileRefresh(r.Context(), h.profileStaler, h.profileRefreshRequester, userID, profileID)
 	publishUserStateEvent(r.Context(), h.EventsHub, userID, profileID, itemID, "", "watchlist", userStateEventState{
 		InWatchlist: boolPtr(false),

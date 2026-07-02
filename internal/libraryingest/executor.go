@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -365,11 +366,16 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	// cancellation), and a slow pass must not delay scan completion or the
 	// serialized scan queue.
 	if e.availability != nil {
+		lk := librarykind.Of(folder.Type)
+		// Audiobook/ebook are dedicated library types, never part of "mixed"
+		// (the scanner routes mixed folders through the video pipeline only).
 		kinds := notifications.AvailabilityKinds{
-			Episodes: isTVLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
-			Movies:   isMovieLibraryType(folder.Type) || isMixedLibraryType(folder.Type),
+			Episodes:   lk.TV || lk.Mixed,
+			Movies:     lk.Movie || lk.Mixed,
+			Audiobooks: lk.Audiobook,
+			Ebooks:     lk.Ebook,
 		}
-		if kinds.Episodes || kinds.Movies {
+		if kinds.Any() {
 			go e.availability.HandleIngestCompleted(scanCtx, folder.ID, mode == scopeModeLibrary, matchScopes, kinds)
 		}
 	}
@@ -449,37 +455,13 @@ func scopeMatchPaths(folder *models.MediaFolder, mode scopeMode, scopePath strin
 }
 
 func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult) bool {
-	if folder == nil || (!isTVLibraryType(folder.Type) && !isMixedLibraryType(folder.Type)) {
+	if folder == nil || (!librarykind.IsTV(folder.Type) && !librarykind.IsMixed(folder.Type)) {
 		return false
 	}
 	if scanResult == nil {
 		return false
 	}
 	return scanResult.New > 0 || scanResult.Updated > 0
-}
-
-func isTVLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "series", "tv", "show", "tvshows":
-		return true
-	default:
-		return false
-	}
-}
-
-func isMixedLibraryType(libraryType string) bool {
-	return strings.ToLower(strings.TrimSpace(libraryType)) == "mixed"
-}
-
-// isMovieLibraryType mirrors the scanner's movie library naming
-// (internal/scanner/scanner.go).
-func isMovieLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "movie", "movies":
-		return true
-	default:
-		return false
-	}
 }
 
 func (e *Executor) scan(ctx context.Context, folder *models.MediaFolder, mode scopeMode, scopePath string) ([]string, *scanner.ScanResult, error) {

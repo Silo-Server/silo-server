@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,6 +56,9 @@ func (p *Provider) Capabilities() watchsync.Capabilities {
 		ImportFavorites:  true,
 		ExportFavorites:  true,
 		RemoveFavorites:  true,
+		ImportWatchlist:  true,
+		ExportWatchlist:  true,
+		RemoveWatchlist:  true,
 		ScrobblePlayback: true,
 	}
 }
@@ -317,6 +321,30 @@ func (p *Provider) FetchFavorites(
 	if err := p.do(ctx, http.MethodGet, "/users/me/favorites/shows/added", cfg, conn.AccessToken, nil, &shows); err != nil {
 		return nil, err
 	}
+	return p.remoteListItems(movies, shows), nil
+}
+
+// FetchWatchlist pulls Trakt's watchlist — a distinct list from favorites. The
+// watchlist endpoints return the same item shape, so the mapping is shared.
+func (p *Provider) FetchWatchlist(
+	ctx context.Context,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+) ([]watchsync.RemoteFavorite, error) {
+	var movies []traktFavoriteMovie
+	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/movies", cfg, conn.AccessToken, nil, &movies); err != nil {
+		return nil, err
+	}
+	var shows []traktFavoriteShow
+	if err := p.do(ctx, http.MethodGet, "/sync/watchlist/shows", cfg, conn.AccessToken, nil, &shows); err != nil {
+		return nil, err
+	}
+	return p.remoteListItems(movies, shows), nil
+}
+
+// remoteListItems maps Trakt movie/show list rows (favorites or watchlist) into
+// the kind-neutral RemoteFavorite carrier.
+func (p *Provider) remoteListItems(movies []traktFavoriteMovie, shows []traktFavoriteShow) []watchsync.RemoteFavorite {
 	rows := make([]watchsync.RemoteFavorite, 0, len(movies)+len(shows))
 	for _, item := range movies {
 		rows = append(rows, watchsync.RemoteFavorite{
@@ -344,7 +372,7 @@ func (p *Provider) FetchFavorites(
 			FavoritedAt:     item.ListedAt,
 		})
 	}
-	return rows, nil
+	return rows
 }
 
 func (p *Provider) FetchHistory(
@@ -396,7 +424,7 @@ func (p *Provider) ExportHistory(
 	plays []watchsync.LocalPlay,
 ) (watchsync.ExportResult, error) {
 	payload := buildHistoryPayload(plays)
-	if len(payload.Movies) == 0 && len(payload.Episodes) == 0 {
+	if len(payload.Movies) == 0 && len(payload.Episodes) == 0 && len(payload.Shows) == 0 {
 		return watchsync.ExportResult{}, nil
 	}
 	var body bytes.Buffer
@@ -455,6 +483,48 @@ func (p *Provider) RemoveFavorites(
 	return favoriteExportResult(favorites, response.NotFound), nil
 }
 
+// Trakt's watchlist accepts and returns the same {movies, shows} id payload as
+// favorites, so the payload builder and not-found parser are shared.
+func (p *Provider) ExportWatchlist(
+	ctx context.Context,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	items []watchsync.LocalFavorite,
+) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, "/sync/watchlist", cfg, conn, items)
+}
+
+func (p *Provider) RemoveWatchlist(
+	ctx context.Context,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	items []watchsync.LocalFavorite,
+) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, "/sync/watchlist/remove", cfg, conn, items)
+}
+
+func (p *Provider) sendWatchlist(
+	ctx context.Context,
+	path string,
+	cfg watchsync.ServerConfig,
+	conn watchsync.Connection,
+	items []watchsync.LocalFavorite,
+) (watchsync.ExportResult, error) {
+	payload := buildFavoritesPayload(items)
+	if len(payload.Movies) == 0 && len(payload.Shows) == 0 {
+		return watchsync.ExportResult{}, nil
+	}
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(payload); err != nil {
+		return watchsync.ExportResult{}, fmt.Errorf("encode trakt watchlist payload: %w", err)
+	}
+	var response traktFavoritesResponse
+	if err := p.do(ctx, http.MethodPost, path, cfg, conn.AccessToken, &body, &response); err != nil {
+		return watchsync.ExportResult{}, err
+	}
+	return favoriteExportResult(items, response.NotFound), nil
+}
+
 func (p *Provider) RemoveHistory(
 	ctx context.Context,
 	cfg watchsync.ServerConfig,
@@ -462,7 +532,7 @@ func (p *Provider) RemoveHistory(
 	plays []watchsync.LocalPlay,
 ) (watchsync.ExportResult, error) {
 	payload := buildHistoryRemovePayload(plays)
-	if len(payload.Movies) == 0 && len(payload.Episodes) == 0 {
+	if len(payload.Movies) == 0 && len(payload.Episodes) == 0 && len(payload.Shows) == 0 {
 		return watchsync.ExportResult{}, nil
 	}
 	var body bytes.Buffer
@@ -680,11 +750,13 @@ func episodeKey(showIDs traktIDs, season, episode int, episodeIDs traktIDs) stri
 type traktHistoryPayload struct {
 	Movies   []traktHistoryMovie   `json:"movies,omitempty"`
 	Episodes []traktHistoryEpisode `json:"episodes,omitempty"`
+	Shows    []traktHistoryShow    `json:"shows,omitempty"`
 }
 
 type traktHistoryRemovePayload struct {
 	Movies   []traktHistoryRemoveMovie   `json:"movies,omitempty"`
 	Episodes []traktHistoryRemoveEpisode `json:"episodes,omitempty"`
+	Shows    []traktHistoryRemoveShow    `json:"shows,omitempty"`
 }
 
 type traktFavoritesPayload struct {
@@ -713,23 +785,79 @@ type traktHistoryRemoveMovie struct {
 	IDs traktIDs `json:"ids"`
 }
 
+// traktHistoryEpisode addresses an episode by its OWN episode-level id in the
+// flat episodes[] array. Episodes lacking their own id go through the nested
+// shows[] structure instead (see traktHistoryShow).
 type traktHistoryEpisode struct {
 	WatchedAt string   `json:"watched_at"`
-	IDs       traktIDs `json:"ids,omitempty"`
-	Show      *struct {
-		IDs traktIDs `json:"ids"`
-	} `json:"show,omitempty"`
-	Season int `json:"season"`
-	Number int `json:"number"`
+	IDs       traktIDs `json:"ids"`
 }
 
 type traktHistoryRemoveEpisode struct {
-	IDs  traktIDs `json:"ids,omitempty"`
-	Show *struct {
-		IDs traktIDs `json:"ids"`
-	} `json:"show,omitempty"`
-	Season int `json:"season"`
+	IDs traktIDs `json:"ids"`
+}
+
+// traktHistoryShow is the nested add form: an episode is addressed by
+// show ids -> season number -> episode number, which is the only shape Trakt
+// accepts when the episode itself carries no external id.
+type traktHistoryShow struct {
+	IDs     traktIDs             `json:"ids"`
+	Seasons []traktHistorySeason `json:"seasons"`
+}
+
+type traktHistorySeason struct {
+	Number   int                       `json:"number"`
+	Episodes []traktHistoryShowEpisode `json:"episodes"`
+}
+
+type traktHistoryShowEpisode struct {
+	Number    int    `json:"number"`
+	WatchedAt string `json:"watched_at"`
+}
+
+// traktHistoryRemoveShow mirrors traktHistoryShow for /sync/history/remove,
+// where watched_at is not required.
+type traktHistoryRemoveShow struct {
+	IDs     traktIDs                   `json:"ids"`
+	Seasons []traktHistoryRemoveSeason `json:"seasons"`
+}
+
+type traktHistoryRemoveSeason struct {
+	Number   int                             `json:"number"`
+	Episodes []traktHistoryRemoveShowEpisode `json:"episodes"`
+}
+
+type traktHistoryRemoveShowEpisode struct {
 	Number int `json:"number"`
+}
+
+// playOwnIDs builds the item's OWN external ids (movie or episode level).
+func playOwnIDs(play watchsync.LocalPlay) traktIDs {
+	ids := traktIDs{IMDb: play.IMDbID}
+	if play.TVDBID != "" {
+		ids.TVDB, _ = strconv.Atoi(play.TVDBID)
+	}
+	if play.TMDBID != "" {
+		ids.TMDB, _ = strconv.Atoi(play.TMDBID)
+	}
+	return ids
+}
+
+// playSeriesIDs builds the parent show's external ids, used for the nested
+// shows[] fallback when an episode has no id of its own.
+func playSeriesIDs(play watchsync.LocalPlay) traktIDs {
+	ids := traktIDs{IMDb: play.SeriesIMDbID}
+	if play.SeriesTVDBID != "" {
+		ids.TVDB, _ = strconv.Atoi(play.SeriesTVDBID)
+	}
+	if play.SeriesTMDBID != "" {
+		ids.TMDB, _ = strconv.Atoi(play.SeriesTMDBID)
+	}
+	return ids
+}
+
+func hasAnyID(ids traktIDs) bool {
+	return ids.TVDB != 0 || ids.TMDB != 0 || ids.IMDb != ""
 }
 
 func buildHistoryPayload(plays []watchsync.LocalPlay) traktHistoryPayload {
@@ -738,36 +866,20 @@ func buildHistoryPayload(plays []watchsync.LocalPlay) traktHistoryPayload {
 		watchedAt := play.WatchedAt.UTC().Format(time.RFC3339)
 		switch play.Kind {
 		case historyimport.KindMovie:
-			ids := traktIDs{IMDb: play.IMDbID}
-			if play.TVDBID != "" {
-				ids.TVDB, _ = strconv.Atoi(play.TVDBID)
-			}
-			if play.TMDBID != "" {
-				ids.TMDB, _ = strconv.Atoi(play.TMDBID)
-			}
-			payload.Movies = append(payload.Movies, traktHistoryMovie{WatchedAt: watchedAt, IDs: ids})
+			payload.Movies = append(payload.Movies, traktHistoryMovie{WatchedAt: watchedAt, IDs: playOwnIDs(play)})
 		case historyimport.KindEpisode:
-			ids := traktIDs{IMDb: play.IMDbID}
-			if play.TVDBID != "" {
-				ids.TVDB, _ = strconv.Atoi(play.TVDBID)
+			if ids := playOwnIDs(play); hasAnyID(ids) {
+				payload.Episodes = append(payload.Episodes, traktHistoryEpisode{WatchedAt: watchedAt, IDs: ids})
+				continue
 			}
-			if play.TMDBID != "" {
-				ids.TMDB, _ = strconv.Atoi(play.TMDBID)
-			}
-			row := traktHistoryEpisode{WatchedAt: watchedAt, IDs: ids, Season: play.SeasonNumber, Number: play.EpisodeNumber}
-			if ids.TVDB == 0 && ids.TMDB == 0 && ids.IMDb == "" {
-				showIDs := traktIDs{IMDb: play.SeriesIMDbID}
-				if play.SeriesTVDBID != "" {
-					showIDs.TVDB, _ = strconv.Atoi(play.SeriesTVDBID)
-				}
-				if play.SeriesTMDBID != "" {
-					showIDs.TMDB, _ = strconv.Atoi(play.SeriesTMDBID)
-				}
-				row.Show = &struct {
-					IDs traktIDs `json:"ids"`
-				}{IDs: showIDs}
-			}
-			payload.Episodes = append(payload.Episodes, row)
+			showIDs := playSeriesIDs(play)
+			slog.Debug("trakt history export: episode has no episode ids, using nested show fallback",
+				"show_tmdb", showIDs.TMDB, "show_tvdb", showIDs.TVDB, "show_imdb", showIDs.IMDb,
+				"season", play.SeasonNumber, "number", play.EpisodeNumber)
+			payload.Shows = appendNestedEpisode(payload.Shows, showIDs, play.SeasonNumber, traktHistoryShowEpisode{
+				Number:    play.EpisodeNumber,
+				WatchedAt: watchedAt,
+			})
 		}
 	}
 	return payload
@@ -778,39 +890,79 @@ func buildHistoryRemovePayload(plays []watchsync.LocalPlay) traktHistoryRemovePa
 	for _, play := range plays {
 		switch play.Kind {
 		case historyimport.KindMovie:
-			ids := traktIDs{IMDb: play.IMDbID}
-			if play.TVDBID != "" {
-				ids.TVDB, _ = strconv.Atoi(play.TVDBID)
-			}
-			if play.TMDBID != "" {
-				ids.TMDB, _ = strconv.Atoi(play.TMDBID)
-			}
-			payload.Movies = append(payload.Movies, traktHistoryRemoveMovie{IDs: ids})
+			payload.Movies = append(payload.Movies, traktHistoryRemoveMovie{IDs: playOwnIDs(play)})
 		case historyimport.KindEpisode:
-			ids := traktIDs{IMDb: play.IMDbID}
-			if play.TVDBID != "" {
-				ids.TVDB, _ = strconv.Atoi(play.TVDBID)
+			if ids := playOwnIDs(play); hasAnyID(ids) {
+				payload.Episodes = append(payload.Episodes, traktHistoryRemoveEpisode{IDs: ids})
+				continue
 			}
-			if play.TMDBID != "" {
-				ids.TMDB, _ = strconv.Atoi(play.TMDBID)
-			}
-			row := traktHistoryRemoveEpisode{IDs: ids, Season: play.SeasonNumber, Number: play.EpisodeNumber}
-			if ids.TVDB == 0 && ids.TMDB == 0 && ids.IMDb == "" {
-				showIDs := traktIDs{IMDb: play.SeriesIMDbID}
-				if play.SeriesTVDBID != "" {
-					showIDs.TVDB, _ = strconv.Atoi(play.SeriesTVDBID)
-				}
-				if play.SeriesTMDBID != "" {
-					showIDs.TMDB, _ = strconv.Atoi(play.SeriesTMDBID)
-				}
-				row.Show = &struct {
-					IDs traktIDs `json:"ids"`
-				}{IDs: showIDs}
-			}
-			payload.Episodes = append(payload.Episodes, row)
+			showIDs := playSeriesIDs(play)
+			slog.Debug("trakt history remove: episode has no episode ids, using nested show fallback",
+				"show_tmdb", showIDs.TMDB, "show_tvdb", showIDs.TVDB, "show_imdb", showIDs.IMDb,
+				"season", play.SeasonNumber, "number", play.EpisodeNumber)
+			payload.Shows = appendNestedRemoveEpisode(payload.Shows, showIDs, play.SeasonNumber, traktHistoryRemoveShowEpisode{
+				Number: play.EpisodeNumber,
+			})
 		}
 	}
 	return payload
+}
+
+// appendNestedEpisode inserts an episode under the nested shows[] structure,
+// merging by show ids then by season number so repeated episodes of the same
+// show/season collapse into a single show + season entry.
+func appendNestedEpisode(shows []traktHistoryShow, showIDs traktIDs, season int, episode traktHistoryShowEpisode) []traktHistoryShow {
+	idx := -1
+	for i := range shows {
+		if shows[i].IDs == showIDs {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		shows = append(shows, traktHistoryShow{IDs: showIDs})
+		idx = len(shows) - 1
+	}
+	sIdx := -1
+	for i := range shows[idx].Seasons {
+		if shows[idx].Seasons[i].Number == season {
+			sIdx = i
+			break
+		}
+	}
+	if sIdx == -1 {
+		shows[idx].Seasons = append(shows[idx].Seasons, traktHistorySeason{Number: season})
+		sIdx = len(shows[idx].Seasons) - 1
+	}
+	shows[idx].Seasons[sIdx].Episodes = append(shows[idx].Seasons[sIdx].Episodes, episode)
+	return shows
+}
+
+func appendNestedRemoveEpisode(shows []traktHistoryRemoveShow, showIDs traktIDs, season int, episode traktHistoryRemoveShowEpisode) []traktHistoryRemoveShow {
+	idx := -1
+	for i := range shows {
+		if shows[i].IDs == showIDs {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		shows = append(shows, traktHistoryRemoveShow{IDs: showIDs})
+		idx = len(shows) - 1
+	}
+	sIdx := -1
+	for i := range shows[idx].Seasons {
+		if shows[idx].Seasons[i].Number == season {
+			sIdx = i
+			break
+		}
+	}
+	if sIdx == -1 {
+		shows[idx].Seasons = append(shows[idx].Seasons, traktHistoryRemoveSeason{Number: season})
+		sIdx = len(shows[idx].Seasons) - 1
+	}
+	shows[idx].Seasons[sIdx].Episodes = append(shows[idx].Seasons[sIdx].Episodes, episode)
+	return shows
 }
 
 func buildFavoritesPayload(favorites []watchsync.LocalFavorite) traktFavoritesPayload {

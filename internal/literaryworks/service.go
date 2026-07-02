@@ -139,6 +139,15 @@ func (s *Service) AutoLinkContent(ctx context.Context, contentID string) (string
 	if s == nil || s.repo == nil {
 		return "", false, ErrWorkNotFound
 	}
+	// Cheap guard first: an item already linked to a work needs no candidate
+	// scan. Rescans re-visit every unchanged book, so skipping the expensive
+	// GetMatchItem + ListMatchCandidates path here is what keeps Postgres idle
+	// on steady-state rescans instead of rebuilding lateral aggregates per book.
+	if workID, err := s.repo.GetFirstWorkIDForContentIDs(ctx, []string{contentID}); err != nil {
+		return "", false, err
+	} else if strings.TrimSpace(workID) != "" {
+		return workID, false, nil
+	}
 	source, err := s.repo.GetMatchItem(ctx, contentID)
 	if err != nil {
 		return "", false, err

@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -118,6 +121,55 @@ func TestHandleStream_KeepsSessionWhenLookupFailsForNonMissingReason(t *testing.
 	}
 	if syncer.calls != 0 {
 		t.Fatalf("sync calls = %d, want 0", syncer.calls)
+	}
+}
+
+// TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500 pins the fix for
+// issue #248: a failure listing downloaded subtitles must surface as a 500 with
+// an "internal_error" code, not be swallowed and reported to the client as a
+// generic "Subtitle track not found" 404 (which made a real backing-store
+// failure look like an intermittent client-side subtitle bug).
+func TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500(t *testing.T) {
+	// No external or embedded tracks, so track index 0 falls through to the
+	// downloaded-subtitle branch that queries the repository.
+	file := &models.MediaFile{
+		ID:        42,
+		ContentID: "movie-1",
+		FilePath:  "/tmp/movie.mkv",
+		Duration:  3600,
+	}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	handler.SubtitleRepo = &handlerMockSubtitleRepo{listErr: errors.New("db unavailable")}
+	handler.S3Client = newMockS3ClientForHandler()
+	handler.S3Bucket = "test-bucket"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", session.ID)
+	routeCtx.URLParams.Add("track", "0.vtt")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rr := httptest.NewRecorder()
+	handler.HandleSubtitle(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body: %v (body = %s)", err, rr.Body.String())
+	}
+	if body.Error != "internal_error" {
+		t.Fatalf("error code = %q, want %q (body = %s)", body.Error, "internal_error", rr.Body.String())
 	}
 }
 

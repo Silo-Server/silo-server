@@ -271,8 +271,14 @@ function APIKeyBlock({
 }
 
 interface ConnectedRunInfo {
-  imported: { watched: number; progress: number; favorites: number };
-  exported: { watched: number; favorites: number; favoriteRemovals: number };
+  imported: { watched: number; progress: number; favorites: number; watchlist: number };
+  exported: {
+    watched: number;
+    favorites: number;
+    favoriteRemovals: number;
+    watchlist: number;
+    watchlistRemovals: number;
+  };
   errorMessage?: string;
   errorHint?: string;
 }
@@ -285,11 +291,14 @@ function deriveRunInfo(
     watched: latestRun?.inbound_watched_imported ?? 0,
     progress: latestRun?.inbound_progress_imported ?? 0,
     favorites: latestRun?.inbound_favorites_imported ?? 0,
+    watchlist: latestRun?.inbound_watchlist_imported ?? 0,
   };
   const exported = {
     watched: latestRun?.outbound_sent ?? 0,
     favorites: latestRun?.outbound_favorites_sent ?? 0,
     favoriteRemovals: latestRun?.favorite_removals_sent ?? 0,
+    watchlist: latestRun?.outbound_watchlist_sent ?? 0,
+    watchlistRemovals: latestRun?.watchlist_removals_sent ?? 0,
   };
   let errorMessage: string | undefined;
   let errorHint: string | undefined;
@@ -312,6 +321,7 @@ function formatLastSync(connection: WatchProviderConnection, latestRun?: WatchPr
     connection.last_progress_sync_at,
     connection.last_outbound_sync_at,
     connection.last_favorites_sync_at,
+    connection.last_watchlist_sync_at,
   ].filter((value): value is string => Boolean(value));
   if (candidates.length === 0) return "Never synced";
   const newest = candidates
@@ -373,6 +383,8 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
   const hasError = Boolean(runInfo?.errorMessage);
   const favoritesSyncEnabled =
     connection.import_favorites_enabled || connection.export_favorites_enabled;
+  const watchlistSyncEnabled =
+    connection.import_watchlist_enabled || connection.export_watchlist_enabled;
 
   let statusVariant: StatusVariant;
   let statusLabel: string;
@@ -554,14 +566,14 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
             <div className="grid grid-cols-2 gap-3 sm:hidden">
               <StatCell
                 label="Last imported"
-                value={`${runInfo.imported.watched.toLocaleString()} watched · ${runInfo.imported.progress.toLocaleString()} progress · ${runInfo.imported.favorites.toLocaleString()} favorites`}
+                value={`${runInfo.imported.watched.toLocaleString()} watched · ${runInfo.imported.progress.toLocaleString()} progress · ${runInfo.imported.favorites.toLocaleString()} favorites · ${runInfo.imported.watchlist.toLocaleString()} watchlist`}
               />
               <StatCell
                 label="Last exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals).toLocaleString()} sent`}
               />
             </div>
-            <div className="hidden grid-cols-4 gap-3 sm:grid">
+            <div className="hidden grid-cols-5 gap-3 sm:grid">
               <StatCell
                 label="Watched"
                 value={`${runInfo.imported.watched.toLocaleString()} imported`}
@@ -575,8 +587,12 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
                 value={`${runInfo.imported.favorites.toLocaleString()} imported`}
               />
               <StatCell
+                label="Watchlist"
+                value={`${runInfo.imported.watchlist.toLocaleString()} imported`}
+              />
+              <StatCell
                 label="Exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals).toLocaleString()} sent`}
               />
             </div>
           </div>
@@ -642,6 +658,49 @@ function WatchProviderCard({ providerKey }: { providerKey: string }) {
                 disabled={isBusy || !favoritesSyncEnabled}
                 onChange={(checked) =>
                   updateConnection.mutate({ sync_favorite_removals_enabled: checked })
+                }
+              />
+            ) : null}
+            {connection.capabilities.import_watchlist ||
+            connection.capabilities.export_watchlist ? (
+              <ToggleRow
+                id={`watch-provider-${providerKey}-watchlist`}
+                label="Sync watchlist"
+                description={`Import your ${displayName} watchlist, and send local watchlist adds.`}
+                checked={watchlistSyncEnabled}
+                disabled={isBusy}
+                onChange={(checked) =>
+                  updateConnection.mutate({
+                    import_watchlist_enabled: checked,
+                    export_watchlist_enabled: checked,
+                    sync_watchlist_removals_enabled: checked
+                      ? connection.sync_watchlist_removals_enabled
+                      : false,
+                  })
+                }
+              />
+            ) : null}
+            {connection.capabilities.remove_watchlist ? (
+              <ToggleRow
+                id={`watch-provider-${providerKey}-watchlist-removals`}
+                label="Sync watchlist removals"
+                description="Remove provider-synced watchlist items on the other side when they are removed locally."
+                checked={connection.sync_watchlist_removals_enabled}
+                disabled={isBusy || !watchlistSyncEnabled}
+                onChange={(checked) =>
+                  updateConnection.mutate({ sync_watchlist_removals_enabled: checked })
+                }
+              />
+            ) : null}
+            {connection.capabilities.provides_watchlist_order ? (
+              <ToggleRow
+                id={`watch-provider-${providerKey}-watchlist-order`}
+                label="Mirror watchlist order"
+                description={`Order your Silo watchlist to match its ${displayName} sort order. Items not on ${displayName} stay at the bottom.`}
+                checked={connection.sync_watchlist_order_enabled}
+                disabled={isBusy || !connection.import_watchlist_enabled}
+                onChange={(checked) =>
+                  updateConnection.mutate({ sync_watchlist_order_enabled: checked })
                 }
               />
             ) : null}

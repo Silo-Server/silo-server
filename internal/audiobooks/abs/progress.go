@@ -376,6 +376,7 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 				"session_id", sid, "content_id", sess.ContentID, "error", err)
 		}
 	}
+	h.updateNativePlaybackProgress(r.Context(), sid, p.CurrentTime)
 
 	// Realtime push to other connected clients.
 	h.publish(a.UserID, "user_item_progress_updated", map[string]any{
@@ -421,6 +422,7 @@ func (h *Handler) handleSessionClose(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	h.stopNativePlaybackSession(r.Context(), sid)
 
 	h.publish(a.UserID, "user_session_closed", map[string]any{
 		"id":            sid,

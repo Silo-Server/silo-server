@@ -15,6 +15,8 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"golang.org/x/sync/singleflight"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -33,12 +35,36 @@ type expiringPluginImageResolverSource interface {
 	ResolveImageURLsWithExpiry(ctx context.Context, paths []string, variant string) (map[string]catalog.ResolvedImageURL, error)
 }
 
+type PluginImageResolverSourceKind string
+
+const (
+	PluginImageResolverSourceExplicit PluginImageResolverSourceKind = "explicit"
+	PluginImageResolverSourceLegacy   PluginImageResolverSourceKind = "legacy"
+)
+
+type PluginImageResolverSourceRegistration struct {
+	Scheme         string
+	Source         PluginImageResolverSource
+	Kind           PluginImageResolverSourceKind
+	Priority       int
+	InstallationID int
+	CapabilityID   string
+}
+
+type pluginImageResolverSourceEntry struct {
+	source         PluginImageResolverSource
+	kind           PluginImageResolverSourceKind
+	priority       int
+	installationID int
+	capabilityID   string
+}
+
 // PluginImageResolver resolves plugin-prefixed image paths (e.g., "metadb://images/abc/original.jpg")
 // by parsing the prefix, routing to the correct plugin, and returning resolved URLs.
 // It implements catalog.ImageResolver and the catalog expiry-aware resolver extension.
 type PluginImageResolver struct {
 	mu           sync.RWMutex
-	sources      map[string]PluginImageResolverSource
+	sources      map[string][]pluginImageResolverSourceEntry
 	s3Presigner  s3ImagePresigner
 	s3PresignTTL time.Duration
 	urlCache     *cache.TTLCache[catalog.ResolvedImageURL]
@@ -48,7 +74,7 @@ type PluginImageResolver struct {
 // NewPluginImageResolver creates a new resolver with no registered sources.
 func NewPluginImageResolver() *PluginImageResolver {
 	return &PluginImageResolver{
-		sources:      make(map[string]PluginImageResolverSource),
+		sources:      make(map[string][]pluginImageResolverSourceEntry),
 		s3PresignTTL: 15 * time.Minute,
 		urlCache:     cache.NewTTLCache[catalog.ResolvedImageURL](),
 	}
@@ -62,9 +88,53 @@ type s3ImagePresigner interface {
 // RegisterSource registers a plugin provider as a source for resolving images
 // with the given plugin ID prefix.
 func (r *PluginImageResolver) RegisterSource(pluginID string, source PluginImageResolverSource) {
+	if source == nil || !ValidImageResolverScheme(pluginID) {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.sources[pluginID] = source
+	r.sources[pluginID] = append(r.sources[pluginID], pluginImageResolverSourceEntry{
+		source: source,
+		kind:   PluginImageResolverSourceLegacy,
+	})
+	sortImageResolverSources(r.sources[pluginID])
+	r.urlCache.InvalidatePrefix("")
+}
+
+func (r *PluginImageResolver) ReplaceSources(registrations []PluginImageResolverSourceRegistration) {
+	sources := make(map[string][]pluginImageResolverSourceEntry)
+	for _, registration := range registrations {
+		scheme := strings.TrimSpace(registration.Scheme)
+		if registration.Source == nil || !ValidImageResolverScheme(scheme) {
+			continue
+		}
+		kind := registration.Kind
+		if kind == "" {
+			kind = PluginImageResolverSourceLegacy
+		}
+		sources[scheme] = append(sources[scheme], pluginImageResolverSourceEntry{
+			source:         registration.Source,
+			kind:           kind,
+			priority:       registration.Priority,
+			installationID: registration.InstallationID,
+			capabilityID:   registration.CapabilityID,
+		})
+	}
+	for scheme := range sources {
+		sortImageResolverSources(sources[scheme])
+	}
+
+	r.mu.Lock()
+	r.sources = sources
+	r.mu.Unlock()
+	r.urlCache.InvalidatePrefix("")
+}
+
+func ValidImageResolverScheme(scheme string) bool {
+	return scheme != "" &&
+		scheme == strings.TrimSpace(scheme) &&
+		scheme == strings.ToLower(scheme) &&
+		!strings.Contains(scheme, "://")
 }
 
 func (r *PluginImageResolver) SetS3Presigner(presigner s3ImagePresigner, ttl time.Duration) {
@@ -143,13 +213,13 @@ func (r *PluginImageResolver) ResolveImageURLsWithExpiry(ctx context.Context, pa
 	r.mu.RLock()
 	presigner := r.s3Presigner
 	s3TTL := r.s3PresignTTL
-	sourcesSnapshot := make(map[string]PluginImageResolverSource, len(grouped))
+	sourcesSnapshot := make(map[string][]pluginImageResolverSourceEntry, len(grouped))
 	for pluginID := range grouped {
 		if pluginID == "" {
 			continue
 		}
-		if source, ok := r.sources[pluginID]; ok {
-			sourcesSnapshot[pluginID] = source
+		if sources, ok := r.sources[pluginID]; ok {
+			sourcesSnapshot[pluginID] = append([]pluginImageResolverSourceEntry(nil), sources...)
 		}
 	}
 	r.mu.RUnlock()
@@ -161,12 +231,12 @@ func (r *PluginImageResolver) ResolveImageURLsWithExpiry(ctx context.Context, pa
 			if pluginID == "" {
 				return r.resolveS3Batch(ctx, presigner, s3TTL, entries), nil
 			}
-			source, ok := sourcesSnapshot[pluginID]
-			if !ok {
-				slog.Warn("no image resolver registered for plugin", "plugin_id", pluginID)
+			sources := sourcesSnapshot[pluginID]
+			if len(sources) == 0 {
+				slog.Warn("no image resolver registered for scheme", "scheme", pluginID)
 				return map[string]catalog.ResolvedImageURL{}, nil
 			}
-			return r.resolvePluginBatch(ctx, pluginID, source, entries, variant), nil
+			return r.resolvePluginBatchWithFallback(ctx, pluginID, sources, entries, variant), nil
 		})
 		if err != nil {
 			slog.Error("image batch resolution failed", "plugin_id", pluginID, "error", err)
@@ -187,6 +257,53 @@ func (r *PluginImageResolver) ResolveImageURLsWithExpiry(ctx context.Context, pa
 	}
 
 	return result
+}
+
+func (r *PluginImageResolver) resolvePluginBatchWithFallback(
+	ctx context.Context,
+	pluginID string,
+	sources []pluginImageResolverSourceEntry,
+	entries []resolveEntry,
+	variant string,
+) map[string]catalog.ResolvedImageURL {
+	resolved := make(map[string]catalog.ResolvedImageURL, len(entries))
+	remaining := append([]resolveEntry(nil), entries...)
+
+	for _, source := range sources {
+		if len(remaining) == 0 {
+			break
+		}
+		resolvedBatch, err := r.resolvePluginBatch(ctx, source.source, remaining, variant)
+		if err != nil {
+			if status.Code(err) == codes.Unimplemented {
+				slog.Debug("plugin image resolver source does not implement image resolution",
+					"scheme", pluginID,
+					"source_kind", source.kind,
+					"installation_id", source.installationID,
+					"capability_id", source.capabilityID)
+				continue
+			}
+			slog.Error("plugin batch image resolution failed",
+				"scheme", pluginID,
+				"source_kind", source.kind,
+				"installation_id", source.installationID,
+				"capability_id", source.capabilityID,
+				"error", err)
+			continue
+		}
+
+		nextRemaining := remaining[:0]
+		for _, entry := range remaining {
+			if value, ok := resolvedBatch[entry.originalPath]; ok && value.URL != "" {
+				resolved[entry.originalPath] = value
+				continue
+			}
+			nextRemaining = append(nextRemaining, entry)
+		}
+		remaining = nextRemaining
+	}
+
+	return resolved
 }
 
 func (r *PluginImageResolver) resolveS3Batch(
@@ -214,11 +331,10 @@ func (r *PluginImageResolver) resolveS3Batch(
 
 func (r *PluginImageResolver) resolvePluginBatch(
 	ctx context.Context,
-	pluginID string,
 	source PluginImageResolverSource,
 	entries []resolveEntry,
 	variant string,
-) map[string]catalog.ResolvedImageURL {
+) (map[string]catalog.ResolvedImageURL, error) {
 	barePaths := make([]string, len(entries))
 	for i, entry := range entries {
 		barePaths[i] = entry.barePath
@@ -239,8 +355,7 @@ func (r *PluginImageResolver) resolvePluginBatch(
 		}
 	}
 	if err != nil {
-		slog.Error("plugin batch image resolution failed", "plugin_id", pluginID, "error", err)
-		return map[string]catalog.ResolvedImageURL{}
+		return nil, err
 	}
 
 	resolved := make(map[string]catalog.ResolvedImageURL, len(entries))
@@ -249,7 +364,7 @@ func (r *PluginImageResolver) resolvePluginBatch(
 			resolved[entry.originalPath] = value
 		}
 	}
-	return resolved
+	return resolved, nil
 }
 
 type resolveEntry struct {
@@ -266,6 +381,28 @@ func sortedResolveEntries(entriesByOriginal map[string]resolveEntry) []resolveEn
 		return entries[i].originalPath < entries[j].originalPath
 	})
 	return entries
+}
+
+func sortImageResolverSources(sources []pluginImageResolverSourceEntry) {
+	sort.SliceStable(sources, func(i, j int) bool {
+		if sourceKindRank(sources[i].kind) != sourceKindRank(sources[j].kind) {
+			return sourceKindRank(sources[i].kind) < sourceKindRank(sources[j].kind)
+		}
+		if sources[i].priority != sources[j].priority {
+			return sources[i].priority > sources[j].priority
+		}
+		if sources[i].installationID != sources[j].installationID {
+			return sources[i].installationID < sources[j].installationID
+		}
+		return sources[i].capabilityID < sources[j].capabilityID
+	})
+}
+
+func sourceKindRank(kind PluginImageResolverSourceKind) int {
+	if kind == PluginImageResolverSourceExplicit {
+		return 0
+	}
+	return 1
 }
 
 func resolvedImageCacheKey(variant, path string) string {

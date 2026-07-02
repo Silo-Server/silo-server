@@ -340,7 +340,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                     />
                   </FieldRow>
 
-                  {(item.type === "movie" || item.type === "series") && (
+                  {["movie", "series", "season", "episode"].includes(item.type) && (
                     <MetadataTranslatePanel item={item} />
                   )}
 

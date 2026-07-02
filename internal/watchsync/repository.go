@@ -29,23 +29,57 @@ type Repository interface {
 	GetActiveSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
 	ListSyncRuns(ctx context.Context, connectionID string, limit int) ([]SyncRun, error)
 	ListLocalWatchEventConnections(ctx context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error)
-	ListFavoriteEventConnections(ctx context.Context, userID int, profileID string, kind LocalFavoriteEventKind) ([]Connection, error)
+	ListListEventConnections(ctx context.Context, userID int, profileID string, list ListKind) ([]Connection, error)
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
 	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
-	UpsertFavoriteStates(ctx context.Context, states []FavoriteState) error
-	ListFavoriteStates(ctx context.Context, connectionID string) ([]FavoriteState, error)
-	ListPendingFavoriteExports(ctx context.Context, connectionID string, limit int) ([]FavoriteState, error)
-	ListPendingFavoriteRemovals(ctx context.Context, connectionID string, limit int) ([]FavoriteState, error)
-	MarkFavoriteExported(ctx context.Context, connectionID, mediaItemID string, exportedAt time.Time) error
-	MarkFavoriteRemoteRemoved(ctx context.Context, connectionID, mediaItemID string, removedAt time.Time) error
-	MarkFavoriteLocalRemoved(ctx context.Context, connectionID, mediaItemID string, removedAt time.Time) error
-	MarkFavoriteError(ctx context.Context, connectionID, mediaItemID, lastError string) error
+	UpsertListItemStates(ctx context.Context, states []ListItemState) error
+	ListListItemStates(ctx context.Context, connectionID string, kind ListKind) ([]ListItemState, error)
+	ListPendingListItemExports(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
+	ListPendingListItemRemovals(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
+	MarkListItemExported(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error
+	MarkListItemRemoteRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
+	MarkListItemLocalRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error
+	MarkListItemError(ctx context.Context, connectionID string, kind ListKind, mediaItemID, lastError string) error
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	UpsertScrobbleSession(ctx context.Context, event ScrobbleEvent, connectionID string, action string) error
 	UpdateScrobbleSession(ctx context.Context, playbackSessionID string, connectionID string, action string, progress float64, historyID string, lastError string, stopSentAt *time.Time) error
 	ListOpenScrobbleSessions(ctx context.Context) ([]ScrobbleSession, error)
 }
+
+// connectionColumns is the canonical select/returning column list for
+// watch_provider_connections, in the exact order scanConnection reads. Sharing
+// it across every read query keeps the column set and scan order in lockstep.
+const connectionColumns = `
+	id::text, provider, user_id, profile_id, provider_account_id, provider_username,
+	access_token, refresh_token, token_expires_at, import_watched_enabled,
+	import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
+	import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
+	import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
+	sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at,
+	last_progress_sync_at, last_outbound_sync_at, last_favorites_sync_at,
+	last_watchlist_sync_at, last_scrobble_error_at, last_error,
+	sync_cursors, created_at, updated_at`
+
+// syncRunColumns is the canonical select/returning column list for
+// watch_provider_sync_runs, in the exact order scanSyncRun reads.
+const syncRunColumns = `
+	id::text, connection_id::text, trigger, status, provider,
+	inbound_watched_found, inbound_watched_imported,
+	inbound_progress_found, inbound_progress_imported,
+	outbound_found, outbound_sent, inbound_favorites_found,
+	inbound_favorites_imported, outbound_favorites_found,
+	outbound_favorites_sent, favorite_removals_sent,
+	inbound_watchlist_found, inbound_watchlist_imported,
+	outbound_watchlist_found, outbound_watchlist_sent, watchlist_removals_sent,
+	warning, error, started_at, completed_at, created_at`
+
+// listItemStateColumns is the canonical select column list for
+// watch_provider_list_items, in the exact order scanListItemStates reads.
+const listItemStateColumns = `
+	id::text, connection_id::text, list_kind, media_item_id, provider_item_key, kind, title, year,
+	remote_present, local_present, last_seen_remote_at, last_seen_local_at,
+	last_exported_at, last_removed_remote_at, last_removed_local_at, last_error, created_at, updated_at`
 
 type PostgresRepository struct {
 	pool   *pgxpool.Pool
@@ -161,13 +195,15 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			access_token, refresh_token, token_expires_at, import_watched_enabled,
 			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
 			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors
+			import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
+			sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at, last_progress_sync_at,
+			last_outbound_sync_at, last_favorites_sync_at, last_watchlist_sync_at, last_scrobble_error_at,
+			last_error, sync_cursors
 		)
 		VALUES (
 			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),
 			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-			$14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24::jsonb
+			$14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29::jsonb
 		)
 		ON CONFLICT (provider, user_id, profile_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
@@ -182,22 +218,21 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			import_favorites_enabled = EXCLUDED.import_favorites_enabled,
 			export_favorites_enabled = EXCLUDED.export_favorites_enabled,
 			sync_favorite_removals_enabled = EXCLUDED.sync_favorite_removals_enabled,
+			import_watchlist_enabled = EXCLUDED.import_watchlist_enabled,
+			export_watchlist_enabled = EXCLUDED.export_watchlist_enabled,
+			sync_watchlist_removals_enabled = EXCLUDED.sync_watchlist_removals_enabled,
+			sync_watchlist_order_enabled = EXCLUDED.sync_watchlist_order_enabled,
 			scrobble_enabled = EXCLUDED.scrobble_enabled,
 			last_inbound_sync_at = EXCLUDED.last_inbound_sync_at,
 			last_progress_sync_at = EXCLUDED.last_progress_sync_at,
 			last_outbound_sync_at = EXCLUDED.last_outbound_sync_at,
 			last_favorites_sync_at = EXCLUDED.last_favorites_sync_at,
+			last_watchlist_sync_at = EXCLUDED.last_watchlist_sync_at,
 			last_scrobble_error_at = EXCLUDED.last_scrobble_error_at,
 			last_error = EXCLUDED.last_error,
 			sync_cursors = EXCLUDED.sync_cursors,
 			updated_at = now()
-		RETURNING
-			id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
-			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
-			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors, created_at, updated_at
+		RETURNING `+connectionColumns+`
 	`,
 		conn.ID,
 		conn.Provider,
@@ -215,11 +250,16 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		conn.ImportFavoritesEnabled,
 		conn.ExportFavoritesEnabled,
 		conn.SyncFavoriteRemovalsEnabled,
+		conn.ImportWatchlistEnabled,
+		conn.ExportWatchlistEnabled,
+		conn.SyncWatchlistRemovalsEnabled,
+		conn.SyncWatchlistOrderEnabled,
 		conn.ScrobbleEnabled,
 		conn.LastInboundSyncAt,
 		conn.LastProgressSyncAt,
 		conn.LastOutboundSyncAt,
 		conn.LastFavoritesSyncAt,
+		conn.LastWatchlistSyncAt,
 		conn.LastScrobbleErrorAt,
 		conn.LastError,
 		encodeSyncCursors(conn.SyncCursors),
@@ -238,13 +278,7 @@ func (r *PostgresRepository) GetConnection(
 	profileID string,
 ) (Connection, bool, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT
-			id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
-			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
-			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors, created_at, updated_at
+		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE provider = $1 AND user_id = $2 AND profile_id = $3
 	`, provider, userID, profileID)
@@ -260,13 +294,7 @@ func (r *PostgresRepository) GetConnection(
 
 func (r *PostgresRepository) GetConnectionByID(ctx context.Context, id string) (Connection, bool, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT
-			id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
-			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
-			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors, created_at, updated_at
+		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE id = $1::uuid
 	`, id)
@@ -301,13 +329,7 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 	_ time.Time,
 ) ([]Connection, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT
-			id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
-			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
-			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors, created_at, updated_at
+		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE provider <> ''
 			AND (
@@ -318,6 +340,9 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				OR import_favorites_enabled
 				OR export_favorites_enabled
 				OR sync_favorite_removals_enabled
+				OR import_watchlist_enabled
+				OR export_watchlist_enabled
+				OR sync_watchlist_removals_enabled
 				OR scrobble_enabled
 			)
 		ORDER BY provider, user_id, profile_id
@@ -356,26 +381,25 @@ func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (Sy
 			outbound_found, outbound_sent, inbound_favorites_found,
 			inbound_favorites_imported, outbound_favorites_found,
 			outbound_favorites_sent, favorite_removals_sent,
+			inbound_watchlist_found, inbound_watchlist_imported,
+			outbound_watchlist_found, outbound_watchlist_sent, watchlist_removals_sent,
 			warning, error, started_at, completed_at
 		)
 		VALUES (
 			$1::uuid, $2, $3, $4,
-			$5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+			$5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+			$16, $17, $18, $19, $20, $21, $22, $23, $24
 		)
-		RETURNING id::text, connection_id::text, trigger, status, provider,
-			inbound_watched_found, inbound_watched_imported,
-			inbound_progress_found, inbound_progress_imported,
-			outbound_found, outbound_sent, inbound_favorites_found,
-			inbound_favorites_imported, outbound_favorites_found,
-			outbound_favorites_sent, favorite_removals_sent,
-			warning, error, started_at, completed_at, created_at
+		RETURNING `+syncRunColumns+`
 	`, run.ConnectionID, run.Trigger, run.Status, run.Provider,
 		run.InboundWatchedFound, run.InboundWatchedImported,
 		run.InboundProgressFound, run.InboundProgressImported,
 		run.OutboundFound, run.OutboundSent, run.InboundFavoritesFound,
 		run.InboundFavoritesImported, run.OutboundFavoritesFound,
-		run.OutboundFavoritesSent, run.FavoriteRemovalsSent, run.Warning, run.Error,
-		run.StartedAt, run.CompletedAt)
+		run.OutboundFavoritesSent, run.FavoriteRemovalsSent,
+		run.InboundWatchlistFound, run.InboundWatchlistImported,
+		run.OutboundWatchlistFound, run.OutboundWatchlistSent, run.WatchlistRemovalsSent,
+		run.Warning, run.Error, run.StartedAt, run.CompletedAt)
 	created, err := scanSyncRun(row)
 	if err != nil {
 		return SyncRun{}, fmt.Errorf("scan created watch provider sync run: %w", err)
@@ -398,21 +422,23 @@ func (r *PostgresRepository) CompleteSyncRun(ctx context.Context, run SyncRun) (
 			outbound_favorites_found = $11,
 			outbound_favorites_sent = $12,
 			favorite_removals_sent = $13,
-			warning = $14,
-			error = $15,
-			completed_at = $16
+			inbound_watchlist_found = $14,
+			inbound_watchlist_imported = $15,
+			outbound_watchlist_found = $16,
+			outbound_watchlist_sent = $17,
+			watchlist_removals_sent = $18,
+			warning = $19,
+			error = $20,
+			completed_at = $21
 		WHERE id = $1::uuid
-		RETURNING id::text, connection_id::text, trigger, status, provider,
-			inbound_watched_found, inbound_watched_imported,
-			inbound_progress_found, inbound_progress_imported,
-			outbound_found, outbound_sent, inbound_favorites_found,
-			inbound_favorites_imported, outbound_favorites_found,
-			outbound_favorites_sent, favorite_removals_sent,
-			warning, error, started_at, completed_at, created_at
+		RETURNING `+syncRunColumns+`
 	`, run.ID, run.Status, run.InboundWatchedFound, run.InboundWatchedImported,
 		run.InboundProgressFound, run.InboundProgressImported, run.OutboundFound, run.OutboundSent,
 		run.InboundFavoritesFound, run.InboundFavoritesImported, run.OutboundFavoritesFound,
-		run.OutboundFavoritesSent, run.FavoriteRemovalsSent, run.Warning, run.Error, run.CompletedAt)
+		run.OutboundFavoritesSent, run.FavoriteRemovalsSent,
+		run.InboundWatchlistFound, run.InboundWatchlistImported, run.OutboundWatchlistFound,
+		run.OutboundWatchlistSent, run.WatchlistRemovalsSent,
+		run.Warning, run.Error, run.CompletedAt)
 	completed, err := scanSyncRun(row)
 	if err != nil {
 		return SyncRun{}, fmt.Errorf("complete watch provider sync run: %w", err)
@@ -422,13 +448,7 @@ func (r *PostgresRepository) CompleteSyncRun(ctx context.Context, run SyncRun) (
 
 func (r *PostgresRepository) GetLatestSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, connection_id::text, trigger, status, provider,
-			inbound_watched_found, inbound_watched_imported,
-			inbound_progress_found, inbound_progress_imported,
-			outbound_found, outbound_sent, inbound_favorites_found,
-			inbound_favorites_imported, outbound_favorites_found,
-			outbound_favorites_sent, favorite_removals_sent,
-			warning, error, started_at, completed_at, created_at
+		SELECT `+syncRunColumns+`
 		FROM watch_provider_sync_runs
 		WHERE connection_id = $1::uuid
 		ORDER BY started_at DESC, created_at DESC
@@ -446,13 +466,7 @@ func (r *PostgresRepository) GetLatestSyncRun(ctx context.Context, connectionID 
 
 func (r *PostgresRepository) GetActiveSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id::text, connection_id::text, trigger, status, provider,
-			inbound_watched_found, inbound_watched_imported,
-			inbound_progress_found, inbound_progress_imported,
-			outbound_found, outbound_sent, inbound_favorites_found,
-			inbound_favorites_imported, outbound_favorites_found,
-			outbound_favorites_sent, favorite_removals_sent,
-			warning, error, started_at, completed_at, created_at
+		SELECT `+syncRunColumns+`
 		FROM watch_provider_sync_runs
 		WHERE connection_id = $1::uuid
 		  AND status IN ('queued', 'running')
@@ -474,13 +488,7 @@ func (r *PostgresRepository) ListSyncRuns(ctx context.Context, connectionID stri
 		limit = 10
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, connection_id::text, trigger, status, provider,
-			inbound_watched_found, inbound_watched_imported,
-			inbound_progress_found, inbound_progress_imported,
-			outbound_found, outbound_sent, inbound_favorites_found,
-			inbound_favorites_imported, outbound_favorites_found,
-			outbound_favorites_sent, favorite_removals_sent,
-			warning, error, started_at, completed_at, created_at
+		SELECT `+syncRunColumns+`
 		FROM watch_provider_sync_runs
 		WHERE connection_id = $1::uuid
 		ORDER BY started_at DESC, created_at DESC
@@ -520,13 +528,7 @@ func (r *PostgresRepository) ListLocalWatchEventConnections(
 		return nil, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT
-			id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
-			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
-			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors, created_at, updated_at
+		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE user_id = $1 AND profile_id = $2 AND `+predicate+`
 		ORDER BY provider
@@ -550,35 +552,26 @@ func (r *PostgresRepository) ListLocalWatchEventConnections(
 	return conns, nil
 }
 
-func (r *PostgresRepository) ListFavoriteEventConnections(
+// ListListEventConnections returns connections that export the given list kind,
+// i.e. should mirror a local add/remove on that list to the provider.
+func (r *PostgresRepository) ListListEventConnections(
 	ctx context.Context,
 	userID int,
 	profileID string,
-	kind LocalFavoriteEventKind,
+	list ListKind,
 ) ([]Connection, error) {
-	var predicate string
-	switch kind {
-	case LocalFavoriteEventAdded:
-		predicate = "export_favorites_enabled = true"
-	case LocalFavoriteEventRemoved:
-		predicate = "export_favorites_enabled = true"
-	default:
-		return nil, nil
+	column := "export_favorites_enabled"
+	if list == ListKindWatchlist {
+		column = "export_watchlist_enabled"
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT
-			id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
-			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
-			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors, created_at, updated_at
+		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
-		WHERE user_id = $1 AND profile_id = $2 AND `+predicate+`
+		WHERE user_id = $1 AND profile_id = $2 AND `+column+` = true
 		ORDER BY provider
 	`, userID, profileID)
 	if err != nil {
-		return nil, fmt.Errorf("list favorite event connections: %w", err)
+		return nil, fmt.Errorf("list %s event connections: %w", list, err)
 	}
 	defer rows.Close()
 
@@ -586,12 +579,12 @@ func (r *PostgresRepository) ListFavoriteEventConnections(
 	for rows.Next() {
 		conn, scanErr := r.scanConnection(rows)
 		if scanErr != nil {
-			return nil, fmt.Errorf("scan favorite event connection: %w", scanErr)
+			return nil, fmt.Errorf("scan %s event connection: %w", list, scanErr)
 		}
 		conns = append(conns, conn)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate favorite event connections: %w", err)
+		return nil, fmt.Errorf("iterate %s event connections: %w", list, err)
 	}
 	return conns, nil
 }
@@ -605,7 +598,7 @@ func (r *PostgresRepository) GetMediaDuration(ctx context.Context, mediaItemID s
 	return duration, nil
 }
 
-func (r *PostgresRepository) GetFavoriteMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error) {
+func (r *PostgresRepository) GetListMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error) {
 	result := make(map[string]LocalFavorite, len(mediaItemIDs))
 	if len(mediaItemIDs) == 0 {
 		return result, nil
@@ -616,19 +609,19 @@ func (r *PostgresRepository) GetFavoriteMediaItems(ctx context.Context, mediaIte
 		WHERE content_id = ANY($1)
 	`, mediaItemIDs)
 	if err != nil {
-		return nil, fmt.Errorf("get favorite media items: %w", err)
+		return nil, fmt.Errorf("get list media items: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var fav LocalFavorite
 		if err := rows.Scan(&fav.MediaItemID, &fav.Kind, &fav.Title, &fav.Year, &fav.IMDbID, &fav.TMDBID, &fav.TVDBID); err != nil {
-			return nil, fmt.Errorf("scan favorite media item: %w", err)
+			return nil, fmt.Errorf("scan list media item: %w", err)
 		}
 		fav.ProviderItemKey = providerItemKeyForLocalFavorite(fav)
 		result[fav.MediaItemID] = fav
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate favorite media items: %w", err)
+		return nil, fmt.Errorf("iterate list media items: %w", err)
 	}
 	return result, nil
 }
@@ -724,163 +717,157 @@ func (r *PostgresRepository) MarkHistoryExportStatus(ctx context.Context, id str
 	return nil
 }
 
-func (r *PostgresRepository) UpsertFavoriteStates(ctx context.Context, states []FavoriteState) error {
+func (r *PostgresRepository) UpsertListItemStates(ctx context.Context, states []ListItemState) error {
 	for _, state := range states {
+		kind := state.ListKind
+		if kind == "" {
+			kind = ListKindFavorites
+		}
 		_, err := r.pool.Exec(ctx, `
-			INSERT INTO watch_provider_favorite_items (
-				connection_id, media_item_id, provider_item_key, kind, title, year,
+			INSERT INTO watch_provider_list_items (
+				connection_id, list_kind, media_item_id, provider_item_key, kind, title, year,
 				remote_present, local_present, last_seen_remote_at, last_seen_local_at,
 				last_exported_at, last_removed_remote_at, last_removed_local_at, last_error
 			)
-			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-			ON CONFLICT (connection_id, media_item_id) DO UPDATE SET
+			VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			ON CONFLICT (connection_id, list_kind, media_item_id) DO UPDATE SET
 				provider_item_key = CASE
 					WHEN EXCLUDED.provider_item_key <> '' THEN EXCLUDED.provider_item_key
-					ELSE watch_provider_favorite_items.provider_item_key
+					ELSE watch_provider_list_items.provider_item_key
 				END,
-				kind = CASE WHEN EXCLUDED.kind <> '' THEN EXCLUDED.kind ELSE watch_provider_favorite_items.kind END,
-				title = CASE WHEN EXCLUDED.title <> '' THEN EXCLUDED.title ELSE watch_provider_favorite_items.title END,
-				year = CASE WHEN EXCLUDED.year <> 0 THEN EXCLUDED.year ELSE watch_provider_favorite_items.year END,
-				remote_present = watch_provider_favorite_items.remote_present OR EXCLUDED.remote_present,
+				kind = CASE WHEN EXCLUDED.kind <> '' THEN EXCLUDED.kind ELSE watch_provider_list_items.kind END,
+				title = CASE WHEN EXCLUDED.title <> '' THEN EXCLUDED.title ELSE watch_provider_list_items.title END,
+				year = CASE WHEN EXCLUDED.year <> 0 THEN EXCLUDED.year ELSE watch_provider_list_items.year END,
+				remote_present = watch_provider_list_items.remote_present OR EXCLUDED.remote_present,
 				local_present = EXCLUDED.local_present,
-				last_seen_remote_at = COALESCE(EXCLUDED.last_seen_remote_at, watch_provider_favorite_items.last_seen_remote_at),
-				last_seen_local_at = COALESCE(EXCLUDED.last_seen_local_at, watch_provider_favorite_items.last_seen_local_at),
-				last_exported_at = COALESCE(EXCLUDED.last_exported_at, watch_provider_favorite_items.last_exported_at),
-				last_removed_remote_at = COALESCE(EXCLUDED.last_removed_remote_at, watch_provider_favorite_items.last_removed_remote_at),
-				last_removed_local_at = COALESCE(EXCLUDED.last_removed_local_at, watch_provider_favorite_items.last_removed_local_at),
+				last_seen_remote_at = COALESCE(EXCLUDED.last_seen_remote_at, watch_provider_list_items.last_seen_remote_at),
+				last_seen_local_at = COALESCE(EXCLUDED.last_seen_local_at, watch_provider_list_items.last_seen_local_at),
+				last_exported_at = COALESCE(EXCLUDED.last_exported_at, watch_provider_list_items.last_exported_at),
+				last_removed_remote_at = COALESCE(EXCLUDED.last_removed_remote_at, watch_provider_list_items.last_removed_remote_at),
+				last_removed_local_at = COALESCE(EXCLUDED.last_removed_local_at, watch_provider_list_items.last_removed_local_at),
 				last_error = EXCLUDED.last_error,
 				updated_at = now()
-		`, state.ConnectionID, state.MediaItemID, state.ProviderItemKey, state.Kind, state.Title, state.Year,
+		`, state.ConnectionID, string(kind), state.MediaItemID, state.ProviderItemKey, state.Kind, state.Title, state.Year,
 			state.RemotePresent, state.LocalPresent, state.LastSeenRemoteAt, state.LastSeenLocalAt,
 			state.LastExportedAt, state.LastRemovedRemoteAt, state.LastRemovedLocalAt, state.LastError)
 		if err != nil {
-			return fmt.Errorf("upsert favorite state: %w", err)
+			return fmt.Errorf("upsert list item state: %w", err)
 		}
 	}
 	return nil
 }
 
-func (r *PostgresRepository) ListFavoriteStates(ctx context.Context, connectionID string) ([]FavoriteState, error) {
+func (r *PostgresRepository) ListListItemStates(ctx context.Context, connectionID string, kind ListKind) ([]ListItemState, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, connection_id::text, media_item_id, provider_item_key, kind, title, year,
-			remote_present, local_present, last_seen_remote_at, last_seen_local_at,
-			last_exported_at, last_removed_remote_at, last_removed_local_at, last_error, created_at, updated_at
-		FROM watch_provider_favorite_items
-		WHERE connection_id = $1::uuid
-	`, connectionID)
+		SELECT `+listItemStateColumns+`
+		FROM watch_provider_list_items
+		WHERE connection_id = $1::uuid AND list_kind = $2
+	`, connectionID, string(kind))
 	if err != nil {
-		return nil, fmt.Errorf("list favorite states: %w", err)
+		return nil, fmt.Errorf("list list item states: %w", err)
 	}
 	defer rows.Close()
-	return scanFavoriteStates(rows)
+	return scanListItemStates(rows)
 }
 
-func (r *PostgresRepository) ListPendingFavoriteExports(ctx context.Context, connectionID string, limit int) ([]FavoriteState, error) {
+func (r *PostgresRepository) ListPendingListItemExports(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, connection_id::text, media_item_id, provider_item_key, kind, title, year,
-			remote_present, local_present, last_seen_remote_at, last_seen_local_at,
-			last_exported_at, last_removed_remote_at, last_removed_local_at, last_error, created_at, updated_at
-		FROM watch_provider_favorite_items
+		SELECT `+listItemStateColumns+`
+		FROM watch_provider_list_items
 		WHERE connection_id = $1::uuid
+		  AND list_kind = $2
 		  AND local_present = true
 		  AND remote_present = false
 		  AND last_error = ''
 		ORDER BY last_seen_local_at ASC NULLS LAST, created_at ASC
-		LIMIT $2
-	`, connectionID, limit)
+		LIMIT $3
+	`, connectionID, string(kind), limit)
 	if err != nil {
-		return nil, fmt.Errorf("list pending favorite exports: %w", err)
+		return nil, fmt.Errorf("list pending list item exports: %w", err)
 	}
 	defer rows.Close()
-	return scanFavoriteStates(rows)
+	return scanListItemStates(rows)
 }
 
-func (r *PostgresRepository) ListPendingFavoriteRemovals(ctx context.Context, connectionID string, limit int) ([]FavoriteState, error) {
+func (r *PostgresRepository) ListPendingListItemRemovals(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT id::text, connection_id::text, media_item_id, provider_item_key, kind, title, year,
-			remote_present, local_present, last_seen_remote_at, last_seen_local_at,
-			last_exported_at, last_removed_remote_at, last_removed_local_at, last_error, created_at, updated_at
-		FROM watch_provider_favorite_items
+		SELECT `+listItemStateColumns+`
+		FROM watch_provider_list_items
 		WHERE connection_id = $1::uuid
+		  AND list_kind = $2
 		  AND local_present = false
 		  AND remote_present = true
 		  AND last_error = ''
 		ORDER BY last_removed_local_at ASC NULLS LAST, updated_at ASC
-		LIMIT $2
-	`, connectionID, limit)
+		LIMIT $3
+	`, connectionID, string(kind), limit)
 	if err != nil {
-		return nil, fmt.Errorf("list pending favorite removals: %w", err)
+		return nil, fmt.Errorf("list pending list item removals: %w", err)
 	}
 	defer rows.Close()
-	return scanFavoriteStates(rows)
+	return scanListItemStates(rows)
 }
 
-func (r *PostgresRepository) MarkFavoriteExported(ctx context.Context, connectionID, mediaItemID string, exportedAt time.Time) error {
-	return r.updateFavoriteState(ctx, connectionID, mediaItemID, `
+func (r *PostgresRepository) MarkListItemExported(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error {
+	return r.updateListItemState(ctx, connectionID, kind, mediaItemID, `
 		remote_present = true,
 		local_present = true,
-		last_exported_at = $3,
-		last_seen_remote_at = COALESCE(last_seen_remote_at, $3),
+		last_exported_at = $4,
+		last_seen_remote_at = COALESCE(last_seen_remote_at, $4),
 		last_error = ''
 	`, exportedAt)
 }
 
-func (r *PostgresRepository) MarkFavoriteRemoteRemoved(ctx context.Context, connectionID, mediaItemID string, removedAt time.Time) error {
-	return r.updateFavoriteState(ctx, connectionID, mediaItemID, `
+func (r *PostgresRepository) MarkListItemRemoteRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error {
+	return r.updateListItemState(ctx, connectionID, kind, mediaItemID, `
 		remote_present = false,
-		last_removed_remote_at = $3,
+		last_removed_remote_at = $4,
 		last_error = ''
 	`, removedAt)
 }
 
-func (r *PostgresRepository) MarkFavoriteLocalRemoved(ctx context.Context, connectionID, mediaItemID string, removedAt time.Time) error {
-	return r.updateFavoriteState(ctx, connectionID, mediaItemID, `
+func (r *PostgresRepository) MarkListItemLocalRemoved(ctx context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error {
+	return r.updateListItemState(ctx, connectionID, kind, mediaItemID, `
 		local_present = false,
-		last_removed_local_at = $3,
+		last_removed_local_at = $4,
 		last_error = ''
 	`, removedAt)
 }
 
-func (r *PostgresRepository) MarkFavoriteError(ctx context.Context, connectionID, mediaItemID, lastError string) error {
+func (r *PostgresRepository) MarkListItemError(ctx context.Context, connectionID string, kind ListKind, mediaItemID, lastError string) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE watch_provider_favorite_items
-		SET last_error = $3, updated_at = now()
-		WHERE connection_id = $1::uuid AND media_item_id = $2
-	`, connectionID, mediaItemID, lastError)
+		UPDATE watch_provider_list_items
+		SET last_error = $4, updated_at = now()
+		WHERE connection_id = $1::uuid AND list_kind = $2 AND media_item_id = $3
+	`, connectionID, string(kind), mediaItemID, lastError)
 	if err != nil {
-		return fmt.Errorf("mark favorite error: %w", err)
+		return fmt.Errorf("mark list item error: %w", err)
 	}
 	return nil
 }
 
-func (r *PostgresRepository) updateFavoriteState(ctx context.Context, connectionID, mediaItemID, setClause string, at time.Time) error {
+func (r *PostgresRepository) updateListItemState(ctx context.Context, connectionID string, kind ListKind, mediaItemID, setClause string, at time.Time) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE watch_provider_favorite_items
+		UPDATE watch_provider_list_items
 		SET `+setClause+`,
 			updated_at = now()
-		WHERE connection_id = $1::uuid AND media_item_id = $2
-	`, connectionID, mediaItemID, at)
+		WHERE connection_id = $1::uuid AND list_kind = $2 AND media_item_id = $3
+	`, connectionID, string(kind), mediaItemID, at)
 	if err != nil {
-		return fmt.Errorf("update favorite state: %w", err)
+		return fmt.Errorf("update list item state: %w", err)
 	}
 	return nil
 }
 
 func (r *PostgresRepository) ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT
-			id::text, provider, user_id, profile_id, provider_account_id, provider_username,
-			access_token, refresh_token, token_expires_at, import_watched_enabled,
-			import_progress_enabled, export_watched_enabled, export_unwatched_enabled,
-			import_favorites_enabled, export_favorites_enabled, sync_favorite_removals_enabled,
-			scrobble_enabled, last_inbound_sync_at, last_progress_sync_at, last_outbound_sync_at,
-			last_favorites_sync_at, last_scrobble_error_at, last_error, sync_cursors, created_at, updated_at
+		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE user_id = $1 AND profile_id = $2 AND scrobble_enabled = true
 		ORDER BY provider
@@ -1050,6 +1037,11 @@ func scanSyncRun(row pgx.Row) (SyncRun, error) {
 		&run.OutboundFavoritesFound,
 		&run.OutboundFavoritesSent,
 		&run.FavoriteRemovalsSent,
+		&run.InboundWatchlistFound,
+		&run.InboundWatchlistImported,
+		&run.OutboundWatchlistFound,
+		&run.OutboundWatchlistSent,
+		&run.WatchlistRemovalsSent,
 		&run.Warning,
 		&run.Error,
 		&run.StartedAt,
@@ -1082,11 +1074,16 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.ImportFavoritesEnabled,
 		&conn.ExportFavoritesEnabled,
 		&conn.SyncFavoriteRemovalsEnabled,
+		&conn.ImportWatchlistEnabled,
+		&conn.ExportWatchlistEnabled,
+		&conn.SyncWatchlistRemovalsEnabled,
+		&conn.SyncWatchlistOrderEnabled,
 		&conn.ScrobbleEnabled,
 		&conn.LastInboundSyncAt,
 		&conn.LastProgressSyncAt,
 		&conn.LastOutboundSyncAt,
 		&conn.LastFavoritesSyncAt,
+		&conn.LastWatchlistSyncAt,
 		&conn.LastScrobbleErrorAt,
 		&conn.LastError,
 		&rawSyncCursors,
@@ -1108,19 +1105,20 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 	return conn, nil
 }
 
-type favoriteStateRows interface {
+type listItemStateRows interface {
 	Next() bool
 	Scan(dest ...any) error
 	Err() error
 }
 
-func scanFavoriteStates(rows favoriteStateRows) ([]FavoriteState, error) {
-	var states []FavoriteState
+func scanListItemStates(rows listItemStateRows) ([]ListItemState, error) {
+	var states []ListItemState
 	for rows.Next() {
-		var state FavoriteState
+		var state ListItemState
 		if err := rows.Scan(
 			&state.ID,
 			&state.ConnectionID,
+			&state.ListKind,
 			&state.MediaItemID,
 			&state.ProviderItemKey,
 			&state.Kind,
@@ -1137,12 +1135,12 @@ func scanFavoriteStates(rows favoriteStateRows) ([]FavoriteState, error) {
 			&state.CreatedAt,
 			&state.UpdatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scan favorite state: %w", err)
+			return nil, fmt.Errorf("scan list item state: %w", err)
 		}
 		states = append(states, state)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate favorite states: %w", err)
+		return nil, fmt.Errorf("iterate list item states: %w", err)
 	}
 	return states, nil
 }

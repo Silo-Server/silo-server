@@ -172,6 +172,9 @@ func (h *Handler) handlePublicTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session expired", http.StatusGone)
 		return
 	}
+	if h.beginNativePlaybackTransport(sid) {
+		defer h.endNativePlaybackTransport(sid)
+	}
 
 	access, err := h.accessFilterForAuth(r.Context(), ctxAuth{UserID: sess.UserID, ProfileID: sess.ProfileID})
 	if err != nil {

@@ -3,9 +3,11 @@ package recommendations
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 )
 
-const CanonicalEmbeddingDimensions = 3072
+const CanonicalEmbeddingDimensions = embeddingvectors.CanonicalDimensions
 
 // EmbeddingLock records the embedding space currently locked for an
 // installation.

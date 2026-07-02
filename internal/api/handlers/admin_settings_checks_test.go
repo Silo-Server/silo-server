@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
@@ -371,6 +372,74 @@ func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
 			}
 			if !tc.restartRequired && snapshot.RestartRequiredReason != "" {
 				t.Fatalf("tracker reason = %q, want empty", snapshot.RestartRequiredReason)
+			}
+		})
+	}
+}
+
+func TestAdminUpdateCatalogSearchSemanticSettingsValidation(t *testing.T) {
+	valid := []struct {
+		key   string
+		value string
+		want  string
+	}{
+		{key: catalog.SearchSettingMeilisearchSemanticEnabled, value: "TRUE", want: "true"},
+		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: ".30", want: "0.3"},
+		{key: catalog.SearchSettingMeilisearchEmbedder, value: "", want: catalog.DefaultMeilisearchEmbedder},
+		{key: catalog.SearchSettingMeilisearchEmbedder, value: "custom_embedder-2", want: "custom_embedder-2"},
+	}
+	for _, tc := range valid {
+		t.Run("valid "+tc.key, func(t *testing.T) {
+			settings := &fakeServerSettingsStore{}
+			handler := &AdminHandler{SettingsRepo: settings, RestartStatus: NewServerRestartStatusTracker()}
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/admin/settings/"+tc.key,
+				strings.NewReader(`{"value":"`+tc.value+`"}`),
+			)
+			req = withChiParam(req, "key", tc.key)
+			rec := httptest.NewRecorder()
+
+			handler.HandleUpdateSetting(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if settings.values[tc.key] != tc.want {
+				t.Fatalf("stored value = %q, want %q", settings.values[tc.key], tc.want)
+			}
+		})
+	}
+
+	invalid := []struct {
+		key   string
+		value string
+	}{
+		{key: catalog.SearchSettingMeilisearchSemanticEnabled, value: "sometimes"},
+		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: "-0.01"},
+		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: "1.01"},
+		{key: catalog.SearchSettingMeilisearchSemanticRatio, value: "NaN"},
+		{key: catalog.SearchSettingMeilisearchEmbedder, value: "bad.name"},
+	}
+	for _, tc := range invalid {
+		t.Run("invalid "+tc.key, func(t *testing.T) {
+			settings := &fakeServerSettingsStore{}
+			handler := &AdminHandler{SettingsRepo: settings}
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/admin/settings/"+tc.key,
+				strings.NewReader(`{"value":"`+tc.value+`"}`),
+			)
+			req = withChiParam(req, "key", tc.key)
+			rec := httptest.NewRecorder()
+
+			handler.HandleUpdateSetting(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if _, ok := settings.values[tc.key]; ok {
+				t.Fatalf("invalid setting was stored: %#v", settings.values)
 			}
 		})
 	}

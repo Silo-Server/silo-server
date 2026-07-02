@@ -28,7 +28,7 @@ type itemsQuery struct {
 	genreName              string
 	isFavorite             bool
 	isResumable            bool
-	hasItemTypeFilter      bool // true when IncludeItemTypes was present in the request
+	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
 	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
 	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
 	sortExplicit           bool // true when SortBy was present in the request
@@ -45,6 +45,8 @@ type itemsQuery struct {
 	mediaTypesExplicit     bool
 	requestedFields        map[string]bool // parsed from Fields param
 	fieldsExplicit         bool            // true when Fields was in the request
+	startItemID            string          // raw encoded ID from StartItemId param
+	adjacentTo             string          // raw encoded ID from AdjacentTo param
 }
 
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
@@ -110,8 +112,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	}
 
 	rawItemTypes := q.Values("IncludeItemTypes")
-	result.hasItemTypeFilter = len(rawItemTypes) > 0 && strings.TrimSpace(strings.Join(rawItemTypes, "")) != ""
-	result.itemTypes = mapIncludeItemTypes(rawItemTypes)
+	rawExcludedItemTypes := q.Values("ExcludeItemTypes")
+	result.hasItemTypeFilter = hasNonEmptyValues(rawItemTypes) || hasNonEmptyValues(rawExcludedItemTypes)
+	result.itemTypes = effectiveItemTypes(rawItemTypes, rawExcludedItemTypes)
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
 	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
@@ -167,6 +170,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.requestedFields = parseRequestedFields(fieldsRaw)
 	result.fieldsExplicit = strings.TrimSpace(fieldsRaw) != ""
 	result.needsDetailFields = requestedFieldsNeedDetail(result.requestedFields)
+
+	result.startItemID = strings.TrimSpace(q.Get("StartItemId"))
+	result.adjacentTo = strings.TrimSpace(q.Get("AdjacentTo"))
 
 	// Diagnostic: when the request stays on the list path, emit a Debug log
 	// listing any requested Fields that mapping.go's itemFromList does not
@@ -340,6 +346,44 @@ func mapIncludeItemTypes(rawValues []string) []string {
 		}
 	}
 	return result
+}
+
+func effectiveItemTypes(rawIncluded, rawExcluded []string) []string {
+	included := mapIncludeItemTypes(rawIncluded)
+	excluded := mapIncludeItemTypes(rawExcluded)
+	if len(excluded) == 0 {
+		return included
+	}
+
+	base := included
+	if len(base) == 0 && !hasNonEmptyValues(rawIncluded) {
+		base = compatVideoTypeList
+	}
+	if len(base) == 0 {
+		return nil
+	}
+
+	excludedSet := make(map[string]struct{}, len(excluded))
+	for _, itemType := range excluded {
+		excludedSet[itemType] = struct{}{}
+	}
+	result := make([]string, 0, len(base))
+	for _, itemType := range base {
+		if _, skip := excludedSet[itemType]; skip {
+			continue
+		}
+		result = append(result, itemType)
+	}
+	return result
+}
+
+func hasNonEmptyValues(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // includeItemTypesContain reports whether a raw IncludeItemTypes value list

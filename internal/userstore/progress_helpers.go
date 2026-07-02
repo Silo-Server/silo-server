@@ -64,7 +64,7 @@ func parseHistoryTimestamp(value string) time.Time {
 // CompletedHistoryItemMap returns the latest completed-history item row for a
 // scoped item query. Lookup failures degrade to an empty map so user-data
 // enrichment can keep returning progress rows.
-func CompletedHistoryItemMap(ctx context.Context, store UserStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
+func CompletedHistoryItemMap(ctx context.Context, store ProgressCompletionStore, query CompletedHistoryItemQuery) map[string]CompletedHistoryItem {
 	result := map[string]CompletedHistoryItem{}
 	if store == nil || query.ProfileID == "" {
 		return result
@@ -124,7 +124,7 @@ func GetProgressWithCompletedHistory(ctx context.Context, store UserStore, profi
 // ListProgressWithCompletedHistory returns progress for mediaItemIDs with
 // completed history folded into the map. History is only queried for IDs that
 // are not already completed by a progress row.
-func ListProgressWithCompletedHistory(ctx context.Context, store UserStore, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error) {
+func ListProgressWithCompletedHistory(ctx context.Context, store ProgressCompletionStore, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error) {
 	mediaItemIDs = compactHistoryMediaItemIDs(mediaItemIDs)
 	if store == nil || profileID == "" || len(mediaItemIDs) == 0 {
 		return map[string]WatchProgress{}, nil

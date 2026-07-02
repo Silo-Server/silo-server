@@ -303,6 +303,13 @@ type DownloadConfig struct {
 	MaxConcurrentPerUser int           `yaml:"-"` // max simultaneous downloads per user (0 = unlimited)
 	MaxPerPeriod         int           `yaml:"-"` // max downloads per user per period (0 = unlimited)
 	PeriodDuration       time.Duration `yaml:"-"` // rolling window for MaxPerPeriod
+
+	// Downloads v2 (offline sync for mobile). The prepare-to-file pipeline that
+	// consumes these ships in Phase 3; they are parsed default-off from Phase 0.
+	TranscodeEnabled      bool   `yaml:"-"` // server gate for transcode-to-file (default false)
+	ArtifactDir           string `yaml:"-"` // prepared-artifact output volume ("" = default under the transcode dir)
+	MaxConcurrentPrepares int    `yaml:"-"` // encode/remux worker-pool size (default 2)
+	ArtifactMaxBytes      int64  `yaml:"-"` // LRU eviction budget for prepared artifacts (0 = unlimited)
 }
 
 // MetadataConfig holds metadata pipeline settings.
@@ -364,6 +371,10 @@ var defaultJellyfinCompatServerID = uuid.NewSHA1(
 	uuid.NameSpaceURL,
 	[]byte("https://silo.local/jellycompat"),
 ).String()
+
+// DefaultTranscodeDir is the fallback playback.transcode_dir; download
+// artifacts default to a sibling directory (see downloads.effectiveArtifactDir).
+const DefaultTranscodeDir = "/tmp/silo-transcode"
 
 const DefaultJellyfinCompatEmulatedServerVersion = "10.12.0"
 const DefaultJellyfinWebVersion = "10.11.6"
@@ -432,7 +443,7 @@ func setDefaults() *configRaw {
 		},
 		Playback: PlaybackConfig{
 			FFmpegPath:                   "/usr/lib/jellyfin-ffmpeg/ffmpeg",
-			TranscodeDir:                 "/tmp/silo-transcode",
+			TranscodeDir:                 DefaultTranscodeDir,
 			HWAccel:                      "auto",
 			ChapterThumbnailWorkers:      1,
 			ChapterThumbnailExecution:    "local",

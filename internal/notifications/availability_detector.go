@@ -39,8 +39,15 @@ func (d *AvailabilityDetector) SetFanoutNudge(nudge func()) {
 // AvailabilityKinds selects which content kinds an ingest scope covers.
 // Each kind keeps its own seed marker and silent-seeding semantics.
 type AvailabilityKinds struct {
-	Episodes bool
-	Movies   bool
+	Episodes   bool
+	Movies     bool
+	Audiobooks bool
+	Ebooks     bool
+}
+
+// Any reports whether at least one kind is selected.
+func (k AvailabilityKinds) Any() bool {
+	return k.Episodes || k.Movies || k.Audiobooks || k.Ebooks
 }
 
 // availabilityKindOps abstracts the per-kind recording calls so episode and
@@ -77,12 +84,24 @@ func (d *AvailabilityDetector) HandleIngestCompleted(ctx context.Context, librar
 			recordForPaths:   d.releases.RecordAvailabilityForPaths,
 		})
 	}
-	if kinds.Movies {
-		d.runKind(detectCtx, libraryID, fullLibrary, scopePaths, availabilityKindOps{
-			kind:             EventKindMovie,
-			recordForLibrary: d.releases.RecordMovieAvailabilityForLibrary,
-			recordForPaths:   d.releases.RecordMovieAvailabilityForPaths,
-		})
+	for _, k := range flatItemKinds {
+		if k.Selected(kinds) {
+			d.runKind(detectCtx, libraryID, fullLibrary, scopePaths, d.flatKindOps(k))
+		}
+	}
+}
+
+// flatKindOps binds one flat item kind's registry entry to the shared
+// detection flow.
+func (d *AvailabilityDetector) flatKindOps(k flatItemKind) availabilityKindOps {
+	return availabilityKindOps{
+		kind: k.Kind,
+		recordForLibrary: func(ctx context.Context, libraryID int, emitEvents bool) (int, int, error) {
+			return d.releases.RecordItemAvailabilityForLibrary(ctx, k, libraryID, emitEvents)
+		},
+		recordForPaths: func(ctx context.Context, libraryID int, scopePaths []string, emitEvents bool) (int, int, error) {
+			return d.releases.RecordItemAvailabilityForPaths(ctx, k, libraryID, scopePaths, emitEvents)
+		},
 	}
 }
 

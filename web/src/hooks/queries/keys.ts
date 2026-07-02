@@ -35,6 +35,7 @@ export interface CatalogParams {
   collection_id?: string;
   person_id?: string;
   type?: string;
+  uses_source_order?: boolean;
   query_fingerprint?: string;
   include_technical?: boolean;
   include_total?: boolean;
@@ -318,6 +319,7 @@ export const calendarKeys = {
 export const downloadKeys = {
   all: ["downloads"] as const,
   list: () => ["downloads", "list"] as const,
+  capability: () => ["downloads", "capability"] as const,
 };
 
 export const themeKeys = {
@@ -364,6 +366,7 @@ export const adminKeys = {
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
+  catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
   requestsRoot: () => ["admin", "requests"] as const,
   requests: (params: Record<string, unknown>) => ["admin", "requests", params] as const,

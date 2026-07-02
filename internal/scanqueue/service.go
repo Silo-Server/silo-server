@@ -231,10 +231,26 @@ func (s *Service) CancelByLibrary(ctx context.Context, libraryID int) (int, erro
 }
 
 func (s *Service) ListActive(ctx context.Context) ([]evt.ScanRun, error) {
+	return s.listActive(ctx, 0)
+}
+
+func (s *Service) ListActiveSnapshot(ctx context.Context, limit int) ([]evt.ScanRun, error) {
+	return s.listActive(ctx, limit)
+}
+
+func (s *Service) listActive(ctx context.Context, limit int) ([]evt.ScanRun, error) {
 	if s == nil || s.repo == nil {
 		return []evt.ScanRun{}, nil
 	}
-	rows, err := s.repo.ListActive(ctx)
+	var (
+		rows []*models.ScanRun
+		err  error
+	)
+	if limit > 0 {
+		rows, err = s.repo.ListActiveLimit(ctx, limit)
+	} else {
+		rows, err = s.repo.ListActive(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}

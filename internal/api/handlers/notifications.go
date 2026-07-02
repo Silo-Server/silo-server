@@ -43,6 +43,8 @@ type notificationSyncResponse struct {
 	UnreadCount   int                                `json:"unread_count"`
 }
 
+type notificationApplePushDisplayResponse = notifications.NotificationDisplay
+
 type unreadCountResponse struct {
 	Count int `json:"count"`
 }
@@ -148,6 +150,29 @@ func (h *NotificationsHandler) HandleGet(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, h.system.PayloadForRow(r.Context(), *row))
+}
+
+// HandleApplePushDisplay handles GET /notifications/push/apple/display/{delivery_id}.
+// It returns only compact display metadata for notification-service-extension
+// enrichment, scoped to the active profile.
+func (h *NotificationsHandler) HandleApplePushDisplay(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	profileID := apimw.GetProfileID(r.Context())
+	id := chi.URLParam(r, "delivery_id")
+	if id == "" {
+		writeError(w, http.StatusNotFound, "not_found", "Notification not found")
+		return
+	}
+	row, err := h.system.Deliveries.GetByID(r.Context(), profileID, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load notification")
+		return
+	}
+	if row == nil {
+		writeError(w, http.StatusNotFound, "not_found", "Notification not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, notificationApplePushDisplayResponse(notifications.BuildNotificationDisplay(*row)))
 }
 
 // HandleUnreadCount handles GET /notifications/unread-count.
@@ -318,9 +343,7 @@ type capabilityWebhooks struct {
 }
 
 // HandleCapability handles GET /notifications/capability. Clients render
-// setup UI from this response instead of introspecting admin settings. Push
-// channels report unavailable until they ship
-// (docs/superpowers/plans/notifications/02-03).
+// setup UI from this response instead of introspecting admin settings.
 func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.Request) {
 	webhooks := capabilityWebhooks{Available: false, MaxPerProfile: 0, SupportedTypes: []string{}}
 	if h.system.Webhooks != nil && h.system.Settings.WebhooksEnabled(r.Context()) {
@@ -364,9 +387,21 @@ func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.R
 			DigestHour: h.system.Settings.DiscordDigestHour(r.Context()),
 		}
 	}
+	applePush := capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}}
+	// Like web push above, availability requires both the wiring (cipher/store)
+	// and the admin delivery toggle: Available must mean "setup will actually
+	// deliver", not "the server could store a token".
+	if h.system.PushDevices != nil && h.system.PushDevices.Available() &&
+		h.system.Settings.ApplePushDeliveryEnabled(r.Context()) {
+		applePush = capabilityPush{
+			Available:      true,
+			Provider:       notifications.PushProviderSiloRelay,
+			SupportedModes: []string{notifications.PushModePrivatePush, notifications.PushModeInAppOnly},
+		}
+	}
 	writeJSON(w, http.StatusOK, capabilityResponse{
 		InApp:       capabilityInApp{Enabled: h.system.Settings.UIEnabled(r.Context())},
-		ApplePush:   capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}},
+		ApplePush:   applePush,
 		AndroidPush: capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}},
 		WebPush:     webPush,
 		Webhooks:    webhooks,

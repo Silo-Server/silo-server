@@ -1,9 +1,8 @@
 import { useQueries } from "@tanstack/react-query";
-import { api } from "@/api/client";
 import type { LibraryCollection } from "@/api/types";
 import { useUserLibraries } from "./libraries";
-import { libraryCollectionKeys } from "./keys";
 import { useCollections } from "./collections";
+import { getLibraryCollectionList, libraryCollectionsQueryOptions } from "./libraryCollections";
 
 export interface CollectionOption {
   id: string;
@@ -23,12 +22,8 @@ export function useAllUserCollections() {
 
   const libraryQueries = useQueries({
     queries: (libraries ?? []).map((lib) => ({
-      queryKey: libraryCollectionKeys.list(lib.id),
-      queryFn: () =>
-        api<{ collections: LibraryCollection[] }>(`/library/${lib.id}/collections`).then(
-          (data) => data.collections ?? [],
-        ),
-      enabled: Number.isFinite(lib.id) && lib.id > 0,
+      ...libraryCollectionsQueryOptions(lib.id),
+      select: getLibraryCollectionList,
     })),
   });
 
@@ -53,20 +48,19 @@ export function useAllUserCollections() {
     for (let i = 0; i < libraries.length; i++) {
       const lib = libraries[i]!;
       const result = libraryQueries[i];
-      if (result?.data) {
-        for (const c of result.data) {
-          collections.push({
-            id: c.id,
-            title: c.title,
-            source: "library",
-            group: lib.name,
-            library_id: lib.id,
-            library_name: lib.name,
-            collection_type: c.collection_type,
-            source_config: c.source_config,
-            last_sync_status: c.last_sync_status,
-          });
-        }
+      const libraryCollections = Array.isArray(result?.data) ? result.data : [];
+      for (const c of libraryCollections) {
+        collections.push({
+          id: c.id,
+          title: c.title,
+          source: "library",
+          group: lib.name,
+          library_id: lib.id,
+          library_name: lib.name,
+          collection_type: c.collection_type,
+          source_config: c.source_config,
+          last_sync_status: c.last_sync_status,
+        });
       }
     }
   }

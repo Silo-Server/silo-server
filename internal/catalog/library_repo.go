@@ -504,19 +504,29 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			}
 		}
 
-		tag, err := tx.Exec(ctx, `
-			DELETE FROM media_items mi
-			WHERE mi.content_id = ANY($1)
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM media_item_libraries mil
-				WHERE mil.content_id = mi.content_id
-			  )
-		`, removedContentIDs)
-		if err != nil {
-			return 0, 0, nil, fmt.Errorf("deleting orphaned media items after folder reconciliation: %w", err)
+		if len(orphanIDs) > 0 {
+			rows, err := tx.Query(ctx, `
+				DELETE FROM media_items mi
+				WHERE mi.content_id = ANY($1)
+				  AND NOT EXISTS (
+					SELECT 1
+					FROM media_item_libraries mil
+					WHERE mil.content_id = mi.content_id
+				  )
+				RETURNING mi.content_id
+			`, orphanIDs)
+			if err != nil {
+				return 0, 0, nil, fmt.Errorf("deleting orphaned media items after folder reconciliation: %w", err)
+			}
+			deletedContentIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				return 0, 0, nil, fmt.Errorf("collecting deleted orphaned media item IDs: %w", err)
+			}
+			deletedItems = len(deletedContentIDs)
+			if err := EnqueueSearchIndexDeletes(ctx, tx, deletedContentIDs); err != nil {
+				return 0, 0, nil, fmt.Errorf("enqueueing catalog search orphan deletes: %w", err)
+			}
 		}
-		deletedItems = int(tag.RowsAffected())
 	}
 
 	if err := tx.Commit(ctx); err != nil {

@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
 // Dependencies holds the pluggable pieces used by the compat server.
@@ -55,19 +56,24 @@ type Dependencies struct {
 	UserDataService UserDataService
 	AuthService     *auth.Service
 
+	// WatchCompletionObserver is notified when a Jellyfin-compat mark-played
+	// completes a watch, so fully-watched items leave the watchlist. Optional.
+	WatchCompletionObserver watchstate.CompletionObserver
+
 	// Autoscan / admin compatibility support.
 	APIKeyValidator  apiKeyValidator
 	APIKeyUserLoader apiKeyUserLoader
 	ScanQueue        scantrigger.Queuer
 
 	// Catalog repos (for ContentService construction)
-	BrowseRepo     *catalog.BrowseRepository
-	ItemRepo       *catalog.ItemRepository
-	SeasonRepo     *catalog.SeasonRepository
-	EpisodeRepo    *catalog.EpisodeRepository
-	ProviderIDRepo *catalog.ProviderIDRepository
-	DetailSvc      *catalog.DetailService
-	FolderRepo     *catalog.FolderRepository
+	BrowseRepo            *catalog.BrowseRepository
+	ItemRepo              *catalog.ItemRepository
+	SeasonRepo            *catalog.SeasonRepository
+	EpisodeRepo           *catalog.EpisodeRepository
+	ProviderIDRepo        *catalog.ProviderIDRepository
+	DetailSvc             *catalog.DetailService
+	FolderRepo            *catalog.FolderRepository
+	CatalogSearchProvider catalog.CatalogSearchProvider
 
 	// Person repository
 	PersonRepo *catalog.PersonRepository
@@ -77,7 +83,12 @@ type Dependencies struct {
 	PresignTTL      time.Duration
 
 	// Playback
-	SessionMgr        SessionManagerInterface
+	SessionMgr SessionManagerInterface
+	// SessionSyncer flushes native session-manager state into the shared
+	// admin live-session table right after compat playback starts/stops, so
+	// the activity dashboard doesn't wait for the periodic reconciler tick.
+	// Optional.
+	SessionSyncer     PlaybackSessionSyncer
 	FileResolver      FilePathResolver
 	UserStoreProvider userstore.UserStoreProvider
 	AccessFilterFn    AccessFilterResolver

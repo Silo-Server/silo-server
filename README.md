@@ -252,9 +252,17 @@ cd web && bun run lint
 cd web && bun run format:check
 ```
 
-## License
+## License & Trademarks
 
-Silo is licensed under `AGPL-3.0-or-later`. See [LICENSE](LICENSE).
+Silo's source code is licensed under the **GNU Affero General Public License
+v3.0 or later** (`AGPL-3.0-or-later`) — see [LICENSE](LICENSE).
+
+The **Silo name, logo, and wordmark are trademarks of Silo Media L.L.C.** and
+are **not** covered by the AGPL. You're free to fork and redistribute the code,
+but forks and redistributions must not use the Silo brand as their identity and
+must remove or replace the brand assets. Publishing a Silo-branded app to an app
+store requires written permission. See [TRADEMARK.md](TRADEMARK.md) for what's
+permitted — including referential use like "compatible with Silo."
 
 ## Configuration
 

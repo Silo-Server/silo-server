@@ -22,6 +22,7 @@ import {
   formatSessionBitrate,
   formatSourceContainerSummary,
   formatTranscodeModeSummary,
+  getSessionClientLabel,
   formatVideoDetail,
   formatVideoSummary,
   normalizeContainerDecision,
@@ -138,7 +139,10 @@ export default function AdminActivity() {
           s.username?.toLowerCase().includes(q) ||
           s.media_title?.toLowerCase().includes(q) ||
           s.series_name?.toLowerCase().includes(q) ||
-          s.episode_name?.toLowerCase().includes(q),
+          s.episode_name?.toLowerCase().includes(q) ||
+          getSessionClientLabel(s).toLowerCase().includes(q) ||
+          s.client_user_agent?.toLowerCase().includes(q) ||
+          s.client_ip?.toLowerCase().includes(q),
       );
     }
     if (methodFilter) result = result.filter((s) => s.play_method === methodFilter);
@@ -516,6 +520,7 @@ function StreamRow({
   const streamBitrate = formatSessionBitrate(session.stream_bitrate_kbps);
   const streamMeta = [sourceContainer, streamBitrate].filter(Boolean).join(" · ");
   const clientIP = session.client_ip?.trim() || "";
+  const clientLabel = getSessionClientLabel(session);
   const playbackPosition = formatPlaybackPosition(session);
   const transcodeMode = formatTranscodeModeSummary(session);
   const containerDecision = normalizeContainerDecision(session.play_method);
@@ -566,36 +571,48 @@ function StreamRow({
       <div className="hidden grid-cols-[minmax(120px,1.1fr)_minmax(190px,1.7fr)_minmax(220px,1.9fr)_minmax(90px,0.8fr)_minmax(125px,0.9fr)_minmax(220px,1.4fr)] items-center gap-2 px-3 py-2.5 sm:grid">
         {/* User */}
         <div className="flex min-w-0 items-center gap-2">
-          <Link
-            to={userHref}
-            className="hover:text-primary flex min-w-0 items-center gap-2 transition-colors"
-          >
+          <Link to={userHref} className="hover:text-primary shrink-0 transition-colors">
             <div
               className="text-primary-foreground flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
               style={{ background: "var(--primary)" }}
             >
               {username.charAt(0).toUpperCase()}
             </div>
-            <div className="min-w-0">
-              <div className="block truncate text-[13px] font-medium">{username}</div>
-              {profileDisplay ? (
-                <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-                  <span className="border-primary/30 bg-primary/15 text-primary max-w-full truncate rounded border px-1.5 py-0.5 text-[10px] leading-none">
-                    {profileDisplay}
-                  </span>
-                </div>
-              ) : null}
-            </div>
           </Link>
-          {clientIP ? (
-            <button
-              type="button"
-              onClick={() => onIPLookup(clientIP)}
-              className="text-muted-foreground hover:text-primary min-w-0 cursor-pointer truncate text-[10px] transition-colors"
-            >
-              {clientIP}
-            </button>
-          ) : null}
+          <div className="min-w-0">
+            <Link to={userHref} className="hover:text-primary block truncate transition-colors">
+              <span className="text-[13px] font-medium">{username}</span>
+            </Link>
+            {profileDisplay ? (
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+                <span className="border-primary/30 bg-primary/15 text-primary max-w-full truncate rounded border px-1.5 py-0.5 text-[10px] leading-none">
+                  {profileDisplay}
+                </span>
+              </div>
+            ) : null}
+            {(clientLabel || clientIP) && (
+              <div className="text-muted-foreground mt-1 flex min-w-0 items-center gap-1.5 text-[10px]">
+                {clientLabel ? (
+                  <span
+                    title={session.client_user_agent || clientLabel}
+                    className="max-w-[8rem] min-w-0 truncate"
+                  >
+                    {clientLabel}
+                  </span>
+                ) : null}
+                {clientLabel && clientIP ? <span className="shrink-0">·</span> : null}
+                {clientIP ? (
+                  <button
+                    type="button"
+                    onClick={() => onIPLookup(clientIP)}
+                    className="hover:text-primary min-w-0 cursor-pointer truncate transition-colors"
+                  >
+                    {clientIP}
+                  </button>
+                ) : null}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Stream */}
@@ -771,8 +788,17 @@ function StreamRow({
             <span className="flex-shrink-0">·</span>
             <span className="flex-shrink-0 font-mono tabular-nums">{elapsed}</span>
           </div>
-          {(clientIP || streamMeta) && (
+          {(clientLabel || clientIP || streamMeta) && (
             <div className="text-muted-foreground mt-1 flex min-w-0 gap-1.5 text-[10px]">
+              {clientLabel ? (
+                <span
+                  title={session.client_user_agent || clientLabel}
+                  className="max-w-[9rem] shrink-0 truncate"
+                >
+                  {clientLabel}
+                </span>
+              ) : null}
+              {clientLabel && (clientIP || streamMeta) ? <span className="shrink-0">·</span> : null}
               {clientIP ? (
                 <button
                   type="button"

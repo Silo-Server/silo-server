@@ -20,6 +20,7 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 		"uwp_ip.updated_at > ce.updated_at",
 		"FROM user_history_hidden_items hhi",
 		"uwp.updated_at <= hhi.hidden_before",
+		"AND (uwp2.completed = TRUE OR uwp2.position_seconds > 0)",
 		"ORDER BY e.series_id, uwp.updated_at DESC, e.season_number DESC, e.episode_number DESC",
 		"LIMIT $3",
 	}

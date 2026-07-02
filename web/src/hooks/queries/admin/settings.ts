@@ -18,6 +18,60 @@ interface SensitiveStatusResponse {
   managed_by_env?: string[];
 }
 
+export interface CatalogSearchStatus {
+  configured_provider: string;
+  active_provider: string;
+  meilisearch: {
+    configured: boolean;
+    healthy: boolean;
+    circuit_state: string;
+    circuit_reason?: string;
+    circuit_until?: string;
+    last_fallback?: string;
+    timeout_ms: number;
+    matching_strategy: string;
+    index_types?: string[];
+    semantic_enabled: boolean;
+    semantic_ratio: number;
+    embedder: string;
+  };
+  index: {
+    active_index_uid: string;
+    schema_version: number;
+    expected_schema_version: number;
+    document_count: number;
+    vector_document_count: number;
+    pending_events: number;
+    last_rebuild_at?: string;
+    last_sync_at?: string;
+    last_processed_event_id: number;
+  };
+  semantic?: {
+    ready: boolean;
+    disabled_reason?: string;
+    vector_coverage_ratio: number;
+    coverage_updated_at?: string;
+    per_type?: Array<{
+      type: string;
+      eligible: number;
+      vectorized: number;
+      vector_coverage_ratio: number;
+      ready: boolean;
+    }>;
+    capability: {
+      ok: boolean;
+      reason?: string;
+      embedder?: string;
+      dimensions?: number;
+    };
+  };
+  tasks: Array<{
+    key: string;
+    name: string;
+    href: string;
+  }>;
+}
+
 export function useAdminServerSettings() {
   return useQuery({
     queryKey: adminKeys.serverSettings(),
@@ -44,6 +98,11 @@ export function useUpdateServerSetting() {
       if (variables.key.startsWith("jellyfin_compat.")) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
+        );
+      }
+      if (variables.key.startsWith("catalog.search.")) {
+        invalidations.push(
+          queryClient.invalidateQueries({ queryKey: adminKeys.catalogSearchStatus() }),
         );
       }
       // Branding and admin theme settings are served live by public endpoints
@@ -79,6 +138,14 @@ export function useCheckAdminSettingsConnection() {
         method: "POST",
         body: JSON.stringify(body),
       }),
+  });
+}
+
+export function useCatalogSearchStatus() {
+  return useQuery({
+    queryKey: adminKeys.catalogSearchStatus(),
+    queryFn: () => api<CatalogSearchStatus>("/admin/catalog/search/status"),
+    staleTime: 15_000,
   });
 }
 

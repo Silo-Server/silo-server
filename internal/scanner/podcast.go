@@ -32,23 +32,10 @@ type parsedPodcastEpisode struct {
 // Returns an os.ErrNotExist-wrapped error if the folder contains zero
 // audio files.
 func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string) (*parsedPodcastShow, error) {
-	entries, err := os.ReadDir(folderPath)
+	audioFiles, err := listPodcastShowAudioFiles(folderPath)
 	if err != nil {
-		return nil, fmt.Errorf("read podcast folder %s: %w", folderPath, err)
+		return nil, err
 	}
-	var audioFiles []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if SupportsAudioFile(entry.Name()) {
-			audioFiles = append(audioFiles, filepath.Join(folderPath, entry.Name()))
-		}
-	}
-	if len(audioFiles) == 0 {
-		return nil, fmt.Errorf("podcast show %s: %w", folderPath, os.ErrNotExist)
-	}
-	sort.Strings(audioFiles)
 
 	show := &parsedPodcastShow{}
 	for idx, path := range audioFiles {
@@ -81,6 +68,27 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 		})
 	}
 	return show, nil
+}
+
+func listPodcastShowAudioFiles(folderPath string) ([]string, error) {
+	entries, err := os.ReadDir(folderPath)
+	if err != nil {
+		return nil, fmt.Errorf("read podcast folder %s: %w", folderPath, err)
+	}
+	var audioFiles []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if SupportsAudioFile(entry.Name()) {
+			audioFiles = append(audioFiles, filepath.Join(folderPath, entry.Name()))
+		}
+	}
+	if len(audioFiles) == 0 {
+		return nil, fmt.Errorf("podcast show %s: %w", folderPath, os.ErrNotExist)
+	}
+	sort.Strings(audioFiles)
+	return audioFiles, nil
 }
 
 // parseTrackNumber accepts ID3-style track values which may be "5" or

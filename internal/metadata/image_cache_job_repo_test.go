@@ -16,6 +16,42 @@ func TestImageCacheRetryDelayCaps(t *testing.T) {
 	}
 }
 
+func TestImageCacheFailureRetryDelayDefersStableProviderFailures(t *testing.T) {
+	tests := []string{
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 403",
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 404",
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 410",
+		"imagecache: download https://example.invalid/missing.jpg: unexpected status 418",
+	}
+	for _, errText := range tests {
+		if got := imageCacheFailureRetryDelay(1, errText); got != 7*24*time.Hour {
+			t.Fatalf("imageCacheFailureRetryDelay(%q) = %s, want 7d", errText, got)
+		}
+	}
+	if got := imageCacheFailureRetryDelay(1, "temporary network error"); got != time.Minute {
+		t.Fatalf("transient failure delay = %s, want 1m", got)
+	}
+}
+
+func TestImageCacheJobRediscoveryUsesNextAttemptAt(t *testing.T) {
+	body, err := os.ReadFile("image_cache_job_repo.go")
+	if err != nil {
+		t.Fatalf("read image_cache_job_repo.go: %v", err)
+	}
+	sql := string(body)
+	if strings.Contains(sql, "metadata_image_cache_jobs.updated_at < NOW()") || strings.Contains(sql, "j.updated_at < NOW()") {
+		t.Fatal("failed image cache job rediscovery must use next_attempt_at, not updated_at age")
+	}
+	for _, want := range []string{
+		"metadata_image_cache_jobs.next_attempt_at <= NOW()",
+		"j.next_attempt_at <= NOW()",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("image cache job rediscovery missing %q", want)
+		}
+	}
+}
+
 func TestNormalizeImageCacheJobInputSkipsNonProviderArtwork(t *testing.T) {
 	for _, sourcePath := range []string{
 		"",

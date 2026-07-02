@@ -20,7 +20,7 @@ type serviceFakeRepo struct {
 	settings            map[string]string
 	syncRuns            []SyncRun
 	historyExports      []HistoryExport
-	favoriteStates      []FavoriteState
+	listItemStates      []ListItemState
 	scrobbleConnections []Connection
 	scrobbleSessions    []ScrobbleSession
 	scrobbleUpdates     []scrobbleUpdate
@@ -211,21 +211,18 @@ func (r *serviceFakeRepo) ListLocalWatchEventConnections(_ context.Context, user
 	return conns, nil
 }
 
-func (r *serviceFakeRepo) ListFavoriteEventConnections(_ context.Context, userID int, profileID string, kind LocalFavoriteEventKind) ([]Connection, error) {
+func (r *serviceFakeRepo) ListListEventConnections(_ context.Context, userID int, profileID string, list ListKind) ([]Connection, error) {
 	var conns []Connection
 	for _, conn := range r.connections {
 		if conn.UserID != userID || conn.ProfileID != profileID {
 			continue
 		}
-		switch kind {
-		case LocalFavoriteEventAdded:
-			if conn.ExportFavoritesEnabled {
-				conns = append(conns, cloneConnectionForTest(conn))
-			}
-		case LocalFavoriteEventRemoved:
-			if conn.ExportFavoritesEnabled {
-				conns = append(conns, cloneConnectionForTest(conn))
-			}
+		enabled := conn.ExportFavoritesEnabled
+		if list == ListKindWatchlist {
+			enabled = conn.ExportWatchlistEnabled
+		}
+		if enabled {
+			conns = append(conns, cloneConnectionForTest(conn))
 		}
 	}
 	return conns, nil
@@ -276,56 +273,48 @@ func (r *serviceFakeRepo) MarkHistoryExportStatus(_ context.Context, id string, 
 	return nil
 }
 
-func (r *serviceFakeRepo) UpsertFavoriteStates(_ context.Context, states []FavoriteState) error {
+func (r *serviceFakeRepo) UpsertListItemStates(_ context.Context, states []ListItemState) error {
 	for _, state := range states {
+		if state.ListKind == "" {
+			state.ListKind = ListKindFavorites
+		}
 		replaced := false
-		for i := range r.favoriteStates {
-			if r.favoriteStates[i].ConnectionID == state.ConnectionID && r.favoriteStates[i].MediaItemID == state.MediaItemID {
+		for i := range r.listItemStates {
+			if r.listItemStates[i].ConnectionID == state.ConnectionID &&
+				r.listItemStates[i].ListKind == state.ListKind &&
+				r.listItemStates[i].MediaItemID == state.MediaItemID {
 				if state.ID == "" {
-					state.ID = r.favoriteStates[i].ID
+					state.ID = r.listItemStates[i].ID
 				}
-				r.favoriteStates[i] = state
+				r.listItemStates[i] = state
 				replaced = true
 				break
 			}
 		}
 		if !replaced {
 			if state.ID == "" {
-				state.ID = "favorite-" + strconv.Itoa(len(r.favoriteStates)+1)
+				state.ID = "list-item-" + strconv.Itoa(len(r.listItemStates)+1)
 			}
-			r.favoriteStates = append(r.favoriteStates, state)
+			r.listItemStates = append(r.listItemStates, state)
 		}
 	}
 	return nil
 }
 
-func (r *serviceFakeRepo) ListFavoriteStates(_ context.Context, connectionID string) ([]FavoriteState, error) {
-	var states []FavoriteState
-	for _, state := range r.favoriteStates {
-		if state.ConnectionID == connectionID {
+func (r *serviceFakeRepo) ListListItemStates(_ context.Context, connectionID string, kind ListKind) ([]ListItemState, error) {
+	var states []ListItemState
+	for _, state := range r.listItemStates {
+		if state.ConnectionID == connectionID && state.ListKind == kind {
 			states = append(states, state)
 		}
 	}
 	return states, nil
 }
 
-func (r *serviceFakeRepo) ListPendingFavoriteExports(_ context.Context, connectionID string, limit int) ([]FavoriteState, error) {
-	var states []FavoriteState
-	for _, state := range r.favoriteStates {
-		if state.ConnectionID == connectionID && state.LocalPresent && !state.RemotePresent && state.LastError == "" {
-			states = append(states, state)
-			if limit > 0 && len(states) >= limit {
-				break
-			}
-		}
-	}
-	return states, nil
-}
-
-func (r *serviceFakeRepo) ListPendingFavoriteRemovals(_ context.Context, connectionID string, limit int) ([]FavoriteState, error) {
-	var states []FavoriteState
-	for _, state := range r.favoriteStates {
-		if state.ConnectionID == connectionID && !state.LocalPresent && state.RemotePresent && state.LastError == "" {
+func (r *serviceFakeRepo) ListPendingListItemExports(_ context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error) {
+	var states []ListItemState
+	for _, state := range r.listItemStates {
+		if state.ConnectionID == connectionID && state.ListKind == kind && state.LocalPresent && !state.RemotePresent && state.LastError == "" {
 			states = append(states, state)
 			if limit > 0 && len(states) >= limit {
 				break
@@ -335,43 +324,60 @@ func (r *serviceFakeRepo) ListPendingFavoriteRemovals(_ context.Context, connect
 	return states, nil
 }
 
-func (r *serviceFakeRepo) MarkFavoriteExported(_ context.Context, connectionID, mediaItemID string, exportedAt time.Time) error {
-	for i := range r.favoriteStates {
-		if r.favoriteStates[i].ConnectionID == connectionID && r.favoriteStates[i].MediaItemID == mediaItemID {
-			r.favoriteStates[i].RemotePresent = true
-			r.favoriteStates[i].LocalPresent = true
-			r.favoriteStates[i].LastExportedAt = &exportedAt
+func (r *serviceFakeRepo) ListPendingListItemRemovals(_ context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error) {
+	var states []ListItemState
+	for _, state := range r.listItemStates {
+		if state.ConnectionID == connectionID && state.ListKind == kind && !state.LocalPresent && state.RemotePresent && state.LastError == "" {
+			states = append(states, state)
+			if limit > 0 && len(states) >= limit {
+				break
+			}
 		}
 	}
+	return states, nil
+}
+
+func (r *serviceFakeRepo) markListItem(connectionID string, kind ListKind, mediaItemID string, apply func(*ListItemState)) {
+	for i := range r.listItemStates {
+		if r.listItemStates[i].ConnectionID == connectionID && r.listItemStates[i].ListKind == kind && r.listItemStates[i].MediaItemID == mediaItemID {
+			apply(&r.listItemStates[i])
+		}
+	}
+}
+
+func (r *serviceFakeRepo) MarkListItemExported(_ context.Context, connectionID string, kind ListKind, mediaItemID string, exportedAt time.Time) error {
+	// Mirror Postgres: successful transitions clear last_error.
+	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
+		s.RemotePresent = true
+		s.LocalPresent = true
+		s.LastExportedAt = &exportedAt
+		s.LastError = ""
+	})
 	return nil
 }
 
-func (r *serviceFakeRepo) MarkFavoriteRemoteRemoved(_ context.Context, connectionID, mediaItemID string, removedAt time.Time) error {
-	for i := range r.favoriteStates {
-		if r.favoriteStates[i].ConnectionID == connectionID && r.favoriteStates[i].MediaItemID == mediaItemID {
-			r.favoriteStates[i].RemotePresent = false
-			r.favoriteStates[i].LastRemovedRemoteAt = &removedAt
-		}
-	}
+func (r *serviceFakeRepo) MarkListItemRemoteRemoved(_ context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error {
+	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
+		s.RemotePresent = false
+		s.LastRemovedRemoteAt = &removedAt
+		s.LastError = ""
+	})
 	return nil
 }
 
-func (r *serviceFakeRepo) MarkFavoriteLocalRemoved(_ context.Context, connectionID, mediaItemID string, removedAt time.Time) error {
-	for i := range r.favoriteStates {
-		if r.favoriteStates[i].ConnectionID == connectionID && r.favoriteStates[i].MediaItemID == mediaItemID {
-			r.favoriteStates[i].LocalPresent = false
-			r.favoriteStates[i].LastRemovedLocalAt = &removedAt
-		}
-	}
+func (r *serviceFakeRepo) MarkListItemLocalRemoved(_ context.Context, connectionID string, kind ListKind, mediaItemID string, removedAt time.Time) error {
+	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
+		s.LocalPresent = false
+		s.LastRemovedLocalAt = &removedAt
+		s.LastError = ""
+	})
 	return nil
 }
 
-func (r *serviceFakeRepo) MarkFavoriteError(_ context.Context, connectionID, mediaItemID, lastError string) error {
-	for i := range r.favoriteStates {
-		if r.favoriteStates[i].ConnectionID == connectionID && r.favoriteStates[i].MediaItemID == mediaItemID {
-			r.favoriteStates[i].LastError = lastError
-		}
-	}
+func (r *serviceFakeRepo) MarkListItemError(_ context.Context, connectionID string, kind ListKind, mediaItemID, lastError string) error {
+	r.markListItem(connectionID, kind, mediaItemID, func(s *ListItemState) {
+		s.LastError = lastError
+	})
 	return nil
 }
 

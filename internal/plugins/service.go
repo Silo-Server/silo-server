@@ -25,6 +25,7 @@ import (
 type pluginClient interface {
 	Manifest() *pluginv1.PluginManifest
 	MetadataProvider(capabilityID string) (*pluginhost.MetadataProviderClient, error)
+	ImageResolver(capabilityID string) (*pluginhost.ImageResolverClient, error)
 	MarkerProvider(capabilityID string) (*pluginhost.MarkerProviderClient, error)
 	MediaAnalyzer(capabilityID string) (*pluginhost.MediaAnalyzerClient, error)
 	ScheduledTask(capabilityID string) (*pluginhost.ScheduledTaskClient, error)
@@ -448,6 +449,18 @@ func (s *Service) MetadataProviderClient(
 		return nil, err
 	}
 	return client.MetadataProvider(capabilityID)
+}
+
+func (s *Service) ImageResolverClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.ImageResolverClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.ImageResolver(capabilityID)
 }
 
 func (s *Service) MarkerProviderClient(

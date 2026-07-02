@@ -60,13 +60,15 @@ func (t *CacheMetadataImagesTask) Execute(ctx context.Context, progress taskmana
 		return fmt.Errorf("caching metadata images: %w", err)
 	}
 	message := fmt.Sprintf(
-		"Batches %d, enqueued %d existing, claimed %d, cached %d, failed %d, skipped %d, deleted %d old successes",
+		"Batches %d, enqueued %d existing, claimed %d, cached %d, failed %d, skipped %d, uploaded %d variants, found %d existing variants, deleted %d old successes",
 		stats.Batches,
 		stats.EnqueuedExisting,
 		stats.Claimed,
 		stats.Succeeded,
 		stats.Failed,
 		stats.Skipped,
+		stats.UploadedVariants,
+		stats.ExistingVariants,
 		stats.DeletedSucceeded,
 	)
 	if stats.RuntimeLimited {

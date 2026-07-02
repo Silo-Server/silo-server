@@ -7,6 +7,7 @@ import SeasonContent from "./SeasonContent";
 
 const mocks = vi.hoisted(() => {
   let capturedActionBarProps: Record<string, unknown> | null = null;
+  let capturedDetailHeroProps: Record<string, unknown> | null = null;
   const capturedMediaMenuProps: Record<string, unknown>[] = [];
 
   return {
@@ -18,10 +19,19 @@ const mocks = vi.hoisted(() => {
         capturedActionBarProps = value;
       },
     },
+    capturedDetailHeroProps: {
+      get value() {
+        return capturedDetailHeroProps;
+      },
+      set value(value: Record<string, unknown> | null) {
+        capturedDetailHeroProps = value;
+      },
+    },
     capturedMediaMenuProps,
     useItemEpisodes: vi.fn(),
     useRefreshItemMetadata: vi.fn(),
     useWatchedStateMutation: vi.fn(),
+    useOnViewTranslation: vi.fn(),
     useRating: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
@@ -53,6 +63,10 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: () => ({ profile: mocks.useAuth()?.profile ?? null }),
 }));
 
+vi.mock("@/hooks/useOnViewTranslation", () => ({
+  useOnViewTranslation: mocks.useOnViewTranslation,
+}));
+
 vi.mock("@/components/MediaItemMenu", () => ({
   default: (props: Record<string, unknown>) => {
     mocks.capturedMediaMenuProps.push(props);
@@ -73,7 +87,10 @@ vi.mock("@/components/ui/skeleton", () => ({
 }));
 
 vi.mock("./DetailHero", () => ({
-  default: ({ actions }: { actions?: ReactNode }) => <div>{actions}</div>,
+  default: (props: { actions?: ReactNode } & Record<string, unknown>) => {
+    mocks.capturedDetailHeroProps.value = props;
+    return <div>{props.actions}</div>;
+  },
 }));
 
 vi.mock("./components/MetadataBadges", () => ({
@@ -138,8 +155,10 @@ function makeSeasonItem(
 describe("SeasonContent", () => {
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
+    mocks.capturedDetailHeroProps.value = null;
     mocks.capturedMediaMenuProps.length = 0;
     mocks.useAuth.mockReturnValue({ user: null });
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: undefined });
     mocks.useRefreshItemMetadata.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useWatchedStateMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
     mocks.useItemEpisodes.mockReturnValue({
@@ -207,6 +226,28 @@ describe("SeasonContent", () => {
       contentId: "episode-1",
       mediaType: "episode",
       hasPartialProgress: true,
+    });
+  });
+
+  it("passes on-view translation controls to the hero", () => {
+    const onTranslate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({
+      translating: true,
+      onTranslate,
+    });
+
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/season-1"]}>
+        <SeasonContent item={makeSeasonItem({ pending_translation_language: "fr" })} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useOnViewTranslation).toHaveBeenCalledWith(
+      expect.objectContaining({ content_id: "season-1", type: "season" }),
+    );
+    expect(mocks.capturedDetailHeroProps.value).toMatchObject({
+      overviewTranslating: true,
+      onTranslateOverview: onTranslate,
     });
   });
 });

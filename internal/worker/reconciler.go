@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -26,6 +27,9 @@ type SessionSync struct {
 	PlayMethod           string // current live transport method for admin session views
 	ReportingNode        string
 	ClientIP             string
+	ClientName           string
+	ClientVersion        string
+	ClientUserAgent      string
 	AudioTrackIndex      int
 	TranscodeAudio       bool
 	StreamBitrateKbps    int
@@ -71,6 +75,14 @@ type Reconciler struct {
 	EventBus        cache.EventBus
 	EventsHub       *evt.Hub
 	PreSync         PreSyncHook
+	// syncMu guards syncRunning/syncPending. Session syncs are coalesced onto a
+	// single owner so concurrent callers (the periodic tick plus request-path
+	// start/stop triggers) can never commit an older session snapshot after a
+	// newer one — which would resurrect stopped sessions or drop freshly
+	// started ones — and so request goroutines never queue behind a slow sync.
+	syncMu      sync.Mutex
+	syncRunning bool
+	syncPending bool
 }
 
 // NewReconciler creates a new Reconciler with sensible defaults. The default
@@ -138,10 +150,11 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 			INSERT INTO playback_sessions_sync
 				(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method,
 				 reporting_node, started_at, updated_at, last_sync_at, client_ip,
+				 client_name, client_version, client_user_agent,
 				 audio_track_index, transcode_audio, stream_bitrate_kbps, transcode_node_url,
 				 target_resolution, target_video_codec, target_audio_codec, target_bitrate_kbps,
 				 transcode_hw_accel, position_seconds, is_paused, has_websocket)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -152,6 +165,9 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				started_at          = EXCLUDED.started_at,
 				updated_at          = EXCLUDED.updated_at,
 				client_ip           = EXCLUDED.client_ip,
+				client_name         = EXCLUDED.client_name,
+				client_version      = EXCLUDED.client_version,
+				client_user_agent   = EXCLUDED.client_user_agent,
 				audio_track_index   = EXCLUDED.audio_track_index,
 				transcode_audio     = EXCLUDED.transcode_audio,
 				stream_bitrate_kbps = EXCLUDED.stream_bitrate_kbps,
@@ -166,8 +182,9 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				has_websocket       = EXCLUDED.has_websocket,
 				last_sync_at        = NOW()
 		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
-			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP), s.AudioTrackIndex,
-			s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
+			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
+			nullableString(s.ClientName), nullableString(s.ClientVersion), nullableString(s.ClientUserAgent),
+			s.AudioTrackIndex, s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
 			nullableString(s.TargetResolution), nullableString(s.TargetVideoCodec),
 			nullableString(s.TargetAudioCodec), nullableInt(s.TargetBitrateKbps),
 			nullableString(s.TranscodeHWAccel), normalizePositionSeconds(s.PositionSeconds),
@@ -230,6 +247,9 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(play_method, ''),
 			COALESCE(reporting_node, ''),
 			COALESCE(HOST(client_ip), ''),
+			COALESCE(client_name, ''),
+			COALESCE(client_version, ''),
+			COALESCE(client_user_agent, ''),
 			COALESCE(audio_track_index, 0),
 			COALESCE(transcode_audio, FALSE),
 			COALESCE(stream_bitrate_kbps, 0),
@@ -265,6 +285,9 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.PlayMethod,
 			&s.ReportingNode,
 			&s.ClientIP,
+			&s.ClientName,
+			&s.ClientVersion,
+			&s.ClientUserAgent,
 			&s.AudioTrackIndex,
 			&s.TranscodeAudio,
 			&s.StreamBitrateKbps,
@@ -318,6 +341,9 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			left[i].PlayMethod != right[i].PlayMethod ||
 			left[i].ReportingNode != right[i].ReportingNode ||
 			left[i].ClientIP != right[i].ClientIP ||
+			left[i].ClientName != right[i].ClientName ||
+			left[i].ClientVersion != right[i].ClientVersion ||
+			left[i].ClientUserAgent != right[i].ClientUserAgent ||
 			left[i].AudioTrackIndex != right[i].AudioTrackIndex ||
 			left[i].TranscodeAudio != right[i].TranscodeAudio ||
 			left[i].StreamBitrateKbps != right[i].StreamBitrateKbps ||
@@ -417,14 +443,56 @@ func (r *Reconciler) tick() {
 	}
 }
 
-// SyncNow runs one immediate session reconciliation using the current local
-// session snapshot. When nodeName is configured, an empty snapshot still
-// clears any rows previously reported by that node.
+// SyncNow reconciles the current local session snapshot into the shared
+// table. When nodeName is configured, an empty snapshot still clears any rows
+// previously reported by that node.
+//
+// Syncs are coalesced: only one reconciliation runs at a time, and a call that
+// arrives while one is in flight returns immediately after asking the running
+// owner for one follow-up pass with a fresh snapshot. The follow-up capture
+// happens after the caller's state change, so its effect is never lost, and
+// snapshots always commit in capture order.
 func (r *Reconciler) SyncNow(ctx context.Context) error {
 	if r.sessionProvider == nil {
 		return nil
 	}
 
+	r.syncMu.Lock()
+	if r.syncRunning {
+		// The in-flight sync may have captured a snapshot that predates this
+		// caller's state change; have the owner run one more pass.
+		r.syncPending = true
+		r.syncMu.Unlock()
+		return nil
+	}
+	r.syncRunning = true
+	// The fresh capture below supersedes any pass queued before ownership.
+	r.syncPending = false
+	r.syncMu.Unlock()
+
+	err := r.syncOnce(ctx)
+	for {
+		r.syncMu.Lock()
+		// Leave a queued pass for the next caller (the periodic tick at the
+		// latest) rather than burning it on an already-expired context.
+		if !r.syncPending || ctx.Err() != nil {
+			r.syncRunning = false
+			r.syncMu.Unlock()
+			return err
+		}
+		r.syncPending = false
+		r.syncMu.Unlock()
+		if passErr := r.syncOnce(ctx); err == nil {
+			err = passErr
+		}
+	}
+}
+
+// syncOnce captures one session snapshot and reconciles it.
+func (r *Reconciler) syncOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	sessions := r.sessionProvider()
 	if len(sessions) == 0 {
 		if r.nodeName == "" {

@@ -226,6 +226,21 @@ func (d *DurableCompatPlaybackStore) FindByRoute(compatToken, routeID string) (*
 	return d.mem.FindByRoute(compatToken, routeID)
 }
 
+// FindByClientPlaySessionID resolves the client-generated PlaySessionId alias,
+// checking the cache first and falling back to loading the compat token's live
+// rows from Postgres into the cache (same bounded fallback as FindByRoute; the
+// alias uniqueness check runs against the repopulated cache).
+func (d *DurableCompatPlaybackStore) FindByClientPlaySessionID(compatToken, clientPlaySessionID string) (*PlaybackSession, bool) {
+	if s, ok := d.mem.FindByClientPlaySessionID(compatToken, clientPlaySessionID); ok {
+		return s, ok
+	}
+	if compatToken == "" {
+		return nil, false
+	}
+	d.loadByCompatToken(compatToken)
+	return d.mem.FindByClientPlaySessionID(compatToken, clientPlaySessionID)
+}
+
 // DeleteExpired physically removes lapsed rows. Reads already filter on
 // expires_at, so this only bounds table growth; run it on the janitor cadence.
 func (d *DurableCompatPlaybackStore) DeleteExpired(ctx context.Context) (int64, error) {

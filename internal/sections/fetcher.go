@@ -426,7 +426,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	}
 
 	nextUpMode := ""
-	if ContinueTypeAllowsNextUp(continueType) {
+	if ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp {
 		nextUpMode, _ = store.GetSetting(ctx, "next_up_mode")
 		if nextUpMode == "" {
 			nextUpMode = "combined"
@@ -1315,30 +1315,52 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 	// Smart / live-query collection: parse the query definition and use the
 	// filtered fetch path, mirroring resolveUserCollectionSource in catalog_resolver.
 	isSmartType := strings.EqualFold(strings.TrimSpace(collection.CollectionType), "smart")
-	hasQueryDef := len(strings.TrimSpace(collection.QueryDefinition)) > 0 &&
-		strings.TrimSpace(collection.QueryDefinition) != "{}" &&
-		strings.TrimSpace(collection.QueryDefinition) != "null"
-	if isSmartType || hasQueryDef {
+	if isSmartType {
 		var qd catalog.QueryDefinition
 		if err := json.Unmarshal([]byte(collection.QueryDefinition), &qd); err != nil {
 			return nil, 0, fmt.Errorf("parsing user collection query_definition: %w", err)
 		}
-		qd = qd.Normalize()
-		// Build a synthetic resolved section with the query definition as config.
-		cfgBytes, _ := json.Marshal(qd)
-		synth := ResolvedSection{
-			ID:          s.ID,
-			SectionType: SectionCustomFilter,
-			Title:       s.Title,
-			Featured:    s.Featured,
-			ItemLimit:   s.ItemLimit,
-			Config:      cfgBytes,
-			Position:    s.Position,
+		if strings.TrimSpace(collection.DisplayQueryDefinition) == "" {
+			qd = qd.Normalize()
+			// Build a synthetic resolved section with the query definition as config.
+			cfgBytes, _ := json.Marshal(qd)
+			synth := ResolvedSection{
+				ID:          s.ID,
+				SectionType: SectionCustomFilter,
+				Title:       s.Title,
+				Featured:    s.Featured,
+				ItemLimit:   s.ItemLimit,
+				Config:      cfgBytes,
+				Position:    s.Position,
+			}
+			return f.fetchFiltered(ctx, synth, libraryID, libraryIDs, filter)
 		}
-		return f.fetchFiltered(ctx, synth, libraryID, libraryIDs, filter)
+
+		qd = applySectionLibraryScopeToQuery(qd.Normalize(), libraryID, libraryIDs)
+		qd = catalog.ApplySmartCollectionItemLimit(qd)
+		limit := catalog.DefaultSmartCollectionItemLimit
+		if qd.Limit != nil && *qd.Limit > 0 {
+			limit = *qd.Limit
+		}
+		executor := &catalog.QueryExecutor{Pool: f.pool}
+		items, _, err := executor.Preview(ctx, qd, filter, limit)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		displayAccess := filter
+		displayAccess.UserID = userID
+		displayAccess.ProfileID = profileID
+		items, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, f.pool, items, collection.DisplayQueryDefinition, displayAccess)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		items, total := limitUserCollectionSectionItems(items, s.ItemLimit)
+		return items, total, nil
 	}
 
-	// Manual collection: fetch stored items.
+	// Exact collection: fetch stored items.
 	collectionItems, err := store.ListCollectionItems(ctx, collectionID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing user collection items: %w", err)
@@ -1347,13 +1369,8 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	limit := s.ItemLimit
-	if limit <= 0 || limit > len(collectionItems) {
-		limit = len(collectionItems)
-	}
-
-	contentIDs := make([]string, 0, limit)
-	for _, item := range collectionItems[:limit] {
+	contentIDs := make([]string, 0, len(collectionItems))
+	for _, item := range collectionItems {
 		contentIDs = append(contentIDs, item.MediaItemID)
 	}
 
@@ -1376,7 +1393,25 @@ func (f *Fetcher) fetchUserCollection(ctx context.Context, s ResolvedSection, li
 		orderedItems = append(orderedItems, item)
 	}
 
-	return orderedItems, len(orderedItems), nil
+	displayAccess := filter
+	displayAccess.UserID = userID
+	displayAccess.ProfileID = profileID
+	orderedItems, err = catalog.FilterCollectionItemsByDisplayQuery(ctx, f.pool, orderedItems, collection.DisplayQueryDefinition, displayAccess)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	orderedItems, total := limitUserCollectionSectionItems(orderedItems, s.ItemLimit)
+
+	return orderedItems, total, nil
+}
+
+func limitUserCollectionSectionItems(items []*models.MediaItem, limit int) ([]*models.MediaItem, int) {
+	total := len(items)
+	if limit > 0 && limit < len(items) {
+		return items[:limit], total
+	}
+	return items, total
 }
 
 func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
@@ -2143,16 +2178,7 @@ func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryI
 		return nil, 0, fmt.Errorf("parsing query definition: %w", err)
 	}
 
-	switch {
-	case libraryID != nil:
-		def.LibraryIDs = []int{*libraryID}
-	case libraryIDs != nil:
-		if len(def.LibraryIDs) == 0 {
-			def.LibraryIDs = append([]int(nil), libraryIDs...)
-		} else {
-			def.LibraryIDs = intersectLibraryIDs(def.LibraryIDs, libraryIDs)
-		}
-	}
+	def = applySectionLibraryScopeToQuery(def, libraryID, libraryIDs)
 
 	if s.ItemLimit > 0 {
 		limit := s.ItemLimit
@@ -2171,6 +2197,20 @@ func (f *Fetcher) fetchFiltered(ctx context.Context, s ResolvedSection, libraryI
 	}
 
 	return items, total, nil
+}
+
+func applySectionLibraryScopeToQuery(def catalog.QueryDefinition, libraryID *int, libraryIDs []int) catalog.QueryDefinition {
+	switch {
+	case libraryID != nil:
+		def.LibraryIDs = []int{*libraryID}
+	case libraryIDs != nil:
+		if len(def.LibraryIDs) == 0 {
+			def.LibraryIDs = append([]int(nil), libraryIDs...)
+		} else {
+			def.LibraryIDs = intersectLibraryIDs(def.LibraryIDs, libraryIDs)
+		}
+	}
+	return def
 }
 
 func buildRandomQuery(s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) (string, []any, int) {

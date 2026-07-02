@@ -32,7 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalogseed"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/download"
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
@@ -114,6 +114,7 @@ type Dependencies struct {
 	AdminStatsProvider           handlers.AdminStatsSource
 	Recommender                  recommendations.Recommender // nil when disabled
 	RecWorker                    *recommendations.Worker     // nil when disabled
+	CatalogSearchVectorizer      catalog.CatalogSearchQueryVectorizer
 	RatingsRepo                  *catalog.RatingsRepo
 	PersonRepo                   *catalog.PersonRepository
 	PersonRefreshQueue           handlers.PersonRefreshQueue
@@ -131,8 +132,9 @@ type Dependencies struct {
 	ActivityLogRepo              *activitylog.Repo
 	OpsLogRepo                   *opslog.Repo
 	FFmpegLogSink                playback.FFmpegLogSink
-	RedisClient                  *redis.Client            // for session listing (may be nil)
-	TaskManager                  *taskmanager.TaskManager // task manager (may be nil)
+	RedisClient                  *redis.Client              // for session listing (may be nil)
+	TaskManager                  *taskmanager.TaskManager   // task manager (may be nil)
+	ArtifactManager              *downloads.ArtifactManager // download prepare-to-file pipeline (may be nil)
 	AdminJobCancelRegistry       *adminjob.CancelRegistry
 	IntroRepository              *intromarkers.Repository
 	IntroAnalyzer                *intromarkers.Analyzer
@@ -142,6 +144,7 @@ type Dependencies struct {
 	MarkerContributionStore      *markers.ContributionStore
 	MarkerContributionService    *markers.ContributionService
 	WatchProviderService         handlers.WatchProviderService
+	WatchCompletionObserver      watchstate.CompletionObserver
 	PluginService                *plugins.Service
 	PluginHTTPProxy              *plugins.HTTPProxy
 	PluginUserConfig             *plugins.UserConfigStore
@@ -433,6 +436,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var seasonRepo *catalog.SeasonRepository
 	var detailSvc *catalog.DetailService
 	var calendarRepo *catalog.CalendarRepository
+	var catalogSearchService *catalog.CatalogSearchService
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
 	var autoscanHandler *handlers.AutoscanHandler
@@ -446,6 +450,23 @@ func NewRouter(deps Dependencies) chi.Router {
 		ebookAnnotationStore = handlers.NewPGEbookReaderAnnotationStore(deps.DB)
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
+		searchIndexEvents := catalog.NewSearchIndexEventRepository(deps.DB)
+		catalogSearchService = catalog.NewCatalogSearchService(
+			context.Background(),
+			settingsRepo,
+			itemRepo,
+			searchIndexEvents,
+			deps.CatalogSearchVectorizer,
+		)
+		if catalogSearchService != nil {
+			catalogSearchService.StartCoverageRefresh(deps.AppContext)
+		}
+		activeSearchProvider := catalog.SearchProviderPostgres
+		if _, ok := catalogSearchService.Provider().(*catalog.MeilisearchSearchProvider); ok {
+			activeSearchProvider = catalog.SearchProviderMeilisearch
+		}
+		searchIndexEvents.WithActiveProvider(activeSearchProvider)
+		itemRepo.WithSearchIndexEvents(searchIndexEvents)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
 		providerIDRepo = catalog.NewProviderIDRepository(deps.DB)
 		calendarRepo = catalog.NewCalendarRepository(deps.DB)
@@ -489,6 +510,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			detailSvc,
 			providerIDRepo,
 		)
+		if catalogSearchService != nil {
+			itemsHandler.SetCatalogSearchProvider(catalogSearchService.Provider())
+		}
 		itemsHandler.EventsHub = deps.EventsHub
 		itemsHandler.UserRepo = userRepo
 		if requester, ok := deps.MetadataService.(handlers.MetadataRefreshRequester); ok {
@@ -496,6 +520,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalWatchEventDispatcher); ok {
 			itemsHandler.SetLocalWatchEventDispatcher(dispatcher)
+		}
+		if deps.WatchCompletionObserver != nil {
+			itemsHandler.SetCompletionObserver(deps.WatchCompletionObserver)
 		}
 		if ebookProgressStore != nil {
 			itemsHandler.SetEbookReaderProgressStore(ebookProgressStore)
@@ -523,7 +550,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		catalogHandler = handlers.NewCatalogHandler(
 			catalog.NewCatalogResolver(browseRepo, itemRepo).
 				WithEpisodeRepository(episodeRepo).
-				WithUserStoreProvider(deps.UserStoreProvider),
+				WithUserStoreProvider(deps.UserStoreProvider).
+				WithSearchProvider(catalogSearchService.Provider()),
 			itemsHandler,
 		)
 		catalogHandler.SetWorkSummaryProvider(literaryRepo)
@@ -611,8 +639,8 @@ func NewRouter(deps Dependencies) chi.Router {
 		personalDataHandler.SetEpisodeRepo(episodeRepo)
 		personalDataHandler.SetSeasonRepo(seasonRepo)
 		personalDataHandler.EventsHub = deps.EventsHub
-		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalFavoriteEventDispatcher); ok {
-			personalDataHandler.SetLocalFavoriteEventDispatcher(dispatcher)
+		if dispatcher, ok := deps.WatchProviderService.(handlers.LocalListEventDispatcher); ok {
+			personalDataHandler.SetLocalListEventDispatcher(dispatcher)
 		}
 		progressHandler = handlers.NewProgressHandler(deps.UserStoreProvider)
 		progressHandler.EventsHub = deps.EventsHub
@@ -707,6 +735,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.StoreProvider = deps.UserStoreProvider
 		}
 		playbackHandler.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
+		playbackHandler.CompletionObserver = deps.WatchCompletionObserver
 		if scrobbler, ok := deps.WatchProviderService.(handlers.PlaybackWatchScrobbler); ok {
 			playbackHandler.WatchScrobbler = scrobbler
 		}
@@ -794,9 +823,9 @@ func NewRouter(deps Dependencies) chi.Router {
 					watchtogether.NewRepository(deps.DB),
 					deps.SessionMgr,
 					deps.FileRepo,
-					playbackHandler.CommandDispatcher,
 					watchtogether.NewCatalogSelectionResolver(detailSvc),
 					watchtogether.NewSuggestionRepository(deps.DB),
+					watchtogether.NewProfileNameResolver(deps.UserStoreProvider),
 				),
 				viewerResolver,
 				roomTokenService,
@@ -838,6 +867,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
 		adminHandler.BootstrapSensitiveValues = deps.BootstrapSensitiveValues
 		adminHandler.RestartStatus = restartStatus
+		adminHandler.CatalogSearchStatus = catalogSearchService
 		if settingsRepo != nil {
 			adminHandler.SettingsRepo = settingsRepo
 		}
@@ -1327,18 +1357,18 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build download handler.
 	var downloadHandler *handlers.DownloadHandler
 	if deps.DB != nil && deps.FileRepo != nil && deps.Config != nil {
-		downloadRepo := download.NewRepository(deps.DB)
-		downloadBandwidth := download.NewBandwidthManager(
+		downloadRepo := downloads.NewRepository(deps.DB)
+		downloadBandwidth := downloads.NewBandwidthManager(
 			deps.Config.Download.ServerBandwidthBPS,
 			deps.Config.Download.UserBandwidthBPS,
 		)
-		downloadLimiter := download.NewQuantityLimiter(
+		downloadLimiter := downloads.NewQuantityLimiter(
 			downloadRepo,
 			deps.Config.Download.MaxConcurrentPerUser,
 			deps.Config.Download.MaxPerPeriod,
 			deps.Config.Download.PeriodDuration,
 		)
-		downloadSvc := download.NewService(
+		downloadSvc := downloads.NewService(
 			downloadRepo,
 			downloadBandwidth,
 			downloadLimiter,
@@ -1350,7 +1380,31 @@ func NewRouter(deps Dependencies) chi.Router {
 			settingsRepo,
 			&deps.Config.Download,
 		)
+		if detailSvc != nil {
+			// Offline manifest + artwork/subtitle proxies (Phase 2). subtitleManager
+			// may be nil when subtitles are unconfigured; pass a nil interface so the
+			// downloaded-subtitle path reports unavailable instead of panicking.
+			var subtitleSource downloads.SubtitleSource
+			if subtitleManager != nil {
+				subtitleSource = subtitleManager
+			}
+			downloadSvc.SetOfflineDeps(detailSvc, subtitleSource, nil)
+		}
+		if deps.ArtifactManager != nil {
+			// Prepare-to-file pipeline (Phase 3): remux/transcode-to-single-file.
+			downloadSvc.SetArtifactManager(deps.ArtifactManager)
+		}
+		// Series monitoring (auto-download subscriptions). Client-pull only:
+		// devices sync on app open / background refresh; there is no server
+		// background worker.
+		downloadSvc.SetSubscriptions(downloads.NewSubscriptionRepository(deps.DB))
 		downloadHandler = handlers.NewDownloadHandler(downloadSvc)
+		if profileHandler != nil {
+			// Profiles may live outside Postgres (sqlite userdb backend), so
+			// deleting one cannot FK-cascade the shared user_devices table;
+			// purge the device library (and its downloads) in-app instead.
+			profileHandler.DeviceLibraryPurger = downloadRepo
+		}
 	} else {
 		downloadHandler = handlers.NewDownloadHandler(nil)
 	}
@@ -1604,6 +1658,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 					notificationsHandler := handlers.NewNotificationsHandler(deps.Notifications, deps.EventsHub)
 					r.With(apimw.RequireProfile).Post("/events/ws-ticket", notificationsHandler.HandleMintWSTicket)
+					r.With(apimw.RequireProfile).Post("/devices/push/apple", notificationsHandler.HandleRegisterApplePushDevice)
 					// Discord DM channel: the linked identity and mode hang off
 					// the login account, not a profile, so these stay outside
 					// the RequireProfile subrouter below (static paths coexist
@@ -1622,6 +1677,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/capability", notificationsHandler.HandleCapability)
 						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
+						r.Get("/push/apple/display/{delivery_id}", notificationsHandler.HandleApplePushDisplay)
 						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
 						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
 						r.Put("/email-preferences/address", notificationsHandler.HandleRequestEmailAddress)
@@ -1825,6 +1881,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Route("/collections", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 						r.Get("/", collectionHandler.HandleListCollections)
+						r.Get("/capabilities", collectionHandler.HandleCapabilities)
 						if libraryCollectionHandler != nil {
 							// Aggregated server (admin-curated) collections across
 							// every accessible library. Separate from "/" (personal,
@@ -2024,6 +2081,8 @@ func NewRouter(deps Dependencies) chi.Router {
 					r.Get("/metadata/ai/status", metadataAIHandler.HandleStatus)
 					if itemRepo != nil {
 						metadataAIHandler.ItemAccess = itemRepo
+						metadataAIHandler.SeasonLookup = seasonRepo
+						metadataAIHandler.EpisodeLookup = episodeRepo
 						r.Post("/items/{id}/translate-description", metadataAIHandler.HandleTranslateOnView)
 					}
 				} else {
@@ -2126,10 +2185,27 @@ func NewRouter(deps Dependencies) chi.Router {
 
 				// Download routes.
 				r.Route("/downloads", func(r chi.Router) {
+					r.Get("/capability", downloadHandler.HandleCapability)
 					r.Post("/", downloadHandler.HandleCreateDownload)
 					r.Get("/", downloadHandler.HandleListDownloads)
+					// Series monitoring (auto-download) subscriptions.
+					r.Post("/subscriptions", downloadHandler.HandleCreateSubscription)
+					r.Post("/subscriptions/sync", downloadHandler.HandleSyncSubscriptions)
+					r.Get("/subscriptions", downloadHandler.HandleListSubscriptions)
+					r.Get("/subscriptions/{id}", downloadHandler.HandleGetSubscription)
+					r.Patch("/subscriptions/{id}", downloadHandler.HandlePatchSubscription)
+					r.Delete("/subscriptions/{id}", downloadHandler.HandleDeleteSubscription)
+					r.Get("/batches/{batch_id}/manifests", downloadHandler.HandleBatchManifests)
+					r.Patch("/{id}", downloadHandler.HandlePatchDownload)
 					r.Delete("/{id}", downloadHandler.HandleDeleteDownload)
+					// GET+HEAD: background download stacks probe with HEAD
+					// before issuing ranged GETs; http.ServeContent handles
+					// HEAD natively.
 					r.Get("/{id}/file", downloadHandler.HandleDownloadFile)
+					r.Head("/{id}/file", downloadHandler.HandleDownloadFile)
+					r.Get("/{id}/manifest", downloadHandler.HandleManifest)
+					r.Get("/{id}/artwork/{kind}", downloadHandler.HandleArtwork)
+					r.Get("/{id}/subtitles/{ref}", downloadHandler.HandleSubtitle)
 				})
 				r.Get("/direct-download", downloadHandler.HandleDirectDownload)
 				r.Head("/direct-download", downloadHandler.HandleDirectDownload)
@@ -2242,6 +2318,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Get("/unmatched", adminHandler.HandleListUnmatched)
 							r.Get("/stats", adminHandler.HandleGetStats)
 							r.Get("/server/status", adminHandler.HandleGetServerStatus)
+							r.Get("/catalog/search/status", adminHandler.HandleGetCatalogSearchStatus)
 							if literaryWorkHandler != nil {
 								r.Get("/literary-works/items/{content_id}/candidates", literaryWorkHandler.HandleListCandidates)
 								r.Post("/literary-works/link", literaryWorkHandler.HandleLinkItems)
@@ -2276,6 +2353,15 @@ func NewRouter(deps Dependencies) chi.Router {
 							}
 							if discordNotificationsHandler != nil {
 								r.Post("/notifications/discord/test", discordNotificationsHandler.HandleAdminTest)
+							}
+							if deps.Notifications != nil || settingsRepo != nil {
+								applePushHandler := handlers.NewAdminApplePushHandler(deps.Notifications, settingsRepo)
+								if deps.Notifications != nil {
+									r.Post("/notifications/push/apple/test", applePushHandler.HandleTest)
+								}
+								if settingsRepo != nil {
+									r.Post("/notifications/push/relay/register", applePushHandler.HandleRegisterRelay)
+								}
 							}
 							if deps.Notifications != nil && deps.Notifications.ServerChannels != nil {
 								serverChannelsHandler := handlers.NewAdminServerChannelsHandler(deps.Notifications)

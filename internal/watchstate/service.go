@@ -16,8 +16,18 @@ type LeafWatchTarget struct {
 }
 
 type Service struct {
-	storeProvider userstore.UserStoreProvider
-	identity      *StableIdentityResolver
+	storeProvider      userstore.UserStoreProvider
+	identity           *StableIdentityResolver
+	completionObserver CompletionObserver
+}
+
+// CompletionObserver is notified after a watch is recorded as completed via a
+// local action (manual mark-watched, playback completion, or a Jellyfin-compat
+// mark-played). It powers cross-cutting reactions such as removing watched
+// items from the watchlist. It is invoked best-effort and must not block the
+// recording path.
+type CompletionObserver interface {
+	HandleWatchedCompleted(ctx context.Context, userID int, profileID string, mediaItemIDs []string)
 }
 
 type PlaybackStopResult struct {
@@ -43,6 +53,21 @@ func (s *Service) WithStableIdentityResolver(identity *StableIdentityResolver) *
 	}
 	s.identity = identity
 	return s
+}
+
+func (s *Service) WithCompletionObserver(observer CompletionObserver) *Service {
+	if s == nil {
+		return nil
+	}
+	s.completionObserver = observer
+	return s
+}
+
+func (s *Service) notifyWatchedCompleted(ctx context.Context, userID int, profileID string, mediaItemIDs []string) {
+	if s == nil || s.completionObserver == nil || len(mediaItemIDs) == 0 {
+		return
+	}
+	s.completionObserver.HandleWatchedCompleted(ctx, userID, profileID, mediaItemIDs)
 }
 
 func (s *Service) RecordManualMarkWatched(ctx context.Context, userID int, profileID string, targets []LeafWatchTarget, watchedAt time.Time) error {
@@ -114,6 +139,9 @@ func (s *Service) RecordPlaybackStop(
 	}
 	result.Completed = entry.Completed
 	result.HistoryID = historyID
+	if entry.Completed {
+		s.notifyWatchedCompleted(ctx, userID, profileID, []string{targetID})
+	}
 	return result, nil
 }
 
@@ -318,6 +346,11 @@ func (s *Service) recordMarkWatched(
 		}
 		result.Entries = append(result.Entries, histEntry)
 	}
+	completedIDs := make([]string, 0, len(targets))
+	for _, target := range targets {
+		completedIDs = append(completedIDs, target.MediaItemID)
+	}
+	s.notifyWatchedCompleted(ctx, userID, profileID, completedIDs)
 	return result, nil
 }
 
@@ -431,6 +464,7 @@ func (s *Service) recordMarkWatchedBatch(
 			return err
 		}
 	}
+	s.notifyWatchedCompleted(ctx, userID, profileID, targetIDs)
 	return nil
 }
 

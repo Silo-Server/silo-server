@@ -23,7 +23,8 @@ var (
 
 // ItemRepository provides CRUD operations for the media_items table.
 type ItemRepository struct {
-	pool *pgxpool.Pool
+	pool              *pgxpool.Pool
+	searchIndexEvents *SearchIndexEventRepository
 }
 
 type itemExecer interface {
@@ -32,7 +33,29 @@ type itemExecer interface {
 
 // NewItemRepository creates a new ItemRepository backed by the given pool.
 func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
-	return &ItemRepository{pool: pool}
+	return &ItemRepository{
+		pool:              pool,
+		searchIndexEvents: NewSearchIndexEventRepository(pool),
+	}
+}
+
+func (r *ItemRepository) WithSearchIndexEvents(events *SearchIndexEventRepository) *ItemRepository {
+	if r == nil {
+		return nil
+	}
+	r.searchIndexEvents = events
+	return r
+}
+
+func (r *ItemRepository) WithActiveSearchProvider(provider string) *ItemRepository {
+	if r == nil {
+		return nil
+	}
+	if r.searchIndexEvents == nil {
+		r.searchIndexEvents = NewSearchIndexEventRepository(r.pool)
+	}
+	r.searchIndexEvents.WithActiveProvider(provider)
+	return r
 }
 
 // GetPoster returns the current poster path and thumbhash for a media item.
@@ -67,7 +90,7 @@ func (r *ItemRepository) SetLocalPoster(ctx context.Context, contentID, posterPa
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE media_items
 		SET poster_path = $2,
-		    poster_thumbhash = NULLIF($3, ''),
+		    poster_thumbhash = $3,
 		    updated_at = NOW()
 		WHERE content_id = $1
 		  AND (poster_path IS NULL OR poster_path = '' OR poster_path LIKE $4 || '%')
@@ -385,7 +408,22 @@ func scanItemsWithTotal(rows pgx.Rows) ([]*models.MediaItem, int, error) {
 // Upsert inserts a new media item or updates all mutable fields if the
 // content_id already exists. The created_at timestamp is preserved on update.
 func (r *ItemRepository) Upsert(ctx context.Context, item *models.MediaItem) error {
-	return r.upsert(ctx, r.pool, item)
+	if r.searchIndexEvents.disabledByActiveProvider() {
+		return r.upsert(ctx, r.pool, item)
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin media item upsert tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := r.upsert(ctx, tx, item); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit media item upsert tx: %w", err)
+	}
+	return nil
 }
 
 // UpsertTx inserts or updates a media item using the caller's transaction.
@@ -429,7 +467,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			type = EXCLUDED.type,
 			title = EXCLUDED.title,
 			sort_title = EXCLUDED.sort_title,
-			default_metadata_language = COALESCE(NULLIF(media_items.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), media_items.default_metadata_language),
 			original_title = EXCLUDED.original_title,
 			year = EXCLUDED.year,
 			genres = EXCLUDED.genres,
@@ -525,6 +563,10 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 	)
 	if err != nil {
 		return fmt.Errorf("upserting media item: %w", err)
+	}
+
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, execer, item.ContentID); err != nil {
+		return fmt.Errorf("enqueueing catalog search upsert: %w", err)
 	}
 
 	return nil
@@ -812,8 +854,14 @@ func (r *ItemRepository) GetByTitleYearType(ctx context.Context, title string, y
 // Delete removes a media item by its content ID and returns S3 image
 // directory paths that should be cleaned up by the caller.
 func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin delete tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// Collect image paths before deletion.
-	imgRows, err := r.pool.Query(ctx, `
+	imgRows, err := tx.Query(ctx, `
 		SELECT poster_path, backdrop_path, logo_path FROM media_items WHERE content_id = $1
 		UNION ALL
 		SELECT poster_path, '', '' FROM seasons WHERE series_id = $1
@@ -840,13 +888,20 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 	}
 	imgRows.Close()
 
-	tag, err := r.pool.Exec(ctx, "DELETE FROM media_items WHERE content_id = $1", contentID)
+	tag, err := tx.Exec(ctx, "DELETE FROM media_items WHERE content_id = $1", contentID)
 	if err != nil {
 		return nil, fmt.Errorf("deleting media item: %w", err)
 	}
 
 	if tag.RowsAffected() == 0 {
 		return nil, ErrItemNotFound
+	}
+
+	if err := r.searchIndexEvents.EnqueueDelete(ctx, tx, contentID); err != nil {
+		return nil, fmt.Errorf("enqueueing catalog search delete: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit delete tx: %w", err)
 	}
 
 	return imageDirs, nil
@@ -860,24 +915,57 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 // (audit 2026-05-01 §3.11). This replaces a prior two-query path that
 // re-evaluated the tsvector predicates for the count.
 func (r *ItemRepository) Search(ctx context.Context, query string, itemTypes []string, limit, offset int, filter AccessFilter) ([]*models.MediaItem, int, error) {
+	items, total, _, _, err := r.SearchPage(ctx, query, itemTypes, limit, offset, filter, true)
+	return items, total, err
+}
+
+func (r *ItemRepository) SearchPage(
+	ctx context.Context,
+	query string,
+	itemTypes []string,
+	limit, offset int,
+	filter AccessFilter,
+	includeTotal bool,
+) ([]*models.MediaItem, int, bool, bool, error) {
 	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
-		return []*models.MediaItem{}, 0, nil
+		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
-	sql, countSQL, args := r.buildSearchSQL(query, itemTypes, limit, offset, filter)
+	queryLimit := limit
+	if !includeTotal {
+		queryLimit = limit + 1
+	}
+	sql, countSQL, args := r.buildSearchSQLWithTotal(query, itemTypes, queryLimit, offset, filter, includeTotal)
 	if sql == "" {
-		return []*models.MediaItem{}, 0, nil
+		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
 
 	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("searching media items: %w", err)
+		return nil, 0, false, includeTotal, fmt.Errorf("searching media items: %w", err)
 	}
 	defer rows.Close()
 
+	if !includeTotal {
+		items, err := scanItems(rows)
+		if err != nil {
+			return nil, 0, false, false, err
+		}
+		hasMore := len(items) > limit
+		if hasMore {
+			items = items[:limit]
+		}
+		total := offset + len(items)
+		if hasMore {
+			total++
+		}
+		return items, total, hasMore, false, nil
+	}
+
 	items, total, err := scanItemsWithTotal(rows)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, false, true, err
 	}
+	hasMore := total > offset+len(items)
 	// COUNT(*) OVER () emits no rows when the data SELECT is empty, so total
 	// stays 0 even when the broader result set has matching rows (e.g. OFFSET
 	// past the last page). Re-query the count to give callers the real total.
@@ -887,10 +975,11 @@ func (r *ItemRepository) Search(ctx context.Context, query string, itemTypes []s
 		// Drop the trailing limit/offset args from the data query.
 		countArgs := args[:len(args)-2]
 		if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			return nil, 0, fmt.Errorf("count fallback for empty search page: %w", err)
+			return nil, 0, false, true, fmt.Errorf("count fallback for empty search page: %w", err)
 		}
+		hasMore = total > offset+len(items)
 	}
-	return items, total, nil
+	return items, total, hasMore, true, nil
 }
 
 // buildSearchSQL assembles the unified search query, returning the SQL string
@@ -918,6 +1007,10 @@ func (r *ItemRepository) Search(ctx context.Context, query string, itemTypes []s
 //	parsed.Phrase
 //	limit, offset
 func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter) (dataSQL, countSQL string, args []any) {
+	return r.buildSearchSQLWithTotal(query, itemTypes, limit, offset, filter, true)
+}
+
+func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool) (dataSQL, countSQL string, args []any) {
 	parsed := parseSearchQuery(query)
 	searchText := parsed.Text
 	if searchText == "" {
@@ -1122,11 +1215,15 @@ func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit,
 		WHERE scored.title_rank > 0
 		   OR scored.title_prefix_rank > 0
 		   OR (COALESCE(stats.has_title_match, 0) = 0 AND scored.overview_rank >= %g)`, overviewMatchFloor)
+	totalColumn := ""
+	if includeTotal {
+		totalColumn = ", COUNT(*) OVER () AS total_count"
+	}
 	dataSQL = scoredCTE + statsCTE + fmt.Sprintf(`
-		SELECT %s, COUNT(*) OVER () AS total_count
-		%s
-		ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, title_prefix_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
-		LIMIT $%d OFFSET $%d`, itemColumns, postFilter, argIdx, argIdx+1)
+			SELECT %s%s
+			%s
+			ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, title_prefix_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
+			LIMIT $%d OFFSET $%d`, itemColumns, totalColumn, postFilter, argIdx, argIdx+1)
 	countSQL = scoredCTE + statsCTE + fmt.Sprintf(`
 		SELECT COUNT(*)
 		%s`, postFilter)
@@ -1236,6 +1333,69 @@ func (r *ItemRepository) EnsureAccessible(ctx context.Context, contentID string,
 	return nil
 }
 
+// EnsureAccessibleIDs is the batch form of EnsureAccessible: it returns the set
+// of content IDs from the input that the viewer may access, applying the exact
+// same predicates (library allow/deny via the single JOIN form, max content
+// rating, excluded media types). An item is accessible iff at least one
+// media_items row — joined per library link when a library filter is active —
+// satisfies the predicates, matching EnsureAccessible's `LIMIT 1` semantics.
+// IDs absent from the returned map are not accessible (mirrors EnsureAccessible
+// returning ErrItemNotFound). Used by GetItemDetailsByIDs to avoid a per-item
+// EnsureAccessible fan-out.
+func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]bool, error) {
+	result := make(map[string]bool, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return result, nil
+	}
+	// An empty (non-nil) allowlist means "no libraries allowed" — nothing is
+	// accessible, exactly as EnsureAccessible returns ErrItemNotFound.
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return result, nil
+	}
+
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	fromClause := "media_items mi"
+	conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
+	args = append(args, contentIDs)
+	argIdx++
+
+	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
+	if filter.AllowedLibraryIDs != nil {
+		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
+		args = append(args, filter.AllowedLibraryIDs)
+		argIdx++
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
+		args = append(args, filter.DisabledLibraryIDs)
+		argIdx++
+	}
+	if needsLibJoin {
+		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
+	}
+
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+
+	query := fmt.Sprintf("SELECT DISTINCT mi.content_id FROM %s WHERE %s", fromClause, strings.Join(conditions, " AND "))
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("checking items access: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning item access row: %w", err)
+		}
+		result[id] = true
+	}
+	return result, rows.Err()
+}
+
 // GetItemsInLibrary returns a membership map for the provided content IDs within
 // a single library. Episode content IDs are matched directly against
 // episode_libraries so compat callers can filter mixed item/episode batches.
@@ -1294,6 +1454,9 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 	}
 
 	if len(people) == 0 {
+		if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
+			return fmt.Errorf("enqueueing catalog search people update: %w", err)
+		}
 		return tx.Commit(ctx)
 	}
 
@@ -1336,6 +1499,10 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 
 	if _, err := tx.Exec(ctx, sb.String(), args...); err != nil {
 		return fmt.Errorf("insert people: %w", err)
+	}
+
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
+		return fmt.Errorf("enqueueing catalog search people update: %w", err)
 	}
 
 	return tx.Commit(ctx)
@@ -1468,12 +1635,24 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 		strings.Join(setClauses, ", "), argIdx)
 	args = append(args, contentID)
 
-	tag, err := r.pool.Exec(ctx, query, args...)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin metadata update tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("updating media item metadata: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
+	}
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
+		return fmt.Errorf("enqueueing catalog search metadata update: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit metadata update tx: %w", err)
 	}
 	return nil
 }
@@ -1491,7 +1670,7 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 			UPDATE media_items
 			SET poster_path = $3,
 				poster_source_path = $2,
-				poster_thumbhash = NULLIF($4, ''),
+				poster_thumbhash = $4,
 				updated_at = NOW()
 			WHERE content_id = $1
 			  AND poster_source_path = $2`
@@ -1501,7 +1680,7 @@ func (r *ItemRepository) UpdateArtworkIfSourceMatches(ctx context.Context, conte
 			UPDATE media_items
 			SET backdrop_path = $3,
 				backdrop_source_path = $2,
-				backdrop_thumbhash = NULLIF($4, ''),
+				backdrop_thumbhash = $4,
 				updated_at = NOW()
 			WHERE content_id = $1
 			  AND backdrop_source_path = $2`

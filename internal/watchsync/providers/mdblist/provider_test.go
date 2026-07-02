@@ -23,8 +23,14 @@ func TestProviderIdentityAndCapabilities(t *testing.T) {
 		t.Fatalf("got display name %q, want MDBList", p.DisplayName())
 	}
 	caps := p.Capabilities()
-	if !caps.ScrobblePlayback || !caps.ImportWatched || !caps.ExportFavorites {
+	if !caps.ScrobblePlayback || !caps.ImportWatched || !caps.ExportWatchlist {
 		t.Fatalf("unexpected capabilities: %#v", caps)
+	}
+	if caps.ImportFavorites || caps.ExportFavorites || caps.RemoveFavorites {
+		t.Fatalf("mdblist should bind to watchlist, not favorites: %#v", caps)
+	}
+	if !caps.ProvidesWatchlistOrder {
+		t.Fatalf("mdblist should provide watchlist order: %#v", caps)
 	}
 	var _ watchsync.APIKeyAuthProvider = p
 }
@@ -274,7 +280,7 @@ func TestScrobbleStartUsesEpisodeShape(t *testing.T) {
 	}
 }
 
-func TestExportFavoritesSendsToWatchlistAdd(t *testing.T) {
+func TestExportWatchlistSendsToWatchlistAdd(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,9 +297,9 @@ func TestExportFavoritesSendsToWatchlistAdd(t *testing.T) {
 		{MediaItemID: "m1", Kind: historyimport.KindMovie, IMDbID: "tt0111161"},
 		{MediaItemID: "s1", Kind: historyimport.KindSeries, IMDbID: "tt0903747"},
 	}
-	result, err := p.ExportFavorites(context.Background(), watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "k"}, favorites)
+	result, err := p.ExportWatchlist(context.Background(), watchsync.ServerConfig{}, watchsync.Connection{AccessToken: "k"}, favorites)
 	if err != nil {
-		t.Fatalf("export favorites: %v", err)
+		t.Fatalf("export watchlist: %v", err)
 	}
 	if !strings.HasPrefix(gotPath, "/watchlist/items/add") {
 		t.Fatalf("got path %q, want /watchlist/items/add", gotPath)

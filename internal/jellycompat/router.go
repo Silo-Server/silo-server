@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -78,6 +79,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		// Smart (live-query) collections derive membership at read time, so the
 		// BoxSet children path needs a query executor to resolve them.
 		itemsHandler.queryExecutor = &catalog.QueryExecutor{Pool: deps.DB}
+		// Continue Watching (Resume) fast path: serve via the capped native
+		// continue-watching fetcher instead of an unbounded progress scan. This is
+		// the section subsystem's read-time fetcher only — no hub-section/virtual-
+		// library exposure is wired here. The continue-watching path needs only
+		// StoreProvider (progress); CollectionRepo/NextUpRepo are deliberately
+		// left unset as they serve other section types.
+		sf := sections.NewFetcher(deps.DB)
+		sf.StoreProvider = deps.UserStoreProvider
+		itemsHandler.sectionsFetcher = sf
 	}
 	itemsHandler.posterPresigner = deps.PosterPresigner
 	itemsHandler.presignTTL = deps.PresignTTL
@@ -109,6 +119,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
+	playbackHandler.SessionSyncer = deps.SessionSyncer
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.S3Client = deps.S3Client
@@ -333,6 +344,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			deps.FolderRepo,
 			deps.UserStoreProvider,
 			deps.AccessFilterFn,
+			deps.CatalogSearchProvider,
 		)
 		if deps.PosterPresigner != nil {
 			svc.posterPresigner = deps.PosterPresigner
@@ -360,6 +372,7 @@ func withDefaults(deps Dependencies) Dependencies {
 			catalog.NewContinueWatchingProgressFilter(pool),
 			staler,
 			deps.RecWorker,
+			deps.WatchCompletionObserver,
 		)
 	}
 

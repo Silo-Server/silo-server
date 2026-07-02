@@ -542,30 +542,47 @@ func (r *FolderRepository) DeleteWithStats(
 		for _, d := range dirs {
 			rawDirs[d] = struct{}{}
 		}
-		var deleted int64
+		var deletedContentIDs []string
 		if err := retryOnDeadlock(ctx, func() error {
+			tx, e := r.pool.Begin(ctx)
+			if e != nil {
+				return e
+			}
+			defer func() { _ = tx.Rollback(ctx) }()
+
 			// Re-check the orphan invariant inside the delete. A concurrent
 			// scan/import may have attached one of these content IDs to another
 			// library after collectOrphanBatch returned; without this guard the
 			// cascade would delete the shared media_items row (and the
 			// newly-added membership), dropping the item from the other library.
-			tag, e := r.pool.Exec(ctx, `
+			rows, e := tx.Query(ctx, `
 				DELETE FROM media_items
 				WHERE content_id = ANY($1)
 				AND NOT EXISTS (
 					SELECT 1 FROM media_item_libraries other
 					WHERE other.content_id = media_items.content_id
 					AND other.media_folder_id <> $2
-				)`, ids, id)
+				)
+				RETURNING content_id`, ids, id)
 			if e != nil {
 				return e
 			}
-			deleted = tag.RowsAffected()
+			attemptDeletedIDs, e := pgx.CollectRows(rows, pgx.RowTo[string])
+			if e != nil {
+				return fmt.Errorf("collecting deleted orphaned item IDs: %w", e)
+			}
+			if err := EnqueueSearchIndexDeletes(ctx, tx, attemptDeletedIDs); err != nil {
+				return fmt.Errorf("enqueueing catalog search orphan deletes: %w", err)
+			}
+			if e := tx.Commit(ctx); e != nil {
+				return e
+			}
+			deletedContentIDs = attemptDeletedIDs
 			return nil
 		}); err != nil {
 			return nil, fmt.Errorf("deleting orphaned items: %w", err)
 		}
-		stats.OrphanedItems += int(deleted)
+		stats.OrphanedItems += len(deletedContentIDs)
 		if progress != nil {
 			progress(stats.OrphanedItems, orphanTotal, "Deleting orphaned items")
 		}
@@ -729,7 +746,8 @@ const collectOrphanedProvisionalIDsByContentIDSQL = `
 const deleteOrphanedProvisionalIDsByContentIDSQL = `
 	DELETE FROM public.media_items mi
 	WHERE mi.content_id = ANY($1)
-	  AND ` + orphanedProvisionalMediaItemConditions
+	  AND ` + orphanedProvisionalMediaItemConditions + `
+	RETURNING mi.content_id`
 
 func (r *FolderRepository) deleteOrphanedItemsByContentID(ctx context.Context, contentIDs []string) (int, []string, error) {
 	if len(contentIDs) == 0 {
@@ -744,23 +762,48 @@ func (r *FolderRepository) deleteOrphanedItemsByContentID(ctx context.Context, c
 		return 0, nil, nil
 	}
 
-	imageDirs, err := collectImageDirs(ctx, r.pool, orphanIDs)
+	rawImageDirs, err := collectRawImageDirs(ctx, r.pool, orphanIDs)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	var deleted int64
+	var deletedIDs []string
+	var imageDirs []string
 	if err := retryOnDeadlock(ctx, func() error {
-		tag, err := r.pool.Exec(ctx, deleteOrphanedProvisionalIDsByContentIDSQL, orphanIDs)
+		tx, err := r.pool.Begin(ctx)
 		if err != nil {
 			return err
 		}
-		deleted = tag.RowsAffected()
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		rows, err := tx.Query(ctx, deleteOrphanedProvisionalIDsByContentIDSQL, orphanIDs)
+		if err != nil {
+			return err
+		}
+		attemptDeletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return fmt.Errorf("collecting deleted late orphan IDs: %w", err)
+		}
+		var attemptImageDirs []string
+		if len(attemptDeletedIDs) > 0 {
+			attemptImageDirs, err = filterUnreferencedImageDirs(ctx, tx, rawImageDirs, attemptDeletedIDs)
+			if err != nil {
+				return err
+			}
+		}
+		if err := EnqueueSearchIndexDeletes(ctx, tx, attemptDeletedIDs); err != nil {
+			return fmt.Errorf("enqueueing catalog search late orphan deletes: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		deletedIDs = attemptDeletedIDs
+		imageDirs = attemptImageDirs
 		return nil
 	}); err != nil {
 		return 0, nil, err
 	}
-	return int(deleted), imageDirs, nil
+	return len(deletedIDs), imageDirs, nil
 }
 
 func (r *FolderRepository) collectOrphanedProvisionalIDsByContentID(ctx context.Context, contentIDs []string) ([]string, error) {

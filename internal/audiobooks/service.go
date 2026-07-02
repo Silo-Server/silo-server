@@ -7,6 +7,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abssocket"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 
@@ -54,7 +55,9 @@ type ABSHandlerDeps struct {
 	// Detail resolves audiobook poster S3 paths into fully-qualified URLs
 	// that ABS clients can fetch. Optional; when nil, /api/items/{id}/cover
 	// 404s rather than redirecting to an unreachable storage path.
-	Detail *catalog.DetailService
+	Detail        *catalog.DetailService
+	SessionMgr    *playback.SessionManager
+	SessionSyncer abs.PlaybackSessionSyncer
 }
 
 // absAuthAdapter is the narrow slice of internal/auth that BuildABSHandler
@@ -158,6 +161,8 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		SmartCollectionStore: smartCollectionStore,
 		RSSFeedStore:         rssFeedStore,
 		SocketIO:             socketServer,
+		NativeSessions:       deps.SessionMgr,
+		NativeSessionSyncer:  deps.SessionSyncer,
 		CoverResolver: func(ctx context.Context, path, variant string) string {
 			if deps.Detail == nil {
 				return ""

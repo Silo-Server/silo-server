@@ -33,6 +33,8 @@ type ServerChannel struct {
 	Enabled                 bool
 	NotifyNewMovies         bool
 	NotifyNewEpisodes       bool
+	NotifyNewAudiobooks     bool
+	NotifyNewEbooks         bool
 	NotifyRequestSubmitted  bool
 	NotifyRequestApproved   bool
 	NotifyRequestDeclined   bool
@@ -61,14 +63,14 @@ func serverChannelSecretAAD(id string) string { return "server_channel:" + id + 
 // release event kind. Unknown kinds (added by future versions) are skipped:
 // an old node must not announce content it cannot render.
 func (c ServerChannel) WantsContentKind(kind string) bool {
-	switch normalizeEventKind(kind) {
-	case EventKindEpisode:
+	normalized := normalizeEventKind(kind)
+	if normalized == EventKindEpisode {
 		return c.NotifyNewEpisodes
-	case EventKindMovie:
-		return c.NotifyNewMovies
-	default:
-		return false
 	}
+	if k, ok := flatKindByString(normalized); ok {
+		return k.WantsToggle(c)
+	}
+	return false
 }
 
 // WantsRequestEvent reports whether the channel's toggles include the given

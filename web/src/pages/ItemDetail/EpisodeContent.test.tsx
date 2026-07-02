@@ -7,6 +7,7 @@ import EpisodeContent from "./EpisodeContent";
 
 const mocks = vi.hoisted(() => {
   let capturedActionBarProps: Record<string, unknown> | null = null;
+  let capturedDetailHeroProps: Record<string, unknown> | null = null;
 
   return {
     capturedActionBarProps: {
@@ -15,6 +16,14 @@ const mocks = vi.hoisted(() => {
       },
       set value(value: Record<string, unknown> | null) {
         capturedActionBarProps = value;
+      },
+    },
+    capturedDetailHeroProps: {
+      get value() {
+        return capturedDetailHeroProps;
+      },
+      set value(value: Record<string, unknown> | null) {
+        capturedDetailHeroProps = value;
       },
     },
     useSeasonDetail: vi.fn(),
@@ -27,6 +36,7 @@ const mocks = vi.hoisted(() => {
     useRating: vi.fn(),
     useSetRating: vi.fn(),
     useDeleteRating: vi.fn(),
+    useOnViewTranslation: vi.fn(),
     setRatingMutate: vi.fn(),
     deleteRatingMutate: vi.fn(),
     startPlayback: vi.fn(),
@@ -45,6 +55,10 @@ vi.mock("@/hooks/useAuth", () => ({
 
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: mocks.useCurrentProfile,
+}));
+
+vi.mock("@/hooks/useOnViewTranslation", () => ({
+  useOnViewTranslation: mocks.useOnViewTranslation,
 }));
 
 vi.mock("@/playback/watchPlaybackContext", () => ({
@@ -78,12 +92,15 @@ vi.mock("@/components/DownloadVersionPicker", () => ({
 }));
 
 vi.mock("./DetailHero", () => ({
-  default: ({ context, actions }: { context?: ReactNode; actions?: ReactNode }) => (
-    <div>
-      {context}
-      {actions}
-    </div>
-  ),
+  default: (props: { context?: ReactNode; actions?: ReactNode } & Record<string, unknown>) => {
+    mocks.capturedDetailHeroProps.value = props;
+    return (
+      <div>
+        {props.context}
+        {props.actions}
+      </div>
+    );
+  },
 }));
 
 vi.mock("./components/MetadataBadges", () => ({
@@ -203,8 +220,10 @@ function countOccurrences(markup: string, fragment: string): number {
 describe("EpisodeContent", () => {
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
+    mocks.capturedDetailHeroProps.value = null;
     mocks.useAuth.mockReturnValue({ user: null });
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
+    mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: undefined });
     mocks.useRefreshItemMetadata.mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
@@ -261,6 +280,28 @@ describe("EpisodeContent", () => {
 
     expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
     expect(markup).toContain(">Season 99<");
+  });
+
+  it("passes on-view translation controls to the hero", () => {
+    const onTranslate = vi.fn();
+    mocks.useOnViewTranslation.mockReturnValue({
+      translating: true,
+      onTranslate,
+    });
+
+    renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/item/episode-1"]}>
+        <EpisodeContent item={makeEpisodeItem({ pending_translation_language: "fr" })} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.useOnViewTranslation).toHaveBeenCalledWith(
+      expect.objectContaining({ content_id: "episode-1", type: "episode" }),
+    );
+    expect(mocks.capturedDetailHeroProps.value).toMatchObject({
+      overviewTranslating: true,
+      onTranslateOverview: onTranslate,
+    });
   });
 
   it("shows all season episodes in the carousel, not just nearby ones", () => {

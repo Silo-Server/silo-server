@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // countingContentService is a ContentService double that returns a fixed
@@ -42,6 +43,18 @@ func (s *countingContentService) GetItemDetail(_ context.Context, _ *Session, co
 	return &upstreamItemDetail{ContentID: contentID}, nil
 }
 
+func (s *countingContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+	out := make(map[string]*upstreamItemDetail, len(contentIDs))
+	for _, id := range contentIDs {
+		detail, err := s.GetItemDetail(ctx, session, id, libraryID)
+		if err != nil || detail == nil {
+			continue
+		}
+		out[id] = detail
+	}
+	return out, nil
+}
+
 func (s *countingContentService) ListUserLibraries(context.Context, *Session) ([]upstreamUserLibrary, error) {
 	panic("unused")
 }
@@ -50,7 +63,7 @@ func (s *countingContentService) BrowseItems(context.Context, *Session, url.Valu
 	panic("unused")
 }
 
-func (s *countingContentService) SearchItems(context.Context, *Session, string, []string, int, int, *int) (*upstreamBrowseResponse, error) {
+func (s *countingContentService) SearchItems(context.Context, *Session, SearchItemsOptions) (*upstreamBrowseResponse, error) {
 	panic("unused")
 }
 
@@ -79,6 +92,189 @@ func (s *countingContentService) ListEpisodesBySeasonID(context.Context, *Sessio
 
 func (s *countingContentService) ListItemFilters(context.Context, *Session, url.Values) (*upstreamItemFiltersResponse, error) {
 	panic("unused")
+}
+
+type recordingSearchContentService struct {
+	countingContentService
+	options []SearchItemsOptions
+	result  *upstreamBrowseResponse
+}
+
+func (s *recordingSearchContentService) SearchItems(_ context.Context, _ *Session, opts SearchItemsOptions) (*upstreamBrowseResponse, error) {
+	s.options = append(s.options, opts)
+	if s.result != nil {
+		return s.result, nil
+	}
+	return &upstreamBrowseResponse{Items: []upstreamListItem{}}, nil
+}
+
+func performEpisodesRequest(t *testing.T, h *ItemsHandler, target, seriesID string) queryResultDTO {
+	t.Helper()
+	req := httptest.NewRequest("GET", target, nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", seriesID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx)
+	ctx = context.WithValue(ctx, compatSessionKey, &Session{
+		StreamAppUserID: 1,
+		ProfileID:       "profile-1",
+	})
+	req = req.WithContext(ctx)
+
+	rec := httptest.NewRecorder()
+	h.HandleEpisodes(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var result queryResultDTO
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return result
+}
+
+func TestHandleEpisodes_StartItemIDTrimsPlayFromHereQueue(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	encodedStartItemID := codec.EncodeStringID(EncodedIDItem, "ep-2")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{
+			{ContentID: "season-0", SeasonNumber: 0, Title: "Specials", EpisodeCount: 1},
+			{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 3},
+		},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 0): {
+			{ContentID: "special-1", SeriesID: seriesContentID, SeasonID: "season-0", SeasonNumber: 0, EpisodeNumber: 1, Title: "Special"},
+		},
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Selected"},
+			{ContentID: "ep-3", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 3, Title: "After"},
+			nil,
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?startItemId="+encodedStartItemID, encodedSeriesID)
+	if result.TotalRecordCount != 2 || result.StartIndex != 0 {
+		t.Fatalf("TotalRecordCount/StartIndex = %d/%d, want 2/0", result.TotalRecordCount, result.StartIndex)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("len(Items) = %d, want 2: %+v", len(result.Items), result.Items)
+	}
+	if result.Items[0].Name != "Selected" || result.Items[1].Name != "After" {
+		t.Fatalf("unexpected queue order: %+v", result.Items)
+	}
+	if result.Items[0].ID != encodedStartItemID {
+		t.Fatalf("first item ID = %q, want %q", result.Items[0].ID, encodedStartItemID)
+	}
+}
+
+func TestHandleEpisodes_StartItemIDMissingReturnsEmptyQueue(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	missingStartItemID := codec.EncodeStringID(EncodedIDItem, "missing-episode")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?StartItemId="+missingStartItemID, encodedSeriesID)
+	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("expected empty queue for missing StartItemId, got total=%d items=%+v", result.TotalRecordCount, result.Items)
+	}
+}
+
+func TestHandleEpisodes_AdjacentToReturnsPrevSelfNextWindow(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	encodedAdjacentTo := codec.EncodeStringID(EncodedIDItem, "ep-2")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{
+			{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 4},
+		},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Selected"},
+			{ContentID: "ep-3", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 3, Title: "After"},
+			{ContentID: "ep-4", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 4, Title: "Last"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?AdjacentTo="+encodedAdjacentTo+"&Limit=1", encodedSeriesID)
+	if result.TotalRecordCount != 3 {
+		t.Fatalf("TotalRecordCount = %d, want 3 (prev/self/next)", result.TotalRecordCount)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("len(Items) = %d, want 3: %+v", len(result.Items), result.Items)
+	}
+	if result.Items[0].Name != "First" || result.Items[1].Name != "Selected" || result.Items[2].Name != "After" {
+		t.Fatalf("unexpected window order: %+v", result.Items)
+	}
+}
+
+func TestHandleEpisodes_AdjacentToUnknownReturnsEmptyPage(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	encodedUnknown := codec.EncodeStringID(EncodedIDItem, "missing-episode")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?AdjacentTo="+encodedUnknown, encodedSeriesID)
+	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("expected empty page for unknown AdjacentTo, got total=%d items=%+v", result.TotalRecordCount, result.Items)
+	}
 }
 
 func TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons(t *testing.T) {
@@ -137,6 +333,133 @@ func TestHandleItems_SeriesParentSeasonFilterReturnsPagedSeasons(t *testing.T) {
 	if item.ParentID != encodedSeriesID || item.SeriesID != encodedSeriesID {
 		t.Fatalf("ParentID/SeriesID = %q/%q, want %q/%q",
 			item.ParentID, item.SeriesID, encodedSeriesID, encodedSeriesID)
+	}
+}
+
+func TestHandleItemsSearchPropagatesEnableTotalRecordCount(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		querySuffix   string
+		wantSkipTotal bool
+	}{
+		{name: "default includes total", wantSkipTotal: false},
+		{name: "disabled skips total", querySuffix: "&EnableTotalRecordCount=false", wantSkipTotal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			codec := NewResourceIDCodec()
+			contentSvc := &recordingSearchContentService{}
+			h := &ItemsHandler{
+				content:  contentSvc,
+				userData: &mockUserDataService{},
+				codec:    codec,
+				mapper:   newMapper(codec, &config.Config{}),
+				images:   NewImageCache(time.Hour, time.Now),
+			}
+
+			req := httptest.NewRequest("GET", "/Users/test/Items?SearchTerm=dune&Limit=5&StartIndex=2"+tc.querySuffix, nil)
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
+				StreamAppUserID: 1,
+				ProfileID:       "profile-1",
+			}))
+
+			rec := httptest.NewRecorder()
+			h.HandleItems(rec, req)
+
+			if rec.Code != 200 {
+				t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+			}
+			if len(contentSvc.options) != 1 {
+				t.Fatalf("SearchItems calls = %d, want 1", len(contentSvc.options))
+			}
+			opts := contentSvc.options[0]
+			if opts.Query != "dune" || opts.Limit != 5 || opts.Offset != 2 {
+				t.Fatalf("SearchItems options = %#v", opts)
+			}
+			if opts.SkipTotal != tc.wantSkipTotal {
+				t.Fatalf("SkipTotal = %v, want %v", opts.SkipTotal, tc.wantSkipTotal)
+			}
+		})
+	}
+}
+
+func TestHandleItemsSearchMediaTypesVideoExcludeMovieEpisodeSearchesSeries(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentSvc := &recordingSearchContentService{}
+	h := &ItemsHandler{
+		content:  contentSvc,
+		userData: &mockUserDataService{},
+		codec:    codec,
+		mapper:   newMapper(codec, &config.Config{}),
+		images:   NewImageCache(time.Hour, time.Now),
+	}
+
+	req := httptest.NewRequest("GET", "/Items?SearchTerm=sponge+bob&Limit=100"+
+		"&ExcludeItemTypes=Movie&ExcludeItemTypes=Episode&ExcludeItemTypes=TvChannel"+
+		"&MediaTypes=Video&EnableTotalRecordCount=false", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
+		StreamAppUserID: 1,
+		ProfileID:       "profile-1",
+	}))
+
+	rec := httptest.NewRecorder()
+	h.HandleItems(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(contentSvc.options) != 1 {
+		t.Fatalf("SearchItems calls = %d, want 1", len(contentSvc.options))
+	}
+	opts := contentSvc.options[0]
+	if opts.Query != "sponge bob" || opts.Limit != 100 || !opts.SkipTotal {
+		t.Fatalf("SearchItems options = %#v", opts)
+	}
+	if len(opts.ItemTypes) != 1 || opts.ItemTypes[0] != "series" {
+		t.Fatalf("ItemTypes = %v, want [series]", opts.ItemTypes)
+	}
+
+	var result queryResultDTO
+	if err := json.NewDecoder(rec.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("result = total %d items %d, want empty", result.TotalRecordCount, len(result.Items))
+	}
+}
+
+func TestHandleItemsSearchSeriesScopeReachesProvider(t *testing.T) {
+	codec := NewResourceIDCodec()
+	contentSvc := &recordingSearchContentService{}
+	h := &ItemsHandler{
+		content:  contentSvc,
+		userData: &mockUserDataService{},
+		codec:    codec,
+		mapper:   newMapper(codec, &config.Config{}),
+		images:   NewImageCache(time.Hour, time.Now),
+	}
+
+	req := httptest.NewRequest("GET", "/Items?SearchTerm=spongebob&Limit=100"+
+		"&IncludeItemTypes=Series&EnableTotalRecordCount=false", nil)
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey, &Session{
+		StreamAppUserID: 1,
+		ProfileID:       "profile-1",
+	}))
+
+	rec := httptest.NewRecorder()
+	h.HandleItems(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(contentSvc.options) != 1 {
+		t.Fatalf("SearchItems calls = %d, want 1", len(contentSvc.options))
+	}
+	opts := contentSvc.options[0]
+	if opts.Query != "spongebob" || opts.Limit != 100 || !opts.SkipTotal {
+		t.Fatalf("SearchItems options = %#v", opts)
+	}
+	if len(opts.ItemTypes) != 1 || opts.ItemTypes[0] != "series" {
+		t.Fatalf("ItemTypes = %v, want [series]", opts.ItemTypes)
 	}
 }
 

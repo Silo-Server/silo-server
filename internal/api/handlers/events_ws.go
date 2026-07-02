@@ -28,8 +28,10 @@ type taskInfoLister interface {
 	ListTasks(includeHidden bool) []taskmanager.TaskInfo
 }
 
+const maxRealtimeScanSnapshotRuns = 500
+
 type activeScanLister interface {
-	ListActive(ctx context.Context) ([]evt.ScanRun, error)
+	ListActiveSnapshot(ctx context.Context, limit int) ([]evt.ScanRun, error)
 }
 
 type EventsHandler struct {
@@ -414,16 +416,21 @@ func (h *EventsHandler) snapshotForChannel(
 		if h == nil {
 			return json.RawMessage("[]"), nil
 		}
-		runs := make([]evt.ScanRun, 0)
-		if h.persistedScans != nil {
-			persisted, err := h.persistedScans.ListActive(r.Context())
+		runs := make([]evt.ScanRun, 0, maxRealtimeScanSnapshotRuns)
+		remaining := maxRealtimeScanSnapshotRuns
+		if h.persistedScans != nil && remaining > 0 {
+			persisted, err := h.persistedScans.ListActiveSnapshot(r.Context(), remaining)
 			if err != nil {
 				return nil, err
 			}
+			if len(persisted) > remaining {
+				persisted = persisted[:remaining]
+			}
 			runs = append(runs, persisted...)
+			remaining -= len(persisted)
 		}
-		if h.scans != nil {
-			runs = append(runs, h.scans.ListActive()...)
+		if h.scans != nil && remaining > 0 {
+			runs = append(runs, h.scans.ListActiveLimit(remaining)...)
 		}
 		return marshalJSON(runs), nil
 	case evt.ChannelHistoryImport:

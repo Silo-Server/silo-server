@@ -167,6 +167,11 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 
 	if err := s.repo.Update(ctx, refreshed); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The row was merged into another person concurrently; there is no
+			// longer anything to refresh under this id.
+			return nil, ErrPersonNotFound
+		}
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
 	s.enqueuePersonPhoto(ctx, refreshed, accumulator.ProviderIDs, photoProviderID)

@@ -302,7 +302,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "/usr/lib/jellyfin-ffmpeg/ffmpeg")
-	cfg.Playback.TranscodeDir = stringOr(m, "playback.transcode_dir", "/tmp/silo-transcode")
+	cfg.Playback.TranscodeDir = stringOr(m, "playback.transcode_dir", DefaultTranscodeDir)
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)
@@ -564,6 +564,31 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.MaxConcurrentPerUser = maxConcurrent
 	cfg.Download.MaxPerPeriod = maxPerPeriod
 	cfg.Download.PeriodDuration = periodDuration
+
+	// Downloads v2 (offline sync). Default-off; the prepare-to-file pipeline that
+	// consumes these ships in Phase 3.
+	downloadTranscodeEnabled, err := boolOr(m, "download.transcode_enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	maxConcurrentPrepares, err := intOr(m, "download.max_concurrent_prepares", 2)
+	if err != nil {
+		return nil, err
+	}
+	artifactMaxBytes, err := int64Or(m, "download.artifact_max_bytes", 0)
+	if err != nil {
+		return nil, err
+	}
+	if maxConcurrentPrepares < 0 {
+		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.max_concurrent_prepares")
+	}
+	if artifactMaxBytes < 0 {
+		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.artifact_max_bytes")
+	}
+	cfg.Download.TranscodeEnabled = downloadTranscodeEnabled
+	cfg.Download.ArtifactDir = stringOr(m, "download.artifact_dir", "")
+	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
+	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
 
 	return cfg, nil
 }

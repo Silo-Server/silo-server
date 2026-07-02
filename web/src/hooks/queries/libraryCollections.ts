@@ -2,18 +2,28 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import type {
   BrowseItem,
+  LibraryCollection,
   LibraryTabCollection,
   LibraryTabResponse,
   ServerVisibleUserCollection,
 } from "@/api/types";
 import { libraryCollectionKeys } from "./keys";
 
-export function useLibraryCollections(libraryId: number) {
-  return useQuery({
+export function libraryCollectionsQueryOptions(libraryId: number) {
+  return {
     queryKey: libraryCollectionKeys.list(libraryId),
-    queryFn: () => api<LibraryTabResponse>(`/library/${libraryId}/collections`),
+    queryFn: () =>
+      api<LibraryTabResponse>(`/library/${libraryId}/collections`).then((data) => ({
+        ...data,
+        collections: data.collections ?? [],
+        groups: data.groups ?? [],
+      })),
     enabled: Number.isFinite(libraryId) && libraryId > 0,
-  });
+  };
+}
+
+export function useLibraryCollections(libraryId: number) {
+  return useQuery(libraryCollectionsQueryOptions(libraryId));
 }
 
 export function flattenLibraryCollections(
@@ -37,6 +47,12 @@ export function useLibraryUserCollections(libraryId: number) {
       ).then((data) => data.collections ?? []),
     enabled: Number.isFinite(libraryId) && libraryId > 0,
   });
+}
+
+export function getLibraryCollectionList(
+  resp: LibraryTabResponse | undefined,
+): LibraryCollection[] {
+  return resp?.collections ?? [];
 }
 
 export function useLibraryCollectionItems(libraryId: number, collectionId: string | null) {

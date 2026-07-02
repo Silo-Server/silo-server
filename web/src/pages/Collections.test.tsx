@@ -5,6 +5,7 @@ import {
   buildUserCollectionEditorPath,
   isCollectionReadOnly,
   toCreateCollectionBody,
+  toUpdateCollectionBody,
   toUserCollectionBuilderValue,
 } from "./userCollectionsShared";
 
@@ -47,6 +48,55 @@ describe("Collections helpers", () => {
       is_shared: true,
       allowed_profile_ids: ["profile-1"],
     });
+  });
+
+  it("sends a canonical display_query_definition fragment for manual collections", () => {
+    const builder = toUserCollectionBuilderValue(null);
+    builder.title = "Unwatched Movies";
+    builder.collection_type = "manual";
+    builder.display_query_definition = {
+      match: "all",
+      groups: [
+        {
+          match: "all",
+          rules: [
+            { field: "watched", op: "is", value: false },
+            { field: "type", op: "is", value: "movie" },
+          ],
+        },
+      ],
+    };
+
+    const createBody = toCreateCollectionBody(builder);
+    expect(createBody.display_query_definition).toEqual({
+      match: "all",
+      groups: [
+        {
+          match: "all",
+          rules: [
+            { field: "watched", op: "is", value: false },
+            { field: "type", op: "is", value: "movie" },
+          ],
+        },
+      ],
+    });
+    expect(createBody).not.toHaveProperty("watch_filter");
+    expect(createBody).not.toHaveProperty("media_filter");
+
+    const updateBody = toUpdateCollectionBody(builder);
+    expect(updateBody.display_query_definition).toEqual(createBody.display_query_definition);
+    expect(updateBody).not.toHaveProperty("watch_filter");
+    expect(updateBody).not.toHaveProperty("media_filter");
+  });
+
+  it("omits display_query_definition for manual collections with no display filter", () => {
+    const builder = toUserCollectionBuilderValue(null);
+    builder.collection_type = "manual";
+    builder.display_query_definition = undefined;
+
+    const createBody = toCreateCollectionBody(builder);
+    expect(createBody.display_query_definition).toBeUndefined();
+    expect(createBody).not.toHaveProperty("watch_filter");
   });
 
   it("builds the create route for user collections", () => {

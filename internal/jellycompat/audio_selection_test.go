@@ -18,17 +18,26 @@ import (
 )
 
 type testCompatSessionManager struct {
-	sessions        map[string]*playback.Session
-	audioTrackCalls []compatAudioTrackCall
-	progressCalls   int
-	stopCalls       []string
-	startCalls      int
+	sessions            map[string]*playback.Session
+	audioTrackCalls     []compatAudioTrackCall
+	progressCalls       int
+	progressUpdates     []compatProgressCall
+	stopCalls           []string
+	startCalls          int
+	beginTransportCalls []string
+	endTransportCalls   []string
 }
 
 type compatAudioTrackCall struct {
 	sessionID       string
 	audioTrackIndex int
 	method          playback.PlayMethod
+}
+
+type compatProgressCall struct {
+	sessionID string
+	position  float64
+	isPaused  bool
 }
 
 func (m *testCompatSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
@@ -49,8 +58,38 @@ func (m *testCompatSessionManager) StartSession(userID int, profileID string, fi
 	return session, nil
 }
 
-func (m *testCompatSessionManager) UpdateProgress(string, float64, bool) error {
+func (m *testCompatSessionManager) UpdateProgress(sessionID string, position float64, isPaused bool) error {
 	m.progressCalls++
+	m.progressUpdates = append(m.progressUpdates, compatProgressCall{
+		sessionID: sessionID,
+		position:  position,
+		isPaused:  isPaused,
+	})
+	if m.sessions != nil {
+		if _, ok := m.sessions[sessionID]; !ok {
+			return playback.ErrSessionNotFound
+		}
+	}
+	return nil
+}
+
+func (m *testCompatSessionManager) BeginTransport(sessionID string) error {
+	m.beginTransportCalls = append(m.beginTransportCalls, sessionID)
+	if m.sessions != nil {
+		if _, ok := m.sessions[sessionID]; !ok {
+			return playback.ErrSessionNotFound
+		}
+	}
+	return nil
+}
+
+func (m *testCompatSessionManager) EndTransport(sessionID string) error {
+	m.endTransportCalls = append(m.endTransportCalls, sessionID)
+	if m.sessions != nil {
+		if _, ok := m.sessions[sessionID]; !ok {
+			return playback.ErrSessionNotFound
+		}
+	}
 	return nil
 }
 

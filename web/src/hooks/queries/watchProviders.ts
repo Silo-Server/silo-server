@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiClientError } from "@/api/client";
-import { favoriteKeys, watchProviderKeys } from "./keys";
+import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
 import { toast } from "sonner";
 import { storage } from "@/utils/storage";
 
@@ -25,6 +25,10 @@ export interface WatchProviderCapabilities {
   import_favorites: boolean;
   export_favorites: boolean;
   remove_favorites: boolean;
+  import_watchlist: boolean;
+  export_watchlist: boolean;
+  remove_watchlist: boolean;
+  provides_watchlist_order: boolean;
   scrobble_playback: boolean;
 }
 
@@ -42,12 +46,17 @@ export interface WatchProviderConnection {
   import_favorites_enabled: boolean;
   export_favorites_enabled: boolean;
   sync_favorite_removals_enabled: boolean;
+  import_watchlist_enabled: boolean;
+  export_watchlist_enabled: boolean;
+  sync_watchlist_removals_enabled: boolean;
+  sync_watchlist_order_enabled: boolean;
   scrobble_enabled: boolean;
   credentials_configured: boolean;
   last_inbound_sync_at?: string;
   last_progress_sync_at?: string;
   last_outbound_sync_at?: string;
   last_favorites_sync_at?: string;
+  last_watchlist_sync_at?: string;
   last_scrobble_error_at?: string;
   last_error?: string;
 }
@@ -78,6 +87,11 @@ export interface WatchProviderSyncRun {
   outbound_favorites_found: number;
   outbound_favorites_sent: number;
   favorite_removals_sent: number;
+  inbound_watchlist_found: number;
+  inbound_watchlist_imported: number;
+  outbound_watchlist_found: number;
+  outbound_watchlist_sent: number;
+  watchlist_removals_sent: number;
   warning?: string;
   error?: string;
   started_at: string;
@@ -109,6 +123,10 @@ export type UpdateWatchProviderConnection = Partial<
     | "import_favorites_enabled"
     | "export_favorites_enabled"
     | "sync_favorite_removals_enabled"
+    | "import_watchlist_enabled"
+    | "export_watchlist_enabled"
+    | "sync_watchlist_removals_enabled"
+    | "sync_watchlist_order_enabled"
     | "scrobble_enabled"
   >
 >;
@@ -284,6 +302,7 @@ export function useTriggerWatchProviderSync(provider: string) {
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
       queryClient.invalidateQueries({ queryKey: favoriteKeys.list() });
+      queryClient.invalidateQueries({ queryKey: watchlistKeys.list() });
       toast.success("Watch provider sync started");
     },
     onError: (err) => {

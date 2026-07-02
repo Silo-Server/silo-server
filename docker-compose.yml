@@ -31,6 +31,26 @@ services:
       timeout: 3s
       retries: 5
 
+  meilisearch:
+    image: ${MEILISEARCH_IMAGE:-getmeili/meilisearch:latest}
+    restart: unless-stopped
+    profiles: [search]
+    entrypoint:
+      - /bin/sh
+      - -euc
+      - |
+        if [ -z "$${MEILI_MASTER_KEY:-}" ]; then
+          echo "MEILI_MASTER_KEY is required when enabling the search profile" >&2
+          exit 1
+        fi
+        exec /bin/meilisearch
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+    ports:
+      - "${MEILISEARCH_HOST:-127.0.0.1}:${MEILISEARCH_PORT:-7700}:7700"
+    volumes:
+      - ${SILO_DATA_ROOT:-/opt/silo}/meilisearch:/meili_data
+
   silo:
     image: ${SILO_IMAGE:-ghcr.io/silo-server/silo-server:latest}
     restart: unless-stopped

@@ -50,6 +50,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -96,6 +97,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 	watchmdblist "github.com/Silo-Server/silo-server/internal/watchsync/providers/mdblist"
@@ -521,6 +523,12 @@ func main() {
 	// still encrypts/decrypts — no raw settings repo may escape into later wiring.
 	settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
 	nodeID := resolveNodeIdentity()
+	catalogSearchStartupSettings, err := catalog.CatalogSearchSettingsFromMap(settings)
+	if err != nil {
+		slog.Warn("catalog search: failed to load settings for startup wiring; using postgres", "err", err)
+		catalogSearchStartupSettings = catalog.DefaultCatalogSearchSettings()
+	}
+	activeCatalogSearchProvider := catalog.ActiveCatalogSearchProvider(catalogSearchStartupSettings)
 
 	// Step 9: Validate
 	if err := cfg.Validate(); err != nil {
@@ -823,6 +831,7 @@ func main() {
 
 		ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
 		s := scanner.NewScanner(fileRepo, ffprobePath, deps.S3Public, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan)
+		s.SetSearchIndexProvider(activeCatalogSearchProvider)
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			s.SetWorkers(updated.Scanner.Workers)
 		})
@@ -1069,7 +1078,7 @@ func main() {
 	if needsWorkers && deps.DB != nil && deps.FileRepo != nil {
 		chainRepo := metadata.NewChainRepository(deps.DB)
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
-		itemRepo = catalog.NewItemRepository(deps.DB)
+		itemRepo = catalog.NewItemRepository(deps.DB).WithActiveSearchProvider(activeCatalogSearchProvider)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
 		seasonRepo = catalog.NewSeasonRepository(deps.DB)
 		personRepo := catalog.NewPersonRepository(deps.DB)
@@ -1079,33 +1088,14 @@ func main() {
 		<-pluginAutoUpdateDone
 
 		imageResolver := metadata.NewPluginImageResolver()
-		if pluginService != nil {
-			// Register image resolver sources for all enabled plugin metadata providers.
-			rows, err := deps.DB.Query(appCtx,
-				`SELECT pc.plugin_installation_id, pc.capability_id
-				 FROM plugin_capabilities pc
-				 JOIN plugin_installations pi ON pi.id = pc.plugin_installation_id
-				 WHERE pc.capability_type = 'metadata_provider.v1' AND pi.enabled = true`)
-			if err != nil {
-				slog.Warn("failed to list capabilities for image resolver registration", "error", err)
-			} else {
-				defer rows.Close()
-				for rows.Next() {
-					var instID int
-					var capID string
-					if err := rows.Scan(&instID, &capID); err != nil {
-						slog.Warn("failed to scan capability for image resolver", "error", err)
-						continue
-					}
-					source := metadata.NewPluginClientSource(instID, capID, func(
-						ctx context.Context, installationID int, capabilityID string,
-					) (metadata.PluginMetadataClient, error) {
-						return pluginService.MetadataProviderClient(ctx, installationID, capabilityID)
-					})
-					imageResolver.RegisterSource(capID, source)
-					slog.Info("registered plugin image resolver", "capability_id", capID, "installation_id", instID)
+		if pluginService != nil && pluginInstallationStore != nil {
+			reloadImageResolvers := func(ctx context.Context) {
+				if err := reloadPluginImageResolvers(ctx, pluginInstallationStore, imageResolver, pluginService); err != nil {
+					slog.Warn("failed to reload plugin image resolvers", "error", err)
 				}
 			}
+			pluginService.AddLifecycleHook(reloadImageResolvers)
+			reloadImageResolvers(appCtx)
 		}
 		if deps.S3Public != nil {
 			presignTTL := cfg.S3.MetadataPresignExpiry
@@ -1467,6 +1457,15 @@ func main() {
 			}
 		})
 	}
+	// Auto-remove fully-watched items from the watchlist (standalone behavior,
+	// default-on per profile), propagating removals to connected providers.
+	if itemRepo != nil && episodeRepo != nil && userStoreProvider != nil {
+		maintainer := watchlist.NewMaintainer(userStoreProvider, itemRepo, episodeRepo)
+		if watchProviderService != nil {
+			maintainer.WithListEventDispatcher(watchProviderService)
+		}
+		deps.WatchCompletionObserver = maintainer
+	}
 	deps.SessionMgr = sessionMgr
 	deps.PlaybackRealtimeHub = playback.NewRealtimeHub()
 	if chapterThumbService != nil && deps.S3Public != nil {
@@ -1530,6 +1529,7 @@ func main() {
 			cfg.Recommendations,
 		)
 		deps.Recommender = recEngine
+		deps.CatalogSearchVectorizer = recEngine
 
 		var err error
 		recWorker, err = recommendations.NewWorker(
@@ -1725,6 +1725,9 @@ func main() {
 			taskMgr.Register(tasks.NewScanLibrariesTask(deps.FolderRepo, deps.LibraryScanQueue, deps.EventBus))
 		}
 		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
+		catalogSearchIndexer := catalog.NewCatalogSearchIndexer(deps.DB, settingsRepo)
+		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
+		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
 		if deps.IntroAnalyzer != nil {
 			taskMgr.Register(tasks.NewDetectIntroMarkersTask(deps.IntroAnalyzer, settingsRepo))
 		}
@@ -1738,6 +1741,41 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		if deps.FileRepo != nil {
+			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
+			// queue hosted on the task manager. Built here (before Start) and shared
+			// with the API via deps so the download service can enqueue jobs.
+			artifactMgr := downloads.NewArtifactManager(
+				downloads.NewArtifactRepository(deps.DB),
+				downloads.NewRepository(deps.DB),
+				deps.FileRepo,
+				downloads.NewPlaybackPreparer(),
+				deps.NodeID,
+				func() *config.Config {
+					if deps.LiveConfig != nil {
+						if c := deps.LiveConfig(); c != nil {
+							return c
+						}
+					}
+					return deps.Config
+				},
+				func(ctx context.Context, d *downloads.Download) {
+					if deps.EventsHub == nil {
+						return
+					}
+					_ = deps.EventsHub.PublishJSON(ctx, evt.ChannelUserState, "download", map[string]any{
+						"download_id":   d.ID,
+						"status":        d.Status,
+						"media_item_id": d.ContentID,
+						"format":        d.Format,
+					}, evt.PublishOptions{UserID: d.UserID, ProfileID: d.ProfileID})
+				},
+			)
+			encodeTask := tasks.NewEncodeDownloadArtifactsTask(artifactMgr)
+			artifactMgr.SetKick(func() { _ = taskMgr.RunTask(appCtx, encodeTask.Key()) })
+			taskMgr.Register(encodeTask)
+			deps.ArtifactManager = artifactMgr
+		}
 		if notificationSystem != nil {
 			taskMgr.Register(tasks.NewSeedContentAvailabilityTask(notificationSystem))
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
@@ -1895,6 +1933,8 @@ func main() {
 			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider),
 			Recs:           recommendations.NewRepo(deps.DB),
 			Detail:         absDetailSvc,
+			SessionMgr:     sessionMgr,
+			SessionSyncer:  deps.SessionSyncer,
 		}
 		absH := audiobooksService.BuildABSHandler(absHDeps)
 		deps.ABSHandler = absH
@@ -2152,6 +2192,7 @@ func main() {
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
+			SessionSyncer:   deps.SessionSyncer,
 		}
 
 		// Wire direct dependencies when DB is available.
@@ -2187,8 +2228,20 @@ func main() {
 			compatDeps.FolderRepo = folderRepo
 			compatDeps.SessionMgr = sessionMgr
 			compatDeps.UserStoreProvider = userStoreProvider
+			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
+			compatSearchService := catalog.NewCatalogSearchService(
+				appCtx,
+				settingsRepo,
+				itemRepo,
+				catalog.NewSearchIndexEventRepository(deps.DB),
+				deps.CatalogSearchVectorizer,
+			)
+			if compatSearchService != nil {
+				compatSearchService.StartCoverageRefresh(appCtx)
+				compatDeps.CatalogSearchProvider = compatSearchService.Provider()
+			}
 
 			if deps.S3Public != nil {
 				compatDeps.PosterPresigner = deps.S3Public
@@ -2490,6 +2543,180 @@ func configureS3Clients(cfg *config.Config, deps *api.Dependencies) {
 	}); s3UserDB != nil {
 		deps.S3UserDB = s3UserDB
 		slog.Info("S3 user-db client configured", "bucket", s3UserDB.Bucket())
+	}
+}
+
+type pluginImageResolverCapabilityStore interface {
+	ListEnabled(ctx context.Context) ([]*plugins.Installation, error)
+	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
+}
+
+func reloadPluginImageResolvers(
+	ctx context.Context,
+	store pluginImageResolverCapabilityStore,
+	resolver *metadata.PluginImageResolver,
+	service *plugins.Service,
+) error {
+	if resolver == nil {
+		return nil
+	}
+	if store == nil || service == nil {
+		resolver.ReplaceSources(nil)
+		return nil
+	}
+
+	installations, err := store.ListEnabled(ctx)
+	if err != nil {
+		return fmt.Errorf("list enabled plugin installations: %w", err)
+	}
+	sort.Slice(installations, func(i, j int) bool {
+		if installations[i] == nil {
+			return false
+		}
+		if installations[j] == nil {
+			return true
+		}
+		return installations[i].ID < installations[j].ID
+	})
+
+	var registrations []metadata.PluginImageResolverSourceRegistration
+	for _, installation := range installations {
+		if installation == nil {
+			continue
+		}
+		capabilities, err := store.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			return fmt.Errorf("list image resolver capabilities for installation %d: %w", installation.ID, err)
+		}
+		sort.Slice(capabilities, func(i, j int) bool {
+			if capabilities[i] == nil {
+				return false
+			}
+			if capabilities[j] == nil {
+				return true
+			}
+			if capabilities[i].Type != capabilities[j].Type {
+				return capabilities[i].Type < capabilities[j].Type
+			}
+			return capabilities[i].ID < capabilities[j].ID
+		})
+
+		for _, capability := range capabilities {
+			if capability == nil {
+				continue
+			}
+			switch capability.Type {
+			case sdkcapability.ImageResolver:
+				schemes, priority := imageResolverCapabilityConfig(capability)
+				if len(schemes) == 0 {
+					slog.Warn("plugin image resolver capability has no valid schemes",
+						"installation_id", installation.ID,
+						"capability_id", capability.ID)
+					continue
+				}
+				for _, scheme := range schemes {
+					source := metadata.NewPluginClientSource(installation.ID, capability.ID, func(
+						ctx context.Context, installationID int, capabilityID string,
+					) (metadata.PluginMetadataClient, error) {
+						return service.ImageResolverClient(ctx, installationID, capabilityID)
+					})
+					registrations = append(registrations, metadata.PluginImageResolverSourceRegistration{
+						Scheme:         scheme,
+						Source:         source,
+						Kind:           metadata.PluginImageResolverSourceExplicit,
+						Priority:       priority,
+						InstallationID: installation.ID,
+						CapabilityID:   capability.ID,
+					})
+				}
+			case sdkcapability.MetadataProvider:
+				scheme := strings.TrimSpace(capability.ID)
+				if !metadata.ValidImageResolverScheme(scheme) {
+					slog.Warn("skipping legacy metadata image resolver with invalid scheme",
+						"installation_id", installation.ID,
+						"capability_id", capability.ID)
+					continue
+				}
+				source := metadata.NewPluginClientSource(installation.ID, capability.ID, func(
+					ctx context.Context, installationID int, capabilityID string,
+				) (metadata.PluginMetadataClient, error) {
+					return service.MetadataProviderClient(ctx, installationID, capabilityID)
+				})
+				registrations = append(registrations, metadata.PluginImageResolverSourceRegistration{
+					Scheme:         scheme,
+					Source:         source,
+					Kind:           metadata.PluginImageResolverSourceLegacy,
+					InstallationID: installation.ID,
+					CapabilityID:   capability.ID,
+				})
+			}
+		}
+	}
+
+	resolver.ReplaceSources(registrations)
+	slog.Info("reloaded plugin image resolvers", "sources", len(registrations))
+	return nil
+}
+
+func imageResolverCapabilityConfig(capability *plugins.Capability) ([]string, int) {
+	if capability == nil {
+		return nil, 0
+	}
+	meta := capabilityMetadataFields(capability.Metadata)
+	return metadataStringList(meta["schemes"]), metadataInt(meta["priority"])
+}
+
+func capabilityMetadataFields(raw map[string]any) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	if nested, ok := raw["metadata"]; ok {
+		switch typed := nested.(type) {
+		case map[string]any:
+			return typed
+		}
+	}
+	return raw
+}
+
+func metadataStringList(value any) []string {
+	var out []string
+	switch typed := value.(type) {
+	case []string:
+		for _, item := range typed {
+			if scheme := strings.TrimSpace(item); metadata.ValidImageResolverScheme(scheme) {
+				out = append(out, scheme)
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				continue
+			}
+			if scheme := strings.TrimSpace(text); metadata.ValidImageResolverScheme(scheme) {
+				out = append(out, scheme)
+			}
+		}
+	}
+	return out
+}
+
+func metadataInt(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int32:
+		return int(typed)
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case json.Number:
+		n, _ := typed.Int64()
+		return int(n)
+	default:
+		return 0
 	}
 }
 

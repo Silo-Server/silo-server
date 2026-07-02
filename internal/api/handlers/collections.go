@@ -43,6 +43,7 @@ type createCollectionRequest struct {
 	AllowedProfileIDs          []string        `json:"allowed_profile_ids"`
 	QueryDefinition            json.RawMessage `json:"query_definition"`
 	SortConfig                 json.RawMessage `json:"sort_config"`
+	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterSourceURL            string          `json:"poster_source_url"`
 }
@@ -56,6 +57,8 @@ type updateCollectionRequest struct {
 	SortConfig                 json.RawMessage        `json:"sort_config"`
 	SourceURL                  *string                `json:"source_url"`
 	MaxItems                   *int                   `json:"max_items"`
+	LibraryIDs                 *[]int                 `json:"library_ids"`
+	DisplayQueryDefinition     json.RawMessage        `json:"display_query_definition"`
 	IncludeInServerCollections *bool                  `json:"include_in_server_collections"`
 	PosterSourceURL            *string                `json:"poster_source_url"`
 	GroupID                    optionalNullableString `json:"group_id"`
@@ -85,6 +88,7 @@ type collectionResponse struct {
 	LastSyncAt                 string          `json:"last_sync_at,omitempty"`
 	LastSyncStatus             string          `json:"last_sync_status,omitempty"`
 	LastSyncMessage            string          `json:"last_sync_message,omitempty"`
+	DisplayQueryDefinition     json.RawMessage `json:"display_query_definition,omitempty"`
 	ItemCount                  int             `json:"item_count"`
 	IncludeInServerCollections bool            `json:"include_in_server_collections"`
 	PosterURL                  string          `json:"poster_url,omitempty"`
@@ -96,6 +100,19 @@ type collectionResponse struct {
 type collectionListResponse struct {
 	Collections []collectionResponse      `json:"collections"`
 	Groups      []collectionGroupResponse `json:"groups"`
+}
+
+type collectionCapabilitiesResponse struct {
+	// DisplayFilterFields are the catalog query fields a personal-collection
+	// display filter may use. Clients build a display_query_definition fragment
+	// from these rather than a bespoke enum.
+	DisplayFilterFields  []string                       `json:"display_filter_fields"`
+	DisplayFilterPresets collectionDisplayFilterPresets `json:"display_filter_presets"`
+}
+
+type collectionDisplayFilterPresets struct {
+	Watched []string `json:"watched"`
+	Media   []string `json:"media"`
 }
 
 type collectionGroupResponse struct {
@@ -208,6 +225,17 @@ func (h *CollectionHandler) HandleListCollections(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// HandleCapabilities exposes additive feature support for collection clients.
+func (h *CollectionHandler) HandleCapabilities(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, collectionCapabilitiesResponse{
+		DisplayFilterFields: []string{"type", "watched"},
+		DisplayFilterPresets: collectionDisplayFilterPresets{
+			Watched: []string{"all", "watched", "unwatched"},
+			Media:   []string{"all", "movie", "series"},
+		},
+	})
+}
+
 // HandleCreateCollection handles POST /collections.
 func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
@@ -247,6 +275,11 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 	}
 	queryDefinition := string(queryDefinitionJSON)
 	sortConfig := string(defaultJSON(req.SortConfig))
+	displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	collection, err := store.CreateCollection(r.Context(), userstore.CreateCollectionInput{
 		CreatorProfileID:           profileID,
 		Name:                       req.Name,
@@ -255,6 +288,7 @@ func (h *CollectionHandler) HandleCreateCollection(w http.ResponseWriter, r *htt
 		AllowedProfileIDs:          req.AllowedProfileIDs,
 		QueryDefinition:            queryDefinition,
 		SortConfig:                 sortConfig,
+		DisplayQueryDefinition:     displayQueryDefinition,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	})
 	if err != nil {
@@ -306,6 +340,14 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		AllowedProfileIDs:          req.AllowedProfileIDs,
 		IncludeInServerCollections: req.IncludeInServerCollections,
 	}
+	if req.DisplayQueryDefinition != nil {
+		displayQueryDefinition, err := catalog.NormalizeDisplayQueryFragment(req.DisplayQueryDefinition)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		input.DisplayQueryDefinition = &displayQueryDefinition
+	}
 	if len(req.QueryDefinition) > 0 {
 		normalized, err := normalizeSmartCollectionQueryDefinitionJSON(req.QueryDefinition, true, true)
 		if err != nil {
@@ -341,7 +383,7 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 	// Source URL and max items both live inside source_config (Limit / URL).
 	// Load the existing collection and re-marshal so the unaffected fields
 	// (preset, media_type, etc.) survive untouched.
-	if req.SourceURL != nil || req.MaxItems != nil {
+	if req.SourceURL != nil || req.MaxItems != nil || req.LibraryIDs != nil {
 		existing, err := store.GetCollection(r.Context(), collectionID)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
@@ -355,6 +397,18 @@ func (h *CollectionHandler) HandleUpdateCollection(w http.ResponseWriter, r *htt
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to parse source config")
 			return
+		}
+		if req.LibraryIDs != nil {
+			if !catalog.IsSyncableType(existing.CollectionType) {
+				writeError(w, http.StatusBadRequest, "bad_request", "library_ids can only be edited for imported collections")
+				return
+			}
+			if !validateOptionalLibraryIDs(*req.LibraryIDs, w) {
+				return
+			}
+			cfg.LibraryIDs = append([]int(nil), (*req.LibraryIDs)...)
+			emptyQuery := "{}"
+			input.QueryDefinition = &emptyQuery
 		}
 		if req.MaxItems != nil {
 			if *req.MaxItems < 0 {
@@ -804,6 +858,9 @@ func toCollectionResponse(c userstore.Collection) collectionResponse {
 		PosterThumbhash:            c.PosterThumbhash,
 		CreatedAt:                  c.CreatedAt,
 		UpdatedAt:                  c.UpdatedAt,
+	}
+	if strings.TrimSpace(c.DisplayQueryDefinition) != "" {
+		resp.DisplayQueryDefinition = json.RawMessage(c.DisplayQueryDefinition)
 	}
 	if c.SourceConfig != "" && c.SourceConfig != "{}" {
 		resp.SourceConfig = json.RawMessage(c.SourceConfig)

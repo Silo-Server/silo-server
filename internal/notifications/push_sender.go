@@ -1,0 +1,343 @@
+package notifications
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
+)
+
+var pushRetrySchedule = []time.Duration{
+	0,
+	30 * time.Second,
+	2 * time.Minute,
+	10 * time.Minute,
+	30 * time.Minute,
+}
+
+const (
+	pushMaxAttempts     = 5
+	pushDispatchQueue   = 512
+	pushRetryClaimLimit = 100
+	relayAppleSendPath  = "/v1/apple/send"
+)
+
+func pushRetryDelay(completedAttempt int) (time.Duration, bool) {
+	if completedAttempt < 1 || completedAttempt >= pushMaxAttempts {
+		return 0, false
+	}
+	return pushRetrySchedule[completedAttempt] - pushRetrySchedule[completedAttempt-1], true
+}
+
+type pushRelayAppleRequest struct {
+	Token          string  `json:"token"`
+	Environment    string  `json:"environment"`
+	Topic          string  `json:"topic"`
+	Mode           string  `json:"mode"`
+	ServerDeviceID string  `json:"server_device_id"`
+	DeliveryID     string  `json:"delivery_id"`
+	CollapseID     *string `json:"collapse_id,omitempty"`
+}
+
+type pushRelayAppleResponse struct {
+	RequestID string `json:"request_id"`
+	APNsID    string `json:"apns_id"`
+	Status    string `json:"status"`
+}
+
+type pushRelayErrorResponse struct {
+	Error struct {
+		Code      string `json:"code"`
+		Message   string `json:"message"`
+		RequestID string `json:"request_id"`
+	} `json:"error"`
+}
+
+type pushSendResult struct {
+	OK             bool
+	HTTPStatus     int
+	RetryAfter     time.Duration
+	RelayRequestID string
+	UpstreamReason string
+	Message        string
+	TerminalDevice bool
+}
+
+type pushSender struct {
+	devices    *PushDeviceRepository
+	deliveries *DeliveryRepository
+	cipher     *secret.Cipher
+	settings   *Settings
+	client     *http.Client
+	logger     *slog.Logger
+}
+
+func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository, cipher *secret.Cipher, settings *Settings) *pushSender {
+	return &pushSender{
+		devices:    devices,
+		deliveries: deliveries,
+		cipher:     cipher,
+		settings:   settings,
+		client:     newWebhookHTTPClient(nil),
+		logger:     slog.Default().With("component", "notifications.apple_push"),
+	}
+}
+
+func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAttempt) *PushDeliveryAttempt {
+	device, err := s.devices.getPushDeviceByID(ctx, attempt.PushDeviceID)
+	if err != nil || device == nil {
+		if err == nil {
+			return s.finalize(ctx, attempt, PushOutcomeFailed, "", "push device deleted", nil, "", nil)
+		}
+		if ctx.Err() == nil {
+			s.logger.Warn("push device lookup failed", "attempt_id", attempt.ID, "error", err)
+		}
+		return nil
+	}
+	if !device.Enabled || device.PushMode != PushModePrivatePush || !s.settings.ApplePushDeliveryEnabled(ctx) {
+		return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_disabled", "apple push delivery disabled", nil, "", nil)
+	}
+	if attempt.NotificationDeliveryID != nil {
+		row, err := s.deliveries.GetRowByID(ctx, *attempt.NotificationDeliveryID)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.logger.Warn("push delivery lookup failed",
+					"attempt_id", attempt.ID,
+					"delivery_id", *attempt.NotificationDeliveryID,
+					"error", err)
+			}
+			return nil
+		}
+		if row == nil {
+			return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_missing", "delivery row missing", nil, "", nil)
+		}
+		if row.ProfileID != device.ProfileID {
+			return s.finalize(ctx, attempt, PushOutcomeFailed, "device_reassigned", "push device reassigned", nil, "", nil)
+		}
+	}
+
+	token, err := s.cipher.Decrypt(device.APNsTokenCiphertext, pushDeviceAPNsTokenAAD(device.ID))
+	if err != nil {
+		return s.finalize(ctx, attempt, PushOutcomeFailed, "decrypt_failed", "APNs token decrypt failed", nil, "", nil)
+	}
+	result := s.send(ctx, attempt, device, token)
+	attemptNumber := attempt.AttemptNumber + 1
+	if result.OK {
+		updated, _ := s.devices.FinalizePushAttempt(ctx, attempt.ID, PushOutcomeDelivered, attemptNumber,
+			result.RelayRequestID, &result.HTTPStatus, result.UpstreamReason, "", nil)
+		_ = s.devices.RecordPushSuccess(ctx, device.ID)
+		return updated
+	}
+
+	statusPtr := (*int)(nil)
+	if result.HTTPStatus > 0 {
+		statusPtr = &result.HTTPStatus
+	}
+	code := result.UpstreamReason
+	if code == "" {
+		code = result.Message
+	}
+	if code == "" {
+		code = "push_delivery_failed"
+	}
+	_ = s.devices.RecordPushFailure(ctx, device.ID, code, result.TerminalDevice)
+
+	delay, more := pushRetryDelay(attemptNumber)
+	if result.RetryAfter > 0 {
+		delay = result.RetryAfter
+	}
+	if more && !result.TerminalDevice && retryableHTTPStatus(result.HTTPStatus) {
+		nextRetry := time.Now().Add(delay)
+		return s.finalize(ctx, attempt, PushOutcomeRetrying, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, &nextRetry)
+	}
+	return s.finalize(ctx, attempt, PushOutcomeFailed, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, nil)
+}
+
+func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, outcome string, reason, message string, statusPtr *int, relayRequestID string, nextRetryAt *time.Time) *PushDeliveryAttempt {
+	attemptNumber := attempt.AttemptNumber + 1
+	updated, err := s.devices.FinalizePushAttempt(ctx, attempt.ID, outcome, attemptNumber, relayRequestID, statusPtr, reason, message, nextRetryAt)
+	if err != nil && ctx.Err() == nil {
+		s.logger.Warn("finalize push attempt failed", "attempt_id", attempt.ID, "error", err)
+	}
+	return updated
+}
+
+func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) pushSendResult {
+	apiKey := s.settings.PushRelayAPIKey(ctx)
+	if apiKey == "" {
+		return pushSendResult{Message: "push relay API key not configured", UpstreamReason: "relay_api_key_missing"}
+	}
+	relayURL := s.settings.PushRelayURL(ctx)
+	deliveryID := attempt.ID
+	if attempt.NotificationDeliveryID != nil {
+		deliveryID = *attempt.NotificationDeliveryID
+	}
+	collapseID := deliveryID
+	body, err := json.Marshal(pushRelayAppleRequest{
+		Token:          token,
+		Environment:    device.APNsEnvironment,
+		Topic:          device.APNsTopic,
+		Mode:           "private_alert",
+		ServerDeviceID: device.ServerDeviceID,
+		DeliveryID:     deliveryID,
+		CollapseID:     &collapseID,
+	})
+	if err != nil {
+		return pushSendResult{Message: "relay payload build failed", UpstreamReason: "payload_build_failed"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+relayAppleSendPath, bytes.NewReader(body))
+	if err != nil {
+		return pushSendResult{Message: "invalid push relay URL", UpstreamReason: "invalid_relay_url"}
+	}
+	if req.URL.Scheme != schemeHTTPS {
+		return pushSendResult{Message: "invalid push relay URL", UpstreamReason: "invalid_relay_url"}
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Silo-Push/1.0")
+	req.Header.Set("Idempotency-Key", fmt.Sprintf("%s:%d", attempt.ID, attempt.AttemptNumber+1))
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return pushSendResult{Message: classifyWebhookError(err), UpstreamReason: "relay_unreachable"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		var parsed pushRelayAppleResponse
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 16<<10)).Decode(&parsed)
+		if parsed.RequestID == "" {
+			parsed.RequestID = resp.Header.Get("X-Request-ID")
+		}
+		return pushSendResult{
+			OK:             true,
+			HTTPStatus:     resp.StatusCode,
+			RelayRequestID: parsed.RequestID,
+		}
+	}
+
+	var parsed pushRelayErrorResponse
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
+	_ = json.Unmarshal(data, &parsed)
+	code := parsed.Error.Code
+	if code == "" {
+		code = fmt.Sprintf("http_%d", resp.StatusCode)
+	}
+	message := parsed.Error.Message
+	if message == "" {
+		message = http.StatusText(resp.StatusCode)
+	}
+	if message == "" {
+		message = fmt.Sprintf("HTTP %d", resp.StatusCode)
+	}
+	return pushSendResult{
+		HTTPStatus:     resp.StatusCode,
+		RetryAfter:     parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		RelayRequestID: parsed.Error.RequestID,
+		UpstreamReason: code,
+		Message:        strings.TrimSpace(message),
+		TerminalDevice: resp.StatusCode == http.StatusUnprocessableEntity && code == "apns_rejected",
+	}
+}
+
+// PushDispatcher implements the channel Dispatcher interface for Apple push
+// on top of the shared channelDispatcher core, with the retry/recovery sweep
+// integrated.
+type PushDispatcher struct {
+	core channelDispatcher[PushDeliveryAttempt]
+}
+
+func newPushDispatcher(sender *pushSender) *PushDispatcher {
+	return &PushDispatcher{core: channelDispatcher[PushDeliveryAttempt]{
+		channel:      "apple push",
+		queue:        make(chan string, pushDispatchQueue),
+		logger:       slog.Default().With("component", "notifications.apple_push.dispatch"),
+		claimPending: sender.devices.ClaimPendingPushForDelivery,
+		process: func(ctx context.Context, attempt PushDeliveryAttempt) {
+			sender.processAttempt(ctx, attempt)
+		},
+		enabled:    sender.settings.ApplePushDeliveryEnabled,
+		claimDue:   sender.devices.ClaimDuePushAttempts,
+		claimLimit: pushRetryClaimLimit,
+	}}
+}
+
+// Dispatch queues the delivery's Apple push attempts for immediate send.
+func (d *PushDispatcher) Dispatch(_ context.Context, delivery DeliveryRow) error {
+	if d == nil {
+		return nil
+	}
+	d.core.dispatch(delivery.ID)
+	return nil
+}
+
+// Run consumes the dispatch queue and the retry/recovery sweep until ctx is
+// canceled.
+func (d *PushDispatcher) Run(ctx context.Context) {
+	d.core.run(ctx)
+}
+
+type ApplePushTestResult struct {
+	AttemptID      string
+	PushDeviceID   string
+	ServerDeviceID string
+	Outcome        string
+	RelayRequestID string
+	UpstreamStatus *int
+	UpstreamReason string
+	FailureMessage string
+}
+
+func (s *System) SendApplePushTest(ctx context.Context, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+	if s == nil || s.pushDeviceRepo == nil || s.pushSender == nil {
+		return nil, ErrPushDeliveryUnavailable
+	}
+	if !s.Settings.ApplePushDeliveryEnabled(ctx) {
+		return nil, ErrPushDeliveryUnavailable
+	}
+	if s.Settings.PushRelayAPIKey(ctx) == "" {
+		return nil, ErrPushDeliveryUnavailable
+	}
+	attempt, device, err := s.pushDeviceRepo.EnqueueAppleTestAttempt(ctx, profileID, serverDeviceID)
+	if err != nil {
+		return nil, err
+	}
+	claimed, err := s.pushDeviceRepo.ClaimPushAttemptByID(ctx, attempt.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(claimed) != 1 {
+		return nil, fmt.Errorf("push test attempt was not claimable")
+	}
+	updated := s.pushSender.processAttempt(ctx, claimed[0])
+	if updated == nil {
+		updated, _ = s.pushDeviceRepo.GetPushAttempt(ctx, attempt.ID)
+	}
+	if updated == nil {
+		return nil, fmt.Errorf("push test attempt disappeared")
+	}
+	result := &ApplePushTestResult{
+		AttemptID:      updated.ID,
+		PushDeviceID:   updated.PushDeviceID,
+		ServerDeviceID: device.ServerDeviceID,
+		Outcome:        updated.Outcome,
+		UpstreamStatus: updated.UpstreamStatus,
+	}
+	if updated.RelayRequestID != nil {
+		result.RelayRequestID = *updated.RelayRequestID
+	}
+	if updated.UpstreamReason != nil {
+		result.UpstreamReason = *updated.UpstreamReason
+	}
+	if updated.FailureMessage != nil {
+		result.FailureMessage = *updated.FailureMessage
+	}
+	return result, nil
+}

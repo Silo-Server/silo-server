@@ -6,6 +6,8 @@ import { buildQueryCatalogHref } from "@/pages/catalogSearchParams";
 import { Search, X } from "lucide-react";
 import type { FormEvent } from "react";
 
+const SEARCH_NAVIGATION_DEBOUNCE_MS = 100;
+
 interface SearchBarProps {
   initialQuery?: string;
   autoFocus?: boolean;
@@ -21,7 +23,7 @@ export default function SearchBar({
   const navigate = useViewTransitionNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const isInitialMount = useRef(true);
-  const debouncedQuery = useDebounce(query, 200);
+  const debouncedQuery = useDebounce(query, SEARCH_NAVIGATION_DEBOUNCE_MS);
 
   useEffect(() => {
     if (autoFocus && inputRef.current) {

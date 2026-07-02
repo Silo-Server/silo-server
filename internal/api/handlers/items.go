@@ -38,6 +38,11 @@ type batchEpisodeFileProvider interface {
 	ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
 }
 
+type overlayFileProvider interface {
+	ListOverlayFilesByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error)
+	ListOverlayFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
+}
+
 type MetadataRefreshRequester interface {
 	RequestStaleMetadataRefresh(ctx context.Context, targetType, contentID string) error
 }
@@ -102,6 +107,15 @@ func NewItemsHandler(
 	}
 }
 
+// SetCompletionObserver wires an optional observer notified when a watch
+// completes (used to auto-remove fully-watched items from the watchlist).
+func (h *ItemsHandler) SetCompletionObserver(obs watchstate.CompletionObserver) {
+	if h == nil || h.watchState == nil || obs == nil {
+		return
+	}
+	h.watchState.WithCompletionObserver(obs)
+}
+
 // SetProfileStaler configures an optional staleness trigger for taste profiles.
 func (h *ItemsHandler) SetProfileStaler(ps ProfileStaler) {
 	h.profileStaler = ps
@@ -114,6 +128,13 @@ func (h *ItemsHandler) SetProfileRefreshRequester(requester ProfileRefreshReques
 
 func (h *ItemsHandler) SetMetadataRefreshRequester(requester MetadataRefreshRequester) {
 	h.metadataRefreshRequester = requester
+}
+
+func (h *ItemsHandler) SetCatalogSearchProvider(provider catalog.CatalogSearchProvider) {
+	if h == nil || h.catalogResolver == nil || provider == nil {
+		return
+	}
+	h.catalogResolver.WithSearchProvider(provider)
 }
 
 func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDispatcher) {
@@ -246,11 +267,17 @@ type sortMetricsResponse struct {
 	SeriesName     string   `json:"series_name,omitempty"`
 }
 
+type itemListImageURLs struct {
+	posterURL   string
+	backdropURL string
+}
+
 // browseResponse is the paginated response for the /items endpoint.
 type browseResponse struct {
-	Total   int                `json:"total"`
-	HasMore bool               `json:"has_more"`
-	Items   []itemListResponse `json:"items"`
+	Total      int                `json:"total"`
+	TotalExact bool               `json:"total_exact"`
+	HasMore    bool               `json:"has_more"`
+	Items      []itemListResponse `json:"items"`
 }
 
 type itemFiltersResponse struct {
@@ -583,9 +610,10 @@ func (h *ItemsHandler) writeCatalogBrowseResponse(w http.ResponseWriter, r *http
 	}
 
 	writeJSON(w, http.StatusOK, browseResponse{
-		Total:   result.Total,
-		HasMore: result.HasMore,
-		Items:   items,
+		Total:      result.Total,
+		TotalExact: result.TotalExact,
+		HasMore:    result.HasMore,
+		Items:      items,
 	})
 	return true
 }
@@ -633,6 +661,13 @@ func (h *ItemsHandler) toItemListResponseWithOverlay(r *http.Request, item *mode
 			item = localized
 		}
 	}
+	resp := itemListResponseShell(item, overlaySummary, userState)
+	resp.PosterURL = h.presignURL(r, cardThumbnailPath(item.PosterPath), "card")
+	resp.BackdropURL = h.presignURL(r, cardThumbnailPath(item.BackdropPath), "card")
+	return resp
+}
+
+func itemListResponseShell(item *models.MediaItem, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse) itemListResponse {
 	resp := itemListResponse{
 		ContentID:         item.ContentID,
 		Type:              item.Type,
@@ -663,8 +698,6 @@ func (h *ItemsHandler) toItemListResponseWithOverlay(r *http.Request, item *mode
 	resp.MangaVolumeCount = item.MangaVolumeCount
 	resp.ReleaseDate = item.ReleaseDate
 	resp.LastAirDate = item.LastAirDate
-	resp.PosterURL = h.presignURL(r, cardThumbnailPath(item.PosterPath), "card")
-	resp.BackdropURL = h.presignURL(r, cardThumbnailPath(item.BackdropPath), "card")
 	if resp.Genres == nil {
 		resp.Genres = []string{}
 	}
@@ -673,6 +706,67 @@ func (h *ItemsHandler) toItemListResponseWithOverlay(r *http.Request, item *mode
 	}
 
 	return resp
+}
+
+func (h *ItemsHandler) localizeItemListModels(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) []*models.MediaItem {
+	if h == nil || h.detailSvc == nil || len(items) == 0 {
+		return items
+	}
+	localized, err := h.detailSvc.LocalizeItemModels(ctx, items, filter)
+	if err != nil || len(localized) != len(items) {
+		return items
+	}
+	return localized
+}
+
+func (h *ItemsHandler) itemListCardImageURLs(ctx context.Context, items []*models.MediaItem) map[string]itemListImageURLs {
+	urls := make(map[string]itemListImageURLs, len(items))
+	if h == nil || h.detailSvc == nil || len(items) == 0 {
+		return urls
+	}
+
+	type pendingImages struct {
+		contentID    string
+		posterPath   string
+		backdropPath string
+	}
+
+	pending := make([]pendingImages, 0, len(items))
+	paths := make([]string, 0, len(items)*2)
+	seenPaths := make(map[string]struct{}, len(items)*2)
+	addPath := func(path string) {
+		if path == "" || path == "-" {
+			return
+		}
+		if _, ok := seenPaths[path]; ok {
+			return
+		}
+		seenPaths[path] = struct{}{}
+		paths = append(paths, path)
+	}
+
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		images := pendingImages{
+			contentID:    item.ContentID,
+			posterPath:   cardThumbnailPath(item.PosterPath),
+			backdropPath: cardThumbnailPath(item.BackdropPath),
+		}
+		pending = append(pending, images)
+		addPath(images.posterPath)
+		addPath(images.backdropPath)
+	}
+
+	resolved := h.detailSvc.PresignURLsWithExpiry(ctx, paths, "card")
+	for _, images := range pending {
+		urls[images.contentID] = itemListImageURLs{
+			posterURL:   resolved[images.posterPath].URL,
+			backdropURL: resolved[images.backdropPath].URL,
+		}
+	}
+	return urls
 }
 
 func (h *ItemsHandler) listEpisodeBrowseMetadata(
@@ -961,7 +1055,7 @@ func (h *ItemsHandler) listOverlaySummaries(ctx context.Context, items []*models
 		return summaries
 	}
 
-	groupedFiles := h.listBrowseItemFiles(ctx, items, filter)
+	groupedFiles := h.listBrowseItemOverlayFiles(ctx, items, filter)
 	for contentID, files := range groupedFiles {
 		if summary := overlays.BuildSummary(files); summary != nil {
 			summaries[contentID] = summary
@@ -1263,21 +1357,7 @@ func (h *ItemsHandler) listBrowseItemFiles(ctx context.Context, items []*models.
 
 	contentIDs := make([]string, 0, len(items))
 	episodeIDs := make([]string, 0)
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		if item == nil || item.ContentID == "" {
-			continue
-		}
-		if _, ok := seen[item.ContentID]; ok {
-			continue
-		}
-		seen[item.ContentID] = struct{}{}
-		if item.Type == "episode" {
-			episodeIDs = append(episodeIDs, item.ContentID)
-		} else {
-			contentIDs = append(contentIDs, item.ContentID)
-		}
-	}
+	collectBrowseFileIDs(items, &contentIDs, &episodeIDs)
 
 	if len(contentIDs) > 0 {
 		contentFiles, err := h.fileRepo.ListByContentIDs(ctx, contentIDs)
@@ -1300,6 +1380,60 @@ func (h *ItemsHandler) listBrowseItemFiles(ctx context.Context, items []*models.
 	}
 
 	return grouped
+}
+
+func (h *ItemsHandler) listBrowseItemOverlayFiles(ctx context.Context, items []*models.MediaItem, filter catalog.AccessFilter) map[string][]*models.MediaFile {
+	if h.fileRepo == nil || len(items) == 0 {
+		return map[string][]*models.MediaFile{}
+	}
+
+	overlayProvider, ok := h.fileRepo.(overlayFileProvider)
+	if !ok {
+		return h.listBrowseItemFiles(ctx, items, filter)
+	}
+
+	contentIDs := make([]string, 0, len(items))
+	episodeIDs := make([]string, 0)
+	collectBrowseFileIDs(items, &contentIDs, &episodeIDs)
+
+	grouped := make(map[string][]*models.MediaFile, len(items))
+	if len(contentIDs) > 0 {
+		contentFiles, err := overlayProvider.ListOverlayFilesByContentIDs(ctx, contentIDs)
+		if err != nil {
+			return h.listBrowseItemFiles(ctx, items, filter)
+		}
+		for contentID, files := range contentFiles {
+			grouped[contentID] = catalog.FilterMediaFilesByAccess(files, filter)
+		}
+	}
+	if len(episodeIDs) > 0 {
+		episodeFiles, err := overlayProvider.ListOverlayFilesByEpisodeIDs(ctx, episodeIDs)
+		if err != nil {
+			return h.listBrowseItemFiles(ctx, items, filter)
+		}
+		for episodeID, files := range episodeFiles {
+			grouped[episodeID] = catalog.FilterMediaFilesByAccess(files, filter)
+		}
+	}
+	return grouped
+}
+
+func collectBrowseFileIDs(items []*models.MediaItem, contentIDs *[]string, episodeIDs *[]string) {
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item == nil || item.ContentID == "" {
+			continue
+		}
+		if _, ok := seen[item.ContentID]; ok {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		if item.Type == "episode" {
+			*episodeIDs = append(*episodeIDs, item.ContentID)
+		} else {
+			*contentIDs = append(*contentIDs, item.ContentID)
+		}
+	}
 }
 
 func firstNonBlankPtr(values ...*string) *string {

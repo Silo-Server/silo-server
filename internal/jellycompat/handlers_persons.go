@@ -45,12 +45,21 @@ func (h *PersonsHandler) HandleGetPersons(w http.ResponseWriter, r *http.Request
 
 	q := newCaseInsensitiveQuery(r.URL.Query())
 	searchTerm := strings.TrimSpace(q.Get("SearchTerm"))
-	limit := parsePositiveInt(q.Get("Limit"), 20)
+	// Person search hits PostgreSQL directly (it is not in the Meilisearch
+	// index), so it is gated: short terms never run and results are capped.
+	limit := clampAuxSearchLimit(parsePositiveInt(q.Get("Limit"), auxSearchMaxResults))
 
 	var people []models.Person
 	var err error
 
 	if searchTerm != "" {
+		if auxSearchTermTooShort(searchTerm) {
+			writeJSON(w, http.StatusOK, queryResultDTO{
+				Items:            []baseItemDTO{},
+				TotalRecordCount: 0,
+			})
+			return
+		}
 		if h.shouldSuppressSearchPeople(r.Context(), session, searchTerm) {
 			writeJSON(w, http.StatusOK, queryResultDTO{
 				Items:            []baseItemDTO{},
@@ -147,7 +156,12 @@ func (h *PersonsHandler) shouldSuppressSearchPeople(ctx context.Context, session
 		return false
 	}
 
-	media, err := h.content.SearchItems(ctx, session, raw, []string{"movie", "series"}, 5, 0, nil)
+	media, err := h.content.SearchItems(ctx, session, SearchItemsOptions{
+		Query:     raw,
+		ItemTypes: []string{"movie", "series"},
+		Limit:     5,
+		SkipTotal: true,
+	})
 	if err != nil || media == nil || len(media.Items) == 0 {
 		return false
 	}

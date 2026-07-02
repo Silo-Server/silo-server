@@ -80,6 +80,10 @@ var SensitiveSettingKeys = map[string]bool{
 	"recommendations.embedding_auth_token": true,
 	"recommendations.openai_api_key":       true,
 
+	// Optional catalog search provider auth. Do not rename this key after
+	// shipping; encrypted values are bound to the setting name.
+	"catalog.search.meilisearch.api_key": true,
+
 	// Watch-sync OAuth client credentials. The client_id entries are low-value
 	// but kept as a harmless safe superset and to match existing redaction.
 	"watchsync.trakt.client_id":     true,
@@ -104,6 +108,9 @@ var SensitiveSettingKeys = map[string]bool{
 	// value by the notifications system; clients receive the public half via
 	// the capability endpoint, never from the settings store).
 	"notifications.web_push.vapid_keypair": true,
+
+	// Silo push relay bearer credential for APNs/FCM delivery.
+	"notifications.push_relay_api_key": true,
 }
 
 // EncryptedSettingsRepo decorates a raw settings store, transparently

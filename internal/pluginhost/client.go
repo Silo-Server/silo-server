@@ -34,6 +34,11 @@ type MetadataProviderClient struct {
 	timeout time.Duration
 }
 
+type ImageResolverClient struct {
+	client  pluginv1.ImageResolverClient
+	timeout time.Duration
+}
+
 type MarkerProviderClient struct {
 	client  pluginv1.MarkerProviderClient
 	timeout time.Duration
@@ -109,6 +114,16 @@ func (c *Client) MetadataProvider(capabilityID string) (*MetadataProviderClient,
 	}
 	return &MetadataProviderClient{
 		client:  c.rpc.MetadataProvider(),
+		timeout: DefaultMetadataTimeout,
+	}, nil
+}
+
+func (c *Client) ImageResolver(capabilityID string) (*ImageResolverClient, error) {
+	if err := c.requireCapability("image_resolver.v1", capabilityID); err != nil {
+		return nil, err
+	}
+	return &ImageResolverClient{
+		client:  c.rpc.ImageResolver(),
 		timeout: DefaultMetadataTimeout,
 	}, nil
 }
@@ -257,6 +272,18 @@ func (c *MetadataProviderClient) ResolveImageURL(ctx context.Context, req *plugi
 }
 
 func (c *MetadataProviderClient) ResolveImageURLs(ctx context.Context, req *pluginv1.ResolveImageURLsRequest) (*pluginv1.ResolveImageURLsResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ResolveImageURLs(callCtx, req)
+}
+
+func (c *ImageResolverClient) ResolveImageURL(ctx context.Context, req *pluginv1.ResolveImageURLRequest) (*pluginv1.ResolveImageURLResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.ResolveImageURL(callCtx, req)
+}
+
+func (c *ImageResolverClient) ResolveImageURLs(ctx context.Context, req *pluginv1.ResolveImageURLsRequest) (*pluginv1.ResolveImageURLsResponse, error) {
 	callCtx, cancel := ensureDeadline(ctx, c.timeout)
 	defer cancel()
 	return c.client.ResolveImageURLs(callCtx, req)

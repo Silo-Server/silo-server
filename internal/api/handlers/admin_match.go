@@ -161,7 +161,11 @@ func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.
 		return
 	}
 
-	if len(req.ProviderIDs) == 0 {
+	// Normalize keys and values the same way the search endpoint does so a
+	// caller-supplied key like "TMDB" or " tmdb " cannot bypass downstream
+	// provider-id handling (e.g. stale-ID suppression in metadata.Process).
+	providerIDs := normalizeMatchProviderIDs(req.ProviderIDs)
+	if len(providerIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "At least one provider ID is required")
 		return
 	}
@@ -191,7 +195,7 @@ func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.
 
 	result, err := h.metadata.Process(r.Context(), metadata.ProcessRequest{
 		ContentID:   contentID,
-		ProviderIDs: req.ProviderIDs,
+		ProviderIDs: providerIDs,
 		FolderID:    folderIDStr,
 		Mode:        metadata.ModeIdentify,
 	})
