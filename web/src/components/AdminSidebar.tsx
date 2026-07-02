@@ -4,13 +4,14 @@ import type { ReactNode } from "react";
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import { SiloBrand } from "@/components/SiloBrand";
 import {
-  ADMIN_NAV_SECTIONS,
+  buildAdminNavSections,
   buildAdminPluginNavItems,
   type AdminNavGroup,
   type AdminNavItem,
 } from "@/lib/adminNavigation";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
+import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useBuildInfo } from "@/hooks/queries/admin/system";
 
@@ -36,6 +37,7 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
   const location = useLocation();
   const sessionCount = useSessionCount();
   const buildInfo = useBuildInfo();
+  const policyCapability = usePolicyCapability();
   // Falls back to "dev build" when the binary carries no VCS/ldflags revision
   // (e.g. `go run` or an image built without BUILD_REVISION) rather than a stark
   // "unavailable".
@@ -50,7 +52,9 @@ export default function AdminSidebar({ onNavigate }: AdminSidebarProps) {
 
   const activityBadge =
     sessionCount > 0 ? <span className="live-badge">{sessionCount} live</span> : undefined;
-  const sections: SidebarSection[] = ADMIN_NAV_SECTIONS.map((section) => ({
+  const sections: SidebarSection[] = buildAdminNavSections({
+    policyEditorAvailable: policyCapability.data?.editor_available === true,
+  }).map((section) => ({
     ...section,
     items: section.items.map((item) =>
       item.href === "/admin/activity" ? { ...item, badge: activityBadge } : item,

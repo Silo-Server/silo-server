@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import AdminSidebar from "./AdminSidebar";
 import type { BuildInfo } from "@/hooks/queries/admin/system";
 
@@ -28,6 +28,14 @@ const mockUseBuildInfo = vi.fn<() => MockBuildInfoResult>(() => ({
 }));
 const mockUseAdminSessions = vi.fn(() => ({ data: [] }));
 const mockUseAdminPluginInstallations = vi.fn(() => ({ data: [] }));
+const mockUsePolicyCapability = vi.fn(() => ({
+  data: {
+    enabled: true,
+    editor_available: true,
+    decision_types: [],
+    generation: 1,
+  },
+}));
 
 vi.mock("@/hooks/useServerBranding", () => ({
   useServerBranding: () => mockUseServerBranding(),
@@ -45,6 +53,10 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   useAdminPluginInstallations: () => mockUseAdminPluginInstallations(),
 }));
 
+vi.mock("@/hooks/queries/admin/policy", () => ({
+  usePolicyCapability: () => mockUsePolicyCapability(),
+}));
+
 function renderSidebar() {
   return renderToStaticMarkup(
     <MemoryRouter initialEntries={["/admin"]}>
@@ -54,6 +66,17 @@ function renderSidebar() {
 }
 
 describe("AdminSidebar", () => {
+  beforeEach(() => {
+    mockUsePolicyCapability.mockReturnValue({
+      data: {
+        enabled: true,
+        editor_available: true,
+        decision_types: [],
+        generation: 1,
+      },
+    });
+  });
+
   it("renders the grouped navigation sections", () => {
     const markup = renderSidebar();
 
@@ -74,6 +97,22 @@ describe("AdminSidebar", () => {
 
     expect(markup).toContain('href="/admin/maintenance"');
     expect(markup).toContain(">Maintenance<");
+  });
+
+  it("hides Policy navigation when the editor capability is unavailable", () => {
+    mockUsePolicyCapability.mockReturnValueOnce({
+      data: {
+        enabled: true,
+        editor_available: false,
+        decision_types: [],
+        generation: 1,
+      },
+    });
+
+    const markup = renderSidebar();
+
+    expect(markup).not.toContain('href="/admin/policy"');
+    expect(markup).not.toContain(">Policy<");
   });
 
   it("includes a Recommendations link in the automation navigation", () => {

@@ -2195,6 +2195,36 @@ export interface RequestListParams {
 }
 
 // Admin
+export interface AccessGroup {
+  id: number;
+  name: string;
+  description: string;
+  library_ids: number[] | null;
+  max_playback_quality: string;
+  download_allowed: boolean;
+  download_transcode_allowed: boolean;
+  max_streams: number;
+  max_transcodes: number;
+  allowed_permissions: string[] | null;
+  requests_allowed: boolean;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccessGroupInput {
+  name?: string;
+  description?: string;
+  library_ids?: number[] | null;
+  max_playback_quality?: string;
+  download_allowed?: boolean;
+  download_transcode_allowed?: boolean;
+  max_streams?: number;
+  max_transcodes?: number;
+  allowed_permissions?: string[] | null;
+  requests_allowed?: boolean;
+}
+
 export interface AdminUser {
   id: number;
   username: string;
@@ -2203,6 +2233,7 @@ export interface AdminUser {
   permissions: string[];
   enabled: boolean;
   library_ids: number[] | null;
+  access_group_id: number | null;
   max_playback_quality: string;
   max_streams: number;
   max_transcodes: number;
@@ -2239,6 +2270,7 @@ export interface UpdateUserRequest {
   permissions?: string[];
   enabled?: boolean;
   library_ids?: number[] | null;
+  access_group_id?: number | null;
   max_playback_quality?: string;
   max_streams?: number;
   max_transcodes?: number;
