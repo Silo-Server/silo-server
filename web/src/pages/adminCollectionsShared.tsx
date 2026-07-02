@@ -882,6 +882,8 @@ export function TraktPresetForm({
   );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [sourceKind, setSourceKind] = useState<"preset" | "list">("preset");
+  const [listUrl, setListUrl] = useState("");
   const [preset, setPreset] = useState<TraktPreset>("trending");
   const [mediaType, setMediaType] = useState<TraktMediaType>("movie");
   const eligibility = libraryEligibilityForMediaKind(mediaType);
@@ -895,8 +897,10 @@ export function TraktPresetForm({
   const [syncSchedule, setSyncSchedule] = useState("");
   const parsedLimit = parseOptionalPositiveInteger(limit);
   const hasInvalidLimit = limit.trim().length > 0 && parsedLimit === undefined;
-  const requiresProfile = preset === "recommended";
+  const isListMode = sourceKind === "list";
+  const requiresProfile = !isListMode && preset === "recommended";
   const missingProfile = requiresProfile && profileId.trim().length === 0;
+  const missingListURL = isListMode && listUrl.trim().length === 0;
 
   useEffect(() => {
     const firstProfileID = profiles[0]?.id;
@@ -913,9 +917,13 @@ export function TraktPresetForm({
           library_ids: libraryIds,
           title,
           description,
-          preset,
-          media_type: mediaType,
-          profile_id: requiresProfile ? profileId : undefined,
+          ...(isListMode
+            ? { list_url: listUrl.trim() }
+            : {
+                preset,
+                media_type: mediaType,
+                profile_id: requiresProfile ? profileId : undefined,
+              }),
           limit: parsedLimit,
           featured,
           poster_source_url: posterSourceUrl.trim() || undefined,
@@ -939,8 +947,14 @@ export function TraktPresetForm({
             <CardTitle>Import Summary</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <SummaryRow label="Preset" value={getTraktPresetLabel(preset)} />
-            <SummaryRow label="Media" value={mediaType === "tv" ? "TV Shows" : "Movies"} />
+            {isListMode ? (
+              <SummaryRow label="Source" value="User list" />
+            ) : (
+              <>
+                <SummaryRow label="Preset" value={getTraktPresetLabel(preset)} />
+                <SummaryRow label="Media" value={mediaType === "tv" ? "TV Shows" : "Movies"} />
+              </>
+            )}
             {requiresProfile ? (
               <SummaryRow
                 label="Profile"
@@ -985,33 +999,65 @@ export function TraktPresetForm({
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Preset</Label>
-            <Select value={preset} onValueChange={(v) => setPreset(v as TraktPreset)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="trending">Trending</SelectItem>
-                <SelectItem value="popular">Popular</SelectItem>
-                <SelectItem value="recommended">Recommended</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Media Type</Label>
-            <Select value={mediaType} onValueChange={(v) => setMediaType(v as TraktMediaType)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="movie">Movies</SelectItem>
-                <SelectItem value="tv">TV Shows</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        <div className="space-y-2">
+          <Label>Source</Label>
+          <Select value={sourceKind} onValueChange={(v) => setSourceKind(v as "preset" | "list")}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="preset">
+                Discovery feed (Trending / Popular / Recommended)
+              </SelectItem>
+              <SelectItem value="list">User list (trakt.tv URL)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
+
+        {isListMode ? (
+          <div className="space-y-2">
+            <Label htmlFor="trakt-list-url">Trakt list URL</Label>
+            <Input
+              id="trakt-list-url"
+              value={listUrl}
+              onChange={(event) => setListUrl(event.target.value)}
+              placeholder="https://trakt.tv/users/jjjonesjr33/lists/saw-cinematic-universe-in-timeline-order"
+              required
+            />
+            <p className="text-muted-foreground text-xs">
+              Paste a public Trakt list URL. Movies and shows in the list are matched against the
+              selected libraries in list order.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Preset</Label>
+              <Select value={preset} onValueChange={(v) => setPreset(v as TraktPreset)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="trending">Trending</SelectItem>
+                  <SelectItem value="popular">Popular</SelectItem>
+                  <SelectItem value="recommended">Recommended</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Media Type</Label>
+              <Select value={mediaType} onValueChange={(v) => setMediaType(v as TraktMediaType)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="movie">Movies</SelectItem>
+                  <SelectItem value="tv">TV Shows</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        )}
 
         {requiresProfile ? (
           <div className="space-y-2">
@@ -1083,7 +1129,11 @@ export function TraktPresetForm({
           type="submit"
           className="w-full"
           disabled={
-            mutation.isPending || libraryIds.length === 0 || hasInvalidLimit || missingProfile
+            mutation.isPending ||
+            libraryIds.length === 0 ||
+            hasInvalidLimit ||
+            missingProfile ||
+            missingListURL
           }
         >
           {mutation.isPending ? "Importing..." : "Import Trakt Collection"}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -118,6 +119,67 @@ func collectionPresetPath(preset, mediaType string) (string, error) {
 	default:
 		return "", fmt.Errorf("trakt: preset must be trending, popular, or recommended")
 	}
+}
+
+// GetUserList fetches the items of a user-authored Trakt list
+// (/users/{user}/lists/{list}/items), preserving list order. Lists mix
+// movies and shows; unknown item types (people, episodes, seasons) are
+// skipped. Public lists need only the app client id; accessToken is passed
+// through for the owner's private lists.
+func (c *Client) GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]CollectionEntry, error) {
+	user = strings.TrimSpace(user)
+	list = strings.TrimSpace(list)
+	if user == "" || list == "" {
+		return nil, errors.New("trakt: user list requires user and list slug")
+	}
+	if limit <= 0 {
+		limit = defaultCollectionPageLimit
+	}
+	if limit > maxCollectionPresetResults {
+		limit = maxCollectionPresetResults
+	}
+
+	basePath := fmt.Sprintf("/users/%s/lists/%s/items", url.PathEscape(user), url.PathEscape(list))
+	results := make([]CollectionEntry, 0, limit)
+	for page := 1; len(results) < limit; page++ {
+		pageLimit := limit - len(results)
+		if pageLimit > defaultCollectionPageLimit {
+			pageLimit = defaultCollectionPageLimit
+		}
+		var resp []struct {
+			Rank  int         `json:"rank"`
+			Type  string      `json:"type"`
+			Movie *traktMedia `json:"movie"`
+			Show  *traktMedia `json:"show"`
+		}
+		reqPath := fmt.Sprintf("%s?page=%d&limit=%d", basePath, page, pageLimit)
+		if err := c.doGet(ctx, reqPath, accessToken, &resp); err != nil {
+			return nil, err
+		}
+		if len(resp) == 0 {
+			break
+		}
+		for _, row := range resp {
+			var entry CollectionEntry
+			switch {
+			case row.Type == "movie" && row.Movie != nil:
+				entry = row.Movie.entry("movie")
+			case row.Type == "show" && row.Show != nil:
+				entry = row.Show.entry("tv")
+			default:
+				continue
+			}
+			entry.Rank = row.Rank
+			results = append(results, entry)
+			if len(results) >= limit {
+				break
+			}
+		}
+		if len(resp) < pageLimit {
+			break
+		}
+	}
+	return results, nil
 }
 
 func (c *Client) getTrending(ctx context.Context, path, mediaType, accessToken string) ([]CollectionEntry, error) {

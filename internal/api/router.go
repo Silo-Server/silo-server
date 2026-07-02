@@ -2962,6 +2962,27 @@ func (a *traktCollectionAdapter) GetCollectionPreset(ctx context.Context, preset
 	return entries, nil
 }
 
+func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
+	results, err := a.client.GetUserList(ctx, user, list, limit, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]catalog.TraktCollectionEntry, len(results))
+	for i, r := range results {
+		entries[i] = catalog.TraktCollectionEntry{
+			TraktID:   r.TraktID,
+			TMDBID:    r.TMDBID,
+			TVDBID:    r.TVDBID,
+			IMDbID:    r.IMDbID,
+			MediaType: r.MediaType,
+			Title:     r.Title,
+			Year:      r.Year,
+			Rank:      r.Rank,
+		}
+	}
+	return entries, nil
+}
+
 // llmConfigFromServer derives the shared AI client config from the server
 // config. Used at construction and again on every config reload.
 func llmConfigFromServer(cfg *config.Config) llm.Config {

@@ -1630,9 +1630,12 @@ export interface ImportTraktCollectionRequest {
   library_ids?: number[];
   title: string;
   description?: string;
-  preset: "trending" | "popular" | "recommended";
-  media_type: "movie" | "tv";
+  // preset/media_type drive a discovery-feed collection; list_url drives a
+  // user-authored Trakt list. Exactly one path is used per request.
+  preset?: "trending" | "popular" | "recommended";
+  media_type?: "movie" | "tv";
   profile_id?: string;
+  list_url?: string;
   limit?: number;
   featured?: boolean;
   poster_url?: string;
