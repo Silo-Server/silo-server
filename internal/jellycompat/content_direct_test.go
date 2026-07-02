@@ -232,6 +232,9 @@ func (s *progressCountingStore) ListProgress(context.Context, string, string, in
 func (s *progressCountingStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListProgressSince(context.Context, string, string) ([]userstore.WatchProgress, string, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error {
 	panic("unused")
 }
