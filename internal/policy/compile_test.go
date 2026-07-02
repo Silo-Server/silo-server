@@ -68,6 +68,16 @@ override(base, _) := base if {
 	object.get(runtime, "version", "") == ""
 }`,
 		},
+		{
+			name: "time_now",
+			source: `package silo_custom.scope
+
+import rego.v1
+
+override(base, _) := base if {
+	time.now_ns() > 0
+}`,
+		},
 	}
 
 	for _, test := range tests {
@@ -91,6 +101,32 @@ override(base, _) := base`)
 	}
 	if !strings.Contains(err.Error(), "policy package must be silo_custom.scope") {
 		t.Fatalf("CompileCheck() error = %v, want package mismatch", err)
+	}
+}
+
+func TestCompileCheckAllowsPureNetHelpers(t *testing.T) {
+	// net.cidr_contains is deterministic; only impure builtins are locked.
+	err := CompileCheck(context.Background(), "scope", `package silo_custom.scope
+
+import rego.v1
+
+override(base, i) := base if {
+	net.cidr_contains("10.0.0.0/8", object.get(i, "client_ip", "10.1.2.3"))
+}`)
+	if err != nil {
+		t.Fatalf("CompileCheck() error = %v, want pure net helper allowed", err)
+	}
+}
+
+func TestCompileCheckRejectsOversizedSource(t *testing.T) {
+	source := "package silo_custom.scope\n\nimport rego.v1\n\n# " +
+		strings.Repeat("x", maxPolicySourceBytes)
+	err := CompileCheck(context.Background(), "scope", source)
+	if !errors.Is(err, ErrCompileFailed) {
+		t.Fatalf("CompileCheck() error = %v, want ErrCompileFailed", err)
+	}
+	if !strings.Contains(err.Error(), "byte limit") {
+		t.Fatalf("CompileCheck() error = %v, want size limit message", err)
 	}
 }
 
@@ -184,8 +220,8 @@ func TestEvaluateTimeoutFailsClosed(t *testing.T) {
 import rego.v1
 
 decision := count([x |
-	some i in numbers.range(1, 10000000)
-	some j in numbers.range(1, 10000000)
+	some i in numbers.range(1, 10000)
+	some j in numbers.range(1, 10000)
 	x := i + j
 ])`,
 	}}, map[DecisionName]string{

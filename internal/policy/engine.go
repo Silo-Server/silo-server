@@ -188,6 +188,9 @@ func (e *Engine) swap(ctx context.Context, modules []ModuleSource, decisions map
 	for name, query := range decisions {
 		options := []func(*rego.Rego){
 			rego.Query(query),
+			// Same sandbox as CompileCheck: a stored source must not gain
+			// builtins at runtime that save-time validation would reject.
+			rego.Capabilities(LockedCapabilities()),
 		}
 		for _, module := range modules {
 			options = append(options, rego.Module(module.Path, module.Source))
