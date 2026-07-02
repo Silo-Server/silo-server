@@ -69,8 +69,12 @@ export default function WatchTogetherJoin() {
       if (nextIndex === null) {
         return;
       }
+      const nextOption = selectionModeOptions[nextIndex];
+      if (!nextOption) {
+        return;
+      }
       event.preventDefault();
-      setSelectionMode(selectionModeOptions[nextIndex].value);
+      setSelectionMode(nextOption.value);
       modeButtonRefs.current[nextIndex]?.focus();
     },
     [],
