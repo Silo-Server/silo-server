@@ -43,6 +43,7 @@ type accessGroupCreateRequest struct {
 	MaxTranscodes            *int                        `json:"max_transcodes,omitempty"`
 	AllowedPermissions       accessGroupStringSliceField `json:"allowed_permissions"`
 	RequestsAllowed          *bool                       `json:"requests_allowed,omitempty"`
+	IsDefault                bool                        `json:"is_default"`
 }
 
 type accessGroupUpdateRequest struct {
@@ -56,6 +57,7 @@ type accessGroupUpdateRequest struct {
 	MaxTranscodes            *int                        `json:"max_transcodes,omitempty"`
 	AllowedPermissions       accessGroupStringSliceField `json:"allowed_permissions,omitempty"`
 	RequestsAllowed          *bool                       `json:"requests_allowed,omitempty"`
+	IsDefault                *bool                       `json:"is_default,omitempty"`
 }
 
 type accessGroupResponse struct {
@@ -70,6 +72,7 @@ type accessGroupResponse struct {
 	MaxTranscodes            int       `json:"max_transcodes"`
 	AllowedPermissions       []string  `json:"allowed_permissions"`
 	RequestsAllowed          bool      `json:"requests_allowed"`
+	IsDefault                bool      `json:"is_default"`
 	MemberCount              int       `json:"member_count"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`
@@ -201,6 +204,8 @@ func (h *AccessGroupHandler) HandleUpdate(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, toAccessGroupResponse(*group))
 }
 
+// HandleDelete removes an access group. Deleting the default group is allowed:
+// the users foreign key clears members and the system is left with no default.
 func (h *AccessGroupHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Access groups are not configured")
@@ -269,6 +274,7 @@ func (r accessGroupCreateRequest) toInput(w http.ResponseWriter) (access.CreateG
 		MaxTranscodes:            maxTranscodes,
 		AllowedPermissions:       allowedPermissions,
 		RequestsAllowed:          requestsAllowed,
+		IsDefault:                r.IsDefault,
 	}, true
 }
 
@@ -315,6 +321,7 @@ func (r accessGroupUpdateRequest) toInput(w http.ResponseWriter) (access.UpdateG
 		MaxTranscodes:            r.MaxTranscodes,
 		AllowedPermissions:       allowedPermissions,
 		RequestsAllowed:          r.RequestsAllowed,
+		IsDefault:                r.IsDefault,
 	}, true
 }
 
@@ -382,6 +389,7 @@ func toAccessGroupResponse(group access.Group) accessGroupResponse {
 		MaxTranscodes:            group.MaxTranscodes,
 		AllowedPermissions:       append([]string(nil), group.AllowedPermissions...),
 		RequestsAllowed:          group.RequestsAllowed,
+		IsDefault:                group.IsDefault,
 		MemberCount:              group.MemberCount,
 		CreatedAt:                group.CreatedAt,
 		UpdatedAt:                group.UpdatedAt,

@@ -189,6 +189,10 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 	for i := range args {
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
+	if input.AccessGroupID == nil {
+		cols = append(cols, "access_group_id")
+		placeholders = append(placeholders, "(SELECT id FROM access_groups WHERE is_default)")
+	}
 
 	query := fmt.Sprintf("INSERT INTO users (%s) VALUES (%s) RETURNING %s",
 		strings.Join(cols, ", "),

@@ -2,12 +2,14 @@ package access
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -123,6 +125,80 @@ func TestGroupStoreQualityUpdateBumpsMemberRevisionsDB(t *testing.T) {
 	}
 }
 
+func TestDefaultAccessGroupSeedAndUniqueDB(t *testing.T) {
+	ctx, pool, store, suffix := newGroupStoreDBTest(t)
+	seedID := defaultAccessGroupSeedID(t, ctx, pool)
+	t.Cleanup(func() {
+		restoreDefaultAccessGroup(t, ctx, pool, seedID)
+	})
+
+	assertDefaultGroupSeed(t, ctx, pool)
+
+	_, err := pool.Exec(ctx, `
+		INSERT INTO access_groups (name, is_default)
+		VALUES ($1, true)`,
+		"Access Group Test "+suffix+" second default",
+	)
+	if err == nil {
+		t.Fatal("second default access group insert succeeded, want unique violation")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		t.Fatalf("second default insert error = %v, want unique violation", err)
+	}
+
+	group := createTestGroup(t, ctx, store, suffix, "swap-default")
+	isDefault := true
+	updated, err := store.Update(ctx, group.ID, UpdateGroupInput{IsDefault: &isDefault})
+	if err != nil {
+		t.Fatalf("Update(is_default true) error: %v", err)
+	}
+	if !updated.IsDefault {
+		t.Fatalf("updated IsDefault = false, want true")
+	}
+	assertSingleDefaultGroup(t, ctx, pool, group.ID)
+
+	isDefault = false
+	updated, err = store.Update(ctx, group.ID, UpdateGroupInput{IsDefault: &isDefault})
+	if err != nil {
+		t.Fatalf("Update(is_default false) error: %v", err)
+	}
+	if updated.IsDefault {
+		t.Fatalf("updated IsDefault = true, want false")
+	}
+	assertNoDefaultGroup(t, ctx, pool)
+}
+
+func TestGroupStoreDeleteDefaultClearsUsersDB(t *testing.T) {
+	ctx, pool, store, suffix := newGroupStoreDBTest(t)
+	seedID := defaultAccessGroupSeedID(t, ctx, pool)
+	t.Cleanup(func() {
+		restoreDefaultAccessGroup(t, ctx, pool, seedID)
+	})
+
+	group := createTestGroup(t, ctx, store, suffix, "delete-default")
+	isDefault := true
+	if _, err := store.Update(ctx, group.ID, UpdateGroupInput{IsDefault: &isDefault}); err != nil {
+		t.Fatalf("Update(is_default true) error: %v", err)
+	}
+	userID := insertAccessGroupTestUser(t, ctx, pool, suffix, &group.ID, 1)
+
+	if err := store.Delete(ctx, group.ID); err != nil {
+		t.Fatalf("Delete(default) error: %v", err)
+	}
+	var hasGroup bool
+	if err := pool.QueryRow(ctx, `
+		SELECT access_group_id IS NOT NULL
+		FROM users
+		WHERE id = $1`, userID).Scan(&hasGroup); err != nil {
+		t.Fatalf("load deleted default member: %v", err)
+	}
+	if hasGroup {
+		t.Fatalf("user access_group_id remained set after deleting default group")
+	}
+	assertNoDefaultGroup(t, ctx, pool)
+}
+
 func newGroupStoreDBTest(t *testing.T) (context.Context, *pgxpool.Pool, *GroupStore, string) {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -143,6 +219,9 @@ func newGroupStoreDBTest(t *testing.T) (context.Context, *pgxpool.Pool, *GroupSt
 	if tableName == nil || *tableName == "" {
 		t.Skip("test database has not applied access groups migration")
 	}
+	if !accessGroupDefaultColumnExists(t, ctx, pool) {
+		t.Skip("test database has not applied default access group migration")
+	}
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	t.Cleanup(func() {
@@ -150,6 +229,128 @@ func newGroupStoreDBTest(t *testing.T) (context.Context, *pgxpool.Pool, *GroupSt
 		_, _ = pool.Exec(ctx, `DELETE FROM access_groups WHERE name LIKE $1`, "Access Group Test "+suffix+"%")
 	})
 	return ctx, pool, NewGroupStore(pool), suffix
+}
+
+func accessGroupDefaultColumnExists(t *testing.T, ctx context.Context, pool *pgxpool.Pool) bool {
+	t.Helper()
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'access_groups'
+			  AND column_name = 'is_default'
+		)`).Scan(&exists); err != nil {
+		t.Fatalf("check access_groups.is_default column: %v", err)
+	}
+	return exists
+}
+
+func defaultAccessGroupSeedID(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int64 {
+	t.Helper()
+	var id int64
+	if err := pool.QueryRow(ctx, `
+		SELECT id
+		FROM access_groups
+		WHERE name = 'Default Group'
+		  AND is_default`).Scan(&id); err != nil {
+		t.Fatalf("load seeded default access group: %v", err)
+	}
+	return id
+}
+
+func assertDefaultGroupSeed(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	var (
+		description              string
+		libraryIDsNull           bool
+		maxPlaybackQuality       string
+		downloadAllowed          bool
+		downloadTranscodeAllowed bool
+		maxStreams               int
+		maxTranscodes            int
+		allowedPermissionsNull   bool
+		requestsAllowed          bool
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT description, library_ids IS NULL, max_playback_quality,
+			download_allowed, download_transcode_allowed, max_streams,
+			max_transcodes, allowed_permissions IS NULL, requests_allowed
+		FROM access_groups
+		WHERE name = 'Default Group'
+		  AND is_default`).Scan(
+		&description,
+		&libraryIDsNull,
+		&maxPlaybackQuality,
+		&downloadAllowed,
+		&downloadTranscodeAllowed,
+		&maxStreams,
+		&maxTranscodes,
+		&allowedPermissionsNull,
+		&requestsAllowed,
+	); err != nil {
+		t.Fatalf("load seeded default access group details: %v", err)
+	}
+	if description != "Applied automatically to newly created users." ||
+		!libraryIDsNull ||
+		maxPlaybackQuality != "" ||
+		!downloadAllowed ||
+		!downloadTranscodeAllowed ||
+		maxStreams != 0 ||
+		maxTranscodes != 0 ||
+		!allowedPermissionsNull ||
+		!requestsAllowed {
+		t.Fatalf("seeded default group is not the expected no-op ceiling")
+	}
+}
+
+func assertSingleDefaultGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool, wantID int64) {
+	t.Helper()
+	var (
+		gotID int64
+		count int
+	)
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(MIN(id), 0), COUNT(*)::int
+		FROM access_groups
+		WHERE is_default`).Scan(&gotID, &count); err != nil {
+		t.Fatalf("count default access groups: %v", err)
+	}
+	if count != 1 || gotID != wantID {
+		t.Fatalf("default groups = count %d id %d, want count 1 id %d", count, gotID, wantID)
+	}
+}
+
+func assertNoDefaultGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		FROM access_groups
+		WHERE is_default`).Scan(&count); err != nil {
+		t.Fatalf("count default access groups: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("default group count = %d, want 0", count)
+	}
+}
+
+func restoreDefaultAccessGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool, seedID int64) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		UPDATE access_groups
+		SET is_default = false
+		WHERE is_default
+		  AND id <> $1`, seedID); err != nil {
+		t.Fatalf("clear non-seed default groups: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE access_groups
+		SET is_default = true
+		WHERE id = $1`, seedID); err != nil {
+		t.Fatalf("restore seeded default group: %v", err)
+	}
 }
 
 func createTestGroup(t *testing.T, ctx context.Context, store *GroupStore, suffix, label string) *Group {

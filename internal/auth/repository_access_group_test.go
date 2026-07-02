@@ -44,6 +44,44 @@ func TestUserRepositoryUpdateAccessGroupIDDB(t *testing.T) {
 	}
 }
 
+func TestUserRepositoryCreateAssignsDefaultAccessGroupDB(t *testing.T) {
+	ctx, pool, suffix := newAccessGroupUserRepoDBTest(t)
+	seedID := defaultAuthAccessGroupSeedID(t, ctx, pool)
+	t.Cleanup(func() {
+		restoreAuthDefaultAccessGroup(t, ctx, pool, seedID)
+	})
+	users := NewUserRepository(pool)
+
+	defaultID := insertAuthAccessGroupTestGroupWithLabel(t, ctx, pool, suffix, "default")
+	setAuthDefaultAccessGroup(t, ctx, pool, defaultID)
+
+	created, err := users.Create(ctx, createAuthAccessGroupUserInput(suffix, "assigned-default", nil))
+	if err != nil {
+		t.Fatalf("Create(default assignment) error: %v", err)
+	}
+	if created.AccessGroupID == nil || *created.AccessGroupID != defaultID {
+		t.Fatalf("AccessGroupID = %#v, want default group %d", created.AccessGroupID, defaultID)
+	}
+
+	explicitID := insertAuthAccessGroupTestGroupWithLabel(t, ctx, pool, suffix, "explicit")
+	created, err = users.Create(ctx, createAuthAccessGroupUserInput(suffix, "explicit", &explicitID))
+	if err != nil {
+		t.Fatalf("Create(explicit group) error: %v", err)
+	}
+	if created.AccessGroupID == nil || *created.AccessGroupID != explicitID {
+		t.Fatalf("AccessGroupID = %#v, want explicit group %d", created.AccessGroupID, explicitID)
+	}
+
+	clearAuthDefaultAccessGroup(t, ctx, pool)
+	created, err = users.Create(ctx, createAuthAccessGroupUserInput(suffix, "no-default", nil))
+	if err != nil {
+		t.Fatalf("Create(no default) error: %v", err)
+	}
+	if created.AccessGroupID != nil {
+		t.Fatalf("AccessGroupID = %#v, want nil without a default group", created.AccessGroupID)
+	}
+}
+
 func newAccessGroupUserRepoDBTest(t *testing.T) (context.Context, *pgxpool.Pool, string) {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
@@ -64,6 +102,9 @@ func newAccessGroupUserRepoDBTest(t *testing.T) (context.Context, *pgxpool.Pool,
 	if tableName == nil || *tableName == "" {
 		t.Skip("test database has not applied access groups migration")
 	}
+	if !authAccessGroupDefaultColumnExists(t, ctx, pool) {
+		t.Skip("test database has not applied default access group migration")
+	}
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	t.Cleanup(func() {
@@ -75,16 +116,94 @@ func newAccessGroupUserRepoDBTest(t *testing.T) (context.Context, *pgxpool.Pool,
 
 func insertAuthAccessGroupTestGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix string) int64 {
 	t.Helper()
+	return insertAuthAccessGroupTestGroupWithLabel(t, ctx, pool, suffix, "")
+}
+
+func insertAuthAccessGroupTestGroupWithLabel(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	suffix string,
+	label string,
+) int64 {
+	t.Helper()
 	var id int64
+	name := "Auth Access Group Test " + suffix
+	if label != "" {
+		name += " " + label
+	}
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO access_groups (name)
 		VALUES ($1)
 		RETURNING id`,
-		"Auth Access Group Test "+suffix,
+		name,
 	).Scan(&id); err != nil {
 		t.Fatalf("insert access group: %v", err)
 	}
 	return id
+}
+
+func createAuthAccessGroupUserInput(suffix, label string, groupID *int64) models.CreateUserInput {
+	id := time.Now().UnixNano()
+	return models.CreateUserInput{
+		Email:         fmt.Sprintf("auth-access-group-test-%s-%s-%d@example.invalid", suffix, label, id),
+		Username:      fmt.Sprintf("auth-access-group-test-%s-%s-%d", suffix, label, id),
+		Password:      "password",
+		Role:          "user",
+		AccessGroupID: groupID,
+	}
+}
+
+func authAccessGroupDefaultColumnExists(t *testing.T, ctx context.Context, pool *pgxpool.Pool) bool {
+	t.Helper()
+	var exists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'access_groups'
+			  AND column_name = 'is_default'
+		)`).Scan(&exists); err != nil {
+		t.Fatalf("check access_groups.is_default column: %v", err)
+	}
+	return exists
+}
+
+func defaultAuthAccessGroupSeedID(t *testing.T, ctx context.Context, pool *pgxpool.Pool) int64 {
+	t.Helper()
+	var id int64
+	if err := pool.QueryRow(ctx, `
+		SELECT id
+		FROM access_groups
+		WHERE name = 'Default Group'
+		  AND is_default`).Scan(&id); err != nil {
+		t.Fatalf("load seeded default access group: %v", err)
+	}
+	return id
+}
+
+func setAuthDefaultAccessGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool, groupID int64) {
+	t.Helper()
+	clearAuthDefaultAccessGroup(t, ctx, pool)
+	if _, err := pool.Exec(ctx, `
+		UPDATE access_groups
+		SET is_default = true
+		WHERE id = $1`, groupID); err != nil {
+		t.Fatalf("set default access group: %v", err)
+	}
+}
+
+func clearAuthDefaultAccessGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `UPDATE access_groups SET is_default = false WHERE is_default`); err != nil {
+		t.Fatalf("clear default access group: %v", err)
+	}
+}
+
+func restoreAuthDefaultAccessGroup(t *testing.T, ctx context.Context, pool *pgxpool.Pool, seedID int64) {
+	t.Helper()
+	setAuthDefaultAccessGroup(t, ctx, pool, seedID)
 }
 
 func insertAuthAccessGroupTestUser(t *testing.T, ctx context.Context, pool *pgxpool.Pool, suffix string) int {

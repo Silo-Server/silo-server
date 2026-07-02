@@ -25,6 +25,7 @@ type Group struct {
 	MaxTranscodes            int
 	AllowedPermissions       []string
 	RequestsAllowed          bool
+	IsDefault                bool
 	MemberCount              int
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
@@ -42,6 +43,7 @@ type CreateGroupInput struct {
 	MaxTranscodes            int
 	AllowedPermissions       []string
 	RequestsAllowed          bool
+	IsDefault                bool
 }
 
 // UpdateGroupInput contains optional fields for updating an access group.
@@ -56,6 +58,7 @@ type UpdateGroupInput struct {
 	MaxTranscodes            *int
 	AllowedPermissions       *[]string
 	RequestsAllowed          *bool
+	IsDefault                *bool
 }
 
 var (
@@ -77,7 +80,7 @@ func NewGroupStore(pool *pgxpool.Pool) *GroupStore {
 
 const accessGroupSelectColumns = `g.id, g.name, g.description, g.library_ids, g.max_playback_quality,
 	g.download_allowed, g.download_transcode_allowed, g.max_streams, g.max_transcodes,
-	g.allowed_permissions, g.requests_allowed, g.created_at, g.updated_at`
+	g.allowed_permissions, g.requests_allowed, g.is_default, g.created_at, g.updated_at`
 
 type groupScanner interface {
 	Scan(dest ...any) error
@@ -97,6 +100,7 @@ func scanGroup(row groupScanner) (*Group, error) {
 		&g.MaxTranscodes,
 		&g.AllowedPermissions,
 		&g.RequestsAllowed,
+		&g.IsDefault,
 		&g.CreatedAt,
 		&g.UpdatedAt,
 		&g.MemberCount,
@@ -174,14 +178,27 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 	if name == "" {
 		return nil, fmt.Errorf("access group name is required")
 	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("beginning access group create: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if input.IsDefault {
+		if _, err := tx.Exec(ctx, `UPDATE access_groups SET is_default = false WHERE is_default`); err != nil {
+			return nil, fmt.Errorf("clearing previous default access group: %w", err)
+		}
+	}
+
 	var id int64
-	err := s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO access_groups (
 			name, description, library_ids, max_playback_quality,
 			download_allowed, download_transcode_allowed, max_streams, max_transcodes,
-			allowed_permissions, requests_allowed
+			allowed_permissions, requests_allowed, is_default
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id`,
 		name,
 		input.Description,
@@ -193,6 +210,7 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 		input.MaxTranscodes,
 		input.AllowedPermissions,
 		input.RequestsAllowed,
+		input.IsDefault,
 	).Scan(&id)
 	if err != nil {
 		if isGroupDuplicate(err) {
@@ -200,11 +218,15 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 		}
 		return nil, fmt.Errorf("creating access group: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing access group create: %w", err)
+	}
 	return s.Get(ctx, id)
 }
 
-// Update modifies an access group. Changing max_playback_quality bumps member
-// access-policy revisions in the same transaction.
+// Update modifies an access group. Setting IsDefault true clears the previous
+// default, and changing max_playback_quality bumps member access-policy
+// revisions in the same transaction.
 func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInput) (*Group, error) {
 	sets := []string{}
 	args := []any{}
@@ -261,6 +283,11 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 		args = append(args, *input.RequestsAllowed)
 		arg++
 	}
+	if input.IsDefault != nil {
+		sets = append(sets, fmt.Sprintf("is_default = $%d", arg))
+		args = append(args, *input.IsDefault)
+		arg++
+	}
 	if len(sets) == 0 {
 		return s.Get(ctx, id)
 	}
@@ -285,6 +312,15 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 			return nil, fmt.Errorf("loading access group for update: %w", err)
 		}
 		qualityChanged = NormalizePlaybackQuality(current) != NormalizePlaybackQuality(*input.MaxPlaybackQuality)
+	}
+	if input.IsDefault != nil && *input.IsDefault {
+		if _, err := tx.Exec(ctx, `
+			UPDATE access_groups
+			SET is_default = false
+			WHERE is_default
+			  AND id <> $1`, id); err != nil {
+			return nil, fmt.Errorf("clearing previous default access group: %w", err)
+		}
 	}
 
 	sets = append(sets, "updated_at = NOW()")
