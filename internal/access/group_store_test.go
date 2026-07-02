@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -270,13 +271,13 @@ func assertDefaultGroupSeed(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		downloadTranscodeAllowed bool
 		maxStreams               int
 		maxTranscodes            int
-		allowedPermissionsNull   bool
+		allowedPermissions       []string
 		requestsAllowed          bool
 	)
 	if err := pool.QueryRow(ctx, `
 		SELECT description, library_ids IS NULL, max_playback_quality,
 			download_allowed, download_transcode_allowed, max_streams,
-			max_transcodes, allowed_permissions IS NULL, requests_allowed
+			max_transcodes, allowed_permissions, requests_allowed
 		FROM access_groups
 		WHERE name = 'Default Group'
 		  AND is_default`).Scan(
@@ -287,7 +288,7 @@ func assertDefaultGroupSeed(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		&downloadTranscodeAllowed,
 		&maxStreams,
 		&maxTranscodes,
-		&allowedPermissionsNull,
+		&allowedPermissions,
 		&requestsAllowed,
 	); err != nil {
 		t.Fatalf("load seeded default access group details: %v", err)
@@ -296,12 +297,12 @@ func assertDefaultGroupSeed(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 		!libraryIDsNull ||
 		maxPlaybackQuality != "" ||
 		!downloadAllowed ||
-		!downloadTranscodeAllowed ||
-		maxStreams != 0 ||
-		maxTranscodes != 0 ||
-		!allowedPermissionsNull ||
+		downloadTranscodeAllowed ||
+		maxStreams != 5 ||
+		maxTranscodes != 5 ||
+		!slices.Equal(allowedPermissions, []string{"marker_edit"}) ||
 		!requestsAllowed {
-		t.Fatalf("seeded default group is not the expected no-op ceiling")
+		t.Fatalf("seeded default group does not match the migration's starter policy")
 	}
 }
 
