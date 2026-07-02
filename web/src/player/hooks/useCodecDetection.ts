@@ -82,6 +82,21 @@ export function getPlaybackEnvironmentSnapshot(): PlaybackEnvironmentSnapshot | 
   };
 }
 
+/**
+ * Detects HDR display support (best effort). Firefox's `dynamic-range` query
+ * reflects the browser canvas and reports `standard` even on HDR displays;
+ * the video plane is exposed via `video-dynamic-range` (Firefox 116+), so
+ * accept either. Browsers treat unknown media features as non-matching, so
+ * querying both is safe everywhere.
+ */
+export function detectHDRFromMatchMedia(matchMediaFn: typeof matchMedia | undefined): boolean {
+  if (!matchMediaFn) return false;
+  return (
+    matchMediaFn("(dynamic-range: high)").matches ||
+    matchMediaFn("(video-dynamic-range: high)").matches
+  );
+}
+
 function testCodec(mimeWithCodec: string): boolean {
   if (typeof MediaSource === "undefined") return false;
   try {
@@ -171,7 +186,7 @@ export function useCodecDetection() {
     const max_resolution = detectMaxResolutionFromScreen(screen.width, screen.height);
 
     // HDR detection (best effort).
-    const hdr = typeof matchMedia !== "undefined" && matchMedia("(dynamic-range: high)").matches;
+    const hdr = detectHDRFromMatchMedia(typeof matchMedia !== "undefined" ? matchMedia : undefined);
 
     return { codecs_video, codecs_audio, containers, max_resolution, hdr };
   }, []);
