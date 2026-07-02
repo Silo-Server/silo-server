@@ -335,7 +335,7 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		return nil, err
 	}
 
-	decision, err := s.policy.Resolve(ctx, req.Quality, user, cfg, file, req.Caps, s.artifacts != nil)
+	decision, err := s.policy.Resolve(ctx, req.Quality, user, cfg, file, req.Caps, s.artifacts != nil, req.DeviceID)
 	if err != nil {
 		return nil, err
 	}

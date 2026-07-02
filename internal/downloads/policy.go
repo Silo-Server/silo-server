@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -44,6 +45,7 @@ func (r DownloadQualityResolver) Resolve(
 	file *models.MediaFile,
 	caps playback.ClientCapabilities,
 	artifactsAvailable bool,
+	deviceID string,
 ) (QualityDecision, error) {
 	quality := normalizeQuality(requested)
 	if !ValidQuality(quality) {
@@ -51,7 +53,8 @@ func (r DownloadQualityResolver) Resolve(
 	}
 
 	if quality != QualityOriginal {
-		if err := r.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable); err != nil {
+		ceiling, err := r.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable, quality, deviceID)
+		if err != nil {
 			return QualityDecision{}, err
 		}
 		bitrate := QualityBitrateKbps(quality)
@@ -60,6 +63,7 @@ func (r DownloadQualityResolver) Resolve(
 			Allow4KTranscode: true,
 		})
 		target.TargetBitrateKbps = bitrate
+		applyQualityCeiling(&target, file, ceiling)
 		return QualityDecision{
 			RequestedQuality:  quality,
 			EffectiveQuality:  quality,
@@ -102,7 +106,8 @@ func (r DownloadQualityResolver) Resolve(
 			RequiresArtifact: true,
 		}, nil
 	default:
-		if err := r.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable); err != nil {
+		ceiling, err := r.ensureTranscodeAvailable(ctx, user, cfg, artifactsAvailable, quality, deviceID)
+		if err != nil {
 			return QualityDecision{}, err
 		}
 		target := playback.ResolvePrepareTarget(file, FormatTranscode, caps, playback.AdminSettings{
@@ -110,6 +115,7 @@ func (r DownloadQualityResolver) Resolve(
 			Allow4KTranscode: true,
 		})
 		target.TargetBitrateKbps = QualityBitrateKbps(Quality20Mbps)
+		applyQualityCeiling(&target, file, ceiling)
 		return QualityDecision{
 			RequestedQuality:  QualityOriginal,
 			EffectiveQuality:  Quality20Mbps,
@@ -273,36 +279,61 @@ func normalizeQuality(q string) string {
 	return q
 }
 
+// ensureTranscodeAvailable checks the download_transcode action and returns the
+// policy's quality ceiling (non-empty only when a custom override narrows the
+// user's max playback quality) so the caller can cap the prepared artifact.
 func (r DownloadQualityResolver) ensureTranscodeAvailable(
 	ctx context.Context,
 	user *models.User,
 	cfg config.DownloadConfig,
 	artifactsAvailable bool,
-) error {
+	requestedQuality string,
+	deviceID string,
+) (string, error) {
 	if r.actionDecider == nil {
 		if err := ensureTranscodeAllowed(user, cfg); err != nil {
-			return err
+			return "", err
 		}
 		if !artifactsAvailable {
-			return ErrQualityUnavailable
+			return "", ErrQualityUnavailable
 		}
-		return nil
+		return "", nil
 	}
-	decision, _, err := r.actionDecider.CheckAction(ctx, downloadActionInput(
+	input := downloadActionInput(
 		policyengine.ActionDownloadTranscode,
 		userIDForPolicy(user),
 		user,
 		cfg,
 		artifactsAvailable,
-		"",
-	))
+		deviceID,
+	)
+	input.RequestedQuality = requestedQuality
+	decision, _, err := r.actionDecider.CheckAction(ctx, input)
 	if err != nil {
-		return ErrDownloadNotAllowed
+		return "", ErrDownloadNotAllowed
 	}
 	if !decision.Allowed {
-		return downloadActionDenyError(decision.Reason)
+		return "", downloadActionDenyError(decision.Reason)
 	}
-	return nil
+	return decision.QualityCeiling, nil
+}
+
+// applyQualityCeiling downscales a transcode target so the prepared artifact
+// stays within a policy quality ceiling. The ceiling applies to what is served
+// (the artifact), so a capped transcode of an over-ceiling source stays
+// downloadable — mirroring the serve-time rule in serveDownloadBytes.
+func applyQualityCeiling(target *playback.PrepareTarget, file *models.MediaFile, ceiling string) {
+	ceiling = access.NormalizePlaybackQuality(ceiling)
+	if ceiling == "" {
+		return
+	}
+	served := target.Resolution
+	if served == "" {
+		served = file.Resolution
+	}
+	if !access.QualityAllowed(served, ceiling) {
+		target.Resolution = ceiling
+	}
 }
 
 func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error {
@@ -315,6 +346,12 @@ func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error 
 	return nil
 }
 
+// downloadActionInput builds the policy facts downloads can assert. FileQuality
+// and the content-rating pair are intentionally left empty: download quality and
+// rating ceilings apply to what is actually served, which the scope-derived
+// access filter enforces at item access and again at serve time against the
+// prepared artifact (see serveDownloadBytes). Asserting the source file's
+// quality here would wrongly deny capped transcodes of over-ceiling sources.
 func downloadActionInput(
 	action string,
 	userID int,

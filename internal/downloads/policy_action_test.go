@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	policyengine "github.com/Silo-Server/silo-server/internal/policy"
 )
 
@@ -91,6 +92,65 @@ func TestPolicyActionDeciderUsesGroupDownloadFlags(t *testing.T) {
 	if !errors.Is(err, ErrDownloadNotAllowed) {
 		t.Fatalf("downloadConfigForUser() error = %v, want ErrDownloadNotAllowed", err)
 	}
+}
+
+func TestResolveTranscodePassesDeviceQualityFactsAndAppliesCeiling(t *testing.T) {
+	decider := &capturingActionDecider{decision: policyengine.ActionDecision{Allowed: true, QualityCeiling: "1080p"}}
+	resolver := DownloadQualityResolver{actionDecider: decider}
+	user := &models.User{ID: 9, DownloadAllowed: true, DownloadTranscodeAllowed: true}
+	cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: true}
+	file := &models.MediaFile{ID: 3, Resolution: "2160p"}
+
+	got, err := resolver.Resolve(
+		context.Background(), Quality10Mbps, user, cfg, file,
+		playback.ClientCapabilities{}, true, "device-9",
+	)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if len(decider.inputs) != 1 {
+		t.Fatalf("decider calls = %d, want 1", len(decider.inputs))
+	}
+	in := decider.inputs[0]
+	if in.Action != policyengine.ActionDownloadTranscode ||
+		in.DeviceID != "device-9" ||
+		in.RequestedQuality != Quality10Mbps {
+		t.Fatalf("action input = %+v, want download_transcode facts with device and requested quality", in)
+	}
+	if got.PrepareTarget.Resolution != "1080p" {
+		t.Fatalf("PrepareTarget.Resolution = %q, want %q (policy ceiling applied)",
+			got.PrepareTarget.Resolution, "1080p")
+	}
+}
+
+func TestResolveTranscodeCeilingKeepsCompliantTarget(t *testing.T) {
+	decider := &capturingActionDecider{decision: policyengine.ActionDecision{Allowed: true, QualityCeiling: "2160p"}}
+	resolver := DownloadQualityResolver{actionDecider: decider}
+	user := &models.User{ID: 9, DownloadAllowed: true, DownloadTranscodeAllowed: true}
+	cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: true}
+	file := &models.MediaFile{ID: 3, Resolution: "1080p"}
+
+	got, err := resolver.Resolve(
+		context.Background(), Quality10Mbps, user, cfg, file,
+		playback.ClientCapabilities{}, true, "",
+	)
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if got.PrepareTarget.Resolution != "" {
+		t.Fatalf("PrepareTarget.Resolution = %q, want no downscale for a compliant source",
+			got.PrepareTarget.Resolution)
+	}
+}
+
+type capturingActionDecider struct {
+	inputs   []policyengine.ActionInput
+	decision policyengine.ActionDecision
+}
+
+func (d *capturingActionDecider) CheckAction(_ context.Context, in policyengine.ActionInput) (policyengine.ActionDecision, policyengine.Meta, error) {
+	d.inputs = append(d.inputs, in)
+	return d.decision, policyengine.Meta{}, nil
 }
 
 func newPolicyActionTestService(
