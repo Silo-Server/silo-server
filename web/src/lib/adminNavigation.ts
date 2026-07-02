@@ -17,6 +17,7 @@ import {
   ScrollText,
   Send,
   Server,
+  ShieldCheck,
   SkipForward,
   SlidersHorizontal,
   Users,
@@ -189,6 +190,13 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
         keywords: ["extensions", "plugin catalog", "repositories"],
         icon: Blocks,
         href: "/admin/plugins",
+      },
+      {
+        label: "Policy",
+        description: "OPA policy documents, vendor modules, simulations, and decision logs.",
+        keywords: ["opa", "rego", "authorization", "decision log", "access policy"],
+        icon: ShieldCheck,
+        href: "/admin/policy",
       },
       {
         label: "Nodes",

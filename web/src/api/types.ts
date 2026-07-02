@@ -4152,3 +4152,107 @@ export interface FilesystemBrowseResponse {
   parent: string;
   entries: FilesystemBrowseEntry[];
 }
+
+// --- Policy Engine ---
+
+export interface PolicyCapability {
+  enabled: boolean;
+  editor_available: boolean;
+  decision_types: string[];
+  generation: number;
+}
+
+export interface PolicyVendorModule {
+  path: string;
+  source: string;
+}
+
+export interface PolicyCompileIssue {
+  row: number;
+  col: number;
+  message: string;
+}
+
+export interface PolicyVersionSummary {
+  id: number;
+  document_id: number;
+  version_number: number;
+  source_sha256: string;
+  compiled_ok: boolean;
+  compile_error?: string;
+  created_by_user_id?: number;
+  comment?: string;
+  created_at: string;
+}
+
+export interface PolicyVersion extends PolicyVersionSummary {
+  source?: string;
+}
+
+export interface PolicyDocument {
+  id: number;
+  domain: string;
+  name: string;
+  enabled: boolean;
+  active_version_id?: number;
+  active_version?: PolicyVersion;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyCreateVersionResult {
+  id: number;
+  version_number: number;
+  compiled_ok: boolean;
+}
+
+export interface PolicyActivateVersionResult {
+  active_version_id: number;
+  generation: number;
+}
+
+export interface PolicySetDocumentEnabledResult {
+  id: number;
+  enabled: boolean;
+  generation: number;
+}
+
+export interface PolicyValidateResult {
+  compiled_ok: boolean;
+  errors: PolicyCompileIssue[];
+}
+
+export interface PolicySimulateRequest {
+  domain: string;
+  source?: string;
+  input: unknown;
+}
+
+export interface PolicySimulateResult {
+  decision: unknown;
+  eval_time_ns: number;
+  generation: number;
+}
+
+export interface PolicyDecisionEntry {
+  id: number;
+  timestamp: string;
+  decision_name: string;
+  policy_generation: number;
+  user_id?: number;
+  profile_id?: string;
+  session_id?: string;
+  request_id?: string;
+  node_id?: string;
+  allowed: boolean | null;
+  eval_time_ns: number;
+  input_digest: string;
+  input_sample?: unknown;
+  result_sample?: unknown;
+  error?: string;
+}
+
+export interface PolicyDecisionListResult {
+  entries: PolicyDecisionEntry[];
+  next_cursor?: string;
+}

@@ -67,6 +67,7 @@ import AdminTaskDetail from "@/pages/AdminTaskDetail";
 import AdminPlugins from "@/pages/AdminPlugins";
 import AdminHistoryImport from "@/pages/AdminHistoryImport";
 import AdminRecommendations from "@/pages/AdminRecommendations";
+import AdminPolicyLayout from "@/pages/admin-policy/AdminPolicyLayout";
 import Recommendations from "@/pages/Recommendations";
 import RecommendationsSection from "@/pages/RecommendationsSection";
 import Calendar from "@/pages/Calendar";
@@ -405,6 +406,7 @@ function AppRoutes() {
                   <Route path="sections" element={<AdminSections />} />
                   <Route path="plugins" element={<AdminPlugins />} />
                   <Route path="settings" element={<AdminSettingsLayout />} />
+                  <Route path="policy" element={<AdminPolicyLayout />} />
                   <Route path="recommendations" element={<AdminRecommendations />} />
                   <Route path="api-keys" element={<AdminApiKeys />} />
                   <Route path="subtitles" element={<AdminSubtitles />} />

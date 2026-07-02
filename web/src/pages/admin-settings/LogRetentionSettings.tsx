@@ -33,7 +33,14 @@ const GLOBAL_KEYS = [
   OPSLOG_RETENTION_DAYS_KEY,
   OPSLOG_MAX_ROWS_KEY,
   OPSLOG_MAX_SIZE_MB_KEY,
+  "policy.decision_log_retention_days",
+  "policy.decision_log_verbosity",
+  "policy.decision_log_scope_sample_rate",
 ] as const;
+
+const POLICY_DECISION_LOG_RETENTION_DAYS_KEY = "policy.decision_log_retention_days";
+const POLICY_DECISION_LOG_VERBOSITY_KEY = "policy.decision_log_verbosity";
+const POLICY_DECISION_LOG_SCOPE_SAMPLE_RATE_KEY = "policy.decision_log_scope_sample_rate";
 
 function createBucketRow(policy?: Partial<LogRetentionBucketPolicy>, fallbackID = "0"): BucketRow {
   return {
@@ -222,6 +229,34 @@ export default function LogRetentionSettings() {
             hint="Uses estimated log row size. Oldest rows are pruned when the budget is exceeded."
             value={getValue(OPSLOG_MAX_SIZE_MB_KEY)}
             onChange={(value) => setValue(OPSLOG_MAX_SIZE_MB_KEY, value)}
+          />
+        </FieldGroup>
+
+        <FieldGroup label="Policy Decision Logs">
+          <SettingField
+            label="Decision Log Retention Days"
+            type="number"
+            hint="Policy decisions older than this are pruned by the cleanup task."
+            value={getValue(POLICY_DECISION_LOG_RETENTION_DAYS_KEY)}
+            onChange={(value) => setValue(POLICY_DECISION_LOG_RETENTION_DAYS_KEY, value)}
+          />
+          <SettingField
+            label="Decision Log Verbosity"
+            type="select"
+            hint="Digest stores hashes only. Verbose stores sampled input and result payloads."
+            value={getValue(POLICY_DECISION_LOG_VERBOSITY_KEY) || "digest"}
+            onChange={(value) => setValue(POLICY_DECISION_LOG_VERBOSITY_KEY, value)}
+            options={[
+              { value: "digest", label: "Digest" },
+              { value: "verbose", label: "Verbose" },
+            ]}
+          />
+          <SettingField
+            label="Scope Sample Rate"
+            type="number"
+            hint="Logs one sampled scope decision per N allowed decisions. Denials and errors always log."
+            value={getValue(POLICY_DECISION_LOG_SCOPE_SAMPLE_RATE_KEY)}
+            onChange={(value) => setValue(POLICY_DECISION_LOG_SCOPE_SAMPLE_RATE_KEY, value)}
           />
         </FieldGroup>
 
