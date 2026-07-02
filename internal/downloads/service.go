@@ -114,7 +114,14 @@ type Service struct {
 func (s *Service) SetOfflineDeps(detail ManifestSource, subs SubtitleSource, client *http.Client) {
 	s.artworkSource = detail
 	s.subtitleSource = subs
-	s.manifest = NewManifestBuilder(detail, subs, s.fileRepo)
+	// The artifact lookup reads s.artifacts at call time so the wiring order of
+	// SetOfflineDeps and SetArtifactManager doesn't matter.
+	s.manifest = NewManifestBuilder(detail, subs, s.fileRepo, func(ctx context.Context, id string) (*Artifact, error) {
+		if s.artifacts == nil {
+			return nil, ErrFormatUnavailable
+		}
+		return s.artifacts.repo.GetByID(ctx, id)
+	})
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -499,7 +506,7 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 		return nil, "", nil, err
 	}
 	if len(items) == 0 {
-		return nil, "", skipped, fmt.Errorf("no downloadable episodes found")
+		return nil, "", skipped, ErrNoDownloadableEpisodes
 	}
 
 	batchID, err := idgen.NextID()
@@ -809,6 +816,9 @@ func (s *Service) ServeDirect(ctx context.Context, w http.ResponseWriter, r *htt
 	if err := s.itemAccess.EnsureAccessible(ctx, file.ContentID, filter); err != nil {
 		return err
 	}
+	if !catalog.FileAllowedByAccess(file, filter) {
+		return catalog.ErrItemNotFound
+	}
 	return s.serveLocalFile(ctx, w, r, file.FilePath, userID)
 }
 
@@ -859,7 +869,7 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 		}
 	}
 
-	if err := s.serveDownloadBytes(ctx, w, r, dl, userID); err != nil {
+	if err := s.serveDownloadBytes(ctx, w, r, dl, userID, filter); err != nil {
 		if dl.Format == FormatOriginal {
 			if updateErr := s.repo.UpdateStatus(ctx, dl.ID, StatusFailed, 0, nil); updateErr != nil {
 				slog.Error("failed to mark download as failed", "download_id", dl.ID, "error", updateErr)
@@ -893,7 +903,7 @@ func (s *Service) serveManaged(ctx context.Context, w http.ResponseWriter, r *ht
 	if err := s.itemAccess.EnsureAccessible(ctx, dl.ContentID, filter); err != nil {
 		return err
 	}
-	return s.serveDownloadBytes(ctx, w, r, dl, userID)
+	return s.serveDownloadBytes(ctx, w, r, dl, userID, filter)
 }
 
 // PatchStatus lets a client confirm a managed entry's local state
@@ -991,8 +1001,17 @@ func (s *Service) resolveFile(ctx context.Context, req CreateRequest) (*models.M
 
 // serveDownloadBytes serves the bytes for a download row: the prepared artifact
 // for remux/transcode rows (which must be ready), or the source media file for
-// original rows.
-func (s *Service) serveDownloadBytes(ctx context.Context, w http.ResponseWriter, r *http.Request, dl *Download, userID int) error {
+// original rows. Both paths mirror playback's per-file authorization
+// (catalog.FileAllowedByAccess): library scope and the profile's max playback
+// quality can change after a row was registered.
+func (s *Service) serveDownloadBytes(ctx context.Context, w http.ResponseWriter, r *http.Request, dl *Download, userID int, filter catalog.AccessFilter) error {
+	file, err := s.fileRepo.GetByID(ctx, dl.MediaFileID)
+	if err != nil {
+		return fmt.Errorf("loading media file: %w", err)
+	}
+	if file == nil {
+		return catalog.ErrItemNotFound
+	}
 	if dl.Format != FormatOriginal && dl.ArtifactID != "" {
 		if s.artifacts == nil {
 			return ErrFormatUnavailable
@@ -1001,13 +1020,22 @@ func (s *Service) serveDownloadBytes(ctx context.Context, w http.ResponseWriter,
 		if err != nil {
 			return err
 		}
+		// The quality ceiling applies to what is actually served — the prepared
+		// artifact's resolution, not the source's (a 720p transcode of a 4K
+		// source must stay downloadable under a 1080p ceiling).
+		served := *file
+		if artifact.Resolution != "" {
+			served.Resolution = artifact.Resolution
+		}
+		if !catalog.FileAllowedByAccess(&served, filter) {
+			return catalog.ErrItemNotFound
+		}
 		return s.serveLocalFile(ctx, w, r, artifact.OutputPath, userID)
 	}
-	file, err := s.fileRepo.GetByID(ctx, dl.MediaFileID)
-	if err != nil {
-		return fmt.Errorf("loading media file: %w", err)
+	if file.MissingSince != nil {
+		return catalog.ErrItemNotFound
 	}
-	if file == nil || file.MissingSince != nil {
+	if !catalog.FileAllowedByAccess(file, filter) {
 		return catalog.ErrItemNotFound
 	}
 	return s.serveLocalFile(ctx, w, r, file.FilePath, userID)

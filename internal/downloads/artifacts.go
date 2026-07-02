@@ -180,10 +180,18 @@ func (m *ArtifactManager) Ensure(ctx context.Context, file *models.MediaFile, fo
 	// row). Requeue it for a fresh attempt so the new download can resolve — or
 	// fail cleanly via reconciliation once the encode is exhausted again.
 	if row.Status == ArtifactFailed {
-		if err := m.repo.Requeue(ctx, row.ID); err != nil {
+		switch err := m.repo.Requeue(ctx, row.ID); {
+		case errors.Is(err, ErrNotFound):
+			// The failed row was swept between EnsureQueued and Requeue:
+			// create a fresh job instead of linking to a dead artifact id.
+			if row, _, err = m.repo.EnsureQueued(ctx, a); err != nil {
+				return nil, err
+			}
+		case err != nil:
 			return nil, err
+		default:
+			row.Status = ArtifactQueued
 		}
-		row.Status = ArtifactQueued
 		m.triggerDrain()
 		return row, nil
 	}

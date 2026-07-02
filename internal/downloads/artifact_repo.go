@@ -231,8 +231,10 @@ func (r *ArtifactRepository) ReclaimExpiredLeases(ctx context.Context) ([]reclai
 
 // Requeue forces a ready/failed artifact back to queued (e.g. when its
 // output_path is missing on disk). The deterministic output_path is preserved.
+// Returns ErrNotFound when the row no longer exists (e.g. a concurrent sweep
+// deleted it) so callers never keep using a dead artifact id.
 func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx,
+	tag, err := r.pool.Exec(ctx,
 		`UPDATE download_artifacts
 		 SET status = 'queued', attempts = 0, error_message = '', next_retry_at = NULL,
 		     lease_owner = NULL, lease_expires_at = NULL, completed_at = NULL
@@ -241,6 +243,9 @@ func (r *ArtifactRepository) Requeue(ctx context.Context, id string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("requeuing artifact: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

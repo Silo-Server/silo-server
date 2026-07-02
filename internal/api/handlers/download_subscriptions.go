@@ -216,6 +216,8 @@ func (h *DownloadHandler) writeSubscriptionError(w http.ResponseWriter, err erro
 		writeError(w, http.StatusBadRequest, "invalid_mode", "Unknown monitor mode")
 	case errors.Is(err, downloads.ErrSeasonsRequired):
 		writeError(w, http.StatusBadRequest, "seasons_required", "season_numbers is required for specific_seasons mode")
+	case errors.Is(err, downloads.ErrInvalidSeasonNumbers):
+		writeError(w, http.StatusBadRequest, "invalid_season_numbers", "season_numbers values must be between 0 and 9999")
 	case errors.Is(err, downloads.ErrNotSeries):
 		writeError(w, http.StatusBadRequest, "not_series", "content_id is not a series")
 	case errors.Is(err, downloads.ErrProfileRequired):

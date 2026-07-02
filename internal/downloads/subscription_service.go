@@ -46,6 +46,9 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, req Subscr
 	if req.Mode == SubModeSpecificSeasons && len(req.SeasonNumbers) == 0 {
 		return nil, ErrSeasonsRequired
 	}
+	if !validSeasonNumbers(req.SeasonNumbers) {
+		return nil, ErrInvalidSeasonNumbers
+	}
 
 	item, err := s.itemRepo.GetByID(ctx, req.SeriesID)
 	if err != nil {
@@ -133,6 +136,19 @@ func (s *Service) UpdateSubscription(ctx context.Context, userID int, profileID,
 	if profileID == "" || deviceID == "" {
 		return nil, ErrProfileRequired
 	}
+	// Same feature/permission gate as CreateSubscription and SyncSubscriptions:
+	// a patch can re-activate or widen a monitor and backfill managed rows, so
+	// it must not bypass an admin disabling downloads or revoking the user.
+	if _, err := s.enabledConfig(ctx); err != nil {
+		return nil, err
+	}
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("loading user: %w", err)
+	}
+	if !user.DownloadAllowed {
+		return nil, ErrDownloadNotAllowed
+	}
 	sub, err := s.subRepo.GetByID(ctx, id, userID, profileID, deviceID)
 	if err != nil {
 		return nil, err
@@ -167,6 +183,9 @@ func (s *Service) UpdateSubscription(ctx context.Context, userID int, profileID,
 	}
 	if sub.Mode == SubModeSpecificSeasons && len(sub.SeasonNumbers) == 0 {
 		return nil, ErrSeasonsRequired
+	}
+	if !validSeasonNumbers(sub.SeasonNumbers) {
+		return nil, ErrInvalidSeasonNumbers
 	}
 	sub.SeasonNumbers = normalizeSeasons(sub.Mode, sub.SeasonNumbers)
 	switch {
@@ -324,6 +343,22 @@ func (s *Service) latestSeason(ctx context.Context, seriesID string) (*int, erro
 		}
 	}
 	return &max, nil
+}
+
+// maxSeasonNumber bounds client-supplied season numbers (Specials are season
+// 0). Values are persisted as int32, so an unchecked int could silently wrap
+// to an unrelated — possibly negative — season.
+const maxSeasonNumber = 9999
+
+// validSeasonNumbers reports whether every season number is within
+// [0, maxSeasonNumber].
+func validSeasonNumbers(nums []int) bool {
+	for _, n := range nums {
+		if n < 0 || n > maxSeasonNumber {
+			return false
+		}
+	}
+	return true
 }
 
 // normalizeSeasons keeps explicit season numbers only for specific-seasons mode;

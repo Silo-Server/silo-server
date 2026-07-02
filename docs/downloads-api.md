@@ -90,7 +90,9 @@ Yes, manifests include metadata needed to make the offline item feel native:
 - Chapters, intro/credits/recap/preview markers.
 - External and downloaded subtitle fetch URLs plus known subtitle file sizes.
 - Container, codecs, resolution, HDR, duration, selected audio track, and audio
-  track inventory.
+  track inventory. For remux/transcode entries these describe the prepared
+  artifact the file endpoint actually delivers (single audio track, target
+  container/codecs), not the catalog source it was prepared from.
 - Stable provider identity and integrity metadata for local validation/rescan recovery.
 
 The client still needs to fetch artwork/subtitle bytes once while online and cache
@@ -603,7 +605,9 @@ Response:
 
 Server behavior:
 
-- `updated_at` is clamped to `server_now + 2m`.
+- `updated_at` is clamped to `server_now + 2m`. A malformed (non-RFC3339)
+  `updated_at` fails that item with `updated_at must be RFC3339`; it is never
+  treated as "now".
 - Completion is calculated by server watched-threshold logic.
 - Completed is a one-way latch; a lower later position does not unwatch an item.
 
@@ -1137,11 +1141,13 @@ Errors use a flat envelope:
 | 400  | `invalid_subtitle_ref`     | Subtitle ref is not `external:{i}` or `downloaded:{id}`.                  |
 | 400  | `invalid_mode`             | Unknown subscription mode.                                                |
 | 400  | `seasons_required`         | `specific_seasons` without `season_numbers`.                              |
+| 400  | `invalid_season_numbers`   | A `season_numbers` value is outside `0–9999`.                             |
 | 400  | `not_series`               | Subscription target is not a series.                                      |
 | 401  | `unauthorized`             | Missing or invalid auth.                                                  |
 | 403  | `feature_disabled`         | Downloads disabled on create paths.                                       |
 | 403  | `forbidden`                | User not allowed to download.                                             |
 | 403  | `transcode_disabled`       | Bitrate quality requested while transcode is disabled.                    |
+| 404  | `no_downloadable_episodes` | Series/season download found no episode with a downloadable file.         |
 | 404  | `not_found`                | Row/content/asset missing or outside profile access.                      |
 | 409  | `download_inactive`        | Row is revoked or not servable.                                           |
 | 429  | `download_limit_exceeded`  | Concurrent download cap hit.                                              |

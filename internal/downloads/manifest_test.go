@@ -57,7 +57,7 @@ func (f fakeFileResolver) ListByEpisodeIDs(context.Context, []string) (map[strin
 // at the source: when the requesting profile is denied content access,
 // GetItemDetail returns ErrItemNotFound and Build propagates it.
 func TestManifestBuilderDeniesRestrictedProfile(t *testing.T) {
-	b := NewManifestBuilder(fakeManifestSource{err: catalog.ErrItemNotFound}, nil, nil)
+	b := NewManifestBuilder(fakeManifestSource{err: catalog.ErrItemNotFound}, nil, nil, nil)
 	_, err := b.Build(context.Background(), &Download{ID: "dl1", ContentID: "c1"}, catalog.AccessFilter{})
 	if !errors.Is(err, catalog.ErrItemNotFound) {
 		t.Fatalf("Build err = %v, want catalog.ErrItemNotFound", err)
@@ -99,7 +99,7 @@ func TestManifestBuilderAssembles(t *testing.T) {
 	subs := fakeSubtitleSource{downloaded: []subtitles.DownloadedSubtitle{
 		{ID: 7, MediaFileID: 99, Language: "fr", Format: subtitles.SubtitleFormat("vtt")},
 	}}
-	b := NewManifestBuilder(fakeManifestSource{detail: detail}, subs, fakeFileResolver{file: file})
+	b := NewManifestBuilder(fakeManifestSource{detail: detail}, subs, fakeFileResolver{file: file}, nil)
 
 	dl := &Download{ID: "dl1", ContentID: "c1", MediaFileID: 99, FileSize: 1024, Format: FormatOriginal}
 	m, err := b.Build(context.Background(), dl, catalog.AccessFilter{})

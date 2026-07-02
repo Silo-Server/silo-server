@@ -346,28 +346,13 @@ func (h *DownloadHandler) HandleDeleteDownload(w http.ResponseWriter, r *http.Re
 // HandlePatchDownload handles PATCH /downloads/{id} — a managed-only endpoint
 // where a client confirms local state (downloading|completed).
 func (h *DownloadHandler) HandlePatchDownload(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+	userID, profileID, deviceID, _, _, ok := h.requireManaged(w, r)
+	if !ok {
 		return
 	}
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Download ID is required")
-		return
-	}
-	if h.svc == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Downloads not configured")
-		return
-	}
-
-	profileID, deviceID, _, _ := managedIdentity(r)
-	if deviceID == "" {
-		writeError(w, http.StatusBadRequest, "device_id_required", "X-Silo-Device-Id header is required")
-		return
-	}
-	if profileID == "" {
-		writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 		return
 	}
 
@@ -612,6 +597,8 @@ func (h *DownloadHandler) writeDownloadError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusTooManyRequests, "download_limit_exceeded", "Maximum concurrent downloads reached")
 	case errors.Is(err, downloads.ErrPeriodLimitReached):
 		writeError(w, http.StatusTooManyRequests, "download_quota_exceeded", "Download quota exceeded for this period")
+	case errors.Is(err, downloads.ErrNoDownloadableEpisodes):
+		writeError(w, http.StatusNotFound, "no_downloadable_episodes", "No downloadable episodes found")
 	case errors.Is(err, catalog.ErrItemNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "Media item not found")
 	default:

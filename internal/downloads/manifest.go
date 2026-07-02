@@ -154,11 +154,15 @@ type ManifestBuilder struct {
 	detail   ManifestSource
 	subs     SubtitleSource
 	fileRepo FileResolver
+	// artifact resolves a download's linked prepared artifact so artifact-backed
+	// manifests can describe the delivered file instead of the catalog source.
+	artifact func(ctx context.Context, id string) (*Artifact, error)
 }
 
-// NewManifestBuilder constructs a ManifestBuilder.
-func NewManifestBuilder(detail ManifestSource, subs SubtitleSource, fileRepo FileResolver) *ManifestBuilder {
-	return &ManifestBuilder{detail: detail, subs: subs, fileRepo: fileRepo}
+// NewManifestBuilder constructs a ManifestBuilder. artifact may be nil when no
+// prepare-to-file pipeline exists (only original downloads are servable then).
+func NewManifestBuilder(detail ManifestSource, subs SubtitleSource, fileRepo FileResolver, artifact func(ctx context.Context, id string) (*Artifact, error)) *ManifestBuilder {
+	return &ManifestBuilder{detail: detail, subs: subs, fileRepo: fileRepo, artifact: artifact}
 }
 
 // Build assembles the manifest for a managed entry. The filter enforces the
@@ -246,8 +250,50 @@ func (b *ManifestBuilder) build(ctx context.Context, dl *Download, filter catalo
 		m.Chapters = toOfflineChapters(v.Chapters)
 	}
 
+	// Remux/transcode entries deliver the prepared artifact, not the catalog
+	// source: describe that file so the client picks the right decoder/tracks.
+	if dl.Format != FormatOriginal && dl.ArtifactID != "" && b.artifact != nil {
+		if a, err := b.artifact(ctx, dl.ArtifactID); err == nil && a != nil {
+			applyArtifactParams(m, a)
+		}
+	}
+
 	m.Subtitles = b.buildSubtitles(ctx, dl, file)
 	return m, nil
+}
+
+// applyArtifactParams overwrites the source file's media parameters with the
+// prepared artifact's target parameters. "copy" targets keep the source value.
+func applyArtifactParams(m *OfflineManifest, a *Artifact) {
+	if a.Container != "" {
+		m.Container = a.Container
+	}
+	if a.CodecVideo != "" && a.CodecVideo != "copy" {
+		m.CodecVideo = a.CodecVideo
+	}
+	if a.CodecAudio != "" && a.CodecAudio != "copy" {
+		m.CodecAudio = a.CodecAudio
+	}
+	if a.Resolution != "" {
+		m.Resolution = a.Resolution
+	}
+	// A prepared file contains exactly one audio stream — the track the encode
+	// selected (playback.PrepareFile maps a single audio track).
+	if len(m.AudioTracks) > 0 {
+		idx := a.AudioTrackIndex
+		if idx < 0 || idx >= len(m.AudioTracks) {
+			idx = 0
+		}
+		track := m.AudioTracks[idx]
+		track.Index = 0
+		track.Default = true
+		if a.CodecAudio != "" && a.CodecAudio != "copy" {
+			track.Codec = a.CodecAudio
+		}
+		m.AudioTracks = []OfflineAudioTrack{track}
+		selected := 0
+		m.SelectedAudioTrackIndex = &selected
+	}
 }
 
 // buildSubtitles enumerates external (sidecar) + downloaded (S3) subtitle assets

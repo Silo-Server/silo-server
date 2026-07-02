@@ -85,12 +85,16 @@ var (
 	// ErrBulkQualityUnavailable keeps season/series batches original-only until
 	// batch artifact UX and storage reporting are explicit.
 	ErrBulkQualityUnavailable = errors.New("bulk quality downloads are not available")
+	// ErrNoDownloadableEpisodes means a series/season download matched a valid
+	// series but none of its episodes have a downloadable file.
+	ErrNoDownloadableEpisodes = errors.New("no downloadable episodes found")
 
 	// Series-monitoring (download subscription) errors.
 	ErrSubscriptionNotFound     = errors.New("download subscription not found")
 	ErrSubscriptionsUnavailable = errors.New("download subscriptions are not available")
 	ErrInvalidSubscriptionMode  = errors.New("invalid subscription mode")
 	ErrSeasonsRequired          = errors.New("season_numbers is required for specific_seasons mode")
+	ErrInvalidSeasonNumbers     = errors.New("season_numbers contains an out-of-range season number")
 	ErrNotSeries                = errors.New("content_id is not a series")
 )
 
