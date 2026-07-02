@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -137,6 +138,14 @@ const overviewMatchFloor = 0.15
 // noise, so common searches stay on the unchanged FTS path and the fuzzy query
 // fires only in the sparse/misspelling case.
 const fuzzyFallbackThreshold = 5
+
+// fuzzyMaxResults caps how many trigram fuzzy matches the fallback contributes.
+// The combined result the fuzzy path serves is therefore bounded at
+// (fuzzyFallbackThreshold-1) FTS rows + fuzzyMaxResults fuzzy rows, small enough
+// to materialize once and slice per page. A "did you mean" fallback has no need
+// to paginate hundreds of low-similarity typo matches; when the true match count
+// exceeds this, the overflow is logged rather than silently dropped.
+const fuzzyMaxResults = 50
 
 // itemColumnNames lists, in scan order, every column selected by media_items
 // item queries. Shared by itemColumns, qualifiedItemColumns,
@@ -892,13 +901,15 @@ func (r *ItemRepository) SearchPage(
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
 
-	// FTS block. queryLimit fetches one extra row in cursor mode so
-	// execSearchBlock can derive hasMore without a separate count.
+	parsed := parseSearchQuery(query)
+
+	// FTS block (the common path). queryLimit fetches one extra row in cursor
+	// mode so execSearchBlock can derive hasMore without a separate count.
 	queryLimit := limit
 	if !includeTotal {
 		queryLimit = limit + 1
 	}
-	sql, countSQL, args := r.buildSearchSQLWithTotal(query, itemTypes, queryLimit, offset, filter, includeTotal)
+	sql, countSQL, args := r.buildSearchSQLFromParsed(parsed, itemTypes, queryLimit, offset, filter, includeTotal)
 	if sql == "" {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
@@ -907,71 +918,113 @@ func (r *ItemRepository) SearchPage(
 		return nil, 0, false, includeTotal, err
 	}
 
-	// Fuzzy fallback. The trigram (typo-tolerant) arm is deliberately NOT part
-	// of the FTS query: OR-ing the pg_trgm % operator into that WHERE forces a
-	// lossy bitmap heap recheck that rebuilds the three title tsvectors for
+	// Fuzzy fallback trigger. The trigram (typo-tolerant) arm is deliberately NOT
+	// part of the FTS query: OR-ing the pg_trgm % operator into that WHERE forces
+	// a lossy bitmap heap recheck that rebuilds the three title tsvectors for
 	// every one of the thousands of near-miss rows the % operator surfaces,
-	// making *every* search take seconds. Instead we reach for the trigram
-	// index only when the FTS result set is fully known and sparse (a likely
-	// misspelling or word-boundary miss), and run it as a separate, cheap query
-	// that scores only on the indexed title_normalized column. Its hits rank
-	// strictly below the FTS block. See buildFuzzySearchSQL.
+	// making *every* search take seconds. Instead we reach for the trigram index
+	// only when the FTS result set is fully known and sparse (a likely
+	// misspelling or word-boundary miss).
 	//
-	// ftsCount is the fully-known size of the FTS block. In exact mode it is the
-	// window count; in cursor mode it is only trustworthy once the FTS block is
-	// exhausted (!ftsHasMore), at which point offset+len(ftsItems) is the whole
-	// block. When the block is not fully known it cannot be sparse.
+	// ftsCount is the fully-known size of the FTS block: the window count in
+	// exact mode, or offset+len(page) once the cursor block is exhausted
+	// (!ftsHasMore). A not-fully-known block cannot be judged sparse.
+	//
+	// In cursor mode ftsCount is only the true block size at offset 0; past it an
+	// empty FTS page inflates ftsCount to offset (we can't tell "sparse, paged
+	// past the block" from "rich, normal page"). So cursor mode only trusts
+	// sparsity on the first page, where searchWithFuzzyFallback serves fuzzy as a
+	// terminal augmentation (no phantom next page a bare offset cursor couldn't
+	// locate). Exact mode paginates the combined result fully.
 	ftsFullyKnown := includeTotal || !ftsHasMore
 	ftsCount := ftsTotal
 	if !includeTotal {
 		ftsCount = offset + len(ftsItems)
 	}
 	sparse := ftsFullyKnown && ftsCount < fuzzyFallbackThreshold
-	if !sparse || !eligibleForFuzzy(parseSearchQuery(query)) {
+	if !includeTotal && offset != 0 {
+		sparse = false
+	}
+	if !sparse || !eligibleForFuzzy(parsed) {
 		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
 	}
+	return r.searchWithFuzzyFallback(ctx, parsed, itemTypes, limit, offset, filter, includeTotal)
+}
 
-	// The combined result is the virtual list [FTS rows...][fuzzy rows...]: FTS
-	// occupies positions [0, ftsCount); fuzzy occupies the remainder. Fill the
-	// requested page from whichever block(s) it overlaps.
-	fuzzyOffset := offset - ftsCount
-	if fuzzyOffset < 0 {
-		fuzzyOffset = 0
-	}
-	fuzzyLimit := limit - len(ftsItems)
-	if fuzzyLimit <= 0 {
-		// Page already saturated by FTS rows (only reachable for tiny limits);
-		// the small fuzzy count is not worth a second round-trip here.
-		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
-	}
-
-	// The fuzzy block never fetches an extra hasMore probe row: exact mode gets
-	// its total from COUNT(*) OVER (), and cursor mode serves the fuzzy fill as a
-	// terminal augmentation of the current page. A bare offset cursor cannot
-	// express the FTS/fuzzy block boundary on later pages, so promising a next
-	// page there would return wrong rows; deep pagination into fuzzy matches is
-	// intentionally not offered to cursor callers.
-	//
-	// Exclude the FTS hits we already have so a title matching both blocks is
-	// not shown twice. At offset 0 (the dominant path) ftsItems holds the entire
-	// FTS block, so this is exact; for deep offsets into the fuzzy block it is
-	// best-effort, which at worst surfaces one already-seen title again.
-	fuzzySQL, fuzzyCountSQL, fuzzyArgs := r.buildFuzzySearchSQL(query, itemTypes, fuzzyLimit, fuzzyOffset, filter, includeTotal, contentIDsOf(ftsItems))
-	if fuzzySQL == "" {
-		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
-	}
-	fuzzyItems, fuzzyTotal, _, err := r.execSearchBlock(ctx, fuzzySQL, fuzzyCountSQL, fuzzyArgs, fuzzyLimit, fuzzyOffset, includeTotal)
+// searchWithFuzzyFallback serves the combined [FTS block][fuzzy block] result
+// for a sparse, fuzzy-eligible query. Because fuzzy only fires when the FTS
+// block is sparse (< fuzzyFallbackThreshold rows) and the fuzzy contribution is
+// capped at fuzzyMaxResults, the ENTIRE combined result is small
+// (< fuzzyFallbackThreshold + fuzzyMaxResults rows). We materialize it once and
+// slice the requested page in memory. That keeps two-block pagination correct on
+// every page — stable total, no cross-page duplicates, no offset arithmetic
+// straddling the block boundary — for both exact and cursor callers. The
+// FTS-only path in SearchPage is untouched and still streams strictly per page.
+func (r *ItemRepository) searchWithFuzzyFallback(
+	ctx context.Context,
+	parsed parsedSearchQuery,
+	itemTypes []string,
+	limit, offset int,
+	filter AccessFilter,
+	includeTotal bool,
+) ([]*models.MediaItem, int, bool, bool, error) {
+	// Full FTS block (< fuzzyFallbackThreshold rows, since the caller verified
+	// sparse). Fetched at offset 0 so we hold the whole block regardless of the
+	// requested page — its ids drive fuzzy dedup below.
+	ftsSQL, ftsCountSQL, ftsArgs := r.buildSearchSQLFromParsed(parsed, itemTypes, fuzzyFallbackThreshold, 0, filter, true)
+	ftsBlock, _, _, err := r.execSearchBlock(ctx, ftsSQL, ftsCountSQL, ftsArgs, fuzzyFallbackThreshold, 0, true)
 	if err != nil {
 		return nil, 0, false, includeTotal, err
 	}
 
-	combined := append(ftsItems, fuzzyItems...)
-	if includeTotal {
-		total := ftsCount + fuzzyTotal
-		return combined, total, total > offset+len(combined), true, nil
+	// Full fuzzy block (<= fuzzyMaxResults rows), excluding every FTS-block id so
+	// no title appears in both blocks and the combined total is stable per page.
+	fuzzySQL, fuzzyCountSQL, fuzzyArgs := r.buildFuzzySearchFromParsed(parsed, itemTypes, fuzzyMaxResults, 0, filter, true, contentIDsOf(ftsBlock))
+	var fuzzyBlock []*models.MediaItem
+	if fuzzySQL != "" {
+		var fuzzyMatched int
+		fuzzyBlock, fuzzyMatched, _, err = r.execSearchBlock(ctx, fuzzySQL, fuzzyCountSQL, fuzzyArgs, fuzzyMaxResults, 0, true)
+		if err != nil {
+			return nil, 0, false, includeTotal, err
+		}
+		if fuzzyMatched > len(fuzzyBlock) {
+			slog.Debug("fuzzy search fallback truncated to cap",
+				"query", parsed.Text, "matched", fuzzyMatched, "cap", fuzzyMaxResults)
+		}
 	}
-	// Cursor mode: terminal page (see above), so there is never a further page.
-	return combined, offset + len(combined), false, false, nil
+
+	combined := append(ftsBlock, fuzzyBlock...)
+	total := len(combined)
+
+	// Slice the requested page out of the materialized list. Clamp lo into
+	// [0,total] and hi into [lo,total] so a caller passing a negative offset or
+	// limit (the exported SearchPage is reachable outside the HTTP parser, which
+	// otherwise guarantees offset>=0 and limit>0) yields an empty page rather
+	// than panicking on a reversed slice.
+	lo := offset
+	if lo < 0 {
+		lo = 0
+	}
+	if lo > total {
+		lo = total
+	}
+	hi := lo + limit
+	if hi < lo {
+		hi = lo
+	}
+	if hi > total {
+		hi = total
+	}
+	page := combined[lo:hi]
+
+	if !includeTotal {
+		// Cursor mode reaches here only at offset 0 (see SearchPage gate). Serve
+		// fuzzy as a terminal page: report only what we return and no next page,
+		// since a bare offset cursor can't locate the FTS/fuzzy boundary on a
+		// follow-up request.
+		return page, len(page), false, false, nil
+	}
+	return page, total, hi < total, true, nil
 }
 
 // execSearchBlock runs one search data query (FTS or fuzzy fallback) and its
@@ -1057,16 +1110,32 @@ func contentIDsOf(items []*models.MediaItem) []string {
 //	parsed.Year (or NULL)
 //	parsed.Phrase
 //	limit, offset
+//
+// searchTextFromParsed derives the effective search text shared by the FTS and
+// fuzzy builders: the parsed Text, or (when the query was only quotes/whitespace
+// that parsed to empty Text) a whitespace-collapsed, quote-stripped fallback off
+// the raw query. Centralized so the two builders can never search different text.
+func searchTextFromParsed(parsed parsedSearchQuery) string {
+	if parsed.Text != "" {
+		return parsed.Text
+	}
+	return collapseSearchWhitespace(strings.ReplaceAll(strings.TrimSpace(parsed.Raw), "\"", " "))
+}
+
 func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter) (dataSQL, countSQL string, args []any) {
 	return r.buildSearchSQLWithTotal(query, itemTypes, limit, offset, filter, true)
 }
 
 func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool) (dataSQL, countSQL string, args []any) {
-	parsed := parseSearchQuery(query)
-	searchText := parsed.Text
-	if searchText == "" {
-		searchText = collapseSearchWhitespace(strings.ReplaceAll(strings.TrimSpace(query), "\"", " "))
-	}
+	return r.buildSearchSQLFromParsed(parseSearchQuery(query), itemTypes, limit, offset, filter, includeTotal)
+}
+
+// buildSearchSQLFromParsed is the FTS query builder proper; the string-taking
+// wrappers above parse first. SearchPage parses once and calls this directly so
+// the same parsedSearchQuery feeds the FTS builder, the fuzzy builder, and the
+// eligibility gate without re-parsing.
+func (r *ItemRepository) buildSearchSQLFromParsed(parsed parsedSearchQuery, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool) (dataSQL, countSQL string, args []any) {
+	searchText := searchTextFromParsed(parsed)
 	if searchText == "" {
 		return "", "", nil
 	}
@@ -1317,11 +1386,13 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 // searchText, then the shared scope placeholders, then the exclusion array, then
 // limit/offset.
 func (r *ItemRepository) buildFuzzySearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string) (dataSQL, countSQL string, args []any) {
-	parsed := parseSearchQuery(query)
-	searchText := parsed.Text
-	if searchText == "" {
-		searchText = collapseSearchWhitespace(strings.ReplaceAll(strings.TrimSpace(query), "\"", " "))
-	}
+	return r.buildFuzzySearchFromParsed(parseSearchQuery(query), itemTypes, limit, offset, filter, includeTotal, excludeContentIDs)
+}
+
+// buildFuzzySearchFromParsed is the fuzzy query builder proper; the string-taking
+// wrapper above parses first. SearchPage parses once and calls this directly.
+func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string) (dataSQL, countSQL string, args []any) {
+	searchText := searchTextFromParsed(parsed)
 	if searchText == "" {
 		return "", "", nil
 	}

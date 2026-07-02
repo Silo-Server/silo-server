@@ -406,6 +406,41 @@ func TestEligibleForFuzzy(t *testing.T) {
 	}
 }
 
+// TestSearchTextFromParsed pins the shared searchText derivation used by both
+// the FTS and fuzzy builders: parsed Text when present, else a quote-stripped
+// fallback off the raw query. Both builders must agree so they search the same
+// text.
+func TestSearchTextFromParsed(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{"interstellar", "interstellar"},
+		{`"the matrix"`, "the matrix"},
+		{"  spaced   out  ", "spaced out"},
+		{`"`, ""},
+		{"   ", ""},
+	}
+	for _, tc := range cases {
+		if got := searchTextFromParsed(parseSearchQuery(tc.raw)); got != tc.want {
+			t.Errorf("searchTextFromParsed(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestParseSearchQuery_NormalizedText asserts parseSearchQuery precomputes the
+// full normalized text that eligibleForFuzzy's token gate reads (so the gate
+// does not re-normalize on every sparse search).
+func TestParseSearchQuery_NormalizedText(t *testing.T) {
+	if got := parseSearchQuery("The Avengers").NormalizedText; got != "the avengers" {
+		t.Fatalf("NormalizedText = %q, want %q", got, "the avengers")
+	}
+	// "and" is dropped and folded, matching normalizeTitleForComparison.
+	if got := parseSearchQuery("law and order").NormalizedText; got != "law order" {
+		t.Fatalf("NormalizedText = %q, want %q", got, "law order")
+	}
+}
+
 // TestItemRepo_Search_FTSQueryHasNoFuzzyArm asserts that the FTS query never
 // carries the trigram % arm or its similarity ranking. Fusing them forced a
 // lossy bitmap recheck that rebuilt the title tsvectors for thousands of

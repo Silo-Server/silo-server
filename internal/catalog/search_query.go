@@ -11,6 +11,11 @@ type parsedSearchQuery struct {
 	Text           string
 	Phrase         string
 	ExactTitleHint string
+	// NormalizedText is normalizeTitleForComparison(Text) computed once at parse
+	// time. Text already folds phrase + remainder together, so this is the full
+	// normalized query used by eligibleForFuzzy's token gate (which would
+	// otherwise re-normalize on every sparse search).
+	NormalizedText string
 	Year           *int
 }
 
@@ -37,6 +42,7 @@ func parseSearchQuery(raw string) parsedSearchQuery {
 		Text:           text,
 		Phrase:         phrase,
 		ExactTitleHint: normalizeTitleForComparison(firstNonEmptySearchValue(phrase, text)),
+		NormalizedText: normalizeTitleForComparison(text),
 		Year:           year,
 	}
 }
@@ -53,7 +59,7 @@ const fuzzyMinTokenLen = 4
 // the trigram fuzzy title fallback.
 func eligibleForFuzzy(parsed parsedSearchQuery) bool {
 	longest := 0
-	for _, tok := range strings.Fields(normalizeTitleForComparison(parsed.Text)) {
+	for _, tok := range strings.Fields(parsed.NormalizedText) {
 		if n := len([]rune(tok)); n > longest {
 			longest = n
 		}
