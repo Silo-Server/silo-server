@@ -27,10 +27,10 @@ SELECT
     NULL,
     '',
     true,
-    true,
-    0,
-    0,
-    NULL,
+    false,
+    5,
+    5,
+    ARRAY['marker_edit'],
     true
 WHERE NOT EXISTS (
     SELECT 1
@@ -49,10 +49,10 @@ WHERE name = 'Default Group'
   AND library_ids IS NULL
   AND max_playback_quality = ''
   AND download_allowed
-  AND download_transcode_allowed
-  AND max_streams = 0
-  AND max_transcodes = 0
-  AND allowed_permissions IS NULL
+  AND NOT download_transcode_allowed
+  AND max_streams = 5
+  AND max_transcodes = 5
+  AND allowed_permissions = ARRAY['marker_edit']
   AND requests_allowed;
 
 DROP INDEX IF EXISTS public.access_groups_one_default_idx;
