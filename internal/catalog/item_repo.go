@@ -131,6 +131,13 @@ func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (s
 // incidental one-mention hits that flooded results before.
 const overviewMatchFloor = 0.15
 
+// fuzzyFallbackThreshold is the FTS result count below which SearchPage reaches
+// for the trigram fuzzy fallback (buildFuzzySearchSQL). At or above it the FTS
+// result set is considered rich enough that a "did you mean" pass would only add
+// noise, so common searches stay on the unchanged FTS path and the fuzzy query
+// fires only in the sparse/misspelling case.
+const fuzzyFallbackThreshold = 5
+
 // itemColumnNames lists, in scan order, every column selected by media_items
 // item queries. Shared by itemColumns, qualifiedItemColumns,
 // qualifiedListItemColumns, and qualifiedItemColumnRefs so the select lists
@@ -884,6 +891,9 @@ func (r *ItemRepository) SearchPage(
 	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
+
+	// FTS block. queryLimit fetches one extra row in cursor mode so
+	// execSearchBlock can derive hasMore without a separate count.
 	queryLimit := limit
 	if !includeTotal {
 		queryLimit = limit + 1
@@ -892,17 +902,100 @@ func (r *ItemRepository) SearchPage(
 	if sql == "" {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
-
-	rows, err := r.pool.Query(ctx, sql, args...)
+	ftsItems, ftsTotal, ftsHasMore, err := r.execSearchBlock(ctx, sql, countSQL, args, limit, offset, includeTotal)
 	if err != nil {
-		return nil, 0, false, includeTotal, fmt.Errorf("searching media items: %w", err)
+		return nil, 0, false, includeTotal, err
+	}
+
+	// Fuzzy fallback. The trigram (typo-tolerant) arm is deliberately NOT part
+	// of the FTS query: OR-ing the pg_trgm % operator into that WHERE forces a
+	// lossy bitmap heap recheck that rebuilds the three title tsvectors for
+	// every one of the thousands of near-miss rows the % operator surfaces,
+	// making *every* search take seconds. Instead we reach for the trigram
+	// index only when the FTS result set is fully known and sparse (a likely
+	// misspelling or word-boundary miss), and run it as a separate, cheap query
+	// that scores only on the indexed title_normalized column. Its hits rank
+	// strictly below the FTS block. See buildFuzzySearchSQL.
+	//
+	// ftsCount is the fully-known size of the FTS block. In exact mode it is the
+	// window count; in cursor mode it is only trustworthy once the FTS block is
+	// exhausted (!ftsHasMore), at which point offset+len(ftsItems) is the whole
+	// block. When the block is not fully known it cannot be sparse.
+	ftsFullyKnown := includeTotal || !ftsHasMore
+	ftsCount := ftsTotal
+	if !includeTotal {
+		ftsCount = offset + len(ftsItems)
+	}
+	sparse := ftsFullyKnown && ftsCount < fuzzyFallbackThreshold
+	if !sparse || !eligibleForFuzzy(parseSearchQuery(query)) {
+		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
+	}
+
+	// The combined result is the virtual list [FTS rows...][fuzzy rows...]: FTS
+	// occupies positions [0, ftsCount); fuzzy occupies the remainder. Fill the
+	// requested page from whichever block(s) it overlaps.
+	fuzzyOffset := offset - ftsCount
+	if fuzzyOffset < 0 {
+		fuzzyOffset = 0
+	}
+	fuzzyLimit := limit - len(ftsItems)
+	if fuzzyLimit <= 0 {
+		// Page already saturated by FTS rows (only reachable for tiny limits);
+		// the small fuzzy count is not worth a second round-trip here.
+		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
+	}
+
+	// The fuzzy block never fetches an extra hasMore probe row: exact mode gets
+	// its total from COUNT(*) OVER (), and cursor mode serves the fuzzy fill as a
+	// terminal augmentation of the current page. A bare offset cursor cannot
+	// express the FTS/fuzzy block boundary on later pages, so promising a next
+	// page there would return wrong rows; deep pagination into fuzzy matches is
+	// intentionally not offered to cursor callers.
+	//
+	// Exclude the FTS hits we already have so a title matching both blocks is
+	// not shown twice. At offset 0 (the dominant path) ftsItems holds the entire
+	// FTS block, so this is exact; for deep offsets into the fuzzy block it is
+	// best-effort, which at worst surfaces one already-seen title again.
+	fuzzySQL, fuzzyCountSQL, fuzzyArgs := r.buildFuzzySearchSQL(query, itemTypes, fuzzyLimit, fuzzyOffset, filter, includeTotal, contentIDsOf(ftsItems))
+	if fuzzySQL == "" {
+		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
+	}
+	fuzzyItems, fuzzyTotal, _, err := r.execSearchBlock(ctx, fuzzySQL, fuzzyCountSQL, fuzzyArgs, fuzzyLimit, fuzzyOffset, includeTotal)
+	if err != nil {
+		return nil, 0, false, includeTotal, err
+	}
+
+	combined := append(ftsItems, fuzzyItems...)
+	if includeTotal {
+		total := ftsCount + fuzzyTotal
+		return combined, total, total > offset+len(combined), true, nil
+	}
+	// Cursor mode: terminal page (see above), so there is never a further page.
+	return combined, offset + len(combined), false, false, nil
+}
+
+// execSearchBlock runs one search data query (FTS or fuzzy fallback) and its
+// count-fallback sibling, returning that block's page. It is the shared engine
+// behind SearchPage's two blocks so both derive hasMore/total identically.
+//
+// In cursor mode (includeTotal == false) the caller fetches limit+1 rows so
+// hasMore is len(items) > limit; the extra row is trimmed here. In exact mode
+// the data query carries COUNT(*) OVER () for the total, which emits no rows on
+// an empty page (e.g. OFFSET past the last row); only then, and only past
+// offset 0, is the count sibling re-run to recover the real total. Both queries
+// must end with the trailing limit/offset args so the count sibling can drop
+// them.
+func (r *ItemRepository) execSearchBlock(ctx context.Context, dataSQL, countSQL string, args []any, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, error) {
+	rows, err := r.pool.Query(ctx, dataSQL, args...)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("searching media items: %w", err)
 	}
 	defer rows.Close()
 
 	if !includeTotal {
 		items, err := scanItems(rows)
 		if err != nil {
-			return nil, 0, false, false, err
+			return nil, 0, false, err
 		}
 		hasMore := len(items) > limit
 		if hasMore {
@@ -912,28 +1005,32 @@ func (r *ItemRepository) SearchPage(
 		if hasMore {
 			total++
 		}
-		return items, total, hasMore, false, nil
+		return items, total, hasMore, nil
 	}
 
 	items, total, err := scanItemsWithTotal(rows)
 	if err != nil {
-		return nil, 0, false, true, err
+		return nil, 0, false, err
 	}
 	hasMore := total > offset+len(items)
-	// COUNT(*) OVER () emits no rows when the data SELECT is empty, so total
-	// stays 0 even when the broader result set has matching rows (e.g. OFFSET
-	// past the last page). Re-query the count to give callers the real total.
-	// Skip when offset == 0 because in that case an empty page genuinely means
-	// total = 0.
 	if len(items) == 0 && offset > 0 {
 		// Drop the trailing limit/offset args from the data query.
 		countArgs := args[:len(args)-2]
 		if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			return nil, 0, false, true, fmt.Errorf("count fallback for empty search page: %w", err)
+			return nil, 0, false, fmt.Errorf("count fallback for empty search page: %w", err)
 		}
 		hasMore = total > offset+len(items)
 	}
-	return items, total, hasMore, true, nil
+	return items, total, hasMore, nil
+}
+
+// contentIDsOf extracts the content_id of each item, preserving order.
+func contentIDsOf(items []*models.MediaItem) []string {
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ContentID
+	}
+	return ids
 }
 
 // buildSearchSQL assembles the unified search query, returning the SQL string
@@ -1000,48 +1097,14 @@ func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []strin
 	overviewMatch := fmt.Sprintf("%s @@ websearch_to_tsquery('english', $1)", overviewVector)
 
 	// Keep the base match condition index-friendly; exact-title logic is used as
-	// a ranking boost later, not as an additional scan predicate.
+	// a ranking boost later, not as an additional scan predicate. The trigram
+	// (typo-tolerant) arm intentionally lives in buildFuzzySearchSQL, not here:
+	// OR-ing the % operator into this WHERE forced a lossy bitmap recheck that
+	// rebuilt the title tsvectors for thousands of near-miss rows. SearchPage
+	// invokes the fuzzy path separately only when this FTS query is sparse.
 	conditions = append(conditions, fmt.Sprintf("(%s OR %s OR %s)", titleMatch, titlePrefixMatch, overviewMatch))
 
-	if len(itemTypes) > 0 {
-		placeholders := make([]string, 0, len(itemTypes))
-		for _, itemType := range itemTypes {
-			if strings.TrimSpace(itemType) == "" {
-				continue
-			}
-			placeholders = append(placeholders, fmt.Sprintf("$%d", argIdx))
-			args = append(args, strings.ToLower(strings.TrimSpace(itemType)))
-			argIdx++
-		}
-		if len(placeholders) > 0 {
-			conditions = append(conditions, fmt.Sprintf("mi.type IN (%s)", strings.Join(placeholders, ", ")))
-		}
-	}
-
-	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
-	fromClause := "media_items mi"
-	if filter.AllowedLibraryIDs != nil {
-		// Caller (Search) is expected to short-circuit when len == 0; we still
-		// guard here so the builder is safe to invoke from tests.
-		if len(filter.AllowedLibraryIDs) > 0 {
-			conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-			args = append(args, filter.AllowedLibraryIDs)
-			argIdx++
-		}
-	}
-	if len(filter.DisabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
-		args = append(args, filter.DisabledLibraryIDs)
-		argIdx++
-	}
-	if needsLibJoin {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-	}
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
-
-	// Manga chapters (type='ebook' rows linked into a manga series) are internal
-	// sub-units and must never surface as standalone search results.
-	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+	fromClause := appendSearchScopeFilters(itemTypes, filter, &conditions, &args, &argIdx)
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
@@ -1181,6 +1244,129 @@ func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []strin
 	countSQL = scoredCTE + statsCTE + fmt.Sprintf(`
 		SELECT COUNT(*)
 		%s`, postFilter)
+	args = append(args, limit, offset)
+	return dataSQL, countSQL, args
+}
+
+// appendSearchScopeFilters appends the scope predicates shared by the FTS search
+// (buildSearchSQLWithTotal) and the trigram fuzzy fallback (buildFuzzySearchSQL):
+// item type, allowed/disabled libraries, the access filter, and the
+// manga-chapter exclusion. It mutates conditions/args/argIdx in place and
+// returns the FROM clause, which gains a JOIN to media_item_libraries when
+// library scoping is requested. Both callers append these in the same order so a
+// single helper keeps the two queries' filtering provably identical.
+func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) (fromClause string) {
+	fromClause = "media_items mi"
+
+	if len(itemTypes) > 0 {
+		placeholders := make([]string, 0, len(itemTypes))
+		for _, itemType := range itemTypes {
+			if strings.TrimSpace(itemType) == "" {
+				continue
+			}
+			placeholders = append(placeholders, fmt.Sprintf("$%d", *argIdx))
+			*args = append(*args, strings.ToLower(strings.TrimSpace(itemType)))
+			*argIdx++
+		}
+		if len(placeholders) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf("mi.type IN (%s)", strings.Join(placeholders, ", ")))
+		}
+	}
+
+	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
+	if filter.AllowedLibraryIDs != nil {
+		// Caller (Search) is expected to short-circuit when len == 0; we still
+		// guard here so the builders are safe to invoke from tests.
+		if len(filter.AllowedLibraryIDs) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", *argIdx))
+			*args = append(*args, filter.AllowedLibraryIDs)
+			*argIdx++
+		}
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		*conditions = append(*conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", *argIdx))
+		*args = append(*args, filter.DisabledLibraryIDs)
+		*argIdx++
+	}
+	if needsLibJoin {
+		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
+	}
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
+
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone search results.
+	*conditions = append(*conditions, MangaChapterExclusionWhere("mi"))
+	return fromClause
+}
+
+// buildFuzzySearchSQL assembles the trigram fuzzy-fallback query invoked by
+// SearchPage only when the FTS query is sparse. Unlike buildSearchSQLWithTotal,
+// the sole match predicate is the pg_trgm % operator against the indexed
+// title_normalized generated column (migration 105's gin_trgm_ops index), and
+// the only ranking signal is similarity() on that same column. Crucially it
+// never references the title tsvectors, so the thousands of low-similarity rows
+// the % operator can surface never pay a per-row tsvector rebuild — that rebuild
+// over the fuzzy candidate set was the entire cause of the multi-second search
+// regression. The % operator admits candidates at the server-default
+// pg_trgm.similarity_threshold (0.3), so no per-query GUC mutation is needed.
+//
+// includeTotal toggles the COUNT(*) OVER () window total the same way
+// buildSearchSQLWithTotal does, so the fuzzy block honors the caller's cursor
+// vs. exact-count mode. excludeContentIDs drops rows already returned by the FTS
+// block so a title matching both is not shown twice. Argument order: $1
+// searchText, then the shared scope placeholders, then the exclusion array, then
+// limit/offset.
+func (r *ItemRepository) buildFuzzySearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string) (dataSQL, countSQL string, args []any) {
+	parsed := parseSearchQuery(query)
+	searchText := parsed.Text
+	if searchText == "" {
+		searchText = collapseSearchWhitespace(strings.ReplaceAll(strings.TrimSpace(query), "\"", " "))
+	}
+	if searchText == "" {
+		return "", "", nil
+	}
+
+	args = []any{searchText}
+	argIdx := 2
+	conditions := []string{"public.normalize_search_text($1) % mi.title_normalized"}
+
+	fromClause := appendSearchScopeFilters(itemTypes, filter, &conditions, &args, &argIdx)
+
+	if len(excludeContentIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf("NOT (mi.content_id = ANY($%d))", argIdx))
+		args = append(args, excludeContentIDs)
+		argIdx++
+	}
+
+	whereClause := "WHERE " + strings.Join(conditions, " AND ")
+
+	// GROUP BY content_id collapses duplicate rows produced by the optional
+	// library JOIN, mirroring buildSearchSQLWithTotal, so COUNT(*) OVER () counts
+	// distinct content_ids. qualifiedItemColumns aliases the coalesced columns so
+	// the outer SELECT can re-reference them; GROUP BY uses the raw refs.
+	qualifiedCols := qualifiedItemColumns("mi")
+	groupByCols := qualifiedItemColumnRefs("mi")
+	scoredCTE := fmt.Sprintf(`
+		WITH scored AS (
+			SELECT
+				%s,
+				MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank
+			FROM %s
+			%s
+			GROUP BY %s
+		)
+	`, qualifiedCols, fromClause, whereClause, groupByCols)
+
+	totalColumn := ""
+	if includeTotal {
+		totalColumn = ", COUNT(*) OVER () AS total_count"
+	}
+	dataSQL = scoredCTE + fmt.Sprintf(`
+		SELECT %s%s
+		FROM scored
+		ORDER BY fuzzy_rank DESC, LOWER(title) ASC, content_id ASC
+		LIMIT $%d OFFSET $%d`, itemColumns, totalColumn, argIdx, argIdx+1)
+	countSQL = scoredCTE + `SELECT COUNT(*) FROM scored`
 	args = append(args, limit, offset)
 	return dataSQL, countSQL, args
 }

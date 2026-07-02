@@ -41,6 +41,26 @@ func parseSearchQuery(raw string) parsedSearchQuery {
 	}
 }
 
+// fuzzyMinTokenLen is the shortest normalized token that may enable the trigram
+// fuzzy title fallback. A token shorter than this forms too few trigrams to use
+// the gin_trgm_ops index selectively (and a 1-2 char token can't use it at
+// all), so for short queries the fuzzy fallback is skipped and search stays on
+// the exact FTS/prefix path. The gate is applied to the longest token so a stray
+// short token ("a vengers") is judged on "vengers", not "a".
+const fuzzyMinTokenLen = 4
+
+// eligibleForFuzzy reports whether a parsed query clears the min-token gate for
+// the trigram fuzzy title fallback.
+func eligibleForFuzzy(parsed parsedSearchQuery) bool {
+	longest := 0
+	for _, tok := range strings.Fields(normalizeTitleForComparison(parsed.Text)) {
+		if n := len([]rune(tok)); n > longest {
+			longest = n
+		}
+	}
+	return longest >= fuzzyMinTokenLen
+}
+
 func extractBalancedPhrase(input string) (string, string) {
 	start := strings.Index(input, "\"")
 	if start == -1 {

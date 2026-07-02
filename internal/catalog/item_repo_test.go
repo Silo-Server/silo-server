@@ -382,6 +382,119 @@ func TestItemRepo_Search_EmptyQueryReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestEligibleForFuzzy pins the min-token gate that guards the fuzzy title
+// fallback: the longest normalized token must clear fuzzyMinTokenLen, so short,
+// non-selective queries stay on the exact FTS/prefix path.
+func TestEligibleForFuzzy(t *testing.T) {
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"avegners", true},   // 8-char typo
+		{"sponge bob", true}, // longest token "sponge" (6)
+		{"a vengers", true},  // judged on "vengers" (7), not "a"
+		{"dune", true},       // exactly at the floor
+		{"the", false},       // 3 chars
+		{"a b c", false},     // all short
+		{"and the", false},   // "and" normalized away, "the" is 3
+		{"   ", false},       // empty
+	}
+	for _, tc := range cases {
+		if got := eligibleForFuzzy(parseSearchQuery(tc.query)); got != tc.want {
+			t.Errorf("eligibleForFuzzy(%q) = %v, want %v", tc.query, got, tc.want)
+		}
+	}
+}
+
+// TestItemRepo_Search_FTSQueryHasNoFuzzyArm asserts that the FTS query never
+// carries the trigram % arm or its similarity ranking. Fusing them forced a
+// lossy bitmap recheck that rebuilt the title tsvectors for thousands of
+// near-miss rows on every search; the fuzzy path is now a separate query
+// (buildFuzzySearchSQL) invoked only as a fallback by SearchPage.
+func TestItemRepo_Search_FTSQueryHasNoFuzzyArm(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, _ := repo.buildSearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{})
+	for _, sql := range []string{dataSQL, countSQL} {
+		if strings.Contains(sql, "% mi.title_normalized") {
+			t.Fatalf("FTS query must not include the trigram %% arm; got:\n%s", sql)
+		}
+		if strings.Contains(sql, "fuzzy_rank") {
+			t.Fatalf("FTS query must not include fuzzy_rank; got:\n%s", sql)
+		}
+		if strings.Contains(sql, "similarity(") {
+			t.Fatalf("FTS query must not compute similarity(); got:\n%s", sql)
+		}
+	}
+}
+
+// TestItemRepo_BuildFuzzySearchSQL asserts that the fuzzy fallback query scores
+// only on the indexed title_normalized column (no title tsvector rebuild),
+// ranks by descending similarity, excludes already-seen content_ids, and
+// applies the same scope filters (type, manga exclusion) as the FTS query.
+func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, []string{"abc", "def"})
+
+	if !strings.Contains(dataSQL, "public.normalize_search_text($1) % mi.title_normalized") {
+		t.Fatalf("expected trigram %% arm against title_normalized; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank") {
+		t.Fatalf("expected similarity ranking on title_normalized; got:\n%s", dataSQL)
+	}
+	// The whole point of the separate query: it must never rebuild the title
+	// tsvectors that made the fused query slow.
+	if strings.Contains(dataSQL, "to_tsvector") || strings.Contains(dataSQL, "ts_rank_cd") {
+		t.Fatalf("fuzzy query must not rebuild title tsvectors; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "ORDER BY fuzzy_rank DESC, LOWER(title) ASC, content_id ASC") {
+		t.Fatalf("expected similarity-ordered results; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "NOT (mi.content_id = ANY($") {
+		t.Fatalf("expected exclusion of already-seen content_ids; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "mi.type IN ($") {
+		t.Fatalf("expected shared type scope filter; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(countSQL, "SELECT COUNT(*) FROM scored") {
+		t.Fatalf("expected count sibling over the scored CTE; got:\n%s", countSQL)
+	}
+	// Arg order: $1 searchText, $2 type, $3 exclusion array, $4 limit, $5 offset.
+	if len(args) != 5 {
+		t.Fatalf("expected 5 args, got %d: %#v", len(args), args)
+	}
+	if args[0] != "avegners" {
+		t.Fatalf("expected $1=searchText; got %#v", args[0])
+	}
+	if args[len(args)-2] != 20 || args[len(args)-1] != 0 {
+		t.Fatalf("expected trailing limit/offset args; got %#v", args[len(args)-2:])
+	}
+}
+
+// TestItemRepo_BuildFuzzySearchSQL_CursorModeOmitsWindowCount asserts that the
+// fuzzy fallback honors cursor mode: with includeTotal=false it must not carry
+// COUNT(*) OVER (), matching buildSearchSQLWithTotal's skip-total contract so
+// SearchPage's cursor path stays a pure keyset page.
+func TestItemRepo_BuildFuzzySearchSQL_CursorModeOmitsWindowCount(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, _, _ := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 21, 0, AccessFilter{}, false, nil)
+	if strings.Contains(dataSQL, "COUNT(*) OVER") {
+		t.Fatalf("cursor-mode fuzzy query must omit window count; got:\n%s", dataSQL)
+	}
+	if strings.Contains(dataSQL, "total_count") {
+		t.Fatalf("cursor-mode fuzzy query must not select total_count; got:\n%s", dataSQL)
+	}
+}
+
+// TestItemRepo_BuildFuzzySearchSQL_EmptyQueryReturnsEmpty guards the same
+// empty-input contract as buildSearchSQL.
+func TestItemRepo_BuildFuzzySearchSQL_EmptyQueryReturnsEmpty(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("   ", []string{"movie"}, 20, 0, AccessFilter{}, true, nil)
+	if dataSQL != "" || countSQL != "" || args != nil {
+		t.Fatalf("expected empty result for blank query; got dataSQL=%q countSQL=%q args=%#v", dataSQL, countSQL, args)
+	}
+}
+
 // TestItemRepo_Search_UsesTitleNormalizedColumn asserts that buildSearchSQL
 // reads the mi.title_normalized stored generated column for the title rank
 // arms (exact_title_match and contiguous_title_match), so the LIKE
