@@ -72,22 +72,28 @@ var queryFieldDefs = map[string]queryFieldDef{
 }
 
 var querySortDefs = map[string]querySortDef{
-	"title":              {columnSQL: "LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))", defaultOrder: "asc", titleSortOnly: true},
-	"added_at":           {defaultOrder: "desc"},
-	"release_date":       {columnSQL: "COALESCE(%s.release_date::text, NULLIF(BTRIM(%s.first_air_date), ''))", defaultOrder: "desc", nullsLast: true},
-	"last_air_date":      {columnSQL: "last_air_date", defaultOrder: "desc", nullsLast: true},
-	"year":               {columnSQL: "year", defaultOrder: "desc"},
-	"content_rating":     {defaultOrder: "asc"},
-	"runtime":            {columnSQL: "runtime", defaultOrder: "desc", nullsLast: true},
-	"rating_imdb":        {columnSQL: "rating_imdb", defaultOrder: "desc", nullsLast: true},
-	"rating_tmdb":        {columnSQL: "rating_tmdb", defaultOrder: "desc", nullsLast: true},
-	"rating_rt_critic":   {columnSQL: "rating_rt_critic", defaultOrder: "desc", nullsLast: true},
-	"rating_rt_audience": {columnSQL: "rating_rt_audience", defaultOrder: "desc", nullsLast: true},
-	"resolution":         {defaultOrder: "desc", nullsLast: true},
-	"bitrate":            {defaultOrder: "desc", nullsLast: true},
-	"progress":           {defaultOrder: "desc", nullsLast: true, personalized: true},
-	"date_viewed":        {defaultOrder: "desc", nullsLast: true, personalized: true},
-	"plays":              {defaultOrder: "desc", nullsLast: true, personalized: true},
+	"title":         {columnSQL: "LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))", defaultOrder: "asc", titleSortOnly: true},
+	"added_at":      {defaultOrder: "desc"},
+	"release_date":  {columnSQL: "COALESCE(%s.release_date::text, NULLIF(BTRIM(%s.first_air_date), ''))", defaultOrder: "desc", nullsLast: true},
+	"last_air_date": {columnSQL: "last_air_date", defaultOrder: "desc", nullsLast: true},
+	// Latest Episodes (issue #202): series ordered by when their newest
+	// episode FILE arrived (denormalized media_items.latest_episode_added_at,
+	// maintained on the episode_libraries insert paths). Distinct from
+	// added_at (when the series itself was first added) and last_air_date
+	// (when the newest episode aired).
+	"latest_episode_added": {columnSQL: "latest_episode_added_at", defaultOrder: "desc", nullsLast: true},
+	"year":                 {columnSQL: "year", defaultOrder: "desc"},
+	"content_rating":       {defaultOrder: "asc"},
+	"runtime":              {columnSQL: "runtime", defaultOrder: "desc", nullsLast: true},
+	"rating_imdb":          {columnSQL: "rating_imdb", defaultOrder: "desc", nullsLast: true},
+	"rating_tmdb":          {columnSQL: "rating_tmdb", defaultOrder: "desc", nullsLast: true},
+	"rating_rt_critic":     {columnSQL: "rating_rt_critic", defaultOrder: "desc", nullsLast: true},
+	"rating_rt_audience":   {columnSQL: "rating_rt_audience", defaultOrder: "desc", nullsLast: true},
+	"resolution":           {defaultOrder: "desc", nullsLast: true},
+	"bitrate":              {defaultOrder: "desc", nullsLast: true},
+	"progress":             {defaultOrder: "desc", nullsLast: true, personalized: true},
+	"date_viewed":          {defaultOrder: "desc", nullsLast: true, personalized: true},
+	"plays":                {defaultOrder: "desc", nullsLast: true, personalized: true},
 	// Audiobook-native sorts. nullsLast so items without an author /
 	// narrator / series association still appear (sorted to the end).
 	"author":   {defaultOrder: "asc", nullsLast: true},

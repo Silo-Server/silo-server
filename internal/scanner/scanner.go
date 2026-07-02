@@ -1484,15 +1484,30 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 	}
 
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
-		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-		SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
-		FROM media_files mf
-		JOIN episodes e ON e.content_id = mf.episode_id
-		WHERE mf.media_folder_id = $1
-		  AND mf.missing_since IS NULL
-		  AND mf.episode_id IS NOT NULL
-		GROUP BY mf.episode_id, mf.media_folder_id
-		ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+		WITH inserted AS (
+			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+			SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
+			FROM media_files mf
+			JOIN episodes e ON e.content_id = mf.episode_id
+			WHERE mf.media_folder_id = $1
+			  AND mf.missing_since IS NULL
+			  AND mf.episode_id IS NOT NULL
+			GROUP BY mf.episode_id, mf.media_folder_id
+			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING episode_id, first_seen_at
+		)
+		-- Bump each parent series' latest-episode-added denorm for the
+		-- genuinely new links ("Latest Episodes" sort, issue #202).
+		UPDATE media_items mi
+		SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+		FROM (
+			SELECT e.series_id, MAX(i.first_seen_at) AS latest_added
+			FROM inserted i
+			JOIN episodes e ON e.content_id = i.episode_id
+			GROUP BY e.series_id
+		) sub
+		WHERE mi.content_id = sub.series_id
+		  AND mi.type = 'series'
 	`, folderID); err != nil {
 		return fmt.Errorf("restoring episode folder memberships: %w", err)
 	}

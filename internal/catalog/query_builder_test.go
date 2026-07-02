@@ -34,6 +34,44 @@ func TestBuildSortClause_LastAirDateUsesNullsLast(t *testing.T) {
 	}
 }
 
+func TestBuildSortClause_LatestEpisodeAddedUsesDenormColumn(t *testing.T) {
+	// "Latest Episodes" sort (issue #202): series ordered by when their
+	// newest episode file arrived, read from the denormalized
+	// media_items.latest_episode_added_at — no JOIN, no args.
+	plan, err := NewQueryBuilder("mi").BuildSortPlan(QuerySort{
+		Field: "latest_episode_added",
+		Order: "desc",
+	})
+	if err != nil {
+		t.Fatalf("BuildSortPlan returned error: %v", err)
+	}
+	if len(plan.Args) != 0 {
+		t.Fatalf("expected no args, got %v", plan.Args)
+	}
+	if len(plan.Joins) != 0 {
+		t.Fatalf("expected no joins (denormalized column), got %v", plan.Joins)
+	}
+	if !strings.Contains(plan.OrderBy, "mi.latest_episode_added_at") {
+		t.Fatalf("expected sort to read mi.latest_episode_added_at, got %q", plan.OrderBy)
+	}
+	if !strings.Contains(plan.OrderBy, "NULLS LAST") {
+		t.Fatalf("expected series without episode files to sort last, got %q", plan.OrderBy)
+	}
+}
+
+func TestBuildOrderByPlan_LatestEpisodeAdded(t *testing.T) {
+	clause, args := buildOrderByPlan("latest_episode_added", "desc", nil, 0, false, false)
+	if len(args) != 0 {
+		t.Fatalf("expected no args, got %v", args)
+	}
+	if !strings.Contains(clause, "mi.latest_episode_added_at DESC NULLS LAST") {
+		t.Fatalf("expected order by mi.latest_episode_added_at DESC NULLS LAST, got %q", clause)
+	}
+	if !strings.Contains(clause, "mi.content_id ASC") {
+		t.Fatalf("expected content_id tiebreaker, got %q", clause)
+	}
+}
+
 func TestBuildSortClause_ReleaseDateUsesNullsLast(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").BuildSortClause(QuerySort{
 		Field: "release_date",

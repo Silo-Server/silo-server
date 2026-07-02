@@ -12,6 +12,7 @@ export type QuerySortField =
   | "added_at"
   | "release_date"
   | "last_air_date"
+  | "latest_episode_added"
   | "year"
   | "content_rating"
   | "runtime"
@@ -98,6 +99,13 @@ export const QUERY_SORT_OPTIONS: QuerySortOption[] = [
     personalized: false,
     applicableMediaScopes: ["series", "episode"],
     preferredMediaScope: "episode",
+  },
+  {
+    value: "latest_episode_added",
+    label: "Latest Episode Added",
+    defaultOrder: "desc",
+    personalized: false,
+    applicableMediaScopes: ["series"],
   },
   {
     value: "year",

@@ -434,8 +434,12 @@ func mapSortBy(raw string) string {
 		return "rating_imdb"
 	case "random":
 		return "random"
-	case "dateplayed", "datelastcontentadded":
+	case "dateplayed":
 		return "created_at"
+	case "datelastcontentadded":
+		// Jellyfin's standard "Latest" sort for TV libraries: shows ordered
+		// by their most recently added episode (issue #202).
+		return "latest_episode_added"
 	default:
 		return "created_at"
 	}

@@ -2935,6 +2935,22 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 			WHERE episode_id IS NOT NULL
 			  AND missing_since IS NULL
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING episode_id, first_seen_at
+		),
+		-- Bump the parent series' latest-episode-added denorm for genuinely
+		-- new links only (conflict no-ops return no rows). Powers the
+		-- "Latest Episodes" sort (issue #202).
+		bumped AS (
+			UPDATE media_items mi
+			SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+			FROM (
+				SELECT e.series_id, MAX(i.first_seen_at) AS latest_added
+				FROM inserted i
+				JOIN episodes e ON e.content_id = i.episode_id
+				GROUP BY e.series_id
+			) sub
+			WHERE mi.content_id = sub.series_id
+			  AND mi.type = 'series'
 		)
 		DELETE FROM episode_libraries el
 		USING previous p
@@ -2982,6 +2998,18 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 			FROM updated
 			GROUP BY episode_id, media_folder_id
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING first_seen_at
+		),
+		-- Bump the series' latest-episode-added denorm for genuinely new
+		-- links only ("Latest Episodes" sort, issue #202). All inserted
+		-- rows belong to $1, so no per-series grouping is needed.
+		bumped AS (
+			UPDATE media_items mi
+			SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+			FROM (SELECT MAX(first_seen_at) AS latest_added FROM inserted) sub
+			WHERE mi.content_id = $1
+			  AND mi.type = 'series'
+			  AND sub.latest_added IS NOT NULL
 		)
 		SELECT COUNT(*) FROM updated
 	`, seriesContentID).Scan(&linked)

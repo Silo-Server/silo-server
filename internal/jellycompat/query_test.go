@@ -77,6 +77,22 @@ func TestMapSortByReleaseDate(t *testing.T) {
 	}
 }
 
+func TestMapSortByDateLastContentAdded(t *testing.T) {
+	// Jellyfin's standard "Latest" sort for TV libraries orders shows by
+	// their most recently added episode. It must map to the
+	// latest_episode_added sort (issue #202), not series creation date.
+	for _, raw := range []string{"DateLastContentAdded", "DateLastContentAdded,SortName"} {
+		if got := mapSortBy(raw); got != "latest_episode_added" {
+			t.Fatalf("mapSortBy(%q) = %q, want latest_episode_added", raw, got)
+		}
+	}
+	// DatePlayed used to piggyback on the same case; it must keep its old
+	// created_at behavior rather than inherit the episode-added sort.
+	if got := mapSortBy("DatePlayed"); got != "created_at" {
+		t.Fatalf("mapSortBy(DatePlayed) = %q, want created_at", got)
+	}
+}
+
 func TestParseContentIDParam(t *testing.T) {
 	got := parseContentIDParam(" movie-1, movie-2, movie-1 ,, ")
 	want := []string{"movie-1", "movie-2"}
