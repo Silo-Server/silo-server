@@ -302,7 +302,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var authMiddleware *apimw.AuthMiddleware
 	var viewerAccessMiddleware *apimw.ViewerAccessMiddleware
 	var permissionMiddleware *apimw.PermissionMiddleware
-	var viewerResolver *access.Resolver
+	var viewerResolver apimw.ViewerResolver
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
 	var sessionRepo *auth.SessionRepository
@@ -341,7 +341,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		if deps.UserStoreProvider != nil {
-			viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService)
+			if deps.PolicySystem != nil {
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP())
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService)
+			}
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
 		}
 		if deps.DB != nil {
@@ -571,7 +576,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		AttachRequestRouter(requestSvc, deps.PluginService)
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if viewerResolver != nil {
-			requestSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(viewerResolver))
+			requestSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: viewerResolver})
 		}
 		// Request lifecycle notifications (submitted / approved / declined):
 		// server-channel broadcasts plus personal deliveries to the requester
@@ -3042,6 +3047,22 @@ func effectiveSubtitleAIConfig(cfg *config.Config) (subtitleai.Config, string) {
 func warnChatOnlyGateway(endpoint string) {
 	slog.Warn("subtitle transcription disabled: the effective transcription endpoint is a chat-only gateway; "+
 		"set a Whisper-compatible Transcription base URL in AI Services", "endpoint", endpoint)
+}
+
+type scopeEntitlementResolver struct {
+	resolver apimw.ViewerResolver
+}
+
+func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
+	scope, err := r.resolver.Resolve(ctx, access.ResolveInput{
+		UserID:              userID,
+		ProfileID:           profileID,
+		SkipPINVerification: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return scope.MaxPlaybackQuality, nil
 }
 
 // metadataAIConfigFromServer derives the metadata translation service config

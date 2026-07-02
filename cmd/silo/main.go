@@ -1376,6 +1376,7 @@ func main() {
 		defer userStoreProvider.Close()
 	}
 
+	var policySystem *policy.System
 	if mode == "integrated" || mode == "api" {
 		policyDecisionLogger := policy.NewDecisionLogger(
 			deps.DB,
@@ -1384,7 +1385,7 @@ func main() {
 		)
 		policyDecisionLogger.SetVerbosity(cfg.Policy.DecisionLogVerbosity)
 		policyDecisionLogger.SetScopeSampleRate(cfg.Policy.DecisionLogScopeSampleRate)
-		policySystem := policy.NewSystem(
+		policySystem = policy.NewSystem(
 			policy.NewPolicyStore(deps.DB),
 			deps.EventBus,
 			slog.Default(),
@@ -1411,17 +1412,21 @@ func main() {
 	// jellycompat, imports, playback) feeds the interest index.
 	var notificationSystem *notifications.System
 	if deps.DB != nil && userStoreProvider != nil {
-		notificationScopes := access.NewResolver(
-			auth.NewUserRepository(deps.DB),
-			userStoreProvider,
-			access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
-		)
+		userRepo := auth.NewUserRepository(deps.DB)
+		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
+		var notificationScopes notifications.ScopeResolver
+		if policySystem != nil {
+			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP())
+		} else {
+			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens)
+		}
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
 			settingsRepo,
 			userStoreProvider,
 			notificationScopes,
-			auth.NewUserRepository(deps.DB),
+			userRepo,
 			deps.EventsHub,
 			deps.RedisClient,
 			deps.SecretCipher,
@@ -1847,12 +1852,16 @@ func main() {
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
 		if userStoreProvider != nil {
-			reconcileResolver := access.NewResolver(
-				auth.NewUserRepository(deps.DB),
-				userStoreProvider,
-				access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
-			)
-			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
+			userRepo := auth.NewUserRepository(deps.DB)
+			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
+			var reconcileResolver scopeResolver
+			if policySystem != nil {
+				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP())
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens)
+			}
+			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
 		if notificationSystem != nil {
 			requestReconcileSvc.SetFulfillmentNotifier(notifications.NewRequestFulfillmentNotifier(notificationSystem))
@@ -1952,6 +1961,10 @@ func main() {
 		if deps.ImageResolver != nil {
 			absDetailSvc.SetImageResolver(deps.ImageResolver)
 		}
+		var absScopeResolver scopeResolver
+		if policySystem != nil {
+			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP())
+		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -1961,7 +1974,7 @@ func main() {
 				Auth: absAuthSvc,
 				Pool: deps.DB,
 			},
-			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider),
+			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider, absScopeResolver),
 			Recs:           recommendations.NewRepo(deps.DB),
 			Detail:         absDetailSvc,
 			SessionMgr:     sessionMgr,
@@ -2306,11 +2319,23 @@ func main() {
 			// user-disabled libraries, and rating/quality ceilings apply to
 			// the compat API exactly as they do to the native API.
 			if userStoreProvider != nil {
-				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(access.NewResolver(
-					userRepo,
-					userStoreProvider,
-					nil, // profile tokens unused: compat login already verifies PINs
-				))
+				var compatScopeResolver jellycompat.ScopeResolver
+				if policySystem != nil {
+					compatScopeResolver = policy.NewViewerResolver(
+						userRepo,
+						userStoreProvider,
+						nil, // profile tokens unused: compat login already verifies PINs
+						policySystem.PDP(),
+					)
+				} else {
+					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+					compatScopeResolver = access.NewResolver(
+						userRepo,
+						userStoreProvider,
+						nil, // profile tokens unused: compat login already verifies PINs
+					)
+				}
+				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 			}
 		}
 
@@ -2952,6 +2977,26 @@ func mapFolderTypeToMediaType(t string) string {
 	default:
 		return "mixed"
 	}
+}
+
+type scopeResolver interface {
+	Resolve(ctx context.Context, input access.ResolveInput) (access.Scope, error)
+}
+
+type scopeEntitlementResolver struct {
+	resolver scopeResolver
+}
+
+func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
+	scope, err := r.resolver.Resolve(ctx, access.ResolveInput{
+		UserID:              userID,
+		ProfileID:           profileID,
+		SkipPINVerification: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return scope.MaxPlaybackQuality, nil
 }
 
 // audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which

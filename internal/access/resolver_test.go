@@ -92,6 +92,9 @@ func (s stubStore) ListProgressFiltered(context.Context, string, string, []strin
 func (s stubStore) ListProgressByMediaItems(context.Context, string, []string) (map[string]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s stubStore) ListProgressSince(context.Context, string, string) ([]userstore.WatchProgress, string, error) {
+	panic("unused")
+}
 func (s stubStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error { panic("unused") }
 func (s stubStore) AddHistoryIfMissing(context.Context, userstore.WatchHistoryEntry) (bool, error) {
 	panic("unused")

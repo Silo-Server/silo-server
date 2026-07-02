@@ -14,13 +14,22 @@ import (
 // the ABS compatibility layer. ABS has already authenticated the account with
 // a password or refresh token, so profile PIN verification is skipped here.
 type ABSAccessResolver struct {
-	resolver *access.Resolver
+	resolver scopeResolver
 }
 
-func NewABSAccessResolver(users access.UserRepository, stores userstore.UserStoreProvider) *ABSAccessResolver {
+type scopeResolver interface {
+	Resolve(ctx context.Context, input access.ResolveInput) (access.Scope, error)
+}
+
+// NewABSAccessResolver creates a resolver for ABS-authenticated access checks.
+func NewABSAccessResolver(users access.UserRepository, stores userstore.UserStoreProvider, resolver scopeResolver) *ABSAccessResolver {
+	if resolver != nil {
+		return &ABSAccessResolver{resolver: resolver}
+	}
 	if users == nil || stores == nil {
 		return nil
 	}
+	// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 	return &ABSAccessResolver{resolver: access.NewResolver(users, stores, nil)}
 }
 
