@@ -2963,6 +2963,10 @@ func max(value, fallback int) int {
 }
 
 func writeCompatUpstreamError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errUpstreamReplaced) {
+		writeError(w, http.StatusConflict, "Conflict", "Playback session changed concurrently; retry the request")
+		return
+	}
 	if errors.Is(err, playback.ErrTooManyStreams) {
 		writeError(w, http.StatusTooManyRequests, "TooManyStreams", "Too many concurrent streams")
 		return

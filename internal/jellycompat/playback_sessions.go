@@ -129,7 +129,10 @@ func (s *PlaybackSessionStore) Update(id string, fn func(*PlaybackSession) error
 }
 
 // FindByClientPlaySessionID resolves the client-generated PlaySessionId alias
-// recorded for plays that skipped PlaybackInfo (Static=true direct play).
+// recorded for plays that skipped PlaybackInfo (Static=true direct play). The
+// alias must identify exactly one live session: a client that reuses one
+// PlaySessionId across plays makes the alias ambiguous, and the caller should
+// fall back to route matching instead of binding an arbitrary session.
 func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlaySessionID string) (*PlaybackSession, bool) {
 	if clientPlaySessionID == "" {
 		return nil, false
@@ -138,6 +141,7 @@ func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlay
 	defer s.mu.RUnlock()
 
 	now := s.now()
+	var match *PlaybackSession
 	for _, session := range s.sessions {
 		if !session.ExpiresAt.After(now) {
 			continue
@@ -146,11 +150,14 @@ func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlay
 			continue
 		}
 		if session.ClientPlaySessionID == clientPlaySessionID {
+			if match != nil {
+				return nil, false
+			}
 			cp := session
-			return &cp, true
+			match = &cp
 		}
 	}
-	return nil, false
+	return match, match != nil
 }
 
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.

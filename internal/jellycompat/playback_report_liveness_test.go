@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -385,6 +386,161 @@ func TestEnsureUpstreamPlayback_ReviveClosesStaleTranscode(t *testing.T) {
 	}
 	if _, stale := handler.transcodes["upstream-reaped"]; stale {
 		t.Fatal("expected the stale transcode entry to be closed before recreating the upstream session")
+	}
+}
+
+// TestHandlePlaybackReport_DuplicateAliasFallsBackToRoute proves a client that
+// reuses one PlaySessionId across different items cannot misbind reports: the
+// ambiguous alias is skipped and the report resolves by ItemId route instead,
+// and a Stopped report with only the ambiguous alias (no ItemId) tears nothing
+// down.
+func TestHandlePlaybackReport_DuplicateAliasFallsBackToRoute(t *testing.T) {
+	handler, mgr, encodedItemID, sourceID := newReportLivenessHandler("upstream-1", true)
+	// Same client alias on a second live session for a DIFFERENT item.
+	otherItemID := handler.codec.EncodeStringID(EncodedIDItem, "movie-2")
+	handler.playbackStore.Put(PlaybackSession{
+		ID:                  "play-2",
+		CompatToken:         "token-1",
+		ItemID:              "movie-2",
+		RouteItemID:         otherItemID,
+		ClientPlaySessionID: "reused-psid",
+		UpstreamSessionID:   "upstream-2",
+		UpstreamPlayMethod:  "direct",
+	})
+	mgr.sessions["upstream-2"] = &playback.Session{ID: "upstream-2", PlayMethod: playback.PlayDirect}
+	if err := handler.playbackStore.Update("play-1", func(current *PlaybackSession) error {
+		current.ClientPlaySessionID = "reused-psid"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Progress with the duplicate alias plus ItemId: must bind play-1 by route.
+	rec := postProgressReport(handler,
+		`{"PlaySessionId":"reused-psid","ItemId":"`+encodedItemID+`","MediaSourceId":"`+sourceID+`","PositionTicks":600000000}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(mgr.progressUpdates) != 1 || mgr.progressUpdates[0].sessionID != "upstream-1" {
+		t.Fatalf("progress updates = %+v, want one update on upstream-1 via item route", mgr.progressUpdates)
+	}
+
+	// Stopped with only the duplicate alias: ambiguous, must tear nothing down.
+	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped",
+		strings.NewReader(`{"PlaySessionId":"reused-psid","PositionTicks":600000000}`))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+	rr := httptest.NewRecorder()
+	handler.HandleSessionPlayingStopped(rr, req)
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("StopSession calls = %v, want none for an ambiguous duplicate alias", mgr.stopCalls)
+	}
+}
+
+// TestHandlePlaybackReport_AliasContradictedByItemFallsBack proves an alias
+// whose session disagrees with the report's ItemId is rejected (a stale or
+// reused client id) and the report resolves by route instead.
+func TestHandlePlaybackReport_AliasContradictedByItemFallsBack(t *testing.T) {
+	handler, mgr, _, _ := newReportLivenessHandler("upstream-1", true)
+	// Alias points at play-1 (movie-1), but the report is about movie-2.
+	if err := handler.playbackStore.Update("play-1", func(current *PlaybackSession) error {
+		current.ClientPlaySessionID = "stale-psid"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	otherItemID := handler.codec.EncodeStringID(EncodedIDItem, "movie-2")
+	handler.playbackStore.Put(PlaybackSession{
+		ID:                 "play-2",
+		CompatToken:        "token-1",
+		ItemID:             "movie-2",
+		RouteItemID:        otherItemID,
+		UpstreamSessionID:  "upstream-2",
+		UpstreamPlayMethod: "direct",
+	})
+	mgr.sessions["upstream-2"] = &playback.Session{ID: "upstream-2", PlayMethod: playback.PlayDirect}
+
+	rec := postProgressReport(handler,
+		`{"PlaySessionId":"stale-psid","ItemId":"`+otherItemID+`","PositionTicks":600000000}`)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(mgr.progressUpdates) != 1 || mgr.progressUpdates[0].sessionID != "upstream-2" {
+		t.Fatalf("progress updates = %+v, want one update on upstream-2 (the reported item)", mgr.progressUpdates)
+	}
+}
+
+// racingStartSessionManager simulates a concurrent request winning the
+// upstream-attach race: while this caller is inside StartSession, the store's
+// play session is re-pointed at a different upstream id/method.
+type racingStartSessionManager struct {
+	testCompatSessionManager
+	store        *PlaybackSessionStore
+	winnerMethod string
+}
+
+func (m *racingStartSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
+	_ = m.store.Update("play-1", func(current *PlaybackSession) error {
+		current.UpstreamSessionID = "upstream-winner"
+		current.UpstreamPlayMethod = m.winnerMethod
+		return nil
+	})
+	return m.testCompatSessionManager.StartSession(userID, profileID, fileID, method, transcodeAudio)
+}
+
+// TestEnsureUpstreamPlayback_CASLoserAdoptsSameMethodWinner proves the loser
+// of a concurrent attach race stops its own freshly created session and
+// adopts the winner when the winner serves the same play method.
+func TestEnsureUpstreamPlayback_CASLoserAdoptsSameMethodWinner(t *testing.T) {
+	handler, _, _, _ := newReportLivenessHandler("", false)
+	base := handler.sessionMgr.(*testCompatSessionManager)
+	racer := &racingStartSessionManager{
+		testCompatSessionManager: *base,
+		store:                    handler.playbackStore,
+		winnerMethod:             "direct",
+	}
+	handler.sessionMgr = racer
+	playSession, _ := handler.playbackStore.Get("play-1")
+	source := playSession.MediaSources[0]
+
+	got, err := handler.ensureUpstreamPlayback(context.Background(),
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"},
+		"play-1", source, "direct")
+	if err != nil {
+		t.Fatalf("ensureUpstreamPlayback: %v", err)
+	}
+	if got.UpstreamSessionID != "upstream-winner" {
+		t.Fatalf("UpstreamSessionID = %q, want the concurrent winner", got.UpstreamSessionID)
+	}
+	if len(racer.stopCalls) != 1 || racer.stopCalls[0] != "upstream-started" {
+		t.Fatalf("StopSession calls = %v, want rollback of the loser's session", racer.stopCalls)
+	}
+}
+
+// TestEnsureUpstreamPlayback_CASLoserRejectsMethodSwitch proves the loser does
+// NOT adopt a winner running a different play method — it rolls back its
+// session and surfaces a conflict instead of continuing with mismatched
+// transcode bookkeeping.
+func TestEnsureUpstreamPlayback_CASLoserRejectsMethodSwitch(t *testing.T) {
+	handler, _, _, _ := newReportLivenessHandler("", false)
+	base := handler.sessionMgr.(*testCompatSessionManager)
+	racer := &racingStartSessionManager{
+		testCompatSessionManager: *base,
+		store:                    handler.playbackStore,
+		winnerMethod:             "transcode",
+	}
+	handler.sessionMgr = racer
+	playSession, _ := handler.playbackStore.Get("play-1")
+	source := playSession.MediaSources[0]
+
+	_, err := handler.ensureUpstreamPlayback(context.Background(),
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"},
+		"play-1", source, "direct")
+	if !errors.Is(err, errUpstreamReplaced) {
+		t.Fatalf("error = %v, want errUpstreamReplaced", err)
+	}
+	if len(racer.stopCalls) != 1 || racer.stopCalls[0] != "upstream-started" {
+		t.Fatalf("StopSession calls = %v, want rollback of the loser's session", racer.stopCalls)
 	}
 }
 

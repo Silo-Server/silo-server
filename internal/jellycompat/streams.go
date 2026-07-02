@@ -798,6 +798,9 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 		// Without either, these reports silently no-op, the admin activity view
 		// position freezes, and stale cleanup drops the still-active session.
 		playSession, ok = h.playbackStore.FindByClientPlaySessionID(session.Token, req.PlaySessionID)
+		if ok && !reportMatchesPlaySession(playSession, req) {
+			playSession, ok = nil, false
+		}
 	}
 	if !ok {
 		for _, routeID := range []string{req.ItemID, req.MediaSourceID} {
@@ -893,6 +896,19 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// reportMatchesPlaySession rejects an alias-resolved session whose item or
+// media source contradicts the report, so a stale or reused client id cannot
+// route a report (or its teardown) to the wrong play.
+func reportMatchesPlaySession(playSession *PlaybackSession, req sessionReportRequest) bool {
+	if req.ItemID != "" && !mediaSourceIDsEqual(playSession.RouteItemID, req.ItemID) {
+		return false
+	}
+	if req.MediaSourceID != "" && findMediaSource(playSession, req.MediaSourceID) == nil {
+		return false
+	}
+	return true
 }
 
 // reviveUpstreamForReport recreates the upstream playback session backing a
@@ -1002,10 +1018,14 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 	}); updateErr != nil {
 		_ = h.sessionMgr.StopSession(session.ID)
 		if errors.Is(updateErr, errUpstreamReplaced) {
-			if winner, ok := h.playbackStore.Get(playSessionID); ok {
+			// Adopt the winner only when it serves the same play method;
+			// otherwise a concurrent method switch made this caller's
+			// negotiated stream obsolete — surface the conflict rather than
+			// continuing on a session with mismatched transcode bookkeeping.
+			if winner, ok := h.playbackStore.Get(playSessionID); ok && winner.UpstreamPlayMethod == method {
 				return winner, nil
 			}
-			return nil, ErrSessionNotFound
+			return nil, errUpstreamReplaced
 		}
 		return nil, updateErr
 	}
