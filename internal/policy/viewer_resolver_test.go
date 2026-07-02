@@ -336,6 +336,43 @@ func TestViewerResolverEvalFailureFailsClosed(t *testing.T) {
 	assertZeroScope(t, scope)
 }
 
+func TestViewerResolverAppliesGroupPolicy(t *testing.T) {
+	ctx := context.Background()
+	user := &models.User{
+		ID:                   1,
+		LibraryIDs:           []int{1, 2, 3},
+		MaxPlaybackQuality:   access.PlaybackQuality4K,
+		AccessPolicyRevision: 5,
+	}
+	group := &access.GroupPolicy{
+		LibraryIDs:               []int{2, 4},
+		MaxPlaybackQuality:       access.PlaybackQualityStandard,
+		DownloadAllowed:          true,
+		DownloadTranscodeAllowed: true,
+		RequestsAllowed:          true,
+	}
+	users := viewerResolverUserRepo{user: user}
+	stores := viewerResolverStoreProvider{store: viewerResolverTestStore{}}
+	resolver := NewViewerResolver(
+		users,
+		stores,
+		nil,
+		newViewerResolverTestPDP(t, ctx),
+		viewerResolverGroupProvider{group: group},
+	)
+
+	scope, err := resolver.Resolve(ctx, access.ResolveInput{UserID: 1, SessionID: "sess-1"})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if !scope.LibrariesRestricted || !reflect.DeepEqual(scope.AllowedLibraryIDs, []int{2}) {
+		t.Fatalf("scope libraries = restricted %t ids %#v, want [2]", scope.LibrariesRestricted, scope.AllowedLibraryIDs)
+	}
+	if scope.MaxPlaybackQuality != access.PlaybackQualityStandard {
+		t.Fatalf("MaxPlaybackQuality = %q, want %q", scope.MaxPlaybackQuality, access.PlaybackQualityStandard)
+	}
+}
+
 type stubProfileTokenValidator struct {
 	claims *access.ProfileTokenClaims
 	err    error
@@ -351,6 +388,15 @@ func (v stubProfileTokenValidator) Validate(string) (*access.ProfileTokenClaims,
 type viewerResolverUserRepo struct {
 	user *models.User
 	err  error
+}
+
+type viewerResolverGroupProvider struct {
+	group *access.GroupPolicy
+	err   error
+}
+
+func (p viewerResolverGroupProvider) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
+	return p.group, p.err
 }
 
 func (r viewerResolverUserRepo) GetByID(_ context.Context, id int) (*models.User, error) {

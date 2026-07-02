@@ -339,6 +339,7 @@ func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
 		{key: "jellyfin_compat.enabled", value: "false", restartRequired: true},
 		// Branding is read live from the settings repo per request.
 		{key: "branding.server_name", value: "Casa", restartRequired: false},
+		{key: "policy.editor_enabled", value: "true", restartRequired: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.key, func(t *testing.T) {
@@ -374,6 +375,27 @@ func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
 				t.Fatalf("tracker reason = %q, want empty", snapshot.RestartRequiredReason)
 			}
 		})
+	}
+}
+
+func TestAdminUpdatePolicyEditorEnabledValidation(t *testing.T) {
+	settings := &fakeServerSettingsStore{}
+	handler := &AdminHandler{SettingsRepo: settings}
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/admin/settings/policy.editor_enabled",
+		strings.NewReader(`{"value":"maybe"}`),
+	)
+	req = withChiParam(req, "key", "policy.editor_enabled")
+	rec := httptest.NewRecorder()
+
+	handler.HandleUpdateSetting(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if _, ok := settings.values["policy.editor_enabled"]; ok {
+		t.Fatalf("invalid policy.editor_enabled was stored: %#v", settings.values)
 	}
 }
 

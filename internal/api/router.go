@@ -303,6 +303,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.DB != nil {
 		settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(deps.DB), deps.SecretCipher)
 	}
+	var accessGroupStore *access.GroupStore
+	if deps.DB != nil {
+		accessGroupStore = access.NewGroupStore(deps.DB)
+	}
 
 	// Build auth handler and auth middleware if DB and config are available.
 	var userRepo *auth.UserRepository
@@ -353,10 +357,10 @@ func NewRouter(deps Dependencies) chi.Router {
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
-				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP())
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService)
+				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore)
 			}
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
 		}
@@ -368,6 +372,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					metadataLibraries,
 					checkPrimaryProfile,
 					permissionPDP,
+					accessGroupStore,
 				).RequireMetadataCurationForItem
 			} else {
 				// Legacy permission middleware: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
@@ -385,9 +390,13 @@ func NewRouter(deps Dependencies) chi.Router {
 			if err != nil {
 				return playback.SessionLimits{}, err
 			}
+			effective, err := access.EffectivePolicyForUser(ctx, user, accessGroupStore)
+			if err != nil {
+				return playback.SessionLimits{}, err
+			}
 			return playback.SessionLimits{
-				MaxStreams:    user.MaxStreams,
-				MaxTranscodes: user.MaxTranscodes,
+				MaxStreams:    effective.MaxStreams,
+				MaxTranscodes: effective.MaxTranscodes,
 			}, nil
 		})
 		if deps.PolicySystem != nil {
@@ -599,6 +608,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
 		AttachRequestRouter(requestSvc, deps.PluginService)
+		requestSvc.SetGroupPolicyProvider(accessGroupStore)
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if viewerResolver != nil {
 			requestSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: viewerResolver})
@@ -878,6 +888,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 	// Build admin handler if we have a user repo.
 	var adminHandler *handlers.AdminHandler
+	var accessGroupHandler *handlers.AccessGroupHandler
 	var catalogSeedHandler *handlers.CatalogSeedHandler
 	var adminJobsHandler *handlers.AdminJobsHandler
 	if userRepo != nil {
@@ -889,6 +900,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		adminHandler.ImpersonationService = authService
 		adminHandler.StatsSource = deps.AdminStatsProvider
 		adminHandler.RealtimeHub = deps.RealtimeHub
+		adminHandler.AccessGroups = accessGroupStore
 		adminHandler.BootstrapSensitiveConfigured = deps.BootstrapSensitiveConfigured
 		adminHandler.BootstrapSensitiveValues = deps.BootstrapSensitiveValues
 		adminHandler.RestartStatus = restartStatus
@@ -903,6 +915,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		if deps.OnServerSettingUpdated != nil {
 			adminHandler.OnServerSettingUpdated = deps.OnServerSettingUpdated
 		}
+	}
+	if accessGroupStore != nil {
+		accessGroupHandler = handlers.NewAccessGroupHandler(accessGroupStore)
 	}
 	if deps.DB != nil {
 		jobRepo := adminjob.NewRepository(deps.DB)
@@ -1405,6 +1420,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			settingsRepo,
 			&deps.Config.Download,
 		)
+		downloadSvc.SetGroupPolicyProvider(accessGroupStore)
 		if deps.PolicySystem != nil {
 			downloadSvc.SetActionDecider(deps.PolicySystem.PDP())
 		}
@@ -1443,6 +1459,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			deps.PolicySystem,
 			policy.NewPolicyStore(deps.DB),
 			policy.NewDecisionRepository(deps.DB),
+			func() bool {
+				cfg := deps.CurrentConfig()
+				return cfg != nil && cfg.Policy.EditorEnabled
+			},
 		)
 	}
 
@@ -2352,6 +2372,13 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Delete("/users/{id}/profiles/{profile_id}/devices/{device_id}/settings", adminHandler.HandleDeleteAllUserDeviceSettings)
 							r.Get("/devices", adminHandler.HandleListDevices)
 							r.Get("/devices/{user_id}/{device_id}", adminHandler.HandleGetDevice)
+							if accessGroupHandler != nil {
+								r.Get("/access-groups", accessGroupHandler.HandleList)
+								r.Post("/access-groups", accessGroupHandler.HandleCreate)
+								r.Get("/access-groups/{id}", accessGroupHandler.HandleGet)
+								r.Put("/access-groups/{id}", accessGroupHandler.HandleUpdate)
+								r.Delete("/access-groups/{id}", accessGroupHandler.HandleDelete)
+							}
 
 							r.Get("/sessions", adminHandler.HandleListSessions)
 							r.Get("/playback-history", adminHandler.HandleListPlaybackHistory)

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	policyengine "github.com/Silo-Server/silo-server/internal/policy"
@@ -71,6 +72,27 @@ func TestPolicyActionDeciderMatchesLegacyCreateGate(t *testing.T) {
 	}
 }
 
+func TestPolicyActionDeciderUsesGroupDownloadFlags(t *testing.T) {
+	ctx := context.Background()
+	user := &models.User{ID: 9, DownloadAllowed: true, DownloadTranscodeAllowed: true}
+	svc := newPolicyActionTestService(
+		user,
+		config.DownloadConfig{Enabled: true, TranscodeEnabled: true},
+		true,
+		newDownloadPolicyPDP(t),
+	)
+	svc.SetGroupPolicyProvider(downloadGroupProvider{group: &access.GroupPolicy{
+		DownloadAllowed:          false,
+		DownloadTranscodeAllowed: true,
+		RequestsAllowed:          true,
+	}})
+
+	_, _, err := svc.downloadConfigForUser(ctx, user.ID, "device-1")
+	if !errors.Is(err, ErrDownloadNotAllowed) {
+		t.Fatalf("downloadConfigForUser() error = %v, want ErrDownloadNotAllowed", err)
+	}
+}
+
 func newPolicyActionTestService(
 	user *models.User,
 	cfg config.DownloadConfig,
@@ -107,4 +129,13 @@ func newDownloadPolicyPDP(t *testing.T) *policyengine.PDP {
 		t.Fatalf("NewEngine() error: %v", err)
 	}
 	return policyengine.NewPDP(engine)
+}
+
+type downloadGroupProvider struct {
+	group *access.GroupPolicy
+	err   error
+}
+
+func (p downloadGroupProvider) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
+	return p.group, p.err
 }

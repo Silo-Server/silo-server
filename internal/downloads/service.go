@@ -87,6 +87,7 @@ type Service struct {
 	itemRepo      ItemResolver
 	episodeRepo   EpisodeResolver
 	userRepo      UserResolver
+	groupProvider access.GroupPolicyProvider
 	itemAccess    ItemAccessChecker
 	settings      SettingsReader
 
@@ -139,6 +140,12 @@ func (s *Service) SetArtifactManager(m *ArtifactManager) {
 // When unset, the subscription endpoints report unavailable.
 func (s *Service) SetSubscriptions(subRepo *SubscriptionRepository) {
 	s.subRepo = subRepo
+}
+
+// SetGroupPolicyProvider wires access-group policy composition into download
+// checks. Nil keeps legacy user-row behavior.
+func (s *Service) SetGroupPolicyProvider(provider access.GroupPolicyProvider) {
+	s.groupProvider = provider
 }
 
 // Config returns the current (live, cache-refreshed) download config. Used by
@@ -248,6 +255,10 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 	if err != nil {
 		return Capability{}, fmt.Errorf("loading user: %w", err)
 	}
+	user, err = s.effectiveDownloadUser(ctx, user)
+	if err != nil {
+		return Capability{}, fmt.Errorf("loading access group policy: %w", err)
+	}
 	c := Capability{
 		Enabled:              cfg.Enabled,
 		DownloadAllowed:      user.DownloadAllowed,
@@ -270,6 +281,25 @@ func (s *Service) Capability(ctx context.Context, userID int) (Capability, error
 		}
 	}
 	return c, nil
+}
+
+func (s *Service) effectiveDownloadUser(ctx context.Context, user *models.User) (*models.User, error) {
+	effective, err := access.EffectivePolicyForUser(ctx, user, s.groupProvider)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, nil
+	}
+	out := *user
+	out.LibraryIDs = effective.LibraryIDs
+	out.MaxPlaybackQuality = effective.MaxPlaybackQuality
+	out.MaxStreams = effective.MaxStreams
+	out.MaxTranscodes = effective.MaxTranscodes
+	out.Permissions = effective.Permissions
+	out.DownloadAllowed = effective.DownloadAllowed
+	out.DownloadTranscodeAllowed = effective.DownloadTranscodeAllowed
+	return &out, nil
 }
 
 // CreateRequest holds the parameters for creating a download. A non-empty

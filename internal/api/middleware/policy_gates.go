@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/go-chi/chi/v5"
@@ -83,6 +84,7 @@ type PolicyPermissionMiddleware struct {
 	libraries    MetadataTargetLibraryResolver
 	checkPrimary PrimaryProfileChecker
 	pdp          PermissionDecider
+	groups       access.GroupPolicyProvider
 }
 
 // NewPolicyPermissionMiddleware creates a PDP-backed permission middleware.
@@ -91,12 +93,18 @@ func NewPolicyPermissionMiddleware(
 	libraries MetadataTargetLibraryResolver,
 	checkPrimary PrimaryProfileChecker,
 	pdp PermissionDecider,
+	groups ...access.GroupPolicyProvider,
 ) *PolicyPermissionMiddleware {
+	var groupProvider access.GroupPolicyProvider
+	if len(groups) > 0 {
+		groupProvider = groups[0]
+	}
 	return &PolicyPermissionMiddleware{
 		users:        users,
 		libraries:    libraries,
 		checkPrimary: checkPrimary,
 		pdp:          pdp,
+		groups:       groupProvider,
 	}
 }
 
@@ -151,12 +159,17 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			writeForbidden(w, metadataCurationRequiredMsg)
 			return
 		}
+		effective, err := access.EffectivePolicyForUser(r.Context(), user, m.groups)
+		if err != nil {
+			writeForbidden(w, metadataCurationRequiredMsg)
+			return
+		}
 
 		permissionOnlyInput := policy.PermissionInput{
 			UserID:              user.ID,
 			Role:                user.Role,
 			UserEnabled:         user.Enabled,
-			AssignedPermissions: slices.Clone(user.Permissions),
+			AssignedPermissions: slices.Clone(effective.Permissions),
 			Permission:          policy.PermissionMetadataCuration,
 			DeclaredProfileID:   declaredProfileID,
 			ActingAsPrimary:     actingAsPrimary,
@@ -186,13 +199,13 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			UserID:                  user.ID,
 			Role:                    user.Role,
 			UserEnabled:             user.Enabled,
-			AssignedPermissions:     slices.Clone(user.Permissions),
+			AssignedPermissions:     slices.Clone(effective.Permissions),
 			Permission:              policy.PermissionMetadataCuration,
 			DeclaredProfileID:       declaredProfileID,
 			ActingAsPrimary:         actingAsPrimary,
 			TargetLibraryIDs:        slices.Clone(targetLibraries),
-			UserLibraryIDs:          slices.Clone(user.LibraryIDs),
-			UserLibrariesRestricted: user.LibraryIDs != nil,
+			UserLibraryIDs:          slices.Clone(effective.LibraryIDs),
+			UserLibrariesRestricted: effective.LibraryIDs != nil,
 		})
 		if err != nil {
 			writePermissionError(w, http.StatusInternalServerError, policyInternalErrorCode, "Failed to verify metadata curation permission")

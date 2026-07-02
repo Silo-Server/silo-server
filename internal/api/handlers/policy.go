@@ -33,14 +33,24 @@ const (
 
 // PolicyHandler handles policy management and simulation endpoints.
 type PolicyHandler struct {
-	system    *policy.System
-	store     *policy.PolicyStore
-	decisions *policy.DecisionRepository
+	system          *policy.System
+	store           *policy.PolicyStore
+	decisions       *policy.DecisionRepository
+	editorAvailable func() bool
 }
 
 // NewPolicyHandler creates a PolicyHandler.
-func NewPolicyHandler(system *policy.System, store *policy.PolicyStore, decisions *policy.DecisionRepository) *PolicyHandler {
-	return &PolicyHandler{system: system, store: store, decisions: decisions}
+func NewPolicyHandler(
+	system *policy.System,
+	store *policy.PolicyStore,
+	decisions *policy.DecisionRepository,
+	editorAvailable ...func() bool,
+) *PolicyHandler {
+	var available func() bool
+	if len(editorAvailable) > 0 {
+		available = editorAvailable[0]
+	}
+	return &PolicyHandler{system: system, store: store, decisions: decisions, editorAvailable: available}
 }
 
 type policyCapabilityResponse struct {
@@ -160,7 +170,7 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 
 	writeJSON(w, http.StatusOK, policyCapabilityResponse{
 		Enabled:         true,
-		EditorAvailable: true,
+		EditorAvailable: h.editorEnabled(),
 		DecisionTypes:   policy.DecisionTypes(),
 		Generation:      h.system.Generation(),
 	})
@@ -168,6 +178,9 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 
 // HandleListVendor handles GET /admin/policy/vendor.
 func (h *PolicyHandler) HandleListVendor(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	modules, err := policy.VendorModules()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, policyErrorInternal, "Failed to load vendor policy modules")
@@ -185,6 +198,9 @@ func (h *PolicyHandler) HandleListVendor(w http.ResponseWriter, r *http.Request)
 
 // HandleListDocuments handles GET /admin/policy/documents.
 func (h *PolicyHandler) HandleListDocuments(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -202,6 +218,9 @@ func (h *PolicyHandler) HandleListDocuments(w http.ResponseWriter, r *http.Reque
 
 // HandleCreateDocument handles POST /admin/policy/documents.
 func (h *PolicyHandler) HandleCreateDocument(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -232,6 +251,9 @@ func (h *PolicyHandler) HandleCreateDocument(w http.ResponseWriter, r *http.Requ
 
 // HandleGetDocument handles GET /admin/policy/documents/{id}.
 func (h *PolicyHandler) HandleGetDocument(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -260,6 +282,9 @@ func (h *PolicyHandler) HandleGetDocument(w http.ResponseWriter, r *http.Request
 
 // HandleListVersions handles GET /admin/policy/documents/{id}/versions.
 func (h *PolicyHandler) HandleListVersions(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -285,6 +310,9 @@ func (h *PolicyHandler) HandleListVersions(w http.ResponseWriter, r *http.Reques
 
 // HandleGetVersion handles GET /admin/policy/documents/{id}/versions/{version}.
 func (h *PolicyHandler) HandleGetVersion(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -302,6 +330,9 @@ func (h *PolicyHandler) HandleGetVersion(w http.ResponseWriter, r *http.Request)
 
 // HandleCreateVersion handles POST /admin/policy/documents/{id}/versions.
 func (h *PolicyHandler) HandleCreateVersion(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -359,6 +390,9 @@ func (h *PolicyHandler) HandleCreateVersion(w http.ResponseWriter, r *http.Reque
 
 // HandleActivateVersion handles POST /admin/policy/documents/{id}/versions/{version}/activate.
 func (h *PolicyHandler) HandleActivateVersion(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -380,6 +414,9 @@ func (h *PolicyHandler) HandleActivateVersion(w http.ResponseWriter, r *http.Req
 
 // HandleSetDocumentEnabled handles POST /admin/policy/documents/{id}/enabled.
 func (h *PolicyHandler) HandleSetDocumentEnabled(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -408,6 +445,9 @@ func (h *PolicyHandler) HandleSetDocumentEnabled(w http.ResponseWriter, r *http.
 
 // HandleDeleteDocument handles DELETE /admin/policy/documents/{id}.
 func (h *PolicyHandler) HandleDeleteDocument(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	if !h.requireStore(w) {
 		return
 	}
@@ -424,6 +464,9 @@ func (h *PolicyHandler) HandleDeleteDocument(w http.ResponseWriter, r *http.Requ
 
 // HandleValidate handles POST /admin/policy/validate.
 func (h *PolicyHandler) HandleValidate(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	var req policyValidateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
@@ -439,6 +482,9 @@ func (h *PolicyHandler) HandleValidate(w http.ResponseWriter, r *http.Request) {
 
 // HandleSimulate handles POST /admin/policy/simulate.
 func (h *PolicyHandler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
+	if !h.requireEditor(w) {
+		return
+	}
 	var req policy.SimulateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
@@ -536,6 +582,18 @@ func (h *PolicyHandler) requireStore(w http.ResponseWriter) bool {
 		return false
 	}
 	return true
+}
+
+func (h *PolicyHandler) requireEditor(w http.ResponseWriter) bool {
+	if h == nil || !h.editorEnabled() {
+		writeError(w, http.StatusForbidden, "policy_editor_disabled", "Policy editor is disabled")
+		return false
+	}
+	return true
+}
+
+func (h *PolicyHandler) editorEnabled() bool {
+	return h != nil && h.editorAvailable != nil && h.editorAvailable()
 }
 
 func (h *PolicyHandler) notifyChanged(r *http.Request) {

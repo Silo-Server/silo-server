@@ -596,6 +596,11 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Policy.EvalTimeoutMS = policyEvalTimeoutMS
+	policyEditorEnabled, err := boolOr(m, "policy.editor_enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.EditorEnabled = policyEditorEnabled
 	cfg.Policy.DecisionLogVerbosity = stringOr(m, "policy.decision_log_verbosity", "digest")
 	policyDecisionLogScopeSampleRate, err := intOr(m, "policy.decision_log_scope_sample_rate", 50)
 	if err != nil {

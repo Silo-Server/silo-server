@@ -22,7 +22,12 @@ type scopeResolver interface {
 }
 
 // NewABSAccessResolver creates a resolver for ABS-authenticated access checks.
-func NewABSAccessResolver(users access.UserRepository, stores userstore.UserStoreProvider, resolver scopeResolver) *ABSAccessResolver {
+func NewABSAccessResolver(
+	users access.UserRepository,
+	stores userstore.UserStoreProvider,
+	resolver scopeResolver,
+	groups ...access.GroupPolicyProvider,
+) *ABSAccessResolver {
 	if resolver != nil {
 		return &ABSAccessResolver{resolver: resolver}
 	}
@@ -30,7 +35,7 @@ func NewABSAccessResolver(users access.UserRepository, stores userstore.UserStor
 		return nil
 	}
 	// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-	return &ABSAccessResolver{resolver: access.NewResolver(users, stores, nil)}
+	return &ABSAccessResolver{resolver: access.NewResolver(users, stores, nil, groups...)}
 }
 
 func (r *ABSAccessResolver) ResolveABSAccess(ctx context.Context, userID, profileID string) (catalog.AccessFilter, error) {

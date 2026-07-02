@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/policy"
@@ -122,6 +123,36 @@ func TestPolicyActingAdminMiddlewareEvalErrorIsInternal(t *testing.T) {
 	}
 }
 
+func TestPolicyMetadataCurationMiddlewareAppliesGroupPermissionMask(t *testing.T) {
+	user := &models.User{
+		ID:          7,
+		Role:        "user",
+		Enabled:     true,
+		LibraryIDs:  []int{1},
+		Permissions: []string{policy.PermissionMetadataCuration},
+	}
+	rec := captureMetadataCurationResponse(
+		NewPolicyPermissionMiddleware(
+			fakePermissionUserLoader{user: user},
+			fakeTargetLibraryResolver{ids: []int{1}},
+			nil,
+			newMiddlewarePolicyPDP(t),
+			middlewareGroupProvider{group: &access.GroupPolicy{
+				AllowedPermissions:       []string{policy.PermissionMarkerEdit},
+				DownloadAllowed:          true,
+				DownloadTranscodeAllowed: true,
+				RequestsAllowed:          true,
+			}},
+		),
+		userClaims(),
+		"",
+		"item-1",
+	)
+	if rec.code != http.StatusForbidden {
+		t.Fatalf("status = %d body = %s, want forbidden", rec.code, rec.body)
+	}
+}
+
 func newMiddlewarePolicyPDP(t *testing.T) *policy.PDP {
 	t.Helper()
 	engine, err := policy.NewEngine(context.Background())
@@ -206,4 +237,13 @@ type errorPermissionDecider struct{}
 
 func (errorPermissionDecider) CheckPermission(context.Context, policy.PermissionInput) (policy.PermissionDecision, policy.Meta, error) {
 	return policy.PermissionDecision{}, policy.Meta{}, errors.New("policy unavailable")
+}
+
+type middlewareGroupProvider struct {
+	group *access.GroupPolicy
+	err   error
+}
+
+func (p middlewareGroupProvider) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
+	return p.group, p.err
 }

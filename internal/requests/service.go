@@ -46,6 +46,7 @@ type Service struct {
 	presence          PresenceResolver
 	router            RequestRouterProvider
 	entitlements      EntitlementResolver
+	groupProvider     access.GroupPolicyProvider
 	requesterIdentity RequesterIdentityResolver
 	notifier          FulfillmentNotifier
 	lifecycle         LifecycleNotifier
@@ -73,6 +74,8 @@ func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *
 func (s *Service) SetRouterProvider(p RequestRouterProvider) { s.router = p }
 
 func (s *Service) SetEntitlementResolver(r EntitlementResolver) { s.entitlements = r }
+
+func (s *Service) SetGroupPolicyProvider(p access.GroupPolicyProvider) { s.groupProvider = p }
 
 func (s *Service) SetRequesterIdentityResolver(r RequesterIdentityResolver) {
 	s.requesterIdentity = r
@@ -377,6 +380,9 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		return nil, fmt.Errorf("request service is not configured")
 	}
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.ensureViewerRequestsAllowed(ctx, viewer.UserID); err != nil {
 		return nil, err
 	}
 	normalized, err := normalizeCreateInput(input)
@@ -763,6 +769,20 @@ func (s *Service) ensureRequestsEnabled(ctx context.Context) error {
 	}
 	if !settings.RequestsEnabled {
 		return ErrRequestsDisabled
+	}
+	return nil
+}
+
+func (s *Service) ensureViewerRequestsAllowed(ctx context.Context, userID int) error {
+	if s.groupProvider == nil {
+		return nil
+	}
+	group, err := s.groupProvider.GetPolicyForUser(ctx, userID)
+	if err != nil {
+		return ErrForbidden
+	}
+	if group != nil && !group.RequestsAllowed {
+		return ErrForbidden
 	}
 	return nil
 }

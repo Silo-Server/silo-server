@@ -192,6 +192,10 @@ func (s *Service) downloadUserForConfig(
 	if err != nil {
 		return nil, fmt.Errorf("loading user: %w", err)
 	}
+	user, err = s.effectiveDownloadUser(ctx, user)
+	if err != nil {
+		return nil, ErrDownloadNotAllowed
+	}
 	if err := s.checkDownloadAction(ctx, policyengine.ActionDownload, userID, user, cfg, s.artifacts != nil, deviceID); err != nil {
 		return nil, err
 	}

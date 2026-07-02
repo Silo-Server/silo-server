@@ -315,6 +315,7 @@ type DownloadConfig struct {
 // PolicyConfig holds embedded policy engine settings.
 type PolicyConfig struct {
 	EvalTimeoutMS              int    `yaml:"-"` // per-decision evaluation timeout in milliseconds
+	EditorEnabled              bool   `yaml:"-"` // advanced policy editor/API surface
 	DecisionLogVerbosity       string `yaml:"-"` // digest or verbose
 	DecisionLogScopeSampleRate int    `yaml:"-"` // log one successful scope decision in N
 	DecisionLogRetentionDays   int    `yaml:"-"` // policy decision log retention window

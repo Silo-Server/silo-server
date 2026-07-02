@@ -25,7 +25,7 @@ import (
 )
 
 func TestPolicyCapabilityShape(t *testing.T) {
-	handler := NewPolicyHandler(policy.NewSystem(nil, nil, nil), nil, nil)
+	handler := NewPolicyHandler(policy.NewSystem(nil, nil, nil), nil, nil, policyEditorEnabled)
 	rec := httptest.NewRecorder()
 	req := newPolicyHandlerRequest(http.MethodGet, "/policy/capability", nil, nil)
 
@@ -46,7 +46,7 @@ func TestPolicyCapabilityShape(t *testing.T) {
 }
 
 func TestPolicyValidateReturnsIssuesWithOK(t *testing.T) {
-	handler := NewPolicyHandler(nil, nil, nil)
+	handler := NewPolicyHandler(nil, nil, nil, policyEditorEnabled)
 	rec := httptest.NewRecorder()
 	req := newPolicyHandlerRequest(http.MethodPost, "/admin/policy/validate", map[string]any{
 		"domain": policy.DomainScope,
@@ -69,7 +69,7 @@ func TestPolicyValidateReturnsIssuesWithOK(t *testing.T) {
 }
 
 func TestPolicySimulateTighteningOverride(t *testing.T) {
-	handler := NewPolicyHandler(nil, nil, nil)
+	handler := NewPolicyHandler(nil, nil, nil, policyEditorEnabled)
 	input := policy.ScopeInput{
 		SchemaVersion:        1,
 		UserID:               7,
@@ -121,13 +121,28 @@ override(base, _) := result if {
 	}
 }
 
+func TestPolicyEditorDisabledGatesEditorEndpoints(t *testing.T) {
+	handler := NewPolicyHandler(policy.NewSystem(nil, nil, nil), nil, nil, func() bool { return false })
+
+	rec := httptest.NewRecorder()
+	req := newPolicyHandlerRequest(http.MethodPost, "/admin/policy/validate", map[string]any{
+		"domain": policy.DomainScope,
+		"source": validHandlerPolicySource(),
+	}, nil)
+	handler.HandleValidate(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s, want forbidden", rec.Code, rec.Body.String())
+	}
+}
+
 func TestPolicyDocumentVersionLifecycleDB(t *testing.T) {
 	ctx := context.Background()
 	pool, store := newPolicyHandlerStoreTest(t, ctx)
 	bus := newPolicyHandlerEventBus()
 	system := newStartedPolicyHandlerSystem(t, ctx, store, bus)
 	defer system.Stop()
-	handler := NewPolicyHandler(system, store, policy.NewDecisionRepository(pool))
+	handler := NewPolicyHandler(system, store, policy.NewDecisionRepository(pool), policyEditorEnabled)
 
 	createDocRec := httptest.NewRecorder()
 	handler.HandleCreateDocument(createDocRec, newPolicyHandlerRequest(http.MethodPost, "/admin/policy/documents", map[string]any{
@@ -203,7 +218,7 @@ func TestPolicyVersionCompileFailurePersistsAndCannotActivateDB(t *testing.T) {
 	_, store := newPolicyHandlerStoreTest(t, ctx)
 	system := newStartedPolicyHandlerSystem(t, ctx, store, newPolicyHandlerEventBus())
 	defer system.Stop()
-	handler := NewPolicyHandler(system, store, nil)
+	handler := NewPolicyHandler(system, store, nil, policyEditorEnabled)
 	document, err := store.CreateDocument(ctx, policy.DomainScope, "bad scope")
 	if err != nil {
 		t.Fatalf("CreateDocument() error: %v", err)
@@ -252,7 +267,7 @@ func TestPolicyEnabledToggleConflictDB(t *testing.T) {
 	_, store := newPolicyHandlerStoreTest(t, ctx)
 	system := newStartedPolicyHandlerSystem(t, ctx, store, newPolicyHandlerEventBus())
 	defer system.Stop()
-	handler := NewPolicyHandler(system, store, nil)
+	handler := NewPolicyHandler(system, store, nil, policyEditorEnabled)
 
 	first, err := store.CreateDocument(ctx, policy.DomainScope, "first")
 	if err != nil {
@@ -365,6 +380,10 @@ func decodePolicyHandlerResponse(t *testing.T, rec *httptest.ResponseRecorder, o
 	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
 		t.Fatalf("decode response %q: %v", rec.Body.String(), err)
 	}
+}
+
+func policyEditorEnabled() bool {
+	return true
 }
 
 func newPolicyHandlerStoreTest(t *testing.T, ctx context.Context) (*pgxpool.Pool, *policy.PolicyStore) {

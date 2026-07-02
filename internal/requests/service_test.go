@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
@@ -30,6 +31,24 @@ func TestCreateRequestQuotaExceeded(t *testing.T) {
 	var quota QuotaError
 	if !errors.As(err, &quota) {
 		t.Fatalf("error = %v, want QuotaError", err)
+	}
+	if len(store.created) != 0 {
+		t.Fatalf("created requests = %d, want 0", len(store.created))
+	}
+}
+
+func TestCreateRequestGroupPolicyCanForbidRequests(t *testing.T) {
+	store := newFakeStore()
+	service := newTestService(store)
+	service.SetGroupPolicyProvider(requestGroupProvider{group: &access.GroupPolicy{RequestsAllowed: false}})
+
+	_, err := service.CreateRequest(context.Background(), testViewer(1), CreateRequestInput{
+		MediaType: MediaTypeMovie,
+		TMDBID:    550,
+		Title:     "Fight Club",
+	})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("error = %v, want ErrForbidden", err)
 	}
 	if len(store.created) != 0 {
 		t.Fatalf("created requests = %d, want 0", len(store.created))
@@ -1313,6 +1332,15 @@ type fakeStore struct {
 
 	listIntegrationsCalls int
 	getSettingsCalls      int
+}
+
+type requestGroupProvider struct {
+	group *access.GroupPolicy
+	err   error
+}
+
+func (p requestGroupProvider) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
+	return p.group, p.err
 }
 
 func newFakeStore() *fakeStore {

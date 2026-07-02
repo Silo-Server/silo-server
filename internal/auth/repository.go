@@ -52,7 +52,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
 	max_streams, max_transcodes, max_profiles, download_allowed,
-	download_transcode_allowed, created_at, updated_at`
+	download_transcode_allowed, access_group_id, created_at, updated_at`
 
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
@@ -74,6 +74,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.MaxProfiles,
 		&u.DownloadAllowed,
 		&u.DownloadTranscodeAllowed,
+		&u.AccessGroupID,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -108,6 +109,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.MaxProfiles,
 			&u.DownloadAllowed,
 			&u.DownloadTranscodeAllowed,
+			&u.AccessGroupID,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 		)
@@ -176,6 +178,10 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 	if input.DownloadTranscodeAllowed != nil {
 		cols = append(cols, "download_transcode_allowed")
 		args = append(args, *input.DownloadTranscodeAllowed)
+	}
+	if input.AccessGroupID != nil {
+		cols = append(cols, "access_group_id")
+		args = append(args, *input.AccessGroupID)
 	}
 
 	// Build placeholders: $1, $2, ..., $N
@@ -311,6 +317,11 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	if input.DownloadTranscodeAllowed != nil {
 		setClauses = append(setClauses, fmt.Sprintf("download_transcode_allowed = $%d", argIndex))
 		args = append(args, *input.DownloadTranscodeAllowed)
+		argIndex++
+	}
+	if input.AccessGroupIDSet {
+		setClauses = append(setClauses, fmt.Sprintf("access_group_id = $%d", argIndex))
+		args = append(args, input.AccessGroupID)
 		argIndex++
 	}
 

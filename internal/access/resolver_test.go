@@ -426,3 +426,43 @@ func TestResolver_DisabledLibraries_NoProfile(t *testing.T) {
 		t.Fatalf("DisabledLibraryIDs = %v, want [7]", scope.DisabledLibraryIDs)
 	}
 }
+
+func TestResolver_AppliesGroupPolicy(t *testing.T) {
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{
+			ID:                   1,
+			LibraryIDs:           []int{1, 2, 3},
+			MaxPlaybackQuality:   PlaybackQuality4K,
+			AccessPolicyRevision: 5,
+		}},
+		stubStoreProvider{store: stubStore{}},
+		nil,
+		stubGroupProvider{group: &GroupPolicy{
+			LibraryIDs:               []int{2, 4},
+			MaxPlaybackQuality:       PlaybackQualityStandard,
+			DownloadAllowed:          true,
+			DownloadTranscodeAllowed: true,
+			RequestsAllowed:          true,
+		}},
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if !scope.LibrariesRestricted || len(scope.AllowedLibraryIDs) != 1 || scope.AllowedLibraryIDs[0] != 2 {
+		t.Fatalf("scope libraries = restricted %t ids %#v, want [2]", scope.LibrariesRestricted, scope.AllowedLibraryIDs)
+	}
+	if scope.MaxPlaybackQuality != PlaybackQualityStandard {
+		t.Fatalf("MaxPlaybackQuality = %q, want %q", scope.MaxPlaybackQuality, PlaybackQualityStandard)
+	}
+}
+
+type stubGroupProvider struct {
+	group *GroupPolicy
+	err   error
+}
+
+func (p stubGroupProvider) GetPolicyForUser(context.Context, int) (*GroupPolicy, error) {
+	return p.group, p.err
+}

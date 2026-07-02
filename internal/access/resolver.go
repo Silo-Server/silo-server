@@ -29,14 +29,20 @@ type Resolver struct {
 	users        UserRepository
 	storeFactory userstore.UserStoreProvider
 	tokens       ProfileTokenValidator
+	groups       GroupPolicyProvider
 }
 
 // NewResolver creates a new scope resolver.
-func NewResolver(users UserRepository, storeFactory userstore.UserStoreProvider, tokens ProfileTokenValidator) *Resolver {
+func NewResolver(users UserRepository, storeFactory userstore.UserStoreProvider, tokens ProfileTokenValidator, groups ...GroupPolicyProvider) *Resolver {
+	var groupProvider GroupPolicyProvider
+	if len(groups) > 0 {
+		groupProvider = groups[0]
+	}
 	return &Resolver{
 		users:        users,
 		storeFactory: storeFactory,
 		tokens:       tokens,
+		groups:       groupProvider,
 	}
 }
 
@@ -46,13 +52,17 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	if err != nil {
 		return Scope{}, fmt.Errorf("loading user %d: %w", input.UserID, err)
 	}
+	effective, err := EffectivePolicyForUser(ctx, user, r.groups)
+	if err != nil {
+		return Scope{}, fmt.Errorf("loading access group policy for user %d: %w", input.UserID, err)
+	}
 
 	scope := Scope{
 		UserID:              user.ID,
 		ProfileID:           input.ProfileID,
-		AllowedLibraryIDs:   cloneInts(user.LibraryIDs),
-		LibrariesRestricted: user.LibraryIDs != nil,
-		MaxPlaybackQuality:  NormalizePlaybackQuality(user.MaxPlaybackQuality),
+		AllowedLibraryIDs:   cloneInts(effective.LibraryIDs),
+		LibrariesRestricted: effective.LibraryIDs != nil,
+		MaxPlaybackQuality:  NormalizePlaybackQuality(effective.MaxPlaybackQuality),
 		PolicyRevision:      user.AccessPolicyRevision,
 		ProfileVerified:     input.ProfileID == "",
 	}
@@ -74,7 +84,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.MaxContentRating = profile.MaxContentRating
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
 		scope.PreferredMetadataLanguage = profile.PreferredMetadataLanguage
-		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(user.LibraryIDs, profile)
+		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
 		if err != nil {
 			return Scope{}, err

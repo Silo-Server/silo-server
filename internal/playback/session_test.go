@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/policy"
 )
@@ -286,6 +288,26 @@ func TestSessionManager_UserLimitProviderOverridesDefaults(t *testing.T) {
 	}
 	if _, err := sm.StartSession(2, "profile-2", 201, playback.PlayDirect, false); err != nil {
 		t.Fatalf("StartSession user 2 second stream: %v", err)
+	}
+}
+
+func TestSessionManager_GroupPolicyLimitUsesStricterValue(t *testing.T) {
+	user := &models.User{ID: 1, MaxStreams: 6, MaxTranscodes: 2}
+	group := &access.GroupPolicy{MaxStreams: 1, MaxTranscodes: 1, RequestsAllowed: true}
+	sm := playback.NewSessionManager(6, 2)
+	sm.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+		effective := access.ApplyGroupPolicy(user, group)
+		return playback.SessionLimits{
+			MaxStreams:    effective.MaxStreams,
+			MaxTranscodes: effective.MaxTranscodes,
+		}, nil
+	})
+
+	if _, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false); err != nil {
+		t.Fatalf("StartSession first stream: %v", err)
+	}
+	if _, err := sm.StartSession(1, "profile-1", 101, playback.PlayDirect, false); err != playback.ErrTooManyStreams {
+		t.Fatalf("StartSession second stream = %v, want ErrTooManyStreams", err)
 	}
 }
 

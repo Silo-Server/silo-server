@@ -16,6 +16,7 @@ type ViewerResolver struct {
 	storeFactory userstore.UserStoreProvider
 	tokens       access.ProfileTokenValidator
 	pdp          *PDP
+	groups       access.GroupPolicyProvider
 }
 
 // NewViewerResolver creates a PDP-backed viewer scope resolver.
@@ -24,12 +25,18 @@ func NewViewerResolver(
 	storeFactory userstore.UserStoreProvider,
 	tokens access.ProfileTokenValidator,
 	pdp *PDP,
+	groups ...access.GroupPolicyProvider,
 ) *ViewerResolver {
+	var groupProvider access.GroupPolicyProvider
+	if len(groups) > 0 {
+		groupProvider = groups[0]
+	}
 	return &ViewerResolver{
 		users:        users,
 		storeFactory: storeFactory,
 		tokens:       tokens,
 		pdp:          pdp,
+		groups:       groupProvider,
 	}
 }
 
@@ -38,6 +45,10 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 	user, err := r.users.GetByID(ctx, input.UserID)
 	if err != nil {
 		return access.Scope{}, fmt.Errorf("loading user %d: %w", input.UserID, err)
+	}
+	effective, err := access.EffectivePolicyForUser(ctx, user, r.groups)
+	if err != nil {
+		return access.Scope{}, fmt.Errorf("loading access group policy for user %d: %w", input.UserID, err)
 	}
 
 	profileVerified := input.ProfileID == ""
@@ -74,9 +85,9 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		UserID:               user.ID,
 		SessionID:            input.SessionID,
 		ProfileID:            input.ProfileID,
-		AccountLibraryIDs:    slices.Clone(user.LibraryIDs),
-		AccountRestricted:    user.LibraryIDs != nil,
-		AccountMaxQuality:    user.MaxPlaybackQuality,
+		AccountLibraryIDs:    slices.Clone(effective.LibraryIDs),
+		AccountRestricted:    effective.LibraryIDs != nil,
+		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
 		DisabledLibraryIDs:   access.DisabledLibraryIDs(ctx, store),
 		ProfileVerified:      profileVerified,
