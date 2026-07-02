@@ -33,15 +33,15 @@ export const regoLanguage = StreamLanguage.define({
     if (stream.peek() === '"') {
       stream.next();
       let escaped = false;
-      let ch: string | undefined;
-      while ((ch = stream.next()) !== undefined) {
+      for (;;) {
+        const ch = stream.next();
+        if (!ch) {
+          break;
+        }
         if (ch === '"' && !escaped) {
           break;
         }
         escaped = ch === "\\" && !escaped;
-        if (ch !== "\\") {
-          escaped = false;
-        }
       }
       return "string";
     }
