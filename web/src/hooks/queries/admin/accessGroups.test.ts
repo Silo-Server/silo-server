@@ -28,6 +28,7 @@ const group: AccessGroup = {
   max_transcodes: 0,
   allowed_permissions: null,
   requests_allowed: true,
+  is_default: false,
   member_count: 2,
   created_at: "2026-07-01T12:00:00Z",
   updated_at: "2026-07-01T12:00:00Z",

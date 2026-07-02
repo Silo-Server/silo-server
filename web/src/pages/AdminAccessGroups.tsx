@@ -193,7 +193,14 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold tracking-tight">{group.name}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="truncate text-base font-semibold tracking-tight">{group.name}</h2>
+            {group.is_default && (
+              <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+                Default
+              </span>
+            )}
+          </div>
           {group.description && (
             <p className="text-muted-foreground mt-0.5 line-clamp-2 text-sm">{group.description}</p>
           )}
@@ -241,6 +248,7 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
   const [maxTranscodes, setMaxTranscodes] = useState(group.max_transcodes);
   const [permissions, setPermissions] = useState<string[] | null>(group.allowed_permissions);
   const [requestsAllowed, setRequestsAllowed] = useState(group.requests_allowed);
+  const [isDefault, setIsDefault] = useState(group.is_default);
 
   const allPermissions = permissions === null;
 
@@ -264,6 +272,7 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
       max_transcodes: maxTranscodes,
       allowed_permissions: permissions,
       requests_allowed: requestsAllowed,
+      is_default: isDefault,
     };
     await updateGroup.mutateAsync({ id: group.id, body });
   }
@@ -292,6 +301,12 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
             />
           </div>
         </div>
+        <ToggleRow
+          label="Default for new users"
+          description="Newly created accounts are placed in this group automatically. Existing users are never moved."
+          checked={isDefault}
+          onCheckedChange={setIsDefault}
+        />
       </div>
 
       <section className="surface-panel space-y-4 rounded-2xl border-0 p-5">
@@ -423,6 +438,8 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
                     group.member_count === 1 ? "member" : "members"
                   } will move to no group and fall back to the built-in defaults. Their own restrictions are unchanged.`
                 : "This group has no members. This can't be undone."}
+              {group.is_default &&
+                " It is also the default for new users — after deleting, new accounts start with no group."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

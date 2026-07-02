@@ -19,6 +19,7 @@ const GROUP = {
   max_transcodes: 0,
   allowed_permissions: [] as string[],
   requests_allowed: false,
+  is_default: true,
   member_count: 3,
   created_at: "2026-07-02T12:00:00Z",
   updated_at: "2026-07-02T12:00:00Z",
@@ -72,8 +73,9 @@ describe("AdminAccessGroups", () => {
 
     expect(await screen.findByText("Kids")).toBeInTheDocument();
     expect(screen.getByText("3 members")).toBeInTheDocument();
-    // Card facts reflect the restriction shape.
+    // Card facts reflect the restriction shape; default groups are labeled.
     expect(screen.getByText("No downloads")).toBeInTheDocument();
+    expect(screen.getByText("Default")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /Kids/ }));
 
@@ -89,6 +91,7 @@ describe("AdminAccessGroups", () => {
         max_streams: 1,
         requests_allowed: false,
         allowed_permissions: [],
+        is_default: true,
       });
     });
   });

@@ -2207,6 +2207,7 @@ export interface AccessGroup {
   max_transcodes: number;
   allowed_permissions: string[] | null;
   requests_allowed: boolean;
+  is_default: boolean;
   member_count: number;
   created_at: string;
   updated_at: string;
@@ -2223,6 +2224,7 @@ export interface AccessGroupInput {
   max_transcodes?: number;
   allowed_permissions?: string[] | null;
   requests_allowed?: boolean;
+  is_default?: boolean;
 }
 
 export interface AdminUser {
