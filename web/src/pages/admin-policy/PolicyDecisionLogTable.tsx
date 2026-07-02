@@ -103,12 +103,10 @@ export function PolicyDecisionLogTable({ domains }: PolicyDecisionLogTableProps)
   }
 
   function goPrevious() {
-    setCursorStack((prev) => {
-      const next = [...prev];
-      const previous = next.pop();
-      setCursor(previous || undefined);
-      return next;
-    });
+    const next = [...cursorStack];
+    const previous = next.pop();
+    setCursorStack(next);
+    setCursor(previous || undefined);
     setSelectedID(undefined);
   }
 

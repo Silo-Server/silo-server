@@ -155,7 +155,7 @@ export function useCreatePolicyVersion() {
       await Promise.all([
         invalidatePolicyDocuments(queryClient, variables.documentId),
         queryClient.invalidateQueries({
-          queryKey: adminKeys.policyVersion(variables.documentId, data.id),
+          queryKey: adminKeys.policyVersion(variables.documentId, data.version_number),
         }),
       ]);
     },

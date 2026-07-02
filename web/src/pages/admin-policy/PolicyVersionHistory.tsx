@@ -104,7 +104,15 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                   key={version.id}
                   data-state={isSelected ? "selected" : undefined}
                   className="cursor-pointer"
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedVersionId(version.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedVersionId(version.id);
+                    }
+                  }}
                 >
                   <TableCell className="font-medium">
                     v{version.version_number}

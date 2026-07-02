@@ -267,7 +267,9 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
       library_ids: libraryIds,
       max_playback_quality: playbackQualityValueFromPreset(qualityPreset),
       download_allowed: downloadAllowed,
-      download_transcode_allowed: transcodeAllowed,
+      // The transcode toggle is disabled (not reset) when downloads are off,
+      // so clamp it here to avoid saving a contradictory record.
+      download_transcode_allowed: downloadAllowed && transcodeAllowed,
       max_streams: maxStreams,
       max_transcodes: maxTranscodes,
       allowed_permissions: permissions,
