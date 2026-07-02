@@ -15,6 +15,14 @@ export default defineConfig(({ mode }) => {
     worker: {
       format: "es",
     },
+    optimizeDeps: {
+      // jassub spawns its own module worker with import.meta.url paths; the
+      // dep optimizer rewrites those into .vite/deps where the worker file
+      // doesn't exist, so the ASS renderer never initializes in dev.
+      exclude: ["jassub"],
+      // CJS deps of the excluded package still need prebundling for ESM interop.
+      include: ["jassub > throughput", "jassub > rvfc-polyfill"],
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
