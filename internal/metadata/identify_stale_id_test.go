@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 
@@ -110,6 +111,79 @@ func TestProcess_IdentifyDoesNotResurrectRecordedStaleProviderID(t *testing.T) {
 	}
 	if len(stale) != 0 {
 		t.Errorf("stale rows after successful rematch = %v, want none", stale)
+	}
+}
+
+// TestProcess_IdentifySuppressesStaleIDDespiteKeyCasing guards the
+// normalization layer: the stale row is recorded with the canonical
+// lower-case provider slug, but the durable row (and therefore the injected
+// provider-id map key) arrives with different casing and padding ("TMDB ").
+// Suppression must still match the two and drop the stale ID.
+func TestProcess_IdentifySuppressesStaleIDDespiteKeyCasing(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: "existing-1",
+		Type:      "series",
+		Title:     "Formula 1",
+		Year:      2016,
+		Status:    "matched",
+		Studios:   []string{},
+		Networks:  []string{},
+		Countries: []string{},
+		Genres:    []string{},
+	}); err != nil {
+		t.Fatalf("upsert existing item: %v", err)
+	}
+
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set("existing-1", &models.MediaItemProviderID{
+		ContentID:  "existing-1",
+		ItemType:   "series",
+		Provider:   "TMDB ",
+		ProviderID: "324880",
+	})
+	h.service.providerIDRepo = providerRepo
+
+	staleRepo := newFakeStaleIDRepo()
+	staleRepo.set("existing-1", &models.StaleMediaID{
+		ContentID:  "existing-1",
+		Provider:   "tmdb",
+		ProviderID: "324880",
+	})
+	h.service.staleIDRepo = staleRepo
+
+	tmdb := &notFoundMetadataProvider{slug: "tmdb"}
+	tvdb := &capturingMetadataProvider{
+		response: &MetadataResult{
+			HasMetadata: true,
+			Title:       "Formula 1: Drive to Survive",
+			ProviderIDs: map[string]string{"tvdb": "417585"},
+		},
+	}
+
+	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+		ContentID:   "existing-1",
+		ProviderIDs: map[string]string{"tvdb": "417585"},
+		Language:    "en",
+		Mode:        ModeIdentify,
+	}, []Provider{tmdb, tvdb})
+	if err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	if result == nil || !result.Updated {
+		t.Fatalf("result = %#v, want Updated=true", result)
+	}
+
+	req := tvdb.lastRequest()
+	for key, value := range req.ProviderIDs {
+		if strings.EqualFold(strings.TrimSpace(key), "tmdb") {
+			t.Errorf("identify request still carries %q=%q, want stale tmdb id suppressed despite key casing", key, value)
+		}
+	}
+	if got := req.ProviderIDs["tvdb"]; got != "417585" {
+		t.Errorf("identify request tvdb id = %q, want 417585", got)
 	}
 }
 

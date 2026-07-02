@@ -821,6 +821,20 @@ func (s *MetadataService) suppressRecordedStaleProviderIDs(
 	if err != nil {
 		return fmt.Errorf("loading stale provider ids for %s: %w", contentID, err)
 	}
+	if len(staleIDs) == 0 {
+		return nil
+	}
+	// Index the incoming map by normalized provider key so suppression cannot
+	// be bypassed by casing or padding differences between the stored stale
+	// row and the caller-supplied map keys (e.g. "TMDB" vs "tmdb").
+	keysByProvider := make(map[string][]string, len(providerIDs))
+	for key := range providerIDs {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if normalized == "" {
+			continue
+		}
+		keysByProvider[normalized] = append(keysByProvider[normalized], key)
+	}
 	for _, staleID := range staleIDs {
 		if staleID == nil {
 			continue
@@ -829,10 +843,13 @@ func (s *MetadataService) suppressRecordedStaleProviderIDs(
 		if provider == "" {
 			continue
 		}
-		if providerIDs[provider] != strings.TrimSpace(staleID.ProviderID) {
-			continue
+		staleValue := strings.TrimSpace(staleID.ProviderID)
+		for _, key := range keysByProvider[provider] {
+			if strings.TrimSpace(providerIDs[key]) != staleValue {
+				continue
+			}
+			delete(providerIDs, key)
 		}
-		delete(providerIDs, provider)
 	}
 	return nil
 }
