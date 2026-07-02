@@ -467,7 +467,7 @@ func (r *ItemRepository) upsert(ctx context.Context, execer itemExecer, item *mo
 			type = EXCLUDED.type,
 			title = EXCLUDED.title,
 			sort_title = EXCLUDED.sort_title,
-			default_metadata_language = COALESCE(NULLIF(media_items.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), media_items.default_metadata_language),
 			original_title = EXCLUDED.original_title,
 			year = EXCLUDED.year,
 			genres = EXCLUDED.genres,

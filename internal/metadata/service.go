@@ -517,10 +517,27 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 		return chain, nil
 	}
 
+	// A folder-scoped manual refresh resolves exactly one language — the
+	// library's setting. When that differs from the item's stamped canonical
+	// language, adopt it so the base row is re-fetched in the library's
+	// language instead of the fetch being shunted into localization tables
+	// forever (issue #211). Adoption is decided here (not in mergeAndPersist)
+	// so identify/initial-match and multi-language item-scoped refreshes are
+	// never affected.
+	adoptTarget := ""
+	if folderID > 0 && req.ContentID != "" && len(languages) == 1 && s.itemRepo != nil {
+		if item, err := s.itemRepo.GetByID(ctx, req.ContentID); err == nil && item != nil {
+			if adoptableFolderLanguage(req.Mode, item.DefaultMetadataLanguage, languages[0]) {
+				adoptTarget = languages[0]
+			}
+		}
+	}
+
 	var final ProcessResult
 	for _, language := range languages {
 		langReq := req
 		langReq.Language = language
+		langReq.AdoptLanguage = adoptTarget != "" && strings.EqualFold(language, adoptTarget)
 		result, err := s.processInternal(ctx, langReq, resolveChain)
 		if err != nil {
 			return nil, err
@@ -566,6 +583,21 @@ func (s *MetadataService) maybeAutoTranslate(ctx context.Context, folderID int, 
 		return
 	}
 	go s.autoTranslator.AutoEnqueue(context.WithoutCancel(ctx), contentID, library)
+}
+
+// adoptableFolderLanguage reports whether a folder-scoped refresh should
+// adopt the folder's language as the item's new canonical metadata language.
+// Only manual refreshes adopt: their MergeReplaceUnlocked policy actually
+// rewrites title/overview, whereas a scheduled refresh merges fill-empty and
+// would restamp the language without replacing the text — mislabeling the
+// base row.
+func adoptableFolderLanguage(mode RefreshMode, stampedLanguage, folderLanguage string) bool {
+	if mode != ModeManualRefresh {
+		return false
+	}
+	stamp := strings.TrimSpace(stampedLanguage)
+	target := strings.TrimSpace(folderLanguage)
+	return stamp != "" && target != "" && !strings.EqualFold(stamp, target)
 }
 
 func parseProcessFolderID(raw string) int {
@@ -1452,7 +1484,7 @@ func (s *MetadataService) mergeAndPersist(
 	}
 
 	canonicalLanguage := strings.TrimSpace(req.Language)
-	if existingItem != nil && strings.TrimSpace(existingItem.DefaultMetadataLanguage) != "" {
+	if !req.AdoptLanguage && existingItem != nil && strings.TrimSpace(existingItem.DefaultMetadataLanguage) != "" {
 		canonicalLanguage = strings.TrimSpace(existingItem.DefaultMetadataLanguage)
 	}
 	if canonicalLanguage == "" {
