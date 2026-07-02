@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -38,8 +39,9 @@ func TestPolicyCapabilityShape(t *testing.T) {
 	if !response.Enabled || !response.EditorAvailable {
 		t.Fatalf("capability = %#v, want enabled editor", response)
 	}
-	if len(response.DecisionTypes) != 1 || response.DecisionTypes[0] != policy.DomainScope {
-		t.Fatalf("decision_types = %#v, want [scope]", response.DecisionTypes)
+	wantDecisionTypes := []string{policy.DomainPermission, policy.DomainScope}
+	if !reflect.DeepEqual(response.DecisionTypes, wantDecisionTypes) {
+		t.Fatalf("decision_types = %#v, want %#v", response.DecisionTypes, wantDecisionTypes)
 	}
 }
 

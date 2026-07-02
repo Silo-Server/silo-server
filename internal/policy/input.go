@@ -1,5 +1,14 @@
 package policy
 
+const (
+	// PermissionActingAdmin is the pseudo-permission used for acting-admin gates.
+	PermissionActingAdmin = "acting_admin"
+	// PermissionMarkerEdit mirrors auth.PermissionMarkerEdit.
+	PermissionMarkerEdit = "marker_edit"
+	// PermissionMetadataCuration mirrors auth.PermissionMetadataCuration.
+	PermissionMetadataCuration = "metadata_curation"
+)
+
 // ScopeInput is the policy input document for resolving an authenticated
 // viewer request into an effective access scope.
 //
@@ -49,4 +58,36 @@ type ScopeDecision struct {
 	PreferredMetadataLanguage string `json:"preferred_metadata_language"`
 	PolicyRevision            int64  `json:"policy_revision"`
 	ProfileVerified           bool   `json:"profile_verified"`
+}
+
+// PermissionInput is the policy input document for route-level permission
+// gates.
+//
+// acting_as_primary is precomputed in Go from the declared profile because
+// Rego never performs database lookups. user_libraries_restricted distinguishes
+// nil user library assignment (unrestricted) from an empty allowlist.
+type PermissionInput struct {
+	SchemaVersion int `json:"schema_version"`
+
+	UserID                  int      `json:"user_id"`
+	Role                    string   `json:"role"`
+	UserEnabled             bool     `json:"user_enabled"`
+	AssignedPermissions     []string `json:"assigned_permissions"`
+	Permission              string   `json:"permission"`
+	DeclaredProfileID       string   `json:"declared_profile_id"`
+	ActingAsPrimary         bool     `json:"acting_as_primary"`
+	TargetLibraryIDs        []int    `json:"target_library_ids"`
+	UserLibraryIDs          []int    `json:"user_library_ids"`
+	UserLibrariesRestricted bool     `json:"user_libraries_restricted"`
+
+	RequestTime string `json:"request_time"`
+	DeviceID    string `json:"device_id"`
+	ClientIP    string `json:"client_ip"`
+}
+
+// PermissionDecision is the policy output document for route-level permission
+// gates.
+type PermissionDecision struct {
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason"`
 }

@@ -22,6 +22,8 @@ type DecisionName string
 const (
 	// DecisionScope resolves the effective viewer access scope.
 	DecisionScope DecisionName = "silo.scope.decision"
+	// DecisionPermission evaluates route-level permission gates.
+	DecisionPermission DecisionName = "silo.permission.decision"
 )
 
 // Meta describes one policy evaluation.
@@ -75,7 +77,7 @@ func NewEngine(ctx context.Context, opts ...EngineOption) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := engine.swap(ctx, modules, scopeQueries(), engine.revision); err != nil {
+	if err := engine.swap(ctx, modules, decisionQueries(), engine.revision); err != nil {
 		return nil, err
 	}
 	return engine, nil
@@ -90,7 +92,7 @@ func NewEngineWithCustom(ctx context.Context, sources map[string]ActiveSource, o
 	if err != nil {
 		return nil, err
 	}
-	if err := engine.swap(ctx, modules, scopeQueries(), engine.revision); err != nil {
+	if err := engine.swap(ctx, modules, decisionQueries(), engine.revision); err != nil {
 		return nil, err
 	}
 	return engine, nil
@@ -118,7 +120,7 @@ func (e *Engine) Reload(ctx context.Context, sources map[string]ActiveSource, ge
 	if err != nil {
 		return err
 	}
-	return e.swap(ctx, modules, scopeQueries(), generation)
+	return e.swap(ctx, modules, decisionQueries(), generation)
 }
 
 // Revision returns the policy generation loaded into this engine.
@@ -199,9 +201,10 @@ func (e *Engine) swap(ctx context.Context, modules []ModuleSource, decisions map
 	return nil
 }
 
-func scopeQueries() map[DecisionName]string {
+func decisionQueries() map[DecisionName]string {
 	return map[DecisionName]string{
-		DecisionScope: "data.silo.scope.decision",
+		DecisionScope:      "data.silo.scope.decision",
+		DecisionPermission: "data.silo.permission.decision",
 	}
 }
 

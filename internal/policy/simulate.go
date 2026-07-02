@@ -14,7 +14,8 @@ import (
 var ErrUnsupportedDomain = errors.New("unsupported policy domain")
 
 var domainDecisions = map[string]DecisionName{
-	DomainScope: DecisionScope,
+	DomainScope:      DecisionScope,
+	DomainPermission: DecisionPermission,
 }
 
 // DecisionTypes returns policy domains with simulation support.
@@ -71,7 +72,7 @@ func Simulate(ctx context.Context, store *PolicyStore, req SimulateRequest) (Sim
 	if err != nil {
 		return SimulateResult{}, err
 	}
-	if err := engine.swap(ctx, modules, scopeQueries(), generation); err != nil {
+	if err := engine.swap(ctx, modules, decisionQueries(), generation); err != nil {
 		return SimulateResult{}, err
 	}
 

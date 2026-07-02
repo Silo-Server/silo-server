@@ -43,6 +43,18 @@ func (p *PDP) ResolveViewerScope(ctx context.Context, input ScopeInput) (ScopeDe
 	return decision, meta, nil
 }
 
+// CheckPermission evaluates a route-level permission gate.
+func (p *PDP) CheckPermission(ctx context.Context, input PermissionInput) (PermissionDecision, Meta, error) {
+	var decision PermissionDecision
+	meta, err := p.engine.Evaluate(ctx, DecisionPermission, input, &decision)
+	if err != nil {
+		p.logPermissionDecision(ctx, input, nil, meta, err)
+		return PermissionDecision{}, Meta{}, err
+	}
+	p.logPermissionDecision(ctx, input, decision, meta, nil)
+	return decision, meta, nil
+}
+
 func (p *PDP) logScopeDecision(ctx context.Context, input ScopeInput, result any, meta Meta, evalErr error) {
 	if p == nil || p.decisionLogger == nil {
 		return
@@ -63,6 +75,32 @@ func (p *PDP) logScopeDecision(ctx context.Context, input ScopeInput, result any
 	p.decisionLogger.LogDecision(entry, input, result)
 }
 
+func (p *PDP) logPermissionDecision(ctx context.Context, input PermissionInput, result any, meta Meta, evalErr error) {
+	if p == nil || p.decisionLogger == nil {
+		return
+	}
+
+	entry := Entry{
+		DecisionName:     DecisionPermission,
+		PolicyGeneration: meta.Revision,
+		UserID:           intPtr(input.UserID),
+		ProfileID:        input.DeclaredProfileID,
+		RequestID:        chimiddleware.GetReqID(ctx),
+		EvalTimeNS:       meta.EvalTimeNS,
+	}
+	if decision, ok := result.(PermissionDecision); ok {
+		entry.Allowed = boolPtr(decision.Allowed)
+	}
+	if evalErr != nil {
+		entry.Error = evalErr.Error()
+	}
+	p.decisionLogger.LogDecision(entry, input, result)
+}
+
 func intPtr(v int) *int {
+	return &v
+}
+
+func boolPtr(v bool) *bool {
 	return &v
 }

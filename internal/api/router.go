@@ -271,9 +271,20 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 
+	var permissionPDP apimw.PermissionDecider
+	if deps.PolicySystem != nil {
+		permissionPDP = deps.PolicySystem.PDP()
+	}
+
 	// Admin authorization for routes: admin role, exercised through the
-	// account's primary household profile (see apimw.RequireActingAdmin).
-	requireActingAdmin := apimw.RequireActingAdmin(checkPrimaryProfile)
+	// account's primary household profile.
+	var requireActingAdmin func(http.Handler) http.Handler
+	if deps.PolicySystem != nil {
+		requireActingAdmin = apimw.NewPolicyActingAdminMiddleware(permissionPDP, checkPrimaryProfile)
+	} else {
+		// Legacy gate: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+		requireActingAdmin = apimw.RequireActingAdmin(checkPrimaryProfile)
+	}
 
 	// Health handler advertises the server's identity so multi-server
 	// clients can display a friendly name. Falls back to empty strings
@@ -301,7 +312,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var authHandler *handlers.AuthHandler
 	var authMiddleware *apimw.AuthMiddleware
 	var viewerAccessMiddleware *apimw.ViewerAccessMiddleware
-	var permissionMiddleware *apimw.PermissionMiddleware
+	var metadataCurationAccess func(http.Handler) http.Handler
 	var viewerResolver apimw.ViewerResolver
 	var profileTokenService *access.ProfileTokenService
 	var jwtService *auth.JWTService
@@ -350,11 +361,22 @@ func NewRouter(deps Dependencies) chi.Router {
 			viewerAccessMiddleware = apimw.NewViewerAccessMiddleware(viewerResolver)
 		}
 		if deps.DB != nil {
-			permissionMiddleware = apimw.NewPermissionMiddleware(
-				userRepo,
-				apimw.NewPGMetadataTargetLibraryResolver(deps.DB),
-				checkPrimaryProfile,
-			)
+			metadataLibraries := apimw.NewPGMetadataTargetLibraryResolver(deps.DB)
+			if deps.PolicySystem != nil {
+				metadataCurationAccess = apimw.NewPolicyPermissionMiddleware(
+					userRepo,
+					metadataLibraries,
+					checkPrimaryProfile,
+					permissionPDP,
+				).RequireMetadataCurationForItem
+			} else {
+				// Legacy permission middleware: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				metadataCurationAccess = apimw.NewPermissionMiddleware(
+					userRepo,
+					metadataLibraries,
+					checkPrimaryProfile,
+				).RequireMetadataCurationForItem
+			}
 		}
 	}
 	if deps.SessionMgr != nil && userRepo != nil {
@@ -2277,8 +2299,8 @@ func NewRouter(deps Dependencies) chi.Router {
 				if adminHandler != nil {
 					r.Route("/admin", func(r chi.Router) {
 						metadataItemAccess := requireActingAdmin
-						if permissionMiddleware != nil {
-							metadataItemAccess = permissionMiddleware.RequireMetadataCurationForItem
+						if metadataCurationAccess != nil {
+							metadataItemAccess = metadataCurationAccess
 						}
 
 						r.Group(func(r chi.Router) {
