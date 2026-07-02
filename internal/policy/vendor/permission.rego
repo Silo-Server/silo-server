@@ -85,15 +85,15 @@ admin_role(i) if {
 }
 
 user_enabled(i) if {
-	object.get(i, "user_enabled", false)
+	object.get(i, "user_enabled", false) == true
 }
 
 acting_as_primary(i) if {
-	object.get(i, "acting_as_primary", false)
+	object.get(i, "acting_as_primary", false) == true
 }
 
 user_libraries_restricted(i) if {
-	object.get(i, "user_libraries_restricted", false)
+	object.get(i, "user_libraries_restricted", false) == true
 }
 
 role(i) := object.get(i, "role", "")
@@ -139,15 +139,21 @@ tighten(base, override) := result if {
 	}
 }
 
+# Only a literal boolean true keeps the base grant; any other override value
+# (including malformed non-boolean output) tightens to a deny.
+override_grants(override) if {
+	object.get(override, "allowed", true) == true
+}
+
 tightened_allowed(base, override) := true if {
 	base.allowed
-	object.get(override, "allowed", true)
+	override_grants(override)
 } else := false
 
 tightened_reason(base, override, allowed) := reason if {
 	not allowed
 	base.allowed
-	not object.get(override, "allowed", true)
+	not override_grants(override)
 	reason := nonempty_string_or_default(object.get(override, "reason", ""), base.reason)
 } else := base.reason
 

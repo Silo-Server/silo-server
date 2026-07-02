@@ -87,23 +87,23 @@ transcode_limit_allows(i) if {
 action(i) := object.get(i, "action", "")
 
 downloads_enabled(i) if {
-	object.get(i, "downloads_enabled", false)
+	object.get(i, "downloads_enabled", false) == true
 }
 
 transcode_enabled(i) if {
-	object.get(i, "transcode_enabled", false)
+	object.get(i, "transcode_enabled", false) == true
 }
 
 download_allowed(i) if {
-	object.get(i, "download_allowed", false)
+	object.get(i, "download_allowed", false) == true
 }
 
 download_transcode_allowed(i) if {
-	object.get(i, "download_transcode_allowed", false)
+	object.get(i, "download_transcode_allowed", false) == true
 }
 
 artifacts_available(i) if {
-	object.get(i, "artifacts_available", false)
+	object.get(i, "artifacts_available", false) == true
 }
 
 file_quality(i) := object.get(i, "file_quality", "")
@@ -147,15 +147,21 @@ tighten(base, override, i) := result if {
 	}
 }
 
+# Only a literal boolean true keeps the base grant; any other override value
+# (including malformed non-boolean output) tightens to a deny.
+override_grants(override) if {
+	object.get(override, "allowed", true) == true
+}
+
 tightened_allowed(base, override) := true if {
 	base.allowed
-	object.get(override, "allowed", true)
+	override_grants(override)
 } else := false
 
 tightened_reason(base, override, allowed) := reason if {
 	not allowed
 	base.allowed
-	not object.get(override, "allowed", true)
+	not override_grants(override)
 	reason := nonempty_string_or_default(object.get(override, "reason", ""), base.reason)
 } else := base.reason
 
