@@ -199,6 +199,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 				  WHERE uwp2.user_id = $1
 				    AND uwp2.profile_id = $2
 				    AND uwp2.media_item_id = e2.content_id
+				    AND (uwp2.completed = TRUE OR uwp2.position_seconds > 0)
 			  )
 			ORDER BY e2.season_number, e2.episode_number
 			LIMIT 1

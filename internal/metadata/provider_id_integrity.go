@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 const providerIDRepairDefaultBatchSize = 250
@@ -434,6 +436,9 @@ func canonicalizeProviderIDDuplicate(
 	if _, err := tx.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, source.ContentID); err != nil {
 		return "", fmt.Errorf("delete duplicate media item %s: %w", source.ContentID, err)
 	}
+	if err := catalog.EnqueueSearchIndexRename(ctx, tx, source.ContentID, canonical.ContentID); err != nil {
+		return "", fmt.Errorf("enqueue catalog search provider-id canonicalization %s -> %s: %w", source.ContentID, canonical.ContentID, err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
 	}
@@ -508,6 +513,9 @@ func canonicalizeProviderIDDuplicateInto(
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, sourceID); err != nil {
 		return "", fmt.Errorf("delete duplicate media item %s: %w", sourceID, err)
+	}
+	if err := catalog.EnqueueSearchIndexRename(ctx, tx, sourceID, canonicalID); err != nil {
+		return "", fmt.Errorf("enqueue catalog search provider-id canonicalization %s -> %s: %w", sourceID, canonicalID, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", fmt.Errorf("commit provider-id canonicalization: %w", err)
@@ -868,8 +876,8 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 	{"delete source stale media ids", `DELETE FROM stale_media_ids WHERE content_id = $1`},
 	{"move watch provider history exports", `UPDATE watch_provider_history_exports SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
 	{"move watch provider scrobble sessions", `UPDATE watch_provider_scrobble_sessions SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
-	{"merge watch provider favorites by provider key", `
-			UPDATE watch_provider_favorite_items dest
+	{"merge watch provider list items by provider key", `
+			UPDATE watch_provider_list_items dest
 			SET remote_present = dest.remote_present OR src.remote_present,
 			    local_present = dest.local_present OR src.local_present,
 			    last_seen_remote_at = GREATEST(dest.last_seen_remote_at, src.last_seen_remote_at),
@@ -877,14 +885,15 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			    last_exported_at = GREATEST(dest.last_exported_at, src.last_exported_at),
 			    last_error = COALESCE(NULLIF(dest.last_error, ''), src.last_error),
 			    updated_at = NOW()
-			FROM watch_provider_favorite_items src
+			FROM watch_provider_list_items src
 			WHERE src.media_item_id = $1
 			  AND dest.media_item_id = $2
 			  AND src.connection_id = dest.connection_id
+			  AND src.list_kind = dest.list_kind
 			  AND src.provider_item_key <> ''
 			  AND src.provider_item_key = dest.provider_item_key`},
-	{"merge watch provider favorites by connection", `
-			UPDATE watch_provider_favorite_items dest
+	{"merge watch provider list items by connection", `
+			UPDATE watch_provider_list_items dest
 			SET provider_item_key = CASE
 			        WHEN dest.provider_item_key = '' THEN src.provider_item_key
 			        ELSE dest.provider_item_key
@@ -899,18 +908,20 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			    last_exported_at = GREATEST(dest.last_exported_at, src.last_exported_at),
 			    last_error = COALESCE(NULLIF(dest.last_error, ''), src.last_error),
 			    updated_at = NOW()
-			FROM watch_provider_favorite_items src
-			WHERE src.media_item_id = $1
-			  AND dest.media_item_id = $2
-			  AND src.connection_id = dest.connection_id`},
-	{"delete duplicate watch provider favorites", `
-			DELETE FROM watch_provider_favorite_items src
-			USING watch_provider_favorite_items dest
+			FROM watch_provider_list_items src
 			WHERE src.media_item_id = $1
 			  AND dest.media_item_id = $2
 			  AND src.connection_id = dest.connection_id
+			  AND src.list_kind = dest.list_kind`},
+	{"delete duplicate watch provider list items", `
+			DELETE FROM watch_provider_list_items src
+			USING watch_provider_list_items dest
+			WHERE src.media_item_id = $1
+			  AND dest.media_item_id = $2
+			  AND src.connection_id = dest.connection_id
+			  AND src.list_kind = dest.list_kind
 			  AND (src.provider_item_key = dest.provider_item_key OR dest.media_item_id = $2)`},
-	{"move remaining watch provider favorites", `UPDATE watch_provider_favorite_items SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
+	{"move remaining watch provider list items", `UPDATE watch_provider_list_items SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},
 }
 
 func canonicalizeMediaItemReferencesTx(ctx context.Context, tx pgx.Tx, sourceID, canonicalID string) error {

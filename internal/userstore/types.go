@@ -200,6 +200,7 @@ type Collection struct {
 	LastSyncAt                 *time.Time
 	LastSyncStatus             string
 	LastSyncMessage            string
+	DisplayQueryDefinition     string
 	ItemCount                  int
 	IncludeInServerCollections bool
 	PosterURL                  string
@@ -246,6 +247,7 @@ type CreateCollectionInput struct {
 	SourceConfig               string
 	SyncSchedule               *string
 	NextSyncAt                 *time.Time
+	DisplayQueryDefinition     string
 	IncludeInServerCollections bool
 	PosterURL                  string
 }
@@ -265,6 +267,7 @@ type UpdateCollectionInput struct {
 	ClearSyncSchedule          bool
 	NextSyncAt                 *time.Time
 	ClearNextSyncAt            bool
+	DisplayQueryDefinition     *string
 	IncludeInServerCollections *bool
 	PosterURL                  *string
 	PosterThumbhash            *string

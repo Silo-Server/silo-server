@@ -126,10 +126,14 @@ func ParseCatalogRequest(values url.Values) (CatalogRequest, error) {
 		if req.CollectionID == "" {
 			return CatalogRequest{}, fmt.Errorf("collection_id is required")
 		}
-		if hasCatalogOverlayParams(values, false) {
-			return CatalogRequest{}, fmt.Errorf("source %q does not allow overlay params", req.Source)
+		overlay, err := parseCatalogOverlay(values)
+		if err != nil {
+			return CatalogRequest{}, err
 		}
-		req.UseSourceOrder = true
+		req.NamePrefix = overlay.namePrefix
+		req.SearchQuery = overlay.searchQuery
+		req.Query = overlay.query
+		req.UseSourceOrder = !overlay.hasExplicitSort
 	default:
 		return CatalogRequest{}, fmt.Errorf("unsupported catalog source %q", req.Source)
 	}

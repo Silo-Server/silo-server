@@ -114,12 +114,14 @@ type mdblistEntry struct {
 }
 
 func (s *Service) syncMDBList(ctx context.Context, store userstore.UserStore, collection *userstore.Collection, cfg SourceConfig, startedAt time.Time) (*SyncResult, *userstore.Collection, error) {
-	url := strings.TrimSpace(cfg.URL)
-	if url == "" {
+	urls := collectionutil.MDBListURLCandidates(cfg.URL, collection.SourceURL)
+	if len(urls) == 0 {
 		return nil, nil, fmt.Errorf("mdblist sync: url is required")
 	}
 
-	entries, err := s.fetchMDBListEntries(ctx, url)
+	entries, err := collectionutil.FetchMDBListWithFallback(urls, func(url string) ([]mdblistEntry, error) {
+		return s.fetchMDBListEntries(ctx, url)
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -301,7 +303,7 @@ func limitCollectionItems(items []userstore.CollectionItemReplacement, limit *in
 }
 
 func (s *Service) fetchMDBListEntries(ctx context.Context, url string) ([]mdblistEntry, error) {
-	url = NormalizeMDBListURL(url)
+	url = collectionutil.NormalizeMDBListURL(url)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating mdblist request: %w", err)

@@ -11,7 +11,7 @@ import type { QuerySortRelevanceScope } from "@/lib/querySortOptions";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
 
 import ActiveFilterBadges from "./ActiveFilterBadges";
-import CatalogFilterBar from "./CatalogFilterBar";
+import CatalogFilterBar, { CATALOG_SOURCE_ORDER_SORT_FIELD } from "./CatalogFilterBar";
 import CatalogFilterSheet from "./CatalogFilterSheet";
 import { countActiveFilters, getActiveFilterBadges } from "./catalogFilterBadges";
 
@@ -45,13 +45,16 @@ export default function CatalogFiltersPanel({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<"guided" | "advanced">("guided");
 
-  const isLocked =
-    state.source === "section" ||
-    state.source === "library_collection" ||
-    state.source === "user_collection";
+  const isLocked = state.source === "section";
+  const isCollectionSource =
+    state.source === "library_collection" || state.source === "user_collection";
+  const usesSourceOrder = isCollectionSource && state.uses_source_order;
 
   const qd = state.query_definition ?? createEmptyQueryDefinition();
   const guidedState = useMemo(() => queryDefinitionToGuidedState(qd), [qd]);
+  const toolbarGuidedState = usesSourceOrder
+    ? { ...guidedState, sortField: CATALOG_SOURCE_ORDER_SORT_FIELD }
+    : guidedState;
   const isAudiobookLibrary =
     libraryType === "audiobook" ||
     libraryType === "audiobooks" ||
@@ -62,7 +65,7 @@ export default function CatalogFiltersPanel({
   );
   const activeCount = useMemo(() => countActiveFilters(guidedState), [guidedState]);
 
-  // Locked sources don't support filtering
+  // Section surfaces are generated blocks and do not expose an overlay editor.
   if (isLocked) {
     return (
       <section className="bg-card space-y-2 rounded-lg border p-4">
@@ -76,15 +79,24 @@ export default function CatalogFiltersPanel({
     libraries ?? state.query_definition.library_ids.map((id) => ({ id, name: `Library ${id}` }));
 
   function update(patch: Partial<GuidedFormState>) {
-    const next = { ...guidedState, ...patch };
-    const nextQd = guidedStateToQueryDefinition(next, qd);
-    onStateChange({ ...state, query_definition: nextQd });
+    const next = { ...toolbarGuidedState, ...patch };
+    const nextUsesSourceOrder =
+      isCollectionSource && next.sortField === CATALOG_SOURCE_ORDER_SORT_FIELD;
+    const nextForQuery = nextUsesSourceOrder
+      ? { ...next, sortField: guidedState.sortField, sortOrder: guidedState.sortOrder }
+      : next;
+    const nextQd = guidedStateToQueryDefinition(nextForQuery, qd);
+    onStateChange({
+      ...state,
+      uses_source_order: nextUsesSourceOrder,
+      query_definition: nextQd,
+    });
   }
 
   return (
     <div className="space-y-3">
       <CatalogFilterBar
-        state={guidedState}
+        state={toolbarGuidedState}
         onUpdate={update}
         activeFilterCount={activeCount}
         onOpenFilters={() => setSheetOpen(true)}
@@ -93,6 +105,8 @@ export default function CatalogFiltersPanel({
         sortRelevanceScope={sortRelevanceScope}
         resultCountLabel={resultCountLabel}
         resultCountLoading={resultCountLoading}
+        sourceOrderLabel={isCollectionSource ? "Collection Order" : undefined}
+        allowEpisodeMediaScope={!isCollectionSource}
       />
 
       <ActiveFilterBadges badges={badges} onClear={update} />

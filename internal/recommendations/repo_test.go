@@ -1,8 +1,11 @@
 package recommendations
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestTasteSeedCandidateQueryOrdersByReliableColdStartSignals(t *testing.T) {
@@ -144,6 +147,129 @@ func TestTasteProfileRefreshSubjectsQueryIncludesEbookReaderProgress(t *testing.
 		"UNION",
 		"SELECT DISTINCT user_id, profile_id FROM ebook_reader_progress",
 	)
+}
+
+func TestBuildItemsNeedingEmbeddingSQLIsCheap(t *testing.T) {
+	query := buildItemsNeedingEmbeddingSQL()
+
+	// The whole point of the cheap pass is that it never pays the per-row
+	// item_people LATERAL joins that the text-staleness CTE needs. If either of
+	// these ever reappears here, Pass 1 has stopped being cheap.
+	if strings.Contains(query, "item_people") {
+		t.Fatalf("cheap embedding query must not reference item_people: %s", query)
+	}
+	if strings.Contains(query, "LATERAL") {
+		t.Fatalf("cheap embedding query must not use LATERAL joins: %s", query)
+	}
+
+	normalized := strings.Join(strings.Fields(query), " ")
+	assertQueryTermsInOrder(t, normalized,
+		"LEFT JOIN media_item_embeddings e ON e.media_item_id = mi.content_id",
+		"e.media_item_id IS NULL OR e.model != $1",
+		"$2 = '' OR mi.content_id > $2",
+		"ORDER BY mi.content_id",
+		"LIMIT $3",
+	)
+}
+
+func TestItemsNeedingEmbeddingMissingAndModelStaleOnly(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := context.Background()
+
+	const (
+		prefix       = "t7cheap-"
+		currentModel = "model-current"
+		oldModel     = "model-old"
+	)
+	cleanupRecoMediaItems(t, pool, prefix)
+
+	missingID := prefix + "1-missing"
+	modelStaleID := prefix + "2-modelstale"
+	textStaleID := prefix + "3-textstale"
+
+	// (i) matched movie, no embedding row at all -> cheap candidate.
+	seedRecoMediaItem(t, pool, missingID, "movie", "matched")
+	// (ii) embedding exists but under an OLD model -> cheap candidate.
+	seedRecoMediaItem(t, pool, modelStaleID, "movie", "matched")
+	seedRecoEmbedding(t, pool, modelStaleID, oldModel, modelStaleID)
+	// (iii) embedding under the CURRENT model. The cheap query only looks at
+	// model identity, so this row must NOT appear even though its cast changed
+	// (text-staleness is Pass 2's job, detected by the expensive CTE).
+	seedRecoMediaItem(t, pool, textStaleID, "movie", "matched")
+	seedRecoEmbedding(t, pool, textStaleID, currentModel, "stale canonical text")
+
+	repo := NewRepo(pool)
+
+	got, err := repo.ItemsNeedingEmbedding(ctx, currentModel, "", 100)
+	if err != nil {
+		t.Fatalf("ItemsNeedingEmbedding: %v", err)
+	}
+	gotSet := make(map[string]bool, len(got))
+	for _, id := range got {
+		gotSet[id] = true
+	}
+	if !gotSet[missingID] {
+		t.Errorf("missing-embedding item %q should be a cheap candidate; got %v", missingID, got)
+	}
+	if !gotSet[modelStaleID] {
+		t.Errorf("model-stale item %q should be a cheap candidate; got %v", modelStaleID, got)
+	}
+	if gotSet[textStaleID] {
+		t.Errorf("text-stale-only item %q must NOT be a cheap candidate; got %v", textStaleID, got)
+	}
+
+	// Results are ordered by content_id, so paging past the first id must skip
+	// it and still surface the rest. This is what lets EmbedAll advance its
+	// cursor over a failed/skipped item without re-fetching it forever.
+	if len(got) < 2 {
+		t.Fatalf("expected at least 2 cheap candidates to exercise the cursor, got %v", got)
+	}
+	first := got[0]
+	after, err := repo.ItemsNeedingEmbedding(ctx, currentModel, first, 100)
+	if err != nil {
+		t.Fatalf("ItemsNeedingEmbedding(afterID): %v", err)
+	}
+	for _, id := range after {
+		if id == first {
+			t.Fatalf("cursor afterID=%q still returned %q", first, first)
+		}
+		if id <= first {
+			t.Fatalf("cursor returned id %q <= afterID %q; ordering broken", id, first)
+		}
+	}
+}
+
+// seedRecoMediaItem inserts a minimal embed-eligible media item whose title is
+// its content_id. Delegates to seedRecoMediaItemTitled so both the cheap-query
+// and EmbedAll tests seed rows that survive ItemRepository.GetByIDs.
+func seedRecoMediaItem(t *testing.T, pool *pgxpool.Pool, contentID, mediaType, status string) {
+	t.Helper()
+	seedRecoMediaItemTitled(t, pool, contentID, mediaType, status, contentID)
+}
+
+// seedRecoEmbedding inserts a zero-vector embedding row with an explicit model
+// and canonical_text. The vector width matches the migrated column (3072).
+func seedRecoEmbedding(t *testing.T, pool *pgxpool.Pool, contentID, model, canonicalText string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
+		VALUES (
+			$1,
+			(SELECT array_agg(0.0::real) FROM generate_series(1, 3072))::vector,
+			$2,
+			$3
+		)
+	`, contentID, model, canonicalText); err != nil {
+		t.Fatalf("seed embedding %s: %v", contentID, err)
+	}
+}
+
+func cleanupRecoMediaItems(t *testing.T, pool *pgxpool.Pool, prefix string) {
+	t.Helper()
+	t.Cleanup(func() {
+		// media_item_embeddings and item_people rows cascade on media_items delete.
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id LIKE $1`, prefix+"%")
+	})
 }
 
 func assertQueryTermsInOrder(t *testing.T, query string, terms ...string) {

@@ -31,14 +31,15 @@ func newDirectUserDataService(
 	resumeFilter *catalog.ContinueWatchingProgressFilter,
 	staler profileStaler,
 	requester profileRefreshRequester,
+	completionObserver watchstate.CompletionObserver,
 ) *directUserDataService {
 	return &directUserDataService{
 		storeProvider: storeProvider,
 		itemRepo:      itemRepo,
 		detailSvc:     detailSvc,
-		watchState: watchstate.NewService(storeProvider).WithStableIdentityResolver(
-			watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo),
-		),
+		watchState: watchstate.NewService(storeProvider).
+			WithStableIdentityResolver(watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)).
+			WithCompletionObserver(completionObserver),
 		resumeFilter:            resumeFilter,
 		profileStaler:           staler,
 		profileRefreshRequester: requester,
@@ -169,6 +170,24 @@ func (s *directUserDataService) ListProgress(ctx context.Context, session *Sessi
 	entries, err := store.ListProgress(ctx, session.ProfileID, status, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list progress: %w", err)
+	}
+
+	result := make([]upstreamProgress, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, toUpstreamProgress(entry))
+	}
+	return result, nil
+}
+
+func (s *directUserDataService) ListProgressFiltered(ctx context.Context, session *Session, status string, types []string, libraryID *int, limit, offset int) ([]upstreamProgress, error) {
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+
+	entries, err := store.ListProgressFiltered(ctx, session.ProfileID, status, types, libraryID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list filtered progress: %w", err)
 	}
 
 	result := make([]upstreamProgress, 0, len(entries))

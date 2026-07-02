@@ -124,6 +124,157 @@ func (r *BrowseRepository) browse(ctx context.Context, filters BrowseFilters, in
 	}, nil
 }
 
+// BrowseRecentlyAddedAcrossLibraries serves a recently_added browse spanning
+// multiple libraries by running the proven single-library index path once per
+// library and merging the already-sorted results in memory. Each per-library
+// query filters on exactly one media_folder_id, so it takes the
+// singleLibraryNoDedup fast path and walks idx_item_libraries_folder_seen_content
+// as a top-N index scan (~1ms). N small walks replace one multi-library
+// MIN(first_seen_at) + GROUP BY scan of the whole catalog (HashAggregate over
+// ~180k groups + top-N heapsort, ~2s with a wide projection and cold cache).
+//
+// It only serves offset 0 — the /Items/Latest hot path. A per-library top-Limit
+// fetch cannot satisfy a deep global offset, so callers must route offset>0
+// pages to BrowsePage; passing a positive Offset here is an error rather than a
+// silently-wrong page.
+//
+// Cross-library dedup is performed app-side: a content_id present in more than
+// one library keeps the EARLIEST first_seen_at, preserving the
+// MIN(first_seen_at) "added at" semantics of the multi-library GROUP BY path.
+// The reported Total is a lower bound (exact when the page is the whole result),
+// chosen so HasMore remains correct for offset 0.
+//
+// Known limitation vs the exact GROUP BY query, bounded to content_ids that
+// live in 2+ libraries: such a dup is only deduped against the slices actually
+// fetched, so if its true MIN(first_seen_at) library does not rank it in that
+// library's top-Limit, the merge sees only a later first_seen_at and may rank it
+// too recent (or drop it if it is outside top-Limit in every library holding it).
+// This is acceptable for an approximate "recently added" rail; do not reuse this
+// path where exact MIN ranking across libraries is required.
+func (r *BrowseRepository) BrowseRecentlyAddedAcrossLibraries(ctx context.Context, base BrowseFilters, libraryIDs []int) (*BrowseResult, error) {
+	if base.Offset > 0 {
+		return nil, fmt.Errorf("browse recently added across libraries: offset %d unsupported, use BrowsePage", base.Offset)
+	}
+	limit := base.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	// Each per-library subquery is clamped to MaxLimit by BrowsePage, but the
+	// merged page is trimmed to this `limit`; clamp it too so the final result
+	// honors the same BrowseFilters.MaxLimit contract as the single-library path.
+	if base.MaxLimit > 0 && limit > base.MaxLimit {
+		limit = base.MaxLimit
+	}
+
+	perLibrary := make([][]*models.MediaItem, 0, len(libraryIDs))
+	anyLibraryHasMore := false
+	for _, id := range libraryIDs {
+		sub := base
+		sub.LibraryID = id
+		// Clearing the multi-library scopes is what selects the
+		// singleLibraryNoDedup fast path in buildBrowsePlan.
+		sub.LibraryIDs = nil
+		sub.DisabledLibraryIDs = nil
+		sub.Offset = 0
+		sub.Limit = limit
+		res, err := r.BrowsePage(ctx, sub, false)
+		if err != nil {
+			return nil, fmt.Errorf("browse recently added in library %d: %w", id, err)
+		}
+		if res == nil {
+			continue
+		}
+		perLibrary = append(perLibrary, res.Items)
+		if res.HasMore {
+			anyLibraryHasMore = true
+		}
+	}
+
+	merged := mergeRecentlyAddedItems(perLibrary)
+	// More results exist when the merged set already overflows the page, or when
+	// any single library still has rows behind its own top-Limit window (which
+	// implies that library alone holds more than `limit` items).
+	hasMore := anyLibraryHasMore || len(merged) > limit
+	total := len(merged)
+	if hasMore && total <= limit {
+		// A library has rows beyond the page but the merged set fit exactly;
+		// nudge the total so offset-0 HasMore stays true for total-driven callers.
+		total = limit + 1
+	}
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+
+	return &BrowseResult{Items: merged, Total: total, HasMore: hasMore}, nil
+}
+
+// mergeRecentlyAddedItems merges per-library recently_added result slices — each
+// already sorted by first_seen_at DESC, content_id ASC — into a single globally
+// ordered slice. Duplicate content_ids are collapsed to one entry whose AddedAt
+// is the EARLIEST across libraries, mirroring MIN(first_seen_at) from the
+// multi-library GROUP BY path. The result is sorted by AddedAt DESC, content_id
+// ASC and is NOT truncated; callers trim to the page size and derive HasMore.
+func mergeRecentlyAddedItems(perLibrary [][]*models.MediaItem) []*models.MediaItem {
+	byID := make(map[string]*models.MediaItem)
+	order := make([]*models.MediaItem, 0)
+	for _, items := range perLibrary {
+		for _, it := range items {
+			if it == nil {
+				continue
+			}
+			existing, ok := byID[it.ContentID]
+			if !ok {
+				byID[it.ContentID] = it
+				order = append(order, it)
+				continue
+			}
+			// Keep the earliest first_seen_at to preserve MIN semantics.
+			if addedAtBefore(it.AddedAt, existing.AddedAt) {
+				existing.AddedAt = it.AddedAt
+			}
+		}
+	}
+	// Re-sort after dedup because collapsing to MIN(first_seen_at) can move an
+	// item earlier than its position in any single per-library slice.
+	slices.SortStableFunc(order, compareRecentlyAdded)
+	return order
+}
+
+// compareRecentlyAdded orders items by AddedAt DESC, then content_id ASC,
+// matching "ORDER BY mil.first_seen_at DESC, mi.content_id ASC". A nil AddedAt
+// sorts last (treated as the oldest).
+func compareRecentlyAdded(a, b *models.MediaItem) int {
+	at, bt := a.AddedAt, b.AddedAt
+	switch {
+	case at == nil && bt == nil:
+		// fall through to the content_id tie-break
+	case at == nil:
+		return 1
+	case bt == nil:
+		return -1
+	default:
+		if at.After(*bt) {
+			return -1
+		}
+		if at.Before(*bt) {
+			return 1
+		}
+	}
+	return strings.Compare(a.ContentID, b.ContentID)
+}
+
+// addedAtBefore reports whether a is strictly earlier than b, treating nil as
+// the oldest possible value so a real timestamp always wins the MIN.
+func addedAtBefore(a, b *time.Time) bool {
+	if a == nil {
+		return b != nil
+	}
+	if b == nil {
+		return false
+	}
+	return a.Before(*b)
+}
+
 // browseQueryPlan captures the rendered SQL fragments and bound args for a
 // browse data query. It is produced by buildBrowsePlan and consumed both by
 // browse() (to execute) and by tests (to inspect the emitted SQL without a

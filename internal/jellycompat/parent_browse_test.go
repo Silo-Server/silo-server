@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -32,8 +33,20 @@ func episodeBySeasonKey(seriesID string, seasonNum int) string {
 	return fmt.Sprintf("%s|%d", seriesID, seasonNum)
 }
 
-func (f *fakeSeasonEpisodeRepo) GetByIDs(context.Context, []string) ([]*models.Episode, error) {
-	return nil, nil
+func (f *fakeSeasonEpisodeRepo) GetByIDs(_ context.Context, contentIDs []string) ([]*models.Episode, error) {
+	want := make(map[string]bool, len(contentIDs))
+	for _, id := range contentIDs {
+		want[id] = true
+	}
+	var out []*models.Episode
+	for _, eps := range f.bySeason {
+		for _, ep := range eps {
+			if ep != nil && want[ep.ContentID] {
+				out = append(out, ep)
+			}
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeSeasonEpisodeRepo) HasFilesByIDs(context.Context, []string) (map[string]bool, error) {
@@ -52,6 +65,38 @@ func (f *fakeSeasonEpisodeRepo) ListBySeries(_ context.Context, seriesID string)
 		}
 	}
 	return out, nil
+}
+
+// ListAdjacentInSeries returns the target episode plus its immediate
+// previous/next neighbors across the whole series, mirroring the repo's
+// natural (season, episode) ordering.
+func (f *fakeSeasonEpisodeRepo) ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error) {
+	all, _ := f.ListBySeries(ctx, seriesID)
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].SeasonNumber == all[j].SeasonNumber {
+			return all[i].EpisodeNumber < all[j].EpisodeNumber
+		}
+		return all[i].SeasonNumber < all[j].SeasonNumber
+	})
+	targetIdx := -1
+	for i, ep := range all {
+		if ep.SeasonNumber == seasonNumber && ep.EpisodeNumber == episodeNumber {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return nil, nil
+	}
+	start := targetIdx - 1
+	if start < 0 {
+		start = 0
+	}
+	end := targetIdx + 2
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[start:end], nil
 }
 
 // TestHandleItems_SeriesParentWithoutTypeReturnsSeasons pins the Void fix: a

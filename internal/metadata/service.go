@@ -4385,14 +4385,28 @@ func (s *MetadataService) deleteCreatedSkeleton(ctx context.Context, contentID s
 	if s.dbPool == nil {
 		return nil
 	}
-	_, err := s.dbPool.Exec(ctx, `
+	tx, err := s.dbPool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
 		DELETE FROM media_items
 		WHERE content_id = $1
 		  AND NOT EXISTS (
 			SELECT 1 FROM media_item_libraries mil
 			WHERE mil.content_id = media_items.content_id
 		  )`, contentID)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		if err := catalog.EnqueueSearchIndexDelete(ctx, tx, contentID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // claimRoot records a canonical root path claim for dedup. Failures are logged
@@ -4782,6 +4796,10 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 		if _, err := tx.Exec(ctx, step.sql, step.args...); err != nil {
 			return fmt.Errorf("%s: %w", step.name, err)
 		}
+	}
+
+	if err := catalog.EnqueueSearchIndexRename(ctx, tx, fromContentID, toContentID); err != nil {
+		return fmt.Errorf("enqueue catalog search skeleton rebind %s -> %s: %w", fromContentID, toContentID, err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

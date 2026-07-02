@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -99,6 +101,7 @@ type AdminHandler struct {
 	OnUserSessionsRevoked        func(ctx context.Context, userID int)
 	OnServerSettingUpdated       func(ctx context.Context, key, value string)
 	RestartStatus                *ServerRestartStatusTracker
+	CatalogSearchStatus          catalog.CatalogSearchStatusProvider
 }
 
 // NewAdminHandler creates a new AdminHandler backed by the given
@@ -2138,6 +2141,109 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 				"subtitle_ai.transcribe_quota_period must be day, week, or month")
 			return
 		}
+	case notifications.SettingApplePushDeliveryEnabled:
+		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "notifications.apple_push_delivery_enabled must be true or false")
+			return
+		}
+		req.Value = strconv.FormatBool(enabled)
+	case notifications.SettingPushRelayURL, notifications.SettingPushRelayDeploymentID, notifications.SettingPushRelayAPIKey:
+		// The registration flow persists the relay URL, deployment id, and API
+		// key together; a direct write to any of them desyncs the stored URL
+		// from the credentials the relay minted for it (and feeds an arbitrary
+		// id into the next rotation request).
+		writeError(w, http.StatusBadRequest, "bad_request",
+			key+" is managed by the push relay registration flow; use POST /admin/notifications/push/relay/register")
+		return
+	case catalog.SearchSettingProvider:
+		switch strings.TrimSpace(strings.ToLower(req.Value)) {
+		case catalog.SearchProviderPostgres, catalog.SearchProviderMeilisearch:
+			req.Value = strings.TrimSpace(strings.ToLower(req.Value))
+		default:
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.provider must be postgres or meilisearch")
+			return
+		}
+	case catalog.SearchSettingMeilisearchURL:
+		value := strings.TrimSpace(req.Value)
+		if value != "" {
+			parsed, err := url.Parse(value)
+			if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+				writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.url must include scheme and host")
+				return
+			}
+		}
+		req.Value = value
+	case catalog.SearchSettingMeilisearchIndex:
+		req.Value = strings.TrimSpace(req.Value)
+		if req.Value == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.index is required")
+			return
+		}
+	case catalog.SearchSettingMeilisearchTimeoutMS:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.timeout_ms must be an integer greater than 0")
+			return
+		}
+		req.Value = strconv.Itoa(n)
+	case catalog.SearchSettingMeilisearchMatchingStrategy:
+		switch strings.TrimSpace(strings.ToLower(req.Value)) {
+		case "last", "all":
+			req.Value = strings.TrimSpace(strings.ToLower(req.Value))
+		default:
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.matching_strategy must be last or all")
+			return
+		}
+	case catalog.SearchSettingMeilisearchSyncBatchSize:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n < 1 || n > catalog.MaxMeilisearchSyncBatchSize {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.sync_batch_size must be an integer between 1 and 10000")
+			return
+		}
+		req.Value = strconv.Itoa(n)
+	case catalog.SearchSettingMeilisearchRebuildBatchSize:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n < 1 || n > catalog.MaxMeilisearchRebuildBatchSize {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.rebuild_batch_size must be an integer between 1 and 25000")
+			return
+		}
+		req.Value = strconv.Itoa(n)
+	case catalog.SearchSettingMeilisearchRebuildQueue:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n < 1 || n > catalog.MaxMeilisearchRebuildQueueDepth {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.rebuild_task_queue_depth must be an integer between 1 and 16")
+			return
+		}
+		req.Value = strconv.Itoa(n)
+	case catalog.SearchSettingMeilisearchIndexTypes:
+		itemTypes, err := catalog.NormalizeCatalogSearchIndexTypesValue(req.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		req.Value = catalog.FormatCatalogSearchIndexTypesValue(itemTypes)
+	case catalog.SearchSettingMeilisearchSemanticEnabled:
+		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.semantic_enabled must be true or false")
+			return
+		}
+		req.Value = strconv.FormatBool(enabled)
+	case catalog.SearchSettingMeilisearchSemanticRatio:
+		ratio, err := strconv.ParseFloat(strings.TrimSpace(req.Value), 64)
+		if err != nil || math.IsNaN(ratio) || ratio < 0 || ratio > 1 {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.semantic_ratio must be a number between 0 and 1")
+			return
+		}
+		req.Value = strconv.FormatFloat(ratio, 'f', -1, 64)
+	case catalog.SearchSettingMeilisearchEmbedder:
+		embedder, err := catalog.NormalizeCatalogSearchEmbedderName(req.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		req.Value = embedder
 	}
 
 	if err := h.SettingsRepo.Set(r.Context(), key, req.Value); err != nil {

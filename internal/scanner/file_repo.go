@@ -59,6 +59,10 @@ const fileColumns = `id, content_id, episode_id, season_number, episode_number,
 	multi_episode_start, multi_episode_end,
 	probe_source, probe_updated_at, match_attempted_at, missing_since, created_at, updated_at`
 
+const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
+	codec_video, codec_audio, resolution, audio_channels, hdr, container,
+	video_tracks, audio_tracks, subtitle_tracks, external_subtitles, edition_key`
+
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
 const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.season_number, mf.episode_number,
@@ -685,6 +689,86 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		return nil, fmt.Errorf("iterating media file rows: %w", err)
 	}
 	return files, nil
+}
+
+func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
+	var files []*models.MediaFile
+	for rows.Next() {
+		var f models.MediaFile
+		var contentID, episodeID, filePath, codecVideo, codecAudio, resolution, container, editionKey *string
+		var audioChannels *int
+		var hdr *bool
+		var videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON []byte
+
+		if err := rows.Scan(
+			&contentID,
+			&episodeID,
+			&f.MediaFolderID,
+			&filePath,
+			&codecVideo,
+			&codecAudio,
+			&resolution,
+			&audioChannels,
+			&hdr,
+			&container,
+			&videoTracksJSON,
+			&audioTracksJSON,
+			&subtitleTracksJSON,
+			&externalSubtitlesJSON,
+			&editionKey,
+		); err != nil {
+			return nil, fmt.Errorf("scanning overlay media file: %w", err)
+		}
+
+		f.ContentID = stringPtrValue(contentID)
+		f.EpisodeID = stringPtrValue(episodeID)
+		f.FilePath = stringPtrValue(filePath)
+		f.CodecVideo = stringPtrValue(codecVideo)
+		f.CodecAudio = stringPtrValue(codecAudio)
+		f.Resolution = stringPtrValue(resolution)
+		f.Container = stringPtrValue(container)
+		f.EditionKey = stringPtrValue(editionKey)
+		if audioChannels != nil {
+			f.AudioChannels = *audioChannels
+		}
+		if hdr != nil {
+			f.HDR = *hdr
+		}
+
+		if len(videoTracksJSON) > 0 {
+			if err := json.Unmarshal(videoTracksJSON, &f.VideoTracks); err != nil {
+				return nil, fmt.Errorf("unmarshaling overlay video_tracks: %w", err)
+			}
+		}
+		if len(audioTracksJSON) > 0 {
+			if err := json.Unmarshal(audioTracksJSON, &f.AudioTracks); err != nil {
+				return nil, fmt.Errorf("unmarshaling overlay audio_tracks: %w", err)
+			}
+		}
+		if len(subtitleTracksJSON) > 0 {
+			if err := json.Unmarshal(subtitleTracksJSON, &f.SubtitleTracks); err != nil {
+				return nil, fmt.Errorf("unmarshaling overlay subtitle_tracks: %w", err)
+			}
+		}
+		if len(externalSubtitlesJSON) > 0 {
+			if err := json.Unmarshal(externalSubtitlesJSON, &f.ExternalSubtitles); err != nil {
+				return nil, fmt.Errorf("unmarshaling overlay external_subtitles: %w", err)
+			}
+		}
+
+		files = append(files, &f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating overlay media file rows: %w", err)
+	}
+	return files, nil
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // serializeJSONB marshals a value to JSON bytes, returning nil for empty slices.
@@ -2615,6 +2699,36 @@ func (r *FileRepository) ListByContentIDs(ctx context.Context, contentIDs []stri
 	return grouped, nil
 }
 
+// ListOverlayFilesByContentIDs returns a lightweight media-file projection for
+// building overlay summaries, grouped by content ID.
+func (r *FileRepository) ListOverlayFilesByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error) {
+	grouped := make(map[string][]*models.MediaFile, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return grouped, nil
+	}
+
+	query := `SELECT ` + overlayFileColumns + ` FROM media_files
+		WHERE content_id = ANY($1) AND missing_since IS NULL
+		ORDER BY content_id ASC, id ASC`
+	rows, err := r.pool.Query(ctx, query, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying overlay files by content_ids: %w", err)
+	}
+	defer rows.Close()
+
+	files, err := scanOverlayMediaFiles(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		if file.ContentID == "" {
+			continue
+		}
+		grouped[file.ContentID] = append(grouped[file.ContentID], file)
+	}
+	return grouped, nil
+}
+
 // ListByEpisodeIDs returns media files grouped by episode ID for the given
 // episode IDs, excluding files that are marked missing.
 func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
@@ -2637,6 +2751,36 @@ func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []stri
 		return nil, err
 	}
 	for _, file := range files {
+		grouped[file.EpisodeID] = append(grouped[file.EpisodeID], file)
+	}
+	return grouped, nil
+}
+
+// ListOverlayFilesByEpisodeIDs returns a lightweight media-file projection for
+// building overlay summaries, grouped by episode ID.
+func (r *FileRepository) ListOverlayFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
+	if len(episodeIDs) == 0 {
+		return grouped, nil
+	}
+
+	query := `SELECT ` + overlayFileColumns + ` FROM media_files
+		WHERE episode_id = ANY($1) AND missing_since IS NULL
+		ORDER BY episode_id ASC, id ASC`
+	rows, err := r.pool.Query(ctx, query, episodeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying overlay files by episode_ids: %w", err)
+	}
+	defer rows.Close()
+
+	files, err := scanOverlayMediaFiles(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		if file.EpisodeID == "" {
+			continue
+		}
 		grouped[file.EpisodeID] = append(grouped[file.EpisodeID], file)
 	}
 	return grouped, nil

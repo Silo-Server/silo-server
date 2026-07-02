@@ -36,6 +36,7 @@ type playbackInfoRequest struct {
 	UserID               string          `json:"UserId"`
 	MediaSourceID        string          `json:"MediaSourceId"`
 	AudioStreamIndex     *compatIntValue `json:"AudioStreamIndex,omitempty"`
+	SubtitleStreamIndex  *compatIntValue `json:"SubtitleStreamIndex,omitempty"`
 	StartTimeTicks       int64           `json:"StartTimeTicks"`
 	EnableDirectPlay     *bool           `json:"EnableDirectPlay"`
 	EnableDirectStream   *bool           `json:"EnableDirectStream"`
@@ -423,11 +424,40 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		if req.MediaSourceID != "" && !mediaSourceIDsEqual(source.ID, req.MediaSourceID) {
 			continue
 		}
+
+		// Resolve the client's subtitle selection against both the
+		// embedded/external tracks and any downloaded subtitles before
+		// advertising the streams, so the chosen subtitle is marked default and
+		// starts with playback (mirrors the audio-selection plumbing).
+		var downloaded []subtitles.DownloadedSubtitle
+		downloadedKnown := true
+		if h.SubtitleRepo != nil {
+			var listErr error
+			downloaded, listErr = h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), source.Version.FileID)
+			if listErr != nil {
+				// Don't treat a lookup failure as "no downloaded subtitles": that
+				// would silently downgrade a valid downloaded selection to the
+				// media default. Resolution falls back to honoring the request.
+				downloaded = nil
+				downloadedKnown = false
+				slog.Warn("jellycompat downloaded subtitle lookup failed",
+					"file_id", source.Version.FileID,
+					"error", listErr,
+				)
+			}
+		}
+		var requestedSubtitleIndex *int
+		if req.SubtitleStreamIndex != nil {
+			requestedSubtitleIndex = intPtr(int(*req.SubtitleStreamIndex))
+		}
+		source.SelectedSubtitleStreamIndex = resolveSelectedSubtitleStreamIndex(source.Version, len(downloaded), downloadedKnown, requestedSubtitleIndex, source.DefaultSubtitleStreamIndex)
+
 		sources = append(sources, source)
 		dto := h.mediaSourceDTO(routeItemID, playSessionID, session.Token, source)
-		// Append downloaded subtitles to the media streams.
-		if h.SubtitleRepo != nil {
-			downloaded, _ := h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), source.Version.FileID)
+
+		// Append downloaded subtitles to the media streams, honoring the selection.
+		if len(downloaded) > 0 {
+			selectedSubtitleStreamIndex := effectiveCompatSubtitleStreamIndex(source)
 			baseIndex := nextDownloadedSubtitleIndex(source.Version)
 			for i, dl := range downloaded {
 				streamIndex := baseIndex + i
@@ -440,7 +470,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 					Language:               dl.Language,
 					DisplayTitle:           displayTitle,
 					Title:                  displayTitle,
-					IsDefault:              false,
+					IsDefault:              selectedSubtitleStreamIndex != nil && streamIndex == *selectedSubtitleStreamIndex,
 					IsExternal:             true,
 					IsForced:               false,
 					IsHearingImpaired:      dl.HearingImpaired,
@@ -523,7 +553,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	allowVideoCopy := boolDefault(req.AllowVideoStreamCopy, true)
 	allowAudioCopy := boolDefault(req.AllowAudioStreamCopy, true)
 
-	audioIndex := defaultAudioStreamIndex(version)
+	audioIndex := preferredAudioStreamIndex(version, profile)
 	subtitleIndex := defaultSubtitleStreamIndex(version)
 	selectedAudioIndex := audioIndex
 	if req.AudioStreamIndex != nil && isValidCompatAudioStreamIndex(version, int(*req.AudioStreamIndex)) {
@@ -596,8 +626,8 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 		MediaAttachments:                    []map[string]any{},
 		Bitrate:                             source.Version.Bitrate * 1000,
 		DefaultAudioStreamIndex:             selectedAudioStreamIndex,
-		DefaultSubtitleStreamIndex:          source.DefaultSubtitleStreamIndex,
-		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, compatToken, playSessionID),
+		DefaultSubtitleStreamIndex:          effectiveCompatSubtitleStreamIndex(source),
+		MediaStreams:                        buildMediaStreamsWithSelection(routeItemID, source.ID, source.Version, selectedAudioStreamIndex, source.SelectedSubtitleStreamIndex, compatToken, playSessionID),
 	}
 	if source.SupportsDirectPlay || source.SupportsDirectStream {
 		dto.DirectStreamURL = fmt.Sprintf(
@@ -621,10 +651,10 @@ func (h *PlaybackHandler) mediaSourceDTO(routeItemID, playSessionID, compatToken
 }
 
 func buildMediaStreams(routeItemID, mediaSourceID string, version catalog.FileVersion) []mediaStreamDTO {
-	return buildMediaStreamsWithSelection(routeItemID, mediaSourceID, version, nil, "", "")
+	return buildMediaStreamsWithSelection(routeItemID, mediaSourceID, version, nil, nil, "", "")
 }
 
-func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedAudioStreamIndex *int, compatToken, playSessionID string) []mediaStreamDTO {
+func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version catalog.FileVersion, selectedAudioStreamIndex, selectedSubtitleStreamIndex *int, compatToken, playSessionID string) []mediaStreamDTO {
 	streams := make([]mediaStreamDTO, 0, len(version.VideoTracks)+len(version.AudioTracks)+len(version.SubtitleTracks))
 	effectiveAudioStreamIndex := selectedAudioStreamIndex
 	if effectiveAudioStreamIndex != nil && !isValidCompatAudioStreamIndex(version, *effectiveAudioStreamIndex) {
@@ -686,7 +716,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			Codec:                  strings.ToLower(track.Codec),
 			Language:               track.Language,
 			TimeBase:               "1/1000",
-			DisplayTitle:           firstNonEmpty(track.Title, track.EmbeddedTitle, track.Language, track.Codec),
+			DisplayTitle:           audioTrackDisplayTitle(track),
 			Title:                  firstNonEmpty(track.Title, track.EmbeddedTitle),
 			IsDefault:              isDefault,
 			IsExternal:             false,
@@ -707,6 +737,13 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 		streamIndex := subtitleTrackIndex(version, track, index)
 		format := subtitleRouteFormat(track.Codec)
 		displayTitle := compatSubtitleDisplayTitle(track)
+		// When the client has made an explicit subtitle selection, only that
+		// stream is the default. A negative selection ("subtitles off") matches
+		// no stream, which correctly clears every embedded default.
+		isDefault := track.Default
+		if selectedSubtitleStreamIndex != nil {
+			isDefault = streamIndex == *selectedSubtitleStreamIndex
+		}
 		streams = append(streams, mediaStreamDTO{
 			Index:                  streamIndex,
 			Type:                   "Subtitle",
@@ -715,7 +752,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			TimeBase:               "1/1000",
 			DisplayTitle:           displayTitle,
 			Title:                  displayTitle,
-			IsDefault:              track.Default,
+			IsDefault:              isDefault,
 			IsExternal:             track.External,
 			IsForced:               track.Forced,
 			IsHearingImpaired:      track.HearingImpaired,
@@ -749,6 +786,120 @@ func defaultAudioStreamIndex(version catalog.FileVersion) *int {
 	}
 	value := len(version.VideoTracks)
 	return &value
+}
+
+// losslessPassthroughCodecs are audio codecs that require dedicated hardware
+// passthrough (AV receiver or decoder chip) and cannot be decoded by
+// software-only players like ExoPlayer on most Android TV devices.
+var losslessPassthroughCodecs = map[string]bool{
+	"truehd": true,
+	"mlp":    true,
+}
+
+// compatFallbackCodecs are broadly supported audio codecs suitable for
+// software decoding. Lower index = higher preference.
+var compatFallbackCodecRank = map[string]int{
+	"eac3":     1,
+	"ac3":      2,
+	"dts":      3,
+	"aac":      4,
+	"flac":     5,
+	"opus":     6,
+	"vorbis":   7,
+	"mp3":      8,
+	"pcm_s16le": 9,
+	"pcm_s24le": 10,
+}
+
+// preferredAudioStreamIndex returns the best audio stream index for the given
+// device profile. When the default audio track is a lossless passthrough codec
+// (TrueHD, MLP) and the profile does not explicitly list that codec as
+// supported, it selects the most compatible fallback track (same language
+// preferred). This prevents Android TV and similar clients from receiving a
+// TrueHD stream they cannot decode when an AC3/EAC3 fallback is present.
+func preferredAudioStreamIndex(version catalog.FileVersion, profile DeviceProfile) *int {
+	defaultIdx := defaultAudioStreamIndex(version)
+	if defaultIdx == nil {
+		return defaultIdx
+	}
+
+	defaultTrackIdx := *defaultIdx - len(version.VideoTracks)
+	if defaultTrackIdx < 0 || defaultTrackIdx >= len(version.AudioTracks) {
+		return defaultIdx
+	}
+	defaultTrack := version.AudioTracks[defaultTrackIdx]
+	if !losslessPassthroughCodecs[normalizeCompatToken(defaultTrack.Codec)] {
+		return defaultIdx // not a passthrough codec; keep default
+	}
+
+	// Check whether the profile explicitly lists this lossless codec as
+	// supported in any DirectPlayProfile. An empty AudioCodec field is a
+	// wildcard that many clients use to mean "try anything" — but for
+	// lossless passthrough codecs we cannot assume the device can actually
+	// decode them, so we do not treat wildcard as explicit support.
+	defaultCodec := normalizeCompatToken(defaultTrack.Codec)
+	for _, p := range profile.DirectPlayProfiles {
+		if !matchesVideoType(p.Type) {
+			continue
+		}
+		if strings.TrimSpace(p.AudioCodec) == "" {
+			continue // wildcard — not explicit support for lossless
+		}
+		for part := range strings.SplitSeq(p.AudioCodec, ",") {
+			if normalizeCompatToken(part) == defaultCodec {
+				return defaultIdx // profile explicitly supports this lossless codec
+			}
+		}
+	}
+
+	// Profile does not explicitly support this lossless codec. Find the best
+	// compatible fallback with the same language as the default track.
+	defaultLang := strings.ToLower(strings.TrimSpace(defaultTrack.Language))
+
+	bestIdx := -1
+	bestRank := 0
+
+	for i, track := range version.AudioTracks {
+		rank, ok := compatFallbackCodecRank[normalizeCompatToken(track.Codec)]
+		if !ok {
+			continue
+		}
+		lang := strings.ToLower(strings.TrimSpace(track.Language))
+		sameLang := lang == defaultLang
+		// Prefer same-language tracks; within each group prefer lower rank number.
+		if bestIdx == -1 {
+			bestIdx = i
+			bestRank = rank
+			if sameLang {
+				bestRank = -rank // negative signals same-language preference
+			}
+		} else {
+			currentSameLang := bestRank < 0
+			if sameLang && !currentSameLang {
+				// Upgrade from cross-language to same-language.
+				bestIdx = i
+				bestRank = -rank
+			} else if sameLang == currentSameLang {
+				// Same language group — pick lower rank (higher quality).
+				effectiveRank := rank
+				effectiveBest := bestRank
+				if sameLang {
+					effectiveRank = -rank
+					effectiveBest = bestRank // already negative
+				}
+				if effectiveRank < effectiveBest {
+					bestIdx = i
+					bestRank = effectiveRank
+				}
+			}
+		}
+	}
+
+	if bestIdx >= 0 {
+		idx := len(version.VideoTracks) + bestIdx
+		return &idx
+	}
+	return defaultIdx
 }
 
 func effectiveCompatAudioStreamIndex(source PlaybackMediaSource) *int {
@@ -824,6 +975,69 @@ func subtitleTrackStreamable(codec string, external bool) bool {
 	return external || !playback.NeedsBurnIn(codec)
 }
 
+// isValidCompatSubtitleStreamIndex reports whether streamIndex addresses a
+// deliverable subtitle: either a streamable embedded/external track (bitmap
+// subs that require burn-in are excluded, matching buildMediaStreams) or one of
+// the downloaded subtitles appended after the embedded streams.
+func isValidCompatSubtitleStreamIndex(version catalog.FileVersion, downloadedCount, streamIndex int) bool {
+	for index, track := range version.SubtitleTracks {
+		if !subtitleTrackStreamable(track.Codec, track.External) {
+			continue
+		}
+		if subtitleTrackIndex(version, track, index) == streamIndex {
+			return true
+		}
+	}
+	if downloadedCount > 0 {
+		base := nextDownloadedSubtitleIndex(version)
+		if streamIndex >= base && streamIndex < base+downloadedCount {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveSelectedSubtitleStreamIndex maps a client-requested subtitle stream
+// index onto the selection stored for the session. A nil request keeps the
+// media default; a negative request is preserved as an explicit "subtitles off"
+// (-1); a valid request is honored; an invalid request falls back to the media
+// default.
+//
+// downloadedKnown reports whether the downloaded-subtitle list was loaded
+// successfully. When it is false, an index that does not match an
+// embedded/external track is honored rather than downgraded, because it may be a
+// downloaded subtitle we could not enumerate — losing the user's choice on a
+// transient lookup failure is worse than echoing an index whose stream is
+// temporarily absent.
+func resolveSelectedSubtitleStreamIndex(version catalog.FileVersion, downloadedCount int, downloadedKnown bool, requested, mediaDefault *int) *int {
+	if requested == nil {
+		return mediaDefault
+	}
+	if *requested < 0 {
+		return intPtr(-1)
+	}
+	if isValidCompatSubtitleStreamIndex(version, downloadedCount, *requested) {
+		return intPtr(*requested)
+	}
+	if !downloadedKnown {
+		return intPtr(*requested)
+	}
+	return mediaDefault
+}
+
+// effectiveCompatSubtitleStreamIndex returns the subtitle stream index to
+// advertise as the default for a source: the explicit selection when present
+// (collapsing "subtitles off" to none), otherwise the media default.
+func effectiveCompatSubtitleStreamIndex(source PlaybackMediaSource) *int {
+	if source.SelectedSubtitleStreamIndex != nil {
+		if *source.SelectedSubtitleStreamIndex < 0 {
+			return nil
+		}
+		return intPtr(*source.SelectedSubtitleStreamIndex)
+	}
+	return source.DefaultSubtitleStreamIndex
+}
+
 func anyDefaultAudioTrack(tracks []models.AudioTrack) bool {
 	for _, track := range tracks {
 		if track.Default {
@@ -852,6 +1066,79 @@ func parseCompatFrameRate(raw string) float64 {
 		}
 	}
 	return 0
+}
+
+func audioTrackDisplayTitle(track models.AudioTrack) string {
+	lang := compatLanguageName(track.Language)
+	codec := audioCodecDisplayName(track.Codec)
+	channels := audioChannelsDisplayName(track.Channels)
+	title := strings.TrimSpace(codec + " " + channels)
+	if lang != "" {
+		title = lang + " - " + title
+	}
+	// Append embedded title only when it adds info beyond codec/channels (e.g. "Commentary").
+	embedded := strings.TrimSpace(firstNonEmpty(track.Title, track.EmbeddedTitle))
+	if !isGenericAudioLabel(embedded) {
+		title += " - " + embedded
+	}
+	return title
+}
+
+func audioCodecDisplayName(codec string) string {
+	switch normalizeCompatToken(codec) {
+	case "truehd":
+		return "TrueHD"
+	case "mlp":
+		return "MLP"
+	case "ac3":
+		return "AC3"
+	case "eac3":
+		return "EAC3"
+	case "dts":
+		return "DTS"
+	case "dtshd", "dtshd_ma":
+		return "DTS-HD MA"
+	case "aac":
+		return "AAC"
+	case "mp3":
+		return "MP3"
+	case "flac":
+		return "FLAC"
+	case "opus":
+		return "Opus"
+	case "vorbis":
+		return "Vorbis"
+	case "pcms16le", "pcms24le", "pcms32le", "pcmf32le":
+		return "PCM"
+	default:
+		return strings.ToUpper(strings.TrimSpace(codec))
+	}
+}
+
+func audioChannelsDisplayName(channels int) string {
+	switch channels {
+	case 1:
+		return "Mono"
+	case 2:
+		return "Stereo"
+	case 6:
+		return "5.1"
+	case 8:
+		return "7.1"
+	default:
+		if channels > 0 {
+			return fmt.Sprintf("%d ch", channels)
+		}
+		return ""
+	}
+}
+
+func isGenericAudioLabel(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "stereo", "mono", "5.1", "7.1", "surround", "5.1 surround", "7.1 surround":
+		return true
+	}
+	return false
 }
 
 func compatSubtitleDisplayTitle(track catalog.VersionSubtitleTrack) string {
@@ -1136,6 +1423,9 @@ func applyPlaybackQueryOverrides(req *playbackInfoRequest, query url.Values) {
 	}
 	if value, ok := parseOptionalInt(firstQueryValue(query, "AudioStreamIndex")); ok {
 		req.AudioStreamIndex = compatIntValuePtr(value)
+	}
+	if value, ok := parseOptionalInt(firstQueryValue(query, "SubtitleStreamIndex")); ok {
+		req.SubtitleStreamIndex = compatIntValuePtr(value)
 	}
 	if value, ok := parseOptionalBool(firstQueryValue(query, "EnableDirectPlay")); ok {
 		req.EnableDirectPlay = &value

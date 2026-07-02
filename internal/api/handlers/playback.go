@@ -103,6 +103,7 @@ type PlaybackHandler struct {
 	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
 	WatchScrobbler          PlaybackWatchScrobbler
 	StableIdentityResolver  *watchstate.StableIdentityResolver
+	CompletionObserver      watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
 	profileStaler           ProfileStaler
 	profileRefreshRequester ProfileRefreshRequester
 	AdminStore              PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
@@ -826,7 +827,9 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 
 	duration := float64(file.Duration)
 	thresholds := h.playbackThresholds(ctx)
-	watchSvc := watchstate.NewService(h.StoreProvider).WithStableIdentityResolver(h.StableIdentityResolver)
+	watchSvc := watchstate.NewService(h.StoreProvider).
+		WithStableIdentityResolver(h.StableIdentityResolver).
+		WithCompletionObserver(h.CompletionObserver)
 	stoppedAt := time.Now().UTC()
 	result, err := watchSvc.RecordPlaybackStop(ctx, session.UserID, session.ProfileID, targetID, duration, session.Position, stoppedAt, userstore.VersionHints{
 		FileID:     file.ID,
@@ -1262,10 +1265,12 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	clientInfo := playbackClientInfoFromRequest(r)
+	sessionCtx := playback.WithClientInfo(r.Context(), clientInfo)
 	var session *playback.Session
 	if starter, ok := h.sessionMgr.(sessionStarterWithFilesContext); ok {
 		session, err = starter.StartSessionWithFilesContext(
-			r.Context(),
+			sessionCtx,
 			userID,
 			profileID,
 			effectiveFile.ID,
@@ -1321,6 +1326,9 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		AudioTrackIndex:   audioTrackIndex,
 		TranscodeAudio:    session.TranscodeAudio,
 		ClientIP:          clientip.FromContext(r.Context()),
+		ClientName:        clientInfo.Name,
+		ClientVersion:     clientInfo.Version,
+		ClientUserAgent:   clientInfo.UserAgent,
 		StreamBitrateKbps: streamBitrateKbps,
 		TargetAudioCodec:  targetAudioCodec,
 	}); err != nil {
@@ -1440,6 +1448,17 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 
 	h.syncSessionsNow(r.Context(), "start")
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func playbackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
+	if r == nil {
+		return playback.ClientInfo{}
+	}
+	return playback.ClientInfo{
+		Name:      strings.TrimSpace(r.Header.Get("X-Silo-Client")),
+		Version:   strings.TrimSpace(r.Header.Get("X-Silo-Client-Version")),
+		UserAgent: r.UserAgent(),
+	}
 }
 
 // subtitleURLExt returns the URL file extension for a subtitle codec.

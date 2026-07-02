@@ -201,9 +201,16 @@ func (s *Service) OnViewMode() string { return s.config().OnViewMode() }
 // cooldown window after a failed job for the same target+language: ordinary
 // page views must never hammer a broken endpoint. Returns the resulting job
 // (which may be the in-flight or recently failed one).
-func (s *Service) RequestOnView(ctx context.Context, contentID, targetLanguage string, requestedBy *int) (*Job, error) {
+func (s *Service) RequestOnView(ctx context.Context, targetKind TargetKind, contentID, targetLanguage string, requestedBy *int) (*Job, error) {
 	if s.config().OnViewMode() == "off" {
 		return nil, ErrNotConfigured
+	}
+	switch targetKind {
+	case "":
+		targetKind = TargetItem
+	case TargetItem, TargetSeason, TargetEpisode:
+	default:
+		return nil, fmt.Errorf("%w: unsupported target kind %q", ErrInvalidRequest, targetKind)
 	}
 	target, err := subtitles.NormalizeLanguageCode(targetLanguage)
 	if err != nil {
@@ -215,6 +222,9 @@ func (s *Service) RequestOnView(ctx context.Context, contentID, targetLanguage s
 		return nil, err
 	}
 	for _, job := range jobs {
+		if job.TargetKind != targetKind {
+			continue
+		}
 		if job.TargetLanguage != target {
 			continue
 		}
@@ -226,10 +236,10 @@ func (s *Service) RequestOnView(ctx context.Context, contentID, targetLanguage s
 	}
 
 	return s.Enqueue(ctx, JobRequest{
-		TargetKind:      TargetItem,
+		TargetKind:      targetKind,
 		ContentID:       contentID,
 		TargetLanguage:  target,
-		IncludeChildren: true,
+		IncludeChildren: targetKind == TargetItem,
 		RequestedBy:     requestedBy,
 	})
 }

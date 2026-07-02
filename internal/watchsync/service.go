@@ -98,20 +98,24 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 	}
 	missingAccessToken := connected && strings.TrimSpace(conn.AccessToken) == ""
 	status := ConnectionStatus{
-		Provider:                    providerKey,
-		DisplayName:                 provider.DisplayName(),
-		Capabilities:                provider.Capabilities(),
-		AuthMethod:                  authMethod,
-		Connected:                   connected && !missingAccessToken,
-		CredentialsConfigured:       credentialsConfigured,
-		ImportWatchedEnabled:        true,
-		ImportProgressEnabled:       true,
-		ExportWatchedEnabled:        true,
-		ExportUnwatchedEnabled:      false,
-		ImportFavoritesEnabled:      true,
-		ExportFavoritesEnabled:      true,
-		SyncFavoriteRemovalsEnabled: false,
-		ScrobbleEnabled:             true,
+		Provider:                     providerKey,
+		DisplayName:                  provider.DisplayName(),
+		Capabilities:                 provider.Capabilities(),
+		AuthMethod:                   authMethod,
+		Connected:                    connected && !missingAccessToken,
+		CredentialsConfigured:        credentialsConfigured,
+		ImportWatchedEnabled:         true,
+		ImportProgressEnabled:        true,
+		ExportWatchedEnabled:         true,
+		ExportUnwatchedEnabled:       false,
+		ImportFavoritesEnabled:       true,
+		ExportFavoritesEnabled:       true,
+		SyncFavoriteRemovalsEnabled:  false,
+		ImportWatchlistEnabled:       true,
+		ExportWatchlistEnabled:       true,
+		SyncWatchlistRemovalsEnabled: false,
+		SyncWatchlistOrderEnabled:    false,
+		ScrobbleEnabled:              true,
 	}
 	if connected {
 		status.ProviderUsername = conn.ProviderUsername
@@ -122,11 +126,16 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 		status.ImportFavoritesEnabled = conn.ImportFavoritesEnabled
 		status.ExportFavoritesEnabled = conn.ExportFavoritesEnabled
 		status.SyncFavoriteRemovalsEnabled = conn.SyncFavoriteRemovalsEnabled
+		status.ImportWatchlistEnabled = conn.ImportWatchlistEnabled
+		status.ExportWatchlistEnabled = conn.ExportWatchlistEnabled
+		status.SyncWatchlistRemovalsEnabled = conn.SyncWatchlistRemovalsEnabled
+		status.SyncWatchlistOrderEnabled = conn.SyncWatchlistOrderEnabled
 		status.ScrobbleEnabled = conn.ScrobbleEnabled
 		status.LastInboundSyncAt = conn.LastInboundSyncAt
 		status.LastProgressSyncAt = conn.LastProgressSyncAt
 		status.LastOutboundSyncAt = conn.LastOutboundSyncAt
 		status.LastFavoritesSyncAt = conn.LastFavoritesSyncAt
+		status.LastWatchlistSyncAt = conn.LastWatchlistSyncAt
 		status.LastScrobbleErrorAt = conn.LastScrobbleErrorAt
 		status.LastError = conn.LastError
 	}
@@ -165,13 +174,50 @@ func (s *Service) UpdateConnection(ctx context.Context, userID int, profileID st
 	if update.SyncFavoriteRemovalsEnabled != nil {
 		conn.SyncFavoriteRemovalsEnabled = *update.SyncFavoriteRemovalsEnabled
 	}
+	if update.ImportWatchlistEnabled != nil {
+		conn.ImportWatchlistEnabled = *update.ImportWatchlistEnabled
+	}
+	if update.ExportWatchlistEnabled != nil {
+		conn.ExportWatchlistEnabled = *update.ExportWatchlistEnabled
+	}
+	if update.SyncWatchlistRemovalsEnabled != nil {
+		conn.SyncWatchlistRemovalsEnabled = *update.SyncWatchlistRemovalsEnabled
+	}
+	watchlistOrderDisabled := false
+	if update.SyncWatchlistOrderEnabled != nil {
+		watchlistOrderDisabled = conn.SyncWatchlistOrderEnabled && !*update.SyncWatchlistOrderEnabled
+		conn.SyncWatchlistOrderEnabled = *update.SyncWatchlistOrderEnabled
+	}
 	if update.ScrobbleEnabled != nil {
 		conn.ScrobbleEnabled = *update.ScrobbleEnabled
+	}
+	// Turning order mirroring off reverts the watchlist to added_at ordering.
+	// Clear the stored order *before* persisting the disable so a failure leaves
+	// both the order and the toggle intact (retriable) rather than reporting
+	// "disabled" while sort_index ordering is still active.
+	if watchlistOrderDisabled {
+		if err := s.clearWatchlistOrder(ctx, conn); err != nil {
+			return ConnectionStatus{}, err
+		}
 	}
 	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
 		return ConnectionStatus{}, err
 	}
 	return s.GetConnectionStatus(ctx, userID, profileID, providerKey)
+}
+
+func (s *Service) clearWatchlistOrder(ctx context.Context, conn Connection) error {
+	if s.storeProvider == nil {
+		return nil
+	}
+	store, err := s.storeProvider.ForUser(ctx, conn.UserID)
+	if err != nil {
+		return fmt.Errorf("open user store to clear watchlist order: %w", err)
+	}
+	if err := store.ReplaceWatchlistOrder(ctx, conn.ProfileID, nil); err != nil {
+		return fmt.Errorf("clear watchlist order: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID string, providerKey string) error {
@@ -187,10 +233,22 @@ func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID s
 		return ManualSyncResult{}, fmt.Errorf("watch provider connection not found")
 	}
 
-	if active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID); err != nil {
-		return ManualSyncResult{}, err
-	} else if ok {
-		return ManualSyncResult{Run: active}, nil
+	for {
+		active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID)
+		if err != nil {
+			return ManualSyncResult{}, err
+		}
+		if !ok {
+			break
+		}
+		if !active.StartedAt.IsZero() && s.now().Sub(active.StartedAt) <= manualSyncTimeout {
+			return ManualSyncResult{Run: active}, nil
+		}
+		active.Status = string(SyncRunStatusFailed)
+		active.Error = "watch provider sync timed out before completion"
+		if _, err := s.completeSyncRun(ctx, active); err != nil {
+			return ManualSyncResult{}, err
+		}
 	}
 
 	if latest, ok, err := s.repo.GetLatestSyncRun(ctx, conn.ID); err != nil {
@@ -318,124 +376,6 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 		}
 	}
 	return nil
-}
-
-func (s *Service) HandleLocalFavoriteEvent(ctx context.Context, event LocalFavoriteEvent) error {
-	if event.UserID == 0 || event.ProfileID == "" || len(event.Favorites) == 0 {
-		return nil
-	}
-	go func() {
-		bg, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		if err := s.processLocalFavoriteEvent(bg, event); err != nil {
-			slog.Warn("failed to dispatch local favorite provider event", "kind", event.Kind, "user_id", event.UserID, "profile_id", event.ProfileID, "error", err)
-		}
-	}()
-	return nil
-}
-
-func (s *Service) processLocalFavoriteEvent(ctx context.Context, event LocalFavoriteEvent) error {
-	conns, err := s.repo.ListFavoriteEventConnections(ctx, event.UserID, event.ProfileID, event.Kind)
-	if err != nil {
-		return err
-	}
-	for _, conn := range conns {
-		provider, ok := s.registry.Get(conn.Provider)
-		if !ok {
-			continue
-		}
-		cfg, err := s.serverConfig(ctx, conn.Provider)
-		if err != nil {
-			s.recordLocalWatchEventError(ctx, conn, err)
-			continue
-		}
-		conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
-		if err != nil {
-			s.recordLocalWatchEventError(ctx, conn, err)
-			continue
-		}
-		switch event.Kind {
-		case LocalFavoriteEventAdded:
-			exporter, ok := provider.(FavoriteExporter)
-			if !ok || !provider.Capabilities().ExportFavorites {
-				continue
-			}
-			if err := s.exportLocalFavorites(ctx, conn, cfg, exporter, event.Favorites); err != nil {
-				s.recordLocalWatchEventError(ctx, conn, err)
-			}
-		case LocalFavoriteEventRemoved:
-			now := s.now()
-			for _, favorite := range event.Favorites {
-				if err := s.repo.MarkFavoriteLocalRemoved(ctx, conn.ID, favorite.MediaItemID, now); err != nil {
-					return err
-				}
-			}
-			if !conn.SyncFavoriteRemovalsEnabled || !provider.Capabilities().RemoveFavorites {
-				continue
-			}
-			remover, ok := provider.(FavoriteRemover)
-			if !ok {
-				continue
-			}
-			if _, err := remover.RemoveFavorites(ctx, cfg, conn, event.Favorites); err != nil {
-				s.recordLocalWatchEventError(ctx, conn, err)
-				continue
-			}
-			for _, favorite := range event.Favorites {
-				if err := s.repo.MarkFavoriteRemoteRemoved(ctx, conn.ID, favorite.MediaItemID, now); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func (s *Service) exportLocalFavorites(ctx context.Context, conn Connection, cfg ServerConfig, exporter FavoriteExporter, favorites []LocalFavorite) error {
-	states := make([]FavoriteState, 0, len(favorites))
-	for _, favorite := range favorites {
-		if favorite.ProviderItemKey == "" {
-			favorite.ProviderItemKey = providerItemKeyForLocalFavorite(favorite)
-		}
-		if favorite.ProviderItemKey == "" {
-			continue
-		}
-		favoritedAt := favorite.FavoritedAt
-		if favoritedAt.IsZero() {
-			favoritedAt = s.now()
-		}
-		states = append(states, FavoriteState{
-			ConnectionID:    conn.ID,
-			MediaItemID:     favorite.MediaItemID,
-			ProviderItemKey: favorite.ProviderItemKey,
-			Kind:            favorite.Kind,
-			Title:           favorite.Title,
-			Year:            favorite.Year,
-			RemotePresent:   false,
-			LocalPresent:    true,
-			LastSeenLocalAt: &favoritedAt,
-		})
-	}
-	if err := s.repo.UpsertFavoriteStates(ctx, states); err != nil {
-		return err
-	}
-	result, err := exporter.ExportFavorites(ctx, cfg, conn, favorites)
-	if err != nil {
-		return err
-	}
-	now := s.now()
-	sent := exportResultSentSet(result)
-	for _, favorite := range favorites {
-		if sent[favorite.MediaItemID] || sent[favorite.ProviderItemKey] {
-			if err := s.repo.MarkFavoriteExported(ctx, conn.ID, favorite.MediaItemID, now); err != nil {
-				return err
-			}
-		}
-	}
-	conn.LastFavoritesSyncAt = &now
-	conn.LastError = ""
-	_, err = s.repo.UpsertConnection(ctx, conn)
-	return err
 }
 
 func (s *Service) recordLocalWatchEventError(ctx context.Context, conn Connection, err error) {
@@ -599,12 +539,17 @@ func (s *Service) persistConnection(
 		return Connection{}, err
 	}
 	if !ok {
+		// Enable every bidirectional sync by default; per-list removal stays
+		// opt-in. Toggles a provider can't serve are skipped at sync time via
+		// the capability check, so enabling them here is harmless.
 		conn = Connection{
 			ImportWatchedEnabled:   true,
 			ImportProgressEnabled:  true,
 			ExportWatchedEnabled:   true,
 			ImportFavoritesEnabled: true,
 			ExportFavoritesEnabled: true,
+			ImportWatchlistEnabled: true,
+			ExportWatchlistEnabled: true,
 			ScrobbleEnabled:        true,
 		}
 	}
@@ -766,24 +711,6 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			}
 		}
 	}
-	if conn.ImportFavoritesEnabled && provider.Capabilities().ImportFavorites {
-		importer, ok := provider.(FavoriteImporter)
-		if !ok {
-			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement favorites import", conn.Provider))
-		} else {
-			result, err := s.ImportFavorites(ctx, conn, cfg, importer)
-			run.InboundFavoritesFound = result.Found
-			run.InboundFavoritesImported = result.Imported
-			run.Warning = appendWarning(run.Warning, result.Warnings)
-			if err != nil {
-				flowErrors = append(flowErrors, "favorites import: "+err.Error())
-			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-				flowErrors = append(flowErrors, "favorites import connection refresh: "+refreshErr.Error())
-			} else {
-				conn = refreshed
-			}
-		}
-	}
 	if conn.ExportWatchedEnabled && provider.Capabilities().ExportWatched {
 		exporter, ok := provider.(WatchedExporter)
 		if !ok {
@@ -801,33 +728,38 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			}
 		}
 	}
-	if conn.ExportFavoritesEnabled && provider.Capabilities().ExportFavorites {
-		exporter, ok := provider.(FavoriteExporter)
-		if !ok {
-			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement favorites export", conn.Provider))
-		} else {
-			result, err := s.ExportFavorites(ctx, conn, cfg, exporter)
-			run.OutboundFavoritesFound = result.LocalFound
-			run.OutboundFavoritesSent = result.Sent
+	// Favorites and watchlist share one pipeline, run per list kind.
+	for _, b := range s.listBindings() {
+		caps := provider.Capabilities()
+		if b.importEnabled(conn) && b.capImport(caps) {
+			result, err := s.importList(ctx, conn, cfg, provider, b)
+			b.setImportCounts(&run, result.Found, result.Imported)
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
-				flowErrors = append(flowErrors, "favorites export: "+err.Error())
+				flowErrors = append(flowErrors, string(b.kind)+" import: "+err.Error())
 			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
-				flowErrors = append(flowErrors, "favorites export connection refresh: "+refreshErr.Error())
+				flowErrors = append(flowErrors, string(b.kind)+" import connection refresh: "+refreshErr.Error())
 			} else {
 				conn = refreshed
 			}
 		}
-	}
-	if conn.SyncFavoriteRemovalsEnabled && provider.Capabilities().RemoveFavorites {
-		remover, ok := provider.(FavoriteRemover)
-		if !ok {
-			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement favorites removal", conn.Provider))
-		} else {
-			removed, err := s.RemovePendingFavorites(ctx, conn, cfg, remover)
-			run.FavoriteRemovalsSent = removed
+		if b.exportEnabled(conn) && b.capExport(caps) {
+			result, err := s.exportList(ctx, conn, cfg, provider, b)
+			b.setExportCounts(&run, result.LocalFound, result.Sent)
+			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
-				flowErrors = append(flowErrors, "favorites removal: "+err.Error())
+				flowErrors = append(flowErrors, string(b.kind)+" export: "+err.Error())
+			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
+				flowErrors = append(flowErrors, string(b.kind)+" export connection refresh: "+refreshErr.Error())
+			} else {
+				conn = refreshed
+			}
+		}
+		if b.removalsEnabled(conn) && b.capRemove(caps) {
+			removed, err := s.removePendingListItems(ctx, conn, cfg, provider, b)
+			b.setRemovalCount(&run, removed)
+			if err != nil {
+				flowErrors = append(flowErrors, string(b.kind)+" removal: "+err.Error())
 			}
 		}
 	}
@@ -867,6 +799,9 @@ func providerSyncNeedsAccessToken(caps Capabilities) bool {
 		caps.ImportFavorites ||
 		caps.ExportFavorites ||
 		caps.RemoveFavorites ||
+		caps.ImportWatchlist ||
+		caps.ExportWatchlist ||
+		caps.RemoveWatchlist ||
 		caps.ScrobblePlayback
 }
 
@@ -1142,133 +1077,6 @@ func fetchProgressImportBatch(
 	return ProgressImportBatch{Rows: rows}, nil
 }
 
-type ImportFavoritesResult struct {
-	Found     int
-	Imported  int
-	Unmatched int
-	Removed   int
-	Warnings  []string
-}
-
-func (s *Service) ImportFavorites(
-	ctx context.Context,
-	conn Connection,
-	cfg ServerConfig,
-	importer FavoriteImporter,
-) (ImportFavoritesResult, error) {
-	if s.matcher == nil {
-		return ImportFavoritesResult{}, fmt.Errorf("watch provider matcher is not configured")
-	}
-	if s.storeProvider == nil {
-		return ImportFavoritesResult{}, fmt.Errorf("user store provider is not configured")
-	}
-	store, err := s.storeProvider.ForUser(ctx, conn.UserID)
-	if err != nil {
-		return ImportFavoritesResult{}, fmt.Errorf("open user store: %w", err)
-	}
-	batch, err := fetchFavoriteImportBatch(ctx, cfg, conn, importer)
-	if err != nil {
-		return ImportFavoritesResult{}, err
-	}
-	rows := batch.Rows
-	result := ImportFavoritesResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
-	seenRemoteKeys := make(map[string]bool, len(rows))
-	states := make([]FavoriteState, 0, len(rows))
-	for _, row := range rows {
-		match, reason, err := s.matcher.Match(ctx, row.HistoryRecord())
-		if err != nil {
-			return result, err
-		}
-		if match == nil {
-			result.Unmatched++
-			if reason != "" {
-				result.Warnings = append(result.Warnings, reason)
-			}
-			continue
-		}
-		if err := store.AddFavoriteAt(ctx, conn.ProfileID, match.MediaItemID, row.FavoritedAt); err != nil {
-			return result, err
-		}
-		result.Imported++
-		key := row.ProviderItemKey
-		if key == "" {
-			key = providerItemKeyForRemoteFavorite(row)
-		}
-		if key != "" {
-			seenRemoteKeys[key] = true
-		}
-		favoritedAt := row.FavoritedAt
-		states = append(states, FavoriteState{
-			ConnectionID:     conn.ID,
-			MediaItemID:      match.MediaItemID,
-			ProviderItemKey:  key,
-			Kind:             row.Kind,
-			Title:            row.Title,
-			Year:             row.Year,
-			RemotePresent:    true,
-			LocalPresent:     true,
-			LastSeenRemoteAt: &favoritedAt,
-			LastSeenLocalAt:  &favoritedAt,
-		})
-	}
-	if err := s.repo.UpsertFavoriteStates(ctx, states); err != nil {
-		return result, err
-	}
-	if err := s.reconcileMissingRemoteFavorites(ctx, conn, store, seenRemoteKeys, &result); err != nil {
-		return result, err
-	}
-	now := s.now()
-	conn.LastFavoritesSyncAt = &now
-	conn.LastError = ""
-	conn.SyncCursors = mergeSyncCursors(conn.SyncCursors, batch.UpdatedCursors)
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
-		return result, err
-	}
-	return result, nil
-}
-
-func fetchFavoriteImportBatch(
-	ctx context.Context,
-	cfg ServerConfig,
-	conn Connection,
-	importer FavoriteImporter,
-) (FavoriteImportBatch, error) {
-	if batchImporter, ok := importer.(FavoriteBatchImporter); ok {
-		return batchImporter.FetchFavoritesBatch(ctx, cfg, conn)
-	}
-	rows, err := importer.FetchFavorites(ctx, cfg, conn)
-	if err != nil {
-		return FavoriteImportBatch{}, err
-	}
-	return FavoriteImportBatch{Rows: rows}, nil
-}
-
-func (s *Service) reconcileMissingRemoteFavorites(ctx context.Context, conn Connection, store userstore.UserStore, seenRemoteKeys map[string]bool, result *ImportFavoritesResult) error {
-	states, err := s.repo.ListFavoriteStates(ctx, conn.ID)
-	if err != nil {
-		return err
-	}
-	now := s.now()
-	for _, state := range states {
-		if !state.RemotePresent || state.ProviderItemKey == "" || seenRemoteKeys[state.ProviderItemKey] {
-			continue
-		}
-		if conn.SyncFavoriteRemovalsEnabled && state.LocalPresent {
-			if err := store.RemoveFavorite(ctx, conn.ProfileID, state.MediaItemID); err != nil {
-				return err
-			}
-			if err := s.repo.MarkFavoriteLocalRemoved(ctx, conn.ID, state.MediaItemID, now); err != nil {
-				return err
-			}
-			result.Removed++
-		}
-		if err := s.repo.MarkFavoriteRemoteRemoved(ctx, conn.ID, state.MediaItemID, now); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func mergeSyncCursors(existing map[string]string, updates map[string]string) map[string]string {
 	merged := make(map[string]string, len(existing)+len(updates))
 	for key, value := range existing {
@@ -1368,14 +1176,6 @@ type ExportWatchedResult struct {
 	RemotePresent int
 	Sent          int
 	Failed        int
-}
-
-type ExportFavoritesResult struct {
-	LocalFound int
-	Queued     int
-	Sent       int
-	Failed     int
-	Warnings   []string
 }
 
 func (s *Service) ExportWatched(
@@ -1508,193 +1308,6 @@ func (s *Service) ExportWatched(
 		return result, err
 	}
 	return result, nil
-}
-
-func (s *Service) ExportFavorites(
-	ctx context.Context,
-	conn Connection,
-	cfg ServerConfig,
-	exporter FavoriteExporter,
-) (ExportFavoritesResult, error) {
-	if s.storeProvider == nil {
-		return ExportFavoritesResult{}, fmt.Errorf("user store provider is not configured")
-	}
-	store, err := s.storeProvider.ForUser(ctx, conn.UserID)
-	if err != nil {
-		return ExportFavoritesResult{}, fmt.Errorf("open user store: %w", err)
-	}
-	rows, err := store.ListFavorites(ctx, conn.ProfileID, 10000, 0)
-	if err != nil {
-		return ExportFavoritesResult{}, err
-	}
-	result := ExportFavoritesResult{LocalFound: len(rows)}
-	favorites, states, warnings, err := s.localFavoritesFromRows(ctx, conn, rows)
-	if err != nil {
-		return result, err
-	}
-	result.Warnings = append(result.Warnings, warnings...)
-	if err := s.repo.UpsertFavoriteStates(ctx, states); err != nil {
-		return result, err
-	}
-	for {
-		pending, err := s.repo.ListPendingFavoriteExports(ctx, conn.ID, 100)
-		if err != nil {
-			return result, err
-		}
-		if len(pending) == 0 {
-			break
-		}
-		byMedia := make(map[string]LocalFavorite, len(favorites))
-		for _, favorite := range favorites {
-			byMedia[favorite.MediaItemID] = favorite
-		}
-		toSend := make([]LocalFavorite, 0, len(pending))
-		for _, state := range pending {
-			favorite, ok := byMedia[state.MediaItemID]
-			if !ok {
-				if err := s.repo.MarkFavoriteLocalRemoved(ctx, conn.ID, state.MediaItemID, s.now()); err != nil {
-					return result, err
-				}
-				continue
-			}
-			toSend = append(toSend, favorite)
-		}
-		if len(toSend) == 0 {
-			continue
-		}
-		result.Queued += len(toSend)
-		exportResult, err := exporter.ExportFavorites(ctx, cfg, conn, toSend)
-		if err != nil {
-			for _, favorite := range toSend {
-				_ = s.repo.MarkFavoriteError(ctx, conn.ID, favorite.MediaItemID, err.Error())
-			}
-			result.Failed += len(toSend)
-			return result, err
-		}
-		now := s.now()
-		sent := exportResultSentSet(exportResult)
-		for _, favorite := range toSend {
-			if sent[favorite.MediaItemID] || sent[favorite.ProviderItemKey] {
-				if err := s.repo.MarkFavoriteExported(ctx, conn.ID, favorite.MediaItemID, now); err != nil {
-					return result, err
-				}
-				result.Sent++
-				continue
-			}
-			if containsString(exportResult.NotFound, favorite.MediaItemID) || containsString(exportResult.NotFound, favorite.ProviderItemKey) {
-				msg := "favorite not found by provider"
-				if err := s.repo.MarkFavoriteError(ctx, conn.ID, favorite.MediaItemID, msg); err != nil {
-					return result, err
-				}
-				result.Warnings = append(result.Warnings, msg+": "+favorite.MediaItemID)
-			}
-		}
-	}
-	now := s.now()
-	conn.LastFavoritesSyncAt = &now
-	conn.LastError = ""
-	if _, err := s.repo.UpsertConnection(ctx, conn); err != nil {
-		return result, err
-	}
-	return result, nil
-}
-
-func (s *Service) RemovePendingFavorites(ctx context.Context, conn Connection, cfg ServerConfig, remover FavoriteRemover) (int, error) {
-	removed := 0
-	for {
-		pending, err := s.repo.ListPendingFavoriteRemovals(ctx, conn.ID, 100)
-		if err != nil {
-			return removed, err
-		}
-		if len(pending) == 0 {
-			return removed, nil
-		}
-		favorites := make([]LocalFavorite, 0, len(pending))
-		for _, state := range pending {
-			favorites = append(favorites, LocalFavorite{
-				MediaItemID:     state.MediaItemID,
-				ProviderItemKey: state.ProviderItemKey,
-				Kind:            state.Kind,
-				Title:           state.Title,
-				Year:            state.Year,
-			})
-		}
-		result, err := remover.RemoveFavorites(ctx, cfg, conn, favorites)
-		if err != nil {
-			for _, favorite := range favorites {
-				_ = s.repo.MarkFavoriteError(ctx, conn.ID, favorite.MediaItemID, err.Error())
-			}
-			return removed, err
-		}
-		now := s.now()
-		sent := exportResultSentSet(result)
-		for _, favorite := range favorites {
-			if sent[favorite.MediaItemID] || sent[favorite.ProviderItemKey] {
-				if err := s.repo.MarkFavoriteRemoteRemoved(ctx, conn.ID, favorite.MediaItemID, now); err != nil {
-					return removed, err
-				}
-				removed++
-			}
-		}
-	}
-}
-
-func (s *Service) localFavoritesFromRows(ctx context.Context, conn Connection, rows []userstore.Favorite) ([]LocalFavorite, []FavoriteState, []string, error) {
-	ids := make([]string, 0, len(rows))
-	addedAtByID := make(map[string]time.Time, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.MediaItemID)
-		if addedAt, err := time.Parse(time.RFC3339, row.AddedAt); err == nil {
-			addedAtByID[row.MediaItemID] = addedAt
-		}
-	}
-	type favoriteMediaResolver interface {
-		GetFavoriteMediaItems(ctx context.Context, mediaItemIDs []string) (map[string]LocalFavorite, error)
-	}
-	resolver, ok := s.repo.(favoriteMediaResolver)
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("favorite media resolver is not configured")
-	}
-	items, err := resolver.GetFavoriteMediaItems(ctx, ids)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	favorites := make([]LocalFavorite, 0, len(rows))
-	states := make([]FavoriteState, 0, len(rows))
-	var warnings []string
-	for _, row := range rows {
-		favorite, ok := items[row.MediaItemID]
-		if !ok {
-			warnings = append(warnings, "favorite media item not found: "+row.MediaItemID)
-			continue
-		}
-		favorite.FavoritedAt = addedAtByID[row.MediaItemID]
-		if favorite.FavoritedAt.IsZero() {
-			favorite.FavoritedAt = s.now()
-		}
-		if favorite.Kind != historyimport.KindMovie && favorite.Kind != historyimport.KindSeries {
-			warnings = append(warnings, "favorite kind is not supported by provider: "+row.MediaItemID)
-			continue
-		}
-		if favorite.ProviderItemKey == "" {
-			warnings = append(warnings, "favorite has no provider ids: "+row.MediaItemID)
-			continue
-		}
-		favorites = append(favorites, favorite)
-		favoritedAt := favorite.FavoritedAt
-		states = append(states, FavoriteState{
-			ConnectionID:    conn.ID,
-			MediaItemID:     favorite.MediaItemID,
-			ProviderItemKey: favorite.ProviderItemKey,
-			Kind:            favorite.Kind,
-			Title:           favorite.Title,
-			Year:            favorite.Year,
-			RemotePresent:   false,
-			LocalPresent:    true,
-			LastSeenLocalAt: &favoritedAt,
-		})
-	}
-	return favorites, states, warnings, nil
 }
 
 func (s *Service) exportLocalPlays(
@@ -1929,6 +1542,22 @@ func containsString(values []string, candidate string) bool {
 		}
 	}
 	return false
+}
+
+// exportFailureReason explains why an item was not confirmed sent, keyed by the
+// provider's failed/not-found result sets, so callers can record a per-item
+// error and let the pending queue advance.
+func exportFailureReason(result ExportResult, item LocalFavorite, kind ListKind) string {
+	if msg, ok := result.Failed[item.MediaItemID]; ok && msg != "" {
+		return msg
+	}
+	if msg, ok := result.Failed[item.ProviderItemKey]; ok && msg != "" {
+		return msg
+	}
+	if containsString(result.NotFound, item.MediaItemID) || containsString(result.NotFound, item.ProviderItemKey) {
+		return string(kind) + " item not found by provider"
+	}
+	return string(kind) + " item not confirmed by provider"
 }
 
 func historySourceForProvider(provider any) userstore.WatchHistorySource {

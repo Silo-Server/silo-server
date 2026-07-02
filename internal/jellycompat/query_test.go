@@ -40,6 +40,30 @@ func TestBuildBrowseParamsPropagatesEnableTotalRecordCount(t *testing.T) {
 	}
 }
 
+func TestParseItemsQueryAppliesExcludeItemTypesToDefaultVideoScope(t *testing.T) {
+	req := httptest.NewRequest("GET", "/Items?SearchTerm=sponge+bob"+
+		"&ExcludeItemTypes=Movie&ExcludeItemTypes=Episode&ExcludeItemTypes=TvChannel", nil)
+
+	query := parseItemsQuery(req, NewResourceIDCodec())
+
+	if !query.hasItemTypeFilter {
+		t.Fatal("expected ExcludeItemTypes to count as an item type filter")
+	}
+	if len(query.itemTypes) != 1 || query.itemTypes[0] != "series" {
+		t.Fatalf("itemTypes = %v, want [series]", query.itemTypes)
+	}
+}
+
+func TestParseItemsQuerySubtractsExcludeItemTypesFromIncludeItemTypes(t *testing.T) {
+	req := httptest.NewRequest("GET", "/Items?IncludeItemTypes=Movie,Series&ExcludeItemTypes=Movie", nil)
+
+	query := parseItemsQuery(req, NewResourceIDCodec())
+
+	if len(query.itemTypes) != 1 || query.itemTypes[0] != "series" {
+		t.Fatalf("itemTypes = %v, want [series]", query.itemTypes)
+	}
+}
+
 func TestMapSortByReleaseDate(t *testing.T) {
 	tests := []string{
 		"PremiereDate",

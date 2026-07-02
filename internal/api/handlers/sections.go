@@ -764,6 +764,8 @@ func (h *SectionHandler) loadResolvedHomeSections(r *http.Request) ([]sections.R
 		}
 	}
 
+	resolved = filterResolvedSectionsByAccess(resolved, accessFilter)
+
 	return resolved, libraryIDs, accessFilter, profileID, nil
 }
 
@@ -1047,6 +1049,7 @@ func (h *SectionHandler) HandleSectionSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	resolved := sections.ResolveForSettings(adminSections, overrides)
+	resolved = filterResolvedSectionsByAccess(resolved, requestAccessFilter(r))
 
 	type settingsEntry struct {
 		ID          string          `json:"id"`
@@ -1078,6 +1081,64 @@ func (h *SectionHandler) HandleSectionSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusOK, map[string][]settingsEntry{"sections": entries})
+}
+
+func filterResolvedSectionsByAccess(resolved []sections.ResolvedSection, filter catalog.AccessFilter) []sections.ResolvedSection {
+	if filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) == 0 {
+		return resolved
+	}
+
+	out := resolved[:0]
+	for _, section := range resolved {
+		if sectionAllowedByAccess(section, filter) {
+			out = append(out, section)
+		}
+	}
+	return out
+}
+
+func sectionAllowedByAccess(section sections.ResolvedSection, filter catalog.AccessFilter) bool {
+	configLibraryIDs := sections.ParseConfigFilters(section.Config).LibraryIDs()
+	if len(configLibraryIDs) == 0 {
+		return true
+	}
+
+	if filter.AllowedLibraryIDs != nil {
+		return intSlicesIntersect(configLibraryIDs, filter.AllowedLibraryIDs)
+	}
+
+	for _, libraryID := range configLibraryIDs {
+		if !intSliceContains(filter.DisabledLibraryIDs, libraryID) {
+			return true
+		}
+	}
+	return false
+}
+
+func intSlicesIntersect(left, right []int) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+
+	set := make(map[int]struct{}, len(right))
+	for _, value := range right {
+		set[value] = struct{}{}
+	}
+	for _, value := range left {
+		if _, ok := set[value]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func intSliceContains(values []int, target int) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // applyDiversityFilter removes items from sections whose recipe has

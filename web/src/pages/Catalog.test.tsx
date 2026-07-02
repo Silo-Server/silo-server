@@ -575,6 +575,22 @@ describe("Catalog page", () => {
     );
   });
 
+  it("uses approximate totals for interactive query searches", () => {
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <App />
+      </QueryClientProvider>,
+    );
+
+    expect(mockUseCatalogWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "query",
+        q: "heat",
+      }),
+      expect.objectContaining({ includeTotal: false }),
+    );
+  });
+
   it("respects an explicit type=all scope instead of the preferred default", () => {
     appInitialEntries = ["/catalog?source=query&q=heat&type=all"];
 

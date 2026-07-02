@@ -229,6 +229,9 @@ func (s *progressCountingStore) GetProgress(context.Context, string, string) (*u
 func (s *progressCountingStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error {
 	panic("unused")
 }
@@ -278,7 +281,16 @@ func (s *progressCountingStore) IsFavorite(context.Context, string, string) (boo
 func (s *progressCountingStore) AddToWatchlist(context.Context, string, string) error {
 	panic("unused")
 }
+func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) error {
+	panic("unused")
+}
+func (s *progressCountingStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
+	return true, nil
+}
 func (s *progressCountingStore) RemoveFromWatchlist(context.Context, string, string) error {
+	panic("unused")
+}
+func (s *progressCountingStore) ReplaceWatchlistOrder(context.Context, string, []string) error {
 	panic("unused")
 }
 func (s *progressCountingStore) ListWatchlist(context.Context, string, int, int) ([]userstore.WatchlistEntry, error) {
@@ -421,14 +433,20 @@ func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context,
 // stubBrowseSource is a deterministic browseSource for testing
 // directContentService without a Postgres pool.
 type stubBrowseSource struct {
-	items []*models.MediaItem
-	total int
-	calls []stubBrowseCall
+	items            []*models.MediaItem
+	total            int
+	calls            []stubBrowseCall
+	crossLibraryCall []stubCrossLibraryCall
 }
 
 type stubBrowseCall struct {
 	filters      catalog.BrowseFilters
 	includeTotal bool
+}
+
+type stubCrossLibraryCall struct {
+	base       catalog.BrowseFilters
+	libraryIDs []int
 }
 
 func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error) {
@@ -447,7 +465,134 @@ func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseF
 	}, nil
 }
 
+func TestBrowseItems_RecentlyAddedNoParentFansOutAcrossLibraries(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{
+			{ID: 1, Name: "Movies", Type: "movie"},
+			{ID: 3, Name: "TV", Type: "series"},
+		},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 1 {
+		t.Fatalf("cross-library calls = %d, want 1", got)
+	}
+	if got := len(browse.calls); got != 0 {
+		t.Fatalf("BrowsePage calls = %d, want 0 (fast path should not use it)", got)
+	}
+	if got := browse.crossLibraryCall[0].libraryIDs; len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("library IDs = %v, want [1 3]", got)
+	}
+}
+
+func TestBrowseItems_RecentlyAddedWithOffsetFallsBackToBrowsePage(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(40), total: 40}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{
+			{ID: 1, Name: "Movies", Type: "movie"},
+			{ID: 3, Name: "TV", Type: "series"},
+		},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("offset", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 0 {
+		t.Fatalf("cross-library calls = %d, want 0 for offset>0", got)
+	}
+	if got := len(browse.calls); got == 0 {
+		t.Fatal("BrowsePage calls = 0, want offset>0 to fall back to BrowsePage")
+	}
+}
+
+func TestBrowseItems_RecentlyAddedSingleLibraryUsesBrowsePage(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{{ID: 1, Name: "Movies", Type: "movie"}},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 0 {
+		t.Fatalf("cross-library calls = %d, want 0 with a single library", got)
+	}
+	if got := len(browse.calls); got == 0 {
+		t.Fatal("BrowsePage calls = 0, want single-library path to use BrowsePage")
+	}
+}
+
+func (s *stubBrowseSource) BrowseRecentlyAddedAcrossLibraries(_ context.Context, base catalog.BrowseFilters, libraryIDs []int) (*catalog.BrowseResult, error) {
+	s.crossLibraryCall = append(s.crossLibraryCall, stubCrossLibraryCall{base: base, libraryIDs: libraryIDs})
+	end := min(max(base.Limit, 0), len(s.items))
+	return &catalog.BrowseResult{
+		Items:   append([]*models.MediaItem(nil), s.items[:end]...),
+		Total:   s.total,
+		HasMore: end < len(s.items),
+	}, nil
+}
+
 func (s *stubBrowseSource) ListGenres(_ context.Context, _ catalog.BrowseFilters) ([]string, error) {
+	return nil, nil
+}
+
+type recordingCatalogSearchProvider struct {
+	requests []catalog.CatalogSearchRequest
+	result   *catalog.CatalogSearchResult
+}
+
+func (p *recordingCatalogSearchProvider) Search(_ context.Context, req catalog.CatalogSearchRequest) (*catalog.CatalogSearchResult, error) {
+	p.requests = append(p.requests, req)
+	if p.result != nil {
+		return p.result, nil
+	}
+	return &catalog.CatalogSearchResult{}, nil
+}
+
+type recordingItemAccessSource struct {
+	searchQueries []string
+	searchTypes   [][]string
+	searchLimits  []int
+	searchOffsets []int
+	items         []*models.MediaItem
+	total         int
+}
+
+func (s *recordingItemAccessSource) EnsureAccessible(context.Context, string, catalog.AccessFilter) error {
+	return nil
+}
+
+func (s *recordingItemAccessSource) Search(_ context.Context, query string, itemTypes []string, limit, offset int, _ catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	s.searchQueries = append(s.searchQueries, query)
+	s.searchTypes = append(s.searchTypes, append([]string(nil), itemTypes...))
+	s.searchLimits = append(s.searchLimits, limit)
+	s.searchOffsets = append(s.searchOffsets, offset)
+	return append([]*models.MediaItem(nil), s.items...), s.total, nil
+}
+
+func (s *recordingItemAccessSource) GetByIDs(context.Context, []string) ([]*models.MediaItem, error) {
 	return nil, nil
 }
 
@@ -458,6 +603,97 @@ func newDirectContentServiceForTest(browse browseSource, provider userstore.User
 	return &directContentService{
 		browseRepo:    browse,
 		storeProvider: provider,
+	}
+}
+
+func TestSearchItemsUsesCatalogSearchProviderWithCompatScope(t *testing.T) {
+	libraryID := 7
+	provider := &recordingCatalogSearchProvider{
+		result: &catalog.CatalogSearchResult{
+			Items: []*models.MediaItem{{
+				ContentID: "movie-1",
+				Type:      "movie",
+				Title:     "Dune",
+			}},
+			Total:   12,
+			HasMore: true,
+		},
+	}
+	svc := &directContentService{
+		searchProvider: provider,
+		accessFilter: func(context.Context, int, string) catalog.AccessFilter {
+			return catalog.AccessFilter{
+				AllowedLibraryIDs:  []int{1, 2},
+				ExcludedMediaTypes: []string{"ebook"},
+				MaxContentRating:   "PG-13",
+			}
+		},
+	}
+
+	result, err := svc.SearchItems(context.Background(), &Session{
+		StreamAppUserID: 22,
+		ProfileID:       "profile-1",
+	}, SearchItemsOptions{
+		Query:     "dune",
+		Limit:     5,
+		Offset:    10,
+		LibraryID: &libraryID,
+		SkipTotal: true,
+	})
+	if err != nil {
+		t.Fatalf("SearchItems error: %v", err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider requests = %d, want 1", len(provider.requests))
+	}
+	req := provider.requests[0]
+	if req.Query != "dune" || req.Limit != 5 || req.Offset != 10 || !req.SkipTotal {
+		t.Fatalf("provider request shape = %#v", req)
+	}
+	if want := []string{"movie", "series", "episode"}; !slices.Equal(req.ItemTypes, want) {
+		t.Fatalf("ItemTypes = %#v, want %#v", req.ItemTypes, want)
+	}
+	if req.Access.PresentationLibraryID == nil || *req.Access.PresentationLibraryID != libraryID {
+		t.Fatalf("PresentationLibraryID = %#v, want %d", req.Access.PresentationLibraryID, libraryID)
+	}
+	for _, mediaType := range []string{"ebook", "audiobook", "podcast"} {
+		if !slices.Contains(req.Access.ExcludedMediaTypes, mediaType) {
+			t.Fatalf("ExcludedMediaTypes = %#v, missing %q", req.Access.ExcludedMediaTypes, mediaType)
+		}
+	}
+	if result.Total != 12 || !result.HasMore || len(result.Items) != 1 || result.Items[0].Title != "Dune" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestSearchItemsFallsBackToItemRepoWhenProviderMissing(t *testing.T) {
+	itemRepo := &recordingItemAccessSource{
+		items: []*models.MediaItem{{
+			ContentID: "movie-1",
+			Type:      "movie",
+			Title:     "Fallback",
+		}},
+		total: 3,
+	}
+	svc := &directContentService{itemRepo: itemRepo}
+
+	result, err := svc.SearchItems(context.Background(), &Session{}, SearchItemsOptions{
+		Query:     "fallback",
+		ItemTypes: []string{"MusicAlbum"},
+		Limit:     2,
+		Offset:    1,
+	})
+	if err != nil {
+		t.Fatalf("SearchItems error: %v", err)
+	}
+	if len(itemRepo.searchQueries) != 1 || itemRepo.searchQueries[0] != "fallback" {
+		t.Fatalf("search queries = %#v", itemRepo.searchQueries)
+	}
+	if want := []string{compatNoMatchType}; !slices.Equal(itemRepo.searchTypes[0], want) {
+		t.Fatalf("search types = %#v, want %#v", itemRepo.searchTypes[0], want)
+	}
+	if result.Total != 3 || !result.HasMore || len(result.Items) != 1 || result.Items[0].Title != "Fallback" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

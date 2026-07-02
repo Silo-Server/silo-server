@@ -33,6 +33,9 @@ func TestRepeatedFieldsParamTriggersDetail(t *testing.T) {
 	if !query.fieldsExplicit {
 		t.Error("fieldsExplicit must be true when repeated Fields params are present")
 	}
+	if query.startItemID != "x" {
+		t.Errorf("startItemID = %q, want x", query.startItemID)
+	}
 }
 
 // TestCommaSeparatedFieldsStillParsed guards the original single-param,

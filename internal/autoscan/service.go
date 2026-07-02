@@ -10,7 +10,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 )
 
-const scanTrigger = "autoscan"
+const (
+	scanTrigger = "autoscan"
+
+	// Autoscan sources can occasionally report a very large marker window after
+	// downtime or provider recovery. Keep those windows bounded in the scan
+	// queue by falling back to one full-library scan per affected library.
+	maxAutoscanTargetsPerPoll = 1000
+)
 
 // Store is the persistence surface the engine needs. The repository implements
 // the full CRUD surface; this interface is the read/bookkeeping subset the poll
@@ -194,15 +201,20 @@ func (s *Service) PollOnce(ctx context.Context) error {
 
 		rewritten := rewriteChanges(changes, src.PathRewrites)
 		targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, ttl)
+		if len(targets) > maxAutoscanTargetsPerPoll {
+			collapsed := collapseTargetsToLibraryScans(targets)
+			slog.WarnContext(ctx, "autoscan: collapsed large scan target batch to library scans",
+				"source_id", src.ID,
+				"targets", len(targets),
+				"collapsed_targets", len(collapsed),
+				"limit", maxAutoscanTargetsPerPoll,
+			)
+			targets = collapsed
+		}
 		var enqueue EnqueueResult
 		if len(targets) > 0 {
 			var eerr error
-			if eventID != 0 {
-				enqueue.Created, enqueue.Reused, eerr = s.queue.EnqueueAutoscanScans(ctx, targets, eventID)
-			} else {
-				eerr = s.queue.EnqueueScans(ctx, targets)
-				enqueue.Created = len(targets)
-			}
+			enqueue, eerr = s.enqueueScanTargets(ctx, targets, eventID)
 			if eerr != nil {
 				s.releaseClaims(ctx, claimed)
 				slog.WarnContext(ctx, "autoscan: enqueue failed", "source_id", src.ID, "err", eerr)
@@ -276,6 +288,34 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		})
 	}
 	return nil
+}
+
+func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.Target, eventID int64) (EnqueueResult, error) {
+	var result EnqueueResult
+	if len(targets) == 0 {
+		return result, nil
+	}
+	for start := 0; start < len(targets); start += maxAutoscanTargetsPerPoll {
+		end := start + maxAutoscanTargetsPerPoll
+		if end > len(targets) {
+			end = len(targets)
+		}
+		chunk := targets[start:end]
+		if eventID != 0 {
+			created, reused, err := s.queue.EnqueueAutoscanScans(ctx, chunk, eventID)
+			if err != nil {
+				return result, err
+			}
+			result.Created += created
+			result.Reused += reused
+			continue
+		}
+		if err := s.queue.EnqueueScans(ctx, chunk); err != nil {
+			return result, err
+		}
+		result.Created += len(chunk)
+	}
+	return result, nil
 }
 
 func (s *Service) createEvent(ctx context.Context, src Source, marker string, startedAt time.Time) (int64, bool) {
@@ -380,6 +420,29 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 	}
 	stats.TargetsClaimed = len(targets)
 	return targets, claimed, resolvedAny, stats
+}
+
+func collapseTargetsToLibraryScans(targets []scantrigger.Target) []scantrigger.Target {
+	if len(targets) == 0 {
+		return []scantrigger.Target{}
+	}
+	seen := make(map[int]struct{})
+	collapsed := make([]scantrigger.Target, 0)
+	for _, target := range targets {
+		if target.Folder == nil {
+			continue
+		}
+		if _, ok := seen[target.Folder.ID]; ok {
+			continue
+		}
+		seen[target.Folder.ID] = struct{}{}
+		collapsed = append(collapsed, scantrigger.Target{
+			Folder:  target.Folder,
+			Mode:    scantrigger.ModeLibrary,
+			Trigger: scanTrigger,
+		})
+	}
+	return collapsed
 }
 
 func (s *Service) resolveChange(ctx context.Context, change Change) (*scantrigger.Target, bool) {

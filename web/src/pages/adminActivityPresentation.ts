@@ -104,6 +104,20 @@ export function formatSessionBitrate(kbps?: number | null): string | null {
   return `${Math.round(kbps)} kbps`;
 }
 
+export function getSessionClientLabel(session: AdminSession): string {
+  const explicitLabel = session.client_label?.trim();
+  if (explicitLabel) {
+    return explicitLabel;
+  }
+
+  const clientName = session.client_name?.trim();
+  const clientVersion = session.client_version?.trim();
+  if (clientName && clientVersion) {
+    return `${clientName} ${clientVersion}`;
+  }
+  return clientName || "";
+}
+
 export function formatSourceContainerSummary(session: AdminSession): string {
   return formatContainer(session.source_container) || "Unknown source";
 }

@@ -732,14 +732,29 @@ func (r *LibraryCollectionRepository) ReplaceItems(ctx context.Context, collecti
 		return fmt.Errorf("clearing collection items: %w", err)
 	}
 
+	// Dedupe by media_item_id before inserting. Different source entries can
+	// resolve to the same library item (e.g. an IMDb and a TMDB entry pointing
+	// at the same local content_id, or one item present in several of the
+	// collection's bound folders), and library_collection_items has a composite
+	// PK (collection_id, media_item_id). Inserting the same media_item_id twice
+	// would raise a duplicate-key violation that fails the whole sync. First
+	// occurrence wins, preserving rank order. Position is renumbered over the
+	// surviving rows so it stays dense.
+	seen := make(map[string]struct{}, len(items))
+	position := 0
 	for _, item := range items {
+		if _, dup := seen[item.MediaItemID]; dup {
+			continue
+		}
+		seen[item.MediaItemID] = struct{}{}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO library_collection_items (
 				collection_id, media_item_id, position, source_rank
 			) VALUES ($1, $2, $3, $4)
-		`, collectionID, item.MediaItemID, item.Position, item.SourceRank); err != nil {
+		`, collectionID, item.MediaItemID, position, item.SourceRank); err != nil {
 			return fmt.Errorf("inserting collection item %s: %w", item.MediaItemID, err)
 		}
+		position++
 	}
 
 	if _, err := tx.Exec(ctx, "UPDATE library_collections SET updated_at = NOW() WHERE id = $1", collectionID); err != nil {

@@ -99,8 +99,20 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string) 
 	if s.dbPool == nil {
 		return fmt.Errorf("rename content id requires database pool")
 	}
-	if _, err := s.dbPool.Exec(ctx, `SELECT silo_rename_content_id($1, $2)`, from, to); err != nil {
+	tx, err := s.dbPool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin content_id rename transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_id($1, $2)`, from, to); err != nil {
 		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
+	}
+	if err := catalog.EnqueueSearchIndexRename(ctx, tx, from, to); err != nil {
+		return fmt.Errorf("enqueue catalog search rename %s -> %s: %w", from, to, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit content_id rename transaction: %w", err)
 	}
 	return nil
 }

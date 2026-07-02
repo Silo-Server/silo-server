@@ -1242,6 +1242,11 @@ export interface EpisodesResponse {
 export type UserCollectionType = "manual" | "smart" | "mdblist" | "tmdb" | "trakt";
 
 export type UserCollectionSyncStatus = "" | "running" | "success" | "failed" | "warning";
+// UI-only presets for the two display-filter dropdowns. They no longer map to
+// dedicated API fields — the server stores the equivalent rules in
+// `display_query_definition` (a filter-only QueryDefinition fragment).
+export type UserCollectionWatchFilter = "all" | "unwatched" | "watched";
+export type UserCollectionMediaFilter = "all" | "movie" | "series";
 export type GroupSortMode = "manual" | "name_asc" | "name_desc" | "recent" | "most_items";
 export type LibraryCollectionGroupKind = "regular" | "user_collections";
 
@@ -1265,6 +1270,8 @@ export interface Collection {
   last_sync_at?: string;
   last_sync_status?: UserCollectionSyncStatus;
   last_sync_message?: string;
+  /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */
+  display_query_definition?: DisplayQueryDefinition;
   item_count?: number;
   include_in_server_collections?: boolean;
   poster_url?: string;
@@ -1306,6 +1313,14 @@ export interface CollectionsListResponse {
   groups: CollectionGroup[];
 }
 
+export interface CollectionCapabilitiesResponse {
+  display_filter_fields: string[];
+  display_filter_presets: {
+    watched: UserCollectionWatchFilter[];
+    media: UserCollectionMediaFilter[];
+  };
+}
+
 export interface QueryRule {
   field: string;
   op: string;
@@ -1315,6 +1330,11 @@ export interface QueryRule {
 export interface QueryGroup {
   match: "all" | "any";
   rules: QueryRule[];
+}
+
+export interface DisplayQueryDefinition {
+  match: "all" | "any";
+  groups: QueryGroup[];
 }
 
 export interface QuerySort {
@@ -1391,6 +1411,8 @@ export interface CreateCollectionRequest {
   allowed_profile_ids?: string[];
   query_definition?: QueryDefinition;
   sort_config?: Record<string, unknown>;
+  /** Filter-only QueryDefinition fragment; omit for no display filter. */
+  display_query_definition?: DisplayQueryDefinition;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
 }
@@ -1405,6 +1427,9 @@ export interface UpdateCollectionRequest {
   source_url?: string;
   /** 0 = unlimited; otherwise a positive cap. */
   max_items?: number;
+  library_ids?: number[];
+  /** Filter-only QueryDefinition fragment; omit for no display filter. */
+  display_query_definition?: DisplayQueryDefinition;
   include_in_server_collections?: boolean;
   poster_source_url?: string;
   group_id?: string | null;
@@ -1528,6 +1553,7 @@ export interface LibraryTabUngrouped {
 
 export interface LibraryTabResponse {
   library_id: number;
+  collections?: LibraryCollection[];
   groups: LibraryTabGroup[];
   ungrouped?: LibraryTabUngrouped;
 }
@@ -1635,6 +1661,8 @@ export interface UserImportSharedFields {
   sync_schedule?: UserCollectionSyncSchedule;
   is_shared?: boolean;
   poster_url?: string;
+  /** Filter-only QueryDefinition fragment for the profile-scoped display filters. */
+  display_query_definition?: DisplayQueryDefinition;
   /** Restrict resolution to these libraries; omitted/empty = entire catalog the user can see. */
   library_ids?: number[];
 }
@@ -2275,6 +2303,10 @@ export interface AdminSession {
   is_paused: boolean;
   has_playback_control?: boolean;
   client_ip?: string;
+  client_name?: string;
+  client_version?: string;
+  client_label?: string;
+  client_user_agent?: string;
   audio_track_index: number;
   transcode_audio: boolean;
   stream_bitrate_kbps: number | null;

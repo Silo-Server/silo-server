@@ -26,6 +26,9 @@ type SessionSync struct {
 	PlayMethod           string // current live transport method for admin session views
 	ReportingNode        string
 	ClientIP             string
+	ClientName           string
+	ClientVersion        string
+	ClientUserAgent      string
 	AudioTrackIndex      int
 	TranscodeAudio       bool
 	StreamBitrateKbps    int
@@ -138,10 +141,11 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 			INSERT INTO playback_sessions_sync
 				(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method,
 				 reporting_node, started_at, updated_at, last_sync_at, client_ip,
+				 client_name, client_version, client_user_agent,
 				 audio_track_index, transcode_audio, stream_bitrate_kbps, transcode_node_url,
 				 target_resolution, target_video_codec, target_audio_codec, target_bitrate_kbps,
 				 transcode_hw_accel, position_seconds, is_paused, has_websocket)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -152,6 +156,9 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				started_at          = EXCLUDED.started_at,
 				updated_at          = EXCLUDED.updated_at,
 				client_ip           = EXCLUDED.client_ip,
+				client_name         = EXCLUDED.client_name,
+				client_version      = EXCLUDED.client_version,
+				client_user_agent   = EXCLUDED.client_user_agent,
 				audio_track_index   = EXCLUDED.audio_track_index,
 				transcode_audio     = EXCLUDED.transcode_audio,
 				stream_bitrate_kbps = EXCLUDED.stream_bitrate_kbps,
@@ -166,8 +173,9 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				has_websocket       = EXCLUDED.has_websocket,
 				last_sync_at        = NOW()
 		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
-			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP), s.AudioTrackIndex,
-			s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
+			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
+			nullableString(s.ClientName), nullableString(s.ClientVersion), nullableString(s.ClientUserAgent),
+			s.AudioTrackIndex, s.TranscodeAudio, nullableInt(s.StreamBitrateKbps), nullableString(s.TranscodeNodeURL),
 			nullableString(s.TargetResolution), nullableString(s.TargetVideoCodec),
 			nullableString(s.TargetAudioCodec), nullableInt(s.TargetBitrateKbps),
 			nullableString(s.TranscodeHWAccel), normalizePositionSeconds(s.PositionSeconds),
@@ -230,6 +238,9 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(play_method, ''),
 			COALESCE(reporting_node, ''),
 			COALESCE(HOST(client_ip), ''),
+			COALESCE(client_name, ''),
+			COALESCE(client_version, ''),
+			COALESCE(client_user_agent, ''),
 			COALESCE(audio_track_index, 0),
 			COALESCE(transcode_audio, FALSE),
 			COALESCE(stream_bitrate_kbps, 0),
@@ -265,6 +276,9 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.PlayMethod,
 			&s.ReportingNode,
 			&s.ClientIP,
+			&s.ClientName,
+			&s.ClientVersion,
+			&s.ClientUserAgent,
 			&s.AudioTrackIndex,
 			&s.TranscodeAudio,
 			&s.StreamBitrateKbps,
@@ -318,6 +332,9 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			left[i].PlayMethod != right[i].PlayMethod ||
 			left[i].ReportingNode != right[i].ReportingNode ||
 			left[i].ClientIP != right[i].ClientIP ||
+			left[i].ClientName != right[i].ClientName ||
+			left[i].ClientVersion != right[i].ClientVersion ||
+			left[i].ClientUserAgent != right[i].ClientUserAgent ||
 			left[i].AudioTrackIndex != right[i].AudioTrackIndex ||
 			left[i].TranscodeAudio != right[i].TranscodeAudio ||
 			left[i].StreamBitrateKbps != right[i].StreamBitrateKbps ||

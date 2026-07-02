@@ -31,6 +31,15 @@ type UserStore interface {
 	ClearProgress(ctx context.Context, profileID, mediaItemID string) error
 	GetProgress(ctx context.Context, profileID, mediaItemID string) (*WatchProgress, error)
 	ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]WatchProgress, error)
+	// ListProgressFiltered is ListProgress with an additional SQL pre-filter on
+	// the backing catalog item's type and/or library, so the watched-items path
+	// no longer scans the whole status set before discarding non-matching rows.
+	// types is matched case-insensitively against media_items.type ("episode"
+	// resolves through the separate episodes table); a nil libraryID drops the
+	// library predicate, and an empty types + nil libraryID degrades to the
+	// plain status listing. It is a coarse pre-filter: callers still apply
+	// access/parental exclusions over the returned rows.
+	ListProgressFiltered(ctx context.Context, profileID, status string, types []string, libraryID *int, limit, offset int) ([]WatchProgress, error)
 	ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error)
 	// ListProgressSince returns rows whose server cursor exceeds the opaque
 	// cursor token (empty = full delta), in cursor order, with the next cursor.
@@ -55,10 +64,17 @@ type UserStore interface {
 	ListFavoritesByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	IsFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error)
 	AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) error
 	RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error
+	// ReplaceWatchlistOrder mirrors a provider's watchlist order: the given ids
+	// get sort_index 0..N-1 in order; all other rows reset to added_at ordering.
+	ReplaceWatchlistOrder(ctx context.Context, profileID string, orderedMediaItemIDs []string) error
 	ListWatchlist(ctx context.Context, profileID string, limit, offset int) ([]WatchlistEntry, error)
 	ListWatchlistByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)
 	InWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error)
+	// RemoveWatchedFromWatchlist reports the profile's preference for auto-removing
+	// fully-watched items from the watchlist (defaults true).
+	RemoveWatchedFromWatchlist(ctx context.Context, profileID string) (bool, error)
 
 	// Collections
 	CreateCollection(ctx context.Context, input CreateCollectionInput) (*Collection, error)

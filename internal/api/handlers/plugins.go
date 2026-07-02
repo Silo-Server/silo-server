@@ -503,7 +503,6 @@ func (h *PluginHandler) HandleCreateInstallation(w http.ResponseWriter, r *http.
 	}
 
 	h.syncMetadataProviders(r.Context(), result.Installation)
-	h.syncImageResolvers(r.Context(), result.Installation)
 
 	response, err := h.buildInstallationResponse(r.Context(), result.Installation, result.Manifest)
 	if err != nil {
@@ -662,7 +661,6 @@ func (h *PluginHandler) installUploadedPlugin(ctx context.Context, path string) 
 
 func (h *PluginHandler) writeUploadedPluginResponse(w http.ResponseWriter, r *http.Request, result *plugins.InstallResult) {
 	h.syncMetadataProviders(r.Context(), result.Installation)
-	h.syncImageResolvers(r.Context(), result.Installation)
 
 	response, err := h.buildInstallationResponse(r.Context(), result.Installation, result.Manifest)
 	if err != nil {
@@ -700,35 +698,6 @@ func (h *PluginHandler) syncMetadataProviders(ctx context.Context, installation 
 				"capability_id", cap.ID,
 				"error", err)
 		}
-	}
-}
-
-// syncImageResolvers registers image resolver sources for any metadata_provider.v1
-// capabilities from the given installation so that plugin-prefixed image URLs
-// (e.g. "tmdb://poster/abc.jpg") can be resolved at runtime.
-func (h *PluginHandler) syncImageResolvers(ctx context.Context, installation *plugins.Installation) {
-	if h.imageResolver == nil || h.service == nil {
-		return
-	}
-
-	caps, err := h.installations.ListCapabilities(ctx, installation.ID)
-	if err != nil {
-		slog.Error("listing capabilities for image resolver sync",
-			"installation_id", installation.ID, "error", err)
-		return
-	}
-
-	for _, cap := range caps {
-		if cap.Type != "metadata_provider.v1" {
-			continue
-		}
-		source := metadata.NewPluginClientSource(installation.ID, cap.ID, func(
-			ctx context.Context, installationID int, capabilityID string,
-		) (metadata.PluginMetadataClient, error) {
-			return h.service.MetadataProviderClient(ctx, installationID, capabilityID)
-		})
-		h.imageResolver.RegisterSource(cap.ID, source)
-		slog.Info("registered plugin image resolver", "capability_id", cap.ID, "installation_id", installation.ID)
 	}
 }
 
@@ -849,11 +818,6 @@ func (h *PluginHandler) HandleUpdateInstallation(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// When a plugin is being enabled, register its image resolvers.
-	if req.Enabled != nil && *req.Enabled && !currentInstallation.Enabled {
-		h.syncImageResolvers(r.Context(), installation)
-	}
-
 	response, err := h.buildInstallationResponse(r.Context(), installation, nil)
 	if err != nil {
 		slog.Error("building updated plugin installation response", "error", err)
@@ -883,7 +847,6 @@ func (h *PluginHandler) HandleApplyUpdate(w http.ResponseWriter, r *http.Request
 	}
 
 	h.syncMetadataProviders(r.Context(), installation)
-	h.syncImageResolvers(r.Context(), installation)
 
 	response, err := h.buildInstallationResponse(r.Context(), installation, nil)
 	if err != nil {

@@ -22,6 +22,7 @@ export interface CatalogSearchState {
   collection_id?: string;
   person_id?: string;
   type_override?: string;
+  uses_source_order?: boolean;
   query_definition: QueryDefinition;
 }
 
@@ -58,7 +59,13 @@ const overlaySources = new Set<CatalogSource>([
   "watchlist",
   "history",
   "person",
+  "library_collection",
+  "user_collection",
 ]);
+
+function isCollectionSource(source: CatalogSource): boolean {
+  return source === "library_collection" || source === "user_collection";
+}
 
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
   return overlaySources.has(source);
@@ -128,31 +135,36 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
     });
   }
 
-  const sort = normalizeQuerySortField(readString(searchParams.get("sort")));
+  const rawSort = readString(searchParams.get("sort"));
   const rawOrder = readString(searchParams.get("order"));
+  const sort = normalizeQuerySortField(rawSort);
+  const hasExplicitSort = Boolean(rawSort || rawOrder);
   const queryLimit = parsePositiveInt(searchParams.get("query_limit")) ?? undefined;
+  const mediaScope =
+    type === "movie" ||
+    type === "series" ||
+    type === "episode" ||
+    type === "audiobook" ||
+    type === "ebook" ||
+    type === "video"
+      ? type
+      : undefined;
 
   baseState.query_definition = normalizeQueryDefinition({
     library_ids: baseState.library_id ? [baseState.library_id] : [],
-    media_scope:
-      type === "movie" ||
-      type === "series" ||
-      type === "episode" ||
-      type === "audiobook" ||
-      type === "ebook" ||
-      type === "video"
-        ? type
-        : undefined,
+    media_scope: mediaScope === "episode" && isCollectionSource(source) ? undefined : mediaScope,
     match: searchParams.get("match") === "any" ? "any" : "all",
     groups: [...implicitGroups, ...groups],
-    sort: sort
-      ? {
-          field: sort,
-          order: rawOrder === "asc" || rawOrder === "desc" ? rawOrder : undefined,
-        }
-      : undefined,
+    sort:
+      sort || hasExplicitSort
+        ? {
+            field: sort ?? "added_at",
+            order: rawOrder === "asc" || rawOrder === "desc" ? rawOrder : undefined,
+          }
+        : undefined,
     limit: queryLimit,
   });
+  baseState.uses_source_order = isCollectionSource(source) && !hasExplicitSort;
 
   return baseState;
 }
@@ -197,6 +209,7 @@ export function buildLibraryCollectionCatalogHref(collectionId: string, title?: 
     source: "library_collection",
     collection_id: collectionId,
     title,
+    uses_source_order: true,
     query_definition: createEmptyQueryDefinition(),
   });
 }
@@ -206,6 +219,7 @@ export function buildUserCollectionCatalogHref(collectionId: string, title?: str
     source: "user_collection",
     collection_id: collectionId,
     title,
+    uses_source_order: true,
     query_definition: createEmptyQueryDefinition(),
   });
 }
@@ -277,16 +291,6 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     return params;
   }
 
-  if (state.source === "library_collection" || state.source === "user_collection") {
-    if (state.collection_id) {
-      params.set("collection_id", state.collection_id);
-    }
-    if (state.title) {
-      params.set("title", state.title);
-    }
-    return params;
-  }
-
   if (state.collection_id) {
     params.set("collection_id", state.collection_id);
   }
@@ -299,9 +303,13 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
   if (state.q) {
     params.set("q", state.q);
   }
-  if (state.type_override) {
+  const stateIsCollectionSource = isCollectionSource(state.source);
+  if (state.type_override && !(stateIsCollectionSource && state.type_override === "episode")) {
     params.set("type", state.type_override);
-  } else if (state.query_definition.media_scope) {
+  } else if (
+    state.query_definition.media_scope &&
+    !(stateIsCollectionSource && state.query_definition.media_scope === "episode")
+  ) {
     params.set("type", state.query_definition.media_scope);
   }
   const effectiveLibraryID = state.library_id ?? state.query_definition.library_ids[0];
@@ -315,9 +323,12 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     params.set("sort", "relevance");
     params.set("order", state.query_definition.sort.order);
   } else if (
+    !state.uses_source_order &&
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
-      (state.source === "query" && effectiveLibraryID != null))
+      (state.source === "query" && effectiveLibraryID != null) ||
+      state.source === "library_collection" ||
+      state.source === "user_collection")
   ) {
     params.set("sort", state.query_definition.sort.field);
     if (state.query_definition.sort.order) {

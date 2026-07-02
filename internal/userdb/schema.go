@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
     profile_id TEXT NOT NULL,
     media_item_id TEXT NOT NULL,
     added_at TEXT NOT NULL,
+    sort_index INTEGER,
     PRIMARY KEY (profile_id, media_item_id)
 );
 
@@ -305,7 +306,7 @@ func InitSchema(db *sql.DB) error {
 // trigger's own UPDATE does not re-fire it. See the offline-sync design
 // (invariant 1). CREATE TRIGGER IF NOT EXISTS never replaces an existing
 // trigger, so changing a body requires a migrate.go step dropping the old one
-// (see migrateToV12).
+// (see migrateToV13).
 const watchProgressSyncTriggers = `
 CREATE TRIGGER IF NOT EXISTS watch_progress_stamp_ins AFTER INSERT ON watch_progress
 BEGIN

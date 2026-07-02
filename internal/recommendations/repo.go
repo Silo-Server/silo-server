@@ -10,30 +10,15 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/embeddingvectors"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 )
 
-// padToLength zero-pads a vector to the target dimension. If the vector is
-// already at or above the target length, it is returned as-is. This allows
-// local models producing shorter vectors (e.g. 768-dim) to be stored in a
-// fixed-dimension column (3072) without schema changes.
-func padToLength(vec []float32, dim int) []float32 {
-	if len(vec) >= dim {
-		return vec
-	}
-	padded := make([]float32, dim)
-	copy(padded, vec)
-	return padded
-}
-
 func ensureCanonicalDimensions(vec []float32) ([]float32, error) {
-	if len(vec) > CanonicalEmbeddingDimensions {
-		return nil, fmt.Errorf("embedding vector length %d exceeds canonical dimension %d", len(vec), CanonicalEmbeddingDimensions)
-	}
-	return padToLength(vec, CanonicalEmbeddingDimensions), nil
+	return embeddingvectors.EnsureCanonicalDimensions(vec)
 }
 
 const embeddingLockSettingKey = "recommendations.embedding_lock"
@@ -167,11 +152,9 @@ func embeddingEligibilityWhereClause() string {
 }
 
 func recommendationItemEligibilityWhereClause(alias string) string {
-	alias = strings.TrimSpace(alias)
-	if alias == "" {
-		alias = "media_items"
-	}
-	return fmt.Sprintf("(%s.status = 'matched' OR %s.type = 'audiobook' OR %s.type = 'ebook')", alias, alias, alias)
+	// Delegate to the shared embed-eligibility predicate so the recommendations
+	// population stays identical to the catalog coverage denominator.
+	return embeddingvectors.ItemEligibilityWhereClause(alias)
 }
 
 // UpsertEmbedding stores or updates an embedding for a media item.
@@ -180,7 +163,13 @@ func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []f
 	if err != nil {
 		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
 	}
-	_, err = r.pool.Exec(ctx, `
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin upsert embedding for item %s: %w", itemID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (media_item_id) DO UPDATE
@@ -191,6 +180,12 @@ func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []f
 	`, itemID, pgvector.NewVector(padded), model, canonicalText)
 	if err != nil {
 		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
+	}
+	if err := catalog.EnqueueSearchIndexUpsert(ctx, tx, itemID); err != nil {
+		return fmt.Errorf("enqueue catalog search embedding update for item %s: %w", itemID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit upsert embedding for item %s: %w", itemID, err)
 	}
 	return nil
 }
@@ -468,20 +463,38 @@ func (r *Repo) findTasteProfileCandidates(
 	return items, genreMap, nil
 }
 
-// ItemsNeedingEmbedding returns content IDs of media items that either have no
-// embedding or whose embedding was generated with a different model.
-// Books bypass the status='matched' gate because their scanner/plugin-derived
-// metadata is authoritative as soon as the scan/enrichment completes.
-func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel string, limit int) ([]string, error) {
-	query := fmt.Sprintf(`
+// buildItemsNeedingEmbeddingSQL returns the cheap missing/model-stale candidate
+// query. It deliberately avoids the per-row item_people LATERAL joins that the
+// text-staleness CTE (ListEmbeddingTextCandidates) needs, so the active-backfill
+// pass stays cheap: a single LEFT JOIN on the embeddings table is enough to find
+// rows that have no embedding or were embedded under a different model. Ordering
+// by content_id makes the $2 cursor stable across calls.
+// Args: $1 = current model, $2 = afterID cursor (empty for the first page), $3 = limit.
+func buildItemsNeedingEmbeddingSQL() string {
+	return fmt.Sprintf(`
 		SELECT mi.content_id
 		FROM   media_items mi
 		LEFT JOIN media_item_embeddings e ON e.media_item_id = mi.content_id
 		WHERE  %s
 		  AND  (e.media_item_id IS NULL OR e.model != $1)
-		LIMIT  $2
+		  AND  ($2 = '' OR mi.content_id > $2)
+		ORDER  BY mi.content_id
+		LIMIT  $3
 	`, embeddingEligibilityWhereClause())
-	rows, err := r.pool.Query(ctx, query, currentModel, limit)
+}
+
+// ItemsNeedingEmbedding returns content IDs of media items that either have no
+// embedding or whose embedding was generated with a different model, ordered by
+// content_id and paged via afterID (pass "" for the first page). This is the
+// "cheap" pass of the embedding backfill: it intentionally does NOT detect
+// text-staleness (which would require the expensive item_people LATERAL joins);
+// re-embedding text-changed items is handled separately by
+// ListEmbeddingTextCandidates.
+//
+// Books bypass the status='matched' gate because their scanner/plugin-derived
+// metadata is authoritative as soon as the scan/enrichment completes.
+func (r *Repo) ItemsNeedingEmbedding(ctx context.Context, currentModel, afterID string, limit int) ([]string, error) {
+	rows, err := r.pool.Query(ctx, buildItemsNeedingEmbeddingSQL(), currentModel, afterID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("items needing embedding: %w", err)
 	}

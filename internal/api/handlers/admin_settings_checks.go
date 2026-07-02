@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/recommendations/embeddings"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -116,12 +117,30 @@ func (h *AdminHandler) HandleCheckSettingsConnection(w http.ResponseWriter, r *h
 		response = checkRedisConnection(r.Context(), cfg)
 	case "recommendations_embedding":
 		response = checkRecommendationsEmbeddingConnection(r.Context(), cfg)
+	case "meilisearch":
+		response = checkMeilisearchConnection(r.Context(), effectiveSettings)
 	default:
 		writeError(w, http.StatusBadRequest, "bad_request", "Unsupported connection check kind")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func checkMeilisearchConnection(ctx context.Context, settings map[string]string) connectionCheckResponse {
+	searchSettings, err := catalog.CatalogSearchSettingsFromMap(settings)
+	if err != nil {
+		return connectionCheckResponse{Success: false, Message: err.Error()}
+	}
+	if searchSettings.MeilisearchURL == "" {
+		return connectionCheckResponse{Success: false, Message: "Meilisearch URL is required"}
+	}
+	searchSettings.Provider = catalog.SearchProviderMeilisearch
+	indexer := catalog.NewCatalogSearchIndexer(nil, nil)
+	if err := indexer.CheckConnection(ctx, searchSettings); err != nil {
+		return connectionCheckResponse{Success: false, Message: err.Error()}
+	}
+	return connectionCheckResponse{Success: true, Message: "Meilisearch connection successful"}
 }
 
 func (h *AdminHandler) effectiveSettingsForConnectionCheck(

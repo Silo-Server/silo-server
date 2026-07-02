@@ -7,6 +7,7 @@ import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import {
   useRedetectEpisodeIntro,
   useRefreshItemMetadata,
@@ -50,6 +51,8 @@ function formatDuration(minutes: number): string {
 }
 
 export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
+  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
+    useOnViewTranslation(item);
   const navigate = useNavigate();
   const location = useLocation();
   useAmbientColor(item.backdrop_thumbhash);
@@ -270,6 +273,8 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           />
         }
         overview={item.overview}
+        overviewTranslating={overviewTranslating}
+        onTranslateOverview={onTranslateOverview}
         crewLine={<HeroCrewLine crew={item.crew ?? []} />}
         actions={
           <ActionBar

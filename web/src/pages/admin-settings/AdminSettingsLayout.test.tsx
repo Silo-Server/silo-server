@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -13,10 +14,26 @@ vi.mock("@/hooks/useSettingsForm", () => ({
 }));
 
 function renderLayout(search = "") {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
   return renderToStaticMarkup(
-    <MemoryRouter initialEntries={[`/admin/settings${search}`]}>
-      <AdminSettingsLayout />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/admin/settings${search}`]}>
+        <AdminSettingsLayout />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function renderInteractiveLayout(search = "") {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[`/admin/settings${search}`]}>
+        <AdminSettingsLayout />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -71,11 +88,7 @@ describe("AdminSettingsLayout", () => {
   });
 
   it("filters admin settings sections from the search box", async () => {
-    render(
-      <MemoryRouter initialEntries={["/admin/settings"]}>
-        <AdminSettingsLayout />
-      </MemoryRouter>,
-    );
+    renderInteractiveLayout();
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "redis");
 
@@ -85,11 +98,7 @@ describe("AdminSettingsLayout", () => {
   });
 
   it("matches individual admin setting labels", async () => {
-    render(
-      <MemoryRouter initialEntries={["/admin/settings"]}>
-        <AdminSettingsLayout />
-      </MemoryRouter>,
-    );
+    renderInteractiveLayout();
 
     await userEvent.type(
       screen.getByRole("searchbox", { name: "Search settings" }),
@@ -101,11 +110,7 @@ describe("AdminSettingsLayout", () => {
   });
 
   it("focuses admin settings search with Cmd+K", () => {
-    render(
-      <MemoryRouter initialEntries={["/admin/settings"]}>
-        <AdminSettingsLayout />
-      </MemoryRouter>,
-    );
+    renderInteractiveLayout();
 
     const searchBox = screen.getByRole("searchbox", { name: "Search settings" });
     fireEvent.keyDown(document, { key: "k", metaKey: true });

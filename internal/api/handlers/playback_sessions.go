@@ -46,6 +46,10 @@ type playbackSessionRow struct {
 	IsPaused                 bool      `json:"is_paused"`
 	HasPlaybackControl       bool      `json:"has_playback_control"`
 	ClientIP                 string    `json:"client_ip,omitempty"`
+	ClientName               string    `json:"client_name,omitempty"`
+	ClientVersion            string    `json:"client_version,omitempty"`
+	ClientLabel              string    `json:"client_label,omitempty"`
+	ClientUserAgent          string    `json:"client_user_agent,omitempty"`
 	AudioTrackIndex          int       `json:"audio_track_index"`
 	TranscodeAudio           bool      `json:"transcode_audio"`
 	StreamBitrateKbps        *int      `json:"stream_bitrate_kbps"`
@@ -149,6 +153,9 @@ func (l *PlaybackSessionsLoader) Load(
 			COALESCE(s.is_paused, FALSE),
 			COALESCE(s.has_websocket, FALSE),
 			COALESCE(HOST(s.client_ip), ''),
+			COALESCE(s.client_name, ''),
+			COALESCE(s.client_version, ''),
+			COALESCE(s.client_user_agent, ''),
 			COALESCE(s.audio_track_index, 0),
 			COALESCE(s.transcode_audio, FALSE),
 			s.stream_bitrate_kbps,
@@ -203,7 +210,8 @@ func (l *PlaybackSessionsLoader) Load(
 			&s.MediaTitle, &s.MediaType, &s.SeriesName, &s.EpisodeName, &s.SeasonNumber, &s.EpisodeNumber,
 			&posterPath,
 			&s.PlayMethod, &s.ReportingNode, &s.NodeDisplayName, &s.FileDuration, &s.StartedAt, &s.UpdatedAt,
-			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.AudioTrackIndex, &s.TranscodeAudio, &streamBitrateKbps,
+			&s.PositionSeconds, &s.IsPaused, &s.HasPlaybackControl, &s.ClientIP, &s.ClientName, &s.ClientVersion,
+			&s.ClientUserAgent, &s.AudioTrackIndex, &s.TranscodeAudio, &streamBitrateKbps,
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec, &targetBitrateKbps,
 			&s.TranscodeHWAccel, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
@@ -215,6 +223,7 @@ func (l *PlaybackSessionsLoader) Load(
 		s.TargetBitrateKbps = targetBitrateKbps
 		s.SourceBitrateKbps = sourceBitrateKbps
 		s.SourceAudioChannels = sourceAudioChannels
+		s.ClientLabel = playbackClientDisplayName(s.ClientName, s.ClientVersion, s.ClientUserAgent)
 		enrichPlaybackSessionRow(&s, audioTracksJSON)
 		sessions = append(sessions, s)
 	}
@@ -333,6 +342,141 @@ func firstNonEmptyValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func playbackClientDisplayName(name, version, userAgent string) string {
+	name = strings.TrimSpace(name)
+	version = shortPlaybackClientVersion(version)
+	if name != "" {
+		if version != "" {
+			return name + " " + version
+		}
+		return name
+	}
+
+	userAgent = strings.TrimSpace(userAgent)
+	if userAgent == "" {
+		return ""
+	}
+
+	rules := []struct {
+		label         string
+		tokens        []string
+		versionTokens []string
+	}{
+		{label: "Infuse", tokens: []string{"infuse"}, versionTokens: []string{"infuse-direct", "infuse"}},
+		{label: "Findroid", tokens: []string{"findroid"}, versionTokens: []string{"findroid"}},
+		{label: "Streamyfin", tokens: []string{"streamyfin"}, versionTokens: []string{"streamyfin"}},
+		{label: "Swiftfin", tokens: []string{"swiftfin"}, versionTokens: []string{"swiftfin"}},
+		{label: "Jellyfin", tokens: []string{"jellyfin"}, versionTokens: []string{"jellyfin"}},
+		{label: "JellyCon", tokens: []string{"jellycon"}, versionTokens: []string{"jellycon"}},
+		{label: "Wholphin", tokens: []string{"wholphin"}, versionTokens: []string{"wholphin"}},
+		{label: "Fladder", tokens: []string{"fladder"}, versionTokens: []string{"fladder"}},
+		{label: "VidHub", tokens: []string{"vidhub"}, versionTokens: []string{"vidhub"}},
+		{label: "SenPlayer", tokens: []string{"senplayer"}, versionTokens: []string{"senplayer"}},
+		{label: "Kodi", tokens: []string{"kodi"}, versionTokens: []string{"kodi"}},
+		{label: "MPV", tokens: []string{"mpv"}, versionTokens: []string{"mpv"}},
+		{label: "Edge", tokens: []string{"edg/"}, versionTokens: []string{"edg"}},
+		{label: "Opera", tokens: []string{"opr/", "opera"}, versionTokens: []string{"opr", "opera"}},
+		{label: "Firefox", tokens: []string{"firefox/", "fxios/"}, versionTokens: []string{"firefox", "fxios"}},
+		{label: "Chrome", tokens: []string{"chrome/", "crios/"}, versionTokens: []string{"chrome", "crios"}},
+		{label: "Safari", tokens: []string{"safari/"}, versionTokens: []string{"version"}},
+	}
+	lower := strings.ToLower(userAgent)
+	for _, rule := range rules {
+		if !containsAny(lower, rule.tokens) {
+			continue
+		}
+		if version := firstProductVersion(userAgent, rule.versionTokens); version != "" {
+			return rule.label + " " + version
+		}
+		return rule.label
+	}
+
+	switch {
+	case strings.Contains(lower, "applecoremedia"):
+		return "Apple player"
+	case strings.Contains(lower, "okhttp"):
+		return "Android client"
+	case strings.Contains(lower, "dart/"):
+		return "Flutter client"
+	case strings.Contains(lower, "go-http-client"):
+		return "Go client"
+	case strings.Contains(lower, "curl/"):
+		return "curl"
+	case strings.Contains(lower, "python-requests"):
+		return "Python requests"
+	default:
+		return firstUserAgentProduct(userAgent)
+	}
+}
+
+func containsAny(value string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstProductVersion(userAgent string, tokens []string) string {
+	for _, field := range strings.Fields(userAgent) {
+		name, version, ok := strings.Cut(field, "/")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(strings.ToLower(name))
+		for _, token := range tokens {
+			if name == strings.TrimSpace(strings.ToLower(token)) {
+				return shortPlaybackClientVersion(version)
+			}
+		}
+	}
+	return ""
+}
+
+func shortPlaybackClientVersion(version string) string {
+	version = strings.Trim(strings.TrimSpace(version), `";),`)
+	if version == "" {
+		return ""
+	}
+	version = strings.Map(func(r rune) rune {
+		if (r >= '0' && r <= '9') || r == '.' {
+			return r
+		}
+		return -1
+	}, version)
+	parts := strings.Split(version, ".")
+	filtered := parts[:0]
+	for _, part := range parts {
+		if part != "" {
+			filtered = append(filtered, part)
+		}
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	if len(filtered) > 2 {
+		filtered = filtered[:2]
+	}
+	if len(filtered) == 2 && filtered[1] == "0" {
+		filtered = filtered[:1]
+	}
+	return strings.Join(filtered, ".")
+}
+
+func firstUserAgentProduct(userAgent string) string {
+	for _, field := range strings.Fields(userAgent) {
+		name, _, ok := strings.Cut(field, "/")
+		if ok {
+			name = strings.Trim(name, `";(),`)
+			if name != "" && !strings.EqualFold(name, "Mozilla") {
+				return name
+			}
+		}
+	}
+	return "Unknown client"
 }
 
 func (l *PlaybackSessionsLoader) populateProfileNames(ctx context.Context, sessions []playbackSessionRow) {

@@ -52,8 +52,9 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 
 	routeID := chiURLParam(r, "id")
 	mediaSourceID := firstNonEmpty(r.URL.Query().Get("mediaSourceId"), r.URL.Query().Get("MediaSourceId"))
+	staticRequest := strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true")
 	playSession, source, err := h.resolvePlaybackRoute(r, session, routeID, mediaSourceID)
-	if err != nil && strings.EqualFold(newCaseInsensitiveQuery(r.URL.Query()).Get("Static"), "true") {
+	if err != nil && staticRequest {
 		// Infuse uses Static=true for direct play without calling PlaybackInfo first.
 		// Create an on-the-fly play session so the stream can proceed. The key
 		// lookup must be case-insensitive: SenPlayer sends "static=true"
@@ -71,7 +72,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 	}
 
 	method := "direct"
-	if !source.SupportsDirectPlay {
+	if !staticRequest && !source.SupportsDirectPlay {
 		if source.SupportsDirectStream {
 			method = "remux"
 		} else {

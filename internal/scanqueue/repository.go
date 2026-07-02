@@ -205,13 +205,25 @@ func (r *Repository) GetActiveByScope(ctx context.Context, libraryID int, mode, 
 }
 
 func (r *Repository) ListActive(ctx context.Context) ([]*models.ScanRun, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT `+scanRunColumns+`
+	return r.listActive(ctx, 0)
+}
+
+func (r *Repository) ListActiveLimit(ctx context.Context, limit int) ([]*models.ScanRun, error) {
+	return r.listActive(ctx, limit)
+}
+
+func (r *Repository) listActive(ctx context.Context, limit int) ([]*models.ScanRun, error) {
+	query := `
+		SELECT ` + scanRunColumns + `
 		FROM scan_runs
 		WHERE status = ANY($1)
-		ORDER BY requested_at ASC`,
-		[]string{StatusAccepted, StatusRunning},
-	)
+		ORDER BY requested_at ASC`
+	args := []any{[]string{StatusAccepted, StatusRunning}}
+	if limit > 0 {
+		query += ` LIMIT $2`
+		args = append(args, limit)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list active scan runs: %w", err)
 	}

@@ -24,6 +24,16 @@ func embeddingTextNeedsRefresh(storedModel, storedCanonicalText, generatedCanoni
 	return storedModel != currentModel || storedCanonicalText != generatedCanonicalText
 }
 
+const (
+	// embeddingBackfillBatchSize is how many items EmbedAll embeds per API call.
+	embeddingBackfillBatchSize = 10
+
+	// embeddingTextStaleQuotaPerRun bounds how many text-stale items the
+	// expensive Pass 2 re-embeds in a single EmbedAll run. It caps the cost of
+	// the one full-table text-staleness CTE scan per run.
+	embeddingTextStaleQuotaPerRun = 200
+)
+
 // SimilarItems returns items most similar to the given item. Blends embedding
 // similarity (70%) with co-watch Jaccard score (30%), applies a validation
 // pipeline, MMR re-ranking, and assigns connection reasons.
@@ -247,17 +257,40 @@ func (e *Engine) EmbedItem(ctx context.Context, itemID string) error {
 	return e.repo.UpsertEmbedding(ctx, itemID, vectors[0], e.cfg.EmbeddingModel, text)
 }
 
-// EmbedAll embeds all items that are missing embeddings or have stale canonical text.
+// EmbedAll embeds items that are missing embeddings or have stale canonical
+// text, in two passes:
+//
+//   - Pass 1 (cheap): drain every missing or model-stale item via the
+//     ItemsNeedingEmbedding cursor. This query is a single LEFT JOIN with no
+//     item_people LATERAL joins, so active backfill (lots of brand-new items)
+//     stays cheap. The cursor advances past each page, so an item that fails to
+//     embed or store is simply retried on the next EmbedAll run rather than
+//     stalling the page forever.
+//   - Pass 2 (expensive): ONLY once Pass 1 has fully drained, make a single
+//     ListEmbeddingTextCandidates scan (LIMIT embeddingTextStaleQuotaPerRun) to
+//     find items whose embedding model is current but whose canonical text has
+//     drifted (e.g. a cast change). Detecting this requires recomputing each
+//     row's text via the full item_people LATERAL CTE, so it is run at most once
+//     per EmbedAll call. Re-embedding refreshes canonical_text, so handled items
+//     drop out of the candidate set on the next run — natural forward progress
+//     without a Pass 2 cursor.
+//
+// Coverage-first tradeoff: in steady state Pass 1 drains every run, so text-stale
+// items are re-embedded promptly. Only under pathological continuous heavy
+// ingest (Pass 1 never drains within a run) does Pass 2 get skipped — we
+// deliberately prioritize getting NEW items covered over re-embedding
+// text-changed ones. A periodic "force Pass 2 every Nth run" is a possible
+// follow-up, intentionally out of scope here.
 func (e *Engine) EmbedAll(ctx context.Context) (int, error) {
 	model := e.cfg.EmbeddingModel
 	total := 0
-	batchSize := 10
-	afterID := ""
 
 	if err := e.ensureEmbeddingLockConfig(ctx); err != nil {
 		return total, err
 	}
 
+	// Pass 1: drain the cheap missing/model-stale backlog via the cursor.
+	afterID := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -265,46 +298,122 @@ func (e *Engine) EmbedAll(ctx context.Context) (int, error) {
 		default:
 		}
 
-		candidates, err := e.repo.ListEmbeddingTextCandidates(ctx, afterID, model, batchSize)
+		ids, err := e.repo.ItemsNeedingEmbedding(ctx, model, afterID, embeddingBackfillBatchSize)
 		if err != nil {
 			return total, err
 		}
-		if len(candidates) == 0 {
+		if len(ids) == 0 {
 			break
 		}
-		afterID = candidates[len(candidates)-1].MediaItemID
-
-		ids := make([]string, 0, len(candidates))
-		stored := make(map[string]EmbeddingTextCandidate, len(candidates))
-		for _, candidate := range candidates {
-			ids = append(ids, candidate.MediaItemID)
-			stored[candidate.MediaItemID] = candidate
-		}
+		afterID = ids[len(ids)-1]
 
 		items, err := e.itemRepo.GetByIDs(ctx, ids)
 		if err != nil {
 			return total, fmt.Errorf("get items for embedding: %w", err)
 		}
-
 		// Hydrate cast/crew for richer embedding text.
 		e.hydrateItemPeople(ctx, items)
 
 		texts := make([]string, len(items))
-		staleItems := make([]*models.MediaItem, 0, len(items))
-		staleTexts := make([]string, 0, len(items))
 		for i, item := range items {
 			texts[i] = embeddings.BuildEmbeddingText(item)
-			candidate := stored[item.ContentID]
-			if embeddingTextNeedsRefresh(candidate.Model, candidate.CanonicalText, texts[i], model) {
-				staleItems = append(staleItems, item)
-				staleTexts = append(staleTexts, texts[i])
-			}
 		}
-		if len(staleItems) == 0 {
+
+		// embedBatch only returns quota/billing or context errors; both mean the
+		// cheap backlog did not fully drain this run, so we stop here and skip the
+		// expensive Pass 2. Any per-item store/embed failure is swallowed inside
+		// embedBatch and retried next run (the cursor passes over it).
+		embedded, err := e.embedBatch(ctx, items, texts, model)
+		total += embedded
+		if err != nil {
+			return total, err
+		}
+	}
+
+	// Reaching here means Pass 1 fully drained (every error path above returns).
+
+	select {
+	case <-ctx.Done():
+		return total, ctx.Err()
+	default:
+	}
+
+	// Pass 2: one expensive text-staleness scan, bounded by the per-run quota.
+	candidates, err := e.repo.ListEmbeddingTextCandidates(ctx, "", model, embeddingTextStaleQuotaPerRun)
+	if err != nil {
+		return total, err
+	}
+	if len(candidates) == 0 {
+		return total, nil
+	}
+
+	ids := make([]string, 0, len(candidates))
+	stored := make(map[string]EmbeddingTextCandidate, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.MediaItemID)
+		stored[candidate.MediaItemID] = candidate
+	}
+
+	items, err := e.itemRepo.GetByIDs(ctx, ids)
+	if err != nil {
+		return total, fmt.Errorf("get items for embedding: %w", err)
+	}
+	e.hydrateItemPeople(ctx, items)
+
+	// Pass 1 already cleared missing/model-stale rows, so the remaining
+	// candidates are text-stale. Re-confirm in Go (the SQL detection is an
+	// approximation of BuildEmbeddingText) before paying for an embed.
+	staleItems := make([]*models.MediaItem, 0, len(items))
+	staleTexts := make([]string, 0, len(items))
+	for _, item := range items {
+		text := embeddings.BuildEmbeddingText(item)
+		candidate := stored[item.ContentID]
+		if embeddingTextNeedsRefresh(candidate.Model, candidate.CanonicalText, text, model) {
+			staleItems = append(staleItems, item)
+			staleTexts = append(staleTexts, text)
+		}
+	}
+
+	embedded, err := e.embedBatch(ctx, staleItems, staleTexts, model)
+	total += embedded
+	if err != nil {
+		return total, err
+	}
+
+	return total, nil
+}
+
+// embedBatch embeds the given items (parallel items/texts slices, same length),
+// chunking internally by embeddingBackfillBatchSize so callers can pass any
+// size. It returns the number of items successfully stored.
+//
+// Behavior preserved from the original EmbedAll inner loop:
+//   - quota/billing errors return immediately (retrying won't help) and are the
+//     only batch-embed errors propagated to the caller;
+//   - any other batch embed failure falls back to embedding one item at a time
+//     so a single oversized item can't block the rest;
+//   - ensureEmbeddingLock runs before each upsert;
+//   - a store (upsert) failure for one item is logged and skipped, not fatal.
+func (e *Engine) embedBatch(ctx context.Context, items []*models.MediaItem, texts []string, model string) (int, error) {
+	total := 0
+	for start := 0; start < len(items); start += embeddingBackfillBatchSize {
+		select {
+		case <-ctx.Done():
+			return total, ctx.Err()
+		default:
+		}
+
+		end := start + embeddingBackfillBatchSize
+		if end > len(items) {
+			end = len(items)
+		}
+		chunkItems := items[start:end]
+		chunkTexts := texts[start:end]
+		if len(chunkItems) == 0 {
 			continue
 		}
 
-		vectors, err := e.embClient.Embed(ctx, staleTexts)
+		vectors, err := e.embClient.Embed(ctx, chunkTexts)
 		if err != nil {
 			// Quota/billing errors won't resolve by retrying — stop immediately.
 			if isQuotaError(err) {
@@ -313,12 +422,12 @@ func (e *Engine) EmbedAll(ctx context.Context) (int, error) {
 
 			// Batch failed — fall back to embedding one at a time so a single
 			// oversized item doesn't block the entire job.
-			slog.Warn("batch embed failed, falling back to single-item mode", "error", err, "batch_size", len(staleItems))
-			for i, item := range staleItems {
+			slog.Warn("batch embed failed, falling back to single-item mode", "error", err, "batch_size", len(chunkItems))
+			for i, item := range chunkItems {
 				if ctx.Err() != nil {
 					return total, ctx.Err()
 				}
-				single := staleTexts[i]
+				single := chunkTexts[i]
 				vecs, embedErr := e.embClient.Embed(ctx, []string{single})
 				if embedErr != nil {
 					if isQuotaError(embedErr) {
@@ -344,14 +453,14 @@ func (e *Engine) EmbedAll(ctx context.Context) (int, error) {
 			continue
 		}
 
-		for i, item := range staleItems {
+		for i, item := range chunkItems {
 			if i >= len(vectors) {
 				break
 			}
 			if err := e.ensureEmbeddingLock(ctx, vectors[i]); err != nil {
 				return total, fmt.Errorf("embed item %s: %w", item.ContentID, err)
 			}
-			if err := e.repo.UpsertEmbedding(ctx, item.ContentID, vectors[i], model, staleTexts[i]); err != nil {
+			if err := e.repo.UpsertEmbedding(ctx, item.ContentID, vectors[i], model, chunkTexts[i]); err != nil {
 				slog.Warn("skipping item, store failed", "item_id", item.ContentID, "error", err)
 				continue
 			}

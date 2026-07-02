@@ -53,6 +53,7 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { compareActiveScans, formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
+import { getSessionClientLabel } from "@/pages/adminActivityPresentation";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const DASHBOARD_AUTO_REFRESH_MS = 60_000;
@@ -485,6 +486,7 @@ function StreamCard({ session }: { session: AdminSession }) {
     : session.media_title || `File #${session.media_file_id}`;
   const username = session.username || `User #${session.user_id}`;
   const elapsed = getTimeAgo(session.started_at);
+  const clientLabel = getSessionClientLabel(session);
   const methodColor =
     session.play_method === "direct"
       ? "bg-success/10 text-success border-success/15"
@@ -564,6 +566,14 @@ function StreamCard({ session }: { session: AdminSession }) {
           >
             {session.play_method || "unknown"}
           </span>
+          {clientLabel ? (
+            <span
+              title={session.client_user_agent || clientLabel}
+              className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+            >
+              <span className="truncate">{clientLabel}</span>
+            </span>
+          ) : null}
           {session.reporting_node && (
             <span className="border-primary/10 bg-primary/5 text-primary inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold">
               {session.node_display_name || session.reporting_node}
@@ -913,6 +923,8 @@ function ActivityCard({
                 : s.media_title || `File #${s.media_file_id}`;
               const username = s.username || `User #${s.user_id}`;
               const profileDisplay = s.profile_name || s.profile_id || "";
+              const clientLabel = getSessionClientLabel(s);
+              const meta = [getTimeAgo(s.started_at), clientLabel].filter(Boolean).join(" · ");
               return (
                 <div
                   key={s.session_id}
@@ -938,9 +950,7 @@ function ActivityCard({
                         {title}
                       </Link>
                     </div>
-                    <div className="text-muted-foreground mt-0.5 text-[10px]">
-                      {getTimeAgo(s.started_at)}
-                    </div>
+                    <div className="text-muted-foreground mt-0.5 text-[10px]">{meta}</div>
                   </div>
                   <div className="flex-shrink-0">
                     <AdminSessionActions session={s} compact />

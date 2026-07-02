@@ -148,4 +148,7 @@ func TestLateOrphanCleanupUsesProvisionalSafetyPredicate(t *testing.T) {
 			t.Fatalf("%s late orphan query does not use provisional safety predicate", name)
 		}
 	}
+	if !strings.Contains(normalizePredicateSQL(deleteOrphanedProvisionalIDsByContentIDSQL), "RETURNING mi.content_id") {
+		t.Fatalf("late orphan delete query must return IDs for catalog search cleanup")
+	}
 }

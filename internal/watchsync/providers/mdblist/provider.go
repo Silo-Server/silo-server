@@ -52,15 +52,18 @@ func (p *Provider) DisplayName() string {
 }
 
 func (p *Provider) Capabilities() watchsync.Capabilities {
+	// MDBList exposes a single list — its watchlist — so it binds to Silo's
+	// watchlist rather than favorites.
 	return watchsync.Capabilities{
-		ImportWatched:    true,
-		ImportProgress:   true,
-		ExportWatched:    true,
-		ExportUnwatched:  true,
-		ImportFavorites:  true,
-		ExportFavorites:  true,
-		RemoveFavorites:  true,
-		ScrobblePlayback: true,
+		ImportWatched:          true,
+		ImportProgress:         true,
+		ExportWatched:          true,
+		ExportUnwatched:        true,
+		ImportWatchlist:        true,
+		ExportWatchlist:        true,
+		RemoveWatchlist:        true,
+		ProvidesWatchlistOrder: true,
+		ScrobblePlayback:       true,
 	}
 }
 
@@ -218,7 +221,7 @@ func progressFromPlayback(providerKey string, item mdblistPlaybackItem) (watchsy
 			SeriesTVDBID:    intString(item.Show.IDs.TVDB),
 			SeasonNumber:    item.Episode.Season,
 			EpisodeNumber:   item.Episode.Number,
-			ProgressPercent: item.Progress,
+			ProgressPercent: float64(item.Progress),
 			PausedAt:        pausedAt,
 		}, true
 	}
@@ -235,7 +238,7 @@ func progressFromPlayback(providerKey string, item mdblistPlaybackItem) (watchsy
 		IMDbID:          item.Movie.IDs.IMDb,
 		TMDBID:          intString(item.Movie.IDs.TMDB),
 		TVDBID:          intString(item.Movie.IDs.TVDB),
-		ProgressPercent: item.Progress,
+		ProgressPercent: float64(item.Progress),
 		PausedAt:        pausedAt,
 	}, true
 }
@@ -305,7 +308,7 @@ func (p *Provider) sendWatched(ctx context.Context, conn watchsync.Connection, p
 	return result, nil
 }
 
-func (p *Provider) FetchFavorites(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemoteFavorite, error) {
+func (p *Provider) FetchWatchlist(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemoteFavorite, error) {
 	now := time.Now().UTC()
 	var rows []watchsync.RemoteFavorite
 	for offset := 0; ; {
@@ -365,12 +368,12 @@ func watchlistRowsFromPayload(providerKey string, payload mdblistWatchlistRespon
 	return rows
 }
 
-func (p *Provider) ExportFavorites(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, favorites []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
-	return p.sendWatchlist(ctx, conn, favorites, "/watchlist/items/add")
+func (p *Provider) ExportWatchlist(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, items []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, conn, items, "/watchlist/items/add")
 }
 
-func (p *Provider) RemoveFavorites(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, favorites []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
-	return p.sendWatchlist(ctx, conn, favorites, "/watchlist/items/remove")
+func (p *Provider) RemoveWatchlist(ctx context.Context, _ watchsync.ServerConfig, conn watchsync.Connection, items []watchsync.LocalFavorite) (watchsync.ExportResult, error) {
+	return p.sendWatchlist(ctx, conn, items, "/watchlist/items/remove")
 }
 
 func (p *Provider) sendWatchlist(ctx context.Context, conn watchsync.Connection, favorites []watchsync.LocalFavorite, path string) (watchsync.ExportResult, error) {
@@ -565,13 +568,44 @@ type mdblistWatchedResponse struct {
 }
 
 type mdblistPlaybackItem struct {
-	Progress float64         `json:"progress"`
+	Progress mdblistProgress `json:"progress"`
 	PausedAt time.Time       `json:"paused_at"`
 	Type     string          `json:"type"`
 	Action   string          `json:"action"`
 	Movie    mdblistMovie    `json:"movie"`
 	Show     mdblistShow     `json:"show"`
 	Episode  *mdblistEpisode `json:"episode"`
+}
+
+type mdblistProgress float64
+
+func (p *mdblistProgress) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*p = 0
+		return nil
+	}
+	var value float64
+	if err := json.Unmarshal(data, &value); err == nil {
+		*p = mdblistProgress(value)
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err != nil {
+		return errors.New("mdblist progress must be a number or numeric string")
+	}
+	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(strings.TrimSuffix(text, "%"))
+	if text == "" {
+		*p = 0
+		return nil
+	}
+	value, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		return fmt.Errorf("parse mdblist progress: %w", err)
+	}
+	*p = mdblistProgress(value)
+	return nil
 }
 
 // mdblistPlaybackResponse accepts both the live API shape (a flat array of

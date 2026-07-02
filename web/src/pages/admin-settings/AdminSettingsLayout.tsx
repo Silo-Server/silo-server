@@ -19,6 +19,7 @@ import NotificationsAdminSettings from "./NotificationsAdminSettings";
 import GeneralSettings from "./GeneralSettings";
 import PlaybackSettings from "./PlaybackSettings";
 import ScannerSettings from "./ScannerSettings";
+import SearchSettings from "./SearchSettings";
 import IntroSettings from "./IntroSettings";
 import SubtitlesSettings from "./SubtitlesSettings";
 import AIServicesSettings from "./AIServicesSettings";
@@ -49,6 +50,7 @@ const SETTINGS_COMPONENTS: Record<string, ComponentType> = {
   theming: ThemeSettings,
   overlays: OverlaySettings,
   scanner: ScannerSettings,
+  search: SearchSettings,
   intro: IntroSettings,
   subtitles: SubtitlesSettings,
   ai: AIServicesSettings,

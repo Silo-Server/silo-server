@@ -109,6 +109,45 @@ func TestHandleVideoStream_UppercaseStaticServesFile(t *testing.T) {
 	}
 }
 
+// TestHandleVideoStream_StaticBypassesNegotiatedCapabilityRejection covers
+// clients that explicitly request the static/original file after PlaybackInfo
+// created a session whose selected source was marked non-direct-playable by
+// codec negotiation. Static=true is a direct-file request, so it must not be
+// rejected with "Media source requires transcoding".
+func TestHandleVideoStream_StaticBypassesNegotiatedCapabilityRejection(t *testing.T) {
+	handler, encodedID, body := newStaticDirectPlayHandler(t)
+	sourceID := NewResourceIDCodec().EncodeIntID(EncodedIDMediaSource, 42)
+	handler.playbackStore.Put(PlaybackSession{
+		ID:          "play-1",
+		CompatToken: "token-1",
+		ItemID:      "movie-1",
+		RouteItemID: encodedID,
+		UserID:      "user-1",
+		MediaSources: []PlaybackMediaSource{{
+			ID:                   sourceID,
+			FileID:               42,
+			Version:              catalog.FileVersion{FileID: 42, Container: "mkv", Duration: 3600},
+			SupportsDirectPlay:   false,
+			SupportsDirectStream: false,
+			SupportsTranscoding:  true,
+		}},
+	})
+
+	queries := []string{
+		"Static=true&PlaySessionId=play-1&MediaSourceId=" + url.QueryEscape(sourceID),
+		"static=true&PlaySessionId=play-1&MediaSourceId=" + url.QueryEscape(sourceID),
+	}
+	for _, rawQuery := range queries {
+		rec := serveStaticStream(handler, encodedID, rawQuery)
+		if rec.Code != 200 {
+			t.Fatalf("query %q: expected status 200; got %d, body=%s", rawQuery, rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); got != body {
+			t.Errorf("query %q: expected file content %q; got %q", rawQuery, body, got)
+		}
+	}
+}
+
 // TestHandleVideoStream_NoStaticNoSessionReturns404 proves the static fallback
 // does not fire unconditionally: with no Static param and an empty playback
 // store, resolvePlaybackRoute correctly 404s.

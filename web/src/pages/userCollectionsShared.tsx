@@ -9,6 +9,11 @@ import {
   useUpdateCollection,
 } from "@/hooks/queries/collections";
 import { buildUserCollectionCatalogHref as buildCatalogHrefForUserCollection } from "@/pages/catalogSearchParams";
+import {
+  collectionMediaFilterLabel,
+  collectionWatchFilterLabel,
+  queryDefinitionToDisplayFilters,
+} from "@/lib/collectionDisplayFilters";
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 import CollectionBuilder, {
   createCollectionBuilderValue,
@@ -44,11 +49,12 @@ export function toUserCollectionBuilderValue(
       allowed_profile_ids: collection?.allowed_profile_ids ?? [],
     },
     include_in_server_collections: collection?.include_in_server_collections ?? false,
+    display_query_definition: collection?.display_query_definition,
   });
 }
 
 export function toCreateCollectionBody(value: CollectionBuilderValue): CreateCollectionRequest {
-  return {
+  const body: CreateCollectionRequest = {
     name: value.title,
     collection_type: value.collection_type,
     is_shared: value.access.is_shared,
@@ -57,10 +63,14 @@ export function toCreateCollectionBody(value: CollectionBuilderValue): CreateCol
     sort_config: value.collection_type === "smart" ? value.sort_config : undefined,
     include_in_server_collections: value.include_in_server_collections,
   };
+  if (value.collection_type === "manual") {
+    body.display_query_definition = value.display_query_definition;
+  }
+  return body;
 }
 
 export function toUpdateCollectionBody(value: CollectionBuilderValue): UpdateCollectionRequest {
-  return {
+  const body: UpdateCollectionRequest = {
     name: value.title,
     is_shared: value.access.is_shared,
     allowed_profile_ids: value.access.allowed_profile_ids,
@@ -68,6 +78,10 @@ export function toUpdateCollectionBody(value: CollectionBuilderValue): UpdateCol
     sort_config: value.collection_type === "smart" ? value.sort_config : undefined,
     include_in_server_collections: value.include_in_server_collections,
   };
+  if (value.collection_type === "manual") {
+    body.display_query_definition = value.display_query_definition;
+  }
+  return body;
 }
 
 export function isCollectionReadOnly(
@@ -94,6 +108,10 @@ function UserCollectionSummary({
       ? `${draft.access.allowed_profile_ids.length} selected`
       : "All profiles";
 
+  const { watch: displayWatch, media: displayMedia } = queryDefinitionToDisplayFilters(
+    draft.display_query_definition,
+  );
+
   const selectedLibraryIDs = draft.query_definition.library_ids;
   const librarySummary =
     selectedLibraryIDs.length === 0
@@ -112,6 +130,12 @@ function UserCollectionSummary({
       <CardContent className="space-y-4">
         <SummaryRow label="Mode" value={draft.collection_type === "smart" ? "Smart" : "Manual"} />
         <SummaryRow label="Libraries" value={librarySummary} />
+        {draft.collection_type === "manual" ? (
+          <>
+            <SummaryRow label="Watch state" value={collectionWatchFilterLabel(displayWatch)} />
+            <SummaryRow label="Content" value={collectionMediaFilterLabel(displayMedia)} />
+          </>
+        ) : null}
         <SummaryRow label="Shared" value={draft.access.is_shared ? "Yes" : "No"} />
         <SummaryRow label="Profiles" value={profileSummary} />
         <SummaryRow

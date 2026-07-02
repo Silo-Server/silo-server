@@ -156,10 +156,11 @@ export function GlobalSearch({
       collection_id: searchState.collection_id,
       person_id: searchState.person_id,
       query_fingerprint: JSON.stringify(searchState.query_definition),
+      include_total: false,
       limit: PREVIEW_LIMIT,
       offset: 0,
     }),
-    queryFn: ({ signal }) => fetchCatalogPage(searchState, PREVIEW_LIMIT, 0, { signal }),
+    queryFn: ({ signal }) => fetchCatalogPage(searchState, PREVIEW_LIMIT, 0, { signal }, false),
     enabled: open && debouncedQuery.length > 0,
     staleTime: 60 * 1000,
   });
@@ -212,7 +213,7 @@ export function GlobalSearch({
 
   const showResultsPanel = query.trim().length > 0;
   const items = previewQuery.data?.items ?? [];
-  const total = previewQuery.data?.total ?? 0;
+  const hasMore = previewQuery.data?.has_more ?? false;
   const showLoading = previewQuery.isFetching && items.length === 0;
   const showEmpty =
     !previewQuery.isFetching &&
@@ -320,10 +321,8 @@ export function GlobalSearch({
                 : `${items.length} results found`}
             </div>
             <div className="text-muted-foreground border-t px-3 py-2 text-center text-xs">
-              {total > PREVIEW_LIMIT ? (
-                <p>
-                  Showing top {PREVIEW_LIMIT} of {total}. Press Enter for all results.
-                </p>
+              {hasMore ? (
+                <p>Showing top results. Press Enter for all results.</p>
               ) : (
                 <p>Press Enter to open the full search page.</p>
               )}

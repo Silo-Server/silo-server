@@ -123,13 +123,14 @@ describe("GlobalSearch", () => {
     });
   });
 
-  it("renders preview rows and total hint when more results exist than the preview limit", () => {
+  it("renders preview rows and an approximate more-results hint", () => {
     const markup = renderSearchMarkup({ defaultOpen: true, initialQuery: "Test" });
 
     expect(markup).toContain('data-testid="dialog"');
     expect(markup).toContain('placeholder="Search library..."');
     expect(markup).toContain("Test Movie");
-    expect(markup).toContain("Showing top 8 of 50");
+    expect(markup).toContain("Showing top results");
+    expect(markup).not.toContain("of 50");
     expect(markup).toContain("Press Enter for all results");
   });
 

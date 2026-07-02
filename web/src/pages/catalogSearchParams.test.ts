@@ -39,6 +39,21 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
+  it("keeps overlay params for collection sources", () => {
+    const state = parseCatalogSearchParams(
+      params("source=user_collection&collection_id=col-7&type=movie&genre=Drama&sort=title"),
+    );
+
+    expect(state.source).toBe("user_collection");
+    expect(state.collection_id).toBe("col-7");
+    expect(state.query_definition.media_scope).toBe("movie");
+    expect(state.query_definition.groups).toContainEqual({
+      match: "all",
+      rules: [{ field: "genre", op: "contains", value: "Drama" }],
+    });
+    expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
+  });
+
   it("keeps ebook media scope from catalog URLs", () => {
     const state = parseCatalogSearchParams(params("source=query&type=ebook&sort=author"));
 
@@ -90,9 +105,9 @@ describe("catalogSourceAllowsOverlay", () => {
     expect(catalogSourceAllowsOverlay("favorites")).toBe(true);
     expect(catalogSourceAllowsOverlay("watchlist")).toBe(true);
     expect(catalogSourceAllowsOverlay("history")).toBe(true);
+    expect(catalogSourceAllowsOverlay("library_collection")).toBe(true);
+    expect(catalogSourceAllowsOverlay("user_collection")).toBe(true);
     expect(catalogSourceAllowsOverlay("section")).toBe(false);
-    expect(catalogSourceAllowsOverlay("library_collection")).toBe(false);
-    expect(catalogSourceAllowsOverlay("user_collection")).toBe(false);
   });
 });
 
@@ -112,20 +127,30 @@ describe("buildCatalogHref", () => {
     ).toBe("source=query&library_id=2&sort=added_at&order=desc");
   });
 
-  it("builds a stable exact-source catalog URL", () => {
-    expect(
-      buildCatalogHref({
-        source: "user_collection",
-        collection_id: "col-7",
-        title: "Shared Picks",
-        query_definition: {
-          library_ids: [3],
-          match: "all",
-          groups: [{ match: "all", rules: [{ field: "genre", op: "contains", value: "Drama" }] }],
-          sort: { field: "title", order: "asc" },
-        },
-      }),
-    ).toBe("/catalog?source=user_collection&collection_id=col-7&title=Shared+Picks");
+  it("builds collection catalog URLs with overlay params", () => {
+    const href = buildCatalogHref({
+      source: "user_collection",
+      collection_id: "col-7",
+      title: "Shared Picks",
+      query_definition: {
+        library_ids: [3],
+        match: "all",
+        groups: [{ match: "all", rules: [{ field: "genre", op: "contains", value: "Drama" }] }],
+        sort: { field: "title", order: "asc" },
+      },
+    });
+
+    const built = new URL(`http://example.test${href}`);
+    expect(built.pathname).toBe("/catalog");
+    expect(built.searchParams.get("source")).toBe("user_collection");
+    expect(built.searchParams.get("collection_id")).toBe("col-7");
+    expect(built.searchParams.get("title")).toBe("Shared Picks");
+    expect(built.searchParams.get("library_id")).toBe("3");
+    expect(built.searchParams.get("sort")).toBe("title");
+    expect(built.searchParams.get("order")).toBe("asc");
+    expect(built.searchParams.get("groups[0][rules][0][field]")).toBe("genre");
+    expect(built.searchParams.get("groups[0][rules][0][op]")).toBe("contains");
+    expect(built.searchParams.get("groups[0][rules][0][value]")).toBe("Drama");
   });
 
   it("builds person catalog URLs with the person id", () => {

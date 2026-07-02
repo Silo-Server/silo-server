@@ -8,11 +8,11 @@ func TestNormalizeMDBListURL(t *testing.T) {
 	}{
 		{"", ""},
 		{"  ", ""},
-		{"https://mdblist.com/lists/quickflix/wwe", "https://mdblist.com/lists/quickflix/wwe/json"},
-		{"https://mdblist.com/lists/quickflix/wwe/", "https://mdblist.com/lists/quickflix/wwe/json"},
-		{"https://mdblist.com/lists/quickflix/wwe/json", "https://mdblist.com/lists/quickflix/wwe/json"},
-		{"https://mdblist.com/lists/quickflix/wwe/json/", "https://mdblist.com/lists/quickflix/wwe/json"},
-		{"  https://mdblist.com/lists/quickflix/wwe  ", "https://mdblist.com/lists/quickflix/wwe/json"},
+		{"https://mdblist.com/lists/example-user/watchlist", "https://mdblist.com/lists/example-user/watchlist/json"},
+		{"https://mdblist.com/lists/example-user/watchlist/", "https://mdblist.com/lists/example-user/watchlist/json"},
+		{"https://mdblist.com/lists/example-user/watchlist/json", "https://mdblist.com/lists/example-user/watchlist/json"},
+		{"https://mdblist.com/lists/example-user/watchlist/json/", "https://mdblist.com/lists/example-user/watchlist/json"},
+		{"  https://mdblist.com/lists/example-user/watchlist  ", "https://mdblist.com/lists/example-user/watchlist/json"},
 	}
 	for _, tc := range cases {
 		if got := NormalizeMDBListURL(tc.in); got != tc.want {

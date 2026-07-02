@@ -295,6 +295,14 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// Box-set/collection search is an in-memory filter over every collection
+	// (not the Meilisearch-backed /Items media search), so short type-ahead
+	// terms are gated before any rows are loaded.
+	if auxSearchTermTooShort(query.searchTerm) {
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+		return
+	}
+
 	visible, err := h.visibleLibraryIDs(r.Context(), session)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -344,7 +352,14 @@ func (h *ItemsHandler) handleBoxSetsList(w http.ResponseWriter, r *http.Request,
 		})
 	}
 
-	page := slicePage(matched, query.startIndex, query.limit)
+	// A search term makes this a guarded aux search path, so cap results like
+	// the other guarded handlers; an empty term is a browse/list request and
+	// keeps the client-requested paging window.
+	pageLimit := query.limit
+	if strings.TrimSpace(query.searchTerm) != "" {
+		pageLimit = clampAuxSearchLimit(query.limit)
+	}
+	page := slicePage(matched, query.startIndex, pageLimit)
 	items := make([]baseItemDTO, 0, len(page))
 	for _, c := range page {
 		items = append(items, h.boxSetFromCollection(r.Context(), c))

@@ -69,6 +69,10 @@ func (c *countingEpisodeListSource) ListBySeriesIDs(_ context.Context, _ []strin
 	return map[string][]*models.Episode{}, nil
 }
 
+func (c *countingEpisodeListSource) GetByIDs(_ context.Context, _ []string) ([]*models.Episode, error) {
+	return nil, nil
+}
+
 // TestListSeasons_UsesBatchEpisodeFetch verifies ListSeasons makes exactly
 // one ListBySeriesGroupedBySeason call (replacing N per-season ListBySeason
 // calls) and exactly one ListProgressByMediaItems call (replacing N

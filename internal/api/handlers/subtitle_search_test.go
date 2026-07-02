@@ -239,6 +239,9 @@ type handlerMockSubtitleRepo struct {
 	subtitles map[int]*subtitles.DownloadedSubtitle
 	nextID    int
 	byKey     map[string]*subtitles.DownloadedSubtitle
+	// listErr, when set, is returned by ListDownloadedSubtitles to simulate a
+	// backing-store failure.
+	listErr error
 }
 
 func newMockSubtitleRepoForHandler() *handlerMockSubtitleRepo {
@@ -265,6 +268,9 @@ func (m *handlerMockSubtitleRepo) GetDownloadedSubtitle(_ context.Context, id in
 }
 
 func (m *handlerMockSubtitleRepo) ListDownloadedSubtitles(context.Context, int) ([]subtitles.DownloadedSubtitle, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
 	return nil, nil
 }
 

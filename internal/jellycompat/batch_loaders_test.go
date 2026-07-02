@@ -111,6 +111,10 @@ func (r *countingEpisodeRepo) ListBySeries(context.Context, string) ([]*models.E
 	return nil, errors.New("ListBySeries not used in fallback test")
 }
 
+func (r *countingEpisodeRepo) ListAdjacentInSeries(context.Context, string, int, int) ([]*models.Episode, error) {
+	return nil, errors.New("ListAdjacentInSeries not used in fallback test")
+}
+
 func TestFilterContentIDsForLibrary_AppliesMembershipAndPreservesOrder(t *testing.T) {
 	libraryID := 7
 

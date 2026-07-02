@@ -19,11 +19,11 @@ BEGIN
     ) THEN
         DROP INDEX public.idx_episodes_season_id_episode_number;
     END IF;
-END
+END;
 $$;
 -- +goose StatementEnd
 
-CREATE INDEX CONCURRENTLY idx_episodes_season_id_episode_number
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_episodes_season_id_episode_number
 ON public.episodes USING btree (season_id, episode_number);
 
 -- +goose Down

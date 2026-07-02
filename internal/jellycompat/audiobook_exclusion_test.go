@@ -160,6 +160,11 @@ func (f *scopeFakeBrowseSource) BrowsePage(_ context.Context, filters catalog.Br
 	return &catalog.BrowseResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false}, nil
 }
 
+func (f *scopeFakeBrowseSource) BrowseRecentlyAddedAcrossLibraries(_ context.Context, base catalog.BrowseFilters, _ []int) (*catalog.BrowseResult, error) {
+	f.lastFilters = base
+	return &catalog.BrowseResult{Items: []*models.MediaItem{}, Total: 0, HasMore: false}, nil
+}
+
 func (f *scopeFakeBrowseSource) ListGenres(_ context.Context, filters catalog.BrowseFilters) ([]string, error) {
 	f.lastFilters = filters
 	return []string{}, nil

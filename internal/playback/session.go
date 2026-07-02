@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,9 @@ type Session struct {
 	BasePlayMethod       PlayMethod
 	TranscodeAudio       bool   // when true, remux should transcode audio to AAC
 	ClientIP             string // resolved client IP for the playback session
+	ClientName           string // reported playback client name, when available
+	ClientVersion        string // reported playback client version, when available
+	ClientUserAgent      string // trimmed request user agent for the playback session
 
 	TranscodeNodeURL string // URL of assigned transcode node (empty = local/integrated)
 	AudioTrackIndex  int
@@ -51,12 +55,42 @@ type SessionStreamState struct {
 	AudioTrackIndex   int
 	TranscodeAudio    bool
 	ClientIP          string
+	ClientName        string
+	ClientVersion     string
+	ClientUserAgent   string
 	StreamBitrateKbps int
 	TargetResolution  string
 	TargetVideoCodec  string
 	TargetAudioCodec  string
 	TargetBitrateKbps int
 	TranscodeHWAccel  string
+}
+
+type clientInfoContextKey struct{}
+
+// ClientInfo carries best-effort client metadata from request handling into
+// the playback session manager.
+type ClientInfo struct {
+	Name      string
+	Version   string
+	UserAgent string
+}
+
+// WithClientInfo stores playback client metadata on a context.
+func WithClientInfo(ctx context.Context, info ClientInfo) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, clientInfoContextKey{}, info)
+}
+
+// ClientInfoFromContext returns playback client metadata stored on a context.
+func ClientInfoFromContext(ctx context.Context) ClientInfo {
+	if ctx == nil {
+		return ClientInfo{}
+	}
+	info, _ := ctx.Value(clientInfoContextKey{}).(ClientInfo)
+	return info
 }
 
 // SessionManager tracks active playback sessions and enforces stream limits.
@@ -132,6 +166,14 @@ func (m *SessionManager) SetExpirationHook(fn func(*Session)) {
 	m.expireHook = fn
 }
 
+func normalizeClientMetadataValue(value string, maxLen int) string {
+	value = strings.TrimSpace(value)
+	if maxLen > 0 && len(value) > maxLen {
+		value = value[:maxLen]
+	}
+	return value
+}
+
 // StartSession creates a new playback session using the same file as both the
 // requested and effective source.
 func (m *SessionManager) StartSession(userID int, profileID string, fileID int, method PlayMethod, transcodeAudio bool) (*Session, error) {
@@ -201,6 +243,7 @@ func (m *SessionManager) StartSessionWithFilesContext(
 	}
 
 	now := time.Now()
+	clientInfo := ClientInfoFromContext(ctx)
 	s := &Session{
 		ID:                   uuid.New().String(),
 		UserID:               userID,
@@ -212,6 +255,9 @@ func (m *SessionManager) StartSessionWithFilesContext(
 		TranscodeAudio:       transcodeAudio,
 		Position:             0,
 		IsPaused:             false,
+		ClientName:           normalizeClientMetadataValue(clientInfo.Name, 128),
+		ClientVersion:        normalizeClientMetadataValue(clientInfo.Version, 64),
+		ClientUserAgent:      normalizeClientMetadataValue(clientInfo.UserAgent, 512),
 		StartedAt:            now,
 		UpdatedAt:            now,
 		LastActivityAt:       now,
@@ -297,6 +343,15 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	s.AudioTrackIndex = state.AudioTrackIndex
 	s.TranscodeAudio = state.TranscodeAudio
 	s.ClientIP = state.ClientIP
+	if value := normalizeClientMetadataValue(state.ClientName, 128); value != "" {
+		s.ClientName = value
+	}
+	if value := normalizeClientMetadataValue(state.ClientVersion, 64); value != "" {
+		s.ClientVersion = value
+	}
+	if value := normalizeClientMetadataValue(state.ClientUserAgent, 512); value != "" {
+		s.ClientUserAgent = value
+	}
 	s.StreamBitrateKbps = state.StreamBitrateKbps
 	s.TargetResolution = state.TargetResolution
 	s.TargetVideoCodec = state.TargetVideoCodec

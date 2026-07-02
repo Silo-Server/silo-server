@@ -8,6 +8,7 @@ import { useHouseholdSessions } from "@/hooks/queries/profiles";
 import {
   formatDecisionLabel,
   formatSessionBitrate,
+  getSessionClientLabel,
   getPlaybackSessionSubtitle,
   getPlaybackSessionTitle,
 } from "@/pages/adminActivityPresentation";
@@ -33,7 +34,12 @@ function formatElapsed(startedAt: string): string {
 }
 
 function streamMeta(session: AdminSession): string {
-  return [formatElapsed(session.started_at), session.client_ip, session.node_display_name]
+  return [
+    formatElapsed(session.started_at),
+    getSessionClientLabel(session),
+    session.client_ip,
+    session.node_display_name,
+  ]
     .filter(Boolean)
     .join(" · ");
 }

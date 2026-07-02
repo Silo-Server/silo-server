@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// legacyV1StampTriggers is the pre-v12 UPDATE trigger body: it only defaulted
+// legacyV1StampTriggers is the pre-v13 UPDATE trigger body: it only defaulted
 // event_at when NULL, leaving the LWW key stale on writes that advanced
 // updated_at without hand-setting event_at.
 const legacyV1StampUpdTrigger = `
@@ -18,11 +18,11 @@ BEGIN
     WHERE rowid = NEW.rowid;
 END;`
 
-// TestMigrateToV12ReplacesStampTriggers verifies the v12 userdb migration
+// TestMigrateToV13ReplacesStampTriggers verifies the v13 userdb migration
 // upgrades an existing database's stamp triggers in place: after migrating, a
 // batch mark-played advances event_at, so a queued offline event older than
 // the mark can no longer win LWW (the v1 trigger left event_at frozen).
-func TestMigrateToV12ReplacesStampTriggers(t *testing.T) {
+func TestMigrateToV13ReplacesStampTriggers(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -32,14 +32,14 @@ func TestMigrateToV12ReplacesStampTriggers(t *testing.T) {
 		t.Fatalf("InitSchema: %v", err)
 	}
 
-	// Simulate an existing v11 database still carrying the v1 trigger body.
+	// Simulate an existing v12 database still carrying the v1 trigger body.
 	if _, err := db.Exec(`DROP TRIGGER IF EXISTS watch_progress_stamp_upd`); err != nil {
 		t.Fatalf("drop new trigger: %v", err)
 	}
 	if _, err := db.Exec(legacyV1StampUpdTrigger); err != nil {
 		t.Fatalf("install legacy trigger: %v", err)
 	}
-	if _, err := db.Exec("PRAGMA user_version = 11"); err != nil {
+	if _, err := db.Exec("PRAGMA user_version = 12"); err != nil {
 		t.Fatalf("set user_version: %v", err)
 	}
 
@@ -67,6 +67,6 @@ func TestMigrateToV12ReplacesStampTriggers(t *testing.T) {
 		t.Fatalf("stale replay: %v", err)
 	}
 	if wrote {
-		t.Fatal("stale offline event won after migration; v12 did not replace the stamp trigger")
+		t.Fatal("stale offline event won after migration; v13 did not replace the stamp trigger")
 	}
 }

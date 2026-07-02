@@ -40,6 +40,7 @@ type FanoutWorker struct {
 	webhooks    *WebhookRepository
 	rateLimiter *profileRateLimiter
 	webPush     *WebPushRepository
+	pushDevices *PushDeviceRepository
 }
 
 // SetWebhookOutbox wires durable webhook attempt enqueueing into the fanout
@@ -53,6 +54,12 @@ func (w *FanoutWorker) SetWebhookOutbox(webhooks *WebhookRepository, limiter *pr
 // transaction.
 func (w *FanoutWorker) SetWebPushOutbox(webPush *WebPushRepository) {
 	w.webPush = webPush
+}
+
+// SetPushOutbox wires durable Apple push attempt enqueueing into the fanout
+// transaction.
+func (w *FanoutWorker) SetPushOutbox(pushDevices *PushDeviceRepository) {
+	w.pushDevices = pushDevices
 }
 
 // NewFanoutWorker creates a FanoutWorker.
@@ -299,6 +306,9 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	if err := w.enqueueWebPushOutbox(ctx, tx, inserted); err != nil {
 		return nil, 0, err
 	}
+	if err := w.enqueuePushOutbox(ctx, tx, inserted); err != nil {
+		return nil, 0, err
+	}
 
 	notifiedProfiles := make([]string, 0, len(inserted))
 	for _, row := range inserted {
@@ -342,6 +352,31 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 type pendingDelivery struct {
 	delivery Delivery
 	flags    ReasonFlags
+}
+
+// enqueuePushOutbox inserts pending Apple push attempt rows for each newly
+// inserted delivery and enabled private-push device.
+func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery) error {
+	if w.pushDevices == nil || len(inserted) == 0 || !w.settings.ApplePushDeliveryEnabled(ctx) {
+		return nil
+	}
+	profileSet := make(map[string]struct{}, len(inserted))
+	profileIDs := make([]string, 0, len(inserted))
+	for _, row := range inserted {
+		if _, ok := profileSet[row.ProfileID]; !ok {
+			profileSet[row.ProfileID] = struct{}{}
+			profileIDs = append(profileIDs, row.ProfileID)
+		}
+	}
+	devicesByProfile, err := w.pushDevices.ListEnabledAppleByProfiles(ctx, tx, profileIDs)
+	if err != nil {
+		return err
+	}
+	attempts := make([]PushDeliveryAttempt, 0, len(inserted))
+	for _, row := range inserted {
+		attempts = append(attempts, newPushDeliveryAttempts(row.ID, devicesByProfile[row.ProfileID])...)
+	}
+	return w.pushDevices.EnqueuePushAttempts(ctx, tx, attempts)
 }
 
 // enqueueWebPushOutbox inserts `pending` web push attempt rows for each newly

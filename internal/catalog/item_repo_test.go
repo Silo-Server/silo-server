@@ -299,6 +299,20 @@ func TestItemRepo_Search_AppliesOverviewRankFloor(t *testing.T) {
 	}
 }
 
+func TestItemRepo_Search_SkipTotalOmitsWindowCount(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, _ := repo.buildSearchSQLWithTotal("s", nil, 61, 0, AccessFilter{}, false)
+	if strings.Contains(dataSQL, "COUNT(*) OVER") {
+		t.Fatalf("skip-total search data query must omit window count; got:\n%s", dataSQL)
+	}
+	if strings.Contains(dataSQL, "total_count") {
+		t.Fatalf("skip-total search data query must not select total_count; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(countSQL, "SELECT COUNT(*)") {
+		t.Fatalf("countSQL should remain available for exact callers; got:\n%s", countSQL)
+	}
+}
+
 // TestItemRepo_Search_EmptyQueryReturnsEmpty pins the early-return contract
 // when input parses to no searchable text. Downstream callers rely on
 // (dataSQL == "") to short-circuit without binding any args.

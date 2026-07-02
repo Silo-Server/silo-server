@@ -273,7 +273,9 @@ func authKind(r *http.Request) string {
 		return "x-emby-token"
 	case strings.TrimSpace(r.Header.Get("X-Mediabrowser-Token")) != "":
 		return "x-mediabrowser-token"
-	case strings.TrimSpace(r.URL.Query().Get("api_key")) != "":
+	case strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("ApiKey")) != "":
+		return "api_key"
+	case strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("api_key")) != "":
 		return "api_key"
 	default:
 		return "none"

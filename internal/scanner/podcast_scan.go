@@ -7,11 +7,16 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 )
+
+type podcastMediaItemReader interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaItem, error)
+}
 
 // ScanPodcastFolder walks a podcasts-typed media folder and writes one
 // media_items row (type='podcast') per immediate subdirectory it can parse
@@ -28,6 +33,8 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 	var attempted int
 	var succeeded int
 	var failures []error
+	reconcileRoots := make([]string, 0, len(folder.Paths))
+	seenPaths := make(map[string]bool)
 	for _, root := range folder.Paths {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -39,6 +46,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 			failures = append(failures, fmt.Errorf("read root %s: %w", root, err))
 			continue
 		}
+		reconcileRoots = append(reconcileRoots, root)
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
@@ -48,7 +56,13 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				return err
 			}
 			attempted++
-			if err := s.reconcilePodcastShow(ctx, folder, subPath); err != nil {
+			if paths, err := listPodcastShowAudioFiles(subPath); err == nil {
+				for _, path := range paths {
+					seenPaths[path] = true
+				}
+			}
+			episodePaths, err := s.reconcilePodcastShow(ctx, folder, subPath)
+			if err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
@@ -61,37 +75,43 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				// Continue with siblings — one bad show should not stop the scan.
 				continue
 			}
+			for _, path := range episodePaths {
+				seenPaths[path] = true
+			}
 			succeeded++
 		}
 	}
 	if attempted > 0 && succeeded == 0 && len(failures) > 0 {
 		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
 	}
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, len(seenPaths) > 0); err != nil {
+		slog.Warn("podcast scan: missing-file reconcile failed", "folder_id", folder.ID, "error", err)
+	}
 	return nil
 }
 
-func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.MediaFolder, folderPath string) error {
+func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.MediaFolder, folderPath string) ([]string, error) {
 	parsed, err := parsePodcastShow(ctx, s.ffprobePath, folderPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("parse podcast show %s: %w", folderPath, err)
+		return nil, fmt.Errorf("parse podcast show %s: %w", folderPath, err)
 	}
 
 	showContentID, err := s.upsertPodcastMediaItem(ctx, folder.ID, folderPath, parsed)
 	if err != nil {
-		return fmt.Errorf("upsert podcast item: %w", err)
+		return nil, fmt.Errorf("upsert podcast item: %w", err)
 	}
 	if err := s.upsertPodcastEpisodesAndFiles(ctx, folder, showContentID, folderPath, parsed); err != nil {
-		return fmt.Errorf("upsert podcast episodes+files: %w", err)
+		return nil, fmt.Errorf("upsert podcast episodes+files: %w", err)
 	}
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
 		VALUES ($1, $2, NOW())
 		ON CONFLICT (content_id, media_folder_id) DO NOTHING
 	`, showContentID, folder.ID); err != nil {
-		return fmt.Errorf("upsert podcast library membership: %w", err)
+		return nil, fmt.Errorf("upsert podcast library membership: %w", err)
 	}
 
 	slog.Info("podcast scan: indexed",
@@ -101,7 +121,11 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 		"author", parsed.Author,
 		"episodes", len(parsed.Episodes),
 	)
-	return nil
+	episodePaths := make([]string, 0, len(parsed.Episodes))
+	for _, episode := range parsed.Episodes {
+		episodePaths = append(episodePaths, episode.Path)
+	}
+	return episodePaths, nil
 }
 
 // upsertPodcastMediaItem reuses an item already linked to the same filesystem
@@ -137,6 +161,17 @@ func resolvePodcastMediaItem(
 		return "", fmt.Errorf("find podcast by root path: %w", err)
 	}
 	if existingID != "" {
+		if reader, ok := itemWriter.(podcastMediaItemReader); ok {
+			existing, err := reader.GetByID(ctx, existingID)
+			if err != nil {
+				return "", fmt.Errorf("load existing podcast item %s: %w", existingID, err)
+			}
+			if applyPodcastShowMetadata(existing, show) {
+				if err := itemWriter.Upsert(ctx, existing); err != nil {
+					return "", fmt.Errorf("update podcast item %s: %w", existingID, err)
+				}
+			}
+		}
 		return existingID, nil
 	}
 
@@ -155,6 +190,112 @@ func resolvePodcastMediaItem(
 		return "", err
 	}
 	return id, nil
+}
+
+func applyPodcastShowMetadata(item *models.MediaItem, show *parsedPodcastShow) bool {
+	if item == nil || show == nil {
+		return false
+	}
+	changed := false
+	if item.Type != "podcast" {
+		item.Type = "podcast"
+		changed = true
+	}
+	if item.Title != show.Title {
+		item.Title = show.Title
+		changed = true
+	}
+	sortTitle := titleutil.DeriveDefaultSortTitle(show.Title)
+	if item.SortTitle != sortTitle {
+		item.SortTitle = sortTitle
+		changed = true
+	}
+	if item.Year != show.Year {
+		item.Year = show.Year
+		changed = true
+	}
+	return changed
+}
+
+func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, sawFiles bool) error {
+	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
+		return nil
+	}
+
+	if !sawFiles {
+		existingCount := 0
+		for _, root := range roots {
+			existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
+			if err != nil {
+				return fmt.Errorf("listing existing podcast files for %q: %w", root, err)
+			}
+			existingCount += len(existing)
+		}
+		if existingCount > 0 {
+			var guard ebookCleanupGuardRepo
+			if s.folderRepo != nil {
+				guard = s.folderRepo
+			}
+			allowed, err := ebookEmptyCleanupAllowed(ctx, guard, folder.ID, true)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				slog.Warn("podcast scan: walk saw zero files but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed",
+					"folder_id", folder.ID, "existing_files", existingCount)
+				return nil
+			}
+		}
+	}
+
+	now := time.Now().UTC()
+	missing := 0
+	for _, root := range roots {
+		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
+		if err != nil {
+			return fmt.Errorf("listing existing podcast files for %q: %w", root, err)
+		}
+		for _, mf := range existing {
+			if mf == nil || seenPaths[mf.FilePath] {
+				continue
+			}
+			if mf.MissingSince == nil {
+				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
+					slog.Error("podcast scan: failed to mark file missing",
+						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
+					continue
+				}
+			}
+			missing++
+		}
+	}
+
+	if s.emptyTrashAfterScan {
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID)
+		if err != nil {
+			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
+		}
+		if trashed > 0 {
+			slog.Info("podcast scan: emptied trash", "folder_id", folder.ID, "deleted", trashed)
+		}
+	}
+
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID)
+	if err != nil {
+		return fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
+	}
+	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
+		bucket := s.s3Client.Bucket()
+		for _, dir := range orphanedImageDirs {
+			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
+		}
+	}
+	if missing > 0 || removedMemberships > 0 || deletedItems > 0 {
+		slog.Info("podcast scan: reconciled missing files",
+			"folder_id", folder.ID, "missing", missing,
+			"memberships_removed", removedMemberships, "items_deleted", deletedItems)
+	}
+	return nil
 }
 
 // upsertPodcastEpisodesAndFiles writes one episodes row and one media_files

@@ -98,6 +98,41 @@ func TestScanPodcastFolderReturnsCanceledContext(t *testing.T) {
 	}
 }
 
+func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "02.mp3"), []byte("audio"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("notes"), 0o644); err != nil {
+		t.Fatalf("write notes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "01.flac"), []byte("audio"), 0o644); err != nil {
+		t.Fatalf("write audio: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+
+	got, err := listPodcastShowAudioFiles(root)
+	if err != nil {
+		t.Fatalf("listPodcastShowAudioFiles: %v", err)
+	}
+	want := []string{
+		filepath.Join(root, "01.flac"),
+		filepath.Join(root, "02.mp3"),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("audio files = %#v, want %#v", got, want)
+	}
+}
+
+func TestListPodcastShowAudioFilesReturnsNotExistForEmptyShow(t *testing.T) {
+	_, err := listPodcastShowAudioFiles(t.TempDir())
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty podcast show error = %v, want os.ErrNotExist", err)
+	}
+}
+
 func TestResolvePodcastMediaItemReusesRootScopedContentID(t *testing.T) {
 	finder := &fakeRootContentFinder{contentID: "podcast-root-id"}
 	writer := &fakeFilesystemItemWriter{}
@@ -144,6 +179,30 @@ func TestResolvePodcastMediaItemCreatesNewWhenRootHasNoClaim(t *testing.T) {
 	}
 	if writer.upserts[0].ContentID != got || writer.upserts[0].Type != "podcast" {
 		t.Fatalf("upserted item = %+v, contentID %q", writer.upserts[0], got)
+	}
+}
+
+func TestApplyPodcastShowMetadataUpdatesIndexedFields(t *testing.T) {
+	item := &models.MediaItem{
+		ContentID: "podcast-1",
+		Type:      "podcast",
+		Title:     "Old Title",
+		SortTitle: "Old Title",
+		Year:      2023,
+	}
+
+	changed := applyPodcastShowMetadata(item, &parsedPodcastShow{Title: "The New Show", Year: 2024})
+	if !changed {
+		t.Fatal("applyPodcastShowMetadata reported no change")
+	}
+	if item.Title != "The New Show" {
+		t.Fatalf("Title = %q, want The New Show", item.Title)
+	}
+	if item.SortTitle != "New Show, The" {
+		t.Fatalf("SortTitle = %q, want New Show, The", item.SortTitle)
+	}
+	if item.Year != 2024 {
+		t.Fatalf("Year = %d, want 2024", item.Year)
 	}
 }
 

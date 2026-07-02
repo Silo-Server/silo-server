@@ -369,6 +369,104 @@ func newTestResolver(exec previewExecutor) *CatalogResolver {
 	}
 }
 
+// fakeSearchProvider is a CatalogSearchProvider stub that returns a fixed
+// CatalogSearchResult so resolveDirectSearchSource's field plumbing can be
+// exercised without a database or live search backend.
+type fakeSearchProvider struct {
+	result *CatalogSearchResult
+}
+
+func (f *fakeSearchProvider) Search(_ context.Context, _ CatalogSearchRequest) (*CatalogSearchResult, error) {
+	return f.result, nil
+}
+
+// TestResolveDirectSearchSource_PlumbsDiagnostics asserts that the four
+// diagnostics fields (Provider, Mode, SemanticUsed, FallbackReason) carried by
+// the provider's CatalogSearchResult are copied onto the resolver's
+// CatalogResult on the direct-search path. Covers both the downgraded-to-keyword
+// case (semantic_not_ready) and the hybrid-survived case.
+func TestResolveDirectSearchSource_PlumbsDiagnostics(t *testing.T) {
+	cases := []struct {
+		name   string
+		result *CatalogSearchResult
+	}{
+		{
+			name: "keyword fallback carries reason",
+			result: &CatalogSearchResult{
+				Items:          []*models.MediaItem{},
+				Provider:       SearchProviderMeilisearch,
+				Mode:           "keyword",
+				SemanticUsed:   false,
+				FallbackReason: `semantic_not_ready: type "movie" coverage 40% below threshold`,
+			},
+		},
+		{
+			name: "hybrid survived",
+			result: &CatalogSearchResult{
+				Items:              []*models.MediaItem{},
+				Provider:           SearchProviderMeilisearch,
+				Mode:               "hybrid",
+				SemanticUsed:       true,
+				IndexPendingEvents: 7,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolver := &CatalogResolver{
+				searchProvider: &fakeSearchProvider{result: tc.result},
+			}
+
+			got, err := resolver.resolveDirectSearchSource(
+				context.Background(),
+				CatalogRequest{Source: CatalogSourceQuery, SearchQuery: "dune", Limit: 20},
+				AccessFilter{},
+			)
+			if err != nil {
+				t.Fatalf("resolveDirectSearchSource error: %v", err)
+			}
+			if got.Provider != tc.result.Provider {
+				t.Fatalf("Provider = %q, want %q", got.Provider, tc.result.Provider)
+			}
+			if got.Mode != tc.result.Mode {
+				t.Fatalf("Mode = %q, want %q", got.Mode, tc.result.Mode)
+			}
+			if got.SemanticUsed != tc.result.SemanticUsed {
+				t.Fatalf("SemanticUsed = %v, want %v", got.SemanticUsed, tc.result.SemanticUsed)
+			}
+			if got.FallbackReason != tc.result.FallbackReason {
+				t.Fatalf("FallbackReason = %q, want %q", got.FallbackReason, tc.result.FallbackReason)
+			}
+			if got.IndexPendingEvents != tc.result.IndexPendingEvents {
+				t.Fatalf("IndexPendingEvents = %d, want %d", got.IndexPendingEvents, tc.result.IndexPendingEvents)
+			}
+		})
+	}
+}
+
+// TestResolveDirectSearchSource_EarlyEmptyOmitsDiagnostics asserts that the
+// early-empty path (no accessible libraries) returns a zero-valued Provider so
+// the handler omits search_diagnostics for it.
+func TestResolveDirectSearchSource_EarlyEmptyOmitsDiagnostics(t *testing.T) {
+	resolver := &CatalogResolver{
+		searchProvider: &fakeSearchProvider{result: &CatalogSearchResult{Provider: SearchProviderMeilisearch}},
+	}
+
+	got, err := resolver.resolveDirectSearchSource(
+		context.Background(),
+		CatalogRequest{Source: CatalogSourceQuery, SearchQuery: "dune", Limit: 20},
+		// AllowedLibraryIDs empty (non-nil) => effectiveCatalogLibraryIDs early-empties.
+		AccessFilter{AllowedLibraryIDs: []int{}},
+	)
+	if err != nil {
+		t.Fatalf("resolveDirectSearchSource error: %v", err)
+	}
+	if got.Provider != "" {
+		t.Fatalf("early-empty Provider = %q, want empty", got.Provider)
+	}
+}
+
 // TestPreviewQuerySource_NamePrefix_DoesNotFetchAllRows asserts that the
 // preview path makes a single PreviewPage call with NamePrefix forwarded into
 // AccessFilter, instead of the previous fetch-all + Go-side filter pattern

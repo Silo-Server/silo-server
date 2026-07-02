@@ -215,6 +215,13 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 	return s
 }
 
+func (s *Scanner) SetSearchIndexProvider(provider string) {
+	if s == nil || s.itemRepo == nil {
+		return
+	}
+	s.itemRepo.WithActiveSearchProvider(provider)
+}
+
 // SetSeriesQueueSyncer installs the optional pending-series root queue synchronizer.
 func (s *Scanner) SetSeriesQueueSyncer(syncer SeriesQueueSyncer) {
 	if s == nil {

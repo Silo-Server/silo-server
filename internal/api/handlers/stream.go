@@ -240,37 +240,49 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	// Check downloaded subtitles (from S3).
 	if h.SubtitleRepo != nil && h.S3Client != nil {
 		downloaded, err := h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), file.ID)
-		if err == nil {
-			downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
-			if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
-				dl := downloaded[downloadedIndex]
-				data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, dl.S3Key)
-				if err != nil {
-					writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
-					return
-				}
+		if err != nil {
+			// A DB failure here must not masquerade as "track not found":
+			// surface it as an internal error (with a server-side signal)
+			// so the real failure is diagnosable instead of looking like an
+			// intermittent 404 to the client.
+			slog.ErrorContext(r.Context(), "list downloaded subtitles failed",
+				"file_id", file.ID,
+				"track", trackIndex,
+				"error", err,
+			)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list downloaded subtitles")
+			return
+		}
 
-				// Serve ASS/SSA downloaded subtitles as raw data.
-				if playback.IsASS(string(dl.Format)) {
-					playback.ServeSubtitle(w, data, "ass")
-					return
-				}
-
-				// If the subtitle is already VTT, serve directly.
-				if dl.Format == subtitles.FormatVTT {
-					playback.ServeSubtitle(w, data, "vtt")
-					return
-				}
-
-				// Convert to VTT using the playback conversion pipeline.
-				vttData, err := playback.ConvertToVTT(data, string(dl.Format))
-				if err != nil {
-					writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
-					return
-				}
-				playback.ServeSubtitle(w, vttData, "vtt")
+		downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
+		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
+			dl := downloaded[downloadedIndex]
+			data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, dl.S3Key)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
 				return
 			}
+
+			// Serve ASS/SSA downloaded subtitles as raw data.
+			if playback.IsASS(string(dl.Format)) {
+				playback.ServeSubtitle(w, data, "ass")
+				return
+			}
+
+			// If the subtitle is already VTT, serve directly.
+			if dl.Format == subtitles.FormatVTT {
+				playback.ServeSubtitle(w, data, "vtt")
+				return
+			}
+
+			// Convert to VTT using the playback conversion pipeline.
+			vttData, err := playback.ConvertToVTT(data, string(dl.Format))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
+				return
+			}
+			playback.ServeSubtitle(w, vttData, "vtt")
+			return
 		}
 	}
 

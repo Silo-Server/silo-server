@@ -165,7 +165,11 @@ func TestPlaybackSessionAuth_CaseInsensitivePlaySessionId(t *testing.T) {
 }
 
 func TestExtractToken_CaseInsensitiveAPIKey(t *testing.T) {
-	for _, key := range []string{"api_key", "Api_Key", "API_KEY"} {
+	// "ApiKey" is Jellyfin's current query spelling (PascalCase); "api_key" is
+	// the legacy spelling. Native clients (incl. Jellyfin Android TV) build
+	// direct-play /Videos/{id}/stream URLs with "ApiKey", so rejecting it 401s
+	// the stream. Match both, plus the casing variants clients send.
+	for _, key := range []string{"ApiKey", "apikey", "APIKEY", "api_key", "Api_Key", "API_KEY"} {
 		req := httptest.NewRequest("GET", "/Videos/itm/stream?"+key+"=tok123", nil)
 		if got, ok := ExtractToken(req); !ok || got != "tok123" {
 			t.Fatalf("%s: ExtractToken = (%q, %v), want (tok123, true)", key, got, ok)

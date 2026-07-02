@@ -545,6 +545,101 @@ func TestBuild_EbookUserStateRulesUseReaderProgress(t *testing.T) {
 	}
 }
 
+func TestBuild_WatchedRollupAndRowTypeBranching(t *testing.T) {
+	buildWatched := func(t *testing.T, scope string) (string, []any) {
+		t.Helper()
+		clause, args, err := NewQueryBuilder("mi").
+			WithMediaScope(scope).
+			WithUserScope(42, "profile-1").
+			Build(QueryDefinition{
+				MediaScope: scope,
+				Match:      "all",
+				Groups: []QueryGroup{{
+					Match: "all",
+					Rules: []QueryRule{{Field: "watched", Op: "is", Value: true}},
+				}},
+			})
+		if err != nil {
+			t.Fatalf("scope %q: Build returned error: %v", scope, err)
+		}
+		// Exactly one (user_id, profile_id) pair is bound regardless of branch,
+		// shared via $1/$2 — a stray $3 would mean the helpers drifted from the
+		// shared-placeholder contract.
+		if len(args) != 2 || args[0] != 42 || args[1] != "profile-1" {
+			t.Fatalf("scope %q: expected user scope args, got %v", scope, args)
+		}
+		if !strings.Contains(clause, "$1") || !strings.Contains(clause, "$2") {
+			t.Fatalf("scope %q: expected $1 and $2 placeholders, got %q", scope, clause)
+		}
+		if strings.Contains(clause, "$3") {
+			t.Fatalf("scope %q: completion clause must reuse $1/$2 only, got %q", scope, clause)
+		}
+		return clause, args
+	}
+
+	tests := []struct {
+		name        string
+		scope       string
+		expectSQL   []string
+		unexpectSQL []string
+	}{
+		{
+			name:  "series scope rolls up over available episodes",
+			scope: "series",
+			expectSQL: []string{
+				"FROM episodes",
+				"episodes.series_id = mi.content_id",
+				"FROM episode_libraries el",
+				"el.episode_id = episodes.content_id",
+				"AND NOT (",                               // no available child is incomplete
+				"uwp.media_item_id = episodes.content_id", // leaf keyed to the episode
+			},
+			unexpectSQL: []string{"CASE", "mi.type =", "episodes.season_id"},
+		},
+		{
+			name:  "movie scope uses the leaf only",
+			scope: "movie",
+			expectSQL: []string{
+				"FROM user_watch_progress uwp",
+				"uwp.media_item_id = mi.content_id",
+				"FROM user_watch_history uwh",
+			},
+			unexpectSQL: []string{"CASE", "FROM episodes", "FROM ebook_reader_progress erp"},
+		},
+		{
+			name:  "unscoped query branches on row type",
+			scope: "",
+			expectSQL: []string{
+				"CASE",
+				"WHEN mi.type = 'series' THEN",
+				"WHEN mi.type = 'season' THEN",
+				"WHEN mi.type = 'ebook' THEN",
+				"episodes.series_id = mi.content_id",
+				"episodes.season_id = mi.content_id",
+				"FROM ebook_reader_progress erp",
+				"erp.content_id = mi.content_id",
+				"el.episode_id = episodes.content_id",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clause, _ := buildWatched(t, tt.scope)
+			for _, fragment := range tt.expectSQL {
+				if !strings.Contains(clause, fragment) {
+					t.Fatalf("expected clause to contain %q, got %q", fragment, clause)
+				}
+			}
+			for _, fragment := range tt.unexpectSQL {
+				if strings.Contains(clause, fragment) {
+					t.Fatalf("did not expect clause to contain %q, got %q", fragment, clause)
+				}
+			}
+		})
+	}
+}
+
 func TestBuild_ResolutionNormalizes4KAndScopesMediaFiles(t *testing.T) {
 	clause, args, err := NewQueryBuilder("mi").
 		WithLibraryScope([]int{3}).

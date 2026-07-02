@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/go-chi/chi/v5"
 )
 
 type sessionContextKey string
@@ -62,9 +64,16 @@ func ExtractToken(r *http.Request) (string, bool) {
 	if token := strings.TrimSpace(r.Header.Get("X-Mediabrowser-Token")); token != "" {
 		return token, true
 	}
-	// Case-insensitive: Jellyfin clients vary the casing (api_key / Api_Key / API_KEY).
-	if token := strings.TrimSpace(newCaseInsensitiveQuery(r.URL.Query()).Get("api_key")); token != "" {
-		return token, true
+	// Query-param token. Jellyfin's current spelling is "ApiKey" (PascalCase,
+	// always enabled); "api_key" is the legacy spelling (gated behind
+	// EnableLegacyAuthorization on a real server). Clients vary the casing
+	// further (Api_Key / API_KEY), so match both keys case-insensitively.
+	// Ref: jellyfin Jellyfin.Server.Implementations/Security/AuthorizationContext.cs.
+	query := newCaseInsensitiveQuery(r.URL.Query())
+	for _, key := range []string{"ApiKey", "api_key"} {
+		if token := strings.TrimSpace(query.Get(key)); token != "" {
+			return token, true
+		}
 	}
 
 	return "", false
@@ -145,7 +154,47 @@ func safeTokenPrefix(token string) string {
 // and continues the handler chain.
 func serveWithSession(next http.Handler, w http.ResponseWriter, r *http.Request, session *Session) {
 	ctx := context.WithValue(r.Context(), compatSessionKey, session)
+	ctx = playback.WithClientInfo(ctx, compatPlaybackClientInfo(r))
 	next.ServeHTTP(w, r.WithContext(ctx))
+}
+
+func compatPlaybackClientInfo(r *http.Request) playback.ClientInfo {
+	if r == nil {
+		return playback.ClientInfo{}
+	}
+	return playback.ClientInfo{
+		Name:      firstMediaBrowserAuthorizationValue(r, "Client"),
+		Version:   firstMediaBrowserAuthorizationValue(r, "Version"),
+		UserAgent: r.UserAgent(),
+	}
+}
+
+func firstMediaBrowserAuthorizationValue(r *http.Request, key string) string {
+	for _, headerName := range []string{"X-Emby-Authorization", "Authorization"} {
+		if value := mediaBrowserAuthorizationValue(r.Header.Get(headerName), key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func mediaBrowserAuthorizationValue(header, key string) string {
+	header = strings.TrimSpace(header)
+	if !strings.HasPrefix(strings.ToLower(header), "mediabrowser ") {
+		return ""
+	}
+	for _, part := range strings.Split(header, ",") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(strings.ToLower(part), "mediabrowser ") {
+			part = strings.TrimSpace(part[len("MediaBrowser "):])
+		}
+		name, value, ok := strings.Cut(part, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(name), key) {
+			continue
+		}
+		return strings.Trim(strings.TrimSpace(value), `"`)
+	}
+	return ""
 }
 
 // resolveCompatToken resolves a token to a compat session: a session-store token
@@ -201,6 +250,37 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore *PlaybackSessionS
 					return
 				}
 			}
+
+			// Stock Jellyfin Android TV ignores the api_key-bearing DirectStreamUrl
+			// we return from PlaybackInfo and builds its own direct-play URL with no
+			// auth header, no api_key/ApiKey, and no PlaySessionId. Anchor auth on
+			// the PlaybackSession negotiated for this item: a successful PlaybackInfo
+			// already authenticated the user and registered a session holding the
+			// CompatToken. Scope this strictly to the direct-play video stream routes
+			// (NOT /Items/{id}/Download) via the chi route pattern, prefer matching
+			// on mediaSourceId when present, and require the matched session's
+			// RouteItemID to equal the requested item so a source id can't
+			// authorize a stream for a different item.
+			if playbackStore != nil {
+				switch chi.RouteContext(r.Context()).RoutePattern() {
+				case "/Videos/{id}/stream", "/Videos/{id}/stream.{container}":
+					routeItemID := chi.URLParam(r, "id")
+					if routeItemID != "" {
+						mediaSourceID := newCaseInsensitiveQuery(r.URL.Query()).Get("mediaSourceId")
+						lookupID := routeItemID
+						if mediaSourceID != "" {
+							lookupID = mediaSourceID
+						}
+						if playSession, _, found := playbackStore.FindByRoute("", lookupID); found && playSession.RouteItemID == routeItemID {
+							if session, ok := resolveCompatToken(r.Context(), sessions, keyAuth, playSession.CompatToken); ok {
+								serveWithSession(next, w, r, session)
+								return
+							}
+						}
+					}
+				}
+			}
+
 			writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		})
 	}

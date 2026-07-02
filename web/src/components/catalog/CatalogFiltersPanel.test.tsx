@@ -65,36 +65,38 @@ describe("CatalogFiltersPanel", () => {
     });
   });
 
-  it("hides overlay controls for exact sources", () => {
-    for (const state of [
-      {
-        source: "section" as const,
-        scope: "home" as const,
-        section_id: "sec-1",
-      },
-      {
-        source: "library_collection" as const,
-        collection_id: "col-1",
-      },
-      {
-        source: "user_collection" as const,
-        collection_id: "col-2",
-      },
-    ]) {
-      const markup = renderToStaticMarkup(
-        <CatalogFiltersPanel
-          state={{
-            ...state,
-            query_definition: createEmptyQueryDefinition(),
-          }}
-          onStateChange={() => {}}
-        />,
-      );
+  it("hides overlay controls for section sources", () => {
+    const markup = renderToStaticMarkup(
+      <CatalogFiltersPanel
+        state={{
+          source: "section",
+          scope: "home",
+          section_id: "sec-1",
+          query_definition: createEmptyQueryDefinition(),
+        }}
+        onStateChange={() => {}}
+      />,
+    );
 
-      expect(markup).toContain("Filters are locked to this source");
-      expect(markup).not.toContain("Guided catalog editor");
-      expect(markup).not.toContain("Advanced catalog editor");
-    }
+    expect(markup).toContain("Filters are locked to this source");
+    expect(markup).not.toContain("Guided catalog editor");
+    expect(markup).not.toContain("Advanced catalog editor");
+  });
+
+  it("renders filter controls for collection sources", () => {
+    const markup = renderToStaticMarkup(
+      <CatalogFiltersPanel
+        state={{
+          source: "user_collection",
+          collection_id: "col-2",
+          query_definition: createEmptyQueryDefinition(),
+        }}
+        onStateChange={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Filters");
+    expect(markup).not.toContain("Filters are locked to this source");
   });
 
   it("renders filter bar for overlay-capable personal sources", () => {
