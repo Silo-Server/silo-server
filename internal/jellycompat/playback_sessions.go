@@ -10,11 +10,16 @@ import (
 // PlaybackSession stores compat-owned playback negotiation state before the
 // native Silo playback session starts.
 type PlaybackSession struct {
-	ID                 string
-	CompatToken        string
-	ItemID             string
-	RouteItemID        string
-	UserID             string
+	ID          string
+	CompatToken string
+	ItemID      string
+	RouteItemID string
+	// ClientPlaySessionID records the client's own generated PlaySessionId
+	// when it differs from ours (Static=true direct play skips PlaybackInfo,
+	// so the client never learns the server id). Playback reports carrying
+	// that id resolve to this session directly instead of by ambiguous route.
+	ClientPlaySessionID string
+	UserID              string
 	InitialSeekSeconds float64
 	MediaSources       []PlaybackMediaSource
 	UpstreamSessionID  string
@@ -121,6 +126,31 @@ func (s *PlaybackSessionStore) Update(id string, fn func(*PlaybackSession) error
 	session.UpdatedAt = s.now()
 	s.sessions[id] = session
 	return nil
+}
+
+// FindByClientPlaySessionID resolves the client-generated PlaySessionId alias
+// recorded for plays that skipped PlaybackInfo (Static=true direct play).
+func (s *PlaybackSessionStore) FindByClientPlaySessionID(compatToken, clientPlaySessionID string) (*PlaybackSession, bool) {
+	if clientPlaySessionID == "" {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	now := s.now()
+	for _, session := range s.sessions {
+		if !session.ExpiresAt.After(now) {
+			continue
+		}
+		if session.CompatToken != compatToken {
+			continue
+		}
+		if session.ClientPlaySessionID == clientPlaySessionID {
+			cp := session
+			return &cp, true
+		}
+	}
+	return nil, false
 }
 
 // FindByRoute resolves a route item/media-source identifier to a compat playback session.

@@ -239,6 +239,155 @@ func TestEnsureUpstreamPlayback_ReusesLiveSession(t *testing.T) {
 	}
 }
 
+// TestHandlePlaybackReport_AliasBindsDeterministicallyAmongDuplicates proves
+// that when two play sessions for the same item live under one compat token,
+// a report carrying the client's own PlaySessionId binds the session that
+// recorded it as an alias — not whichever the route scan happens to hit first.
+func TestHandlePlaybackReport_AliasBindsDeterministicallyAmongDuplicates(t *testing.T) {
+	handler, mgr, encodedItemID, sourceID := newReportLivenessHandler("upstream-1", true)
+	// A second live play of the same item under the same token, no alias.
+	other, _ := handler.playbackStore.Get("play-1")
+	sibling := *other
+	sibling.ID = "play-2"
+	sibling.UpstreamSessionID = "upstream-2"
+	handler.playbackStore.Put(sibling)
+	mgr.sessions["upstream-2"] = &playback.Session{ID: "upstream-2", PlayMethod: playback.PlayDirect}
+	// The stream path recorded the client's PlaySessionId on play-1.
+	if err := handler.playbackStore.Update("play-1", func(current *PlaybackSession) error {
+		current.ClientPlaySessionID = "infuse-client-psid"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := postProgressReport(handler,
+		`{"PlaySessionId":"infuse-client-psid","ItemId":"`+encodedItemID+`","MediaSourceId":"`+sourceID+`","PositionTicks":1234500000}`)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(mgr.progressUpdates) != 1 {
+		t.Fatalf("UpdateProgress calls = %d, want 1", len(mgr.progressUpdates))
+	}
+	if got := mgr.progressUpdates[0].sessionID; got != "upstream-1" {
+		t.Fatalf("UpdateProgress session = %q, want upstream-1 (the aliased session)", got)
+	}
+}
+
+// TestHandleVideoStream_StaticRecordsClientPlaySessionAlias proves the stream
+// path records the client-generated PlaySessionId so subsequent playback
+// reports resolve the session without relying on ItemId/route matching.
+func TestHandleVideoStream_StaticRecordsClientPlaySessionAlias(t *testing.T) {
+	handler, encodedID, _ := newStaticDirectPlayHandler(t)
+
+	rec := serveStaticStream(handler, encodedID, "Static=true&PlaySessionId=infuse-client-psid")
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	playSession, ok := handler.playbackStore.FindByClientPlaySessionID("token-1", "infuse-client-psid")
+	if !ok {
+		t.Fatal("expected the static play session to record the client PlaySessionId alias")
+	}
+	if playSession.UpstreamSessionID != "upstream-started" {
+		t.Fatalf("UpstreamSessionID = %q, want upstream-started", playSession.UpstreamSessionID)
+	}
+
+	// The full Infuse loop: a progress report carrying only the client id
+	// (no ItemId) must reach the upstream session via the alias.
+	mgr := handler.sessionMgr.(*testCompatSessionManager)
+	rep := postProgressReport(handler, `{"PlaySessionId":"infuse-client-psid","PositionTicks":600000000}`)
+	if rep.Code != http.StatusNoContent {
+		t.Fatalf("report status = %d", rep.Code)
+	}
+	if len(mgr.progressUpdates) != 1 || mgr.progressUpdates[0].sessionID != "upstream-started" {
+		t.Fatalf("progress updates = %+v, want one update on upstream-started", mgr.progressUpdates)
+	}
+}
+
+// TestHandlePlaybackReport_StopViaAliasTearsDown proves a Stopped report
+// resolved through the recorded alias still tears the play session down —
+// the alias is an exact, caller-owned match.
+func TestHandlePlaybackReport_StopViaAliasTearsDown(t *testing.T) {
+	handler, mgr, _, sourceID := newReportLivenessHandler("upstream-1", true)
+	if err := handler.playbackStore.Update("play-1", func(current *PlaybackSession) error {
+		current.ClientPlaySessionID = "infuse-client-psid"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(
+		`{"PlaySessionId":"infuse-client-psid","MediaSourceId":"`+sourceID+`","PositionTicks":9000000000}`))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+	rec := httptest.NewRecorder()
+	handler.HandleSessionPlayingStopped(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(mgr.stopCalls) != 1 || mgr.stopCalls[0] != "upstream-1" {
+		t.Fatalf("StopSession calls = %v, want exactly one for upstream-1", mgr.stopCalls)
+	}
+	if _, ok := handler.playbackStore.Get("play-1"); ok {
+		t.Fatal("expected alias-matched Stopped report to tear down the play session")
+	}
+}
+
+// TestHandlePlaybackReport_StopViaRouteMatchDoesNotTearDown proves a Stopped
+// report that only matched by item/source route (an ambiguous match when the
+// same item plays twice under one token) must not tear down the session it
+// happened to hit; stale cleanup owns that session's end of life.
+func TestHandlePlaybackReport_StopViaRouteMatchDoesNotTearDown(t *testing.T) {
+	handler, mgr, encodedItemID, sourceID := newReportLivenessHandler("upstream-1", true)
+
+	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(
+		`{"PlaySessionId":"never-seen-psid","ItemId":"`+encodedItemID+`","MediaSourceId":"`+sourceID+`","PositionTicks":9000000000}`))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+	rec := httptest.NewRecorder()
+	handler.HandleSessionPlayingStopped(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(mgr.stopCalls) != 0 {
+		t.Fatalf("StopSession calls = %v, want none for an ambiguous route-only match", mgr.stopCalls)
+	}
+	if _, ok := handler.playbackStore.Get("play-1"); !ok {
+		t.Fatal("expected route-only Stopped report to leave the play session in place")
+	}
+	// The final position still lands on the upstream session.
+	if len(mgr.progressUpdates) != 1 || mgr.progressUpdates[0].sessionID != "upstream-1" {
+		t.Fatalf("progress updates = %+v, want one update on upstream-1", mgr.progressUpdates)
+	}
+}
+
+// TestEnsureUpstreamPlayback_ReviveClosesStaleTranscode proves that when a
+// reaped upstream session is recreated under the same play method, any
+// transcode still keyed to the stale upstream id is closed first — otherwise
+// a second ffmpeg would start alongside the orphaned one.
+func TestEnsureUpstreamPlayback_ReviveClosesStaleTranscode(t *testing.T) {
+	handler, mgr, _, _ := newReportLivenessHandler("upstream-reaped", false)
+	handler.transcodes["upstream-reaped"] = nil // stale entry keyed by the reaped id
+
+	playSession, _ := handler.playbackStore.Get("play-1")
+	source := playSession.MediaSources[0]
+	if _, err := handler.ensureUpstreamPlayback(context.Background(),
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"},
+		"play-1", source, "direct"); err != nil {
+		t.Fatalf("ensureUpstreamPlayback: %v", err)
+	}
+
+	if mgr.startCalls != 1 {
+		t.Fatalf("StartSession calls = %d, want 1", mgr.startCalls)
+	}
+	if _, stale := handler.transcodes["upstream-reaped"]; stale {
+		t.Fatal("expected the stale transcode entry to be closed before recreating the upstream session")
+	}
+}
+
 // TestHandleVideoStream_DirectPlayMarksTransport proves the compat stream
 // handler marks an in-flight media transport on the upstream session while
 // serving, mirroring the native stream handler. Without it, a long-lived
