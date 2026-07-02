@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
@@ -1171,8 +1172,11 @@ func (w *MatchWorker) queueUsageForFolder(ctx context.Context, folderID int) (us
 	}
 	useSeriesQueue = w.enableTVSeriesRootQueue &&
 		w.seriesClaimer != nil &&
-		(isTVLibraryType(folderType) || isMixedLibraryType(folderType))
-	useMovieQueue = w.movieClaimer != nil && isMovieLibraryType(folderType)
+		(librarykind.IsTV(folderType) || librarykind.IsMixed(folderType))
+	// Mixed libraries feed the movie queue too: their unmatched files may be
+	// either kind, and the movie queue is the fallback lane.
+	useMovieQueue = w.movieClaimer != nil &&
+		(librarykind.IsMovie(folderType) || librarykind.IsMixed(folderType))
 	return useSeriesQueue, useMovieQueue, nil
 }
 
@@ -1265,28 +1269,6 @@ func truncateSeriesQueueError(errText string) string {
 		return errText
 	}
 	return errText[:1024]
-}
-
-func isTVLibraryType(folderType string) bool {
-	switch strings.ToLower(strings.TrimSpace(folderType)) {
-	case "series", "tv", "show", "tvshows":
-		return true
-	default:
-		return false
-	}
-}
-
-func isMixedLibraryType(folderType string) bool {
-	return strings.ToLower(strings.TrimSpace(folderType)) == "mixed"
-}
-
-func isMovieLibraryType(folderType string) bool {
-	switch strings.ToLower(strings.TrimSpace(folderType)) {
-	case "movie", "movies", "mixed":
-		return true
-	default:
-		return false
-	}
 }
 
 // RetryUnmatchedItemsByFolderAndPathPrefix revisits linked unmatched items in

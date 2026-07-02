@@ -141,30 +141,52 @@ func (r *ReleaseRepository) MarkContentSeeded(ctx context.Context, libraryID int
 	return err
 }
 
-// RecordMovieAvailabilityForLibrary inserts movie_availability rows for every
-// movie currently present in the library (one-way, idempotent) and, when
-// emitEvents is true, creates movie release events for the newly inserted
-// rows. Returns (availability rows inserted, release events created).
-func (r *ReleaseRepository) RecordMovieAvailabilityForLibrary(ctx context.Context, libraryID int, emitEvents bool) (int, int, error) {
-	query := `
-		INSERT INTO movie_availability (library_id, item_id)
-		SELECT mil.media_folder_id, mi.content_id
-		FROM media_item_libraries mil
-		JOIN media_items mi ON mi.content_id = mil.content_id AND mi.type = 'movie'
-		WHERE mil.media_folder_id = $1
-		ON CONFLICT (library_id, item_id) DO NOTHING
-		RETURNING item_id, available_at`
-	return r.recordMovieAvailability(ctx, libraryID, emitEvents, query, []any{libraryID})
+// RecordItemAvailabilityForLibrary inserts availability rows for every item
+// of the kind currently present in the library (one-way, idempotent) and,
+// when emitEvents is true, creates release events for the newly inserted
+// rows. Shared by every flat item kind (item_kind.go). Returns (availability
+// rows inserted, release events created).
+func (r *ReleaseRepository) RecordItemAvailabilityForLibrary(ctx context.Context, k flatItemKind, libraryID int, emitEvents bool) (int, int, error) {
+	args := []any{libraryID, k.ItemType}
+	var query string
+	if k.AvailabilityTable == movieAvailabilityTable {
+		query = `
+			INSERT INTO movie_availability (library_id, item_id)
+			SELECT mil.media_folder_id, mi.content_id
+			FROM media_item_libraries mil
+			JOIN media_items mi ON mi.content_id = mil.content_id AND mi.type = $2
+			WHERE mil.media_folder_id = $1
+			ON CONFLICT (library_id, item_id) DO NOTHING
+			RETURNING item_id, available_at`
+	} else {
+		query = `
+			INSERT INTO item_availability (library_id, item_id, kind)
+			SELECT mil.media_folder_id, mi.content_id, $3
+			FROM media_item_libraries mil
+			JOIN media_items mi ON mi.content_id = mil.content_id AND mi.type = $2
+			WHERE mil.media_folder_id = $1
+			ON CONFLICT (library_id, item_id, kind) DO NOTHING
+			RETURNING item_id, available_at`
+		args = append(args, k.Kind)
+	}
+	return r.recordItemAvailability(ctx, k, libraryID, emitEvents, query, args)
 }
 
-// RecordMovieAvailabilityForPaths inserts availability rows for movies whose
-// playable files live under the given scope paths (subtree/file ingest), and
-// optionally creates release events for newly inserted rows.
-func (r *ReleaseRepository) RecordMovieAvailabilityForPaths(ctx context.Context, libraryID int, scopePaths []string, emitEvents bool) (int, int, error) {
+// RecordItemAvailabilityForPaths inserts availability rows for items of the
+// kind whose files live under the given scope paths (subtree/file ingest),
+// and optionally creates release events for newly inserted rows.
+func (r *ReleaseRepository) RecordItemAvailabilityForPaths(ctx context.Context, k flatItemKind, libraryID int, scopePaths []string, emitEvents bool) (int, int, error) {
 	if len(scopePaths) == 0 {
 		return 0, 0, nil
 	}
-	args := []any{libraryID}
+	args := []any{libraryID, k.ItemType}
+	// The column list doubles as the ON CONFLICT target: both tables' primary
+	// keys are exactly their insert columns.
+	insertCols, selectExtra := "(library_id, item_id)", ""
+	if k.AvailabilityTable != movieAvailabilityTable {
+		args = append(args, k.Kind)
+		insertCols, selectExtra = "(library_id, item_id, kind)", ", $3"
+	}
 	scopeConds := make([]string, 0, len(scopePaths))
 	for _, path := range scopePaths {
 		args = append(args, path)
@@ -173,49 +195,50 @@ func (r *ReleaseRepository) RecordMovieAvailabilityForPaths(ctx context.Context,
 			fmt.Sprintf("(mf.file_path = $%d OR starts_with(mf.file_path, $%d || '/'))", idx, idx))
 	}
 	query := `
-		INSERT INTO movie_availability (library_id, item_id)
-		SELECT DISTINCT mf.media_folder_id, mi.content_id
+		INSERT INTO ` + k.AvailabilityTable + ` ` + insertCols + `
+		SELECT DISTINCT mf.media_folder_id, mi.content_id` + selectExtra + `
 		FROM media_files mf
-		JOIN media_items mi ON mi.content_id = mf.content_id AND mi.type = 'movie'
+		JOIN media_items mi ON mi.content_id = mf.content_id AND mi.type = $2
 		WHERE mf.media_folder_id = $1
 		  AND mf.missing_since IS NULL
 		  AND mf.episode_id IS NULL
 		  AND mf.content_id IS NOT NULL
 		  AND (` + strings.Join(scopeConds, " OR ") + `)
-		ON CONFLICT (library_id, item_id) DO NOTHING
+		ON CONFLICT ` + insertCols + ` DO NOTHING
 		RETURNING item_id, available_at`
-	return r.recordMovieAvailability(ctx, libraryID, emitEvents, query, args)
+	return r.recordItemAvailability(ctx, k, libraryID, emitEvents, query, args)
 }
 
-// recordMovieAvailability is the movie counterpart of recordAvailability: insert
-// availability facts and the optional release events in one transaction.
-func (r *ReleaseRepository) recordMovieAvailability(ctx context.Context, libraryID int, emitEvents bool, query string, args []any) (int, int, error) {
+// recordItemAvailability is the flat-item counterpart of recordAvailability:
+// insert availability facts and the optional release events in one
+// transaction.
+func (r *ReleaseRepository) recordItemAvailability(ctx context.Context, k flatItemKind, libraryID int, emitEvents bool, query string, args []any) (int, int, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return 0, 0, fmt.Errorf("begin movie availability tx: %w", err)
+		return 0, 0, fmt.Errorf("begin item availability tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return 0, 0, fmt.Errorf("insert movie availability: %w", err)
+		return 0, 0, fmt.Errorf("insert %s availability: %w", k.Kind, err)
 	}
-	type newMovie struct {
+	type newItem struct {
 		ItemID      string
 		AvailableAt time.Time
 	}
-	inserted := make([]newMovie, 0, 16)
+	inserted := make([]newItem, 0, 16)
 	for rows.Next() {
-		var row newMovie
+		var row newItem
 		if err := rows.Scan(&row.ItemID, &row.AvailableAt); err != nil {
 			rows.Close()
-			return 0, 0, fmt.Errorf("scan inserted movie availability: %w", err)
+			return 0, 0, fmt.Errorf("scan inserted %s availability: %w", k.Kind, err)
 		}
 		inserted = append(inserted, row)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("read inserted movie availability: %w", err)
+		return 0, 0, fmt.Errorf("read inserted %s availability: %w", k.Kind, err)
 	}
 
 	events := 0
@@ -241,23 +264,23 @@ func (r *ReleaseRepository) recordMovieAvailability(ctx context.Context, library
 				eventArgs = append(eventArgs,
 					ulid.Make().String(),
 					libraryID,
-					EventKindMovie,
+					k.Kind,
 					row.ItemID,
 					row.AvailableAt,
-					MovieDedupeKey(libraryID, row.ItemID),
+					ItemDedupeKey(k.Kind, libraryID, row.ItemID),
 				)
 			}
 			sb.WriteString(" ON CONFLICT (dedupe_key) DO NOTHING")
 			tag, err := tx.Exec(ctx, sb.String(), eventArgs...)
 			if err != nil {
-				return 0, 0, fmt.Errorf("insert movie release events: %w", err)
+				return 0, 0, fmt.Errorf("insert %s release events: %w", k.Kind, err)
 			}
 			events += int(tag.RowsAffected())
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return 0, 0, fmt.Errorf("commit movie availability tx: %w", err)
+		return 0, 0, fmt.Errorf("commit item availability tx: %w", err)
 	}
 	return len(inserted), events, nil
 }
@@ -270,10 +293,11 @@ func EpisodeDedupeKey(libraryID int, seriesID string, episodeKey int) string {
 	return fmt.Sprintf("episode:%d:%s:%d", libraryID, seriesID, episodeKey)
 }
 
-// MovieDedupeKey composes the release_events dedupe key for a movie. The
-// "movie:" prefix keeps the keyspace disjoint from episode keys.
-func MovieDedupeKey(libraryID int, itemID string) string {
-	return fmt.Sprintf("movie:%d:%s", libraryID, itemID)
+// ItemDedupeKey composes the release_events dedupe key for a flat item kind
+// (movie, audiobook, ebook). The kind prefix keeps each kind's keyspace
+// disjoint from the others and from episode keys.
+func ItemDedupeKey(kind string, libraryID int, itemID string) string {
+	return fmt.Sprintf("%s:%d:%s", kind, libraryID, itemID)
 }
 
 type newAvailability struct {

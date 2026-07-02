@@ -158,10 +158,10 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	// Non-episode kinds (movies) have no per-profile interest and never fan
-	// out; mark them processed immediately so retention reclaims them. This
-	// must happen before the burst cap: movie events have no series_id, and
-	// ApplyBurstCap groups by (library_id, series_id). The server-channel
+	// Non-episode kinds (movies, audiobooks, ebooks) have no per-profile
+	// interest and never fan out; mark them processed immediately so retention
+	// reclaims them. This must happen before the burst cap: flat item events
+	// have no series_id, and ApplyBurstCap groups by (library_id, series_id). The server-channel
 	// sweep reads events by cursor regardless of processed state.
 	events, others := PartitionEventsByKind(claimed)
 	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(others), nil); err != nil {

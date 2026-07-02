@@ -33,9 +33,10 @@ func EvaluateRecipient(interest SeriesInterest, prefs Preferences, episodeKey in
 }
 
 // PartitionEventsByKind splits claimed events into episode events (which fan
-// out to profiles) and everything else (movie events, which only feed the
-// server-channel broadcast sweep). Order is preserved within each partition.
-// The common all-episode batch returns the input slice unchanged.
+// out to profiles) and everything else (flat item kinds — movies, audiobooks,
+// ebooks — which only feed the server-channel broadcast sweep). Order is
+// preserved within each partition. The common all-episode batch returns the
+// input slice unchanged.
 func PartitionEventsByKind(events []ReleaseEvent) (episodes, others []ReleaseEvent) {
 	allEpisodes := true
 	for _, event := range events {
