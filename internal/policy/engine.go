@@ -168,7 +168,10 @@ func (e *Engine) Evaluate(ctx context.Context, name DecisionName, input any, out
 		return meta, fmt.Errorf("%w: %w", ErrPolicyEvalFailed, err)
 	}
 	if len(resultSet) == 0 || len(resultSet[0].Expressions) == 0 {
-		return meta, fmt.Errorf("%w: empty result for %s", ErrPolicyEvalFailed, name)
+		// Vendor policies index required input fields directly, so a partial
+		// input document (e.g. a hand-written simulate payload) yields an
+		// undefined decision rather than an eval error.
+		return meta, fmt.Errorf("%w: decision %s is undefined for this input (missing required input fields?)", ErrPolicyEvalFailed, name)
 	}
 	raw, err := json.Marshal(resultSet[0].Expressions[0].Value)
 	if err != nil {
