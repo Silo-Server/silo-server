@@ -1343,6 +1343,7 @@ export interface QuerySort {
     | "added_at"
     | "release_date"
     | "last_air_date"
+    | "latest_episode_added"
     | "year"
     | "content_rating"
     | "runtime"
