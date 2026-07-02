@@ -2145,21 +2145,6 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if key == "defaults.max_playback_quality" {
-		normalized, ok := access.ParsePlaybackQualityPreset(req.Value)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
-			return
-		}
-		req.Value = normalized
-	}
-	if key == "defaults.max_profiles" {
-		n, err := strconv.Atoi(req.Value)
-		if err != nil || n < 1 {
-			writeError(w, http.StatusBadRequest, "bad_request", "defaults.max_profiles must be an integer >= 1")
-			return
-		}
-	}
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
