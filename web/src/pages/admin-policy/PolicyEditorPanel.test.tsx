@@ -19,6 +19,8 @@ vi.mock("@uiw/react-codemirror", () => ({
   ),
 }));
 
+import type { PolicyDocument } from "@/api/types";
+import { adminKeys } from "@/hooks/queries/keys";
 import { mapPolicyIssuesToDiagnostics } from "@/lib/policyDiagnostics";
 
 import { PolicyEditorPanel } from "./PolicyEditorPanel";
@@ -27,6 +29,34 @@ import {
   jsonResponse,
   renderWithPolicyProviders,
 } from "./policyTestUtils";
+
+const LIVE_V2_SOURCE = "package silo_custom.scope\n\nbad if {\n  x\n}\n";
+const LIVE_V3_SOURCE = "package silo_custom.scope\n\nlive_three if {\n  input\n}\n";
+
+function documentWithLiveV3(): PolicyDocument {
+  return {
+    id: 1,
+    domain: "scope",
+    name: "Scope limits",
+    enabled: true,
+    active_version_id: 11,
+    active_version: {
+      id: 11,
+      document_id: 1,
+      version_number: 3,
+      source_sha256: "def",
+      compiled_ok: true,
+      created_at: "2026-07-02T13:00:00Z",
+      source: LIVE_V3_SOURCE,
+    },
+    created_at: "2026-07-02T12:00:00Z",
+    updated_at: "2026-07-02T13:00:00Z",
+  };
+}
+
+function regoTextarea() {
+  return screen.getByLabelText("Rego policy source") as HTMLTextAreaElement;
+}
 
 describe("PolicyEditorPanel", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -103,6 +133,63 @@ describe("PolicyEditorPanel", () => {
     });
     expect(await screen.findByText(/var x is unsafe/)).toBeInTheDocument();
     expect(screen.getByText(/3:3/)).toBeInTheDocument();
+  });
+
+  it("keeps a dirty draft and shows a notice when a newer version goes live elsewhere", async () => {
+    const { client } = renderWithPolicyProviders(
+      <PolicyEditorPanel documentId={1} domains={["scope"]} />,
+    );
+
+    expect(await screen.findByText("Scope limits")).toBeInTheDocument();
+    await waitFor(() => expect(regoTextarea().value).toContain("bad if"));
+
+    const myDraft = "package silo_custom.scope\n\nmy_edit if {\n  input\n}\n";
+    fireEvent.change(regoTextarea(), { target: { value: myDraft } });
+
+    // Another admin activates v3 — surfaced here as a background query update.
+    act(() => {
+      client.setQueryData(adminKeys.policyDocument(1), documentWithLiveV3());
+    });
+
+    // The dirty draft is preserved rather than silently reseeded.
+    expect(regoTextarea().value).toBe(myDraft);
+    expect(await screen.findByText(/Version 3 is now live elsewhere/)).toBeInTheDocument();
+  });
+
+  it("adopts the newer live version when the load button is clicked", async () => {
+    const { client } = renderWithPolicyProviders(
+      <PolicyEditorPanel documentId={1} domains={["scope"]} />,
+    );
+
+    expect(await screen.findByText("Scope limits")).toBeInTheDocument();
+    await waitFor(() => expect(regoTextarea().value).toContain("bad if"));
+
+    const myDraft = "package silo_custom.scope\n\nmy_edit if {\n  input\n}\n";
+    fireEvent.change(regoTextarea(), { target: { value: myDraft } });
+    act(() => {
+      client.setQueryData(adminKeys.policyDocument(1), documentWithLiveV3());
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /load live version/i }));
+
+    await waitFor(() => expect(regoTextarea().value).toContain("live_three"));
+    expect(screen.queryByText(/now live elsewhere/)).not.toBeInTheDocument();
+  });
+
+  it("adopts a newer live version automatically when the editor is clean", async () => {
+    const { client } = renderWithPolicyProviders(
+      <PolicyEditorPanel documentId={1} domains={["scope"]} />,
+    );
+
+    expect(await screen.findByText("Scope limits")).toBeInTheDocument();
+    await waitFor(() => expect(regoTextarea().value).toBe(LIVE_V2_SOURCE));
+
+    act(() => {
+      client.setQueryData(adminKeys.policyDocument(1), documentWithLiveV3());
+    });
+
+    await waitFor(() => expect(regoTextarea().value).toBe(LIVE_V3_SOURCE));
+    expect(screen.queryByText(/now live elsewhere/)).not.toBeInTheDocument();
   });
 
   it("maps compile issues to clamped CodeMirror diagnostics", () => {

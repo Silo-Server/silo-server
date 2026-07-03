@@ -1,5 +1,5 @@
 import { Check, CheckCircle2, Play, Save, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import type {
@@ -49,6 +49,26 @@ interface PolicyEditorStateProps {
   seedIsActive: boolean;
   seedVersion?: PolicyVersion;
   versions: readonly PolicyVersionSummary[];
+  onStateChange: (state: EditorDirtyState) => void;
+  newerSeed?: NewerSeedInfo;
+}
+
+interface EditorDirtyState {
+  draft: string;
+  pending: boolean;
+}
+
+interface NewerSeedInfo {
+  versionNumber?: number;
+  onAdopt: () => void;
+}
+
+interface PinnedSeed {
+  documentId: number;
+  key: string;
+  initialSource: string;
+  seedIsActive: boolean;
+  seedVersion?: PolicyVersion;
 }
 
 interface ValidationState {
@@ -146,6 +166,15 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
     (versionsQuery.isLoading || (latestVersionId !== undefined && latestVersionQuery.isLoading)),
   );
 
+  // The seed we are currently editing against. It only advances to a newer
+  // server seed when doing so cannot discard unsaved work (see reconcile below),
+  // so a background refetch never silently drops an admin's dirty draft.
+  const [pinned, setPinned] = useState<PinnedSeed | null>(null);
+  // Latest reported editor state, used only to decide whether an incoming seed
+  // may replace the editor. PolicyEditorState is memoized, so reporting this
+  // does not re-render the (heavy) editor subtree on every keystroke.
+  const [editorState, setEditorState] = useState<EditorDirtyState | null>(null);
+
   if (!documentId) {
     return (
       <div className="surface-panel-subtle text-muted-foreground rounded-2xl p-6 text-sm">
@@ -166,29 +195,70 @@ export function PolicyEditorPanel({ documentId, domains }: PolicyEditorPanelProp
     );
   }
 
-  const initialSource = seedVersion?.source ?? defaultPolicySource(document.domain);
-  const seedIsActive = seedVersion !== undefined && seedVersion.id === document.active_version_id;
+  const fresh: PinnedSeed = {
+    documentId: document.id,
+    key: seedKey(document, seedVersion),
+    initialSource: seedVersion?.source ?? defaultPolicySource(document.domain),
+    seedIsActive: seedVersion !== undefined && seedVersion.id === document.active_version_id,
+    seedVersion,
+  };
+
+  // Adopting `fresh` remounts the editor and resets the draft to fresh.initialSource.
+  // That is safe when the editor has no unsaved work relative to the pinned seed,
+  // or when the draft already equals the incoming source (e.g. right after the
+  // admin activated their own version — nothing is lost). Otherwise we keep the
+  // pinned seed mounted and surface the newer version as a non-destructive notice.
+  // Switching documents always adopts: the draft belongs to the previous
+  // document and must never ride along into another document's editor.
+  const sameDocument = pinned !== null && pinned.documentId === document.id;
+  const editorDirty =
+    sameDocument &&
+    pinned !== null &&
+    editorState !== null &&
+    (editorState.draft !== pinned.initialSource || editorState.pending);
+  const safeToAdopt =
+    !editorDirty || (editorState !== null && editorState.draft === fresh.initialSource);
+  const shouldAdopt = pinned === null || !sameDocument || (pinned.key !== fresh.key && safeToAdopt);
+  const effective = shouldAdopt ? fresh : pinned;
+  const keepingPinned = !shouldAdopt && pinned.key !== fresh.key;
+
+  if (shouldAdopt && pinned?.key !== fresh.key) {
+    // setState during render: React re-renders before commit; the guard above
+    // makes it a fixed point (next render pinned.key === fresh.key). Clearing
+    // the reported editor state keeps a stale report from the outgoing editor
+    // from blocking or mislabeling the next seed until the new editor reports.
+    setPinned(fresh);
+    setEditorState(null);
+  }
 
   return (
     <PolicyEditorState
-      key={seedKey(document, seedVersion)}
+      key={effective.key}
       document={document}
       domains={domains}
-      initialSource={initialSource}
-      seedIsActive={seedIsActive}
-      seedVersion={seedVersion}
+      initialSource={effective.initialSource}
+      seedIsActive={effective.seedIsActive}
+      seedVersion={effective.seedVersion}
       versions={versionsQuery.data ?? []}
+      onStateChange={setEditorState}
+      newerSeed={
+        keepingPinned
+          ? { versionNumber: fresh.seedVersion?.version_number, onAdopt: () => setPinned(fresh) }
+          : undefined
+      }
     />
   );
 }
 
-function PolicyEditorState({
+const PolicyEditorState = memo(function PolicyEditorState({
   document,
   domains,
   initialSource,
   seedIsActive,
   seedVersion,
   versions,
+  onStateChange,
+  newerSeed,
 }: PolicyEditorStateProps) {
   const [draft, setDraft] = useState(initialSource);
   const [comment, setComment] = useState("");
@@ -200,6 +270,14 @@ function PolicyEditorState({
   const validatePolicy = useValidatePolicy();
   const createVersion = useCreatePolicyVersion();
   const activateVersion = useActivatePolicyVersion();
+
+  // Report the draft plus whether there is uncommitted work (a saved-but-not-yet
+  // activated version, or a typed comment) so the panel can decide whether an
+  // incoming seed may safely replace this editor.
+  const pending = Boolean(saved) || comment.trim().length > 0;
+  useEffect(() => {
+    onStateChange({ draft, pending });
+  }, [draft, pending, onStateChange]);
 
   const meta = policyDomainMeta(document.domain);
   const validated = validation?.source === draft && validation.result.compiled_ok;
@@ -356,6 +434,26 @@ function PolicyEditorState({
           </p>
         )}
 
+        {newerSeed && (
+          <div className="border-warning/40 bg-warning/10 mt-4 flex flex-col gap-2 rounded-lg border px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-warning">
+              {newerSeed.versionNumber !== undefined
+                ? `Version ${newerSeed.versionNumber} is now live elsewhere.`
+                : "A newer policy is now live elsewhere."}{" "}
+              Loading it will discard your unsaved draft.
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={newerSeed.onAdopt}
+            >
+              Load live version
+            </Button>
+          </div>
+        )}
+
         {step === "save" && (
           <div className="mt-4 max-w-lg">
             <Input
@@ -420,4 +518,4 @@ function PolicyEditorState({
       </AlertDialog>
     </div>
   );
-}
+});

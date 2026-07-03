@@ -47,11 +47,12 @@ export function renderWithPolicyProviders(ui: ReactNode) {
       mutations: { retry: false },
     },
   });
-  return render(
+  const result = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>{ui}</MemoryRouter>
     </QueryClientProvider>,
   );
+  return { ...result, client };
 }
 
 export function jsonResponse(body: unknown, status = 200) {
