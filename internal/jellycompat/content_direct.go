@@ -431,7 +431,27 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		if crossLibraryRecentlyAdded && filters.Offset == 0 {
 			// The merge helper returns a Total/HasMore consistent with offset 0,
 			// so wantTotal is satisfied without the expensive cross-library count.
-			result, err = s.browseRepo.BrowseRecentlyAddedAcrossLibraries(ctx, filters, crossLibraryIDs)
+			//
+			// The fast path cannot serve a global offset — a per-library top-N walk
+			// can't satisfy a deep merged offset. When the isPlayed overlay drops
+			// items, the offset-paging loop would advance filters.Offset on the next
+			// iteration and fall through to BrowsePage's whole-catalog
+			// MIN(first_seen_at) + GROUP BY (~0.8s+ on a large catalog). Instead,
+			// pull the entire over-fetch budget in this single merged index walk so
+			// the loop fills from one fast call.
+			//
+			// Caveat: BrowseRecentlyAddedAcrossLibraries clamps its limit to
+			// MaxLimit (compatBrowseMaxLimit=1000), so this fully avoids the
+			// BrowsePage fall-through only while maxScannedRows <= 1000 — i.e. for
+			// requestedLimit <= 200, which covers the /Items/Latest hot path
+			// (limit ~24-50). For very large requestedLimit (201-1000) the clamp
+			// can still leave a 2nd chunk that pages into BrowsePage; that case is
+			// rare for recently-added rails and remains correct, just not optimized.
+			fastFilters := filters
+			if isPlayedFilter != "" && fastFilters.Limit < maxScannedRows {
+				fastFilters.Limit = maxScannedRows
+			}
+			result, err = s.browseRepo.BrowseRecentlyAddedAcrossLibraries(ctx, fastFilters, crossLibraryIDs)
 		} else {
 			result, err = s.browseRepo.BrowsePage(ctx, filters, wantTotal)
 		}
