@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type { CreateLibraryRequest, Library } from "@/api/types";
+import type { CreateLibraryRequest, Library, PluginInstallation } from "@/api/types";
 import {
   useCreateLibrary,
   useLibraryProviders,
@@ -16,12 +16,44 @@ export type LevelChainItem = {
   enabled: boolean;
 };
 
-type MetadataProvider = {
+export type MetadataProvider = {
   plugin_installation_id: number;
   capability_id: string;
   slug: string;
   defaultPriority: Record<string, number>;
 };
+
+// metadataProvidersFromInstallations flattens enabled plugin installations into
+// the metadata providers used to seed a library's provider chain. The provider
+// slug is the capability id — the same value the server returns for a saved
+// chain (provider_slug = capability_id) — so a provider reads identically
+// whether the chain is freshly defaulted or loaded from the server, instead of
+// showing the display name ("TMDB") before save and the id ("tmdb") after.
+export function metadataProvidersFromInstallations(
+  installations: PluginInstallation[],
+): MetadataProvider[] {
+  const result: MetadataProvider[] = [];
+  for (const inst of installations) {
+    if (!inst.enabled) continue;
+    for (const cap of inst.capabilities ?? []) {
+      if (cap.type !== "metadata_provider.v1") continue;
+      const dp =
+        (cap.metadata?.default_priority as Record<string, number>) ??
+        ((cap.metadata?.metadata as Record<string, unknown>)?.default_priority as Record<
+          string,
+          number
+        >) ??
+        {};
+      result.push({
+        plugin_installation_id: inst.id,
+        capability_id: cap.id,
+        slug: cap.id,
+        defaultPriority: dp,
+      });
+    }
+  }
+  return result;
+}
 
 export interface LibraryFormErrors {
   name?: string;
@@ -168,30 +200,10 @@ export function useLibraryForm({
   const { installations } = useAdminPlugins();
   const { data: currentChain } = useLibraryProviders(library?.id ?? null);
 
-  const metadataProviders = useMemo(() => {
-    const result: MetadataProvider[] = [];
-    for (const inst of installations) {
-      if (!inst.enabled) continue;
-      for (const cap of inst.capabilities ?? []) {
-        if (cap.type === "metadata_provider.v1") {
-          const dp =
-            (cap.metadata?.default_priority as Record<string, number>) ??
-            ((cap.metadata?.metadata as Record<string, unknown>)?.default_priority as Record<
-              string,
-              number
-            >) ??
-            {};
-          result.push({
-            plugin_installation_id: inst.id,
-            capability_id: cap.id,
-            slug: cap.display_name || cap.id,
-            defaultPriority: dp,
-          });
-        }
-      }
-    }
-    return result;
-  }, [installations]);
+  const metadataProviders = useMemo(
+    () => metadataProvidersFromInstallations(installations),
+    [installations],
+  );
 
   const isPending =
     createMutation.isPending || updateMutation.isPending || setChainMutation.isPending;
