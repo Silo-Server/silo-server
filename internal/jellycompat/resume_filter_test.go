@@ -155,6 +155,74 @@ func TestLoadProgressPage_BoundsScanForSparseVisibleSet(t *testing.T) {
 	}
 }
 
+// TestLoadProgressPage_BoundsFastPathScanForSparseVisibleSet pins the cap on the
+// raw-offset fast path (default Continue Watching shape: no type/library filter,
+// EnableTotalRecordCount=false, StartIndex=0). This is the branch the sections
+// fallback hits in production, and it has its own scan loop separate from the
+// general loop. Without the fast-path cap a fully-dismissed history would page to
+// the end here even though the other bounds test (which sets
+// EnableTotalRecordCount=true) routes around this branch entirely.
+func TestLoadProgressPage_BoundsFastPathScanForSparseVisibleSet(t *testing.T) {
+	const total = 5000
+	entries := make([]upstreamProgress, 0, total)
+	items := make(map[string]*models.MediaItem, total)
+	hidden := make(map[string]bool, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("movie-%d", i)
+		entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
+		items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
+		hidden[id] = true
+	}
+	userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
+	h := resumeTestHandler(userData, items)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	// Default shape → the raw-offset fast path (loop A), not the general loop.
+	query := itemsQuery{limit: 20}
+	_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", query, nil, nil)
+	if err != nil {
+		t.Fatalf("loadProgressPage: %v", err)
+	}
+
+	const oneBatchOvershoot = 200
+	if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
+		t.Fatalf("fast-path scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
+	}
+	if userData.maxScanned >= total {
+		t.Fatalf("fast path scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
+	}
+}
+
+// TestLoadProgressPage_CompletedScanNotCapped pins that the completed
+// (watched-items) path is exempt from resumeScanMaxRows: it paginates on an exact
+// TotalRecordCount, so it must keep scanning past the cap. Mirrors the Codex
+// review concern that the cap not leak into watched-items pagination.
+func TestLoadProgressPage_CompletedScanNotCapped(t *testing.T) {
+	const total = resumeScanMaxRows * 3
+	entries := make([]upstreamProgress, 0, total)
+	items := make(map[string]*models.MediaItem, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("movie-%d", i)
+		entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 100, DurationSeconds: 100, Completed: true})
+		items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
+	}
+	// No hidden entries: completed does not run FilterResumeProgress.
+	userData := &resumeFilteringUserData{entries: entries}
+	h := resumeTestHandler(userData, items)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	query := itemsQuery{limit: 20, enableTotalRecordCount: true}
+	_, gotTotal, err := h.loadProgressPage(context.Background(), session, "completed", query, nil, nil)
+	if err != nil {
+		t.Fatalf("loadProgressPage: %v", err)
+	}
+	// The exact watched-items total must be reported, i.e. the scan must not stop
+	// at the resume cap.
+	if gotTotal != total {
+		t.Fatalf("completed total = %d, want exact %d (cap must not apply to watched items)", gotTotal, total)
+	}
+}
+
 // TestLoadProgressPage_ResumeFilterAppliesWithTypeFilter covers the
 // scan-from-zero branch (IncludeItemTypes present): filtering must apply
 // there too, and visible pagination must skip filtered entries.

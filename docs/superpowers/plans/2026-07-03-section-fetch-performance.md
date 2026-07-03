@@ -109,7 +109,7 @@ recompute, and one avoidable large join in the NextUp query.
 (`internal/catalog/nextup_repo.go:112`) for `user_id=627` executed in **91ms
 warm**, and the cost is dominated by one thing:
 
-```
+```text
 completed_episodes CTE:
   Nested Loop (actual 60.8ms, 56,884 buffers)
     -> Index Scan idx_user_watch_progress_profile  (14,512 rows, 847 buffers)
@@ -131,7 +131,7 @@ The `completed_episodes` CTE does
 `migrations/sql/20260612130000_deterministic_content_id.sql`). An episode's id
 embeds its series anchor, season, and episode:
 
-```
+```text
 episode-tvdb-296762-1-5   ->  series = series-tvdb-296762, season = 1, episode = 5
 ```
 

@@ -2426,6 +2426,15 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			if len(result) >= query.limit || rawCount < batchSize {
 				break
 			}
+			// Same bound as the general loop below: the resume fast path filters in
+			// memory via FilterResumeProgress, so a sparse visible set (heavy
+			// watcher with mostly dismissed/superseded recent rows) would otherwise
+			// page to the end of history without ever filling the page. This is the
+			// default Continue Watching shape and the fallback hit when the sections
+			// fetcher is unavailable, so it must be bounded too.
+			if resumeFiltered && offset+rawCount >= resumeScanMaxRows {
+				break
+			}
 			offset += rawCount
 		}
 		return h.finishProgressPage(ctx, session, result, query, libraryID), 0, nil
@@ -2496,16 +2505,21 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 		if !query.enableTotalRecordCount && len(items) >= query.limit {
 			break
 		}
-		// Bound the scan unconditionally: never page through more than
-		// resumeScanMaxRows of history in one request, even when the visible
-		// (post-filter) page stays sparse. The in-progress path filters in memory
-		// via FilterResumeProgress, so a heavy watcher whose recent rows are mostly
-		// dismissed/superseded could otherwise keep paging to the end of history
-		// without ever filling the page. Progress rows are recency-ordered, so the
-		// most recent resumeScanMaxRows already cover every realistically-visible
-		// Continue Watching entry; beyond the cap we stop and return what we have
-		// (and, for EnableTotalRecordCount, a clamped lower-bound total).
-		if offset >= resumeScanMaxRows {
+		// Bound the resume scan: never page through more than resumeScanMaxRows of
+		// history in one request, even when the visible (post-filter) page stays
+		// sparse. The in-progress path filters in memory via FilterResumeProgress,
+		// so a heavy watcher whose recent rows are mostly dismissed/superseded
+		// could otherwise keep paging to the end of history without ever filling
+		// the page. Progress rows are recency-ordered, so the most recent
+		// resumeScanMaxRows already cover every realistically-visible Continue
+		// Watching entry; beyond the cap we stop and return what we have (and, for
+		// EnableTotalRecordCount, a clamped lower-bound total).
+		//
+		// Gated on resumeFiltered so the completed (watched-items) path is exempt:
+		// there the SQL pre-filter already bounds the scan and clients paginate on
+		// an exact TotalRecordCount, so capping would underreport the total and
+		// drop deep StartIndex pages.
+		if resumeFiltered && offset >= resumeScanMaxRows {
 			break
 		}
 	}
