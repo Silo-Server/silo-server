@@ -162,6 +162,7 @@ type libraryCollectionSourceConfig struct {
 	Provider   string              `json:"provider,omitempty"`
 	Preset     string              `json:"preset,omitempty"`
 	URL        string              `json:"url,omitempty"`
+	ListURL    string              `json:"list_url,omitempty"`
 	MediaType  string              `json:"media_type,omitempty"`
 	TimeWindow string              `json:"time_window,omitempty"`
 	ProfileID  string              `json:"profile_id,omitempty"`
@@ -984,7 +985,10 @@ func (s *LibraryCollectionService) syncTraktListCollection(ctx context.Context, 
 	if s.TraktCollections == nil {
 		return nil, fmt.Errorf("Trakt list sync requires configured Trakt access")
 	}
-	listURL := strings.TrimSpace(cfg.URL)
+	listURL := strings.TrimSpace(cfg.ListURL)
+	if listURL == "" {
+		listURL = strings.TrimSpace(cfg.URL)
+	}
 	if listURL == "" {
 		listURL = strings.TrimSpace(collection.SourceURL)
 	}
@@ -1029,6 +1033,10 @@ func ParseTraktListURL(raw string) (user, list string, err error) {
 		parsed, parseErr := url.Parse(normalized)
 		if parseErr != nil {
 			return "", "", fmt.Errorf("Trakt list sync: invalid url %q", raw)
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if host != "trakt.tv" && host != "www.trakt.tv" {
+			return badFormat()
 		}
 		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 		if len(parts) != 4 || parts[0] != "users" || parts[2] != "lists" {

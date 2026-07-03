@@ -3524,11 +3524,13 @@ func buildTraktListSourceConfig(listURL string, limit *int) (json.RawMessage, er
 		Mode     string `json:"mode"`
 		Provider string `json:"provider"`
 		URL      string `json:"url"`
+		ListURL  string `json:"list_url"`
 		Limit    *int   `json:"limit,omitempty"`
 	}{
 		Mode:     "trakt_list",
 		Provider: "trakt",
 		URL:      listURL,
+		ListURL:  listURL,
 		Limit:    limit,
 	}
 	return json.Marshal(payload)

@@ -11,11 +11,14 @@ func TestParseTraktListURL(t *testing.T) {
 		wantErr bool
 	}{
 		{"full url", "https://trakt.tv/users/jjjonesjr33/lists/saw-cinematic-universe-in-timeline-order", "jjjonesjr33", "saw-cinematic-universe-in-timeline-order", false},
+		{"www url", "https://www.trakt.tv/users/someone/lists/best-of", "someone", "best-of", false},
+		{"mixed-case host", "https://Trakt.TV/users/someone/lists/best-of", "someone", "best-of", false},
 		{"url with query", "https://trakt.tv/users/someone/lists/best-of?sort=rank,asc", "someone", "best-of", false},
 		{"no scheme", "trakt.tv/users/someone/lists/best-of", "someone", "best-of", false},
 		{"shorthand", "someone/best-of", "someone", "best-of", false},
 		{"trailing slash", "https://trakt.tv/users/someone/lists/best-of/", "someone", "best-of", false},
 		{"empty", "", "", "", true},
+		{"wrong host", "https://example.com/users/someone/lists/best-of", "", "", true},
 		{"not a list url", "https://trakt.tv/movies/trending", "", "", true},
 		{"missing slug", "https://trakt.tv/users/someone/lists/", "", "", true},
 	}
