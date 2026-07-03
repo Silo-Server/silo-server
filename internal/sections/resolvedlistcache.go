@@ -43,6 +43,10 @@ const (
 	// resolvedListRefreshTimeout bounds a detached background rebuild so a stuck
 	// query can never pin a pool connection indefinitely.
 	resolvedListRefreshTimeout = 30 * time.Second
+	// resolvedListPruneInterval bounds how often expired entries are swept from
+	// the map, so keys for scopes that are never requested again cannot linger
+	// for the life of the process.
+	resolvedListPruneInterval = time.Minute
 )
 
 // resolvedListLoader builds the shared item list for a cache key. It takes a
@@ -61,6 +65,9 @@ type resolvedListEntry struct {
 var (
 	resolvedListCacheMu sync.RWMutex
 	resolvedListCache   = make(map[string]resolvedListEntry)
+	// resolvedListLastPrune is the last time expired entries were swept; guarded
+	// by resolvedListCacheMu.
+	resolvedListLastPrune time.Time
 
 	// resolvedListGroup collapses concurrent blocking rebuilds (cold miss /
 	// expired) for the same key into a single loader call.
@@ -153,7 +160,7 @@ func scheduleResolvedListRefresh(key string, now time.Time, loader resolvedListL
 		}()
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("resolved list cache refresh panicked", "key", key, "panic", r)
+				slog.Error("resolved list cache refresh panicked", "key_hash", resolvedListLogKey(key), "panic", r)
 			}
 		}()
 
@@ -162,7 +169,7 @@ func scheduleResolvedListRefresh(key string, now time.Time, loader resolvedListL
 
 		items, total, err := loader(ctx)
 		if err != nil {
-			slog.Warn("resolved list cache refresh failed", "key", key, "error", err)
+			slog.Warn("resolved list cache refresh failed", "key_hash", resolvedListLogKey(key), "error", err)
 			return
 		}
 		// A transiently empty refresh preserves the existing (stale-but-usable)
@@ -183,6 +190,7 @@ func resolvedListGet(key string) (resolvedListEntry, bool) {
 
 func resolvedListSet(key string, items []*models.MediaItem, total int, now time.Time) {
 	resolvedListCacheMu.Lock()
+	pruneExpiredResolvedListEntriesLocked(now)
 	resolvedListCache[key] = resolvedListEntry{
 		items:        cloneMediaItems(items),
 		total:        total,
@@ -191,6 +199,22 @@ func resolvedListSet(key string, items []*models.MediaItem, total int, now time.
 		expiresAt:    now.Add(resolvedListTTL),
 	}
 	resolvedListCacheMu.Unlock()
+}
+
+// pruneExpiredResolvedListEntriesLocked sweeps expired entries at most once per
+// resolvedListPruneInterval. The caller must hold resolvedListCacheMu. Keys for
+// scopes that are never looked up again would otherwise remain forever, so this
+// bounds the map to roughly the set of scopes seen within one TTL window.
+func pruneExpiredResolvedListEntriesLocked(now time.Time) {
+	if !resolvedListLastPrune.IsZero() && now.Sub(resolvedListLastPrune) < resolvedListPruneInterval {
+		return
+	}
+	for k, entry := range resolvedListCache {
+		if !now.Before(entry.expiresAt) {
+			delete(resolvedListCache, k)
+		}
+	}
+	resolvedListLastPrune = now
 }
 
 // cloneMediaItems returns a shallow copy of the slice: it protects the cached
@@ -303,6 +327,14 @@ func hashSectionConfig(config json.RawMessage) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// resolvedListLogKey returns a short digest of a cache key for logging. The raw
+// key embeds user-controlled access-scope fields (e.g. NamePrefix), so only the
+// digest is emitted to logs, not the raw input.
+func resolvedListLogKey(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:8])
+}
+
 func writeSortedStrings(b *strings.Builder, values []string) {
 	if len(values) == 0 {
 		return
@@ -356,6 +388,7 @@ func isCacheableSectionType(resolved ResolvedSection) bool {
 func resetResolvedListCacheForTest() {
 	resolvedListCacheMu.Lock()
 	resolvedListCache = make(map[string]resolvedListEntry)
+	resolvedListLastPrune = time.Time{}
 	resolvedListCacheMu.Unlock()
 
 	resolvedListRefreshMu.Lock()

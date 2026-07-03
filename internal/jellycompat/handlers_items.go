@@ -954,14 +954,11 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Fast path: a per-library Latest (first page, no played filter, no backdrop
-	// filter) is the same user-agnostic list as the native "recently added"
-	// library rail (both order by mil.first_seen_at DESC). Serve it through the
-	// native section fetch so it reuses the shared resolved-list cache instead of
-	// re-running BrowseItems. It is restricted to movies and series libraries;
-	// every other library type (ebook, music, manga, mixed, …) is ignored and
-	// keeps its exact BrowseItems behavior. On any failure fall back to browse.
-	if (libraryItemType == "movie" || libraryItemType == "series") && query.startIndex == 0 && query.isPlayed == nil && !query.requireBackdrop && h.sectionsFetcher != nil {
+	// Fast path: a per-library Latest is the same user-agnostic list as the native
+	// "recently added" library rail (both order by mil.first_seen_at DESC). When
+	// eligible, serve it through the native section fetch so it reuses the shared
+	// resolved-list cache instead of re-running BrowseItems; otherwise fall back.
+	if latestFastPathEligible(query, libraryItemType, h.sectionsFetcher != nil) {
 		items, err := h.loadLatestViaSections(r.Context(), session, query)
 		if err == nil {
 			applyImageTypeLimit(items, query.imageTypeLimit)
@@ -1055,6 +1052,32 @@ func (h *ItemsHandler) buildLatestItemDTOs(ctx context.Context, session *Session
 // fallback, so HandleLatest should fall back quietly rather than log a failure.
 var errLatestNotEligible = errors.New("jellycompat: latest not eligible for native section path")
 
+// latestFastPathEligible reports whether a /Items/Latest request can be served
+// through the native recently-added section (and its shared cache) with results
+// identical to the BrowseItems fallback. The synthetic recently-added section
+// only expresses a single library type plus the access scope, so any request
+// that carries a filter it cannot reproduce must fall back:
+//   - not a movies/series library (mixed/ebook/music/… would surface non-video);
+//   - a deeper page, played-status filter, or backdrop-required flag; or
+//   - a genre, name-prefix, or person filter (the section config can't scope to
+//     these, so serving unfiltered recently-added would return a wrong, broader
+//     result set than BrowseItems does).
+func latestFastPathEligible(query itemsQuery, libraryItemType string, hasSectionsFetcher bool) bool {
+	if !hasSectionsFetcher {
+		return false
+	}
+	if libraryItemType != "movie" && libraryItemType != "series" {
+		return false
+	}
+	if query.startIndex != 0 || query.isPlayed != nil || query.requireBackdrop {
+		return false
+	}
+	if query.genreName != "" || query.namePrefix != "" || query.personID != 0 {
+		return false
+	}
+	return true
+}
+
 // loadLatestViaSections serves a per-library /Items/Latest through the native
 // recently-added section fetch, reusing the shared resolved-list cache. The
 // synthetic section carries the same type+config+limit+scope the native library
@@ -1080,6 +1103,12 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 	limit := query.limit
 	if limit <= 0 {
 		limit = compatDefaultLatestLimit
+	}
+	// Clamp to the same ceiling the BrowseItems fallback enforces, so a large
+	// client Limit can't drive an oversized recently-added fetch or explode the
+	// shared cache key with unbounded ItemLimit values.
+	if limit > compatBrowseMaxLimit {
+		limit = compatBrowseMaxLimit
 	}
 	libraryID := query.parentLibraryID
 	resolved := sections.ResolvedSection{

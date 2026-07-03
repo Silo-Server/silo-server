@@ -225,6 +225,34 @@ func TestResolvedListCacheKeyScopeStillIsolatesWithoutID(t *testing.T) {
 	}
 }
 
+// TestResolvedListCacheEvictsExpiredEntries verifies expired entries are swept
+// so the process-global map cannot grow unbounded across never-repeated scopes.
+func TestResolvedListCacheEvictsExpiredEntries(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+
+	base := time.Unix(1_700_000_000, 0)
+	if _, _, err := getOrRefresh(context.Background(), "scope-A", base, staticLoader(mediaItems("a1"), nil)); err != nil {
+		t.Fatalf("prime scope-A: %v", err)
+	}
+	if _, ok := resolvedListGet("scope-A"); !ok {
+		t.Fatalf("scope-A should be cached right after priming")
+	}
+
+	// A later write, past scope-A's expiry (base+15m) and the prune interval,
+	// must sweep scope-A while installing scope-B.
+	later := base.Add(20 * time.Minute)
+	if _, _, err := getOrRefresh(context.Background(), "scope-B", later, staticLoader(mediaItems("b1"), nil)); err != nil {
+		t.Fatalf("prime scope-B: %v", err)
+	}
+	if _, ok := resolvedListGet("scope-A"); ok {
+		t.Fatalf("expired scope-A should have been evicted")
+	}
+	if _, ok := resolvedListGet("scope-B"); !ok {
+		t.Fatalf("scope-B should be present")
+	}
+}
+
 // TestResolvedListCacheKeyContentBoundaries verifies the content-scoping access
 // boundaries (AllowedContentIDs, NamePrefix) that the filter-driven builders
 // enforce as SQL constraints each produce a distinct key, so a content-restricted
