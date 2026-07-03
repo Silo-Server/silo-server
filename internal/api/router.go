@@ -466,6 +466,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			activeSearchProvider = catalog.SearchProviderMeilisearch
 		}
 		searchIndexEvents.WithActiveProvider(activeSearchProvider)
+		// Latch the provider for the package-level enqueue helpers used by
+		// metadata/scanner/etc. so they skip the per-call settings lookup.
+		catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 		itemRepo.WithSearchIndexEvents(searchIndexEvents)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
 		providerIDRepo = catalog.NewProviderIDRepository(deps.DB)

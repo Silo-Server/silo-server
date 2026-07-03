@@ -4,11 +4,126 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestCoalesceSearchIndexEvents(t *testing.T) {
+	sortedCopy := func(values []string) []string {
+		out := append([]string(nil), values...)
+		sort.Strings(out)
+		return out
+	}
+	cases := []struct {
+		name        string
+		events      []SearchIndexEvent
+		wantUpserts []string
+		wantDeletes []string
+	}{
+		{
+			name: "later delete wins over earlier upsert",
+			events: []SearchIndexEvent{
+				{Action: SearchIndexEventUpsert, ContentID: "x"},
+				{Action: SearchIndexEventDelete, ContentID: "x"},
+			},
+			wantDeletes: []string{"x"},
+		},
+		{
+			name: "later upsert resurrects earlier delete",
+			events: []SearchIndexEvent{
+				{Action: SearchIndexEventDelete, ContentID: "x"},
+				{Action: SearchIndexEventUpsert, ContentID: "x"},
+			},
+			wantUpserts: []string{"x"},
+		},
+		{
+			name: "rename deletes previous id and upserts new id",
+			events: []SearchIndexEvent{
+				{Action: SearchIndexEventRename, ContentID: "new", PreviousContentID: "old"},
+			},
+			wantUpserts: []string{"new"},
+			wantDeletes: []string{"old"},
+		},
+		{
+			name: "delete after rename removes the renamed id",
+			events: []SearchIndexEvent{
+				{Action: SearchIndexEventRename, ContentID: "new", PreviousContentID: "old"},
+				{Action: SearchIndexEventDelete, ContentID: "new"},
+			},
+			wantDeletes: []string{"new", "old"},
+		},
+		{
+			name: "upsert after rename resurrects the previous id",
+			events: []SearchIndexEvent{
+				{Action: SearchIndexEventRename, ContentID: "new", PreviousContentID: "old"},
+				{Action: SearchIndexEventUpsert, ContentID: "old"},
+			},
+			wantUpserts: []string{"new", "old"},
+		},
+		{
+			name: "blank ids are dropped",
+			events: []SearchIndexEvent{
+				{Action: SearchIndexEventUpsert, ContentID: "  "},
+				{Action: SearchIndexEventRename, ContentID: "new", PreviousContentID: ""},
+			},
+			wantUpserts: []string{"new"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			upserts, deletes := coalesceSearchIndexEvents(tc.events)
+			if got, want := sortedCopy(upserts), sortedCopy(tc.wantUpserts); !slices.Equal(got, want) {
+				t.Fatalf("upserts = %v, want %v", got, want)
+			}
+			if got, want := sortedCopy(deletes), sortedCopy(tc.wantDeletes); !slices.Equal(got, want) {
+				t.Fatalf("deletes = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestStaleCatalogSearchIndexUIDs(t *testing.T) {
+	uids := []string{
+		"silo_media_items_rebuild_100", // superseded rebuild
+		"silo_media_items_rebuild_200", // newly active
+		"silo_media_items",             // legacy previously-active index
+		"other_app_index",              // unrelated index on a shared instance
+		"silo_media_items_rebuild_50",  // failed-run leftover
+		"",
+	}
+	stale := staleCatalogSearchIndexUIDs(uids, "silo_media_items", "silo_media_items_rebuild_200", "silo_media_items")
+	sort.Strings(stale)
+	want := []string{"silo_media_items", "silo_media_items_rebuild_100", "silo_media_items_rebuild_50"}
+	if !slices.Equal(stale, want) {
+		t.Fatalf("stale = %v, want %v", stale, want)
+	}
+
+	// The newly active index must survive even when it is also the previous
+	// active uid (re-running a rebuild that already swapped).
+	if got := staleCatalogSearchIndexUIDs([]string{"idx_rebuild_1"}, "idx", "idx_rebuild_1", "idx_rebuild_1"); len(got) != 0 {
+		t.Fatalf("active index must never be deleted, got %v", got)
+	}
+}
+
+func TestRebuildIndexingPercent(t *testing.T) {
+	if got := rebuildIndexingPercent(0, 0); got != 50 {
+		t.Fatalf("unknown total should report midpoint, got %v", got)
+	}
+	if got := rebuildIndexingPercent(0, 10); got != 5 {
+		t.Fatalf("start of band = %v, want 5", got)
+	}
+	if got := rebuildIndexingPercent(10, 10); got != 90 {
+		t.Fatalf("end of band = %v, want 90", got)
+	}
+	// Documents created after the total was counted must not push past the band.
+	if got := rebuildIndexingPercent(15, 10); got != 90 {
+		t.Fatalf("overshoot should clamp to 90, got %v", got)
+	}
+}
 
 func TestAttachDocumentVectorsSkipsWhenSemanticDisabled(t *testing.T) {
 	docs := []catalogSearchDocument{{ContentID: "movie-1", Title: "Movie"}}

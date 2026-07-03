@@ -404,15 +404,19 @@ type CatalogSearchMeiliStatus struct {
 }
 
 type CatalogSearchIndexStateStatus struct {
-	ActiveIndexUID        string     `json:"active_index_uid"`
-	SchemaVersion         int        `json:"schema_version"`
-	ExpectedSchemaVersion int        `json:"expected_schema_version"`
-	DocumentCount         int        `json:"document_count"`
-	VectorDocumentCount   int        `json:"vector_document_count"`
-	PendingEvents         int        `json:"pending_events"`
-	LastRebuildAt         *time.Time `json:"last_rebuild_at,omitempty"`
-	LastSyncAt            *time.Time `json:"last_sync_at,omitempty"`
-	LastProcessedEventID  int64      `json:"last_processed_event_id"`
+	ActiveIndexUID        string `json:"active_index_uid"`
+	SchemaVersion         int    `json:"schema_version"`
+	ExpectedSchemaVersion int    `json:"expected_schema_version"`
+	DocumentCount         int    `json:"document_count"`
+	VectorDocumentCount   int    `json:"vector_document_count"`
+	PendingEvents         int    `json:"pending_events"`
+	// DeadLetteredEvents counts outbox events that exhausted their retries and
+	// were dropped; each is an item whose index document is stale until the
+	// next rebuild.
+	DeadLetteredEvents   int        `json:"dead_lettered_events"`
+	LastRebuildAt        *time.Time `json:"last_rebuild_at,omitempty"`
+	LastSyncAt           *time.Time `json:"last_sync_at,omitempty"`
+	LastProcessedEventID int64      `json:"last_processed_event_id"`
 }
 
 type CatalogSearchTaskLink struct {

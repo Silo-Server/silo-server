@@ -2241,6 +2241,14 @@ func main() {
 			if compatSearchService != nil {
 				compatSearchService.StartCoverageRefresh(appCtx)
 				compatDeps.CatalogSearchProvider = compatSearchService.Provider()
+				// Latch the resolved provider for the package-level enqueue
+				// helpers (idempotent with the API router's latch; this also
+				// covers modes that wire jellycompat without the router).
+				activeSearchProvider := catalog.SearchProviderPostgres
+				if _, ok := compatSearchService.Provider().(*catalog.MeilisearchSearchProvider); ok {
+					activeSearchProvider = catalog.SearchProviderMeilisearch
+				}
+				catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 			}
 
 			if deps.S3Public != nil {

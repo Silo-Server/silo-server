@@ -289,6 +289,13 @@ export default function SearchSettings() {
                 </>
               )}
               <StatusRow label="Pending Events" value={String(status.index.pending_events)} />
+              {status.index.dead_lettered_events > 0 && (
+                <StatusRow
+                  label="Dead-lettered Events"
+                  value={String(status.index.dead_lettered_events)}
+                  badge="stale until rebuild"
+                />
+              )}
               <StatusRow
                 label="Last Sync"
                 value={formatStatusDate(status.index.last_sync_at) || "Never"}
