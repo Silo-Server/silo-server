@@ -84,6 +84,35 @@ func TestAccessGroupHandlerUpdateDefaultUnsetsPrevious(t *testing.T) {
 	}
 }
 
+func TestAccessGroupHandlerDefaultGroupGuards(t *testing.T) {
+	store := newAccessGroupHandlerTestStore()
+	store.groups[1] = access.Group{ID: 1, Name: "Default", DownloadAllowed: true, RequestsAllowed: true, IsDefault: true}
+	store.nextID = 2
+	handler := NewAccessGroupHandler(store)
+
+	rec := httptest.NewRecorder()
+	req := accessGroupRequestWithID(http.MethodDelete, "/api/v1/admin/access-groups/1", nil, "1")
+	handler.HandleDelete(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("HandleDelete(default) status = %d, want %d, body %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if _, ok := store.groups[1]; !ok {
+		t.Fatalf("default group removed despite conflict response")
+	}
+
+	rec = httptest.NewRecorder()
+	req = accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/1", strings.NewReader(`{
+		"is_default": false
+	}`), "1")
+	handler.HandleUpdate(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("HandleUpdate(demote default) status = %d, want %d, body %s", rec.Code, http.StatusConflict, rec.Body.String())
+	}
+	if !store.groups[1].IsDefault {
+		t.Fatalf("default group demoted despite conflict response")
+	}
+}
+
 type accessGroupHandlerTestStore struct {
 	nextID int64
 	groups map[int64]access.Group
@@ -179,6 +208,8 @@ func (s *accessGroupHandlerTestStore) Update(_ context.Context, id int64, input 
 	if input.IsDefault != nil {
 		if *input.IsDefault {
 			s.clearDefault()
+		} else if group.IsDefault {
+			return nil, access.ErrDefaultGroupRequired
 		}
 		group.IsDefault = *input.IsDefault
 	}
@@ -188,8 +219,12 @@ func (s *accessGroupHandlerTestStore) Update(_ context.Context, id int64, input 
 }
 
 func (s *accessGroupHandlerTestStore) Delete(_ context.Context, id int64) error {
-	if _, ok := s.groups[id]; !ok {
+	group, ok := s.groups[id]
+	if !ok {
 		return access.ErrGroupNotFound
+	}
+	if group.IsDefault {
+		return access.ErrDefaultGroupRequired
 	}
 	delete(s.groups, id)
 	return nil

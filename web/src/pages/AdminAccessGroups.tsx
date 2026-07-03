@@ -305,9 +305,14 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
         </div>
         <ToggleRow
           label="Default for new users"
-          description="Newly created accounts are placed in this group automatically. Existing users are never moved."
+          description={
+            group.is_default
+              ? "Newly created accounts are placed in this group automatically. To change this, make another group the default."
+              : "Newly created accounts are placed in this group automatically. Existing users are never moved."
+          }
           checked={isDefault}
           onCheckedChange={setIsDefault}
+          disabled={group.is_default}
         />
       </div>
 
@@ -416,15 +421,23 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button
-          type="button"
-          variant="ghost"
-          className="text-destructive hover:text-destructive"
-          onClick={() => setConfirmDelete(true)}
-        >
-          <Trash2 className="size-4" />
-          Delete group
-        </Button>
+        <div className="flex flex-col gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            className="text-destructive hover:text-destructive"
+            onClick={() => setConfirmDelete(true)}
+            disabled={group.is_default}
+          >
+            <Trash2 className="size-4" />
+            Delete group
+          </Button>
+          {group.is_default && (
+            <p className="text-muted-foreground text-xs">
+              The default group can’t be deleted. Make another group the default first.
+            </p>
+          )}
+        </div>
         <Button type="button" onClick={save} disabled={updateGroup.isPending}>
           {updateGroup.isPending ? "Saving..." : "Save changes"}
         </Button>
@@ -440,8 +453,6 @@ function AccessGroupEditor({ group, onDeleted }: AccessGroupEditorProps) {
                     group.member_count === 1 ? "member" : "members"
                   } will move to no group and fall back to the built-in defaults. Their own restrictions are unchanged.`
                 : "This group has no members. This can't be undone."}
-              {group.is_default &&
-                " It is also the default for new users — after deleting, new accounts start with no group."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

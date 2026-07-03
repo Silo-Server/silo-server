@@ -204,8 +204,9 @@ func (h *AccessGroupHandler) HandleUpdate(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, toAccessGroupResponse(*group))
 }
 
-// HandleDelete removes an access group. Deleting the default group is allowed:
-// the users foreign key clears members and the system is left with no default.
+// HandleDelete removes an access group. The users foreign key clears member
+// assignments. The default group cannot be deleted (409) — new non-admin users
+// are assigned to it at creation, so another group must be made default first.
 func (h *AccessGroupHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.store == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Access groups are not configured")
@@ -371,6 +372,9 @@ func writeAccessGroupError(w http.ResponseWriter, err error, fallback string) {
 		writeError(w, http.StatusNotFound, "not_found", "Access group not found")
 	case errors.Is(err, access.ErrGroupDuplicate):
 		writeError(w, http.StatusConflict, "conflict", "Access group name already exists")
+	case errors.Is(err, access.ErrDefaultGroupRequired):
+		writeError(w, http.StatusConflict, "conflict",
+			"This is the default group for new users. Make another group the default first.")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal_error", fallback)
 	}

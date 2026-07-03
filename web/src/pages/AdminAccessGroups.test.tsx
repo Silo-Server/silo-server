@@ -95,4 +95,16 @@ describe("AdminAccessGroups", () => {
       });
     });
   });
+
+  it("locks demotion and deletion for the default group", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Kids/ }));
+
+    // The server rejects demoting or deleting the default group, so the
+    // editor disables both paths and explains the promote-another-group flow.
+    expect(await screen.findByRole("switch", { name: "Default for new users" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /delete group/i })).toBeDisabled();
+    expect(screen.getByText(/make another group the default first/i)).toBeInTheDocument();
+  });
 });

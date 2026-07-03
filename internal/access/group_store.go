@@ -66,6 +66,11 @@ var (
 	ErrGroupNotFound = errors.New("access group not found")
 	// ErrGroupDuplicate reports a unique-name conflict.
 	ErrGroupDuplicate = errors.New("access group already exists")
+	// ErrDefaultGroupRequired reports an operation that would leave the server
+	// without a default access group. New non-admin users are assigned to the
+	// default group at creation, so losing it would create them ungrouped and
+	// uncapped (the legacy per-user column defaults were retired).
+	ErrDefaultGroupRequired = errors.New("a default access group is required")
 )
 
 // GroupStore persists access groups in Postgres.
@@ -226,7 +231,8 @@ func (s *GroupStore) Create(ctx context.Context, input CreateGroupInput) (*Group
 
 // Update modifies an access group. Setting IsDefault true clears the previous
 // default, and changing max_playback_quality bumps member access-policy
-// revisions in the same transaction.
+// revisions in the same transaction. The current default cannot be demoted
+// directly (which would leave no default) — promote another group instead.
 func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInput) (*Group, error) {
 	sets := []string{}
 	args := []any{}
@@ -322,6 +328,22 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 			return nil, fmt.Errorf("clearing previous default access group: %w", err)
 		}
 	}
+	if input.IsDefault != nil && !*input.IsDefault {
+		var isDefault bool
+		if err := tx.QueryRow(ctx, `
+			SELECT is_default
+			FROM access_groups
+			WHERE id = $1
+			FOR UPDATE`, id).Scan(&isDefault); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrGroupNotFound
+			}
+			return nil, fmt.Errorf("loading access group for update: %w", err)
+		}
+		if isDefault {
+			return nil, ErrDefaultGroupRequired
+		}
+	}
 
 	sets = append(sets, "updated_at = NOW()")
 	query := fmt.Sprintf("UPDATE access_groups SET %s WHERE id = $%d", strings.Join(sets, ", "), arg)
@@ -351,13 +373,28 @@ func (s *GroupStore) Update(ctx context.Context, id int64, input UpdateGroupInpu
 }
 
 // Delete removes an access group. User memberships are cleared by the FK.
+// The default group cannot be deleted — promote another group to default
+// first — so new-user creation always finds a governing group.
 func (s *GroupStore) Delete(ctx context.Context, id int64) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM access_groups WHERE id = $1`, id)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM access_groups WHERE id = $1 AND NOT is_default`, id)
 	if err != nil {
 		return fmt.Errorf("deleting access group: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrGroupNotFound
+		var isDefault bool
+		err := s.pool.QueryRow(ctx, `SELECT is_default FROM access_groups WHERE id = $1`, id).Scan(&isDefault)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return ErrGroupNotFound
+		case err != nil:
+			return fmt.Errorf("checking access group default flag: %w", err)
+		case isDefault:
+			return ErrDefaultGroupRequired
+		default:
+			// The row reappeared between DELETE and the check; treat the
+			// original miss as not-found rather than retrying.
+			return ErrGroupNotFound
+		}
 	}
 	return nil
 }
