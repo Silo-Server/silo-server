@@ -4797,6 +4797,9 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 			return fmt.Errorf("%s: %w", step.name, err)
 		}
 	}
+	if err := catalog.RecomputeSeriesLatestEpisodeAdded(ctx, tx, []string{fromContentID}); err != nil {
+		return err
+	}
 
 	if err := catalog.EnqueueSearchIndexRename(ctx, tx, fromContentID, toContentID); err != nil {
 		return fmt.Errorf("enqueue catalog search skeleton rebind %s -> %s: %w", fromContentID, toContentID, err)

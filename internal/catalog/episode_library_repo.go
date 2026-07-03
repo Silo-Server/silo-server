@@ -21,33 +21,65 @@ func NewEpisodeLibraryRepository(pool *pgxpool.Pool) *EpisodeLibraryRepository {
 // memberships for episodes that no longer have any present files in the given
 // folder. The returned count is the number of removed stale memberships.
 func (r *EpisodeLibraryRepository) ReconcileFolderMembership(ctx context.Context, folderID int) (int, error) {
-	if _, err := r.pool.Exec(ctx, `
-		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-		SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
-		FROM media_files mf
-		JOIN episodes e ON e.content_id = mf.episode_id
-		WHERE mf.media_folder_id = $1
-		  AND mf.missing_since IS NULL
-		  AND mf.episode_id IS NOT NULL
-		GROUP BY mf.episode_id, mf.media_folder_id
-		ON CONFLICT (episode_id, media_folder_id) DO NOTHING
-	`, folderID); err != nil {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("beginning episode membership reconciliation transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var insertedSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		WITH inserted AS (
+			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+			SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
+			FROM media_files mf
+			JOIN episodes e ON e.content_id = mf.episode_id
+			WHERE mf.media_folder_id = $1
+			  AND mf.missing_since IS NULL
+			  AND mf.episode_id IS NOT NULL
+			GROUP BY mf.episode_id, mf.media_folder_id
+			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING episode_id
+		)
+		SELECT COALESCE(array_agg(DISTINCT e.series_id), ARRAY[]::text[])
+		FROM inserted i
+		JOIN episodes e ON e.content_id = i.episode_id
+	`, folderID).Scan(&insertedSeriesIDs); err != nil {
 		return 0, fmt.Errorf("restoring episode library membership: %w", err)
 	}
 
-	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM episode_libraries el
-		WHERE el.media_folder_id = $1
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM media_files mf
-			WHERE mf.media_folder_id = el.media_folder_id
-			  AND mf.episode_id = el.episode_id
-			  AND mf.missing_since IS NULL
-		  )
-	`, folderID)
-	if err != nil {
+	var removed int
+	var deletedSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		WITH deleted AS (
+			DELETE FROM episode_libraries el
+			WHERE el.media_folder_id = $1
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM media_files mf
+				WHERE mf.media_folder_id = el.media_folder_id
+				  AND mf.episode_id = el.episode_id
+				  AND mf.missing_since IS NULL
+			)
+			RETURNING el.episode_id
+		)
+		SELECT COUNT(*)::int,
+		       COALESCE(
+			       array_agg(DISTINCT e.series_id) FILTER (WHERE e.series_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       )
+		FROM deleted d
+		LEFT JOIN episodes e ON e.content_id = d.episode_id
+	`, folderID).Scan(&removed, &deletedSeriesIDs); err != nil {
 		return 0, fmt.Errorf("reconciling episode library membership: %w", err)
 	}
-	return int(tag.RowsAffected()), nil
+
+	affectedSeriesIDs := append(insertedSeriesIDs, deletedSeriesIDs...)
+	if err := RecomputeSeriesLatestEpisodeAdded(ctx, tx, affectedSeriesIDs); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("committing episode membership reconciliation transaction: %w", err)
+	}
+	return removed, nil
 }
