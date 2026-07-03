@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strings"
@@ -681,12 +682,41 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 		return out, nil
 	}
 
-	// Resolve the user store once for the whole page; enrichment is per-item but
-	// uses the identical code path as GetItemDetail.
+	// Resolve the user store once for the whole page.
 	var store userstore.UserStore
 	if s.storeProvider != nil {
 		if resolved, storeErr := s.storeProvider.ForUser(ctx, session.StreamAppUserID); storeErr == nil {
 			store = resolved
+		}
+	}
+
+	// Batch the leaf-item progress lookup. enrichDetailUserData issues
+	// GetProgressWithCompletedHistory per item (two point queries each), so a
+	// 50-item page cost ~100 sequential round-trips. Movies/episodes own a
+	// progress row, so their played/position state is resolved here in a single
+	// ListProgressWithCompletedHistory call — semantically identical to the
+	// per-item path (absent id → nil, completed-history synthesized). Series own
+	// no progress row and need a per-series episode rollup, so they stay on the
+	// per-item enrichDetailUserData path in the loop below.
+	var leafProgress map[string]userstore.WatchProgress
+	if store != nil {
+		leafIDs := make([]string, 0, len(details))
+		for id, detail := range details {
+			if isCompatExcludedMediaType(detail.Type) || strings.EqualFold(detail.Type, "series") {
+				continue
+			}
+			leafIDs = append(leafIDs, id)
+		}
+		if len(leafIDs) > 0 {
+			if pm, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, leafIDs); err == nil {
+				leafProgress = pm
+			} else {
+				// On failure the whole page loses played/position state at once
+				// (the per-item path failed one id at a time); log so the drop is
+				// observable rather than silent. Items still render from list data.
+				slog.Warn("jellycompat: batch leaf progress lookup failed; page rendered without played state",
+					"error", err, "leaf_count", len(leafIDs))
+			}
 		}
 	}
 
@@ -696,7 +726,15 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 		}
 		upstream := itemDetailToUpstream(detail)
 		if store != nil {
-			s.enrichDetailUserData(ctx, store, session.ProfileID, id, &upstream)
+			if strings.EqualFold(detail.Type, "series") {
+				s.enrichDetailUserData(ctx, store, session.ProfileID, id, &upstream)
+			} else {
+				var wp *userstore.WatchProgress
+				if entry, ok := leafProgress[id]; ok {
+					wp = &entry
+				}
+				upstream.UserData = seasonUserDataFromProgress(wp)
+			}
 		}
 		out[id] = &upstream
 	}

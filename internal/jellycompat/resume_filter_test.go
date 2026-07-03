@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -22,6 +23,7 @@ type resumeFilteringUserData struct {
 	lastFilteredTypes []string
 	filterCalls       int
 	filteredBatchSize []int
+	maxScanned        int // highest row index read across ListProgress pages
 }
 
 func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, status string, limit, offset int) ([]upstreamProgress, error) {
@@ -30,6 +32,9 @@ func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, st
 		return nil, nil
 	}
 	end := min(offset+limit, len(s.entries))
+	if end > s.maxScanned {
+		s.maxScanned = end
+	}
 	return s.entries[offset:end], nil
 }
 
@@ -108,6 +113,45 @@ func TestLoadProgressPage_ResumeHidesFilteredEntries(t *testing.T) {
 	}
 	if userData.filterCalls == 0 {
 		t.Fatal("expected FilterResumeProgress to be called for in_progress status")
+	}
+}
+
+// TestLoadProgressPage_BoundsScanForSparseVisibleSet pins the resumeScanMaxRows
+// cap: a heavy watcher whose in-progress rows are almost all hidden by
+// FilterResumeProgress must not page through the entire history looking to fill
+// the visible page. Before the cap was made unconditional, the scan only stopped
+// once len(items) >= limit, so a page that never fills walked every row.
+func TestLoadProgressPage_BoundsScanForSparseVisibleSet(t *testing.T) {
+	const total = 5000
+	entries := make([]upstreamProgress, 0, total)
+	items := make(map[string]*models.MediaItem, total)
+	hidden := make(map[string]bool, total)
+	for i := 0; i < total; i++ {
+		id := fmt.Sprintf("movie-%d", i)
+		entries = append(entries, upstreamProgress{MediaItemID: id, PositionSeconds: 10, DurationSeconds: 100})
+		items[id] = &models.MediaItem{ContentID: id, Type: "movie", Title: id}
+		hidden[id] = true // everything dismissed → visible page never fills
+	}
+	userData := &resumeFilteringUserData{entries: entries, hidden: hidden}
+	h := resumeTestHandler(userData, items)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	// EnableTotalRecordCount=true is the shape that previously forced the full
+	// O(history) scan.
+	query := itemsQuery{limit: 20, enableTotalRecordCount: true}
+	_, _, err := h.loadProgressPage(context.Background(), session, "in_progress", query, nil, nil)
+	if err != nil {
+		t.Fatalf("loadProgressPage: %v", err)
+	}
+
+	// The scan must stop near the cap, not walk all `total` rows. Allow one extra
+	// batch of overshoot (the break fires after offset crosses the cap).
+	const oneBatchOvershoot = 200
+	if userData.maxScanned > resumeScanMaxRows+oneBatchOvershoot {
+		t.Fatalf("scan not bounded: read %d rows, want <= %d", userData.maxScanned, resumeScanMaxRows+oneBatchOvershoot)
+	}
+	if userData.maxScanned >= total {
+		t.Fatalf("scanned the entire history (%d rows); cap did not engage", userData.maxScanned)
 	}
 }
 

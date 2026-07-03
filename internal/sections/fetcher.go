@@ -48,7 +48,16 @@ type SectionItemMeta struct {
 
 const recentSeasonPremiereBadgeWindowDays = 14
 const editorialCandidateCacheTTL = 24 * time.Hour
-const fetchAllMaxConcurrency = 4
+
+// fetchAllMaxConcurrency bounds how many sections FetchAll resolves in parallel.
+// Each concurrent section holds a pgxpool connection, so this is also per-request
+// pool pressure: with the default pool of 20 conns (database.max_connections),
+// N concurrent home requests can hold up to N*fetchAllMaxConcurrency connections.
+// Raised from 4 to 6 to cut the wave count for large home layouts (e.g. 32
+// sections: 8 waves → 6) while keeping headroom for a few concurrent home loads
+// before the pool saturates. Do not raise further without widening the pool or
+// load-testing pool contention.
+const fetchAllMaxConcurrency = 6
 const slowSectionFetchThreshold = 500 * time.Millisecond
 const slowAggregateFetchThreshold = time.Second
 
