@@ -106,17 +106,21 @@ func (s *PostgresUserStore) ListFavoritesByMediaItems(ctx context.Context, profi
 // --- Watchlist ---
 
 func (s *PostgresUserStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) error {
-	return s.AddToWatchlistAt(ctx, profileID, mediaItemID, time.Now().UTC())
+	_, err := s.AddToWatchlistAt(ctx, profileID, mediaItemID, time.Now().UTC())
+	return err
 }
 
-func (s *PostgresUserStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) error {
-	_, err := s.pool.Exec(ctx,
+func (s *PostgresUserStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
 		`INSERT INTO user_watchlist (user_id, profile_id, media_item_id, added_at)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
 		s.userID, profileID, mediaItemID, addedAt.UTC(),
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func (s *PostgresUserStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) error {

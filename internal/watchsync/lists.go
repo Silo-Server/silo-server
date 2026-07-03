@@ -169,7 +169,8 @@ func (s *Service) watchlistBinding() listBinding {
 			return res, true, err
 		},
 		localAdd: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) error {
-			return store.AddToWatchlistAt(ctx, profileID, mediaItemID, at)
+			_, err := store.AddToWatchlistAt(ctx, profileID, mediaItemID, at)
+			return err
 		},
 		localRemove: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error {
 			return store.RemoveFromWatchlist(ctx, profileID, mediaItemID)

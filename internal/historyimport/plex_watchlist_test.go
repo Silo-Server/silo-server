@@ -6,7 +6,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 func TestNormalizePlexWatchlistItem(t *testing.T) {
@@ -116,4 +122,149 @@ func TestFetchWatchlistStopsOnEmptyPage(t *testing.T) {
 	if len(items) != 0 || calls != 1 {
 		t.Fatalf("items=%d calls=%d, want 0 items after a single call", len(items), calls)
 	}
+}
+
+func TestPlexWatchlistImportCountsOnlyInsertedRows(t *testing.T) {
+	ctx := context.Background()
+	pool := newPlexWatchlistImportTestPool(t)
+	repo := NewRepository(pool, nil)
+	service := &Service{
+		repo:         repo,
+		matcher:      NewMatcher(repo),
+		stores:       pgstore.NewPostgresProvider(pool),
+		bgContext:    ctx,
+		runSemaphore: make(chan struct{}, maxConcurrentRuns),
+		runCancels:   make(map[string]context.CancelFunc),
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, year, tmdb_id, status)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		"movie-693134", KindMovie, "Dune: Part Two", 2024, "693134", "matched",
+	); err != nil {
+		t.Fatalf("seed media item: %v", err)
+	}
+	run, err := repo.CreateRun(ctx, Run{
+		ID:               "plex-watchlist-duplicate-run",
+		UserID:           42,
+		ProfileID:        "profile-1",
+		SourceType:       SourceTypePlex,
+		ConnectionMode:   ConnectionModePlexOAuth,
+		Status:           RunStatusQueued,
+		Warnings:         []string{},
+		UnmatchedSamples: []UnmatchedSample{},
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	updatedAt := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.UTC)
+	record := Record{
+		Kind:        KindMovie,
+		Title:       "Dune: Part Two",
+		Year:        2024,
+		TMDBID:      "693134",
+		Watchlisted: true,
+		UpdatedAt:   updatedAt,
+	}
+	service.executeRun(run, staticWatchlistProvider{records: []Record{record, record}})
+
+	completed, err := repo.GetRunForUser(ctx, 42, run.ID)
+	if err != nil {
+		t.Fatalf("GetRunForUser: %v", err)
+	}
+	if completed.Status != RunStatusCompleted {
+		t.Fatalf("run status = %q, want %q; warnings=%v", completed.Status, RunStatusCompleted, completed.Warnings)
+	}
+	if completed.WatchlistAdded != 1 {
+		t.Fatalf("WatchlistAdded = %d, want 1", completed.WatchlistAdded)
+	}
+	var rows int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM user_watchlist
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+		42, "profile-1", "movie-693134",
+	).Scan(&rows); err != nil {
+		t.Fatalf("count watchlist rows: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("watchlist rows = %d, want 1", rows)
+	}
+}
+
+type staticWatchlistProvider struct {
+	records []Record
+}
+
+func (p staticWatchlistProvider) Fetch(context.Context) ([]Record, []string, error) {
+	return p.records, nil, nil
+}
+
+func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse db config: %v", err)
+	}
+	config.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	for _, stmt := range []string{
+		`CREATE TEMP TABLE media_items (
+			content_id text PRIMARY KEY,
+			type text NOT NULL,
+			title text NOT NULL,
+			year integer,
+			imdb_id text,
+			tmdb_id text,
+			tvdb_id text,
+			status text NOT NULL DEFAULT 'matched'
+		) ON COMMIT PRESERVE ROWS`,
+		`CREATE TEMP TABLE user_watchlist (
+			user_id integer NOT NULL,
+			profile_id text NOT NULL,
+			media_item_id text NOT NULL,
+			added_at timestamptz NOT NULL DEFAULT now(),
+			sort_index integer,
+			PRIMARY KEY (user_id, profile_id, media_item_id)
+		) ON COMMIT PRESERVE ROWS`,
+		`CREATE TEMP TABLE history_import_runs (
+			id text PRIMARY KEY,
+			user_id integer NOT NULL,
+			profile_id text NOT NULL,
+			source_type text NOT NULL,
+			connection_mode text NOT NULL,
+			status text NOT NULL,
+			mapping_id integer,
+			fetched integer NOT NULL DEFAULT 0,
+			matched integer NOT NULL DEFAULT 0,
+			unmatched integer NOT NULL DEFAULT 0,
+			progress_updated integer NOT NULL DEFAULT 0,
+			history_created integer NOT NULL DEFAULT 0,
+			watchlist_added integer NOT NULL DEFAULT 0,
+			skipped integer NOT NULL DEFAULT 0,
+			warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
+			unmatched_samples jsonb NOT NULL DEFAULT '[]'::jsonb,
+			error_message text,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			started_at timestamptz,
+			completed_at timestamptz,
+			last_heartbeat_at timestamptz
+		) ON COMMIT PRESERVE ROWS`,
+	} {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			t.Fatalf("create temp test table: %v", err)
+		}
+	}
+	return pool
 }

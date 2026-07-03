@@ -284,7 +284,7 @@ func (s *progressCountingStore) IsFavorite(context.Context, string, string) (boo
 func (s *progressCountingStore) AddToWatchlist(context.Context, string, string) error {
 	panic("unused")
 }
-func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) error {
+func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s *progressCountingStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {

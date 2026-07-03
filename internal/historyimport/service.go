@@ -403,18 +403,19 @@ func (s *Service) resolvePlexAuth(ctx context.Context, userID int, input CreateR
 // addToWatchlist puts a matched watchlist import onto the importing
 // profile's watchlist (idempotent: the store insert is ON CONFLICT DO
 // NOTHING, so re-imports do not duplicate or reorder entries).
-func (s *Service) addToWatchlist(ctx context.Context, userID int, profileID, mediaItemID string, addedAt time.Time) error {
+func (s *Service) addToWatchlist(ctx context.Context, userID int, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
 	if s.stores == nil {
-		return fmt.Errorf("watchlist import: user store provider not configured")
+		return false, fmt.Errorf("watchlist import: user store provider not configured")
 	}
 	store, err := s.stores.ForUser(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("watchlist import: open user store: %w", err)
+		return false, fmt.Errorf("watchlist import: open user store: %w", err)
 	}
-	if err := store.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt); err != nil {
-		return fmt.Errorf("watchlist import: add %s: %w", mediaItemID, err)
+	inserted, err := store.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
+	if err != nil {
+		return false, fmt.Errorf("watchlist import: add %s: %w", mediaItemID, err)
 	}
-	return nil
+	return inserted, nil
 }
 
 func (s *Service) executeRun(run *Run, provider Provider) {
@@ -503,9 +504,10 @@ func (s *Service) executeRun(run *Run, provider Provider) {
 		// Watchlist entries carry no watch state: the matched item joins the
 		// importing profile's watchlist and the progress pipeline is skipped.
 		if record.Watchlisted {
-			if err := s.addToWatchlist(ctx, run.UserID, run.ProfileID, match.MediaItemID, record.UpdatedAt); err != nil {
+			inserted, err := s.addToWatchlist(ctx, run.UserID, run.ProfileID, match.MediaItemID, record.UpdatedAt)
+			if err != nil {
 				summary.Warnings = append(summary.Warnings, err.Error())
-			} else {
+			} else if inserted {
 				summary.WatchlistAdded++
 			}
 			s.persistProgressMaybe(ctx, run.ID, summary, i+1, len(records))
