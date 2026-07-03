@@ -320,7 +320,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
 			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(episodes.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			runtime = EXCLUDED.runtime,
@@ -503,7 +503,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
 			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(episodes.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			runtime = EXCLUDED.runtime,
@@ -821,6 +821,50 @@ func (r *EpisodeRepository) ListBySeason(ctx context.Context, seriesID string, s
 	rows, err := r.pool.Query(ctx, query, seriesID, seasonNum)
 	if err != nil {
 		return nil, fmt.Errorf("listing episodes by season: %w", err)
+	}
+	defer rows.Close()
+
+	return scanEpisodes(rows)
+}
+
+// ListAdjacentInSeries returns the episode at (seasonNumber, episodeNumber)
+// together with its immediate previous and next available neighbors within the
+// series, in natural (season, episode) order. It is the bounded backing query
+// for Jellyfin's AdjacentTo request (Wholphin autoplay/skip): instead of
+// materializing every episode of the series, each neighbor is found with a
+// bounded index range scan backed by the episodes_series_season_episode_key
+// UNIQUE index (series_id, season_number, episode_number). Neighbors are
+// resolved across season boundaries, so the result is at most three rows.
+func (r *EpisodeRepository) ListAdjacentInSeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) ([]*models.Episode, error) {
+	query := `SELECT ` + episodeColumns + ` FROM (
+		(SELECT ` + episodeColumns + `
+			FROM episodes
+			WHERE series_id = $1
+			  AND (season_number, episode_number) < ($2, $3)
+			  AND ` + episodeAvailabilityPredicate + `
+			ORDER BY season_number DESC, episode_number DESC
+			LIMIT 1)
+		UNION ALL
+		(SELECT ` + episodeColumns + `
+			FROM episodes
+			WHERE series_id = $1
+			  AND season_number = $2
+			  AND episode_number = $3
+			  AND ` + episodeAvailabilityPredicate + `)
+		UNION ALL
+		(SELECT ` + episodeColumns + `
+			FROM episodes
+			WHERE series_id = $1
+			  AND (season_number, episode_number) > ($2, $3)
+			  AND ` + episodeAvailabilityPredicate + `
+			ORDER BY season_number ASC, episode_number ASC
+			LIMIT 1)
+	) AS adjacent
+	ORDER BY season_number ASC, episode_number ASC`
+
+	rows, err := r.pool.Query(ctx, query, seriesID, seasonNumber, episodeNumber)
+	if err != nil {
+		return nil, fmt.Errorf("listing adjacent episodes in series: %w", err)
 	}
 	defer rows.Close()
 

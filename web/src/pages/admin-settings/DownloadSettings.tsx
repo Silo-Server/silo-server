@@ -11,6 +11,10 @@ const KEYS = [
   "download.max_concurrent_per_user",
   "download.max_per_period",
   "download.period_duration",
+  "download.transcode_enabled",
+  "download.artifact_dir",
+  "download.max_concurrent_prepares",
+  "download.artifact_max_bytes",
 ];
 
 export default function DownloadSettings() {
@@ -71,6 +75,34 @@ export default function DownloadSettings() {
             hint="Rolling window for the per-period limit (e.g., 24h, 168h, 720h)"
             value={form.getValue("download.period_duration")}
             onChange={(v) => form.setValue("download.period_duration", v)}
+          />
+        </FieldGroup>
+
+        <FieldGroup label="Offline Sync (Prepared Downloads)">
+          <SettingField
+            label="Transcode-to-File Enabled"
+            hint="Allow server-side transcode of downloads to a device-friendly file. Requires the per-user download-transcode permission. Downloaded files persist on-device until the user deletes them — there is no expiry or revocation of files already downloaded."
+            type="toggle"
+            value={form.getValue("download.transcode_enabled")}
+            onChange={(v) => form.setValue("download.transcode_enabled", v)}
+          />
+          <SettingField
+            label="Artifact Directory"
+            hint="Where prepared (remux/transcode) download files are written. Empty = a 'downloads' subdirectory under the transcode directory."
+            value={form.getValue("download.artifact_dir")}
+            onChange={(v) => form.setValue("download.artifact_dir", v)}
+          />
+          <SettingField
+            label="Max Concurrent Prepares"
+            hint="Encode/remux worker-pool size for preparing download files."
+            value={form.getValue("download.max_concurrent_prepares")}
+            onChange={(v) => form.setValue("download.max_concurrent_prepares", v)}
+          />
+          <SettingField
+            label="Artifact Storage Budget (bytes)"
+            hint="LRU eviction budget for prepared download files. 0 = unlimited."
+            value={form.getValue("download.artifact_max_bytes")}
+            onChange={(v) => form.setValue("download.artifact_max_bytes", v)}
           />
         </FieldGroup>
       </div>

@@ -50,6 +50,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -68,6 +69,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -615,6 +617,10 @@ func main() {
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
+			// Read jellycompat reconstruction recipes central wrote at transcode
+			// start, so this node can rebuild a Jellyfin transcode after its own
+			// restart (the node hop token is recipe-less). Shares the offload Redis.
+			srv.SetRecipeStore(noderecipe.NewStore(redisClient, 0))
 			handler = srv.Handler()
 		}
 
@@ -1398,6 +1404,7 @@ func main() {
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
+
 		if libraryIngestExecutor != nil {
 			libraryIngestExecutor.SetAvailabilityDetector(notificationSystem.Detector)
 		}
@@ -1734,6 +1741,41 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		if deps.FileRepo != nil {
+			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
+			// queue hosted on the task manager. Built here (before Start) and shared
+			// with the API via deps so the download service can enqueue jobs.
+			artifactMgr := downloads.NewArtifactManager(
+				downloads.NewArtifactRepository(deps.DB),
+				downloads.NewRepository(deps.DB),
+				deps.FileRepo,
+				downloads.NewPlaybackPreparer(),
+				deps.NodeID,
+				func() *config.Config {
+					if deps.LiveConfig != nil {
+						if c := deps.LiveConfig(); c != nil {
+							return c
+						}
+					}
+					return deps.Config
+				},
+				func(ctx context.Context, d *downloads.Download) {
+					if deps.EventsHub == nil {
+						return
+					}
+					_ = deps.EventsHub.PublishJSON(ctx, evt.ChannelUserState, "download", map[string]any{
+						"download_id":   d.ID,
+						"status":        d.Status,
+						"media_item_id": d.ContentID,
+						"format":        d.Format,
+					}, evt.PublishOptions{UserID: d.UserID, ProfileID: d.ProfileID})
+				},
+			)
+			encodeTask := tasks.NewEncodeDownloadArtifactsTask(artifactMgr)
+			artifactMgr.SetKick(func() { _ = taskMgr.RunTask(appCtx, encodeTask.Key()) })
+			taskMgr.Register(encodeTask)
+			deps.ArtifactManager = artifactMgr
+		}
 		if notificationSystem != nil {
 			taskMgr.Register(tasks.NewSeedContentAvailabilityTask(notificationSystem))
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
@@ -2147,6 +2189,10 @@ func main() {
 			JWTSecret:        cfg.Auth.JWTSecret,
 			RecWorker:        recWorker,
 			FrontendFS:       deps.FrontendFS,
+			// Hand remote-transcode recipes to the shared recipe store so a dedicated
+			// transcode node that restarts can rebuild a jellycompat session.
+			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
+			SessionSyncer:   deps.SessionSyncer,
 		}
 
 		// Wire direct dependencies when DB is available.

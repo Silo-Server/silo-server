@@ -68,8 +68,8 @@ importers:
         specifier: ^1.6.15
         version: 1.6.15
       jassub:
-        specifier: ^2.4.2
-        version: 2.4.2
+        specifier: ^2.5.6
+        version: 2.5.6
       libpgs:
         specifier: ^0.8.1
         version: 0.8.1
@@ -1805,8 +1805,8 @@ packages:
     resolution: {integrity: sha512-RQ4h9F6DOiHxpdocUDrOl6xBM+yOtz+LkUol47AVWcfebGBDpZ7w7Xvz9PS24JgXvLGiXXzSAfdCdVy1tPlaFA==}
     engines: {bun: '>=0.7.0', deno: '>=1.0.0', node: '>=18.0.0'}
 
-  abslink@1.1.6:
-    resolution: {integrity: sha512-8fQgnUoVSgc1IhOrYzdDY+wTDPktbuYjds2LKf9kWYWKwDnHgXU168gdV3sPei7vevFf5m2fPZ6IQSKZkSjHVg==}
+  abslink@1.2.2:
+    resolution: {integrity: sha512-HCOItvzORPjMzddCmEpbH8+W1VM3yjH+CR7DLtxlxFKX/jz5twJbm7KLfblO7eKLnXINLah8Hk2ZAJqxXeSkOg==}
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
@@ -2211,8 +2211,8 @@ packages:
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
 
-  jassub@2.4.2:
-    resolution: {integrity: sha512-qWECKZWADUYAlXrzTEKPw+zY06XNy4tuZhTTWyk/ML+axRSMuOcbI0tAxL6tdXg+wdROd+EZU83SQFh/frugCg==}
+  jassub@2.5.6:
+    resolution: {integrity: sha512-jsbEPVR+JvcOcGa8PbyVvHmFol+rQtAfty7JDp1WWrS3GEfThitjI5sXT0VLfG6/BLuyIuv1+2qykWdWyLkpQw==}
 
   jiti@2.6.1:
     resolution: {integrity: sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==}
@@ -4590,7 +4590,7 @@ snapshots:
 
   '@zip.js/zip.js@2.8.26': {}
 
-  abslink@1.1.6: {}
+  abslink@1.2.2: {}
 
   acorn-jsx@5.3.2(acorn@8.16.0):
     dependencies:
@@ -4974,9 +4974,9 @@ snapshots:
 
   isexe@2.0.0: {}
 
-  jassub@2.4.2:
+  jassub@2.5.6:
     dependencies:
-      abslink: 1.1.6
+      abslink: 1.2.2
       lfa-ponyfill: 1.1.0
       rvfc-polyfill: 1.0.8
       throughput: 1.0.2

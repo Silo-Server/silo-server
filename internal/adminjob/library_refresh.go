@@ -89,6 +89,7 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 	query := `
 		SELECT mi.content_id, COALESCE(mi.tmdb_id, ''), COALESCE(mi.tvdb_id, ''), COALESCE(mi.imdb_id, '')
 		FROM media_item_libraries mil
+		JOIN media_folders f ON f.id = mil.media_folder_id
 		JOIN media_items mi ON mi.content_id = mil.content_id
 		WHERE mil.media_folder_id = $1`
 	args := []any{libraryID}
@@ -122,6 +123,11 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 				SELECT 1
 				FROM stale_media_ids smi
 				WHERE smi.content_id = mi.content_id
+			)
+			OR (
+				COALESCE(mi.default_metadata_language, '') <> ''
+				AND LOWER(TRIM(mi.default_metadata_language))
+					<> LOWER(TRIM(COALESCE(NULLIF(f.metadata_language, ''), 'en')))
 			)
 		  )`
 	}

@@ -506,10 +506,13 @@ func TestUpdateStreamState(t *testing.T) {
 		TranscodeAudio:    true,
 		ClientIP:          "10.0.0.10",
 		StreamBitrateKbps: 4200,
-		TargetResolution:  "1080p",
-		TargetVideoCodec:  "h264",
-		TargetAudioCodec:  "aac",
-		TargetBitrateKbps: 4000,
+		TargetResolution:   "1080p",
+		TargetVideoCodec:   "h264",
+		TargetAudioCodec:   "aac",
+		TargetBitrateKbps:  4000,
+		SubtitleTrackIndex: 3,
+		SubtitleBurnIn:     true,
+		SegmentDuration:    4,
 	})
 	if err != nil {
 		t.Fatalf("UpdateStreamState: %v", err)
@@ -548,6 +551,15 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 	if got.TargetBitrateKbps != 4000 {
 		t.Errorf("TargetBitrateKbps = %d, want 4000", got.TargetBitrateKbps)
+	}
+	if got.SubtitleTrackIndex != 3 {
+		t.Errorf("SubtitleTrackIndex = %d, want 3", got.SubtitleTrackIndex)
+	}
+	if !got.SubtitleBurnIn {
+		t.Error("SubtitleBurnIn = false, want true")
+	}
+	if got.SegmentDuration != 4 {
+		t.Errorf("SegmentDuration = %d, want 4", got.SegmentDuration)
 	}
 }
 

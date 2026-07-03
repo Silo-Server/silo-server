@@ -42,6 +42,8 @@ func TestRestartRequired(t *testing.T) {
 		{"overlays.enabled", false},
 		{"markers.mode", false},
 		{"download.enabled", false},
+		{"download.transcode_enabled", false},
+		{"download.max_concurrent_prepares", false},
 		{"allow_4k_transcode", false},
 		{"defaults.card_overlays", false},
 		// Unknown keys default to live.

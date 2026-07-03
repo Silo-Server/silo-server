@@ -2,6 +2,7 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -35,6 +36,14 @@ type Session struct {
 	TargetBitrateKbps int    // requested output bitrate cap for transcodes
 	TranscodeHWAccel  string // effective hardware acceleration mode for transcodes
 
+	// Byte-affecting transcode recipe fields the offloaded restart path needs to
+	// rebuild the exact same stream after an audio switch. Local transcodes read
+	// these from the live ts.Opts(); offloaded transcodes own no local runtime, so
+	// the session is the only place to recover them (see HandleChangeAudioTrack).
+	SubtitleTrackIndex int // -1 = no subtitles
+	SubtitleBurnIn     bool
+	SegmentDuration    int // HLS segment length in seconds (cadence)
+
 	Position                   float64
 	IsPaused                   bool
 	HasWebSocket               bool
@@ -64,6 +73,15 @@ type SessionStreamState struct {
 	TargetAudioCodec  string
 	TargetBitrateKbps int
 	TranscodeHWAccel  string
+
+	// Byte-affecting transcode recipe fields preserved so an offloaded restart
+	// (e.g. audio switch) can rebuild the exact same stream. SubtitleTrackIndex
+	// defaults to 0 on a zero-value state; callers that manage subtitles must set
+	// it explicitly (-1 for none) — burn-in is additionally gated by
+	// SubtitleBurnIn so a zero index never burns track 0 by accident.
+	SubtitleTrackIndex int
+	SubtitleBurnIn     bool
+	SegmentDuration    int
 }
 
 type clientInfoContextKey struct{}
@@ -119,8 +137,13 @@ const (
 	// observed playback activity before it stops counting toward limits.
 	DefaultActiveSessionGrace = 45 * time.Second
 
-	// DefaultPausedSessionGrace is the longer grace period for paused sessions.
-	DefaultPausedSessionGrace = 2 * time.Minute
+	// DefaultPausedSessionGrace is the longer grace period for paused
+	// sessions. It must comfortably cover an intentional pause (dinner
+	// break, phone call): reaping a paused session kills its transcode
+	// and there is currently no revival path, so a too-short grace makes
+	// pressing Play after a long pause freeze the client (issue #243).
+	// Keep in sync with pausedSessionGrace in internal/worker/cleanup.go.
+	DefaultPausedSessionGrace = 30 * time.Minute
 )
 
 // NewSessionManager creates a SessionManager with the given concurrency limits.
@@ -267,6 +290,89 @@ func (m *SessionManager) StartSessionWithFilesContext(
 	return s, nil
 }
 
+// RegisterReconstructed re-inserts a session under an existing ID after the
+// in-memory state was lost (e.g. a server restart). Unlike StartSession* it
+// does NOT mint a new UUID and does NOT run admission/limit accounting: the
+// session already existed and was admitted before the restart, so counting it
+// again would be wrong. If a live session with the same ID already exists
+// (a concurrent reconstruct won the race), the existing one is returned and
+// the caller's copy is discarded.
+//
+// The caller is responsible for having re-bound s.UserID to the live
+// authenticated request before calling this — RegisterReconstructed performs
+// no authorization itself.
+func (m *SessionManager) RegisterReconstructed(s *Session) *Session {
+	if s == nil || s.ID == "" {
+		return s
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.sessions[s.ID]; ok {
+		return existing
+	}
+	now := time.Now()
+	if s.StartedAt.IsZero() {
+		s.StartedAt = now
+	}
+	s.UpdatedAt = now
+	s.LastActivityAt = now
+	m.sessions[s.ID] = s
+	return s
+}
+
+// RegisterReconstructedWithLimits is RegisterReconstructed plus the same per-user
+// admission caps StartSession enforces. Token-carried reconstruct replays a
+// signed recipe to rebuild a session lost to a restart; without a cap check a
+// client could replay one token repeatedly (or after legitimately reaching its
+// limit) and reconstruct past the per-user concurrent stream/transcode caps,
+// since RegisterReconstructed skips admission accounting.
+//
+// Legitimately reconstructing a user's own surviving sessions still succeeds:
+// the cap counts the user's *currently-live* sessions, and the one being rebuilt
+// is not yet in the map, so the first MaxStreams reconstructs admit. Only the
+// over-cap replay is refused (ErrTooManyStreams / ErrTooManyTranscodes). If an
+// identical session id is already live (a concurrent reconstruct won), it is
+// returned without re-counting. Caps are looked up via the same limit provider
+// as StartSession.
+func (m *SessionManager) RegisterReconstructedWithLimits(ctx context.Context, s *Session) (*Session, error) {
+	if s == nil || s.ID == "" {
+		return s, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	limits, err := m.limitsForUser(ctx, s.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if existing, ok := m.sessions[s.ID]; ok {
+		return existing, nil
+	}
+
+	// The session being reconstructed is not yet in the map, so the live counts
+	// reflect the user's *other* sessions; admitting one more must stay within cap.
+	if limits.MaxStreams > 0 && m.activeCountLocked(s.UserID) >= limits.MaxStreams {
+		return nil, ErrTooManyStreams
+	}
+	if s.PlayMethod == PlayTranscode && limits.MaxTranscodes > 0 &&
+		m.transcodeCountLocked(s.UserID) >= limits.MaxTranscodes {
+		return nil, ErrTooManyTranscodes
+	}
+
+	now := time.Now()
+	if s.StartedAt.IsZero() {
+		s.StartedAt = now
+	}
+	s.UpdatedAt = now
+	s.LastActivityAt = now
+	m.sessions[s.ID] = s
+	return s, nil
+}
+
 func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (SessionLimits, error) {
 	m.mu.RLock()
 	provider := m.limitProvider
@@ -281,7 +387,11 @@ func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (Session
 	}
 	limits, err := provider(ctx, userID)
 	if err != nil {
-		return SessionLimits{}, fmt.Errorf("load session limits for user %d: %w", userID, err)
+		// Tag provider failures with ErrLimitProviderUnavailable so the
+		// reconstruct admission path can distinguish a transient limit-lookup
+		// failure (which it may fail open on) from a genuine over-cap rejection.
+		return SessionLimits{}, fmt.Errorf("load session limits for user %d: %w",
+			userID, errors.Join(ErrLimitProviderUnavailable, err))
 	}
 	return limits, nil
 }
@@ -358,6 +468,9 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	s.TargetAudioCodec = state.TargetAudioCodec
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
+	s.SubtitleTrackIndex = state.SubtitleTrackIndex
+	s.SubtitleBurnIn = state.SubtitleBurnIn
+	s.SegmentDuration = state.SegmentDuration
 	m.touchSessionLocked(s)
 	return nil
 }

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, type MutableRefObject, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import { toMediaTime } from "../utils/mediaTimeline";
 import type { WatchTogetherRoomConnectionResult } from "./useWatchTogetherRoomConnection";
 
@@ -39,6 +46,8 @@ export function useWatchTogetherPlaybackSync({
   const serverTimeOffsetMs = roomConnection.serverTimeOffsetMs;
   const attachedSessionId = room?.attached_session_id ?? null;
   const roomConnected = room !== null;
+  const roomPlaybackState = room?.playback_state ?? null;
+  const roomPhase = room?.phase ?? null;
   const sendRoomMessage = roomConnection.sendRoomMessage;
   const waitingStateRef = useRef<"idle" | "buffering" | "ready">("idle");
 
@@ -126,7 +135,7 @@ export function useWatchTogetherPlaybackSync({
         !roomConnected ||
         !sessionId ||
         attachedSessionId !== sessionId ||
-        room?.playback_state !== "waiting" ||
+        roomPlaybackState !== "waiting" ||
         waitingStateRef.current === "ready" ||
         !video
       ) {
@@ -150,8 +159,8 @@ export function useWatchTogetherPlaybackSync({
     [
       attachedSessionId,
       connectionState,
-      room,
       roomConnected,
+      roomPlaybackState,
       sendRoomMessage,
       sessionId,
       streamOriginRef,
@@ -167,7 +176,7 @@ export function useWatchTogetherPlaybackSync({
         !roomConnected ||
         !sessionId ||
         attachedSessionId !== sessionId ||
-        room?.phase !== "playing" ||
+        roomPhase !== "playing" ||
         waitingStateRef.current === "buffering" ||
         !video
       ) {
@@ -191,8 +200,8 @@ export function useWatchTogetherPlaybackSync({
     [
       attachedSessionId,
       connectionState,
-      room,
       roomConnected,
+      roomPhase,
       sendRoomMessage,
       sessionId,
       streamOriginRef,
@@ -200,10 +209,15 @@ export function useWatchTogetherPlaybackSync({
     ],
   );
 
-  return {
-    attachedSessionId,
-    requestTransport,
-    reportReady,
-    reportBuffering,
-  };
+  // Stable identity so consumers (e.g. VideoPlayer's video-event-listener
+  // effect) don't re-run on every room snapshot.
+  return useMemo(
+    () => ({
+      attachedSessionId,
+      requestTransport,
+      reportReady,
+      reportBuffering,
+    }),
+    [attachedSessionId, requestTransport, reportReady, reportBuffering],
+  );
 }

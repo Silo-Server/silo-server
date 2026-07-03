@@ -318,7 +318,11 @@ func TestRestartSeekTarget_CopyModeUsesManifestTimelineWhenAvailable(t *testing.
 	}
 }
 
-func TestRestartSeekTarget_CopyModeFallsBackToFixedDurationWhenSegmentOutsideManifest(t *testing.T) {
+func TestRestartSeekTarget_CopyModeReportsUnresolvedWhenSegmentOutsideManifest(t *testing.T) {
+	// Copy-mode fragments have variable durations, so a segment the manifest
+	// can't yet place must NOT fall back to fixed-duration seg×dur math (which
+	// would seek FFmpeg to the wrong source time and desync A/V). Instead it
+	// reports the seek target as unresolved (0, false, nil).
 	tempDir := t.TempDir()
 	manifest := strings.Join([]string{
 		"#EXTM3U",
@@ -349,11 +353,11 @@ func TestRestartSeekTarget_CopyModeFallsBackToFixedDurationWhenSegmentOutsideMan
 	if err != nil {
 		t.Fatalf("RestartSeekTarget: %v", err)
 	}
-	if !ok {
-		t.Fatal("RestartSeekTarget returned ok=false")
+	if ok {
+		t.Fatalf("RestartSeekTarget(50) returned ok=true (got %f); copy-mode should report unresolved, not seg×dur", got)
 	}
-	if got != 100 {
-		t.Fatalf("RestartSeekTarget(50) = %f, want 100", got)
+	if got != 0 {
+		t.Fatalf("RestartSeekTarget(50) = %f, want 0", got)
 	}
 }
 
@@ -377,8 +381,13 @@ func TestRestartSeekTarget_EncodedUsesFixedDurationMath(t *testing.T) {
 	}
 }
 
-func TestRestartSeekTarget_CopyModeFallsBackWhenManifestNotReady(t *testing.T) {
+func TestRestartSeekTarget_CopyModeReportsUnresolvedWhenManifestNotReady(t *testing.T) {
+	// A freshly reconstructed copy-mode window has a near-empty/absent manifest
+	// (ErrManifestNotReady). The seek target must be reported unresolved
+	// (0, false, nil) so the caller retries instead of seeking to a fabricated
+	// seg×dur position.
 	session := &TranscodeSession{
+		outputDir: t.TempDir(), // no stream.m3u8 written -> ErrManifestNotReady
 		opts: TranscodeOpts{
 			TargetCodecVideo: "copy",
 			SegmentDuration:  2,
@@ -389,11 +398,11 @@ func TestRestartSeekTarget_CopyModeFallsBackWhenManifestNotReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestartSeekTarget: %v", err)
 	}
-	if !ok {
-		t.Fatal("RestartSeekTarget returned ok=false")
+	if ok {
+		t.Fatalf("RestartSeekTarget(10) returned ok=true (got %f); copy-mode should report unresolved when manifest not ready", got)
 	}
-	if got != 20 {
-		t.Fatalf("RestartSeekTarget(10) = %f, want 20", got)
+	if got != 0 {
+		t.Fatalf("RestartSeekTarget(10) = %f, want 0", got)
 	}
 }
 
@@ -735,5 +744,44 @@ func TestCleanStaleSegments(t *testing.T) {
 				t.Errorf("expected %s to be removed, but it still exists", name)
 			}
 		}
+	}
+}
+
+func TestAppendManifestQueryParam(t *testing.T) {
+	manifest := strings.Join([]string{
+		"#EXTM3U",
+		"#EXT-X-VERSION:7",
+		"#EXT-X-TARGETDURATION:2",
+		"#EXT-X-MAP:URI=\"segment/init.mp4\"",
+		"#EXTINF:2.000000,",
+		"segment/seg_00000.ts",
+		"#EXTINF:2.000000,",
+		"segment/seg_00001.ts?existing=1",
+		"",
+	}, "\n")
+
+	got := string(AppendManifestQueryParam([]byte(manifest), "st", "TOKEN"))
+	for _, want := range []string{
+		"#EXT-X-MAP:URI=\"segment/init.mp4?st=TOKEN\"",
+		"segment/seg_00000.ts?st=TOKEN",
+		"segment/seg_00001.ts?existing=1&st=TOKEN",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rewritten manifest missing %q:\n%s", want, got)
+		}
+	}
+	// Tags and EXTINF lines must be untouched.
+	if !strings.Contains(got, "#EXT-X-TARGETDURATION:2") || strings.Contains(got, "#EXT-X-TARGETDURATION:2?st") {
+		t.Fatalf("non-URI tag was rewritten:\n%s", got)
+	}
+}
+
+func TestAppendManifestQueryParam_NonManifestUnchanged(t *testing.T) {
+	body := []byte("not a manifest\nsegment/seg_00000.ts\n")
+	if got := AppendManifestQueryParam(body, "st", "TOKEN"); string(got) != string(body) {
+		t.Fatalf("non-manifest body should be unchanged, got:\n%s", got)
+	}
+	if got := AppendManifestQueryParam([]byte("#EXTM3U\nseg.ts\n"), "", "TOKEN"); !strings.Contains(string(got), "seg.ts\n") || strings.Contains(string(got), "seg.ts?") {
+		t.Fatalf("empty key should be a no-op, got:\n%s", got)
 	}
 }

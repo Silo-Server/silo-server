@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
@@ -51,70 +50,19 @@ type webPushPayload struct {
 
 // buildWebPushPayload renders a delivery for the service worker.
 func buildWebPushPayload(row DeliveryRow, posterURL string) ([]byte, error) {
+	display := BuildNotificationDisplay(row)
 	payload := webPushPayload{
-		Title:      "Silo",
-		URL:        "/notifications",
+		Title:      display.Title,
+		Body:       display.Body,
+		URL:        display.URL,
 		Tag:        row.ID,
 		DeliveryID: row.ID,
 	}
 	switch row.Type {
 	case DeliveryTypeEpisodeAvailable:
-		if row.SeriesTitle != "" {
-			payload.Title = "New episode of " + row.SeriesTitle
-		} else {
-			payload.Title = "New episode available"
-		}
-		var code string
-		if row.SeasonNumber != nil && row.EpisodeNumber != nil {
-			code = fmt.Sprintf("S%dE%d", *row.SeasonNumber, *row.EpisodeNumber)
-		}
-		switch {
-		case code != "" && row.EpisodeTitle != "":
-			payload.Body = code + " — " + row.EpisodeTitle
-		case code != "":
-			payload.Body = code
-		default:
-			payload.Body = row.EpisodeTitle
-		}
-		if row.EpisodeID != nil {
-			payload.URL = "/item/" + *row.EpisodeID
-		}
 		payload.Icon = posterURL
 	case DeliveryTypeRequestFulfilled:
-		if row.SeriesTitle != "" {
-			payload.Title = row.SeriesTitle + " is now available"
-		} else {
-			payload.Title = "Your request is now available"
-		}
-		payload.Body = "Your media request has arrived in the library."
-		if row.SeriesID != nil {
-			payload.URL = "/item/" + *row.SeriesID
-		}
 		payload.Icon = posterURL
-	case DeliveryTypeRequestApproved:
-		flags := parseRequestFlags(row.ReasonFlags)
-		payload.Title = "Your request was approved"
-		if flags.Title != "" {
-			payload.Title = flags.Title + " was approved"
-		}
-		payload.Body = "Your media request was approved."
-	case DeliveryTypeRequestDeclined:
-		flags := parseRequestFlags(row.ReasonFlags)
-		payload.Title = "Your request was declined"
-		if flags.Title != "" {
-			payload.Title = flags.Title + " was declined"
-		}
-		payload.Body = "Your media request was declined."
-		if flags.Reason != "" {
-			payload.Body = "Reason: " + flags.Reason
-		}
-	case DeliveryTypeWebhookAutoDisabled:
-		payload.Title = "A webhook stopped working"
-		payload.Body = "Open notification settings to fix it."
-		payload.URL = "/settings/notifications"
-	default:
-		// Unknown types render generically; the inbox has the details.
-		payload.Title = genericNotificationTitle
 	}
 	return json.Marshal(payload)
 }
@@ -280,21 +228,23 @@ func (s *webPushSender) send(ctx context.Context, sub *WebPushSubscription, mess
 	return resp.StatusCode, retryAfter, nil
 }
 
-// WebPushDispatcher implements the channel Dispatcher interface: it hands
-// delivery IDs to a bounded worker pool that claims and sends the pending
-// outbox attempts. A full queue defers to the retry worker's recovery sweep.
+// WebPushDispatcher implements the channel Dispatcher interface on top of the
+// shared channelDispatcher core, with the retry/recovery sweep integrated.
 type WebPushDispatcher struct {
-	sender *webPushSender
-	queue  chan string
-	logger *slog.Logger
+	core channelDispatcher[DeliveryAttempt]
 }
 
 func newWebPushDispatcher(sender *webPushSender) *WebPushDispatcher {
-	return &WebPushDispatcher{
-		sender: sender,
-		queue:  make(chan string, webhookDispatchQueue),
-		logger: slog.Default().With("component", "notifications.webpush.dispatch"),
-	}
+	return &WebPushDispatcher{core: channelDispatcher[DeliveryAttempt]{
+		channel:      "web push",
+		queue:        make(chan string, webhookDispatchQueue),
+		logger:       slog.Default().With("component", "notifications.webpush.dispatch"),
+		claimPending: sender.subscriptions.ClaimPendingForDelivery,
+		process:      sender.processAttempt,
+		enabled:      sender.settings.WebPushEnabled,
+		claimDue:     sender.subscriptions.ClaimDue,
+		claimLimit:   webhookRetryClaimLimit,
+	}}
 }
 
 // Dispatch queues the delivery's web push attempts for immediate send.
@@ -302,83 +252,12 @@ func (d *WebPushDispatcher) Dispatch(_ context.Context, delivery DeliveryRow) er
 	if d == nil {
 		return nil
 	}
-	select {
-	case d.queue <- delivery.ID:
-	default:
-		d.logger.Warn("web push dispatch queue full; deferring to retry worker",
-			"delivery_id", delivery.ID)
-	}
+	d.core.dispatch(delivery.ID)
 	return nil
 }
 
 // Run consumes the dispatch queue and the retry/recovery sweep until ctx is
 // canceled.
 func (d *WebPushDispatcher) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-	for range webhookDispatchWorkers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case deliveryID := <-d.queue:
-					d.processDelivery(ctx, deliveryID)
-				}
-			}
-		}()
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		ticker := time.NewTicker(webhookRetryInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
-			if !d.sender.settings.WebPushEnabled(ctx) {
-				continue
-			}
-			for {
-				attempts, err := d.sender.subscriptions.ClaimDue(ctx, webhookRetryClaimLimit)
-				if err != nil {
-					if ctx.Err() == nil {
-						d.logger.Warn("web push retry claim failed", "error", err)
-					}
-					break
-				}
-				if len(attempts) == 0 {
-					break
-				}
-				for _, attempt := range attempts {
-					if ctx.Err() != nil {
-						return
-					}
-					d.sender.processAttempt(ctx, attempt)
-				}
-			}
-		}
-	}()
-	wg.Wait()
-}
-
-func (d *WebPushDispatcher) processDelivery(ctx context.Context, deliveryID string) {
-	attempts, err := d.sender.subscriptions.ClaimPendingForDelivery(ctx, deliveryID)
-	if err != nil {
-		if ctx.Err() == nil {
-			d.logger.Warn("web push attempt claim failed", "delivery_id", deliveryID, "error", err)
-		}
-		return
-	}
-	for _, attempt := range attempts {
-		if ctx.Err() != nil {
-			return
-		}
-		d.sender.processAttempt(ctx, attempt)
-	}
+	d.core.run(ctx)
 }

@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS watch_progress (
     duration_seconds REAL NOT NULL,
     completed BOOLEAN DEFAULT false,
     updated_at TEXT NOT NULL,
+    event_at TEXT,
+    synced_seq INTEGER,
     last_file_id INTEGER,
     last_resolution TEXT,
     last_hdr BOOLEAN,
@@ -285,10 +287,91 @@ func InitSchema(db *sql.DB) error {
 	if err := ensureWatchHistoryIdentityColumn(db); err != nil {
 		return err
 	}
+	if err := ensureWatchProgressSyncColumns(db); err != nil {
+		return err
+	}
 	if err := migratePlaybackSettingsToDeviceScope(db); err != nil {
 		return err
 	}
 	return backfillUserDevices(db)
+}
+
+// watchProgressSyncTriggers stamps the server-owned cursor (synced_seq) on every
+// watch_progress write and owns the LWW key: event_at defaults to the write
+// time, and an UPDATE that changed updated_at without explicitly changing
+// event_at advances it too (else a queued offline event older than that write
+// would win SetProgressIfNewer's comparison and resurrect stale progress).
+// Writes that DO set event_at — offline sync's clamped client event time —
+// keep their value. With recursive_triggers OFF (the userdb default) the
+// trigger's own UPDATE does not re-fire it. See the offline-sync design
+// (invariant 1). CREATE TRIGGER IF NOT EXISTS never replaces an existing
+// trigger, so changing a body requires a migrate.go step dropping the old one
+// (see migrateToV13).
+const watchProgressSyncTriggers = `
+CREATE TRIGGER IF NOT EXISTS watch_progress_stamp_ins AFTER INSERT ON watch_progress
+BEGIN
+    UPDATE watch_progress
+    SET synced_seq = (SELECT COALESCE(MAX(synced_seq), 0) + 1 FROM watch_progress),
+        event_at = COALESCE(event_at, updated_at)
+    WHERE rowid = NEW.rowid;
+END;
+CREATE TRIGGER IF NOT EXISTS watch_progress_stamp_upd AFTER UPDATE ON watch_progress
+BEGIN
+    UPDATE watch_progress
+    SET synced_seq = (SELECT COALESCE(MAX(synced_seq), 0) + 1 FROM watch_progress),
+        event_at = CASE
+            WHEN NEW.event_at IS NULL THEN NEW.updated_at
+            WHEN NEW.event_at IS OLD.event_at AND NEW.updated_at IS NOT OLD.updated_at THEN NEW.updated_at
+            ELSE NEW.event_at
+        END
+    WHERE rowid = NEW.rowid;
+END;
+CREATE INDEX IF NOT EXISTS watch_progress_synced_idx ON watch_progress (profile_id, synced_seq);
+`
+
+// ensureWatchProgressSyncColumns adds the event_at (LWW key) and synced_seq
+// (server cursor) columns, backfills them, and installs the stamping triggers.
+// Idempotent: safe to run on every open for both fresh and existing databases.
+func ensureWatchProgressSyncColumns(db *sql.DB) error {
+	columns := []struct{ name, definition string }{
+		{name: "event_at", definition: "TEXT"},
+		{name: "synced_seq", definition: "INTEGER"},
+	}
+	for _, column := range columns {
+		var count int
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
+			"watch_progress", column.name,
+		).Scan(&count); err != nil {
+			return fmt.Errorf("checking watch_progress.%s column: %w", column.name, err)
+		}
+		if count > 0 {
+			continue
+		}
+		if _, err := db.Exec(
+			fmt.Sprintf("ALTER TABLE watch_progress ADD COLUMN %s %s", column.name, column.definition),
+		); err != nil {
+			return fmt.Errorf("adding watch_progress.%s column: %w", column.name, err)
+		}
+	}
+
+	// Backfill before the triggers exist so these one-off writes don't trip them.
+	if _, err := db.Exec(`UPDATE watch_progress SET event_at = updated_at WHERE event_at IS NULL`); err != nil {
+		return fmt.Errorf("backfilling watch_progress.event_at: %w", err)
+	}
+	if _, err := db.Exec(`
+		UPDATE watch_progress SET synced_seq = (
+			SELECT COUNT(*) FROM watch_progress w2
+			WHERE w2.updated_at < watch_progress.updated_at
+			   OR (w2.updated_at = watch_progress.updated_at AND w2.rowid <= watch_progress.rowid)
+		) WHERE synced_seq IS NULL`); err != nil {
+		return fmt.Errorf("backfilling watch_progress.synced_seq: %w", err)
+	}
+
+	if _, err := db.Exec(watchProgressSyncTriggers); err != nil {
+		return fmt.Errorf("installing watch_progress sync triggers: %w", err)
+	}
+	return nil
 }
 
 func ensureAutoSkipRecapPreviewColumns(db *sql.DB) error {

@@ -2141,6 +2141,21 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 				"subtitle_ai.transcribe_quota_period must be day, week, or month")
 			return
 		}
+	case notifications.SettingApplePushDeliveryEnabled:
+		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "notifications.apple_push_delivery_enabled must be true or false")
+			return
+		}
+		req.Value = strconv.FormatBool(enabled)
+	case notifications.SettingPushRelayURL, notifications.SettingPushRelayDeploymentID, notifications.SettingPushRelayAPIKey:
+		// The registration flow persists the relay URL, deployment id, and API
+		// key together; a direct write to any of them desyncs the stored URL
+		// from the credentials the relay minted for it (and feeds an arbitrary
+		// id into the next rotation request).
+		writeError(w, http.StatusBadRequest, "bad_request",
+			key+" is managed by the push relay registration flow; use POST /admin/notifications/push/relay/register")
+		return
 	case catalog.SearchSettingProvider:
 		switch strings.TrimSpace(strings.ToLower(req.Value)) {
 		case catalog.SearchProviderPostgres, catalog.SearchProviderMeilisearch:

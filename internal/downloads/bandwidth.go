@@ -1,4 +1,4 @@
-package download
+package downloads
 
 import (
 	"context"
@@ -65,12 +65,14 @@ func (bm *BandwidthManager) getUserLimiter(userID int) *rate.Limiter {
 		return nil
 	}
 	if v, ok := bm.userLimiters.Load(userID); ok {
-		return v.(*rate.Limiter)
+		lim, _ := v.(*rate.Limiter)
+		return lim
 	}
 	burst := max(int(ubps/4), 32*1024)
 	limiter := rate.NewLimiter(rate.Limit(ubps), burst)
 	actual, _ := bm.userLimiters.LoadOrStore(userID, limiter)
-	return actual.(*rate.Limiter)
+	lim, _ := actual.(*rate.Limiter)
+	return lim
 }
 
 // ThrottledReader wraps an io.ReadSeeker with bandwidth limiting for the given user.

@@ -24,3 +24,28 @@ func MinResumeFraction(pct int) float64 {
 	}
 	return float64(pct) / 100.0
 }
+
+// ResolveProgressState classifies one progress event against the thresholds:
+// skip (below the min-resume floor — discard entirely), completed (above the
+// watched threshold — the returned position resets to 0 so completed rows
+// hold no resume point, matching MarkWatched), or a plain in-progress update.
+// The single home of the rule shared by both store backends and the
+// offline-sync ingest; `completed` remains a one-way latch at the write site.
+func ResolveProgressState(position, duration float64, t ProgressThresholds) (pos float64, completed, skip bool) {
+	// Clamp malformed client input so negative values can never classify — or
+	// persist — as real progress on any backend.
+	if position < 0 {
+		position = 0
+	}
+	if duration < 0 {
+		duration = 0
+	}
+	if duration > 0 && position > 0 && position/duration < MinResumeFraction(t.MinResumePct) {
+		return position, false, true
+	}
+	completed = duration > 0 && position/duration > WatchedFraction(t.WatchedPct)
+	if completed {
+		position = 0
+	}
+	return position, completed, false
+}

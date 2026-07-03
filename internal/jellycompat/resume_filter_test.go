@@ -18,12 +18,24 @@ type resumeFilteringUserData struct {
 	entries           []upstreamProgress
 	hidden            map[string]bool
 	listedStatuses    []string
+	filteredStatuses  []string
+	lastFilteredTypes []string
 	filterCalls       int
 	filteredBatchSize []int
 }
 
 func (s *resumeFilteringUserData) ListProgress(_ context.Context, _ *Session, status string, limit, offset int) ([]upstreamProgress, error) {
 	s.listedStatuses = append(s.listedStatuses, status)
+	if offset >= len(s.entries) {
+		return nil, nil
+	}
+	end := min(offset+limit, len(s.entries))
+	return s.entries[offset:end], nil
+}
+
+func (s *resumeFilteringUserData) ListProgressFiltered(_ context.Context, _ *Session, status string, types []string, _ *int, limit, offset int) ([]upstreamProgress, error) {
+	s.filteredStatuses = append(s.filteredStatuses, status)
+	s.lastFilteredTypes = types
 	if offset >= len(s.entries) {
 		return nil, nil
 	}
@@ -162,6 +174,44 @@ func TestLoadProgressPage_CompletedSkipsResumeFilter(t *testing.T) {
 	}
 	if len(dtos) != 1 || dtos[0].Name != "Movie One" {
 		t.Fatalf("completed names = %v, want [Movie One]", dtoNames(dtos))
+	}
+}
+
+// TestLoadProgressPage_CompletedTypeFilterUsesFilteredFetch pins that the
+// watched-items path (completed status with an IncludeItemTypes filter) routes
+// through ListProgressFiltered — the SQL pre-filter — instead of the full-set
+// ListProgress scan it replaced.
+func TestLoadProgressPage_CompletedTypeFilterUsesFilteredFetch(t *testing.T) {
+	items := map[string]*models.MediaItem{
+		"movie-1": {ContentID: "movie-1", Type: "movie", Title: "Movie One"},
+		"movie-2": {ContentID: "movie-2", Type: "movie", Title: "Movie Two"},
+	}
+	userData := &resumeFilteringUserData{
+		entries: []upstreamProgress{
+			{MediaItemID: "movie-1", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+			{MediaItemID: "movie-2", PositionSeconds: 100, DurationSeconds: 100, Completed: true},
+		},
+	}
+	h := resumeTestHandler(userData, items)
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+	typeSet := map[string]bool{"movie": true}
+	dtos, _, err := h.loadProgressPage(context.Background(), session, "completed", itemsQuery{limit: 10}, typeSet, nil)
+	if err != nil {
+		t.Fatalf("loadProgressPage: %v", err)
+	}
+
+	if len(userData.filteredStatuses) == 0 {
+		t.Fatal("expected ListProgressFiltered to serve completed + type filter")
+	}
+	if len(userData.listedStatuses) != 0 {
+		t.Fatalf("expected ListProgress not to be called; got %v", userData.listedStatuses)
+	}
+	if len(userData.lastFilteredTypes) != 1 || userData.lastFilteredTypes[0] != "movie" {
+		t.Fatalf("filtered types = %v, want [movie]", userData.lastFilteredTypes)
+	}
+	if got := dtoNames(dtos); len(got) != 2 {
+		t.Fatalf("completed names = %v, want 2 movies", got)
 	}
 }
 

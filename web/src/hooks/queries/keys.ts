@@ -319,6 +319,7 @@ export const calendarKeys = {
 export const downloadKeys = {
   all: ["downloads"] as const,
   list: () => ["downloads", "list"] as const,
+  capability: () => ["downloads", "capability"] as const,
 };
 
 export const themeKeys = {

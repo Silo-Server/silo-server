@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +33,21 @@ var (
 const (
 	defaultTransportLead = 500 * time.Millisecond
 	minTransportLead     = 350 * time.Millisecond
+	// maxTransportLead bounds how far in the future transport commands may be
+	// scheduled, so a single member with a huge (or bogus) measured latency
+	// cannot stall the whole room.
+	maxTransportLead = 5 * time.Second
+	// maxBufferingAnchorDriftSeconds bounds how far a buffering member's
+	// reported position may move the shared room anchor.
+	maxBufferingAnchorDriftSeconds = 5.0
+	// waitingResumeDeadline is how long a room stays in the waiting state
+	// before stragglers are skipped and playback resumes for everyone ready.
+	waitingResumeDeadline = 30 * time.Second
+	// roomIdleTTL is how long a room may go without any playback-anchor
+	// activity before the janitor closes it.
+	roomIdleTTL = 24 * time.Hour
+	// janitorInterval is how often idle rooms are swept.
+	janitorInterval = 10 * time.Minute
 )
 
 type RoomConnection interface {
@@ -57,6 +73,7 @@ type RoomStore interface {
 		expectedGeneration int64,
 	) (*Room, error)
 	CloseRoom(ctx context.Context, roomID string, closedAt time.Time) (*Room, error)
+	ListIdleRoomIDs(ctx context.Context, cutoff time.Time, limit int) ([]string, error)
 	UpdateSelection(
 		ctx context.Context,
 		roomID string,
@@ -81,14 +98,6 @@ type MediaFileLookup interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 }
 
-type RoomCommandDispatcher interface {
-	DispatchToSession(
-		command playback.CommandEnvelope,
-		deadline time.Duration,
-		fallback func(),
-	) playback.CommandDispatchResult
-}
-
 type WatchTogetherSelectionResolver interface {
 	ResolveSelection(ctx context.Context, userID int, profileID string, input SelectItemInput) (*ResolvedSelection, error)
 }
@@ -102,18 +111,27 @@ type Registration struct {
 type memberState struct {
 	userID      int
 	profileID   string
+	displayName string
 	sessionID   string
 	connection  RoomConnection
 	isReady     bool
 	isBuffering bool
-	ignoreWait  bool
-	lastPingMS  int64
+	// ignoreWait excludes a member from room-wide readiness barriers. It is
+	// set when the member fails to become ready before waitingResumeDeadline
+	// and cleared once they attach or report ready again.
+	ignoreWait bool
+	lastPingMS int64
 }
 
 type liveRoom struct {
 	room           Room
 	members        map[string]*memberState
 	hostCloseTimer *time.Timer
+	waitingTimer   *time.Timer
+	// waitingEpoch identifies the current waiting period; deadline callbacks
+	// carry the epoch they were armed for so a stale timer cannot act on a
+	// newer waiting period.
+	waitingEpoch int64
 }
 
 type snapshotDispatch struct {
@@ -132,10 +150,12 @@ type Service struct {
 	suggestions       SuggestionStore
 	sessions          RoomSessionLookup
 	files             MediaFileLookup
-	dispatcher        RoomCommandDispatcher
 	selectionResolver WatchTogetherSelectionResolver
+	profileNames      ProfileNameResolver
 	hostDisconnectTTL time.Duration
 	now               func() time.Time
+
+	janitorStop chan struct{}
 
 	mu    sync.Mutex
 	rooms map[string]*liveRoom
@@ -145,22 +165,37 @@ func NewService(
 	repo RoomStore,
 	sessions RoomSessionLookup,
 	files MediaFileLookup,
-	dispatcher RoomCommandDispatcher,
 	selectionResolver WatchTogetherSelectionResolver,
 	suggestions SuggestionStore,
+	profileNames ProfileNameResolver,
 ) *Service {
-	return &Service{
+	s := &Service{
 		repo:              repo,
 		suggestions:       suggestions,
 		sessions:          sessions,
 		files:             files,
-		dispatcher:        dispatcher,
 		selectionResolver: selectionResolver,
+		profileNames:      profileNames,
 		hostDisconnectTTL: 15 * time.Second,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
-		rooms: make(map[string]*liveRoom),
+		janitorStop: make(chan struct{}),
+		rooms:       make(map[string]*liveRoom),
+	}
+	go s.runJanitor()
+	return s
+}
+
+// Close stops the service's background maintenance loop.
+func (s *Service) Close() {
+	if s == nil || s.janitorStop == nil {
+		return
+	}
+	select {
+	case <-s.janitorStop:
+	default:
+		close(s.janitorStop)
 	}
 }
 
@@ -256,6 +291,10 @@ func (s *Service) Connect(
 	}
 
 	memberKey := buildMemberKey(userID, profileID)
+	displayName := fallbackMemberName
+	if s.profileNames != nil {
+		displayName = s.profileNames.ProfileDisplayName(ctx, userID, profileID)
+	}
 
 	s.mu.Lock()
 	current := live.members[memberKey]
@@ -267,6 +306,7 @@ func (s *Service) Connect(
 		previousConn = current.connection
 	}
 	current.connection = conn
+	current.displayName = displayName
 
 	if room.HostUserID == userID && room.HostProfileID == profileID && live.hostCloseTimer != nil {
 		live.hostCloseTimer.Stop()
@@ -289,7 +329,6 @@ func (s *Service) Disconnect(reg *Registration, explicitLeave bool) {
 		return
 	}
 
-	var dispatches []snapshotDispatch
 	s.mu.Lock()
 	live := s.rooms[reg.roomID]
 	if live == nil {
@@ -321,290 +360,35 @@ func (s *Service) Disconnect(reg *Registration, explicitLeave bool) {
 		hostUserID := live.room.HostUserID
 		hostProfileID := live.room.HostProfileID
 		live.hostCloseTimer = time.AfterFunc(s.hostDisconnectTTL, func() {
-			_ = s.CloseRoom(context.Background(), roomID, hostUserID, hostProfileID)
+			s.closeIfHostStillDisconnected(roomID, hostUserID, hostProfileID)
 		})
 	}
 
-	dispatches = s.prepareSnapshotDispatchesLocked(live)
-	s.mu.Unlock()
-	s.runDispatches(dispatches)
-}
-
-func (s *Service) AttachSession(
-	ctx context.Context,
-	roomID string,
-	userID int,
-	profileID string,
-	sessionID string,
-) (Snapshot, error) {
-	room, live, err := s.getOrLoadLiveRoom(ctx, roomID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-
-	session, err := s.sessions.GetSession(sessionID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if session.UserID != userID || session.ProfileID != profileID {
-		return Snapshot{}, ErrSessionMismatch
-	}
-	if err := s.validateSessionContent(ctx, room, session); err != nil {
-		return Snapshot{}, err
-	}
-
-	s.mu.Lock()
-	member := live.members[buildMemberKey(userID, profileID)]
-	if member == nil || member.connection == nil {
-		s.mu.Unlock()
-		return Snapshot{}, ErrRoomForbidden
-	}
-	member.sessionID = sessionID
-	member.isReady = false
-	member.isBuffering = live.room.Phase == RoomPhasePlaying
-
-	var commandDispatches []commandDispatch
-	if live.room.Phase == RoomPhasePlaying {
-		if live.room.PlaybackState == RoomPlaybackStatePlaying && s.activeParticipantCountLocked(live) > 1 {
-			position := s.expectedPositionLocked(live)
-			commandDispatches, _ = s.enterWaitingLocked(live, position, true)
-			expectedGeneration := live.room.Generation
-			live.room.Generation++
-			persisted, updateErr := s.repo.UpdateAnchor(
-				ctx,
-				live.room.ID,
-				live.room.AnchorPositionSeconds,
-				live.room.IsPaused,
-				live.room.PlaybackState,
-				live.room.ResumeOnReady,
-				live.room.AnchorUpdatedAt,
-				live.room.Generation,
-				expectedGeneration,
-			)
-			if updateErr != nil {
-				if errors.Is(updateErr, ErrRoomStateConflict) {
-					if refreshed, refreshErr := s.repo.GetRoomByID(ctx, roomID); refreshErr == nil && refreshed != nil {
-						live.room = *refreshed
-					}
-					snapshot := s.buildSnapshotLocked(live, userID, profileID)
-					s.mu.Unlock()
-					return snapshot, nil
-				}
-				s.mu.Unlock()
-				return Snapshot{}, updateErr
-			}
-			live.room = *persisted
-		} else {
-			commandDispatches = s.syncMemberToRoomLocked(live, sessionID)
-		}
-	}
-
-	snapshot := s.buildSnapshotLocked(live, userID, profileID)
-	dispatches := s.prepareSnapshotDispatchesLocked(live)
-	s.mu.Unlock()
-
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
-	return snapshot, nil
-}
-
-func (s *Service) HandleTransportRequest(
-	ctx context.Context,
-	roomID string,
-	userID int,
-	profileID string,
-	request TransportRequest,
-) (Snapshot, error) {
-	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-
-	s.mu.Lock()
-	member := live.members[buildMemberKey(userID, profileID)]
-	if member == nil || member.connection == nil || member.sessionID == "" {
-		s.mu.Unlock()
-		return Snapshot{}, ErrConnectionNotAttached
-	}
-	if err := s.ensureTransportAllowedLocked(live, userID, profileID, request.Action); err != nil {
-		s.mu.Unlock()
-		return Snapshot{}, err
-	}
-
-	position := live.room.AnchorPositionSeconds
-	if request.PositionSeconds != nil {
-		position = math.Max(0, *request.PositionSeconds)
-	} else if !live.room.IsPaused {
-		position = s.expectedPositionLocked(live)
-	}
-
-	now := s.now()
-	live.room.AnchorPositionSeconds = position
-	live.room.AnchorUpdatedAt = now
-	commandDispatches := []commandDispatch(nil)
-	executeAt := now.Add(s.highestPingLocked(live))
-	switch request.Action {
-	case TransportActionPlay:
-		live.room.ResumeOnReady = true
-		live.room.IsPaused = false
-		live.room.PlaybackState = RoomPlaybackStatePlaying
-		commandDispatches = s.transportCommandDispatchesLocked(
-			live,
-			TransportActionPlay,
-			position,
-			executeAt,
-		)
-	case TransportActionPause:
-		live.room.ResumeOnReady = false
-		live.room.IsPaused = true
-		live.room.PlaybackState = RoomPlaybackStatePaused
-		commandDispatches = s.transportCommandDispatchesLocked(
-			live,
-			TransportActionPause,
-			position,
-			executeAt,
-		)
-	case TransportActionSeek:
-		live.room.ResumeOnReady = !request.IsPaused
-		live.room.IsPaused = true
-		live.room.PlaybackState = RoomPlaybackStateWaiting
-		s.resetMemberReadinessLocked(live, false)
-		commandDispatches = s.transportCommandDispatchesLocked(
-			live,
-			TransportActionSeek,
-			position,
-			executeAt,
-		)
-	default:
-		s.mu.Unlock()
-		return Snapshot{}, ErrTransportNotAllowed
-	}
-	expectedGeneration := live.room.Generation
-	live.room.Generation++
-	persisted, updateErr := s.repo.UpdateAnchor(
-		ctx,
-		live.room.ID,
-		live.room.AnchorPositionSeconds,
-		live.room.IsPaused,
-		live.room.PlaybackState,
-		live.room.ResumeOnReady,
-		live.room.AnchorUpdatedAt,
-		live.room.Generation,
-		expectedGeneration,
-	)
-	if updateErr != nil {
-		if errors.Is(updateErr, ErrRoomStateConflict) {
-			if refreshed, refreshErr := s.repo.GetRoomByID(ctx, roomID); refreshErr == nil && refreshed != nil {
-				live.room = *refreshed
-			}
-		}
-		s.mu.Unlock()
-		if errors.Is(updateErr, ErrRoomStateConflict) {
-			return s.Snapshot(ctx, roomID, userID, profileID)
-		}
-		return Snapshot{}, updateErr
-	}
-	live.room = *persisted
-	snapshot := s.buildSnapshotLocked(live, userID, profileID)
-	dispatches := s.prepareSnapshotDispatchesLocked(live)
-	s.mu.Unlock()
-
-	s.runDispatches(dispatches)
-	s.runCommandDispatches(commandDispatches)
-	return snapshot, nil
-}
-
-func (s *Service) HandleStateReport(
-	ctx context.Context,
-	roomID string,
-	userID int,
-	profileID string,
-	report StateReport,
-) (Snapshot, error) {
-	_, live, err := s.getOrLoadLiveRoom(ctx, roomID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-
-	var dispatches []snapshotDispatch
-	var correctionDispatches []commandDispatch
-
-	s.mu.Lock()
-	member := live.members[buildMemberKey(userID, profileID)]
-	if member == nil || member.connection == nil {
-		s.mu.Unlock()
-		return Snapshot{}, ErrRoomForbidden
-	}
-	if member.sessionID == "" || member.sessionID != report.SessionID {
-		s.mu.Unlock()
-		return Snapshot{}, ErrConnectionNotAttached
-	}
-
-	isHost := userID == live.room.HostUserID && profileID == live.room.HostProfileID
-	expected := s.expectedPositionLocked(live)
-	pauseMismatch := report.IsPaused != live.room.IsPaused
-	drift := math.Abs(report.PositionSeconds - expected)
-
-	snapshot := s.buildSnapshotLocked(live, userID, profileID)
-	if isHost && (pauseMismatch || drift > 1.5) {
-		live.room.AnchorPositionSeconds = math.Max(0, report.PositionSeconds)
-		live.room.IsPaused = report.IsPaused
-		live.room.AnchorUpdatedAt = s.now()
-		expectedGeneration := live.room.Generation
-		live.room.Generation++
-		persisted, updateErr := s.repo.UpdateAnchor(
-			ctx,
-			live.room.ID,
-			live.room.AnchorPositionSeconds,
-			live.room.IsPaused,
-			live.room.PlaybackState,
-			live.room.ResumeOnReady,
-			live.room.AnchorUpdatedAt,
-			live.room.Generation,
-			expectedGeneration,
-		)
-		if updateErr != nil {
-			if errors.Is(updateErr, ErrRoomStateConflict) {
-				if refreshed, refreshErr := s.repo.GetRoomByID(ctx, roomID); refreshErr == nil && refreshed != nil {
-					live.room = *refreshed
-				}
-				snapshot = s.buildSnapshotLocked(live, userID, profileID)
-				s.mu.Unlock()
-				return snapshot, nil
-			}
-			s.mu.Unlock()
-			return Snapshot{}, updateErr
-		}
-		live.room = *persisted
-		snapshot = s.buildSnapshotLocked(live, userID, profileID)
+	// A departing member may have been the last participant the room was
+	// waiting on; re-evaluate readiness so the others aren't stuck.
+	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(context.Background(), live, false)
+	if dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
-	} else if !isHost && (pauseMismatch || drift > 1.0) {
-		correctionDispatches = s.targetedCommandDispatchesLocked(live, report.SessionID, TransportCommand{
-			CommandID:         uuid.NewString(),
-			SelectionRevision: live.room.SelectionRevision,
-			Action: func() TransportAction {
-				if live.room.PlaybackState == RoomPlaybackStatePlaying {
-					return TransportActionPlay
-				}
-				return TransportActionPause
-			}(),
-			PositionSeconds: math.Max(0, expectedPosition(live.room, s.now())),
-			ExecuteAt:       s.now().Add(s.highestPingLocked(live)).UTC().Format(time.RFC3339Nano),
-			IssuedAt:        s.now().UTC().Format(time.RFC3339Nano),
-			PlaybackState:   live.room.PlaybackState,
-		})
 	}
 	s.mu.Unlock()
-	if isHost && (pauseMismatch || drift > 1.5) {
-		s.runDispatches(dispatches)
-		return snapshot, nil
-	}
+	s.runDispatches(dispatches)
+	s.runCommandDispatches(commandDispatches)
+}
 
-	if len(correctionDispatches) > 0 {
-		s.runCommandDispatches(correctionDispatches)
+// closeIfHostStillDisconnected closes a room after the host-disconnect grace
+// period, unless the host reconnected while the timer was in flight
+// (Timer.Stop cannot recall a callback that already fired).
+func (s *Service) closeIfHostStillDisconnected(roomID string, hostUserID int, hostProfileID string) {
+	s.mu.Lock()
+	live := s.rooms[roomID]
+	// A nil live room means nobody (host included) is connected; closing is
+	// safe. Only a live room with the host re-connected aborts the close.
+	if live != nil && s.hostConnectedLocked(live) {
+		s.mu.Unlock()
+		return
 	}
-
-	return snapshot, nil
+	s.mu.Unlock()
+	_ = s.CloseRoom(context.Background(), roomID, hostUserID, hostProfileID)
 }
 
 func (s *Service) AttachSessionForConnection(
@@ -642,6 +426,7 @@ func (s *Service) AttachSessionForConnection(
 	}
 	member.sessionID = sessionID
 	member.isReady = false
+	member.ignoreWait = false
 	member.isBuffering = live.room.Phase == RoomPhasePlaying
 
 	var commandDispatches []commandDispatch
@@ -649,32 +434,16 @@ func (s *Service) AttachSessionForConnection(
 		if live.room.PlaybackState == RoomPlaybackStatePlaying && s.activeParticipantCountLocked(live) > 1 {
 			position := s.expectedPositionLocked(live)
 			commandDispatches, _ = s.enterWaitingLocked(live, position, true)
-			expectedGeneration := live.room.Generation
-			live.room.Generation++
-			persisted, updateErr := s.repo.UpdateAnchor(
-				ctx,
-				live.room.ID,
-				live.room.AnchorPositionSeconds,
-				live.room.IsPaused,
-				live.room.PlaybackState,
-				live.room.ResumeOnReady,
-				live.room.AnchorUpdatedAt,
-				live.room.Generation,
-				expectedGeneration,
-			)
-			if updateErr != nil {
-				if errors.Is(updateErr, ErrRoomStateConflict) {
-					if refreshed, refreshErr := s.repo.GetRoomByID(ctx, reg.roomID); refreshErr == nil && refreshed != nil {
-						live.room = *refreshed
-					}
-					snapshot := s.buildSnapshotLocked(live, userID, profileID)
-					s.mu.Unlock()
-					return snapshot, nil
-				}
+			conflict, err := s.persistAnchorLocked(ctx, live)
+			if err != nil {
 				s.mu.Unlock()
-				return Snapshot{}, updateErr
+				return Snapshot{}, err
 			}
-			live.room = *persisted
+			if conflict {
+				snapshot := s.buildSnapshotLocked(live, userID, profileID)
+				s.mu.Unlock()
+				return snapshot, nil
+			}
 		} else {
 			commandDispatches = s.syncMemberToRoomLocked(live, sessionID)
 		}
@@ -726,13 +495,14 @@ func (s *Service) HandleTransportRequestForConnection(
 	now := s.now()
 	live.room.AnchorPositionSeconds = position
 	live.room.AnchorUpdatedAt = now
-	commandDispatches := []commandDispatch(nil)
+	var commandDispatches []commandDispatch
 	executeAt := now.Add(s.highestPingLocked(live))
 	switch request.Action {
 	case TransportActionPlay:
 		live.room.ResumeOnReady = true
 		live.room.IsPaused = false
 		live.room.PlaybackState = RoomPlaybackStatePlaying
+		s.disarmWaitingDeadlineLocked(live)
 		commandDispatches = s.transportCommandDispatchesLocked(
 			live,
 			TransportActionPlay,
@@ -743,6 +513,7 @@ func (s *Service) HandleTransportRequestForConnection(
 		live.room.ResumeOnReady = false
 		live.room.IsPaused = true
 		live.room.PlaybackState = RoomPlaybackStatePaused
+		s.disarmWaitingDeadlineLocked(live)
 		commandDispatches = s.transportCommandDispatchesLocked(
 			live,
 			TransportActionPause,
@@ -754,6 +525,7 @@ func (s *Service) HandleTransportRequestForConnection(
 		live.room.IsPaused = true
 		live.room.PlaybackState = RoomPlaybackStateWaiting
 		s.resetMemberReadinessLocked(live, false)
+		s.armWaitingDeadlineLocked(live)
 		commandDispatches = s.transportCommandDispatchesLocked(
 			live,
 			TransportActionSeek,
@@ -764,32 +536,16 @@ func (s *Service) HandleTransportRequestForConnection(
 		s.mu.Unlock()
 		return Snapshot{}, ErrTransportNotAllowed
 	}
-	expectedGeneration := live.room.Generation
-	live.room.Generation++
-	persisted, updateErr := s.repo.UpdateAnchor(
-		ctx,
-		live.room.ID,
-		live.room.AnchorPositionSeconds,
-		live.room.IsPaused,
-		live.room.PlaybackState,
-		live.room.ResumeOnReady,
-		live.room.AnchorUpdatedAt,
-		live.room.Generation,
-		expectedGeneration,
-	)
+	conflict, updateErr := s.persistAnchorLocked(ctx, live)
 	if updateErr != nil {
-		if errors.Is(updateErr, ErrRoomStateConflict) {
-			if refreshed, refreshErr := s.repo.GetRoomByID(ctx, reg.roomID); refreshErr == nil && refreshed != nil {
-				live.room = *refreshed
-			}
-		}
 		s.mu.Unlock()
-		if errors.Is(updateErr, ErrRoomStateConflict) {
-			return s.Snapshot(ctx, reg.roomID, userID, profileID)
-		}
 		return Snapshot{}, updateErr
 	}
-	live.room = *persisted
+	if conflict {
+		snapshot := s.buildSnapshotLocked(live, userID, profileID)
+		s.mu.Unlock()
+		return snapshot, nil
+	}
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
@@ -839,33 +595,16 @@ func (s *Service) HandleStateReportForConnection(
 		live.room.AnchorPositionSeconds = math.Max(0, report.PositionSeconds)
 		live.room.IsPaused = report.IsPaused
 		live.room.AnchorUpdatedAt = s.now()
-		expectedGeneration := live.room.Generation
-		live.room.Generation++
-		persisted, updateErr := s.repo.UpdateAnchor(
-			ctx,
-			live.room.ID,
-			live.room.AnchorPositionSeconds,
-			live.room.IsPaused,
-			live.room.PlaybackState,
-			live.room.ResumeOnReady,
-			live.room.AnchorUpdatedAt,
-			live.room.Generation,
-			expectedGeneration,
-		)
+		conflict, updateErr := s.persistAnchorLocked(ctx, live)
 		if updateErr != nil {
-			if errors.Is(updateErr, ErrRoomStateConflict) {
-				if refreshed, refreshErr := s.repo.GetRoomByID(ctx, reg.roomID); refreshErr == nil && refreshed != nil {
-					live.room = *refreshed
-				}
-				snapshot = s.buildSnapshotLocked(live, userID, profileID)
-				s.mu.Unlock()
-				return snapshot, nil
-			}
 			s.mu.Unlock()
 			return Snapshot{}, updateErr
 		}
-		live.room = *persisted
 		snapshot = s.buildSnapshotLocked(live, userID, profileID)
+		if conflict {
+			s.mu.Unlock()
+			return snapshot, nil
+		}
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
 	} else if !isHost && (pauseMismatch || drift > 1.0) {
 		correctionDispatches = s.targetedCommandDispatchesLocked(live, report.SessionID, TransportCommand{
@@ -928,61 +667,13 @@ func (s *Service) HandleReadyForConnection(
 
 	member.isReady = true
 	member.isBuffering = false
+	member.ignoreWait = false
+
+	dispatches, commandDispatches = s.maybeResumeFromWaitingLocked(ctx, live, false)
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
-	if live.room.PlaybackState != RoomPlaybackStateWaiting || !s.allParticipantsReadyLocked(live) {
+	if dispatches == nil {
 		dispatches = s.prepareSnapshotDispatchesLocked(live)
-		s.mu.Unlock()
-		s.runDispatches(dispatches)
-		return snapshot, nil
 	}
-
-	live.room.AnchorPositionSeconds = math.Max(0, live.room.AnchorPositionSeconds)
-	live.room.AnchorUpdatedAt = s.now()
-	action := TransportActionPause
-	if live.room.ResumeOnReady {
-		live.room.IsPaused = false
-		live.room.PlaybackState = RoomPlaybackStatePlaying
-		action = TransportActionPlay
-	} else {
-		live.room.IsPaused = true
-		live.room.PlaybackState = RoomPlaybackStatePaused
-		action = TransportActionPause
-	}
-
-	expectedGeneration := live.room.Generation
-	live.room.Generation++
-	persisted, updateErr := s.repo.UpdateAnchor(
-		ctx,
-		live.room.ID,
-		live.room.AnchorPositionSeconds,
-		live.room.IsPaused,
-		live.room.PlaybackState,
-		live.room.ResumeOnReady,
-		live.room.AnchorUpdatedAt,
-		live.room.Generation,
-		expectedGeneration,
-	)
-	if updateErr != nil {
-		if errors.Is(updateErr, ErrRoomStateConflict) {
-			if refreshed, refreshErr := s.repo.GetRoomByID(ctx, reg.roomID); refreshErr == nil && refreshed != nil {
-				live.room = *refreshed
-			}
-			snapshot = s.buildSnapshotLocked(live, userID, profileID)
-			s.mu.Unlock()
-			return snapshot, nil
-		}
-		s.mu.Unlock()
-		return Snapshot{}, updateErr
-	}
-	live.room = *persisted
-	snapshot = s.buildSnapshotLocked(live, userID, profileID)
-	dispatches = s.prepareSnapshotDispatchesLocked(live)
-	commandDispatches = s.transportCommandDispatchesLocked(
-		live,
-		action,
-		live.room.AnchorPositionSeconds,
-		s.now().Add(s.highestPingLocked(live)),
-	)
 	s.mu.Unlock()
 
 	s.runDispatches(dispatches)
@@ -1022,45 +713,36 @@ func (s *Service) HandleBufferingForConnection(
 
 	member.isBuffering = true
 	member.isReady = false
-	if live.room.Phase != RoomPhasePlaying {
+	// Members already excluded from the readiness barrier must not drag the
+	// whole room back into waiting while they catch up.
+	if live.room.Phase != RoomPhasePlaying || member.ignoreWait {
 		snapshot := s.buildSnapshotLocked(live, userID, profileID)
 		s.mu.Unlock()
 		return snapshot, nil
 	}
 
 	if live.room.PlaybackState != RoomPlaybackStateWaiting {
+		// Bound how far a single member's report can move the shared anchor.
+		position := math.Max(0, report.PositionSeconds)
+		expected := math.Max(0, s.expectedPositionLocked(live))
+		if math.Abs(position-expected) > maxBufferingAnchorDriftSeconds {
+			position = expected
+		}
 		commandDispatches, _ = s.enterWaitingLocked(
 			live,
-			math.Max(0, report.PositionSeconds),
+			position,
 			live.room.PlaybackState == RoomPlaybackStatePlaying || live.room.ResumeOnReady,
 		)
-
-		expectedGeneration := live.room.Generation
-		live.room.Generation++
-		persisted, updateErr := s.repo.UpdateAnchor(
-			ctx,
-			live.room.ID,
-			live.room.AnchorPositionSeconds,
-			live.room.IsPaused,
-			live.room.PlaybackState,
-			live.room.ResumeOnReady,
-			live.room.AnchorUpdatedAt,
-			live.room.Generation,
-			expectedGeneration,
-		)
+		conflict, updateErr := s.persistAnchorLocked(ctx, live)
 		if updateErr != nil {
-			if errors.Is(updateErr, ErrRoomStateConflict) {
-				if refreshed, refreshErr := s.repo.GetRoomByID(ctx, reg.roomID); refreshErr == nil && refreshed != nil {
-					live.room = *refreshed
-				}
-				snapshot := s.buildSnapshotLocked(live, userID, profileID)
-				s.mu.Unlock()
-				return snapshot, nil
-			}
 			s.mu.Unlock()
 			return Snapshot{}, updateErr
 		}
-		live.room = *persisted
+		if conflict {
+			snapshot := s.buildSnapshotLocked(live, userID, profileID)
+			s.mu.Unlock()
+			return snapshot, nil
+		}
 	}
 
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
@@ -1094,6 +776,9 @@ func (s *Service) HandlePingForConnection(
 		return ErrRoomForbidden
 	}
 	if pingMS > 0 {
+		if maxMS := maxTransportLead.Milliseconds(); pingMS > maxMS {
+			pingMS = maxMS
+		}
 		member.lastPingMS = pingMS
 	}
 	return nil
@@ -1122,29 +807,18 @@ func (s *Service) UpdatePolicy(
 	}
 
 	live.room.GuestControlPolicy = policy
-	expectedGeneration := live.room.Generation
-	live.room.Generation++
-	persisted, updateErr := s.repo.UpdatePolicy(
-		ctx,
-		roomID,
-		policy,
-		live.room.Generation,
-		expectedGeneration,
-	)
+	conflict, updateErr := s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
+		return s.repo.UpdatePolicy(ctx, roomID, room.GuestControlPolicy, room.Generation, expectedGeneration)
+	})
 	if updateErr != nil {
-		if errors.Is(updateErr, ErrRoomStateConflict) {
-			if refreshed, refreshErr := s.repo.GetRoomByID(ctx, roomID); refreshErr == nil && refreshed != nil {
-				live.room = *refreshed
-			}
-			snapshot := s.buildSnapshotLocked(live, userID, profileID)
-			s.mu.Unlock()
-			return snapshot, nil
-		}
 		s.mu.Unlock()
 		return Snapshot{}, updateErr
 	}
-	live.room = *persisted
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	if conflict {
+		s.mu.Unlock()
+		return snapshot, nil
+	}
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
@@ -1202,44 +876,49 @@ func (s *Service) SelectItem(
 	live.room.AnchorPositionSeconds = 0
 	live.room.IsPaused = true
 	live.room.AnchorUpdatedAt = now
-	s.resetMemberReadinessLocked(live, false)
-	expectedGeneration := live.room.Generation
 	live.room.SelectionRevision++
-	live.room.Generation++
-
-	persisted, updateErr := s.repo.UpdateSelection(
-		ctx,
-		roomID,
-		SelectItemInput{
-			ContentID: resolved.ContentID,
-			FileID:    resolved.FileID,
-			LibraryID: resolved.LibraryID,
-		},
-		live.room.Phase,
-		live.room.PlaybackState,
-		live.room.ResumeOnReady,
-		live.room.AnchorPositionSeconds,
-		live.room.IsPaused,
-		live.room.AnchorUpdatedAt,
-		live.room.SelectionRevision,
-		live.room.Generation,
-		expectedGeneration,
-	)
-	if updateErr != nil {
-		if errors.Is(updateErr, ErrRoomStateConflict) {
-			if refreshed, refreshErr := s.repo.GetRoomByID(ctx, roomID); refreshErr == nil && refreshed != nil {
-				live.room = *refreshed
-			}
-			snapshot := s.buildSnapshotLocked(live, userID, profileID)
-			s.mu.Unlock()
-			return snapshot, nil
+	// Sessions attached for the previous selection are stale: readiness for
+	// the new content must come from a fresh attach, not an old session.
+	for _, member := range live.members {
+		if member == nil {
+			continue
 		}
+		member.sessionID = ""
+		member.isReady = false
+		member.isBuffering = false
+		member.ignoreWait = false
+	}
+	s.disarmWaitingDeadlineLocked(live)
+
+	conflict, updateErr := s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
+		return s.repo.UpdateSelection(
+			ctx,
+			roomID,
+			SelectItemInput{
+				ContentID: resolved.ContentID,
+				FileID:    resolved.FileID,
+				LibraryID: resolved.LibraryID,
+			},
+			room.Phase,
+			room.PlaybackState,
+			room.ResumeOnReady,
+			room.AnchorPositionSeconds,
+			room.IsPaused,
+			room.AnchorUpdatedAt,
+			room.SelectionRevision,
+			room.Generation,
+			expectedGeneration,
+		)
+	})
+	if updateErr != nil {
 		s.mu.Unlock()
 		return Snapshot{}, updateErr
 	}
-
-	live.room = *persisted
 	snapshot := s.buildSnapshotLocked(live, userID, profileID)
+	if conflict {
+		s.mu.Unlock()
+		return snapshot, nil
+	}
 	dispatches := s.prepareSnapshotDispatchesLocked(live)
 	s.mu.Unlock()
 
@@ -1288,6 +967,9 @@ func (s *Service) CloseRoom(ctx context.Context, roomID string, userID int, prof
 		if live.hostCloseTimer != nil {
 			live.hostCloseTimer.Stop()
 		}
+		if live.waitingTimer != nil {
+			live.waitingTimer.Stop()
+		}
 		delete(s.rooms, roomID)
 	}
 	s.mu.Unlock()
@@ -1305,6 +987,229 @@ func (s *Service) loadRoom(ctx context.Context, load func() (*Room, error)) (*Ro
 		return nil, ErrRoomClosed
 	}
 	return room, nil
+}
+
+// persistRoomChangeLocked persists a caller-applied mutation of live.room.
+// It bumps the room generation, releases s.mu for the database round-trip,
+// then re-acquires it and reconciles live.room with the persisted row. It
+// must be called with s.mu held and always returns with s.mu held.
+//
+// When it returns conflict=true the caller lost an optimistic-concurrency
+// race: live.room has been refreshed from the database and the caller should
+// rebuild its snapshot from it and skip dispatching transport commands.
+func (s *Service) persistRoomChangeLocked(
+	ctx context.Context,
+	live *liveRoom,
+	persist func(room Room, expectedGeneration int64) (*Room, error),
+) (conflict bool, err error) {
+	expected := live.room.Generation
+	live.room.Generation++
+	roomCopy := live.room
+
+	s.mu.Unlock()
+	persisted, persistErr := persist(roomCopy, expected)
+	var refreshed *Room
+	if errors.Is(persistErr, ErrRoomStateConflict) {
+		refreshed, _ = s.repo.GetRoomByID(ctx, roomCopy.ID)
+	}
+	s.mu.Lock()
+
+	if persistErr != nil {
+		// This writer's optimistic increment never landed; undo it so a
+		// failed write cannot leave a phantom generation that makes every
+		// later CAS conflict. Concurrent writers' stacked increments are
+		// preserved because each writer undoes exactly its own.
+		live.room.Generation--
+		if errors.Is(persistErr, ErrRoomStateConflict) {
+			// Adopt the database row only if it is at least as new as the
+			// local copy — a concurrent writer may have advanced live.room
+			// while the lock was released, and a stale refresh must not
+			// overwrite that newer state.
+			if refreshed != nil && refreshed.Generation >= live.room.Generation {
+				live.room = *refreshed
+			}
+			return true, nil
+		}
+		return false, persistErr
+	}
+	// A concurrent writer may have advanced the local copy while the lock was
+	// released; never regress it to an older persisted generation.
+	if persisted != nil && persisted.Generation >= live.room.Generation {
+		live.room = *persisted
+	}
+	return false, nil
+}
+
+// persistAnchorLocked persists the room's anchor/playback-state fields via
+// persistRoomChangeLocked. Must be called with s.mu held; returns with it held.
+func (s *Service) persistAnchorLocked(ctx context.Context, live *liveRoom) (bool, error) {
+	return s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
+		return s.repo.UpdateAnchor(
+			ctx,
+			room.ID,
+			room.AnchorPositionSeconds,
+			room.IsPaused,
+			room.PlaybackState,
+			room.ResumeOnReady,
+			room.AnchorUpdatedAt,
+			room.Generation,
+			expectedGeneration,
+		)
+	})
+}
+
+func (s *Service) armWaitingDeadlineLocked(live *liveRoom) {
+	if live.waitingTimer != nil {
+		live.waitingTimer.Stop()
+	}
+	live.waitingEpoch++
+	epoch := live.waitingEpoch
+	roomID := live.room.ID
+	live.waitingTimer = time.AfterFunc(waitingResumeDeadline, func() {
+		s.handleWaitingDeadline(roomID, epoch)
+	})
+}
+
+func (s *Service) disarmWaitingDeadlineLocked(live *liveRoom) {
+	if live.waitingTimer != nil {
+		live.waitingTimer.Stop()
+		live.waitingTimer = nil
+	}
+	live.waitingEpoch++
+}
+
+// handleWaitingDeadline fires when a waiting period outlives
+// waitingResumeDeadline: members that never became ready stop blocking the
+// readiness barrier (ignoreWait) and playback resumes for everyone else.
+func (s *Service) handleWaitingDeadline(roomID string, epoch int64) {
+	s.mu.Lock()
+	live := s.rooms[roomID]
+	if live == nil || live.waitingEpoch != epoch || live.room.PlaybackState != RoomPlaybackStateWaiting {
+		s.mu.Unlock()
+		return
+	}
+	for _, member := range live.members {
+		if member == nil || member.connection == nil || member.sessionID == "" {
+			continue
+		}
+		if !member.isReady {
+			member.ignoreWait = true
+		}
+	}
+	dispatches, commandDispatches := s.maybeResumeFromWaitingLocked(context.Background(), live, true)
+	s.mu.Unlock()
+	s.runDispatches(dispatches)
+	s.runCommandDispatches(commandDispatches)
+}
+
+// maybeResumeFromWaitingLocked leaves the waiting state once every remaining
+// participant is ready (or unconditionally when force is set), persists the
+// transition, and prepares the resulting snapshot and transport dispatches.
+// It returns (nil, nil) when the room is not ready to resume. Must be called
+// with s.mu held; the lock is temporarily released for persistence.
+func (s *Service) maybeResumeFromWaitingLocked(
+	ctx context.Context,
+	live *liveRoom,
+	force bool,
+) ([]snapshotDispatch, []commandDispatch) {
+	if live.room.Phase != RoomPhasePlaying || live.room.PlaybackState != RoomPlaybackStateWaiting {
+		return nil, nil
+	}
+	if !force && !s.allParticipantsReadyLocked(live) {
+		return nil, nil
+	}
+
+	saved := live.room
+	live.room.AnchorPositionSeconds = math.Max(0, live.room.AnchorPositionSeconds)
+	live.room.AnchorUpdatedAt = s.now()
+	action := TransportActionPause
+	if live.room.ResumeOnReady {
+		live.room.IsPaused = false
+		live.room.PlaybackState = RoomPlaybackStatePlaying
+		action = TransportActionPlay
+	} else {
+		live.room.IsPaused = true
+		live.room.PlaybackState = RoomPlaybackStatePaused
+	}
+
+	conflict, err := s.persistAnchorLocked(ctx, live)
+	if err != nil {
+		// The transition never landed in the database. Restore the waiting
+		// state so snapshots keep matching persisted reality, and re-arm the
+		// deadline so the resume is retried instead of silently dropped.
+		live.room.AnchorPositionSeconds = saved.AnchorPositionSeconds
+		live.room.AnchorUpdatedAt = saved.AnchorUpdatedAt
+		live.room.IsPaused = saved.IsPaused
+		live.room.PlaybackState = saved.PlaybackState
+		s.armWaitingDeadlineLocked(live)
+		return s.prepareSnapshotDispatchesLocked(live), nil
+	}
+	if conflict {
+		// live.room now reflects the database row that won the race; if it is
+		// still waiting the armed deadline keeps covering it.
+		return s.prepareSnapshotDispatchesLocked(live), nil
+	}
+	s.disarmWaitingDeadlineLocked(live)
+	commandDispatches := s.transportCommandDispatchesLocked(
+		live,
+		action,
+		live.room.AnchorPositionSeconds,
+		s.now().Add(s.highestPingLocked(live)),
+	)
+	return s.prepareSnapshotDispatchesLocked(live), commandDispatches
+}
+
+func (s *Service) runJanitor() {
+	ticker := time.NewTicker(janitorInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.janitorStop:
+			return
+		case <-ticker.C:
+			s.sweepIdleRooms()
+		}
+	}
+}
+
+// sweepIdleRooms evicts live rooms with no connected members from memory and
+// closes rooms whose playback anchor has been idle for longer than
+// roomIdleTTL, so abandoned rooms do not accumulate forever.
+func (s *Service) sweepIdleRooms() {
+	s.mu.Lock()
+	for roomID, live := range s.rooms {
+		if live == nil || s.connectedMemberCountLocked(live) == 0 {
+			// Room state is fully persisted; it reloads on next access. Any
+			// pending host-close timer keeps working from the database.
+			if live != nil && live.waitingTimer != nil {
+				live.waitingTimer.Stop()
+			}
+			delete(s.rooms, roomID)
+		}
+	}
+	s.mu.Unlock()
+
+	if s.repo == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cutoff := s.now().Add(-roomIdleTTL)
+	roomIDs, err := s.repo.ListIdleRoomIDs(ctx, cutoff, 100)
+	if err != nil {
+		return
+	}
+	closedAt := s.now()
+	for _, roomID := range roomIDs {
+		s.mu.Lock()
+		live := s.rooms[roomID]
+		hasMembers := live != nil && s.connectedMemberCountLocked(live) > 0
+		s.mu.Unlock()
+		if hasMembers {
+			continue
+		}
+		_, _ = s.repo.CloseRoom(ctx, roomID, closedAt)
+	}
 }
 
 func (s *Service) getOrLoadLiveRoom(ctx context.Context, roomID string) (*Room, *liveRoom, error) {
@@ -1391,6 +1296,30 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 		invitePath = fmt.Sprintf("/rooms/join?token=%s", live.room.JoinToken)
 	}
 
+	members := make([]MemberSummary, 0, len(live.members))
+	for _, m := range live.members {
+		if m == nil || m.connection == nil {
+			continue
+		}
+		members = append(members, MemberSummary{
+			UserID:      m.userID,
+			ProfileID:   m.profileID,
+			DisplayName: m.displayName,
+			IsHost:      m.userID == live.room.HostUserID && m.profileID == live.room.HostProfileID,
+			IsSelf:      m.userID == userID && m.profileID == profileID,
+			Connected:   true,
+		})
+	}
+	sort.Slice(members, func(i, j int) bool {
+		if members[i].IsHost != members[j].IsHost {
+			return members[i].IsHost
+		}
+		if members[i].DisplayName != members[j].DisplayName {
+			return members[i].DisplayName < members[j].DisplayName
+		}
+		return members[i].ProfileID < members[j].ProfileID
+	})
+
 	return Snapshot{
 		RoomID:                  live.room.ID,
 		Phase:                   live.room.Phase,
@@ -1424,6 +1353,7 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 			return member.sessionID
 		}(),
 		InvitePath: invitePath,
+		Members:    members,
 	}
 }
 
@@ -1485,36 +1415,6 @@ func (s *Service) hostConnectedLocked(live *liveRoom) bool {
 	return member != nil && member.connection != nil
 }
 
-func (s *Service) sessionIDsLocked(live *liveRoom) []string {
-	var sessionIDs []string
-	for _, member := range live.members {
-		if member == nil || member.sessionID == "" {
-			continue
-		}
-		sessionIDs = append(sessionIDs, member.sessionID)
-	}
-	return sessionIDs
-}
-
-func (s *Service) hasHostAttachedSessionLocked(live *liveRoom) bool {
-	member := live.members[buildMemberKey(live.room.HostUserID, live.room.HostProfileID)]
-	return member != nil && member.sessionID != ""
-}
-
-func withoutSessionID(sessionIDs []string, excluded string) []string {
-	if excluded == "" || len(sessionIDs) == 0 {
-		return sessionIDs
-	}
-	filtered := make([]string, 0, len(sessionIDs))
-	for _, sessionID := range sessionIDs {
-		if sessionID == excluded {
-			continue
-		}
-		filtered = append(filtered, sessionID)
-	}
-	return filtered
-}
-
 func (s *Service) expectedPositionLocked(live *liveRoom) float64 {
 	return expectedPosition(live.room, s.now())
 }
@@ -1556,6 +1456,10 @@ func (s *Service) allParticipantsReadyLocked(live *liveRoom) bool {
 	return participants > 0
 }
 
+// highestPingLocked returns the scheduling lead for transport commands: the
+// worst measured round-trip time across participants, bounded to
+// [minTransportLead, maxTransportLead] so one member's bogus latency cannot
+// stall the room.
 func (s *Service) highestPingLocked(live *liveRoom) time.Duration {
 	highest := defaultTransportLead
 	for _, member := range live.members {
@@ -1565,13 +1469,16 @@ func (s *Service) highestPingLocked(live *liveRoom) time.Duration {
 		if member.lastPingMS <= 0 {
 			continue
 		}
-		delay := time.Duration(member.lastPingMS*2) * time.Millisecond
+		delay := time.Duration(member.lastPingMS) * time.Millisecond
 		if delay > highest {
 			highest = delay
 		}
 	}
 	if highest < minTransportLead {
 		return minTransportLead
+	}
+	if highest > maxTransportLead {
+		return maxTransportLead
 	}
 	return highest
 }
@@ -1656,6 +1563,7 @@ func (s *Service) enterWaitingLocked(live *liveRoom, positionSeconds float64, re
 	if s.activeParticipantCountLocked(live) == 0 {
 		return nil, false
 	}
+	s.armWaitingDeadlineLocked(live)
 	executeAt := s.now().Add(s.highestPingLocked(live))
 	return s.transportCommandDispatchesLocked(
 		live,

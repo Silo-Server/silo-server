@@ -219,7 +219,7 @@ func resolveCompatToken(ctx context.Context, sessions *SessionStore, keyAuth *Ad
 // PlaybackSessionAuth creates middleware that falls back to playback session
 // authentication for media stream endpoints where external players (e.g. libmpv)
 // don't forward auth headers or query parameters.
-func PlaybackSessionAuth(sessions *SessionStore, playbackStore *PlaybackSessionStore, keyAuth *AdminAPIKeyAuthenticator) func(next http.Handler) http.Handler {
+func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackStore, keyAuth *AdminAPIKeyAuthenticator) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Try standard token auth first — a compat session token or an sa_

@@ -179,6 +179,24 @@ func (s *directUserDataService) ListProgress(ctx context.Context, session *Sessi
 	return result, nil
 }
 
+func (s *directUserDataService) ListProgressFiltered(ctx context.Context, session *Session, status string, types []string, libraryID *int, limit, offset int) ([]upstreamProgress, error) {
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+
+	entries, err := store.ListProgressFiltered(ctx, session.ProfileID, status, types, libraryID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list filtered progress: %w", err)
+	}
+
+	result := make([]upstreamProgress, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, toUpstreamProgress(entry))
+	}
+	return result, nil
+}
+
 // FilterResumeProgress applies the same hiding rules as the first-party
 // Continue Watching fetcher: dismissed entries and episodes superseded by a
 // later-completed episode in the same series.

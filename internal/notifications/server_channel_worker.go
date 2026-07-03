@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -242,8 +243,10 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 	return true, nil
 }
 
-// loadContentMeta batch-fetches display metadata for every series and movie
-// in the batch, keyed by content id.
+// loadContentMeta batch-fetches display metadata for every series and flat
+// item in the batch, keyed by content id. The author join only yields rows
+// for items with author credits (audiobooks, ebooks); movies and series scan
+// an empty string.
 func loadContentMeta(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (map[string]ContentMeta, error) {
 	idSet := make(map[string]struct{}, len(events))
 	ids := make([]string, 0, len(events))
@@ -257,7 +260,7 @@ func loadContentMeta(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (map
 		}
 	}
 	for _, event := range events {
-		if event.Kind == EventKindMovie {
+		if _, ok := flatKindByString(normalizeEventKind(event.Kind)); ok {
 			add(event.ItemID)
 		} else {
 			add(event.SeriesID)
@@ -268,14 +271,23 @@ func loadContentMeta(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (map
 		return metas, nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT content_id, title, COALESCE(year, 0), COALESCE(type, ''),
-		       COALESCE(overview, ''), COALESCE(poster_path, ''),
-		       COALESCE(poster_source_path, ''),
-		       COALESCE(genres, '{}'::text[]), COALESCE(content_rating, ''),
-		       COALESCE(rating_imdb, 0), COALESCE(rating_tmdb, 0),
-		       COALESCE(imdb_id, ''), COALESCE(tmdb_id, ''), COALESCE(tvdb_id, '')
-		FROM media_items
-		WHERE content_id = ANY($1)`, ids)
+		SELECT mi.content_id, mi.title, COALESCE(mi.year, 0), COALESCE(mi.type, ''),
+		       COALESCE(mi.overview, ''), COALESCE(mi.poster_path, ''),
+		       COALESCE(mi.poster_source_path, ''),
+		       COALESCE(mi.genres, '{}'::text[]), COALESCE(mi.content_rating, ''),
+		       COALESCE(mi.rating_imdb, 0), COALESCE(mi.rating_tmdb, 0),
+		       COALESCE(mi.imdb_id, ''), COALESCE(mi.tmdb_id, ''), COALESCE(mi.tvdb_id, ''),
+		       COALESCE(author.name, '')
+		FROM media_items mi
+		LEFT JOIN LATERAL (
+			SELECT p.name
+			FROM item_people ip
+			JOIN people p ON p.id = ip.person_id
+			WHERE ip.content_id = mi.content_id AND ip.kind = $2
+			ORDER BY ip.sort_order, p.name
+			LIMIT 1
+		) author ON TRUE
+		WHERE mi.content_id = ANY($1)`, ids, int(models.PersonKindAuthor))
 	if err != nil {
 		return nil, fmt.Errorf("load content metadata: %w", err)
 	}
@@ -288,6 +300,7 @@ func loadContentMeta(ctx context.Context, tx pgx.Tx, events []ReleaseEvent) (map
 			&meta.Genres, &meta.ContentRating,
 			&meta.RatingIMDB, &meta.RatingTMDB,
 			&meta.IMDBID, &meta.TMDBID, &meta.TVDBID,
+			&meta.Author,
 		); err != nil {
 			return nil, fmt.Errorf("scan content metadata: %w", err)
 		}

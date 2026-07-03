@@ -152,6 +152,37 @@ func (r *Repository) UpdateAnchor(
 	)
 }
 
+// ListIdleRoomIDs returns rooms that are still open but have seen no
+// playback-anchor activity since the cutoff, so the janitor can close them.
+func (r *Repository) ListIdleRoomIDs(ctx context.Context, cutoff time.Time, limit int) ([]string, error) {
+	if r == nil || r.pool == nil {
+		return nil, fmt.Errorf("watch together repository unavailable")
+	}
+
+	const query = `
+		SELECT id FROM watch_together_rooms
+		WHERE phase <> 'ended'
+		  AND GREATEST(anchor_updated_at, created_at) < $1
+		LIMIT $2
+	`
+
+	rows, err := r.pool.Query(ctx, query, cutoff.UTC(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list idle watch together rooms: %w", err)
+	}
+	defer rows.Close()
+
+	var roomIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan idle watch together room id: %w", err)
+		}
+		roomIDs = append(roomIDs, id)
+	}
+	return roomIDs, rows.Err()
+}
+
 func (r *Repository) CloseRoom(ctx context.Context, roomID string, closedAt time.Time) (*Room, error) {
 	const query = `
 		UPDATE watch_together_rooms

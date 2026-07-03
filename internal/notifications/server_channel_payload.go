@@ -33,7 +33,10 @@ type ContentMeta struct {
 	PosterSourcePath string
 	// PosterURL is the fetchable poster URL chosen by the sweep worker
 	// (System.discordPosterURL); empty renders the embed without an image.
-	PosterURL     string
+	PosterURL string
+	// Author is the primary credited author (item_people, kind=author),
+	// populated for audiobook/ebook items; empty for movies and series.
+	Author        string
 	Genres        []string
 	ContentRating string
 	RatingIMDB    float64
@@ -47,26 +50,28 @@ func (m ContentMeta) providerIDs() providerIDs {
 	return providerIDs{MediaType: m.Type, IMDB: m.IMDBID, TMDB: m.TMDBID, TVDB: m.TVDBID}
 }
 
-// ContentGroup is one rendered unit of a content digest: a movie, or every
-// new episode of one series in the batch.
+// ContentGroup is one rendered unit of a content digest: a flat item (movie,
+// audiobook, ebook), or every new episode of one series in the batch.
 type ContentGroup struct {
-	Kind      string // EventKindEpisode | EventKindMovie
+	Kind      string // EventKindEpisode or a flat item kind (item_kind.go)
 	LibraryID int
 	// Episode groups.
 	SeriesID string
 	Episodes []ReleaseEvent // ascending episode_key
-	// Movie groups.
+	// Flat item groups.
 	ItemID string
-	// Meta describes the series (episode groups) or the movie itself, with
+	// Meta describes the series (episode groups) or the item itself, with
 	// Title already defaulted when the catalog row is missing.
 	Meta ContentMeta
 }
 
 // GroupContentEvents folds a batch of release events into display groups:
 // episodes group per (library, series) so a season pack renders as one line,
-// movies render individually but dedupe by item across libraries. Group order
-// follows first appearance in the batch (sweep order). metas is keyed by
-// series_id / item_id; missing entries fall back to generic labels.
+// flat items render individually but dedupe by item across libraries. Events
+// of a kind this node cannot describe (a newer node's kind string) are
+// skipped. Group order follows first appearance in the batch (sweep order).
+// metas is keyed by series_id / item_id; missing entries fall back to
+// generic labels.
 func GroupContentEvents(events []ReleaseEvent, metas map[string]ContentMeta) []ContentGroup {
 	type groupKey struct {
 		kind      string
@@ -74,29 +79,35 @@ func GroupContentEvents(events []ReleaseEvent, metas map[string]ContentMeta) []C
 		contentID string
 	}
 	index := make(map[groupKey]int)
-	seenMovies := make(map[string]struct{})
+	seenItems := make(map[string]struct{})
 	groups := make([]ContentGroup, 0, len(events))
 
 	for _, event := range events {
-		switch normalizeEventKind(event.Kind) {
-		case EventKindMovie:
-			// The same movie landing in two libraries (e.g. "Movies" and
-			// "Movies 4K") announces once.
-			if _, dup := seenMovies[event.ItemID]; dup {
+		kind := normalizeEventKind(event.Kind)
+		if kind != EventKindEpisode {
+			flat, ok := flatKindByString(kind)
+			if !ok {
 				continue
 			}
-			seenMovies[event.ItemID] = struct{}{}
+			// The same item landing in two libraries (e.g. "Movies" and
+			// "Movies 4K") announces once. The dedupe key is kind-scoped so
+			// item ids can never collide across kinds.
+			itemKey := kind + ":" + event.ItemID
+			if _, dup := seenItems[itemKey]; dup {
+				continue
+			}
+			seenItems[itemKey] = struct{}{}
 			meta := metas[event.ItemID]
 			if meta.Title == "" {
-				meta.Title = "New movie"
+				meta.Title = "New " + flat.ItemType
 			}
 			groups = append(groups, ContentGroup{
-				Kind:      EventKindMovie,
+				Kind:      kind,
 				LibraryID: event.LibraryID,
 				ItemID:    event.ItemID,
 				Meta:      meta,
 			})
-		default:
+		} else {
 			key := groupKey{EventKindEpisode, event.LibraryID, event.SeriesID}
 			if at, ok := index[key]; ok {
 				groups[at].Episodes = append(groups[at].Episodes, event)
@@ -148,16 +159,14 @@ func episodeRangeLabel(episodes []ReleaseEvent) string {
 
 // contentGroupTitle renders a group's display line.
 func contentGroupTitle(group ContentGroup) string {
-	switch group.Kind {
-	case EventKindMovie:
+	if _, ok := flatKindByString(group.Kind); ok {
 		return titleWithYear(group.Meta.Title, group.Meta.Year)
-	default:
-		if len(group.Episodes) == 1 {
-			return fmt.Sprintf("%s — %s", group.Meta.Title, episodeRangeLabel(group.Episodes))
-		}
-		return fmt.Sprintf("%s — %d new episodes (%s)",
-			group.Meta.Title, len(group.Episodes), episodeRangeLabel(group.Episodes))
 	}
+	if len(group.Episodes) == 1 {
+		return fmt.Sprintf("%s — %s", group.Meta.Title, episodeRangeLabel(group.Episodes))
+	}
+	return fmt.Sprintf("%s — %d new episodes (%s)",
+		group.Meta.Title, len(group.Episodes), episodeRangeLabel(group.Episodes))
 }
 
 // serverChannelMaxEmbeds caps content digests at Discord's per-message embed
@@ -177,13 +186,20 @@ func BuildServerChannelDiscordContent(groups []ContentGroup, test bool) ([]byte,
 	embeds := make([]discordEmbed, 0, len(groups))
 	for _, group := range groups {
 		author := "New episodes available on Silo"
-		if group.Kind == EventKindMovie {
-			author = "New movie available on Silo"
+		if flat, ok := flatKindByString(group.Kind); ok {
+			author = "New " + flat.ItemType + " available on Silo"
 		} else if len(group.Episodes) == 1 {
 			author = "New episode available on Silo"
 		}
 		ids := group.Meta.providerIDs()
-		fields := make([]discordEmbedField, 0, 2)
+		fields := make([]discordEmbedField, 0, 3)
+		if group.Meta.Author != "" {
+			fields = append(fields, discordEmbedField{
+				Name:   "Author",
+				Value:  truncateWithEllipsis(group.Meta.Author, discordFieldValueLimit),
+				Inline: true,
+			})
+		}
 		if rating := ratingLabel(group.Meta.RatingIMDB, group.Meta.RatingTMDB); rating != "" {
 			fields = append(fields, discordEmbedField{Name: "Rating", Value: rating, Inline: true})
 		}
@@ -234,6 +250,7 @@ type serverChannelContentRow struct {
 	ItemID      string `json:"item_id,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Year        int    `json:"year,omitempty"`
+	Author      string `json:"author,omitempty"`
 	SeriesID    string `json:"series_id,omitempty"`
 	SeriesTitle string `json:"series_title,omitempty"`
 	// Episode span for episode groups.
@@ -259,12 +276,12 @@ func BuildServerChannelGenericContent(groups []ContentGroup, channelID string, t
 			Kind:      group.Kind,
 			LibraryID: group.LibraryID,
 		}
-		switch group.Kind {
-		case EventKindMovie:
+		if _, ok := flatKindByString(group.Kind); ok {
 			row.ItemID = group.ItemID
 			row.Title = group.Meta.Title
 			row.Year = group.Meta.Year
-		default:
+			row.Author = group.Meta.Author
+		} else {
 			row.SeriesID = group.SeriesID
 			row.SeriesTitle = group.Meta.Title
 			row.EpisodeCount = len(group.Episodes)

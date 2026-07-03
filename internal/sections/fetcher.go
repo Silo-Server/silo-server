@@ -426,7 +426,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	}
 
 	nextUpMode := ""
-	if ContinueTypeAllowsNextUp(continueType) {
+	if ContinueTypeAllowsNextUp(continueType) && !resolved.SuppressNextUp {
 		nextUpMode, _ = store.GetSetting(ctx, "next_up_mode")
 		if nextUpMode == "" {
 			nextUpMode = "combined"

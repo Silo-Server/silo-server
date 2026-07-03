@@ -2521,6 +2521,8 @@ export interface ServerNotificationChannel {
   enabled: boolean;
   notify_new_movies: boolean;
   notify_new_episodes: boolean;
+  notify_new_audiobooks: boolean;
+  notify_new_ebooks: boolean;
   notify_request_submitted: boolean;
   notify_request_approved: boolean;
   notify_request_declined: boolean;
@@ -2543,6 +2545,8 @@ export interface ServerNotificationChannelInput {
   enabled?: boolean;
   notify_new_movies?: boolean;
   notify_new_episodes?: boolean;
+  notify_new_audiobooks?: boolean;
+  notify_new_ebooks?: boolean;
   notify_request_submitted?: boolean;
   notify_request_approved?: boolean;
   notify_request_declined?: boolean;

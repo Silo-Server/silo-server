@@ -54,6 +54,9 @@ type System struct {
 	// WebPush is nil when the settings store is not writable (VAPID keys
 	// could not be provisioned).
 	WebPush *WebPushService
+	// PushDevices is nil when no at-rest cipher is configured; APNs tokens are
+	// credentials and must not be stored in plaintext.
+	PushDevices *PushDeviceService
 	// EmailPrefs is nil when no mail sender was provided.
 	EmailPrefs *EmailPrefsRepository
 	// DiscordPrefs holds Discord DM link + mode state; the channel only
@@ -73,6 +76,9 @@ type System struct {
 	webhookRetry      *WebhookRetryWorker
 	webPushRepo       *WebPushRepository
 	webPushDispatcher *WebPushDispatcher
+	pushDeviceRepo    *PushDeviceRepository
+	pushDispatcher    *PushDispatcher
+	pushSender        *pushSender
 	// serverChannelWorker sweeps release_events into admin broadcast posts;
 	// nil without the at-rest cipher.
 	serverChannelWorker *serverChannelWorker
@@ -119,6 +125,10 @@ func NewSystem(
 	var webhookDispatcher *WebhookDispatcher
 	var webhookRetry *WebhookRetryWorker
 	var sender *webhookSender
+	var pushDeviceService *PushDeviceService
+	var pushDeviceRepo *PushDeviceRepository
+	var pushSenderInst *pushSender
+	var pushDispatcher *PushDispatcher
 	if cipher != nil {
 		webhookRepo = NewWebhookRepository(pool)
 		sender = newWebhookSender(webhookRepo, deliveries, cipher, settings)
@@ -126,6 +136,11 @@ func NewSystem(
 		webhookDispatcher = newWebhookDispatcher(sender)
 		webhookRetry = newWebhookRetryWorker(sender)
 		dispatchers = append(dispatchers, webhookDispatcher)
+		pushDeviceRepo = NewPushDeviceRepository(pool)
+		pushDeviceService = NewPushDeviceService(pushDeviceRepo, cipher)
+		pushSenderInst = newPushSender(pushDeviceRepo, deliveries, cipher, settings)
+		pushDispatcher = newPushDispatcher(pushSenderInst)
+		dispatchers = append(dispatchers, pushDispatcher)
 	}
 
 	// Admin server channels (broadcast destinations) share the cipher
@@ -187,6 +202,9 @@ func NewSystem(
 	if webPushRepo != nil {
 		fanout.SetWebPushOutbox(webPushRepo)
 	}
+	if pushDeviceRepo != nil {
+		fanout.SetPushOutbox(pushDeviceRepo)
+	}
 	detector := NewAvailabilityDetector(releases, settings)
 	detector.SetFanoutNudge(func() {
 		fanout.Nudge()
@@ -207,6 +225,7 @@ func NewSystem(
 		Webhooks:            webhookService,
 		ServerChannels:      serverChannelService,
 		WebPush:             webPushService,
+		PushDevices:         pushDeviceService,
 		EmailPrefs:          emailPrefs,
 		DiscordPrefs:        discordPrefs,
 		mailSender:          mailSender,
@@ -218,6 +237,9 @@ func NewSystem(
 		webhookRetry:        webhookRetry,
 		webPushRepo:         webPushRepo,
 		webPushDispatcher:   webPushDispatcher,
+		pushDeviceRepo:      pushDeviceRepo,
+		pushDispatcher:      pushDispatcher,
+		pushSender:          pushSenderInst,
 		serverChannelWorker: serverChannelSweep,
 		dispatcher:          multiDispatcher,
 		pool:                pool,
@@ -354,6 +376,13 @@ func (s *System) Start(ctx context.Context) {
 			}
 		}()
 	}
+	if s.pushDispatcher != nil {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.pushDispatcher.Run(ctx)
+		}()
+	}
 }
 
 // Wait blocks until the background loops exit (after their context is
@@ -390,6 +419,11 @@ func (s *System) PurgeProfile(ctx context.Context, profileID string) error {
 			return fmt.Errorf("purge web push subscriptions: %w", err)
 		}
 	}
+	if s.pushDeviceRepo != nil {
+		if err := s.pushDeviceRepo.DeleteAllForProfile(ctx, profileID); err != nil {
+			return fmt.Errorf("purge push devices: %w", err)
+		}
+	}
 	if s.EmailPrefs != nil {
 		if err := s.EmailPrefs.DeleteForProfile(ctx, profileID); err != nil {
 			return fmt.Errorf("purge email prefs: %w", err)
@@ -418,20 +452,29 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 			progress(percent, message)
 		}
 	}
-	// Episode and movie availability seed independently: each kind has its
-	// own seed markers, because the episode pass historically marked every
-	// scanned library (movie libraries included) with zero movie rows.
-	passes := []struct {
+	// Each kind seeds independently with its own seed markers, because the
+	// episode pass historically marked every scanned library (movie libraries
+	// included) with zero movie rows. The flat item kinds come from the
+	// registry so a new kind cannot be forgotten here.
+	type seedPass struct {
 		kind          string
 		seedCondition string
 		record        func(ctx context.Context, libraryID int, emitEvents bool) (int, int, error)
-	}{
-		{EventKindEpisode,
-			`SELECT 1 FROM notification_library_seed_state seed WHERE seed.library_id = mf.id`,
-			s.Releases.RecordAvailabilityForLibrary},
-		{EventKindMovie,
-			`SELECT 1 FROM notification_content_seed_state seed WHERE seed.library_id = mf.id AND seed.kind = 'movie'`,
-			s.Releases.RecordMovieAvailabilityForLibrary},
+	}
+	passes := []seedPass{{
+		kind:          EventKindEpisode,
+		seedCondition: `SELECT 1 FROM notification_library_seed_state seed WHERE seed.library_id = mf.id`,
+		record:        s.Releases.RecordAvailabilityForLibrary,
+	}}
+	for _, k := range flatItemKinds {
+		passes = append(passes, seedPass{
+			kind: k.Kind,
+			seedCondition: `SELECT 1 FROM notification_content_seed_state seed
+				WHERE seed.library_id = mf.id AND seed.kind = '` + k.Kind + `'`,
+			record: func(ctx context.Context, libraryID int, emitEvents bool) (int, int, error) {
+				return s.Releases.RecordItemAvailabilityForLibrary(ctx, k, libraryID, emitEvents)
+			},
+		})
 	}
 	for passIdx, pass := range passes {
 		rows, err := s.pool.Query(ctx, `
@@ -470,9 +513,10 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 				return fmt.Errorf("mark library %d seeded (%s): %w", libraryID, pass.kind, err)
 			}
 			totalSeeded += inserted
-			// Each pass owns half the progress range.
-			passBase := passIdx * 50
-			report(passBase+(i+1)*50/max(len(libraryIDs), 1),
+			// Each pass owns an equal slice of the progress range.
+			passSpan := 100 / len(passes)
+			passBase := passIdx * passSpan
+			report(passBase+(i+1)*passSpan/max(len(libraryIDs), 1),
 				fmt.Sprintf("Seeded library %d %s availability (%d new rows)", libraryID, pass.kind, inserted))
 		}
 		s.logger.Info("availability seeding completed",

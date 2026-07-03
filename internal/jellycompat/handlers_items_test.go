@@ -43,6 +43,18 @@ func (s *countingContentService) GetItemDetail(_ context.Context, _ *Session, co
 	return &upstreamItemDetail{ContentID: contentID}, nil
 }
 
+func (s *countingContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+	out := make(map[string]*upstreamItemDetail, len(contentIDs))
+	for _, id := range contentIDs {
+		detail, err := s.GetItemDetail(ctx, session, id, libraryID)
+		if err != nil || detail == nil {
+			continue
+		}
+		out[id] = detail
+	}
+	return out, nil
+}
+
 func (s *countingContentService) ListUserLibraries(context.Context, *Session) ([]upstreamUserLibrary, error) {
 	panic("unused")
 }
@@ -193,6 +205,75 @@ func TestHandleEpisodes_StartItemIDMissingReturnsEmptyQueue(t *testing.T) {
 	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?StartItemId="+missingStartItemID, encodedSeriesID)
 	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
 		t.Fatalf("expected empty queue for missing StartItemId, got total=%d items=%+v", result.TotalRecordCount, result.Items)
+	}
+}
+
+func TestHandleEpisodes_AdjacentToReturnsPrevSelfNextWindow(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	encodedAdjacentTo := codec.EncodeStringID(EncodedIDItem, "ep-2")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{
+			{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 4},
+		},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+			{ContentID: "ep-2", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Selected"},
+			{ContentID: "ep-3", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 3, Title: "After"},
+			{ContentID: "ep-4", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 4, Title: "Last"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?AdjacentTo="+encodedAdjacentTo+"&Limit=1", encodedSeriesID)
+	if result.TotalRecordCount != 3 {
+		t.Fatalf("TotalRecordCount = %d, want 3 (prev/self/next)", result.TotalRecordCount)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("len(Items) = %d, want 3: %+v", len(result.Items), result.Items)
+	}
+	if result.Items[0].Name != "First" || result.Items[1].Name != "Selected" || result.Items[2].Name != "After" {
+		t.Fatalf("unexpected window order: %+v", result.Items)
+	}
+}
+
+func TestHandleEpisodes_AdjacentToUnknownReturnsEmptyPage(t *testing.T) {
+	codec := NewResourceIDCodec()
+	seriesContentID := "series-1"
+	seasonContentID := "season-1"
+	encodedSeriesID := codec.EncodeStringID(EncodedIDItem, seriesContentID)
+	encodedUnknown := codec.EncodeStringID(EncodedIDItem, "missing-episode")
+	contentSvc := &countingContentService{
+		seasons: []upstreamSeason{{ContentID: seasonContentID, SeasonNumber: 1, Title: "Season 1", EpisodeCount: 1}},
+	}
+	episodeRepo := &fakeSeasonEpisodeRepo{bySeason: map[string][]*models.Episode{
+		episodeBySeasonKey(seriesContentID, 1): {
+			{ContentID: "ep-1", SeriesID: seriesContentID, SeasonID: seasonContentID, SeasonNumber: 1, EpisodeNumber: 1, Title: "First"},
+		},
+	}}
+	h := &ItemsHandler{
+		content:     contentSvc,
+		userData:    &mockUserDataService{},
+		codec:       codec,
+		mapper:      newMapper(codec, &config.Config{}),
+		images:      NewImageCache(time.Hour, time.Now),
+		episodeRepo: episodeRepo,
+	}
+
+	result := performEpisodesRequest(t, h, "/Shows/"+encodedSeriesID+"/Episodes?AdjacentTo="+encodedUnknown, encodedSeriesID)
+	if result.TotalRecordCount != 0 || len(result.Items) != 0 {
+		t.Fatalf("expected empty page for unknown AdjacentTo, got total=%d items=%+v", result.TotalRecordCount, result.Items)
 	}
 }
 

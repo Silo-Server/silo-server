@@ -326,6 +326,67 @@ func TestAdminMatchApply_RequiresProviderIDs(t *testing.T) {
 	}
 }
 
+func TestAdminMatchApply_NormalizesProviderIDKeys(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"item-5": {ContentID: "item-5", Title: "Test", Type: "movie"},
+		},
+	}
+	metaSvc := &fakeMatchMetadataService{
+		processResult: &metadata.ProcessResult{ContentID: "item-5", Updated: true},
+	}
+	h := NewAdminMatchHandler(items, nil, metaSvc)
+	router := buildMatchRouter(h)
+
+	body, _ := json.Marshal(matchApplyRequest{
+		ProviderIDs: map[string]string{
+			" TMDB ": " 157336 ",
+			"blank":  "   ",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-5/match/apply", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := metaSvc.lastProcess.ProviderIDs["tmdb"]; got != "157336" {
+		t.Errorf("Process provider_ids[tmdb] = %q, want 157336 (keys/values must be normalized)", got)
+	}
+	if _, ok := metaSvc.lastProcess.ProviderIDs[" TMDB "]; ok {
+		t.Errorf("Process received raw key %q, want normalized keys only: %v", " TMDB ", metaSvc.lastProcess.ProviderIDs)
+	}
+	if _, ok := metaSvc.lastProcess.ProviderIDs["blank"]; ok {
+		t.Errorf("blank provider IDs should be dropped, got %v", metaSvc.lastProcess.ProviderIDs)
+	}
+}
+
+func TestAdminMatchApply_RejectsAllBlankProviderIDs(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"item-6": {ContentID: "item-6", Title: "Test", Type: "movie"},
+		},
+	}
+	h := NewAdminMatchHandler(items, nil, &fakeMatchMetadataService{})
+	router := buildMatchRouter(h)
+
+	body, _ := json.Marshal(matchApplyRequest{
+		ProviderIDs: map[string]string{"tmdb": "   ", " ": "123"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-6/match/apply", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for all-blank provider_ids, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminMatchApply_ItemNotFound(t *testing.T) {
 	items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{}}
 	h := NewAdminMatchHandler(items, nil, &fakeMatchMetadataService{})

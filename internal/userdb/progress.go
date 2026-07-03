@@ -20,15 +20,11 @@ type WatchHistoryEntry = userstore.WatchHistoryEntry
 // The position is only updated if the new value is greater than the existing one.
 // The completed flag is set to true when position/duration exceeds the watched threshold.
 func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
 		return nil
 	}
 	now := nowUTC()
-	completed := false
-	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
-		completed = true
-		position = 0 // match MarkWatched() — completed rows hold no resume point
-	}
 	// Mirrors the Postgres pgstore UpdateProgress: `completed` is a one-way
 	// watched latch; position resets to 0 on completion so a rewatch
 	// heartbeat on a completed row re-enters Continue Watching through plain
@@ -47,7 +43,8 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 			duration_seconds = excluded.duration_seconds,
 			completed = CASE WHEN excluded.completed = 1
 				THEN 1 ELSE watch_progress.completed END,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err := db.Exec(query, profileID, mediaItemID, position, duration, completed, now, now, profileID, mediaItemID)
 	if err != nil {
@@ -60,15 +57,11 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 // after the min-resume threshold. The completed flag stays a one-way watched
 // latch: only ClearProgress/ClearProgressBatch (mark unwatched) release it.
 func SetProgress(db *sql.DB, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
 		return nil
 	}
 	now := nowUTC()
-	completed := false
-	if duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct) {
-		completed = true
-		position = 0 // match MarkWatched() — completed rows hold no resume point
-	}
 	query := `
 		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		SELECT ?, ?, ?, ?, ?, ` + visibleTimestampSQL + `
@@ -81,7 +74,8 @@ func SetProgress(db *sql.DB, profileID, mediaItemID string, position, duration f
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
 			completed = watch_progress.completed OR excluded.completed,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err := db.Exec(query, profileID, mediaItemID, position, duration, completed, now, now, profileID, mediaItemID)
 	if err != nil {
@@ -119,7 +113,8 @@ func SetProgressAt(db *sql.DB, profileID, mediaItemID string, position, duration
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
 			completed = watch_progress.completed OR excluded.completed,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err = db.Exec(query, profileID, mediaItemID, position, duration, completed, updatedAtText)
 	if err != nil {
@@ -149,16 +144,19 @@ func SetProgressIfNewer(db *sql.DB, profileID, mediaItemID string, position, dur
 	if suppressed {
 		return false, nil
 	}
+	// event_at is the LWW comparison key (the clamped client event time); the
+	// synced_seq cursor is stamped server-side by the watch_progress triggers.
 	res, err := db.Exec(`
-		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at, event_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
 			position_seconds = excluded.position_seconds,
 			duration_seconds = excluded.duration_seconds,
 			completed = watch_progress.completed OR excluded.completed,
-			updated_at = excluded.updated_at
-		WHERE excluded.updated_at > watch_progress.updated_at
-	`, profileID, mediaItemID, position, duration, completed, updatedAtText)
+			updated_at = excluded.updated_at,
+			event_at = excluded.event_at
+		WHERE excluded.event_at > watch_progress.event_at
+	`, profileID, mediaItemID, position, duration, completed, updatedAtText, updatedAtText)
 	if err != nil {
 		return false, fmt.Errorf("setting newer progress: %w", err)
 	}
@@ -188,7 +186,8 @@ func MarkWatched(db *sql.DB, profileID, mediaItemID string, duration float64) er
 			position_seconds = 0,
 			duration_seconds = excluded.duration_seconds,
 			completed = 1,
-			updated_at = excluded.updated_at
+			updated_at = excluded.updated_at,
+			event_at = excluded.updated_at
 	`
 	_, err := db.Exec(query, profileID, mediaItemID, duration, now, now, profileID, mediaItemID)
 	if err != nil {
@@ -424,6 +423,55 @@ func ListProgress(db *sql.DB, profileID string, status string, limit, offset int
 		return nil, fmt.Errorf("iterating progress rows: %w", err)
 	}
 	return results, nil
+}
+
+// ListProgressSince returns watch_progress rows whose server cursor (synced_seq)
+// exceeds cursor, in cursor order, along with the next cursor to resume from.
+// Delta delivery is driven only by synced_seq, never a client clock (invariant 1).
+func ListProgressSince(db *sql.DB, profileID string, cursor int64, limit int) ([]WatchProgress, int64, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	rows, err := db.Query(`
+		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at, synced_seq,
+		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
+		FROM watch_progress
+		WHERE profile_id = ? AND synced_seq IS NOT NULL AND synced_seq > ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM hidden_history_items hhi
+			WHERE hhi.profile_id = watch_progress.profile_id
+			  AND hhi.media_item_id = watch_progress.media_item_id
+			  AND watch_progress.updated_at <= hhi.hidden_before
+		  )
+		ORDER BY synced_seq ASC
+		LIMIT ?
+	`, profileID, cursor, limit)
+	if err != nil {
+		return nil, cursor, fmt.Errorf("listing progress since: %w", err)
+	}
+	defer rows.Close()
+
+	next := cursor
+	var results []WatchProgress
+	for rows.Next() {
+		var wp WatchProgress
+		var seq int64
+		if err := rows.Scan(
+			&wp.ProfileID, &wp.MediaItemID, &wp.PositionSeconds, &wp.DurationSeconds, &wp.Completed, &wp.UpdatedAt, &seq,
+			&wp.LastFileID, &wp.LastResolution, &wp.LastHDR, &wp.LastCodecVideo, &wp.LastEditionKey,
+		); err != nil {
+			return nil, cursor, fmt.Errorf("scanning progress since row: %w", err)
+		}
+		if seq > next {
+			next = seq
+		}
+		results = append(results, wp)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, cursor, fmt.Errorf("iterating progress since rows: %w", err)
+	}
+	return results, next, nil
 }
 
 func ListProgressByMediaItems(db *sql.DB, profileID string, mediaItemIDs []string) (map[string]WatchProgress, error) {

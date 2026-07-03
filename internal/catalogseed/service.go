@@ -1828,7 +1828,10 @@ func bulkUpdatePeople(ctx context.Context, tx pgx.Tx, people map[int64]*importPe
 		FROM (VALUES `,
 		rows,
 		7,
-		nil,
+		// A standalone VALUES clause has no target column to infer types
+		// from, so v.id must be cast explicitly or it defaults to text and
+		// the join predicate becomes bigint = text (SQLSTATE 42883).
+		map[int]string{0: "::bigint"},
 		`) AS v(id, tmdb_id, imdb_id, tvdb_id, plex_guid, photo_path, photo_thumbhash)
 		WHERE p.id = v.id`,
 		nil,

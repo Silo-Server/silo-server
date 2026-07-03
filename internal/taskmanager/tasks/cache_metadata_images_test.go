@@ -56,6 +56,8 @@ func TestCacheMetadataImagesTaskReportsStats(t *testing.T) {
 			Claimed:          4,
 			Succeeded:        3,
 			Failed:           1,
+			UploadedVariants: 7,
+			ExistingVariants: 2,
 		},
 	}
 	task := NewCacheMetadataImagesTask(runner)
@@ -72,7 +74,7 @@ func TestCacheMetadataImagesTaskReportsStats(t *testing.T) {
 	if runner.maxRuntime != 10*time.Minute {
 		t.Fatalf("maxRuntime = %s, want 10m", runner.maxRuntime)
 	}
-	if progress.message != "Batches 3, enqueued 5 existing, claimed 4, cached 3, failed 1, skipped 0, deleted 0 old successes" {
+	if progress.message != "Batches 3, enqueued 5 existing, claimed 4, cached 3, failed 1, skipped 0, uploaded 7 variants, found 2 existing variants, deleted 0 old successes" {
 		t.Fatalf("progress message = %q", progress.message)
 	}
 }

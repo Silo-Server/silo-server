@@ -28,6 +28,7 @@ type LibraryPosterPresigner interface {
 // substitute a stub without standing up a Postgres pool.
 type browseSource interface {
 	BrowsePage(ctx context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error)
+	BrowseRecentlyAddedAcrossLibraries(ctx context.Context, base catalog.BrowseFilters, libraryIDs []int) (*catalog.BrowseResult, error)
 	ListGenres(ctx context.Context, filters catalog.BrowseFilters) ([]string, error)
 }
 
@@ -189,6 +190,7 @@ type episodeListSource interface {
 	ListBySeason(ctx context.Context, seriesID string, seasonNum int) ([]*models.Episode, error)
 	ListBySeriesGroupedBySeason(ctx context.Context, seriesID string) (map[int][]*models.Episode, error)
 	ListBySeriesIDs(ctx context.Context, seriesIDs []string) (map[string][]*models.Episode, error)
+	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.Episode, error)
 }
 
 // directContentService implements ContentService by calling catalog repos directly.
@@ -264,18 +266,7 @@ func clampMaxContentRating(existing, requested string) string {
 func (s *directContentService) ListUserLibraries(ctx context.Context, session *Session) ([]upstreamUserLibrary, error) {
 	filter := s.resolveFilter(ctx, session)
 
-	var folders []*models.MediaFolder
-	var err error
-	if filter.AllowedLibraryIDs != nil {
-		// A non-nil allowlist means the viewer is restricted; an empty
-		// allowlist grants access to no libraries at all.
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return []upstreamUserLibrary{}, nil
-		}
-		folders, err = s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
-	} else {
-		folders, err = s.folderRepo.GetEnabled(ctx)
-	}
+	folders, err := s.accessibleFolders(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("list libraries: %w", err)
 	}
@@ -313,6 +304,51 @@ func (s *directContentService) ListUserLibraries(ctx context.Context, session *S
 		libraries = append(libraries, lib)
 	}
 	return libraries, nil
+}
+
+// accessibleFolders resolves the media folders the viewer may browse, honoring
+// the allowlist semantics shared by the library and browse endpoints. A nil
+// AllowedLibraryIDs means unrestricted (all enabled libraries); a non-nil but
+// empty allowlist grants access to no libraries at all.
+func (s *directContentService) accessibleFolders(ctx context.Context, filter catalog.AccessFilter) ([]*models.MediaFolder, error) {
+	if filter.AllowedLibraryIDs != nil {
+		if len(filter.AllowedLibraryIDs) == 0 {
+			return nil, nil
+		}
+		return s.folderRepo.ListByIDs(ctx, filter.AllowedLibraryIDs)
+	}
+	return s.folderRepo.GetEnabled(ctx)
+}
+
+// accessibleLibraryIDs resolves the library IDs the viewer may browse, applying
+// the same allowlist/disabled-list semantics as ListUserLibraries. It is used to
+// fan a no-parentId recently_added browse into one fast single-library query per
+// library.
+func (s *directContentService) accessibleLibraryIDs(ctx context.Context, filter catalog.AccessFilter) ([]int, error) {
+	folders, err := s.accessibleFolders(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	disabled := make(map[int]struct{}, len(filter.DisabledLibraryIDs))
+	for _, id := range filter.DisabledLibraryIDs {
+		disabled[id] = struct{}{}
+	}
+	ids := make([]int, 0, len(folders))
+	for _, f := range folders {
+		if _, ok := disabled[f.ID]; ok {
+			continue
+		}
+		// Audiobook and podcast libraries are served by the ABS-compat API and
+		// are never exposed on the Jellyfin surface. ListUserLibraries skips
+		// them; skip them here too so the recently_added fan-out can't pull
+		// compat-hidden libraries into /Items/Latest and so we don't waste a
+		// per-library query on folders that yield no Jellyfin-visible rows.
+		if isCompatHiddenLibraryType(f.Type) {
+			continue
+		}
+		ids = append(ids, f.ID)
+	}
+	return ids, nil
 }
 
 func (s *directContentService) BrowseItems(ctx context.Context, session *Session, params url.Values) (*upstreamBrowseResponse, error) {
@@ -356,6 +392,27 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		RequireBackdrop:    parseBool(params.Get("require_backdrop"), false),
 	}
 
+	// A no-parentId recently_added browse (the /Items/Latest hot path) would
+	// otherwise run a multi-library MIN(first_seen_at) + GROUP BY scan over the
+	// whole catalog. Fan it into one fast single-library index walk per library
+	// and merge in memory instead. Only offset 0 is served this way; deeper
+	// pages fall back to the multi-library query below.
+	crossLibraryRecentlyAdded := filters.Sort == "recently_added" && filters.LibraryID == 0
+	var crossLibraryIDs []int
+	if crossLibraryRecentlyAdded {
+		ids, err := s.accessibleLibraryIDs(ctx, filter)
+		if err != nil {
+			return nil, fmt.Errorf("browse items: %w", err)
+		}
+		// With 0 or 1 accessible libraries the single multi-library query is
+		// already the fast path, so leave behavior unchanged.
+		if len(ids) >= 2 {
+			crossLibraryIDs = ids
+		} else {
+			crossLibraryRecentlyAdded = false
+		}
+	}
+
 	var collected []upstreamListItem
 	totalFromCatalog := 0
 	totalKnown := false
@@ -368,7 +425,15 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 
 	for len(collected) < requestedLimit && scannedRows < maxScannedRows {
 		wantTotal := includeTotal && !totalKnown
-		result, err := s.browseRepo.BrowsePage(ctx, filters, wantTotal)
+		var result *catalog.BrowseResult
+		var err error
+		if crossLibraryRecentlyAdded && filters.Offset == 0 {
+			// The merge helper returns a Total/HasMore consistent with offset 0,
+			// so wantTotal is satisfied without the expensive cross-library count.
+			result, err = s.browseRepo.BrowseRecentlyAddedAcrossLibraries(ctx, filters, crossLibraryIDs)
+		} else {
+			result, err = s.browseRepo.BrowsePage(ctx, filters, wantTotal)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("browse items: %w", err)
 		}
@@ -378,13 +443,14 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		}
 		hasMore = result.HasMore
 
-		batch := make([]upstreamListItem, 0, len(result.Items))
-		for _, mi := range result.Items {
-			if s.detailSvc != nil {
-				if localized, locErr := s.detailSvc.LocalizeItemModel(ctx, mi, filter); locErr == nil && localized != nil {
-					mi = localized
-				}
+		localizedItems := result.Items
+		if s.detailSvc != nil {
+			if localized, locErr := s.detailSvc.LocalizeItemModels(ctx, result.Items, filter); locErr == nil && localized != nil {
+				localizedItems = localized
 			}
+		}
+		batch := make([]upstreamListItem, 0, len(localizedItems))
+		for _, mi := range localizedItems {
 			batch = append(batch, mediaItemToListItem(mi))
 		}
 		s.presignListItems(ctx, batch)
@@ -492,13 +558,14 @@ func (s *directContentService) SearchItems(ctx context.Context, session *Session
 		hasMore = opts.Offset+len(items) < total
 	}
 
-	listItems := make([]upstreamListItem, 0, len(items))
-	for _, mi := range items {
-		if s.detailSvc != nil {
-			if localized, locErr := s.detailSvc.LocalizeItemModel(ctx, mi, filter); locErr == nil && localized != nil {
-				mi = localized
-			}
+	localizedItems := items
+	if s.detailSvc != nil {
+		if localized, locErr := s.detailSvc.LocalizeItemModels(ctx, items, filter); locErr == nil && localized != nil {
+			localizedItems = localized
 		}
+	}
+	listItems := make([]upstreamListItem, 0, len(localizedItems))
+	for _, mi := range localizedItems {
 		listItems = append(listItems, mediaItemToListItem(mi))
 	}
 	s.presignListItems(ctx, listItems)
@@ -529,26 +596,129 @@ func (s *directContentService) GetItemDetail(ctx context.Context, session *Sessi
 
 	// Enrich with user data
 	if s.storeProvider != nil {
-		store, storeErr := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
-		if storeErr == nil {
-			progress, _ := userstore.GetProgressWithCompletedHistory(ctx, store, session.ProfileID, contentID)
-			result.UserData = seasonUserDataFromProgress(progress)
+		if store, storeErr := s.storeProvider.ForUser(ctx, session.StreamAppUserID); storeErr == nil {
+			s.enrichDetailUserData(ctx, store, session.ProfileID, contentID, &result)
+		}
+	}
 
-			// A series never has a progress row of its own, so roll watch
-			// state up from its episodes (mirrors applySeasonUserData) to
-			// give clients Played/UnplayedItemCount at the series level.
-			if result.UserData == nil && strings.EqualFold(result.Type, "series") && s.episodeRepo != nil {
-				if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
-					episodes := episodesBySeries[contentID]
-					episodeIDs := modelEpisodeContentIDs(episodes)
-					progressMap := chunkedProgressByMediaItems(ctx, store, session.ProfileID, episodeIDs)
-					result.UserData = catalog.EpisodeRollupUserData(episodes, progressMap)
+	return &result, nil
+}
+
+// enrichDetailUserData populates the per-profile UserData on an item detail from
+// the user store: leaf progress for movies/episodes, and an episode rollup for
+// series (which never own a progress row of their own). Shared by GetItemDetail
+// and GetItemDetailsByIDs so both surfaces report identical Played/position/
+// UnplayedItemCount values.
+func (s *directContentService) enrichDetailUserData(ctx context.Context, store userstore.UserStore, profileID, contentID string, result *upstreamItemDetail) {
+	progress, _ := userstore.GetProgressWithCompletedHistory(ctx, store, profileID, contentID)
+	result.UserData = seasonUserDataFromProgress(progress)
+
+	// A series never has a progress row of its own, so roll watch state up from
+	// its episodes (mirrors applySeasonUserData) to give clients Played/
+	// UnplayedItemCount at the series level.
+	if result.UserData == nil && strings.EqualFold(result.Type, "series") && s.episodeRepo != nil {
+		if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
+			episodes := episodesBySeries[contentID]
+			episodeIDs := modelEpisodeContentIDs(episodes)
+			progressMap := chunkedProgressByMediaItems(ctx, store, profileID, episodeIDs)
+			result.UserData = catalog.EpisodeRollupUserData(episodes, progressMap)
+		}
+	}
+}
+
+// GetItemDetailsByIDs is the batched form of GetItemDetail for a page of content
+// IDs. It returns upstream item details keyed by content ID, each identical to
+// what GetItemDetail would return for that id: the catalog detail is built by
+// the batched DetailService path (or GetEpisodeDetailsForSeries for episodes),
+// then run through the same compat-excluded-type guard, itemDetailToUpstream
+// conversion, and UserData enrichment. IDs that are excluded media types,
+// access-filtered, or otherwise unresolved are simply absent from the map so the
+// caller renders them from list data, mirroring GetItemDetail's error path.
+func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]*upstreamItemDetail, error) {
+	out := make(map[string]*upstreamItemDetail, len(contentIDs))
+	if len(contentIDs) == 0 || s.detailSvc == nil {
+		return out, nil
+	}
+	filter := applyCompatPresentationLibrary(s.resolveFilter(ctx, session), libraryID)
+
+	details := make(map[string]*catalog.ItemDetail, len(contentIDs))
+
+	// Movies/series (and any other media_items rows) in one batched call.
+	itemDetails, err := s.detailSvc.GetItemDetailsByIDs(ctx, contentIDs, filter)
+	if err != nil {
+		return nil, wrapCatalogError(err)
+	}
+	for id, detail := range itemDetails {
+		details[id] = detail
+	}
+
+	// Episodes: group the remaining ids by series and reuse the series-hoisted
+	// batch path, which is the episode equivalent of GetItemDetailsByIDs.
+	remaining := make([]string, 0, len(contentIDs))
+	for _, id := range contentIDs {
+		if _, ok := details[id]; !ok {
+			remaining = append(remaining, id)
+		}
+	}
+	if len(remaining) > 0 && s.episodeRepo != nil {
+		if episodeIDsBySeries, err := s.groupEpisodesBySeries(ctx, remaining); err == nil {
+			for seriesID, epIDs := range episodeIDsBySeries {
+				epDetails, epErr := s.detailSvc.GetEpisodeDetailsForSeries(ctx, seriesID, epIDs, filter)
+				if epErr != nil {
+					// Series inaccessible or a transient error: leave these ids
+					// unresolved so the caller renders them from list data,
+					// matching per-item GetItemDetail erroring for each.
+					continue
+				}
+				for id, detail := range epDetails {
+					details[id] = detail
 				}
 			}
 		}
 	}
 
-	return &result, nil
+	if len(details) == 0 {
+		return out, nil
+	}
+
+	// Resolve the user store once for the whole page; enrichment is per-item but
+	// uses the identical code path as GetItemDetail.
+	var store userstore.UserStore
+	if s.storeProvider != nil {
+		if resolved, storeErr := s.storeProvider.ForUser(ctx, session.StreamAppUserID); storeErr == nil {
+			store = resolved
+		}
+	}
+
+	for id, detail := range details {
+		if isCompatExcludedMediaType(detail.Type) {
+			continue
+		}
+		upstream := itemDetailToUpstream(detail)
+		if store != nil {
+			s.enrichDetailUserData(ctx, store, session.ProfileID, id, &upstream)
+		}
+		out[id] = &upstream
+	}
+	return out, nil
+}
+
+// groupEpisodesBySeries maps the subset of contentIDs that are episodes to their
+// series IDs, returning seriesID → episode content IDs. Non-episode ids are
+// silently skipped.
+func (s *directContentService) groupEpisodesBySeries(ctx context.Context, contentIDs []string) (map[string][]string, error) {
+	episodes, err := s.episodeRepo.GetByIDs(ctx, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	grouped := make(map[string][]string, len(episodes))
+	for _, ep := range episodes {
+		if ep == nil || ep.SeriesID == "" {
+			continue
+		}
+		grouped[ep.SeriesID] = append(grouped[ep.SeriesID], ep.ContentID)
+	}
+	return grouped, nil
 }
 
 func (s *directContentService) ListSeasons(ctx context.Context, session *Session, seriesID string, libraryID *int) ([]upstreamSeason, error) {
