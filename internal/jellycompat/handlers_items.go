@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -943,9 +944,35 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	// library's collection type when no explicit IncludeItemTypes is given.
 	// Without this, clients like Infuse may not display "Latest Movies"
 	// sections because they rely on the library-type-appropriate item filter.
-	if query.parentLibraryID > 0 && len(query.itemTypes) == 0 {
-		if inferredType := h.inferLibraryItemType(r.Context(), session, query.parentLibraryID); inferredType != "" {
-			query.itemTypes = []string{inferredType}
+	// libraryItemType is "movie", "series", or "" (any other/mixed type) — it
+	// also decides fast-path eligibility below, so it is resolved once here.
+	var libraryItemType string
+	if query.parentLibraryID > 0 {
+		libraryItemType = h.inferLibraryItemType(r.Context(), session, query.parentLibraryID)
+		if len(query.itemTypes) == 0 && libraryItemType != "" {
+			query.itemTypes = []string{libraryItemType}
+		}
+	}
+
+	// Fast path: a per-library Latest (first page, no played filter, no backdrop
+	// filter) is the same user-agnostic list as the native "recently added"
+	// library rail (both order by mil.first_seen_at DESC). Serve it through the
+	// native section fetch so it reuses the shared resolved-list cache instead of
+	// re-running BrowseItems. It is restricted to movies and series libraries;
+	// every other library type (ebook, music, manga, mixed, …) is ignored and
+	// keeps its exact BrowseItems behavior. On any failure fall back to browse.
+	if (libraryItemType == "movie" || libraryItemType == "series") && query.startIndex == 0 && query.isPlayed == nil && !query.requireBackdrop && h.sectionsFetcher != nil {
+		items, err := h.loadLatestViaSections(r.Context(), session, query)
+		if err == nil {
+			applyImageTypeLimit(items, query.imageTypeLimit)
+			writeJSON(w, http.StatusOK, items)
+			return
+		}
+		// errLatestNotEligible is an expected "this request can't use the cached
+		// path" signal (e.g. a client requesting a type other than the library's
+		// own), not a failure — fall back quietly.
+		if !errors.Is(err, errLatestNotEligible) {
+			slog.Warn("jellycompat: latest via sections failed, falling back to browse", "error", err)
 		}
 	}
 
@@ -955,18 +982,32 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.rememberListImages(result.Items)
 
-	contentIDs := contentIDsFromListItems(result.Items)
-	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDs)
+	items, err := h.buildLatestItemDTOs(r.Context(), session, query, result.Items)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, episodeContentIDsFromListItems(result.Items), libraryIDPtr(query.parentLibraryID))
+	applyImageTypeLimit(items, query.imageTypeLimit)
+	writeJSON(w, http.StatusOK, items)
+}
+
+// buildLatestItemDTOs maps a resolved list of upstream list items to the
+// /Items/Latest wire response, applying the per-user overlay (favorites,
+// progress, episode targets), the library ParentId, and the optional detail-
+// field upgrade. It is the shared tail of both the native section fast path and
+// the BrowseItems fallback so the overlay logic lives in exactly one place.
+func (h *ItemsHandler) buildLatestItemDTOs(ctx context.Context, session *Session, query itemsQuery, listItems []upstreamListItem) ([]baseItemDTO, error) {
+	h.rememberListImages(listItems)
+
+	contentIDs := contentIDsFromListItems(listItems)
+	favorites, progress, err := resolveUserStateForContentIDs(ctx, session, h.userData, contentIDs)
 	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
+		return nil, err
+	}
+	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(ctx, session, episodeContentIDsFromListItems(listItems), libraryIDPtr(query.parentLibraryID))
+	if err != nil {
+		return nil, err
 	}
 
 	// Encode library ID for the ParentId field on each item.
@@ -977,11 +1018,11 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 
 	var detailsByID map[string]*upstreamItemDetail
 	if query.needsDetailFields {
-		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, libraryIDPtr(query.parentLibraryID))
+		detailsByID = h.batchListItemDetails(ctx, session, contentIDs, libraryIDPtr(query.parentLibraryID))
 	}
 
-	items := make([]baseItemDTO, 0, len(result.Items))
-	for _, item := range result.Items {
+	items := make([]baseItemDTO, 0, len(listItems))
+	for _, item := range listItems {
 		if query.needsDetailFields {
 			if detail, ok := detailsByID[item.ContentID]; ok && detail != nil {
 				h.rememberDetailImages(*detail)
@@ -1006,8 +1047,105 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, dto)
 	}
-	applyImageTypeLimit(items, query.imageTypeLimit)
-	writeJSON(w, http.StatusOK, items)
+	return items, nil
+}
+
+// errLatestNotEligible signals that a /Items/Latest request cannot be served
+// through the native section path without diverging from the BrowseItems
+// fallback, so HandleLatest should fall back quietly rather than log a failure.
+var errLatestNotEligible = errors.New("jellycompat: latest not eligible for native section path")
+
+// loadLatestViaSections serves a per-library /Items/Latest through the native
+// recently-added section fetch, reusing the shared resolved-list cache. The
+// synthetic section carries the same type+config+limit+scope the native library
+// rail uses, so with the identity-independent cache key both surfaces collapse
+// to one shared entry. The cached *models.MediaItem values are treated
+// read-only; LocalizeItemModels deep-copies before any presign mutation.
+func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Session, query itemsQuery) ([]baseItemDTO, error) {
+	// The caller has already restricted this to movies/series libraries. Pin the
+	// exact single type the BrowseItems fallback would use (movie or series) so
+	// the two paths return byte-identical membership; if a client asked for some
+	// other type against this library, fall back rather than risk a mismatch.
+	cfg := latestRecentlyAddedConfig(query.itemTypes)
+	if cfg == nil {
+		return nil, errLatestNotEligible
+	}
+
+	filter := h.resolveAccessFilter(ctx, session)
+	// Fold the client's clamped max content rating into the access filter so the
+	// shared cached list respects the client's cap AND the cache key captures it
+	// — identical to the clamp BrowseItems applies.
+	filter.MaxContentRating = clampMaxContentRating(filter.MaxContentRating, query.maxOfficialRating)
+
+	limit := query.limit
+	if limit <= 0 {
+		limit = compatDefaultLatestLimit
+	}
+	libraryID := query.parentLibraryID
+	resolved := sections.ResolvedSection{
+		ID:          "compat-latest",
+		SectionType: sections.SectionRecentlyAdded,
+		Title:       "Latest",
+		ItemLimit:   limit,
+		Config:      cfg,
+	}
+
+	withItems, err := h.sectionsFetcher.FetchOne(ctx, resolved, &libraryID, nil, session.StreamAppUserID, session.ProfileID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	listItems := h.compatListItemsFromModels(ctx, filter, withItems.Items)
+	return h.buildLatestItemDTOs(ctx, session, query, listItems)
+}
+
+// compatDefaultLatestLimit mirrors BrowseItems' default page size (see
+// directContentService.BrowseItems) so the native Latest path fetches the same
+// number of rows when the client omits Limit.
+const compatDefaultLatestLimit = 24
+
+// latestRecentlyAddedConfig encodes the inferred item-type filter into the
+// recently-added section Config (the filter_type field buildRecentlyAddedQuery
+// reads). It normalizes through compatScopedTypes — the SAME helper BrowseItems
+// uses — and only encodes a concrete single type (movie or series); an empty or
+// mixed library yields a nil config (all types).
+func latestRecentlyAddedConfig(itemTypes []string) json.RawMessage {
+	scoped := compatScopedTypes(strings.Join(itemTypes, ","))
+	var filterType string
+	switch scoped {
+	case "movie", "series":
+		filterType = scoped
+	default:
+		return nil
+	}
+	cfg, err := json.Marshal(sections.SectionConfigFilters{FilterType: filterType})
+	if err != nil {
+		return nil
+	}
+	return cfg
+}
+
+// compatListItemsFromModels localizes cached media-item models, converts them to
+// the compat list-item wire shape, and presigns their image URLs. The cached
+// models are never mutated in place: LocalizeItemModels deep-copies, and the
+// per-item presign operates on the freshly-built upstreamListItem values.
+func (h *ItemsHandler) compatListItemsFromModels(ctx context.Context, filter catalog.AccessFilter, items []*models.MediaItem) []upstreamListItem {
+	localized := items
+	if h.detailSvc != nil {
+		if loc, err := h.detailSvc.LocalizeItemModels(ctx, items, filter); err == nil && loc != nil {
+			localized = loc
+		}
+	}
+	listItems := make([]upstreamListItem, 0, len(localized))
+	for _, mi := range localized {
+		if mi == nil {
+			continue
+		}
+		li := mediaItemToListItem(mi)
+		h.presignCompatListItem(ctx, &li)
+		listItems = append(listItems, li)
+	}
+	return listItems
 }
 
 // HandleSuggestions serves GET /Items/Suggestions.

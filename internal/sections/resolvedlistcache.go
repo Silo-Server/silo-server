@@ -209,17 +209,31 @@ func cloneMediaItems(items []*models.MediaItem) []*models.MediaItem {
 
 // resolvedListCacheKey builds the access-scope cache key. It is security
 // critical: it must capture every access boundary and nothing that is per-user.
-// Modeled on editorialCandidateCacheKey, extended with section identity (type +
-// ID + config hash), the requested ItemLimit, and the full access scope. It
-// deliberately excludes userID/profileID so entries are shared across everyone
-// with the same access.
+//
+// Keying is identity-independent: an entry is keyed by what fully determines the
+// shared membership and ordering — the section TYPE, its CONFIG (hashed), the
+// requested ItemLimit, and the full access scope (library scope + rating +
+// excluded types + content allow-list + name prefix). It deliberately EXCLUDES
+// resolved.ID. Every cacheable section type derives its membership purely from
+// TYPE + CONFIG + limit + scope: none of the cacheable fetch helpers
+// (recently_added / recently_released, genre / custom_filter,
+// critically_acclaimed, award_winners, format_showcase, seasonal_themed,
+// mood_collection, trending_on_server, new_to_library, most_watched,
+// trending_discover, admin_curated_list, or the library-collection path) reads
+// the section's own ID to determine which items it contains — the sole s.ID read
+// lives in the non-cacheable user-collection branch. Dropping the arbitrary ID
+// lets two sections that share type+config+limit+scope collapse to ONE shared
+// entry: e.g. a natively configured "recently added" library rail and the
+// jellyfin-compat /Items/Latest for that same library are built once and reused
+// across both surfaces.
+//
+// userID/profileID are still excluded so entries are shared across everyone with
+// the same access; the per-user overlay is always recomputed downstream, so a
+// cached entry never leaks one profile's state to another.
 func resolvedListCacheKey(resolved ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) string {
 	var b strings.Builder
 	b.WriteString("type=")
 	b.WriteString(string(resolved.SectionType))
-
-	b.WriteString("|id=")
-	b.WriteString(resolved.ID)
 
 	b.WriteString("|config=")
 	b.WriteString(hashSectionConfig(resolved.Config))

@@ -97,6 +97,134 @@ func TestResolvedListCacheScopeIsolation(t *testing.T) {
 	}
 }
 
+// TestResolvedListCacheKeyIgnoresSectionID is the core Approach-2 guarantee: two
+// sections that share type+config+limit+scope but carry different arbitrary IDs
+// hash to the SAME key. This is what lets a native "recently added" rail and the
+// jellyfin-compat /Items/Latest collapse to one shared cache entry.
+func TestResolvedListCacheKeyIgnoresSectionID(t *testing.T) {
+	cfg := json.RawMessage(`{"filter_type":"movie"}`)
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	libraryID := 7
+
+	native := ResolvedSection{ID: "home-rail-42", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
+	compat := ResolvedSection{ID: "compat-latest", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
+
+	keyNative := resolvedListCacheKey(native, &libraryID, nil, scope)
+	keyCompat := resolvedListCacheKey(compat, &libraryID, nil, scope)
+	if keyNative != keyCompat {
+		t.Fatalf("expected identical keys regardless of section ID, got %q vs %q", keyNative, keyCompat)
+	}
+
+	// A differing type, config, limit, library, or scope must still split the key
+	// — the ID is the only field that no longer participates.
+	if resolvedListCacheKey(ResolvedSection{ID: "x", SectionType: SectionRecentlyReleased, ItemLimit: 24, Config: cfg}, &libraryID, nil, scope) == keyNative {
+		t.Fatalf("different section type must change the key")
+	}
+	if resolvedListCacheKey(ResolvedSection{ID: "x", SectionType: SectionRecentlyAdded, ItemLimit: 12, Config: cfg}, &libraryID, nil, scope) == keyNative {
+		t.Fatalf("different item limit must change the key")
+	}
+	if resolvedListCacheKey(native, &libraryID, nil, catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "R"}) == keyNative {
+		t.Fatalf("different max content rating must change the key")
+	}
+	otherLibrary := 8
+	if resolvedListCacheKey(native, &otherLibrary, nil, scope) == keyNative {
+		t.Fatalf("different library must change the key")
+	}
+}
+
+// TestResolvedListCacheSharedAcrossSurfaces proves the WIN end-to-end through
+// getOrRefresh: a native recently-added section and the compat /Items/Latest for
+// the same library+type+limit+scope build the shared list exactly ONCE and reuse
+// it across both surfaces.
+func TestResolvedListCacheSharedAcrossSurfaces(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+
+	cfg := json.RawMessage(`{"filter_type":"movie"}`)
+	scope := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	libraryID := 7
+	now := time.Unix(1_700_000_000, 0)
+
+	native := ResolvedSection{ID: "home-recent-1", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
+	compat := ResolvedSection{ID: "compat-latest", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: cfg}
+
+	keyNative := resolvedListCacheKey(native, &libraryID, nil, scope)
+	keyCompat := resolvedListCacheKey(compat, &libraryID, nil, scope)
+
+	var calls int64
+	shared := mediaItems("m1", "m2", "m3")
+
+	// Native surface builds the list first (cold miss → loader runs).
+	gotNative, _, err := getOrRefresh(context.Background(), keyNative, now, staticLoader(shared, &calls))
+	if err != nil {
+		t.Fatalf("native load: %v", err)
+	}
+	// Compat surface hits the SAME entry: the loader must NOT run again.
+	gotCompat, _, err := getOrRefresh(context.Background(), keyCompat, now, func(context.Context) ([]*models.MediaItem, int, error) {
+		t.Fatalf("compat loader must not run: the native entry should be shared")
+		return nil, 0, nil
+	})
+	if err != nil {
+		t.Fatalf("compat load: %v", err)
+	}
+
+	if got := atomic.LoadInt64(&calls); got != 1 {
+		t.Fatalf("shared list built %d times, want exactly 1", got)
+	}
+	if a, b := itemIDs(gotNative), itemIDs(gotCompat); len(a) != 3 || len(b) != 3 || a[0] != b[0] || a[2] != b[2] {
+		t.Fatalf("surfaces returned divergent lists: native=%v compat=%v", a, b)
+	}
+}
+
+// TestResolvedListCacheKeyScopeStillIsolatesWithoutID is the SECURITY guarantee:
+// with the section ID removed from the key, two requests that are identical
+// except for access scope (library, max content rating, or allowed-content-ids)
+// must STILL hash to distinct keys so one profile can never be served another's
+// membership.
+func TestResolvedListCacheKeyScopeStillIsolatesWithoutID(t *testing.T) {
+	// Deliberately identical section identity to prove scope alone splits the key.
+	resolved := ResolvedSection{ID: "same-id", SectionType: SectionRecentlyAdded, ItemLimit: 24, Config: json.RawMessage(`{"filter_type":"movie"}`)}
+	base := catalog.AccessFilter{AllowedLibraryIDs: []int{1, 2}, MaxContentRating: "PG-13"}
+	lib1, lib2 := 7, 8
+
+	baseline := resolvedListCacheKey(resolved, &lib1, nil, base)
+
+	// Different presentation library.
+	if resolvedListCacheKey(resolved, &lib2, nil, base) == baseline {
+		t.Fatalf("different library must isolate the key even with identical section ID")
+	}
+	// Different max content rating.
+	rating := base
+	rating.MaxContentRating = "R"
+	if resolvedListCacheKey(resolved, &lib1, nil, rating) == baseline {
+		t.Fatalf("different max content rating must isolate the key")
+	}
+	// Different allowed-content-ids (content-restricted profile).
+	restricted := base
+	restricted.AllowedContentIDs = []string{"c1", "c2"}
+	if resolvedListCacheKey(resolved, &lib1, nil, restricted) == baseline {
+		t.Fatalf("different allowed-content-ids must isolate the key")
+	}
+	// Different accessible library set.
+	accessible := base
+	accessible.AllowedLibraryIDs = []int{1, 2, 3}
+	if resolvedListCacheKey(resolved, &lib1, nil, accessible) == baseline {
+		t.Fatalf("different accessible library set must isolate the key")
+	}
+	// Different disabled library set.
+	disabled := base
+	disabled.DisabledLibraryIDs = []int{9}
+	if resolvedListCacheKey(resolved, &lib1, nil, disabled) == baseline {
+		t.Fatalf("different disabled library set must isolate the key")
+	}
+	// Different excluded media types.
+	excluded := base
+	excluded.ExcludedMediaTypes = []string{"audiobook"}
+	if resolvedListCacheKey(resolved, &lib1, nil, excluded) == baseline {
+		t.Fatalf("different excluded media types must isolate the key")
+	}
+}
+
 // TestResolvedListCacheKeyContentBoundaries verifies the content-scoping access
 // boundaries (AllowedContentIDs, NamePrefix) that the filter-driven builders
 // enforce as SQL constraints each produce a distinct key, so a content-restricted
