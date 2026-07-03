@@ -11,6 +11,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -65,6 +66,21 @@ func TestPolicyValidateReturnsIssuesWithOK(t *testing.T) {
 	}
 	if len(response.Errors) == 0 || response.Errors[0].Row == 0 || response.Errors[0].Col == 0 {
 		t.Fatalf("errors = %#v, want row/col diagnostics", response.Errors)
+	}
+}
+
+func TestPolicyValidateRejectsOversizedBody(t *testing.T) {
+	handler := NewPolicyHandler(nil, nil, nil, policyEditorEnabled)
+	rec := httptest.NewRecorder()
+	req := newPolicyHandlerRequest(http.MethodPost, "/admin/policy/validate", map[string]any{
+		"domain": policy.DomainScope,
+		"source": strings.Repeat("a", maxPolicyRequestBodyBytes+1),
+	}, nil)
+
+	handler.HandleValidate(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d, body = %s", rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
 	}
 }
 

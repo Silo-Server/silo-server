@@ -31,6 +31,28 @@ const (
 	policyVersionNotFoundMessage    = "Policy version not found"
 )
 
+// maxPolicyRequestBodyBytes bounds JSON bodies on policy write endpoints.
+// CompileCheck already caps Rego sources at 256 KiB, but only after the body
+// has been decoded; 1 MiB leaves room for JSON encoding overhead and simulate
+// input documents while keeping oversized payloads from buffering in memory.
+const maxPolicyRequestBodyBytes = 1 << 20
+
+// decodePolicyRequest decodes a size-capped JSON request body into dst,
+// writing the error response and returning false when decoding fails.
+func decodePolicyRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxPolicyRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Request body must be under 1 MiB")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
+		return false
+	}
+	return true
+}
+
 // PolicyHandler handles policy management and simulation endpoints.
 type PolicyHandler struct {
 	system          *policy.System
@@ -226,8 +248,7 @@ func (h *PolicyHandler) HandleCreateDocument(w http.ResponseWriter, r *http.Requ
 	}
 
 	var req policyCreateDocumentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
+	if !decodePolicyRequest(w, r, &req) {
 		return
 	}
 	domain := strings.TrimSpace(req.Domain)
@@ -347,8 +368,7 @@ func (h *PolicyHandler) HandleCreateVersion(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req policyCreateVersionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
+	if !decodePolicyRequest(w, r, &req) {
 		return
 	}
 
@@ -426,8 +446,7 @@ func (h *PolicyHandler) HandleSetDocumentEnabled(w http.ResponseWriter, r *http.
 	}
 
 	var req policySetEnabledRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
+	if !decodePolicyRequest(w, r, &req) {
 		return
 	}
 	generation, err := h.store.SetEnabled(r.Context(), documentID, req.Enabled)
@@ -468,8 +487,7 @@ func (h *PolicyHandler) HandleValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req policyValidateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
+	if !decodePolicyRequest(w, r, &req) {
 		return
 	}
 	response := policyValidateResponse{CompiledOK: true, Errors: []policy.CompileIssue{}}
@@ -486,8 +504,7 @@ func (h *PolicyHandler) HandleSimulate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req policy.SimulateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, policyErrorBadRequest, policyInvalidRequestBodyMessage)
+	if !decodePolicyRequest(w, r, &req) {
 		return
 	}
 	result, err := policy.Simulate(r.Context(), h.store, req)
