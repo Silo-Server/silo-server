@@ -93,6 +93,41 @@ func TestMapSortByDateLastContentAdded(t *testing.T) {
 	}
 }
 
+func TestParseItemsQueryDateLastContentAddedSortScope(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "series only",
+			path: "/Items?IncludeItemTypes=Series&SortBy=DateLastContentAdded",
+			want: "latest_episode_added",
+		},
+		{
+			name: "movie",
+			path: "/Items?IncludeItemTypes=Movie&SortBy=DateLastContentAdded",
+			want: "created_at",
+		},
+		{
+			name: "no type",
+			path: "/Items?SortBy=DateLastContentAdded",
+			want: "created_at",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+
+			query := parseItemsQuery(req, NewResourceIDCodec())
+
+			if query.sort != tc.want {
+				t.Fatalf("sort = %q, want %q", query.sort, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseContentIDParam(t *testing.T) {
 	got := parseContentIDParam(" movie-1, movie-2, movie-1 ,, ")
 	want := []string{"movie-1", "movie-2"}

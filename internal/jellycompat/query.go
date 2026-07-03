@@ -118,6 +118,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
 	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
+	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
+		result.sort = "created_at"
+	}
 	if len(result.itemTypes) > 0 {
 		result.itemType = result.itemTypes[0]
 	}
@@ -384,6 +387,10 @@ func hasNonEmptyValues(values []string) bool {
 		}
 	}
 	return false
+}
+
+func itemTypesOnlySeries(itemTypes []string) bool {
+	return len(itemTypes) == 1 && itemTypes[0] == "series"
 }
 
 // includeItemTypesContain reports whether a raw IncludeItemTypes value list
