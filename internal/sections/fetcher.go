@@ -290,7 +290,20 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 
 	var items []*models.MediaItem
 	var total int
-	items, total, err = f.fetchSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+	if isCacheableSectionType(resolved) {
+		// User-agnostic rows share one process-global entry per access scope.
+		// getOrRefresh returns a defensive slice copy, so reordering or
+		// truncating result.Items below (or in a caller) cannot corrupt the
+		// cached entry; the pointed-to *MediaItem must not be mutated in place
+		// (see cloneMediaItems). The per-user overlay still runs fresh in
+		// buildSectionsResponse.
+		key := resolvedListCacheKey(resolved, libraryID, libraryIDs, filter)
+		items, total, err = getOrRefresh(ctx, key, f.now(), func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
+			return f.fetchSection(loadCtx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+		})
+	} else {
+		items, total, err = f.fetchSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+	}
 	if err != nil {
 		return SectionWithItems{}, err
 	}
