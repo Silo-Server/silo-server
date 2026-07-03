@@ -2065,50 +2065,73 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 
 	var entries []metadata.ChainEntry
 	for _, level := range levels {
-		type candidate struct {
-			installationID int
-			capabilityID   string
-			priority       int
-			enabled        bool
-		}
-		var candidates []candidate
-
+		candidates := make([]seedCandidate, 0, len(caps))
 		for _, c := range caps {
-			defaultPriority := metadata.LookupDefaultPriority(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
-			if defaultPriority > 0 {
-				candidates = append(candidates, candidate{
-					installationID: c.PluginInstallationID,
-					capabilityID:   c.CapabilityID,
-					priority:       defaultPriority,
-					enabled:        true,
-				})
-			} else {
-				// Plugin doesn't declare this level — include but disabled.
-				candidates = append(candidates, candidate{
-					installationID: c.PluginInstallationID,
-					capabilityID:   c.CapabilityID,
-					priority:       999,
-					enabled:        false,
-				})
-			}
-		}
-
-		sort.Slice(candidates, func(i, j int) bool {
-			return candidates[i].priority < candidates[j].priority
-		})
-
-		for i, cand := range candidates {
-			entries = append(entries, metadata.ChainEntry{
-				PluginInstallationID: cand.installationID,
-				CapabilityID:         cand.capabilityID,
-				CapabilityType:       "metadata_provider.v1",
-				ContentLevel:         level,
-				Priority:             i,
-				Enabled:              cand.enabled,
+			p := metadata.LookupSeedPlacement(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
+			candidates = append(candidates, seedCandidate{
+				installationID:   c.PluginInstallationID,
+				capabilityID:     c.CapabilityID,
+				supportsLevel:    p.SupportsLevel,
+				declaredPriority: p.DefaultPriority,
+				defaultEnabled:   p.DefaultEnabled,
 			})
+		}
+		entries = append(entries, buildSeededChainEntries(level, candidates)...)
+	}
+
+	return entries
+}
+
+// seedCandidate is a metadata provider under consideration for a freshly seeded
+// chain at one content level, carrying the manifest-declared values that decide
+// its placement.
+type seedCandidate struct {
+	installationID   int
+	capabilityID     string
+	supportsLevel    bool // provider handles this content level (declared it, or is a legacy catch-all)
+	declaredPriority int  // manifest default_priority for this level; 0 = level not declared
+	defaultEnabled   bool // manifest default_enabled; false = specialist opts out of auto-enable
+}
+
+// buildSeededChainEntries orders the providers for one content level and assigns
+// positional priorities. Providers that do not handle this level are dropped
+// outright — a single-purpose provider (e.g. audiobook/ebook/manga metadata)
+// never clutters a library type it cannot serve. Of the remaining providers, one
+// that declares this level (declaredPriority>0) is placed by that priority and
+// seeded enabled unless it opted out via default_enabled; a legacy provider that
+// declares no levels at all is parked last and disabled. Keeping an opted-out
+// provider at its declared priority (rather than forcing it last) means that when
+// a user does enable it, it slots in where the manifest intends instead of
+// jumping to the top of the chain.
+func buildSeededChainEntries(level string, candidates []seedCandidate) []metadata.ChainEntry {
+	ranked := make([]seedCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if !c.supportsLevel {
+			continue
+		}
+		if c.declaredPriority > 0 {
+			ranked = append(ranked, c)
+		} else {
+			// Legacy provider that declares no levels — park last, disabled.
+			ranked = append(ranked, seedCandidate{installationID: c.installationID, capabilityID: c.capabilityID, supportsLevel: true, declaredPriority: 999, defaultEnabled: false})
 		}
 	}
 
+	sort.SliceStable(ranked, func(i, j int) bool {
+		return ranked[i].declaredPriority < ranked[j].declaredPriority
+	})
+
+	entries := make([]metadata.ChainEntry, len(ranked))
+	for i, c := range ranked {
+		entries[i] = metadata.ChainEntry{
+			PluginInstallationID: c.installationID,
+			CapabilityID:         c.capabilityID,
+			CapabilityType:       "metadata_provider.v1",
+			ContentLevel:         level,
+			Priority:             i,
+			Enabled:              c.declaredPriority > 0 && c.defaultEnabled,
+		}
+	}
 	return entries
 }
 

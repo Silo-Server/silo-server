@@ -690,8 +690,8 @@ func (h *PluginHandler) syncMetadataProviders(ctx context.Context, installation 
 		if cap.Type != "metadata_provider.v1" {
 			continue
 		}
-		if err := h.chainRepo.AppendProviderToAllChains(ctx, installation.ID, cap.ID, func(level string) int {
-			return metadata.LookupDefaultPriority(ctx, h.chainRepo.Pool(), installation.ID, cap.ID, level)
+		if err := h.chainRepo.AppendProviderToAllChains(ctx, installation.ID, cap.ID, func(level string) metadata.SeedPlacement {
+			return metadata.LookupSeedPlacement(ctx, h.chainRepo.Pool(), installation.ID, cap.ID, level)
 		}); err != nil {
 			slog.Warn("failed to append provider to library chains",
 				"installation_id", installation.ID,

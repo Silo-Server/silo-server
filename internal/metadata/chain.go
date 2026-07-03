@@ -144,14 +144,15 @@ func (r *ChainRepository) DeleteChain(ctx context.Context, folderID int) error {
 }
 
 // AppendProviderToAllChains adds a provider to every existing library chain
-// (per content level) that doesn't already include it. The defaultPriority
-// callback returns the plugin's declared priority for a content level (0 means
-// the plugin doesn't declare that level — the entry is still added but disabled).
+// (per content level) that it serves and doesn't already include it. The
+// placement callback resolves the plugin's manifest intent for a content level:
+// levels it does not support are skipped entirely, and it is appended enabled
+// only when it declares the level and opts into default_enabled.
 func (r *ChainRepository) AppendProviderToAllChains(
 	ctx context.Context,
 	pluginInstallationID int,
 	capabilityID string,
-	defaultPriority func(contentLevel string) int,
+	placement func(contentLevel string) SeedPlacement,
 ) error {
 	// Find every distinct (folder, level) pair that has chain entries.
 	rows, err := r.pool.Query(ctx,
@@ -179,6 +180,15 @@ func (r *ChainRepository) AppendProviderToAllChains(
 	}
 
 	for _, g := range groups {
+		// Only attach the provider to levels it actually serves. A single-purpose
+		// provider (e.g. audiobook/ebook/manga metadata, or a sports provider that
+		// only declares series levels) must not clutter every library's chain with
+		// a disabled row for content it cannot handle.
+		p := placement(g.contentLevel)
+		if !p.SupportsLevel {
+			continue
+		}
+
 		// Check if the provider is already in this chain.
 		var exists bool
 		err := r.pool.QueryRow(ctx,
@@ -207,8 +217,11 @@ func (r *ChainRepository) AppendProviderToAllChains(
 			return fmt.Errorf("getting max priority: %w", err)
 		}
 
-		dp := defaultPriority(g.contentLevel)
-		enabled := dp > 0
+		// A provider joins an existing library disabled unless it declares this
+		// level and opts into being enabled by default. This keeps a specialist
+		// (default_enabled=false) one click away instead of silently taking over
+		// established libraries the moment it is installed.
+		enabled := p.DefaultPriority > 0 && p.DefaultEnabled
 
 		_, err = r.pool.Exec(ctx,
 			`INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, capability_type, content_level, priority, enabled)
@@ -388,6 +401,61 @@ func extractDefaultPriority(metadataJSON []byte, contentLevel string) int {
 		return int(v)
 	}
 	return 0
+}
+
+// extractDefaultEnabled reports whether a provider should be enabled by default
+// when a chain is first seeded for a new library. It defaults to true when the
+// flag is absent or unparseable, so every plugin predating this flag keeps its
+// original seeded-enabled behavior. A specialist provider (e.g. a sports
+// metadata source that should not compete with general providers on every
+// library) sets metadata.default_enabled=false to be seeded installed-but-off,
+// leaving it one click away for users who want it. The flag lives in the same
+// "metadata" envelope as default_priority.
+func extractDefaultEnabled(metadataJSON []byte) bool {
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
+		return true
+	}
+	raw, ok := meta["default_enabled"]
+	if !ok {
+		if innerRaw, innerOK := meta["metadata"]; innerOK {
+			var inner map[string]json.RawMessage
+			if err := json.Unmarshal(innerRaw, &inner); err == nil {
+				raw, ok = inner["default_enabled"]
+			}
+		}
+	}
+	if !ok {
+		return true
+	}
+	var enabled bool
+	if err := json.Unmarshal(raw, &enabled); err != nil {
+		return true
+	}
+	return enabled
+}
+
+// SeedPlacement captures how a provider's manifest wants it placed when a chain
+// is first seeded for a content level: whether it handles the level at all, its
+// declared priority, and whether it should be enabled by default.
+type SeedPlacement struct {
+	SupportsLevel   bool
+	DefaultPriority int
+	DefaultEnabled  bool
+}
+
+// LookupSeedPlacement resolves a provider's seed placement for one content level
+// from its capability manifest with a single metadata fetch. SupportsLevel uses
+// the same rule as the chain-less fallback (providerSupportsLevel): a provider
+// that enumerates levels is eligible only for the ones it lists; a provider that
+// declares none stays eligible everywhere.
+func LookupSeedPlacement(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID, contentLevel string) SeedPlacement {
+	md := lookupCapabilityMetadata(ctx, pool, pluginInstallationID, capabilityID)
+	return SeedPlacement{
+		SupportsLevel:   providerSupportsLevel(md, contentLevel),
+		DefaultPriority: extractDefaultPriority(md, contentLevel),
+		DefaultEnabled:  extractDefaultEnabled(md),
+	}
 }
 
 // declaredPriorityLevels parses a capability's default_priority map. The map may
