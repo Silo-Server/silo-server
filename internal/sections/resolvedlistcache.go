@@ -36,8 +36,8 @@ const (
 	resolvedListTTL = 15 * time.Minute
 	// resolvedListRefreshLead is how far ahead of expiry a background rebuild is
 	// kicked off, so steady traffic is always served a warm entry.
-	resolvedListRefreshLead = 3 * time.Minute
-	// resolvedListRefreshAfter is the soft threshold (builtAt + 12min): reaching
+	resolvedListRefreshLead = 10 * time.Minute
+	// resolvedListRefreshAfter is the soft threshold (builtAt + 5min): reaching
 	// it serves the cached value and triggers one async rebuild.
 	resolvedListRefreshAfter = resolvedListTTL - resolvedListRefreshLead
 	// resolvedListRefreshTimeout bounds a detached background rebuild so a stuck
@@ -360,8 +360,6 @@ func isCacheableSectionType(resolved ResolvedSection) bool {
 	switch resolved.SectionType {
 	case SectionRecentlyAdded,
 		SectionRecentlyReleased,
-		SectionGenre,
-		SectionCustomFilter,
 		SectionCriticallyAcclaimed,
 		SectionAwardWinners,
 		SectionFormatShowcase,
@@ -372,7 +370,27 @@ func isCacheableSectionType(resolved ResolvedSection) bool {
 		SectionMostWatched,
 		SectionTrendingDiscover,
 		SectionAdminCuratedList:
+		// Seasonal/mood/trending build their query definition server-side from a
+		// fixed theme/mood/snapshot schema (never from user-supplied rules), so
+		// they are always user-agnostic.
 		return true
+	case SectionGenre, SectionCustomFilter:
+		// These route through fetchFiltered → ParseQueryDefinition, whose
+		// user-supplied QueryDefinition can carry personalized (per-profile)
+		// rules/sorts (watched, favorited, in_watchlist, in_progress,
+		// last_watched; sorts progress/date_viewed/plays) that inject
+		// EXISTS(... user_id/profile_id ...) predicates. Such a rail's
+		// membership differs per profile and must never be served from the
+		// user-agnostic shared cache, whose key excludes userID/profileID.
+		// Non-personalized definitions stay cacheable. Use the same parser
+		// fetchFiltered uses so cacheability tracks execution exactly.
+		def, err := ParseQueryDefinition(resolved.Config)
+		if err != nil {
+			// Unparseable config: fetchFiltered would also fail (nothing gets
+			// cached), so stay off the cache path to be safe.
+			return false
+		}
+		return !def.IsPersonalized()
 	case SectionCollection:
 		// Only library collections are shared; user collections are
 		// profile-scoped and must never be served across profiles.

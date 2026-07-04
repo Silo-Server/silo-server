@@ -407,6 +407,54 @@ func TestIsCacheableSectionType(t *testing.T) {
 	}
 }
 
+// TestIsCacheableSectionTypePersonalizedFilter verifies genre / custom_filter
+// sections whose QueryDefinition carries a personalized (per-profile) rule or
+// sort are NOT cacheable — their membership differs per profile and the shared
+// cache key excludes userID/profileID — while non-personalized definitions of
+// the same types stay cacheable.
+func TestIsCacheableSectionTypePersonalizedFilter(t *testing.T) {
+	nonPersonalized := mustJSON(t, catalog.QueryDefinition{
+		Match: "all",
+		Groups: []catalog.QueryGroup{
+			{Match: "all", Rules: []catalog.QueryRule{
+				{Field: "genre", Op: "contains", Value: "Action"},
+			}},
+		},
+	})
+
+	personalizedRule := mustJSON(t, catalog.QueryDefinition{
+		Match: "all",
+		Groups: []catalog.QueryGroup{
+			{Match: "all", Rules: []catalog.QueryRule{
+				{Field: "genre", Op: "contains", Value: "Action"},
+				{Field: "in_watchlist", Op: "is", Value: true},
+			}},
+		},
+	})
+
+	personalizedSort := mustJSON(t, catalog.QueryDefinition{
+		Match: "all",
+		Groups: []catalog.QueryGroup{
+			{Match: "all", Rules: []catalog.QueryRule{
+				{Field: "watched", Op: "is", Value: false},
+			}},
+		},
+		Sort: catalog.QuerySort{Field: "progress", Order: "desc"},
+	})
+
+	for _, st := range []SectionType{SectionCustomFilter, SectionGenre} {
+		if !isCacheableSectionType(ResolvedSection{SectionType: st, Config: nonPersonalized}) {
+			t.Errorf("%s with a non-personalized definition should be cacheable", st)
+		}
+		if isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedRule}) {
+			t.Errorf("%s with a personalized rule (in_watchlist) must NOT be cacheable", st)
+		}
+		if isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedSort}) {
+			t.Errorf("%s with a personalized sort/rule (watched/progress) must NOT be cacheable", st)
+		}
+	}
+}
+
 // TestResolvedListCacheCollectionUserExclusion verifies library collections are
 // cacheable while user (profile-scoped) collections are not.
 func TestResolvedListCacheCollectionUserExclusion(t *testing.T) {

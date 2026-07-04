@@ -323,6 +323,24 @@ func QueryFieldRequiresProfile(field string) bool {
 	return ok && def.personalized
 }
 
+// IsPersonalized reports whether the definition references any per-profile
+// state: a rule field (in any group) or the sort field that injects a
+// profile-scoped EXISTS(... user_id/profile_id ...) predicate — the
+// personalized fields (watched, favorited, in_watchlist, in_progress,
+// last_watched) and sorts (progress, date_viewed, plays). A personalized
+// definition's membership/ordering differs per profile, so it must never be
+// served from a user-agnostic shared cache keyed only by access scope.
+func (q QueryDefinition) IsPersonalized() bool {
+	for _, group := range q.Groups {
+		for _, rule := range group.Rules {
+			if QueryFieldRequiresProfile(rule.Field) {
+				return true
+			}
+		}
+	}
+	return QuerySortRequiresProfile(q.Sort.Field)
+}
+
 func NormalizeLegacySectionFilter(config json.RawMessage) (QueryDefinition, error) {
 	var legacy struct {
 		FilterType       string       `json:"filter_type"`
