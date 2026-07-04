@@ -72,7 +72,9 @@ func (s *PersonRefreshService) RefreshPerson(ctx context.Context, id int64) (*mo
 		return nil, fmt.Errorf("person refresh providers are not configured")
 	}
 
-	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool)
+	// Person refresh is a background path; the nil checker falls back to a
+	// direct pool query rather than the hot-path installation cache.
+	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool, nil)
 	if err != nil {
 		return nil, fmt.Errorf("resolve person providers: %w", err)
 	}

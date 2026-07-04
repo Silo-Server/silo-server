@@ -114,9 +114,20 @@ type AutoUpdateService struct {
 	installer     autoUpdateInstaller
 	host          autoUpdateHost
 	logger        *slog.Logger
+
+	// onChange is fired after a run mutates any plugin_installations row so
+	// that peers sharing the same store (notably plugins.Service and its
+	// installation cache) can invalidate their memoized state. It is optional:
+	// when nil, no notification is sent. Pass plugins.Service.OnLifecycleChange
+	// here to keep that service's installation cache consistent with the
+	// version-specific InstallPath/Version this service writes.
+	onChange func(context.Context)
 }
 
-// NewAutoUpdateService creates a new AutoUpdateService.
+// NewAutoUpdateService creates a new AutoUpdateService. onChange is optional and
+// nil-safe: when non-nil it is invoked once after any run that mutates an
+// installation row (auto-update applied, default plugin installed, or an
+// available version recorded) so peers can invalidate cached installation state.
 func NewAutoUpdateService(
 	repositories autoUpdateRepositoryStore,
 	installations autoUpdateInstallationStore,
@@ -124,6 +135,7 @@ func NewAutoUpdateService(
 	installer autoUpdateInstaller,
 	host autoUpdateHost,
 	logger *slog.Logger,
+	onChange func(context.Context),
 ) *AutoUpdateService {
 	if logger == nil {
 		logger = slog.Default()
@@ -135,6 +147,7 @@ func NewAutoUpdateService(
 		installer:     installer,
 		host:          host,
 		logger:        logger,
+		onChange:      onChange,
 	}
 }
 
@@ -202,7 +215,28 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		}
 	}
 
+	// Any of these outcomes wrote to a plugin_installations row: installing a
+	// default plugin creates one, an applied auto-update rewrites the version-
+	// specific InstallPath/Version (and deletes the old install dir), and a
+	// notify records available_version. Fire onChange once per run so peers such
+	// as plugins.Service invalidate their installation cache; otherwise stale
+	// rows (old InstallPath/Version) would make later plugin RPCs fail against a
+	// re-extracted, newer archive.
+	if summary.DefaultPluginsInstalled > 0 || summary.UpdatesApplied > 0 || summary.UpdatesAvailable > 0 {
+		s.notifyChanged(ctx)
+	}
+
 	return summary, nil
+}
+
+// notifyChanged fires the optional onChange hook. It is nil-safe and
+// best-effort: OnLifecycleChange already recovers hook panics internally, so a
+// direct call cannot fail the update pass.
+func (s *AutoUpdateService) notifyChanged(ctx context.Context) {
+	if s.onChange == nil {
+		return
+	}
+	s.onChange(ctx)
 }
 
 // Run seeds the default repository if needed, fetches the catalog, auto-installs

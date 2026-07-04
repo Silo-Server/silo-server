@@ -281,6 +281,7 @@ func handleChildProvider404(
 type MetadataService struct {
 	chainRepo               *ChainRepository
 	pluginResolver          pluginMetadataResolver
+	enabledChecker          InstallationEnabledChecker
 	itemRepo                metadataItemRepo
 	providerIDRepo          metadataProviderIDRepo
 	episodeRepo             metadataEpisodeRepo
@@ -363,6 +364,7 @@ type chainResolver func(contentLevel string) ([]Provider, error)
 func NewMetadataService(
 	chainRepo *ChainRepository,
 	pluginResolver pluginMetadataResolver,
+	enabledChecker InstallationEnabledChecker,
 	itemRepo *catalog.ItemRepository,
 	providerIDRepo *catalog.ProviderIDRepository,
 	episodeRepo *catalog.EpisodeRepository,
@@ -399,6 +401,7 @@ func NewMetadataService(
 	return &MetadataService{
 		chainRepo:               chainRepo,
 		pluginResolver:          pluginResolver,
+		enabledChecker:          enabledChecker,
 		itemRepo:                itemRepo,
 		providerIDRepo:          providerIDRepo,
 		episodeRepo:             episodeRepo,
@@ -468,7 +471,7 @@ func (s *MetadataService) resolveChainCached(ctx context.Context, folderID int, 
 	}
 	s.chainCacheMu.RUnlock()
 
-	providers, err := ResolveChain(ctx, folderID, contentLevel, s.chainRepo, s.pluginResolver)
+	providers, err := ResolveChainWithChecker(ctx, folderID, contentLevel, s.chainRepo, s.pluginResolver, s.enabledChecker)
 	if err != nil {
 		return nil, err
 	}

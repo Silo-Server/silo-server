@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// InstallationEnabledChecker answers whether a plugin installation is enabled.
+// It mirrors the structural-dependency style of pluginMetadataResolver /
+// PluginResolverAdapter so the metadata package can consult the plugins
+// service's in-memory installation cache without importing (and creating an
+// import cycle with) the plugins package. *plugins.Service satisfies it via
+// IsInstallationEnabled.
+type InstallationEnabledChecker interface {
+	IsInstallationEnabled(ctx context.Context, installationID int) (bool, error)
+}
+
+// installationEnabled reports whether a plugin installation is enabled. When a
+// checker is supplied it is served from the plugins service's cache (no DB
+// read); when nil it falls back to a direct pool query so tests and non-plugin
+// builds keep working unchanged.
+func installationEnabled(
+	ctx context.Context,
+	checker InstallationEnabledChecker,
+	pool *pgxpool.Pool,
+	installationID int,
+) (bool, error) {
+	if checker != nil {
+		return checker.IsInstallationEnabled(ctx, installationID)
+	}
+	var enabled bool
+	err := pool.QueryRow(ctx,
+		"SELECT enabled FROM plugin_installations WHERE id = $1",
+		installationID,
+	).Scan(&enabled)
+	return enabled, err
+}
+
 // ChainEntry represents a single entry in a library's provider chain.
 type ChainEntry struct {
 	PluginInstallationID int
@@ -231,12 +262,31 @@ func (r *ChainRepository) AppendProviderToAllChains(
 // ordered by their plugin manifest default_priority for the given content level.
 //
 // Providers whose underlying plugin installation is disabled are silently skipped.
+//
+// The enabled-check falls back to a direct pool query. Callers on the hot path
+// (MetadataService.resolveChainCached) use ResolveChainWithChecker to serve it
+// from the plugins service's in-memory installation cache instead.
 func ResolveChain(
 	ctx context.Context,
 	folderID int,
 	contentLevel string,
 	chainRepo *ChainRepository,
 	resolver pluginMetadataResolver,
+) ([]Provider, error) {
+	return ResolveChainWithChecker(ctx, folderID, contentLevel, chainRepo, resolver, nil)
+}
+
+// ResolveChainWithChecker is ResolveChain with an optional
+// InstallationEnabledChecker threaded through the enabled-check. A nil checker
+// preserves the direct pool-query behavior, so existing callers and tests are
+// unaffected.
+func ResolveChainWithChecker(
+	ctx context.Context,
+	folderID int,
+	contentLevel string,
+	chainRepo *ChainRepository,
+	resolver pluginMetadataResolver,
+	checker InstallationEnabledChecker,
 ) ([]Provider, error) {
 	chainEntries, err := chainRepo.GetChain(ctx, folderID, contentLevel)
 	if err != nil {
@@ -253,10 +303,10 @@ func ResolveChain(
 	chainEntries = enabledEntries
 
 	if len(chainEntries) > 0 {
-		return resolveChainEntries(ctx, chainEntries, resolver, chainRepo.pool), nil
+		return resolveChainEntries(ctx, chainEntries, resolver, chainRepo.pool, checker), nil
 	}
 
-	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool)
+	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool, checker)
 	if err != nil {
 		return nil, err
 	}
@@ -276,12 +326,13 @@ func resolveEnabledProviders(
 	ctx context.Context,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) ([]Provider, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
-	return buildProviders(ctx, caps, resolver, pool), nil
+	return buildProviders(ctx, caps, resolver, pool, checker), nil
 }
 
 // resolveEnabledProvidersByPriority returns all enabled providers sorted by
@@ -292,6 +343,7 @@ func resolveEnabledProvidersByPriority(
 	contentLevel string,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) ([]Provider, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
@@ -335,7 +387,7 @@ func resolveEnabledProvidersByPriority(
 	for i, item := range items {
 		sorted[i] = item.cap
 	}
-	return buildProviders(ctx, sorted, resolver, pool), nil
+	return buildProviders(ctx, sorted, resolver, pool, checker), nil
 }
 
 // providerSupportsLevel reports whether a metadata provider should participate
@@ -453,6 +505,7 @@ func resolveChainEntries(
 	entries []ChainEntry,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) []Provider {
 	caps := make([]CapabilityInfo, 0, len(entries))
 	for _, e := range entries {
@@ -463,7 +516,7 @@ func resolveChainEntries(
 			DisplayName:          displayName,
 		})
 	}
-	return buildProviders(ctx, caps, resolver, pool)
+	return buildProviders(ctx, caps, resolver, pool, checker)
 }
 
 // buildProviders constructs Provider instances from capability info, skipping
@@ -473,14 +526,11 @@ func buildProviders(
 	caps []CapabilityInfo,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) []Provider {
 	providers := make([]Provider, 0, len(caps))
 	for _, c := range caps {
-		var enabled bool
-		err := pool.QueryRow(ctx,
-			"SELECT enabled FROM plugin_installations WHERE id = $1",
-			c.PluginInstallationID,
-		).Scan(&enabled)
+		enabled, err := installationEnabled(ctx, checker, pool, c.PluginInstallationID)
 		if err != nil || !enabled {
 			slog.Debug("skipping metadata provider: plugin installation disabled",
 				"installation_id", c.PluginInstallationID, "capability_id", c.CapabilityID)
