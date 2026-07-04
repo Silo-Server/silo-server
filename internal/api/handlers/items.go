@@ -915,7 +915,7 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback) (ep
 		resp.AirDate = ep.AirDate.Format("2006-01-02")
 	}
 
-	return resp, cardThumbnailPath(stillPath)
+	return resp, episodeStillPath(stillPath)
 }
 
 // buildEpisodeResponses converts episodes to API responses using batched
@@ -1700,32 +1700,34 @@ func (h *ItemsHandler) userStoreForRequest(r *http.Request) (userstore.UserStore
 	return store, profileID, true
 }
 
-// cardThumbnailPath converts an S3 image path from original to w300 for use in
-// browse/card views (posters, backdrops, and stills at card size).
-// Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned as-is —
-// variant selection is handled at resolution time for plugin paths.
-func cardThumbnailPath(path string) string {
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	// Plugin-prefixed paths pass through — variant handled at resolution time.
+// imageVariantPath rewrites a cached "/original." S3 image path to the given
+// variant. Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned
+// as-is — their variant selection is handled at resolution time.
+func imageVariantPath(path, variant string) string {
 	if strings.Contains(path, "://") {
 		return path
 	}
-	return strings.Replace(path, "/original.", "/w300.", 1)
+	return strings.Replace(path, "/original.", "/"+variant+".", 1)
+}
+
+// cardThumbnailPath converts an S3 image path from original to w300 for use in
+// browse/card views (posters, backdrops, and stills at card size).
+func cardThumbnailPath(path string) string {
+	return imageVariantPath(path, "w300")
+}
+
+// episodeStillPath converts an S3 still path from original to w500 — the
+// largest variant the image cache generates for stills. Episode stills
+// render on large 16:9 cards (the tvOS season view draws them ~920px wide
+// on a 4K panel), where the w300 card thumbnail is a visible 3x upscale.
+func episodeStillPath(path string) string {
+	return imageVariantPath(path, "w500")
 }
 
 // featuredPosterPath converts an S3 poster path from original to w500 for
 // featured/hero contexts (displayed at ~220px CSS / 440px retina).
-// Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned as-is.
 func featuredPosterPath(path string) string {
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.Contains(path, "://") {
-		return path
-	}
-	return strings.Replace(path, "/original.", "/w500.", 1)
+	return imageVariantPath(path, "w500")
 }
 
 // featuredBackdropPath converts an S3 backdrop path from original to w1920 for
