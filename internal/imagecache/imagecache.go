@@ -255,9 +255,14 @@ func variantWidths(t metadata.ImageType) []int {
 	case metadata.ImageBackdrop:
 		return []int{1920, 1280, 300}
 	case metadata.ImageLogo:
-		return []int{500}
+		// w1280: hero logos render up to ~1240 physical px on 4K TV
+		// clients (620 pt at the tvOS 2x composite scale); w500 was a
+		// visible 2.5x upscale on crisp-edged title art.
+		return []int{1280, 500}
 	case metadata.ImageStill:
-		return []int{500, 300}
+		// w780: episode stills render ~920 physical px on 4K TV season
+		// views; w500 leaves a 1.8x upscale, w780 is visually native.
+		return []int{780, 500, 300}
 	case metadata.ImageProfile:
 		return []int{500, 300}
 	default:

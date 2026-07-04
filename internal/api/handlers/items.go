@@ -894,7 +894,14 @@ func (h *ItemsHandler) toEpisodeResponseWithFallback(r *http.Request, ep *models
 func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback) (episodeResponse, string) {
 	stillPath := ep.StillPath
 	stillThumbhash := ep.StillThumbhash
-	if strings.TrimSpace(stillPath) == "" && strings.TrimSpace(fallback.Path) != "" {
+	// Only the episode's own still is a "still" image type (which generates
+	// the w780/w500 variants). The fallback is the parent series' backdrop or
+	// poster, which generate different variants — applying the still's w780
+	// (and its w500 resolver fallback) to a backdrop 404s, since backdrops
+	// only have w1920/w1280/w300. Track which we're using so the card path
+	// keeps the fallback on an existing variant.
+	usingOwnStill := strings.TrimSpace(stillPath) != ""
+	if !usingOwnStill && strings.TrimSpace(fallback.Path) != "" {
 		stillPath = fallback.Path
 		stillThumbhash = fallback.Thumbhash
 	}
@@ -915,7 +922,12 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback) (ep
 		resp.AirDate = ep.AirDate.Format("2006-01-02")
 	}
 
-	return resp, episodeStillPath(stillPath)
+	// w780 only for the episode's own still; the series-artwork fallback keeps
+	// the safe w300 card variant that backdrops and posters always generate.
+	if usingOwnStill {
+		return resp, episodeStillPath(stillPath)
+	}
+	return resp, cardThumbnailPath(stillPath)
 }
 
 // buildEpisodeResponses converts episodes to API responses using batched
@@ -1716,12 +1728,14 @@ func cardThumbnailPath(path string) string {
 	return imageVariantPath(path, "w300")
 }
 
-// episodeStillPath converts an S3 still path from original to w500 — the
+// episodeStillPath converts an S3 still path from original to w780 — the
 // largest variant the image cache generates for stills. Episode stills
 // render on large 16:9 cards (the tvOS season view draws them ~920px wide
-// on a 4K panel), where the w300 card thumbnail is a visible 3x upscale.
+// on a 4K panel), where the w300 card thumbnail was a visible 3x upscale.
+// Libraries cached before w780 existed fall back to w500 at resolution
+// time (metadata.PluginImageResolver newVariantFallbacks).
 func episodeStillPath(path string) string {
-	return imageVariantPath(path, "w500")
+	return imageVariantPath(path, "w780")
 }
 
 // featuredPosterPath converts an S3 poster path from original to w500 for

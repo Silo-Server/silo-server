@@ -45,16 +45,16 @@ func TestBackdropVariantPath(t *testing.T) {
 			want:    "/tmdb/shows/1399/backdrop/w1920.jpg",
 		},
 		{
-			name:    "episode still clamps to w500 (no large variant exists)",
+			name:    "episode still clamps to w780 (largest generated still variant)",
 			path:    "tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
 			desired: "w1280",
-			want:    "tvdb/series/73141/seasons/22/episodes/9/still/w500.webp",
+			want:    "tvdb/series/73141/seasons/22/episodes/9/still/w780.webp",
 		},
 		{
-			name:    "episode still clamps w1920 to w500",
+			name:    "episode still clamps w1920 to w780",
 			path:    "tvdb/series/73141/seasons/22/episodes/9/still/original.webp",
 			desired: "w1920",
-			want:    "tvdb/series/73141/seasons/22/episodes/9/still/w500.webp",
+			want:    "tvdb/series/73141/seasons/22/episodes/9/still/w780.webp",
 		},
 		{
 			name:    "http url passes through",
