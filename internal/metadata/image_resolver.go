@@ -68,15 +68,19 @@ type PluginImageResolver struct {
 	s3Presigner  s3ImagePresigner
 	s3PresignTTL time.Duration
 	urlCache     *cache.TTLCache[catalog.ResolvedImageURL]
-	group        singleflight.Group
+	// variantExistsCache memoizes S3 existence checks for newly-introduced
+	// image variants (see newVariantFallbacks).
+	variantExistsCache *cache.TTLCache[bool]
+	group              singleflight.Group
 }
 
 // NewPluginImageResolver creates a new resolver with no registered sources.
 func NewPluginImageResolver() *PluginImageResolver {
 	return &PluginImageResolver{
-		sources:      make(map[string][]pluginImageResolverSourceEntry),
-		s3PresignTTL: 15 * time.Minute,
-		urlCache:     cache.NewTTLCache[catalog.ResolvedImageURL](),
+		sources:            make(map[string][]pluginImageResolverSourceEntry),
+		s3PresignTTL:       15 * time.Minute,
+		urlCache:           cache.NewTTLCache[catalog.ResolvedImageURL](),
+		variantExistsCache: cache.NewTTLCache[bool](),
 	}
 }
 
@@ -318,15 +322,86 @@ func (r *PluginImageResolver) resolveS3Batch(
 	}
 	expiresAt := time.Now().Add(ttl)
 	for _, entry := range entries {
-		url, err := presigner.PresignGetURL(ctx, presigner.Bucket(), entry.originalPath, ttl)
+		key := r.existingVariantKey(ctx, presigner, entry.originalPath)
+		url, err := presigner.PresignGetURL(ctx, presigner.Bucket(), key, ttl)
 		if err != nil {
-			slog.Error("s3 image resolution failed", "path", entry.originalPath, "error", err)
+			slog.Error("s3 image resolution failed", "path", key, "error", err)
 			continue
 		}
 		expiry := expiresAt
 		resolved[entry.originalPath] = catalog.ResolvedImageURL{URL: url, ExpiresAt: &expiry}
 	}
 	return resolved
+}
+
+// newVariantFallbacks maps variant filenames introduced after libraries were
+// first cached to the largest variant every earlier ladder generated. Images
+// cached before the ladder grew have no object at the new key; presigning it
+// blindly would serve a 404. Falling back keeps them rendering (slightly
+// softer) until a metadata refresh regenerates variants — uploadVariants
+// fills only the missing objects from the stored original, so the fallback
+// retires organically per image.
+var newVariantFallbacks = map[string]string{
+	"w780":  "w500", // stills: ladder grew for 4K TV episode cards
+	"w1280": "w500", // logos: ladder grew for 4K TV hero logos
+}
+
+type s3ObjectExister interface {
+	ObjectExists(ctx context.Context, bucket, key string) (bool, error)
+}
+
+// existingVariantKey returns the key to presign for a cached-image variant
+// path. Keys naming a newly-introduced variant are existence-checked (with a
+// TTL-cached result, so steady-state serving adds no S3 round-trips) and
+// swapped to the pre-ladder fallback variant when the object is missing.
+func (r *PluginImageResolver) existingVariantKey(ctx context.Context, presigner s3ImagePresigner, key string) string {
+	variant, fallback, ok := newVariantFallback(key)
+	if !ok {
+		return key
+	}
+	exister, ok := presigner.(s3ObjectExister)
+	if !ok {
+		return key
+	}
+	cacheKey := "s3-variant-exists|" + key
+	if exists, ok := r.variantExistsCache.Get(cacheKey); ok {
+		if exists {
+			return key
+		}
+		return strings.Replace(key, "/"+variant+".", "/"+fallback+".", 1)
+	}
+	exists, err := exister.ObjectExists(ctx, presigner.Bucket(), key)
+	if err != nil {
+		// Optimistic on errors: presign the requested key rather than
+		// silently degrading every image during an S3 blip.
+		return key
+	}
+	if exists {
+		// Once generated, a variant object is immutable.
+		r.variantExistsCache.Set(cacheKey, true, 24*time.Hour)
+		return key
+	}
+	// Short TTL so a refresh-generated variant is picked up promptly.
+	r.variantExistsCache.Set(cacheKey, false, 15*time.Minute)
+	return strings.Replace(key, "/"+variant+".", "/"+fallback+".", 1)
+}
+
+// newVariantFallback extracts the variant filename from a cached image key
+// ("…/still/w780.webp" → "w780") and reports its fallback when the variant
+// is one of the newly-introduced rungs.
+func newVariantFallback(key string) (variant, fallback string, ok bool) {
+	lastSlash := strings.LastIndex(key, "/")
+	if lastSlash < 0 {
+		return "", "", false
+	}
+	name := key[lastSlash+1:]
+	dot := strings.IndexByte(name, '.')
+	if dot <= 0 {
+		return "", "", false
+	}
+	variant = name[:dot]
+	fallback, ok = newVariantFallbacks[variant]
+	return variant, fallback, ok
 }
 
 func (r *PluginImageResolver) resolvePluginBatch(
