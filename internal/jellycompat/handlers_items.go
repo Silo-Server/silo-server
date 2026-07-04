@@ -1125,6 +1125,14 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 	}
 
 	listItems := h.compatListItemsFromModels(ctx, filter, withItems.Items)
+	// The BrowseItems fallback aggregates series watch state via
+	// EnrichSeriesUserData; a series has no progress row of its own, so without
+	// this its Latest rail would drop Played/UnplayedItemCount and diverge from
+	// page 2. Enrich the freshly-built per-request list items (never the cached
+	// models) before the DTOs are built so userDataDTO sees the populated
+	// UserData. It runs under the request session, so counts are per-profile, and
+	// only touches series rows (movies are left untouched).
+	h.content.EnrichSeriesUserData(ctx, session, listItems)
 	return h.buildLatestItemDTOs(ctx, session, query, listItems)
 }
 
@@ -1170,10 +1178,9 @@ func (h *ItemsHandler) compatListItemsFromModels(ctx context.Context, filter cat
 		if mi == nil {
 			continue
 		}
-		li := mediaItemToListItem(mi)
-		h.presignCompatListItem(ctx, &li)
-		listItems = append(listItems, li)
+		listItems = append(listItems, mediaItemToListItem(mi))
 	}
+	presignCompatListItems(h.detailSvc, ctx, listItems)
 	return listItems
 }
 
@@ -2075,10 +2082,9 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 
 		listItems := make([]upstreamListItem, 0, len(result.Items))
 		for _, mi := range result.Items {
-			listItem := mediaItemToListItem(mi)
-			h.presignCompatListItem(r.Context(), &listItem)
-			listItems = append(listItems, listItem)
+			listItems = append(listItems, mediaItemToListItem(mi))
 		}
+		presignCompatListItems(h.detailSvc, r.Context(), listItems)
 		h.rememberListImages(listItems)
 
 		progress, progressErr := resolveProgressForContentIDs(r.Context(), session, h.userData, contentIDsFromListItems(listItems))
@@ -2810,29 +2816,6 @@ func (h *ItemsHandler) resolveAccessFilter(ctx context.Context, session *Session
 		return withCompatAccessExclusions(h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID))
 	}
 	return withCompatAccessExclusions(catalog.AccessFilter{})
-}
-
-func (h *ItemsHandler) presignCompatListItem(ctx context.Context, item *upstreamListItem) {
-	if item.PosterPath == "" {
-		item.PosterPath = item.PosterURL
-	}
-	if item.BackdropPath == "" {
-		item.BackdropPath = item.BackdropURL
-	}
-	if item.LogoPath == "" {
-		item.LogoPath = item.LogoURL
-	}
-	if item.StillPath == "" {
-		item.StillPath = item.StillURL
-	}
-	item.PosterURL = h.presignCompatImagePath(ctx, item.PosterURL, "poster")
-	item.BackdropURL = h.presignCompatImagePath(ctx, item.BackdropURL, "backdrop")
-	item.LogoURL = h.presignCompatImagePath(ctx, item.LogoURL, "logo")
-	item.StillURL = h.presignCompatImagePath(ctx, item.StillURL, "still")
-}
-
-func (h *ItemsHandler) presignCompatImagePath(ctx context.Context, path, imageType string) string {
-	return compatPresignImage(h.detailSvc, ctx, path, imageType, compatCardImageSize)
 }
 
 func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL string, series seriesImageSet) {

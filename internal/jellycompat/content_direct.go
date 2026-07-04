@@ -474,7 +474,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		for _, mi := range localizedItems {
 			batch = append(batch, mediaItemToListItem(mi))
 		}
-		s.presignListItems(ctx, batch)
+		presignCompatListItems(s.detailSvc, ctx, batch)
 		if isPlayedFilter != "" {
 			// Need user data to filter by played status. The handler's
 			// resolveUserStateForContentIDs call covers UserData on the wire
@@ -511,7 +511,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	// userDataDTO only overrides item-level UserData when a direct progress
 	// row exists, and one never does for a series id.
 	if isPlayedFilter == "" {
-		s.enrichSeriesUserData(ctx, session, collected)
+		s.EnrichSeriesUserData(ctx, session, collected)
 	}
 
 	if totalKnown {
@@ -589,7 +589,7 @@ func (s *directContentService) SearchItems(ctx context.Context, session *Session
 	for _, mi := range localizedItems {
 		listItems = append(listItems, mediaItemToListItem(mi))
 	}
-	s.presignListItems(ctx, listItems)
+	presignCompatListItems(s.detailSvc, ctx, listItems)
 	s.enrichListItemsUserData(ctx, session, listItems)
 
 	return &upstreamBrowseResponse{
@@ -822,10 +822,10 @@ func (s *directContentService) ListSeasons(ctx context.Context, session *Session
 				}
 			}
 			us := modelSeasonToUpstream(season, len(eps))
-			s.presignSeason(ctx, &us)
 			applySeasonUserData(&us, eps, progressMap)
 			result = append(result, us)
 		}
+		s.presignSeasons(ctx, result)
 		return result, nil
 	}
 
@@ -909,13 +909,13 @@ func (s *directContentService) ListEpisodes(ctx context.Context, session *Sessio
 			}
 		}
 		ue := modelEpisodeToUpstream(ep, seriesID)
-		s.presignEpisode(ctx, &ue)
 		if progress, ok := progressMap[ep.ContentID]; ok {
 			progressCopy := progress
 			ue.UserData = seasonUserDataFromProgress(&progressCopy)
 		}
 		result = append(result, ue)
 	}
+	s.presignEpisodes(ctx, result)
 	return result, nil
 }
 
@@ -977,9 +977,13 @@ func (s *directContentService) enrichListItemsUserData(ctx context.Context, sess
 	s.enrichSeriesListUserData(ctx, session, store, items)
 }
 
-// enrichSeriesUserData is enrichSeriesListUserData with store acquisition,
-// for callers that haven't already resolved the user store.
-func (s *directContentService) enrichSeriesUserData(ctx context.Context, session *Session, items []upstreamListItem) {
+// EnrichSeriesUserData is enrichSeriesListUserData with store acquisition,
+// for callers that haven't already resolved the user store. It is exported on
+// the ContentService interface so the native /Items/Latest fast path can apply
+// the same series watch-state rollup the BrowseItems path applies (a series has
+// no progress row of its own, so this rollup is the only source of its
+// Played/UnplayedItemCount).
+func (s *directContentService) EnrichSeriesUserData(ctx context.Context, session *Session, items []upstreamListItem) {
 	if s.storeProvider == nil || len(items) == 0 {
 		return
 	}
@@ -1161,88 +1165,50 @@ func seasonUserDataFromProgress(progress *userstore.WatchProgress) *catalog.Seas
 }
 
 // --- Image URL presigning helpers ---
+//
+// The list-item presign implementation (presignCompatListItems) and its shared
+// collect/resolve helpers live in presign_list.go so directContentService and
+// ItemsHandler share one batched path. Seasons and episodes carry a single
+// relevant image type each, so they
+// get their own bounded batch helpers below rather than reusing the four-type
+// list presigner.
 
-func (s *directContentService) presignListItem(ctx context.Context, item *upstreamListItem) {
-	if item == nil {
-		return
-	}
-	items := []upstreamListItem{*item}
-	s.presignListItems(ctx, items)
-	*item = items[0]
-}
-
-func (s *directContentService) presignListItems(ctx context.Context, items []upstreamListItem) {
-	if len(items) == 0 {
-		return
-	}
-	for i := range items {
-		ensureListItemImagePaths(&items[i])
-	}
-	if s.detailSvc == nil {
-		return
-	}
-
-	posterURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.PosterURL }), "poster", compatCardImageSize)
-	backdropURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.BackdropURL }), "backdrop", compatCardImageSize)
-	logoURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.LogoURL }), "logo", compatCardImageSize)
-	stillURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectListImagePaths(items, func(item upstreamListItem) string { return item.StillURL }), "still", compatCardImageSize)
-
-	for i := range items {
-		items[i].PosterURL = resolvedListImageURL(posterURLs, items[i].PosterURL)
-		items[i].BackdropURL = resolvedListImageURL(backdropURLs, items[i].BackdropURL)
-		items[i].LogoURL = resolvedListImageURL(logoURLs, items[i].LogoURL)
-		items[i].StillURL = resolvedListImageURL(stillURLs, items[i].StillURL)
-	}
-}
-
-func ensureListItemImagePaths(item *upstreamListItem) {
-	if item.PosterPath == "" {
-		item.PosterPath = item.PosterURL
-	}
-	if item.BackdropPath == "" {
-		item.BackdropPath = item.BackdropURL
-	}
-	if item.LogoPath == "" {
-		item.LogoPath = item.LogoURL
-	}
-	if item.StillPath == "" {
-		item.StillPath = item.StillURL
-	}
-}
-
-func collectListImagePaths(items []upstreamListItem, pick func(upstreamListItem) string) []string {
-	paths := make([]string, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		path := pick(item)
-		if path == "" {
-			continue
-		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		paths = append(paths, path)
-	}
-	return paths
-}
-
-func resolvedListImageURL(resolved map[string]catalog.ResolvedImageURL, path string) string {
-	if path == "" {
-		return ""
-	}
-	if value, ok := resolved[path]; ok {
-		return value.URL
-	}
-	return ""
-}
-
+// presignSeason presigns a single season poster. It delegates to the batched
+// presignSeasons so genuinely-singular callers (GetSeason) share one code path;
+// page callers must use presignSeasons directly.
 func (s *directContentService) presignSeason(ctx context.Context, season *upstreamSeason) {
-	season.PosterURL = compatPresignImage(s.detailSvc, ctx, season.PosterURL, "poster", compatCardImageSize)
+	if season == nil {
+		return
+	}
+	seasons := []upstreamSeason{*season}
+	s.presignSeasons(ctx, seasons)
+	*season = seasons[0]
 }
 
-func (s *directContentService) presignEpisode(ctx context.Context, ep *upstreamEpisode) {
-	ep.StillURL = compatPresignImage(s.detailSvc, ctx, ep.StillURL, "still", compatCardImageSize)
+// presignSeasons presigns every season poster in a single batched
+// PresignImageURLsWithExpiry call for the whole collection instead of one
+// singular call per season.
+func (s *directContentService) presignSeasons(ctx context.Context, seasons []upstreamSeason) {
+	if s.detailSvc == nil || len(seasons) == 0 {
+		return
+	}
+	posterURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(seasons, func(se upstreamSeason) string { return se.PosterURL }), "poster", compatCardImageSize)
+	for i := range seasons {
+		seasons[i].PosterURL = resolvedListImageURL(posterURLs, seasons[i].PosterURL)
+	}
+}
+
+// presignEpisodes presigns every episode still in a single batched
+// PresignImageURLsWithExpiry call for the whole collection instead of one
+// singular call per episode.
+func (s *directContentService) presignEpisodes(ctx context.Context, episodes []upstreamEpisode) {
+	if s.detailSvc == nil || len(episodes) == 0 {
+		return
+	}
+	stillURLs := s.detailSvc.PresignImageURLsWithExpiry(ctx, collectImagePaths(episodes, func(ep upstreamEpisode) string { return ep.StillURL }), "still", compatCardImageSize)
+	for i := range episodes {
+		episodes[i].StillURL = resolvedListImageURL(stillURLs, episodes[i].StillURL)
+	}
 }
 
 // --- Model-to-upstream mapping helpers ---

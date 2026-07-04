@@ -94,6 +94,9 @@ func (s *countingContentService) ListItemFilters(context.Context, *Session, url.
 	panic("unused")
 }
 
+func (s *countingContentService) EnrichSeriesUserData(context.Context, *Session, []upstreamListItem) {
+}
+
 type recordingSearchContentService struct {
 	countingContentService
 	options []SearchItemsOptions

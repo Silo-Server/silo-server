@@ -249,6 +249,47 @@ func TestFetchCompatItemsByContentIDsFallback_LibraryOutsideAllowlistShortCircui
 	}
 }
 
+// TestFetchCompatItemsByContentIDsFallback_BatchesPresign pins Fix #2b for the
+// batch-loader path: after collecting the page it must presign in one batch per
+// populated image type, not one singular call per item. The resolver batch
+// count stays bounded by image type as the item count grows.
+func TestFetchCompatItemsByContentIDsFallback_BatchesPresign(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	repo := &countingItemRepo{
+		itemsByID: map[string]*models.MediaItem{
+			"a": {ContentID: "a", Type: "movie", Title: "A", PosterPath: "plug://poster-a", BackdropPath: "plug://backdrop-a"},
+			"b": {ContentID: "b", Type: "movie", Title: "B", PosterPath: "plug://poster-b", BackdropPath: "plug://backdrop-b"},
+			"c": {ContentID: "c", Type: "movie", Title: "C", PosterPath: "plug://poster-c", BackdropPath: "plug://backdrop-c"},
+		},
+	}
+	h := &ItemsHandler{itemRepo: repo, detailSvc: detailSvc}
+
+	got, err := h.fetchCompatItemsByContentIDsFallback(
+		context.Background(),
+		&Session{},
+		[]string{"a", "b", "c"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("fetchCompatItemsByContentIDsFallback returned error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 items in result; got %d", len(got))
+	}
+	if resolver.singleCalls != 0 {
+		t.Errorf("single image resolver calls = %d, want 0 (batched path only)", resolver.singleCalls)
+	}
+	// 3 items × poster+backdrop → only 2 batched resolver calls, not 2×3.
+	if resolver.batchCalls != 2 {
+		t.Errorf("batch image resolver calls = %d, want 2 (poster+backdrop, independent of item count)", resolver.batchCalls)
+	}
+	if got["a"].PosterURL != "batch:card:plug://poster-a" {
+		t.Errorf("item a PosterURL = %q", got["a"].PosterURL)
+	}
+}
+
 // TestFetchCompatEpisodeTargetsByContentIDsFallback_UsesBatchedSeriesAccess
 // pins the episode-fallback fix: series-level access checks must be batched
 // through itemRepo.GetByIDsWithAccess instead of iterating EnsureAccessible
