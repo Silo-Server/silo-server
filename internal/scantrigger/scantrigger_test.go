@@ -192,6 +192,26 @@ func TestResolverRejectsVanishedPathWhenRootIsGone(t *testing.T) {
 	}
 }
 
+func TestResolverRejectsVanishedPathInDisabledLibrary(t *testing.T) {
+	root := t.TempDir()
+	vanished := filepath.Join(root, "Movie (2026)", "Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      26,
+		Name:    "Movies",
+		Enabled: false,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusConflict || reqErr.Code != "conflict" {
+		t.Fatalf("unexpected error: %#v", reqErr)
+	}
+}
+
 func TestResolverRejectsVanishedPathOnNonNotExistStatError(t *testing.T) {
 	root := t.TempDir()
 	// A regular file where a directory is expected makes Lstat on a child

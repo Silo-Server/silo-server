@@ -278,6 +278,8 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	if fileRemovalGrace < 0 {
+		slog.Warn("negative scanner.file_removal_grace setting; missing files will be deleted immediately",
+			"value", m["scanner.file_removal_grace"])
 		fileRemovalGrace = 0
 	}
 	cfg.Scanner.FileRemovalGrace = fileRemovalGrace
