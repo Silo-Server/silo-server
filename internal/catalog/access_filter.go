@@ -20,10 +20,10 @@ type AccessFilter struct {
 	// → ProfilePreferredLanguage → the library's metadata_language.
 	ProfilePreferredLanguage string
 	MaxContentRating         string
-	MaxPlaybackQuality    string
-	SelectedFileID        int
-	UserID                int
-	ProfileID             string
+	MaxPlaybackQuality       string
+	SelectedFileID           int
+	UserID                   int
+	ProfileID                string
 	// NamePrefix, when non-empty, restricts results to items whose
 	// LOWER(COALESCE(NULLIF(BTRIM(sort_title),''), title)) starts with the
 	// given (case-insensitive) prefix. Pushed into the SQL WHERE clause so

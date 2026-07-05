@@ -12,8 +12,8 @@ var (
 	// without a recognized concurrency-limit code (e.g. an admin custom
 	// override, or a failed policy evaluation) must not masquerade as one.
 	ErrPlaybackNotAllowed = errors.New("playback not allowed by policy")
-	ErrFileNotFound      = errors.New("media file not found")
-	ErrTranscodeFailed   = errors.New("transcode process failed")
-	ErrSegmentNotFound   = errors.New("segment not found")
-	ErrManifestNotReady  = errors.New("manifest not ready")
+	ErrFileNotFound       = errors.New("media file not found")
+	ErrTranscodeFailed    = errors.New("transcode process failed")
+	ErrSegmentNotFound    = errors.New("segment not found")
+	ErrManifestNotReady   = errors.New("manifest not ready")
 )
