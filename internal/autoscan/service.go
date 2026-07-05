@@ -37,6 +37,7 @@ type Store interface {
 type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
 	ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*scantrigger.Target, error)
+	ResolveVanishedPath(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
 }
 
 // Queuer enqueues resolved scan targets.
@@ -399,6 +400,13 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 
 	for _, dir := range uniqueParentDirs(legacyPaths) {
 		target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
+		if isRequestError(rerr) {
+			// The directory may have been removed (e.g. a deleted movie
+			// folder). Fall back to a reconciling scan of the vanished path so
+			// its files are marked missing promptly. Paths outside Silo's
+			// media folders still resolve to nothing and are skipped below.
+			target, rerr = s.resolver.ResolveVanishedPath(ctx, dir, scanTrigger)
+		}
 		if rerr != nil {
 			var reqErr *scantrigger.RequestError
 			if errors.As(rerr, &reqErr) {
@@ -445,6 +453,14 @@ func collapseTargetsToLibraryScans(targets []scantrigger.Target) []scantrigger.T
 	return collapsed
 }
 
+// isRequestError reports whether err is a scantrigger.RequestError — the
+// resolver's "this path is not scannable as-is" signal, as opposed to an
+// internal failure.
+func isRequestError(err error) bool {
+	var reqErr *scantrigger.RequestError
+	return errors.As(err, &reqErr)
+}
+
 func (s *Service) resolveChange(ctx context.Context, change Change) (*scantrigger.Target, bool) {
 	if change.SourcePath == "" {
 		return nil, false
@@ -460,6 +476,12 @@ func (s *Service) resolveChange(ctx context.Context, change Change) (*scantrigge
 		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})
 		if err == nil && target != nil && target.Mode != scantrigger.ModeFile {
 			return nil, false
+		}
+		if isRequestError(err) {
+			// The file may have been deleted (upgrade/replacement). Fall back
+			// to a reconciling scan so the stale row is marked missing
+			// promptly instead of lingering until the next full library scan.
+			target, err = s.resolver.ResolveVanishedPath(ctx, change.SourcePath, scanTrigger)
 		}
 	default:
 		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})

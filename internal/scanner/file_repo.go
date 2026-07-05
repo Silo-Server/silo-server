@@ -2498,26 +2498,17 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 	return nil
 }
 
-// DeleteMissing deletes media files that have been missing longer than the grace period.
+// DeleteMissingByFolder deletes media files in the given folder that have been
+// marked missing for longer than the grace period. Missing files are already
+// hidden from clients; the grace only delays deleting the row so a file that
+// reappears within the window restores without re-probing or re-matching.
+// A zero grace deletes all missing-marked rows immediately.
 // Returns the number of rows deleted.
-func (r *FileRepository) DeleteMissing(ctx context.Context, gracePeriod time.Duration) (int, error) {
+func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
 	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE missing_since IS NOT NULL AND missing_since < $1",
-		cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("deleting missing files: %w", err)
-	}
-	return int(tag.RowsAffected()), nil
-}
-
-// DeleteMissingByFolder deletes all media files marked as missing in the given folder.
-// Returns the number of rows deleted.
-func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int) (int, error) {
-	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL",
-		folderID,
+		"DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2",
+		folderID, cutoff,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("deleting missing files for folder %d: %w", folderID, err)

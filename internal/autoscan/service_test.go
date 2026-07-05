@@ -156,6 +156,10 @@ func (passthroughConnRes) Resolve(context.Context, Connection) (ResolvedConnecti
 type fakeResolver struct{}
 
 func (fakeResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if strings.Contains(req.Path, "vanished") {
+		// Mimic the real resolver's stat failure for deleted paths.
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "Path does not exist"}
+	}
 	if strings.HasPrefix(req.Path, "/mnt/media/") {
 		mode := scantrigger.ModeSubtree
 		if filepath.Ext(req.Path) == ".mkv" {
@@ -171,6 +175,19 @@ func (fakeResolver) ResolveMissingSubtree(_ context.Context, subtreePath, trigge
 		return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: subtreePath, Trigger: trigger}, nil
 	}
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+
+func (fakeResolver) ResolveVanishedPath(_ context.Context, path, trigger string) (*scantrigger.Target, error) {
+	if !strings.HasPrefix(path, "/mnt/media/") {
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+	}
+	// Mimic the real resolver: vanished video files reconcile via their parent
+	// directory; other vanished paths reconcile as themselves.
+	scope := path
+	if filepath.Ext(path) == ".mkv" {
+		scope = filepath.Dir(path)
+	}
+	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: scope, Trigger: trigger}, nil
 }
 
 type distinctFolderResolver struct{}
@@ -205,6 +222,10 @@ func (distinctFolderResolver) ResolveMissingSubtree(_ context.Context, subtreePa
 	}, nil
 }
 
+func (distinctFolderResolver) ResolveVanishedPath(_ context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+
 // unresolvableResolver treats every path as outside Silo's media folders,
 // returning a RequestError — the "none resolved → misconfiguration" signal.
 type unresolvableResolver struct{}
@@ -213,6 +234,9 @@ func (unresolvableResolver) Resolve(_ context.Context, req scantrigger.Request) 
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
 }
 func (unresolvableResolver) ResolveMissingSubtree(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+func (unresolvableResolver) ResolveVanishedPath(context.Context, string, string) (*scantrigger.Target, error) {
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
 }
 
@@ -485,6 +509,71 @@ func TestPollOnceStructuredSubtreeChangeEnqueuesExactSubtree(t *testing.T) {
 	}
 	if _, ok := store.advanced["s1"]; !ok {
 		t.Fatalf("expected marker advanced for s1")
+	}
+}
+
+func TestPollOnceFileChangeForDeletedPathFallsBackToSubtreeScan(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{
+			SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv",
+			Scope:      ChangeScopeFile,
+		}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 fallback subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
+		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
+	}
+	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie-vanished (2026)" {
+		t.Fatalf("subtree path = %q", got)
+	}
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
+	}
+}
+
+func TestPollOnceLegacyChangeForDeletedDirFallsBackToSubtreeScan(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
+		}},
+	}
+	// Legacy/auto changes collapse to the parent dir before resolving; a
+	// removed movie folder makes that dir vanish too.
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{
+			SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv",
+			Scope:      ChangeScopeAuto,
+		}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 fallback subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
+		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
+	}
+	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie-vanished (2026)" {
+		t.Fatalf("subtree path = %q", got)
 	}
 }
 

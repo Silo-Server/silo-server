@@ -126,11 +126,16 @@ type Scanner struct {
 	// worker pool while a scan is running (applies to the next scan).
 	workers             atomic.Int32
 	emptyTrashAfterScan bool
-	markerFetcher       func(context.Context, string) *IntroCreditsMarkers
-	metadataQueue       MetadataQueueProducer
-	movieQueueSyncer    MovieQueueSyncer
-	seriesQueueSyncer   SeriesQueueSyncer
-	literaryWorkLinker  LiteraryWorkLinker
+	// fileRemovalGrace is how long a file must have been marked missing before
+	// emptying trash hard-deletes its row. Missing files are hidden from
+	// clients immediately; the grace only delays losing per-file state so a
+	// file that reappears (flapping mount, reverted upgrade) restores cheaply.
+	fileRemovalGrace   time.Duration
+	markerFetcher      func(context.Context, string) *IntroCreditsMarkers
+	metadataQueue      MetadataQueueProducer
+	movieQueueSyncer   MovieQueueSyncer
+	seriesQueueSyncer  SeriesQueueSyncer
+	literaryWorkLinker LiteraryWorkLinker
 }
 
 // SetImageCacher installs the imagecache.Cacher used by book scanners to push
@@ -189,9 +194,12 @@ type SeriesQueueSyncer interface {
 }
 
 // NewScanner creates a new Scanner with the given dependencies.
-func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client.Client, workers int, emptyTrashAfterScan bool) *Scanner {
+func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client.Client, workers int, emptyTrashAfterScan bool, fileRemovalGrace time.Duration) *Scanner {
 	if workers < 1 {
 		workers = 8
+	}
+	if fileRemovalGrace < 0 {
+		fileRemovalGrace = 0
 	}
 	s := &Scanner{
 		fileRepo:            fileRepo,
@@ -210,6 +218,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		ffprobePath:         ffprobePath,
 		s3Client:            s3Client,
 		emptyTrashAfterScan: emptyTrashAfterScan,
+		fileRemovalGrace:    fileRemovalGrace,
 		markerFetcher:       nil,
 	}
 	s.SetWorkers(workers)
@@ -832,11 +841,12 @@ func (s *Scanner) scanPaths(
 		result.Missing++
 	}
 
-	// Empty trash: delete all files marked as missing for this folder.
-	// Safe because the empty-root guard (above) returns early when 0 files
-	// are found on disk, so we only reach here when the root is populated.
+	// Empty trash: delete files marked as missing for longer than the removal
+	// grace for this folder. Safe because the empty-root guard (above) returns
+	// early when 0 files are found on disk, so we only reach here when the
+	// root is populated.
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -1043,7 +1053,7 @@ func (s *Scanner) scanFolderByRoots(
 	}
 
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}

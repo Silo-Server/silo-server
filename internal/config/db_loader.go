@@ -273,6 +273,14 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Scanner.EmptyTrashAfterScan = emptyTrash
+	fileRemovalGrace, err := durationOr(m, "scanner.file_removal_grace", 24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	if fileRemovalGrace < 0 {
+		fileRemovalGrace = 0
+	}
+	cfg.Scanner.FileRemovalGrace = fileRemovalGrace
 
 	// Matcher
 	matcherWorkers, err := intOr(m, "matcher.workers", 8)

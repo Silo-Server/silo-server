@@ -127,15 +127,16 @@ type userDBConfigRaw struct {
 
 // ScannerConfig holds media scanner settings.
 type ScannerConfig struct {
-	Workers                int  `yaml:"workers"`
-	MaxConcurrentLibraries int  `yaml:"max_concurrent_libraries"`
-	MaxConcurrentScoped    int  `yaml:"max_concurrent_scoped"`
-	EmptyTrashAfterScan    bool `yaml:"-"`
+	Workers                int           `yaml:"workers"`
+	MaxConcurrentLibraries int           `yaml:"max_concurrent_libraries"`
+	MaxConcurrentScoped    int           `yaml:"max_concurrent_scoped"`
+	EmptyTrashAfterScan    bool          `yaml:"-"`
+	FileRemovalGrace       time.Duration `yaml:"-"`
 }
 
 // scannerConfigRaw is the raw YAML representation with duration strings.
 type scannerConfigRaw struct {
-	FileRemovalGrace       string `yaml:"file_removal_grace"` // legacy; preserved on YAML import only
+	FileRemovalGrace       string `yaml:"file_removal_grace"`
 	Workers                int    `yaml:"workers"`
 	MaxConcurrentLibraries int    `yaml:"max_concurrent_libraries"`
 	MaxConcurrentScoped    int    `yaml:"max_concurrent_scoped"`
