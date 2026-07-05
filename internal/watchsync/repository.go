@@ -59,7 +59,7 @@ const connectionColumns = `
 	sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at,
 	last_progress_sync_at, last_outbound_sync_at, last_favorites_sync_at,
 	last_watchlist_sync_at, last_scrobble_error_at, last_error,
-	sync_cursors, created_at, updated_at`
+	rate_limited_until, sync_cursors, created_at, updated_at`
 
 // syncRunColumns is the canonical select/returning column list for
 // watch_provider_sync_runs, in the exact order scanSyncRun reads.
@@ -198,12 +198,12 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			import_watchlist_enabled, export_watchlist_enabled, sync_watchlist_removals_enabled,
 			sync_watchlist_order_enabled, scrobble_enabled, last_inbound_sync_at, last_progress_sync_at,
 			last_outbound_sync_at, last_favorites_sync_at, last_watchlist_sync_at, last_scrobble_error_at,
-			last_error, sync_cursors
+			last_error, rate_limited_until, sync_cursors
 		)
 		VALUES (
 			COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),
 			$2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-			$14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29::jsonb
+			$14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30::jsonb
 		)
 		ON CONFLICT (provider, user_id, profile_id) DO UPDATE SET
 			provider_account_id = EXCLUDED.provider_account_id,
@@ -230,6 +230,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 			last_watchlist_sync_at = EXCLUDED.last_watchlist_sync_at,
 			last_scrobble_error_at = EXCLUDED.last_scrobble_error_at,
 			last_error = EXCLUDED.last_error,
+			rate_limited_until = EXCLUDED.rate_limited_until,
 			sync_cursors = EXCLUDED.sync_cursors,
 			updated_at = now()
 		RETURNING `+connectionColumns+`
@@ -262,6 +263,7 @@ func (r *PostgresRepository) UpsertConnection(ctx context.Context, conn Connecti
 		conn.LastWatchlistSyncAt,
 		conn.LastScrobbleErrorAt,
 		conn.LastError,
+		conn.RateLimitedUntil,
 		encodeSyncCursors(conn.SyncCursors),
 	)
 	saved, err := r.scanConnection(row)
@@ -326,12 +328,13 @@ func (r *PostgresRepository) DeleteConnection(
 
 func (r *PostgresRepository) ListConnectionsDueForSync(
 	ctx context.Context,
-	_ time.Time,
+	now time.Time,
 ) ([]Connection, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE provider <> ''
+			AND (rate_limited_until IS NULL OR rate_limited_until <= $1)
 			AND (
 				import_watched_enabled
 				OR import_progress_enabled
@@ -346,7 +349,7 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 				OR scrobble_enabled
 			)
 		ORDER BY provider, user_id, profile_id
-	`)
+	`, now)
 	if err != nil {
 		return nil, fmt.Errorf("list due watch provider connections: %w", err)
 	}
@@ -1086,6 +1089,7 @@ func (r *PostgresRepository) scanConnection(row pgx.Row) (Connection, error) {
 		&conn.LastWatchlistSyncAt,
 		&conn.LastScrobbleErrorAt,
 		&conn.LastError,
+		&conn.RateLimitedUntil,
 		&rawSyncCursors,
 		&conn.CreatedAt,
 		&conn.UpdatedAt,

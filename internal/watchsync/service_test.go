@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2036,5 +2037,147 @@ func TestHistorySourceForProviderDefaultsAndUsesProviderSource(t *testing.T) {
 	}
 	if got := historySourceForProvider(struct{}{}); got != userstore.WatchHistorySourceImport {
 		t.Fatalf("historySourceForProvider(no source) = %q, want import", got)
+	}
+}
+
+// rateLimitedImporterStub rate-limits watched import and records whether the
+// progress flow was still attempted afterwards.
+type rateLimitedImporterStub struct {
+	progressCalled *bool
+}
+
+func (p rateLimitedImporterStub) Key() string         { return "trakt" }
+func (p rateLimitedImporterStub) DisplayName() string { return "Trakt" }
+func (p rateLimitedImporterStub) Capabilities() Capabilities {
+	return Capabilities{ImportWatched: true, ImportProgress: true}
+}
+
+func (p rateLimitedImporterStub) FetchWatched(context.Context, ServerConfig, Connection) ([]RemoteWatch, error) {
+	return nil, RateLimitedError{Provider: "trakt", RetryAfter: 30 * time.Minute}
+}
+
+func (p rateLimitedImporterStub) FetchProgress(context.Context, ServerConfig, Connection) ([]RemoteProgress, error) {
+	*p.progressCalled = true
+	return nil, nil
+}
+
+func (p rateLimitedImporterStub) HistorySource() userstore.WatchHistorySource {
+	return userstore.WatchHistorySourceTrakt
+}
+
+func TestServiceSyncConnectionDefersOnRateLimit(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	repo := newServiceFakeRepo()
+	progressCalled := false
+	provider := rateLimitedImporterStub{progressCalled: &progressCalled}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	service := NewService(repo, reg).
+		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithWatchState(noOpWatchState{}).
+		WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
+	service.now = func() time.Time { return now }
+	conn := Connection{
+		ID:                    "conn-1",
+		Provider:              "trakt",
+		UserID:                7,
+		ProfileID:             "profile-1",
+		AccessToken:           "access",
+		ImportWatchedEnabled:  true,
+		ImportProgressEnabled: true,
+	}
+	repo.connections[connectionKey("trakt", 7, "profile-1")] = conn
+
+	err = service.SyncConnection(context.Background(), conn, "scheduled")
+	if err == nil {
+		t.Fatal("SyncConnection error = nil, want rate limit failure")
+	}
+	if progressCalled {
+		t.Fatal("progress import ran after the watched import was rate limited")
+	}
+	updated := repo.connections[connectionKey("trakt", 7, "profile-1")]
+	wantUntil := now.Add(30 * time.Minute)
+	if updated.RateLimitedUntil == nil || !updated.RateLimitedUntil.Equal(wantUntil) {
+		t.Fatalf("RateLimitedUntil = %v, want %v", updated.RateLimitedUntil, wantUntil)
+	}
+	if !strings.Contains(updated.LastError, "rate limit") {
+		t.Fatalf("LastError = %q, want rate limit message", updated.LastError)
+	}
+
+	// A manual sync during the deferral must be refused with the remaining wait.
+	_, err = service.RequestManualSync(context.Background(), 7, "profile-1", "trakt")
+	var cooldown SyncCooldownError
+	if !errors.As(err, &cooldown) {
+		t.Fatalf("RequestManualSync error = %v, want SyncCooldownError", err)
+	}
+	if cooldown.RetryAfterSeconds != 30*60 {
+		t.Fatalf("RetryAfterSeconds = %d, want %d", cooldown.RetryAfterSeconds, 30*60)
+	}
+}
+
+func TestServiceSyncConnectionLeavesExportsPendingOnRateLimit(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+		ID:              "history-1",
+		ProfileID:       "profile-1",
+		MediaItemID:     "movie-1",
+		WatchedAt:       "2026-05-04T12:00:00Z",
+		DurationSeconds: 7200,
+		Completed:       true,
+		Source:          userstore.WatchHistorySourcePlayback,
+		Identity: userstore.WatchIdentity{
+			StableType:  "movie",
+			ProviderIDs: map[string]string{"tmdb": "603"},
+		},
+	}); err != nil {
+		t.Fatalf("AddHistory: %v", err)
+	}
+
+	repo := newServiceFakeRepo()
+	provider := watchedExporterStub{exportErr: RateLimitedError{Provider: "trakt", RetryAfter: time.Hour}}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg).WithUserStoreProvider(staticStoreProvider{
+		store: userdb.NewSQLiteUserStore(db),
+	})
+	conn := Connection{
+		ID:                   "conn-1",
+		Provider:             "trakt",
+		UserID:               7,
+		ProfileID:            "profile-1",
+		AccessToken:          "access",
+		ExportWatchedEnabled: true,
+	}
+	repo.connections[connectionKey("trakt", 7, "profile-1")] = conn
+
+	if err := service.SyncConnection(context.Background(), conn, "scheduled"); err == nil {
+		t.Fatal("SyncConnection error = nil, want rate limit failure")
+	}
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != "pending" {
+		t.Fatalf("history exports = %+v, want one still-pending export", repo.historyExports)
+	}
+	updated := repo.connections[connectionKey("trakt", 7, "profile-1")]
+	if updated.RateLimitedUntil == nil {
+		t.Fatal("RateLimitedUntil not set after rate-limited export")
 	}
 }

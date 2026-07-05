@@ -2,6 +2,8 @@ package watchsync
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -192,9 +194,12 @@ type Connection struct {
 	LastWatchlistSyncAt          *time.Time
 	LastScrobbleErrorAt          *time.Time
 	LastError                    string
-	SyncCursors                  map[string]string `json:"-"`
-	CreatedAt                    time.Time
-	UpdatedAt                    time.Time
+	// RateLimitedUntil defers scheduled syncs after a provider 429 so retries
+	// don't burn more of the provider's request quota while still throttled.
+	RateLimitedUntil *time.Time
+	SyncCursors      map[string]string `json:"-"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type SyncRun struct {
@@ -247,6 +252,30 @@ type SyncCooldownError struct {
 
 func (e SyncCooldownError) Error() string {
 	return "watch provider sync is cooling down"
+}
+
+// RateLimitedError reports that a provider rejected a request with HTTP 429
+// (or an equivalent quota signal). RetryAfter carries the provider-supplied
+// Retry-After when available, otherwise a provider-chosen fallback; zero means
+// unknown. Callers should stop issuing requests to the provider and defer the
+// remaining work instead of treating affected items as failed.
+type RateLimitedError struct {
+	Provider   string
+	RetryAfter time.Duration
+}
+
+func (e RateLimitedError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("%s rate limit reached; retry after %s", e.Provider, e.RetryAfter.Round(time.Second))
+	}
+	return fmt.Sprintf("%s rate limit reached", e.Provider)
+}
+
+// AsRateLimited unwraps err looking for a RateLimitedError.
+func AsRateLimited(err error) (RateLimitedError, bool) {
+	var rle RateLimitedError
+	ok := errors.As(err, &rle)
+	return rle, ok
 }
 
 type DeviceAuthSession struct {

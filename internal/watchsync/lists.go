@@ -403,6 +403,11 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, fmt.Errorf("provider %q does not implement %s export", conn.Provider, b.kind)
 		}
 		if err != nil {
+			// Rate-limited items are not failures: leave them pending so the
+			// next run (after the deferral) retries without churning state.
+			if _, limited := AsRateLimited(err); limited {
+				return result, err
+			}
 			for _, item := range toSend {
 				_ = s.repo.MarkListItemError(ctx, conn.ID, b.kind, item.MediaItemID, err.Error())
 			}
