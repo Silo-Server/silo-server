@@ -676,6 +676,11 @@ func main() {
 		defer func() { _ = apiRedisClient.Close() }()
 	}
 
+	// Assigned below once the trusted-proxy config is seeded; captured by the
+	// OnServerSettingUpdated closure, which only runs on admin requests after
+	// startup completes.
+	var ipResolver *clientip.Resolver
+
 	deps := api.Dependencies{
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -701,7 +706,17 @@ func main() {
 			restartReqCh <- struct{}{}
 			return nil
 		},
-		OnServerSettingUpdated: func(_ context.Context, _, _ string) {
+		OnServerSettingUpdated: func(ctx context.Context, key, _ string) {
+			// Key-scoped reload for the client-IP trust boundary: unlike the
+			// whole-config watcher reload below, this cannot be blocked by an
+			// unrelated malformed setting failing config.LoadFromDB.
+			if key == clientip.SettingTrustedProxies && ipResolver != nil {
+				if cidrs, loadErr := clientip.LoadTrustedCIDRs(ctx, settingsRepo); loadErr != nil {
+					slog.Warn("clientip config reload failed", "error", loadErr)
+				} else {
+					ipResolver.UpdateTrustedCIDRs(cidrs)
+				}
+			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
 			// then, leaving only the 60s poll).
@@ -1581,7 +1596,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load trusted CIDRs: %v", err)
 	}
-	ipResolver := clientip.NewResolver(trustedCIDRs)
+	ipResolver = clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
 	// Hot-reload trusted proxies on settings changes via two complementary
 	// paths. The direct event-bus subscription re-reads only the clientip key,
