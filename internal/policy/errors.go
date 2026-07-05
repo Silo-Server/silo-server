@@ -10,6 +10,15 @@ var (
 	// ErrPolicyEvalFailed marks failures that must be treated as fail-closed
 	// policy evaluation outcomes.
 	ErrPolicyEvalFailed = errors.New("policy eval failed")
+	// ErrPolicyEvalTimeout marks evaluations that exceeded the eval budget. It
+	// always accompanies ErrPolicyEvalFailed (fail-closed consumers keep
+	// working unchanged) but lets operators and the activation guard tell a
+	// slow policy apart from a broken one.
+	ErrPolicyEvalTimeout = errors.New("policy eval timed out")
+	// ErrPolicySlowEval marks a policy source rejected by the activation-time
+	// cost guard: evaluating it exceeded the configured eval budget, so
+	// activating it would convert to request-path failures for every viewer.
+	ErrPolicySlowEval = errors.New("policy evaluation exceeds the eval budget")
 	// ErrUnknownDecision marks requests for a decision that is not loaded.
 	ErrUnknownDecision = errors.New("unknown policy decision")
 	// ErrCompileFailed marks policy compilation failures with structured issues.

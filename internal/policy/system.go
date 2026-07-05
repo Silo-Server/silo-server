@@ -245,6 +245,32 @@ func (s *System) DegradedState() DegradedState {
 	}
 }
 
+// EvalTimeout returns the configured per-decision evaluation budget, used by
+// the activation-time cost guard so it measures against the live budget.
+func (s *System) EvalTimeout() time.Duration {
+	if s == nil {
+		return defaultEvalTimeout
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.evalTimeout
+}
+
+// EvalTimeouts returns how many evaluations exceeded the eval budget on the
+// live engine since boot.
+func (s *System) EvalTimeouts() int64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	engine := s.engine
+	s.mu.RUnlock()
+	if engine == nil {
+		return 0
+	}
+	return engine.EvalTimeouts()
+}
+
 // SetEvalTimeout hot-updates the per-decision policy evaluation timeout.
 func (s *System) SetEvalTimeout(timeout time.Duration) {
 	if s == nil || timeout <= 0 {

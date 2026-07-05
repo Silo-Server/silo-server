@@ -83,6 +83,7 @@ type policyCapabilityResponse struct {
 	Degraded        bool     `json:"degraded"`
 	DegradedReason  string   `json:"degraded_reason,omitempty"`
 	DegradedDomains []string `json:"degraded_domains,omitempty"`
+	EvalTimeouts    int64    `json:"eval_timeouts"`
 }
 
 // policyApplyStatus reports whether a persisted policy mutation is live on
@@ -213,6 +214,7 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 		Degraded:        degraded.Degraded,
 		DegradedReason:  degraded.Reason,
 		DegradedDomains: degraded.Domains,
+		EvalTimeouts:    h.system.EvalTimeouts(),
 	})
 }
 
@@ -438,6 +440,20 @@ func (h *PolicyHandler) HandleActivateVersion(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	document, err := h.store.GetDocument(r.Context(), documentID)
+	if err != nil {
+		h.writeStoreError(w, err, "Failed to load policy document")
+		return
+	}
+	version, err := h.store.GetVersion(r.Context(), documentID, versionID)
+	if err != nil {
+		h.writeStoreError(w, err, "Failed to load policy version")
+		return
+	}
+	if err := policy.GuardEvalCost(r.Context(), document.Domain, version.RegoSource, h.evalBudget()); err != nil {
+		h.writeEvalCostError(w, err)
+		return
+	}
 	generation, err := h.store.Activate(r.Context(), documentID, versionID)
 	if err != nil {
 		h.writeStoreError(w, err, "Failed to activate policy version")
@@ -467,6 +483,26 @@ func (h *PolicyHandler) HandleSetDocumentEnabled(w http.ResponseWriter, r *http.
 	var req policySetEnabledRequest
 	if !decodePolicyRequest(w, r, &req) {
 		return
+	}
+	if req.Enabled {
+		// Enabling puts the document's active version into the live bundle, so
+		// it gets the same eval-cost guard as activation.
+		document, err := h.store.GetDocument(r.Context(), documentID)
+		if err != nil {
+			h.writeStoreError(w, err, "Failed to load policy document")
+			return
+		}
+		if document.ActiveVersionID != nil {
+			version, err := h.store.GetVersion(r.Context(), documentID, *document.ActiveVersionID)
+			if err != nil {
+				h.writeStoreError(w, err, "Failed to load policy version")
+				return
+			}
+			if err := policy.GuardEvalCost(r.Context(), document.Domain, version.RegoSource, h.evalBudget()); err != nil {
+				h.writeEvalCostError(w, err)
+				return
+			}
+		}
 	}
 	generation, err := h.store.SetEnabled(r.Context(), documentID, req.Enabled)
 	if err != nil {
@@ -674,6 +710,26 @@ func (h *PolicyHandler) writeStoreError(w http.ResponseWriter, err error, fallba
 		writeError(w, http.StatusConflict, policyErrorConflict, "Policy document has an active version")
 	default:
 		writeError(w, http.StatusInternalServerError, policyErrorInternal, fallback)
+	}
+}
+
+// evalBudget returns the live per-decision evaluation budget for the
+// activation-time cost guard.
+func (h *PolicyHandler) evalBudget() time.Duration {
+	if h == nil || h.system == nil {
+		return 0 // GuardEvalCost falls back to the default budget
+	}
+	return h.system.EvalTimeout()
+}
+
+func (h *PolicyHandler) writeEvalCostError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, policy.ErrPolicySlowEval):
+		writeError(w, http.StatusUnprocessableEntity, policyErrorUnprocessable, err.Error())
+	case errors.Is(err, policy.ErrCompileFailed):
+		h.writeCompileError(w, err)
+	default:
+		writeError(w, http.StatusInternalServerError, policyErrorInternal, "Failed to verify policy evaluation cost")
 	}
 }
 

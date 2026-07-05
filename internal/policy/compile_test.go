@@ -291,6 +291,14 @@ decision := count([x |
 	if !errors.Is(err, ErrPolicyEvalFailed) {
 		t.Fatalf("Evaluate() error = %v, want ErrPolicyEvalFailed", err)
 	}
+	// Timeouts stay fail-closed but carry the distinct sentinel and counter so
+	// a slow policy is attributable, not just a generic eval failure.
+	if !errors.Is(err, ErrPolicyEvalTimeout) {
+		t.Fatalf("Evaluate() error = %v, want ErrPolicyEvalTimeout to match", err)
+	}
+	if got := engine.EvalTimeouts(); got != 1 {
+		t.Fatalf("EvalTimeouts() = %d, want 1", got)
+	}
 }
 
 func tighteningScopeOverrideSource() string {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/open-policy-agent/opa/v1/ast"
@@ -52,6 +53,8 @@ type Engine struct {
 	revision int64
 	skipped  []SkippedSource
 	logger   *slog.Logger
+
+	evalTimeouts atomic.Int64
 }
 
 // EngineOption configures an Engine.
@@ -159,6 +162,12 @@ func (e *Engine) Revision() int64 {
 	return e.revision
 }
 
+// EvalTimeouts returns how many evaluations have exceeded the eval budget
+// since this engine was constructed.
+func (e *Engine) EvalTimeouts() int64 {
+	return e.evalTimeouts.Load()
+}
+
 // SkippedSources returns the enabled custom sources that were dropped from the
 // currently loaded bundle. Non-empty means the engine serves degraded (more
 // permissive than stored policy); only boot-time loading can produce skips.
@@ -207,6 +216,15 @@ func (e *Engine) Evaluate(ctx context.Context, name DecisionName, input any, out
 		Revision:     revision,
 	}
 	if err != nil {
+		// A timeout is still fail-closed (ErrPolicyEvalFailed matches), but it
+		// gets its own sentinel, counter, and Error log: a slow policy denies
+		// every request on the hot path and must be attributable.
+		if errors.Is(evalCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			e.evalTimeouts.Add(1)
+			e.logger.ErrorContext(ctx, "policy evaluation timed out",
+				"decision", string(name), "timeout", timeout, "total_timeouts", e.evalTimeouts.Load())
+			return meta, fmt.Errorf("%w: %w after %s: %w", ErrPolicyEvalFailed, ErrPolicyEvalTimeout, timeout, err)
+		}
 		return meta, fmt.Errorf("%w: %w", ErrPolicyEvalFailed, err)
 	}
 	if len(resultSet) == 0 || len(resultSet[0].Expressions) == 0 {
