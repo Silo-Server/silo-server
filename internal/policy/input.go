@@ -158,6 +158,13 @@ type ActionInput struct {
 	CurrentActiveTranscodes int    `json:"current_active_transcodes"`
 	RequestedAction         string `json:"requested_action"`
 
+	// FileQuality is supplied only when the source resolution is what gets
+	// served: direct-original and remux downloads. Capped transcode checks and
+	// playback admission leave it empty (the vendor quality gate treats empty
+	// as allowed), so custom rules keyed on file_quality only fire for
+	// original-resolution serving. The content-rating pair is likewise empty
+	// on download paths — rating ceilings are enforced by the access filter at
+	// item access before any action check runs.
 	RequestedQuality   string `json:"requested_quality"`
 	FileQuality        string `json:"file_quality"`
 	MaxPlaybackQuality string `json:"max_playback_quality"`

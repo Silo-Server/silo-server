@@ -199,3 +199,64 @@ type downloadGroupProvider struct {
 func (p downloadGroupProvider) GetPolicyForUser(context.Context, int) (*access.GroupPolicy, error) {
 	return p.group, p.err
 }
+
+// TestResolveOriginalAssertsServedQuality is the C6 regression: a direct
+// original download of an over-ceiling source must be denied at create time —
+// serve-time authorization (serveDownloadBytes) could never satisfy the row —
+// while a capped transcode of the same source stays allowed, and a compliant
+// source passes with the served quality asserted to the policy.
+func TestResolveOriginalAssertsServedQuality(t *testing.T) {
+	ctx := context.Background()
+	pdp := newDownloadPolicyPDP(t)
+	resolver := DownloadQualityResolver{actionDecider: pdp}
+	cfg := config.DownloadConfig{Enabled: true, TranscodeEnabled: true}
+	user := &models.User{ID: 9, DownloadAllowed: true, DownloadTranscodeAllowed: true, MaxPlaybackQuality: "1080p"}
+	overCeiling := &models.MediaFile{ID: 3, Resolution: "2160p"}
+
+	_, err := resolver.Resolve(ctx, QualityOriginal, user, cfg, overCeiling, playback.ClientCapabilities{}, true, "")
+	if !errors.Is(err, ErrQualityUnavailable) {
+		t.Fatalf("Resolve(over-ceiling original) error = %v, want ErrQualityUnavailable", err)
+	}
+
+	// The same over-ceiling source stays downloadable as a capped transcode:
+	// the ceiling applies to the prepared artifact, not the source.
+	transcode, err := resolver.Resolve(ctx, Quality5Mbps, user, cfg, overCeiling, playback.ClientCapabilities{}, true, "")
+	if err != nil {
+		t.Fatalf("Resolve(capped transcode of over-ceiling source) error: %v", err)
+	}
+	if !transcode.RequiresArtifact || transcode.DeliveryFormat != FormatTranscode {
+		t.Fatalf("transcode decision = %+v, want artifact-backed transcode", transcode)
+	}
+
+	compliant := &models.MediaFile{ID: 4, Resolution: "1080p"}
+	if _, err := resolver.Resolve(ctx, QualityOriginal, user, cfg, compliant, playback.ClientCapabilities{}, true, ""); err != nil {
+		t.Fatalf("Resolve(compliant original) error: %v", err)
+	}
+}
+
+// TestResolveOriginalPopulatesFileQualityFact pins the input contract: the
+// final download check on original-resolution paths carries file_quality.
+func TestResolveOriginalPopulatesFileQualityFact(t *testing.T) {
+	decider := &capturingActionDecider{decision: policyengine.ActionDecision{Allowed: true}}
+	resolver := DownloadQualityResolver{actionDecider: decider}
+	user := &models.User{ID: 9, DownloadAllowed: true, MaxPlaybackQuality: "2160p"}
+	cfg := config.DownloadConfig{Enabled: true}
+	file := &models.MediaFile{ID: 3, Resolution: "1080p"}
+
+	if _, err := resolver.Resolve(
+		context.Background(), QualityOriginal, user, cfg, file,
+		playback.ClientCapabilities{}, true, "device-9",
+	); err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if len(decider.inputs) != 1 {
+		t.Fatalf("decider calls = %d, want 1", len(decider.inputs))
+	}
+	in := decider.inputs[0]
+	if in.Action != policyengine.ActionDownload ||
+		in.FileQuality != "1080p" ||
+		in.RequestedQuality != QualityOriginal ||
+		in.DeviceID != "device-9" {
+		t.Fatalf("action input = %+v, want download action with file_quality asserted", in)
+	}
+}

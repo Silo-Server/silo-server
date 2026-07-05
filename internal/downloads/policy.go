@@ -85,6 +85,12 @@ func (r DownloadQualityResolver) Resolve(
 
 	switch decision {
 	case playback.PlayDirect:
+		// Original bytes are served at the source resolution, so assert it at
+		// create time: otherwise an over-ceiling original registers a row that
+		// serveDownloadBytes can never satisfy (review finding C6).
+		if err := r.ensureServedQualityAllowed(ctx, user, cfg, artifactsAvailable, file, deviceID); err != nil {
+			return QualityDecision{}, err
+		}
 		return QualityDecision{
 			RequestedQuality: QualityOriginal,
 			EffectiveQuality: QualityOriginal,
@@ -93,6 +99,11 @@ func (r DownloadQualityResolver) Resolve(
 	case playback.PlayRemux:
 		if !artifactsAvailable {
 			return QualityDecision{}, ErrQualityUnavailable
+		}
+		// A remux artifact keeps the source resolution, so it is served — and
+		// must be asserted — like an original (unlike capped transcodes).
+		if err := r.ensureServedQualityAllowed(ctx, user, cfg, artifactsAvailable, file, deviceID); err != nil {
+			return QualityDecision{}, err
 		}
 		target := playback.ResolvePrepareTarget(file, FormatRemux, caps, playback.AdminSettings{
 			TranscodeEnabled: cfg.TranscodeEnabled && user.DownloadTranscodeAllowed,
@@ -318,6 +329,50 @@ func (r DownloadQualityResolver) ensureTranscodeAvailable(
 	return decision.QualityCeiling, nil
 }
 
+// ensureServedQualityAllowed runs the final download action check for paths
+// that serve the source resolution unchanged (direct originals and remuxes),
+// with FileQuality populated so the policy's quality gate sees what will
+// actually be served. Capped transcode paths never assert FileQuality — their
+// ceiling applies to the prepared artifact (see downloadActionInput).
+func (r DownloadQualityResolver) ensureServedQualityAllowed(
+	ctx context.Context,
+	user *models.User,
+	cfg config.DownloadConfig,
+	artifactsAvailable bool,
+	file *models.MediaFile,
+	deviceID string,
+) error {
+	if r.actionDecider == nil {
+		if user != nil && !access.QualityAllowed(file.Resolution, user.MaxPlaybackQuality) {
+			return ErrQualityUnavailable
+		}
+		return nil
+	}
+	input := downloadActionInput(
+		policyengine.ActionDownload,
+		userIDForPolicy(user),
+		user,
+		cfg,
+		artifactsAvailable,
+		deviceID,
+	)
+	input.RequestedQuality = QualityOriginal
+	input.FileQuality = file.Resolution
+	decision, _, err := r.actionDecider.CheckAction(ctx, input)
+	if err != nil {
+		return ErrDownloadNotAllowed
+	}
+	if !decision.Allowed {
+		return downloadActionDenyError(decision.ReasonCode)
+	}
+	// A custom override may narrow the ceiling below the served resolution;
+	// nothing can cap an original/remux, so that narrowing is a denial here.
+	if decision.QualityCeiling != "" && !access.QualityAllowed(file.Resolution, decision.QualityCeiling) {
+		return ErrQualityUnavailable
+	}
+	return nil
+}
+
 // applyQualityCeiling downscales a transcode target so the prepared artifact
 // stays within a policy quality ceiling. The ceiling applies to what is served
 // (the artifact), so a capped transcode of an over-ceiling source stays
@@ -347,11 +402,13 @@ func ensureTranscodeAllowed(user *models.User, cfg config.DownloadConfig) error 
 }
 
 // downloadActionInput builds the policy facts downloads can assert. FileQuality
-// and the content-rating pair are intentionally left empty: download quality and
-// rating ceilings apply to what is actually served, which the scope-derived
-// access filter enforces at item access and again at serve time against the
-// prepared artifact (see serveDownloadBytes). Asserting the source file's
-// quality here would wrongly deny capped transcodes of over-ceiling sources.
+// is left empty here and populated only where the source resolution is what
+// gets served (direct originals and remuxes — see ensureServedQualityAllowed):
+// asserting it on capped transcode paths would wrongly deny transcodes of
+// over-ceiling sources, whose ceiling applies to the prepared artifact. The
+// content-rating pair stays empty on every download path — rating ceilings are
+// enforced by the scope-derived access filter at item access
+// (EnsureAccessible) before any action check runs.
 func downloadActionInput(
 	action string,
 	userID int,
@@ -395,7 +452,8 @@ func downloadActionDenyError(reasonCode string) error {
 		return ErrFeatureDisabled
 	case policyengine.ReasonCodeTranscodeDisabled:
 		return ErrTranscodeDisabled
-	case policyengine.ReasonCodeDownloadArtifactsUnavailable:
+	case policyengine.ReasonCodeDownloadArtifactsUnavailable,
+		policyengine.ReasonCodeQualityCeilingExceeded:
 		return ErrQualityUnavailable
 	default:
 		return ErrDownloadNotAllowed
