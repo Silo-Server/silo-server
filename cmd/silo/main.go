@@ -1583,6 +1583,24 @@ func main() {
 	}
 	ipResolver := clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
+	// Hot-reload trusted proxies on settings changes. The config watcher
+	// covers both the Redis event path and the Redis-less poll/RequestReload
+	// path, so admin UI edits apply without a restart on any deployment.
+	configWatcher.OnChange(func(old, updated *config.Config) {
+		if old != nil && old.ClientIP.TrustedProxies == updated.ClientIP.TrustedProxies {
+			return
+		}
+		raw := updated.ClientIP.TrustedProxies
+		if raw == "" {
+			raw = clientip.DefaultTrustedProxies
+		}
+		cidrs, parseErr := clientip.ParseCIDRs(raw)
+		if parseErr != nil {
+			slog.Warn("clientip config reload failed", "error", parseErr)
+			return
+		}
+		ipResolver.UpdateTrustedCIDRs(cidrs)
+	})
 
 	// Step 6b: Create rate limiter.
 	if cfg.RateLimit.Enabled && deps.DB != nil {
@@ -1619,13 +1637,6 @@ func main() {
 			if event.Type == cache.EventSettingsChanged {
 				if reloadErr := rateLimitMW.Reload(context.Background()); reloadErr != nil {
 					slog.Warn("rate limit config reload from event failed", "error", reloadErr)
-				}
-				// Reload trusted proxies
-				cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
-				if loadErr != nil {
-					slog.Warn("clientip config reload failed", "error", loadErr)
-				} else {
-					ipResolver.UpdateTrustedCIDRs(cidrs)
 				}
 			}
 		})

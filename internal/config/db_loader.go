@@ -218,6 +218,10 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.S3.UserDB.AccessKey = stringOr(m, "s3.user_db_access_key", "")
 	cfg.S3.UserDB.SecretKey = stringOr(m, "s3.user_db_secret_key", "")
 
+	// Client IP resolution ("" = clientip package defaults). Kept in the
+	// config snapshot so the nodeconfig watcher hot-reloads the resolver.
+	cfg.ClientIP.TrustedProxies = stringOr(m, "clientip.trusted_proxies", "")
+
 	// TMDB collection presets (independent of metadata providers)
 	cfg.TMDBAPIKey = stringOr(m, "tmdb.api_key", "")
 

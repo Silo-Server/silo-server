@@ -321,6 +321,13 @@ type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
 }
 
+// ClientIPConfig holds client IP resolution settings.
+type ClientIPConfig struct {
+	// TrustedProxies is the comma-separated CIDR list of reverse proxies
+	// whose X-Forwarded-For headers are trusted ("" = built-in defaults).
+	TrustedProxies string `yaml:"-"`
+}
+
 // Config is the top-level configuration for Silo.
 type Config struct {
 	Server               ServerConfig               `yaml:"server"`
@@ -341,6 +348,7 @@ type Config struct {
 	SubtitleAI           SubtitleAIConfig           `yaml:"-"`
 	MetadataAI           MetadataAIConfig           `yaml:"-"`
 	Download             DownloadConfig             `yaml:"-"`
+	ClientIP             ClientIPConfig             `yaml:"-"`
 	TMDBAPIKey           string                     `yaml:"-"`
 	MDBListAPIKey        string                     `yaml:"-"`
 }

@@ -10,6 +10,7 @@ const KEYS = [
   "auth.refresh_token_expiry",
   "server.log_level",
   "server.log_quiet",
+  "clientip.trusted_proxies",
 ];
 
 export default function GeneralSettings() {
@@ -36,7 +37,7 @@ export default function GeneralSettings() {
       <div className="mb-6 space-y-2">
         <h2 className="text-xl font-semibold tracking-tight">General</h2>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Authentication, token lifetimes, and server logging behavior.
+          Authentication, token lifetimes, networking, and server logging behavior.
         </p>
       </div>
 
@@ -76,6 +77,15 @@ export default function GeneralSettings() {
             hint="Comma-separated subsystem prefixes to silence"
             value={form.getValue("server.log_quiet")}
             onChange={(v) => form.setValue("server.log_quiet", v)}
+          />
+        </FieldGroup>
+
+        <FieldGroup label="Network">
+          <SettingField
+            label="Trusted Proxies"
+            hint="Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. 172.16.0.0/12, 203.0.113.7/32. Leave empty for the built-in private-network defaults. Applies without a restart."
+            value={form.getValue("clientip.trusted_proxies")}
+            onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
           />
         </FieldGroup>
       </div>

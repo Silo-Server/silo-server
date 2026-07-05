@@ -2114,6 +2114,14 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		} else {
 			req.Value = normalized
 		}
+	case clientip.SettingTrustedProxies:
+		normalized, err := clientip.NormalizeCIDRList(req.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"clientip.trusted_proxies must be a comma-separated list of CIDRs: "+err.Error())
+			return
+		}
+		req.Value = normalized
 	case "ai.asr_base_url":
 		if llm.IsChatOnlyGateway(req.Value) {
 			writeError(w, http.StatusBadRequest, "bad_request",

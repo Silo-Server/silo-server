@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 )
 
@@ -15,33 +16,74 @@ type SettingsStore interface {
 }
 
 const (
-	keyTrustedProxies = "clientip.trusted_proxies"
-	// Default: RFC 1918 private ranges + loopback + link-local
-	defaultTrustedProxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
+	// SettingTrustedProxies is the server_settings key holding the
+	// comma-separated CIDR list of trusted reverse proxies.
+	SettingTrustedProxies = "clientip.trusted_proxies"
+	// EnvTrustedProxies overrides SettingTrustedProxies at startup when set.
+	EnvTrustedProxies = "SILO_TRUSTED_PROXIES"
+	// DefaultTrustedProxies: RFC 1918 private ranges + loopback.
+	DefaultTrustedProxies = "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,::1/128"
 )
 
-// SeedDefaults writes the default trusted proxy config if not already set.
+// SeedDefaults ensures the trusted proxy setting exists. When the
+// SILO_TRUSTED_PROXIES environment variable is set it wins: the value is
+// validated and persisted so the admin UI shows the effective config (and is
+// re-applied on every startup while the variable remains set). Otherwise the
+// default list is written only if the setting is unset.
 func SeedDefaults(ctx context.Context, store SettingsStore) error {
-	existing, err := store.Get(ctx, keyTrustedProxies)
+	if env := strings.TrimSpace(os.Getenv(EnvTrustedProxies)); env != "" {
+		normalized, err := NormalizeCIDRList(env)
+		if err != nil {
+			return fmt.Errorf("invalid %s: %w", EnvTrustedProxies, err)
+		}
+		existing, err := store.Get(ctx, SettingTrustedProxies)
+		if err != nil {
+			return fmt.Errorf("seed clientip defaults: %w", err)
+		}
+		if existing == normalized {
+			return nil
+		}
+		return store.Set(ctx, SettingTrustedProxies, normalized)
+	}
+	existing, err := store.Get(ctx, SettingTrustedProxies)
 	if err != nil {
 		return fmt.Errorf("seed clientip defaults: %w", err)
 	}
 	if existing != "" {
 		return nil
 	}
-	return store.Set(ctx, keyTrustedProxies, defaultTrustedProxies)
+	return store.Set(ctx, SettingTrustedProxies, DefaultTrustedProxies)
 }
 
 // LoadTrustedCIDRs reads the trusted proxy CIDRs from settings.
 func LoadTrustedCIDRs(ctx context.Context, store SettingsStore) ([]*net.IPNet, error) {
-	raw, err := store.Get(ctx, keyTrustedProxies)
+	raw, err := store.Get(ctx, SettingTrustedProxies)
 	if err != nil {
 		return nil, fmt.Errorf("load trusted proxies: %w", err)
 	}
 	if raw == "" {
-		raw = defaultTrustedProxies
+		raw = DefaultTrustedProxies
 	}
 	return ParseCIDRs(raw)
+}
+
+// NormalizeCIDRList validates a comma-separated CIDR list and returns it in
+// canonical form (trimmed entries joined by ", "). An empty list is valid and
+// means "use the built-in defaults".
+func NormalizeCIDRList(raw string) (string, error) {
+	parts := strings.Split(raw, ",")
+	var out []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(p); err != nil {
+			return "", fmt.Errorf("invalid CIDR %q (expected e.g. 203.0.113.7/32)", p)
+		}
+		out = append(out, p)
+	}
+	return strings.Join(out, ", "), nil
 }
 
 // ParseCIDRs parses a comma-separated list of CIDR strings.
