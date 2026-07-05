@@ -26,6 +26,7 @@ test_acting_admin_no_declared_profile if {
 	})
 	got.allowed
 	got.reason == "allowed"
+	got.reason_code == ""
 }
 
 test_acting_admin_primary_profile if {
@@ -47,6 +48,7 @@ test_acting_admin_rejects_non_primary_profile if {
 	})
 	not got.allowed
 	got.reason == "primary profile required"
+	got.reason_code == "primary_profile_required"
 }
 
 test_acting_admin_rejects_non_admin if {
@@ -55,6 +57,7 @@ test_acting_admin_rejects_non_admin if {
 	})
 	not got.allowed
 	got.reason == "admin role required"
+	got.reason_code == "admin_role_required"
 }
 
 test_acting_admin_rejects_disabled_user if {
@@ -65,6 +68,7 @@ test_acting_admin_rejects_disabled_user if {
 	})
 	not got.allowed
 	got.reason == "user disabled"
+	got.reason_code == "user_disabled"
 }
 
 test_marker_edit_admin_implicit_grant if {
@@ -89,6 +93,7 @@ test_marker_edit_rejects_missing_permission if {
 	})
 	not got.allowed
 	got.reason == "marker edit permission required"
+	got.reason_code == "marker_edit_permission_required"
 }
 
 test_metadata_curation_acting_admin_bypasses_libraries if {
@@ -133,6 +138,7 @@ test_metadata_curation_rejects_out_of_scope if {
 	})
 	not got.allowed
 	got.reason == "item is outside user libraries"
+	got.reason_code == "item_outside_user_libraries"
 }
 
 test_metadata_curation_rejects_empty_targets if {
@@ -144,6 +150,7 @@ test_metadata_curation_rejects_empty_targets if {
 	})
 	not got.allowed
 	got.reason == "item is outside user libraries"
+	got.reason_code == "item_outside_user_libraries"
 }
 
 test_metadata_curation_non_primary_admin_requires_assigned_permission if {
@@ -156,6 +163,7 @@ test_metadata_curation_non_primary_admin_requires_assigned_permission if {
 	})
 	not got.allowed
 	got.reason == "metadata curation permission required"
+	got.reason_code == "metadata_curation_permission_required"
 }
 
 test_metadata_curation_non_primary_admin_allows_assigned_permission if {
@@ -175,6 +183,7 @@ test_unknown_permission_rejected if {
 	})
 	not got.allowed
 	got.reason == "unknown permission"
+	got.reason_code == "unknown_permission"
 }
 
 deny_override(_, _) := {
@@ -191,6 +200,7 @@ test_tightening_override_applies if {
 		with data.silo_custom.permission.override as deny_override
 	not got.allowed
 	got.reason == "quiet hours"
+	got.reason_code == "custom_denial"
 }
 
 allow_override(_, _) := {

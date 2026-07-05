@@ -213,7 +213,7 @@ func (m *PolicyPermissionMiddleware) RequireMetadataCurationForItem(next http.Ha
 			return
 		}
 		if !decision.Allowed {
-			if decision.Reason == "item is outside user libraries" {
+			if decision.ReasonCode == policy.ReasonCodeItemOutsideUserLibraries {
 				writeForbidden(w, "Item is outside your assigned libraries")
 				return
 			}

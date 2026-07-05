@@ -238,7 +238,7 @@ func (s *Service) checkDownloadAction(
 		return ErrDownloadNotAllowed
 	}
 	if !decision.Allowed {
-		return downloadActionDenyError(decision.Reason)
+		return downloadActionDenyError(decision.ReasonCode)
 	}
 	return nil
 }
@@ -313,7 +313,7 @@ func (r DownloadQualityResolver) ensureTranscodeAvailable(
 		return "", ErrDownloadNotAllowed
 	}
 	if !decision.Allowed {
-		return "", downloadActionDenyError(decision.Reason)
+		return "", downloadActionDenyError(decision.ReasonCode)
 	}
 	return decision.QualityCeiling, nil
 }
@@ -386,13 +386,16 @@ func userIDForPolicy(user *models.User) int {
 	return user.ID
 }
 
-func downloadActionDenyError(reason string) error {
-	switch reason {
-	case "downloads disabled":
+// downloadActionDenyError maps a typed policy reason code — never the
+// free-text reason — to a downloads error. Unrecognized codes (including
+// custom_denial from admin overrides) fall back to the generic denial.
+func downloadActionDenyError(reasonCode string) error {
+	switch reasonCode {
+	case policyengine.ReasonCodeDownloadsDisabled:
 		return ErrFeatureDisabled
-	case "transcode disabled":
+	case policyengine.ReasonCodeTranscodeDisabled:
 		return ErrTranscodeDisabled
-	case "download artifacts unavailable":
+	case policyengine.ReasonCodeDownloadArtifactsUnavailable:
 		return ErrQualityUnavailable
 	default:
 		return ErrDownloadNotAllowed

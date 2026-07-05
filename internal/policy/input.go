@@ -98,11 +98,42 @@ type PermissionInput struct {
 }
 
 // PermissionDecision is the policy output document for route-level permission
-// gates.
+// gates. Reason is human-readable free text; ReasonCode is the stable machine
+// contract (one of the ReasonCode* constants).
 type PermissionDecision struct {
-	Allowed bool   `json:"allowed"`
-	Reason  string `json:"reason"`
+	Allowed    bool   `json:"allowed"`
+	Reason     string `json:"reason"`
+	ReasonCode string `json:"reason_code"`
 }
+
+// Reason codes emitted by the vendor policy bundle. These — not the free-text
+// reason strings — are the contract Go consumers branch on. A custom override
+// that flips a base allow to a deny always carries ReasonCodeCustomDenial,
+// because override reasons are administrator free text.
+const (
+	ReasonCodeCustomDenial = "custom_denial"
+
+	// Permission decisions.
+	ReasonCodeUnknownPermission            = "unknown_permission"
+	ReasonCodeUserDisabled                 = "user_disabled"
+	ReasonCodeAdminRoleRequired            = "admin_role_required"
+	ReasonCodePrimaryProfileRequired       = "primary_profile_required"
+	ReasonCodeMarkerEditPermissionRequired = "marker_edit_permission_required"
+	ReasonCodeMetadataCurationRequired     = "metadata_curation_permission_required"
+	ReasonCodeItemOutsideUserLibraries     = "item_outside_user_libraries"
+
+	// Action decisions.
+	ReasonCodeUnknownAction                = "unknown_action"
+	ReasonCodeDownloadsDisabled            = "downloads_disabled"
+	ReasonCodeDownloadPermissionRequired   = "download_permission_required"
+	ReasonCodeTranscodeDisabled            = "transcode_disabled"
+	ReasonCodeDownloadTranscodeRequired    = "download_transcode_permission_required"
+	ReasonCodeDownloadArtifactsUnavailable = "download_artifacts_unavailable"
+	ReasonCodeQualityCeilingExceeded       = "quality_ceiling_exceeded"
+	ReasonCodeContentRatingExceeded        = "content_rating_exceeded"
+	ReasonCodeMaxStreamsExceeded           = "max_streams_exceeded"
+	ReasonCodeMaxTranscodesExceeded        = "max_transcodes_exceeded"
+)
 
 // ActionInput is the policy input document for download eligibility,
 // download-transcode eligibility, and playback admission.
@@ -140,8 +171,11 @@ type ActionInput struct {
 
 // ActionDecision is the policy output document for action checks. QualityCeiling
 // is set only when a custom override narrows the input max_playback_quality.
+// Reason is human-readable free text; ReasonCode is the stable machine contract
+// (one of the ReasonCode* constants).
 type ActionDecision struct {
 	Allowed        bool   `json:"allowed"`
 	Reason         string `json:"reason"`
+	ReasonCode     string `json:"reason_code"`
 	QualityCeiling string `json:"quality_ceiling"`
 }

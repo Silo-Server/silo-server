@@ -2971,6 +2971,10 @@ func writeCompatUpstreamError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusTooManyRequests, "TooManyTranscodes", "Too many concurrent transcodes")
 		return
 	}
+	if errors.Is(err, playback.ErrPlaybackNotAllowed) {
+		writeError(w, http.StatusForbidden, "PlaybackNotAllowed", "Playback denied by server policy")
+		return
+	}
 
 	var httpErr *HTTPError
 	if errors.As(err, &httpErr) {

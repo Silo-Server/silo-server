@@ -374,8 +374,35 @@ func TestSessionManager_AdmissionDeciderErrorDenies(t *testing.T) {
 	})
 
 	_, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
-	if !errors.Is(err, playback.ErrTooManyStreams) {
-		t.Fatalf("StartSession with failing decider = %v, want ErrTooManyStreams", err)
+	if !errors.Is(err, playback.ErrPlaybackNotAllowed) {
+		t.Fatalf("StartSession with failing decider = %v, want ErrPlaybackNotAllowed", err)
+	}
+}
+
+func TestSessionManager_AdmissionReasonCodesMapToSentinelErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		reasonCode string
+		want       error
+	}{
+		{"max streams", playback.AdmissionReasonMaxStreamsExceeded, playback.ErrTooManyStreams},
+		{"max transcodes", playback.AdmissionReasonMaxTranscodesExceeded, playback.ErrTooManyTranscodes},
+		// A custom-override denial carries free text and the custom_denial
+		// code; it must not surface as a concurrency-limit error.
+		{"custom denial", "custom_denial", playback.ErrPlaybackNotAllowed},
+		{"empty code", "", playback.ErrPlaybackNotAllowed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := playback.NewSessionManager(0, 0)
+			sm.SetAdmissionDecider(func(context.Context, playback.AdmissionRequest) (playback.AdmissionDecision, error) {
+				return playback.AdmissionDecision{Allowed: false, Reason: "quiet hours", ReasonCode: tc.reasonCode}, nil
+			})
+			_, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("StartSession denial with code %q = %v, want %v", tc.reasonCode, err, tc.want)
+			}
+		})
 	}
 }
 

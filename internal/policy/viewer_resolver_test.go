@@ -336,6 +336,30 @@ func TestViewerResolverEvalFailureFailsClosed(t *testing.T) {
 	assertZeroScope(t, scope)
 }
 
+func TestViewerResolverPolicyRevokedProfileVerification(t *testing.T) {
+	ctx := context.Background()
+	users := viewerResolverUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}}
+	stores := viewerResolverStoreProvider{store: viewerResolverTestStore{}}
+	engine, err := NewEngineWithCustom(ctx, map[string]ActiveSource{
+		"scope": {Source: `package silo_custom.scope
+
+import rego.v1
+
+override(_, _) := {"profile_verified": false}
+`},
+	})
+	if err != nil {
+		t.Fatalf("NewEngineWithCustom() error: %v", err)
+	}
+	resolver := NewViewerResolver(users, stores, nil, NewPDP(engine))
+
+	scope, err := resolver.Resolve(ctx, access.ResolveInput{UserID: 1, SessionID: "sess-1"})
+	if !errors.Is(err, access.ErrProfileUnverified) {
+		t.Fatalf("Resolve() error = %v, want ErrProfileUnverified when policy revokes verification", err)
+	}
+	assertZeroScope(t, scope)
+}
+
 func TestViewerResolverAppliesGroupPolicy(t *testing.T) {
 	ctx := context.Background()
 	user := &models.User{

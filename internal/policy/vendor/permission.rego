@@ -13,21 +13,21 @@ base_decision := acting_admin_decision(input) if {
 	input.permission == "marker_edit"
 } else := metadata_curation_decision(input) if {
 	input.permission == "metadata_curation"
-} else := deny("unknown permission")
+} else := deny("unknown permission", "unknown_permission")
 
 acting_admin_decision(i) := allow if {
 	acting_admin_allowed(i)
-} else := deny("user disabled") if {
+} else := deny("user disabled", "user_disabled") if {
 	not user_enabled(i)
-} else := deny("admin role required") if {
+} else := deny("admin role required", "admin_role_required") if {
 	not admin_role(i)
-} else := deny("primary profile required")
+} else := deny("primary profile required", "primary_profile_required")
 
 marker_edit_decision(i) := allow if {
 	effective_permission_allowed(i, "marker_edit")
-} else := deny("user disabled") if {
+} else := deny("user disabled", "user_disabled") if {
 	not user_enabled(i)
-} else := deny("marker edit permission required")
+} else := deny("marker edit permission required", "marker_edit_permission_required")
 
 metadata_curation_decision(i) := allow if {
 	acting_admin_allowed(i)
@@ -35,11 +35,11 @@ metadata_curation_decision(i) := allow if {
 	user_enabled(i)
 	assigned_permission(i, "metadata_curation")
 	target_libraries_allowed(i)
-} else := deny("user disabled") if {
+} else := deny("user disabled", "user_disabled") if {
 	not user_enabled(i)
-} else := deny("metadata curation permission required") if {
+} else := deny("metadata curation permission required", "metadata_curation_permission_required") if {
 	not assigned_permission(i, "metadata_curation")
-} else := deny("item is outside user libraries")
+} else := deny("item is outside user libraries", "item_outside_user_libraries")
 
 effective_permission_allowed(i, permission) if {
 	user_enabled(i)
@@ -123,19 +123,25 @@ has_value(values, value) if {
 allow := {
 	"allowed": true,
 	"reason": "allowed",
+	"reason_code": "",
 }
 
-deny(reason) := {
+# reason is human-readable free text; reason_code is the machine contract Go
+# consumers switch on (see policy.ReasonCode* constants).
+deny(reason, code) := {
 	"allowed": false,
 	"reason": reason,
+	"reason_code": code,
 }
 
 tighten(base, override) := result if {
 	allowed := tightened_allowed(base, override)
 	reason := tightened_reason(base, override, allowed)
+	reason_code := tightened_reason_code(base, override, allowed)
 	result := {
 		"allowed": allowed,
 		"reason": reason,
+		"reason_code": reason_code,
 	}
 }
 
@@ -156,6 +162,14 @@ tightened_reason(base, override, allowed) := reason if {
 	not override_grants(override)
 	reason := nonempty_string_or_default(object.get(override, "reason", ""), base.reason)
 } else := base.reason
+
+# Overrides only carry free-text reasons, so a custom deny always gets the
+# fixed custom_denial code; a base deny keeps its vendor code.
+tightened_reason_code(base, override, allowed) := "custom_denial" if {
+	not allowed
+	base.allowed
+	not override_grants(override)
+} else := object.get(base, "reason_code", "")
 
 nonempty_string_or_default(value, fallback) := value if {
 	is_string(value)

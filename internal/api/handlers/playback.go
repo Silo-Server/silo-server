@@ -1297,6 +1297,10 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusTooManyRequests, "too_many_transcodes", "Too many concurrent transcodes")
 			return
 		}
+		if errors.Is(err, playback.ErrPlaybackNotAllowed) {
+			writeError(w, http.StatusForbidden, "playback_not_allowed", "Playback denied by server policy")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start playback session")
 		return
 	}

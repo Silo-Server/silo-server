@@ -34,6 +34,10 @@ func NewPlaybackAdmissionDecider(checker ActionChecker) playback.AdmissionDecide
 		if err != nil {
 			return playback.AdmissionDecision{}, err
 		}
-		return playback.AdmissionDecision{Allowed: decision.Allowed, Reason: decision.Reason}, nil
+		return playback.AdmissionDecision{
+			Allowed:    decision.Allowed,
+			Reason:     decision.Reason,
+			ReasonCode: decision.ReasonCode,
+		}, nil
 	}
 }

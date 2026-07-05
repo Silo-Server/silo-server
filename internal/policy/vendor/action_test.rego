@@ -30,6 +30,7 @@ test_download_allowed if {
 	got := decision with input as base_input
 	got.allowed
 	got.reason == "allowed"
+	got.reason_code == ""
 	got.quality_ceiling == ""
 }
 
@@ -39,6 +40,7 @@ test_download_rejects_disabled_downloads if {
 	})
 	not got.allowed
 	got.reason == "downloads disabled"
+	got.reason_code == "downloads_disabled"
 }
 
 test_download_rejects_user_flag if {
@@ -47,6 +49,7 @@ test_download_rejects_user_flag if {
 	})
 	not got.allowed
 	got.reason == "download permission required"
+	got.reason_code == "download_permission_required"
 }
 
 test_download_rejects_quality_ceiling if {
@@ -56,6 +59,7 @@ test_download_rejects_quality_ceiling if {
 	})
 	not got.allowed
 	got.reason == "quality ceiling exceeded"
+	got.reason_code == "quality_ceiling_exceeded"
 }
 
 test_download_rejects_content_rating if {
@@ -65,6 +69,7 @@ test_download_rejects_content_rating if {
 	})
 	not got.allowed
 	got.reason == "content rating exceeded"
+	got.reason_code == "content_rating_exceeded"
 }
 
 test_download_transcode_allowed if {
@@ -82,6 +87,7 @@ test_download_transcode_rejects_server_transcode_flag if {
 	})
 	not got.allowed
 	got.reason == "transcode disabled"
+	got.reason_code == "transcode_disabled"
 }
 
 test_download_transcode_rejects_user_transcode_flag if {
@@ -91,6 +97,7 @@ test_download_transcode_rejects_user_transcode_flag if {
 	})
 	not got.allowed
 	got.reason == "download transcode permission required"
+	got.reason_code == "download_transcode_permission_required"
 }
 
 test_download_transcode_rejects_missing_artifacts if {
@@ -100,6 +107,7 @@ test_download_transcode_rejects_missing_artifacts if {
 	})
 	not got.allowed
 	got.reason == "download artifacts unavailable"
+	got.reason_code == "download_artifacts_unavailable"
 }
 
 test_playback_admission_allows_below_limits if {
@@ -132,6 +140,7 @@ test_playback_admission_rejects_stream_limit_at_limit if {
 	})
 	not got.allowed
 	got.reason == "max streams exceeded"
+	got.reason_code == "max_streams_exceeded"
 }
 
 test_playback_admission_rejects_transcode_limit_at_limit if {
@@ -143,6 +152,7 @@ test_playback_admission_rejects_transcode_limit_at_limit if {
 	})
 	not got.allowed
 	got.reason == "max transcodes exceeded"
+	got.reason_code == "max_transcodes_exceeded"
 }
 
 test_playback_admission_direct_ignores_transcode_limit if {
@@ -161,6 +171,7 @@ test_unknown_action_rejected if {
 	})
 	not got.allowed
 	got.reason == "unknown action"
+	got.reason_code == "unknown_action"
 }
 
 deny_override(_, _) := {
@@ -174,6 +185,7 @@ test_tightening_deny_override_applies if {
 		with data.silo_custom.action.override as deny_override
 	not got.allowed
 	got.reason == "quiet hours"
+	got.reason_code == "custom_denial"
 }
 
 allow_override(_, _) := {

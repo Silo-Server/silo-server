@@ -127,10 +127,22 @@ type AdmissionRequest struct {
 }
 
 // AdmissionDecision is the result of an optional policy admission decision.
+// Reason is free text for logs; ReasonCode is the typed contract mapped to
+// sentinel errors (values mirror the vendor policy reason_code output).
 type AdmissionDecision struct {
-	Allowed bool
-	Reason  string
+	Allowed    bool
+	Reason     string
+	ReasonCode string
 }
+
+// Admission reason codes recognized by admissionDenyError. They mirror the
+// policy package's ReasonCode* constants; playback cannot import policy
+// (policy's adapters import playback), so the shared values are pinned by
+// tests on both sides.
+const (
+	AdmissionReasonMaxStreamsExceeded    = "max_streams_exceeded"
+	AdmissionReasonMaxTranscodesExceeded = "max_transcodes_exceeded"
+)
 
 // AdmissionDecider can replace SessionManager's inline limit comparison while
 // keeping session counting in Go.
@@ -291,7 +303,7 @@ func (m *SessionManager) StartSessionWithFilesContext(
 			return nil, admissionDenyError("")
 		}
 		if !decision.Allowed {
-			return nil, admissionDenyError(decision.Reason)
+			return nil, admissionDenyError(decision.ReasonCode)
 		}
 
 		m.mu.Lock()
@@ -348,11 +360,18 @@ func newSession(
 	}
 }
 
-func admissionDenyError(reason string) error {
-	if reason == "max transcodes exceeded" {
+// admissionDenyError maps a typed reason code to a sentinel error. Anything
+// unrecognized — custom-override denials, engine failures — is a generic
+// policy denial, not a concurrency-limit error.
+func admissionDenyError(reasonCode string) error {
+	switch reasonCode {
+	case AdmissionReasonMaxStreamsExceeded:
+		return ErrTooManyStreams
+	case AdmissionReasonMaxTranscodesExceeded:
 		return ErrTooManyTranscodes
+	default:
+		return ErrPlaybackNotAllowed
 	}
-	return ErrTooManyStreams
 }
 
 func (m *SessionManager) limitsForUser(ctx context.Context, userID int) (SessionLimits, error) {

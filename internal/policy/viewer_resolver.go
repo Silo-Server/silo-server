@@ -113,6 +113,13 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 	if err != nil {
 		return access.Scope{}, fmt.Errorf("resolve viewer scope policy: %w", err)
 	}
+	// The scope contract emits a tighten-only profile_verified output: a custom
+	// override may revoke verification but never grant it. Enforce a revocation
+	// the same way legacy PIN failures surface, so the middleware returns
+	// 403 profile_unverified instead of silently proceeding.
+	if profileVerified && !decision.ProfileVerified {
+		return access.Scope{}, fmt.Errorf("%w: revoked by policy", access.ErrProfileUnverified)
+	}
 
 	var allowed []int
 	if !decision.Unrestricted {
@@ -136,6 +143,10 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		MaxPlaybackQuality:        decision.MaxPlaybackQuality,
 		PreferredMetadataLanguage: decision.PreferredMetadataLanguage,
 		PolicyRevision:            user.AccessPolicyRevision,
-		ProfileVerified:           profileVerified,
+		// The policy output is tighten-only (merged_profile_verified), so a
+		// custom override may revoke verification but never grant it. ANDing
+		// with the Go-computed fact keeps that invariant even if a policy bug
+		// emitted true for an unverified profile.
+		ProfileVerified: profileVerified && decision.ProfileVerified,
 	}, nil
 }
