@@ -31,6 +31,29 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
+// downloadQuotaLockClassID is the advisory-lock classid for per-user download
+// quota serialization (arbitrary but stable; the second key is the user ID).
+const downloadQuotaLockClassID = 0x646c6f61 // "dloa"
+
+// WithUserQuotaLock runs fn while holding a cross-node advisory lock for the
+// user, serializing download quota check + row creation. Without it the
+// check-then-insert pair races: concurrent creates can all observe free quota
+// before any of them inserts a row. The lock lives on a dedicated transaction
+// used only as its holder — fn's own statements run through the pool and
+// commit before the lock releases, so the next holder sees them.
+func (r *Repository) WithUserQuotaLock(ctx context.Context, userID int, fn func(ctx context.Context) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin download quota lock: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, $2)`, downloadQuotaLockClassID, userID); err != nil {
+		return fmt.Errorf("acquiring download quota lock for user %d: %w", userID, err)
+	}
+	return fn(ctx)
+}
+
 // scanInto scans a single download row's columns (in downloadColumns order)
 // into d, mapping nullable text columns to empty strings.
 func scanInto(row pgx.Row, d *Download) error {

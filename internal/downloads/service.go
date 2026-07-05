@@ -351,31 +351,35 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 		return rows[0], nil
 	}
 
-	if err := s.limiter.Check(ctx, userID, 1); err != nil {
-		return nil, err
-	}
-	id, err := idgen.NextID()
+	var d *Download
+	err = s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+			return err
+		}
+		id, err := idgen.NextID()
+		if err != nil {
+			return fmt.Errorf("generating download ID: %w", err)
+		}
+		now := time.Now()
+		d = &Download{
+			ID:               id,
+			UserID:           userID,
+			MediaFileID:      file.ID,
+			ContentID:        file.ContentID,
+			EpisodeID:        file.EpisodeID,
+			Kind:             KindQueued,
+			Status:           StatusQueued,
+			Format:           FormatOriginal,
+			Quality:          QualityOriginal,
+			EffectiveQuality: QualityOriginal,
+			Revision:         1,
+			FileSize:         file.FileSize,
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		}
+		return s.repo.Create(ctx, d)
+	})
 	if err != nil {
-		return nil, fmt.Errorf("generating download ID: %w", err)
-	}
-	now := time.Now()
-	d := &Download{
-		ID:               id,
-		UserID:           userID,
-		MediaFileID:      file.ID,
-		ContentID:        file.ContentID,
-		EpisodeID:        file.EpisodeID,
-		Kind:             KindQueued,
-		Status:           StatusQueued,
-		Format:           FormatOriginal,
-		Quality:          QualityOriginal,
-		EffectiveQuality: QualityOriginal,
-		Revision:         1,
-		FileSize:         file.FileSize,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}
-	if err := s.repo.Create(ctx, d); err != nil {
 		return nil, err
 	}
 	return d, nil
@@ -392,9 +396,7 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 	}
 
 	// Resolve any existing managed entry first: replacing one doesn't add a
-	// row, so it stays quota-exempt. Every other path must pass the limiter
-	// BEFORE artifacts.Ensure — a rejected request must not leave an encode
-	// job behind (the worker would run it even though the caller saw 429).
+	// row, so it stays quota-exempt and needs no quota lock.
 	var existing *Download
 	if managed {
 		ex, err := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID)
@@ -405,71 +407,94 @@ func (s *Service) createArtifactDownload(ctx context.Context, userID int, req Cr
 			return nil, err
 		}
 	}
-	if existing == nil {
-		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+	if existing != nil {
+		artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
+		if err != nil {
 			return nil, err
 		}
-	}
-
-	artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
-	if err != nil {
-		return nil, err
-	}
-
-	status := StatusPreparing
-	size := file.FileSize
-	if artifact.Status == ArtifactReady {
-		status = StatusReady
-		size = artifact.FileSize
-	}
-
-	if existing != nil {
+		status, size := artifactRowStatus(artifact, file)
 		replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
 		return s.reuseOrReplaceManaged(ctx, existing, replacement)
 	}
-	if managed {
-		if err := s.repo.EnsureDevice(ctx, userID, req.ProfileID, req.DeviceID, req.DeviceName, req.DevicePlatform); err != nil {
-			return nil, err
-		}
-	}
 
-	id, err := idgen.NextID()
-	if err != nil {
-		return nil, fmt.Errorf("generating download ID: %w", err)
-	}
-	now := time.Now()
-	d := &Download{
-		ID:                id,
-		UserID:            userID,
-		MediaFileID:       file.ID,
-		ContentID:         file.ContentID,
-		EpisodeID:         file.EpisodeID,
-		Kind:              KindQueued,
-		Status:            status,
-		Format:            decision.DeliveryFormat,
-		Quality:           decision.RequestedQuality,
-		EffectiveQuality:  decision.EffectiveQuality,
-		TargetBitrateKbps: decision.TargetBitrateKbps,
-		Revision:          1,
-		ArtifactID:        artifact.ID,
-		FileSize:          size,
-		CreatedAt:         now,
-		UpdatedAt:         now,
-	}
-	if managed {
-		d.ProfileID = req.ProfileID
-		d.DeviceID = req.DeviceID
-	}
-	if err := s.repo.Create(ctx, d); err != nil {
+	// New row: the quota lock serializes check + insert across concurrent
+	// creates so they cannot all observe free quota before any row exists. The
+	// limiter must still pass BEFORE artifacts.Ensure — a rejected request must
+	// not leave an encode job behind (the worker would run it even though the
+	// caller saw 429) — so the lock spans Ensure too.
+	var d *Download
+	err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+		if err := s.limiter.Check(ctx, userID, 1); err != nil {
+			return err
+		}
+		artifact, err := s.artifacts.Ensure(ctx, file, decision.DeliveryFormat, decision.PrepareTarget)
+		if err != nil {
+			return err
+		}
+		status, size := artifactRowStatus(artifact, file)
+
 		if managed {
-			if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); gerr == nil {
-				replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
-				return s.reuseOrReplaceManaged(ctx, existing, replacement)
+			if err := s.repo.EnsureDevice(ctx, userID, req.ProfileID, req.DeviceID, req.DeviceName, req.DevicePlatform); err != nil {
+				return err
 			}
 		}
+
+		id, err := idgen.NextID()
+		if err != nil {
+			return fmt.Errorf("generating download ID: %w", err)
+		}
+		now := time.Now()
+		d = &Download{
+			ID:                id,
+			UserID:            userID,
+			MediaFileID:       file.ID,
+			ContentID:         file.ContentID,
+			EpisodeID:         file.EpisodeID,
+			Kind:              KindQueued,
+			Status:            status,
+			Format:            decision.DeliveryFormat,
+			Quality:           decision.RequestedQuality,
+			EffectiveQuality:  decision.EffectiveQuality,
+			TargetBitrateKbps: decision.TargetBitrateKbps,
+			Revision:          1,
+			ArtifactID:        artifact.ID,
+			FileSize:          size,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		if managed {
+			d.ProfileID = req.ProfileID
+			d.DeviceID = req.DeviceID
+		}
+		if err := s.repo.Create(ctx, d); err != nil {
+			if managed {
+				if existing, gerr := s.repo.GetManagedEntry(ctx, userID, req.ProfileID, req.DeviceID, file.ContentID, file.EpisodeID); gerr == nil {
+					replacement := buildManagedDownload(userID, req.ProfileID, req.DeviceID, managedItem{file: file, contentID: file.ContentID, episodeID: file.EpisodeID}, decision, "", status, size, artifact.ID)
+					row, rerr := s.reuseOrReplaceManaged(ctx, existing, replacement)
+					if rerr != nil {
+						return rerr
+					}
+					d = row
+					return nil
+				}
+			}
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return d, nil
+}
+
+// artifactRowStatus maps an ensured artifact to the download row status and
+// recorded size: ready artifacts serve immediately, anything else is preparing.
+func artifactRowStatus(artifact *Artifact, file *models.MediaFile) (string, int64) {
+	if artifact.Status == ArtifactReady {
+		return StatusReady, artifact.FileSize
+	}
+	return StatusPreparing, file.FileSize
 }
 
 // CreateSeries creates download records for every episode in a series. Managed
@@ -568,10 +593,12 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 			UpdatedAt:        now,
 		})
 	}
-	if err := s.limiter.Check(ctx, userID, len(dls)); err != nil {
-		return nil, "", nil, err
-	}
-	if err := s.repo.CreateBatch(ctx, dls); err != nil {
+	if err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+		if err := s.limiter.Check(ctx, userID, len(dls)); err != nil {
+			return err
+		}
+		return s.repo.CreateBatch(ctx, dls)
+	}); err != nil {
 		return nil, "", nil, err
 	}
 	return dls, batchID, skipped, nil
@@ -657,20 +684,26 @@ func (s *Service) ensureManaged(ctx context.Context, userID int, req CreateReque
 	if len(newIdx) == 0 {
 		return results, nil
 	}
-	if err := s.limiter.Check(ctx, userID, len(newIdx)); err != nil {
-		return nil, err
-	}
-
-	toInsert := make([]*Download, 0, len(newIdx))
-	for _, i := range newIdx {
-		d, err := buildManagedOriginal(userID, req.ProfileID, req.DeviceID, items[i], decision, batchID)
-		if err != nil {
-			return nil, err
+	var inserted []*Download
+	if err := s.repo.WithUserQuotaLock(ctx, userID, func(ctx context.Context) error {
+		if err := s.limiter.Check(ctx, userID, len(newIdx)); err != nil {
+			return err
 		}
-		toInsert = append(toInsert, d)
-	}
-	inserted, err := s.repo.CreateManagedEntriesBatch(ctx, toInsert)
-	if err != nil {
+		toInsert := make([]*Download, 0, len(newIdx))
+		for _, i := range newIdx {
+			d, err := buildManagedOriginal(userID, req.ProfileID, req.DeviceID, items[i], decision, batchID)
+			if err != nil {
+				return err
+			}
+			toInsert = append(toInsert, d)
+		}
+		rows, err := s.repo.CreateManagedEntriesBatch(ctx, toInsert)
+		if err != nil {
+			return err
+		}
+		inserted = rows
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	byKey := make(map[ManagedEntryKey]*Download, len(inserted))
