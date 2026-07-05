@@ -208,7 +208,62 @@ override(base, _) := base if {`,
 	if !strings.Contains(logOutput, "skipping invalid custom policy source") ||
 		!strings.Contains(logOutput, "domain=scope") ||
 		!strings.Contains(logOutput, "document_id=123") {
-		t.Fatalf("warning log did not include skip fields: %s", logOutput)
+		t.Fatalf("error log did not include skip fields: %s", logOutput)
+	}
+
+	skipped := engine.SkippedSources()
+	if len(skipped) != 1 || skipped[0].Domain != "scope" || skipped[0].DocumentID != 123 || skipped[0].Err == nil {
+		t.Fatalf("SkippedSources() = %#v, want the dropped scope source recorded", skipped)
+	}
+}
+
+func TestEngineReloadRejectsInvalidCustomSource(t *testing.T) {
+	ctx := context.Background()
+	engine, err := NewEngineWithCustom(ctx, map[string]ActiveSource{
+		"scope": {DocumentID: 1, VersionID: 1, Source: tighteningScopeOverrideSource()},
+	}, WithRevision(7))
+	if err != nil {
+		t.Fatalf("NewEngineWithCustom() error: %v", err)
+	}
+
+	err = engine.Reload(ctx, map[string]ActiveSource{
+		"scope": {
+			DocumentID: 1,
+			VersionID:  2,
+			Source: `package silo_custom.scope
+
+import rego.v1
+
+override(base, _) := base if {`,
+		},
+	}, 8)
+	if err == nil {
+		t.Fatal("Reload() error = nil, want compile failure for the invalid custom source")
+	}
+	if !strings.Contains(err.Error(), `domain "scope"`) || !strings.Contains(err.Error(), "document 1") {
+		t.Fatalf("Reload() error = %v, want domain and document identified", err)
+	}
+
+	// The last known-good bundle must keep serving: revision unchanged and the
+	// previous tightening override still applied.
+	if got := engine.Revision(); got != 7 {
+		t.Fatalf("Revision() after failed reload = %d, want 7", got)
+	}
+	pdp := NewPDP(engine)
+	decision, _, err := pdp.ResolveViewerScope(ctx, ScopeInput{
+		SchemaVersion:        1,
+		UserID:               42,
+		SessionID:            "sess-1",
+		AccountRestricted:    false,
+		AccessPolicyRevision: 9,
+		ProfileVerified:      true,
+		RequestTime:          "2026-07-02T12:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("ResolveViewerScope() error: %v", err)
+	}
+	if decision.Unrestricted {
+		t.Fatalf("Unrestricted = true after failed reload, want last known-good tightened decision: %#v", decision)
 	}
 }
 

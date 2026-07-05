@@ -80,6 +80,18 @@ type policyCapabilityResponse struct {
 	EditorAvailable bool     `json:"editor_available"`
 	DecisionTypes   []string `json:"decision_types"`
 	Generation      int64    `json:"generation"`
+	Degraded        bool     `json:"degraded"`
+	DegradedReason  string   `json:"degraded_reason,omitempty"`
+	DegradedDomains []string `json:"degraded_domains,omitempty"`
+}
+
+// policyApplyStatus reports whether a persisted policy mutation is live on
+// this node. Applied=false means the store change succeeded but the local
+// engine still serves the previous generation (the poll loop keeps retrying).
+type policyApplyStatus struct {
+	Applied          bool   `json:"applied"`
+	FailedStep       string `json:"failed_step,omitempty"`
+	LoadedGeneration int64  `json:"loaded_generation"`
 }
 
 type policyVendorModuleResponse struct {
@@ -130,6 +142,7 @@ type policyCreateVersionResponse struct {
 type policyActivateVersionResponse struct {
 	ActiveVersionID int64 `json:"active_version_id"`
 	Generation      int64 `json:"generation"`
+	policyApplyStatus
 }
 
 type policySetEnabledRequest struct {
@@ -140,6 +153,7 @@ type policySetEnabledResponse struct {
 	ID         int64 `json:"id"`
 	Enabled    bool  `json:"enabled"`
 	Generation int64 `json:"generation"`
+	policyApplyStatus
 }
 
 type policyValidateRequest struct {
@@ -190,11 +204,15 @@ func (h *PolicyHandler) HandleCapability(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	degraded := h.system.DegradedState()
 	writeJSON(w, http.StatusOK, policyCapabilityResponse{
 		Enabled:         true,
 		EditorAvailable: h.editorEnabled(),
 		DecisionTypes:   policy.DecisionTypes(),
 		Generation:      h.system.Generation(),
+		Degraded:        degraded.Degraded,
+		DegradedReason:  degraded.Reason,
+		DegradedDomains: degraded.Domains,
 	})
 }
 
@@ -425,10 +443,11 @@ func (h *PolicyHandler) HandleActivateVersion(w http.ResponseWriter, r *http.Req
 		h.writeStoreError(w, err, "Failed to activate policy version")
 		return
 	}
-	h.notifyChanged(r)
-	writeJSON(w, http.StatusOK, policyActivateVersionResponse{
-		ActiveVersionID: versionID,
-		Generation:      generation,
+	status := h.notifyChanged(r)
+	writeJSON(w, applyStatusCode(status), policyActivateVersionResponse{
+		ActiveVersionID:   versionID,
+		Generation:        generation,
+		policyApplyStatus: status,
 	})
 }
 
@@ -454,11 +473,12 @@ func (h *PolicyHandler) HandleSetDocumentEnabled(w http.ResponseWriter, r *http.
 		h.writeStoreError(w, err, "Failed to update policy document")
 		return
 	}
-	h.notifyChanged(r)
-	writeJSON(w, http.StatusOK, policySetEnabledResponse{
-		ID:         documentID,
-		Enabled:    req.Enabled,
-		Generation: generation,
+	status := h.notifyChanged(r)
+	writeJSON(w, applyStatusCode(status), policySetEnabledResponse{
+		ID:                documentID,
+		Enabled:           req.Enabled,
+		Generation:        generation,
+		policyApplyStatus: status,
 	})
 }
 
@@ -613,13 +633,31 @@ func (h *PolicyHandler) editorEnabled() bool {
 	return h != nil && h.editorAvailable != nil && h.editorAvailable()
 }
 
-func (h *PolicyHandler) notifyChanged(r *http.Request) {
+// notifyChanged applies the persisted change to the live engine and reports
+// the outcome. Store success and live-apply success are distinct: callers must
+// surface Applied=false instead of implying the policy is already enforced.
+func (h *PolicyHandler) notifyChanged(r *http.Request) policyApplyStatus {
 	if h == nil || h.system == nil {
-		return
+		return policyApplyStatus{Applied: false, FailedStep: "local_reload"}
 	}
-	if err := h.system.NotifyChanged(r.Context()); err != nil {
-		slog.Error("policy notify changed failed", "error", err)
+	status := h.system.ApplyChanged(r.Context())
+	if err := status.Err(); err != nil {
+		slog.Error("policy notify changed failed", "error", err, "failed_step", status.FailedStep())
 	}
+	return policyApplyStatus{
+		Applied:          status.Applied(),
+		FailedStep:       status.FailedStep(),
+		LoadedGeneration: status.Generation,
+	}
+}
+
+// applyStatusCode maps an apply outcome to the response status: 200 when the
+// mutation is live on this node, 202 when it persisted but has not applied.
+func applyStatusCode(status policyApplyStatus) int {
+	if status.Applied {
+		return http.StatusOK
+	}
+	return http.StatusAccepted
 }
 
 func (h *PolicyHandler) writeStoreError(w http.ResponseWriter, err error, fallback string) {

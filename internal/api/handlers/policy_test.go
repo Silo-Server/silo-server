@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -563,4 +564,119 @@ func validHandlerPolicySource() string {
 import rego.v1
 
 override(base, _) := base`
+}
+
+type erroringPolicyEventBus struct{}
+
+func (erroringPolicyEventBus) Publish(context.Context, string, cache.Event) error {
+	return errBusDown
+}
+
+func (erroringPolicyEventBus) Subscribe(context.Context, string, cache.EventHandler) error {
+	return nil
+}
+
+func (erroringPolicyEventBus) Close() error { return nil }
+
+var errBusDown = errors.New("event bus down")
+
+func createCompiledPolicyVersion(t *testing.T, handler *PolicyHandler, documentID int64) int64 {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	handler.HandleCreateVersion(rec, newPolicyHandlerRequest(
+		http.MethodPost,
+		"/admin/policy/documents/"+strconv.FormatInt(documentID, 10)+"/versions",
+		map[string]any{"source": validHandlerPolicySource()},
+		map[string]string{"id": strconv.FormatInt(documentID, 10)},
+	))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create version status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var created policyCreateVersionResponse
+	decodePolicyHandlerResponse(t, rec, &created)
+	return created.ID
+}
+
+func TestPolicyActivateReportsLocalReloadFailureDB(t *testing.T) {
+	ctx := context.Background()
+	_, store := newPolicyHandlerStoreTest(t, ctx)
+
+	// The system reloads from an unreachable store, so persistence (through
+	// the good store) succeeds while the live apply fails.
+	badPool, err := pgxpool.New(ctx, "postgres://silo:silo@127.0.0.1:1/silo?connect_timeout=1")
+	if err != nil {
+		t.Fatalf("create unreachable pool: %v", err)
+	}
+	t.Cleanup(badPool.Close)
+	system := policy.NewSystem(
+		policy.NewPolicyStore(badPool),
+		&cache.NoopEventBus{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		policy.WithSystemPollInterval(time.Hour),
+	)
+	if err := system.Start(ctx); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	defer system.Stop()
+
+	handler := NewPolicyHandler(system, store, nil, policyEditorEnabled)
+	document, err := store.CreateDocument(ctx, policy.DomainScope, "apply failure scope")
+	if err != nil {
+		t.Fatalf("CreateDocument() error: %v", err)
+	}
+	versionID := createCompiledPolicyVersion(t, handler, document.ID)
+
+	rec := httptest.NewRecorder()
+	handler.HandleActivateVersion(rec, newPolicyHandlerRequest(
+		http.MethodPost,
+		"/admin/policy/documents/"+strconv.FormatInt(document.ID, 10)+"/versions/"+strconv.FormatInt(versionID, 10)+"/activate",
+		nil,
+		map[string]string{
+			"id":      strconv.FormatInt(document.ID, 10),
+			"version": strconv.FormatInt(versionID, 10),
+		},
+	))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("activate status = %d, want 202, body = %s", rec.Code, rec.Body.String())
+	}
+	var response policyActivateVersionResponse
+	decodePolicyHandlerResponse(t, rec, &response)
+	if response.Applied || response.FailedStep != "local_reload" {
+		t.Fatalf("apply status = %#v, want applied=false failed_step=local_reload", response.policyApplyStatus)
+	}
+	if response.Generation == 0 || response.LoadedGeneration == response.Generation {
+		t.Fatalf("loaded generation %d should lag stored generation %d", response.LoadedGeneration, response.Generation)
+	}
+}
+
+func TestPolicySetEnabledReportsPublishFailureDB(t *testing.T) {
+	ctx := context.Background()
+	_, store := newPolicyHandlerStoreTest(t, ctx)
+	system := newStartedPolicyHandlerSystem(t, ctx, store, erroringPolicyEventBus{})
+	defer system.Stop()
+
+	handler := NewPolicyHandler(system, store, nil, policyEditorEnabled)
+	document, err := store.CreateDocument(ctx, policy.DomainScope, "publish failure scope")
+	if err != nil {
+		t.Fatalf("CreateDocument() error: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.HandleSetDocumentEnabled(rec, newPolicyHandlerRequest(
+		http.MethodPost,
+		"/admin/policy/documents/"+strconv.FormatInt(document.ID, 10)+"/enabled",
+		map[string]any{"enabled": true},
+		map[string]string{"id": strconv.FormatInt(document.ID, 10)},
+	))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set enabled status = %d, want 200 (local apply succeeded), body = %s", rec.Code, rec.Body.String())
+	}
+	var response policySetEnabledResponse
+	decodePolicyHandlerResponse(t, rec, &response)
+	if !response.Applied || response.FailedStep != "event_publish" {
+		t.Fatalf("apply status = %#v, want applied=true failed_step=event_publish", response.policyApplyStatus)
+	}
+	if response.LoadedGeneration != response.Generation {
+		t.Fatalf("loaded generation %d != stored generation %d after successful local reload", response.LoadedGeneration, response.Generation)
+	}
 }

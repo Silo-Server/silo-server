@@ -230,8 +230,8 @@ func (s *PolicyStore) Activate(ctx context.Context, documentID, versionID int64)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var lockedID int64
-	if err := tx.QueryRow(ctx, `SELECT id FROM policy_documents WHERE id = $1 FOR UPDATE`, documentID).Scan(&lockedID); err != nil {
+	var domain string
+	if err := tx.QueryRow(ctx, `SELECT domain FROM policy_documents WHERE id = $1 FOR UPDATE`, documentID).Scan(&domain); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrDocumentNotFound
 		}
@@ -239,13 +239,14 @@ func (s *PolicyStore) Activate(ctx context.Context, documentID, versionID int64)
 	}
 
 	var compiledOK bool
+	var source string
 	if err := tx.QueryRow(ctx, `
-		SELECT compiled_ok
+		SELECT compiled_ok, rego_source
 		FROM policy_document_versions
 		WHERE id = $1 AND document_id = $2`,
 		versionID,
 		documentID,
-	).Scan(&compiledOK); err != nil {
+	).Scan(&compiledOK, &source); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrVersionNotFound
 		}
@@ -253,6 +254,12 @@ func (s *PolicyStore) Activate(ctx context.Context, documentID, versionID int64)
 	}
 	if !compiledOK {
 		return 0, ErrVersionNotCompiled
+	}
+	// Re-verify instead of trusting the stored compiled_ok flag: the sandbox
+	// or vendor contract may have changed since save time, and activating a
+	// source that no longer compiles would fail every subsequent reload.
+	if err := CompileCheck(ctx, domain, source); err != nil {
+		return 0, fmt.Errorf("%w: stored source no longer compiles: %w", ErrVersionNotCompiled, err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -298,6 +305,27 @@ func (s *PolicyStore) SetEnabled(ctx context.Context, documentID int64, enabled 
 			return 0, ErrDocumentNotFound
 		}
 		return 0, mapPolicyConstraintError("set policy document enabled", err)
+	}
+
+	if enabled {
+		// Enabling puts the active version into the live bundle, so re-verify
+		// it the same way Activate does before committing the toggle.
+		var domain string
+		var source *string
+		if err := tx.QueryRow(ctx, `
+			SELECT d.domain, v.rego_source
+			FROM policy_documents d
+			LEFT JOIN policy_document_versions v ON v.id = d.active_version_id
+			WHERE d.id = $1`,
+			documentID,
+		).Scan(&domain, &source); err != nil {
+			return 0, fmt.Errorf("read policy document before enable: %w", err)
+		}
+		if source != nil {
+			if err := CompileCheck(ctx, domain, *source); err != nil {
+				return 0, fmt.Errorf("%w: stored source no longer compiles: %w", ErrVersionNotCompiled, err)
+			}
+		}
 	}
 
 	generation, err := bumpGeneration(ctx, tx)

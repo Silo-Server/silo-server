@@ -30,6 +30,29 @@ type System struct {
 	cancel   context.CancelFunc
 	reloadCh chan struct{}
 	wg       sync.WaitGroup
+
+	// bootDegradedReason is set when the initial engine could not load the
+	// full stored policy (store unreachable or custom bundle failed) and is
+	// cleared by the first successful reload from the store.
+	bootDegradedReason string
+}
+
+// Degraded-state reasons reported by DegradedState.
+const (
+	DegradedReasonStoreUnavailable    = "store_unavailable"
+	DegradedReasonCustomBundleFailed  = "custom_bundle_failed"
+	DegradedReasonCustomSourceInvalid = "custom_source_invalid"
+)
+
+// DegradedState reports whether the live engine is serving with less than the
+// full set of enabled custom policy sources. Because custom policy is
+// tighten-only, a degraded engine is more permissive than administrator intent.
+type DegradedState struct {
+	Degraded bool
+	Reason   string
+	// Domains lists policy domains whose enabled custom source was dropped
+	// from the loaded bundle (empty when the whole store was unavailable).
+	Domains []string
 }
 
 // SystemOption configures a System.
@@ -88,7 +111,7 @@ func (s *System) Start(ctx context.Context) error {
 		return nil
 	}
 
-	engine, err := s.initialEngine(ctx)
+	engine, bootDegradedReason, err := s.initialEngine(ctx)
 	if err != nil {
 		return err
 	}
@@ -101,6 +124,7 @@ func (s *System) Start(ctx context.Context) error {
 		return errors.New("policy system already started")
 	}
 	s.engine = engine
+	s.bootDegradedReason = bootDegradedReason
 	s.pdp = NewPDP(engine, WithDecisionLogger(s.decisionLogger))
 	s.cancel = cancel
 	s.mu.Unlock()
@@ -187,6 +211,40 @@ func (s *System) Generation() int64 {
 	return engine.Revision()
 }
 
+// DegradedState reports whether the live engine dropped any enabled custom
+// policy (boot-time store outage, custom bundle failure, or per-source compile
+// skips). A degraded engine serves more permissive decisions than the stored
+// policy, so operators must be able to see it.
+func (s *System) DegradedState() DegradedState {
+	if s == nil {
+		return DegradedState{}
+	}
+	s.mu.RLock()
+	engine := s.engine
+	bootReason := s.bootDegradedReason
+	s.mu.RUnlock()
+
+	if bootReason != "" {
+		return DegradedState{Degraded: true, Reason: bootReason}
+	}
+	if engine == nil {
+		return DegradedState{}
+	}
+	skipped := engine.SkippedSources()
+	if len(skipped) == 0 {
+		return DegradedState{}
+	}
+	domains := make([]string, 0, len(skipped))
+	for _, skip := range skipped {
+		domains = append(domains, skip.Domain)
+	}
+	return DegradedState{
+		Degraded: true,
+		Reason:   DegradedReasonCustomSourceInvalid,
+		Domains:  domains,
+	}
+}
+
 // SetEvalTimeout hot-updates the per-decision policy evaluation timeout.
 func (s *System) SetEvalTimeout(timeout time.Duration) {
 	if s == nil || timeout <= 0 {
@@ -201,6 +259,34 @@ func (s *System) SetEvalTimeout(timeout time.Duration) {
 	}
 }
 
+// ApplyStatus describes how a policy change was applied: whether this node's
+// engine reloaded to the stored generation and whether peers were notified.
+type ApplyStatus struct {
+	LocalReloadErr error
+	PublishErr     error
+	// Generation is the generation loaded in the live engine after the apply
+	// attempt — it matches the stored generation only when Applied.
+	Generation int64
+}
+
+// Applied reports whether the local engine now serves the stored policy.
+func (st ApplyStatus) Applied() bool { return st.LocalReloadErr == nil }
+
+// FailedStep names the first failed apply step ("local_reload" or
+// "event_publish"), or "" when both steps succeeded.
+func (st ApplyStatus) FailedStep() string {
+	switch {
+	case st.LocalReloadErr != nil:
+		return "local_reload"
+	case st.PublishErr != nil:
+		return "event_publish"
+	}
+	return ""
+}
+
+// Err joins the per-step errors, nil when the change fully applied.
+func (st ApplyStatus) Err() error { return errors.Join(st.LocalReloadErr, st.PublishErr) }
+
 // NotifyChanged reloads this node synchronously and publishes a cross-node
 // invalidation event. The last known-good engine remains active on reload
 // failure.
@@ -208,34 +294,48 @@ func (s *System) NotifyChanged(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
+	return s.ApplyChanged(ctx).Err()
+}
 
-	var errs []error
+// ApplyChanged reloads this node synchronously, publishes a cross-node
+// invalidation event, and reports per-step outcomes so callers can distinguish
+// "persisted" from "live". The last known-good engine remains active on reload
+// failure.
+func (s *System) ApplyChanged(ctx context.Context) ApplyStatus {
+	if s == nil {
+		return ApplyStatus{}
+	}
+
+	var status ApplyStatus
 	if err := s.reloadFromStore(ctx); err != nil {
 		s.logger.ErrorContext(ctx, "policy reload after local change failed", "error", err)
-		errs = append(errs, err)
+		status.LocalReloadErr = err
 	}
 	if s.eventBus != nil {
 		if err := s.eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPolicyChanged}); err != nil {
 			s.logger.ErrorContext(ctx, "policy change publish failed", "error", err)
-			errs = append(errs, err)
+			status.PublishErr = err
 		}
 	}
-	return errors.Join(errs...)
+	status.Generation = s.Generation()
+	return status
 }
 
-func (s *System) initialEngine(ctx context.Context) (*Engine, error) {
+func (s *System) initialEngine(ctx context.Context) (*Engine, string, error) {
 	sources, generation, err := s.loadSnapshot(ctx)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "policy store unavailable; starting with vendor policy only", "error", err)
-		return s.newVendorEngine(ctx)
+		s.logger.ErrorContext(ctx, "policy store unavailable; starting DEGRADED with vendor policy only", "error", err)
+		engine, err := s.newVendorEngine(ctx)
+		return engine, DegradedReasonStoreUnavailable, err
 	}
 
 	engine, err := NewEngineWithCustom(ctx, sources, s.engineOptions(WithRevision(generation))...)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "policy custom bundle load failed; starting with vendor policy only", "error", err)
-		return s.newVendorEngine(ctx)
+		s.logger.ErrorContext(ctx, "policy custom bundle load failed; starting DEGRADED with vendor policy only", "error", err)
+		engine, err := s.newVendorEngine(ctx)
+		return engine, DegradedReasonCustomBundleFailed, err
 	}
-	return engine, nil
+	return engine, "", nil
 }
 
 func (s *System) newVendorEngine(ctx context.Context) (*Engine, error) {
@@ -269,6 +369,9 @@ func (s *System) reloadFromStore(ctx context.Context) error {
 	if err := engine.Reload(ctx, sources, generation); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	s.bootDegradedReason = ""
+	s.mu.Unlock()
 	s.logger.InfoContext(ctx, "policy engine reloaded", "generation", generation)
 	return nil
 }

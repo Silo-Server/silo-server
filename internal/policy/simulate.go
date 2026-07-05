@@ -69,7 +69,9 @@ func Simulate(ctx context.Context, store *PolicyStore, req SimulateRequest) (Sim
 	}
 
 	engine := newEngine(WithRevision(generation))
-	modules, err := engine.modulesWithCustom(ctx, sources)
+	// Lenient on stored sources: a broken source in another domain must not
+	// block simulating a fix. The candidate source itself was CompileChecked.
+	modules, _, err := engine.modulesWithCustom(ctx, sources)
 	if err != nil {
 		return SimulateResult{}, err
 	}

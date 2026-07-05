@@ -35,12 +35,22 @@ type Meta struct {
 	Revision     int64
 }
 
+// SkippedSource records an enabled custom policy source that failed
+// compilation and was left out of the compiled bundle. A bundle serving with
+// skipped sources is strictly more permissive than the administrator intended.
+type SkippedSource struct {
+	Domain     string
+	DocumentID int64
+	Err        error
+}
+
 // Engine owns compiled Rego queries and evaluates named decisions.
 type Engine struct {
 	mu       sync.RWMutex
 	queries  map[DecisionName]rego.PreparedEvalQuery
 	timeout  time.Duration
 	revision int64
+	skipped  []SkippedSource
 	logger   *slog.Logger
 }
 
@@ -87,16 +97,19 @@ func NewEngine(ctx context.Context, opts ...EngineOption) (*Engine, error) {
 
 // NewEngineWithCustom compiles the embedded vendor policy bundle layered with
 // active administrator-authored policy sources. Invalid custom sources are
-// skipped with a warning so a bad row never takes down vendor policy decisions.
+// skipped so a bad row never takes down vendor policy decisions at boot, but
+// every skip is recorded on the engine (see SkippedSources) and logged at
+// Error level: the resulting bundle is more permissive than the stored policy.
 func NewEngineWithCustom(ctx context.Context, sources map[string]ActiveSource, opts ...EngineOption) (*Engine, error) {
 	engine := newEngine(opts...)
-	modules, err := engine.modulesWithCustom(ctx, sources)
+	modules, skipped, err := engine.modulesWithCustom(ctx, sources)
 	if err != nil {
 		return nil, err
 	}
 	if err := engine.swap(ctx, modules, decisionQueries(), engine.revision); err != nil {
 		return nil, err
 	}
+	engine.setSkipped(skipped)
 	return engine, nil
 }
 
@@ -115,14 +128,28 @@ func NewEngineFromStore(ctx context.Context, store *PolicyStore, opts ...EngineO
 	return NewEngineWithCustom(ctx, sources, opts...)
 }
 
-// Reload compiles a new bundle from vendor policy plus valid active custom
-// sources, then atomically swaps prepared queries and revision.
+// Reload compiles a new bundle from vendor policy plus active custom sources,
+// then atomically swaps prepared queries and revision. Unlike boot, Reload is
+// strict: any enabled custom source that fails compilation fails the whole
+// reload so the last known-good bundle keeps serving — a silent per-domain
+// skip would widen decisions while the generation reports fully applied.
 func (e *Engine) Reload(ctx context.Context, sources map[string]ActiveSource, generation int64) error {
-	modules, err := e.modulesWithCustom(ctx, sources)
+	modules, skipped, err := e.modulesWithCustom(ctx, sources)
 	if err != nil {
 		return err
 	}
-	return e.swap(ctx, modules, decisionQueries(), generation)
+	if len(skipped) > 0 {
+		errs := make([]error, 0, len(skipped))
+		for _, skip := range skipped {
+			errs = append(errs, fmt.Errorf("custom policy source for domain %q (document %d) failed compilation: %w", skip.Domain, skip.DocumentID, skip.Err))
+		}
+		return errors.Join(errs...)
+	}
+	if err := e.swap(ctx, modules, decisionQueries(), generation); err != nil {
+		return err
+	}
+	e.setSkipped(nil)
+	return nil
 }
 
 // Revision returns the policy generation loaded into this engine.
@@ -130,6 +157,21 @@ func (e *Engine) Revision() int64 {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.revision
+}
+
+// SkippedSources returns the enabled custom sources that were dropped from the
+// currently loaded bundle. Non-empty means the engine serves degraded (more
+// permissive than stored policy); only boot-time loading can produce skips.
+func (e *Engine) SkippedSources() []SkippedSource {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return append([]SkippedSource(nil), e.skipped...)
+}
+
+func (e *Engine) setSkipped(skipped []SkippedSource) {
+	e.mu.Lock()
+	e.skipped = append([]SkippedSource(nil), skipped...)
+	e.mu.Unlock()
 }
 
 // SetEvalTimeout updates the per-decision evaluation timeout. Non-positive
@@ -245,15 +287,21 @@ func sortedActiveSourceDomains(sources map[string]ActiveSource) []string {
 	return domains
 }
 
-func (e *Engine) modulesWithCustom(ctx context.Context, sources map[string]ActiveSource) ([]ModuleSource, error) {
+func (e *Engine) modulesWithCustom(ctx context.Context, sources map[string]ActiveSource) ([]ModuleSource, []SkippedSource, error) {
 	modules, err := vendorModules(false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	var skipped []SkippedSource
 	for _, domain := range sortedActiveSourceDomains(sources) {
 		source := sources[domain]
 		if err := CompileCheck(ctx, domain, source.Source); err != nil {
-			e.warnSkippedCustomSource(ctx, domain, source, err)
+			e.logSkippedCustomSource(ctx, domain, source, err)
+			skipped = append(skipped, SkippedSource{
+				Domain:     domain,
+				DocumentID: source.DocumentID,
+				Err:        err,
+			})
 			continue
 		}
 		modules = append(modules, ModuleSource{
@@ -261,10 +309,10 @@ func (e *Engine) modulesWithCustom(ctx context.Context, sources map[string]Activ
 			Source: source.Source,
 		})
 	}
-	return modules, nil
+	return modules, skipped, nil
 }
 
-func (e *Engine) warnSkippedCustomSource(ctx context.Context, domain string, source ActiveSource, err error) {
+func (e *Engine) logSkippedCustomSource(ctx context.Context, domain string, source ActiveSource, err error) {
 	fields := []any{
 		"domain", domain,
 		"error", err,
@@ -272,7 +320,9 @@ func (e *Engine) warnSkippedCustomSource(ctx context.Context, domain string, sou
 	if source.DocumentID != 0 {
 		fields = append(fields, "document_id", source.DocumentID)
 	}
-	e.logger.WarnContext(ctx, "skipping invalid custom policy source", fields...)
+	// Error, not Warn: a skipped source means requests are being decided by a
+	// more permissive bundle than the administrator activated.
+	e.logger.ErrorContext(ctx, "skipping invalid custom policy source", fields...)
 }
 
 func compileErrorFromOPA(err error) error {

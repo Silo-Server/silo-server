@@ -62,6 +62,11 @@ func TestSystemDegradedBootUsesVendorPolicy(t *testing.T) {
 	defer system.Stop()
 
 	assertVendorScopeDecision(t, system)
+
+	degraded := system.DegradedState()
+	if !degraded.Degraded || degraded.Reason != DegradedReasonStoreUnavailable {
+		t.Fatalf("DegradedState() = %#v, want degraded with reason %q", degraded, DegradedReasonStoreUnavailable)
+	}
 }
 
 func TestSystemReloadFailureKeepsLastKnownGood(t *testing.T) {
