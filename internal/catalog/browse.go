@@ -1482,6 +1482,13 @@ func buildOrderByPlan(sort, order string, snapshot *time.Time, argIdx int, singl
 			direction,
 			nullsClause,
 		), nil
+	case "latest_episode_added":
+		// Latest Episodes (issue #202): denormalized newest-episode-file
+		// arrival; NULLS LAST so movies and episode-less series trail.
+		return fmt.Sprintf(
+			"ORDER BY mi.latest_episode_added_at %s NULLS LAST, mi.content_id ASC",
+			direction,
+		), nil
 	case "rating_imdb":
 		return fmt.Sprintf("ORDER BY mi.rating_imdb %s%s, mi.content_id ASC", direction, nullsClause), nil
 	case "rating_tmdb":

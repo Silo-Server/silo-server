@@ -71,6 +71,20 @@ type Service struct {
 	lifecycleMu    sync.RWMutex
 	lifecycleHooks []func(context.Context)
 	launchGroup    singleflight.Group
+
+	// installationCache memoizes plugin_installations rows keyed by ID so the
+	// hot plugin-RPC path (ensureClient -> loadInstallation) and the metadata
+	// chain enabled-check answer from memory instead of a per-call DB read. It
+	// is wiped wholesale by invalidateInstallationCache, registered as a
+	// lifecycle hook, so a cached row is at most one lifecycle event stale.
+	//
+	// installationCacheGen guards the read-through against an invalidate that
+	// races an in-flight GetByID: the generation is captured before the store
+	// read and re-checked under the write lock, so a row fetched before a
+	// lifecycle mutation is never written back into a freshly-cleared cache.
+	installationCacheMu  sync.RWMutex
+	installationCache    map[int]*Installation
+	installationCacheGen uint64
 }
 
 // SetEventDispatcher wires the EventDispatcher into the Service. The
@@ -124,7 +138,7 @@ func NewService(
 	installer *Installer,
 	host Host,
 ) *Service {
-	return &Service{
+	svc := &Service{
 		repositories:  repositories,
 		installations: installations,
 		configs:       configs,
@@ -133,6 +147,12 @@ func NewService(
 		archiveCache:  NewArchiveCache(installations),
 		host:          host,
 	}
+	// Self-register the installation-cache invalidation so it can never be
+	// silently forgotten by a new caller: every OnLifecycleChange (install /
+	// enable / disable / update / uninstall) wipes the cache, keeping the
+	// memoized rows correct without any external wiring.
+	svc.AddLifecycleHook(func(context.Context) { svc.invalidateInstallationCache() })
+	return svc
 }
 
 func (s *Service) FetchCatalog(ctx context.Context) ([]CatalogEntry, error) {
@@ -720,14 +740,77 @@ func (s *Service) ensureInstallationCache(
 }
 
 func (s *Service) loadInstallation(ctx context.Context, installationID int, requireEnabled bool) (*Installation, error) {
-	installation, err := s.installations.GetByID(ctx, installationID)
+	installation, err := s.cachedInstallation(ctx, installationID)
 	if err != nil {
 		return nil, err
 	}
+	// The requireEnabled gate is applied after the cache read so the cache
+	// stores the row regardless of its enabled state and ErrInstallationDisabled
+	// semantics are unchanged.
 	if requireEnabled && !installation.Enabled {
 		return nil, ErrInstallationDisabled
 	}
 	return installation, nil
+}
+
+// cachedInstallation returns the plugin_installations row for installationID
+// from the in-memory cache, loading it from the store on a miss. The returned
+// *Installation is shared and must be treated as read-only by callers; it is
+// evicted wholesale by invalidateInstallationCache on every lifecycle change.
+func (s *Service) cachedInstallation(ctx context.Context, installationID int) (*Installation, error) {
+	s.installationCacheMu.RLock()
+	cached, ok := s.installationCache[installationID]
+	gen := s.installationCacheGen
+	s.installationCacheMu.RUnlock()
+	if ok {
+		return cached, nil
+	}
+
+	installation, err := s.installations.GetByID(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+
+	s.installationCacheMu.Lock()
+	// Only publish the fetched row if no invalidation happened while GetByID was
+	// in flight. Otherwise the row may pre-date a just-committed lifecycle change
+	// (e.g. a disable), and writing it would resurrect stale state until the next
+	// event. On a generation mismatch we still return the freshly-read row to the
+	// caller but leave the cache untouched.
+	if s.installationCacheGen == gen {
+		if s.installationCache == nil {
+			s.installationCache = make(map[int]*Installation)
+		}
+		s.installationCache[installationID] = installation
+	}
+	s.installationCacheMu.Unlock()
+
+	return installation, nil
+}
+
+// invalidateInstallationCache clears the in-memory installation cache. It is
+// registered as a lifecycle hook (see NewService) so OnLifecycleChange evicts
+// stale rows after every install / enable / disable / update / uninstall.
+func (s *Service) invalidateInstallationCache() {
+	if s == nil {
+		return
+	}
+	s.installationCacheMu.Lock()
+	s.installationCache = nil
+	s.installationCacheGen++
+	s.installationCacheMu.Unlock()
+}
+
+// IsInstallationEnabled reports whether the given plugin installation is
+// enabled, served from the in-memory installation cache. It backs the metadata
+// chain's enabled-check (internal/metadata/chain.go) so provider construction
+// no longer issues a per-capability SELECT on the hot path.
+func (s *Service) IsInstallationEnabled(ctx context.Context, installationID int) (bool, error) {
+	installation, err := s.loadInstallation(ctx, installationID, false)
+	if err != nil {
+		return false, err
+	}
+	return installation.Enabled, nil
 }
 
 func (s *Service) ensureLoadedInstallation(

@@ -27,7 +27,8 @@ type Server struct {
 	egress     *egressMeter
 }
 
-// NewServer creates a new proxy server backed by a config watcher and session tracker.
+// NewServer creates a new proxy server backed by a config watcher and session
+// tracker.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	return &Server{
 		watcher: watcher,
@@ -139,13 +140,7 @@ func (s *Server) handleDirectPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info := nodesessions.SessionInfo{
-		SessionID: claims.SessionID,
-		NodeURL:   s.tracker.NodeURL(),
-		NodeName:  s.tracker.NodeName(),
-		Type:      "direct_play",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+	info := sessionInfo(s.tracker, claims, "direct_play")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
 
@@ -158,13 +153,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info := nodesessions.SessionInfo{
-		SessionID: claims.SessionID,
-		NodeURL:   s.tracker.NodeURL(),
-		NodeName:  s.tracker.NodeName(),
-		Type:      "remux",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+	info := sessionInfo(s.tracker, claims, "remux")
 	s.tracker.Track(r.Context(), info)
 	defer s.tracker.Remove(r.Context(), claims.SessionID)
 
@@ -201,13 +190,22 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 // short manifest/segment requests, so the session is tracked by recent
 // activity instead of request lifetime.
 func (s *Server) touchTranscodeSession(r *http.Request, claims *streamtoken.Claims) {
-	s.tracker.Touch(r.Context(), nodesessions.SessionInfo{
-		SessionID: claims.SessionID,
-		NodeURL:   s.tracker.NodeURL(),
-		NodeName:  s.tracker.NodeName(),
-		Type:      "transcode",
-		StartedAt: time.Now().UTC().Format(time.RFC3339),
-	})
+	s.tracker.Touch(r.Context(), sessionInfo(s.tracker, claims, "transcode"))
+}
+
+// sessionInfo builds the node-session tracker record for a verified token,
+// copying the numeric ownership keys the node-session tracker needs.
+func sessionInfo(tr *nodesessions.Tracker, claims *streamtoken.Claims, kind string) nodesessions.SessionInfo {
+	return nodesessions.SessionInfo{
+		SessionID:   claims.SessionID,
+		NodeURL:     tr.NodeURL(),
+		NodeName:    tr.NodeName(),
+		Type:        kind,
+		StartedAt:   time.Now().UTC().Format(time.RFC3339),
+		AuthUserID:  claims.UserID,
+		ProfileID:   claims.ProfileID,
+		MediaFileID: claims.MediaFileID,
+	}
 }
 
 func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +322,14 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Auth.JWTSecret)
+	// Forward the verified stream token so the transcode node can self-reconstruct
+	// a lost session after its OWN restart: the token carries the full byte-affecting
+	// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
+	// of 404ing (the integrated server already does this from the same token). The
+	// node re-verifies the token independently before trusting it.
+	if token := chi.URLParam(r, "token"); token != "" {
+		req.Header.Set("X-Silo-Stream-Token", token)
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {

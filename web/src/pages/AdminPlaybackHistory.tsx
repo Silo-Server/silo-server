@@ -22,6 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 
 const ALL_USERS = "all";
 const ALL_PROFILES = "all";
@@ -427,7 +428,7 @@ function formatDuration(seconds: number | null) {
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatPreferredDateTime(date);
 }
 
 function formatRelative(value: string) {

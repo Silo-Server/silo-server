@@ -69,6 +69,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -617,6 +618,10 @@ func main() {
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
+			// Read jellycompat reconstruction recipes central wrote at transcode
+			// start, so this node can rebuild a Jellyfin transcode after its own
+			// restart (the node hop token is recipe-less). Shares the offload Redis.
+			srv.SetRecipeStore(noderecipe.NewStore(redisClient, 0))
 			handler = srv.Handler()
 		}
 
@@ -672,6 +677,11 @@ func main() {
 		defer func() { _ = apiRedisClient.Close() }()
 	}
 
+	// Assigned below once the trusted-proxy config is seeded; captured by the
+	// OnServerSettingUpdated closure, which only runs on admin requests after
+	// startup completes.
+	var ipResolver *clientip.Resolver
+
 	deps := api.Dependencies{
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -697,7 +707,19 @@ func main() {
 			restartReqCh <- struct{}{}
 			return nil
 		},
-		OnServerSettingUpdated: func(_ context.Context, _, _ string) {
+		OnServerSettingUpdated: func(_ context.Context, key, _ string) {
+			// Key-scoped reload for the client-IP trust boundary: unlike the
+			// whole-config watcher reload below, this cannot be blocked by an
+			// unrelated malformed setting failing config.LoadFromDB. Uses a
+			// fresh context — the setting is already persisted, so the reload
+			// must not be skipped because the admin request was canceled.
+			if key == clientip.SettingTrustedProxies && ipResolver != nil {
+				if cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
+					slog.Warn("clientip config reload failed", "error", loadErr)
+				} else {
+					ipResolver.UpdateTrustedCIDRs(cidrs)
+				}
+			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
 			// then, leaving only the 60s poll).
@@ -1001,6 +1023,12 @@ func main() {
 			installer,
 			pluginHost,
 			slog.Default(),
+			// Auto-updates rewrite installation rows (new version-specific
+			// InstallPath/Version) and delete the old install dir without going
+			// through pluginService. Wire OnLifecycleChange so the service's
+			// installation cache is invalidated and later plugin RPCs re-read
+			// the fresh row instead of a stale one.
+			pluginService.OnLifecycleChange,
 		)
 		go func() {
 			defer close(pluginAutoUpdateDone)
@@ -1114,12 +1142,32 @@ func main() {
 		rootClaimRepo = catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo = catalog.NewGroupClaimRepository(deps.DB)
 		pluginResolver := metadata.NewPluginResolverAdapter(pluginService)
+		// Serve the metadata chain's plugin-installation enabled-check from the
+		// plugins service's in-memory installation cache. Declared as the
+		// interface type and only assigned when pluginService is non-nil so a
+		// nil *plugins.Service is passed as a genuine nil interface (not a
+		// typed-nil), letting buildProviders fall back to the pool query.
+		var installationEnabledChecker metadata.InstallationEnabledChecker
+		if pluginService != nil {
+			installationEnabledChecker = pluginService
+		}
 		metadataService = metadata.NewMetadataService(
-			chainRepo, pluginResolver,
+			chainRepo, pluginResolver, installationEnabledChecker,
 			itemRepo, providerIDRepo, episodeRepo, seasonRepo, libraryRepo, deps.FolderRepo,
 			personRepo,
 			deps.FileRepo, skippedRootRepo, staleIDRepo, rootClaimRepo,
 		)
+		// Drop the resolved-chain cache whenever a plugin is installed, enabled,
+		// disabled, updated, or uninstalled. The installation-enabled check is
+		// served from the plugins service's in-memory cache (invalidated on the
+		// same events), but resolveChainCached would otherwise keep serving a
+		// stale provider chain for up to chainCacheTTL after a provider's
+		// availability changes.
+		if pluginService != nil {
+			pluginService.AddLifecycleHook(func(context.Context) {
+				metadataService.InvalidateChainCache()
+			})
+		}
 		personRefreshService = metadata.NewPersonRefreshService(deps.DB, pluginResolver, personRepo)
 		personRefreshService.SetImageResolver(imageResolver)
 
@@ -1435,6 +1483,7 @@ func main() {
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
+
 		if libraryIngestExecutor != nil {
 			libraryIngestExecutor.SetAvailabilityDetector(notificationSystem.Detector)
 		}
@@ -1575,6 +1624,7 @@ func main() {
 			cfg.Recommendations.TasteProfilesCron,
 			cfg.Recommendations.CowatchCron,
 			cfg.Recommendations.RecommendationsCron,
+			cfg.Recommendations.EmbeddingsJobTimeout,
 		)
 		if err != nil {
 			slog.Error("failed to create recommendation worker", "error", err)
@@ -1591,8 +1641,40 @@ func main() {
 	if err != nil {
 		log.Fatalf("load trusted CIDRs: %v", err)
 	}
-	ipResolver := clientip.NewResolver(trustedCIDRs)
+	ipResolver = clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
+	// Hot-reload trusted proxies on settings changes via two complementary
+	// paths. The direct event-bus subscription re-reads only the clientip key,
+	// so a malformed unrelated setting (which fails the whole-config reload)
+	// cannot leave stale trust CIDRs on Redis-backed multi-instance deploys.
+	_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type != cache.EventSettingsChanged {
+			return
+		}
+		cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
+		if loadErr != nil {
+			slog.Warn("clientip config reload failed", "error", loadErr)
+			return
+		}
+		ipResolver.UpdateTrustedCIDRs(cidrs)
+	})
+	// The config watcher covers the Redis-less poll/RequestReload path, so
+	// admin UI edits apply without a restart on single-node deployments too.
+	configWatcher.OnChange(func(old, updated *config.Config) {
+		if old != nil && old.ClientIP.TrustedProxies == updated.ClientIP.TrustedProxies {
+			return
+		}
+		raw := updated.ClientIP.TrustedProxies
+		if raw == "" {
+			raw = clientip.DefaultTrustedProxies
+		}
+		cidrs, parseErr := clientip.ParseCIDRs(raw)
+		if parseErr != nil {
+			slog.Warn("clientip config reload failed", "error", parseErr)
+			return
+		}
+		ipResolver.UpdateTrustedCIDRs(cidrs)
+	})
 
 	// Step 6b: Create rate limiter.
 	if cfg.RateLimit.Enabled && deps.DB != nil {
@@ -1629,13 +1711,6 @@ func main() {
 			if event.Type == cache.EventSettingsChanged {
 				if reloadErr := rateLimitMW.Reload(context.Background()); reloadErr != nil {
 					slog.Warn("rate limit config reload from event failed", "error", reloadErr)
-				}
-				// Reload trusted proxies
-				cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
-				if loadErr != nil {
-					slog.Warn("clientip config reload failed", "error", loadErr)
-				} else {
-					ipResolver.UpdateTrustedCIDRs(cidrs)
 				}
 			}
 		})
@@ -2244,7 +2319,10 @@ func main() {
 			JWTSecret:        cfg.Auth.JWTSecret,
 			RecWorker:        recWorker,
 			FrontendFS:       deps.FrontendFS,
-			SessionSyncer:    deps.SessionSyncer,
+			// Hand remote-transcode recipes to the shared recipe store so a dedicated
+			// transcode node that restarts can rebuild a jellycompat session.
+			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
+			SessionSyncer:   deps.SessionSyncer,
 		}
 
 		// Wire direct dependencies when DB is available.
@@ -2293,6 +2371,14 @@ func main() {
 			if compatSearchService != nil {
 				compatSearchService.StartCoverageRefresh(appCtx)
 				compatDeps.CatalogSearchProvider = compatSearchService.Provider()
+				// Latch the resolved provider for the package-level enqueue
+				// helpers (idempotent with the API router's latch; this also
+				// covers modes that wire jellycompat without the router).
+				activeSearchProvider := catalog.SearchProviderPostgres
+				if _, ok := compatSearchService.Provider().(*catalog.MeilisearchSearchProvider); ok {
+					activeSearchProvider = catalog.SearchProviderMeilisearch
+				}
+				catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 			}
 
 			if deps.S3Public != nil {

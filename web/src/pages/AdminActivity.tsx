@@ -49,6 +49,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { formatDateTime, formatTime } from "@/lib/datetime";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
@@ -301,11 +302,9 @@ export default function AdminActivity() {
                           </Link>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {new Date(entry.first_seen).toLocaleString()}
+                          {formatDateTime(entry.first_seen)}
                         </TableCell>
-                        <TableCell className="text-sm">
-                          {new Date(entry.last_seen).toLocaleString()}
-                        </TableCell>
+                        <TableCell className="text-sm">{formatDateTime(entry.last_seen)}</TableCell>
                         <TableCell className="text-right">
                           {entry.request_count.toLocaleString()}
                         </TableCell>
@@ -1223,7 +1222,7 @@ function ffmpegRowText(entry: OperationalLogEntry) {
 function formatTimeOnly(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString();
+  return formatTime(date, { second: "2-digit" });
 }
 
 function EmptyState({ hasData }: { hasData: boolean }) {

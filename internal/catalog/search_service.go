@@ -175,6 +175,9 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 			if pending, err := s.state.PendingCount(ctx, SearchProviderMeilisearch); err == nil {
 				status.Index.PendingEvents = pending
 			}
+			if deadLettered, err := s.state.DeadLetterCount(ctx, SearchProviderMeilisearch); err == nil {
+				status.Index.DeadLetteredEvents = deadLettered
+			}
 		}
 		if s.itemRepo != nil && s.itemRepo.pool != nil {
 			if vectorCount, err := countCatalogSearchVectorDocuments(ctx, s.itemRepo.pool, settings.IndexTypes, ""); err == nil {

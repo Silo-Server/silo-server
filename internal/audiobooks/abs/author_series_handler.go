@@ -32,7 +32,8 @@ func (h *Handler) handleAuthorDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "author get failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, authorToABS(author))
+	lib := h.resolveDefaultLibrary(r.Context(), access)
+	writeJSON(w, http.StatusOK, authorToABS(author, lib, h.absBaseURL(r)))
 }
 
 func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
@@ -62,31 +63,97 @@ func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "series get failed", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, seriesToABS(series))
+	lib := h.resolveDefaultLibrary(r.Context(), access)
+	writeJSON(w, http.StatusOK, seriesToABS(series, lib, h.absBaseURL(r)))
 }
 
-func authorToABS(a Author) map[string]any {
-	books := make([]map[string]any, 0, len(a.Books))
+// authorObjectABS builds the real ABS Author.toOldJSON(+numBooks) shape
+// (server/models/Author.js). silo does not track asin/description/imagePath/
+// timestamps, so those are emitted as null/0 — nullable in real ABS, and a
+// present key (not its value) is what keeps strict clients from crashing.
+func authorObjectABS(id, name, libraryID string, numBooks int) map[string]any {
+	return map[string]any{
+		"id":          id,
+		"asin":        nil,
+		"name":        name,
+		"description": nil,
+		"imagePath":   nil,
+		"libraryId":   libraryID,
+		"addedAt":     0,
+		"updatedAt":   0,
+		"numBooks":    numBooks,
+	}
+}
+
+func authorToABS(a Author, lib AudiobookLibrary, baseURL string) map[string]any {
+	libID := audiobookLibraryID(lib)
+	obj := authorObjectABS(a.ID, a.Name, libID, len(a.Books))
+	// Author-detail books are full minified library items (not thin stubs) so
+	// any strict client decodes them with its LibraryItem model.
+	books := make([]MinifiedLibraryItem, 0, len(a.Books))
 	for _, b := range a.Books {
-		books = append(books, map[string]any{"id": b.ContentID, "media": map[string]any{"metadata": map[string]any{"title": b.Title}}})
+		books = append(books, Minify(siloItemToLibraryItem(b, lib, baseURL)))
 	}
+	obj["libraryItems"] = books
+	return obj
+}
+
+// seriesObjectABS builds the real ABS Series.toOldJSON shape
+// (server/models/Series.js). description/timestamps are absent in silo's
+// catalog → null/0.
+func seriesObjectABS(id, name, libraryID string, numBooks int) map[string]any {
 	return map[string]any{
-		"id":       a.ID,
-		"name":     a.Name,
-		"numBooks": len(a.Books),
-		"books":    books,
+		"id":               id,
+		"name":             name,
+		"nameIgnorePrefix": titleIgnorePrefix(name),
+		"description":      nil,
+		"addedAt":          0,
+		"updatedAt":        0,
+		"libraryId":        libraryID,
+		"numBooks":         numBooks,
 	}
 }
 
-func seriesToABS(s Series) map[string]any {
-	books := make([]map[string]any, 0, len(s.Books))
+func seriesToABS(s Series, lib AudiobookLibrary, baseURL string) map[string]any {
+	libID := audiobookLibraryID(lib)
+	obj := seriesObjectABS(s.ID, s.Name, libID, len(s.Books))
+	books := make([]MinifiedLibraryItem, 0, len(s.Books))
 	for _, b := range s.Books {
-		books = append(books, map[string]any{"id": b.ContentID, "media": map[string]any{"metadata": map[string]any{"title": b.Title}}})
+		books = append(books, Minify(siloItemToLibraryItem(b, lib, baseURL)))
 	}
-	return map[string]any{
-		"id":       s.ID,
-		"name":     s.Name,
-		"numBooks": len(s.Books),
-		"books":    books,
+	obj["books"] = books
+	return obj
+}
+
+// seriesBookMinified builds a full real-ABS minified library item from the
+// limited fields the series-LIST query carries (no full MediaItem). Every
+// required minified key is present with a safe placeholder so strict clients
+// (Plappa) decode the series card's books[] without crashing.
+func seriesBookMinified(contentID, title, libID, baseURL string, updatedAtMs int64) MinifiedLibraryItem {
+	return MinifiedLibraryItem{
+		ID:          contentID,
+		Ino:         contentID,
+		LibraryID:   libID,
+		FolderID:    VirtualFolderID,
+		IsFile:      true,
+		MtimeMs:     updatedAtMs,
+		CtimeMs:     updatedAtMs,
+		BirthtimeMs: updatedAtMs,
+		AddedAt:     updatedAtMs,
+		UpdatedAt:   updatedAtMs,
+		MediaType:   LibraryMediaType,
+		Media: minifiedMedia{
+			ID: contentID,
+			Metadata: minifiedMetadata{
+				Title:             title,
+				TitleIgnorePrefix: titleIgnorePrefix(title),
+				Genres:            []string{},
+			},
+			CoverPath:     baseURL + "/api/items/" + contentID + "/cover",
+			Tags:          []string{},
+			NumTracks:     1,
+			NumAudioFiles: 1,
+		},
+		NumFiles: 1,
 	}
 }

@@ -179,7 +179,7 @@ func (h *AdminPlaybackControlHandler) handleSessionCommand(w http.ResponseWriter
 
 	fallback := func() {
 		h.playback.forgetRealtimeCommand(commandID)
-		_ = h.playback.stopPlaybackSessionByID(context.Background(), sessionID)
+		_ = h.playback.stopPlaybackSessionByID(context.Background(), sessionID, true)
 	}
 
 	h.playback.rememberRealtimeCommand(commandID, sessionID, name)

@@ -481,6 +481,111 @@ func (f fakeMeilisearchIndexStateStore) PendingCount(context.Context, string) (i
 	return f.pending, nil
 }
 
+type countingMeilisearchIndexStateStore struct {
+	state         SearchIndexState
+	pending       int
+	getStateCalls int
+	pendingCalls  int
+}
+
+func (f *countingMeilisearchIndexStateStore) GetState(context.Context, string) (SearchIndexState, error) {
+	f.getStateCalls++
+	return f.state, nil
+}
+
+func (f *countingMeilisearchIndexStateStore) PendingCount(context.Context, string) (int, error) {
+	f.pendingCalls++
+	return f.pending, nil
+}
+
+func TestMeilisearchProviderCachesIndexStateAcrossRequests(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"hits":[],"estimatedTotalHits":0}`))
+	}))
+	defer server.Close()
+
+	client, err := newMeilisearchClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatalf("newMeilisearchClient: %v", err)
+	}
+	store := &countingMeilisearchIndexStateStore{
+		state: SearchIndexState{
+			ActiveIndexUID: "search-index",
+			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false),
+		},
+		pending: 3,
+	}
+	provider := &MeilisearchSearchProvider{
+		stateRepo: store,
+		fallback:  &PostgresSearchProvider{},
+		client:    client,
+		config: MeilisearchProviderConfig{
+			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
+			Embedder:         DefaultMeilisearchEmbedder,
+		},
+	}
+
+	for i := 0; i < 3; i++ {
+		result, err := provider.Search(context.Background(), CatalogSearchRequest{Query: "sponge", Limit: 10})
+		if err != nil {
+			t.Fatalf("Search %d returned error: %v", i, err)
+		}
+		if result.IndexPendingEvents != 3 {
+			t.Fatalf("Search %d IndexPendingEvents = %d, want cached 3", i, result.IndexPendingEvents)
+		}
+	}
+	if store.getStateCalls != 1 || store.pendingCalls != 1 {
+		t.Fatalf("state store calls = %d/%d, want 1/1 (state cached within TTL)", store.getStateCalls, store.pendingCalls)
+	}
+}
+
+func TestMeilisearchProviderInvalidatesStateCacheOnSearchFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// 404 models the cached index having been deleted by a rebuild's
+		// cleanup; it must not trip the circuit, only the state cache.
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Index search-index not found.","code":"index_not_found"}`))
+	}))
+	defer server.Close()
+
+	client, err := newMeilisearchClient(server.URL, "", time.Second)
+	if err != nil {
+		t.Fatalf("newMeilisearchClient: %v", err)
+	}
+	store := &countingMeilisearchIndexStateStore{
+		state: SearchIndexState{
+			ActiveIndexUID: "search-index",
+			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false),
+		},
+	}
+	provider := &MeilisearchSearchProvider{
+		stateRepo: store,
+		fallback:  &PostgresSearchProvider{},
+		client:    client,
+		config: MeilisearchProviderConfig{
+			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
+			Embedder:         DefaultMeilisearchEmbedder,
+		},
+	}
+
+	// Both searches fail (the nil-repo postgres fallback errors too); what
+	// matters is that the failed first search dropped the cached state so the
+	// second one refetched instead of reusing it for the rest of the TTL.
+	for i := 0; i < 2; i++ {
+		if _, err := provider.Search(context.Background(), CatalogSearchRequest{Query: "sponge", Limit: 10}); err == nil {
+			t.Fatalf("Search %d should surface the fallback error in this setup", i)
+		}
+	}
+	if store.getStateCalls != 2 {
+		t.Fatalf("getStateCalls = %d, want 2 (cache invalidated after failed search)", store.getStateCalls)
+	}
+	if reason, blocked := provider.circuitBlocked(time.Now()); blocked {
+		t.Fatalf("HTTP 404 must not trip the circuit, got open circuit: %s", reason)
+	}
+}
+
 func TestMeilisearchProviderUsesActiveIndexWhenPendingUpdatesExist(t *testing.T) {
 	requests := 0
 	var gotMethod, gotPath string
@@ -509,9 +614,6 @@ func TestMeilisearchProviderUsesActiveIndexWhenPendingUpdatesExist(t *testing.T)
 		fallback: &PostgresSearchProvider{},
 		client:   client,
 		config: MeilisearchProviderConfig{
-			BatchSize:        meilisearchDefaultBatchSize,
-			CandidateScanCap: meilisearchDefaultCandidateScanCap,
-			DeepOffsetLimit:  meilisearchDefaultDeepOffsetLimit,
 			MatchingStrategy: DefaultMeilisearchMatchingStrategy,
 			Embedder:         DefaultMeilisearchEmbedder,
 		},

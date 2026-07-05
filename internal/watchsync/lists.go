@@ -169,7 +169,8 @@ func (s *Service) watchlistBinding() listBinding {
 			return res, true, err
 		},
 		localAdd: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) error {
-			return store.AddToWatchlistAt(ctx, profileID, mediaItemID, at)
+			_, err := store.AddToWatchlistAt(ctx, profileID, mediaItemID, at)
+			return err
 		},
 		localRemove: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error {
 			return store.RemoveFromWatchlist(ctx, profileID, mediaItemID)
@@ -402,6 +403,11 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, fmt.Errorf("provider %q does not implement %s export", conn.Provider, b.kind)
 		}
 		if err != nil {
+			// Rate-limited items are not failures: leave them pending so the
+			// next run (after the deferral) retries without churning state.
+			if _, limited := AsRateLimited(err); limited {
+				return result, err
+			}
 			for _, item := range toSend {
 				_ = s.repo.MarkListItemError(ctx, conn.ID, b.kind, item.MediaItemID, err.Error())
 			}

@@ -38,6 +38,7 @@ import { Plus, Trash2, Copy } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { formatDate } from "@/lib/datetime";
 
 function maskKey(key: string): string {
   if (key.length <= 10) return key;
@@ -170,10 +171,10 @@ export default function AdminApiKeys() {
                   </Select>
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
-                  {new Date(key.created_at).toLocaleDateString()}
+                  {formatDate(key.created_at)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs">
-                  {key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : "Never"}
+                  {key.last_used_at ? formatDate(key.last_used_at) : "Never"}
                 </TableCell>
                 <TableCell>
                   <Button

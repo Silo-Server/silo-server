@@ -42,6 +42,7 @@ import {
 } from "./adminCatalogMaintenancePathRewrites";
 import { formatExportProgressLabel, formatJobProgress } from "./adminCatalogMaintenanceFormatters";
 import { Download, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
+import { formatDateTime } from "@/lib/datetime";
 
 export default function AdminCatalogMaintenance() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -433,7 +434,7 @@ export default function AdminCatalogMaintenance() {
                       </Badge>
                       <span className="text-sm font-medium">{describeImportJob(job)}</span>
                       <span className="text-muted-foreground text-xs">
-                        requested {new Date(job.requested_at).toLocaleString()}
+                        requested {formatDateTime(job.requested_at)}
                       </span>
                     </div>
                     <div className="text-muted-foreground text-sm">
@@ -448,7 +449,7 @@ export default function AdminCatalogMaintenance() {
                     <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
                       <span>Progress: {formatJobProgress(job)}</span>
                       {job.completed_at ? (
-                        <span>Finished: {new Date(job.completed_at).toLocaleString()}</span>
+                        <span>Finished: {formatDateTime(job.completed_at)}</span>
                       ) : null}
                       {job.status === "completed" ? (
                         <span>
@@ -528,7 +529,7 @@ export default function AdminCatalogMaintenance() {
                       </Badge>
                       <span className="text-sm font-medium">{scopeLabel}</span>
                       <span className="text-muted-foreground text-xs">
-                        requested {new Date(job.requested_at).toLocaleString()}
+                        requested {formatDateTime(job.requested_at)}
                       </span>
                     </div>
                     <div className="text-muted-foreground text-sm">
@@ -537,7 +538,7 @@ export default function AdminCatalogMaintenance() {
                     <div className="text-muted-foreground flex flex-wrap gap-4 text-xs">
                       <span>Progress: {progressLabel}</span>
                       {job.completed_at ? (
-                        <span>Finished: {new Date(job.completed_at).toLocaleString()}</span>
+                        <span>Finished: {formatDateTime(job.completed_at)}</span>
                       ) : null}
                       {exportResult.items_exported ? (
                         <span>
@@ -605,7 +606,7 @@ function describeExportJob(job: AdminJob) {
     exportRequest.library_ids && exportRequest.library_ids.length > 0
       ? `${exportRequest.library_ids.length} librar${exportRequest.library_ids.length === 1 ? "y" : "ies"}`
       : "All libraries";
-  return `${scopeLabel} • ${new Date(job.requested_at).toLocaleString()}`;
+  return `${scopeLabel} • ${formatDateTime(job.requested_at)}`;
 }
 
 function describeImportJob(job: AdminJob) {
@@ -617,7 +618,7 @@ function describeImportJob(job: AdminJob) {
 }
 
 function describeImportSource(source: CatalogSeedImportSource) {
-  const label = source.last_modified ? new Date(source.last_modified).toLocaleString() : source.key;
+  const label = source.last_modified ? formatDateTime(source.last_modified) : source.key;
   return `${label} • ${source.key}`;
 }
 

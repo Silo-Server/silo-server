@@ -453,6 +453,21 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	if parsed.Title == "" {
 		parsed.Title = ebookTitleFromPath(filePath)
 	}
+	if len(parsed.Authors) == 0 {
+		if author := ebookAuthorFromPath(filePath); author != "" {
+			parsed.Authors = []string{author}
+			// A path-derived title carries the same " - Author" suffix; drop it
+			// so the title, group key, and enrichment query stay clean. Compare
+			// normalized so case/spacing variants (e.g. "a. f.  carter") match
+			// the recovered author and don't leave a duplicated suffix.
+			if idx := strings.LastIndex(parsed.Title, " - "); idx >= 0 {
+				suffixAuthor := strings.TrimSpace(parsed.Title[idx+len(" - "):])
+				if normalizeEbookIdentityPart(suffixAuthor) == normalizeEbookIdentityPart(author) {
+					parsed.Title = strings.TrimSpace(parsed.Title[:idx])
+				}
+			}
+		}
+	}
 
 	groupKey := ebookContentGroupKey(&parsed, filePath)
 	unlock := groupLocks.lock(groupKey)
@@ -883,6 +898,80 @@ func ebookTitleFromPath(filePath string) string {
 		return base[:len(base)-len(".fb2.zip")]
 	}
 	return strings.TrimSuffix(base, filepath.Ext(base))
+}
+
+// ebookAuthorFromPath recovers an author for libraries that shelve books as
+// ".../<Author>/<Title>/<Title> - <Author>.ext" but embed no author in the file
+// (common for PDF/MOBI/AZW3). It returns a value only when two independent path
+// signals agree: the grandparent directory name and the filename's trailing
+// " - X" segment. Authorless layouts — magazines, language courses, flat dumps —
+// satisfy neither or only one signal, so they never get a junk author that would
+// poison the enrichment search.
+func ebookAuthorFromPath(filePath string) string {
+	base := ebookTitleFromPath(filePath)
+	idx := strings.LastIndex(base, " - ")
+	if idx < 0 {
+		return ""
+	}
+	fromName := strings.TrimSpace(base[idx+len(" - "):])
+	if fromName == "" {
+		return ""
+	}
+	grandparent := strings.TrimSpace(filepath.Base(filepath.Dir(filepath.Dir(filePath))))
+	switch grandparent {
+	case "", ".", string(filepath.Separator):
+		return ""
+	}
+	if normalizeEbookIdentityPart(fromName) != normalizeEbookIdentityPart(grandparent) {
+		return ""
+	}
+	// Position alone cannot tell author from title: some libraries shelve
+	// books as "<Title>/<Author>/<Author> - <Title>" (inverted) which also
+	// satisfies the grandparent==suffix check and would assign the title as
+	// the author. Require the candidate to look like a person name; series and
+	// title folders ("De legenden van de Alfen") fail this and are rejected.
+	if !looksLikePersonName(grandparent) {
+		return ""
+	}
+	// Return the directory form, which carries canonical casing ("A. F. Carter"
+	// rather than a lowercased filename suffix).
+	return grandparent
+}
+
+// looksLikePersonName reports whether value is shaped like an author name. A
+// "Last, First" comma form is accepted outright; otherwise every token must be
+// capitalized or a known name particle (van, de, von, ...). Title/series
+// strings contain lowercase content words and so are rejected.
+func looksLikePersonName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if strings.ContainsAny(value, "0123456789") {
+		return false
+	}
+	if strings.Contains(value, ",") {
+		return true
+	}
+	particles := map[string]struct{}{
+		"van": {}, "von": {}, "de": {}, "der": {}, "den": {}, "het": {}, "di": {},
+		"da": {}, "del": {}, "della": {}, "la": {}, "le": {}, "el": {}, "du": {},
+		"dos": {}, "das": {}, "bin": {}, "al": {}, "ter": {}, "te": {}, "ten": {},
+		"op": {}, "'t": {},
+	}
+	hasUpper := false
+	for _, token := range strings.Fields(value) {
+		r := []rune(token)[0]
+		if unicode.IsUpper(r) {
+			hasUpper = true
+			continue
+		}
+		if _, ok := particles[strings.ToLower(token)]; ok {
+			continue
+		}
+		return false
+	}
+	return hasUpper
 }
 
 func normalizeEbookIdentityPart(value string) string {

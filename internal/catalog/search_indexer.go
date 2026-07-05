@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ type CatalogSearchIndexRebuildStats struct {
 	ActiveIndexUID string `json:"active_index_uid,omitempty"`
 	DocumentCount  int    `json:"document_count"`
 	VectorDocCount int    `json:"vector_document_count"`
+	RemovedIndexes int    `json:"removed_indexes"`
 }
 
 type queuedMeilisearchTask struct {
@@ -48,6 +50,21 @@ type queuedMeilisearchTask struct {
 }
 
 const meilisearchMaxDocumentPayloadBytes = 80 * 1024 * 1024
+
+// meilisearchIndexingTimeout bounds a single indexing HTTP call (document
+// batches run up to meilisearchMaxDocumentPayloadBytes). It is deliberately
+// independent of catalog.search.meilisearch.timeout_ms: that setting protects
+// the interactive search hot path and defaults to 800ms, which is far too
+// tight to upload a multi-megabyte rebuild batch to a non-loopback
+// Meilisearch — and raising it to make indexing work would loosen search
+// fallback latency at the same time.
+const meilisearchIndexingTimeout = 2 * time.Minute
+
+// catalogSearchExcludeMangaChaptersSQL excludes per-chapter manga rows from
+// catalog search documents and semantic coverage counts; chapters are reached
+// through their parent series and would otherwise flood the index. The
+// predicate expects media_items to be aliased as `mi`.
+const catalogSearchExcludeMangaChaptersSQL = `NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = mi.content_id)`
 
 type CatalogSearchIndexer struct {
 	pool          *pgxpool.Pool
@@ -247,6 +264,14 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 	if err != nil {
 		return stats, err
 	}
+	priorState, err := i.events.GetState(ctx, SearchProviderMeilisearch)
+	if err != nil {
+		return stats, err
+	}
+	totalDocs, err := countCatalogSearchEligibleDocuments(ctx, i.pool, settings.IndexTypes)
+	if err != nil {
+		return stats, err
+	}
 
 	buildIndexUID := fmt.Sprintf("%s_rebuild_%d", settings.MeilisearchIndex, time.Now().Unix())
 	stats.ActiveIndexUID = buildIndexUID
@@ -286,9 +311,10 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 				docCount: len(batch),
 				vecCount: catalogSearchVectorDocumentCount(batch),
 			})
-			reportSearchIndexProgress(progress, 25, fmt.Sprintf("Submitted %d catalog items", stats.DocumentCount+queuedDocumentCount(queuedTasks)))
+			submitted := stats.DocumentCount + queuedDocumentCount(queuedTasks)
+			reportSearchIndexProgress(progress, rebuildIndexingPercent(submitted, totalDocs), fmt.Sprintf("Submitted %d of %d catalog items", submitted, totalDocs))
 			if len(queuedTasks) >= settings.RebuildQueueDepth {
-				if err := waitNextMeilisearchTask(ctx, client, &queuedTasks, &stats, progress); err != nil {
+				if err := waitNextMeilisearchTask(ctx, client, &queuedTasks, &stats, progress, totalDocs); err != nil {
 					return stats, err
 				}
 			}
@@ -296,7 +322,7 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 		lastID = docs[len(docs)-1].ContentID
 	}
 	for len(queuedTasks) > 0 {
-		if err := waitNextMeilisearchTask(ctx, client, &queuedTasks, &stats, progress); err != nil {
+		if err := waitNextMeilisearchTask(ctx, client, &queuedTasks, &stats, progress, totalDocs); err != nil {
 			return stats, err
 		}
 	}
@@ -308,15 +334,82 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 	if vectorCount, err := countCatalogSearchVectorDocuments(ctx, i.pool, settings.IndexTypes, ""); err == nil {
 		stats.VectorDocCount = vectorCount
 	}
+	// Swap the state pointer BEFORE marking events processed. If the process
+	// dies between the two, still-pending events simply replay into the new
+	// active index as idempotent upserts on the next sync. The reverse order
+	// would mark events processed while the old index is still active, losing
+	// those changes from the served index until the next rebuild.
+	if err := i.events.UpdateStateAfterRebuild(ctx, SearchProviderMeilisearch, buildIndexUID, catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled), docCount, rebuildEventHighWater); err != nil {
+		return stats, err
+	}
 	if err := i.events.MarkProcessedThrough(ctx, SearchProviderMeilisearch, rebuildEventHighWater); err != nil {
 		return stats, err
 	}
-	if err := i.events.UpdateStateAfterRebuild(ctx, SearchProviderMeilisearch, buildIndexUID, catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled), docCount, rebuildEventHighWater); err != nil {
-		return stats, err
+	reportSearchIndexProgress(progress, 95, "Removing superseded catalog search indexes")
+	removed, err := cleanupSupersededMeilisearchIndexes(ctx, client, settings.MeilisearchIndex, buildIndexUID, priorState.ActiveIndexUID)
+	stats.RemovedIndexes = removed
+	if err != nil {
+		// The new index is already active; a failed cleanup costs disk on the
+		// Meilisearch instance, not correctness, and the next rebuild retries.
+		slog.Warn("catalog search: failed to remove superseded meilisearch indexes", "err", err, "removed", removed)
 	}
 	setSearchIndexTaskResult(progress, stats)
 	reportSearchIndexProgress(progress, 100, fmt.Sprintf("Rebuilt catalog search index with %d documents", docCount))
 	return stats, nil
+}
+
+// rebuildIndexingPercent maps rebuild document progress onto the 5-90% band of
+// the task's progress bar (index creation sits below, finalization above).
+func rebuildIndexingPercent(done, total int) float64 {
+	if total <= 0 {
+		return 50
+	}
+	if done > total {
+		done = total
+	}
+	return 5 + 85*float64(done)/float64(total)
+}
+
+// cleanupSupersededMeilisearchIndexes deletes indexes this rebuild has made
+// unreachable: the previously active index and any `<prefix>_rebuild_*`
+// leftovers from failed or superseded runs. Without it, every rebuild leaks a
+// full copy of the catalog on the Meilisearch instance.
+func cleanupSupersededMeilisearchIndexes(ctx context.Context, client *meilisearchClient, indexPrefix, activeUID, previousActiveUID string) (int, error) {
+	uids, err := client.ListIndexUIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, uid := range staleCatalogSearchIndexUIDs(uids, indexPrefix, activeUID, previousActiveUID) {
+		task, err := client.DeleteIndex(ctx, uid)
+		if err != nil {
+			return removed, err
+		}
+		if err := client.WaitTask(ctx, task); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// staleCatalogSearchIndexUIDs selects which index uids a finished rebuild
+// should delete: every `<prefix>_rebuild_` index except the newly active one,
+// plus the previously active index (which may predate the rebuild naming
+// scheme). Indexes outside the prefix are never touched, so a shared
+// Meilisearch instance stays safe.
+func staleCatalogSearchIndexUIDs(uids []string, indexPrefix, activeUID, previousActiveUID string) []string {
+	rebuildPrefix := indexPrefix + "_rebuild_"
+	var stale []string
+	for _, uid := range uids {
+		if uid == "" || uid == activeUID {
+			continue
+		}
+		if strings.HasPrefix(uid, rebuildPrefix) || uid == previousActiveUID {
+			stale = append(stale, uid)
+		}
+	}
+	return stale
 }
 
 func waitNextMeilisearchTask(
@@ -325,6 +418,7 @@ func waitNextMeilisearchTask(
 	queue *[]queuedMeilisearchTask,
 	stats *CatalogSearchIndexRebuildStats,
 	progress SearchIndexProgressReporter,
+	totalDocs int,
 ) error {
 	if len(*queue) == 0 {
 		return nil
@@ -336,7 +430,7 @@ func waitNextMeilisearchTask(
 	}
 	stats.DocumentCount += next.docCount
 	stats.VectorDocCount += next.vecCount
-	reportSearchIndexProgress(progress, 25, fmt.Sprintf("Indexed %d catalog items", stats.DocumentCount))
+	reportSearchIndexProgress(progress, rebuildIndexingPercent(stats.DocumentCount, totalDocs), fmt.Sprintf("Indexed %d of %d catalog items", stats.DocumentCount, totalDocs))
 	return nil
 }
 
@@ -409,7 +503,7 @@ func (i *CatalogSearchIndexer) loadClient(ctx context.Context) (CatalogSearchSet
 	if err != nil || !ok {
 		return settings, nil, ok, err
 	}
-	client, err := newMeilisearchClient(settings.MeilisearchURL, settings.MeilisearchAPIKey, settings.Timeout)
+	client, err := newMeilisearchClient(settings.MeilisearchURL, settings.MeilisearchAPIKey, meilisearchIndexingTimeout)
 	if err != nil {
 		return settings, nil, false, err
 	}
@@ -456,7 +550,7 @@ func catalogSearchMeilisearchSettings(embedder string, semanticEnabled bool) map
 			"tagline",
 		},
 		"pagination": map[string]any{
-			"maxTotalHits": meilisearchDefaultCandidateScanCap,
+			"maxTotalHits": meilisearchCandidateScanCap,
 		},
 	}
 	if semanticEnabled {
@@ -540,10 +634,7 @@ func (i *CatalogSearchIndexer) LoadDocumentsAfter(ctx context.Context, afterCont
 	typeFilter := normalizeCatalogSearchItemTypes(itemTypes)
 	whereClause := `
 			WHERE ($1::text = '' OR mi.content_id > $1)
-			  AND NOT EXISTS (
-				SELECT 1 FROM manga_chapters mc
-				WHERE mc.chapter_content_id = mi.content_id
-			  )`
+			  AND ` + catalogSearchExcludeMangaChaptersSQL
 	args := []any{afterContentID, limit}
 	if len(typeFilter) > 0 {
 		whereClause += `
@@ -577,10 +668,7 @@ func (i *CatalogSearchIndexer) LoadDocumentsByIDs(ctx context.Context, contentID
 	typeFilter := normalizeCatalogSearchItemTypes(itemTypes)
 	whereClause := `
 			WHERE mi.content_id = ANY($1)
-			  AND NOT EXISTS (
-				SELECT 1 FROM manga_chapters mc
-				WHERE mc.chapter_content_id = mi.content_id
-			  )`
+			  AND ` + catalogSearchExcludeMangaChaptersSQL
 	args := []any{contentIDs}
 	if len(typeFilter) > 0 {
 		whereClause += `
@@ -779,12 +867,36 @@ func countCatalogSearchVectorDocuments(ctx context.Context, q coverageQuerier, i
 		SELECT COUNT(*)
 		FROM media_item_embeddings e
 		JOIN media_items mi ON mi.content_id = e.media_item_id
-		WHERE NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = mi.content_id)
+		WHERE `+catalogSearchExcludeMangaChaptersSQL+`
 		  AND ($1::text[] IS NULL OR mi.type = ANY($1))
 		  AND (mi.status = 'matched' OR mi.type IN ('audiobook','ebook'))
 		  AND ($2 = '' OR e.model = $2)
 	`, typeArg, model).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count catalog search vector documents: %w", err)
+	}
+	return count, nil
+}
+
+// countCatalogSearchEligibleDocuments counts the items a rebuild will index
+// (nil/empty itemTypes => all types). It applies the same predicate as the
+// document loaders — NOT the vector-eligibility predicate — so the total is an
+// exact denominator for rebuild progress reporting.
+func countCatalogSearchEligibleDocuments(ctx context.Context, q coverageQuerier, itemTypes []string) (int, error) {
+	if q == nil {
+		return 0, nil
+	}
+	var typeArg any
+	if typeFilter := normalizeCatalogSearchItemTypes(itemTypes); len(typeFilter) > 0 {
+		typeArg = typeFilter
+	}
+	var count int
+	if err := q.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM media_items mi
+		WHERE `+catalogSearchExcludeMangaChaptersSQL+`
+		  AND ($1::text[] IS NULL OR mi.type = ANY($1))
+	`, typeArg).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count catalog search eligible documents: %w", err)
 	}
 	return count, nil
 }

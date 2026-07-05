@@ -10,6 +10,7 @@ const KEYS = [
   "auth.refresh_token_expiry",
   "server.log_level",
   "server.log_quiet",
+  "clientip.trusted_proxies",
 ];
 
 export default function GeneralSettings() {
@@ -36,7 +37,7 @@ export default function GeneralSettings() {
       <div className="mb-6 space-y-2">
         <h2 className="text-xl font-semibold tracking-tight">General</h2>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Authentication, token lifetimes, and server logging behavior.
+          Authentication, token lifetimes, networking, and server logging behavior.
         </p>
       </div>
 
@@ -77,6 +78,39 @@ export default function GeneralSettings() {
             value={form.getValue("server.log_quiet")}
             onChange={(v) => form.setValue("server.log_quiet", v)}
           />
+        </FieldGroup>
+
+        <FieldGroup label="Network">
+          <SettingField
+            label="Trusted Proxies"
+            hint={
+              "Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, " +
+              "e.g. 172.16.0.0/12, 203.0.113.7/32. Applies without a restart."
+            }
+            value={form.getValue("clientip.trusted_proxies")}
+            onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
+          />
+          <div className="border-border/60 bg-muted/30 my-3 rounded-lg border px-3 py-2">
+            <p className="text-sm font-medium">Choosing trusted proxy ranges</p>
+            <ul className="text-muted-foreground mt-1 list-disc space-y-1 pl-4 text-xs leading-relaxed">
+              <li>
+                Setting this replaces the defaults (private ranges 10.0.0.0/8, 172.16.0.0/12,
+                192.168.0.0/16 and loopback). Leave it empty to keep them.
+              </li>
+              <li>
+                Recommended: keep the defaults, and only add your proxy&apos;s public address as a
+                /32 (e.g. 203.0.113.7/32) if it reaches Silo from outside those ranges.
+              </li>
+              <li>
+                CDNs such as Cloudflare connect from many published IP ranges — you must list all of
+                their CIDRs and keep the list up to date as they change.
+              </li>
+              <li>
+                Avoid 0.0.0.0/0 (trust everything): any client could then spoof its IP with a forged
+                X-Forwarded-For header, affecting rate limits and audit logs.
+              </li>
+            </ul>
+          </div>
         </FieldGroup>
       </div>
 

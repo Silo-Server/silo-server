@@ -95,13 +95,10 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 		}
 	}
 
-	// Presign artwork only for the page being returned.
+	// Presign artwork only for the page being returned, batching each image
+	// type into one PresignImageURLsWithExpiry call for the whole page.
 	result := slicePage(ordered, offset, limit)
-	for i := range result {
-		result[i].PosterURL = compatPresignImage(s.detailSvc, ctx, result[i].PosterURL, "poster", compatCardImageSize)
-		result[i].BackdropURL = compatPresignImage(s.detailSvc, ctx, result[i].BackdropURL, "backdrop", compatCardImageSize)
-		result[i].LogoURL = compatPresignImage(s.detailSvc, ctx, result[i].LogoURL, "logo", compatCardImageSize)
-	}
+	presignCompatListItems(ctx, s.detailSvc, result)
 	if result == nil {
 		result = []upstreamListItem{}
 	}

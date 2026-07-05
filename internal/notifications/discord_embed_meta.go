@@ -18,8 +18,10 @@ const discordOverviewLimit = 350
 // Media-type discriminator values shared by catalog rows (media_items.type)
 // and request payloads.
 const (
-	mediaTypeMovie  = "movie"
-	mediaTypeSeries = "series"
+	mediaTypeMovie     = "movie"
+	mediaTypeSeries    = "series"
+	mediaTypeAudiobook = "audiobook"
+	mediaTypeEbook     = "ebook"
 )
 
 // providerIDs carries the external database identifiers an embed can link to.

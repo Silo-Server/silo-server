@@ -59,6 +59,14 @@ type ProcessRequest struct {
 	FolderID    string            // Which library folder
 	Language    string            // ISO 639-1 metadata language (resolved from folder)
 	Mode        RefreshMode
+	// AdoptLanguage makes Language the item's new canonical metadata
+	// language: the base row is rewritten in Language and
+	// default_metadata_language is restamped, instead of routing a
+	// non-canonical language to the localization tables. Set by
+	// folder-scoped manual refreshes when the library's configured
+	// language differs from the item's stamp, so changing a library's
+	// metadata language actually re-fetches titles/overviews.
+	AdoptLanguage bool
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -92,6 +100,7 @@ type MatchHints struct {
 // SearchQuery is passed to SearchProvider.Search().
 type SearchQuery struct {
 	Title                     string
+	Author                    string // optional creator hint (e.g. ebook author) folded into the search query
 	Year                      int
 	ContentType               string            // media_items.type value
 	ProviderIDs               map[string]string // Accumulated IDs from prior providers

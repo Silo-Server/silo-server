@@ -44,21 +44,25 @@ func (h *Handler) handleLibraryDetail(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	resp := map[string]any{
-		"library": audiobookLibraryMap(lib),
+	library := audiobookLibraryMap(lib)
+	// Real ABS LibraryController.findOne returns the library object DIRECTLY
+	// when there is no ?include=filterdata; only the filterdata request wraps
+	// it in { filterdata, issues, numUserPlaylists, customMetadataProviders,
+	// library }. Returning the wrapped shape unconditionally breaks clients
+	// that read library fields off the top level.
+	if !includeHas(r.URL.Query().Get("include"), "filterdata") {
+		writeJSON(w, http.StatusOK, library)
+		return
 	}
-	if includeHas(r.URL.Query().Get("include"), "filterdata") {
-		resp["filterdata"] = h.buildFilterData(r, lib)
-		resp["issues"] = 0
-		// numUserPlaylists drives the bottom-nav "Playlists" tab
-		// visibility on the ABS mobile client (BookshelfNavBar.vue:25
-		// gates the tab on `numUserPlaylists` being truthy). Comment
-		// in plugins/server.js:129 confirms "precise number is not
-		// necessary" — we just need a non-zero count when the caller
-		// has any playlists, so the ListUserPlaylists len suffices.
-		resp["numUserPlaylists"] = h.countUserPlaylists(r)
-	}
-	writeJSON(w, http.StatusOK, resp)
+	// numUserPlaylists drives the bottom-nav "Playlists" tab visibility on the
+	// ABS mobile client (BookshelfNavBar.vue gates the tab on it being truthy).
+	writeJSON(w, http.StatusOK, map[string]any{
+		"filterdata":              h.buildFilterData(r, lib),
+		"issues":                  0,
+		"numUserPlaylists":        h.countUserPlaylists(r),
+		"customMetadataProviders": []any{},
+		"library":                 library,
+	})
 }
 
 // countUserPlaylists returns the playlist count for the authenticated
@@ -99,14 +103,14 @@ func (h *Handler) buildFilterData(r *http.Request, lib AudiobookLibrary) map[str
 	access, _, _ := h.accessFilterFromRequest(r)
 
 	authorObjs := []AuthorObj{}
-	if rows, err := h.deps.MediaStore.ListLibraryAuthors(ctx, lib.ID, fetchCap, access); err == nil {
+	if rows, _, err := h.deps.MediaStore.ListLibraryAuthors(ctx, lib.ID, fetchCap, 0, "name", false, access); err == nil {
 		for _, a := range rows {
 			authorObjs = append(authorObjs, AuthorObj{ID: a.ID, Name: a.Name})
 		}
 	}
 
 	seriesObjs := []SeriesObj{}
-	if rows, err := h.deps.MediaStore.ListLibrarySeries(ctx, lib.ID, fetchCap, access); err == nil {
+	if rows, _, err := h.deps.MediaStore.ListLibrarySeries(ctx, lib.ID, fetchCap, 0, access); err == nil {
 		for _, s := range rows {
 			seriesObjs = append(seriesObjs, SeriesObj{ID: s.ID, Name: s.Name})
 		}
@@ -152,7 +156,11 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	sortBy := q.Get("sort")
 	sortDesc := q.Get("desc") == "1"
 	filterBy := q.Get("filter")
-	minified := q.Get("minified") == "1"
+	// Real ABS getByFilterAndSort ALWAYS serializes list items minified
+	// (LibraryItem.toOldJSONMinified); the non-minified hybrid is a shape no
+	// real client requests. Default to minified; only an explicit minified=0
+	// opts into the full shape.
+	minified := q.Get("minified") != "0"
 	collapseSeries := q.Get("collapseseries") == "1"
 	include := q.Get("include")
 
@@ -164,18 +172,31 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch the full visible library when filtering so local post-filter
-	// cannot truncate candidates before applying the predicate.
-	fetchLimit := limit
-	if hasFilter || collapseSeries || limit == 0 {
-		fetchLimit = 0
+	// authors/series/narrators filters push down into SQL (indexed) so we never
+	// load + hydrate the whole library. This applies even with collapseseries=1
+	// (the client's per-artist album sync): the SQL filter reduces to a handful
+	// of rows, then collapse + paging run in Go over that small set. Only
+	// progress/genre/tag/language filters still need the Go post-filter and the
+	// full fetch.
+	pushDown := hasFilter &&
+		(filter.Kind == FilterAuthors || filter.Kind == FilterSeries || filter.Kind == FilterNarrators)
+	sqlFilter := Filter{}
+	if pushDown {
+		sqlFilter = filter
 	}
-	fetchOffset := 0
-	if !hasFilter && !collapseSeries && limit > 0 {
+	goFilter := hasFilter && !pushDown
+
+	// SQL paginates only when nothing is post-processed in Go (no Go filter, no
+	// collapse) and the limit is positive; otherwise fetch the (now
+	// SQL-filtered, hence small) candidate set in full and slice in Go.
+	sqlPaginated := !goFilter && !collapseSeries && limit > 0
+	fetchLimit, fetchOffset := 0, 0
+	if sqlPaginated {
+		fetchLimit = limit
 		fetchOffset = page * limit
 	}
 
-	items, total, err := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, fetchLimit, fetchOffset, access)
+	items, total, err := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, fetchLimit, fetchOffset, access, sqlFilter)
 	if err != nil {
 		http.Error(w, "list audiobooks: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -188,8 +209,8 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		all = append(all, siloItemToLibraryItem(item, lib, baseURL))
 	}
 
-	// Local filter (post-fetch).
-	if hasFilter {
+	// Local filter (post-fetch) — only for filters not pushed into SQL.
+	if goFilter {
 		filtered := make([]LibraryItem, 0, len(all))
 		for _, it := range all {
 			if filter.Matches(it, false, false, false) {
@@ -207,9 +228,9 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 		total = len(collapsed)
 	}
 
-	// Slice for page/limit.
+	// Slice for page/limit. When SQL already paginated we serve the rows as-is.
 	pageStart, pageEnd := 0, len(collapsed)
-	if limit > 0 && (hasFilter || collapseSeries) {
+	if limit > 0 && !sqlPaginated {
 		pageStart = page * limit
 		if pageStart > len(collapsed) {
 			pageStart = len(collapsed)
@@ -313,48 +334,40 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, page := readPagedQuery(r, 50)
-	// Fetch the full list (capped at 5000) and paginate locally so the
-	// envelope's total reflects real DB count, not the page slice length.
-	// ABS clients use total to decide whether to fetch page 2.
-	const fetchCap = 5000
+	sortBy := r.URL.Query().Get("sort")
+	sortDesc := r.URL.Query().Get("desc") == "1"
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
 		return
 	}
-	authors, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, fetchCap, access)
+	// Reads the precomputed author materialized view: indexed paginated read +
+	// trivial count, so large libraries aren't capped and full syncs don't blow
+	// the client's background-task window. limit=0 means "return all".
+	offset := 0
+	if limit > 0 {
+		offset = page * limit
+	}
+	pageAuthors, total, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, limit, offset, sortBy, sortDesc, access)
 	if err != nil {
 		http.Error(w, "list authors: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	libID := audiobookLibraryID(lib)
-	total := len(authors)
-	// Local slice for the requested page.
-	// ABS contract: limit=0 means "return all".
-	var pageAuthors []AuthorSummary
-	if limit == 0 {
-		pageAuthors = authors
-	} else {
-		start := page * limit
-		end := start + limit
-		if start > total {
-			start = total
-		}
-		if end > total {
-			end = total
-		}
-		pageAuthors = authors[start:end]
-	}
 	results := make([]map[string]any, 0, len(pageAuthors))
 	for _, a := range pageAuthors {
-		results = append(results, map[string]any{
-			"id":        a.ID,
-			"name":      a.Name,
-			"numBooks":  a.NumBooks,
-			"libraryId": libID,
-		})
+		results = append(results, authorObjectABS(a.ID, a.Name, libID, a.NumBooks))
 	}
-	writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))
+	// Real ABS LibraryController.getAuthors branches on isPaginated =
+	// (limit present & numeric) && (page present & numeric): paged envelope
+	// when true, else a bare { authors: [...] }. Emitting the paged shape for
+	// the non-paginated request crashes clients that key on `authors`.
+	q := r.URL.Query()
+	if q.Get("limit") != "" && q.Get("page") != "" {
+		writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"authors": results})
 }
 
 // handleLibrarySeries — GET /abs/api/libraries/{id}/series
@@ -368,78 +381,56 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit, page := readPagedQuery(r, 25)
-	const fetchCap = 5000
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
 		return
 	}
-	series, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, fetchCap, access)
+	// Paginate in SQL with a separate COUNT so large libraries aren't truncated
+	// at a fixed cap. limit=0 means "return all" (ABS contract).
+	offset := 0
+	if limit > 0 {
+		offset = page * limit
+	}
+	pageSeries, total, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, limit, offset, access)
 	if err != nil {
 		http.Error(w, "list series: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	libID := audiobookLibraryID(lib)
 	baseURL := h.absBaseURL(r)
-	total := len(series)
-	// ABS contract: limit=0 means "return all".
-	var pageSeries []SeriesSummary
-	if limit == 0 {
-		pageSeries = series
-	} else {
-		start := page * limit
-		end := start + limit
-		if start > total {
-			start = total
-		}
-		if end > total {
-			end = total
-		}
-		pageSeries = series[start:end]
-	}
 	results := make([]map[string]any, 0, len(pageSeries))
 	for _, s := range pageSeries {
-		// books[] is what LazySeriesCard reads to populate the
-		// GroupCover stack. Each entry is a minified LibraryItem with
-		// the cover URL on media.coverPath; the mobile client's
-		// globals/getLibraryItemCoverSrc getter requires this field
-		// to render any cover image, otherwise the card falls back
-		// to a name-only placeholder.
-		books := make([]map[string]any, 0, len(s.Books))
+		// books[] is what LazySeriesCard reads to populate the GroupCover
+		// stack. Real ABS emits FULL minified library items here; a thin stub
+		// crashes strict clients (Plappa) on the first missing required key.
+		books := make([]MinifiedLibraryItem, 0, len(s.Books))
 		for _, bp := range s.Books {
 			updatedMs := int64(0)
 			if !bp.UpdatedAt.IsZero() {
 				updatedMs = bp.UpdatedAt.UnixMilli()
 			}
-			books = append(books, map[string]any{
-				"id":        bp.ContentID,
-				"libraryId": libID,
-				"mediaType": LibraryMediaType,
-				"updatedAt": updatedMs,
-				"media": map[string]any{
-					"coverPath": baseURL + "/api/items/" + bp.ContentID + "/cover",
-					"metadata":  map[string]any{"title": bp.Title},
-				},
-			})
+			books = append(books, seriesBookMinified(bp.ContentID, bp.Title, libID, baseURL, updatedMs))
 		}
-		results = append(results, map[string]any{
-			"id":        s.ID,
-			"name":      s.Name,
-			"numBooks":  s.NumBooks,
-			"libraryId": libID,
-			"addedAt":   0,
-			"books":     books,
-		})
+		obj := seriesObjectABS(s.ID, s.Name, libID, s.NumBooks)
+		obj["books"] = books
+		results = append(results, obj)
 	}
 	writeJSON(w, http.StatusOK, pagedEnvelope(results, total, limit, page, "name", false, "", false, ""))
 }
 
 // handleLibrarySearch — GET /abs/api/libraries/{id}/search?q=…&limit=…
-// Returns matching books grouped under "book", with empty arrays for the
-// other ABS-standard buckets (podcast, series, authors, tags). Bucket
-// names match continuum-plugin-audiobooks exactly: note "authors" plural,
-// not "author" — ABS mobile clients key off the plural form and a
-// singular bucket is silently dropped.
+//
+// Matches server/utils/queries/libraryItemsBookFilters.js `search()` (real
+// ABS branches to the book-filter search for a non-podcast library, which
+// is all Silo ever serves). That function returns exactly these keys:
+// book, narrators, tags, genres, series, authors — there is NO "podcast"
+// key for a book-library search (that only appears from the separate
+// podcast-filter branch). Each book entry is `{ libraryItem }` — real ABS
+// does not include matchKey/matchText on book entries (those only exist
+// on the interactive-search HTML autocomplete, not this JSON endpoint).
+// We keep an extra empty "podcast" bucket anyway since an extra key never
+// crashes a strict client, only a missing one does.
 func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	lib, ok := h.resolveLibrary(w, r)
 	if !ok {
@@ -451,11 +442,13 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 	empty := map[string]any{
-		"book":    []any{},
-		"podcast": []any{},
-		"series":  []any{},
-		"authors": []any{},
-		"tags":    []any{},
+		"book":      []any{},
+		"podcast":   []any{},
+		"narrators": []any{},
+		"tags":      []any{},
+		"genres":    []any{},
+		"series":    []any{},
+		"authors":   []any{},
 	}
 	if q == "" {
 		writeJSON(w, http.StatusOK, empty)
@@ -472,16 +465,89 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	baseURL := h.absBaseURL(r)
+	libID := audiobookLibraryID(lib)
 	books := make([]map[string]any, 0, len(items))
 	for _, it := range items {
 		books = append(books, map[string]any{
 			"libraryItem": siloItemToLibraryItem(it, lib, baseURL),
-			"matchKey":    "title",
-			"matchText":   it.Title,
 		})
 	}
+
+	// Best-effort author/series buckets: silo has no dedicated search-scoped
+	// store query for these yet, so we reuse the existing aggregate listers
+	// (capped, same pattern as buildFilterData/handleLibraryAuthors/
+	// handleLibrarySeries) and filter client-side on a case-insensitive
+	// substring match. narrators/tags/genres have no backing aggregation
+	// query at all in silo's catalog today and stay empty-but-present.
+	qLower := strings.ToLower(q)
+	const fetchCap = 5000
+
+	authorsOut := []any{}
+	if rows, _, err := h.deps.MediaStore.ListLibraryAuthors(r.Context(), lib.ID, fetchCap, 0, "name", false, access); err == nil {
+		for _, a := range rows {
+			if !strings.Contains(strings.ToLower(a.Name), qLower) {
+				continue
+			}
+			authorsOut = append(authorsOut, map[string]any{
+				"id":        a.ID,
+				"name":      a.Name,
+				"numBooks":  a.NumBooks,
+				"libraryId": libID,
+			})
+			if len(authorsOut) >= limit {
+				break
+			}
+		}
+	}
+
+	seriesOut := []any{}
+	if rows, _, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, fetchCap, 0, access); err == nil {
+		for _, s := range rows {
+			if !strings.Contains(strings.ToLower(s.Name), qLower) {
+				continue
+			}
+			// Real ABS wraps series search hits as { series, books } — the
+			// series sub-object is the plain Series.toOldJSON() shape (no
+			// numBooks field there; we add it anyway since an extra key is
+			// harmless), matched here with the same per-book thin map
+			// handleLibrarySeries above uses for its books[] entries.
+			seriesBooks := make([]map[string]any, 0, len(s.Books))
+			for _, bp := range s.Books {
+				updatedMs := int64(0)
+				if !bp.UpdatedAt.IsZero() {
+					updatedMs = bp.UpdatedAt.UnixMilli()
+				}
+				seriesBooks = append(seriesBooks, map[string]any{
+					"id":        bp.ContentID,
+					"libraryId": libID,
+					"mediaType": LibraryMediaType,
+					"updatedAt": updatedMs,
+					"media": map[string]any{
+						"coverPath": baseURL + "/api/items/" + bp.ContentID + "/cover",
+						"metadata":  map[string]any{"title": bp.Title},
+					},
+				})
+			}
+			seriesOut = append(seriesOut, map[string]any{
+				"series": map[string]any{
+					"id":        s.ID,
+					"name":      s.Name,
+					"numBooks":  s.NumBooks,
+					"libraryId": libID,
+					"addedAt":   0,
+				},
+				"books": seriesBooks,
+			})
+			if len(seriesOut) >= limit {
+				break
+			}
+		}
+	}
+
 	out := empty
 	out["book"] = books
+	out["authors"] = authorsOut
+	out["series"] = seriesOut
 	writeJSON(w, http.StatusOK, out)
 }
 
@@ -535,16 +601,23 @@ func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
 	}
 
 	libID := audiobookLibraryID(lib)
-	if series, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, shelfLimit, access); err == nil && len(series) > 0 {
+	if series, _, err := h.deps.MediaStore.ListLibrarySeries(r.Context(), lib.ID, shelfLimit, 0, access); err == nil && len(series) > 0 {
 		recent := make([]map[string]any, 0, len(series))
 		for _, s := range series {
-			recent = append(recent, map[string]any{
-				"id":        s.ID,
-				"name":      s.Name,
-				"numBooks":  s.NumBooks,
-				"libraryId": libID,
-				"books":     []any{},
-			})
+			// Full real-ABS series object + minified books (same shape as
+			// /libraries/{id}/series) so the recent-series shelf card decodes
+			// identically and its cover stack has real items.
+			obj := seriesObjectABS(s.ID, s.Name, libID, s.NumBooks)
+			books := make([]MinifiedLibraryItem, 0, len(s.Books))
+			for _, bp := range s.Books {
+				updatedMs := int64(0)
+				if !bp.UpdatedAt.IsZero() {
+					updatedMs = bp.UpdatedAt.UnixMilli()
+				}
+				books = append(books, seriesBookMinified(bp.ContentID, bp.Title, libID, baseURL, updatedMs))
+			}
+			obj["books"] = books
+			recent = append(recent, obj)
 		}
 		shelves[3]["entities"] = recent
 		shelves[3]["total"] = len(recent)
@@ -652,22 +725,28 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 		FolderID:    VirtualFolderID,
 		Path:        "",
 		RelPath:     "",
+		IsFile:      true,
 		MtimeMs:     addedAtMs,
 		CtimeMs:     addedAtMs,
 		BirthtimeMs: addedAtMs,
 		MediaType:   LibraryMediaType,
 		Media: LibraryItemMedia{
-			Metadata:   meta,
-			Duration:   duration,
-			CoverPath:  coverPath,
-			AudioFiles: []AudioTrack{},
-			Tracks:     []AudioTrack{},
-			Chapters:   []ChapterABS{},
-			NumTracks:  0, // populated by item-detail handler
-			Tags:       []string{},
+			ID:            item.ContentID,
+			LibraryItemID: item.ContentID,
+			Metadata:      meta,
+			Duration:      duration,
+			CoverPath:     coverPath,
+			AudioFiles:    []AudioTrack{},
+			Tracks:        []AudioTrack{},
+			Chapters:      []ChapterABS{},
+			NumTracks:     0, // populated by item-detail handler
+			Tags:          []string{},
 		},
-		AddedAt:   addedAtMs,
-		UpdatedAt: updatedAtMs,
+		LibraryFiles: []map[string]any{}, // populated by item-detail handler
+		LastScan:     addedAtMs,
+		ScanVersion:  ServerVersion,
+		AddedAt:      addedAtMs,
+		UpdatedAt:    updatedAtMs,
 	}
 }
 
@@ -681,6 +760,8 @@ func siloItemToLibraryItem(item *models.MediaItem, lib AudiobookLibrary, baseURL
 func siloItemToMetadata(item *models.MediaItem) Metadata {
 	authors := make([]AuthorObj, 0)
 	narrators := make([]string, 0)
+	authorNames := make([]string, 0)
+	lfNames := make([]string, 0)
 
 	for _, p := range item.People {
 		switch p.Kind {
@@ -689,12 +770,15 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 				ID:   strconv.FormatInt(p.ID, 10),
 				Name: p.Name,
 			})
+			authorNames = append(authorNames, p.Name)
+			lfNames = append(lfNames, lastFirst(p.Name))
 		case models.PersonKindNarrator:
 			narrators = append(narrators, p.Name)
 		}
 	}
 
 	series := make([]SeriesObj, 0, len(item.AudiobookSeries))
+	seriesName := ""
 	for _, membership := range item.AudiobookSeries {
 		name := strings.TrimSpace(membership.Name)
 		if name == "" {
@@ -705,6 +789,12 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 			obj.Sequence = strconv.FormatFloat(*membership.Index, 'f', -1, 64)
 		}
 		series = append(series, obj)
+		if seriesName == "" {
+			seriesName = name
+			if obj.Sequence != "" {
+				seriesName += " #" + obj.Sequence
+			}
+		}
 	}
 
 	publishedYear := ""
@@ -727,15 +817,22 @@ func siloItemToMetadata(item *models.MediaItem) Metadata {
 	}
 
 	return Metadata{
-		Title:         item.Title,
-		Authors:       authors,
-		Narrators:     narrators,
-		Series:        series,
-		Description:   item.Overview,
-		PublishedYear: publishedYear,
-		Publisher:     publisher,
-		Genres:        genres,
-		Tags:          tags,
+		Title:             item.Title,
+		TitleIgnorePrefix: titleIgnorePrefix(item.Title),
+		Authors:           authors,
+		AuthorName:        strings.Join(authorNames, ", "),
+		AuthorNameLF:      strings.Join(lfNames, ", "),
+		Narrators:         narrators,
+		NarratorName:      strings.Join(narrators, ", "),
+		Series:            series,
+		SeriesName:        seriesName,
+		Description:       item.Overview,
+		DescriptionPlain:  stripHTML(item.Overview),
+		PublishedYear:     publishedYear,
+		Publisher:         publisher,
+		Genres:            genres,
+		Language:          "en",
+		Tags:              tags,
 	}
 }
 
@@ -747,12 +844,16 @@ func siloItemToLibraryItemDetail(item *models.MediaItem, files []*models.MediaFi
 
 	tracks := siloFilesToAudioTracks(item.ContentID, files, baseURL, "")
 
-	// Recompute duration from files if the item's Runtime is zero.
-	totalDuration := base.Media.Duration
+	// media.duration is the summed track duration (real ABS: sum of audio file
+	// durations), NOT the item's Runtime — Runtime is often stale/mis-scanned
+	// (e.g. 222s for a 3.7h book), which desyncs the player's scrubber. Fall
+	// back to Runtime only when there are no tracks to sum.
+	totalDuration := float64(0)
+	for _, t := range tracks {
+		totalDuration += t.Duration
+	}
 	if totalDuration == 0 {
-		for _, t := range tracks {
-			totalDuration += t.Duration
-		}
+		totalDuration = base.Media.Duration
 	}
 
 	// Chapters from the first file that has them.
@@ -771,12 +872,34 @@ func siloItemToLibraryItemDetail(item *models.MediaItem, files []*models.MediaFi
 		}
 	}
 
+	// libraryFiles + summed size mirror real ABS toOldJSONExpanded. Each entry
+	// is the real-ABS library file shape (ino + file metadata + fileType).
+	nowMs := time.Now().UnixMilli()
+	libraryFiles := make([]map[string]any, 0, len(tracks))
+	var totalSize int64
+	for _, t := range tracks {
+		if t.Metadata != nil {
+			totalSize += t.Metadata.Size
+		}
+		libraryFiles = append(libraryFiles, map[string]any{
+			"ino":             t.Ino,
+			"metadata":        t.Metadata,
+			"isSupplementary": false,
+			"addedAt":         nowMs,
+			"updatedAt":       nowMs,
+			"fileType":        "audio",
+		})
+	}
+
 	base.Media.AudioFiles = tracks
 	base.Media.Tracks = tracks
 	base.Media.Chapters = chapters
 	base.Media.NumTracks = len(tracks)
 	base.Media.Duration = totalDuration
+	base.Media.Size = totalSize
 	base.NumTracks = len(tracks)
+	base.LibraryFiles = libraryFiles
+	base.Size = totalSize
 	return base
 }
 
@@ -843,6 +966,7 @@ func siloFilesToAudioTracks(contentID string, files []*models.MediaFile, baseURL
 			TimeBase:         "1/14112000",
 			Channels:         channels,
 			ChannelLayout:    channelLayout,
+			Chapters:         []ChapterABS{},
 			EmbeddedCoverArt: nil,
 			MetaTags:         map[string]string{},
 			MimeType:         mimeType,

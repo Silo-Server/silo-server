@@ -626,12 +626,31 @@ func (r *fakeFileRepo) GetUnmatchedByFolderAndPathPrefix(_ context.Context, _ in
 
 // fakeLibraryRepo implements metadataLibraryRepo.
 type fakeLibraryRepo struct {
-	mu          sync.Mutex
-	memberships map[string]time.Time // "contentID:folderID" -> first_seen_at
+	mu           sync.Mutex
+	memberships  map[string]time.Time // "contentID:folderID" -> first_seen_at
+	languages    map[string][]string  // contentID -> distinct metadata languages override
+	languagesErr map[string]error     // contentID -> forced lookup error
 }
 
 func newFakeLibraryRepo() *fakeLibraryRepo {
-	return &fakeLibraryRepo{memberships: make(map[string]time.Time)}
+	return &fakeLibraryRepo{
+		memberships:  make(map[string]time.Time),
+		languages:    make(map[string][]string),
+		languagesErr: make(map[string]error),
+	}
+}
+
+// setMetadataLanguages overrides GetDistinctMetadataLanguagesForItem for one
+// item, optionally forcing a lookup error.
+func (r *fakeLibraryRepo) setMetadataLanguages(contentID string, languages []string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.languages[contentID] = languages
+	if err != nil {
+		r.languagesErr[contentID] = err
+	} else {
+		delete(r.languagesErr, contentID)
+	}
 }
 
 func (r *fakeLibraryRepo) Upsert(_ context.Context, contentID string, folderID int, firstSeenAt time.Time) error {
@@ -671,6 +690,16 @@ func (r *fakeLibraryRepo) GetFolderIDsForItem(_ context.Context, contentID strin
 }
 
 func (r *fakeLibraryRepo) GetDistinctMetadataLanguagesForItem(ctx context.Context, contentID string) ([]string, error) {
+	r.mu.Lock()
+	forcedErr := r.languagesErr[contentID]
+	override, hasOverride := r.languages[contentID]
+	r.mu.Unlock()
+	if forcedErr != nil {
+		return nil, forcedErr
+	}
+	if hasOverride {
+		return override, nil
+	}
 	folderIDs, err := r.GetFolderIDsForItem(ctx, contentID)
 	if err != nil {
 		return nil, err

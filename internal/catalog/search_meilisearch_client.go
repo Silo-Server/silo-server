@@ -228,6 +228,52 @@ func (c *meilisearchClient) DeleteDocuments(ctx context.Context, uid string, ids
 	return newMeilisearchTaskRef(task.TaskUID), nil
 }
 
+// DeleteIndex removes an index. A missing index is not an error — cleanup of
+// superseded rebuild indexes must be idempotent across crashes and retries.
+func (c *meilisearchClient) DeleteIndex(ctx context.Context, uid string) (meilisearchTaskRef, error) {
+	var task meilisearchTask
+	err := c.do(ctx, http.MethodDelete, "/indexes/"+url.PathEscape(uid), nil, &task)
+	if err != nil {
+		var httpErr *meilisearchHTTPError
+		if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.Code == "index_not_found") {
+			return meilisearchTaskRef{}, nil
+		}
+		return meilisearchTaskRef{}, err
+	}
+	return newMeilisearchTaskRef(task.TaskUID), nil
+}
+
+type meilisearchIndexListResponse struct {
+	Results []struct {
+		UID string `json:"uid"`
+	} `json:"results"`
+	Offset int `json:"offset"`
+	Limit  int `json:"limit"`
+	Total  int `json:"total"`
+}
+
+// ListIndexUIDs pages through GET /indexes and returns every index uid on the
+// instance. Meilisearch caps the page size, so this loops until the reported
+// total is reached (or a page comes back short/empty).
+func (c *meilisearchClient) ListIndexUIDs(ctx context.Context) ([]string, error) {
+	const pageLimit = 100
+	var uids []string
+	for offset := 0; ; {
+		var out meilisearchIndexListResponse
+		endpoint := fmt.Sprintf("/indexes?limit=%d&offset=%d", pageLimit, offset)
+		if err := c.do(ctx, http.MethodGet, endpoint, nil, &out); err != nil {
+			return nil, err
+		}
+		for _, result := range out.Results {
+			uids = append(uids, result.UID)
+		}
+		offset += len(out.Results)
+		if len(out.Results) == 0 || offset >= out.Total {
+			return uids, nil
+		}
+	}
+}
+
 func (c *meilisearchClient) Stats(ctx context.Context, uid string) (int, error) {
 	var out meilisearchStatsResponse
 	err := c.do(ctx, http.MethodGet, "/indexes/"+url.PathEscape(uid)+"/stats", nil, &out)
@@ -273,8 +319,13 @@ func (c *meilisearchClient) do(ctx context.Context, method, endpoint string, bod
 		return fmt.Errorf("meilisearch client is not configured")
 	}
 	reqURL := *c.baseURL
-	reqURL.Path = path.Join(c.baseURL.Path, endpoint)
-	if strings.HasSuffix(endpoint, "/") && !strings.HasSuffix(reqURL.Path, "/") {
+	endpointPath := endpoint
+	if idx := strings.IndexByte(endpoint, '?'); idx >= 0 {
+		endpointPath = endpoint[:idx]
+		reqURL.RawQuery = endpoint[idx+1:]
+	}
+	reqURL.Path = path.Join(c.baseURL.Path, endpointPath)
+	if strings.HasSuffix(endpointPath, "/") && !strings.HasSuffix(reqURL.Path, "/") {
 		reqURL.Path += "/"
 	}
 

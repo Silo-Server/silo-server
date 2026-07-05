@@ -29,6 +29,7 @@ type Worker struct {
 	profileRefreshCh      chan profileRefreshRequest
 	profileRefreshPending map[string]struct{}
 	cancelFunc            context.CancelFunc
+	embeddingsJobTimeout  time.Duration
 }
 
 const tasteProfileRefreshSubjectsQuery = `
@@ -45,13 +46,17 @@ const tasteProfileRefreshSubjectsQuery = `
 	SELECT DISTINCT user_id, profile_id FROM user_watchlist`
 
 // NewWorker creates a new recommendation Worker.
-func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron string) (*Worker, error) {
+func NewWorker(engine *Engine, embeddingsCron, tasteProfilesCron, cowatchCron, recommendationsCron string, embeddingsJobTimeout time.Duration) (*Worker, error) {
+	if embeddingsJobTimeout <= 0 {
+		embeddingsJobTimeout = 24 * time.Hour
+	}
 	w := &Worker{
 		engine:                engine,
 		cron:                  cron.New(),
 		running:               make(map[JobName]bool),
 		profileRefreshCh:      make(chan profileRefreshRequest, 256),
 		profileRefreshPending: make(map[string]struct{}),
+		embeddingsJobTimeout:  embeddingsJobTimeout,
 	}
 
 	if _, err := w.cron.AddFunc(embeddingsCron, w.runEmbeddings); err != nil {
@@ -123,9 +128,9 @@ func (w *Worker) TriggerEmbeddings() error {
 	}
 	go func() {
 		defer w.setRunning(JobEmbeddings, false)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), w.embeddingsJobTimeout)
 		defer cancel()
-		slog.Info("starting embedding job (manual trigger)")
+		slog.Info("starting embedding job (manual trigger)", "timeout", w.embeddingsJobTimeout)
 		count, err := w.engine.EmbedAll(ctx)
 		if err != nil {
 			slog.Error("embedding job failed", "error", err, "embedded", count)
@@ -236,9 +241,9 @@ func (w *Worker) runEmbeddings() {
 	}
 	defer w.setRunning(JobEmbeddings, false)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), w.embeddingsJobTimeout)
 	defer cancel()
-	slog.Info("starting embedding job")
+	slog.Info("starting embedding job", "timeout", w.embeddingsJobTimeout)
 	count, err := w.engine.EmbedAll(ctx)
 	if err != nil {
 		slog.Error("embedding job failed", "error", err, "embedded", count)

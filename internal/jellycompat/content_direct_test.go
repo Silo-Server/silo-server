@@ -99,7 +99,6 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 	resolver := &countingCompatImageResolver{}
 	detailSvc := &catalog.DetailService{}
 	detailSvc.SetImageResolver(resolver)
-	svc := &directContentService{detailSvc: detailSvc}
 
 	items := []upstreamListItem{
 		{
@@ -115,7 +114,7 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 		},
 	}
 
-	svc.presignListItems(context.Background(), items)
+	presignCompatListItems(context.Background(), detailSvc, items)
 
 	if resolver.singleCalls != 0 {
 		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
@@ -144,6 +143,100 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 	}
 	if got := items[1].StillURL; got != "batch:card:plug://still-2" {
 		t.Fatalf("StillURL = %q", got)
+	}
+}
+
+// TestPresignSeasonsBatchResolvesImages pins Fix #2c: presignSeasons must issue
+// exactly one PresignImageURLsWithExpiry batch for the whole season collection
+// (one image type), not one singular call per season.
+func TestPresignSeasonsBatchResolvesImages(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	svc := &directContentService{detailSvc: detailSvc}
+
+	seasons := []upstreamSeason{
+		{ContentID: "s1", PosterURL: "plug://poster-1"},
+		{ContentID: "s2", PosterURL: "plug://poster-2"},
+		{ContentID: "s3", PosterURL: "plug://poster-3"},
+	}
+
+	svc.presignSeasons(context.Background(), seasons)
+
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	if resolver.batchCalls != 1 {
+		t.Fatalf("batch image resolver calls = %d, want 1 (one poster batch for %d seasons)", resolver.batchCalls, len(seasons))
+	}
+	if got := seasons[0].PosterURL; got != "batch:card:plug://poster-1" {
+		t.Fatalf("season[0] PosterURL = %q", got)
+	}
+	if got := seasons[2].PosterURL; got != "batch:card:plug://poster-3" {
+		t.Fatalf("season[2] PosterURL = %q", got)
+	}
+}
+
+// TestPresignEpisodesBatchResolvesImages pins Fix #2c for episodes: one still
+// batch for the whole collection regardless of episode count.
+func TestPresignEpisodesBatchResolvesImages(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	svc := &directContentService{detailSvc: detailSvc}
+
+	episodes := []upstreamEpisode{
+		{ContentID: "e1", StillURL: "plug://still-1"},
+		{ContentID: "e2", StillURL: "plug://still-2"},
+		{ContentID: "e3", StillURL: "plug://still-3"},
+	}
+
+	svc.presignEpisodes(context.Background(), episodes)
+
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	if resolver.batchCalls != 1 {
+		t.Fatalf("batch image resolver calls = %d, want 1 (one still batch for %d episodes)", resolver.batchCalls, len(episodes))
+	}
+	if got := episodes[1].StillURL; got != "batch:card:plug://still-2" {
+		t.Fatalf("episode[1] StillURL = %q", got)
+	}
+}
+
+// TestCompatListItemsFromModelsBatchesPresign pins Fix #2b for the cached
+// home/Latest rail path: the loop builds the whole page first, then presigns in
+// one batch per populated image type independent of item count.
+func TestCompatListItemsFromModelsBatchesPresign(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	h := &ItemsHandler{detailSvc: detailSvc}
+
+	mediaItems := []*models.MediaItem{
+		{ContentID: "m1", Type: "movie", Title: "One", PosterPath: "plug://poster-1", BackdropPath: "plug://backdrop-1"},
+		{ContentID: "m2", Type: "movie", Title: "Two", PosterPath: "plug://poster-2", BackdropPath: "plug://backdrop-2"},
+		{ContentID: "m3", Type: "movie", Title: "Three", PosterPath: "plug://poster-3", BackdropPath: "plug://backdrop-3"},
+	}
+
+	items := h.compatListItemsFromModels(context.Background(), catalog.AccessFilter{}, mediaItems)
+
+	if len(items) != 3 {
+		t.Fatalf("expected 3 list items; got %d", len(items))
+	}
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	// poster + backdrop are populated across the rail; logo/still are empty and
+	// therefore skipped. The count is bounded by image type, not the 3 items.
+	if resolver.batchCalls != 2 {
+		t.Fatalf("batch image resolver calls = %d, want 2 (poster+backdrop, independent of item count)", resolver.batchCalls)
+	}
+	if got := items[0].PosterURL; got != "batch:card:plug://poster-1" {
+		t.Fatalf("items[0] PosterURL = %q", got)
+	}
+	if got := items[2].BackdropURL; got != "batch:card:plug://backdrop-3" {
+		t.Fatalf("items[2] BackdropURL = %q", got)
 	}
 }
 
@@ -284,7 +377,7 @@ func (s *progressCountingStore) IsFavorite(context.Context, string, string) (boo
 func (s *progressCountingStore) AddToWatchlist(context.Context, string, string) error {
 	panic("unused")
 }
-func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) error {
+func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s *progressCountingStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {

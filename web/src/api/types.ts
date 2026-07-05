@@ -421,6 +421,7 @@ export interface HistoryImportRun {
   unmatched: number;
   progress_updated: number;
   history_created: number;
+  watchlist_added: number;
   skipped: number;
   warnings: string[];
   unmatched_samples: HistoryImportUnmatchedSample[];
@@ -479,6 +480,7 @@ export interface CreateHistoryImportRunRequest {
   plex_server_id?: string;
   plex_base_url?: string;
   plex_token?: string;
+  plex_account_token?: string;
 }
 
 export interface CreateHistoryImportSourceRequest {
@@ -1343,6 +1345,7 @@ export interface QuerySort {
     | "added_at"
     | "release_date"
     | "last_air_date"
+    | "latest_episode_added"
     | "year"
     | "content_rating"
     | "runtime"
@@ -1630,9 +1633,12 @@ export interface ImportTraktCollectionRequest {
   library_ids?: number[];
   title: string;
   description?: string;
-  preset: "trending" | "popular" | "recommended";
-  media_type: "movie" | "tv";
+  // preset/media_type drive a discovery-feed collection; list_url drives a
+  // user-authored Trakt list. Exactly one path is used per request.
+  preset?: "trending" | "popular" | "recommended";
+  media_type?: "movie" | "tv";
   profile_id?: string;
+  list_url?: string;
   limit?: number;
   featured?: boolean;
   poster_url?: string;
@@ -2555,6 +2561,8 @@ export interface ServerNotificationChannel {
   enabled: boolean;
   notify_new_movies: boolean;
   notify_new_episodes: boolean;
+  notify_new_audiobooks: boolean;
+  notify_new_ebooks: boolean;
   notify_request_submitted: boolean;
   notify_request_approved: boolean;
   notify_request_declined: boolean;
@@ -2577,6 +2585,8 @@ export interface ServerNotificationChannelInput {
   enabled?: boolean;
   notify_new_movies?: boolean;
   notify_new_episodes?: boolean;
+  notify_new_audiobooks?: boolean;
+  notify_new_ebooks?: boolean;
   notify_request_submitted?: boolean;
   notify_request_approved?: boolean;
   notify_request_declined?: boolean;

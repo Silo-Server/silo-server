@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -943,30 +945,71 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 	// library's collection type when no explicit IncludeItemTypes is given.
 	// Without this, clients like Infuse may not display "Latest Movies"
 	// sections because they rely on the library-type-appropriate item filter.
-	if query.parentLibraryID > 0 && len(query.itemTypes) == 0 {
-		if inferredType := h.inferLibraryItemType(r.Context(), session, query.parentLibraryID); inferredType != "" {
-			query.itemTypes = []string{inferredType}
+	// libraryItemType is "movie", "series", or "" (any other/mixed type) — it
+	// also decides fast-path eligibility below, so it is resolved once here.
+	var libraryItemType string
+	if query.parentLibraryID > 0 {
+		libraryItemType = h.inferLibraryItemType(r.Context(), session, query.parentLibraryID)
+		if len(query.itemTypes) == 0 && libraryItemType != "" {
+			query.itemTypes = []string{libraryItemType}
 		}
 	}
 
+	// Build the fallback's browse params FIRST: fast-path eligibility is
+	// decided off these actual params (see latestFastPathEligible), so a filter
+	// later added to buildBrowseParams can never be silently ignored by the
+	// cached path.
 	params := buildLatestBrowseParams(query)
+
+	// Fast path: a per-library Latest is the same user-agnostic list as the native
+	// "recently added" library rail (both order by mil.first_seen_at DESC). When
+	// eligible, serve it through the native section fetch so it reuses the shared
+	// resolved-list cache instead of re-running BrowseItems; otherwise fall back.
+	if h.sectionsFetcher != nil && latestFastPathEligible(params, libraryItemType) {
+		items, err := h.loadLatestViaSections(r.Context(), session, query)
+		if err == nil {
+			applyImageTypeLimit(items, query.imageTypeLimit)
+			writeJSON(w, http.StatusOK, items)
+			return
+		}
+		// errLatestNotEligible is an expected "this request can't use the cached
+		// path" signal (e.g. a client requesting a type other than the library's
+		// own), not a failure — fall back quietly.
+		if !errors.Is(err, errLatestNotEligible) {
+			slog.Warn("jellycompat: latest via sections failed, falling back to browse", "error", err)
+		}
+	}
 	result, err := h.content.BrowseItems(r.Context(), session, params)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	h.rememberListImages(result.Items)
 
-	contentIDs := contentIDsFromListItems(result.Items)
-	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDs)
+	items, err := h.buildLatestItemDTOs(r.Context(), session, query, result.Items)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, episodeContentIDsFromListItems(result.Items), libraryIDPtr(query.parentLibraryID))
+	applyImageTypeLimit(items, query.imageTypeLimit)
+	writeJSON(w, http.StatusOK, items)
+}
+
+// buildLatestItemDTOs maps a resolved list of upstream list items to the
+// /Items/Latest wire response, applying the per-user overlay (favorites,
+// progress, episode targets), the library ParentId, and the optional detail-
+// field upgrade. It is the shared tail of both the native section fast path and
+// the BrowseItems fallback so the overlay logic lives in exactly one place.
+func (h *ItemsHandler) buildLatestItemDTOs(ctx context.Context, session *Session, query itemsQuery, listItems []upstreamListItem) ([]baseItemDTO, error) {
+	h.rememberListImages(listItems)
+
+	contentIDs := contentIDsFromListItems(listItems)
+	favorites, progress, err := resolveUserStateForContentIDs(ctx, session, h.userData, contentIDs)
 	if err != nil {
-		writeCompatUpstreamError(w, err)
-		return
+		return nil, err
+	}
+	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(ctx, session, episodeContentIDsFromListItems(listItems), libraryIDPtr(query.parentLibraryID))
+	if err != nil {
+		return nil, err
 	}
 
 	// Encode library ID for the ParentId field on each item.
@@ -977,11 +1020,11 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 
 	var detailsByID map[string]*upstreamItemDetail
 	if query.needsDetailFields {
-		detailsByID = h.batchListItemDetails(r.Context(), session, contentIDs, libraryIDPtr(query.parentLibraryID))
+		detailsByID = h.batchListItemDetails(ctx, session, contentIDs, libraryIDPtr(query.parentLibraryID))
 	}
 
-	items := make([]baseItemDTO, 0, len(result.Items))
-	for _, item := range result.Items {
+	items := make([]baseItemDTO, 0, len(listItems))
+	for _, item := range listItems {
 		if query.needsDetailFields {
 			if detail, ok := detailsByID[item.ContentID]; ok && detail != nil {
 				h.rememberDetailImages(*detail)
@@ -1006,8 +1049,189 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, dto)
 	}
-	applyImageTypeLimit(items, query.imageTypeLimit)
-	writeJSON(w, http.StatusOK, items)
+	return items, nil
+}
+
+// errLatestNotEligible signals that a /Items/Latest request cannot be served
+// through the native section path without diverging from the BrowseItems
+// fallback, so HandleLatest should fall back quietly rather than log a failure.
+var errLatestNotEligible = errors.New("jellycompat: latest not eligible for native section path")
+
+// latestFastPathReproducibleParams is the closed set of browse params the
+// synthetic recently-added section reproduces exactly:
+//   - limit / offset — offset must be 0 (checked below); limit is applied by
+//     slicing the shared list;
+//   - type / library_id — expressed by the section config + library scope;
+//   - sort / order — buildLatestBrowseParams pins recently_added/desc on both
+//     paths;
+//   - include_total — Latest returns a bare array, so the total is unused;
+//   - max_content_rating — folded into the access filter (and the cache key).
+//
+// Any OTHER param buildBrowseParams emits — today's filters (genre,
+// name_prefix, person_id, is_played, require_backdrop) and any filter added in
+// the future — disqualifies the fast path, because the shared cached list
+// cannot honor it. Deciding off the actual params (not a hand-mirrored field
+// list) is what keeps this gate and the fallback from silently drifting apart.
+var latestFastPathReproducibleParams = map[string]struct{}{
+	"limit":              {},
+	"offset":             {},
+	"type":               {},
+	"library_id":         {},
+	"sort":               {},
+	"order":              {},
+	"include_total":      {},
+	"max_content_rating": {},
+}
+
+// latestFastPathEligible reports whether a /Items/Latest request can be served
+// through the native recently-added section (and its shared cache) with results
+// identical to the BrowseItems fallback. It inspects the browse params the
+// fallback would actually receive: every param must be one the section path
+// reproduces, the request must be for the first page of a movies/series
+// library, the limit must fit the fixed shared fetch budget, and a client
+// rating cap must be a known rating (an unknown string matches nothing in
+// BrowseItems and must not mint arbitrary cache keys).
+func latestFastPathEligible(params url.Values, libraryItemType string) bool {
+	if libraryItemType != "movie" && libraryItemType != "series" {
+		return false
+	}
+	for key := range params {
+		if _, ok := latestFastPathReproducibleParams[key]; !ok {
+			return false
+		}
+	}
+	if params.Get("offset") != "0" {
+		return false
+	}
+	if limit := catalog.ParseIntParam(params.Get("limit")); limit > compatLatestCacheFetchLimit {
+		return false
+	}
+	if rating := strings.TrimSpace(params.Get("max_content_rating")); rating != "" {
+		if _, known := access.RatingRank(rating); !known {
+			return false
+		}
+	}
+	return true
+}
+
+// loadLatestViaSections serves a per-library /Items/Latest through the native
+// recently-added section fetch, reusing the shared resolved-list cache. The
+// synthetic section carries the same type+config+limit+scope the native library
+// rail uses, so with the identity-independent cache key both surfaces collapse
+// to one shared entry. The cached *models.MediaItem values are treated
+// read-only; LocalizeItemModels deep-copies before any presign mutation.
+func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Session, query itemsQuery) ([]baseItemDTO, error) {
+	// The caller has already restricted this to movies/series libraries. Pin the
+	// exact single type the BrowseItems fallback would use (movie or series) so
+	// the two paths return byte-identical membership; if a client asked for some
+	// other type against this library, fall back rather than risk a mismatch.
+	cfg := latestRecentlyAddedConfig(query.itemTypes)
+	if cfg == nil {
+		return nil, errLatestNotEligible
+	}
+
+	filter := h.resolveAccessFilter(ctx, session)
+	// Fold the client's clamped max content rating into the access filter so the
+	// shared cached list respects the client's cap AND the cache key captures it
+	// — identical to the clamp BrowseItems applies.
+	filter.MaxContentRating = clampMaxContentRating(filter.MaxContentRating, query.maxOfficialRating)
+
+	limit := query.limit
+	if limit <= 0 {
+		limit = compatDefaultBrowseLimit
+	}
+	// Eligibility already rejected limits beyond the shared fetch budget, but
+	// this path must stay safe if called directly.
+	if limit > compatLatestCacheFetchLimit {
+		return nil, errLatestNotEligible
+	}
+	libraryID := query.parentLibraryID
+	// Always fetch the FIXED compatLatestCacheFetchLimit budget and slice down
+	// to the requested page below. ItemLimit is a cache-key component, so
+	// echoing the raw client Limit would let one client mint a distinct
+	// process-global cache entry per Limit value; with the fixed budget every
+	// compat Latest request for a scope+library shares exactly one entry.
+	resolved := sections.ResolvedSection{
+		ID:          "compat-latest",
+		SectionType: sections.SectionRecentlyAdded,
+		Title:       "Latest",
+		ItemLimit:   compatLatestCacheFetchLimit,
+		Config:      cfg,
+	}
+
+	withItems, err := h.sectionsFetcher.FetchOne(ctx, resolved, &libraryID, nil, session.StreamAppUserID, session.ProfileID, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// The shared list is ordered by first_seen_at DESC, so its first N entries
+	// are exactly what a direct limit-N fetch would return.
+	sharedItems := withItems.Items
+	if len(sharedItems) > limit {
+		sharedItems = sharedItems[:limit]
+	}
+
+	listItems := h.compatListItemsFromModels(ctx, filter, sharedItems)
+	// The BrowseItems fallback aggregates series watch state via
+	// EnrichSeriesUserData; a series has no progress row of its own, so without
+	// this its Latest rail would drop Played/UnplayedItemCount and diverge from
+	// page 2. Enrich the freshly-built per-request list items (never the cached
+	// models) before the DTOs are built so userDataDTO sees the populated
+	// UserData. It runs under the request session, so counts are per-profile, and
+	// only touches series rows (movies are left untouched).
+	h.content.EnrichSeriesUserData(ctx, session, listItems)
+	return h.buildLatestItemDTOs(ctx, session, query, listItems)
+}
+
+// compatLatestCacheFetchLimit is the fixed number of rows the Latest fast path
+// asks the shared recently-added cache for, regardless of the client's Limit
+// (the response is sliced down afterwards). Fixing the fetch size keeps the
+// client's Limit out of the cache key — one entry per scope+library instead of
+// one per distinct Limit value — and comfortably covers the Latest hot path
+// (clients request ~16-50); larger limits fall back to BrowseItems.
+const compatLatestCacheFetchLimit = 100
+
+// latestRecentlyAddedConfig encodes the inferred item-type filter into the
+// recently-added section Config (the filter_type field buildRecentlyAddedQuery
+// reads). It normalizes through compatScopedTypes — the SAME helper BrowseItems
+// uses — and only encodes a concrete single type (movie or series); an empty or
+// mixed library yields a nil config (all types).
+func latestRecentlyAddedConfig(itemTypes []string) json.RawMessage {
+	scoped := compatScopedTypes(strings.Join(itemTypes, ","))
+	var filterType string
+	switch scoped {
+	case "movie", "series":
+		filterType = scoped
+	default:
+		return nil
+	}
+	cfg, err := json.Marshal(sections.SectionConfigFilters{FilterType: filterType})
+	if err != nil {
+		return nil
+	}
+	return cfg
+}
+
+// compatListItemsFromModels localizes cached media-item models, converts them to
+// the compat list-item wire shape, and presigns their image URLs. The cached
+// models are never mutated in place: LocalizeItemModels deep-copies, and the
+// per-item presign operates on the freshly-built upstreamListItem values.
+func (h *ItemsHandler) compatListItemsFromModels(ctx context.Context, filter catalog.AccessFilter, items []*models.MediaItem) []upstreamListItem {
+	localized := items
+	if h.detailSvc != nil {
+		if loc, err := h.detailSvc.LocalizeItemModels(ctx, items, filter); err == nil && loc != nil {
+			localized = loc
+		}
+	}
+	listItems := make([]upstreamListItem, 0, len(localized))
+	for _, mi := range localized {
+		if mi == nil {
+			continue
+		}
+		listItems = append(listItems, mediaItemToListItem(mi))
+	}
+	presignCompatListItems(ctx, h.detailSvc, listItems)
+	return listItems
 }
 
 // HandleSuggestions serves GET /Items/Suggestions.
@@ -1908,10 +2132,9 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 
 		listItems := make([]upstreamListItem, 0, len(result.Items))
 		for _, mi := range result.Items {
-			listItem := mediaItemToListItem(mi)
-			h.presignCompatListItem(r.Context(), &listItem)
-			listItems = append(listItems, listItem)
+			listItems = append(listItems, mediaItemToListItem(mi))
 		}
+		presignCompatListItems(r.Context(), h.detailSvc, listItems)
 		h.rememberListImages(listItems)
 
 		progress, progressErr := resolveProgressForContentIDs(r.Context(), session, h.userData, contentIDsFromListItems(listItems))
@@ -2244,6 +2467,22 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 // scan bounded and predictable under load.
 const maxResumeItems = 50
 
+// resumeScanMaxRows bounds how many progress rows loadProgressPage will scan in
+// a single request. Without a cap, a client sending EnableTotalRecordCount=true
+// (or a Series/Season-only request, which matches no leaf in-progress row) forces
+// the in-progress loop to page through the profile's entire history — an
+// O(history) scan that reached tens of seconds for heavy watchers.
+//
+// In the common case the loop exits far earlier (the page fills from the first
+// batch or two), so this cap only engages for pathological/empty-match requests;
+// its value just bounds that worst case. 300 gives ample headroom to fill a
+// ~20-item Continue Watching page even when the great majority of recent rows are
+// dismissed/superseded, while keeping the wasted scan on empty-match requests
+// small. Progress rows are recency-ordered, so the first resumeScanMaxRows cover
+// every realistically-visible entry; beyond the cap the returned total becomes a
+// clamped lower bound (the "+" suffix behavior clients already tolerate).
+const resumeScanMaxRows = 300
+
 // loadResumeViaSections serves Continue Watching through the native
 // continue-watching fetcher. The fetcher applies the same dismissal and
 // superseded-episode filtering as FilterResumeProgress, so visible parity with
@@ -2410,6 +2649,15 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			if len(result) >= query.limit || rawCount < batchSize {
 				break
 			}
+			// Same bound as the general loop below: the resume fast path filters in
+			// memory via FilterResumeProgress, so a sparse visible set (heavy
+			// watcher with mostly dismissed/superseded recent rows) would otherwise
+			// page to the end of history without ever filling the page. This is the
+			// default Continue Watching shape and the fallback hit when the sections
+			// fetcher is unavailable, so it must be bounded too.
+			if resumeFiltered && offset+rawCount >= resumeScanMaxRows {
+				break
+			}
 			offset += rawCount
 		}
 		return h.finishProgressPage(ctx, session, result, query, libraryID), 0, nil
@@ -2478,6 +2726,23 @@ func (h *ItemsHandler) loadProgressPage(ctx context.Context, session *Session, s
 			break
 		}
 		if !query.enableTotalRecordCount && len(items) >= query.limit {
+			break
+		}
+		// Bound the resume scan: never page through more than resumeScanMaxRows of
+		// history in one request, even when the visible (post-filter) page stays
+		// sparse. The in-progress path filters in memory via FilterResumeProgress,
+		// so a heavy watcher whose recent rows are mostly dismissed/superseded
+		// could otherwise keep paging to the end of history without ever filling
+		// the page. Progress rows are recency-ordered, so the most recent
+		// resumeScanMaxRows already cover every realistically-visible Continue
+		// Watching entry; beyond the cap we stop and return what we have (and, for
+		// EnableTotalRecordCount, a clamped lower-bound total).
+		//
+		// Gated on resumeFiltered so the completed (watched-items) path is exempt:
+		// there the SQL pre-filter already bounds the scan and clients paginate on
+		// an exact TotalRecordCount, so capping would underreport the total and
+		// drop deep StartIndex pages.
+		if resumeFiltered && offset >= resumeScanMaxRows {
 			break
 		}
 	}
@@ -2601,29 +2866,6 @@ func (h *ItemsHandler) resolveAccessFilter(ctx context.Context, session *Session
 		return withCompatAccessExclusions(h.accessFilter(ctx, session.StreamAppUserID, session.ProfileID))
 	}
 	return withCompatAccessExclusions(catalog.AccessFilter{})
-}
-
-func (h *ItemsHandler) presignCompatListItem(ctx context.Context, item *upstreamListItem) {
-	if item.PosterPath == "" {
-		item.PosterPath = item.PosterURL
-	}
-	if item.BackdropPath == "" {
-		item.BackdropPath = item.BackdropURL
-	}
-	if item.LogoPath == "" {
-		item.LogoPath = item.LogoURL
-	}
-	if item.StillPath == "" {
-		item.StillPath = item.StillURL
-	}
-	item.PosterURL = h.presignCompatImagePath(ctx, item.PosterURL, "poster")
-	item.BackdropURL = h.presignCompatImagePath(ctx, item.BackdropURL, "backdrop")
-	item.LogoURL = h.presignCompatImagePath(ctx, item.LogoURL, "logo")
-	item.StillURL = h.presignCompatImagePath(ctx, item.StillURL, "still")
-}
-
-func (h *ItemsHandler) presignCompatImagePath(ctx context.Context, path, imageType string) string {
-	return compatPresignImage(h.detailSvc, ctx, path, imageType, compatCardImageSize)
 }
 
 func (h *ItemsHandler) rememberCompatEpisodeImages(dto baseItemDTO, stillURL string, series seriesImageSet) {
@@ -2963,6 +3205,10 @@ func max(value, fallback int) int {
 }
 
 func writeCompatUpstreamError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errUpstreamReplaced) {
+		writeError(w, http.StatusConflict, "Conflict", "Playback session changed concurrently; retry the request")
+		return
+	}
 	if errors.Is(err, playback.ErrTooManyStreams) {
 		writeError(w, http.StatusTooManyRequests, "TooManyStreams", "Too many concurrent streams")
 		return

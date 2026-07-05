@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -257,7 +258,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
 
-	if isAudiobookLibraryType(folder.Type) {
+	if librarykind.IsAudiobook(folder.Type) {
 		if err := s.ScanAudiobookFolder(watchCtx, folder, true); err != nil {
 			return nil, err
 		}
@@ -267,7 +268,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
-	if isPodcastLibraryType(folder.Type) {
+	if librarykind.IsPodcast(folder.Type) {
 		if err := s.ScanPodcastFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
@@ -277,14 +278,14 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
-	if isMangaLibraryType(folder.Type) {
+	if librarykind.IsManga(folder.Type) {
 		if err := s.ScanMangaFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
 	}
 
-	if isEbookLibraryType(folder.Type) {
+	if librarykind.IsEbook(folder.Type) {
 		if err := s.ScanEbookFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
@@ -300,7 +301,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	cleanSubtree := filepath.Clean(subtreePath)
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
-	if isAudiobookLibraryType(folder.Type) {
+	if librarykind.IsAudiobook(folder.Type) {
 		scanRoot, err := cleanScopedAudiobookScanRoot(subtreePath)
 		if err != nil {
 			return nil, err
@@ -313,13 +314,13 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		}
 		return &ScanResult{}, nil
 	}
-	if isMangaLibraryType(folder.Type) {
+	if librarykind.IsManga(folder.Type) {
 		if err := s.scanMangaPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
 	}
-	if isEbookLibraryType(folder.Type) {
+	if librarykind.IsEbook(folder.Type) {
 		if err := s.scanEbookPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
 			return nil, err
 		}
@@ -346,49 +347,6 @@ func scopedFolderPaths(folder *models.MediaFolder, paths []string) *models.Media
 	return &clone
 }
 
-func isMovieLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "movie", "movies":
-		return true
-	default:
-		return false
-	}
-}
-func isAudiobookLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "audiobook", "audiobooks":
-		return true
-	default:
-		return false
-	}
-}
-func isPodcastLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "podcast", "podcasts":
-		return true
-	default:
-		return false
-	}
-}
-
-func isEbookLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "ebook", "ebooks":
-		return true
-	default:
-		return false
-	}
-}
-
-func isMangaLibraryType(t string) bool {
-	switch strings.ToLower(strings.TrimSpace(t)) {
-	case "manga":
-		return true
-	default:
-		return false
-	}
-}
-
 // walkMode tells walkLogicalTree which file extensions to surface and
 // which library-specific filename heuristics (sample/extra skipping)
 // to apply.
@@ -407,15 +365,15 @@ const (
 // pass arbitrary types preserve their prior behavior.
 func walkModeFor(folderType string) walkMode {
 	switch {
-	case isMovieLibraryType(folderType):
+	case librarykind.IsMovie(folderType):
 		return walkModeMovie
-	case isAudiobookLibraryType(folderType):
+	case librarykind.IsAudiobook(folderType):
 		return walkModeAudiobook
-	case isPodcastLibraryType(folderType):
+	case librarykind.IsPodcast(folderType):
 		return walkModePodcast
-	case isEbookLibraryType(folderType):
+	case librarykind.IsEbook(folderType):
 		return walkModeEbook
-	case isMangaLibraryType(folderType):
+	case librarykind.IsManga(folderType):
 		// Manga chapters are .cbz/.cbr archives, surfaced by the ebook walk.
 		return walkModeEbook
 	default:
@@ -1484,15 +1442,30 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 	}
 
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
-		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-		SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
-		FROM media_files mf
-		JOIN episodes e ON e.content_id = mf.episode_id
-		WHERE mf.media_folder_id = $1
-		  AND mf.missing_since IS NULL
-		  AND mf.episode_id IS NOT NULL
-		GROUP BY mf.episode_id, mf.media_folder_id
-		ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+		WITH inserted AS (
+			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+			SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
+			FROM media_files mf
+			JOIN episodes e ON e.content_id = mf.episode_id
+			WHERE mf.media_folder_id = $1
+			  AND mf.missing_since IS NULL
+			  AND mf.episode_id IS NOT NULL
+			GROUP BY mf.episode_id, mf.media_folder_id
+			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING episode_id, first_seen_at
+		)
+		-- Bump each parent series' latest-episode-added denorm for the
+		-- genuinely new links ("Latest Episodes" sort, issue #202).
+		UPDATE media_items mi
+		SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+		FROM (
+			SELECT e.series_id, MAX(i.first_seen_at) AS latest_added
+			FROM inserted i
+			JOIN episodes e ON e.content_id = i.episode_id
+			GROUP BY e.series_id
+		) sub
+		WHERE mi.content_id = sub.series_id
+		  AND mi.type = 'series'
 	`, folderID); err != nil {
 		return fmt.Errorf("restoring episode folder memberships: %w", err)
 	}
@@ -1507,7 +1480,8 @@ func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderI
 
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id)
-		SELECT DISTINCT mf.media_folder_id, mf.canonical_root_path, mf.content_id
+		SELECT DISTINCT ON (mf.media_folder_id, mf.canonical_root_path)
+			mf.media_folder_id, mf.canonical_root_path, mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
@@ -1592,7 +1566,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	}
 
 	cleanFile := filepath.Clean(filePath)
-	if isAudiobookLibraryType(folder.Type) {
+	if librarykind.IsAudiobook(folder.Type) {
 		if !SupportsAudioFile(cleanFile) {
 			return fmt.Errorf("unrecognized audio extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
 		}

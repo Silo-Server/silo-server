@@ -64,6 +64,7 @@ import {
   hasAssignedPermission,
   setAssignedPermission,
 } from "@/lib/permissions";
+import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -472,19 +473,13 @@ function parseTime(value?: string | null) {
 function formatDateTime(value?: string | null, fallback = "-") {
   const timestamp = parseTime(value);
   if (timestamp === null) return fallback;
-  return new Date(timestamp).toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimePreferred(timestamp, { dateStyle: "medium", seconds: false });
 }
 
 function formatFullDateTime(value?: string | null) {
   const timestamp = parseTime(value);
   if (timestamp === null) return "";
-  return new Date(timestamp).toLocaleString();
+  return formatDateTimePreferred(timestamp);
 }
 
 function formatRelativeTime(value?: string | null, fallback = "-") {

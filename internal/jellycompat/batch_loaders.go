@@ -102,11 +102,14 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 		return nil, err
 	}
 
-	result := make(map[string]upstreamListItem, len(items))
+	listItems := make([]upstreamListItem, 0, len(items))
 	for _, item := range items {
-		listItem := mediaItemToListItem(item)
-		h.presignCompatListItem(ctx, &listItem)
-		result[item.ContentID] = listItem
+		listItems = append(listItems, mediaItemToListItem(item))
+	}
+	presignCompatListItems(ctx, h.detailSvc, listItems)
+	result := make(map[string]upstreamListItem, len(listItems))
+	for _, listItem := range listItems {
+		result[listItem.ContentID] = listItem
 	}
 	return result, nil
 }
@@ -128,10 +131,13 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context,
 	if err != nil {
 		return nil, err
 	}
+	listItems := make([]upstreamListItem, 0, len(items))
 	for _, item := range items {
-		listItem := mediaItemToListItem(item)
-		h.presignCompatListItem(ctx, &listItem)
-		result[item.ContentID] = listItem
+		listItems = append(listItems, mediaItemToListItem(item))
+	}
+	presignCompatListItems(ctx, h.detailSvc, listItems)
+	for _, listItem := range listItems {
+		result[listItem.ContentID] = listItem
 	}
 	return result, nil
 }
@@ -314,10 +320,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			RatingIMDB:        ratingIMDB,
 			RatingTMDB:        ratingTMDB,
 			Overview:          overview,
-			PosterURL:         h.presignCompatImagePath(ctx, stillPath, "still"),
-			BackdropURL:       h.presignCompatImagePath(ctx, seriesBackdrop, "backdrop"),
-			LogoURL:           h.presignCompatImagePath(ctx, seriesLogoPath, "logo"),
-			StillURL:          h.presignCompatImagePath(ctx, stillPath, "still"),
+			PosterURL:         compatPresignImage(h.detailSvc, ctx, stillPath, "still", compatCardImageSize),
+			BackdropURL:       compatPresignImage(h.detailSvc, ctx, seriesBackdrop, "backdrop", compatCardImageSize),
+			LogoURL:           compatPresignImage(h.detailSvc, ctx, seriesLogoPath, "logo", compatCardImageSize),
+			StillURL:          compatPresignImage(h.detailSvc, ctx, stillPath, "still", compatCardImageSize),
 			PosterPath:        stillPath,
 			BackdropPath:      seriesBackdrop,
 			BackdropThumbhash: seriesBackdropTH,
@@ -340,10 +346,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 			Item: listItem,
 			SeriesImages: seriesImageSet{
 				ContentID:         seriesID,
-				PosterURL:         h.presignCompatImagePath(ctx, seriesPosterPath, "poster"),
+				PosterURL:         compatPresignImage(h.detailSvc, ctx, seriesPosterPath, "poster", compatCardImageSize),
 				PosterPath:        seriesPosterPath,
 				PosterThumbhash:   seriesPosterTH,
-				BackdropURL:       h.presignCompatImagePath(ctx, seriesBackdrop, "backdrop"),
+				BackdropURL:       compatPresignImage(h.detailSvc, ctx, seriesBackdrop, "backdrop", compatCardImageSize),
 				BackdropPath:      seriesBackdrop,
 				BackdropThumbhash: seriesBackdropTH,
 				UpdatedAt:         seriesUpdatedAt,
@@ -428,10 +434,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			RatingIMDB:        episode.RatingIMDB,
 			RatingTMDB:        episode.RatingTMDB,
 			Overview:          episode.Overview,
-			PosterURL:         h.presignCompatImagePath(ctx, episode.StillPath, "still"),
-			BackdropURL:       h.presignCompatImagePath(ctx, series.BackdropPath, "backdrop"),
-			LogoURL:           h.presignCompatImagePath(ctx, series.LogoPath, "logo"),
-			StillURL:          h.presignCompatImagePath(ctx, episode.StillPath, "still"),
+			PosterURL:         compatPresignImage(h.detailSvc, ctx, episode.StillPath, "still", compatCardImageSize),
+			BackdropURL:       compatPresignImage(h.detailSvc, ctx, series.BackdropPath, "backdrop", compatCardImageSize),
+			LogoURL:           compatPresignImage(h.detailSvc, ctx, series.LogoPath, "logo", compatCardImageSize),
+			StillURL:          compatPresignImage(h.detailSvc, ctx, episode.StillPath, "still", compatCardImageSize),
 			PosterPath:        episode.StillPath,
 			BackdropPath:      series.BackdropPath,
 			BackdropThumbhash: series.BackdropThumbhash,
@@ -453,10 +459,10 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			Item: listItem,
 			SeriesImages: seriesImageSet{
 				ContentID:         series.ContentID,
-				PosterURL:         h.presignCompatImagePath(ctx, series.PosterPath, "poster"),
+				PosterURL:         compatPresignImage(h.detailSvc, ctx, series.PosterPath, "poster", compatCardImageSize),
 				PosterPath:        series.PosterPath,
 				PosterThumbhash:   series.PosterThumbhash,
-				BackdropURL:       h.presignCompatImagePath(ctx, series.BackdropPath, "backdrop"),
+				BackdropURL:       compatPresignImage(h.detailSvc, ctx, series.BackdropPath, "backdrop", compatCardImageSize),
 				BackdropPath:      series.BackdropPath,
 				BackdropThumbhash: series.BackdropThumbhash,
 				UpdatedAt:         series.UpdatedAt,

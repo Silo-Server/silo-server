@@ -452,20 +452,29 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 			progress(percent, message)
 		}
 	}
-	// Episode and movie availability seed independently: each kind has its
-	// own seed markers, because the episode pass historically marked every
-	// scanned library (movie libraries included) with zero movie rows.
-	passes := []struct {
+	// Each kind seeds independently with its own seed markers, because the
+	// episode pass historically marked every scanned library (movie libraries
+	// included) with zero movie rows. The flat item kinds come from the
+	// registry so a new kind cannot be forgotten here.
+	type seedPass struct {
 		kind          string
 		seedCondition string
 		record        func(ctx context.Context, libraryID int, emitEvents bool) (int, int, error)
-	}{
-		{EventKindEpisode,
-			`SELECT 1 FROM notification_library_seed_state seed WHERE seed.library_id = mf.id`,
-			s.Releases.RecordAvailabilityForLibrary},
-		{EventKindMovie,
-			`SELECT 1 FROM notification_content_seed_state seed WHERE seed.library_id = mf.id AND seed.kind = 'movie'`,
-			s.Releases.RecordMovieAvailabilityForLibrary},
+	}
+	passes := []seedPass{{
+		kind:          EventKindEpisode,
+		seedCondition: `SELECT 1 FROM notification_library_seed_state seed WHERE seed.library_id = mf.id`,
+		record:        s.Releases.RecordAvailabilityForLibrary,
+	}}
+	for _, k := range flatItemKinds {
+		passes = append(passes, seedPass{
+			kind: k.Kind,
+			seedCondition: `SELECT 1 FROM notification_content_seed_state seed
+				WHERE seed.library_id = mf.id AND seed.kind = '` + k.Kind + `'`,
+			record: func(ctx context.Context, libraryID int, emitEvents bool) (int, int, error) {
+				return s.Releases.RecordItemAvailabilityForLibrary(ctx, k, libraryID, emitEvents)
+			},
+		})
 	}
 	for passIdx, pass := range passes {
 		rows, err := s.pool.Query(ctx, `
@@ -504,9 +513,10 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 				return fmt.Errorf("mark library %d seeded (%s): %w", libraryID, pass.kind, err)
 			}
 			totalSeeded += inserted
-			// Each pass owns half the progress range.
-			passBase := passIdx * 50
-			report(passBase+(i+1)*50/max(len(libraryIDs), 1),
+			// Each pass owns an equal slice of the progress range.
+			passSpan := 100 / len(passes)
+			passBase := passIdx * passSpan
+			report(passBase+(i+1)*passSpan/max(len(libraryIDs), 1),
 				fmt.Sprintf("Seeded library %d %s availability (%d new rows)", libraryID, pass.kind, inserted))
 		}
 		s.logger.Info("availability seeding completed",

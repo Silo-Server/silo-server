@@ -13,7 +13,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -23,11 +26,31 @@ import (
 const (
 	defaultBaseURL = "https://api.mdblist.com"
 	syncPageLimit  = 1000
+
+	// MDBList enforces a daily request quota (1,000/day on the free tier) plus
+	// an undocumented short-window limit. Pacing to ~1 request/second keeps
+	// paginated fetches and chunked exports under the burst limit; the daily
+	// quota is handled by treating 429s as a signal to defer the whole sync.
+	requestInterval = time.Second
+	requestBurst    = 2
+
+	// A 429 with a short Retry-After is retried in place so pagination
+	// survives burst-limit blips; anything longer defers the sync run.
+	maxInPlaceRetryWait = 15 * time.Second
+	maxRetryAttempts    = 2
+
+	// Without a Retry-After header we cannot tell a burst limit from an
+	// exhausted daily quota, so default to backing off until the next
+	// scheduled sync (the scheduler runs hourly).
+	defaultRetryAfter = time.Hour
 )
 
 type Provider struct {
 	client  *http.Client
 	baseURL string
+	// limiters paces requests per API key: each key has its own MDBList
+	// quota, so one throttled account must not stall other users' syncs.
+	limiters sync.Map // apiKey string -> *rate.Limiter
 }
 
 func NewProvider(client *http.Client, baseURL string) *Provider {
@@ -428,6 +451,12 @@ func (p *Provider) fetchUser(ctx context.Context, apiKey string) (mdblistUser, e
 	return user, nil
 }
 
+func (p *Provider) limiter(apiKey string) *rate.Limiter {
+	actual, _ := p.limiters.LoadOrStore(apiKey, rate.NewLimiter(rate.Every(requestInterval), requestBurst))
+	limiter, _ := actual.(*rate.Limiter)
+	return limiter
+}
+
 func (p *Provider) do(ctx context.Context, method string, path string, apiKey string, body io.Reader, out any) error {
 	if strings.TrimSpace(apiKey) == "" {
 		return errors.New("mdblist api key is missing")
@@ -439,33 +468,110 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 	}
 	target += separator + "apikey=" + url.QueryEscape(apiKey)
 
+	// Buffer the body so rate-limited attempts can be replayed.
+	var payload []byte
+	if body != nil {
+		buffered, err := io.ReadAll(body)
+		if err != nil {
+			return fmt.Errorf("read mdblist request body: %w", err)
+		}
+		payload = buffered
+	}
+
+	limiter := p.limiter(apiKey)
+	for attempt := 0; ; attempt++ {
+		if err := limiter.Wait(ctx); err != nil {
+			return fmt.Errorf("wait for mdblist rate limiter: %w", err)
+		}
+		retryAfter, err := p.doOnce(ctx, method, path, target, payload, out)
+		if err == nil {
+			return nil
+		}
+		if retryAfter < 0 {
+			return err
+		}
+		// Rate limited. Retry in place for short waits; otherwise surface a
+		// typed error so the sync run defers instead of burning more quota.
+		if retryAfter == 0 {
+			retryAfter = defaultRetryAfter
+		}
+		if attempt >= maxRetryAttempts || retryAfter > maxInPlaceRetryWait {
+			// Exhausted in-place retries mean the short Retry-After hints were
+			// not trustworthy; floor the deferral so the sync doesn't come
+			// straight back into the same limit.
+			if attempt >= maxRetryAttempts && retryAfter < defaultRetryAfter {
+				retryAfter = defaultRetryAfter
+			}
+			return watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: retryAfter}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryAfter):
+		}
+	}
+}
+
+// doOnce performs a single HTTP attempt. On a 429 it returns the wait hinted
+// by Retry-After (0 when absent) alongside the error; every other failure
+// returns -1 to signal "not retryable".
+func (p *Provider) doOnce(ctx context.Context, method, path, target string, payload []byte, out any) (time.Duration, error) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
 	req, err := http.NewRequestWithContext(ctx, method, target, body)
 	if err != nil {
-		return fmt.Errorf("create mdblist request: %w", err)
+		return -1, fmt.Errorf("create mdblist request: %w", err)
 	}
-	if body != nil {
+	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("send mdblist request: %w", err)
+		return -1, fmt.Errorf("send mdblist request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			fmt.Errorf("mdblist request %s %s rate limited: status 429", method, path)
+	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("mdblist request %s %s rejected: status %d (check api key)", method, path, resp.StatusCode)
+		return -1, fmt.Errorf("mdblist request %s %s rejected: status %d (check api key)", method, path, resp.StatusCode)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("mdblist request %s %s failed: status %d", method, path, resp.StatusCode)
+		return -1, fmt.Errorf("mdblist request %s %s failed: status %d", method, path, resp.StatusCode)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
-		return nil
+		return -1, nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode mdblist response: %w", err)
+		return -1, fmt.Errorf("decode mdblist response: %w", err)
 	}
-	return nil
+	return -1, nil
+}
+
+// parseRetryAfter reads an RFC 7231 Retry-After value (delay-seconds or
+// HTTP-date). It returns 0 when the header is absent or unparseable.
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds < 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		if wait := at.Sub(now); wait > 0 {
+			return wait
+		}
+	}
+	return 0
 }
 
 // --- ID & payload helpers ---

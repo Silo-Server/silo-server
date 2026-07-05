@@ -31,6 +31,8 @@ const (
 	libraryPageStateSettingKey         = "ui.library_page_state"
 	rememberLibraryPageStateSettingKey = "ui.remember_library_page_state"
 	searchMediaScopeSettingKey         = "search.media_scope"
+	dateFormatSettingKey               = "ui.date_format"
+	timeFormatSettingKey               = "ui.time_format"
 )
 
 const (
@@ -210,6 +212,19 @@ var settingsRegistry = map[string]settingSpec{
 		DefaultValue: "video",
 		Validate: validateEnumSetting(searchMediaScopeSettingKey,
 			"all", "video", "audiobook"),
+	},
+	// Preferred display formats for dates and clock times. "auto" defers to
+	// the client's locale default.
+	dateFormatSettingKey: {
+		Scope:        scopeUser,
+		DefaultValue: "auto",
+		Validate: validateEnumSetting(dateFormatSettingKey,
+			"auto", "DD/MM/YYYY", "MM/DD/YYYY", "YYYY-MM-DD"),
+	},
+	timeFormatSettingKey: {
+		Scope:        scopeUser,
+		DefaultValue: "auto",
+		Validate:     validateEnumSetting(timeFormatSettingKey, "auto", "12h", "24h"),
 	},
 	"player.hdr_enabled": {
 		Scope:        scopeDevice,

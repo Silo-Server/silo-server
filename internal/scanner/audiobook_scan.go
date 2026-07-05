@@ -153,6 +153,12 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	if contentID == "" {
 		return "", false, nil
 	}
+	// All files must share the same content_id; fragmented folders need reconcile.
+	for _, mf := range existing[1:] {
+		if mf.ContentID != contentID {
+			return "", false, nil
+		}
+	}
 	items, err := s.itemRepo.GetByIDs(ctx, []string{contentID})
 	if err != nil {
 		return "", false, fmt.Errorf("get item for skip check: %w", err)

@@ -33,7 +33,7 @@ func TestWatchlistOrderMirrorsProviderSequence(t *testing.T) {
 	// Add in one order (added_at ascending a, b, c).
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i, id := range []string{"a", "b", "c"} {
-		if err := AddToWatchlistAt(db, profile, id, base.Add(time.Duration(i)*time.Hour)); err != nil {
+		if _, err := AddToWatchlistAt(db, profile, id, base.Add(time.Duration(i)*time.Hour)); err != nil {
 			t.Fatalf("AddToWatchlistAt %s: %v", id, err)
 		}
 	}
@@ -52,7 +52,7 @@ func TestWatchlistOrderMirrorsProviderSequence(t *testing.T) {
 	}
 
 	// A locally-added item (no synced index) sorts after the ordered ones.
-	if err := AddToWatchlistAt(db, profile, "d", base.Add(10*time.Hour)); err != nil {
+	if _, err := AddToWatchlistAt(db, profile, "d", base.Add(10*time.Hour)); err != nil {
 		t.Fatalf("AddToWatchlistAt d: %v", err)
 	}
 	if got := watchlistIDs(t, db, profile); !equalStrings(got, []string{"c", "a", "b", "d"}) {

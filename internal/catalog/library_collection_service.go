@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -82,6 +83,9 @@ type TMDBDiscoverFetcher interface {
 // TraktCollectionFetcher abstracts the Trakt discovery API.
 type TraktCollectionFetcher interface {
 	GetCollectionPreset(ctx context.Context, preset, mediaType string, limit int, accessToken string) ([]TraktCollectionEntry, error)
+	// GetUserList fetches a user-authored Trakt list in list order. Public
+	// lists need no access token.
+	GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]TraktCollectionEntry, error)
 }
 
 // TraktAccessTokenResolver returns a profile-scoped Trakt access token for
@@ -158,6 +162,7 @@ type libraryCollectionSourceConfig struct {
 	Provider   string              `json:"provider,omitempty"`
 	Preset     string              `json:"preset,omitempty"`
 	URL        string              `json:"url,omitempty"`
+	ListURL    string              `json:"list_url,omitempty"`
 	MediaType  string              `json:"media_type,omitempty"`
 	TimeWindow string              `json:"time_window,omitempty"`
 	ProfileID  string              `json:"profile_id,omitempty"`
@@ -234,6 +239,8 @@ func (s *LibraryCollectionService) SyncCollectionWithOptions(ctx context.Context
 		return s.syncTMDBDiscoverCollection(ctx, collection, source, opts)
 	case "trakt_preset":
 		return s.syncTraktPresetCollection(ctx, collection, source, opts)
+	case "trakt_list":
+		return s.syncTraktListCollection(ctx, collection, source, opts)
 	default:
 		return nil, fmt.Errorf("unsupported collection sync mode: %s", source.Mode)
 	}
@@ -965,6 +972,95 @@ func (s *LibraryCollectionService) syncTraktPresetCollection(ctx context.Context
 		"count", len(results),
 	)
 
+	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts)
+}
+
+// syncTraktListCollection populates a collection from a user-authored Trakt
+// list (issue #214). The list reference comes from cfg.URL, a trakt.tv list
+// URL like https://trakt.tv/users/{user}/lists/{slug}. Lists mix movies and
+// shows; matching and ordering reuse the preset pipeline.
+func (s *LibraryCollectionService) syncTraktListCollection(ctx context.Context, collection *models.LibraryCollection, cfg libraryCollectionSourceConfig, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
+	startedAt := syncTimestamp()
+
+	if s.TraktCollections == nil {
+		return nil, fmt.Errorf("Trakt list sync requires configured Trakt access")
+	}
+	listURL := strings.TrimSpace(cfg.ListURL)
+	if listURL == "" {
+		listURL = strings.TrimSpace(cfg.URL)
+	}
+	if listURL == "" {
+		listURL = strings.TrimSpace(collection.SourceURL)
+	}
+	user, list, err := ParseTraktListURL(listURL)
+	if err != nil {
+		return s.recordFailedCollectionSync(ctx, collection.ID, startedAt, err.Error())
+	}
+
+	fetchLimit := collectionutil.SourceFetchLimit(cfg.Limit)
+	results, err := s.TraktCollections.GetUserList(ctx, user, list, fetchLimit, "")
+	if err != nil {
+		return nil, fmt.Errorf("fetching Trakt list %s/%s: %w", user, list, err)
+	}
+
+	slog.Info("Trakt list sync: fetched results",
+		"collection_id", collection.ID,
+		"user", user,
+		"list", list,
+		"count", len(results),
+	)
+
+	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts)
+}
+
+// ParseTraktListURL extracts the user and list slug from a trakt.tv list URL
+// (https://trakt.tv/users/{user}/lists/{slug}[?...]) or a bare
+// "{user}/{slug}" shorthand.
+func ParseTraktListURL(raw string) (user, list string, err error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", "", fmt.Errorf("Trakt list sync: url is required")
+	}
+	badFormat := func() (string, string, error) {
+		return "", "", fmt.Errorf("Trakt list sync: expected a URL like https://trakt.tv/users/{user}/lists/{list}, got %q", raw)
+	}
+	isURL := strings.Contains(trimmed, "://") || strings.Contains(strings.ToLower(trimmed), "trakt.tv")
+	if isURL {
+		normalized := trimmed
+		if !strings.Contains(normalized, "://") {
+			normalized = "https://" + normalized
+		}
+		parsed, parseErr := url.Parse(normalized)
+		if parseErr != nil {
+			return "", "", fmt.Errorf("Trakt list sync: invalid url %q", raw)
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if host != "trakt.tv" && host != "www.trakt.tv" {
+			return badFormat()
+		}
+		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+		if len(parts) != 4 || parts[0] != "users" || parts[2] != "lists" {
+			return badFormat()
+		}
+		user, list = parts[1], parts[3]
+	} else {
+		// Bare "{user}/{slug}" shorthand.
+		parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+		if len(parts) != 2 {
+			return badFormat()
+		}
+		user, list = parts[0], parts[1]
+	}
+	if user == "" || list == "" {
+		return badFormat()
+	}
+	return user, list, nil
+}
+
+// completeTraktEntrySync matches fetched Trakt entries against the
+// collection's libraries and records the sync run. Shared by the preset and
+// user-list sources.
+func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, collection *models.LibraryCollection, results []TraktCollectionEntry, limit *int, startedAt time.Time, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
 	matchedItems := make([]LibraryCollectionItemInput, 0, len(results))
 	seenContentIDs := make(map[string]int, len(results))
 	warnings := make([]string, 0)
@@ -1005,7 +1101,7 @@ func (s *LibraryCollectionService) syncTraktPresetCollection(ctx context.Context
 			Position:    len(matchedItems),
 			SourceRank:  sourceRank,
 		})
-		if collectionutil.ItemLimitReached(len(matchedItems), cfg.Limit) {
+		if collectionutil.ItemLimitReached(len(matchedItems), limit) {
 			limitReached = true
 			break
 		}

@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -94,6 +93,8 @@ type SessionManagerInterface interface {
 	StopSession(sessionID string) error
 	GetSession(sessionID string) (*playback.Session, error)
 	SetTranscodeNodeURL(sessionID, url string) error
+	BeginTransport(sessionID string) error
+	EndTransport(sessionID string) error
 }
 
 type sessionStarterContext interface {
@@ -124,7 +125,7 @@ type PlaybackHandler struct {
 	content                 ContentService
 	codec                   *ResourceIDCodec
 	deviceProfiles          *DeviceProfileStore
-	playbackStore           *PlaybackSessionStore
+	playbackStore           CompatPlaybackStore
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver
 	storeProvider           userstore.UserStoreProvider
@@ -135,13 +136,35 @@ type PlaybackHandler struct {
 	FFmpegPath              string
 	HWAccel                 string
 	TranscodeDir            string
-	transcodeMu             sync.RWMutex
-	transcodes              map[string]*playback.TranscodeSession
-	SubtitleRepo            subtitles.Repository  // optional; enables downloaded subtitles
-	S3Client                subtitles.S3Client    // optional; for serving S3 subtitles
-	S3Bucket                string                // bucket for subtitle storage
-	SettingsRepo            SettingsReader        // optional; reads watched threshold setting
-	SessionSyncer           PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
+	// tm is the shared transcode-session lifecycle (live map, reconstruct) — the
+	// same type the native handler uses, so jellycompat gets the reconstruct cap
+	// and node-affinity rule for free. The reconstruction recipe is carried in the
+	// compat playback store (PlaybackSession.Recipe), since Jellyfin clients cannot
+	// round-trip a native stream token.
+	tm            *playback.TranscodeManager
+	SubtitleRepo  subtitles.Repository  // optional; enables downloaded subtitles
+	S3Client      subtitles.S3Client    // optional; for serving S3 subtitles
+	S3Bucket      string                // bucket for subtitle storage
+	SettingsRepo  SettingsReader        // optional; reads watched threshold setting
+	SessionSyncer PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
+	// RecipeNodeStore hands a remote transcode's reconstruction recipe to the
+	// control-plane recipe store (Redis) so a dedicated transcode node that
+	// restarts can rebuild ffmpeg from it. The node-hop token is server-minted and
+	// could carry the recipe, but it is mutated in place and the client can't be
+	// driven to refresh a stale token, so the node reconstructs from this
+	// server-authoritative store instead (see internal/noderecipe). Optional
+	// (nil disables it — integrated/no-node deployments need no handoff).
+	RecipeNodeStore recipeNodePutter
+}
+
+// recipeNodePutter persists and removes a remote transcode's reconstruction
+// recipe in a control-plane store keyed by upstream session id. *noderecipe.Store
+// implements it. Delete is nil-safe and treats a missing key as a no-op success;
+// it is called on deliberate teardown so a stopped session cannot be resurrected
+// from a leaked recipe.
+type recipeNodePutter interface {
+	Put(ctx context.Context, sessionID string, card playback.RecipeCard) error
+	Delete(ctx context.Context, sessionID string) error
 }
 
 // playbackThresholds reads the playback.watched_threshold and
@@ -186,7 +209,7 @@ func NewPlaybackHandler(
 	content ContentService,
 	codec *ResourceIDCodec,
 	deviceProfiles *DeviceProfileStore,
-	playbackStore *PlaybackSessionStore,
+	playbackStore CompatPlaybackStore,
 	sessionMgr SessionManagerInterface,
 	fileResolver FilePathResolver,
 	storeProvider userstore.UserStoreProvider,
@@ -214,14 +237,52 @@ func NewPlaybackHandler(
 		FFmpegPath:     ffmpegPath,
 		HWAccel:        hwAccel,
 		TranscodeDir:   transcodeDir,
-		transcodes:     make(map[string]*playback.TranscodeSession),
+		tm:             playback.NewTranscodeManager(),
 	}
-	if cleaned, err := playback.CleanupOrphanedTranscodeDirs(h.TranscodeDir, nil); err != nil {
-		slog.Warn("jellycompat transcode cleanup failed", "dir", h.TranscodeDir, "error", err)
-	} else if cleaned > 0 {
-		slog.Info("jellycompat transcode cleanup removed orphaned dirs", "dir", h.TranscodeDir, "count", cleaned)
+	// Wire the shared transcode manager with closures so it reads the handler's
+	// (late-set) JWTSecret lazily, matching the native handler.
+	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.Config = func() playback.TranscodeRuntimeConfig {
+		return playback.TranscodeRuntimeConfig{
+			TranscodeDir: h.TranscodeDir,
+			FFmpegPath:   h.FFmpegPath,
+			HWAccel:      h.HWAccel,
+		}
+	}
+	if reg, ok := sessionMgr.(interface {
+		GetSession(string) (*playback.Session, error)
+		RegisterReconstructed(*playback.Session) *playback.Session
+		RegisterReconstructedWithLimits(context.Context, *playback.Session) (*playback.Session, error)
+	}); ok {
+		h.tm.Sessions = reg
+	}
+	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
+		// ffmpeg crash: drop the dead transcode and stop the upstream native
+		// session. The recipe stays in the compat store so a resume reconstructs.
+		nodeURL := ""
+		if h.sessionMgr != nil {
+			if up, err := h.sessionMgr.GetSession(sessionID); err == nil && up != nil {
+				nodeURL = up.TranscodeNodeURL
+			}
+		}
+		// Guarded close is the authoritative gate: only tear down if the live entry
+		// is still the crashed one. We must NOT stop the upstream session before this
+		// check — if a successor reconstructed under the same id between ffmpeg's exit
+		// and here, an early StopSession would orphan its ffmpeg (live transcode, no
+		// session). Only stop the upstream session when the compare-and-delete matched
+		// the dead transcode. The recipe stays in the compat store either way so a
+		// resume reconstructs.
+		if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
+			_ = h.sessionMgr.StopSession(sessionID)
+		}
 	}
 	return h
+}
+
+// CleanupOrphanedTranscodes removes stale per-session transcode dirs, sparing
+// those whose recipe card still exists. Delegates to the shared manager.
+func (h *PlaybackHandler) CleanupOrphanedTranscodes() (int, error) {
+	return h.tm.CleanupOrphanedTranscodes()
 }
 
 // buildProxyRedirectURL signs a stream token and builds the redirect URL for
@@ -297,6 +358,7 @@ func clampSeekSeconds(seekSeconds float64, sources []PlaybackMediaSource) float6
 
 func (h *PlaybackHandler) startRemoteTranscode(
 	ctx context.Context,
+	playSessionID string,
 	upstreamSessionID string,
 	source PlaybackMediaSource,
 	file *models.MediaFile,
@@ -357,6 +419,92 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
 		return fmt.Errorf("remote transcode start rejected: status %d", resp.StatusCode)
+	}
+
+	// Mirror the byte-affecting opts sent to the node into a RecipeCard and persist
+	// it for restart resilience. The node-hop token is identity-only by design (see
+	// internal/noderecipe), and central serves Jellyfin clients that carry no native
+	// token of their own, so without a persisted recipe a node or central restart
+	// cannot rebuild ffmpeg and segment serves 404.
+	opts := playback.TranscodeOpts{
+		SessionID:          upstreamSessionID,
+		InputPath:          reqBody.InputPath,
+		SeekSeconds:        reqBody.SeekSeconds,
+		StartSegmentNumber: reqBody.StartSegmentNumber,
+		TargetCodecVideo:   reqBody.TargetCodecVideo,
+		TargetCodecAudio:   reqBody.TargetCodecAudio,
+		SegmentDuration:    reqBody.SegmentDuration,
+		HWAccel:            reqBody.HWAccel,
+		AudioTrackIndex:    reqBody.AudioTrackIndex,
+		TotalDuration:      reqBody.TotalDuration,
+	}
+	if source.TranscodeAudio {
+		opts.TargetCodecVideo = "copy"
+	}
+
+	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
+		// Roll back the already-started node ffmpeg so it isn't leaked.
+		h.tm.CloseTranscodeSession(upstreamSessionID, transcodeNodeURL)
+		return err
+	}
+
+	return nil
+}
+
+// persistTranscodeRecipe builds the reconstruction recipe from the upstream
+// session's identity and persists it for restart resilience. It is shared by the
+// local (ensureLocalTranscode) and remote (startRemoteTranscode) transcode paths
+// so both stores stay in lock-step.
+//
+// The recipe is recorded in the compat store in the same Update that marks the
+// transcode started — a failed write leaves neither set — and then best-effort
+// handed to the node recipe store (Redis) for dedicated transcode nodes. The node
+// URL is taken from the upstream session (bound before start on the remote path),
+// so it is "" for integrated transcodes and the node-store write is skipped.
+// A Jellyfin client carries no native token of its own and the node-hop token is
+// deliberately identity-only (see internal/noderecipe), so the persisted recipe is
+// the only way a node or central restart can rebuild ffmpeg.
+//
+// Returns an error only when the compat-store Update fails; the caller owns
+// rolling back its (local or remote) transcode in that case. A missing upstream
+// session (a start/build race, or no session manager in tests) is logged and the
+// live transcode is left serving — only restart resilience is forfeited.
+func (h *PlaybackHandler) persistTranscodeRecipe(
+	ctx context.Context,
+	playSessionID, upstreamSessionID string,
+	opts playback.TranscodeOpts,
+) error {
+	var recipe *playback.RecipeCard
+	if h.sessionMgr != nil {
+		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
+			card := playback.NewRecipeCard(upstream.UserID, upstream.ProfileID, upstream.MediaFileID, upstream.TranscodeNodeURL, opts)
+			recipe = &card
+		}
+	}
+	if recipe == nil {
+		slog.Warn("transcode recipe not persisted: upstream session unavailable",
+			"playback_session_id", upstreamSessionID)
+	}
+
+	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+		current.TranscodeStarted = true
+		current.Recipe = recipe
+		return nil
+	}); err != nil {
+		return fmt.Errorf("update playback session: %w", err)
+	}
+
+	// Hand the recipe to the control-plane store (Redis) so a dedicated transcode
+	// node that restarts can rebuild ffmpeg from it. Bounded and best effort: a
+	// stalled write must not hang the manifest request, and a failed write only
+	// forfeits node-restart resilience for this session, never the start.
+	if recipe != nil && recipe.TranscodeNodeURL != "" && h.RecipeNodeStore != nil {
+		putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if err := h.RecipeNodeStore.Put(putCtx, upstreamSessionID, *recipe); err != nil {
+			slog.Warn("persist node transcode recipe failed", "error", err,
+				"playback_session_id", upstreamSessionID, "node", recipe.TranscodeNodeURL)
+		}
 	}
 	return nil
 }

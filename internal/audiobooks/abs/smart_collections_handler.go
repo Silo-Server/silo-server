@@ -325,7 +325,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 
 	candidates := make([]smartcoll.Candidate, 0, 256)
 	for _, lib := range targetLibs {
-		items, _, lerr := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, 0, 0, access)
+		items, _, lerr := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, 0, 0, access, Filter{})
 		if lerr != nil {
 			slog.Warn("abs smart collection list-audiobooks failed", "err", lerr, "library", lib.ID)
 			continue

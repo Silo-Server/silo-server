@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -54,13 +55,27 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Real ABS (express body-parser + passport local) accepts BOTH JSON and
+	// application/x-www-form-urlencoded credential bodies; different clients
+	// send different encodings. Buffer the body once, try JSON, then fall back
+	// to form-encoded — a JSON-only parse 400s a form-encoded client, which
+	// the app surfaces as a generic "unknown error" on sign-in.
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
 	var body struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
+	if jsonErr := json.Unmarshal(raw, &body); jsonErr != nil || strings.TrimSpace(body.Username) == "" {
+		if vals, formErr := url.ParseQuery(string(raw)); formErr == nil {
+			if u := vals.Get("username"); u != "" {
+				body.Username = u
+				body.Password = vals.Get("password")
+			}
+		}
 	}
 	if strings.TrimSpace(body.Username) == "" || body.Password == "" {
 		http.Error(w, "username and password are required", http.StatusUnauthorized)
@@ -163,7 +178,15 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 	slog.Debug("abs completeLogin: tokens persisted",
 		"user_id", userID, "access_jti", accessJTI, "refresh_jti", refreshJTI)
 
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, userID, displayName, access, refresh))
+	// Real ABS delivers the refresh token in the body when the client opts in
+	// via x-return-tokens, otherwise as an HttpOnly refresh_token cookie.
+	// Mirrors server/Auth.js: setRefreshTokenCookie when !returnTokens.
+	returnRefreshInBody := strings.EqualFold(r.Header.Get("x-return-tokens"), "true")
+	if !returnRefreshInBody {
+		setRefreshCookie(w, r, refresh, refreshTTL)
+	}
+
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, userID, displayName, access, refresh, returnRefreshInBody))
 }
 
 // handleABSPing — GET /ping (mounted also as /healthcheck). Wire shape
@@ -171,7 +194,12 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 // use this to validate the URL before showing the login form, and any
 // other shape causes the official mobile app to reject the server.
 func (h *Handler) handleABSPing(w http.ResponseWriter, _ *http.Request) {
+	// Real ABS /ping returns {"success": true} (server/Server.js). The ABS
+	// apps validate a server address by reading response.success — without it
+	// they report "unable to reach". The pong/server/version keys are kept as
+	// harmless extras for plugin-shape clients.
 	writeJSON(w, http.StatusOK, map[string]any{
+		"success": true,
 		"server":  "audiobookshelf",
 		"version": ServerVersion,
 		"pong":    true,
@@ -184,15 +212,68 @@ func (h *Handler) handleABSInit(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleABSStatus — GET /status. Mobile clients call this on every
-// connection to confirm the server is an ABS install and pull a few
-// global flags. Matches the plugin shape exactly (key order intentional).
+// connection to confirm the server is an ABS install and to learn which
+// auth methods to render on the login form. Mirrors real ABS Server.js
+// /status: {app, serverVersion, isInit, language, authMethods, authFormData}.
+// authMethods drives the login UI — omitting it can leave the app unable to
+// present a usable login flow.
 func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"isInit":        true,
-		"language":      "en-us",
 		"app":           "audiobookshelf",
 		"serverVersion": ServerVersion,
+		"isInit":        true,
+		"language":      "en-us",
+		"authMethods":   []string{"local"},
+		"authFormData":  map[string]any{},
 	})
+}
+
+// absUserObject builds the ABS user object shared by the login/authorize
+// envelope and GET /me. It mirrors the key set of audiobookshelf
+// User.toOldJSONForBrowser (server/models/User.js) so every endpoint that
+// emits a user decodes with one client model — a missing key crashes strict
+// clients, so we emit the full set even where silo has no analog (email is
+// "", the flags are constant).
+//
+// `token` is the caller's current access token — real ABS's deprecated
+// non-expiring `token` slot. The login/authorize caller additionally sets
+// user.accessToken / user.refreshToken; GET /me never carries those.
+func absUserObject(userID, displayName, token, defaultLibraryID string, now time.Time) map[string]any {
+	name := displayName
+	if name == "" {
+		name = userID
+	}
+	nowMs := now.UnixMilli()
+	return map[string]any{
+		"id":                              userID,
+		"username":                        name,
+		"email":                           "",
+		"type":                            "user",
+		"defaultLibraryId":                defaultLibraryID,
+		"librariesAccessible":             []any{},
+		"itemTagsAccessible":              []any{},
+		"itemTagsSelected":                []any{},
+		"mediaProgress":                   []any{},
+		"bookmarks":                       []any{},
+		"seriesHideFromContinueListening": []any{},
+		"isOldToken":                      false,
+		"isActive":                        true,
+		"isLocked":                        false,
+		"hasOpenIDLink":                   false,
+		"token":                           token,
+		"lastSeen":                        nowMs,
+		"createdAt":                       nowMs,
+		"permissions": map[string]any{
+			"download":                  true,
+			"update":                    true,
+			"delete":                    true,
+			"upload":                    true,
+			"accessAllLibraries":        true,
+			"accessAllTags":             true,
+			"accessExplicitContent":     true,
+			"selectedTagsNotAccessible": false,
+		},
+	}
 }
 
 // loginEnvelope builds the response body shared by /login and /authorize.
@@ -209,14 +290,9 @@ func (h *Handler) loginEnvelope(
 	r *http.Request,
 	now time.Time,
 	userID, displayName, accessToken, refreshToken string,
+	returnRefreshInBody bool,
 ) map[string]any {
 	// displayName falls back to userID when the validator didn't supply one.
-	// ABS clients require a non-empty username on the user envelope.
-	name := displayName
-	if name == "" {
-		name = userID
-	}
-
 	libraryMaps := make([]map[string]any, 0)
 	defaultLibraryID := VirtualLibraryID
 	access, _, _ := h.accessFilterFromRequest(r)
@@ -228,40 +304,18 @@ func (h *Handler) loginEnvelope(
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	nowMs := now.UnixMilli()
+	user := absUserObject(userID, displayName, accessToken, defaultLibraryID, now)
 
-	user := map[string]any{
-		"id":                              userID,
-		"username":                        name,
-		"type":                            "user",
-		"defaultLibraryId":                defaultLibraryID,
-		"librariesAccessible":             []any{},
-		"itemTagsAccessible":              []any{},
-		"itemTagsSelected":                []any{},
-		"mediaProgress":                   []any{},
-		"bookmarks":                       []any{},
-		"seriesHideFromContinueListening": []any{},
-		"isOldToken":                      false,
-		"token":                           accessToken,
-		"lastSeen":                        nowMs,
-		"createdAt":                       nowMs,
-		"permissions": map[string]any{
-			"download":                  true,
-			"update":                    true,
-			"delete":                    true,
-			"upload":                    true,
-			"accessAllLibraries":        true,
-			"accessAllTags":             true,
-			"accessExplicitContent":     true,
-			"selectedTagsNotAccessible": false,
-		},
-	}
-
-	// x-return-tokens opt-in: when set, embed token pair on user object too
-	// (some clients read from the user envelope, others from the top level).
-	if strings.EqualFold(r.Header.Get("x-return-tokens"), "true") {
-		user["accessToken"] = accessToken
+	// Real ABS (v2.26+) ALWAYS sets user.accessToken; modern clients read it
+	// from exactly res.user.accessToken. The x-return-tokens header gates ONLY
+	// the refresh token: present in the body when the client opts in, otherwise
+	// null (and delivered as the refresh_token cookie by the caller). See
+	// audiobookshelf server/Auth.js handleLoginSuccess.
+	user["accessToken"] = accessToken
+	if returnRefreshInBody {
 		user["refreshToken"] = refreshToken
+	} else {
+		user["refreshToken"] = nil
 	}
 
 	serverSettings := map[string]any{
@@ -300,7 +354,31 @@ func (h *Handler) loginEnvelope(
 		"podcastEpisodeSchedule":            "0 * * * *",
 		"sortingIgnorePrefixesValue":        "",
 		"allowIframe":                       false,
-		"authActiveAuthMethods":             []string{"local"},
+		// Auth / rate-limit / OpenID fields from real ABS
+		// ServerSettings.toJSONForBrowser. OIDC-aware clients (Prologue)
+		// decode serverSettings into a strict model that includes these keys;
+		// omitting them throws keyNotFound and the whole login response fails
+		// to decode ("unknown error" on the login screen). Emit real ABS's
+		// defaults for an OIDC-disabled server — authActiveAuthMethods still
+		// advertises only "local", so no client tries the OpenID flow.
+		"rateLimitLoginRequests":             10,
+		"rateLimitLoginWindow":               600000,
+		"backupPath":                         "/metadata/backups",
+		"allowedOrigins":                     []string{},
+		"authActiveAuthMethods":              []string{"local"},
+		"authLoginCustomMessage":             nil,
+		"authOpenIDIssuerURL":                nil,
+		"authOpenIDAuthorizationURL":         nil,
+		"authOpenIDTokenURL":                 nil,
+		"authOpenIDUserInfoURL":              nil,
+		"authOpenIDJwksURL":                  nil,
+		"authOpenIDLogoutURL":                nil,
+		"authOpenIDTokenSigningAlgorithm":    "RS256",
+		"authOpenIDButtonText":               "Login with OpenID",
+		"authOpenIDAutoLaunch":               false,
+		"authOpenIDAutoRegister":             false,
+		"authOpenIDMatchExistingBy":          nil,
+		"authOpenIDSubfolderForRedirectURLs": "",
 	}
 
 	return map[string]any{
@@ -360,7 +438,24 @@ func (h *Handler) handleABSAuthorize(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, a.UserID, access, ""))
+	// /authorize never issues a refresh token (the client already holds one),
+	// so there is nothing to return in the body.
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, time.Now(), a.UserID, a.UserID, access, "", false))
+}
+
+// setRefreshCookie writes the ABS refresh_token cookie exactly as real ABS
+// does when a client did not opt into body-token delivery. HttpOnly + Lax,
+// Secure only under TLS so plain-HTTP LAN deployments still receive it.
+func setRefreshCookie(w http.ResponseWriter, r *http.Request, refresh string, ttl time.Duration) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    refresh,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(ttl / time.Second),
+	})
 }
 
 // handleRefresh — POST /auth/refresh
@@ -385,6 +480,16 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&p); err == nil {
 			refreshTok = p.RefreshToken
+		}
+	}
+	if refreshTok == "" {
+		// Cookie-flow clients (those that omit x-return-tokens at login) hold the
+		// refresh token only in the HttpOnly refresh_token cookie the server set —
+		// they send neither header nor body. Read it here or they get a spurious
+		// 400 once the access token expires. Mirrors real ABS Auth.js, which
+		// checks req.cookies.refresh_token.
+		if c, err := r.Cookie("refresh_token"); err == nil {
+			refreshTok = strings.TrimSpace(c.Value)
 		}
 	}
 	if refreshTok == "" {
@@ -481,31 +586,50 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("abs refresh: rotated", "user", claims.UserID,
 		"old_jti", claims.JTI, "new_access_jti", newAccessJTI, "new_refresh_jti", newRefreshJTI)
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"user": map[string]any{
-			"id":           claims.UserID,
-			"accessToken":  access,
-			"refreshToken": refresh,
-		},
-		"accessToken":  access,
-		"refreshToken": refresh,
-	})
+	// Real ABS /auth/refresh returns the SAME payload as /login. Return the
+	// full envelope (not a thin token map) so a strict client can decode it
+	// with the same model it uses for login. The rotated refresh token goes
+	// in the body when the client sent x-refresh-token (mobile), otherwise as
+	// the refresh_token cookie. No displayName is available at refresh time —
+	// loginEnvelope falls back to the userID for username.
+	returnRefreshInBody := strings.TrimSpace(r.Header.Get("x-refresh-token")) != ""
+	if !returnRefreshInBody {
+		setRefreshCookie(w, r, refresh, refreshTTL)
+	}
+	writeJSON(w, http.StatusOK, h.loginEnvelope(r, now, claims.UserID, "", access, refresh, returnRefreshInBody))
 }
 
 // handleLogout — POST /logout (and /api/logout, /abs/api/logout, /abs/api/auth/logout)
 //
 // Mounted OUTSIDE the bearerAuth group so a client whose access token has
 // expired — the most common "I want to sign out" moment — can still revoke
-// their JTI without first re-authenticating. The handler parses the bearer
-// itself, attempts JTI revoke if parseable, and ALWAYS returns 204. Mirrors
-// continuum-plugin-audiobooks/internal/abs/handler.go:handleLogout.
+// their JTI without first re-authenticating.
 //
-// Logout invalidates every active ABS access/refresh token for the presented
-// user profile so a signed-out client cannot silently mint a new access token
-// with its saved refresh token.
+// Real ABS returns HTTP 200 with { redirect_url } (null for local auth), NOT
+// an empty 204 — a strict client decodes the body and would fail on 204. It
+// also clears the refresh_token cookie. Token/session revocation is
+// best-effort: a failure there must not turn logout into an error the client
+// can't recover from.
 func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
-	defer w.WriteHeader(http.StatusNoContent)
+	h.revokeLogoutPrincipal(r)
 
+	// Clear the refresh_token cookie set at login (MaxAge<0 deletes it).
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   -1,
+	})
+
+	// redirect_url is null for local auth (only OpenID logout returns a URL).
+	writeJSON(w, http.StatusOK, map[string]any{"redirect_url": nil})
+}
+
+// revokeLogoutPrincipal best-effort revokes every active token for the bearer's
+// principal and closes its open playback sessions. All failures are logged and
+// swallowed — the caller always responds 200.
+func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 	raw := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if raw == "" {
 		raw = r.URL.Query().Get("token")

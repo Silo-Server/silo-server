@@ -51,5 +51,12 @@ export function buildPlayerStreamUrl(
     streamPath.startsWith("http://") || streamPath.startsWith("https://")
       ? streamPath
       : `${apiBaseUrl}${streamPath}`;
-  return `${base}${query ? `?${query}` : ""}`;
+  if (!query) {
+    return base;
+  }
+  // The backend stream URL may already carry its own query string (e.g. the
+  // `?st=<streamtoken>` reconstruct token for integrated-mode direct/remux).
+  // Join with `&` in that case so we don't clobber it into `st=X?token=Y`.
+  const separator = base.includes("?") ? "&" : "?";
+  return `${base}${separator}${query}`;
 }

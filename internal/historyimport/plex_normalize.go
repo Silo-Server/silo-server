@@ -47,6 +47,29 @@ func NormalizePlexItem(item PlexItem, series *PlexItem) Record {
 	return record
 }
 
+// NormalizePlexWatchlistItem maps an account-watchlist entry to an import
+// record: movie or series identity only, flagged Watchlisted, and carrying
+// no watch state (a watchlist entry says "want to watch", not "watched").
+func NormalizePlexWatchlistItem(item PlexItem) Record {
+	record := Record{
+		ExternalID:  item.RatingKey,
+		Title:       item.Title,
+		Year:        item.Year,
+		Watchlisted: true,
+		UpdatedAt:   time.Now().UTC(),
+	}
+	ParsePlexGuids(item.Guid, &record.IMDbID, &record.TMDBID, &record.TVDBID)
+	switch item.Type {
+	case "movie":
+		record.Kind = KindMovie
+	case "show":
+		record.Kind = KindSeries
+	default:
+		record.Kind = item.Type
+	}
+	return record
+}
+
 func NormalizePlexHistoryItem(item PlexHistoryItem, series *PlexItem) Record {
 	record := Record{
 		ExternalID:      item.RatingKey,

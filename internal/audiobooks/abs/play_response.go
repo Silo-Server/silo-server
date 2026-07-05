@@ -254,7 +254,7 @@ func buildSiloAudioTracks(
 			TimeBase:             "1/14112000",
 			Channels:             channels,
 			ChannelLayout:        channelLayout,
-			Chapters:             nil,
+			Chapters:             []ChapterABS{},
 			EmbeddedCoverArt:     nil,
 			MetaTags:             map[string]string{},
 			MimeType:             mimeType,

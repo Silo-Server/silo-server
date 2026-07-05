@@ -320,7 +320,7 @@ func (r *EpisodeRepository) Upsert(ctx context.Context, ep *models.Episode) erro
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
 			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(episodes.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			runtime = EXCLUDED.runtime,
@@ -503,7 +503,7 @@ func (r *EpisodeRepository) BulkUpsert(ctx context.Context, seriesID string, epi
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			season_id = COALESCE(EXCLUDED.season_id, episodes.season_id),
 			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(episodes.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), episodes.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			runtime = EXCLUDED.runtime,

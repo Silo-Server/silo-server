@@ -180,8 +180,16 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 		return nil, fmt.Errorf("encode provider ids for plugin search: %w", err)
 	}
 
+	// The plugin search contract carries a single free-text Query. When the
+	// caller supplies an author hint (ebooks), fold it in so title-only matches
+	// that need disambiguation — or messy filename titles — can still resolve.
+	queryText := strings.TrimSpace(query.Title)
+	if author := strings.TrimSpace(query.Author); author != "" {
+		queryText = strings.TrimSpace(queryText + " " + author)
+	}
+
 	response, err := client.Search(ctx, &pluginv1.SearchMetadataRequest{
-		Query:       query.Title,
+		Query:       queryText,
 		ItemType:    query.ContentType,
 		Year:        int32(query.Year),
 		ProviderIds: providerIDs,

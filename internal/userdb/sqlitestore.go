@@ -196,7 +196,7 @@ func (s *SQLiteUserStore) AddToWatchlist(_ context.Context, profileID, mediaItem
 	return AddToWatchlist(s.db, profileID, mediaItemID)
 }
 
-func (s *SQLiteUserStore) AddToWatchlistAt(_ context.Context, profileID, mediaItemID string, addedAt time.Time) error {
+func (s *SQLiteUserStore) AddToWatchlistAt(_ context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
 	return AddToWatchlistAt(s.db, profileID, mediaItemID, addedAt)
 }
 

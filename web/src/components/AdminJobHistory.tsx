@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { formatJobProgress } from "./adminCatalogMaintenanceFormatters";
+import { formatDateTime } from "@/lib/datetime";
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   delete_library: "Library Delete",
@@ -156,7 +157,7 @@ export default function AdminJobHistory() {
                   <Badge variant="outline">{jobTypeLabel(job.job_type)}</Badge>
                   {desc && <span className="text-sm font-medium">{desc}</span>}
                   <span className="text-muted-foreground text-xs">
-                    {new Date(job.requested_at).toLocaleString()}
+                    {formatDateTime(job.requested_at)}
                   </span>
                 </div>
                 <div className="text-muted-foreground flex flex-wrap gap-3 text-xs">
@@ -165,9 +166,7 @@ export default function AdminJobHistory() {
                     <span>Progress: {progress}</span>
                   )}
                   {result && <span>{result}</span>}
-                  {job.completed_at && (
-                    <span>Finished: {new Date(job.completed_at).toLocaleString()}</span>
-                  )}
+                  {job.completed_at && <span>Finished: {formatDateTime(job.completed_at)}</span>}
                 </div>
                 {job.error_message && (
                   <div className="text-destructive text-xs">{job.error_message}</div>

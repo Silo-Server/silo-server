@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -2861,8 +2862,16 @@ func (r *FileRepository) ClearContentID(ctx context.Context, fileID int) error {
 // ClearContentLinksByPathPrefix removes content and episode link fields for
 // present files beneath a specific root path in one media folder.
 func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, folderID int, pathPrefix string) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin clearing media file content links transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	var cleared int
-	err := r.pool.QueryRow(ctx, `
+	var oldEpisodeIDs []string
+	var affectedSeriesIDs []string
+	err = tx.QueryRow(ctx, `
 		WITH previous AS (
 			SELECT id, media_folder_id, episode_id AS old_episode_id
 			FROM media_files
@@ -2885,16 +2894,28 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 				updated_at = NOW()
 			WHERE id IN (SELECT id FROM previous)
 			RETURNING id
-		),
-		deleted AS (
+		)
+		SELECT COUNT(*)::int,
+		       COALESCE(
+			       array_agg(DISTINCT p.old_episode_id) FILTER (WHERE p.old_episode_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       ),
+		       COALESCE(
+			       array_agg(DISTINCT e.series_id) FILTER (WHERE e.series_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       )
+		FROM cleared c
+		JOIN previous p ON p.id = c.id
+		LEFT JOIN episodes e ON e.content_id = p.old_episode_id
+	`, folderID, pathPrefix, pathPrefixLike(pathPrefix)).Scan(&cleared, &oldEpisodeIDs, &affectedSeriesIDs)
+	if err != nil {
+		return 0, fmt.Errorf("clearing media file content links by path prefix: %w", err)
+	}
+	if len(oldEpisodeIDs) > 0 {
+		if _, err := tx.Exec(ctx, `
 			DELETE FROM episode_libraries el
-			USING (
-				SELECT DISTINCT media_folder_id, old_episode_id AS episode_id
-				FROM previous
-				WHERE old_episode_id IS NOT NULL
-			) touched
-			WHERE el.media_folder_id = touched.media_folder_id
-			  AND el.episode_id = touched.episode_id
+			WHERE el.media_folder_id = $1
+			  AND el.episode_id = ANY($2::text[])
 			  AND NOT EXISTS (
 				SELECT 1
 				FROM media_files mf
@@ -2902,24 +2923,43 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 				  AND mf.episode_id = el.episode_id
 				  AND mf.missing_since IS NULL
 			  )
-		)
-		SELECT COUNT(*) FROM cleared
-	`, folderID, pathPrefix, pathPrefixLike(pathPrefix)).Scan(&cleared)
-	if err != nil {
-		return 0, fmt.Errorf("clearing media file content links by path prefix: %w", err)
+		`, folderID, oldEpisodeIDs); err != nil {
+			return 0, fmt.Errorf("deleting stale episode library links by path prefix: %w", err)
+		}
+		if err := catalog.RecomputeSeriesLatestEpisodeAdded(ctx, tx, affectedSeriesIDs); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit clearing media file content links transaction: %w", err)
 	}
 	return cleared, nil
 }
 
 // UpdateEpisodeLink sets the episode linkage fields on a media file.
 func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, episodeID string, seasonNum, episodeNum int) error {
-	_, err := r.pool.Exec(ctx, `
-		WITH previous AS (
-			SELECT media_folder_id, episode_id AS old_episode_id
-			FROM media_files
-			WHERE id = $4
-		),
-		updated AS (
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin episode link transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var folderID int
+	var oldEpisodeID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT media_folder_id, episode_id
+		FROM media_files
+		WHERE id = $1
+		FOR UPDATE
+	`, fileID).Scan(&folderID, &oldEpisodeID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("loading existing episode link: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		WITH updated AS (
 			UPDATE media_files
 			SET episode_id = $1,
 				season_number = $2,
@@ -2936,21 +2976,45 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 			  AND missing_since IS NULL
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 		)
-		DELETE FROM episode_libraries el
-		USING previous p
-		WHERE p.old_episode_id IS NOT NULL
-		  AND p.old_episode_id <> $1
-		  AND el.media_folder_id = p.media_folder_id
-		  AND el.episode_id = p.old_episode_id
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM media_files mf
-			WHERE mf.media_folder_id = el.media_folder_id
-			  AND mf.episode_id = el.episode_id
-			  AND mf.missing_since IS NULL
-		  )
-	`, episodeID, seasonNum, episodeNum, fileID)
-	return err
+		SELECT COUNT(*) FROM inserted
+	`, episodeID, seasonNum, episodeNum, fileID); err != nil {
+		return fmt.Errorf("updating episode link: %w", err)
+	}
+
+	affectedEpisodeIDs := []string{episodeID}
+	if oldEpisodeID != nil && *oldEpisodeID != episodeID {
+		affectedEpisodeIDs = append(affectedEpisodeIDs, *oldEpisodeID)
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM episode_libraries el
+			WHERE el.media_folder_id = $1
+			  AND el.episode_id = $2
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM media_files mf
+				WHERE mf.media_folder_id = el.media_folder_id
+				  AND mf.episode_id = el.episode_id
+				  AND mf.missing_since IS NULL
+			  )
+		`, folderID, *oldEpisodeID); err != nil {
+			return fmt.Errorf("deleting old episode library link: %w", err)
+		}
+	}
+
+	var affectedSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(DISTINCT series_id), ARRAY[]::text[])
+		FROM episodes
+		WHERE content_id = ANY($1::text[])
+	`, affectedEpisodeIDs).Scan(&affectedSeriesIDs); err != nil {
+		return fmt.Errorf("collecting affected episode series: %w", err)
+	}
+	if err := catalog.RecomputeSeriesLatestEpisodeAdded(ctx, tx, affectedSeriesIDs); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit episode link transaction: %w", err)
+	}
+	return nil
 }
 
 // BulkLinkEpisodesBySeries links all already-numbered files for a series to
@@ -2982,6 +3046,18 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 			FROM updated
 			GROUP BY episode_id, media_folder_id
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING first_seen_at
+		),
+		-- Bump the series' latest-episode-added denorm for genuinely new
+		-- links only ("Latest Episodes" sort, issue #202). All inserted
+		-- rows belong to $1, so no per-series grouping is needed.
+		bumped AS (
+			UPDATE media_items mi
+			SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+			FROM (SELECT MAX(first_seen_at) AS latest_added FROM inserted) sub
+			WHERE mi.content_id = $1
+			  AND mi.type = 'series'
+			  AND sub.latest_added IS NOT NULL
 		)
 		SELECT COUNT(*) FROM updated
 	`, seriesContentID).Scan(&linked)

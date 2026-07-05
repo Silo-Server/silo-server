@@ -46,7 +46,9 @@ type MediaStore interface {
 	GetAudiobooksByIDs(ctx context.Context, contentIDs []string, access catalog.AccessFilter) (map[string]*models.MediaItem, error)
 	// ListAudiobooks returns a page of audiobooks. When libraryID is non-zero
 	// it filters to items in that media_folder; 0 means all audiobook items.
-	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter) ([]*models.MediaItem, int, error)
+	// filter optionally pushes an authors/series/narrators predicate into the
+	// query (Filter{} for none) so per-author syncs avoid a full-library scan.
+	ListAudiobooks(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter, filter Filter) ([]*models.MediaItem, int, error)
 	GetMediaFiles(ctx context.Context, contentID string, access catalog.AccessFilter) ([]*models.MediaFile, error)
 	// GetMediaFileByID fetches a single media file by its integer PK.
 	// Used by the ABS file-streaming handler when a caller supplies a
@@ -67,12 +69,14 @@ type MediaStore interface {
 	// ListDiscover returns a randomized sampling of audiobooks for the
 	// Home tab's discover shelf (helps new users browse the library).
 	ListDiscover(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]*models.MediaItem, error)
-	// ListLibraryAuthors returns distinct authors of audiobooks in the
-	// library along with each author's book count.
-	ListLibraryAuthors(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]AuthorSummary, error)
-	// ListLibrarySeries returns distinct series (from audiobook_series)
-	// represented in the library, ordered by name.
-	ListLibrarySeries(ctx context.Context, libraryID int64, limit int, access catalog.AccessFilter) ([]SeriesSummary, error)
+	// ListLibraryAuthors returns one page of distinct audiobook authors (from a
+	// precomputed materialized view) plus the total author count. sortBy is one
+	// of "name" (default), "addedAt", or "numBooks"; limit<=0 returns all.
+	ListLibraryAuthors(ctx context.Context, libraryID int64, limit, offset int, sortBy string, sortDesc bool, access catalog.AccessFilter) ([]AuthorSummary, int, error)
+	// ListLibrarySeries returns one SQL-paginated page of distinct series (from
+	// audiobook_series) in the library plus the total series count. limit<=0
+	// returns all.
+	ListLibrarySeries(ctx context.Context, libraryID int64, limit, offset int, access catalog.AccessFilter) ([]SeriesSummary, int, error)
 	// GetAuthorByID returns the author with the given people.id plus
 	// their audiobook list, sorted by title. Returns ErrNotFound when
 	// no people row matches.
@@ -223,10 +227,16 @@ type Dependencies struct {
 	TokenStore     TokenStore
 	CredValidator  ProfileCredentialValidator
 	AccessResolver AccessResolver
-	Config         ConfigProvider
-	Publisher      EventPublisher // may be nil
-	Recommender    Recommender    // may be nil
-	LoginLimiter   *LoginLimiter  // may be nil — one is created if absent
+	// UsernameResolver returns the display username for an ABS principal
+	// (userID, profileID) without re-authenticating. Optional; GET /me falls
+	// back to the userID when this is nil or returns "". Login gets the
+	// display name from the credential validator, but /me only has the token
+	// claims, so it needs this to show the real username instead of the id.
+	UsernameResolver func(ctx context.Context, userID, profileID string) string
+	Config           ConfigProvider
+	Publisher        EventPublisher // may be nil
+	Recommender      Recommender    // may be nil
+	LoginLimiter     *LoginLimiter  // may be nil — one is created if absent
 	// InstallID returns the current plugin install ID for building
 	// host-proxy-routable URLs. Defaults to "silo.audiobooks" when nil.
 	InstallID func() string
@@ -329,13 +339,17 @@ func (h *Handler) mountRoutes(r chi.Router) {
 		r.Get(prefix+"/status", h.handleABSStatus)
 	}
 
-	// Stage 2: login (body credentials).
-	r.Post("/login", h.handleLogin)
-	r.Post("/abs/api/login", h.handleLogin)
-	// Token rotation — mobile clients call this every ~22h to avoid the
-	// 24h access-token interactive re-login trap.
-	r.Post("/auth/refresh", h.handleRefresh)
-	r.Post("/abs/api/auth/refresh", h.handleRefresh)
+	// Stage 2: login (body credentials). Real ABS serves /login at root, but
+	// clients differ on the prefix — some POST /api/login or /abs/api/login.
+	// The rest of the authenticated surface is mounted under both /api and
+	// /abs/api, so mount login+refresh under the same set; a client posting
+	// /api/login otherwise 404s and surfaces a generic "unknown error".
+	for _, prefix := range []string{"", "/api", "/abs/api"} {
+		r.Post(prefix+"/login", h.handleLogin)
+		// Token rotation — mobile clients call this every ~22h to avoid the
+		// 24h access-token interactive re-login trap.
+		r.Post(prefix+"/auth/refresh", h.handleRefresh)
+	}
 	// Logout is mounted OUTSIDE bearerAuth so an expired-access client can
 	// still sign out (the primary "sign out" UX moment). The handler parses
 	// the bearer locally, revokes the JTI if parseable, and always returns
@@ -414,10 +428,19 @@ func (h *Handler) mountRoutes(r chi.Router) {
 			// PATCH /me/progress/{id}/{episodeId} — podcast episode
 			// progress; audiobook-only catalog, so this is a stub.
 			r.Patch(prefix+"/me/progress/{libraryItemId}/{episodeId}", h.handleSetEpisodeProgress)
-			// PATCH /session/{sid}           — heartbeat: position + time_listening
+			// POST  /session/{sid}/sync      — real ABS heartbeat path
+			// (SessionController.sync). The official ABS mobile/web clients
+			// POST here; missing it means playback progress never syncs.
+			r.Post(prefix+"/session/{sid}/sync", h.handleSessionSync)
+			// PATCH /session/{sid}           — silo-native heartbeat alias
+			// (kept additive for silo's own clients).
 			r.Patch(prefix+"/session/{sid}", h.handleSessionSync)
 			// POST  /session/{sid}/close     — finalise the play session
 			r.Post(prefix+"/session/{sid}/close", h.handleSessionClose)
+			// POST  /session/local          — sync one offline-recorded session
+			r.Post(prefix+"/session/local", h.handleSyncLocalSession)
+			// POST  /session/local-all      — batch-sync offline-recorded sessions
+			r.Post(prefix+"/session/local-all", h.handleSyncLocalSessions)
 			// Bookmarks — POST/PATCH both upsert; DELETE is idempotent.
 			r.Post(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_created"))
 			r.Patch(prefix+"/me/item/{itemId}/bookmark", h.handleUpsertBookmark("bookmark_updated"))

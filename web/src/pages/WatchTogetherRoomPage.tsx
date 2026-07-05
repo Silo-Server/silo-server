@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   ChevronLeft,
   ChevronRight,
-  Link,
+  Link as LinkIcon,
+  LogOut,
   Play,
   Search,
   ShieldCheck,
@@ -15,10 +16,20 @@ import {
 import { ApiClientError } from "@/api/client";
 import { type BrowseItem } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import {
+  ConnectionStateLabel,
+  ConnectionStatusDot,
+} from "@/components/watchtogether/ConnectionStatusDot";
+import { EndWatchPartyDialog } from "@/components/watchtogether/EndWatchPartyDialog";
 import { fetchCatalogPage, createCatalogSearchState } from "@/hooks/queries/catalog";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useSeasons, useSeasonEpisodes } from "@/hooks/queries/episodes";
-import { buildWatchTogetherInviteUrl } from "@/lib/watchTogether";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import {
+  copyWatchTogetherInvite,
+  endWatchTogetherRoom,
+  setWatchTogetherGuestControl,
+} from "@/lib/watchTogetherActions";
 import { storage } from "@/utils/storage";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
@@ -28,6 +39,15 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { WatchTogetherSuggestionPanel } from "./WatchTogetherSuggestionPanel";
 
 function describeRoomError(error: unknown) {
+  if (error === "not_found") {
+    return "Room not found.";
+  }
+  if (error === "ended") {
+    return "That watch party is no longer active.";
+  }
+  if (error === "forbidden") {
+    return "You don't have access to this watch party.";
+  }
   if (error === "host_left" || error === "room_closed") {
     return "The room has ended.";
   }
@@ -296,20 +316,36 @@ function NowPlayingHero({
   );
 }
 
-/* ─── Connection status dot ─── */
-function StatusDot({ state }: { state: string }) {
-  const color =
-    state === "connected"
-      ? "bg-green-400"
-      : state === "connecting"
-        ? "bg-yellow-400 animate-pulse"
-        : "bg-red-400";
-  return <span className={`inline-block h-2 w-2 rounded-full ${color}`} />;
+/* ─── Terminal full-body state (room ended, missing token, …) ─── */
+function RoomTerminalState({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div
+      role="alert"
+      className="mx-auto flex w-full max-w-5xl flex-col items-center gap-3 px-6 py-24 text-center"
+    >
+      <div className="bg-surface flex size-16 items-center justify-center rounded-2xl border border-white/10">
+        <Users className="text-muted-foreground size-7" />
+      </div>
+      <h1 className="mt-2 text-xl font-semibold tracking-tight">{title}</h1>
+      <p className="text-muted-foreground max-w-sm text-sm">{description}</p>
+      <div className="mt-3 flex items-center gap-2">{children}</div>
+    </div>
+  );
 }
 
 export default function WatchTogetherRoomPage() {
+  useDocumentTitle("Watch Party");
   const { roomId } = useParams<{ roomId: string }>();
   const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const roomToken = searchParams.get("room_token");
   const playbackController = useWatchPlaybackController();
@@ -326,6 +362,8 @@ export default function WatchTogetherRoomPage() {
   const [candidate, setCandidate] = useState<BrowseItem | null>(null);
   const [candidateContext, setCandidateContext] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [ending, setEnding] = useState(false);
   const [searchStep, setSearchStep] = useState<SearchStep>({ stage: "results" });
   const lastAutoStartRevisionRef = useRef<number | null>(null);
   const suppressAutoStartSelectionRef = useRef(
@@ -407,28 +445,34 @@ export default function WatchTogetherRoomPage() {
     });
   }, [playbackController, roomConnection.room, roomId, roomToken]);
 
-  const inviteUrl = buildWatchTogetherInviteUrl(roomConnection.room?.invite_path);
+  const hasInvite = Boolean(roomConnection.room?.invite_path);
   const isHost = roomConnection.room?.self_can_manage_room === true;
   const isVoteMode = roomConnection.room?.selection_mode === "vote";
   const pendingAction: PendingAction = isVoteMode ? "suggest" : "select";
-  const roomError = !roomId || !roomToken ? "Room token is required." : roomConnection.closedReason;
 
   const handleCopyInvite = useCallback(async () => {
-    if (!inviteUrl) {
-      return;
-    }
-    await navigator.clipboard.writeText(inviteUrl);
-    toast.success(`Invite copied. Room code ${roomConnection.room?.code ?? ""}`.trim());
-  }, [inviteUrl, roomConnection.room?.code]);
+    await copyWatchTogetherInvite(roomConnection.room?.invite_path, roomConnection.room?.code);
+  }, [roomConnection.room?.code, roomConnection.room?.invite_path]);
 
   const handleTogglePolicy = useCallback(async () => {
     const room = roomConnection.room;
     if (!room) {
       return;
     }
-    await roomConnection.updatePolicy(
+    await setWatchTogetherGuestControl(
+      roomConnection.updatePolicy,
       room.guest_control_policy === "guest_play_pause" ? "host_only" : "guest_play_pause",
     );
+  }, [roomConnection]);
+
+  const handleEndRoom = useCallback(async () => {
+    setEnding(true);
+    try {
+      await endWatchTogetherRoom(roomConnection.closeRoom);
+    } finally {
+      setEnding(false);
+      setEndConfirmOpen(false);
+    }
   }, [roomConnection]);
 
   const handleConfirmCandidate = useCallback(async () => {
@@ -452,6 +496,8 @@ export default function WatchTogetherRoomPage() {
         await roomConnection.selectItem({
           content_id: candidate.content_id,
         });
+        setCandidate(null);
+        setCandidateContext(null);
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update room");
@@ -519,7 +565,29 @@ export default function WatchTogetherRoomPage() {
   }, []);
 
   if (!roomId || !roomToken) {
-    return <div className="mx-auto max-w-5xl px-6 py-10 text-sm">Room token is required.</div>;
+    return (
+      <RoomTerminalState
+        title="This invite link is incomplete"
+        description="The link is missing its access token, so the room can't be opened. Ask the host for a fresh invite, or join with a room code instead."
+      >
+        <Button type="button" onClick={() => navigate("/rooms/join")}>
+          Join with a code
+        </Button>
+      </RoomTerminalState>
+    );
+  }
+
+  if (roomConnection.closedReason) {
+    return (
+      <RoomTerminalState
+        title={describeRoomError(roomConnection.closedReason)}
+        description="Start a new watch party or join another room to keep watching together."
+      >
+        <Button type="button" onClick={() => navigate("/rooms/join")}>
+          Start a new party
+        </Button>
+      </RoomTerminalState>
+    );
   }
 
   const isPlaying = roomConnection.room?.phase === "playing";
@@ -538,40 +606,37 @@ export default function WatchTogetherRoomPage() {
               Watch Party
             </div>
             <div className="mt-0.5 text-lg font-semibold tracking-tight">
-              {roomConnection.room?.code ?? roomId}
+              {roomConnection.room?.code ?? "…"}
             </div>
           </div>
 
           <div className="bg-border hidden h-8 w-px sm:block" />
 
-          <div className="hidden items-center gap-4 sm:flex">
+          <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm">
               <Users className="text-muted-foreground size-3.5" />
               <span>{roomConnection.room?.member_count ?? 0}</span>
             </div>
             <div className="flex items-center gap-2 text-sm">
-              <StatusDot state={roomConnection.connectionState} />
-              <span className="text-muted-foreground">
-                {roomConnection.connectionState === "connected"
-                  ? "Connected"
-                  : roomConnection.connectionState === "connecting"
-                    ? "Connecting..."
-                    : "Disconnected"}
+              <ConnectionStatusDot state={roomConnection.connectionState} />
+              <span className="text-muted-foreground hidden sm:inline">
+                <ConnectionStateLabel state={roomConnection.connectionState} />
               </span>
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {inviteUrl ? (
+          {hasInvite ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => void handleCopyInvite()}
               className="gap-1.5"
+              aria-label="Copy invite link"
             >
-              <Link className="size-3.5" />
+              <LinkIcon className="size-3.5" />
               <span className="hidden sm:inline">Invite</span>
             </Button>
           ) : null}
@@ -595,19 +660,53 @@ export default function WatchTogetherRoomPage() {
                 type="button"
                 variant="destructive"
                 size="sm"
-                onClick={() => void roomConnection.closeRoom()}
+                onClick={() => setEndConfirmOpen(true)}
               >
                 End
               </Button>
             </>
           ) : null}
+          {roomConnection.room && !isHost ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => navigate("/rooms/join")}
+              className="gap-1.5"
+            >
+              <LogOut className="size-3.5" />
+              Leave
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {/* ─── Error state ─── */}
-      {roomError ? (
-        <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
-          {describeRoomError(roomError)}
+      {/* ─── Participants (optional additive server field) ─── */}
+      {roomConnection.room?.members?.length ? (
+        <div className="glass-subtle flex flex-wrap items-center gap-2 rounded-xl px-4 py-3 sm:px-5">
+          {roomConnection.room.members.map((member, index) => (
+            <div
+              key={`${member.profile_id}-${index}`}
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-sm"
+            >
+              <span
+                aria-hidden="true"
+                className={`inline-block h-1.5 w-1.5 rounded-full ${
+                  member.connected ? "bg-emerald-400" : "bg-white/25"
+                }`}
+              />
+              <span className="font-medium">
+                {member.display_name}
+                {member.is_self ? " (you)" : ""}
+              </span>
+              <span className="sr-only">{member.connected ? "Connected" : "Disconnected"}</span>
+              {member.is_host ? (
+                <span className="text-muted-foreground rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
+                  Host
+                </span>
+              ) : null}
+            </div>
+          ))}
         </div>
       ) : null}
 
@@ -649,6 +748,7 @@ export default function WatchTogetherRoomPage() {
               placeholder={
                 isVoteMode ? "Search to suggest something..." : "Search movies and series..."
               }
+              aria-label="Search movies and series"
               className="border-border bg-surface placeholder:text-muted-foreground h-12 w-full rounded-xl border py-3 pr-4 pl-11 text-sm shadow-sm transition-all duration-200 outline-none focus:border-white/30 focus:ring-1 focus:ring-white/10"
             />
             {query && (
@@ -658,6 +758,7 @@ export default function WatchTogetherRoomPage() {
                   setQuery("");
                   setSearchStep({ stage: "results" });
                 }}
+                aria-label="Clear search"
                 className="text-muted-foreground hover:text-foreground absolute top-1/2 right-4 -translate-y-1/2 transition-colors"
               >
                 <X className="size-4" />
@@ -882,6 +983,13 @@ export default function WatchTogetherRoomPage() {
           />
         </>
       ) : null}
+
+      <EndWatchPartyDialog
+        open={endConfirmOpen}
+        onOpenChange={setEndConfirmOpen}
+        onConfirm={() => void handleEndRoom()}
+        isPending={ending}
+      />
     </div>
   );
 }

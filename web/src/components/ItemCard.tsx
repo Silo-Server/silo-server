@@ -8,6 +8,7 @@ import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
+import { formatDate as formatPreferredDate } from "@/lib/datetime";
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -16,11 +17,7 @@ function formatDate(value?: string | null) {
     return null;
   }
   const date = new Date(DATE_ONLY_PATTERN.test(value) ? `${value}T00:00:00` : value);
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatPreferredDate(date, "medium") || null;
 }
 
 function formatRuntime(minutes?: number | null) {

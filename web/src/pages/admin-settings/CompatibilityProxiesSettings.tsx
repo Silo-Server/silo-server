@@ -26,6 +26,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
+import { formatDateTime } from "@/lib/datetime";
 
 const JELLYFIN_KEYS = [
   "jellyfin_compat.enabled",
@@ -59,7 +60,7 @@ function formatTimestamp(value?: string): string {
   if (!value) return "Unknown";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleString();
+  return formatDateTime(parsed);
 }
 
 function formatOperationPhase(value?: string): string {

@@ -22,6 +22,13 @@ type ContentService interface {
 	ListEpisodes(ctx context.Context, session *Session, seriesID string, seasonNumber int, libraryID *int) ([]upstreamEpisode, error)
 	ListEpisodesBySeasonID(ctx context.Context, session *Session, seasonID string, libraryID *int) ([]upstreamEpisode, error)
 	ListItemFilters(ctx context.Context, session *Session, params url.Values) (*upstreamItemFiltersResponse, error)
+	// EnrichSeriesUserData fills the aggregated Played/UnplayedItemCount rollup
+	// for series rows in a list response, in place. A series never has a progress
+	// row of its own, so this rollup is the only source of that state. Callers
+	// pass the same session as the request so the counts are scoped to the
+	// caller's profile. Rows that are not series, or that already carry UserData,
+	// are left untouched.
+	EnrichSeriesUserData(ctx context.Context, session *Session, items []upstreamListItem)
 }
 
 type SearchItemsOptions struct {

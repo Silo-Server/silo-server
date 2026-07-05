@@ -1,5 +1,7 @@
 import { CollectionSearchableSelect } from "@/components/CollectionSearchableSelect";
+import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { useAllUserCollections } from "@/hooks/queries/useAllUserCollections";
+import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import type { RecipeDefinition } from "@/lib/recipes";
 
 export interface RecipeParamFieldsProps {
@@ -14,6 +16,9 @@ export default function RecipeParamFields({ def, params, onChange }: RecipeParam
   }
   if (def.type === "continue_watching") {
     return <ContinueTypeParamField params={params} onChange={onChange} />;
+  }
+  if (def.type === "watchlist" || def.type === "favorites") {
+    return <PersonalListFilterFields params={params} onChange={onChange} />;
   }
   if (def.type === "seasonal_themed") {
     return <SeasonalParamField params={params} onChange={onChange} />;
@@ -110,6 +115,49 @@ export default function RecipeParamFields({ def, params, onChange }: RecipeParam
 interface ParamFieldProps {
   params: Record<string, unknown>;
   onChange: (next: Record<string, unknown>) => void;
+}
+
+// PersonalListFilterFields edits the optional filter_type / filter_library_ids
+// filters for watchlist and favorites sections, e.g. a "Movies watchlist" rail.
+function PersonalListFilterFields({ params, onChange }: ParamFieldProps) {
+  const { data: libraries } = useAvailableUserLibraries();
+  const filterType = typeof params.filter_type === "string" ? params.filter_type : "";
+  const libraryIds = Array.isArray(params.filter_library_ids)
+    ? params.filter_library_ids.filter((id): id is number => typeof id === "number")
+    : [];
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <label className="block">
+        <span className="mb-1 block text-xs text-white/70">Media type</span>
+        <select
+          value={filterType || "all"}
+          onChange={(e) =>
+            onChange({
+              ...params,
+              filter_type: e.target.value === "all" ? undefined : e.target.value,
+            })
+          }
+          className="w-full rounded border border-white/15 bg-white/5 px-3 py-2 text-sm"
+        >
+          <option value="all">All Media</option>
+          <option value="movie">Movies</option>
+          <option value="series">TV Shows</option>
+          <option value="audiobook">Audiobooks</option>
+        </select>
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs text-white/70">Libraries</span>
+        <LibraryMultiSelect
+          libraries={libraries ?? []}
+          value={libraryIds}
+          onChange={(next) =>
+            onChange({ ...params, filter_library_ids: next.length > 0 ? next : undefined })
+          }
+        />
+      </label>
+    </div>
+  );
 }
 
 function ContinueTypeParamField({ params, onChange }: ParamFieldProps) {

@@ -687,6 +687,26 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Re-fetch metadata when the library's metadata language changed, so
+	// existing items adopt the new language instead of keeping the one
+	// stamped at first match. Quick mode suffices: the refresh item lister
+	// includes complete-but-language-mismatched items.
+	if h.JobRepo != nil && !strings.EqualFold(strings.TrimSpace(oldFolder.MetadataLanguage), strings.TrimSpace(folder.MetadataLanguage)) {
+		job, jobErr := h.JobRepo.CreateLibraryRefresh(r.Context(), currentAdminUserID(r), adminjob.LibraryRefreshRequest{
+			LibraryID:   folder.ID,
+			LibraryName: folder.Name,
+			Mode:        adminjob.LibraryRefreshModeQuick,
+		}, "Queued metadata refresh after library language change")
+		if jobErr != nil {
+			var conflict *adminjob.ActiveJobConflictError
+			if !errors.As(jobErr, &conflict) {
+				slog.Warn("queue language-change metadata refresh failed", "library_id", folder.ID, "error", jobErr)
+			}
+		} else {
+			publishEventJob(r.Context(), h.EventsHub, "job.created", job)
+		}
+	}
+
 	// Rescan when paths have changed (folders added or removed).
 	if req.Paths != nil && !slices.Equal(oldFolder.Paths, *req.Paths) {
 		if h.ScanQueue != nil {
@@ -2495,10 +2515,15 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 		)`
 	}
 
+	// Manga chapters carry their series' match state; the chapter rows
+	// themselves stay 'pending' and are resolved through the manga series,
+	// so they must not surface as actionable unmatched items here.
+	mangaChapterGuard := ` AND ` + catalog.MangaChapterExclusionWhere("mi")
+
 	countSQL := `
 		SELECT COUNT(*)
 		FROM media_items mi
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')`
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + mangaChapterGuard
 	countSQL += filter
 
 	var total int
@@ -2521,10 +2546,10 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 			WHERE mil.content_id = mi.content_id
 			LIMIT 1
 		) lib ON true
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s%s
 		ORDER BY mi.title ASC, mi.content_id ASC
 		LIMIT $%d OFFSET $%d
-	`, filter, len(filterArgs)+1, len(filterArgs)+2)
+	`, mangaChapterGuard, filter, len(filterArgs)+1, len(filterArgs)+2)
 
 	rows, err := h.pool.Query(r.Context(), listSQL, listArgs...)
 	if err != nil {

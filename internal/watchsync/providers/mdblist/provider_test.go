@@ -314,3 +314,156 @@ func TestExportWatchlistSendsToWatchlistAdd(t *testing.T) {
 		t.Fatalf("expected shows array in body: %#v", gotBody)
 	}
 }
+
+func TestDoRetriesShortRateLimitInPlace(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"user_id": 7, "username": "retry"})
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	user, err := p.fetchUser(context.Background(), "key")
+	if err != nil {
+		t.Fatalf("fetch user after retry: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("got %d attempts, want 2", attempts)
+	}
+	if user.UserID != 7 {
+		t.Fatalf("unexpected user %#v", user)
+	}
+}
+
+func TestDoReturnsRateLimitedErrorWithoutRetryAfter(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	_, err := p.fetchUser(context.Background(), "key")
+	rle, ok := watchsync.AsRateLimited(err)
+	if !ok {
+		t.Fatalf("expected RateLimitedError, got %v", err)
+	}
+	if rle.Provider != "mdblist" {
+		t.Fatalf("got provider %q, want mdblist", rle.Provider)
+	}
+	// No Retry-After means burst limit and exhausted daily quota are
+	// indistinguishable, so the provider defers a full hour.
+	if rle.RetryAfter != defaultRetryAfter {
+		t.Fatalf("got retry-after %s, want %s", rle.RetryAfter, defaultRetryAfter)
+	}
+	if attempts != 1 {
+		t.Fatalf("got %d attempts, want 1 (no in-place retry for long waits)", attempts)
+	}
+}
+
+func TestDoReturnsRateLimitedErrorWithLongRetryAfter(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	_, err := p.fetchUser(context.Background(), "key")
+	rle, ok := watchsync.AsRateLimited(err)
+	if !ok {
+		t.Fatalf("expected RateLimitedError, got %v", err)
+	}
+	if rle.RetryAfter != time.Hour {
+		t.Fatalf("got retry-after %s, want 1h", rle.RetryAfter)
+	}
+}
+
+func TestDoReplaysBodyOnRateLimitRetry(t *testing.T) {
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		if len(bodies) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	err := p.do(context.Background(), http.MethodPost, "/watchlist/items/add", "key", strings.NewReader(`{"movies":[]}`), nil)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	if len(bodies) != 2 || bodies[0] != bodies[1] || bodies[0] != `{"movies":[]}` {
+		t.Fatalf("body not replayed identically: %#v", bodies)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, time.July, 5, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		value string
+		want  time.Duration
+	}{
+		{"", 0},
+		{"garbage", 0},
+		{"-5", 0},
+		{"7", 7 * time.Second},
+		{now.Add(90 * time.Second).Format(http.TimeFormat), 90 * time.Second},
+		{now.Add(-time.Minute).Format(http.TimeFormat), 0},
+	}
+	for _, tc := range cases {
+		if got := parseRetryAfter(tc.value, now); got != tc.want {
+			t.Fatalf("parseRetryAfter(%q) = %s, want %s", tc.value, got, tc.want)
+		}
+	}
+}
+
+func TestLimiterIsPerAPIKey(t *testing.T) {
+	p := NewProvider(nil, "")
+	first := p.limiter("a")
+	second := p.limiter("a")
+	if first != second {
+		t.Fatal("same key should reuse one limiter")
+	}
+	if other := p.limiter("b"); other == first {
+		t.Fatal("distinct keys should not share a limiter")
+	}
+}
+
+func TestDoFloorsRetryAfterWhenRetriesExhausted(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	_, err := p.fetchUser(context.Background(), "key")
+	rle, ok := watchsync.AsRateLimited(err)
+	if !ok {
+		t.Fatalf("expected RateLimitedError, got %v", err)
+	}
+	if attempts != maxRetryAttempts+1 {
+		t.Fatalf("got %d attempts, want %d", attempts, maxRetryAttempts+1)
+	}
+	// The short Retry-After hints proved untrustworthy, so the deferral must
+	// be floored rather than parroting the last 1s hint.
+	if rle.RetryAfter != defaultRetryAfter {
+		t.Fatalf("got retry-after %s, want floored %s", rle.RetryAfter, defaultRetryAfter)
+	}
+}

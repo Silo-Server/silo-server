@@ -150,6 +150,8 @@ func (s *stubContentService) ListItemFilters(context.Context, *Session, url.Valu
 	panic("unused")
 }
 
+func (s *stubContentService) EnrichSeriesUserData(context.Context, *Session, []upstreamListItem) {}
+
 func TestHandleGetUserData_UsesBatchResolveCall(t *testing.T) {
 	// HandleGetUserData should resolve favorite + progress in a single
 	// resolveUserStateForContentIDs call (one DB round-trip pair),

@@ -27,7 +27,10 @@ const (
 	activeSessionGrace = 45 * time.Second
 
 	// pausedSessionGrace is the staleness threshold for paused sessions.
-	pausedSessionGrace = 2 * time.Minute
+	// Must comfortably cover an intentional pause: reaping kills the
+	// transcode with no revival path (issue #243). Keep in sync with
+	// playback.DefaultPausedSessionGrace.
+	pausedSessionGrace = 30 * time.Minute
 
 	// cleanupInterval is how often the cleanup ticker fires.
 	cleanupInterval = 15 * time.Second

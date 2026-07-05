@@ -32,6 +32,15 @@ type StreamHandler struct {
 	EventsHub     *evt.Hub
 	AdminStore    PlaybackAdminStore
 	SessionSyncer PlaybackSessionSyncer
+	// TM is the shared transcode/reconstruct manager (same instance as the
+	// PlaybackHandler's). It lets a direct/remux stream rebuild its playback
+	// Session from the recipe card after a server restart instead of 404-ing.
+	// May be nil (tests / minimal setups) — reconstruct is then simply off.
+	TM *playback.TranscodeManager
+	// JWTSecret verifies the stream token carried on the serve URL (?st=), which
+	// is the reconstruction descriptor for direct/remux after a restart. Empty
+	// disables token-based reconstruct (tests / minimal setups).
+	JWTSecret string
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -54,6 +63,10 @@ func NewStreamHandler(sessionMgr SessionManagerInterface, fileResolver FilePathR
 	return &StreamHandler{
 		sessionMgr:   sessionMgr,
 		fileResolver: fileResolver,
+		// A bare manager (no recipe store) behaves as "no reconstruct" — plain
+		// GetSession + ownership — so HandleStream has a single code path. The
+		// router overwrites this with the shared manager to enable reconstruct.
+		TM: playback.NewTranscodeManager(),
 	}
 }
 
@@ -75,14 +88,22 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	setPlaybackSessionLogContext(r, sessionID)
 
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil {
+	// Look up the session, reconstructing it from the recipe card on a not-found
+	// miss (e.g. after a server restart) so a direct/remux stream resumes instead
+	// of 404-ing. The client re-supplies its position (HTTP Range for direct, the
+	// ?seek= query for remux), so no runtime beyond the Session needs rebuilding.
+	// Without a token (or signing secret) reconstruct is off, collapsing to a
+	// plain GetSession + ownership check.
+	card := streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	session, status := h.TM.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, userID, card)
+	switch status {
+	case playback.SessionMissing:
 		writePlaybackSessionNotFound(w)
 		return
-	}
-
-	// Verify session ownership.
-	if session.UserID != userID {
+	case playback.SessionLoadFailed:
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		return
+	case playback.SessionForbidden:
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return
 	}

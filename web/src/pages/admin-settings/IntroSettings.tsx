@@ -19,6 +19,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
+import { formatDateTime } from "@/lib/datetime";
 
 const INTRO_SETTING_KEYS = ["markers.mode", "markers.lazy_playback"];
 const INTEGER_INPUT_PATTERN = /^[+-]?\d+$/;
@@ -293,7 +294,7 @@ function formatTaskResult(task: TaskInfo | undefined) {
     if (parts.length > 0) return parts.join(", ");
   }
 
-  return new Date(result.completed_at).toLocaleString();
+  return formatDateTime(result.completed_at);
 }
 
 function TaskActionRow({

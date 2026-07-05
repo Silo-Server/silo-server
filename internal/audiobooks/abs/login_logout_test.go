@@ -2,6 +2,7 @@ package abs
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,7 +40,7 @@ func mintAndPersistAccess(t *testing.T, store *memTokenStore, cfg *staticConfig,
 	return access
 }
 
-func TestHandleLogout_RevokesJTIAndReturns204(t *testing.T) {
+func TestHandleLogout_RevokesJTIAndReturns200(t *testing.T) {
 	h, store, cfg := newLogoutTestHandler(t)
 	jti := "logout-test-jti"
 	access := mintAndPersistAccess(t, store, cfg, "1", jti)
@@ -50,8 +51,16 @@ func TestHandleLogout_RevokesJTIAndReturns204(t *testing.T) {
 	rec := httptest.NewRecorder()
 	h.handleLogout(rec, req)
 
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	// Real ABS logout body: { redirect_url: null } for local auth.
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if v, ok := body["redirect_url"]; !ok || v != nil {
+		t.Errorf("redirect_url = %v (present=%v), want null", v, ok)
 	}
 	tok, _ := store.GetTokenByJTI(context.Background(), jti)
 	if tok.RevokedAt == nil {
@@ -59,35 +68,35 @@ func TestHandleLogout_RevokesJTIAndReturns204(t *testing.T) {
 	}
 }
 
-// TestHandleLogout_NoBearer_204 covers the "client called sign-out with no
+// TestHandleLogout_NoBearer_200 covers the "client called sign-out with no
 // token" path — must still 204 (logout is idempotent / fire-and-forget).
-func TestHandleLogout_NoBearer_204(t *testing.T) {
+func TestHandleLogout_NoBearer_200(t *testing.T) {
 	h, _, _ := newLogoutTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	rec := httptest.NewRecorder()
 	h.handleLogout(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 }
 
-// TestHandleLogout_GarbageBearer_204 covers an unparseable token: must still
+// TestHandleLogout_GarbageBearer_200 covers an unparseable token: must still
 // 204 (we never want sign-out to error the client out).
-func TestHandleLogout_GarbageBearer_204(t *testing.T) {
+func TestHandleLogout_GarbageBearer_200(t *testing.T) {
 	h, _, _ := newLogoutTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	req.Header.Set("Authorization", "Bearer not.a.real.jwt")
 	rec := httptest.NewRecorder()
 	h.handleLogout(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 }
 
-// TestHandleLogout_WrongSignature_204 covers a token signed by a different
+// TestHandleLogout_WrongSignature_200 covers a token signed by a different
 // secret (attacker token, restored from backup, etc.): must 204 and NOT
 // revoke (signature mismatch means we can't trust the JTI claim).
-func TestHandleLogout_WrongSignature_204(t *testing.T) {
+func TestHandleLogout_WrongSignature_200(t *testing.T) {
 	h, store, _ := newLogoutTestHandler(t)
 	jti := "victim-jti"
 	_ = store.InsertToken(context.Background(), ABSToken{ID: jti, UserID: "victim", JTI: jti})
@@ -100,8 +109,8 @@ func TestHandleLogout_WrongSignature_204(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+bogus)
 	rec := httptest.NewRecorder()
 	h.handleLogout(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Errorf("status = %d, want 204", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
 	}
 	tok, _ := store.GetTokenByJTI(context.Background(), jti)
 	if tok.RevokedAt != nil {
@@ -121,8 +130,8 @@ func TestHandleLogout_IsIdempotent(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+access)
 		rec := httptest.NewRecorder()
 		h.handleLogout(rec, req)
-		if rec.Code != http.StatusNoContent {
-			t.Fatalf("iter %d: status = %d, want 204", i, rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("iter %d: status = %d, want 200", i, rec.Code)
 		}
 	}
 }

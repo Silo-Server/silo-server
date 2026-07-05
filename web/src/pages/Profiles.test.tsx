@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   navigate: vi.fn(),
   editorPin: "",
+  searchParams: new URLSearchParams(),
 }));
 
 vi.mock("react-router", async () => {
@@ -20,6 +21,7 @@ vi.mock("react-router", async () => {
   return {
     ...actual,
     useNavigate: () => mocks.navigate,
+    useSearchParams: () => [mocks.searchParams, vi.fn()],
   };
 });
 
@@ -152,6 +154,7 @@ describe("Profiles", () => {
     mocks.useAuth.mockReset();
     mocks.navigate.mockReset();
     mocks.editorPin = "";
+    mocks.searchParams = new URLSearchParams();
 
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile(), makeProfile({ id: "profile-2", name: "Guest" })],
@@ -244,6 +247,27 @@ describe("Profiles", () => {
     await click(findButton(container, "confirm-pin"));
 
     expect(selectProfile).toHaveBeenCalledWith(lockedProfile, "verified-token");
+    expect(mocks.navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("returns to the sanitized redirect target after selecting a profile", async () => {
+    mocks.searchParams = new URLSearchParams("redirect=%2Frooms%2Fabc%3Froom_token%3Dxyz");
+
+    await render(<Profiles />);
+
+    await click(findButton(container, "Main"));
+
+    expect(selectProfile).toHaveBeenCalled();
+    expect(mocks.navigate).toHaveBeenCalledWith("/rooms/abc?room_token=xyz");
+  });
+
+  it("ignores unsafe redirect targets when selecting a profile", async () => {
+    mocks.searchParams = new URLSearchParams("redirect=https%3A%2F%2Fevil.example");
+
+    await render(<Profiles />);
+
+    await click(findButton(container, "Main"));
+
     expect(mocks.navigate).toHaveBeenCalledWith("/");
   });
 });

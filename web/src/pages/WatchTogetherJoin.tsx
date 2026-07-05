@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { ApiClientError } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,23 @@ function describeJoinError(error: unknown) {
   return error instanceof Error ? error.message : "Failed to join room.";
 }
 
+const selectionModeOptions = [
+  {
+    value: "host_pick",
+    title: "Host Picks",
+    caption: "Host decides what to watch.",
+  },
+  {
+    value: "vote",
+    title: "Vote Together",
+    caption: "Everyone suggests and votes.",
+  },
+] as const satisfies ReadonlyArray<{
+  value: WatchTogetherSelectionMode;
+  title: string;
+  caption: string;
+}>;
+
 export default function WatchTogetherJoin() {
   useDocumentTitle("Watch Party");
   const navigate = useNavigate();
@@ -34,7 +51,34 @@ export default function WatchTogetherJoin() {
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const modeButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const hasInviteToken = token !== "";
+
+  const handleModeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      let nextIndex: number | null = null;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+        nextIndex = (index + 1) % selectionModeOptions.length;
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+        nextIndex = (index - 1 + selectionModeOptions.length) % selectionModeOptions.length;
+      } else if (event.key === "Home") {
+        nextIndex = 0;
+      } else if (event.key === "End") {
+        nextIndex = selectionModeOptions.length - 1;
+      }
+      if (nextIndex === null) {
+        return;
+      }
+      const nextOption = selectionModeOptions[nextIndex];
+      if (!nextOption) {
+        return;
+      }
+      event.preventDefault();
+      setSelectionMode(nextOption.value);
+      modeButtonRefs.current[nextIndex]?.focus();
+    },
+    [],
+  );
 
   const joinRoom = useCallback(
     async (input: { code?: string; join_token?: string }) => {
@@ -90,6 +134,25 @@ export default function WatchTogetherJoin() {
     [hasInviteToken],
   );
 
+  // While an invite token is being auto-joined (and hasn't failed yet), show a
+  // pending state instead of the full create/join form.
+  const autoJoinPending = hasInviteToken && !error;
+
+  if (autoJoinPending) {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-4 px-6 py-24 text-center">
+        <div
+          aria-hidden="true"
+          className="border-foreground/20 border-t-foreground h-8 w-8 animate-spin rounded-full border-2"
+        />
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{headline}</h1>
+        <p className="text-muted-foreground max-w-sm text-sm" role="status">
+          Hang tight — we're taking you into the room.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 px-6 py-10 sm:px-8">
       <div className="max-w-2xl">
@@ -99,7 +162,7 @@ export default function WatchTogetherJoin() {
         <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">{headline}</h1>
         <p className="text-muted-foreground mt-3 max-w-2xl text-sm leading-6">
           Start an empty room, invite people in, then choose what everyone watches from the lobby.
-          Invite links still open the same flow and take guests into the room automatically.
+          Got an invite link? Just open it — you'll join automatically.
         </p>
       </div>
 
@@ -135,7 +198,10 @@ export default function WatchTogetherJoin() {
       </div>
 
       {error ? (
-        <div className="rounded-[8px] border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <div
+          role="alert"
+          className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+        >
           {error}
         </div>
       ) : null}
@@ -151,40 +217,39 @@ export default function WatchTogetherJoin() {
             </div>
 
             <div>
-              <label className="text-sm font-medium">Selection mode</label>
-              <div className="mt-2 flex gap-2" role="radiogroup">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={selectionMode === "host_pick"}
-                  onClick={() => setSelectionMode("host_pick")}
-                  className={`flex-1 rounded-[8px] border px-3 py-2.5 text-left text-sm transition-colors ${
-                    selectionMode === "host_pick"
-                      ? "border-foreground/50 bg-accent font-medium"
-                      : "text-muted-foreground hover:bg-muted/60"
-                  }`}
-                >
-                  <div className="font-medium">Host Picks</div>
-                  <div className="text-muted-foreground mt-0.5 text-xs">
-                    Host decides what to watch.
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={selectionMode === "vote"}
-                  onClick={() => setSelectionMode("vote")}
-                  className={`flex-1 rounded-[8px] border px-3 py-2.5 text-left text-sm transition-colors ${
-                    selectionMode === "vote"
-                      ? "border-foreground/50 bg-accent font-medium"
-                      : "text-muted-foreground hover:bg-muted/60"
-                  }`}
-                >
-                  <div className="font-medium">Vote Together</div>
-                  <div className="text-muted-foreground mt-0.5 text-xs">
-                    Everyone suggests and votes.
-                  </div>
-                </button>
+              <label id="watch-selection-mode-label" className="text-sm font-medium">
+                Selection mode
+              </label>
+              <div
+                className="mt-2 flex gap-2"
+                role="radiogroup"
+                aria-labelledby="watch-selection-mode-label"
+              >
+                {selectionModeOptions.map((option, index) => {
+                  const selected = selectionMode === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      ref={(element) => {
+                        modeButtonRefs.current[index] = element;
+                      }}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      tabIndex={selected ? 0 : -1}
+                      onClick={() => setSelectionMode(option.value)}
+                      onKeyDown={(event) => handleModeKeyDown(event, index)}
+                      className={`flex-1 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                        selected
+                          ? "border-foreground/50 bg-accent font-medium"
+                          : "text-muted-foreground hover:bg-muted/60"
+                      }`}
+                    >
+                      <div className="font-medium">{option.title}</div>
+                      <div className="text-muted-foreground mt-0.5 text-xs">{option.caption}</div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -192,7 +257,7 @@ export default function WatchTogetherJoin() {
               type="button"
               onClick={() => void createRoom()}
               disabled={creating || joining}
-              className="h-11 rounded-[8px] px-5"
+              className="h-11 rounded-lg px-5"
             >
               {creating ? "Creating..." : "Create Watch Party"}
             </Button>
@@ -204,7 +269,7 @@ export default function WatchTogetherJoin() {
             <div>
               <h2 className="text-lg font-semibold">Join a room</h2>
               <p className="text-foreground/55 mt-1 text-sm leading-6">
-                Enter a room code or retry an invite link to enter the existing party.
+                Have a room code from the host? Enter it here to join their party.
               </p>
             </div>
 
@@ -235,7 +300,7 @@ export default function WatchTogetherJoin() {
               type="button"
               onClick={() => void joinRoom({ code: code.trim().toUpperCase() })}
               disabled={joining || creating || code.trim() === ""}
-              className="h-11 rounded-[8px] px-5"
+              className="h-11 rounded-lg px-5"
             >
               {joining ? "Joining..." : "Join Watch Party"}
             </Button>
@@ -246,7 +311,7 @@ export default function WatchTogetherJoin() {
                 variant="outline"
                 onClick={() => void joinRoom({ join_token: token })}
                 disabled={joining || creating}
-                className="h-11 rounded-[8px] px-5"
+                className="h-11 rounded-lg px-5"
               >
                 Retry Invite Link
               </Button>

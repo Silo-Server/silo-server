@@ -86,6 +86,10 @@ import {
   type DeviceProfileTabEntry,
 } from "@/components/admin/deviceOverrides";
 import { toast } from "sonner";
+import {
+  formatDate as formatPreferredDate,
+  formatDateTime as formatDateTimePreferred,
+} from "@/lib/datetime";
 
 export default function AdminUserDetail() {
   const { id } = useParams<{ id: string }>();
@@ -1182,15 +1186,11 @@ function formatDuration(seconds: number | null) {
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatPreferredDate(date, "medium");
 }
 
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatDateTimePreferred(date);
 }

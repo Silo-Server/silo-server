@@ -66,6 +66,7 @@ import {
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
+import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/datetime";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
@@ -75,17 +76,16 @@ type HistoryView = "scans" | "polls";
 
 function formatTime(value: string | undefined): string {
   if (!value) return "-";
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return formatTimePreferred(value, { hour: "2-digit" });
 }
 
 function formatTimestamp(value: string | undefined): string {
   if (!value) return "-";
-  return new Date(value).toLocaleString([], {
+  const day = new Date(value).toLocaleDateString(preferredDateLocale(), {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   });
+  return `${day}, ${formatTimePreferred(value, { hour: "2-digit" })}`;
 }
 
 function formatDuration(ms: number): string {

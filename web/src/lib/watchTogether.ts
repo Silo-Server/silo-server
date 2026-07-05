@@ -7,6 +7,15 @@ export type WatchTogetherPlaybackState = "idle" | "waiting" | "paused" | "playin
 export type WatchTogetherSelectionMode = "host_pick" | "vote";
 export type WatchTogetherTransportAction = "play" | "pause" | "seek";
 
+export interface WatchTogetherRoomMember {
+  user_id: number;
+  profile_id: string;
+  display_name: string;
+  is_host: boolean;
+  is_self: boolean;
+  connected: boolean;
+}
+
 export interface WatchTogetherRoomSnapshot {
   room_id: string;
   phase: WatchTogetherRoomPhase;
@@ -30,6 +39,8 @@ export interface WatchTogetherRoomSnapshot {
   self_ignore_wait: boolean;
   attached_session_id?: string;
   invite_path?: string;
+  /** Optional additive field; absent on older servers. Host is listed first. */
+  members?: WatchTogetherRoomMember[];
 }
 
 export interface WatchTogetherTransportCommand {

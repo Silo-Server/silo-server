@@ -26,6 +26,7 @@ import {
   providerLabel,
   staggerRowClass,
 } from "./subtitleAdminStyles";
+import { formatDate } from "@/lib/datetime";
 
 interface AdminSubtitlesTableProps {
   subtitles: AdminDownloadedSubtitle[];
@@ -46,7 +47,7 @@ function formatRelative(value: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 30) return `${days}d ago`;
-  return date.toLocaleDateString();
+  return formatDate(date);
 }
 
 export default function AdminSubtitlesTable({

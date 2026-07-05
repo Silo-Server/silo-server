@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Film, FileVideo, Users, Play } from "lucide-react";
 import type { AdminSession, AdminStats } from "@/api/types";
 import { getSessionClientLabel } from "@/pages/adminActivityPresentation";
+import { formatDateTime } from "@/lib/datetime";
 
 export default function AdminStats() {
   const statsQuery = useAdminStats();
@@ -125,9 +126,7 @@ function SessionsSection({
                   <TableCell>{s.media_file_id}</TableCell>
                   <TableCell>{s.play_method}</TableCell>
                   <TableCell>{getSessionClientLabel(s) || "—"}</TableCell>
-                  <TableCell className="text-xs">
-                    {new Date(s.started_at).toLocaleString()}
-                  </TableCell>
+                  <TableCell className="text-xs">{formatDateTime(s.started_at)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

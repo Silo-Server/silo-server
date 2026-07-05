@@ -1,3 +1,5 @@
+import { formatTime, preferredDateLocale } from "@/lib/datetime";
+
 interface UpcomingPresentationEvent {
   type: "movie" | "episode" | "season_premiere";
   air_date: string;
@@ -55,7 +57,7 @@ export function formatUpcomingSubtitle(event: UpcomingPresentationEvent): string
 }
 
 export function formatUpcomingDate(airDate: string): string {
-  return new Date(`${airDate}T00:00:00`).toLocaleDateString(undefined, {
+  return new Date(`${airDate}T00:00:00`).toLocaleDateString(preferredDateLocale(), {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -66,17 +68,11 @@ export function formatUpcomingTime(airTime?: string | null, airAt?: string | nul
   if (airAt) {
     const date = new Date(airAt);
     if (!Number.isNaN(date.getTime())) {
-      return date.toLocaleTimeString(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-      });
+      return formatTime(date);
     }
   }
   if (!airTime) {
     return null;
   }
-  return new Date(`2000-01-01T${airTime}`).toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatTime(new Date(`2000-01-01T${airTime}`));
 }

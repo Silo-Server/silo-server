@@ -44,6 +44,8 @@ import { formatRelativeTime } from "@/lib/date";
 type ChannelNotifyKey =
   | "notify_new_movies"
   | "notify_new_episodes"
+  | "notify_new_audiobooks"
+  | "notify_new_ebooks"
   | "notify_request_submitted"
   | "notify_request_approved"
   | "notify_request_declined"
@@ -61,6 +63,8 @@ const EVENT_SECTIONS: { label: string; fields: ChannelNotifyField[] }[] = [
     fields: [
       { key: "notify_new_movies", label: "New movies", defaultValue: true },
       { key: "notify_new_episodes", label: "New episodes", defaultValue: true },
+      { key: "notify_new_audiobooks", label: "New audiobooks", defaultValue: true },
+      { key: "notify_new_ebooks", label: "New ebooks", defaultValue: true },
     ],
   },
   {

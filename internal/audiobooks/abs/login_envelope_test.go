@@ -17,7 +17,7 @@ func TestLoginEnvelope_HasRequiredKeys(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(),"u1", "Display Name", "access.jwt", "refresh.jwt")
+	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", true)
 	body, err := json.Marshal(env)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -105,7 +105,7 @@ func TestLoginEnvelope_XReturnTokens_SurfacesOnUser(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 	req.Header.Set("x-return-tokens", "true")
 
-	env := h.loginEnvelope(req, time.Now(),"u1", "Display Name", "access.jwt", "refresh.jwt")
+	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", true)
 	user, ok := env["user"].(map[string]any)
 	if !ok {
 		t.Fatalf("user is not a map: %T", env["user"])
@@ -118,16 +118,21 @@ func TestLoginEnvelope_XReturnTokens_SurfacesOnUser(t *testing.T) {
 	}
 }
 
-// TestLoginEnvelope_NoXReturnTokens_OmitsFromUser is the inverse: without the
-// header, user object should NOT carry the duplicated tokens (top-level only).
-func TestLoginEnvelope_NoXReturnTokens_OmitsFromUser(t *testing.T) {
+// TestLoginEnvelope_NoXReturnTokens covers the default flow: real ABS ALWAYS
+// puts accessToken on the user object, and sets refreshToken to null when the
+// client did not opt into body delivery via x-return-tokens (the caller then
+// ships the refresh token as a cookie).
+func TestLoginEnvelope_NoXReturnTokens(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(),"u1", "Display Name", "access.jwt", "refresh.jwt")
+	env := h.loginEnvelope(req, time.Now(), "u1", "Display Name", "access.jwt", "refresh.jwt", false)
 	user, _ := env["user"].(map[string]any)
-	if _, present := user["accessToken"]; present {
-		t.Errorf("user.accessToken should not be set without x-return-tokens header")
+	if user["accessToken"] != "access.jwt" {
+		t.Errorf("user.accessToken = %v, want access.jwt (must always be present)", user["accessToken"])
+	}
+	if rt, present := user["refreshToken"]; !present || rt != nil {
+		t.Errorf("user.refreshToken = %v (present=%v), want nil without x-return-tokens", rt, present)
 	}
 }
 
@@ -138,10 +143,9 @@ func TestLoginEnvelope_DisplayNameFallsBackToUserID(t *testing.T) {
 	h, _, _ := newRefreshTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/login", nil)
 
-	env := h.loginEnvelope(req, time.Now(),"user-42", "", "a", "r")
+	env := h.loginEnvelope(req, time.Now(), "user-42", "", "a", "r", false)
 	user, _ := env["user"].(map[string]any)
 	if user["username"] != "user-42" {
 		t.Errorf("username = %v, want user-42 (fallback)", user["username"])
 	}
 }
-

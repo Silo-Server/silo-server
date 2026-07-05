@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAccessToken, getProfileToken } from "@/api/client";
+import { ApiClientError, getAccessToken, getProfileToken } from "@/api/client";
 import {
   closeWatchTogetherRoom,
   type CreateWatchTogetherSuggestionInput,
@@ -54,6 +54,26 @@ export interface WatchTogetherRoomConnectionResult {
 const reconnectDelays = [500, 1_000, 2_000, 5_000];
 const pingIntervalMs = 15_000;
 
+/**
+ * Maps a room-fetch failure to a terminal closed reason. Returns null for
+ * transient errors (network, 5xx) so the reconnect loop keeps retrying.
+ */
+function closedReasonFromRoomFetchError(error: unknown): string | null {
+  if (!(error instanceof ApiClientError)) {
+    return null;
+  }
+  switch (error.status) {
+    case 404:
+      return "not_found";
+    case 410:
+      return "ended";
+    case 403:
+      return "forbidden";
+    default:
+      return null;
+  }
+}
+
 function buildRoomWebSocketUrl(
   apiBaseUrl: string,
   roomId: string,
@@ -104,6 +124,13 @@ export function useWatchTogetherRoomConnection({
     closedReasonRef.current = closedReason;
   }, [closedReason]);
 
+  // Sets the ref synchronously (before the state commit) so the reconnect
+  // loop can never fire between setState and the ref-syncing effect above.
+  const markClosed = useCallback((reason: string) => {
+    closedReasonRef.current = reason;
+    setClosedReason(reason);
+  }, []);
+
   const sendRoomMessage = useCallback((message: Record<string, unknown>) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -140,7 +167,15 @@ export function useWatchTogetherRoomConnection({
         }
         setRoom(response.room);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        const reason = closedReasonFromRoomFetchError(error);
+        if (reason) {
+          markClosed(reason);
+        }
+      });
 
     void listWatchTogetherSuggestions(roomId, roomToken)
       .then((response) => {
@@ -155,7 +190,7 @@ export function useWatchTogetherRoomConnection({
       cancelled = true;
       window.clearTimeout(resetClosedReasonTimer);
     };
-  }, [roomId, roomToken]);
+  }, [markClosed, roomId, roomToken]);
 
   useEffect(() => {
     if (!roomId || !roomToken) {
@@ -259,7 +294,7 @@ export function useWatchTogetherRoomConnection({
           }
           case "room_closed":
             setRoom(null);
-            setClosedReason(typeof message.reason === "string" ? message.reason : "room_closed");
+            markClosed(typeof message.reason === "string" ? message.reason : "room_closed");
             socket.close();
             return;
           case "transport_command": {
@@ -289,10 +324,19 @@ export function useWatchTogetherRoomConnection({
               }
             }
             return;
-          default:
-            if (message.type === "error") {
+          case "error": {
+            // Defense in depth: some server paths report terminal conditions
+            // as an error message instead of (or before) room_closed.
+            if (message.code === "not_found" || message.code === "gone") {
+              setRoom(null);
+              markClosed(message.code === "gone" ? "ended" : "not_found");
+              socket.close();
+            } else {
               console.warn("[watch-together]", message.code ?? "error", message.message ?? "");
             }
+            return;
+          }
+          default:
         }
       });
 
@@ -332,7 +376,7 @@ export function useWatchTogetherRoomConnection({
         socket.close();
       }
     };
-  }, [roomId, roomToken]);
+  }, [markClosed, roomId, roomToken]);
 
   const updatePolicy = useCallback(
     async (policy: GuestControlPolicy) => {

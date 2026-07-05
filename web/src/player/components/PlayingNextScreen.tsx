@@ -7,6 +7,8 @@ import { useEffectiveSettings, useSetDeviceSetting } from "@/hooks/queries/setti
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
+import { preferredDateLocale } from "@/lib/datetime";
+import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 
 interface PlayingNextScreenProps {
   seriesId?: string;
@@ -32,6 +34,7 @@ export function PlayingNextScreen({
   onPlayItem,
   onClose,
 }: PlayingNextScreenProps) {
+  useDateTimeFormat();
   // -- Auto-play setting --
   const { profile } = useCurrentProfile();
   const { data: effectiveSettings } = useEffectiveSettings(profile?.id, [AUTOPLAY_SETTING_KEY]);
@@ -205,7 +208,7 @@ export function PlayingNextScreen({
                 <div className="flex items-center gap-2 text-[11px] text-white/40 sm:text-xs">
                   {nextEpisode.airDate && (
                     <span>
-                      {new Date(nextEpisode.airDate).toLocaleDateString(undefined, {
+                      {new Date(nextEpisode.airDate).toLocaleDateString(preferredDateLocale(), {
                         year: "numeric",
                         month: "long",
                         day: "numeric",

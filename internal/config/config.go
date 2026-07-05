@@ -246,6 +246,10 @@ type RecommendationsConfig struct {
 	TasteDecayHalfLifeDays float64 `yaml:"-"`
 	DiversityLambda        float64 `yaml:"-"`
 	CowatchCron            string  `yaml:"-"`
+	// EmbeddingsJobTimeout bounds a single embedding backfill run. A local
+	// CPU embedder over a large catalog needs hours, so this defaults to 24h
+	// (replacing a hardcoded 30m that truncated large first-run backfills).
+	EmbeddingsJobTimeout time.Duration `yaml:"-"`
 }
 
 // AIConfig holds the shared connection settings for Silo's AI features
@@ -326,6 +330,13 @@ type MetadataConfig struct {
 	CacheImages bool `yaml:"-"`
 }
 
+// ClientIPConfig holds client IP resolution settings.
+type ClientIPConfig struct {
+	// TrustedProxies is the comma-separated CIDR list of reverse proxies
+	// whose X-Forwarded-For headers are trusted ("" = built-in defaults).
+	TrustedProxies string `yaml:"-"`
+}
+
 // Config is the top-level configuration for Silo.
 type Config struct {
 	Server               ServerConfig               `yaml:"server"`
@@ -347,6 +358,7 @@ type Config struct {
 	MetadataAI           MetadataAIConfig           `yaml:"-"`
 	Download             DownloadConfig             `yaml:"-"`
 	Policy               PolicyConfig               `yaml:"-"`
+	ClientIP             ClientIPConfig             `yaml:"-"`
 	TMDBAPIKey           string                     `yaml:"-"`
 	MDBListAPIKey        string                     `yaml:"-"`
 }

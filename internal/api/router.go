@@ -524,6 +524,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			activeSearchProvider = catalog.SearchProviderMeilisearch
 		}
 		searchIndexEvents.WithActiveProvider(activeSearchProvider)
+		// Latch the provider for the package-level enqueue helpers used by
+		// metadata/scanner/etc. so they skip the per-call settings lookup.
+		catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 		itemRepo.WithSearchIndexEvents(searchIndexEvents)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
 		providerIDRepo = catalog.NewProviderIDRepository(deps.DB)
@@ -807,6 +810,13 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.SessionSyncer = deps.SessionSyncer
 		}
 		if streamHandler != nil {
+			// Share the playback handler's transcode/reconstruct manager so a
+			// direct/remux stream can rebuild its session from the token recipe
+			// after a restart (same manager, same SessionManager).
+			streamHandler.TM = playbackHandler.TranscodeManager()
+			if deps.Config != nil {
+				streamHandler.JWTSecret = deps.Config.Auth.JWTSecret
+			}
 			streamHandler.AdminStore = playbackAdminStore
 			streamHandler.EventsHub = deps.EventsHub
 			streamHandler.SessionSyncer = deps.SessionSyncer
@@ -875,9 +885,9 @@ func NewRouter(deps Dependencies) chi.Router {
 					watchtogether.NewRepository(deps.DB),
 					deps.SessionMgr,
 					deps.FileRepo,
-					playbackHandler.CommandDispatcher,
 					watchtogether.NewCatalogSelectionResolver(detailSvc),
 					watchtogether.NewSuggestionRepository(deps.DB),
+					watchtogether.NewProfileNameResolver(deps.UserStoreProvider),
 				),
 				viewerResolver,
 				roomTokenService,
@@ -3055,6 +3065,27 @@ type traktCollectionAdapter struct {
 
 func (a *traktCollectionAdapter) GetCollectionPreset(ctx context.Context, preset, mediaType string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
 	results, err := a.client.GetCollectionPreset(ctx, preset, mediaType, limit, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]catalog.TraktCollectionEntry, len(results))
+	for i, r := range results {
+		entries[i] = catalog.TraktCollectionEntry{
+			TraktID:   r.TraktID,
+			TMDBID:    r.TMDBID,
+			TVDBID:    r.TVDBID,
+			IMDbID:    r.IMDbID,
+			MediaType: r.MediaType,
+			Title:     r.Title,
+			Year:      r.Year,
+			Rank:      r.Rank,
+		}
+	}
+	return entries, nil
+}
+
+func (a *traktCollectionAdapter) GetUserList(ctx context.Context, user, list string, limit int, accessToken string) ([]catalog.TraktCollectionEntry, error) {
+	results, err := a.client.GetUserList(ctx, user, list, limit, accessToken)
 	if err != nil {
 		return nil, err
 	}

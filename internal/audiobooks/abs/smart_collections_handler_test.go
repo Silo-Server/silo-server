@@ -110,7 +110,7 @@ type itemListStubMediaStore struct {
 	items []*models.MediaItem
 }
 
-func (s *itemListStubMediaStore) ListAudiobooks(_ context.Context, _ int64, _, _ int, _ catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+func (s *itemListStubMediaStore) ListAudiobooks(_ context.Context, _ int64, _, _ int, _ catalog.AccessFilter, _ Filter) ([]*models.MediaItem, int, error) {
 	return s.items, len(s.items), nil
 }
 

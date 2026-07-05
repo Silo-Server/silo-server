@@ -15,6 +15,7 @@ import {
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import type { TaskCategory, TaskInfo, TriggerConfig } from "@/api/types";
+import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 
 const CATEGORY_ORDER: TaskCategory[] = ["library", "metadata", "system"];
 const RUN_BUTTON_MIN_VISIBLE_MS = 1_000;
@@ -144,7 +145,7 @@ function formatNextRun(dateStr: string, now: number): string {
 
 function formatDateTime(dateStr?: string | null): string {
   if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleString();
+  return formatPreferredDateTime(dateStr);
 }
 
 function delay(ms: number) {

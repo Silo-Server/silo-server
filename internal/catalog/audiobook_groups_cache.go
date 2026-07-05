@@ -3,8 +3,6 @@ package catalog
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -97,9 +95,11 @@ func sliceGroups(groups []AudiobookGroup, offset, limit int) []AudiobookGroup {
 	return groups[offset:end]
 }
 
-// audiobookGroupsCacheKey identifies a cached full list. It includes every
-// AccessFilter field that changes the rows or the per-profile progress counts
-// so two viewers (or two access scopes) never share an entry.
+// audiobookGroupsCacheKey identifies a cached full list. The cached value
+// embeds per-profile progress counts, so the key adds UserID/ProfileID on top
+// of the shared access-scope component (WriteAccessScopeCacheKey), which
+// serializes every row-visibility boundary and keeps this cache in sync with
+// the other access-scoped caches when AccessFilter grows.
 func audiobookGroupsCacheKey(q AudiobookGroupsQuery, filter AccessFilter) string {
 	sortKey := strings.ToLower(strings.TrimSpace(q.Sort))
 	if sortKey == "" {
@@ -107,36 +107,7 @@ func audiobookGroupsCacheKey(q AudiobookGroupsQuery, filter AccessFilter) string
 	}
 	searchKey := strings.ToLower(strings.TrimSpace(q.SearchPrefix))
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d|%s|%s|q=%s|u=%d|p=%s|cr=%s", q.LibraryID, q.GroupBy, sortKey, searchKey, filter.UserID, filter.ProfileID, filter.MaxContentRating)
-	b.WriteString("|allow=")
-	b.WriteString(joinSortedInts(filter.AllowedLibraryIDs))
-	b.WriteString("|deny=")
-	b.WriteString(joinSortedInts(filter.DisabledLibraryIDs))
-	b.WriteString("|cids=")
-	b.WriteString(strings.Join(sortedCopy(filter.AllowedContentIDs), ","))
-	b.WriteString("|excluded_types=")
-	b.WriteString(strings.Join(sortedCopy(filter.ExcludedMediaTypes), ","))
+	fmt.Fprintf(&b, "%d|%s|%s|q=%s|u=%d|p=%s", q.LibraryID, q.GroupBy, sortKey, searchKey, filter.UserID, filter.ProfileID)
+	filter.WriteAccessScopeCacheKey(&b)
 	return b.String()
-}
-
-func joinSortedInts(values []int) string {
-	if len(values) == 0 {
-		return ""
-	}
-	cp := append([]int(nil), values...)
-	sort.Ints(cp)
-	parts := make([]string, len(cp))
-	for i, v := range cp {
-		parts[i] = strconv.Itoa(v)
-	}
-	return strings.Join(parts, ",")
-}
-
-func sortedCopy(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	cp := append([]string(nil), values...)
-	sort.Strings(cp)
-	return cp
 }

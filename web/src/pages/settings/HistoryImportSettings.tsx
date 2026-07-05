@@ -38,6 +38,7 @@ import {
 } from "./HistoryImportSettings.utils";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, CheckCircle2, CircleSlash2, Clock, Loader2, XCircle } from "lucide-react";
+import { formatDate } from "@/lib/datetime";
 
 const STATUS_CONFIG = {
   queued: {
@@ -102,6 +103,7 @@ export default function HistoryImportSettings() {
 
   // Plex state
   const [plexServers, setPlexServers] = useState<BrowserPlexServer[]>([]);
+  const [plexAccountToken, setPlexAccountToken] = useState("");
   const [plexServerId, setPlexServerId] = useState("");
   const [plexSavedSourceId, setPlexSavedSourceId] = useState("");
   const [plexToken, setPlexToken] = useState("");
@@ -169,16 +171,21 @@ export default function HistoryImportSettings() {
 
     void (async () => {
       try {
-        const servers = await completePlexAuthentication(pinID, returnedPlexPinCode);
+        const { accountToken, servers } = await completePlexAuthentication(
+          pinID,
+          returnedPlexPinCode,
+        );
         if (cancelled) {
           return;
         }
+        setPlexAccountToken(accountToken);
         setPlexServers(servers);
         setPlexServerId(servers[0]?.clientIdentifier ?? "");
       } catch (error) {
         if (cancelled) {
           return;
         }
+        setPlexAccountToken("");
         setPlexServers([]);
         setPlexServerId("");
         setPlexAuthError(error instanceof Error ? error.message : "Failed to finish Plex sign-in");
@@ -255,6 +262,7 @@ export default function HistoryImportSettings() {
           source: "plex",
           plex_base_url: selectedPlexOAuthServerURL,
           plex_token: selectedPlexOAuthServer.accessToken,
+          plex_account_token: plexAccountToken || undefined,
         });
         setActiveRunId(run.id);
       } else if (plexMode === "saved" && selectedPlexSavedSource) {
@@ -840,6 +848,7 @@ function RunSummary({ run }: { run: HistoryImportRun | null }) {
         <MetricCard label="Unmatched" value={run.unmatched} accent="warning" />
         <MetricCard label="Progress" value={run.progress_updated} accent="positive" />
         <MetricCard label="History" value={run.history_created} accent="positive" />
+        <MetricCard label="Watchlist" value={run.watchlist_added} accent="positive" />
         <MetricCard label="Skipped" value={run.skipped} />
       </div>
 
@@ -986,7 +995,7 @@ function formatRelativeTime(dateStr: string): string {
   if (minutes < 60) return `${minutes}m ago`;
   if (hours < 24) return `${hours}h ago`;
   if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
+  return formatDate(dateStr);
 }
 
 function formatDuration(startStr: string, endStr: string): string {

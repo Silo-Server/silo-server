@@ -169,15 +169,22 @@ export async function listPlexResources(token: string): Promise<BrowserPlexServe
     });
 }
 
+export interface PlexAuthenticationResult {
+  /** The plex.tv account token; needed for account-level APIs like the watchlist. */
+  accountToken: string;
+  servers: BrowserPlexServer[];
+}
+
 export async function completePlexAuthentication(
   pinID: number,
   pinCode: string,
-): Promise<BrowserPlexServer[]> {
+): Promise<PlexAuthenticationResult> {
   const authToken = await checkPlexPin(pinID, pinCode);
   if (!authToken) {
     throw new Error("Plex sign-in was not completed. Please try again.");
   }
-  return listPlexResources(authToken);
+  const servers = await listPlexResources(authToken);
+  return { accountToken: authToken, servers };
 }
 
 export function getPreferredPlexServerURL(server: BrowserPlexServer): string {

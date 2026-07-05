@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/table";
 import type { AuditLogEntry, OperationalLogEntry } from "@/api/types";
 import { useAdminLogStream } from "@/hooks/admin/useAdminLogStream";
+import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 
 export default function AdminLogs() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -363,6 +365,7 @@ const OperationalLogRow = memo(function OperationalLogRow({
   highlight?: boolean;
   onSelectEntry: (entry: OperationalLogEntry) => void;
 }) {
+  useDateTimeFormat();
   return (
     <TableRow
       className={`cursor-pointer ${highlight ? "bg-primary/5" : ""}`}
@@ -383,6 +386,7 @@ const OperationalLogRow = memo(function OperationalLogRow({
 });
 
 const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry }) {
+  useDateTimeFormat();
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap">{formatDateTime(entry.timestamp)}</TableCell>
@@ -503,7 +507,7 @@ function shortID(value: string) {
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatPreferredDateTime(date);
 }
 
 function formatConnectionState(state: "connecting" | "live" | "disconnected") {
