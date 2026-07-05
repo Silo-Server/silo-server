@@ -442,3 +442,28 @@ func TestLimiterIsPerAPIKey(t *testing.T) {
 		t.Fatal("distinct keys should not share a limiter")
 	}
 }
+
+func TestDoFloorsRetryAfterWhenRetriesExhausted(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	p := NewProvider(server.Client(), server.URL)
+	_, err := p.fetchUser(context.Background(), "key")
+	rle, ok := watchsync.AsRateLimited(err)
+	if !ok {
+		t.Fatalf("expected RateLimitedError, got %v", err)
+	}
+	if attempts != maxRetryAttempts+1 {
+		t.Fatalf("got %d attempts, want %d", attempts, maxRetryAttempts+1)
+	}
+	// The short Retry-After hints proved untrustworthy, so the deferral must
+	// be floored rather than parroting the last 1s hint.
+	if rle.RetryAfter != defaultRetryAfter {
+		t.Fatalf("got retry-after %s, want floored %s", rle.RetryAfter, defaultRetryAfter)
+	}
+}

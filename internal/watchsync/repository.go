@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,7 @@ type Repository interface {
 	GetConnectionByID(ctx context.Context, id string) (Connection, bool, error)
 	DeleteConnection(ctx context.Context, provider string, userID int, profileID string) error
 	ListConnectionsDueForSync(ctx context.Context, now time.Time) ([]Connection, error)
+	DeferConnectionsForAccount(ctx context.Context, provider, providerAccountID string, until time.Time, lastError string) (int, error)
 	CreateSyncRun(ctx context.Context, run SyncRun) (SyncRun, error)
 	CompleteSyncRun(ctx context.Context, run SyncRun) (SyncRun, error)
 	GetLatestSyncRun(ctx context.Context, connectionID string) (SyncRun, bool, error)
@@ -369,6 +371,31 @@ func (r *PostgresRepository) ListConnectionsDueForSync(
 	return conns, nil
 }
 
+// DeferConnectionsForAccount stamps rate_limited_until on every connection
+// bound to the same provider account. Provider rate limits apply to the API
+// key/account, not the Silo profile, so all sibling connections must sit out
+// the same window.
+func (r *PostgresRepository) DeferConnectionsForAccount(
+	ctx context.Context,
+	provider string,
+	providerAccountID string,
+	until time.Time,
+	lastError string,
+) (int, error) {
+	if strings.TrimSpace(providerAccountID) == "" {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_connections
+		SET rate_limited_until = $1, last_error = $2, updated_at = now()
+		WHERE provider = $3 AND provider_account_id = $4
+	`, until, lastError, provider, providerAccountID)
+	if err != nil {
+		return 0, fmt.Errorf("defer watch provider connections for account: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 func (r *PostgresRepository) CreateSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
 	if run.Status == "" {
 		run.Status = string(SyncRunStatusRunning)
@@ -534,6 +561,7 @@ func (r *PostgresRepository) ListLocalWatchEventConnections(
 		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE user_id = $1 AND profile_id = $2 AND `+predicate+`
+			AND (rate_limited_until IS NULL OR rate_limited_until <= now())
 		ORDER BY provider
 	`, userID, profileID)
 	if err != nil {
@@ -571,6 +599,7 @@ func (r *PostgresRepository) ListListEventConnections(
 		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE user_id = $1 AND profile_id = $2 AND `+column+` = true
+			AND (rate_limited_until IS NULL OR rate_limited_until <= now())
 		ORDER BY provider
 	`, userID, profileID)
 	if err != nil {
@@ -873,6 +902,7 @@ func (r *PostgresRepository) ListScrobbleConnections(ctx context.Context, userID
 		SELECT `+connectionColumns+`
 		FROM watch_provider_connections
 		WHERE user_id = $1 AND profile_id = $2 AND scrobble_enabled = true
+			AND (rate_limited_until IS NULL OR rate_limited_until <= now())
 		ORDER BY provider
 	`, userID, profileID)
 	if err != nil {

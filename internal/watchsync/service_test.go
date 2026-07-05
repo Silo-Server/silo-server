@@ -17,6 +17,7 @@ import (
 
 type serviceFakeRepo struct {
 	connections         map[string]Connection
+	dueConnections      []Connection
 	sessions            map[string]DeviceAuthSession
 	settings            map[string]string
 	syncRuns            []SyncRun
@@ -95,6 +96,30 @@ func (r *serviceFakeRepo) GetConnection(
 	return cloneConnectionForTest(conn), ok, nil
 }
 
+func (r *serviceFakeRepo) DeferConnectionsForAccount(
+	_ context.Context,
+	provider string,
+	providerAccountID string,
+	until time.Time,
+	lastError string,
+) (int, error) {
+	if providerAccountID == "" {
+		return 0, nil
+	}
+	deferred := 0
+	for key, conn := range r.connections {
+		if conn.Provider != provider || conn.ProviderAccountID != providerAccountID {
+			continue
+		}
+		untilCopy := until
+		conn.RateLimitedUntil = &untilCopy
+		conn.LastError = lastError
+		r.connections[key] = conn
+		deferred++
+	}
+	return deferred, nil
+}
+
 func (r *serviceFakeRepo) GetConnectionByID(_ context.Context, id string) (Connection, bool, error) {
 	for _, conn := range r.connections {
 		if conn.ID == id {
@@ -123,7 +148,11 @@ func (r *serviceFakeRepo) ListConnectionsDueForSync(
 	_ context.Context,
 	_ time.Time,
 ) ([]Connection, error) {
-	return nil, nil
+	out := make([]Connection, 0, len(r.dueConnections))
+	for _, conn := range r.dueConnections {
+		out = append(out, cloneConnectionForTest(conn))
+	}
+	return out, nil
 }
 
 func (r *serviceFakeRepo) CreateSyncRun(_ context.Context, run SyncRun) (SyncRun, error) {
@@ -2044,6 +2073,7 @@ func TestHistorySourceForProviderDefaultsAndUsesProviderSource(t *testing.T) {
 // progress flow was still attempted afterwards.
 type rateLimitedImporterStub struct {
 	progressCalled *bool
+	fetchCalls     *int
 }
 
 func (p rateLimitedImporterStub) Key() string         { return "trakt" }
@@ -2053,6 +2083,9 @@ func (p rateLimitedImporterStub) Capabilities() Capabilities {
 }
 
 func (p rateLimitedImporterStub) FetchWatched(context.Context, ServerConfig, Connection) ([]RemoteWatch, error) {
+	if p.fetchCalls != nil {
+		*p.fetchCalls++
+	}
 	return nil, RateLimitedError{Provider: "trakt", RetryAfter: 30 * time.Minute}
 }
 
@@ -2179,5 +2212,67 @@ func TestServiceSyncConnectionLeavesExportsPendingOnRateLimit(t *testing.T) {
 	updated := repo.connections[connectionKey("trakt", 7, "profile-1")]
 	if updated.RateLimitedUntil == nil {
 		t.Fatal("RateLimitedUntil not set after rate-limited export")
+	}
+}
+
+func TestSyncDueConnectionsSkipsSiblingsOfRateLimitedAccount(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	repo := newServiceFakeRepo()
+	fetchCalls := 0
+	progressCalled := false
+	provider := rateLimitedImporterStub{progressCalled: &progressCalled, fetchCalls: &fetchCalls}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	now := time.Date(2026, 7, 5, 12, 0, 0, 0, time.UTC)
+	service := NewService(repo, reg).
+		WithMatcher(matchedMatcherStub{mediaItemID: "movie-1"}).
+		WithWatchState(noOpWatchState{}).
+		WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
+	service.now = func() time.Time { return now }
+
+	// Two household profiles share one MDBList-style API key (same provider
+	// account); the second must not sync after the first exhausts the quota.
+	first := Connection{
+		ID:                   "conn-1",
+		Provider:             "trakt",
+		UserID:               7,
+		ProfileID:            "profile-1",
+		ProviderAccountID:    "acct-1",
+		AccessToken:          "access",
+		ImportWatchedEnabled: true,
+	}
+	second := Connection{
+		ID:                   "conn-2",
+		Provider:             "trakt",
+		UserID:               7,
+		ProfileID:            "profile-2",
+		ProviderAccountID:    "acct-1",
+		AccessToken:          "access",
+		ImportWatchedEnabled: true,
+	}
+	repo.connections[connectionKey("trakt", 7, "profile-1")] = first
+	repo.connections[connectionKey("trakt", 7, "profile-2")] = second
+	repo.dueConnections = []Connection{first, second}
+
+	if err := service.SyncDueConnections(context.Background()); err != nil {
+		t.Fatalf("SyncDueConnections: %v", err)
+	}
+	if fetchCalls != 1 {
+		t.Fatalf("fetch calls = %d, want 1 (sibling connection must be skipped)", fetchCalls)
+	}
+	sibling := repo.connections[connectionKey("trakt", 7, "profile-2")]
+	wantUntil := now.Add(30 * time.Minute)
+	if sibling.RateLimitedUntil == nil || !sibling.RateLimitedUntil.Equal(wantUntil) {
+		t.Fatalf("sibling RateLimitedUntil = %v, want %v", sibling.RateLimitedUntil, wantUntil)
 	}
 }

@@ -496,6 +496,12 @@ func (p *Provider) do(ctx context.Context, method string, path string, apiKey st
 			retryAfter = defaultRetryAfter
 		}
 		if attempt >= maxRetryAttempts || retryAfter > maxInPlaceRetryWait {
+			// Exhausted in-place retries mean the short Retry-After hints were
+			// not trustworthy; floor the deferral so the sync doesn't come
+			// straight back into the same limit.
+			if attempt >= maxRetryAttempts && retryAfter < defaultRetryAfter {
+				retryAfter = defaultRetryAfter
+			}
 			return watchsync.RateLimitedError{Provider: p.Key(), RetryAfter: retryAfter}
 		}
 		select {

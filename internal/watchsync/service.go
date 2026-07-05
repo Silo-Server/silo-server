@@ -578,6 +578,15 @@ func (s *Service) SyncDueConnections(ctx context.Context) error {
 		return fmt.Errorf("list due watch provider connections: %w", err)
 	}
 	for _, conn := range conns {
+		// Re-read each connection before syncing: an earlier connection in
+		// this batch may have rate-limited the shared provider account and
+		// deferred its siblings after the snapshot was taken.
+		if current, ok, err := s.repo.GetConnectionByID(ctx, conn.ID); err == nil && ok {
+			conn = current
+		}
+		if conn.RateLimitedUntil != nil && conn.RateLimitedUntil.After(s.now()) {
+			continue
+		}
 		if err := s.SyncConnection(ctx, conn, "scheduled"); err != nil {
 			slog.Warn("watch provider connection sync failed", "provider", conn.Provider, "user_id", conn.UserID, "profile_id", conn.ProfileID, "error", err)
 		}
@@ -809,8 +818,10 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 
 // deferRateLimitedConnection records when the provider's rate limit is
 // expected to clear so scheduled syncs skip the connection until then. The
-// pending export/removal rows are left untouched and picked up by the first
-// run after the deferral expires.
+// provider limit applies to the API key/account rather than the Silo profile,
+// so the deferral is stamped on every connection bound to the same provider
+// account. The pending export/removal rows are left untouched and picked up
+// by the first run after the deferral expires.
 func (s *Service) deferRateLimitedConnection(ctx context.Context, conn Connection, rle RateLimitedError) error {
 	fresh, err := s.reloadConnection(ctx, conn)
 	if err != nil {
@@ -821,13 +832,23 @@ func (s *Service) deferRateLimitedConnection(ctx context.Context, conn Connectio
 		retryAfter = time.Hour
 	}
 	until := s.now().Add(retryAfter)
-	fresh.RateLimitedUntil = &until
-	fresh.LastError = fmt.Sprintf("%s; sync deferred until %s", rle.Error(), until.Format(time.RFC3339))
-	if _, err := s.repo.UpsertConnection(ctx, fresh); err != nil {
-		return err
+	lastError := fmt.Sprintf("%s; sync deferred until %s", rle.Error(), until.Format(time.RFC3339))
+	deferred := 1
+	if strings.TrimSpace(fresh.ProviderAccountID) != "" {
+		deferred, err = s.repo.DeferConnectionsForAccount(ctx, fresh.Provider, fresh.ProviderAccountID, until, lastError)
+		if err != nil {
+			return err
+		}
+	} else {
+		fresh.RateLimitedUntil = &until
+		fresh.LastError = lastError
+		if _, err := s.repo.UpsertConnection(ctx, fresh); err != nil {
+			return err
+		}
 	}
 	slog.Info("watch provider sync deferred by rate limit",
-		"provider", conn.Provider, "user_id", conn.UserID, "profile_id", conn.ProfileID, "until", until)
+		"provider", conn.Provider, "user_id", conn.UserID, "profile_id", conn.ProfileID,
+		"until", until, "connections_deferred", deferred)
 	return nil
 }
 
