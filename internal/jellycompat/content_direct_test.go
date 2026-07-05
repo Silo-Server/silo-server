@@ -114,7 +114,7 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 		},
 	}
 
-	presignCompatListItems(detailSvc, context.Background(), items)
+	presignCompatListItems(context.Background(), detailSvc, items)
 
 	if resolver.singleCalls != 0 {
 		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)

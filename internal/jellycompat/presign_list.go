@@ -13,7 +13,7 @@ import (
 // rail costs four resolver invocations instead of 4×40. This is the single
 // shared implementation for both directContentService and ItemsHandler; do not
 // reintroduce a per-item presign body.
-func presignCompatListItems(detailSvc *catalog.DetailService, ctx context.Context, items []upstreamListItem) {
+func presignCompatListItems(ctx context.Context, detailSvc *catalog.DetailService, items []upstreamListItem) {
 	if len(items) == 0 {
 		return
 	}

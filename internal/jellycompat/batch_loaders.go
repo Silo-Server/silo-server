@@ -106,7 +106,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 	for _, item := range items {
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
-	presignCompatListItems(h.detailSvc, ctx, listItems)
+	presignCompatListItems(ctx, h.detailSvc, listItems)
 	result := make(map[string]upstreamListItem, len(listItems))
 	for _, listItem := range listItems {
 		result[listItem.ContentID] = listItem
@@ -135,7 +135,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context,
 	for _, item := range items {
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
-	presignCompatListItems(h.detailSvc, ctx, listItems)
+	presignCompatListItems(ctx, h.detailSvc, listItems)
 	for _, listItem := range listItems {
 		result[listItem.ContentID] = listItem
 	}

@@ -98,7 +98,7 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 	// Presign artwork only for the page being returned, batching each image
 	// type into one PresignImageURLsWithExpiry call for the whole page.
 	result := slicePage(ordered, offset, limit)
-	presignCompatListItems(s.detailSvc, ctx, result)
+	presignCompatListItems(ctx, s.detailSvc, result)
 	if result == nil {
 		result = []upstreamListItem{}
 	}

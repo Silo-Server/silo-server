@@ -474,7 +474,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 		for _, mi := range localizedItems {
 			batch = append(batch, mediaItemToListItem(mi))
 		}
-		presignCompatListItems(s.detailSvc, ctx, batch)
+		presignCompatListItems(ctx, s.detailSvc, batch)
 		if isPlayedFilter != "" {
 			// Need user data to filter by played status. The handler's
 			// resolveUserStateForContentIDs call covers UserData on the wire
@@ -589,7 +589,7 @@ func (s *directContentService) SearchItems(ctx context.Context, session *Session
 	for _, mi := range localizedItems {
 		listItems = append(listItems, mediaItemToListItem(mi))
 	}
-	presignCompatListItems(s.detailSvc, ctx, listItems)
+	presignCompatListItems(ctx, s.detailSvc, listItems)
 	s.enrichListItemsUserData(ctx, session, listItems)
 
 	return &upstreamBrowseResponse{

@@ -323,8 +323,27 @@ func hashSectionConfig(config json.RawMessage) string {
 	if len(config) == 0 {
 		return "none"
 	}
+	// Canonicalize before hashing so semantically identical configs that differ
+	// only in whitespace or field order share a cache entry (the whole point of
+	// keying native and jellycompat fetches to the same rail). Fall back to the
+	// raw bytes when the config isn't valid JSON.
+	if canonical, err := canonicalJSON(config); err == nil {
+		config = canonical
+	}
 	sum := sha256.Sum256(config)
 	return hex.EncodeToString(sum[:])
+}
+
+// canonicalJSON returns a stable encoding of raw by decoding and re-marshaling
+// it, so object key order and insignificant whitespace no longer affect the
+// bytes. encoding/json marshals map keys in sorted order, giving a deterministic
+// form.
+func canonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return nil, err
+	}
+	return json.Marshal(decoded)
 }
 
 // resolvedListLogKey returns a short digest of a cache key for logging. The raw

@@ -303,6 +303,32 @@ func TestResolvedListCacheKeyContentBoundaries(t *testing.T) {
 	}
 }
 
+// TestHashSectionConfigCanonicalizes verifies configs that are semantically
+// identical but differ in whitespace or field order hash the same, so native
+// and jellycompat fetches of the same rail share a cache entry. It fails if the
+// canonicalization step is removed.
+func TestHashSectionConfigCanonicalizes(t *testing.T) {
+	a := hashSectionConfig(json.RawMessage(`{"sort":"added","order":"desc"}`))
+	reordered := hashSectionConfig(json.RawMessage(`{"order":"desc","sort":"added"}`))
+	spaced := hashSectionConfig(json.RawMessage("{ \"sort\":  \"added\" ,\n\"order\": \"desc\" }"))
+	if a != reordered {
+		t.Fatalf("field-order should not change the config hash: %q vs %q", a, reordered)
+	}
+	if a != spaced {
+		t.Fatalf("whitespace should not change the config hash: %q vs %q", a, spaced)
+	}
+
+	// A genuinely different config must still hash differently.
+	if a == hashSectionConfig(json.RawMessage(`{"sort":"title","order":"desc"}`)) {
+		t.Fatalf("distinct configs must hash differently")
+	}
+
+	// Invalid JSON falls back to raw bytes rather than collapsing together.
+	if hashSectionConfig(json.RawMessage(`not json`)) == hashSectionConfig(json.RawMessage(`also not`)) {
+		t.Fatalf("distinct non-JSON configs must hash differently")
+	}
+}
+
 // TestResolvedListCacheDoesNotCacheEmpty verifies a transiently empty result is
 // not frozen for the TTL: the loader runs again on the next request.
 func TestResolvedListCacheDoesNotCacheEmpty(t *testing.T) {

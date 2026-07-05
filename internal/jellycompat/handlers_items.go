@@ -1180,7 +1180,7 @@ func (h *ItemsHandler) compatListItemsFromModels(ctx context.Context, filter cat
 		}
 		listItems = append(listItems, mediaItemToListItem(mi))
 	}
-	presignCompatListItems(h.detailSvc, ctx, listItems)
+	presignCompatListItems(ctx, h.detailSvc, listItems)
 	return listItems
 }
 
@@ -2084,7 +2084,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 		for _, mi := range result.Items {
 			listItems = append(listItems, mediaItemToListItem(mi))
 		}
-		presignCompatListItems(h.detailSvc, r.Context(), listItems)
+		presignCompatListItems(r.Context(), h.detailSvc, listItems)
 		h.rememberListImages(listItems)
 
 		progress, progressErr := resolveProgressForContentIDs(r.Context(), session, h.userData, contentIDsFromListItems(listItems))
