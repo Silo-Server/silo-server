@@ -706,12 +706,14 @@ func main() {
 			restartReqCh <- struct{}{}
 			return nil
 		},
-		OnServerSettingUpdated: func(ctx context.Context, key, _ string) {
+		OnServerSettingUpdated: func(_ context.Context, key, _ string) {
 			// Key-scoped reload for the client-IP trust boundary: unlike the
 			// whole-config watcher reload below, this cannot be blocked by an
-			// unrelated malformed setting failing config.LoadFromDB.
+			// unrelated malformed setting failing config.LoadFromDB. Uses a
+			// fresh context — the setting is already persisted, so the reload
+			// must not be skipped because the admin request was canceled.
 			if key == clientip.SettingTrustedProxies && ipResolver != nil {
-				if cidrs, loadErr := clientip.LoadTrustedCIDRs(ctx, settingsRepo); loadErr != nil {
+				if cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
 					slog.Warn("clientip config reload failed", "error", loadErr)
 				} else {
 					ipResolver.UpdateTrustedCIDRs(cidrs)
