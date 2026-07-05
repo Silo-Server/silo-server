@@ -54,6 +54,60 @@ func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, 
 	}
 }
 
+// libraryAccessConditions returns the per-item library allow/deny predicates
+// gating keyColumn's membership rows in media_item_libraries (e.g.
+// "mi.content_id", or "e.series_id" for episode access resolved through the
+// parent series). allowedIdx and disabledIdx are 1-based SQL placeholder
+// positions for the allowed/disabled folder-ID arrays; 0 means that restriction
+// is not active.
+//
+// The predicates are independent EXISTS / NOT EXISTS subqueries — never
+// allow/deny checks against one joined membership row. The single-join form
+// leaks: an item linked to BOTH a passing library and a disabled one satisfies
+// the predicates via the passing row (audit 2026-05-01 §3.3; review finding C3).
+//
+// When only a disabled list is active, positive membership is still required:
+// orphan items (no media_item_libraries link — mid-scan, stale rows from a
+// removed library, or metadata-refresh inserts not yet linked) must not become
+// visible to a restricted viewer through a vacuous NOT EXISTS. When an allowed
+// list is active it already implies membership, so no extra EXISTS is added.
+func libraryAccessConditions(keyColumn string, allowedIdx, disabledIdx int) []string {
+	var conditions []string
+	if allowedIdx > 0 {
+		conditions = append(conditions, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = %s AND mil.media_folder_id = ANY($%d))",
+			keyColumn, allowedIdx))
+	}
+	if disabledIdx > 0 {
+		if allowedIdx == 0 {
+			conditions = append(conditions, fmt.Sprintf(
+				"EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = %s)",
+				keyColumn))
+		}
+		conditions = append(conditions, fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = %s AND mil.media_folder_id = ANY($%d))",
+			keyColumn, disabledIdx))
+	}
+	return conditions
+}
+
+// appendLibraryAccessConditions binds the filter's library restrictions as args
+// and appends the matching libraryAccessConditions predicates for keyColumn.
+func appendLibraryAccessConditions(keyColumn string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	var allowedIdx, disabledIdx int
+	if filter.AllowedLibraryIDs != nil {
+		*args = append(*args, filter.AllowedLibraryIDs)
+		allowedIdx = *argIdx
+		*argIdx = *argIdx + 1
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		*args = append(*args, filter.DisabledLibraryIDs)
+		disabledIdx = *argIdx
+		*argIdx = *argIdx + 1
+	}
+	*conditions = append(*conditions, libraryAccessConditions(keyColumn, allowedIdx, disabledIdx)...)
+}
+
 // ApplySectionAccessFilter applies non-library access constraints to section queries.
 func ApplySectionAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
 	applyAccessFilter(alias, filter, conditions, args, argIdx)

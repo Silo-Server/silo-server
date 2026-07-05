@@ -629,16 +629,9 @@ func (r *ItemRepository) GetStatusByIDs(ctx context.Context, ids []string) (map[
 // allowed to see — replaces a per-item EnsureAccessible loop alongside the
 // existing batch GetByIDs (audit 2026-05-01 §3.3).
 //
-// Library-access semantics differ intentionally from EnsureAccessible. That
-// method joins media_item_libraries once and applies allowed/disabled
-// predicates against the same row, so an item linked to BOTH an allowed and
-// a separate disabled library can satisfy the join via the allowed row and
-// leak through. GetByIDsWithAccess uses independent EXISTS / NOT EXISTS
-// subqueries: the item must be in some allowed library AND not in any
-// disabled library. This is per-link rather than per-row and is strictly
-// stricter (no leakage when an item spans both an allowed and a disabled
-// library). Callers that specifically need the older single-row JOIN form
-// should call EnsureAccessible directly; no current caller does.
+// Library access uses the shared per-item EXISTS / NOT EXISTS predicates
+// (libraryAccessConditions), the same semantics EnsureAccessible and
+// EnsureAccessibleIDs enforce.
 func (r *ItemRepository) GetByIDsWithAccess(ctx context.Context, contentIDs []string, access AccessFilter) ([]*models.MediaItem, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, nil
@@ -660,52 +653,13 @@ func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access 
             FROM media_items mi
             WHERE mi.content_id = ANY($1)`
 	args := []any{contentIDs}
-
 	argIdx := 2
-	if access.AllowedLibraryIDs != nil {
-		sql += fmt.Sprintf(`
-            AND EXISTS (
-                SELECT 1 FROM media_item_libraries mil
-                WHERE mil.content_id = mi.content_id
-                  AND mil.media_folder_id = ANY($%d)
-            )`, argIdx)
-		args = append(args, access.AllowedLibraryIDs)
-		argIdx++
-	}
-	if len(access.DisabledLibraryIDs) > 0 {
-		// When DisabledLibraryIDs is active without an AllowedLibraryIDs
-		// allowlist, also require positive library membership. Otherwise
-		// orphan items (rows in media_items with no media_item_libraries
-		// link — e.g. mid-scan, stale rows from a removed library, or
-		// metadata-refresh inserts not yet linked) would pass the NOT EXISTS
-		// (which is true over an empty subquery set) and become visible to
-		// users whose access policy is restricted by DisabledLibraryIDs.
-		// EnsureAccessible's prior INNER JOIN on media_item_libraries
-		// implicitly enforced this membership; the EXISTS pair here makes
-		// it explicit. When AllowedLibraryIDs is non-nil, the EXISTS-by-
-		// allowed-list above already provides positive membership.
-		if access.AllowedLibraryIDs == nil {
-			sql += `
-            AND EXISTS (
-                SELECT 1 FROM media_item_libraries mil
-                WHERE mil.content_id = mi.content_id
-            )`
-		}
-		sql += fmt.Sprintf(`
-            AND NOT EXISTS (
-                SELECT 1 FROM media_item_libraries mil
-                WHERE mil.content_id = mi.content_id
-                  AND mil.media_folder_id = ANY($%d)
-            )`, argIdx)
-		args = append(args, access.DisabledLibraryIDs)
-		argIdx++
-	}
 
-	// Apply MaxContentRating and type exclusions like applyAccessFilter does.
-	var ratingConditions []string
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating, ExcludedMediaTypes: access.ExcludedMediaTypes}, &ratingConditions, &args, &argIdx)
-	for _, c := range ratingConditions {
-		sql += " AND " + c
+	var conditions []string
+	appendLibraryAccessConditions("mi.content_id", access, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: access.MaxContentRating, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	for _, c := range conditions {
+		sql += "\n            AND " + c
 	}
 
 	sql += " ORDER BY mi.content_id ASC"
@@ -1292,37 +1246,18 @@ func (r *ItemRepository) ListUnmatchedByFolderAndPathPrefix(ctx context.Context,
 }
 
 // EnsureAccessible returns ErrItemNotFound when the item falls outside the effective scope.
+//
+// Library restrictions are enforced with the same independent EXISTS /
+// NOT EXISTS predicates as GetByIDsWithAccess (see libraryAccessConditions):
+// an item linked to both a passing and a disabled library must not leak
+// through the passing link.
 func (r *ItemRepository) EnsureAccessible(ctx context.Context, contentID string, filter AccessFilter) error {
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	fromClause := "media_items mi"
-	conditions = append(conditions, fmt.Sprintf("mi.content_id = $%d", argIdx))
-	args = append(args, contentID)
-	argIdx++
-
-	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
-	if filter.AllowedLibraryIDs != nil {
-		if len(filter.AllowedLibraryIDs) == 0 {
-			return ErrItemNotFound
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-		args = append(args, filter.AllowedLibraryIDs)
-		argIdx++
-	}
-	if len(filter.DisabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
-		args = append(args, filter.DisabledLibraryIDs)
-		argIdx++
-	}
-	if needsLibJoin {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
+	// An empty (non-nil) allowlist means "no libraries allowed".
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return ErrItemNotFound
 	}
 
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
-
-	query := fmt.Sprintf("SELECT 1 FROM %s WHERE %s LIMIT 1", fromClause, strings.Join(conditions, " AND "))
+	query, args := buildEnsureAccessibleSQL(contentID, filter)
 	var found int
 	if err := r.pool.QueryRow(ctx, query, args...).Scan(&found); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1333,15 +1268,27 @@ func (r *ItemRepository) EnsureAccessible(ctx context.Context, contentID string,
 	return nil
 }
 
+func buildEnsureAccessibleSQL(contentID string, filter AccessFilter) (string, []any) {
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	conditions = append(conditions, fmt.Sprintf("mi.content_id = $%d", argIdx))
+	args = append(args, contentID)
+	argIdx++
+
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+
+	return fmt.Sprintf("SELECT 1 FROM media_items mi WHERE %s LIMIT 1", strings.Join(conditions, " AND ")), args
+}
+
 // EnsureAccessibleIDs is the batch form of EnsureAccessible: it returns the set
 // of content IDs from the input that the viewer may access, applying the exact
-// same predicates (library allow/deny via the single JOIN form, max content
-// rating, excluded media types). An item is accessible iff at least one
-// media_items row — joined per library link when a library filter is active —
-// satisfies the predicates, matching EnsureAccessible's `LIMIT 1` semantics.
-// IDs absent from the returned map are not accessible (mirrors EnsureAccessible
-// returning ErrItemNotFound). Used by GetItemDetailsByIDs to avoid a per-item
-// EnsureAccessible fan-out.
+// same predicates (per-item library allow/deny via EXISTS / NOT EXISTS, max
+// content rating, excluded media types). IDs absent from the returned map are
+// not accessible (mirrors EnsureAccessible returning ErrItemNotFound). Used by
+// GetItemDetailsByIDs to avoid a per-item EnsureAccessible fan-out.
 func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]bool, error) {
 	result := make(map[string]bool, len(contentIDs))
 	if len(contentIDs) == 0 {
@@ -1353,33 +1300,7 @@ func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []s
 		return result, nil
 	}
 
-	var conditions []string
-	var args []any
-	argIdx := 1
-
-	fromClause := "media_items mi"
-	conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
-	args = append(args, contentIDs)
-	argIdx++
-
-	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
-	if filter.AllowedLibraryIDs != nil {
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-		args = append(args, filter.AllowedLibraryIDs)
-		argIdx++
-	}
-	if len(filter.DisabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
-		args = append(args, filter.DisabledLibraryIDs)
-		argIdx++
-	}
-	if needsLibJoin {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-	}
-
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
-
-	query := fmt.Sprintf("SELECT DISTINCT mi.content_id FROM %s WHERE %s", fromClause, strings.Join(conditions, " AND "))
+	query, args := buildEnsureAccessibleIDsSQL(contentIDs, filter)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("checking items access: %w", err)
@@ -1394,6 +1315,21 @@ func (r *ItemRepository) EnsureAccessibleIDs(ctx context.Context, contentIDs []s
 		result[id] = true
 	}
 	return result, rows.Err()
+}
+
+func buildEnsureAccessibleIDsSQL(contentIDs []string, filter AccessFilter) (string, []any) {
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	conditions = append(conditions, fmt.Sprintf("mi.content_id = ANY($%d)", argIdx))
+	args = append(args, contentIDs)
+	argIdx++
+
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+
+	return fmt.Sprintf("SELECT mi.content_id FROM media_items mi WHERE %s", strings.Join(conditions, " AND ")), args
 }
 
 // GetItemsInLibrary returns a membership map for the provided content IDs within
