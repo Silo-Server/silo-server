@@ -147,6 +147,10 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 	}
 	if _, err := os.Lstat(cleanPath); err == nil {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path still exists"}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// Only a confirmed ENOENT counts as vanished. Permission or other
+		// stat failures must not reconcile still-existing files as missing.
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path could not be inspected"}
 	}
 	folders, err := r.folders.List(ctx)
 	if err != nil {

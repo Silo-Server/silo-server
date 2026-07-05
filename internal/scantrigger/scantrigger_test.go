@@ -192,6 +192,32 @@ func TestResolverRejectsVanishedPathWhenRootIsGone(t *testing.T) {
 	}
 }
 
+func TestResolverRejectsVanishedPathOnNonNotExistStatError(t *testing.T) {
+	root := t.TempDir()
+	// A regular file where a directory is expected makes Lstat on a child
+	// path fail with ENOTDIR — a stat failure that is not ENOENT.
+	notADir := filepath.Join(root, "Movie (2026)")
+	if err := os.WriteFile(notADir, []byte("file, not dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(notADir, "Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      25,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).ResolveVanishedPath(context.Background(), child, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusBadRequest {
+		t.Fatalf("unexpected error: %#v", reqErr)
+	}
+}
+
 func TestResolverRejectsVanishedPathThatStillExists(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "Movie (2026).mkv")
