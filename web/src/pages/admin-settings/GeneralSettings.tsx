@@ -83,7 +83,11 @@ export default function GeneralSettings() {
         <FieldGroup label="Network">
           <SettingField
             label="Trusted Proxies"
-            hint="Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. 172.16.0.0/12, 203.0.113.7/32. Leave empty for the built-in private-network defaults. Applies without a restart."
+            hint={
+              "Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, " +
+              "e.g. 172.16.0.0/12, 203.0.113.7/32. Leave empty for the built-in " +
+              "private-network defaults. Applies without a restart."
+            }
             value={form.getValue("clientip.trusted_proxies")}
             onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
           />
