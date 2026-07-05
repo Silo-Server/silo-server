@@ -1583,9 +1583,23 @@ func main() {
 	}
 	ipResolver := clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
-	// Hot-reload trusted proxies on settings changes. The config watcher
-	// covers both the Redis event path and the Redis-less poll/RequestReload
-	// path, so admin UI edits apply without a restart on any deployment.
+	// Hot-reload trusted proxies on settings changes via two complementary
+	// paths. The direct event-bus subscription re-reads only the clientip key,
+	// so a malformed unrelated setting (which fails the whole-config reload)
+	// cannot leave stale trust CIDRs on Redis-backed multi-instance deploys.
+	_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type != cache.EventSettingsChanged {
+			return
+		}
+		cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
+		if loadErr != nil {
+			slog.Warn("clientip config reload failed", "error", loadErr)
+			return
+		}
+		ipResolver.UpdateTrustedCIDRs(cidrs)
+	})
+	// The config watcher covers the Redis-less poll/RequestReload path, so
+	// admin UI edits apply without a restart on single-node deployments too.
 	configWatcher.OnChange(func(old, updated *config.Config) {
 		if old != nil && old.ClientIP.TrustedProxies == updated.ClientIP.TrustedProxies {
 			return
