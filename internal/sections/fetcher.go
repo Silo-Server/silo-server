@@ -214,11 +214,12 @@ func editorialCandidateCacheKey(subjectType string, libraryID *int, libraryIDs [
 	b.WriteString("|libraries=")
 	writeOptionalSortedInts(&b, libraryIDs)
 
-	b.WriteString("|disabled=")
-	writeSortedInts(&b, filter.DisabledLibraryIDs)
-
-	b.WriteString("|rating=")
-	b.WriteString(filter.MaxContentRating)
+	// Serialize the full access scope through the shared catalog helper. The
+	// candidate loaders push rating AND excluded media types (via
+	// ApplySectionAccessFilter) into their SQL, so the key must capture every
+	// boundary; the shared helper guarantees it stays in sync with the other
+	// access-scoped caches when AccessFilter grows.
+	filter.WriteAccessScopeCacheKey(&b)
 	return b.String()
 }
 
@@ -290,7 +291,7 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 
 	var items []*models.MediaItem
 	var total int
-	if isCacheableSectionType(resolved) {
+	if f.isCacheableSectionType(resolved) {
 		// User-agnostic rows share one process-global entry per access scope.
 		// getOrRefresh returns a defensive slice copy, so reordering or
 		// truncating result.Items below (or in a caller) cannot corrupt the
@@ -1192,12 +1193,70 @@ func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string,
 	return summaries, nil
 }
 
-func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
-	switch s.SectionType {
+// userAgnosticSectionFetch is the signature shared by every fetch helper whose
+// membership is identical for all profiles with the same access scope: no
+// userID, no profileID. The signature is the enforcement mechanism for the
+// shared resolved-list cache — a helper cannot start reading per-profile state
+// without changing its signature, dropping out of userAgnosticSectionFetcher,
+// and forcing an explicit new cacheability decision at compile time.
+type userAgnosticSectionFetch func(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error)
+
+// userAgnosticSectionFetcher returns the fetch function for section types whose
+// shared item list may be cached across profiles, or nil for every other type.
+// It is the single source of truth for that decision: fetchSection dispatches
+// through it AND isCacheableSectionType derives cache eligibility from it, so
+// the two can never disagree.
+//
+// Deliberately absent despite having the user-agnostic signature:
+//   - SectionRandom — user-agnostic but must reshuffle per request;
+//   - SectionEditorialSpotlight — has its own candidate cache + rotation and a
+//     dedicated FetchOne branch;
+//   - SectionGenre / SectionCustomFilter — fetchFiltered shares the signature,
+//     but a user-supplied QueryDefinition can carry personalized rules, so
+//     cacheability needs the dynamic IsPersonalized check in
+//     isCacheableSectionType (dispatch stays in fetchSection's switch);
+//   - SectionCollection — user vs library collections are decided by config,
+//     handled dynamically in isCacheableSectionType.
+func (f *Fetcher) userAgnosticSectionFetcher(t SectionType) userAgnosticSectionFetch {
+	switch t {
 	case SectionRecentlyAdded:
-		return f.fetchRecentlyAdded(ctx, s, libraryID, libraryIDs, filter)
+		return f.fetchRecentlyAdded
 	case SectionRecentlyReleased:
-		return f.fetchRecentlyReleased(ctx, s, libraryID, libraryIDs, filter)
+		return f.fetchRecentlyReleased
+	case SectionCriticallyAcclaimed:
+		return f.fetchCriticallyAcclaimed
+	case SectionAwardWinners:
+		// fetchAwardWinners derives everything from the section config; adapt
+		// it to the shared signature.
+		return func(ctx context.Context, s ResolvedSection, _ *int, _ []int, _ catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+			return f.fetchAwardWinners(ctx, s)
+		}
+	case SectionFormatShowcase:
+		return f.fetchFormatShowcase
+	case SectionSeasonalThemed:
+		return f.fetchSeasonalThemed
+	case SectionMoodCollection:
+		return f.fetchMoodCollection
+	case SectionTrendingOnServer:
+		return f.fetchTrending
+	case SectionNewToLibrary:
+		return f.fetchNewToLibrary
+	case SectionMostWatched:
+		return f.fetchMostWatched
+	case SectionTrendingDiscover:
+		return f.fetchTrendingDiscover
+	case SectionAdminCuratedList:
+		return f.fetchAdminCuratedList
+	default:
+		return nil
+	}
+}
+
+func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	if fetch := f.userAgnosticSectionFetcher(s.SectionType); fetch != nil {
+		return fetch(ctx, s, libraryID, libraryIDs, filter)
+	}
+	switch s.SectionType {
 	case SectionGenre, SectionCustomFilter:
 		return f.fetchFiltered(ctx, s, libraryID, libraryIDs, filter)
 	case SectionRandom:
@@ -1208,32 +1267,12 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 		return f.fetchRecommendationSection(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionHiddenGems:
 		return f.fetchHiddenGems(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
-	case SectionCriticallyAcclaimed:
-		return f.fetchCriticallyAcclaimed(ctx, s, libraryID, libraryIDs, filter)
-	case SectionAwardWinners:
-		return f.fetchAwardWinners(ctx, s)
 	case SectionForgottenFavorites:
 		return f.fetchForgottenFavorites(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
-	case SectionFormatShowcase:
-		return f.fetchFormatShowcase(ctx, s, libraryID, libraryIDs, filter)
 	case SectionEditorialSpotlight:
 		return f.fetchEditorialSpotlight(ctx, s, libraryID, libraryIDs, filter)
-	case SectionSeasonalThemed:
-		return f.fetchSeasonalThemed(ctx, s, libraryID, libraryIDs, filter)
-	case SectionMoodCollection:
-		return f.fetchMoodCollection(ctx, s, libraryID, libraryIDs, filter)
-	case SectionTrendingOnServer:
-		return f.fetchTrending(ctx, s, libraryID, libraryIDs, filter)
 	case SectionProfileActivityFeed:
 		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter)
-	case SectionNewToLibrary:
-		return f.fetchNewToLibrary(ctx, s, libraryID, libraryIDs, filter)
-	case SectionMostWatched:
-		return f.fetchMostWatched(ctx, s, libraryID, libraryIDs, filter)
-	case SectionTrendingDiscover:
-		return f.fetchTrendingDiscover(ctx, s, libraryID, libraryIDs, filter)
-	case SectionAdminCuratedList:
-		return f.fetchAdminCuratedList(ctx, s, libraryID, libraryIDs, filter)
 	default:
 		// Profile-scoped types (continue_watching, watchlist, favorites)
 		// will be wired later when user store integration is added.
@@ -2522,7 +2561,7 @@ func itemColumnsList(alias string) []string {
 		"imdb_id", "tmdb_id", "tvdb_id",
 		"poster_path", "poster_thumbhash", "backdrop_path", "backdrop_thumbhash", "logo_path",
 		"metadata_s3_path", "metadata_etag", "season_count",
-		"studios", "networks", "countries", "first_air_date", "last_air_date",
+		"studios", "networks", "countries", "release_date::text", "first_air_date", "last_air_date",
 		"show_status",
 		"matched_at", "status", "created_at", "updated_at",
 	}
@@ -2591,7 +2630,7 @@ func scanMediaItems(rows pgx.Rows) ([]*models.MediaItem, error) {
 			&item.ImdbID, &item.TmdbID, &item.TvdbID,
 			&item.PosterPath, &item.PosterThumbhash, &item.BackdropPath, &item.BackdropThumbhash, &item.LogoPath,
 			&item.MetadataS3Path, &item.MetadataEtag, &item.SeasonCount,
-			&item.Studios, &item.Networks, &item.Countries, &item.FirstAirDate, &item.LastAirDate,
+			&item.Studios, &item.Networks, &item.Countries, &item.ReleaseDate, &item.FirstAirDate, &item.LastAirDate,
 			&item.ShowStatus,
 			&item.MatchedAt, &item.Status, &item.CreatedAt, &item.UpdatedAt,
 		)

@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"net/url"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -11,38 +12,43 @@ import (
 )
 
 // TestLatestFastPathEligible pins the eligibility rules for the native
-// /Items/Latest fast path. The synthetic recently-added section can only express
-// a single library type + access scope, so any request carrying a filter it
-// cannot reproduce must fall back to BrowseItems. Genre/name-prefix/person are
-// the regression this guards: the section config cannot scope to them, so
-// serving unfiltered recently-added would return a wrong, broader result set.
+// /Items/Latest fast path. Eligibility is decided off the ACTUAL browse params
+// the fallback would receive (buildLatestBrowseParams), so any filter the
+// synthetic recently-added section cannot reproduce — including params added to
+// buildBrowseParams in the future — must disqualify the request rather than be
+// silently ignored by the cached path.
 func TestLatestFastPathEligible(t *testing.T) {
 	played := true
-	base := func() itemsQuery { return itemsQuery{parentLibraryID: 7, startIndex: 0} }
+	base := func() itemsQuery { return itemsQuery{parentLibraryID: 7, startIndex: 0, limit: 24} }
+	paramsFor := func(q itemsQuery) url.Values { return buildLatestBrowseParams(q) }
 
-	eligible := base()
-	if !latestFastPathEligible(eligible, "movie", true) {
+	if !latestFastPathEligible(paramsFor(base()), "movie") {
 		t.Fatalf("a plain first-page movies-library Latest should be eligible")
 	}
-	if !latestFastPathEligible(base(), "series", true) {
+	if !latestFastPathEligible(paramsFor(base()), "series") {
 		t.Fatalf("a plain first-page series-library Latest should be eligible")
+	}
+	knownRating := base()
+	knownRating.maxOfficialRating = "PG-13"
+	if !latestFastPathEligible(paramsFor(knownRating), "movie") {
+		t.Fatalf("a known max rating should stay eligible (it folds into the access filter)")
 	}
 
 	cases := []struct {
 		name    string
 		libType string
-		fetcher bool
 		mutate  func(*itemsQuery)
 	}{
-		{name: "no sections fetcher", libType: "movie", fetcher: false},
-		{name: "non-video library", libType: "", fetcher: true},
-		{name: "ebook library", libType: "ebook", fetcher: true},
-		{name: "deeper page", libType: "movie", fetcher: true, mutate: func(q *itemsQuery) { q.startIndex = 24 }},
-		{name: "played filter", libType: "movie", fetcher: true, mutate: func(q *itemsQuery) { q.isPlayed = &played }},
-		{name: "backdrop required", libType: "movie", fetcher: true, mutate: func(q *itemsQuery) { q.requireBackdrop = true }},
-		{name: "genre filter", libType: "movie", fetcher: true, mutate: func(q *itemsQuery) { q.genreName = "Action" }},
-		{name: "name prefix filter", libType: "movie", fetcher: true, mutate: func(q *itemsQuery) { q.namePrefix = "The" }},
-		{name: "person filter", libType: "series", fetcher: true, mutate: func(q *itemsQuery) { q.personID = 42 }},
+		{name: "non-video library", libType: ""},
+		{name: "ebook library", libType: "ebook"},
+		{name: "deeper page", libType: "movie", mutate: func(q *itemsQuery) { q.startIndex = 24 }},
+		{name: "played filter", libType: "movie", mutate: func(q *itemsQuery) { q.isPlayed = &played }},
+		{name: "backdrop required", libType: "movie", mutate: func(q *itemsQuery) { q.requireBackdrop = true }},
+		{name: "genre filter", libType: "movie", mutate: func(q *itemsQuery) { q.genreName = "Action" }},
+		{name: "name prefix filter", libType: "movie", mutate: func(q *itemsQuery) { q.namePrefix = "The" }},
+		{name: "person filter", libType: "series", mutate: func(q *itemsQuery) { q.personID = 42 }},
+		{name: "limit beyond shared fetch budget", libType: "movie", mutate: func(q *itemsQuery) { q.limit = compatLatestCacheFetchLimit + 1 }},
+		{name: "unknown rating string", libType: "movie", mutate: func(q *itemsQuery) { q.maxOfficialRating = "NOT-A-RATING" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,10 +56,18 @@ func TestLatestFastPathEligible(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&q)
 			}
-			if latestFastPathEligible(q, tc.libType, tc.fetcher) {
+			if latestFastPathEligible(paramsFor(q), tc.libType) {
 				t.Fatalf("%s must NOT be eligible for the native fast path", tc.name)
 			}
 		})
+	}
+
+	// The future-drift guard: a param buildBrowseParams starts emitting that
+	// this gate has never heard of must disqualify the fast path on its own.
+	future := paramsFor(base())
+	future.Set("years", "2020")
+	if latestFastPathEligible(future, "movie") {
+		t.Fatal("an unrecognized browse param must disqualify the fast path")
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,9 +39,10 @@ const (
 	// resolvedListRefreshAfter is the soft threshold (builtAt + 5min): reaching
 	// it serves the cached value and triggers one async rebuild.
 	resolvedListRefreshAfter = resolvedListTTL - resolvedListRefreshLead
-	// resolvedListRefreshTimeout bounds a detached background rebuild so a stuck
-	// query can never pin a pool connection indefinitely.
-	resolvedListRefreshTimeout = 30 * time.Second
+	// resolvedListBuildTimeout bounds every detached loader run — background
+	// refreshes and blocking rebuilds alike — so a stuck query can never pin a
+	// pool connection indefinitely.
+	resolvedListBuildTimeout = 30 * time.Second
 	// resolvedListPruneInterval bounds how often expired entries are swept from
 	// the map, so keys for scopes that are never requested again cannot linger
 	// for the life of the process.
@@ -119,7 +119,15 @@ func blockingResolvedListRebuild(ctx context.Context, key string, now time.Time,
 		if entry, ok := resolvedListGet(key); ok && now.Before(entry.expiresAt) {
 			return buildResult{items: entry.items, total: entry.total}, nil
 		}
-		items, total, err := loader(ctx)
+		// Run the loader detached from the leader's request cancellation:
+		// singleflight shares this one build across every collapsed waiter, so
+		// the leader's client disconnecting (or its deadline firing) must not
+		// fail all the other requests riding on the flight. WithoutCancel keeps
+		// the leader's context values (tracing, logging) while dropping its
+		// cancellation; the timeout re-bounds the detached work.
+		loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), resolvedListBuildTimeout)
+		defer cancel()
+		items, total, err := loader(loadCtx)
 		if err != nil {
 			return nil, err
 		}
@@ -164,7 +172,7 @@ func scheduleResolvedListRefresh(key string, now time.Time, loader resolvedListL
 			}
 		}()
 
-		ctx, cancel := context.WithTimeout(context.Background(), resolvedListRefreshTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), resolvedListBuildTimeout)
 		defer cancel()
 
 		items, total, err := loader(ctx)
@@ -275,48 +283,13 @@ func resolvedListCacheKey(resolved ResolvedSection, libraryID *int, libraryIDs [
 	b.WriteString("|libraries=")
 	writeOptionalSortedInts(&b, libraryIDs)
 
-	b.WriteString("|accessible=")
-	writeOptionalSortedInts(&b, filter.AllowedLibraryIDs)
-
-	b.WriteString("|disabled=")
-	writeSortedInts(&b, filter.DisabledLibraryIDs)
-
-	b.WriteString("|rating=")
-	b.WriteString(filter.MaxContentRating)
-
-	b.WriteString("|excludedtypes=")
-	writeSortedStrings(&b, filter.ExcludedMediaTypes)
-
-	// AllowedContentIDs and NamePrefix are enforced as SQL constraints by the
-	// filter-driven builders (fetchFiltered, fetchSeasonalThemed,
-	// fetchMoodCollection via QueryExecutor). They are per-scope access
-	// boundaries, so they MUST key the entry or a content-restricted profile
-	// could be served an unrestricted profile's membership. AllowedContentIDs is
-	// hashed (it can be large) and preserves the nil (unrestricted) vs empty
-	// (restrict-to-nothing) distinction the catalog layer relies on.
-	b.WriteString("|nameprefix=")
-	b.WriteString(filter.NamePrefix)
-
-	b.WriteString("|allowedcontent=")
-	b.WriteString(hashOptionalContentIDs(filter.AllowedContentIDs))
+	// Every access boundary (library scope, rating, excluded types, content
+	// allow-list, name prefix) is serialized by the shared catalog helper so
+	// this cache can never drift from the other access-scoped caches when
+	// AccessFilter grows a new boundary field.
+	filter.WriteAccessScopeCacheKey(&b)
 
 	return b.String()
-}
-
-// hashOptionalContentIDs returns a bounded, order-independent digest of an
-// allow-list, preserving the nil vs empty distinction (nil = unrestricted,
-// empty = restrict to nothing) that the catalog access layer branches on.
-func hashOptionalContentIDs(ids []string) string {
-	if ids == nil {
-		return "<nil>"
-	}
-	if len(ids) == 0 {
-		return "<empty>"
-	}
-	sorted := append([]string(nil), ids...)
-	sort.Strings(sorted)
-	sum := sha256.Sum256([]byte(strings.Join(sorted, ",")))
-	return hex.EncodeToString(sum[:])
 }
 
 func hashSectionConfig(config json.RawMessage) string {
@@ -354,45 +327,20 @@ func resolvedListLogKey(key string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-func writeSortedStrings(b *strings.Builder, values []string) {
-	if len(values) == 0 {
-		return
-	}
-	sorted := append([]string(nil), values...)
-	sort.Strings(sorted)
-	for i, value := range sorted {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(value)
-	}
-}
-
 // isCacheableSectionType reports whether a resolved section's shared item list
-// may be cached. The whitelist covers the user-agnostic rows whose membership
-// is identical for everyone with the same access scope. Random is excluded so
-// its per-request shuffle is preserved; per-user rows (continue watching,
-// next-up, recommendations, hidden gems, forgotten favorites, activity feed)
-// have no shared base and are excluded; user collections are profile-scoped and
-// excluded via the UserCollectionID check.
-func isCacheableSectionType(resolved ResolvedSection) bool {
-	switch resolved.SectionType {
-	case SectionRecentlyAdded,
-		SectionRecentlyReleased,
-		SectionCriticallyAcclaimed,
-		SectionAwardWinners,
-		SectionFormatShowcase,
-		SectionSeasonalThemed,
-		SectionMoodCollection,
-		SectionTrendingOnServer,
-		SectionNewToLibrary,
-		SectionMostWatched,
-		SectionTrendingDiscover,
-		SectionAdminCuratedList:
-		// Seasonal/mood/trending build their query definition server-side from a
-		// fixed theme/mood/snapshot schema (never from user-supplied rules), so
-		// they are always user-agnostic.
+// may be cached. Cacheability is derived from userAgnosticSectionFetcher — the
+// same table fetchSection dispatches through — so the "may this row be shared
+// across profiles?" decision lives in exactly one place and cannot drift from
+// the fetch implementation. Random is excluded from that table so its
+// per-request shuffle is preserved; per-user rows (continue watching, next-up,
+// recommendations, hidden gems, forgotten favorites, activity feed) have no
+// shared base; user collections are profile-scoped and excluded via the
+// UserCollectionID check.
+func (f *Fetcher) isCacheableSectionType(resolved ResolvedSection) bool {
+	if f.userAgnosticSectionFetcher(resolved.SectionType) != nil {
 		return true
+	}
+	switch resolved.SectionType {
 	case SectionGenre, SectionCustomFilter:
 		// These route through fetchFiltered → ParseQueryDefinition, whose
 		// user-supplied QueryDefinition can carry personalized (per-profile)

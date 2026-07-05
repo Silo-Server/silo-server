@@ -388,8 +388,10 @@ func TestResolvedListCacheDefensiveCopy(t *testing.T) {
 }
 
 // TestIsCacheableSectionType covers the whitelist, the user-collection
-// exclusion, and the explicit exclusions.
+// exclusion, and the explicit exclusions. Cacheability is derived from
+// userAgnosticSectionFetcher, so this doubles as a pin on that table.
 func TestIsCacheableSectionType(t *testing.T) {
+	f := &Fetcher{}
 	cacheable := []SectionType{
 		SectionRecentlyAdded,
 		SectionRecentlyReleased,
@@ -407,7 +409,7 @@ func TestIsCacheableSectionType(t *testing.T) {
 		SectionAdminCuratedList,
 	}
 	for _, st := range cacheable {
-		if !isCacheableSectionType(ResolvedSection{SectionType: st}) {
+		if !f.isCacheableSectionType(ResolvedSection{SectionType: st}) {
 			t.Errorf("expected %s to be cacheable", st)
 		}
 	}
@@ -427,7 +429,7 @@ func TestIsCacheableSectionType(t *testing.T) {
 		SectionEditorialSpotlight,
 	}
 	for _, st := range notCacheable {
-		if isCacheableSectionType(ResolvedSection{SectionType: st}) {
+		if f.isCacheableSectionType(ResolvedSection{SectionType: st}) {
 			t.Errorf("expected %s to NOT be cacheable", st)
 		}
 	}
@@ -439,6 +441,7 @@ func TestIsCacheableSectionType(t *testing.T) {
 // cache key excludes userID/profileID — while non-personalized definitions of
 // the same types stay cacheable.
 func TestIsCacheableSectionTypePersonalizedFilter(t *testing.T) {
+	f := &Fetcher{}
 	nonPersonalized := mustJSON(t, catalog.QueryDefinition{
 		Match: "all",
 		Groups: []catalog.QueryGroup{
@@ -469,13 +472,13 @@ func TestIsCacheableSectionTypePersonalizedFilter(t *testing.T) {
 	})
 
 	for _, st := range []SectionType{SectionCustomFilter, SectionGenre} {
-		if !isCacheableSectionType(ResolvedSection{SectionType: st, Config: nonPersonalized}) {
+		if !f.isCacheableSectionType(ResolvedSection{SectionType: st, Config: nonPersonalized}) {
 			t.Errorf("%s with a non-personalized definition should be cacheable", st)
 		}
-		if isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedRule}) {
+		if f.isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedRule}) {
 			t.Errorf("%s with a personalized rule (in_watchlist) must NOT be cacheable", st)
 		}
-		if isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedSort}) {
+		if f.isCacheableSectionType(ResolvedSection{SectionType: st, Config: personalizedSort}) {
 			t.Errorf("%s with a personalized sort/rule (watched/progress) must NOT be cacheable", st)
 		}
 	}
@@ -484,11 +487,12 @@ func TestIsCacheableSectionTypePersonalizedFilter(t *testing.T) {
 // TestResolvedListCacheCollectionUserExclusion verifies library collections are
 // cacheable while user (profile-scoped) collections are not.
 func TestResolvedListCacheCollectionUserExclusion(t *testing.T) {
+	f := &Fetcher{}
 	libraryCollection := ResolvedSection{
 		SectionType: SectionCollection,
 		Config:      mustJSON(t, SectionCollectionConfig{LibraryCollectionID: "lib-coll-1"}),
 	}
-	if !isCacheableSectionType(libraryCollection) {
+	if !f.isCacheableSectionType(libraryCollection) {
 		t.Fatalf("library collection should be cacheable")
 	}
 
@@ -496,7 +500,7 @@ func TestResolvedListCacheCollectionUserExclusion(t *testing.T) {
 		SectionType: SectionCollection,
 		Config:      mustJSON(t, SectionCollectionConfig{UserCollectionID: "user-coll-1"}),
 	}
-	if isCacheableSectionType(userCollection) {
+	if f.isCacheableSectionType(userCollection) {
 		t.Fatalf("user collection must NOT be cacheable (profile-scoped)")
 	}
 }
@@ -645,4 +649,39 @@ func waitFor(timeout time.Duration, cond func() bool) bool {
 		time.Sleep(time.Millisecond)
 	}
 	return cond()
+}
+
+// TestBlockingRebuildDetachedFromLeaderCancellation verifies a cold-miss
+// blocking rebuild survives the initiating request's cancellation: singleflight
+// shares one build across every collapsed waiter, so the leader's client
+// disconnecting must not fail all the other requests riding on the flight.
+func TestBlockingRebuildDetachedFromLeaderCancellation(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+
+	// A context canceled BEFORE the build starts: without detachment the loader
+	// (which honors ctx like the real fetchers do) would fail immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	loader := func(loadCtx context.Context) ([]*models.MediaItem, int, error) {
+		if err := loadCtx.Err(); err != nil {
+			return nil, 0, err
+		}
+		return mediaItems("x1"), 1, nil
+	}
+
+	now := time.Unix(1_700_000_000, 0)
+	items, total, err := getOrRefresh(ctx, "detach-key", now, loader)
+	if err != nil {
+		t.Fatalf("blocking rebuild must run detached from the leader's cancellation, got %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ContentID != "x1" {
+		t.Fatalf("unexpected result: items=%v total=%d", itemIDs(items), total)
+	}
+
+	// The successful detached build must have been cached for later requests.
+	if _, ok := resolvedListGet("detach-key"); !ok {
+		t.Fatal("detached rebuild did not cache its result")
+	}
 }

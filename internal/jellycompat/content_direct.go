@@ -36,6 +36,10 @@ type browseSource interface {
 const (
 	compatBrowseChunkLimit = 100
 	compatBrowseMaxLimit   = 1000
+	// compatDefaultBrowseLimit is the page size used when a client omits Limit.
+	// Shared by BrowseItems and the /Items/Latest section fast path so the two
+	// paths always agree on the default page size.
+	compatDefaultBrowseLimit = 24
 )
 
 // compatVideoTypes is the media_items type scope the Jellyfin compat surface
@@ -360,7 +364,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 
 	requestedLimit := catalog.ParseIntParam(params.Get("limit"))
 	if requestedLimit <= 0 {
-		requestedLimit = 24
+		requestedLimit = compatDefaultBrowseLimit
 	}
 	if requestedLimit > compatBrowseMaxLimit {
 		requestedLimit = compatBrowseMaxLimit
@@ -719,6 +723,7 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 	// no progress row and need a per-series episode rollup, so they stay on the
 	// per-item enrichDetailUserData path in the loop below.
 	var leafProgress map[string]userstore.WatchProgress
+	leafBatchFailed := false
 	if store != nil {
 		leafIDs := make([]string, 0, len(details))
 		for id, detail := range details {
@@ -731,10 +736,12 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 			if pm, err := userstore.ListProgressWithCompletedHistory(ctx, store, session.ProfileID, leafIDs); err == nil {
 				leafProgress = pm
 			} else {
-				// On failure the whole page loses played/position state at once
-				// (the per-item path failed one id at a time); log so the drop is
-				// observable rather than silent. Items still render from list data.
-				slog.Warn("jellycompat: batch leaf progress lookup failed; page rendered without played state",
+				// A transient store error must not blank played/position state
+				// for the whole page at once: fall back to the per-item lookups
+				// below, which degrade one id at a time exactly like the
+				// pre-batch path did.
+				leafBatchFailed = true
+				slog.Warn("jellycompat: batch leaf progress lookup failed; falling back to per-item lookups",
 					"error", err, "leaf_count", len(leafIDs))
 			}
 		}
@@ -746,9 +753,10 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 		}
 		upstream := itemDetailToUpstream(detail)
 		if store != nil {
-			if strings.EqualFold(detail.Type, "series") {
+			switch {
+			case strings.EqualFold(detail.Type, "series"), leafBatchFailed:
 				s.enrichDetailUserData(ctx, store, session.ProfileID, id, &upstream)
-			} else {
+			default:
 				var wp *userstore.WatchProgress
 				if entry, ok := leafProgress[id]; ok {
 					wp = &entry

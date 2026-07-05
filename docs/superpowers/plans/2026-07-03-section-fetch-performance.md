@@ -322,5 +322,3 @@ calls slow."
   the `DISTINCT ON ... DESC` tiebreak picks the highest-numbered completed episode.
 - `make lint`, `go build ./...`, targeted unit tests for the content_id SQL
   derivation (mirror existing `history_source` tests, plus the `::int` cast path).
-</content>
-</invoke>

@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -954,11 +955,17 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Build the fallback's browse params FIRST: fast-path eligibility is
+	// decided off these actual params (see latestFastPathEligible), so a filter
+	// later added to buildBrowseParams can never be silently ignored by the
+	// cached path.
+	params := buildLatestBrowseParams(query)
+
 	// Fast path: a per-library Latest is the same user-agnostic list as the native
 	// "recently added" library rail (both order by mil.first_seen_at DESC). When
 	// eligible, serve it through the native section fetch so it reuses the shared
 	// resolved-list cache instead of re-running BrowseItems; otherwise fall back.
-	if latestFastPathEligible(query, libraryItemType, h.sectionsFetcher != nil) {
+	if h.sectionsFetcher != nil && latestFastPathEligible(params, libraryItemType) {
 		items, err := h.loadLatestViaSections(r.Context(), session, query)
 		if err == nil {
 			applyImageTypeLimit(items, query.imageTypeLimit)
@@ -972,8 +979,6 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("jellycompat: latest via sections failed, falling back to browse", "error", err)
 		}
 	}
-
-	params := buildLatestBrowseParams(query)
 	result, err := h.content.BrowseItems(r.Context(), session, params)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
@@ -1052,28 +1057,59 @@ func (h *ItemsHandler) buildLatestItemDTOs(ctx context.Context, session *Session
 // fallback, so HandleLatest should fall back quietly rather than log a failure.
 var errLatestNotEligible = errors.New("jellycompat: latest not eligible for native section path")
 
+// latestFastPathReproducibleParams is the closed set of browse params the
+// synthetic recently-added section reproduces exactly:
+//   - limit / offset — offset must be 0 (checked below); limit is applied by
+//     slicing the shared list;
+//   - type / library_id — expressed by the section config + library scope;
+//   - sort / order — buildLatestBrowseParams pins recently_added/desc on both
+//     paths;
+//   - include_total — Latest returns a bare array, so the total is unused;
+//   - max_content_rating — folded into the access filter (and the cache key).
+//
+// Any OTHER param buildBrowseParams emits — today's filters (genre,
+// name_prefix, person_id, is_played, require_backdrop) and any filter added in
+// the future — disqualifies the fast path, because the shared cached list
+// cannot honor it. Deciding off the actual params (not a hand-mirrored field
+// list) is what keeps this gate and the fallback from silently drifting apart.
+var latestFastPathReproducibleParams = map[string]struct{}{
+	"limit":              {},
+	"offset":             {},
+	"type":               {},
+	"library_id":         {},
+	"sort":               {},
+	"order":              {},
+	"include_total":      {},
+	"max_content_rating": {},
+}
+
 // latestFastPathEligible reports whether a /Items/Latest request can be served
 // through the native recently-added section (and its shared cache) with results
-// identical to the BrowseItems fallback. The synthetic recently-added section
-// only expresses a single library type plus the access scope, so any request
-// that carries a filter it cannot reproduce must fall back:
-//   - not a movies/series library (mixed/ebook/music/… would surface non-video);
-//   - a deeper page, played-status filter, or backdrop-required flag; or
-//   - a genre, name-prefix, or person filter (the section config can't scope to
-//     these, so serving unfiltered recently-added would return a wrong, broader
-//     result set than BrowseItems does).
-func latestFastPathEligible(query itemsQuery, libraryItemType string, hasSectionsFetcher bool) bool {
-	if !hasSectionsFetcher {
-		return false
-	}
+// identical to the BrowseItems fallback. It inspects the browse params the
+// fallback would actually receive: every param must be one the section path
+// reproduces, the request must be for the first page of a movies/series
+// library, the limit must fit the fixed shared fetch budget, and a client
+// rating cap must be a known rating (an unknown string matches nothing in
+// BrowseItems and must not mint arbitrary cache keys).
+func latestFastPathEligible(params url.Values, libraryItemType string) bool {
 	if libraryItemType != "movie" && libraryItemType != "series" {
 		return false
 	}
-	if query.startIndex != 0 || query.isPlayed != nil || query.requireBackdrop {
+	for key := range params {
+		if _, ok := latestFastPathReproducibleParams[key]; !ok {
+			return false
+		}
+	}
+	if params.Get("offset") != "0" {
 		return false
 	}
-	if query.genreName != "" || query.namePrefix != "" || query.personID != 0 {
+	if limit := catalog.ParseIntParam(params.Get("limit")); limit > compatLatestCacheFetchLimit {
 		return false
+	}
+	if rating := strings.TrimSpace(params.Get("max_content_rating")); rating != "" {
+		if _, known := access.RatingRank(rating); !known {
+			return false
+		}
 	}
 	return true
 }
@@ -1102,20 +1138,24 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 
 	limit := query.limit
 	if limit <= 0 {
-		limit = compatDefaultLatestLimit
+		limit = compatDefaultBrowseLimit
 	}
-	// Clamp to the same ceiling the BrowseItems fallback enforces, so a large
-	// client Limit can't drive an oversized recently-added fetch or explode the
-	// shared cache key with unbounded ItemLimit values.
-	if limit > compatBrowseMaxLimit {
-		limit = compatBrowseMaxLimit
+	// Eligibility already rejected limits beyond the shared fetch budget, but
+	// this path must stay safe if called directly.
+	if limit > compatLatestCacheFetchLimit {
+		return nil, errLatestNotEligible
 	}
 	libraryID := query.parentLibraryID
+	// Always fetch the FIXED compatLatestCacheFetchLimit budget and slice down
+	// to the requested page below. ItemLimit is a cache-key component, so
+	// echoing the raw client Limit would let one client mint a distinct
+	// process-global cache entry per Limit value; with the fixed budget every
+	// compat Latest request for a scope+library shares exactly one entry.
 	resolved := sections.ResolvedSection{
 		ID:          "compat-latest",
 		SectionType: sections.SectionRecentlyAdded,
 		Title:       "Latest",
-		ItemLimit:   limit,
+		ItemLimit:   compatLatestCacheFetchLimit,
 		Config:      cfg,
 	}
 
@@ -1124,7 +1164,14 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 		return nil, err
 	}
 
-	listItems := h.compatListItemsFromModels(ctx, filter, withItems.Items)
+	// The shared list is ordered by first_seen_at DESC, so its first N entries
+	// are exactly what a direct limit-N fetch would return.
+	sharedItems := withItems.Items
+	if len(sharedItems) > limit {
+		sharedItems = sharedItems[:limit]
+	}
+
+	listItems := h.compatListItemsFromModels(ctx, filter, sharedItems)
 	// The BrowseItems fallback aggregates series watch state via
 	// EnrichSeriesUserData; a series has no progress row of its own, so without
 	// this its Latest rail would drop Played/UnplayedItemCount and diverge from
@@ -1136,10 +1183,13 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 	return h.buildLatestItemDTOs(ctx, session, query, listItems)
 }
 
-// compatDefaultLatestLimit mirrors BrowseItems' default page size (see
-// directContentService.BrowseItems) so the native Latest path fetches the same
-// number of rows when the client omits Limit.
-const compatDefaultLatestLimit = 24
+// compatLatestCacheFetchLimit is the fixed number of rows the Latest fast path
+// asks the shared recently-added cache for, regardless of the client's Limit
+// (the response is sliced down afterwards). Fixing the fetch size keeps the
+// client's Limit out of the cache key — one entry per scope+library instead of
+// one per distinct Limit value — and comfortably covers the Latest hot path
+// (clients request ~16-50); larger limits fall back to BrowseItems.
+const compatLatestCacheFetchLimit = 100
 
 // latestRecentlyAddedConfig encodes the inferred item-type filter into the
 // recently-added section Config (the filter_type field buildRecentlyAddedQuery
