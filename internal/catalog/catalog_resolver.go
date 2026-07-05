@@ -1696,6 +1696,11 @@ func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store users
 		if err != nil {
 			return nil, err
 		}
+		// The episode scope shows history at episode granularity; every other
+		// scope collapses episode watch events into their series display item.
+		if isEpisodeCatalogScope(req.Query.MediaScope) {
+			return HistoryEpisodeScopeIDs(entries), nil
+		}
 		return ResolveHistoryDisplayIDs(ctx, entries, NewEpisodeRepository(r.itemRepo.pool))
 	default:
 		return nil, fmt.Errorf("%w: source %q is not a personal source", ErrInvalidCatalogRequest, req.Source)
@@ -1806,6 +1811,10 @@ func (r *CatalogResolver) fetchAccessibleItemsByID(ctx context.Context, contentI
 		return []*models.MediaItem{}, nil
 	}
 
+	if isEpisodeCatalogScope(req.Query.MediaScope) {
+		return r.fetchAccessibleEpisodeItemsByID(ctx, contentIDs, req, access)
+	}
+
 	filters, earlyEmpty, err := catalogBrowseFilters(req, access)
 	if err != nil {
 		return nil, err
@@ -1833,6 +1842,61 @@ func (r *CatalogResolver) fetchAccessibleItemsByID(ctx context.Context, contentI
 		ordered = append(ordered, item)
 	}
 	return ordered, nil
+}
+
+// fetchAccessibleEpisodeItemsByID is the episode-scope counterpart of
+// fetchAccessibleItemsByID. Episode rows are not present in media_items — they
+// hydrate through the episode catalog relation — so the browse-repository path
+// (which scans media_items and would match nothing) is replaced by the episode
+// query executor with the requested ids as the allowed-content set. Query
+// filters are applied in the same pass; sort and limit are stripped because
+// the caller re-imposes source order or its own sort downstream.
+func (r *CatalogResolver) fetchAccessibleEpisodeItemsByID(ctx context.Context, contentIDs []string, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {
+	filterDef := req.Query
+	filterDef.Sort = QuerySort{}
+	filterDef.Limit = nil
+
+	queryAccess := access
+	if access.AllowedContentIDs != nil {
+		queryAccess.AllowedContentIDs = intersectContentIDs(contentIDs, access.AllowedContentIDs)
+	} else {
+		queryAccess.AllowedContentIDs = contentIDs
+	}
+
+	executor := r.queryExecutorForScope(filterDef.MediaScope, nil)
+	items, _, err := executor.Preview(ctx, filterDef, queryAccess, len(contentIDs))
+	if err != nil {
+		return nil, err
+	}
+
+	byID := make(map[string]*models.MediaItem, len(items))
+	for _, item := range items {
+		if item != nil {
+			byID[item.ContentID] = item
+		}
+	}
+
+	ordered := make([]*models.MediaItem, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if item, ok := byID[contentID]; ok {
+			ordered = append(ordered, item)
+		}
+	}
+	return ordered, nil
+}
+
+func intersectContentIDs(ids []string, allowed []string) []string {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, id := range allowed {
+		allowedSet[id] = struct{}{}
+	}
+	intersection := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := allowedSet[id]; ok {
+			intersection = append(intersection, id)
+		}
+	}
+	return intersection
 }
 
 func (r *CatalogResolver) fetchAllBrowseCandidates(ctx context.Context, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {
