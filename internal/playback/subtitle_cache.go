@@ -87,7 +87,7 @@ func (c *SubtitleCache) ServeSUPExtract(w http.ResponseWriter, r *http.Request, 
 	cacheable := c != nil && r.URL.Query().Get("windowed") == ""
 	if cacheable {
 		if cached, modTime, ok := c.Lookup(inputPath, trackIndex); ok {
-			defer cached.Close()
+			defer func() { _ = cached.Close() }()
 			slog.DebugContext(r.Context(), "subtitle stream served from cache",
 				"input", inputPath, "track", trackIndex)
 			w.Header().Set("Content-Type", "application/octet-stream")

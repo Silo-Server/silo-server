@@ -177,7 +177,7 @@ func TestSubtitleCacheTeeWriteFailureKeepsServingClient(t *testing.T) {
 		t.Fatal("BeginFill returned nil")
 	}
 	// Force temp-file writes to fail (simulates disk full).
-	fill.tmp.Close()
+	_ = fill.tmp.Close()
 
 	var client strings.Builder
 	n, err := fill.Tee(&client).Write([]byte("bytes for the viewer"))
