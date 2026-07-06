@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -39,6 +40,18 @@ func NewContinueWatchingProgressFilter(pool *pgxpool.Pool) *ContinueWatchingProg
 }
 
 const supersededProgressPageSize = 500
+
+// supersededProgressMaxPages hard-caps how many completed-history pages the
+// superseded-episode walk reads in one request. The updated_at cutoff normally
+// halts paging far sooner (an import-heavy profile's completed rows predate its
+// active in-progress items, so the scan stops on the first page); this bound
+// only engages in the adversarial case of a very old in-progress entry sitting
+// behind a large volume of newer completions. Hitting it means the tail of the
+// completed set went unscanned, so a genuinely-superseded episode could
+// momentarily survive on the Continue Watching row — we log when that happens
+// rather than silently mis-filter, and it self-corrects once the stale
+// in-progress entry ages out of the scanned window.
+const supersededProgressMaxPages = 5
 
 // SupersededEpisodeProgressIDs returns the content IDs of in-progress entries
 // whose series has a later episode completed more recently than the entry's
@@ -111,7 +124,8 @@ func CompletedProgressSnapshots(ctx context.Context, store ProgressLister, profi
 	seen := make(map[string]struct{})
 	snapshots := make([]ProgressSnapshot, 0)
 
-	for offset := 0; ; offset += supersededProgressPageSize {
+	for page := 0; page < supersededProgressMaxPages; page++ {
+		offset := page * supersededProgressPageSize
 		entries, err := store.ListProgress(ctx, profileID, "completed", supersededProgressPageSize, offset)
 		if err != nil {
 			return nil, fmt.Errorf("listing completed progress for superseded episodes: %w", err)
@@ -135,6 +149,16 @@ func CompletedProgressSnapshots(ctx context.Context, store ProgressLister, profi
 			return snapshots, nil
 		}
 	}
+
+	// Fell out of the loop with a full final page: the page cap halted the walk
+	// before the cutoff, so completed rows past the scanned window were skipped.
+	// Log it so a real profile that trips this backstop is visible rather than
+	// silently under-filtered.
+	slog.Warn("continue-watching: superseded-episode walk hit page cap; completed-history tail left unscanned",
+		"profile_id", profileID,
+		"pages_scanned", supersededProgressMaxPages,
+		"rows_scanned", len(snapshots))
+	return snapshots, nil
 }
 
 // ProgressSnapshots converts progress rows to snapshots, dropping rows with a

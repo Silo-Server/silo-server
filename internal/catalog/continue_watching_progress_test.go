@@ -90,6 +90,33 @@ func TestCompletedProgressSnapshotsStopsAtCutoff(t *testing.T) {
 	}
 }
 
+func TestCompletedProgressSnapshotsHaltsAtPageCap(t *testing.T) {
+	t.Parallel()
+
+	// More completed history than the page cap allows, all newer than the
+	// (zero) cutoff so nothing halts the walk except the cap itself.
+	entries := make([]userstore.WatchProgress, (supersededProgressMaxPages+1)*supersededProgressPageSize)
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := range entries {
+		entries[i] = userstore.WatchProgress{
+			MediaItemID: "done-" + strconv.Itoa(i),
+			UpdatedAt:   base.Add(time.Duration(-i) * time.Second).Format(time.RFC3339),
+		}
+	}
+	store := &stubProgressLister{entries: entries}
+
+	snapshots, err := CompletedProgressSnapshots(context.Background(), store, "p1", time.Time{})
+	if err != nil {
+		t.Fatalf("CompletedProgressSnapshots: %v", err)
+	}
+	if len(store.calls) != supersededProgressMaxPages {
+		t.Fatalf("ListProgress calls = %d, want %d (page cap)", len(store.calls), supersededProgressMaxPages)
+	}
+	if len(snapshots) != supersededProgressMaxPages*supersededProgressPageSize {
+		t.Fatalf("completed snapshots count = %d, want %d (capped pages)", len(snapshots), supersededProgressMaxPages*supersededProgressPageSize)
+	}
+}
+
 func TestBuildSupersededEpisodeProgressQueryUsesStoreSnapshotsWithFreshnessGate(t *testing.T) {
 	t.Parallel()
 
