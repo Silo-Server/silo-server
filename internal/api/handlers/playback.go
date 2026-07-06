@@ -1986,8 +1986,9 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 	if session.PlayMethod == playback.PlayTranscode {
 		if ts := h.tm.GetTranscodeSession(sessionID); ts != nil {
 			ts.SetAudioTrackIndex(req.AudioTrackIndex)
-			seekSeconds := req.Position
-			startSegment := computeStartSegment(seekSeconds, ts.Opts().SegmentDuration)
+			tsOpts := ts.Opts()
+			startSegment := computeStartSegment(req.Position, tsOpts.SegmentDuration)
+			seekSeconds := alignedSeekSeconds(req.Position, tsOpts.SegmentDuration, tsOpts.TargetCodecVideo)
 			// Throttler + exit monitor re-arm via the session's restart hook.
 			if restartErr := h.tm.RestartSessionLocked(context.WithoutCancel(r.Context()), sessionID, ts, seekSeconds, startSegment); restartErr != nil {
 				slog.ErrorContext(r.Context(), "failed to restart transcode for audio switch", "component", "api", "session", sessionID, "error", restartErr)
@@ -2267,6 +2268,25 @@ func computeStartSegment(seekSeconds float64, segmentDuration int) int {
 	return int(seekSeconds / float64(segmentDuration))
 }
 
+// alignedSeekSeconds snaps an encoded transcode's ffmpeg start position down
+// to the boundary of the segment computeStartSegment assigns it. The synthetic
+// VOD manifest declares segment N to begin at exactly N×segmentDuration;
+// spawning ffmpeg at the raw seek position makes segment N actually begin up
+// to one segment later, and hls.js aligns that content to the declared
+// position — shifting the session's entire timeline (audio, video, and every
+// out-of-band subtitle cue) late by seek mod segmentDuration. Copy-mode
+// sessions serve ffmpeg's real manifest, whose declared timings match the
+// fragments it produces, so they keep the raw seek.
+func alignedSeekSeconds(seekSeconds float64, segmentDuration int, targetVideoCodec string) float64 {
+	if strings.EqualFold(targetVideoCodec, "copy") || seekSeconds <= 0 {
+		return seekSeconds
+	}
+	if segmentDuration <= 0 {
+		segmentDuration = 2
+	}
+	return float64(computeStartSegment(seekSeconds, segmentDuration) * segmentDuration)
+}
+
 // transcodeStartState holds the common parameters needed to finalize a
 // transcode start (update session state, log, and sync) for both remote
 // and local paths.
@@ -2481,7 +2501,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			SessionID:          req.SessionID,
 			InputPath:          file.FilePath,
 			SourceVideoCodec:   file.CodecVideo,
-			SeekSeconds:        req.SeekSeconds,
+			SeekSeconds:        alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
 			StartSegmentNumber: computeStartSegment(req.SeekSeconds, req.SegmentDuration),
 			TargetResolution:   req.TargetResolution,
 			TargetCodecVideo:   req.TargetCodecVideo,
@@ -2595,7 +2615,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		OutputDir:          filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
 		SessionID:          req.SessionID,
 		SourceVideoCodec:   file.CodecVideo,
-		SeekSeconds:        req.SeekSeconds,
+		SeekSeconds:        alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
 		StartSegmentNumber: computeStartSegment(req.SeekSeconds, req.SegmentDuration),
 		TargetResolution:   req.TargetResolution,
 		TargetCodecVideo:   req.TargetCodecVideo,

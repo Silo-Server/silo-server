@@ -1742,3 +1742,31 @@ func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 		t.Fatalf("alternate.ID = %d, want 3", alternate.ID)
 	}
 }
+
+func TestAlignedSeekSeconds(t *testing.T) {
+	tests := []struct {
+		name        string
+		seek        float64
+		segDur      int
+		targetVideo string
+		want        float64
+	}{
+		// Encoded transcodes snap down to the declared segment boundary so the
+		// synthetic manifest's timeline matches the produced content exactly.
+		{"encoded mid-segment seek snaps down", 1158.673, 2, "h264", 1158},
+		{"encoded boundary seek unchanged", 1158, 2, "h264", 1158},
+		{"encoded zero seek unchanged", 0, 2, "h264", 0},
+		{"segment duration defaults to 2", 1158.673, 0, "h264", 1158},
+		// Copy-mode serves ffmpeg's real manifest; raw seek stands.
+		{"copy keeps raw seek", 1158.673, 2, "copy", 1158.673},
+		{"copy case-insensitive", 1158.673, 2, "COPY", 1158.673},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := alignedSeekSeconds(tt.seek, tt.segDur, tt.targetVideo); got != tt.want {
+				t.Fatalf("alignedSeekSeconds(%v, %d, %q) = %v, want %v",
+					tt.seek, tt.segDur, tt.targetVideo, got, tt.want)
+			}
+		})
+	}
+}
