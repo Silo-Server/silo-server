@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -44,9 +45,13 @@ type StreamHandler struct {
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
-	SubtitleRepo   subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client       subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket       string               // bucket for subtitle storage
+	// SubtitleCache stores full-track PGS (.sup) extracts under the transcode
+	// dir so repeat selections skip the whole-file ffmpeg demux. May be nil
+	// (tests / minimal setups) — extraction then always streams uncached.
+	SubtitleCache *playback.SubtitleCache
+	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
+	S3Client      subtitles.S3Client   // optional; needed for fetching S3 subtitles
+	S3Bucket      string               // bucket for subtitle storage
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -490,29 +495,41 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		"duration_seconds", duration,
 	)
 
+	extract := func(dst io.Writer) error {
+		return playback.StreamExtractSubtitle(r.Context(), playback.StreamExtractOpts{
+			InputPath:       file.FilePath,
+			TrackIndex:      embeddedIndex,
+			SourceCodec:     track.Codec,
+			SeekSeconds:     seek,
+			DurationSeconds: duration,
+			AllowWindow:     allowWindow,
+			FFmpegPath:      h.ffmpegPath(),
+			Writer:          dst,
+		})
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Full-track PGS extracts are expensive (whole-file demux) and byte-
+	// identical across requests, so they are served from / teed into the
+	// subtitle cache. All other formats stream uncached: VTT is already
+	// windowed and fast, ASS is small.
+	if outFormat == "sup" {
+		err := h.SubtitleCache.ServeSUPExtract(w, r, file.FilePath, embeddedIndex, extract)
+		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
+		return
+	}
+
 	switch outFormat {
 	case "ass":
 		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	case "sup":
-		w.Header().Set("Content-Type", "application/octet-stream")
 	default:
 		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
 	}
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
-	err := playback.StreamExtractSubtitle(r.Context(), playback.StreamExtractOpts{
-		InputPath:       file.FilePath,
-		TrackIndex:      embeddedIndex,
-		SourceCodec:     track.Codec,
-		SeekSeconds:     seek,
-		DurationSeconds: duration,
-		AllowWindow:     allowWindow,
-		FFmpegPath:      h.ffmpegPath(),
-		Writer:          w,
-	})
-	if err != nil {
+	if err := extract(w); err != nil {
 		// Headers already committed — best we can do is log and let
 		// the client see a truncated response.
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
