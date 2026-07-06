@@ -235,21 +235,19 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	// data arrives) while teeing it into the cache for the next request.
 	// Clients that manage their own sliding window opt in with ?windowed=1
 	// (+ ?position=/?duration=), mirroring the API stream handler; windowed
-	// requests bypass the cache and extract only the requested slice.
+	// requests extract only the requested slice — from the cached full
+	// track when one exists (warming it in the background when not).
 	if requestedFormat == "sup" {
 		allowWindow, seek, duration := playback.PGSWindowRequest(r.URL.Query())
-		err := s.subCache.ServeSUPExtract(w, r, claims.MediaPath, trackIndex, func(dst io.Writer) error {
-			return playback.StreamExtractSubtitle(r.Context(), playback.StreamExtractOpts{
-				InputPath:       claims.MediaPath,
-				TrackIndex:      trackIndex,
-				SourceCodec:     "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
-				SeekSeconds:     seek,
-				DurationSeconds: duration,
-				AllowWindow:     allowWindow,
-				FFmpegPath:      cfg.Playback.FFmpegPath,
-				Writer:          dst,
-			})
-		})
+		err := s.subCache.ServeSUPExtract(w, r, playback.StreamExtractOpts{
+			InputPath:       claims.MediaPath,
+			TrackIndex:      trackIndex,
+			SourceCodec:     "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
+			SeekSeconds:     seek,
+			DurationSeconds: duration,
+			AllowWindow:     allowWindow,
+			FFmpegPath:      cfg.Playback.FFmpegPath,
+		}, playback.StreamExtractSubtitle)
 		if err != nil && r.Context().Err() == nil {
 			// Headers already committed — log and let the client see a
 			// truncated response.

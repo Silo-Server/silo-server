@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -495,27 +494,26 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		"duration_seconds", duration,
 	)
 
-	extract := func(dst io.Writer) error {
-		return playback.StreamExtractSubtitle(r.Context(), playback.StreamExtractOpts{
-			InputPath:       file.FilePath,
-			TrackIndex:      embeddedIndex,
-			SourceCodec:     track.Codec,
-			SeekSeconds:     seek,
-			DurationSeconds: duration,
-			AllowWindow:     allowWindow,
-			FFmpegPath:      h.ffmpegPath(),
-			Writer:          dst,
-		})
+	opts := playback.StreamExtractOpts{
+		InputPath:       file.FilePath,
+		TrackIndex:      embeddedIndex,
+		SourceCodec:     track.Codec,
+		SeekSeconds:     seek,
+		DurationSeconds: duration,
+		AllowWindow:     allowWindow,
+		FFmpegPath:      h.ffmpegPath(),
 	}
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	// Full-track PGS extracts are expensive (whole-file demux) and byte-
 	// identical across requests, so they are served from / teed into the
-	// subtitle cache. All other formats stream uncached: VTT is already
-	// windowed and fast, ASS is small.
+	// subtitle cache; windowed PGS requests extract their slice from the
+	// cached full track when present (warming it in the background when
+	// not). All other formats stream uncached: VTT is already windowed
+	// and fast, ASS is small.
 	if outFormat == "sup" {
-		err := h.SubtitleCache.ServeSUPExtract(w, r, file.FilePath, embeddedIndex, extract)
+		err := h.SubtitleCache.ServeSUPExtract(w, r, opts, playback.StreamExtractSubtitle)
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
 		return
 	}
@@ -529,7 +527,8 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
-	if err := extract(w); err != nil {
+	opts.Writer = w
+	if err := playback.StreamExtractSubtitle(r.Context(), opts); err != nil {
 		// Headers already committed — best we can do is log and let
 		// the client see a truncated response.
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)

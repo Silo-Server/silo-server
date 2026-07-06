@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -40,6 +41,40 @@ func fillEntry(t *testing.T, c *SubtitleCache, source string, track int, payload
 	if err := fill.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
+}
+
+// supExtractOpts builds the base extract options a handler would pass to
+// ServeSUPExtract for a PGS track.
+func supExtractOpts(source string, track int) StreamExtractOpts {
+	return StreamExtractOpts{
+		InputPath:   source,
+		TrackIndex:  track,
+		SourceCodec: "hdmv_pgs_subtitle",
+	}
+}
+
+// windowedSupOpts builds options for a windowed (?windowed=1) PGS request.
+func windowedSupOpts(source string, track int, seek, duration float64) StreamExtractOpts {
+	opts := supExtractOpts(source, track)
+	opts.AllowWindow = true
+	opts.SeekSeconds = seek
+	opts.DurationSeconds = duration
+	return opts
+}
+
+// waitForCacheEntry polls until the cache holds a committed entry for
+// source+track — used to observe asynchronous background warms.
+func waitForCacheEntry(t *testing.T, c *SubtitleCache, source string, track int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if f, _, ok := c.Lookup(source, track); ok {
+			_ = f.Close()
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("cache entry for track %d never appeared", track)
 }
 
 func readAllAndClose(t *testing.T, f *os.File) string {
@@ -288,16 +323,16 @@ func TestServeSUPExtractCacheFlow(t *testing.T) {
 	c, source := newTestCache(t)
 
 	extractCalls := 0
-	extract := func(dst io.Writer) error {
+	extract := func(_ context.Context, opts StreamExtractOpts) error {
 		extractCalls++
-		_, err := dst.Write([]byte("SUP PAYLOAD"))
+		_, err := opts.Writer.Write([]byte("SUP PAYLOAD"))
 		return err
 	}
 
 	// First request: miss → streamed 200 with no-store, entry committed.
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/sub.sup", nil)
-	if err := c.ServeSUPExtract(rec, req, source, 0, extract); err != nil {
+	if err := c.ServeSUPExtract(rec, req, supExtractOpts(source, 0), extract); err != nil {
 		t.Fatal(err)
 	}
 	if extractCalls != 1 {
@@ -312,7 +347,7 @@ func TestServeSUPExtractCacheFlow(t *testing.T) {
 
 	// Second request: hit → served from cache, no extract, revalidatable.
 	rec = httptest.NewRecorder()
-	if err := c.ServeSUPExtract(rec, req, source, 0, extract); err != nil {
+	if err := c.ServeSUPExtract(rec, req, supExtractOpts(source, 0), extract); err != nil {
 		t.Fatal(err)
 	}
 	if extractCalls != 1 {
@@ -335,7 +370,7 @@ func TestServeSUPExtractCacheFlow(t *testing.T) {
 	rec = httptest.NewRecorder()
 	rangeReq := httptest.NewRequest(http.MethodGet, "/sub.sup", nil)
 	rangeReq.Header.Set("Range", "bytes=4-10")
-	if err := c.ServeSUPExtract(rec, rangeReq, source, 0, extract); err != nil {
+	if err := c.ServeSUPExtract(rec, rangeReq, supExtractOpts(source, 0), extract); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Code != http.StatusPartialContent || rec.Body.String() != "PAYLOAD" {
@@ -343,35 +378,219 @@ func TestServeSUPExtractCacheFlow(t *testing.T) {
 	}
 }
 
-func TestServeSUPExtractWindowedBypassesCache(t *testing.T) {
+// A windowed request against a cached track must run its extract with the
+// cached .sup as input (small file → near-instant window) instead of
+// re-demuxing the original media, must never publish its sliced output as a
+// cache entry, and must bump the entry's LRU recency.
+func TestServeSUPExtractWindowedUsesCachedTrack(t *testing.T) {
 	c, source := newTestCache(t)
 	fillEntry(t, c, source, 0, "FULL TRACK")
 
+	// Age the entry so the LRU recency bump is observable.
+	entry := entryPath(t, c, source, 0)
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(entry, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	var got StreamExtractOpts
 	extractCalls := 0
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1", nil)
-	err := c.ServeSUPExtract(rec, req, source, 0, func(dst io.Writer) error {
+	req := httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=1200&duration=3600", nil)
+	err := c.ServeSUPExtract(rec, req, windowedSupOpts(source, 0, 1200, 3600), func(_ context.Context, opts StreamExtractOpts) error {
 		extractCalls++
-		_, err := dst.Write([]byte("WINDOW SLICE"))
+		got = opts
+		_, err := opts.Writer.Write([]byte("WINDOW SLICE"))
 		return err
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if extractCalls != 1 {
-		t.Fatal("windowed request must run its own extract even when cached")
+		t.Fatalf("extract calls = %d", extractCalls)
 	}
 	if rec.Body.String() != "WINDOW SLICE" {
 		t.Fatalf("windowed body = %q", rec.Body.String())
 	}
-	// The full-track entry must be untouched.
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("windowed Cache-Control = %q", cc)
+	}
+	if got.InputPath != entry {
+		t.Fatalf("windowed extract input = %q, want cached entry %q", got.InputPath, entry)
+	}
+	if !got.InputIsExtractedSup {
+		t.Fatal("windowed extract from cache must set InputIsExtractedSup")
+	}
+	if got.SeekSeconds != 1200 || got.DurationSeconds != 3600 || !got.AllowWindow {
+		t.Fatalf("window parameters not preserved: %+v", got)
+	}
+
+	// The full-track entry must be untouched, with recency bumped.
 	f, _, ok := c.Lookup(source, 0)
 	if !ok {
 		t.Fatal("full-track entry lost")
 	}
-	if got := readAllAndClose(t, f); got != "FULL TRACK" {
-		t.Fatalf("full-track entry corrupted: %q", got)
+	if content := readAllAndClose(t, f); content != "FULL TRACK" {
+		t.Fatalf("full-track entry corrupted: %q", content)
 	}
+	info, err := os.Stat(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().After(old.Add(time.Minute)) {
+		t.Fatalf("windowed serve must bump LRU recency: mtime = %v", info.ModTime())
+	}
+}
+
+// A windowed miss must trigger exactly one detached background warm no
+// matter how many windowed requests arrive while it runs, and once the warm
+// commits, the next windowed request extracts from the cached track.
+func TestServeSUPExtractWindowedMissWarmsOnce(t *testing.T) {
+	c, source := newTestCache(t)
+
+	var (
+		mu          sync.Mutex
+		warmOpts    []StreamExtractOpts
+		windowOpts  []StreamExtractOpts
+		warmRelease = make(chan struct{})
+	)
+	extract := func(_ context.Context, opts StreamExtractOpts) error {
+		if opts.AllowWindow {
+			mu.Lock()
+			windowOpts = append(windowOpts, opts)
+			mu.Unlock()
+			_, err := opts.Writer.Write([]byte("WINDOW SLICE"))
+			return err
+		}
+		mu.Lock()
+		warmOpts = append(warmOpts, opts)
+		mu.Unlock()
+		<-warmRelease
+		_, err := opts.Writer.Write([]byte("FULL TRACK"))
+		return err
+	}
+
+	// N windowed misses: each still streams its own windowed slice from the
+	// original file; only the first starts a warm (BeginFill coalescing keeps
+	// the rest out — deterministic because the in-flight slot is reserved
+	// synchronously before ServeSUPExtract returns).
+	for i := 0; i < 4; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=100&duration=3600", nil)
+		if err := c.ServeSUPExtract(rec, req, windowedSupOpts(source, 0, 100, 3600), extract); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Body.String() != "WINDOW SLICE" {
+			t.Fatalf("windowed body = %q", rec.Body.String())
+		}
+	}
+	close(warmRelease)
+	waitForCacheEntry(t, c, source, 0)
+
+	mu.Lock()
+	if len(warmOpts) != 1 {
+		t.Fatalf("warm extracts = %d, want exactly 1", len(warmOpts))
+	}
+	warm := warmOpts[0]
+	if warm.InputPath != source || warm.SeekSeconds != 0 || warm.DurationSeconds != 0 || warm.AllowWindow || warm.InputIsExtractedSup {
+		t.Fatalf("warm must be a full-track extract of the original file: %+v", warm)
+	}
+	if len(windowOpts) != 4 {
+		t.Fatalf("windowed extracts = %d, want 4", len(windowOpts))
+	}
+	for _, wo := range windowOpts {
+		if wo.InputPath != source || wo.InputIsExtractedSup {
+			t.Fatalf("pre-warm windowed extract must read the original file: %+v", wo)
+		}
+	}
+	mu.Unlock()
+
+	// Warm committed → the next windowed request reads the cached track.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=200&duration=3600", nil)
+	if err := c.ServeSUPExtract(rec, req, windowedSupOpts(source, 0, 200, 3600), extract); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	last := windowOpts[len(windowOpts)-1]
+	mu.Unlock()
+	if last.InputPath != entryPath(t, c, source, 0) || !last.InputIsExtractedSup {
+		t.Fatalf("post-warm windowed extract must read the cached track: %+v", last)
+	}
+}
+
+// Warms beyond the server-wide slot budget are dropped, not queued, and a
+// dropped warm must not leave an in-flight reservation behind.
+func TestWarmInBackgroundSemaphoreDrop(t *testing.T) {
+	c, source := newTestCache(t)
+
+	release := make(chan struct{})
+	extract := func(_ context.Context, opts StreamExtractOpts) error {
+		<-release
+		_, err := opts.Writer.Write([]byte("FULL TRACK"))
+		return err
+	}
+
+	// Occupy every warm slot (slots are acquired synchronously).
+	for track := 0; track < subtitleCacheWarmSlots; track++ {
+		c.WarmInBackground(supExtractOpts(source, track), extract)
+	}
+	// One more: dropped without reserving the track's in-flight slot.
+	overflow := subtitleCacheWarmSlots
+	c.WarmInBackground(supExtractOpts(source, overflow), extract)
+	if fill := c.BeginFill(source, overflow); fill == nil {
+		t.Fatal("dropped warm must not hold the in-flight slot")
+	} else {
+		fill.Discard()
+	}
+
+	close(release)
+	for track := 0; track < subtitleCacheWarmSlots; track++ {
+		waitForCacheEntry(t, c, source, track)
+	}
+	if _, _, ok := c.Lookup(source, overflow); ok {
+		t.Fatal("dropped warm must not populate the cache")
+	}
+
+	// With slots free again, the overflow track's warm goes through.
+	c.WarmInBackground(supExtractOpts(source, overflow), extract)
+	waitForCacheEntry(t, c, source, overflow)
+}
+
+// A warm that races an already-in-flight client fill must skip (BeginFill
+// coalescing) and release its warm slot for other tracks.
+func TestWarmInBackgroundSkipsInFlightFill(t *testing.T) {
+	c, source := newTestCache(t)
+
+	clientFill := c.BeginFill(source, 0)
+	if clientFill == nil {
+		t.Fatal("BeginFill returned nil")
+	}
+	warmed := make(chan struct{}, 1)
+	c.WarmInBackground(supExtractOpts(source, 0), func(_ context.Context, opts StreamExtractOpts) error {
+		warmed <- struct{}{}
+		_, err := opts.Writer.Write([]byte("WARM"))
+		return err
+	})
+
+	// The skipped warm must have released its slot synchronously: all
+	// subtitleCacheWarmSlots slots are still available.
+	for track := 1; track <= subtitleCacheWarmSlots; track++ {
+		c.WarmInBackground(supExtractOpts(source, track), func(_ context.Context, opts StreamExtractOpts) error {
+			_, err := opts.Writer.Write([]byte("FULL TRACK"))
+			return err
+		})
+	}
+	for track := 1; track <= subtitleCacheWarmSlots; track++ {
+		waitForCacheEntry(t, c, source, track)
+	}
+
+	select {
+	case <-warmed:
+		t.Fatal("warm for an in-flight track must not run")
+	default:
+	}
+	clientFill.Discard()
 }
 
 func TestServeSUPExtractDiscardsOnExtractError(t *testing.T) {
@@ -380,8 +599,8 @@ func TestServeSUPExtractDiscardsOnExtractError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/sub.sup", nil)
 	wantErr := errors.New("ffmpeg exploded")
-	err := c.ServeSUPExtract(rec, req, source, 0, func(dst io.Writer) error {
-		_, _ = dst.Write([]byte("PARTIAL"))
+	err := c.ServeSUPExtract(rec, req, supExtractOpts(source, 0), func(_ context.Context, opts StreamExtractOpts) error {
+		_, _ = opts.Writer.Write([]byte("PARTIAL"))
 		return wantErr
 	})
 	if !errors.Is(err, wantErr) {
@@ -397,17 +616,28 @@ func TestServeSUPExtractDiscardsOnExtractError(t *testing.T) {
 
 func TestServeSUPExtractNilCacheStreams(t *testing.T) {
 	var c *SubtitleCache
+	extract := func(_ context.Context, opts StreamExtractOpts) error {
+		_, err := opts.Writer.Write([]byte("UNCACHED"))
+		return err
+	}
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/sub.sup", nil)
-	err := c.ServeSUPExtract(rec, req, "/nonexistent.mkv", 0, func(dst io.Writer) error {
-		_, err := dst.Write([]byte("UNCACHED"))
-		return err
-	})
-	if err != nil {
+	if err := c.ServeSUPExtract(rec, req, supExtractOpts("/nonexistent.mkv", 0), extract); err != nil {
 		t.Fatal(err)
 	}
 	if rec.Body.String() != "UNCACHED" {
 		t.Fatalf("body = %q", rec.Body.String())
+	}
+
+	// Windowed requests on a nil cache stream too (no lookup, no warm).
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/sub.sup?windowed=1&position=10", nil)
+	if err := c.ServeSUPExtract(rec, req, windowedSupOpts("/nonexistent.mkv", 0, 10, 3600), extract); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Body.String() != "UNCACHED" {
+		t.Fatalf("windowed body = %q", rec.Body.String())
 	}
 }
 

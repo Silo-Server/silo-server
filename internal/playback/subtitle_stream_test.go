@@ -132,6 +132,48 @@ func TestStreamExtractArgs_WindowedPGS(t *testing.T) {
 	}
 }
 
+// A windowed extract whose input is a cached full-track .sup must force the
+// sup demuxer (the elementary stream has no container header to probe from
+// arbitrary offsets), remap to the file's sole stream regardless of the
+// original container's track ordinal, and still seek/window with -copyts so
+// the cached stream's absolute timestamps survive into the output.
+func TestStreamExtractArgs_ExtractedSupInput(t *testing.T) {
+	args := streamExtractArgs(StreamExtractOpts{
+		InputPath:           "/transcode/subtitle-cache/abc-s3-1-2.sup",
+		TrackIndex:          3,
+		SourceCodec:         "hdmv_pgs_subtitle",
+		SeekSeconds:         1200,
+		DurationSeconds:     3600,
+		AllowWindow:         true,
+		InputIsExtractedSup: true,
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-f sup -i /transcode/subtitle-cache/abc-s3-1-2.sup") {
+		t.Fatalf("cached sup input must force the sup demuxer before -i: %s", joined)
+	}
+	if !strings.Contains(joined, "-map 0:s:0") {
+		t.Fatalf("cached sup holds exactly one stream; must map 0:s:0: %s", joined)
+	}
+	if strings.Contains(joined, "0:s:3") {
+		t.Fatalf("original container track ordinal must not leak into sup input mapping: %s", joined)
+	}
+	if !strings.Contains(joined, "-ss 1200.000") || !strings.Contains(joined, "-t 3600.000") {
+		t.Fatalf("cached sup extract must still window the input: %s", joined)
+	}
+	ssIdx := slices.Index(args, "-ss")
+	inIdx := slices.Index(args, "-i")
+	if ssIdx < 0 || inIdx < 0 || ssIdx > inIdx {
+		t.Fatalf("-ss must be an input option (before -i): %s", joined)
+	}
+	if !strings.Contains(joined, "-copyts") {
+		t.Fatalf("cached sup extract must preserve absolute timestamps: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:s copy") || !strings.Contains(joined, "-f sup pipe:1") {
+		t.Fatalf("cached sup extract should copy into a sup stream: %s", joined)
+	}
+}
+
 // AllowWindow must not override the ASS guard — its [Script Info] header
 // only exists at stream offset 0, so a seeked extract would be broken.
 func TestStreamExtractArgs_ASSIgnoresAllowWindow(t *testing.T) {

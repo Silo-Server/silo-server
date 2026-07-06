@@ -46,6 +46,18 @@ type StreamExtractOpts struct {
 	// [Script Info] header exists only at stream offset 0, so a seeked
 	// extract would be structurally broken.
 	AllowWindow bool
+	// InputIsExtractedSup marks InputPath as a cached full-track .sup
+	// elementary stream (a previous full extract, produced with -copyts so
+	// its timestamps are absolute source PTS) rather than the original
+	// media container. The input format is forced with `-f sup` — the
+	// headerless stream is probeable via its "PG" magic, but an explicit
+	// format is robust against probe-size edge cases — and the stream
+	// mapping is forced to `0:s:0`: a .sup holds exactly one stream, so
+	// TrackIndex (which names the ordinal in the *original* container) no
+	// longer applies. Seeking such an input with -copyts re-emits the same
+	// absolute timestamps, so windowed output is byte-compatible with a
+	// window cut from the original file.
+	InputIsExtractedSup bool
 	// FFmpegPath overrides the ffmpeg binary lookup.
 	FFmpegPath string
 	// Writer receives ffmpeg's stdout bytes as they arrive. When it
@@ -152,9 +164,16 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 		args = append(args, "-t", strconv.FormatFloat(opts.DurationSeconds, 'f', 3, 64))
 	}
 
+	// A cached .sup input has no container magic worth probing and exactly
+	// one stream: force the demuxer and remap to the sole stream ordinal.
+	trackIndex := opts.TrackIndex
+	if opts.InputIsExtractedSup {
+		args = append(args, "-f", "sup")
+		trackIndex = 0
+	}
 	args = append(args,
 		"-i", opts.InputPath,
-		"-map", fmt.Sprintf("0:s:%d", opts.TrackIndex),
+		"-map", fmt.Sprintf("0:s:%d", trackIndex),
 		"-c:s", outCodec,
 	)
 
