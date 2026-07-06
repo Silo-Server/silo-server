@@ -974,7 +974,11 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	episode, err := s.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
 		if errors.Is(err, ErrEpisodeNotFound) {
-			return nil, ErrItemNotFound
+			// Fourth tier: a local extra. Serving it from GetItemDetail keeps
+			// per-item consumers that resolve arbitrary content ids
+			// (jellycompat PlaybackInfo in particular) playable without a
+			// separate lookup path.
+			return s.buildExtraItemDetail(ctx, contentID, filter)
 		}
 		return nil, err
 	}
@@ -989,6 +993,67 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		return nil, err
 	}
 	return s.buildEpisodeDetail(ctx, episode, seriesCtx, filter)
+}
+
+// buildExtraItemDetail resolves a local extra as a minimal ItemDetail:
+// title/kind plus the ordinary playback surface (versions, subtitles) built
+// from its backing files. Access control is the parent item's.
+func (s *DetailService) buildExtraItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
+	if s.extraRepo == nil {
+		return nil, ErrItemNotFound
+	}
+	extra, err := s.extraRepo.GetByID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, ErrExtraNotFound) {
+			return nil, ErrItemNotFound
+		}
+		return nil, err
+	}
+	if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
+		return nil, err
+	}
+	if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
+		return nil, err
+	}
+	fetcher, ok := s.fileFetcher.(extraFileFetcher)
+	if !ok {
+		return nil, ErrItemNotFound
+	}
+	files, err := fetcher.GetByExtraID(ctx, extra.ContentID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching extra files: %w", err)
+	}
+	files = FilterMediaFilesByAccess(files, filter)
+	files = s.preparePlaybackFiles(ctx, files)
+
+	detail := &ItemDetail{
+		ContentID: extra.ContentID,
+		Type:      "extra",
+		Title:     extra.Title,
+		Genres:    []string{},
+		Cast:      []CastCredit{},
+		Crew:      []CrewCredit{},
+		Studios:   []string{},
+		Networks:  []string{},
+	}
+	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
+		ctx,
+		files,
+		filter,
+		extra.ContentID,
+	)
+	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
+		if localized, locErr := s.LocalizeItemModel(ctx, parent, filter); locErr == nil {
+			parent = localized
+		}
+		if detail.Title == "" {
+			detail.Title = parent.Title
+		}
+		detail.SeriesID = extra.ParentID
+		detail.SeriesTitle = parent.Title
+		detail.Year = parent.Year
+	}
+	return detail, nil
 }
 
 // seriesDetailContext caches series-level lookups so a batched episode-detail

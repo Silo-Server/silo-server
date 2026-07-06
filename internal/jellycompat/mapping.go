@@ -595,6 +595,10 @@ func jellyfinItemType(native string) string {
 		return "Episode"
 	case "season":
 		return "Season"
+	case "extra":
+		// Local extras have no dedicated BaseItemKind; plain Video is what
+		// Jellyfin uses for special features.
+		return "Video"
 	default:
 		if native == "" {
 			return ""
