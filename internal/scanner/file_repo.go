@@ -2955,6 +2955,7 @@ func (r *FileRepository) UpdateContentIDByObservedRootPath(ctx context.Context, 
 		WHERE media_folder_id = $2
 		  AND observed_root_path = $3
 		  AND missing_since IS NULL
+		  AND extra_id IS NULL
 		  AND (content_id IS NULL OR content_id <> $1)
 	`, contentID, folderID, observedRootPath)
 	if err != nil {

@@ -184,6 +184,7 @@ func (r *RootClaimRepository) ClaimAndRelinkFiles(ctx context.Context, folderID 
 		SET content_id = $1, updated_at = NOW()
 		WHERE media_folder_id = $2
 		  AND missing_since IS NULL
+		  AND extra_id IS NULL
 		  AND (content_id IS NULL OR content_id = '')
 		  AND (file_path = $3 OR file_path LIKE $4)
 	`, contentID, folderID, rootPath, prefixLike)

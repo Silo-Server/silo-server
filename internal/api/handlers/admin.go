@@ -936,7 +936,7 @@ func (h *AdminHandler) HandleListUnmatched(w http.ResponseWriter, r *http.Reques
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT id, media_folder_id, file_path, file_size, container
 		 FROM media_files
-		 WHERE content_id IS NULL
+		 WHERE content_id IS NULL AND extra_id IS NULL
 		 ORDER BY id ASC
 		 LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {

@@ -79,7 +79,7 @@ const movieQueueFileEligibleCond = `folders.enabled = true
 		lower(trim(folders.type)) IN ('movie', 'movies') OR
 		(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'movie')
 	  )
-	  AND mf.missing_since IS NULL
+	  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 	  AND (
 		mf.content_id IS NULL OR mf.content_id = '' OR
 		lower(trim(COALESCE(mi.status, ''))) IN ('pending', 'unmatched', 'ambiguous')

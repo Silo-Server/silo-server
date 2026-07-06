@@ -122,6 +122,7 @@ func (r *GroupClaimRepository) ClaimAndRelinkFiles(
 		  AND group_key_version = $3
 		  AND content_group_key = $4
 		  AND missing_since IS NULL
+		  AND extra_id IS NULL
 		  AND (content_id IS NULL OR content_id = '')
 	`, contentID, folderID, groupKeyVersion, contentGroupKey)
 	if err != nil {
