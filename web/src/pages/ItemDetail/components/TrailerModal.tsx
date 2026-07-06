@@ -1,4 +1,4 @@
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { ItemVideo } from "@/api/types";
 import { extraKindLabel } from "@/lib/extraKinds";
 
@@ -19,11 +19,11 @@ export default function TrailerModal({ video, onOpenChange }: TrailerModalProps)
     <Dialog open={video !== null} onOpenChange={onOpenChange}>
       <DialogContent className="gap-0 overflow-hidden border-none bg-black p-0 sm:max-w-4xl">
         <DialogTitle className="sr-only">{title}</DialogTitle>
+        <DialogDescription className="sr-only">Trailer video player</DialogDescription>
         {video && (
           <iframe
             src={`https://www.youtube-nocookie.com/embed/${video.site_key}?autoplay=1`}
             allow="autoplay; encrypted-media; fullscreen"
-            allowFullScreen
             title={title}
             className="aspect-video w-full"
           />
