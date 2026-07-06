@@ -333,7 +333,11 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, page := readPagedQuery(r, 50)
+	// Real ABS returns ALL authors for a non-paginated request (no default
+	// cap) — clients like the official app fetch the whole list once and
+	// scroll it locally, so a server-side default limit silently truncates
+	// the Authors page. limit=0 means "return all".
+	limit, page := readPagedQuery(r, 0)
 	sortBy := r.URL.Query().Get("sort")
 	sortDesc := r.URL.Query().Get("desc") == "1"
 	access, _, err := h.accessFilterFromRequest(r)
@@ -380,7 +384,9 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, page := readPagedQuery(r, 25)
+	// Like /authors: real ABS serves the full set when the client doesn't
+	// paginate; a server-side default limit truncates the Series page.
+	limit, page := readPagedQuery(r, 0)
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
