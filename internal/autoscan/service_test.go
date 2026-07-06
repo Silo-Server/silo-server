@@ -240,6 +240,24 @@ func (unresolvableResolver) ResolveVanishedPath(context.Context, string, string)
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
 }
 
+// mixedTransientResolver resolves /mnt/media/ paths normally and fails every
+// other path with a plain (non-RequestError) internal error — the mixed
+// "some resolved, some failed transiently" poll window.
+type mixedTransientResolver struct{}
+
+func (mixedTransientResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if strings.HasPrefix(req.Path, "/mnt/media/") {
+		return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: req.Path, Trigger: req.Trigger}, nil
+	}
+	return nil, errors.New("listing folders: connection timeout")
+}
+func (mixedTransientResolver) ResolveMissingSubtree(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, errors.New("listing folders: connection timeout")
+}
+func (mixedTransientResolver) ResolveVanishedPath(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, errors.New("listing folders: connection timeout")
+}
+
 // transientFailureResolver fails every resolve with a plain (non-RequestError)
 // error, simulating an internal fault such as a database timeout.
 type transientFailureResolver struct{}
@@ -816,6 +834,50 @@ func TestPollOnceHoldsMarkerOnTransientResolveFailure(t *testing.T) {
 		t.Fatalf("event status = %q, want %q", event.Status, EventStatusError)
 	}
 	if event.ChangesReturned != 2 || event.ChangesResolved != 0 {
+		t.Fatalf("event counts = %+v", event)
+	}
+}
+
+func TestPollOnceHoldsMarkerWhenSomeResolveAndOthersFailTransiently(t *testing.T) {
+	// One path resolves and enqueues, another fails with an internal
+	// (non-RequestError) resolver fault. The resolved target's scan must still
+	// be enqueued, but the marker must HOLD and an error be recorded so the
+	// failed path is retried next poll instead of being skipped.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
+			"/mnt/media/Show/S01/E01.mkv",
+			"/data/other/Movie/movie.mkv",
+		},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := NewService(store, prov, passthroughConnRes{}, mixedTransientResolver{}, q, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("the resolved target should still enqueue, got %d", len(q.enqueued))
+	}
+	if got, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance when any resolve attempt failed transiently, advanced to %q", got)
+	}
+	msg, ok := store.recorded["s1"]
+	if !ok || !strings.Contains(msg, "failed internally") {
+		t.Fatalf("expected recorded transient-failure error, got %q ok=%v", msg, ok)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.Status != EventStatusError {
+		t.Fatalf("event status = %q, want %q", event.Status, EventStatusError)
+	}
+	if event.ChangesReturned != 2 || event.ChangesResolved != 1 {
 		t.Fatalf("event counts = %+v", event)
 	}
 }

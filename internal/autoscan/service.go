@@ -131,8 +131,8 @@ func NewService(
 // all resolve OUTSIDE Silo's libraries (routine for whole-volume filesystem
 // watchers; the event finishes as "unresolved" so it stays visible). The
 // marker is held only on genuine failures: provider errors, enqueue errors,
-// and windows where nothing resolved because resolve attempts failed
-// internally (possibly transient), so those imports are retried next poll.
+// and windows where any resolve attempt failed internally (possibly
+// transient), so the affected imports are retried next poll.
 func (s *Service) PollOnce(ctx context.Context) error {
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
@@ -244,39 +244,45 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		//   - returned paths, resolved but all
 		//     suppressed (recently scanned /
 		//     debounced)                           → work is effectively done; advance.
-		//   - returned paths AND NOTHING resolved  → depends on WHY nothing
-		//     resolved:
-		//       * every path is outside Silo's libraries (RequestError) — a benign,
-		//         expected condition for whole-volume filesystem watchers (e.g.
-		//         CephFS), which observe folders that are not registered as Silo
-		//         libraries. Holding here would pin the marker and permanently
-		//         stall autoscan, so advance; finish the event as "unresolved" so
-		//         the condition stays visible in poll history.
-		//       * one or more resolve attempts failed INTERNALLY (resolver/database
-		//         fault) — possibly transient, so hold the marker and record the
-		//         error; a later poll re-reads the same window once the fault
-		//         clears. Advancing here would silently skip real imports.
-		// (Some-but-not-all resolving counts as resolved — the unresolved paths are
-		// legitimately outside Silo's libraries, so advancing is correct.)
+		//   - ANY resolve attempt failed INTERNALLY (resolver/database fault —
+		//     possibly transient), whether or not other paths resolved → hold the
+		//     marker and record the error; a later poll re-reads the same window
+		//     once the fault clears. Advancing would silently skip the failed
+		//     paths. Targets that DID resolve were already enqueued above; the
+		//     re-read at worst re-scans them, which is safe.
+		//   - returned paths AND NOTHING resolved  → every path is outside Silo's
+		//     libraries (RequestError) — a benign, expected condition for
+		//     whole-volume filesystem watchers (e.g. CephFS), which observe
+		//     folders that are not registered as Silo libraries. Holding here
+		//     would pin the marker and permanently stall autoscan, so advance;
+		//     finish the event as "unresolved" so the condition stays visible in
+		//     poll history.
+		// (Some-but-not-all resolving still advances when the unresolved
+		// remainder is merely outside Silo's libraries.)
 		//
 		// NOTE: len(targets)==0 alone is NOT misconfiguration — paths can resolve
 		// yet be fully suppressed. Gate on resolvedAny, not targets.
+		if stats.TransientErrors > 0 {
+			msg := fmt.Sprintf("%d resolve attempt(s) failed internally (%d of %d path(s) resolved) — holding marker to retry", stats.TransientErrors, stats.ChangesResolved, len(changes))
+			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
+				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+			}
+			s.finishEvent(ctx, eventID, EventFinish{
+				Status:          EventStatusError,
+				ChangesReturned: len(changes),
+				ChangesResolved: stats.ChangesResolved,
+				TargetsClaimed:  stats.TargetsClaimed,
+				ScansCreated:    enqueue.Created,
+				ScansReused:     enqueue.Reused,
+				ScansSuppressed: stats.Suppressed,
+				ErrorMessage:    msg,
+				MarkerAfter:     marker,
+			})
+			continue // do NOT advance marker
+		}
 		status := EventStatusSuccess
 		var statusMsg string
 		if len(changes) > 0 && !resolvedAny {
-			if stats.TransientErrors > 0 {
-				msg := fmt.Sprintf("returned %d path(s), none resolved and %d resolve attempt(s) failed internally — holding marker to retry", len(changes), stats.TransientErrors)
-				if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
-					slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
-				}
-				s.finishEvent(ctx, eventID, EventFinish{
-					Status:          EventStatusError,
-					ChangesReturned: len(changes),
-					ErrorMessage:    msg,
-					MarkerAfter:     marker,
-				})
-				continue // do NOT advance marker
-			}
 			status = EventStatusUnresolved
 			statusMsg = fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — advanced past them", len(changes))
 			slog.WarnContext(ctx, "autoscan: returned paths matched no library folder — advancing marker",
