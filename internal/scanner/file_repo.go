@@ -399,6 +399,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		var f models.MediaFile
 		var contentID *string
 		var episodeID *string
+		var extraID *string
 		var seasonNumber, episodeNumber *int
 		var canonicalRootPath *string
 		var observedRootPath, contentGroupKey, baseTitle, baseType, identityConfidence *string
@@ -432,6 +433,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.ID,
 			&contentID,
 			&episodeID,
+			&extraID,
 			&seasonNumber,
 			&episodeNumber,
 			&f.MediaFolderID,
@@ -520,6 +522,9 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		}
 		if episodeID != nil {
 			f.EpisodeID = *episodeID
+		}
+		if extraID != nil {
+			f.ExtraID = *extraID
 		}
 		if seasonNumber != nil {
 			f.SeasonNumber = *seasonNumber

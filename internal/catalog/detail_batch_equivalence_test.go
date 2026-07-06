@@ -133,12 +133,17 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	personActor1 := suffix
 	personActor2 := suffix + 1
 	personDirector := suffix + 2
+	extraA := fmt.Sprintf("batch-equiv-extra-%d", suffix)
+	extraFolderName := fmt.Sprintf("batch-equiv-folder-%d", suffix)
 
 	t.Cleanup(func() {
 		ids := []string{movieA, movieB, series, movieR}
 		batchEquivExec(t, pool, `DELETE FROM item_people WHERE content_id = ANY($1)`, ids)
 		batchEquivExec(t, pool, `DELETE FROM people WHERE id = ANY($1)`, []int64{personActor1, personActor2, personDirector})
 		batchEquivExec(t, pool, `DELETE FROM media_item_localizations WHERE content_id = ANY($1)`, ids)
+		// Deleting the folder cascades the extra's media_files row; deleting
+		// the items cascades item_videos and media_extras.
+		batchEquivExec(t, pool, `DELETE FROM media_folders WHERE name = $1`, extraFolderName)
 		batchEquivExec(t, pool, `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
 	})
 
@@ -187,6 +192,35 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	insertCredit(personActor1, personActor1, models.PersonKindActor, "Hero", 0)
 	insertCredit(personActor2, personActor2, models.PersonKindActor, "Sidekick", 1)
 	insertCredit(personDirector, personDirector, models.PersonKindDirector, "", 0)
+
+	// Remote videos on movieA and the series: exercises the batched
+	// videoRepo.ListByContentIDs prefetch against per-item GetByContentID.
+	insertVideo := func(id int64, contentID, providerKey, kind string, official bool, order int) {
+		batchEquivExec(t, pool, `
+			INSERT INTO item_videos (id, content_id, provider, provider_key, kind, site, site_key, name, language, is_official, sort_order)
+			VALUES ($1, $2, 'tmdb', $3, $4, 'youtube', 'yt-' || $3, 'Video ' || $3, 'en', $5, $6)
+		`, id, contentID, providerKey, kind, official, order)
+	}
+	insertVideo(suffix+10, movieA, "v1", "trailer", true, 0)
+	insertVideo(suffix+11, movieA, "v2", "featurette", false, 1)
+	insertVideo(suffix+12, series, "v3", "teaser", false, 0)
+
+	// A local extra on movieA backed by a live media_files row: exercises the
+	// batched extraRepo.ListWithFilesByParentIDs prefetch against the per-item
+	// ListWithFilesByParentID lookup.
+	var extraFolderID int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name) VALUES ('movies', $1) RETURNING id`,
+		extraFolderName).Scan(&extraFolderID); err != nil {
+		t.Fatalf("seed extra folder: %v", err)
+	}
+	batchEquivExec(t, pool, `
+		INSERT INTO media_extras (content_id, parent_id, kind, title)
+		VALUES ($1, $2, 'featurette', 'Making Of')
+	`, extraA, movieA)
+	batchEquivExec(t, pool, `
+		INSERT INTO media_files (extra_id, media_folder_id, file_path, duration)
+		VALUES ($1, $2, $3, 120)
+	`, extraA, extraFolderID, fmt.Sprintf("/media/batch-equiv-extra-%d.mkv", suffix))
 
 	fileFetcher := &batchEquivFileFetcher{files: map[string][]*models.MediaFile{
 		movieA: {
@@ -277,5 +311,15 @@ func TestGetItemDetailsByIDs_MatchesGetItemDetail(t *testing.T) {
 	}
 	if got := batch[series]; got.WorkID != "work-series-1" {
 		t.Fatalf("series work summary not applied: WorkID=%q", got.WorkID)
+	}
+	if got := batch[movieA]; len(got.Videos) != 2 || got.Videos[0].Kind != "trailer" || got.Videos[0].SiteKey != "yt-v1" {
+		t.Fatalf("movieA videos prefetch mismatch: %#v", got.Videos)
+	}
+	if got := batch[series]; len(got.Videos) != 1 || got.Videos[0].Kind != "teaser" {
+		t.Fatalf("series videos prefetch mismatch: %#v", got.Videos)
+	}
+	if got := batch[movieA]; len(got.Extras) != 1 || got.Extras[0].ContentID != extraA ||
+		got.Extras[0].DurationSeconds != 120 || got.Extras[0].FileID == 0 {
+		t.Fatalf("movieA extras prefetch mismatch: %#v", got.Extras)
 	}
 }

@@ -4,19 +4,10 @@ import { Play } from "lucide-react";
 import type { ItemExtra } from "@/api/types";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { extraKindGroupLabel } from "@/lib/extraKinds";
+import { formatClock } from "@/lib/markers";
 
 interface ExtrasSectionProps {
   extras: ItemExtra[];
-}
-
-function formatExtraDuration(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-    : `${m}:${String(s).padStart(2, "0")}`;
 }
 
 /**
@@ -91,7 +82,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
         <span className="text-foreground block truncate text-[13px] font-medium">{title}</span>
         {extra.duration_seconds != null && extra.duration_seconds > 0 && (
           <span className="text-muted-foreground block text-[11px] tabular-nums">
-            {formatExtraDuration(extra.duration_seconds)}
+            {formatClock(extra.duration_seconds)}
           </span>
         )}
       </span>

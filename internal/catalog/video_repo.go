@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -139,13 +140,7 @@ func (r *VideoRepository) ListByContentIDs(ctx context.Context, contentIDs []str
 	return result, nil
 }
 
-type pgxRows interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-}
-
-func scanItemVideos(rows pgxRows) ([]models.ItemVideo, error) {
+func scanItemVideos(rows pgx.Rows) ([]models.ItemVideo, error) {
 	var videos []models.ItemVideo
 	for rows.Next() {
 		var v models.ItemVideo
