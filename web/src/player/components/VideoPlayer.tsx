@@ -1627,6 +1627,8 @@ export function VideoPlayer({
   );
 
   // -- PGS (Blu-ray bitmap) subtitle rendering via libpgs --
+  // Shares the text overlay's appearance settings; the compositor applies
+  // the geometric prefs (size, position, background box) to the bitmaps.
   const { isActive: isPGSActive } = usePGSSubtitles(
     videoRef,
     subtitleUrls,
@@ -1634,6 +1636,7 @@ export function VideoPlayer({
     isDetached,
     streamOriginSeconds,
     subtitleDelayMs,
+    subtitleSettings,
   );
 
   // -- Auto-select subtitle track based on mode --

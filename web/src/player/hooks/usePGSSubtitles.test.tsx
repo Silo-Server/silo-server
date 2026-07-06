@@ -3,6 +3,7 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { usePGSSubtitles } from "./usePGSSubtitles";
 import type { PlayerSubtitleInfo } from "../types";
+import { DEFAULT_SUBTITLE_APPEARANCE } from "../../lib/subtitleAppearance";
 
 // Capture every constructed renderer so tests can assert options and
 // lifecycle (libpgs fetches subUrl inside its worker — no fetch mocking).
@@ -58,6 +59,14 @@ const srtTrack: PlayerSubtitleInfo = {
 const tracks = [srtTrack, pgsTrack, otherPgsTrack];
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   constructorOpts.length = 0;
   disposeSpies.length = 0;
   renderers.length = 0;
@@ -66,7 +75,9 @@ beforeEach(() => {
 describe("usePGSSubtitles", () => {
   it("creates a renderer wired to the video and .sup URL for a PGS track", async () => {
     const videoRef = makeVideoRef();
-    const { result } = renderHook(() => usePGSSubtitles(videoRef, tracks, 3, false, 0, 0));
+    const { result } = renderHook(() =>
+      usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+    );
 
     await waitFor(() => expect(constructorOpts).toHaveLength(1));
 
@@ -74,13 +85,17 @@ describe("usePGSSubtitles", () => {
     expect(opts.video).toBe(videoRef.current);
     expect(opts.subUrl).toBe(pgsTrack.url);
     expect(opts.workerUrl).toBe("/assets/libpgs.worker.js");
-    expect(opts.aspectRatio).toBe("contain");
+    // Decode in the worker, draw on the main thread: the source canvas must
+    // stay readable for region detection.
+    expect(opts.mode).toBe("workerWithoutOffscreenCanvas");
+    expect(opts.canvas).toBeInstanceOf(HTMLCanvasElement);
     expect(result.current.isActive).toBe(true);
   });
 
   it("does nothing for text and ASS tracks", async () => {
     const { result, rerender } = renderHook(
-      ({ index }) => usePGSSubtitles(makeVideoRef(), tracks, index, false, 0, 0),
+      ({ index }) =>
+        usePGSSubtitles(makeVideoRef(), tracks, index, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
       { initialProps: { index: 1 as number | null } },
     );
 
@@ -95,7 +110,9 @@ describe("usePGSSubtitles", () => {
   it("applies stream origin and subtracts user delay from the time offset", async () => {
     // Positive delay shows subtitles later; libpgs looks up the display set
     // at currentTime + timeOffset, so later means a smaller offset.
-    renderHook(() => usePGSSubtitles(makeVideoRef(), tracks, 3, false, 30, 2000));
+    renderHook(() =>
+      usePGSSubtitles(makeVideoRef(), tracks, 3, false, 30, 2000, DEFAULT_SUBTITLE_APPEARANCE),
+    );
 
     await waitFor(() => expect(constructorOpts).toHaveLength(1));
     expect(constructorOpts[0]!.timeOffset).toBe(28);
@@ -104,7 +121,8 @@ describe("usePGSSubtitles", () => {
   it("updates the time offset in place without recreating the renderer", async () => {
     const videoRef = makeVideoRef();
     const { rerender } = renderHook(
-      ({ delay }) => usePGSSubtitles(videoRef, tracks, 3, false, 0, delay),
+      ({ delay }) =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, delay, DEFAULT_SUBTITLE_APPEARANCE),
       { initialProps: { delay: 0 } },
     );
 
@@ -119,7 +137,8 @@ describe("usePGSSubtitles", () => {
   it("disposes the renderer when switching to a non-PGS track", async () => {
     const videoRef = makeVideoRef();
     const { result, rerender } = renderHook(
-      ({ index }) => usePGSSubtitles(videoRef, tracks, index, false, 0, 0),
+      ({ index }) =>
+        usePGSSubtitles(videoRef, tracks, index, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
       { initialProps: { index: 3 } },
     );
 
@@ -133,7 +152,8 @@ describe("usePGSSubtitles", () => {
   it("recreates the renderer when switching between PGS tracks", async () => {
     const videoRef = makeVideoRef();
     const { rerender } = renderHook(
-      ({ index }) => usePGSSubtitles(videoRef, tracks, index, false, 0, 0),
+      ({ index }) =>
+        usePGSSubtitles(videoRef, tracks, index, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
       { initialProps: { index: 3 } },
     );
 
@@ -148,7 +168,8 @@ describe("usePGSSubtitles", () => {
   it("disposes the renderer while detached and reports inactive", async () => {
     const videoRef = makeVideoRef();
     const { result, rerender } = renderHook(
-      ({ detached }) => usePGSSubtitles(videoRef, tracks, 3, detached, 0, 0),
+      ({ detached }) =>
+        usePGSSubtitles(videoRef, tracks, 3, detached, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
       { initialProps: { detached: false } },
     );
 
@@ -160,7 +181,9 @@ describe("usePGSSubtitles", () => {
   });
 
   it("disposes the renderer on unmount", async () => {
-    const { unmount } = renderHook(() => usePGSSubtitles(makeVideoRef(), tracks, 3, false, 0, 0));
+    const { unmount } = renderHook(() =>
+      usePGSSubtitles(makeVideoRef(), tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+    );
 
     await waitFor(() => expect(renderers).toHaveLength(1));
 
