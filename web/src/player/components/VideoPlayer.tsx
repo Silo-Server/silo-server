@@ -1629,7 +1629,9 @@ export function VideoPlayer({
   // -- PGS (Blu-ray bitmap) subtitle rendering via libpgs --
   // Shares the text overlay's appearance settings; the compositor applies
   // the geometric prefs (size, position, background box) to the bitmaps.
-  const { isActive: isPGSActive } = usePGSSubtitles(
+  // isLoadingCues: the hook has paused (or is bridging) playback while a
+  // window of bitmap cues extracts; surface the indicator below.
+  const { isActive: isPGSActive, isLoadingCues: pgsCuesLoading } = usePGSSubtitles(
     videoRef,
     subtitleUrls,
     activeSubtitleIndex,
@@ -2314,6 +2316,17 @@ export function VideoPlayer({
           onSkip={nextEpisode.skipToNext}
           onCancel={nextEpisode.cancelAutoPlay}
         />
+      )}
+
+      {/* PGS subtitle window extraction indicator — usePGSSubtitles holds
+          playback while cue data loads; mirror the translation indicator. */}
+      {!isDetached && pgsCuesLoading && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+          <div className="flex items-center gap-3 rounded-lg bg-black/80 px-4 py-3 text-sm text-white shadow-lg">
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+            Loading subtitles…
+          </div>
+        </div>
       )}
 
       {/* Live translation buffering indicator */}

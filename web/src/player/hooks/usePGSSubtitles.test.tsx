@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
-import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { usePGSSubtitles } from "./usePGSSubtitles";
 import type { PlayerSubtitleInfo } from "../types";
 import { DEFAULT_SUBTITLE_APPEARANCE } from "../../lib/subtitleAppearance";
@@ -15,6 +15,12 @@ class MockPgsRenderer {
   timeOffset: number;
   dispose = vi.fn();
   loadFromUrl = vi.fn();
+  // Mirrors the private libpgs internals the hook observes for cue
+  // readiness: the parsed-timestamp array (90kHz ticks) and the callback
+  // fired after each worker update replaces it.
+  implementation: { updateTimestamps: number[]; onTimestampsUpdated?: () => void } = {
+    updateTimestamps: [],
+  };
   constructor(opts: Record<string, unknown>) {
     constructorOpts.push(opts);
     this.timeOffset = (opts.timeOffset as number) ?? 0;
@@ -23,11 +29,37 @@ class MockPgsRenderer {
   }
 }
 
+// Simulates the worker posting a parse-progress update: replaces the
+// timestamp array (values in source-time seconds) and fires the callback,
+// exactly like PgsRendererImpl.setUpdateTimestamps.
+function deliverTimestamps(renderer: MockPgsRenderer, seconds: number[]) {
+  renderer.implementation.updateTimestamps = seconds.map((s) => s * 90_000);
+  act(() => renderer.implementation.onTimestampsUpdated?.());
+}
+
 vi.mock("libpgs", () => ({ PgsRenderer: MockPgsRenderer }));
 vi.mock("libpgs/dist/libpgs.worker.js?url", () => ({ default: "/assets/libpgs.worker.js" }));
 
 function makeVideoRef(): RefObject<HTMLVideoElement | null> {
   return { current: document.createElement("video") };
+}
+
+// jsdom's HTMLMediaElement has no working play()/pause(); stub them to flip
+// `paused` and fire the native events the hook's hold machinery listens to.
+function makePlayableVideoRef(): RefObject<HTMLVideoElement> {
+  const video = document.createElement("video");
+  let paused = true;
+  Object.defineProperty(video, "paused", { get: () => paused });
+  video.play = vi.fn(() => {
+    paused = false;
+    video.dispatchEvent(new Event("play"));
+    return Promise.resolve();
+  });
+  video.pause = vi.fn(() => {
+    paused = true;
+    video.dispatchEvent(new Event("pause"));
+  });
+  return { current: video };
 }
 
 const pgsTrack: PlayerSubtitleInfo = {
@@ -71,6 +103,10 @@ beforeEach(() => {
   constructorOpts.length = 0;
   disposeSpies.length = 0;
   renderers.length = 0;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("usePGSSubtitles", () => {
@@ -291,5 +327,214 @@ describe("usePGSSubtitles", () => {
 
     unmount();
     expect(disposeSpies[0]!).toHaveBeenCalled();
+  });
+
+  describe("cue-gating hold", () => {
+    it("pauses a playing video on the initial load and resumes once cues cover the playhead", async () => {
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      const { result } = renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await waitFor(() => expect(renderers).toHaveLength(1));
+
+      // The initial window fetch started with nothing to show: hold.
+      expect(videoRef.current.pause).toHaveBeenCalledTimes(1);
+      expect(videoRef.current.paused).toBe(true);
+
+      // Parsed watermark passes the playhead (0s) → auto-resume.
+      deliverTimestamps(renderers[0]!, [5, 30]);
+      expect(videoRef.current.paused).toBe(false);
+      expect(result.current.isLoadingCues).toBe(false);
+    });
+
+    it("does not resume a video that was already paused when the track was enabled", async () => {
+      const videoRef = makePlayableVideoRef();
+      renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await waitFor(() => expect(renderers).toHaveLength(1));
+
+      expect(videoRef.current.pause).not.toHaveBeenCalled();
+      deliverTimestamps(renderers[0]!, [5, 30]);
+      // The user's deliberate pause is respected: readiness must not play.
+      expect(videoRef.current.play).not.toHaveBeenCalled();
+      expect(videoRef.current.paused).toBe(true);
+    });
+
+    it("pauses on a seek outside coverage and ignores the previous window's stale watermark", async () => {
+      const videoRef = makePlayableVideoRef();
+      videoRef.current.currentTime = 5000;
+      await videoRef.current.play();
+
+      const { result } = renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await waitFor(() => expect(renderers).toHaveLength(1));
+      // Resolve the initial hold: window [4990, 8590) parsed up to 8000s.
+      deliverTimestamps(renderers[0]!, [5010, 8000]);
+      expect(videoRef.current.paused).toBe(false);
+
+      // Seek far outside coverage.
+      videoRef.current.currentTime = 100;
+      videoRef.current.dispatchEvent(new Event("seeked"));
+
+      expect(renderers[0]!.loadFromUrl).toHaveBeenCalledWith(
+        `${pgsTrack.url}&windowed=1&position=90&duration=3600`,
+      );
+      // Still held: the old watermark (8000s > 100s) must not count while no
+      // update has arrived for the new load yet.
+      expect(videoRef.current.paused).toBe(true);
+      deliverTimestamps(renderers[0]!, [120, 400]);
+      expect(videoRef.current.paused).toBe(false);
+      expect(result.current.isLoadingCues).toBe(false);
+    });
+
+    it("does not pause for the prefetch reload inside coverage", async () => {
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await waitFor(() => expect(renderers).toHaveLength(1));
+      deliverTimestamps(renderers[0]!, [5, 3599]);
+      expect(videoRef.current.paused).toBe(false);
+      const pauseCalls = (videoRef.current.pause as ReturnType<typeof vi.fn>).mock.calls.length;
+
+      // Inside the 60s prefetch lead of the [0, 3600) window: reload without
+      // gating — the current window's cues still render.
+      videoRef.current.currentTime = 3550;
+      videoRef.current.dispatchEvent(new Event("timeupdate"));
+
+      expect(renderers[0]!.loadFromUrl).toHaveBeenCalledWith(
+        `${pgsTrack.url}&windowed=1&position=3540&duration=3600`,
+      );
+      expect(videoRef.current.pause).toHaveBeenCalledTimes(pauseCalls);
+      expect(videoRef.current.paused).toBe(false);
+    });
+
+    it("respects a user play during the hold and does not fight it on readiness", async () => {
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      const { result } = renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await waitFor(() => expect(renderers).toHaveLength(1));
+      expect(videoRef.current.paused).toBe(true);
+
+      // User presses play mid-hold: playback continues, cues pop in late.
+      await videoRef.current.play();
+      expect(videoRef.current.paused).toBe(false);
+
+      const playCalls = (videoRef.current.play as ReturnType<typeof vi.fn>).mock.calls.length;
+      deliverTimestamps(renderers[0]!, [5, 30]);
+      // Readiness must not issue another play (or pause) of its own.
+      expect(videoRef.current.play).toHaveBeenCalledTimes(playCalls);
+      expect(videoRef.current.pause).toHaveBeenCalledTimes(1);
+      expect(result.current.isLoadingCues).toBe(false);
+    });
+
+    it("does not auto-resume when the user pauses after playing through a hold", async () => {
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await waitFor(() => expect(renderers).toHaveLength(1));
+
+      // User plays through the hold, then deliberately pauses.
+      await videoRef.current.play();
+      videoRef.current.pause();
+      expect(videoRef.current.paused).toBe(true);
+
+      deliverTimestamps(renderers[0]!, [5, 30]);
+      expect(videoRef.current.paused).toBe(true);
+    });
+
+    it("cancels the hold and resumes when subtitles are disabled", async () => {
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      const { result, rerender } = renderHook(
+        ({ index }) =>
+          usePGSSubtitles(videoRef, tracks, index, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+        { initialProps: { index: 3 as number | null } },
+      );
+      await waitFor(() => expect(renderers).toHaveLength(1));
+      expect(videoRef.current.paused).toBe(true);
+
+      rerender({ index: null });
+      await waitFor(() => expect(disposeSpies[0]!).toHaveBeenCalled());
+      expect(videoRef.current.paused).toBe(false);
+      expect(result.current.isLoadingCues).toBe(false);
+    });
+
+    it("shows the loading indicator only after the grace period", async () => {
+      vi.useFakeTimers();
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      const { result } = renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      // Flush the mocked dynamic import (a microtask; timers stay frozen).
+      await act(async () => {});
+      expect(renderers).toHaveLength(1);
+      expect(videoRef.current.paused).toBe(true);
+      expect(result.current.isLoadingCues).toBe(false);
+
+      act(() => vi.advanceTimersByTime(499));
+      expect(result.current.isLoadingCues).toBe(false);
+      act(() => vi.advanceTimersByTime(1));
+      expect(result.current.isLoadingCues).toBe(true);
+
+      deliverTimestamps(renderers[0]!, [5, 30]);
+      expect(result.current.isLoadingCues).toBe(false);
+      expect(videoRef.current.paused).toBe(false);
+    });
+
+    it("never flashes the indicator when cues arrive within the grace period", async () => {
+      vi.useFakeTimers();
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      const { result } = renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await act(async () => {});
+      expect(renderers).toHaveLength(1);
+
+      act(() => vi.advanceTimersByTime(300));
+      deliverTimestamps(renderers[0]!, [5, 30]);
+      act(() => vi.advanceTimersByTime(1000));
+      expect(result.current.isLoadingCues).toBe(false);
+      expect(videoRef.current.paused).toBe(false);
+    });
+
+    it("resumes after the safety timeout and keeps the indicator until data arrives", async () => {
+      vi.useFakeTimers();
+      const videoRef = makePlayableVideoRef();
+      await videoRef.current.play();
+
+      const { result } = renderHook(() =>
+        usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+      );
+      await act(async () => {});
+      expect(renderers).toHaveLength(1);
+      expect(videoRef.current.paused).toBe(true);
+
+      act(() => vi.advanceTimersByTime(20_000));
+      // Playback must not stay stranded on a broken extract...
+      expect(videoRef.current.paused).toBe(false);
+      // ...but the indicator persists until cue data really lands.
+      expect(result.current.isLoadingCues).toBe(true);
+
+      deliverTimestamps(renderers[0]!, [5, 30]);
+      expect(result.current.isLoadingCues).toBe(false);
+    });
   });
 });

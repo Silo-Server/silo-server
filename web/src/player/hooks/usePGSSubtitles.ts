@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PgsRenderer } from "libpgs";
 import libpgsWorkerUrl from "libpgs/dist/libpgs.worker.js?url";
 import type { PlayerSubtitleInfo } from "../types";
@@ -27,6 +27,28 @@ const SEEK_BACKOFF = 10;
 // current one's coverage ends, so the new cues are loading before playback
 // crosses the boundary.
 const PREFETCH_LEAD = 60;
+// A cue-gating hold shorter than this never shows the loading indicator, so
+// fast extracts don't flash UI.
+const HOLD_INDICATOR_GRACE_MS = 500;
+// Don't strand playback on a broken or glacial extract: after this long the
+// hold resumes playback and only the indicator stays up until data arrives.
+const HOLD_SAFETY_TIMEOUT_MS = 20_000;
+// PGS presentation timestamps are 90kHz clock ticks
+// (PgsRendererHelper.getIndexFromTimestamps compares against time*1000*90).
+const PGS_TICKS_PER_SECOND = 90_000;
+
+// Undocumented libpgs internals observed for cue readiness. PgsRenderer keeps
+// its PgsRendererImpl in a private `implementation` field; the impl holds the
+// parsed `updateTimestamps` array (90kHz ticks, ascending — replaced wholesale
+// on every worker `updateTimestamps` message) and invokes
+// `onTimestampsUpdated` after each replacement. The worker posts those
+// messages at most ~1/sec while parsing the streamed .sup, plus once at
+// completion. If a future libpgs version reshapes these internals we detect
+// that and simply never gate playback (old pre-hold behavior).
+interface PgsRendererInternals {
+  updateTimestamps?: unknown;
+  onTimestampsUpdated?: () => void;
+}
 
 /**
  * Manages client-side PGS (Blu-ray bitmap) subtitle rendering via libpgs.
@@ -55,6 +77,14 @@ const PREFETCH_LEAD = 60;
  *
  * Coordination mirrors useASSSubtitles: the `isActive` return value tells the
  * player to suppress the VTT text overlay while bitmap rendering is active.
+ *
+ * Cue-gating hold: extraction takes seconds, so when a fetch starts with
+ * nothing on screen to bridge it (initial track enable, or a seek outside the
+ * covered window — NOT the prefetch, which reloads while current cues still
+ * render), the hook pauses the video until the renderer's parsed data covers
+ * the playhead, then auto-resumes if it was the one that paused and the user
+ * hasn't taken over meanwhile. `isLoadingCues` tells the player to show a
+ * "Loading subtitles…" indicator once the hold outlives a short grace period.
  */
 export function usePGSSubtitles(
   videoRef: React.RefObject<HTMLVideoElement | null>,
@@ -64,8 +94,11 @@ export function usePGSSubtitles(
   streamOriginSeconds: number,
   subtitleDelayMs: number,
   appearance: SubtitleAppearance,
-): { isActive: boolean } {
+): { isActive: boolean; isLoadingCues: boolean } {
   const rendererRef = useRef<PgsRenderer | null>(null);
+  // True while a cue-gating hold has outlived its grace period (or timed out
+  // waiting): the player shows a "Loading subtitles…" indicator.
+  const [isLoadingCues, setIsLoadingCues] = useState(false);
   const libpgsImportRef = useRef<Promise<typeof import("libpgs")> | null>(null);
   // libpgs renders the display set whose timestamp matches
   // `video.currentTime + timeOffset`, and .sup timestamps are in source media
@@ -122,13 +155,124 @@ export function usePGSSubtitles(
     let windowStart = 0;
     let windowEnd = 0;
 
+    // --- Cue-gating hold state ---
+    // The libpgs implementation object, when its shape matches what we know
+    // how to observe; null disables holds entirely (readiness would be
+    // unobservable, and a hold that can only end by timeout is worse than the
+    // old play-through behavior).
+    let observedImpl: { updateTimestamps: number[] } | null = null;
+    // Timestamp batches received since the last loadFromUrl. The impl keeps
+    // the *previous* window's array until the worker's first post for the new
+    // load, so a stale watermark must not satisfy readiness.
+    let updatesSinceLoad = 0;
+    // A hold is pending: cue data does not yet cover the playhead.
+    let holdPending = false;
+    // We paused the video for this hold and owe an auto-resume. Cleared by
+    // any user-initiated play/pause so we never fight the user.
+    let holdWePaused = false;
+    let holdGraceTimer: ReturnType<typeof setTimeout> | null = null;
+    let holdSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+    // Our own video.pause()/play() calls fire the same events as the user's;
+    // these flags let the event handlers ignore exactly those.
+    let selfPause = false;
+    let selfPlay = false;
+
     // Builds the windowed .sup URL for a window anchored just before
     // `sourcePos`, and records the coverage it will provide.
     function windowUrl(sourcePos: number): string {
       windowStart = Math.max(0, sourcePos - SEEK_BACKOFF);
       windowEnd = windowStart + WINDOW_DURATION;
+      updatesSinceLoad = 0;
       const sep = activeUrl!.includes("?") ? "&" : "?";
       return `${activeUrl}${sep}windowed=1&position=${windowStart}&duration=${WINDOW_DURATION}`;
+    }
+
+    // Whether the renderer's parsed data can show a cue at source time `pos`.
+    // libpgs renders the display set at time T only when some parsed
+    // timestamp exceeds T*90000 (getIndexFromTimestamps returns -1
+    // otherwise), so the last parsed timestamp is an exact readiness
+    // watermark for the current load.
+    function cueDataCovers(pos: number): boolean {
+      const ts = observedImpl?.updateTimestamps;
+      if (!ts || updatesSinceLoad === 0 || ts.length === 0) return false;
+      return ts[ts.length - 1]! > pos * PGS_TICKS_PER_SECOND;
+    }
+
+    function resumeIfWePaused() {
+      if (holdWePaused && video!.paused) {
+        selfPlay = true;
+        void video!.play().catch(() => {
+          selfPlay = false;
+        });
+      }
+      holdWePaused = false;
+    }
+
+    function endHold(resume: boolean) {
+      holdPending = false;
+      if (holdGraceTimer) clearTimeout(holdGraceTimer);
+      if (holdSafetyTimer) clearTimeout(holdSafetyTimer);
+      holdGraceTimer = null;
+      holdSafetyTimer = null;
+      setIsLoadingCues(false);
+      if (resume) resumeIfWePaused();
+      else holdWePaused = false;
+    }
+
+    // Starts (or restarts, after a seek during a hold) the cue-gating hold
+    // for a load that has nothing on screen to bridge it.
+    function beginHold() {
+      if (!observedImpl || cancelled) return;
+      if (holdGraceTimer) clearTimeout(holdGraceTimer);
+      if (holdSafetyTimer) clearTimeout(holdSafetyTimer);
+      holdPending = true;
+      if (!video!.paused) {
+        holdWePaused = true;
+        selfPause = true;
+        video!.pause();
+      }
+      holdGraceTimer = setTimeout(() => {
+        holdGraceTimer = null;
+        if (holdPending) setIsLoadingCues(true);
+      }, HOLD_INDICATOR_GRACE_MS);
+      holdSafetyTimer = setTimeout(() => {
+        holdSafetyTimer = null;
+        // Resume playback but keep holdPending (and the indicator) so the
+        // hold still resolves cleanly if data eventually arrives.
+        if (!holdPending) return;
+        setIsLoadingCues(true);
+        resumeIfWePaused();
+      }, HOLD_SAFETY_TIMEOUT_MS);
+    }
+
+    // Ends the hold once parsed cue data reaches the playhead. Driven by the
+    // renderer's timestamp updates (≤1/sec plus one at load completion) and,
+    // when the user plays through a hold, by timeupdate.
+    function checkHoldReadiness() {
+      if (!holdPending || cancelled) return;
+      if (!cueDataCovers(currentSourcePos())) return;
+      endHold(true);
+      // Show the now-available cue immediately, even while still paused.
+      compositeWithFollowUp();
+    }
+
+    // User pressed play during a hold: respect it — release the resume
+    // obligation and let cues pop in when data arrives (indicator stays).
+    function handlePlayEvent() {
+      if (selfPlay) {
+        selfPlay = false;
+        return;
+      }
+      holdWePaused = false;
+    }
+
+    // User paused deliberately (during a hold or not): never auto-resume.
+    function handlePauseEvent() {
+      if (selfPause) {
+        selfPause = false;
+        return;
+      }
+      holdWePaused = false;
     }
 
     // Current playback position in source-time seconds — the timeline both
@@ -148,8 +292,12 @@ export function usePGSSubtitles(
       const renderer = rendererRef.current;
       if (!renderer || cancelled) return;
       const pos = currentSourcePos();
-      if (pos >= windowStart && pos < windowEnd - PREFETCH_LEAD) return;
+      const inCoverage = pos >= windowStart && pos < windowEnd;
+      if (inCoverage && pos < windowEnd - PREFETCH_LEAD) return;
       renderer.loadFromUrl(windowUrl(pos));
+      // A prefetch (still inside coverage) keeps playing on the old window's
+      // cues; only a load with nothing to show gates playback.
+      if (!inCoverage) beginHold();
     }
 
     function composite() {
@@ -271,6 +419,7 @@ export function usePGSSubtitles(
     // playhead, then recomposites the frame libpgs drew for the new time.
     function handleTimeProgress() {
       maybeReloadWindow();
+      checkHoldReadiness();
       compositeWithFollowUp();
     }
 
@@ -304,6 +453,25 @@ export function usePGSSubtitles(
       }
       rendererRef.current = renderer;
 
+      // Observe parse progress through libpgs' private implementation. The
+      // wrapper assigns its own onTimestampsUpdated (re-render on new data)
+      // in its constructor; chain it rather than replace it.
+      const impl = (renderer as unknown as { implementation?: PgsRendererInternals })
+        .implementation;
+      if (impl && Array.isArray(impl.updateTimestamps)) {
+        observedImpl = impl as { updateTimestamps: number[] };
+        const chained = impl.onTimestampsUpdated;
+        impl.onTimestampsUpdated = () => {
+          chained?.();
+          updatesSinceLoad += 1;
+          checkHoldReadiness();
+        };
+      }
+
+      // The constructor already kicked off the initial window fetch (subUrl)
+      // with nothing on screen: gate playback until its cues arrive.
+      beginHold();
+
       // Visible overlay the compositor draws styled cues onto.
       displayCanvas = document.createElement("canvas");
       displayCanvas.style.position = "absolute";
@@ -319,6 +487,9 @@ export function usePGSSubtitles(
       // drive the sliding fetch window.
       video.addEventListener("timeupdate", handleTimeProgress);
       video.addEventListener("seeked", handleTimeProgress);
+      // Distinguish user play/pause from our own during a hold.
+      video.addEventListener("play", handlePlayEvent);
+      video.addEventListener("pause", handlePauseEvent);
       resizeObserver = new ResizeObserver(() => composite());
       resizeObserver.observe(video);
       composite();
@@ -329,9 +500,14 @@ export function usePGSSubtitles(
     return () => {
       cancelled = true;
       compositeRef.current = null;
+      // Cancel any hold: disabling subtitles (or switching tracks) must
+      // resume playback immediately if we were the ones who paused it.
+      endHold(true);
       if (followUpTimer) clearTimeout(followUpTimer);
       video.removeEventListener("timeupdate", handleTimeProgress);
       video.removeEventListener("seeked", handleTimeProgress);
+      video.removeEventListener("play", handlePlayEvent);
+      video.removeEventListener("pause", handlePauseEvent);
       resizeObserver?.disconnect();
       displayCanvas?.remove();
       // dispose() terminates the worker, which also abandons its in-flight
@@ -376,7 +552,7 @@ export function usePGSSubtitles(
     };
   }, []);
 
-  return { isActive: isPGS && !isDetached };
+  return { isActive: isPGS && !isDetached, isLoadingCues };
 }
 
 function hexToRgbSafe(hex: string): { r: number; g: number; b: number } {
