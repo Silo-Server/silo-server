@@ -1001,19 +1001,15 @@ func (s *ABSMediaStore) GetAuthorByID(ctx context.Context, authorID string, acce
 	if err != nil {
 		return abs.Author{}, abs.ErrNotFound
 	}
-	var name string
-	var poster *string
-	row := s.Pool.QueryRow(ctx, `SELECT name, poster_path FROM people WHERE id = $1`, id)
-	if err := row.Scan(&name, &poster); err != nil {
+	var name, photo string
+	row := s.Pool.QueryRow(ctx, `SELECT name, photo_path FROM people WHERE id = $1`, id)
+	if err := row.Scan(&name, &photo); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return abs.Author{}, abs.ErrNotFound
 		}
 		return abs.Author{}, fmt.Errorf("abs_media_store: get author: %w", err)
 	}
-	author := abs.Author{ID: authorID, Name: name}
-	if poster != nil {
-		author.PosterPath = *poster
-	}
+	author := abs.Author{ID: authorID, Name: name, PosterPath: photo}
 	conditions := []string{`ip.person_id = $1`, `ip.kind = 7`, `mi.type = 'audiobook'`}
 	args := []any{id}
 	argIdx := 2
