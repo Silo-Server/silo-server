@@ -109,6 +109,21 @@ func (r *NextUpRepository) ListNextUp(ctx context.Context, q NextUpQuery) ([]Nex
 	return results, nil
 }
 
+// nextUpAnchorMaxRows bounds how many of the profile's most recent completed
+// rows the global next-up query considers when deriving per-series anchors.
+// Without a bound the completed_episodes CTE re-reads the profile's entire
+// completed history per call — 233k rows joined to episodes for the worst
+// bulk-import profile, measured at up to 44.7s. A next-up rail surfaces ~24
+// series; the 500 most recently completed episodes cover every series that can
+// realistically rank on it (a series whose last completed episode is older
+// than 500 completions of other content sorts far past the rail's limit).
+// Progress rows are recency-ordered on idx_uwp_profile_completed, so the
+// bounded anchor scan is an ordered index walk. Series-scoped calls (the
+// show-detail tile) stay unbounded: they must anchor on the series' last
+// completed episode no matter how long ago it was watched, and are naturally
+// bounded by one series.
+const nextUpAnchorMaxRows = 500
+
 func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 	args := []interface{}{q.UserID, q.ProfileID, limit}
 	argIdx := 4
@@ -154,8 +169,14 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 		sourceTable = "eligible_series"
 	}
 
-	query := fmt.Sprintf(`
-		WITH completed_episodes AS (
+	// Global queries derive series anchors from a bounded recent-completions
+	// scan (see nextUpAnchorMaxRows); series-scoped queries keep the unbounded
+	// shape so the anchor is the series' last completed episode regardless of
+	// age. The hidden-items exclusion and date cutoff apply inside the bounded
+	// scan so hidden/old rows never consume the anchor budget.
+	var completedEpisodesCTE string
+	if q.SeriesID != "" {
+		completedEpisodesCTE = fmt.Sprintf(`completed_episodes AS (
 			SELECT DISTINCT ON (e.series_id)
 				e.series_id,
 				e.season_number,
@@ -177,7 +198,40 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 			  %s
 			  %s
 			ORDER BY e.series_id, uwp.updated_at DESC, e.season_number DESC, e.episode_number DESC
-		)
+		)`, seriesFilter, dateCutoffFilter)
+	} else {
+		completedEpisodesCTE = fmt.Sprintf(`recent_completed AS (
+			SELECT uwp.media_item_id, uwp.updated_at
+			FROM user_watch_progress uwp
+			WHERE uwp.user_id = $1
+			  AND uwp.profile_id = $2
+			  AND uwp.completed = TRUE
+			  AND NOT EXISTS (
+				  SELECT 1
+				  FROM user_history_hidden_items hhi
+				  WHERE hhi.user_id = uwp.user_id
+				    AND hhi.profile_id = uwp.profile_id
+				    AND hhi.media_item_id = uwp.media_item_id
+				    AND uwp.updated_at <= hhi.hidden_before
+			  )
+			  %s
+			ORDER BY uwp.updated_at DESC
+			LIMIT %d
+		),
+		completed_episodes AS (
+			SELECT DISTINCT ON (e.series_id)
+				e.series_id,
+				e.season_number,
+				e.episode_number,
+				uwp.updated_at
+			FROM recent_completed uwp
+			JOIN episodes e ON e.content_id = uwp.media_item_id
+			ORDER BY e.series_id, uwp.updated_at DESC, e.season_number DESC, e.episode_number DESC
+		)`, dateCutoffFilter, nextUpAnchorMaxRows)
+	}
+
+	query := fmt.Sprintf(`
+		WITH %s
 		%s
 		SELECT
 			next_ep.content_id,
@@ -205,7 +259,7 @@ func buildListNextUpQuery(q NextUpQuery, limit int) (string, []interface{}) {
 			LIMIT 1
 		) next_ep ON true
 		ORDER BY es.updated_at DESC
-		LIMIT $3`, seriesFilter, dateCutoffFilter, inProgressExclusion, sourceTable)
+		LIMIT $3`, completedEpisodesCTE, inProgressExclusion, sourceTable)
 
 	return query, args
 }
