@@ -5,6 +5,21 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+// SeasonUserDataFromCounts builds the aggregate watch state DTO from a
+// SQL-side rollup (userstore.SeriesEpisodeRollupStore). It must stay
+// value-for-value identical to EpisodeRollupUserData over the same episodes.
+func SeasonUserDataFromCounts(counts userstore.SeriesWatchCounts) *SeasonUserData {
+	if counts.TotalEpisodes == 0 {
+		return &SeasonUserData{}
+	}
+	return &SeasonUserData{
+		WatchedCount:    counts.WatchedCount,
+		UnplayedCount:   counts.TotalEpisodes - counts.WatchedCount,
+		InProgressCount: counts.InProgressCount,
+		Played:          counts.WatchedCount == counts.TotalEpisodes,
+	}
+}
+
 // EpisodeRollupUserData computes aggregate watch state for a season or series
 // from pre-fetched per-episode progress. Completed history should already be
 // folded into progressMap by the caller's userstore helper.

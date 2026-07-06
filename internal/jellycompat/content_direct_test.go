@@ -971,3 +971,95 @@ func makeBrowseTestMediaItems(count int) []*models.MediaItem {
 	}
 	return items
 }
+
+// seriesRollupCountingStore layers userstore.SeriesEpisodeRollupStore on top
+// of the panic-stub store: when the SQL rollup capability is present, the
+// chunked ListProgressByMediaItems path must not run at all.
+type seriesRollupCountingStore struct {
+	*progressCountingStore
+	counts      map[string]userstore.SeriesWatchCounts
+	rollupCalls int
+}
+
+func (s *seriesRollupCountingStore) SeriesEpisodeWatchCounts(_ context.Context, _ string, seriesIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
+	s.rollupCalls++
+	out := make(map[string]userstore.SeriesWatchCounts, len(seriesIDs))
+	for _, id := range seriesIDs {
+		if c, ok := s.counts[id]; ok {
+			out[id] = c
+		}
+	}
+	return out, nil
+}
+
+// TestEnrichSeriesUserDataUsesSQLRollup: a store exposing the SQL rollup
+// capability serves the series watch-state badge from one aggregate call —
+// no episode-list materialization, no chunked per-episode progress queries —
+// and produces the same SeasonUserData shape as the chunked path.
+func TestEnrichSeriesUserDataUsesSQLRollup(t *testing.T) {
+	store := &seriesRollupCountingStore{
+		progressCountingStore: &progressCountingStore{},
+		counts: map[string]userstore.SeriesWatchCounts{
+			"series-1": {TotalEpisodes: 3, WatchedCount: 2, InProgressCount: 1},
+		},
+	}
+	// The episode source panics on use: the rollup path must never list
+	// episodes.
+	svc := &directContentService{
+		episodeRepo:   &seriesEpisodeSource{},
+		storeProvider: &completedProgressStoreProvider{store: store},
+	}
+
+	items := []upstreamListItem{
+		{ContentID: "series-1", Type: "series", Title: "Show"},
+		{ContentID: "series-2", Type: "series", Title: "No Episodes"},
+		{ContentID: "movie-1", Type: "movie", Title: "Film"},
+	}
+	svc.EnrichSeriesUserData(context.Background(), &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, items)
+
+	if store.rollupCalls != 1 {
+		t.Fatalf("expected exactly one rollup call, got %d", store.rollupCalls)
+	}
+	if store.listProgressCalls != 0 {
+		t.Fatalf("chunked progress path must not run when the SQL rollup is available, got %d calls", store.listProgressCalls)
+	}
+
+	want := &catalog.SeasonUserData{WatchedCount: 2, UnplayedCount: 1, InProgressCount: 1, Played: false}
+	if got := items[0].UserData; got == nil || *got != *want {
+		t.Fatalf("series-1 UserData = %+v, want %+v", got, want)
+	}
+	// A series absent from the rollup result (no available episodes) keeps a
+	// nil UserData — the same shape the episode-list path gave it.
+	if items[1].UserData != nil {
+		t.Fatalf("series-2 UserData = %+v, want nil", items[1].UserData)
+	}
+	if items[2].UserData != nil {
+		t.Fatalf("movie UserData = %+v, want nil", items[2].UserData)
+	}
+}
+
+// TestSeasonUserDataFromCountsMatchesEpisodeRollup pins the SQL-side counts
+// mapping to the in-memory EpisodeRollupUserData it replaces.
+func TestSeasonUserDataFromCountsMatchesEpisodeRollup(t *testing.T) {
+	episodes := []*models.Episode{
+		{ContentID: "ep-1"},
+		{ContentID: "ep-2"},
+		{ContentID: "ep-3"},
+	}
+	progress := map[string]userstore.WatchProgress{
+		"ep-1": {MediaItemID: "ep-1", Completed: true},
+		"ep-2": {MediaItemID: "ep-2", PositionSeconds: 42},
+	}
+
+	fromEpisodes := catalog.EpisodeRollupUserData(episodes, progress)
+	fromCounts := catalog.SeasonUserDataFromCounts(userstore.SeriesWatchCounts{
+		TotalEpisodes: 3, WatchedCount: 1, InProgressCount: 1,
+	})
+	if *fromEpisodes != *fromCounts {
+		t.Fatalf("counts mapping diverged: episodes=%+v counts=%+v", fromEpisodes, fromCounts)
+	}
+
+	if empty := catalog.SeasonUserDataFromCounts(userstore.SeriesWatchCounts{}); *empty != (catalog.SeasonUserData{}) {
+		t.Fatalf("zero counts must produce the empty rollup, got %+v", empty)
+	}
+}
