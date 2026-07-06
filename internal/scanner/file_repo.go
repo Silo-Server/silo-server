@@ -2949,6 +2949,10 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 		return fmt.Errorf("loading existing episode link: %w", err)
 	}
 
+	// The INSERT is the top-level statement: a data-modifying CTE can only be
+	// referenced by later query parts if it has a RETURNING clause, so a
+	// trailing "SELECT COUNT(*) FROM inserted" is invalid PostgreSQL and made
+	// this statement error on every call.
 	if _, err := tx.Exec(ctx, `
 		WITH updated AS (
 			UPDATE media_files
@@ -2958,16 +2962,13 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 				updated_at = NOW()
 			WHERE id = $4
 			RETURNING episode_id, media_folder_id, created_at, missing_since
-		),
-		inserted AS (
-			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-			SELECT episode_id, media_folder_id, created_at
-			FROM updated
-			WHERE episode_id IS NOT NULL
-			  AND missing_since IS NULL
-			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 		)
-		SELECT COUNT(*) FROM inserted
+		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+		SELECT episode_id, media_folder_id, created_at
+		FROM updated
+		WHERE episode_id IS NOT NULL
+		  AND missing_since IS NULL
+		ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 	`, episodeID, seasonNum, episodeNum, fileID); err != nil {
 		return fmt.Errorf("updating episode link: %w", err)
 	}
