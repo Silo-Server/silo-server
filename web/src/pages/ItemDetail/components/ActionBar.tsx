@@ -12,6 +12,7 @@ import {
   Play,
   RefreshCw,
   Pencil,
+  Scissors,
   Search,
   RotateCcw,
   Tags,
@@ -74,6 +75,7 @@ interface ActionBarProps {
   isRedetectingIntro?: boolean;
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
+  onSplitItem?: () => void;
   isAdmin?: boolean;
   canCurateMetadata?: boolean;
   /** Enables the "Edit Markers" action (playable items only: movies/episodes). */
@@ -125,6 +127,7 @@ export default function ActionBar({
   isRedetectingIntro = false,
   onEditMetadata,
   onMatchItem,
+  onSplitItem,
   isAdmin = false,
   canCurateMetadata = false,
   canEditMarkers = false,
@@ -437,6 +440,12 @@ export default function ActionBar({
                   <DropdownMenuItem onSelect={onMatchItem}>
                     <Search className="size-4" />
                     Match Item
+                  </DropdownMenuItem>
+                )}
+                {canCurateMetadata && onSplitItem && (
+                  <DropdownMenuItem onSelect={onSplitItem}>
+                    <Scissors className="size-4" />
+                    Split Versions
                   </DropdownMenuItem>
                 )}
               </>

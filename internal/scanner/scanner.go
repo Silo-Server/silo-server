@@ -106,22 +106,23 @@ type scannerImageCacher interface {
 }
 
 type Scanner struct {
-	fileRepo           *FileRepository
-	rootSnapshotRepo   *ScannedRootRepository
-	groupSnapshotRepo  *ScannedGroupRepository
-	rootOverrideRepo   *MediaRootOverrideRepository
-	groupOverrideRepo  *MediaGroupOverrideRepository
-	locationRepo       *ObservedLocationRepository
-	groupLocationRepo  *GroupLocationRepository
-	folderRepo         *catalog.FolderRepository
-	libraryRepo        *catalog.LibraryItemRepository
-	episodeLibraryRepo *catalog.EpisodeLibraryRepository
-	itemRepo           *catalog.ItemRepository
-	personRepo         *catalog.PersonRepository
-	episodeRepo        *catalog.EpisodeRepository
-	ffprobePath        string
-	s3Client           *s3client.Client // public assets bucket (may be nil)
-	imageCacher        scannerImageCacher
+	fileRepo             *FileRepository
+	rootSnapshotRepo     *ScannedRootRepository
+	groupSnapshotRepo    *ScannedGroupRepository
+	rootOverrideRepo     *MediaRootOverrideRepository
+	groupOverrideRepo    *MediaGroupOverrideRepository
+	identityOverrideRepo *MediaIdentityOverrideRepository
+	locationRepo         *ObservedLocationRepository
+	groupLocationRepo    *GroupLocationRepository
+	folderRepo           *catalog.FolderRepository
+	libraryRepo          *catalog.LibraryItemRepository
+	episodeLibraryRepo   *catalog.EpisodeLibraryRepository
+	itemRepo             *catalog.ItemRepository
+	personRepo           *catalog.PersonRepository
+	episodeRepo          *catalog.EpisodeRepository
+	ffprobePath          string
+	s3Client             *s3client.Client // public assets bucket (may be nil)
+	imageCacher          scannerImageCacher
 	// workers is atomic so admin settings changes can resize the per-scan
 	// worker pool while a scan is running (applies to the next scan).
 	workers             atomic.Int32
@@ -202,24 +203,25 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		fileRemovalGrace = 0
 	}
 	s := &Scanner{
-		fileRepo:            fileRepo,
-		rootSnapshotRepo:    NewScannedRootRepository(fileRepo.Pool()),
-		groupSnapshotRepo:   NewScannedGroupRepository(fileRepo.Pool()),
-		rootOverrideRepo:    NewMediaRootOverrideRepository(fileRepo.Pool()),
-		groupOverrideRepo:   NewMediaGroupOverrideRepository(fileRepo.Pool()),
-		locationRepo:        NewObservedLocationRepository(fileRepo.Pool()),
-		groupLocationRepo:   NewGroupLocationRepository(fileRepo.Pool()),
-		folderRepo:          catalog.NewFolderRepository(fileRepo.Pool()),
-		libraryRepo:         catalog.NewLibraryItemRepository(fileRepo.Pool()),
-		episodeLibraryRepo:  catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
-		itemRepo:            catalog.NewItemRepository(fileRepo.Pool()),
-		personRepo:          catalog.NewPersonRepository(fileRepo.Pool()),
-		episodeRepo:         catalog.NewEpisodeRepository(fileRepo.Pool()),
-		ffprobePath:         ffprobePath,
-		s3Client:            s3Client,
-		emptyTrashAfterScan: emptyTrashAfterScan,
-		fileRemovalGrace:    fileRemovalGrace,
-		markerFetcher:       nil,
+		fileRepo:             fileRepo,
+		rootSnapshotRepo:     NewScannedRootRepository(fileRepo.Pool()),
+		groupSnapshotRepo:    NewScannedGroupRepository(fileRepo.Pool()),
+		rootOverrideRepo:     NewMediaRootOverrideRepository(fileRepo.Pool()),
+		groupOverrideRepo:    NewMediaGroupOverrideRepository(fileRepo.Pool()),
+		identityOverrideRepo: NewMediaIdentityOverrideRepository(fileRepo.Pool()),
+		locationRepo:         NewObservedLocationRepository(fileRepo.Pool()),
+		groupLocationRepo:    NewGroupLocationRepository(fileRepo.Pool()),
+		folderRepo:           catalog.NewFolderRepository(fileRepo.Pool()),
+		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()),
+		episodeLibraryRepo:   catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
+		itemRepo:             catalog.NewItemRepository(fileRepo.Pool()),
+		personRepo:           catalog.NewPersonRepository(fileRepo.Pool()),
+		episodeRepo:          catalog.NewEpisodeRepository(fileRepo.Pool()),
+		ffprobePath:          ffprobePath,
+		s3Client:             s3Client,
+		emptyTrashAfterScan:  emptyTrashAfterScan,
+		fileRemovalGrace:     fileRemovalGrace,
+		markerFetcher:        nil,
 	}
 	s.SetWorkers(workers)
 	return s
@@ -665,7 +667,11 @@ func (s *Scanner) scanPaths(
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
 	rootInference := inferRootAssignments(filePaths, folder.Type, folder.ID, rootOverrides)
-	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments)
+	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
+	if err != nil {
+		return nil, fmt.Errorf("loading identity overrides: %w", err)
+	}
+	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading group overrides: %w", err)
@@ -1172,7 +1178,11 @@ func (s *Scanner) scanScope(
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
 	rootInference := inferRootAssignments(filePaths, folder.Type, folder.ID, rootOverrides)
-	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments)
+	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
+	if err != nil {
+		return nil, fmt.Errorf("loading identity overrides: %w", err)
+	}
+	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading group overrides: %w", err)
@@ -1626,7 +1636,11 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	rootInference := inferRootAssignments([]string{filePath}, folder.Type, folder.ID, rootOverrides)
 	s.logRootInferenceDisagreements(rootInference.Assignments)
 
-	groupInference := inferGroupAssignments([]string{filePath}, folder.Type, folder.ID, rootInference.Assignments)
+	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
+	if err != nil {
+		return fmt.Errorf("loading identity overrides for file: %w", err)
+	}
+	groupInference := inferGroupAssignments([]string{filePath}, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return fmt.Errorf("loading group overrides for file: %w", err)
@@ -2484,6 +2498,20 @@ func (s *Scanner) loadRootOverrides(
 		overridesByRoot[filepath.Clean(override.RootPath)] = override
 	}
 	return overridesByRoot, nil
+}
+
+func (s *Scanner) loadIdentityOverrides(
+	ctx context.Context,
+	folderID int,
+) (*identityOverrideSet, error) {
+	if s == nil || s.identityOverrideRepo == nil || folderID <= 0 {
+		return nil, nil
+	}
+	overrides, err := s.identityOverrideRepo.ListByFolder(ctx, folderID)
+	if err != nil {
+		return nil, err
+	}
+	return newIdentityOverrideSet(overrides), nil
 }
 
 func (s *Scanner) loadGroupOverrides(

@@ -6,9 +6,12 @@ import type {
   ApplyItemImageRequest,
   ApplyItemImageResponse,
   ItemDetail,
+  ItemFilesResponse,
   ItemImagesResponse,
   ItemMatchSearchRequest,
   ItemMatchSearchResponse,
+  ItemSplitRequest,
+  ItemSplitResponse,
   WatchDetail,
 } from "@/api/types";
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
@@ -372,6 +375,45 @@ export function useApplyItemMatch() {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to apply match");
+    },
+  });
+}
+
+// --- Split/merge hooks ---
+
+export function useItemFiles(contentId: string | undefined) {
+  return useQuery({
+    queryKey: ["items", "files", contentId],
+    queryFn: () => api<ItemFilesResponse>(`/admin/items/${itemPathID(contentId ?? "")}/files`),
+    enabled: Boolean(contentId),
+    staleTime: 30_000,
+  });
+}
+
+export function useSplitItem() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ contentId, request }: { contentId: string; request: ItemSplitRequest }) =>
+      api<ItemSplitResponse>(`/admin/items/${itemPathID(contentId)}/split`, {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    onSuccess: async (result, { contentId }) => {
+      if (result.dry_run) return;
+      toast.success(
+        `Moved ${result.files_moved} file${result.files_moved === 1 ? "" : "s"} to a separate item`,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["items", "detail", contentId] }),
+        queryClient.invalidateQueries({ queryKey: ["catalog", "items", contentId, "detail"] }),
+        queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", contentId] }),
+        queryClient.invalidateQueries({ queryKey: ["items", "files", contentId] }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() }),
+      ]);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to split item");
     },
   });
 }

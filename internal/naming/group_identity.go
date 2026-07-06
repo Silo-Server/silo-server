@@ -24,6 +24,9 @@ type GroupIdentity struct {
 	State              string
 	EvidenceJSON       []byte
 	RepresentativePath string
+	// Overridden marks that an operator identity override was applied to this
+	// file (see ApplyIdentityOverride).
+	Overridden bool
 }
 
 // InferGroupIdentity derives a logical content-group identity from a media
@@ -79,6 +82,17 @@ func InferGroupIdentity(filePath string, libraryType string, assignment RootAssi
 				group.TvdbID = ids.TvdbID
 			}
 		}
+	}
+
+	// Structured provider IDs anchor the group KEY, not just the identity.
+	// Title+year keys merge distinct titles that normalize identically
+	// ("Passenger (2026)" vs "The Passenger (2026)" — the article is stripped),
+	// silently stacking two tagged movies as fake versions of one item. An
+	// explicit tag is the strongest identity evidence there is, so files tagged
+	// with the same provider ID always share a group and files tagged apart
+	// never merge, regardless of how their titles compare.
+	if anchored := anchoredGroupKey(group.GroupKeyVersion, group.BaseType, group.TmdbID, group.ImdbID, group.TvdbID); anchored != "" {
+		group.ContentGroupKey = anchored
 	}
 
 	if group.ContentGroupKey == "" {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
@@ -4900,6 +4901,24 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 		},
 	}
 
+	// Move user state (progress, history, favorites, ...) onto the surviving
+	// item before the source rows are touched: the source media_items row is
+	// deleted below, which would strand the soft-referenced watch state and
+	// cascade-delete FK children like collection memberships. Runs first so
+	// the episode S/E mapping still sees the source series' episode rows.
+	episodePairs, err := mergeEpisodeIDPairs(ctx, tx, fromContentID, toContentID)
+	if err != nil {
+		return err
+	}
+	if _, err := reattribute.Run(ctx, tx, reattribute.Options{
+		FromContentID: fromContentID,
+		ToContentID:   toContentID,
+		WholeItem:     true,
+		EpisodePairs:  episodePairs,
+	}); err != nil {
+		return fmt.Errorf("reattributing user state %s -> %s: %w", fromContentID, toContentID, err)
+	}
+
 	for _, step := range steps {
 		if _, err := tx.Exec(ctx, step.sql, step.args...); err != nil {
 			return fmt.Errorf("%s: %w", step.name, err)
@@ -4917,6 +4936,38 @@ func (s *MetadataService) rebindItemToExistingItem(ctx context.Context, fromCont
 		return fmt.Errorf("commit skeleton rebind transaction: %w", err)
 	}
 	return nil
+}
+
+// mergeEpisodeIDPairs maps the source series' episode content ids onto the
+// target series' episodes by (season, episode) number, so episode-level user
+// state survives a series merge. Episodes with no counterpart on the target
+// are skipped: their state stays on ids that die with the source series, which
+// is today's behavior, and the next scan recreates the episodes on the target.
+func mergeEpisodeIDPairs(ctx context.Context, tx pgx.Tx, fromContentID, toContentID string) ([]reattribute.IDPair, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT src.content_id, dest.content_id
+		FROM episodes src
+		JOIN episodes dest
+		  ON dest.series_id = $2
+		 AND dest.season_number = src.season_number
+		 AND dest.episode_number = src.episode_number
+		WHERE src.series_id = $1
+		  AND src.content_id <> dest.content_id
+	`, fromContentID, toContentID)
+	if err != nil {
+		return nil, fmt.Errorf("mapping episode ids for merge %s -> %s: %w", fromContentID, toContentID, err)
+	}
+	defer rows.Close()
+
+	var pairs []reattribute.IDPair
+	for rows.Next() {
+		var pair reattribute.IDPair
+		if err := rows.Scan(&pair.From, &pair.To); err != nil {
+			return nil, fmt.Errorf("scanning episode id pair: %w", err)
+		}
+		pairs = append(pairs, pair)
+	}
+	return pairs, rows.Err()
 }
 
 func rebindDeletableStatuses(allowMatchedSource bool) []string {

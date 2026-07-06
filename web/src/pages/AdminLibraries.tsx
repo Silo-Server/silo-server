@@ -1369,14 +1369,27 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                     {root.observed_file_count}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setEditingRoot(root)}
-                    >
-                      Override
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setEditingRoot(root)}
+                      >
+                        Override
+                      </Button>
+                      {root.content_id ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          asChild
+                          title="Open the matched item; use its Split Versions action to separate wrongly merged files"
+                        >
+                          <Link to={`/item/${encodeURIComponent(root.content_id)}`}>Resolve</Link>
+                        </Button>
+                      ) : null}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

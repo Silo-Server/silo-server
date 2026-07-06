@@ -981,6 +981,24 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 	}
 
+	// Build admin split/merge handler for repairing wrong version groupings.
+	var adminSplitHandler *handlers.AdminSplitHandler
+	if itemRepo != nil && deps.DB != nil {
+		var merger handlers.ItemMerger
+		if m, ok := deps.MetadataService.(handlers.ItemMerger); ok {
+			merger = m
+		}
+		adminSplitHandler = handlers.NewAdminSplitHandler(
+			deps.DB,
+			itemRepo,
+			deps.MetadataService,
+			merger,
+			deps.Refresher,
+			deps.Scanner,
+			deps.FolderRepo,
+		)
+	}
+
 	// Build admin image handler for poster/backdrop/logo selection.
 	var adminImageHandler *handlers.AdminImageHandler
 	if imageSvc, ok := deps.MetadataService.(handlers.ImageService); ok && itemRepo != nil && seasonRepo != nil && episodeRepo != nil && deps.DB != nil && detailSvc != nil {
@@ -2366,6 +2384,11 @@ func NewRouter(deps Dependencies) chi.Router {
 							if adminMatchHandler != nil {
 								r.Post("/items/{id}/match/search", adminMatchHandler.HandleSearchItemMatchCandidates)
 								r.Post("/items/{id}/match/apply", adminMatchHandler.HandleApplyItemMatch)
+							}
+							if adminSplitHandler != nil {
+								r.Get("/items/{id}/files", adminSplitHandler.HandleListItemFiles)
+								r.Post("/items/{id}/split", adminSplitHandler.HandleSplitItem)
+								r.Post("/items/{id}/merge", adminSplitHandler.HandleMergeItem)
 							}
 							if metadataAIHandler != nil {
 								r.Post("/items/{id}/metadata-translation", metadataAIHandler.HandleTranslate)

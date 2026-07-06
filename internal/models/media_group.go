@@ -43,6 +43,36 @@ type MediaGroupOverride struct {
 	UpdatedAt       time.Time
 }
 
+// Scopes for MediaIdentityOverride rows.
+const (
+	IdentityOverrideScopeRoot = "root"
+	IdentityOverrideScopeFile = "file"
+)
+
+// MediaIdentityOverride stores an operator-provided identity forced onto all
+// files under a root path (scope "root") or one file (scope "file"). Applied
+// per file during group inference, before bucketing, so overridden files form
+// their own content group — this is what makes a version split durable across
+// rescans. File scope wins over root scope.
+type MediaIdentityOverride struct {
+	ID              int64
+	MediaFolderID   int
+	Scope           string // "root" or "file"
+	RootPath        string // scope="root"
+	FilePath        string // scope="file"
+	ForcedType      string
+	ForcedTitle     string
+	ForcedYear      int
+	ForcedTmdbID    string
+	ForcedImdbID    string
+	ForcedTvdbID    string
+	Note            string
+	CreatedByUserID *int
+	UpdatedByUserID *int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 // ObservedMediaLocation tracks one physical path-scoped media location.
 type ObservedMediaLocation struct {
 	MediaFolderID          int

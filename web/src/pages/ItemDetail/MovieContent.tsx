@@ -17,6 +17,7 @@ import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MediaLocations from "@/components/MediaLocations";
 import MatchItemDialog from "@/components/MatchItemDialog";
+import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
@@ -65,6 +66,7 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   const deleteRatingMutation = useDeleteRating(item.content_id);
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [subtitleSearchOpen, setSubtitleSearchOpen] = useState(false);
 
@@ -268,6 +270,9 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
             canEditMarkers={canEditMarkers}
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
+            onSplitItem={
+              canCurateMetadata && item.versions.length > 1 ? () => setSplitOpen(true) : undefined
+            }
             versions={item.versions}
             playbackVariants={item.playback_variants}
             selectedVersion={selectedVersion}
@@ -335,6 +340,14 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
           item={item}
           open={matchOpen}
           onOpenChange={setMatchOpen}
+        />
+      )}
+      {canCurateMetadata && (
+        <SplitItemDialog
+          key={`split-${item.content_id}`}
+          item={item}
+          open={splitOpen}
+          onOpenChange={setSplitOpen}
         />
       )}
       <DownloadVersionPicker

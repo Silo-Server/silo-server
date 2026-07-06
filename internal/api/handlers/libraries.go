@@ -299,6 +299,9 @@ type libraryRootResponse struct {
 	FirstSeenAt    time.Time       `json:"first_seen_at"`
 	LastSeenAt     time.Time       `json:"last_seen_at"`
 	ActiveOverride *rootOverride   `json:"active_override,omitempty"`
+	// ContentID is the catalog item this group matched to, when known — it
+	// lets the admin UI jump from an ambiguous root to the item's split flow.
+	ContentID string `json:"content_id,omitempty"`
 }
 
 type rootOverride struct {
@@ -2313,6 +2316,29 @@ func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	contentIDByGroup := map[string]string{}
+	if h.pool != nil {
+		claimRows, err := h.pool.Query(r.Context(), `
+			SELECT group_key_version, content_group_key, content_id
+			FROM media_item_groups
+			WHERE media_folder_id = $1
+		`, libraryID)
+		if err != nil {
+			slog.Warn("listing group claims", "library_id", libraryID, "error", err)
+		} else {
+			defer claimRows.Close()
+			for claimRows.Next() {
+				var version int
+				var groupKey, contentID string
+				if err := claimRows.Scan(&version, &groupKey, &contentID); err != nil {
+					slog.Warn("scanning group claim", "library_id", libraryID, "error", err)
+					break
+				}
+				contentIDByGroup[groupOverrideLookupKey(version, groupKey)] = contentID
+			}
+		}
+	}
+
 	items := make([]libraryRootResponse, 0, len(groups))
 	for _, group := range groups {
 		rootPath := strings.TrimSpace(group.SampleObservedRootPath)
@@ -2337,6 +2363,7 @@ func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request)
 			OverrideSource: group.OverrideSource,
 			FirstSeenAt:    group.FirstSeenAt,
 			LastSeenAt:     group.LastSeenAt,
+			ContentID:      contentIDByGroup[groupOverrideLookupKey(group.GroupKeyVersion, group.ContentGroupKey)],
 		}
 		if override, ok := overrideByGroup[groupOverrideLookupKey(group.GroupKeyVersion, group.ContentGroupKey)]; ok {
 			resp.ActiveOverride = &rootOverride{
@@ -2379,7 +2406,7 @@ func (h *LibraryHandler) HandleUpsertRootOverride(w http.ResponseWriter, r *http
 	}
 	if location == nil || location.PrimaryContentGroupKey == "" {
 		if location != nil && location.ContentGroupCount > 1 {
-			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains multiple logical groups; override the group after splitting or selecting a specific item")
+			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains files from multiple items; resolve it with the item split flow (POST /admin/items/{id}/split)")
 			return
 		}
 		writeError(w, http.StatusNotFound, "not_found", "Root not found")
@@ -2437,7 +2464,7 @@ func (h *LibraryHandler) HandleDeleteRootOverride(w http.ResponseWriter, r *http
 	}
 	if location == nil || location.PrimaryContentGroupKey == "" {
 		if location != nil && location.ContentGroupCount > 1 {
-			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains multiple logical groups; delete the override from a specific group instead")
+			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains files from multiple items; manage its identity overrides via the item split flow instead")
 			return
 		}
 		writeError(w, http.StatusNotFound, "not_found", "Root not found")

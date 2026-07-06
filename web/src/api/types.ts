@@ -2945,6 +2945,8 @@ export interface LibraryRoot {
   first_seen_at: string;
   last_seen_at: string;
   active_override?: LibraryRootOverride;
+  /** Catalog item this group matched to, when known. */
+  content_id?: string;
 }
 
 export interface LibraryRootsResponse {
@@ -4133,6 +4135,68 @@ export interface ItemMatchSearchResponse {
 export interface ItemMatchApplyRequest {
   provider_ids: Record<string, string>;
   library_id?: number;
+}
+
+// Split/merge (wrong version-grouping repair) types
+
+export interface ItemFile {
+  id: number;
+  library_id: number;
+  file_path: string;
+  observed_root_path: string;
+  season_number?: number;
+  episode_number?: number;
+}
+
+export interface ItemFilesResponse {
+  files: ItemFile[];
+}
+
+export type SplitHistoryMode = "evidence" | "keep" | "move_all";
+
+export interface ItemSplitTarget {
+  provider_ids?: Record<string, string>;
+  content_id?: string;
+  unmatched?: boolean;
+  title?: string;
+  year?: number;
+}
+
+export interface ItemSplitRequest {
+  file_ids: number[];
+  target: ItemSplitTarget;
+  history_mode?: SplitHistoryMode;
+  persist_override?: boolean;
+  dry_run?: boolean;
+}
+
+export interface ReattributionReport {
+  playback_session_log: number;
+  downloads: number;
+  progress_moved: number;
+  progress_conflicts: number;
+  history_moved: number;
+  history_stayed: number;
+  history_ambiguous: number;
+  intent_moved: number;
+  episode_pairs_moved: number;
+  ambiguous_history?: {
+    user_id: number;
+    profile_id: string;
+    watched_at: string;
+  }[];
+}
+
+export interface ItemSplitResponse {
+  dry_run: boolean;
+  source_content_id: string;
+  target_content_id: string;
+  target_created: boolean;
+  files_moved: number;
+  root_overrides: string[];
+  file_overrides: string[];
+  episode_pairs: number;
+  reattribution: ReattributionReport;
 }
 
 // Image selector types

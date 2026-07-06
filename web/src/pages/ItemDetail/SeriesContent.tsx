@@ -16,6 +16,7 @@ import CastCarousel from "@/components/CastCarousel";
 import CrewList from "@/components/CrewList";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
 import MatchItemDialog from "@/components/MatchItemDialog";
+import SplitItemDialog from "@/components/SplitItemDialog";
 import PageBack from "@/components/PageBack";
 import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
@@ -52,6 +53,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
 
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
   const { data: seasonsData, isLoading: seasonsLoading } = useSeasons(item.content_id);
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
   const seasons = useMemo(() => seasonsData?.seasons ?? [], [seasonsData?.seasons]);
@@ -183,6 +185,7 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
             canCurateMetadata={canCurateMetadata}
             onEditMetadata={canCurateMetadata ? () => setEditOpen(true) : undefined}
             onMatchItem={canCurateMetadata ? () => setMatchOpen(true) : undefined}
+            onSplitItem={canCurateMetadata ? () => setSplitOpen(true) : undefined}
             rating={item.user_rating ?? null}
             onRatingChange={handleRatingChange}
           />
@@ -238,6 +241,14 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
           item={item}
           open={matchOpen}
           onOpenChange={setMatchOpen}
+        />
+      )}
+      {canCurateMetadata && (
+        <SplitItemDialog
+          key={`split-${item.content_id}`}
+          item={item}
+          open={splitOpen}
+          onOpenChange={setSplitOpen}
         />
       )}
     </div>
