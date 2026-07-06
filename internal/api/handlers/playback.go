@@ -68,6 +68,13 @@ type PlaybackEpisodeLookup interface {
 	GetByID(ctx context.Context, contentID string) (*models.Episode, error)
 }
 
+// PlaybackExtraLookup resolves local extras (media_extras) so their files
+// authorize through the parent item, like episodes authorize through their
+// series.
+type PlaybackExtraLookup interface {
+	GetByID(ctx context.Context, contentID string) (*models.MediaExtra, error)
+}
+
 type PlaybackSessionSyncer interface {
 	SyncNow(ctx context.Context) error
 }
@@ -114,6 +121,7 @@ type PlaybackHandler struct {
 	JWTSecret               string                    // needed for signing stream tokens
 	ItemAccess              PlaybackItemAccessChecker // optional; enables file authorization checks
 	EpisodeLookup           PlaybackEpisodeLookup     // optional; resolves episode files to their series
+	ExtraLookup             PlaybackExtraLookup       // optional; resolves extras files to their parent item
 	OriginalLangLookup      PlaybackOriginalLanguageLookup
 	SettingsRepo            PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher      PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
@@ -2206,6 +2214,20 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 		}
 	case file.ContentID != "":
 		if err := h.ItemAccess.EnsureAccessible(r.Context(), file.ContentID, filter); err != nil {
+			return nil, err
+		}
+	case file.ExtraID != "":
+		if h.ExtraLookup == nil {
+			return nil, catalog.ErrItemNotFound
+		}
+		extra, err := h.ExtraLookup.GetByID(r.Context(), file.ExtraID)
+		if err != nil {
+			if errors.Is(err, catalog.ErrExtraNotFound) {
+				return nil, catalog.ErrItemNotFound
+			}
+			return nil, err
+		}
+		if err := h.ItemAccess.EnsureAccessible(r.Context(), extra.ParentID, filter); err != nil {
 			return nil, err
 		}
 	default:

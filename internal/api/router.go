@@ -490,6 +490,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var peopleHandler *handlers.PeopleHandler
 	var itemRepo *catalog.ItemRepository
 	var episodeRepo *catalog.EpisodeRepository
+	var extraRepo *catalog.ExtraRepository
 	var providerIDRepo *catalog.ProviderIDRepository
 	var seasonRepo *catalog.SeasonRepository
 	var detailSvc *catalog.DetailService
@@ -529,6 +530,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 		itemRepo.WithSearchIndexEvents(searchIndexEvents)
 		episodeRepo = catalog.NewEpisodeRepository(deps.DB)
+		extraRepo = catalog.NewExtraRepository(deps.DB)
 		providerIDRepo = catalog.NewProviderIDRepository(deps.DB)
 		calendarRepo = catalog.NewCalendarRepository(deps.DB)
 
@@ -593,6 +595,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				FileResolver:  deps.FileRepo,
 				ItemAccess:    itemRepo,
 				EpisodeLookup: episodeRepo,
+				ExtraLookup:   extraRepo,
 			})
 			if ebookProgressStore != nil {
 				ebookReaderHandler.ProgressStore = ebookProgressStore
@@ -1052,6 +1055,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				FileResolver:  deps.FileRepo,
 				ItemAccess:    itemRepo,
 				EpisodeLookup: episodeRepo,
+				ExtraLookup:   extraRepo,
 			}
 		}
 	}
@@ -2201,6 +2205,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							FileResolver:  deps.FileRepo,
 							ItemAccess:    itemRepo,
 							EpisodeLookup: episodeRepo,
+							ExtraLookup:   extraRepo,
 						}
 						subtitleSearchHandler.FileAuthorizer = fileAuthorizer
 						if subtitleAIHandler != nil {
@@ -2234,6 +2239,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				if playbackHandler != nil {
 					playbackHandler.ItemAccess = itemRepo
 					playbackHandler.EpisodeLookup = episodeRepo
+					playbackHandler.ExtraLookup = extraRepo
 					playbackHandler.OriginalLangLookup = itemRepo
 					playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
 
