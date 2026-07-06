@@ -74,19 +74,41 @@ function appendPosition(url: string, position: number): string {
  * `subtitleDelayMs` lets the user nudge sync without a refetch: new cues
  * are added with the current delay baked in, and existing cues are shifted
  * in place whenever the value changes. Positive = show subtitles later.
+ * `streamOriginSeconds` changes (a copy-mode session restarting at a new
+ * position) are handled the same way: existing cues shift in place onto
+ * the new timeline instead of tearing down the track.
  */
 export function useSubtitleTracks(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   subtitleUrls: PlayerSubtitleInfo[],
   activeSubtitleIndex: number | null,
-  streamOriginRef: React.RefObject<number>,
+  streamOriginSeconds: number,
   subtitleDelayMs: number,
+  // Known media duration in source-time seconds (0 when unknown). Used to
+  // decide when a fetch window has reached end-of-input.
+  durationRef: React.RefObject<number>,
+  // Media-time position playback is heading to (pending seek target, or the
+  // session's start position). While the element has no media loaded yet
+  // (session start or a stream restart), `video.currentTime` still reads 0
+  // rather than the resume/seek target — fetching the window at 0 wastes an
+  // ffmpeg run and, because only one fetch is in flight at a time, blocks
+  // the correct window until it completes.
+  fetchAnchorRef: React.RefObject<number>,
   liveCues?: ParsedCue[] | null,
   // Identifies the current live translation job. Changing it (a new job) rebuilds
   // the track and resets the dedup set so cues from a prior run never linger.
   liveTrackKey?: string | null,
 ): string[] {
   const [activeCueTexts, setActiveCueTexts] = useState<string[]>([]);
+
+  // Latest stream origin, readable from stable callbacks (maybeFetch) without
+  // retriggering the main effect.
+  const streamOriginRef = useRef(streamOriginSeconds);
+  streamOriginRef.current = streamOriginSeconds;
+  // Origin currently baked into the track's VTTCue times. Cue-add paths read
+  // this (not the live origin) so the track never mixes bases; the rebase
+  // effect below is the only place it advances, shifting existing cues along.
+  const appliedOriginRef = useRef(streamOriginSeconds);
 
   const activeSub =
     activeSubtitleIndex !== null
@@ -138,6 +160,8 @@ export function useSubtitleTracks(
     trackRef.current = track;
     seenCueKeysRef.current = new Set();
     processedLiveCuesRef.current = 0;
+    // Fresh track has no cues, so it trivially carries the current origin.
+    appliedOriginRef.current = streamOriginRef.current;
 
     let cancelled = false;
     let hasFetched = false;
@@ -175,9 +199,13 @@ export function useSubtitleTracks(
       // Cue timestamps come from ffmpeg in source-PTS. For copy-mode HLS
       // the player timeline is rebased to start at `streamOriginSeconds`,
       // so subtract it. For regular transcodes origin is 0 and the
-      // subtraction is a no-op. Any active user-facing sync delay gets
-      // baked in here so new cues line up with existing ones.
-      const origin = streamOriginRef.current ?? 0;
+      // subtraction is a no-op. Use the origin already baked into the
+      // track (not the live one) so cues added while an origin change is
+      // still propagating stay consistent with the existing cues — the
+      // rebase effect shifts everything to the new origin in one pass.
+      // Any active user-facing sync delay gets baked in here so new cues
+      // line up with existing ones.
+      const origin = appliedOriginRef.current;
       const delaySec = appliedDelayMsRef.current / 1000;
       addCuesToTrack(track, newCues, origin, delaySec, seenCueKeysRef.current);
     }
@@ -211,7 +239,6 @@ export function useSubtitleTracks(
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
-        let lastCueEnd = 0;
 
         // Split on the last complete cue boundary (blank line) and parse
         // the safe prefix, keep the rest. The WebVTT muxer emits cues
@@ -227,7 +254,6 @@ export function useSubtitleTracks(
           const cues = parseVTT(safe);
           if (cues.length > 0) {
             addParsedCues(cues);
-            lastCueEnd = cues[cues.length - 1]!.end;
           }
         }
 
@@ -237,13 +263,16 @@ export function useSubtitleTracks(
           const cues = parseVTT(buf);
           if (cues.length > 0) {
             addParsedCues(cues);
-            lastCueEnd = cues[cues.length - 1]!.end;
           }
         }
 
-        // If ffmpeg closed well short of the requested end, treat it as
-        // end-of-input and stop prefetching.
-        if (lastCueEnd > 0 && lastCueEnd < requestedEnd - WINDOW_OVERLAP) {
+        // End-of-input only when the window reaches the known media
+        // duration. Don't infer it from where the window's cues stop:
+        // a window that ends inside a dialogue gap looks identical to
+        // end-of-file by that signal, and a false positive here silently
+        // stops subtitles for the rest of playback.
+        const durationSec = durationRef.current ?? 0;
+        if (durationSec > 0 && requestedEnd >= durationSec) {
           atEOF = true;
         }
       } catch (err) {
@@ -264,16 +293,30 @@ export function useSubtitleTracks(
     //   - no cues yet → initial fetch
     //   - current position fell behind coverageStart (backward seek
     //     outside window) → reset and fetch fresh window from here
+    //   - position jumped past windowEnd (forward seek outside window) →
+    //     reset and fetch fresh window from here, so the skipped-over gap
+    //     is never mistaken for covered range
     //   - playback is nearing windowEnd and we haven't hit EOF → queue
     //     the next window, overlapping slightly with the previous
     function maybeFetch() {
       if (cancelled || inflight) return;
-      const mediaTime = toMediaTime(videoEl.currentTime, streamOriginRef.current ?? 0);
+      // Until the element has media loaded, currentTime reads 0 rather than
+      // the position playback will actually start at (resume target, or a
+      // seek that restarted the stream) — use the intended position instead.
+      const mediaTime =
+        videoEl.readyState > 0
+          ? toMediaTime(videoEl.currentTime, streamOriginRef.current ?? 0)
+          : (fetchAnchorRef.current ?? 0);
       if (!hasFetched) {
         fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
         return;
       }
       if (mediaTime < coverageStart - 1) {
+        atEOF = false;
+        fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
+        return;
+      }
+      if (mediaTime > windowEnd + 1) {
         atEOF = false;
         fetchWindow(Math.max(0, mediaTime - SEEK_BACKOFF), true);
         return;
@@ -315,10 +358,30 @@ export function useSubtitleTracks(
         trackRef.current = null;
       }
     };
-    // `subtitleDelayMs` is intentionally excluded — nudging delay must not
-    // tear down and refetch the track. The delay-update effect below shifts
-    // existing cues in place instead.
-  }, [activeUrl, activeCodec, activeLang, activeIsLive, liveTrackKey, streamOriginRef, videoRef]);
+    // `subtitleDelayMs` and `streamOriginSeconds` are intentionally excluded —
+    // nudging delay or remapping the timeline must not tear down and refetch
+    // the track. The update effects below shift existing cues in place instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeUrl, activeCodec, activeLang, activeIsLive, liveTrackKey, videoRef]);
+
+  // Re-base already-loaded cues when the media timeline remaps — e.g. a
+  // copy-mode session restarting at a new position after an out-of-window
+  // seek changes `streamOriginSeconds`. Cue times are player-local
+  // (`source - origin + delay`), so a larger origin moves every cue earlier.
+  // Without this shift, cues loaded under the old origin display offset by
+  // exactly the origin delta after the restart.
+  useEffect(() => {
+    const deltaSec = streamOriginSeconds - appliedOriginRef.current;
+    appliedOriginRef.current = streamOriginSeconds;
+    if (deltaSec === 0) return;
+    const cues = trackRef.current?.cues;
+    if (!cues) return;
+    for (const cue of Array.from(cues)) {
+      const vc = cue as VTTCue;
+      vc.startTime = Math.max(0, vc.startTime - deltaSec);
+      vc.endTime = vc.endTime - deltaSec;
+    }
+  }, [streamOriginSeconds]);
 
   // Apply delay changes to already-loaded cues without rebuilding the track.
   // Runs after the main effect, so trackRef is current.
@@ -356,7 +419,7 @@ export function useSubtitleTracks(
     const fresh = liveCues.slice(processedLiveCuesRef.current);
     if (fresh.length === 0) return;
     processedLiveCuesRef.current = liveCues.length;
-    const origin = streamOriginRef.current ?? 0;
+    const origin = appliedOriginRef.current;
     const delaySec = appliedDelayMsRef.current / 1000;
     addCuesToTrack(track, fresh, origin, delaySec, seenCueKeysRef.current);
     // While paused, adding a cue over the playhead doesn't reliably fire
@@ -370,7 +433,7 @@ export function useSubtitleTracks(
           : [],
       );
     }
-  }, [liveCues, activeIsLive, activeSubtitleIndex, liveTrackKey, streamOriginRef, videoRef]);
+  }, [liveCues, activeIsLive, activeSubtitleIndex, liveTrackKey, videoRef]);
 
   return activeCueTexts;
 }

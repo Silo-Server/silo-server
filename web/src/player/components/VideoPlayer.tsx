@@ -220,6 +220,7 @@ export function VideoPlayer({
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
   const streamOriginRef = useRef(0);
+  const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
   const autoSkippedIntroKeyRef = useRef<string | null>(null);
@@ -429,8 +430,15 @@ export function VideoPlayer({
     displayedPlaybackState.playMethod === "remux";
 
   // Keep the player-local clock mapped onto the canonical media timeline.
-  streamOriginRef.current =
+  const streamOriginSeconds =
     effectivePlayMethod === "transcode" ? transcodeQuality.streamOriginSeconds : 0;
+  streamOriginRef.current = streamOriginSeconds;
+
+  // Media-time position playback is heading to, for consumers that need a
+  // position before the element has media loaded (when currentTime still
+  // reads 0): an in-flight seek target, else the session's start position.
+  subtitleFetchAnchorRef.current =
+    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, streamOriginSeconds);
 
   useEffect(() => {
     if (backendDuration > 0) {
@@ -1600,8 +1608,10 @@ export function VideoPlayer({
     videoRef,
     effectiveSubtitleTracks,
     activeSubtitleIndex,
-    streamOriginRef,
+    streamOriginSeconds,
     subtitleDelayMs,
+    durationRef,
+    subtitleFetchAnchorRef,
     liveCues,
     liveTranslation?.trackKey ?? null,
   );
@@ -1612,7 +1622,7 @@ export function VideoPlayer({
     subtitleUrls,
     activeSubtitleIndex,
     isDetached,
-    transcodeQuality.streamOriginSeconds,
+    streamOriginSeconds,
     subtitleDelayMs,
   );
 
@@ -1622,7 +1632,7 @@ export function VideoPlayer({
     subtitleUrls,
     activeSubtitleIndex,
     isDetached,
-    transcodeQuality.streamOriginSeconds,
+    streamOriginSeconds,
     subtitleDelayMs,
   );
 
