@@ -1460,11 +1460,20 @@ func (h *PlaybackHandler) resolvePlaybackRoute(r *http.Request, compatSession *S
 	clientPlaySessionID := newCaseInsensitiveQuery(r.URL.Query()).Get("PlaySessionId")
 	if clientPlaySessionID != "" {
 		if playSession, ok := h.playbackStore.Get(clientPlaySessionID); ok && playSession.CompatToken == compatSession.Token {
-			if mediaSourceID != "" {
-				source := findMediaSource(playSession, mediaSourceID)
-				return playSession, source, nil
+			// Fall back to the primary source only for the Jellyfin
+			// MediaSource.Id == Item.Id convention: a client that reused the
+			// server's PlaySessionId may send the item id (== routeID) as
+			// mediaSourceId, which never matches Silo's fileID-based source ids.
+			// Any other unmatched id (stale/foreign, or a wrong multi-version
+			// id) keeps source nil so HandleVideoStream rejects it rather than
+			// silently serving the wrong file. Mirrors Jellyfin's
+			// StreamingHelpers, which defaults to the primary source only for an
+			// empty or item-id mediaSourceId.
+			source := findMediaSource(playSession, mediaSourceID)
+			if source == nil && (mediaSourceID == "" || mediaSourceIDsEqual(mediaSourceID, routeID)) {
+				source = firstMediaSource(playSession)
 			}
-			return playSession, firstMediaSource(playSession), nil
+			return playSession, source, nil
 		}
 		// The PlaySessionId is unknown to us (the client never called PlaybackInfo,
 		// so it is the client's own id) or belongs to another caller. Fall through

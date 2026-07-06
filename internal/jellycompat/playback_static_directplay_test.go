@@ -148,6 +148,80 @@ func TestHandleVideoStream_StaticBypassesNegotiatedCapabilityRejection(t *testin
 	}
 }
 
+// TestHandleVideoStream_KnownPlaySessionItemIDMediaSourceServesFile covers a
+// client that calls PlaybackInfo, reuses the server-minted PlaySessionId on the
+// stream request, but sends the *item id* as mediaSourceId (Jellyfin's
+// MediaSource.Id == Item.Id convention) instead of the server's fileID-based
+// source id. The PlaySessionId lookup hits, but the item id matches no stored
+// source, so findMediaSource returns nil. That branch must fall back to the
+// session's primary source — as FindByRoute and createStaticPlaySession already
+// do — rather than returning a nil source and 400ing "Media source is required".
+func TestHandleVideoStream_KnownPlaySessionItemIDMediaSourceServesFile(t *testing.T) {
+	handler, encodedID, body := newStaticDirectPlayHandler(t)
+	sourceID := NewResourceIDCodec().EncodeIntID(EncodedIDMediaSource, 42)
+	handler.playbackStore.Put(PlaybackSession{
+		ID:          "server-psid",
+		CompatToken: "token-1",
+		ItemID:      "movie-1",
+		RouteItemID: encodedID,
+		UserID:      "user-1",
+		MediaSources: []PlaybackMediaSource{{
+			ID:                 sourceID,
+			FileID:             42,
+			Version:            catalog.FileVersion{FileID: 42, Container: "mkv", Duration: 3600},
+			SupportsDirectPlay: true,
+		}},
+	})
+
+	// mediaSourceId is the route item id (encodedID), which is NOT the stored
+	// source id (a distinct EncodedIDMediaSource UUID). Lowercase playSessionId
+	// mirrors the real client call shape.
+	rawQuery := "static=true&playSessionId=server-psid&mediaSourceId=" + url.QueryEscape(encodedID)
+	rec := serveStaticStream(handler, encodedID, rawQuery)
+
+	if rec.Code != 200 {
+		t.Fatalf("expected status 200; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Body.String(); got != body {
+		t.Errorf("expected file content %q; got %q", body, got)
+	}
+}
+
+// TestHandleVideoStream_KnownPlaySessionUnknownMediaSourceRejected guards the
+// scope of the item-id fallback: a named mediaSourceId under a known
+// PlaySessionId that matches neither a stored source nor the route item id
+// (a stale/foreign id, or a wrong version on a multi-version item) must stay
+// rejected with 400 rather than silently serving the primary source. Only the
+// item-id convention (routeID) falls back; everything else is an error, matching
+// Jellyfin's StreamingHelpers.
+func TestHandleVideoStream_KnownPlaySessionUnknownMediaSourceRejected(t *testing.T) {
+	handler, encodedID, _ := newStaticDirectPlayHandler(t)
+	sourceID := NewResourceIDCodec().EncodeIntID(EncodedIDMediaSource, 42)
+	handler.playbackStore.Put(PlaybackSession{
+		ID:          "server-psid",
+		CompatToken: "token-1",
+		ItemID:      "movie-1",
+		RouteItemID: encodedID,
+		UserID:      "user-1",
+		MediaSources: []PlaybackMediaSource{{
+			ID:                 sourceID,
+			FileID:             42,
+			Version:            catalog.FileVersion{FileID: 42, Container: "mkv", Duration: 3600},
+			SupportsDirectPlay: true,
+		}},
+	})
+
+	// A media source id that is neither the stored source (fileID 42) nor the
+	// route item id -- e.g. a stale/foreign or wrong-version id.
+	otherSourceID := NewResourceIDCodec().EncodeIntID(EncodedIDMediaSource, 999)
+	rawQuery := "static=true&playSessionId=server-psid&mediaSourceId=" + url.QueryEscape(otherSourceID)
+	rec := serveStaticStream(handler, encodedID, rawQuery)
+
+	if rec.Code != 400 {
+		t.Fatalf("expected status 400 for an unknown mediaSourceId; got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestHandleVideoStream_NoStaticNoSessionReturns404 proves the static fallback
 // does not fire unconditionally: with no Static param and an empty playback
 // store, resolvePlaybackRoute correctly 404s.
