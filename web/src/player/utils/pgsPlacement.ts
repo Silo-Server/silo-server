@@ -44,9 +44,28 @@ const FONT_SIZE_SCALE: Record<SubtitleAppearance["fontSize"], number> = {
 // keep their authored placement. Mirrors bitmapBottomAnchorBand.
 const BOTTOM_ANCHOR_BAND = 0.75;
 
-// Bottom preset margin as a fraction of video height, matching the text
-// render's bottom margin (silo-apple uses 30/1080 on non-TV surfaces).
-const BOTTOM_MARGIN_FRACTION = 30 / 1080;
+// Position offsets as fractions of the 16:9 reference frame height — the
+// same anchors the text overlay uses (POSITION_OFFSETS in
+// lib/subtitleAppearance.ts), so PGS dialogue lands where SRT text does.
+const POSITION_OFFSET: Record<SubtitleAppearance["position"], number> = {
+  bottom: 0.07,
+  "lower-third": 0.18,
+  top: 0.07,
+};
+
+/**
+ * The 16:9 reference frame the text overlay anchors to (see
+ * computeSubtitlePositionStyle in lib/subtitleAppearance.ts): matched to the
+ * video's shorter dimension and centered on it, so for wider-than-16:9
+ * content the frame extends into the letterbox — subtitles landing there is
+ * the intended, text-consistent behavior.
+ */
+function referenceFrame(videoRect: Rect): { top: number; bottom: number; height: number } {
+  const videoAspect = videoRect.width / videoRect.height;
+  const height = videoAspect >= 16 / 9 ? videoRect.width * (9 / 16) : videoRect.height;
+  const centerY = videoRect.y + videoRect.height / 2;
+  return { top: centerY - height / 2, bottom: centerY + height / 2, height };
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -166,14 +185,15 @@ export function computePgsPlacements(
   }));
 
   // Bottom preset: one group-wide shift that moves the authored bottom edge
-  // of the dialogue band to the text render's bottom margin, computed over
+  // of the dialogue band to the text overlay's bottom anchor, computed over
   // the whole group so multi-cue compositions keep authored spacing.
+  const ref = referenceFrame(videoRect);
   let bottomShift = 0;
   if (appearance.position === "bottom") {
     const band = baseFrames.filter((f) => f.normMaxY >= BOTTOM_ANCHOR_BAND);
     if (band.length > 0) {
       const groupMaxY = Math.max(...band.map((f) => f.y + f.height));
-      const target = videoRect.y + videoRect.height * (1 - BOTTOM_MARGIN_FRACTION);
+      const target = ref.bottom - ref.height * POSITION_OFFSET.bottom;
       bottomShift = target - groupMaxY;
     }
   }
@@ -202,17 +222,21 @@ export function computePgsPlacements(
           y += bottomShift;
           break;
         case "lower-third":
-          y = videoRect.y + videoRect.height * 0.7 - scaledHeight;
+          y = ref.bottom - ref.height * POSITION_OFFSET["lower-third"] - scaledHeight;
           break;
         case "top":
-          y = videoRect.y + videoRect.height * 0.05;
+          y = ref.top + ref.height * POSITION_OFFSET.top;
           break;
       }
     }
 
+    // Clamp horizontally to the video box; vertically to the reference frame
+    // union, which may extend into the letterbox — same as the text overlay.
+    const minY = Math.min(videoRect.y, ref.top);
+    const maxY = Math.max(videoRect.y + videoRect.height, ref.bottom);
     const dest: Rect = {
       x: clamp(x, videoRect.x, videoRect.x + videoRect.width - scaledWidth),
-      y: clamp(y, videoRect.y, videoRect.y + videoRect.height - scaledHeight),
+      y: clamp(y, minY, maxY - scaledHeight),
       width: scaledWidth,
       height: scaledHeight,
     };

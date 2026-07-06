@@ -86,10 +86,10 @@ describe("computePgsPlacements", () => {
     expect(p!.dest.x + p!.dest.width / 2).toBeCloseTo(960);
   });
 
-  it("re-margins dialogue-band cues to the text bottom margin", () => {
+  it("re-margins dialogue-band cues to the text overlay's bottom anchor", () => {
     const [p] = computePgsPlacements([dialogue], 1920, 1080, VIDEO_RECT, appearance({}));
-    const expectedBottom = 1080 - 1080 * (30 / 1080);
-    expect(p!.dest.y + p!.dest.height).toBeCloseTo(expectedBottom);
+    // 16:9 content: reference frame equals the video rect, bottom offset 7%.
+    expect(p!.dest.y + p!.dest.height).toBeCloseTo(1080 - 1080 * 0.07);
   });
 
   it("moves dialogue to the lower third and top presets", () => {
@@ -100,7 +100,7 @@ describe("computePgsPlacements", () => {
       VIDEO_RECT,
       appearance({ position: "lower-third" }),
     );
-    expect(lower!.dest.y + lower!.dest.height).toBeCloseTo(1080 * 0.7);
+    expect(lower!.dest.y + lower!.dest.height).toBeCloseTo(1080 - 1080 * 0.18);
 
     const [top] = computePgsPlacements(
       [dialogue],
@@ -109,7 +109,7 @@ describe("computePgsPlacements", () => {
       VIDEO_RECT,
       appearance({ position: "top" }),
     );
-    expect(top!.dest.y).toBeCloseTo(1080 * 0.05);
+    expect(top!.dest.y).toBeCloseTo(1080 * 0.07);
   });
 
   it("leaves floating signs at their authored placement", () => {
@@ -130,9 +130,9 @@ describe("computePgsPlacements", () => {
     const line1: Rect = { x: 700, y: 900, width: 500, height: 40 };
     const line2: Rect = { x: 700, y: 980, width: 500, height: 40 };
     const [p1, p2] = computePgsPlacements([line1, line2], 1920, 1080, VIDEO_RECT, appearance({}));
-    // Group bottom (1020) moves to the margin line; both cues shift equally,
-    // preserving authored spacing between their bottom-anchored edges.
-    const shift = 1080 - 30 - 1020;
+    // Group bottom (1020) moves to the 7% anchor line; both cues shift
+    // equally, preserving authored spacing between bottom-anchored edges.
+    const shift = 1080 - 1080 * 0.07 - 1020;
     expect(p1!.dest.y + p1!.dest.height).toBeCloseTo(940 + shift);
     expect(p2!.dest.y + p2!.dest.height).toBeCloseTo(1020 + shift);
   });
@@ -151,6 +151,19 @@ describe("computePgsPlacements", () => {
 
     const [plain] = computePgsPlacements([dialogue], 1920, 1080, VIDEO_RECT, appearance({}));
     expect(plain!.background).toBeNull();
+  });
+
+  it("anchors wide-content dialogue into the letterbox like the text overlay", () => {
+    // 2.35:1 video letterboxed in a 16:9 canvas: the reference frame extends
+    // below the video box, so the bottom anchor lands in the letterbox.
+    const videoRect = computeVideoRect(1920, 1080, 2.35);
+    const srcH = Math.round(1920 / 2.35);
+    const cue: Rect = { x: 660, y: srcH - 130, width: 600, height: 80 };
+    const [p] = computePgsPlacements([cue], 1920, srcH, videoRect, appearance({}));
+    const refBottom = 1080 / 2 + (1920 * (9 / 16)) / 2;
+    expect(p!.dest.y + p!.dest.height).toBeCloseTo(refBottom - 1920 * (9 / 16) * 0.07);
+    // Below the video box — inside the letterbox band.
+    expect(p!.dest.y + p!.dest.height).toBeGreaterThan(videoRect.y + videoRect.height);
   });
 
   it("clamps scaled cues into the video rect", () => {
