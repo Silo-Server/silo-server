@@ -199,13 +199,31 @@ Silo often sees sidecar files that mirror the media basename:
 These are common and expected. Episode naming guidance in this page refers to the media files
 themselves, but sidecars may legitimately reuse the same stem.
 
-Some movie supplemental content is intentionally skipped, such as:
+Supplemental directories next to a movie (and directly under a series root)
+are scanned as **extras** attached to that item, following the Jellyfin/Plex
+folder convention:
 
+- `Trailers`, `Teasers`
 - `Featurettes`
 - `Behind the Scenes`
 - `Deleted Scenes`
-- `Trailers`
-- `Sample.mkv`
+- `Clips`, `Shorts`, `Interviews`, `Scenes`
+- `Extras`, `Other`
+
+Filename suffixes on files sitting next to the movie are also recognized:
+`Movie (2020)-trailer.mkv`, `-teaser`, `-featurette`, `-clip`,
+`-behindthescenes`, `-deleted`, `-interview`, `-short`, `-other`.
+
+Extras never appear as versions of the main title; they show in the item's
+Extras section and play like any other file. Extras are bound to the item
+owning the surrounding folder, so an extras directory at the library root is
+ignored. For series libraries, `Extras/` files carrying a valid `SxxExx`
+token keep their documented season-`0` mapping and are not treated as extras.
+
+Noise content is still intentionally skipped:
+
+- `Sample` / `Samples` directories and `Sample.mkv`-style files
+- `Subs` / `Subtitles` directories (handled by subtitle detection)
 
 ## What The Dev Anime Library Validated
 

@@ -15,6 +15,7 @@ import (
 type scanStateFile struct {
 	ID                    int
 	ContentID             string
+	ExtraID               string
 	CanonicalRootPath     string
 	ObservedRootPath      string
 	ContentGroupKey       string
@@ -50,7 +51,7 @@ type scanStateFile struct {
 	ExternalSubtitlePaths []string
 }
 
-const scanStateColumns = `id, content_id,
+const scanStateColumns = `id, content_id, extra_id,
 	canonical_root_path, observed_root_path, content_group_key, group_key_version,
 	base_title, base_year, base_type, identity_confidence, identity_json,
 	file_path, file_size, file_modified_at,
@@ -74,6 +75,7 @@ const scanStateColumns = `id, content_id,
 func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	var state scanStateFile
 	var contentID *string
+	var extraID *string
 	var canonicalRootPath, observedRootPath, contentGroupKey, baseTitle, baseType *string
 	var groupKeyVersion, baseYear *int
 	var identityConfidence *string
@@ -90,6 +92,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	if err := row.Scan(
 		&state.ID,
 		&contentID,
+		&extraID,
 		&canonicalRootPath,
 		&observedRootPath,
 		&contentGroupKey,
@@ -129,6 +132,9 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 
 	if contentID != nil {
 		state.ContentID = *contentID
+	}
+	if extraID != nil {
+		state.ExtraID = *extraID
 	}
 	if canonicalRootPath != nil {
 		state.CanonicalRootPath = *canonicalRootPath
@@ -257,6 +263,7 @@ func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {
 	return &scanStateFile{
 		ID:                    file.ID,
 		ContentID:             file.ContentID,
+		ExtraID:               file.ExtraID,
 		CanonicalRootPath:     file.CanonicalRootPath,
 		ObservedRootPath:      file.ObservedRootPath,
 		ContentGroupKey:       file.ContentGroupKey,

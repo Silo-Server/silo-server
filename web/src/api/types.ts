@@ -1081,6 +1081,29 @@ export type MarkerSegmentInput = { start?: number | null; end?: number | null };
  */
 export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | null>>;
 
+/**
+ * Remote provider video (trailer, teaser, featurette, ...) attached to an
+ * item. Kinds: "trailer", "teaser", "featurette", "clip", "behind_the_scenes",
+ * "bloopers", "deleted_scene", "other".
+ */
+export interface ItemVideo {
+  kind: string;
+  site: string;
+  site_key: string;
+  name?: string;
+  language?: string;
+  is_official: boolean;
+}
+
+/** Local extras file attached to an item; content_id is a watchable target. */
+export interface ItemExtra {
+  content_id: string;
+  kind: string;
+  title?: string;
+  duration_seconds?: number;
+  file_id?: number;
+}
+
 export interface ItemDetail {
   content_id: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
@@ -1147,6 +1170,11 @@ export interface ItemDetail {
 
   // Root folder paths for series items (admin-only).
   folder_paths?: string[];
+
+  // Remote provider videos, pre-sorted (trailers first, official first).
+  videos?: ItemVideo[];
+  // Local extras files, pre-sorted by kind.
+  extras?: ItemExtra[];
 
   // Playback.
   versions: FileVersion[];
@@ -2814,6 +2842,8 @@ export interface Library {
   chapter_thumbnails_enabled: boolean;
   chapter_thumbnails_supported: boolean;
   intro_detection_enabled: boolean;
+  /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
+  trailer_kinds: string[];
   sort_order: number;
   poster_url?: string;
   last_scanned_at: string | null;
@@ -2986,6 +3016,7 @@ export interface CreateLibraryRequest {
   auto_translate_metadata?: boolean;
   chapter_thumbnails_enabled?: boolean;
   intro_detection_enabled?: boolean;
+  trailer_kinds?: string[];
 }
 
 export interface UpdateLibraryRequest extends Partial<CreateLibraryRequest> {}

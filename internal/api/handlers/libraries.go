@@ -195,6 +195,9 @@ type updateLibraryRequest struct {
 	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty"`
 	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty"`
+	// TrailerKinds is the allow-list of remote video kinds fetched during
+	// metadata refresh (ExtraKind values); empty array disables remote videos.
+	TrailerKinds *[]string `json:"trailer_kinds,omitempty"`
 }
 
 // scanRequest represents the JSON body for POST /scan.
@@ -231,6 +234,7 @@ type libraryResponse struct {
 	ChapterThumbnailsEnabled   bool       `json:"chapter_thumbnails_enabled"`
 	ChapterThumbnailsSupported bool       `json:"chapter_thumbnails_supported"`
 	IntroDetectionEnabled      bool       `json:"intro_detection_enabled"`
+	TrailerKinds               []string   `json:"trailer_kinds"`
 	SortOrder                  int        `json:"sort_order"`
 	PosterURL                  string     `json:"poster_url,omitempty"`
 	LastScannedAt              *time.Time `json:"last_scanned_at,omitempty"`
@@ -346,6 +350,10 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 	if paths == nil {
 		paths = []string{}
 	}
+	trailerKinds := f.TrailerKinds
+	if trailerKinds == nil {
+		trailerKinds = []string{}
+	}
 	return libraryResponse{
 		ID:                         f.ID,
 		Paths:                      paths,
@@ -357,6 +365,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		ChapterThumbnailsEnabled:   f.ChapterThumbnailsEnabled,
 		ChapterThumbnailsSupported: false,
 		IntroDetectionEnabled:      f.IntroDetectionEnabled,
+		TrailerKinds:               trailerKinds,
 		SortOrder:                  f.SortOrder,
 		LastScannedAt:              f.LastScannedAt,
 		ScanWarningCode:            f.ScanWarningCode,
@@ -661,6 +670,7 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 		AutoTranslateMetadata:    req.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
+		TrailerKinds:             req.TrailerKinds,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {

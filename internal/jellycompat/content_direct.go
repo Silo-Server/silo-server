@@ -1287,6 +1287,8 @@ func itemDetailToUpstream(d *catalog.ItemDetail) upstreamItemDetail {
 		Versions:      d.Versions,
 		Cast:          d.Cast,
 		Crew:          d.Crew,
+		Videos:        d.Videos,
+		Extras:        d.Extras,
 	}
 	if detail.Genres == nil {
 		detail.Genres = []string{}

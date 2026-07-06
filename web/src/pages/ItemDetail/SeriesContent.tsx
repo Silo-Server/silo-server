@@ -24,6 +24,8 @@ import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import SeasonCarousel from "./SeasonCarousel";
 import SeasonEpisodeGrid from "./components/SeasonEpisodeGrid";
 import MetadataBadges from "./components/MetadataBadges";
+import TrailersSection from "./components/TrailersSection";
+import ExtrasSection from "./components/ExtrasSection";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
 import ActionBar from "./components/ActionBar";
@@ -212,6 +214,10 @@ export default function SeriesContent({ item }: { item: ItemDetail & { type: "se
         ) : (
           seasons.length > 0 && <SeasonCarousel seasons={seasons} />
         )}
+        {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
+
+        {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
+
         {item.cast && item.cast.length > 0 && (
           <div>
             <h2 className="mb-5 text-xl font-semibold tracking-tight">Cast</h2>

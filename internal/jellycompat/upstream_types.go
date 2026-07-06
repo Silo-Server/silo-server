@@ -104,6 +104,8 @@ type upstreamItemDetail struct {
 	Versions          []catalog.FileVersion   `json:"versions,omitempty"`
 	Cast              []catalog.CastCredit    `json:"cast,omitempty"`
 	Crew              []catalog.CrewCredit    `json:"crew,omitempty"`
+	Videos            []catalog.ItemVideoInfo `json:"videos,omitempty"`
+	Extras            []catalog.ItemExtraInfo `json:"extras,omitempty"`
 }
 
 type upstreamSeason struct {

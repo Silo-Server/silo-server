@@ -915,17 +915,108 @@ func (h *ItemsHandler) HandleFilters2Stub(w http.ResponseWriter, r *http.Request
 // HandleLocalTrailers serves GET /Items/{id}/LocalTrailers (and the legacy
 // /Users/{userId}/Items/{id}/LocalTrailers alias). Jellyfin returns a bare
 // BaseItemDto array — not the {Items,TotalRecordCount,StartIndex} envelope, so
-// this cannot reuse HandleItemStub. Silo does not index local trailer files, so
-// the result is always empty; returning [] matches Jellyfin's contract for an
-// item with no local trailers and stops the chi 404 that clients (Infuse,
-// Moonfin) otherwise hit on every item-detail load.
+// this cannot reuse HandleItemStub. Returns the item's local extras of
+// trailer/teaser kind as playable items; [] when it has none, which matches
+// Jellyfin's contract and stops the chi 404 that clients (Infuse, Moonfin)
+// otherwise hit on every item-detail load.
 func (h *ItemsHandler) HandleLocalTrailers(w http.ResponseWriter, r *http.Request) {
+	h.writeLocalExtras(w, r, true)
+}
+
+// HandleSpecialFeatures serves GET /Items/{id}/SpecialFeatures (and the
+// /Users/{userId}/... alias): the item's non-trailer local extras
+// (featurettes, deleted scenes, ...) as a bare BaseItemDto array.
+func (h *ItemsHandler) HandleSpecialFeatures(w http.ResponseWriter, r *http.Request) {
+	h.writeLocalExtras(w, r, false)
+}
+
+// writeLocalExtras is the shared body of LocalTrailers/SpecialFeatures:
+// Jellyfin splits one extras concept across two endpoints by kind.
+func (h *ItemsHandler) writeLocalExtras(w http.ResponseWriter, r *http.Request, trailersOnly bool) {
 	session := SessionFromContext(r.Context())
 	if session == nil {
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return
 	}
-	writeJSON(w, http.StatusOK, []baseItemDTO{})
+
+	if h.codec == nil || h.content == nil {
+		writeJSON(w, http.StatusOK, []baseItemDTO{})
+		return
+	}
+
+	rawID := chi.URLParam(r, "id")
+	contentID, err := h.codec.DecodeStringID(EncodedIDItem, rawID)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []baseItemDTO{})
+		return
+	}
+
+	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []baseItemDTO{})
+		return
+	}
+
+	items := []baseItemDTO{}
+	for _, extra := range detail.Extras {
+		if isLocalTrailerKind(extra.Kind) != trailersOnly {
+			continue
+		}
+		items = append(items, h.extraToBaseItem(extra, rawID))
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// extraToBaseItem maps a local extra onto a minimal playable BaseItemDto. The
+// extra's content_id is a first-class watch target (GetWatchDetail resolves
+// it through the extras fallback tier), so PlaybackInfo and the stream
+// endpoints work on the encoded id with no extra plumbing.
+func (h *ItemsHandler) extraToBaseItem(extra catalog.ItemExtraInfo, parentEncodedID string) baseItemDTO {
+	name := extra.Title
+	if name == "" {
+		name = extraKindDisplayName(extra.Kind)
+	}
+	itemType := "Video"
+	if isLocalTrailerKind(extra.Kind) {
+		itemType = "Trailer"
+	}
+	dto := baseItemDTO{
+		ID:        h.codec.EncodeStringID(EncodedIDItem, extra.ContentID),
+		Type:      itemType,
+		IsFolder:  false,
+		Name:      name,
+		ServerID:  h.mapper.serverID,
+		MediaType: "Video",
+		ParentID:  parentEncodedID,
+		ImageTags: map[string]string{},
+	}
+	if extra.DurationSeconds > 0 {
+		dto.RunTimeTicks = secondsToTicks(float64(extra.DurationSeconds))
+	}
+	applyPlayableLocation(&dto, true)
+	return dto
+}
+
+// extraKindDisplayName is the fallback item name for an untitled extra.
+func extraKindDisplayName(kind string) string {
+	switch models.ExtraKind(kind) {
+	case models.ExtraKindTrailer:
+		return "Trailer"
+	case models.ExtraKindTeaser:
+		return "Teaser"
+	case models.ExtraKindFeaturette:
+		return "Featurette"
+	case models.ExtraKindClip:
+		return "Clip"
+	case models.ExtraKindBehindTheScenes:
+		return "Behind the Scenes"
+	case models.ExtraKindBloopers:
+		return "Bloopers"
+	case models.ExtraKindDeletedScene:
+		return "Deleted Scene"
+	default:
+		return "Extra"
+	}
 }
 
 // HandleLatest serves GET /Items/Latest.

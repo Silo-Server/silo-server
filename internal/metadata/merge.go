@@ -84,6 +84,12 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 		mergeScalar(&target.LogoPath, source.LogoPath, mode)
 	}
 
+	// Remote videos accumulate across providers (TMDB trailers + another
+	// provider's clips can coexist), deduped by provider identity.
+	if !isLocked(FieldVideos) {
+		mergeVideos(&target.Videos, source.Videos)
+	}
+
 	// Provider IDs always accumulate, never overwrite
 	mergeProviderIDs(target, source)
 }
@@ -138,8 +144,37 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	if !isLocked(FieldCast) || !isLocked(FieldCrew) {
 		mergePeople(&target.People, source.People, mode)
 	}
+	if !isLocked(FieldVideos) {
+		mergeVideos(&target.Videos, source.Videos)
+	}
 
 	mergeProviderIDs(target, source)
+}
+
+// mergeVideos accumulates source videos into target, skipping entries the
+// target already has from the same provider (same provider video id) or that
+// point at the same hosted video (same site/site_key). Unlike scalar fields
+// this ignores MergeMode: the set is replaced wholesale at persist time each
+// refresh, so within one refresh pass accumulation is always correct.
+func mergeVideos(target *[]RemoteVideo, source []RemoteVideo) {
+	if len(source) == 0 {
+		return
+	}
+	seen := make(map[string]bool, len(*target)*2)
+	for _, v := range *target {
+		seen["p|"+v.Provider+"|"+v.ProviderKey] = true
+		seen["s|"+strings.ToLower(v.Site)+"|"+v.SiteKey] = true
+	}
+	for _, v := range source {
+		providerKey := "p|" + v.Provider + "|" + v.ProviderKey
+		siteKey := "s|" + strings.ToLower(v.Site) + "|" + v.SiteKey
+		if seen[providerKey] || (v.SiteKey != "" && seen[siteKey]) {
+			continue
+		}
+		seen[providerKey] = true
+		seen[siteKey] = true
+		*target = append(*target, v)
+	}
 }
 
 // MergeSeasonResult merges source into target using the standard metadata

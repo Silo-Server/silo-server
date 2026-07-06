@@ -26,6 +26,13 @@ type FileVersionFetcher interface {
 	GetByEpisodeID(ctx context.Context, episodeID string) ([]*models.MediaFile, error)
 }
 
+// extraFileFetcher is the optional FileVersionFetcher extension used to
+// resolve files backing local extras (media_extras rows). The concrete
+// *scanner.FileRepository implements it; test fakes may omit it.
+type extraFileFetcher interface {
+	GetByExtraID(ctx context.Context, extraID string) ([]*models.MediaFile, error)
+}
+
 type PlaybackProbeEnsurer interface {
 	Ensure(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error)
 }
@@ -153,6 +160,14 @@ type ItemDetail struct {
 	Versions         []FileVersion     `json:"versions"`
 	PlaybackVariants []PlaybackVariant `json:"playback_variants,omitempty"`
 
+	// Remote provider videos (YouTube trailers, teasers, ...) for
+	// movies/series, ordered for display (trailers first, official first).
+	Videos []ItemVideoInfo `json:"videos,omitempty"`
+
+	// Local extras (scanner-discovered trailers, featurettes, deleted
+	// scenes, ...) playable via their own content_id through /watch.
+	Extras []ItemExtraInfo `json:"extras,omitempty"`
+
 	// Root folder paths for series items (admin-only).
 	FolderPaths []string `json:"folder_paths,omitempty"`
 
@@ -193,6 +208,29 @@ type ItemDetail struct {
 
 	// Manga-specific detail. Present only when Type == "manga".
 	Manga *MangaDetailExtension `json:"manga,omitempty"`
+}
+
+// ItemVideoInfo is the API shape of a remote provider video. It exposes the
+// site reference (site + site_key) rather than internal row identity so
+// clients can build embed/watch URLs without further lookups.
+type ItemVideoInfo struct {
+	Kind       string `json:"kind"`
+	Site       string `json:"site"`
+	SiteKey    string `json:"site_key"`
+	Name       string `json:"name,omitempty"`
+	Language   string `json:"language,omitempty"`
+	IsOfficial bool   `json:"is_official"`
+}
+
+// ItemExtraInfo is the API shape of a local extra. ContentID is a playable
+// watch target (same /watch flow as any item); FileID backs download/direct
+// stream affordances.
+type ItemExtraInfo struct {
+	ContentID       string `json:"content_id"`
+	Kind            string `json:"kind"`
+	Title           string `json:"title,omitempty"`
+	DurationSeconds int    `json:"duration_seconds,omitempty"`
+	FileID          int    `json:"file_id,omitempty"`
 }
 
 type AudiobookDetailExtension struct {
@@ -545,6 +583,8 @@ type DetailService struct {
 		GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 	}
 	fileFetcher       FileVersionFetcher
+	videoRepo         *VideoRepository
+	extraRepo         *ExtraRepository
 	rootClaimRepo     *RootClaimRepository
 	groupClaimRepo    *GroupClaimRepository
 	imageResolver     ImageResolver
@@ -571,6 +611,8 @@ func NewDetailService(
 		itemLocRepo:    NewMediaItemLocalizationRepository(itemRepo.pool),
 		seasonLocRepo:  NewSeasonLocalizationRepository(itemRepo.pool),
 		episodeLocRepo: NewEpisodeLocalizationRepository(itemRepo.pool),
+		videoRepo:      NewVideoRepository(itemRepo.pool),
+		extraRepo:      NewExtraRepository(itemRepo.pool),
 		fileFetcher:    fileFetcher,
 	}
 }
@@ -1142,6 +1184,30 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		}
 	}
 
+	// Remote videos and local extras for movie/series items in two queries.
+	movieSeriesIDs := make([]string, 0, len(visible))
+	for _, item := range visible {
+		if item.Type == "movie" || item.Type == "series" {
+			movieSeriesIDs = append(movieSeriesIDs, item.ContentID)
+		}
+	}
+	var videosByID map[string][]models.ItemVideo
+	var extrasByID map[string][]ExtraWithFile
+	if len(movieSeriesIDs) > 0 {
+		if s.videoRepo != nil {
+			videosByID, err = s.videoRepo.ListByContentIDs(ctx, movieSeriesIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if s.extraRepo != nil {
+			extrasByID, err = s.extraRepo.ListWithFilesByParentIDs(ctx, movieSeriesIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// Work summaries for the whole page in one query, when the provider supports
 	// batching (ListSummariesForContentIDs is the documented batch equivalent of
 	// GetSummaryForContentID).
@@ -1178,6 +1244,16 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 			pf.haveWorkSummary = true
 			pf.workSummary = workSummaries[id]
 		}
+		if item.Type == "movie" || item.Type == "series" {
+			if s.videoRepo != nil {
+				pf.haveVideos = true
+				pf.videos = videosByID[id]
+			}
+			if s.extraRepo != nil {
+				pf.haveExtras = true
+				pf.extras = extrasByID[id]
+			}
+		}
 		detail, err := s.buildMediaItemDetail(ctx, item, id, filter, pf)
 		if err != nil {
 			// Skip rather than fail the batch; the caller falls back to list
@@ -1188,6 +1264,67 @@ func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []st
 		result[id] = detail
 	}
 	return result, nil
+}
+
+// fetchItemVideos returns the item's remote videos in API shape, honoring a
+// batch prefetch when present. Lookup failures degrade to an empty section.
+func (s *DetailService) fetchItemVideos(ctx context.Context, contentID string, pf *itemDetailPrefetch) []ItemVideoInfo {
+	var videos []models.ItemVideo
+	if pf != nil && pf.haveVideos {
+		videos = pf.videos
+	} else if s.videoRepo != nil {
+		fetched, err := s.videoRepo.GetByContentID(ctx, contentID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to fetch item videos", "content_id", contentID, "error", err)
+			return nil
+		}
+		videos = fetched
+	}
+	if len(videos) == 0 {
+		return nil
+	}
+	infos := make([]ItemVideoInfo, 0, len(videos))
+	for _, v := range videos {
+		infos = append(infos, ItemVideoInfo{
+			Kind:       string(v.Kind),
+			Site:       v.Site,
+			SiteKey:    v.SiteKey,
+			Name:       v.Name,
+			Language:   v.Language,
+			IsOfficial: v.IsOfficial,
+		})
+	}
+	return infos
+}
+
+// fetchItemExtras returns the item's local extras in API shape, honoring a
+// batch prefetch when present. Lookup failures degrade to an empty section.
+func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, pf *itemDetailPrefetch) []ItemExtraInfo {
+	var extras []ExtraWithFile
+	if pf != nil && pf.haveExtras {
+		extras = pf.extras
+	} else if s.extraRepo != nil {
+		fetched, err := s.extraRepo.ListWithFilesByParentID(ctx, contentID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to fetch item extras", "content_id", contentID, "error", err)
+			return nil
+		}
+		extras = fetched
+	}
+	if len(extras) == 0 {
+		return nil
+	}
+	infos := make([]ItemExtraInfo, 0, len(extras))
+	for _, e := range extras {
+		infos = append(infos, ItemExtraInfo{
+			ContentID:       e.ContentID,
+			Kind:            string(e.Kind),
+			Title:           e.Title,
+			DurationSeconds: e.Duration,
+			FileID:          e.FileID,
+		})
+	}
+	return infos
 }
 
 // fetchCredits returns cast and crew credits for the given content ID.
@@ -1220,6 +1357,10 @@ type itemDetailPrefetch struct {
 	files              []*models.MediaFile
 	haveWorkSummary    bool
 	workSummary        *WorkSummary
+	haveVideos         bool
+	videos             []models.ItemVideo
+	haveExtras         bool
+	extras             []ExtraWithFile
 }
 
 func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.MediaItem, contentID string, filter AccessFilter, pf *itemDetailPrefetch) (*ItemDetail, error) {
@@ -1315,6 +1456,12 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			item.ContentID,
 		)
 		detail.OverlaySummary = overlays.BuildSummary(files)
+	}
+
+	// Trailers/extras apply to movies and series only.
+	if item.Type == "movie" || item.Type == "series" {
+		detail.Videos = s.fetchItemVideos(ctx, contentID, pf)
+		detail.Extras = s.fetchItemExtras(ctx, contentID, pf)
 	}
 
 	if item.Type == "audiobook" {
@@ -2227,6 +2374,11 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 
 	episode, err := s.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
+		// Third fallback tier: a local extra (media_extras). Access is the
+		// parent item's; playback reuses the ordinary file/versions pipeline.
+		if errors.Is(err, ErrEpisodeNotFound) {
+			return s.buildExtraWatchDetail(ctx, contentID, filter)
+		}
 		return nil, err
 	}
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
@@ -2288,6 +2440,63 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		detail.Year = series.Year
 	}
 
+	return detail, nil
+}
+
+// buildExtraWatchDetail resolves a local extra (media_extras) as a watch
+// target. Access control is the parent item's library membership, mirroring
+// how episodes gate on their series.
+func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID string, filter AccessFilter) (*WatchDetail, error) {
+	if s.extraRepo == nil {
+		return nil, ErrItemNotFound
+	}
+	extra, err := s.extraRepo.GetByID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, ErrExtraNotFound) {
+			return nil, ErrItemNotFound
+		}
+		return nil, err
+	}
+	if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
+		return nil, err
+	}
+	if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
+		return nil, err
+	}
+	fetcher, ok := s.fileFetcher.(extraFileFetcher)
+	if !ok {
+		return nil, ErrItemNotFound
+	}
+	files, err := fetcher.GetByExtraID(ctx, extra.ContentID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching extra watch files: %w", err)
+	}
+	files = FilterMediaFilesByAccess(files, filter)
+	files = s.preparePlaybackFiles(ctx, files)
+	s.queueWatchPlaybackFiles(ctx, extra.ContentID, "extra", files)
+	detail := s.newWatchDetail(
+		ctx,
+		extra.ContentID,
+		"extra",
+		extra.Title,
+		"",
+		files,
+		filter,
+		extra.ParentID,
+	)
+	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
+		if localized, locErr := s.LocalizeItemModel(ctx, parent, filter); locErr == nil {
+			parent = localized
+		}
+		if detail.Title == "" {
+			detail.Title = parent.Title
+		}
+		// Surface the owning item the way episodes surface their series so
+		// players can show "<Extra> — <Movie>" context.
+		detail.SeriesID = extra.ParentID
+		detail.SeriesTitle = parent.Title
+		detail.Year = parent.Year
+	}
 	return detail, nil
 }
 

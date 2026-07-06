@@ -50,19 +50,40 @@ var ignoredDirNames = map[string]bool{
 	".downloads":   true,
 }
 
+// ignoredMovieSupplementalDirNames holds movie-library directory names whose
+// contents are never playable content (noise). Extras-shaped directories
+// (Trailers/, Featurettes/, ...) are NOT in this set: they are walked and
+// classified via extrasDirKinds instead of discarded.
 var ignoredMovieSupplementalDirNames = map[string]bool{
-	"sample":            true,
-	"samples":           true,
-	"extra":             true,
-	"extras":            true,
-	"featurette":        true,
-	"featurettes":       true,
-	"behind the scenes": true,
-	"deleted scenes":    true,
-	"trailer":           true,
-	"trailers":          true,
-	"subs":              true,
-	"subtitles":         true,
+	"sample":    true,
+	"samples":   true,
+	"subs":      true,
+	"subtitles": true,
+}
+
+// extrasDirKinds classifies supplemental directory names (normalized via
+// normalizeScannerDirLabel) into the shared extra-kind vocabulary. The set
+// mirrors the Jellyfin/Plex extras folder convention.
+var extrasDirKinds = map[string]models.ExtraKind{
+	"extra":             models.ExtraKindOther,
+	"extras":            models.ExtraKindOther,
+	"other":             models.ExtraKindOther,
+	"others":            models.ExtraKindOther,
+	"featurette":        models.ExtraKindFeaturette,
+	"featurettes":       models.ExtraKindFeaturette,
+	"behind the scenes": models.ExtraKindBehindTheScenes,
+	"deleted scene":     models.ExtraKindDeletedScene,
+	"deleted scenes":    models.ExtraKindDeletedScene,
+	"trailer":           models.ExtraKindTrailer,
+	"trailers":          models.ExtraKindTrailer,
+	"teaser":            models.ExtraKindTeaser,
+	"teasers":           models.ExtraKindTeaser,
+	"clip":              models.ExtraKindClip,
+	"clips":             models.ExtraKindClip,
+	"bloopers":          models.ExtraKindBloopers,
+	"interviews":        models.ExtraKindOther,
+	"scenes":            models.ExtraKindOther,
+	"shorts":            models.ExtraKindOther,
 }
 
 func normalizeScannerDirLabel(name string) string {
@@ -120,6 +141,7 @@ type Scanner struct {
 	itemRepo             *catalog.ItemRepository
 	personRepo           *catalog.PersonRepository
 	episodeRepo          *catalog.EpisodeRepository
+	extraRepo            *catalog.ExtraRepository
 	ffprobePath          string
 	s3Client             *s3client.Client // public assets bucket (may be nil)
 	imageCacher          scannerImageCacher
@@ -217,6 +239,7 @@ func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client
 		itemRepo:             catalog.NewItemRepository(fileRepo.Pool()),
 		personRepo:           catalog.NewPersonRepository(fileRepo.Pool()),
 		episodeRepo:          catalog.NewEpisodeRepository(fileRepo.Pool()),
+		extraRepo:            catalog.NewExtraRepository(fileRepo.Pool()),
 		ffprobePath:          ffprobePath,
 		s3Client:             s3Client,
 		emptyTrashAfterScan:  emptyTrashAfterScan,
@@ -658,20 +681,23 @@ func (s *Scanner) scanPaths(
 	})
 
 	// Track which paths we see on disk so we can detect missing files.
+	// Extras count as seen (they own media_files rows) but are partitioned
+	// out of identity inference and match processing below.
 	seenPaths := make(map[string]bool, len(filePaths))
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(filePaths, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading identity overrides: %w", err)
 	}
-	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
+	groupInference := inferGroupAssignments(primaryPaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading group overrides: %w", err)
@@ -785,7 +811,7 @@ func (s *Scanner) scanPaths(
 		}
 	}()
 
-	for _, p := range filePaths {
+	for _, p := range primaryPaths {
 		pathCh <- p
 	}
 	close(pathCh)
@@ -818,6 +844,12 @@ func (s *Scanner) scanPaths(
 	if ctx.Err() != nil {
 		return result, ctx.Err()
 	}
+
+	extraStats := s.processExtraFiles(ctx, folder, walkRoots, extraCandidates, existingByPath)
+	result.New += extraStats.New
+	result.Updated += extraStats.Updated
+	result.Unchanged += extraStats.Unchanged
+	result.Errors += extraStats.Errors
 
 	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
@@ -1169,20 +1201,23 @@ func (s *Scanner) scanScope(
 		FilesDiscovered: len(filePaths),
 	})
 
+	// Extras count as seen (so reconciliation keeps their rows) but are
+	// partitioned out of identity inference and match processing.
 	seenPaths := make(map[string]bool, len(filePaths))
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(filePaths, folder.Type, folder.ID, rootOverrides)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
 	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading identity overrides: %w", err)
 	}
-	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
+	groupInference := inferGroupAssignments(primaryPaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading group overrides: %w", err)
@@ -1267,7 +1302,7 @@ func (s *Scanner) scanScope(
 		}
 	}()
 
-	for _, p := range filePaths {
+	for _, p := range primaryPaths {
 		pathCh <- p
 	}
 	close(pathCh)
@@ -1291,6 +1326,14 @@ func (s *Scanner) scanScope(
 		Unchanged:       result.Unchanged,
 		Errors:          result.Errors,
 	})
+
+	if ctx.Err() == nil {
+		extraStats := s.processExtraFiles(ctx, folder, walkRoots, extraCandidates, existingByPath)
+		result.New += extraStats.New
+		result.Updated += extraStats.Updated
+		result.Unchanged += extraStats.Unchanged
+		result.Errors += extraStats.Errors
+	}
 
 	return &scopedScan{
 		walkRoots:      append([]string(nil), walkRoots...),
@@ -1611,6 +1654,16 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	existing, err := s.fileRepo.GetByPath(ctx, filePath)
 	if err == nil {
 		existingByPath[filePath] = scanStateFromMediaFile(existing)
+	}
+
+	// A local extra (Trailers/ dir, -trailer suffix, ...) bypasses identity
+	// inference and matching entirely.
+	if candidate, isExtra := classifyExtraPath(cleanFile, folder.Type); isExtra {
+		stats := s.processExtraFiles(ctx, folder, folder.Paths, []extraCandidate{candidate}, existingByPath)
+		if stats.Errors > 0 {
+			return fmt.Errorf("processing extra file %s failed", cleanFile)
+		}
+		return nil
 	}
 	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
 	if err != nil {

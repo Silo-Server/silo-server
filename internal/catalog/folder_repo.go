@@ -115,6 +115,7 @@ type UpdateFolderInput struct {
 	AutoTranslateMetadata    *bool
 	ChapterThumbnailsEnabled *bool
 	IntroDetectionEnabled    *bool
+	TrailerKinds             *[]string // nil = no change; empty slice disables remote videos
 }
 
 // FolderRepository provides CRUD operations for the media_folders table.
@@ -143,7 +144,7 @@ func (r *FolderRepository) Pool() *pgxpool.Pool {
 
 // folderColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanFolder stays in sync.
-const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, poster_path, last_scanned_at,
+const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, trailer_kinds, poster_path, last_scanned_at,
 	scan_warning_code, scan_warning_message, scan_warning_at, allow_empty_cleanup_once, sort_order`
 
 // scanFolder scans a single row into a *models.MediaFolder.
@@ -159,6 +160,7 @@ func scanFolder(row pgx.Row) (*models.MediaFolder, error) {
 		&f.AutoTranslateMetadata,
 		&f.ChapterThumbnailsEnabled,
 		&f.IntroDetectionEnabled,
+		&f.TrailerKinds,
 		&f.PosterPath,
 		&f.LastScannedAt,
 		&f.ScanWarningCode,
@@ -192,6 +194,7 @@ func scanFolders(rows pgx.Rows) ([]*models.MediaFolder, error) {
 			&f.AutoTranslateMetadata,
 			&f.ChapterThumbnailsEnabled,
 			&f.IntroDetectionEnabled,
+			&f.TrailerKinds,
 			&f.PosterPath,
 			&f.LastScannedAt,
 			&f.ScanWarningCode,
@@ -416,6 +419,15 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 	if input.IntroDetectionEnabled != nil {
 		setClauses = append(setClauses, fmt.Sprintf("intro_detection_enabled = $%d", argIndex))
 		args = append(args, *input.IntroDetectionEnabled)
+		argIndex++
+	}
+	if input.TrailerKinds != nil {
+		normalized := make([]string, 0, len(*input.TrailerKinds))
+		for _, k := range *input.TrailerKinds {
+			normalized = append(normalized, string(models.NormalizeExtraKind(k)))
+		}
+		setClauses = append(setClauses, fmt.Sprintf("trailer_kinds = $%d", argIndex))
+		args = append(args, normalized)
 		argIndex++
 	}
 	if len(setClauses) > 0 {

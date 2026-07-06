@@ -23,6 +23,8 @@ import RecommendationGrid from "@/components/RecommendationGrid";
 import DetailHero from "./DetailHero";
 import { useOnViewTranslation } from "@/hooks/useOnViewTranslation";
 import MetadataBadges from "./components/MetadataBadges";
+import TrailersSection from "./components/TrailersSection";
+import ExtrasSection from "./components/ExtrasSection";
 import QualityBadges from "./components/QualityBadges";
 import ScoreRow from "./components/ScoreRow";
 import HeroCrewLine from "./components/HeroCrewLine";
@@ -308,6 +310,10 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
 
       <div className="page-shell space-y-12 py-10 sm:space-y-14">
         {canCurateMetadata && <MediaLocations title="Media locations" versions={item.versions} />}
+
+        {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
+
+        {item.extras && item.extras.length > 0 && <ExtrasSection extras={item.extras} />}
 
         {item.cast && item.cast.length > 0 && (
           <div>

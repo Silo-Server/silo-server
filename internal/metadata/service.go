@@ -177,6 +177,12 @@ type metadataFolderRepo interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 }
 
+// metadataVideoRepo persists remote provider videos. The concrete
+// *catalog.VideoRepository satisfies this.
+type metadataVideoRepo interface {
+	ReplaceByContentID(ctx context.Context, contentID string, videos []models.ItemVideo) error
+}
+
 // AutoTranslator is the seam to the metadata AI translation service: after a
 // refresh, libraries that opted in get missing localizations filled by AI.
 // Implemented by *translation.Service; AutoEnqueue must be cheap and must
@@ -294,6 +300,7 @@ type MetadataService struct {
 	episodeLocalizationRepo *catalog.EpisodeLocalizationRepository
 	autoTranslator          AutoTranslator // optional; set via SetAutoTranslator
 	personRepo              *catalog.PersonRepository
+	videoRepo               metadataVideoRepo
 	fileRepo                FileContentUpdater
 	skippedRootRepo         metadataSkippedRootRepo
 	staleIDRepo             metadataStaleIDRepo
@@ -386,10 +393,12 @@ func NewMetadataService(
 	var groupClaimRepo metadataGroupClaimRepo
 	var groupOverrideRepo metadataGroupOverrideRepo
 	var observedLocationRepo metadataObservedLocationRepo
+	var videoRepo metadataVideoRepo
 	var dbPool *pgxpool.Pool
 	if folderRepo != nil {
 		pool := folderRepo.Pool()
 		dbPool = pool
+		videoRepo = catalog.NewVideoRepository(pool)
 		itemLocalizationRepo = catalog.NewMediaItemLocalizationRepository(pool)
 		seasonLocalizationRepo = catalog.NewSeasonLocalizationRepository(pool)
 		episodeLocalizationRepo = catalog.NewEpisodeLocalizationRepository(pool)
@@ -413,6 +422,7 @@ func NewMetadataService(
 		seasonLocalizationRepo:  seasonLocalizationRepo,
 		episodeLocalizationRepo: episodeLocalizationRepo,
 		personRepo:              personRepo,
+		videoRepo:               videoRepo,
 		fileRepo:                fileRepo,
 		skippedRootRepo:         skippedRootRepo,
 		staleIDRepo:             staleIDRepo,
@@ -689,6 +699,105 @@ func (s *MetadataService) resolveFolderLanguage(ctx context.Context, folderID in
 		return "en"
 	}
 	return strings.TrimSpace(folder.MetadataLanguage)
+}
+
+// resolveAllowedVideoKinds returns the union of trailer_kinds across the
+// libraries containing the item, or just the scoped folder's when a folder id
+// is provided. The union (most-permissive) mirrors the multi-library language
+// posture. A nil return means "allow all": unknown scope or a transient
+// lookup failure must never wipe stored trailers.
+func (s *MetadataService) resolveAllowedVideoKinds(ctx context.Context, contentID string, folderID int) map[models.ExtraKind]bool {
+	if s.folderRepo == nil {
+		return nil
+	}
+	var folderIDs []int
+	if folderID > 0 {
+		folderIDs = []int{folderID}
+	} else if s.libraryRepo != nil {
+		ids, err := s.libraryRepo.GetFolderIDsForItem(ctx, contentID)
+		if err != nil {
+			slog.Warn("metadata: resolving item libraries for video kinds failed",
+				"content_id", contentID, "error", err)
+			return nil
+		}
+		folderIDs = ids
+	}
+	if len(folderIDs) == 0 {
+		return nil
+	}
+	allowed := make(map[models.ExtraKind]bool)
+	resolvedAny := false
+	for _, id := range folderIDs {
+		folder, err := s.folderRepo.GetByID(ctx, id)
+		if err != nil || folder == nil {
+			continue
+		}
+		resolvedAny = true
+		for _, kind := range folder.TrailerKinds {
+			allowed[models.ExtraKind(kind)] = true
+		}
+	}
+	if !resolvedAny {
+		return nil
+	}
+	return allowed
+}
+
+// filterVideosByKinds applies the per-library allow-list; a nil map allows
+// everything, an empty map filters everything (remote videos disabled).
+func filterVideosByKinds(videos []RemoteVideo, allowed map[models.ExtraKind]bool) []RemoteVideo {
+	if allowed == nil || len(videos) == 0 {
+		return videos
+	}
+	filtered := make([]RemoteVideo, 0, len(videos))
+	for _, v := range videos {
+		if allowed[v.Kind] {
+			filtered = append(filtered, v)
+		}
+	}
+	return filtered
+}
+
+// itemVideosFromRemote converts pipeline videos into item_videos rows with a
+// stable display order: kinds in vocabulary order (trailers first), official
+// before unofficial, provider order otherwise preserved.
+func itemVideosFromRemote(contentID string, videos []RemoteVideo) []models.ItemVideo {
+	rank := make(map[models.ExtraKind]int, len(models.AllExtraKinds))
+	for i, k := range models.AllExtraKinds {
+		rank[k] = i
+	}
+	ordered := append([]RemoteVideo(nil), videos...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ri, rj := rank[ordered[i].Kind], rank[ordered[j].Kind]; ri != rj {
+			return ri < rj
+		}
+		return ordered[i].IsOfficial && !ordered[j].IsOfficial
+	})
+
+	rows := make([]models.ItemVideo, 0, len(ordered))
+	for i, v := range ordered {
+		var publishedAt *time.Time
+		if v.PublishedAt != "" {
+			if t, err := time.Parse(time.RFC3339, v.PublishedAt); err == nil {
+				publishedAt = &t
+			}
+		}
+		rows = append(rows, models.ItemVideo{
+			ContentID:   contentID,
+			Provider:    v.Provider,
+			ProviderKey: v.ProviderKey,
+			Kind:        v.Kind,
+			Site:        v.Site,
+			SiteKey:     v.SiteKey,
+			Name:        v.Name,
+			Language:    v.Language,
+			IsOfficial:  v.IsOfficial,
+			SizeHint:    v.SizeHint,
+			PublishedAt: publishedAt,
+			SortOrder:   i,
+		})
+	}
+	return rows
 }
 
 func prependUniqueString(values []string, value string) []string {
@@ -1689,6 +1798,21 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
 			slog.Warn("metadata: failed to replace people", "content_id", contentID, "error", err)
+		}
+	}
+
+	// Persist remote videos (trailers etc.), filtered by the library's
+	// trailer_kinds allow-list. Replace-unlocked refreshes replace the whole
+	// set — including clearing it — so narrowing the allow-list converges on
+	// the next refresh; fill-empty refreshes only write when providers
+	// returned something, so a transient provider failure cannot wipe data.
+	if isCanonicalWrite && s.videoRepo != nil && !isFieldLocked(locked, FieldVideos) {
+		allowed := s.resolveAllowedVideoKinds(ctx, contentID, parseProcessFolderID(req.FolderID))
+		filtered := filterVideosByKinds(accumulator.Videos, allowed)
+		if len(filtered) > 0 || mergeMode == MergeReplaceUnlocked {
+			if err := s.videoRepo.ReplaceByContentID(ctx, contentID, itemVideosFromRemote(contentID, filtered)); err != nil {
+				slog.Warn("metadata: failed to replace item videos", "content_id", contentID, "error", err)
+			}
 		}
 	}
 
