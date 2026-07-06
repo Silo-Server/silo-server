@@ -53,7 +53,23 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDs(ctx contex
 		return map[string]struct{}{}, nil
 	}
 
-	completed, err := CompletedProgressSnapshots(ctx, store, profileID)
+	// A completed episode can only supersede an in-progress one it was finished
+	// more recently than (the query gates on
+	// done_progress.updated_at > ip_progress.updated_at). So the only completed
+	// rows that can matter are those updated after the oldest in-progress entry;
+	// anything older can supersede nothing. Bounding the completed walk at that
+	// timestamp keeps import-heavy profiles — whose entire back-catalogue is
+	// completed=TRUE with old timestamps — from re-paging hundreds of thousands
+	// of irrelevant rows on every Resume/Continue Watching load (the 60–116s
+	// tail in the 2026-07-06 slow-query comparison).
+	oldestInProgress := inProgress[0].UpdatedAt
+	for _, snapshot := range inProgress[1:] {
+		if snapshot.UpdatedAt.Before(oldestInProgress) {
+			oldestInProgress = snapshot.UpdatedAt
+		}
+	}
+
+	completed, err := CompletedProgressSnapshots(ctx, store, profileID, oldestInProgress)
 	if err != nil {
 		return nil, err
 	}
@@ -84,9 +100,14 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDs(ctx contex
 	return superseded, nil
 }
 
-// CompletedProgressSnapshots pages through all completed progress rows for the
-// profile and returns deduplicated snapshots.
-func CompletedProgressSnapshots(ctx context.Context, store ProgressLister, profileID string) ([]ProgressSnapshot, error) {
+// CompletedProgressSnapshots pages through the profile's completed progress
+// rows and returns deduplicated snapshots updated after notBefore. The
+// completed listing is ordered updated_at DESC (newest first), so once a row at
+// or before notBefore is reached every later page is older still and paging
+// stops — callers only care about completed episodes finished more recently
+// than an in-progress entry, so older rows are irrelevant. Pass a zero
+// notBefore to walk the whole history.
+func CompletedProgressSnapshots(ctx context.Context, store ProgressLister, profileID string, notBefore time.Time) ([]ProgressSnapshot, error) {
 	seen := make(map[string]struct{})
 	snapshots := make([]ProgressSnapshot, 0)
 
@@ -96,7 +117,12 @@ func CompletedProgressSnapshots(ctx context.Context, store ProgressLister, profi
 			return nil, fmt.Errorf("listing completed progress for superseded episodes: %w", err)
 		}
 
+		reachedCutoff := false
 		for _, snapshot := range ProgressSnapshots(entries) {
+			if !snapshot.UpdatedAt.After(notBefore) {
+				reachedCutoff = true
+				break
+			}
 			contentID := snapshot.ContentID
 			if _, ok := seen[contentID]; ok {
 				continue
@@ -105,7 +131,7 @@ func CompletedProgressSnapshots(ctx context.Context, store ProgressLister, profi
 			snapshots = append(snapshots, snapshot)
 		}
 
-		if len(entries) < supersededProgressPageSize {
+		if reachedCutoff || len(entries) < supersededProgressPageSize {
 			return snapshots, nil
 		}
 	}
