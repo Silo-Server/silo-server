@@ -147,19 +147,33 @@ func Run(ctx context.Context, tx pgx.Tx, opts Options) (*Report, error) {
 const pairsCTE = `(SELECT unnest($1::text[]) AS from_id, unnest($2::text[]) AS to_id) p`
 
 // intentTables are the item-level rows with no per-file dimension. Each entry
-// lists the non-item PK columns used to detect collisions at the destination
-// (destination wins; the duplicate source row is dropped).
+// names the content-id column being remapped and the non-id PK columns used to
+// detect collisions at the destination (destination wins; the duplicate source
+// row is dropped). The series_id-keyed preference tables ride along so a
+// series merge/split carries audio/subtitle/quality preferences with it
+// (mirrors the provider-merge remap in internal/metadata/provider_id_integrity.go).
+const (
+	colMediaItemID = "media_item_id"
+	colSeriesID    = "series_id"
+	colUserID      = "user_id"
+	colProfileID   = "profile_id"
+)
+
 var intentTables = []struct {
-	table   string
-	keyCols []string
+	table    string
+	idColumn string
+	keyCols  []string
 }{
-	{"user_favorites", []string{"user_id", "profile_id"}},
-	{"user_watchlist", []string{"user_id", "profile_id"}},
-	{"user_ratings", []string{"user_id", "profile_id"}},
-	{"user_personal_collection_items", []string{"user_id", "collection_id", "sub_item_id"}},
-	{"library_collection_items", []string{"collection_id"}},
-	{"user_home_item_dismissals", []string{"user_id", "profile_id", "surface"}},
-	{"user_history_hidden_items", []string{"user_id", "profile_id"}},
+	{"user_favorites", colMediaItemID, []string{colUserID, colProfileID}},
+	{"user_watchlist", colMediaItemID, []string{colUserID, colProfileID}},
+	{"user_ratings", colMediaItemID, []string{colUserID, colProfileID}},
+	{"user_personal_collection_items", colMediaItemID, []string{colUserID, "collection_id", "sub_item_id"}},
+	{"library_collection_items", colMediaItemID, []string{"collection_id"}},
+	{"user_home_item_dismissals", colMediaItemID, []string{colUserID, colProfileID, "surface"}},
+	{"user_history_hidden_items", colMediaItemID, []string{colUserID, colProfileID}},
+	{"user_audio_preferences", colSeriesID, []string{colUserID, colProfileID}},
+	{"user_subtitle_preferences", colSeriesID, []string{colUserID, colProfileID}},
+	{"user_series_playback_preferences", colSeriesID, []string{colUserID, colProfileID}},
 }
 
 // movePairs moves ALL state rows for each (from,to) pair: the whole-item path
@@ -194,6 +208,33 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 	}
 	report.Downloads += int(tag.RowsAffected())
 
+	// Managed offline downloads (downloads-v2): soft content_id + episode_id.
+	// PK is the download id, so plain remaps — both columns swept because
+	// episode pairs land in episode_id while item pairs land in content_id.
+	tag, err = tx.Exec(ctx, `
+		UPDATE downloads t SET content_id = p.to_id, updated_at = NOW()
+		FROM `+pairsCTE+` WHERE t.content_id = p.from_id
+	`, fromIDs, toIDs)
+	if err != nil {
+		return fmt.Errorf("reattribute: downloads content pairs: %w", err)
+	}
+	report.Downloads += int(tag.RowsAffected())
+	if _, err := tx.Exec(ctx, `
+		UPDATE downloads t SET episode_id = p.to_id, updated_at = NOW()
+		FROM `+pairsCTE+` WHERE t.episode_id = p.from_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: downloads episode pairs: %w", err)
+	}
+
+	// series_id is denormalized onto dismissals (not part of their PK), so a
+	// plain sweep keeps continue-watching/next-up dismissals series-scoped.
+	if _, err := tx.Exec(ctx, `
+		UPDATE user_home_item_dismissals t SET series_id = p.to_id
+		FROM `+pairsCTE+` WHERE t.series_id = p.from_id
+	`, fromIDs, toIDs); err != nil {
+		return fmt.Errorf("reattribute: dismissal series pairs: %w", err)
+	}
+
 	tag, err = tx.Exec(ctx, `
 		UPDATE user_watch_history t SET media_item_id = p.to_id
 		FROM `+pairsCTE+` WHERE t.media_item_id = p.from_id
@@ -211,7 +252,7 @@ func movePairs(ctx context.Context, tx pgx.Tx, pairs []IDPair, report *Report) (
 	report.ProgressConflicts += conflicts
 
 	for _, intent := range intentTables {
-		movedRows, err := moveIntentPairs(ctx, tx, intent.table, intent.keyCols, fromIDs, toIDs)
+		movedRows, err := moveIntentPairs(ctx, tx, intent.table, intent.idColumn, intent.keyCols, fromIDs, toIDs)
 		if err != nil {
 			return err
 		}
@@ -265,7 +306,7 @@ func moveProgressPairs(ctx context.Context, tx pgx.Tx, fromIDs, toIDs []string) 
 
 // moveIntentPairs moves one intent table for the pairs; on a destination
 // collision the destination row wins and the source duplicate is dropped.
-func moveIntentPairs(ctx context.Context, tx pgx.Tx, table string, keyCols []string, fromIDs, toIDs []string) (int, error) {
+func moveIntentPairs(ctx context.Context, tx pgx.Tx, table, idColumn string, keyCols []string, fromIDs, toIDs []string) (int, error) {
 	join := ""
 	for _, col := range keyCols {
 		join += fmt.Sprintf(" AND dest.%s = src.%s", col, col)
@@ -273,14 +314,14 @@ func moveIntentPairs(ctx context.Context, tx pgx.Tx, table string, keyCols []str
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM `+table+` src
 		USING `+pairsCTE+`, `+table+` dest
-		WHERE src.media_item_id = p.from_id
-		  AND dest.media_item_id = p.to_id`+join+`
+		WHERE src.`+idColumn+` = p.from_id
+		  AND dest.`+idColumn+` = p.to_id`+join+`
 	`, fromIDs, toIDs); err != nil {
 		return 0, fmt.Errorf("reattribute: %s dedupe: %w", table, err)
 	}
 	tag, err := tx.Exec(ctx, `
-		UPDATE `+table+` t SET media_item_id = p.to_id
-		FROM `+pairsCTE+` WHERE t.media_item_id = p.from_id
+		UPDATE `+table+` t SET `+idColumn+` = p.to_id
+		FROM `+pairsCTE+` WHERE t.`+idColumn+` = p.from_id
 	`, fromIDs, toIDs)
 	if err != nil {
 		return 0, fmt.Errorf("reattribute: %s move: %w", table, err)
@@ -295,6 +336,15 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 		return fmt.Errorf("reattribute: file-subset move requires moved file ids")
 	}
 
+	// History classification MUST run before the session log is re-pointed:
+	// its evidence query reads playback_history_admin rows still keyed to the
+	// source item. Moving the log first would erase exactly the evidence that
+	// proves a profile's plays were all on moved files, leaving that profile's
+	// history behind as "ambiguous".
+	if err := moveHistorySubset(ctx, tx, opts, report); err != nil {
+		return err
+	}
+
 	// Per-session log: exact.
 	tag, err := tx.Exec(ctx, `
 		UPDATE playback_history_admin
@@ -306,7 +356,7 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	}
 	report.PlaybackSessionLog = int(tag.RowsAffected())
 
-	// Downloads: exact.
+	// Downloads: exact (history rows and managed offline downloads).
 	tag, err = tx.Exec(ctx, `
 		UPDATE user_downloads
 		SET media_item_id = $3
@@ -317,6 +367,18 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	}
 	report.Downloads = int(tag.RowsAffected())
 
+	// Managed offline downloads: soft content_id, remapped per file. The
+	// episode_id column re-derives via EpisodePairs in Run for series splits.
+	tag, err = tx.Exec(ctx, `
+		UPDATE downloads
+		SET content_id = $3, updated_at = NOW()
+		WHERE content_id = $1 AND media_file_id = ANY($2::int[])
+	`, opts.FromContentID, opts.MovedFileIDs, opts.ToContentID)
+	if err != nil {
+		return fmt.Errorf("reattribute: downloads subset: %w", err)
+	}
+	report.Downloads += int(tag.RowsAffected())
+
 	// Progress: rows whose resume point sits on a moved file follow it.
 	moved, conflicts, err := moveProgressSubset(ctx, tx, opts)
 	if err != nil {
@@ -325,15 +387,11 @@ func moveFileSubset(ctx context.Context, tx pgx.Tx, opts Options, report *Report
 	report.ProgressMoved = moved
 	report.ProgressConflicts = conflicts
 
-	if err := moveHistorySubset(ctx, tx, opts, report); err != nil {
-		return err
-	}
-
 	// Intent rows only move when the operator asserts the whole identity was
 	// wrong; evidence about individual files cannot attribute intent.
 	if opts.Mode == HistoryModeMoveAll {
 		for _, intent := range intentTables {
-			movedRows, err := moveIntentPairs(ctx, tx, intent.table, intent.keyCols,
+			movedRows, err := moveIntentPairs(ctx, tx, intent.table, intent.idColumn, intent.keyCols,
 				[]string{opts.FromContentID}, []string{opts.ToContentID})
 			if err != nil {
 				return err

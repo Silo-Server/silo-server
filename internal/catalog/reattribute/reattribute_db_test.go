@@ -48,14 +48,42 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	t.Cleanup(func() {
 		for _, table := range []string{
-			"playback_history_admin", "user_downloads", "user_watch_history",
+			"playback_history_admin", "user_downloads", "downloads", "user_watch_history",
 			"user_watch_progress", "user_favorites", "user_watchlist", "user_ratings",
+			"user_audio_preferences", "user_subtitle_preferences", "user_series_playback_preferences",
+			"user_home_item_dismissals",
 		} {
 			_, _ = pool.Exec(ctx, `DELETE FROM `+table+` WHERE user_id = $1`, userID)
 		}
 		_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
 	})
 	return env
+}
+
+// seedMediaFile creates a media_folders + media_files pair so tables with a
+// real FK on media_file_id (downloads) can be seeded.
+func (e *testEnv) seedMediaFile(t *testing.T, contentID, path string) int {
+	t.Helper()
+	ctx := context.Background()
+	var folderID int
+	if err := e.pool.QueryRow(ctx,
+		`INSERT INTO media_folders (type, name, enabled) VALUES ('movies', $1, true) RETURNING id`,
+		fmt.Sprintf("reattr-folder-%d", e.suffix),
+	).Scan(&folderID); err != nil {
+		t.Fatalf("seed folder: %v", err)
+	}
+	var fileID int
+	if err := e.pool.QueryRow(ctx, `
+		INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
+		VALUES ($1, $2, $3, 1000) RETURNING id
+	`, contentID, folderID, path).Scan(&fileID); err != nil {
+		t.Fatalf("seed media file: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(ctx, `DELETE FROM media_files WHERE id = $1`, fileID)
+		_, _ = e.pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+	})
+	return fileID
 }
 
 func (e *testEnv) run(t *testing.T, opts Options) *Report {
@@ -94,6 +122,16 @@ func TestRun_FileSubsetExactAndProgress(t *testing.T) {
 	to := fmt.Sprintf("movie-dst-%d", env.suffix)
 	movedFile, stayFile := 910001, 910002
 
+	// Managed offline download on a real media_files row (FK) keyed to the
+	// moved file: its content_id must follow the split.
+	managedFile := env.seedMediaFile(t, from, fmt.Sprintf("/reattr/%d/a.mkv", env.suffix))
+	if _, err := env.pool.Exec(ctx, `
+		INSERT INTO downloads (id, user_id, media_file_id, content_id, kind, status)
+		VALUES ($1, $2, $3, $4, 'queued', 'completed')
+	`, fmt.Sprintf("mdl-%d", env.suffix), env.userID, managedFile, from); err != nil {
+		t.Fatalf("seed managed download: %v", err)
+	}
+
 	// Session log rows on both files; download on the moved file; progress
 	// resuming on the moved file.
 	for i, fileID := range []int{movedFile, stayFile} {
@@ -120,15 +158,23 @@ func TestRun_FileSubsetExactAndProgress(t *testing.T) {
 	report := env.run(t, Options{
 		FromContentID: from,
 		ToContentID:   to,
-		MovedFileIDs:  []int{movedFile},
+		MovedFileIDs:  []int{movedFile, managedFile},
 		Mode:          HistoryModeEvidence,
 	})
 
-	if report.PlaybackSessionLog != 1 || report.Downloads != 1 || report.ProgressMoved != 1 {
-		t.Fatalf("report = %+v, want 1 session log, 1 download, 1 progress moved", report)
+	if report.PlaybackSessionLog != 1 || report.Downloads != 2 || report.ProgressMoved != 1 {
+		t.Fatalf("report = %+v, want 1 session log, 2 downloads (user+managed), 1 progress moved", report)
 	}
 	if got := env.itemIDOf(t, "user_downloads", "user_id = $1", env.userID); got != to {
 		t.Fatalf("download item = %q, want %q", got, to)
+	}
+	var managedContentID string
+	if err := env.pool.QueryRow(ctx,
+		`SELECT content_id FROM downloads WHERE user_id = $1`, env.userID).Scan(&managedContentID); err != nil {
+		t.Fatalf("load managed download: %v", err)
+	}
+	if managedContentID != to {
+		t.Fatalf("managed download content_id = %q, want %q", managedContentID, to)
 	}
 	if got := env.itemIDOf(t, "user_watch_progress", "user_id = $1", env.userID); got != to {
 		t.Fatalf("progress item = %q, want %q", got, to)
@@ -254,6 +300,20 @@ func TestRun_WholeItemPairsAndConflicts(t *testing.T) {
 	`, env.userID, env.profileID, epFrom, epTo); err != nil {
 		t.Fatalf("seed progress: %v", err)
 	}
+	// Series-scoped subtitle preference and a dismissal denormalizing the
+	// series id: both must follow the merge.
+	if _, err := env.pool.Exec(ctx, `
+		INSERT INTO user_subtitle_preferences (user_id, profile_id, series_id, subtitle_language)
+		VALUES ($1, $2, $3, 'en')
+	`, env.userID, env.profileID, from); err != nil {
+		t.Fatalf("seed subtitle preference: %v", err)
+	}
+	if _, err := env.pool.Exec(ctx, `
+		INSERT INTO user_home_item_dismissals (user_id, profile_id, surface, media_item_id, series_id)
+		VALUES ($1, $2, 'next_up', $3, $4)
+	`, env.userID, env.profileID, epFrom, from); err != nil {
+		t.Fatalf("seed dismissal: %v", err)
+	}
 
 	report := env.run(t, Options{
 		FromContentID: from,
@@ -261,6 +321,24 @@ func TestRun_WholeItemPairsAndConflicts(t *testing.T) {
 		WholeItem:     true,
 		EpisodePairs:  []IDPair{{From: epFrom, To: epTo}},
 	})
+
+	var prefSeriesID string
+	if err := env.pool.QueryRow(ctx,
+		`SELECT series_id FROM user_subtitle_preferences WHERE user_id = $1`, env.userID).Scan(&prefSeriesID); err != nil {
+		t.Fatalf("load subtitle preference: %v", err)
+	}
+	if prefSeriesID != to {
+		t.Fatalf("subtitle preference series_id = %q, want %q", prefSeriesID, to)
+	}
+	var dismissItem, dismissSeries string
+	if err := env.pool.QueryRow(ctx, `
+		SELECT media_item_id, series_id FROM user_home_item_dismissals WHERE user_id = $1
+	`, env.userID).Scan(&dismissItem, &dismissSeries); err != nil {
+		t.Fatalf("load dismissal: %v", err)
+	}
+	if dismissItem != epTo || dismissSeries != to {
+		t.Fatalf("dismissal = (%q, %q), want (%q, %q)", dismissItem, dismissSeries, epTo, to)
+	}
 
 	var favCount int
 	if err := env.pool.QueryRow(ctx,
