@@ -885,11 +885,23 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		$49, $50, $51
 	)
 	ON CONFLICT (file_path) DO UPDATE SET
-		content_id = COALESCE(EXCLUDED.content_id, media_files.content_id),
-		episode_id = COALESCE(EXCLUDED.episode_id, media_files.episode_id),
-		extra_id = COALESCE(EXCLUDED.extra_id, media_files.extra_id),
-		season_number = COALESCE(EXCLUDED.season_number, media_files.season_number),
-		episode_number = COALESCE(EXCLUDED.episode_number, media_files.episode_number),
+		content_id = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.content_id, media_files.content_id)
+		END,
+		episode_id = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.episode_id, media_files.episode_id)
+		END,
+		extra_id = EXCLUDED.extra_id,
+		season_number = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.season_number, media_files.season_number)
+		END,
+		episode_number = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.episode_number, media_files.episode_number)
+		END,
 		media_folder_id = EXCLUDED.media_folder_id,
 		canonical_root_path = EXCLUDED.canonical_root_path,
 		observed_root_path = EXCLUDED.observed_root_path,
@@ -2695,28 +2707,6 @@ func (r *FileRepository) GetByExtraID(ctx context.Context, extraID string) ([]*m
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
-}
-
-// MarkFileAsExtra stamps a media_files row as a local extra: ownership moves
-// to extra_id and any primary-content linkage (content/episode ids, episode
-// numbers, group key) is cleared so the row can never surface as a version or
-// re-enter the match queues.
-func (r *FileRepository) MarkFileAsExtra(ctx context.Context, fileID int, extraID string) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE media_files SET
-			extra_id = $2,
-			content_id = NULL,
-			episode_id = NULL,
-			season_number = NULL,
-			episode_number = NULL,
-			content_group_key = '',
-			match_attempted_at = NULL,
-			updated_at = NOW()
-		WHERE id = $1`, fileID, extraID)
-	if err != nil {
-		return fmt.Errorf("marking file %d as extra: %w", fileID, err)
-	}
-	return nil
 }
 
 // FindParentContentIDForStem finds the owning content id of a primary file in

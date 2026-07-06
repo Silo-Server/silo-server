@@ -27,7 +27,21 @@ CREATE INDEX idx_media_extras_parent_id ON media_extras (parent_id);
 -- content-keyed query (version picker, playback variants, downloads) is
 -- structurally blind to them; ownership flows through extra_id instead.
 ALTER TABLE media_files
-    ADD COLUMN IF NOT EXISTS extra_id TEXT REFERENCES media_extras(content_id) ON DELETE SET NULL;
+    ADD COLUMN IF NOT EXISTS extra_id TEXT;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+-- NOT VALID keeps the constraint addition from scanning the (large)
+-- media_files table under an exclusive lock; VALIDATE below only takes
+-- SHARE UPDATE EXCLUSIVE and the column is all-NULL at migration time.
+ALTER TABLE media_files
+    ADD CONSTRAINT media_files_extra_id_fkey
+    FOREIGN KEY (extra_id) REFERENCES media_extras(content_id) ON DELETE SET NULL
+    NOT VALID;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+ALTER TABLE media_files VALIDATE CONSTRAINT media_files_extra_id_fkey;
 -- +goose StatementEnd
 
 -- +goose StatementBegin

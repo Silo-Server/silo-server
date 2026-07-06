@@ -1049,8 +1049,13 @@ func (s *DetailService) buildExtraItemDetail(ctx context.Context, contentID stri
 		if detail.Title == "" {
 			detail.Title = parent.Title
 		}
-		detail.SeriesID = extra.ParentID
-		detail.SeriesTitle = parent.Title
+		// Series fields only for series-owned extras: clients treat a
+		// populated series_id as episodic context (post-roll/next-episode
+		// flows), which is wrong for a movie's extras.
+		if parent.Type == "series" {
+			detail.SeriesID = extra.ParentID
+			detail.SeriesTitle = parent.Title
+		}
 		detail.Year = parent.Year
 	}
 	return detail, nil
@@ -2556,10 +2561,13 @@ func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID str
 		if detail.Title == "" {
 			detail.Title = parent.Title
 		}
-		// Surface the owning item the way episodes surface their series so
-		// players can show "<Extra> — <Movie>" context.
-		detail.SeriesID = extra.ParentID
-		detail.SeriesTitle = parent.Title
+		// Series fields only for series-owned extras: players treat a
+		// populated SeriesID as episodic context (post-roll/next-episode
+		// flows), which is wrong for a movie's extras.
+		if parent.Type == "series" {
+			detail.SeriesID = extra.ParentID
+			detail.SeriesTitle = parent.Title
+		}
 		detail.Year = parent.Year
 	}
 	return detail, nil

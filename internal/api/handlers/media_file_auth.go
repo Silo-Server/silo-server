@@ -56,7 +56,7 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 		// Local extras authorize through their parent item, like episodes
 		// authorize through their series.
 		if a.ExtraLookup == nil {
-			return nil, catalog.ErrItemNotFound
+			return nil, fmt.Errorf("extra lookup not configured")
 		}
 		extra, err := a.ExtraLookup.GetByID(r.Context(), file.ExtraID)
 		if err != nil {
@@ -64,6 +64,9 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 				return nil, catalog.ErrItemNotFound
 			}
 			return nil, err
+		}
+		if extra == nil {
+			return nil, catalog.ErrItemNotFound
 		}
 		if err := a.ItemAccess.EnsureAccessible(r.Context(), extra.ParentID, filter); err != nil {
 			return nil, err

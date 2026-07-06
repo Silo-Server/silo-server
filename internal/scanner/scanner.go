@@ -1663,6 +1663,15 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if stats.Errors > 0 {
 			return fmt.Errorf("processing extra file %s failed", cleanFile)
 		}
+		// Converting a previously-primary row into an extra clears its
+		// content linkage; run the same membership cleanup a full scan would
+		// so stale library membership doesn't linger until the next scan.
+		if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+			return fmt.Errorf("syncing present library state for extra file: %w", err)
+		}
+		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID); err != nil {
+			return fmt.Errorf("reconciling library membership after extra file scan: %w", err)
+		}
 		return nil
 	}
 	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))

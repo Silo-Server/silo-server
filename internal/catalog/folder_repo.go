@@ -160,6 +160,28 @@ func defaultTrailerKinds() []string {
 	return kinds
 }
 
+// normalizeTrailerKindsInput canonicalizes an allow-list from the API:
+// trim/lowercase, drop values outside the known vocabulary (rather than
+// folding them to "other", which would silently widen the allow-list), and
+// dedupe while preserving order.
+func normalizeTrailerKindsInput(kinds []string) []string {
+	normalized := make([]string, 0, len(kinds))
+	seen := make(map[string]bool, len(kinds))
+	for _, raw := range kinds {
+		kind := strings.ToLower(strings.TrimSpace(raw))
+		if kind == "" || seen[kind] {
+			continue
+		}
+		if string(models.NormalizeExtraKind(kind)) != kind {
+			// Unknown value: NormalizeExtraKind would fold it to "other".
+			continue
+		}
+		seen[kind] = true
+		normalized = append(normalized, kind)
+	}
+	return normalized
+}
+
 // folderColumns is the list of columns returned by all SELECT queries.
 // Kept in one place so scanFolder stays in sync.
 const folderColumns = `id, type, name, enabled, metadata_language, auto_translate_metadata, chapter_thumbnails_enabled, intro_detection_enabled, trailer_kinds, poster_path, last_scanned_at,
@@ -286,11 +308,7 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 	if trailerKinds == nil {
 		trailerKinds = defaultTrailerKinds()
 	} else {
-		normalized := make([]string, 0, len(trailerKinds))
-		for _, k := range trailerKinds {
-			normalized = append(normalized, string(models.NormalizeExtraKind(k)))
-		}
-		trailerKinds = normalized
+		trailerKinds = normalizeTrailerKindsInput(trailerKinds)
 	}
 
 	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, trailer_kinds, sort_order)
@@ -451,12 +469,8 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 		argIndex++
 	}
 	if input.TrailerKinds != nil {
-		normalized := make([]string, 0, len(*input.TrailerKinds))
-		for _, k := range *input.TrailerKinds {
-			normalized = append(normalized, string(models.NormalizeExtraKind(k)))
-		}
 		setClauses = append(setClauses, fmt.Sprintf("trailer_kinds = $%d", argIndex))
-		args = append(args, normalized)
+		args = append(args, normalizeTrailerKindsInput(*input.TrailerKinds))
 		argIndex++
 	}
 	if len(setClauses) > 0 {

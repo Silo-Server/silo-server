@@ -2218,7 +2218,7 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 		}
 	case file.ExtraID != "":
 		if h.ExtraLookup == nil {
-			return nil, catalog.ErrItemNotFound
+			return nil, fmt.Errorf("extra lookup not configured")
 		}
 		extra, err := h.ExtraLookup.GetByID(r.Context(), file.ExtraID)
 		if err != nil {
@@ -2226,6 +2226,9 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 				return nil, catalog.ErrItemNotFound
 			}
 			return nil, err
+		}
+		if extra == nil {
+			return nil, catalog.ErrItemNotFound
 		}
 		if err := h.ItemAccess.EnsureAccessible(r.Context(), extra.ParentID, filter); err != nil {
 			return nil, err

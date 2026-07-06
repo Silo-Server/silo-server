@@ -134,14 +134,6 @@ func (s *Scanner) processExtraFiles(
 		}
 
 		extraID := contentid.ForLocal(candidate.Path)
-		existing := existingByPath[candidate.Path]
-		if existing != nil && existing.ExtraID == extraID &&
-			existing.FileSize == info.Size() && existing.ProbeUpdatedAt != nil &&
-			existing.MissingSince == nil {
-			stats.Unchanged++
-			continue
-		}
-
 		parentID, err := s.resolveExtraParent(ctx, folder.ID, candidate, rootSet)
 		if err != nil {
 			slog.Warn("scanner: extra parent lookup failed", "path", candidate.Path, "error", err)
@@ -155,6 +147,9 @@ func (s *Scanner) processExtraFiles(
 			continue
 		}
 
+		// Upsert the entity before the unchanged check so parent/kind/title
+		// converge on every scan (a rematched parent or reclassified kind
+		// must not be masked by an unchanged file).
 		if err := s.extraRepo.Upsert(ctx, models.MediaExtra{
 			ContentID: extraID,
 			ParentID:  parentID,
@@ -167,6 +162,15 @@ func (s *Scanner) processExtraFiles(
 		}
 
 		fileModifiedAt := normalizeFileModifiedAt(info.ModTime())
+		existing := existingByPath[candidate.Path]
+		if existing != nil && existing.ExtraID == extraID &&
+			existing.FileSize == info.Size() &&
+			existing.FileModifiedAt != nil && existing.FileModifiedAt.Equal(fileModifiedAt) &&
+			existing.ProbeUpdatedAt != nil && existing.MissingSince == nil {
+			stats.Unchanged++
+			continue
+		}
+
 		hints := s.gatherHints(candidate.Path)
 		probe, probeSource := s.probeFile(ctx, candidate.Path)
 
@@ -188,17 +192,11 @@ func (s *Scanner) processExtraFiles(
 			mf.ExternalSubtitles = []models.ExternalSubtitle{}
 		}
 
-		upserted, err := s.fileRepo.Upsert(ctx, mf)
-		if err != nil {
+		// The upsert clears content/episode linkage atomically when extra_id
+		// is set, so a pre-existing primary row (e.g. a "-trailer" file
+		// previously scanned as a movie version) converts in one statement.
+		if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
 			slog.Warn("scanner: extra file upsert failed", "path", candidate.Path, "error", err)
-			stats.Errors++
-			continue
-		}
-		// A pre-existing row may have been primary content (e.g. a
-		// "-trailer" file previously scanned as a movie version); force the
-		// extra shape: ownership via extra_id only.
-		if err := s.fileRepo.MarkFileAsExtra(ctx, upserted.ID, extraID); err != nil {
-			slog.Warn("scanner: marking file as extra failed", "path", candidate.Path, "error", err)
 			stats.Errors++
 			continue
 		}
