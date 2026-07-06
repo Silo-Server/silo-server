@@ -96,6 +96,10 @@ type CreateFolderInput struct {
 	MetadataLanguage         string // ISO 639-1 code; defaults to "en" if empty
 	ChapterThumbnailsEnabled bool
 	IntroDetectionEnabled    bool
+	// TrailerKinds is the allow-list of remote video kinds fetched during
+	// metadata refresh; nil applies the default (all provider kinds), an
+	// empty slice disables remote videos.
+	TrailerKinds []string
 }
 
 // FolderReorderEntry carries a folder ID and its new sort position.
@@ -140,6 +144,20 @@ func NewFolderRepository(pool *pgxpool.Pool) *FolderRepository {
 // repositories need the same pool for cross-repo operations.
 func (r *FolderRepository) Pool() *pgxpool.Pool {
 	return r.pool
+}
+
+// defaultTrailerKinds mirrors the media_folders.trailer_kinds column default:
+// every provider-reported kind (deleted_scene is local-only and never comes
+// from providers).
+func defaultTrailerKinds() []string {
+	kinds := make([]string, 0, len(models.AllExtraKinds))
+	for _, k := range models.AllExtraKinds {
+		if k == models.ExtraKindDeletedScene {
+			continue
+		}
+		kinds = append(kinds, string(k))
+	}
+	return kinds
 }
 
 // folderColumns is the list of columns returned by all SELECT queries.
@@ -264,9 +282,19 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 	if metaLang == "" {
 		metaLang = "en"
 	}
+	trailerKinds := input.TrailerKinds
+	if trailerKinds == nil {
+		trailerKinds = defaultTrailerKinds()
+	} else {
+		normalized := make([]string, 0, len(trailerKinds))
+		for _, k := range trailerKinds {
+			normalized = append(normalized, string(models.NormalizeExtraKind(k)))
+		}
+		trailerKinds = normalized
+	}
 
-	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, sort_order)
-		VALUES ($1, $2, $3, $4, $5, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
+	query := `INSERT INTO media_folders (type, name, metadata_language, chapter_thumbnails_enabled, intro_detection_enabled, trailer_kinds, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM media_folders))
 		RETURNING ` + folderColumns
 
 	row := tx.QueryRow(ctx, query,
@@ -275,6 +303,7 @@ func (r *FolderRepository) Create(ctx context.Context, input CreateFolderInput) 
 		metaLang,
 		input.ChapterThumbnailsEnabled,
 		input.IntroDetectionEnabled,
+		trailerKinds,
 	)
 
 	folder, err := scanFolder(row)

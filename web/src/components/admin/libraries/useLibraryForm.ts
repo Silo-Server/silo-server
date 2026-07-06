@@ -8,6 +8,7 @@ import {
   useUpdateLibrary,
 } from "@/hooks/queries/admin/libraries";
 import { useAdminPlugins } from "@/hooks/queries/admin/plugins";
+import { PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 
 export type LevelChainItem = {
   plugin_installation_id: number;
@@ -158,7 +159,9 @@ export function useLibraryForm({
   const [introDetectionEnabled, setIntroDetectionEnabled] = useState(
     library?.intro_detection_enabled ?? false,
   );
-  const [trailerKinds, setTrailerKinds] = useState<string[]>(library?.trailer_kinds ?? ["trailer"]);
+  const [trailerKinds, setTrailerKinds] = useState<string[]>(
+    library?.trailer_kinds ?? [...PROVIDER_TRAILER_KINDS],
+  );
   const [levelChains, setLevelChains] = useState<Record<string, LevelChainItem[]>>({});
   const [chainDirty, setChainDirty] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);

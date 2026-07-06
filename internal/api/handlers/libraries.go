@@ -183,6 +183,9 @@ type createLibraryRequest struct {
 	MetadataLanguage         string   `json:"metadata_language,omitempty"`
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty"`
+	// TrailerKinds is the allow-list of remote video kinds fetched during
+	// metadata refresh; omitted = default (all provider kinds).
+	TrailerKinds []string `json:"trailer_kinds,omitempty"`
 }
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
@@ -573,6 +576,7 @@ func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Requ
 		MetadataLanguage:         req.MetadataLanguage,
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
+		TrailerKinds:             req.TrailerKinds,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrDuplicatePath) {
