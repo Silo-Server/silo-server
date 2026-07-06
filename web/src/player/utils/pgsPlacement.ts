@@ -15,6 +15,15 @@ export interface Rect {
   height: number;
 }
 
+export interface CueRegion extends Rect {
+  /**
+   * Height of the tallest text line inside the region (regions merge the
+   * lines of a multi-line cue). Drives text-size matching; defaults to the
+   * region height (single-line) when absent.
+   */
+  lineHeight?: number;
+}
+
 export interface PgsCuePlacement {
   /** Source rect on the decoded PGS frame, in source-canvas pixels. */
   src: Rect;
@@ -24,20 +33,31 @@ export interface PgsCuePlacement {
   background: { rect: Rect; cornerRadius: number } | null;
 }
 
-// Authored PGS bitmaps typically render larger than the text subtitle track
-// at the same preset; shrink the whole ladder so the default preset visually
-// matches the text render. Mirrors silo-apple's authoredSizeCompensation.
-const AUTHORED_SIZE_COMPENSATION = 0.85;
-
-// Scale ladder derived from the text overlay's font-size map relative to the
-// "large" default (see FONT_SIZE_MAP in lib/subtitleAppearance.ts).
-const FONT_SIZE_SCALE: Record<SubtitleAppearance["fontSize"], number> = {
-  small: 0.625,
-  medium: 0.8,
-  large: 1,
-  xlarge: 1.25,
-  xxlarge: 1.5,
+// Pixel equivalents of the text overlay's font-size map (rem × 16; see
+// FONT_SIZE_MAP in lib/subtitleAppearance.ts). A rendered text line's ink
+// span (ascender to descender) is roughly the font size, and so is a PGS
+// line's painted height — so cues are scaled per line to this target, making
+// bitmap text the same size as SRT text at every preset regardless of how
+// large the disc authored it.
+const FONT_SIZE_PX: Record<SubtitleAppearance["fontSize"], number> = {
+  small: 20,
+  medium: 25.6,
+  large: 32,
+  xlarge: 40,
+  xxlarge: 48,
 };
+
+// Upscaling bitmaps beyond this gets visibly blurry; a cue authored tinier
+// than this bound keeps some of its size difference instead.
+const MAX_UPSCALE = 2.5;
+
+/**
+ * Target on-canvas height for one line of PGS text, in CSS pixels. Multiply
+ * by devicePixelRatio when compositing onto a device-pixel canvas.
+ */
+export function pgsTextLineHeightPx(fontSize: SubtitleAppearance["fontSize"]): number {
+  return FONT_SIZE_PX[fontSize];
+}
 
 // Cues whose authored bottom edge sits in this lower band are "dialogue" and
 // follow the position preset; cues above it (floating signs, top captions)
@@ -85,7 +105,7 @@ export function detectCueRegions(
   width: number,
   height: number,
   alphaThreshold = 16,
-): Rect[] {
+): CueRegion[] {
   // Row projection: which rows contain any visible pixel.
   const rowHasInk = new Array<boolean>(height).fill(false);
   for (let y = 0; y < height; y++) {
@@ -117,9 +137,21 @@ export function detectCueRegions(
     bands.push({ top: bandStart, bottom: lastInk });
   }
 
-  // Tight horizontal bounds per band.
-  const regions: Rect[] = [];
+  // Tight horizontal bounds and per-line height per band. Within a band,
+  // maximal runs of consecutive ink rows are the individual text lines.
+  const regions: CueRegion[] = [];
   for (const band of bands) {
+    let lineHeight = 0;
+    let runStart = -1;
+    for (let y = band.top; y <= band.bottom + 1; y++) {
+      if (y <= band.bottom && rowHasInk[y]) {
+        if (runStart < 0) runStart = y;
+      } else if (runStart >= 0) {
+        lineHeight = Math.max(lineHeight, y - runStart);
+        runStart = -1;
+      }
+    }
+
     let minX = width;
     let maxX = -1;
     for (let y = band.top; y <= band.bottom; y++) {
@@ -143,6 +175,7 @@ export function detectCueRegions(
         y: band.top,
         width: maxX - minX + 1,
         height: band.bottom - band.top + 1,
+        lineHeight,
       });
     }
   }
@@ -158,19 +191,21 @@ export function detectCueRegions(
  * @param sourceWidth/sourceHeight Decoded PGS frame dimensions.
  * @param videoRect The rendered video content box on the display canvas.
  * @param appearance The shared subtitle appearance settings.
+ * @param textLineHeightPx Target height of one text line on the display
+ *   canvas (pgsTextLineHeightPx × devicePixelRatio for device-pixel canvases).
  */
 export function computePgsPlacements(
-  regions: Rect[],
+  regions: CueRegion[],
   sourceWidth: number,
   sourceHeight: number,
   videoRect: Rect,
   appearance: SubtitleAppearance,
+  textLineHeightPx: number,
 ): PgsCuePlacement[] {
   if (sourceWidth <= 0 || sourceHeight <= 0 || videoRect.width <= 0 || videoRect.height <= 0) {
     return [];
   }
 
-  const scale = AUTHORED_SIZE_COMPENSATION * FONT_SIZE_SCALE[appearance.fontSize];
   const sx = videoRect.width / sourceWidth;
   const sy = videoRect.height / sourceHeight;
 
@@ -201,9 +236,15 @@ export function computePgsPlacements(
   return baseFrames.map((frame, i) => {
     const region = regions[i]!;
 
-    // Size: scale around a regional anchor — dialogue in the lower half
-    // grows upward from its bottom edge, top/mid signs grow downward. Cap
-    // the scale so a full-width cue can never outgrow the video box.
+    // Size: match this cue's text-line height to the text overlay's, then
+    // scale around a regional anchor — dialogue in the lower half grows
+    // upward from its bottom edge, top/mid signs grow downward. Cap the
+    // scale so a full-width cue can never outgrow the video box.
+    const authoredLine = (region.lineHeight ?? region.height) * sy;
+    const scale =
+      authoredLine > 0 && textLineHeightPx > 0
+        ? Math.min(textLineHeightPx / authoredLine, MAX_UPSCALE)
+        : 1;
     const effectiveScale = Math.min(
       scale,
       frame.width > 0 ? videoRect.width / frame.width : scale,

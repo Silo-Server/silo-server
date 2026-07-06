@@ -4,7 +4,12 @@ import libpgsWorkerUrl from "libpgs/dist/libpgs.worker.js?url";
 import type { PlayerSubtitleInfo } from "../types";
 import { isPGSCodec } from "../utils/subtitleCodecs";
 import type { SubtitleAppearance } from "../../lib/subtitleAppearance";
-import { computePgsPlacements, computeVideoRect, detectCueRegions } from "../utils/pgsPlacement";
+import {
+  computePgsPlacements,
+  computeVideoRect,
+  detectCueRegions,
+  pgsTextLineHeightPx,
+} from "../utils/pgsPlacement";
 
 // Downsampled scan width for cue-region detection. Region rects are scaled
 // back up to source pixels, so the ±(source/scanWidth) rounding is invisible.
@@ -136,6 +141,7 @@ export function usePGSSubtitles(
         y: r.y * upscale,
         width: r.width * upscale,
         height: r.height * upscale,
+        lineHeight: (r.lineHeight ?? r.height) * upscale,
       }));
 
       const a = appearanceRef.current;
@@ -163,7 +169,10 @@ export function usePGSSubtitles(
           ? video.videoWidth / video.videoHeight
           : srcW / srcH;
       const videoRect = computeVideoRect(pxW, pxH, videoAspect);
-      const placements = computePgsPlacements(regions, srcW, srcH, videoRect, a);
+      // The canvas works in device pixels; the text overlay's font sizes are
+      // CSS pixels.
+      const lineHeight = pgsTextLineHeightPx(a.fontSize) * dpr;
+      const placements = computePgsPlacements(regions, srcW, srcH, videoRect, a, lineHeight);
 
       for (const p of placements) {
         if (p.background) {
