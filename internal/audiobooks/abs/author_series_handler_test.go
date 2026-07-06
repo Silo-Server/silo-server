@@ -32,7 +32,7 @@ func (s *authorSeriesStubMediaStore) GetSeriesByName(_ context.Context, name str
 
 func TestAuthor_Detail_ReturnsBooks(t *testing.T) {
 	media := &authorSeriesStubMediaStore{
-		author: Author{ID: "42", Name: "Brandon Sanderson", Books: []*models.MediaItem{
+		author: Author{ID: "42", Name: "Brandon Sanderson", PosterPath: "tmdb/people/42/profile", Books: []*models.MediaItem{
 			{ContentID: "book-1", Title: "Mistborn"},
 			{ContentID: "book-2", Title: "Stormlight"},
 		}},
@@ -55,6 +55,11 @@ func TestAuthor_Detail_ReturnsBooks(t *testing.T) {
 		if _, ok := got[k]; !ok {
 			t.Errorf("author object missing key %q", k)
 		}
+	}
+	// A photo-bearing author must emit a non-null imagePath — it is the
+	// client's cue to fetch /api/authors/{id}/image.
+	if got["imagePath"] == nil {
+		t.Errorf("imagePath = nil for author with a photo")
 	}
 	// Author items are real-ABS minified library items under libraryItems.
 	items, _ := got["libraryItems"].([]any)
@@ -83,7 +88,7 @@ func (s *libAuthorsStub) ListLibraryAuthors(_ context.Context, _ int64, _, _ int
 // paginated, paged { results, total, ... } when limit+page are present.
 func TestLibraryAuthors_EnvelopeBranchesOnPagination(t *testing.T) {
 	media := &libAuthorsStub{authors: []AuthorSummary{
-		{ID: "1", Name: "Alpha", NumBooks: 2},
+		{ID: "1", Name: "Alpha", NumBooks: 2, HasPhoto: true},
 		{ID: "2", Name: "Beta", NumBooks: 1},
 	}}
 	h := New(Dependencies{MediaStore: media})
@@ -107,6 +112,16 @@ func TestLibraryAuthors_EnvelopeBranchesOnPagination(t *testing.T) {
 	}
 	if len(authors) != 2 {
 		t.Errorf("authors len = %d, want 2", len(authors))
+	}
+	if len(authors) == 2 {
+		a0, _ := authors[0].(map[string]any)
+		a1, _ := authors[1].(map[string]any)
+		if a0["imagePath"] == nil {
+			t.Errorf("imagePath = nil for list author with a photo")
+		}
+		if a1["imagePath"] != nil {
+			t.Errorf("imagePath = %v for list author without a photo, want null", a1["imagePath"])
+		}
 	}
 	if a0, _ := authors[0].(map[string]any); a0 != nil {
 		if _, ok := a0["asin"]; !ok {

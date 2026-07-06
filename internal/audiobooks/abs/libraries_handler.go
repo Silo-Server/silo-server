@@ -356,7 +356,7 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	libID := audiobookLibraryID(lib)
 	results := make([]map[string]any, 0, len(pageAuthors))
 	for _, a := range pageAuthors {
-		results = append(results, authorObjectABS(a.ID, a.Name, libID, a.NumBooks))
+		results = append(results, authorObjectABS(a.ID, a.Name, libID, a.NumBooks, a.HasPhoto))
 	}
 	// Real ABS LibraryController.getAuthors branches on isPaginated =
 	// (limit present & numeric) && (page present & numeric): paged envelope

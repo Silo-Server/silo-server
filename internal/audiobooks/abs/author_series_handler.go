@@ -68,16 +68,24 @@ func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorObjectABS builds the real ABS Author.toOldJSON(+numBooks) shape
-// (server/models/Author.js). silo does not track asin/description/imagePath/
-// timestamps, so those are emitted as null/0 — nullable in real ABS, and a
-// present key (not its value) is what keeps strict clients from crashing.
-func authorObjectABS(id, name, libraryID string, numBooks int) map[string]any {
+// (server/models/Author.js). silo does not track asin/description/timestamps,
+// so those are emitted as null/0 — nullable in real ABS, and a present key
+// (not its value) is what keeps strict clients from crashing. imagePath is
+// a server-local filesystem path in real ABS; clients treat any non-null
+// value as "this author has a photo" and fetch it via
+// GET /api/authors/{id}/image rather than dereferencing the path, so a
+// synthetic ABS-shaped path is emitted when silo has a photo for the person.
+func authorObjectABS(id, name, libraryID string, numBooks int, hasPhoto bool) map[string]any {
+	var imagePath any
+	if hasPhoto {
+		imagePath = "/metadata/authors/" + id + ".jpg"
+	}
 	return map[string]any{
 		"id":          id,
 		"asin":        nil,
 		"name":        name,
 		"description": nil,
-		"imagePath":   nil,
+		"imagePath":   imagePath,
 		"libraryId":   libraryID,
 		"addedAt":     0,
 		"updatedAt":   0,
@@ -87,7 +95,7 @@ func authorObjectABS(id, name, libraryID string, numBooks int) map[string]any {
 
 func authorToABS(a Author, lib AudiobookLibrary, baseURL string) map[string]any {
 	libID := audiobookLibraryID(lib)
-	obj := authorObjectABS(a.ID, a.Name, libID, len(a.Books))
+	obj := authorObjectABS(a.ID, a.Name, libID, len(a.Books), a.PosterPath != "")
 	// Author-detail books are full minified library items (not thin stubs) so
 	// any strict client decodes them with its LibraryItem model.
 	books := make([]MinifiedLibraryItem, 0, len(a.Books))

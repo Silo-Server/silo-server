@@ -93,6 +93,10 @@ type AuthorSummary struct {
 	ID       string
 	Name     string
 	NumBooks int
+	// HasPhoto reports whether the author's people row carries a photo, so
+	// list responses can emit a non-null imagePath (the client's cue to
+	// fetch /api/authors/{id}/image).
+	HasPhoto bool
 }
 
 // SeriesSummary is an aggregated series entry for /libraries/{id}/series.

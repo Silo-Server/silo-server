@@ -764,15 +764,20 @@ func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64,
 	var orderBy string
 	switch sortBy {
 	case "addedAt":
-		orderBy = "added_at " + dir + ", person_id"
+		orderBy = "c.added_at " + dir + ", c.person_id"
 	case "numBooks":
-		orderBy = "num_books " + dir + ", LOWER(name)"
+		orderBy = "c.num_books " + dir + ", LOWER(c.name)"
 	default: // name
-		orderBy = "LOWER(name) " + dir
+		orderBy = "LOWER(c.name) " + dir
 	}
 
-	dataSQL := `SELECT person_id, name, num_books, added_at FROM abs_audiobook_author_counts
-		WHERE library_id = $1 ORDER BY ` + orderBy
+	// The MV carries no photo column; join people at read time so photo
+	// presence is always current instead of stale until the next REFRESH.
+	dataSQL := `SELECT c.person_id, c.name, c.num_books, c.added_at,
+			COALESCE(p.photo_path, '') <> ''
+		FROM abs_audiobook_author_counts c
+		LEFT JOIN people p ON p.id = c.person_id
+		WHERE c.library_id = $1 ORDER BY ` + orderBy
 	args := []any{int(libraryID)}
 	if limit > 0 {
 		dataSQL += ` LIMIT $2 OFFSET $3`
@@ -786,15 +791,16 @@ func (s *ABSMediaStore) ListLibraryAuthors(ctx context.Context, libraryID int64,
 	out := make([]abs.AuthorSummary, 0, 64)
 	for rows.Next() {
 		var (
-			id      int64
-			name    string
-			books   int
-			addedAt time.Time
+			id       int64
+			name     string
+			books    int
+			addedAt  time.Time
+			hasPhoto bool
 		)
-		if err := rows.Scan(&id, &name, &books, &addedAt); err != nil {
+		if err := rows.Scan(&id, &name, &books, &addedAt, &hasPhoto); err != nil {
 			return nil, 0, fmt.Errorf("abs_media_store: scan author: %w", err)
 		}
-		out = append(out, abs.AuthorSummary{ID: fmt.Sprintf("%d", id), Name: name, NumBooks: books})
+		out = append(out, abs.AuthorSummary{ID: fmt.Sprintf("%d", id), Name: name, NumBooks: books, HasPhoto: hasPhoto})
 	}
 	return out, total, rows.Err()
 }
@@ -846,7 +852,8 @@ func (s *ABSMediaStore) listLibraryAuthorsLive(ctx context.Context, libraryID in
 		orderBy = "LOWER(p.name) " + dir
 	}
 	dataSQL := `
-		SELECT p.id, p.name, COUNT(DISTINCT mi.content_id) AS num_books
+		SELECT p.id, p.name, COUNT(DISTINCT mi.content_id) AS num_books,
+			p.photo_path <> ''
 		FROM media_items mi
 		JOIN item_people ip ON ip.content_id = mi.content_id AND ip.kind = 7
 		JOIN people p ON p.id = ip.person_id
@@ -866,14 +873,15 @@ func (s *ABSMediaStore) listLibraryAuthorsLive(ctx context.Context, libraryID in
 	out := make([]abs.AuthorSummary, 0, 64)
 	for rows.Next() {
 		var (
-			id    int64
-			name  string
-			books int
+			id       int64
+			name     string
+			books    int
+			hasPhoto bool
 		)
-		if err := rows.Scan(&id, &name, &books); err != nil {
+		if err := rows.Scan(&id, &name, &books, &hasPhoto); err != nil {
 			return nil, 0, fmt.Errorf("abs_media_store: scan author (live): %w", err)
 		}
-		out = append(out, abs.AuthorSummary{ID: fmt.Sprintf("%d", id), Name: name, NumBooks: books})
+		out = append(out, abs.AuthorSummary{ID: fmt.Sprintf("%d", id), Name: name, NumBooks: books, HasPhoto: hasPhoto})
 	}
 	return out, total, rows.Err()
 }
