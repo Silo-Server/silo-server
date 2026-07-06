@@ -460,16 +460,25 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		outFormat = "sup"
 	}
 
-	// ASS and PGS are fetched exactly once and consumed whole by their
-	// client-side renderers (JASSUB / libpgs), so they must never be
-	// windowed. Note subtitleSeekPosition falls back to the session's
-	// last reported position even without a ?position= query — relying
-	// on StreamExtractSubtitle's codec guard alone would still log a
+	// ASS is fetched exactly once and consumed whole by its client-side
+	// renderer (JASSUB), so it must never be windowed. PGS defaults to
+	// the same whole-track behavior, but a client that manages its own
+	// sliding window (the web player's libpgs hook) opts in explicitly
+	// with ?windowed=1 + ?position=/?duration=; there is deliberately no
+	// session-position fallback for sup — an implicit window would
+	// silently drop cues for clients that fetch once. Note
+	// subtitleSeekPosition falls back to the session's last reported
+	// position even without a ?position= query — relying on
+	// StreamExtractSubtitle's codec guard alone would still log a
 	// misleading nonzero seek here.
 	var seek, duration float64
-	if outFormat == "vtt" {
+	var allowWindow bool
+	switch outFormat {
+	case "vtt":
 		seek = subtitleSeekPosition(r, session)
 		duration = subtitleWindowDuration(r)
+	case "sup":
+		allowWindow, seek, duration = playback.PGSWindowRequest(r.URL.Query())
 	}
 	slog.InfoContext(r.Context(), "subtitle stream requested", "component", "api",
 		"file_id", file.ID,
@@ -499,6 +508,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		SourceCodec:     track.Codec,
 		SeekSeconds:     seek,
 		DurationSeconds: duration,
+		AllowWindow:     allowWindow,
 		FFmpegPath:      h.ffmpegPath(),
 		Writer:          w,
 	})

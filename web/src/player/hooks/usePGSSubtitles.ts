@@ -15,6 +15,19 @@ import {
 // back up to source pixels, so the ±(source/scanWidth) rounding is invisible.
 const SCAN_WIDTH = 480;
 
+// Each windowed .sup fetch covers this many source-time seconds. ffmpeg's
+// startup cost dominates the extract, so a big window is nearly free and
+// keeps re-fetches rare. Matches the server's ?duration= cap.
+const WINDOW_DURATION = 3600;
+// Pull back this many seconds from the playback position when requesting a
+// window. PGS epochs can straddle a seek point; the backoff bounds the worst
+// case to one dropped cue.
+const SEEK_BACKOFF = 10;
+// Re-point the renderer at the next window this many seconds before the
+// current one's coverage ends, so the new cues are loading before playback
+// crosses the boundary.
+const PREFETCH_LEAD = 60;
+
 /**
  * Manages client-side PGS (Blu-ray bitmap) subtitle rendering via libpgs.
  *
@@ -31,6 +44,14 @@ const SCAN_WIDTH = 480;
  * libpgs runs in `workerWithoutOffscreenCanvas` mode: decode stays in the
  * worker, but drawing happens on the main thread so the source canvas stays
  * readable for region detection.
+ *
+ * Fetching is windowed (mirroring useSubtitleTracks' VTT sliding window):
+ * the .sup URL carries `windowed=1&position=&duration=` so the server seeks
+ * near the playback position instead of demuxing the whole file from byte 0.
+ * When playback seeks outside the covered range — or approaches its end —
+ * the renderer is re-pointed at a fresh window via `loadFromUrl` without
+ * tearing it down. Positions are in source-time seconds, the same timeline
+ * libpgs looks up display sets on (`video.currentTime + timeOffset`).
  *
  * Coordination mirrors useASSSubtitles: the `isActive` return value tells the
  * player to suppress the VTT text overlay while bitmap rendering is active.
@@ -95,6 +116,41 @@ export function usePGSSubtitles(
     const sourceCanvas = document.createElement("canvas");
     // Downsampled scratch canvas for alpha-channel region detection.
     const scanCanvas = document.createElement("canvas");
+
+    // Source-time range the current windowed fetch covers. Updated by
+    // windowUrl whenever a new window is requested.
+    let windowStart = 0;
+    let windowEnd = 0;
+
+    // Builds the windowed .sup URL for a window anchored just before
+    // `sourcePos`, and records the coverage it will provide.
+    function windowUrl(sourcePos: number): string {
+      windowStart = Math.max(0, sourcePos - SEEK_BACKOFF);
+      windowEnd = windowStart + WINDOW_DURATION;
+      const sep = activeUrl!.includes("?") ? "&" : "?";
+      return `${activeUrl}${sep}windowed=1&position=${windowStart}&duration=${WINDOW_DURATION}`;
+    }
+
+    // Current playback position in source-time seconds — the timeline both
+    // the server's ?position= and libpgs display-set lookup use. offsetRef
+    // is streamOrigin minus the user delay; the delay is millisecond-scale
+    // and well inside SEEK_BACKOFF, so it doesn't need unpicking here.
+    function currentSourcePos(): number {
+      return Math.max(0, video!.currentTime + offsetRef.current);
+    }
+
+    // Re-points the renderer at a fresh window when playback falls outside
+    // the covered range (a seek) or approaches its end (normal playback).
+    // loadFromUrl resets libpgs' display sets in place — no renderer
+    // teardown, and times outside the loaded range simply render nothing
+    // until the new window's data arrives.
+    function maybeReloadWindow() {
+      const renderer = rendererRef.current;
+      if (!renderer || cancelled) return;
+      const pos = currentSourcePos();
+      if (pos >= windowStart && pos < windowEnd - PREFETCH_LEAD) return;
+      renderer.loadFromUrl(windowUrl(pos));
+    }
 
     function composite() {
       if (cancelled || !displayCanvas || !video) return;
@@ -211,6 +267,13 @@ export function usePGSSubtitles(
       followUpTimer = setTimeout(composite, 120);
     }
 
+    // Playback-progress handler: keeps the fetch window covering the
+    // playhead, then recomposites the frame libpgs drew for the new time.
+    function handleTimeProgress() {
+      maybeReloadWindow();
+      compositeWithFollowUp();
+    }
+
     async function initRenderer() {
       if (!video || cancelled) return;
 
@@ -225,7 +288,7 @@ export function usePGSSubtitles(
       const renderer = new PgsRendererClass({
         video,
         canvas: sourceCanvas,
-        subUrl: activeUrl!,
+        subUrl: windowUrl(currentSourcePos()),
         workerUrl: libpgsWorkerUrl,
         timeOffset: offsetRef.current,
         // Decode in the worker but draw on the main thread so the source
@@ -252,9 +315,10 @@ export function usePGSSubtitles(
       video.parentElement?.appendChild(displayCanvas);
 
       // Recomposite as playback advances (libpgs redraws the source canvas
-      // on the same events) and when the layout changes.
-      video.addEventListener("timeupdate", compositeWithFollowUp);
-      video.addEventListener("seeked", compositeWithFollowUp);
+      // on the same events) and when the layout changes; the same events
+      // drive the sliding fetch window.
+      video.addEventListener("timeupdate", handleTimeProgress);
+      video.addEventListener("seeked", handleTimeProgress);
       resizeObserver = new ResizeObserver(() => composite());
       resizeObserver.observe(video);
       composite();
@@ -266,8 +330,8 @@ export function usePGSSubtitles(
       cancelled = true;
       compositeRef.current = null;
       if (followUpTimer) clearTimeout(followUpTimer);
-      video.removeEventListener("timeupdate", compositeWithFollowUp);
-      video.removeEventListener("seeked", compositeWithFollowUp);
+      video.removeEventListener("timeupdate", handleTimeProgress);
+      video.removeEventListener("seeked", handleTimeProgress);
       resizeObserver?.disconnect();
       displayCanvas?.remove();
       // dispose() terminates the worker, which also abandons its in-flight

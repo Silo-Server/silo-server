@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -37,6 +38,14 @@ type StreamExtractOpts struct {
 	// while keeping memory and in-flight state finite; the client
 	// requests subsequent windows as playback approaches the tail.
 	DurationSeconds float64
+	// AllowWindow lets SeekSeconds/DurationSeconds apply to PGS extracts.
+	// By default PGS is never windowed because clients fetch the .sup
+	// stream exactly once and consume it whole; a client that explicitly
+	// opts in (via ?windowed=1) re-requests fresh windows itself as
+	// playback moves outside coverage. ASS ignores this flag — its
+	// [Script Info] header exists only at stream offset 0, so a seeked
+	// extract would be structurally broken.
+	AllowWindow bool
 	// FFmpegPath overrides the ffmpeg binary lookup.
 	FFmpegPath string
 	// Writer receives ffmpeg's stdout bytes as they arrive. When it
@@ -121,12 +130,14 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 	// Input seek (before -i) is the fast variant: ffmpeg jumps near the
 	// requested position before demuxing. ASS can't use it because the
 	// output needs the [Script Info] header which only sits at offset 0.
-	// PGS can't either: the client (libpgs) fetches the .sup stream
-	// exactly once and consumes it whole, so the output must cover the
-	// complete track from offset 0 with original timestamps — windowing
-	// would silently drop every cue outside the window. The same logic
-	// excludes both from the -t duration cap below.
-	windowable := !IsASS(opts.SourceCodec) && !IsPGS(opts.SourceCodec)
+	// PGS defaults to non-windowed too: a client that fetches the .sup
+	// stream exactly once and consumes it whole needs the complete track
+	// from offset 0 — windowing would silently drop every cue outside
+	// the window. Clients that manage their own sliding window opt in
+	// via AllowWindow; -copyts below keeps the windowed output on
+	// absolute source timestamps so cues stay in sync. The same logic
+	// governs the -t duration cap below.
+	windowable := !IsASS(opts.SourceCodec) && (!IsPGS(opts.SourceCodec) || opts.AllowWindow)
 	seekApplied := opts.SeekSeconds > 0 && windowable
 	if seekApplied {
 		args = append(args, "-ss", strconv.FormatFloat(opts.SeekSeconds, 'f', 3, 64))
@@ -160,6 +171,34 @@ func streamExtractArgs(opts StreamExtractOpts) []string {
 		"-f", outFormat,
 		"pipe:1",
 	)
+}
+
+// PGSWindowRequest reports whether a subtitle request explicitly opts in
+// to windowed PGS extraction (?windowed=1) and, if so, the seek position
+// and window duration to use. Only explicit query params count — there is
+// deliberately no session-position fallback, because a client that did
+// not ask for a window expects the complete track from offset 0 and would
+// silently lose every cue outside an implicit window. Absent or invalid
+// params leave the existing (non-windowed) behavior byte-identical.
+//
+// Shared by the API stream handler and the standalone proxy so both
+// endpoints gate the window identically.
+func PGSWindowRequest(q url.Values) (allow bool, seekSeconds, durationSeconds float64) {
+	if q.Get("windowed") != "1" {
+		return false, 0, 0
+	}
+	const maxDuration = 3600.0
+	if raw := q.Get("position"); raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil && v >= 0 {
+			seekSeconds = v
+		}
+	}
+	if raw := q.Get("duration"); raw != "" {
+		if v, err := strconv.ParseFloat(raw, 64); err == nil && v > 0 && v <= maxDuration {
+			durationSeconds = v
+		}
+	}
+	return true, seekSeconds, durationSeconds
 }
 
 // copyAndFlush streams from src to dst in 32KB chunks, calling Flush on

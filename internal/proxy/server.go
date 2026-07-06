@@ -225,17 +225,24 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	// stream the PGS track as a raw .sup elementary stream for client-side
 	// bitmap rendering (libpgs). Unlike the buffered text paths below, this
 	// streams ffmpeg output directly: the track can be large and the client
-	// renders progressively as data arrives.
+	// renders progressively as data arrives. Clients that manage their own
+	// sliding window opt in with ?windowed=1 (+ ?position=/?duration=),
+	// mirroring the API stream handler; without it the complete track is
+	// extracted from offset 0.
 	if requestedFormat == "sup" {
+		allowWindow, seek, duration := playback.PGSWindowRequest(r.URL.Query())
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		err := playback.StreamExtractSubtitle(r.Context(), playback.StreamExtractOpts{
-			InputPath:   claims.MediaPath,
-			TrackIndex:  trackIndex,
-			SourceCodec: "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
-			FFmpegPath:  cfg.Playback.FFmpegPath,
-			Writer:      w,
+			InputPath:       claims.MediaPath,
+			TrackIndex:      trackIndex,
+			SourceCodec:     "hdmv_pgs_subtitle", // .sup URLs are only generated for PGS tracks
+			SeekSeconds:     seek,
+			DurationSeconds: duration,
+			AllowWindow:     allowWindow,
+			FFmpegPath:      cfg.Playback.FFmpegPath,
+			Writer:          w,
 		})
 		if err != nil && r.Context().Err() == nil {
 			// Headers already committed — log and let the client see a

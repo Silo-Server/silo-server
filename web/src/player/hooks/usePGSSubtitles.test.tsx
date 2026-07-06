@@ -14,6 +14,7 @@ const renderers: MockPgsRenderer[] = [];
 class MockPgsRenderer {
   timeOffset: number;
   dispose = vi.fn();
+  loadFromUrl = vi.fn();
   constructor(opts: Record<string, unknown>) {
     constructorOpts.push(opts);
     this.timeOffset = (opts.timeOffset as number) ?? 0;
@@ -83,7 +84,9 @@ describe("usePGSSubtitles", () => {
 
     const opts = constructorOpts[0]!;
     expect(opts.video).toBe(videoRef.current);
-    expect(opts.subUrl).toBe(pgsTrack.url);
+    // The fetch is windowed: the server seeks near the playback position
+    // (0 here) instead of demuxing the whole file from byte 0.
+    expect(opts.subUrl).toBe(`${pgsTrack.url}&windowed=1&position=0&duration=3600`);
     expect(opts.workerUrl).toBe("/assets/libpgs.worker.js");
     // Decode in the worker, draw on the main thread: the source canvas must
     // stay readable for region detection.
@@ -162,7 +165,106 @@ describe("usePGSSubtitles", () => {
     rerender({ index: 4 });
     await waitFor(() => expect(renderers).toHaveLength(2));
     expect(disposeSpies[0]!).toHaveBeenCalledTimes(1);
-    expect(constructorOpts[1]!.subUrl).toBe(otherPgsTrack.url);
+    expect(constructorOpts[1]!.subUrl).toBe(
+      `${otherPgsTrack.url}&windowed=1&position=0&duration=3600`,
+    );
+  });
+
+  it("anchors the initial window just before the playback position", async () => {
+    const videoRef = makeVideoRef();
+    videoRef.current!.currentTime = 1200;
+    renderHook(() =>
+      usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+    );
+
+    await waitFor(() => expect(constructorOpts).toHaveLength(1));
+    // 10s backoff: PGS epochs can straddle the seek point.
+    expect(constructorOpts[0]!.subUrl).toBe(
+      `${pgsTrack.url}&windowed=1&position=1190&duration=3600`,
+    );
+  });
+
+  it("re-points the renderer at a new window on a seek outside coverage", async () => {
+    const videoRef = makeVideoRef();
+    renderHook(() =>
+      usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+    );
+
+    await waitFor(() => expect(renderers).toHaveLength(1));
+
+    // Initial window covers [0, 3600); seek far past it.
+    videoRef.current!.currentTime = 5000;
+    videoRef.current!.dispatchEvent(new Event("seeked"));
+
+    expect(renderers[0]!.loadFromUrl).toHaveBeenCalledTimes(1);
+    expect(renderers[0]!.loadFromUrl).toHaveBeenCalledWith(
+      `${pgsTrack.url}&windowed=1&position=4990&duration=3600`,
+    );
+    expect(disposeSpies[0]!).not.toHaveBeenCalled();
+  });
+
+  it("does not reload the window for a seek inside coverage", async () => {
+    const videoRef = makeVideoRef();
+    renderHook(() =>
+      usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+    );
+
+    await waitFor(() => expect(renderers).toHaveLength(1));
+
+    videoRef.current!.currentTime = 500;
+    videoRef.current!.dispatchEvent(new Event("seeked"));
+
+    expect(renderers[0]!.loadFromUrl).not.toHaveBeenCalled();
+  });
+
+  it("prefetches the next window as playback approaches the coverage end", async () => {
+    const videoRef = makeVideoRef();
+    renderHook(() =>
+      usePGSSubtitles(videoRef, tracks, 3, false, 0, 0, DEFAULT_SUBTITLE_APPEARANCE),
+    );
+
+    await waitFor(() => expect(renderers).toHaveLength(1));
+
+    // Inside the 60s prefetch lead of the [0, 3600) window.
+    videoRef.current!.currentTime = 3550;
+    videoRef.current!.dispatchEvent(new Event("timeupdate"));
+
+    expect(renderers[0]!.loadFromUrl).toHaveBeenCalledWith(
+      `${pgsTrack.url}&windowed=1&position=3540&duration=3600`,
+    );
+
+    // The reload updated coverage; the next tick must not refetch.
+    renderers[0]!.loadFromUrl.mockClear();
+    videoRef.current!.currentTime = 3555;
+    videoRef.current!.dispatchEvent(new Event("timeupdate"));
+    expect(renderers[0]!.loadFromUrl).not.toHaveBeenCalled();
+  });
+
+  it("computes window positions in source time using the stream origin", async () => {
+    const videoRef = makeVideoRef();
+    // Copy-mode session: player timeline is rebased so currentTime 0 maps to
+    // source time 600.
+    renderHook(() =>
+      usePGSSubtitles(videoRef, tracks, 3, false, 600, 0, DEFAULT_SUBTITLE_APPEARANCE),
+    );
+
+    await waitFor(() => expect(constructorOpts).toHaveLength(1));
+    expect(constructorOpts[0]!.subUrl).toBe(
+      `${pgsTrack.url}&windowed=1&position=590&duration=3600`,
+    );
+
+    // Stream-relative 3100 is source 3700 — comfortably inside the
+    // [590, 4190) window (and clear of its 60s prefetch lead), so no reload.
+    videoRef.current!.currentTime = 3100;
+    videoRef.current!.dispatchEvent(new Event("seeked"));
+    expect(renderers[0]!.loadFromUrl).not.toHaveBeenCalled();
+
+    // Stream-relative 3600 is source 4200, past the window end (4190).
+    videoRef.current!.currentTime = 3600;
+    videoRef.current!.dispatchEvent(new Event("seeked"));
+    expect(renderers[0]!.loadFromUrl).toHaveBeenCalledWith(
+      `${pgsTrack.url}&windowed=1&position=4190&duration=3600`,
+    );
   });
 
   it("disposes the renderer while detached and reports inactive", async () => {
