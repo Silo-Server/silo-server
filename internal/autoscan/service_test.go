@@ -711,11 +711,10 @@ func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
 	}
 }
 
-func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
-	// A freshly-enabled source with no path_rewrites: the provider returns paths
-	// that don't map to any Silo library folder (the resolver RequestErrors on
-	// every path). The marker must NOT advance (so the imports aren't skipped
-	// forever) and an explaining error is recorded.
+func TestPollOnceAdvancesMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
+	// A filesystem watcher (e.g. CephFS) may return paths from folders that are
+	// not registered as Silo libraries. The marker must ADVANCE so autoscan does
+	// not stall permanently; no error is recorded, only a log warning.
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
@@ -738,28 +737,21 @@ func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	if len(q.enqueued) != 0 {
 		t.Fatalf("nothing should enqueue when no path resolves, got %d", len(q.enqueued))
 	}
-	if _, ok := store.advanced["s1"]; ok {
-		t.Fatalf("marker must NOT advance when paths returned but none resolved")
+	if got := store.advanced["s1"]; got != "m1" {
+		t.Fatalf("marker must advance when paths returned but none resolved, got %q", got)
 	}
-	msg, ok := store.recorded["s1"]
-	if !ok || msg == "" {
-		t.Fatalf("expected an explaining error recorded for s1, got %q ok=%v", msg, ok)
-	}
-	if want := "returned 2 path(s)"; !strings.Contains(msg, want) {
-		t.Fatalf("recorded error %q should mention %q", msg, want)
+	if msg, ok := store.recorded["s1"]; ok {
+		t.Fatalf("no error should be recorded when advancing past unresolvable paths, got %q", msg)
 	}
 	if len(store.events) != 1 {
 		t.Fatalf("expected one finished event, got %d", len(store.events))
 	}
 	event := store.events[0]
-	if event.Status != EventStatusUnresolved {
-		t.Fatalf("event status = %q, want %q", event.Status, EventStatusUnresolved)
+	if event.Status != EventStatusSuccess {
+		t.Fatalf("event status = %q, want %q", event.Status, EventStatusSuccess)
 	}
 	if event.ChangesReturned != 2 || event.ChangesResolved != 0 || event.TargetsClaimed != 0 {
 		t.Fatalf("event counts = %+v", event)
-	}
-	if !strings.Contains(event.ErrorMessage, "returned 2 path(s)") {
-		t.Fatalf("event error = %q", event.ErrorMessage)
 	}
 }
 

@@ -239,28 +239,19 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		//   - returned paths, resolved but all
 		//     suppressed (recently scanned /
 		//     debounced)                           → work is effectively done; advance.
-		//   - returned paths AND NOTHING resolved  → do NOT advance. This is the
-		//     freshly-enabled-source state (path_rewrites not configured yet); the
-		//     incoming paths don't map to any Silo library folder. Advancing here
-		//     would skip those imports forever. Surface why so the operator can fix
-		//     the rewrites, then a later poll re-reads the same window and resolves.
+		//   - returned paths AND NOTHING resolved  → advance and warn. Filesystem
+		//     watchers (e.g. CephFS) observe the entire volume and will return paths
+		//     from folders that are not registered as Silo libraries. Stalling here
+		//     permanently blocks autoscan for every future poll. Log a warning so
+		//     the operator can investigate, but advance so the queue keeps moving.
 		// (Some-but-not-all resolving counts as resolved — the unresolved paths are
 		// legitimately outside Silo's libraries, so advancing is correct.)
 		//
 		// NOTE: len(targets)==0 alone is NOT misconfiguration — paths can resolve
-		// yet be fully suppressed. Gate the error on resolvedAny, not targets.
+		// yet be fully suppressed. Gate the warning on resolvedAny, not targets.
 		if len(changes) > 0 && !resolvedAny {
-			msg := fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — check this source's path rewrites", len(changes))
-			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
-				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
-			}
-			s.finishEvent(ctx, eventID, EventFinish{
-				Status:          EventStatusUnresolved,
-				ChangesReturned: len(changes),
-				ErrorMessage:    msg,
-				MarkerAfter:     marker,
-			})
-			continue // do NOT advance marker
+			slog.WarnContext(ctx, "autoscan: returned paths matched no library folder — advancing marker",
+				"source_id", src.ID, "changes", len(changes))
 		}
 		if aerr := s.store.AdvanceMarker(ctx, src.ID, next); aerr != nil {
 			slog.WarnContext(ctx, "autoscan: advance marker failed", "source_id", src.ID, "err", aerr)
