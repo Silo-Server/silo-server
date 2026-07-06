@@ -1,6 +1,7 @@
 package abs
 
 import (
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,19 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+// maxUnpaginatedAuthors / maxUnpaginatedSeries clamp the "return all" forms
+// of /libraries/{id}/authors and /libraries/{id}/series. Real ABS returns the
+// complete set and typical libraries stay well under these bounds, but silo
+// serves libraries real ABS never sees (250k+ books → ~98k authors, ~32k
+// series) and an unbounded response crashes non-paginating mobile clients.
+// Series is bounded tighter because each row embeds up to four minified book
+// objects for the cover stack. Truncation is logged at Warn so it is
+// observable instead of silent.
+const (
+	maxUnpaginatedAuthors = 10000
+	maxUnpaginatedSeries  = 2000
 )
 
 // ---------------------------------------------------------------------------
@@ -335,9 +349,15 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	}
 	// Real ABS returns ALL authors for a non-paginated request (no default
 	// cap) — clients like the official app fetch the whole list once and
-	// scroll it locally, so a server-side default limit silently truncates
-	// the Authors page. limit=0 means "return all".
+	// scroll it locally, so a small server-side default limit silently
+	// truncates the Authors page. limit=0 means "return all", clamped by
+	// the guardrail below: at silo scale (a 250k-book library carries ~98k
+	// authors) a truly unbounded response crashes non-paginating mobile
+	// clients, which real ABS never has to survive.
 	limit, page := readPagedQuery(r, 0)
+	if limit <= 0 || limit > maxUnpaginatedAuthors {
+		limit = maxUnpaginatedAuthors
+	}
 	sortBy := r.URL.Query().Get("sort")
 	sortDesc := r.URL.Query().Get("desc") == "1"
 	access, _, err := h.accessFilterFromRequest(r)
@@ -356,6 +376,10 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "list authors: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if total > len(pageAuthors) && r.URL.Query().Get("page") == "" {
+		slog.Warn("abs authors truncated for non-paginated request",
+			"library", lib.ID, "total", total, "returned", len(pageAuthors))
 	}
 	libID := audiobookLibraryID(lib)
 	results := make([]map[string]any, 0, len(pageAuthors))
@@ -385,8 +409,12 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Like /authors: real ABS serves the full set when the client doesn't
-	// paginate; a server-side default limit truncates the Series page.
+	// paginate; a small server-side default limit truncates the Series page.
+	// Clamped by the same guardrail (see maxUnpaginatedSeries).
 	limit, page := readPagedQuery(r, 0)
+	if limit <= 0 || limit > maxUnpaginatedSeries {
+		limit = maxUnpaginatedSeries
+	}
 	access, _, err := h.accessFilterFromRequest(r)
 	if err != nil {
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
@@ -402,6 +430,10 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "list series: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if total > len(pageSeries) && r.URL.Query().Get("page") == "" {
+		slog.Warn("abs series truncated for non-paginated request",
+			"library", lib.ID, "total", total, "returned", len(pageSeries))
 	}
 	libID := audiobookLibraryID(lib)
 	baseURL := h.absBaseURL(r)
