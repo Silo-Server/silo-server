@@ -1625,6 +1625,47 @@ export function VideoPlayer({
     subtitleSettings.position,
   );
 
+  // Measure the bottom control bar so bottom-anchored subtitles can lift just
+  // above it while it's visible (YouTube-style) instead of hiding behind it.
+  // The base offset scales with the player, but the bar is a roughly fixed
+  // pixel height, so measure rather than hardcode. The .player-hud element is
+  // laid out even while the controls are faded out, so its height is readable
+  // regardless of visibility.
+  const [controlBarHeight, setControlBarHeight] = useState(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || isDetached) return;
+    const hud = container.querySelector<HTMLElement>(".player-hud");
+    if (!hud) return;
+    const update = () => setControlBarHeight(hud.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(hud);
+    return () => ro.disconnect();
+  }, [isDetached, isPlayerReady, displayMode]);
+
+  // Bottom-anchored cues rise to clear the control bar (plus a small gap) only
+  // while the bar is up and only in the main foreground player; top-anchored
+  // cues never collide with the bottom HUD, so they don't move.
+  const SUBTITLE_HUD_GAP = 12;
+  const baseSubtitleBottomPx = (() => {
+    const raw = subtitlePositionStyle.bottom;
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+    if (typeof raw === "string" && raw.endsWith("px")) {
+      const parsed = parseFloat(raw);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  })();
+  const subtitlesLifted =
+    displayMode === "foreground" &&
+    controlsVisible &&
+    subtitleSettings.position !== "top" &&
+    controlBarHeight > 0;
+  const subtitleLiftPx = subtitlesLifted
+    ? Math.max(0, controlBarHeight + SUBTITLE_HUD_GAP - baseSubtitleBottomPx)
+    : 0;
+
   // -- Subtitle cue matching --
   // Returns active cue texts for custom rendering instead of native TextTrack
   // (which has browser bugs with stale cues persisting after seek).
@@ -2342,14 +2383,20 @@ export function VideoPlayer({
 
       {/* Subtitle overlay — suppressed when JASSUB (ASS) is rendering; bitmap
           tracks are burned into the video server-side and never reach here.
-          z-[5] keeps cues above the video but BELOW the controls layer (z-10)
-          so the bottom HUD paints over them instead of the cues cluttering the
-          control bar. When controls are hidden the whole HUD layer is
-          opacity-0, so the cues are fully visible. */}
+          While the control bar is up, bottom-anchored cues rise just above it
+          (subtitleLiftPx) so they never overlap the HUD; they settle back when
+          it hides. z-[5] keeps cues below the controls layer (z-10) as a
+          safety, so any residual overlap tucks behind the bar rather than
+          painting on top of it. */}
       {!isDetached && !isASSActive && activeCueTexts.length > 0 && (
         <div
           className="pointer-events-none absolute inset-x-0 z-[5] flex flex-col items-center gap-1"
-          style={{ ...containerStyle, ...subtitlePositionStyle }}
+          style={{
+            ...containerStyle,
+            ...subtitlePositionStyle,
+            transform: `translateY(-${subtitleLiftPx}px)`,
+            transition: "transform 200ms ease",
+          }}
         >
           {activeCueTexts.map((text, i) => (
             <span
