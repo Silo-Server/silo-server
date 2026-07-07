@@ -21,6 +21,7 @@ export type MetadataProvider = {
   capability_id: string;
   slug: string;
   defaultPriority: Record<string, number>;
+  defaultEnabled: boolean;
 };
 
 // metadataProvidersFromInstallations flattens enabled plugin installations into
@@ -44,11 +45,18 @@ export function metadataProvidersFromInstallations(
           number
         >) ??
         {};
+      // Same precedence and fail-open rule as the server's extractDefaultEnabled:
+      // top-level flag wins over the "metadata" envelope, and anything that is
+      // not literally boolean false means enabled.
+      const rawEnabled =
+        cap.metadata?.default_enabled ??
+        (cap.metadata?.metadata as Record<string, unknown> | undefined)?.default_enabled;
       result.push({
         plugin_installation_id: inst.id,
         capability_id: cap.id,
         slug: cap.id,
         defaultPriority: dp,
+        defaultEnabled: typeof rawEnabled === "boolean" ? rawEnabled : true,
       });
     }
   }
@@ -96,23 +104,47 @@ export function contentLevelLabel(level: string): string {
     .join(" ");
 }
 
-function buildDefaultLevelChains(
+// A provider that declares a non-empty default_priority map enumerates the
+// content levels it supports; one that declares none is a legacy catch-all,
+// eligible everywhere but ranked after every declaring provider.
+const LEGACY_CATCH_ALL_PRIORITY = 999;
+
+function declaredPriority(provider: MetadataProvider, level: string): number {
+  const p = provider.defaultPriority[level] ?? 0;
+  return p > 0 ? p : 0;
+}
+
+function providerSupportsLevel(provider: MetadataProvider, level: string): boolean {
+  if (Object.keys(provider.defaultPriority).length === 0) return true;
+  return declaredPriority(provider, level) > 0;
+}
+
+// buildDefaultLevelChains mirrors the server's seeding rules
+// (buildSeededChainEntries in internal/api/handlers/libraries.go): a chain the
+// user customizes before saving replaces the server-seeded one, so the two must
+// agree. Providers that don't handle a level are dropped outright; a declaring
+// provider is ranked by its declared priority and enabled unless it opted out
+// via default_enabled; a legacy catch-all is parked last and disabled.
+export function buildDefaultLevelChains(
   metadataProviders: MetadataProvider[],
   libraryType: string,
 ): Record<string, LevelChainItem[]> {
   const defaultChain: Record<string, LevelChainItem[]> = {};
   for (const level of contentLevelsForType(libraryType)) {
-    const sorted = [...metadataProviders].sort((a, b) => {
-      const pa = a.defaultPriority[level] ?? 0;
-      const pb = b.defaultPriority[level] ?? 0;
-      if ((pa === 0) !== (pb === 0)) return pa === 0 ? 1 : -1;
-      return pa - pb;
-    });
-    defaultChain[level] = sorted.map((provider) => ({
+    const ranked = metadataProviders
+      .filter((provider) => providerSupportsLevel(provider, level))
+      .map((provider) => {
+        const priority = declaredPriority(provider, level);
+        return priority > 0
+          ? { provider, priority, enabled: provider.defaultEnabled }
+          : { provider, priority: LEGACY_CATCH_ALL_PRIORITY, enabled: false };
+      })
+      .sort((a, b) => a.priority - b.priority);
+    defaultChain[level] = ranked.map(({ provider, enabled }) => ({
       plugin_installation_id: provider.plugin_installation_id,
       capability_id: provider.capability_id,
       provider_slug: provider.slug,
-      enabled: (provider.defaultPriority[level] ?? 0) > 0,
+      enabled,
     }));
   }
   return defaultChain;
