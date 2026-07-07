@@ -955,6 +955,10 @@ export interface VersionVideoTrack {
   title?: string;
   codec?: string;
   dolby_vision?: string;
+  dv_profile?: number;
+  dv_bl_compat_id?: number;
+  dv_el_present?: boolean;
+  hdr10_plus?: boolean;
   profile?: string;
   level?: number;
   width?: number;
@@ -964,6 +968,7 @@ export interface VersionVideoTrack {
   frame_rate?: string;
   bitrate?: number;
   video_range?: string;
+  video_range_type?: string;
   color_primaries?: string;
   color_space?: string;
   color_transfer?: string;

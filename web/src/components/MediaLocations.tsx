@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Copy } from "lucide-react";
+import { Copy, Info } from "lucide-react";
 import { toast } from "sonner";
 import type { FileVersion } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ interface MediaLocationsProps {
   emptyMessage?: string;
   compact?: boolean;
   summaryBuilder?: (version: FileVersion) => string;
+  onShowMediaInfo?: (fileId: number) => void;
 }
 
 interface MediaLocationEntry {
@@ -95,6 +96,7 @@ export default function MediaLocations({
   emptyMessage,
   compact = false,
   summaryBuilder = buildQualitySummary,
+  onShowMediaInfo,
 }: MediaLocationsProps) {
   const locations = useMemo(
     () => deriveMediaLocationsWithSummary(versions, summaryBuilder),
@@ -144,19 +146,34 @@ export default function MediaLocations({
                 </div>
               </div>
 
-              {location.folderPath ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="text-muted-foreground hover:text-foreground h-7 w-7 shrink-0"
-                  onClick={() => copyText(location.folderPath, "Copied folder path")}
-                  title="Copy full folder path"
-                  aria-label={`Copy full folder path for ${location.fileName}`}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-              ) : null}
+              <div className="flex shrink-0 items-center gap-1">
+                {onShowMediaInfo ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-foreground h-7 w-7"
+                    onClick={() => onShowMediaInfo(location.fileId)}
+                    title="View media info"
+                    aria-label={`View media info for ${location.fileName}`}
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
+                {location.folderPath ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground hover:text-foreground h-7 w-7"
+                    onClick={() => copyText(location.folderPath, "Copied folder path")}
+                    title="Copy full folder path"
+                    aria-label={`Copy full folder path for ${location.fileName}`}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </div>
         ))}

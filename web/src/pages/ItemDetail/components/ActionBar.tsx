@@ -7,6 +7,7 @@ import {
   Captions,
   Download,
   FolderPlus,
+  Info,
   Loader2,
   MoreVertical,
   Play,
@@ -76,6 +77,7 @@ interface ActionBarProps {
   onEditMetadata?: () => void;
   onMatchItem?: () => void;
   onSplitItem?: () => void;
+  onShowMediaInfo?: () => void;
   isAdmin?: boolean;
   canCurateMetadata?: boolean;
   /** Enables the "Edit Markers" action (playable items only: movies/episodes). */
@@ -128,6 +130,7 @@ export default function ActionBar({
   onEditMetadata,
   onMatchItem,
   onSplitItem,
+  onShowMediaInfo,
   isAdmin = false,
   canCurateMetadata = false,
   canEditMarkers = false,
@@ -240,7 +243,8 @@ export default function ActionBar({
   );
   const hasAdminActions = Boolean(isAdmin && (contentId || onRedetectIntro));
   const hasMetadataActions = Boolean(
-    (canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem)) || showMarkerEditor,
+    (canCurateMetadata && (onRefresh || onEditMetadata || onMatchItem || onShowMediaInfo)) ||
+    showMarkerEditor,
   );
 
   const formattedResumeTime = formatPlaybackTime(resumePositionSeconds ?? 0);
@@ -398,6 +402,12 @@ export default function ActionBar({
             {(hasAdminActions || hasMetadataActions) && (
               <>
                 {hasOverflowActions && <DropdownMenuSeparator />}
+                {canCurateMetadata && onShowMediaInfo && (
+                  <DropdownMenuItem onSelect={onShowMediaInfo}>
+                    <Info className="size-4" />
+                    Media Info
+                  </DropdownMenuItem>
+                )}
                 {isAdmin && contentId && (
                   <DropdownMenuItem
                     onSelect={() =>
