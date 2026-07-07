@@ -139,6 +139,15 @@ type OverlaySummary struct {
 	MultiSub      bool   `json:"multi_sub,omitempty"`   // ≥1 subtitle track (embedded or external)
 }
 
+// PrimaryDVProfile returns the Dolby Vision profile of the first video
+// track (0 when none/unprobed).
+func (f *MediaFile) PrimaryDVProfile() int {
+	if f == nil || len(f.VideoTracks) == 0 {
+		return 0
+	}
+	return f.VideoTracks[0].DVProfile
+}
+
 // VideoTrack represents a probed video stream stored as JSONB.
 type VideoTrack struct {
 	Title           string `json:"title,omitempty"`

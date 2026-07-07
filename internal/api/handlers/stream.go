@@ -133,7 +133,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				seekSeconds = s
 			}
 		}
-		if err := playback.ServeRemux(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex); err != nil {
+		if err := playback.ServeRemux(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile()); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 

@@ -115,7 +115,7 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*source); ok {
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
-		_ = playback.ServeRemux(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex)
+		_ = playback.ServeRemux(w, r, file.FilePath, "mp4", seekSeconds, source.TranscodeAudio, audioTrackIndex, file.PrimaryDVProfile())
 	default:
 		_ = playback.ServeDirectPlay(w, r, file.FilePath)
 	}

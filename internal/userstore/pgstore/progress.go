@@ -62,10 +62,12 @@ func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, media
 		position = 0 // match MarkWatched() — completed rows hold no resume point
 	}
 	// `completed` is a one-way watched latch; position resets to 0 on
-	// completion so `position_seconds > 0` means "has a resume point". A
-	// rewatch heartbeat on a completed row therefore re-enters Continue
-	// Watching through plain GREATEST (stored position is 0) while the
-	// watched flag survives.
+	// completion so `position_seconds > 0` means "has a resume point".
+	// Position itself is last-write-wins: a deliberate backward seek is a
+	// legitimate resume point (the old GREATEST clamp made "rewind and stop"
+	// resume at the stale, later position on every client). Rewatching a
+	// completed row still re-enters Continue Watching (stored position is 0,
+	// any heartbeat replaces it) while the watched flag survives.
 	_, err := s.pool.Exec(ctx, `
 		WITH visible AS (
 			SELECT
@@ -85,7 +87,7 @@ func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, media
 		FROM visible
 		ON CONFLICT(user_id, profile_id, media_item_id) DO UPDATE SET
 			position_seconds = CASE WHEN excluded.completed THEN 0
-				ELSE GREATEST(excluded.position_seconds, user_watch_progress.position_seconds) END,
+				ELSE excluded.position_seconds END,
 			duration_seconds = excluded.duration_seconds,
 			completed = CASE WHEN excluded.completed
 				THEN TRUE ELSE user_watch_progress.completed END,

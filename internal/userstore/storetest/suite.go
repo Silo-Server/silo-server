@@ -229,13 +229,15 @@ func testProgress(t *testing.T, newStore func(t *testing.T) userstore.UserStore)
 		t.Errorf("PositionSeconds after forward = %v, want 1000", wp.PositionSeconds)
 	}
 
-	// UpdateProgress backward: should NOT go backward
+	// UpdateProgress backward: last write wins. A deliberate backward seek is
+	// a legitimate resume point — clamping to the furthest position made
+	// "rewind and stop" resume at the old, later spot on every client.
 	if err := store.UpdateProgress(ctx, "p1", "movie-1", 600, 7200, noThreshold); err != nil {
 		t.Fatalf("UpdateProgress(backward): %v", err)
 	}
 	wp, _ = store.GetProgress(ctx, "p1", "movie-1")
-	if wp.PositionSeconds != 1000 {
-		t.Errorf("PositionSeconds after backward = %v, want 1000 (unchanged)", wp.PositionSeconds)
+	if wp.PositionSeconds != 600 {
+		t.Errorf("PositionSeconds after backward = %v, want 600 (last write wins)", wp.PositionSeconds)
 	}
 
 	// SetProgress backward: should work (unconditional)

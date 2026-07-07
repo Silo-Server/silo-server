@@ -44,7 +44,12 @@ type RemuxSession struct {
 // pipe:1 for stdout output.
 // When transcodeAudio is true, video is copied but audio is transcoded to
 // stereo AAC (handles cases like DTS/TrueHD that browsers cannot decode).
-func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int) []string {
+// dvProfile is the file's Dolby Vision profile (0 = none). Profile 7 remuxes
+// strip DV RPUs: the enhancement layer is dropped by the video map below, so
+// the RPUs would dangle — stripping yields a clean HDR10 base layer (the
+// Apple-parity fallback for devices without a P7 decoder). Profile 8 RPUs
+// stay: the base layer is self-contained and DV clients can render it.
+func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) []string {
 	args := []string{
 		"-nostdin",
 		"-hide_banner",
@@ -88,6 +93,10 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 	}
 	args = append(args, "-sn", "-dn")
 
+	if dvProfile == 7 {
+		args = append(args, "-bsf:v", "dovi_rpu=strip=1")
+	}
+
 	if transcodeAudio {
 		// Video copy + stereo AAC encode is effectively single-threaded work.
 		// ffmpeg's default auto-threading spawns one filter thread per CPU
@@ -122,11 +131,11 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 //
 // When transcodeAudio is true video is copied but audio is transcoded to AAC.
 // The caller must call Close() when done to clean up resources.
-func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int) (*RemuxSession, error) {
+func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) (*RemuxSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	bin := ffmpegBinary()
-	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex)
+	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -182,7 +191,7 @@ func containerMIME(format string) string {
 // response writer. The response is streamed (chunked transfer) since the
 // total size is not known in advance.
 // When transcodeAudio is true, audio is transcoded to AAC while video is copied.
-func ServeRemux(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int) error {
+func ServeRemux(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) error {
 	// Check file exists before starting ffmpeg to return a proper 404.
 	// Headers must be written before streaming begins, so we can't detect
 	// ffmpeg errors after WriteHeader(200) has been sent.
@@ -195,7 +204,7 @@ func ServeRemux(w http.ResponseWriter, r *http.Request, filePath, outputFormat s
 		return err
 	}
 
-	session, err := StartRemux(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex)
+	session, err := StartRemux(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err
