@@ -1201,7 +1201,14 @@ func (h *ItemsHandler) toEpisodeResponseWithFallback(r *http.Request, ep *models
 func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback) (episodeResponse, string) {
 	stillPath := ep.StillPath
 	stillThumbhash := ep.StillThumbhash
-	if strings.TrimSpace(stillPath) == "" && strings.TrimSpace(fallback.Path) != "" {
+	// Only the episode's own still is a "still" image type (which generates
+	// the w780/w500 variants). The fallback is the parent series' backdrop or
+	// poster, which generate different variants — applying the still's w780
+	// (and its w500 resolver fallback) to a backdrop 404s, since backdrops
+	// only have w1920/w1280/w300. Track which we're using so the card path
+	// keeps the fallback on an existing variant.
+	usingOwnStill := strings.TrimSpace(stillPath) != ""
+	if !usingOwnStill && strings.TrimSpace(fallback.Path) != "" {
 		stillPath = fallback.Path
 		stillThumbhash = fallback.Thumbhash
 	}
@@ -1222,6 +1229,11 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback) (ep
 		resp.AirDate = ep.AirDate.Format("2006-01-02")
 	}
 
+	// w780 only for the episode's own still; the series-artwork fallback keeps
+	// the safe w300 card variant that backdrops and posters always generate.
+	if usingOwnStill {
+		return resp, episodeStillPath(stillPath)
+	}
 	return resp, cardThumbnailPath(stillPath)
 }
 
@@ -2020,32 +2032,36 @@ func (h *ItemsHandler) userStoreForRequest(r *http.Request) (userstore.UserStore
 	return store, profileID, true
 }
 
-// cardThumbnailPath converts an S3 image path from original to w300 for use in
-// browse/card views (posters, backdrops, and stills at card size).
-// Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned as-is —
-// variant selection is handled at resolution time for plugin paths.
-func cardThumbnailPath(path string) string {
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	// Plugin-prefixed paths pass through — variant handled at resolution time.
+// imageVariantPath rewrites a cached "/original." S3 image path to the given
+// variant. Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned
+// as-is — their variant selection is handled at resolution time.
+func imageVariantPath(path, variant string) string {
 	if strings.Contains(path, "://") {
 		return path
 	}
-	return strings.Replace(path, "/original.", "/w300.", 1)
+	return strings.Replace(path, "/original.", "/"+variant+".", 1)
+}
+
+// cardThumbnailPath converts an S3 image path from original to w300 for use in
+// browse/card views (posters, backdrops, and stills at card size).
+func cardThumbnailPath(path string) string {
+	return imageVariantPath(path, "w300")
+}
+
+// episodeStillPath converts an S3 still path from original to w780 — the
+// largest variant the image cache generates for stills. Episode stills
+// render on large 16:9 cards (the tvOS season view draws them ~920px wide
+// on a 4K panel), where the w300 card thumbnail was a visible 3x upscale.
+// Libraries cached before w780 existed fall back to w500 at resolution
+// time (metadata.PluginImageResolver newVariantFallbacks).
+func episodeStillPath(path string) string {
+	return imageVariantPath(path, "w780")
 }
 
 // featuredPosterPath converts an S3 poster path from original to w500 for
 // featured/hero contexts (displayed at ~220px CSS / 440px retina).
-// Full URLs (TMDB/TVDB) and plugin-prefixed paths are returned as-is.
 func featuredPosterPath(path string) string {
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.Contains(path, "://") {
-		return path
-	}
-	return strings.Replace(path, "/original.", "/w500.", 1)
+	return imageVariantPath(path, "w500")
 }
 
 // featuredBackdropPath converts an S3 backdrop path from original to w1920 for

@@ -4036,10 +4036,11 @@ func imageTypeFromCachedPath(path string) string {
 
 // BackdropVariantPath rewrites a cached "/original." image path to the
 // requested backdrop variant (e.g. "w1280" or "w1920"). Episode "backdrops"
-// are frequently the episode still, which the cache only generates at
-// w500/w300 — so requesting a backdrop width 404s. For still/poster/logo
-// paths this clamps to that type's largest cached variant instead. Full URLs,
-// plugin-prefixed paths, and non-"/original." paths pass through unchanged.
+// are frequently the episode still, which the cache generates at smaller
+// widths than backdrops — so requesting a backdrop width 404s. For
+// still/poster/logo paths this clamps to that type's largest cached variant
+// instead. Full URLs, plugin-prefixed paths, and non-"/original." paths pass
+// through unchanged.
 func BackdropVariantPath(path, desiredVariant string) string {
 	if path == "" || strings.Contains(path, "://") || !strings.Contains(path, "/original.") {
 		return path
@@ -4067,8 +4068,19 @@ func cachedImageVariantKey(imageType, size string) string {
 		}
 		return "w1920"
 	case "logo":
-		return "w500"
-	case "poster", "still":
+		// Largest generated logo variant — 4K TV heroes render logos at
+		// ~1240 physical px. Libraries cached before the ladder grew fall
+		// back to w500 at resolution time (see newVariantFallbacks).
+		return "w1280"
+	case "still":
+		if size == "small" {
+			return "w300"
+		}
+		// Largest generated still variant — 4K TV season views render
+		// episode stills at ~920 physical px. Pre-ladder libraries fall
+		// back to w500 at resolution time (see newVariantFallbacks).
+		return "w780"
+	case "poster":
 		if size == "small" {
 			return "w300"
 		}

@@ -475,17 +475,17 @@ func TestCache_Logo(t *testing.T) {
 	}
 
 	keys := s3.keys()
-	// Expect 2 variants: original, w500 — NO w300 or w1280
-	if len(keys) != 2 {
-		t.Errorf("expected 2 uploaded variants, got %d: %v", len(keys), keys)
+	// Expect 3 variants: original, w1280 (4K TV hero logos), w500 — NO w300
+	if len(keys) != 3 {
+		t.Errorf("expected 3 uploaded variants, got %d: %v", len(keys), keys)
 	}
-	for _, variant := range []string{"original", "w500"} {
+	for _, variant := range []string{"original", "w1280", "w500"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
 	}
-	for _, forbidden := range []string{"w300", "w1280"} {
+	for _, forbidden := range []string{"w300"} {
 		if _, ok := result.VariantPaths[forbidden]; ok {
 			t.Errorf("logo should not have %s variant", forbidden)
 		}
@@ -516,7 +516,7 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 	if result.Thumbhash == "" {
 		t.Fatal("Thumbhash is empty")
 	}
-	for _, variant := range []string{"original", "w500"} {
+	for _, variant := range []string{"original", "w1280", "w500"} {
 		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
 			t.Errorf("missing S3 key %q in %v", want, s3.keys())
