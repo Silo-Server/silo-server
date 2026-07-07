@@ -1,13 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { AudioLines } from "lucide-react";
 import type { PlayerAudioTrack } from "../types";
+import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
 import {
   audioTitle,
   compactAudioMeta,
-  formatChannels,
   formatLanguageName,
 } from "@/pages/ItemDetail/components/versionFormatUtils";
-import { mapAudioLabel } from "@/pages/ItemDetail/components/versionRankingUtils";
 
 interface AudioTrackMenuProps {
   tracks: PlayerAudioTrack[];

@@ -42,7 +42,8 @@ import DetailHero from "./DetailHero";
 import HeroCrewLine from "./components/HeroCrewLine";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
-import { formatFileSize, formatPageCount, metadataLine } from "./components/versionFormatUtils";
+import { formatFileSize } from "@/lib/mediaFormat";
+import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
 
 function genreHref(genre: string, libraryId?: number): string {
   const params = new URLSearchParams();

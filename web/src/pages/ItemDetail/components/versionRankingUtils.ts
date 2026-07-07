@@ -1,16 +1,5 @@
 import type { FileVersion, LeafItemUserData, PlaybackVariant } from "@/api/types";
-
-export function mapAudioLabel(codec: string): string {
-  const lower = codec.toLowerCase();
-  if (lower.includes("atmos")) return "Atmos";
-  if (lower.includes("truehd")) return "TrueHD";
-  if (lower.includes("dts-hd") || lower.includes("dts:x")) return "DTS-HD";
-  if (lower.includes("dts")) return "DTS";
-  if (lower.includes("eac3") || lower.includes("e-ac-3")) return "EAC3";
-  if (lower.includes("aac")) return "AAC";
-  if (lower.includes("flac")) return "FLAC";
-  return codec.toUpperCase();
-}
+import { mapAudioLabel } from "@/lib/mediaFormat";
 
 export const RESOLUTION_RANK: Record<string, number> = {
   "4k": 4,

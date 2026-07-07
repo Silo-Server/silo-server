@@ -9,7 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { formatFileSize } from "@/pages/ItemDetail/components/versionFormatUtils";
+import { formatFileSize } from "@/lib/mediaFormat";
 import { buildDirectDownloadUrl } from "@/hooks/queries/downloads";
 import { buildQualitySummary, sortByResolution } from "@/pages/ItemDetail/components/VersionFlyout";
 

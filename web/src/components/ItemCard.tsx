@@ -9,6 +9,7 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
+import { formatBitrate } from "@/lib/mediaFormat";
 
 const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -38,13 +39,6 @@ function formatRating(value?: number | null, max = 10) {
 
 function formatPercent(value?: number | null) {
   return value != null ? `${value}%` : null;
-}
-
-function formatBitrate(kbps?: number | null) {
-  if (!kbps || kbps <= 0) {
-    return null;
-  }
-  return `${kbps.toLocaleString()} kbps`;
 }
 
 function formatProgress(ratio?: number | null) {
@@ -149,7 +143,7 @@ function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string })
         <>{item.sort_metrics?.resolution || item.overlay_summary?.resolution || defaultLabel}</>
       );
     case "bitrate":
-      return <>{formatBitrate(item.sort_metrics?.bitrate_kbps) ?? defaultLabel}</>;
+      return <>{formatBitrate(item.sort_metrics?.bitrate_kbps ?? undefined) || defaultLabel}</>;
     case "progress":
       return <>{formatProgress(item.sort_metrics?.progress_ratio) ?? defaultLabel}</>;
     case "date_viewed":

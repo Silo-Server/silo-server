@@ -3,7 +3,6 @@ import type { FileVersion } from "@/api/types";
 import {
   resolutionScore,
   audioScore,
-  mapAudioLabel,
   pickBestAttributes,
   RESOLUTION_RANK,
   AUDIO_RANK,
@@ -86,44 +85,6 @@ describe("audioScore", () => {
     expect(audioScore("mp3")).toBe(-1);
     expect(audioScore("")).toBe(-1);
     expect(audioScore("pcm")).toBe(-1);
-  });
-});
-
-describe("mapAudioLabel", () => {
-  it("maps atmos codec strings to Atmos", () => {
-    expect(mapAudioLabel("TrueHD Atmos")).toBe("Atmos");
-    expect(mapAudioLabel("eac3 atmos")).toBe("Atmos");
-  });
-
-  it("maps truehd to TrueHD", () => {
-    expect(mapAudioLabel("truehd")).toBe("TrueHD");
-  });
-
-  it("maps dts-hd and dts:x to DTS-HD", () => {
-    expect(mapAudioLabel("dts-hd")).toBe("DTS-HD");
-    expect(mapAudioLabel("dts:x")).toBe("DTS-HD");
-  });
-
-  it("maps dts to DTS", () => {
-    expect(mapAudioLabel("dts")).toBe("DTS");
-  });
-
-  it("maps eac3 and e-ac-3 to EAC3", () => {
-    expect(mapAudioLabel("eac3")).toBe("EAC3");
-    expect(mapAudioLabel("e-ac-3")).toBe("EAC3");
-  });
-
-  it("maps aac to AAC", () => {
-    expect(mapAudioLabel("aac")).toBe("AAC");
-  });
-
-  it("maps flac to FLAC", () => {
-    expect(mapAudioLabel("flac")).toBe("FLAC");
-  });
-
-  it("uppercases unknown codecs", () => {
-    expect(mapAudioLabel("mp3")).toBe("MP3");
-    expect(mapAudioLabel("opus")).toBe("OPUS");
   });
 });
 

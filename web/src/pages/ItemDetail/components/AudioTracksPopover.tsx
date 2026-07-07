@@ -6,9 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getLanguageName } from "@/player/utils/languageNames";
-import { audioTitle, formatChannels, compactAudioMeta } from "./versionFormatUtils";
+import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { audioTitle, compactAudioMeta } from "./versionFormatUtils";
 import { formatAudioTrackSummary, resolveAudioTrackSelection } from "./prePlaySelection";
-import { mapAudioLabel } from "./versionRankingUtils";
 
 interface AudioTracksPopoverProps {
   version: FileVersion | null;

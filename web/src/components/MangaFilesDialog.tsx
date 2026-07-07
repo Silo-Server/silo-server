@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dialog";
 import { useMangaSeriesFiles } from "@/hooks/queries/catalogRead";
 import { prettifyVolumeLabel } from "@/lib/mangaChapters";
-import { formatFileSize } from "@/pages/ItemDetail/components/versionFormatUtils";
+import { formatFileSize } from "@/lib/mediaFormat";
 
 // fileRowLabel describes the chapter a file backs: its volume token when
 // present, otherwise a chapter form mirroring the series list labels.
