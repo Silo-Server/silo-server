@@ -241,21 +241,31 @@ export default function ItemCard({
                 Ambiguous
               </span>
             )}
-            {item.status === "matched" && overlayPrefs && (
+            {/* Manga cards carry purpose-built status/count chips in both top
+                corners; generic overlays would render underneath them. */}
+            {item.status === "matched" && item.type !== "manga" && overlayPrefs && (
               <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
             )}
-            {mangaStatus && (
-              <span
-                className={`glass-chip absolute top-2.5 left-2.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
-              >
-                {mangaStatus.label}
-              </span>
-            )}
-            {mangaCountLabel && (
-              <span className="glass-chip text-foreground absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
-                <Layers className="size-3" />
-                {mangaCountLabel}
-              </span>
+            {(mangaStatus || mangaCountLabel) && (
+              /* One shared row so the two chips split the card width and
+                 truncate instead of overlapping on narrow cards. */
+              <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5">
+                {mangaStatus ? (
+                  <span
+                    className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
+                  >
+                    {mangaStatus.label}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                {mangaCountLabel && (
+                  <span className="glass-chip text-foreground inline-flex min-w-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-semibold tracking-[0.14em] uppercase">
+                    <Layers className="size-3 shrink-0" />
+                    <span className="truncate">{mangaCountLabel}</span>
+                  </span>
+                )}
+              </div>
             )}
           </div>
         </ViewTransitionLink>

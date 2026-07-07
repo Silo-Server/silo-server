@@ -10,6 +10,7 @@ import {
   buildDefaultPrefs,
   CATEGORY_GROUPS,
   getOverlayDef,
+  isOverlaySuppressed,
   OVERLAY_REGISTRY,
   OVERLAY_PRESETS,
   POSITION_OPTIONS,
@@ -135,12 +136,17 @@ function OverlayToggle({ overlayId, prefs, onUpdate }: OverlayToggleProps) {
   const config = prefs.items[overlayId];
   const preset = getPreset(prefs.preset);
   const resolvedShowIcon = !!def.iconCapable && (config.showIcon ?? preset.preferIcon);
+  const suppressed = config.enabled && isOverlaySuppressed(overlayId, prefs);
 
   return (
     <SettingRow
       label={def.label}
       description={def.description}
-      hint={def.availabilityNote}
+      hint={
+        suppressed
+          ? "Hidden while the combined Resolution + HDR badge is enabled."
+          : def.availabilityNote
+      }
       control={({ id }) => (
         <div className="flex items-center gap-2">
           {def.iconCapable && (

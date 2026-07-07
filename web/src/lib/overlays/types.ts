@@ -117,7 +117,6 @@ export interface OverlayDef {
   iconId?: OverlayIconId; // static icon, when applicable
   defaultAccent?: string; // suggested accent color in palette pickers
   iconCapable: boolean; // whether the icon toggle should appear in settings
-  iconOnly?: boolean; // render icon only (no label) when icon is present
   availabilityNote?: string; // shown when data source isn't wired up yet
   getValue: (data: OverlayData) => string | null;
   getIcon?: (data: OverlayData) => OverlayIconId | null; // dynamic icon by data
@@ -150,3 +149,13 @@ export type OverlayIconId =
   | "atmos"
   | "av1"
   | "tomato";
+
+// Wordmark icons render their text as the mark itself (defined in icons.tsx).
+// When a badge's label says the same thing, the renderer suppresses the label
+// so the badge doesn't read "HDR10 HDR10".
+export const WORDMARK_TEXT: Partial<Record<OverlayIconId, string>> = {
+  hdr: "HDR",
+  hdr10: "HDR10",
+  atmos: "ATMOS",
+  av1: "AV1",
+};

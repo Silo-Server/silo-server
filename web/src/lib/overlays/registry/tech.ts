@@ -4,11 +4,16 @@ import type { OverlayDef, OverlayIconId } from "../types";
 // Tech overlays — derived from the media file (codec, container, resolution,
 // audio properties). All data flows through OverlaySummary on the backend.
 
+// hdrIcon picks the badge icon for a dynamic-range value. Wordmark icons
+// (hdr10, hdr) replace the text label when they spell the same thing (see
+// WORDMARK_TEXT), so they are only returned for values they fully express;
+// HLG has no mark and renders as a plain text label.
 function hdrIcon(value: string | undefined): OverlayIconId | null {
   if (!value) return null;
   if (value.includes("DV")) return "dolby-vision";
-  if (value.includes("HDR10")) return "hdr10";
-  return "hdr";
+  if (value === "HDR10") return "hdr10";
+  if (value === "HDR") return "hdr";
+  return null;
 }
 
 function audioIcon(value: string | undefined): OverlayIconId | null {
@@ -33,7 +38,7 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     defaultEnabled: true,
     iconId: "monitor",
     iconCapable: true,
-    getValue: (d) => d.resolution?.toUpperCase() ?? null,
+    getValue: (d) => prettyResolution(d.resolution),
   },
   {
     id: "hdr",
@@ -60,7 +65,9 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
       const hdr = compactHdrSuffix(d.hdr);
       return hdr ? `${res} ${hdr}` : res;
     },
-    getIcon: (d) => hdrIcon(d.hdr),
+    // Only the DV circle mark works next to a combined label; a wordmark
+    // (HDR10) would visually duplicate the label's HDR suffix.
+    getIcon: (d) => (d.hdr?.includes("DV") ? "dolby-vision" : null),
   },
   {
     id: "audio",

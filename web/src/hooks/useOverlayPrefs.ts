@@ -45,10 +45,15 @@ export function useOverlayPrefs() {
     [raw, setSetting],
   );
 
+  // While either query is in flight, report null prefs instead of built-in
+  // defaults: rendering defaults first would flash badges that vanish (or
+  // change) the moment the user's own config or the admin kill switch loads.
+  const isLoading = userLoading || configLoading;
+
   return {
-    prefs: enabled ? prefs : null,
+    prefs: enabled && !isLoading ? prefs : null,
     setPrefs,
-    isLoading: userLoading || configLoading,
+    isLoading,
     enabled,
   };
 }

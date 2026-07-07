@@ -47,9 +47,9 @@ const LUCIDE_ICONS: Partial<Record<OverlayIconId, LucideIcon>> = {
 
 function HDRMark(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 24 12" fill="currentColor" {...props}>
+    <svg viewBox="0 0 26 12" fill="currentColor" {...props}>
       <text
-        x="12"
+        x="13"
         y="9"
         fontSize="10"
         fontWeight="900"
@@ -64,9 +64,9 @@ function HDRMark(props: SVGProps<SVGSVGElement>) {
 
 function HDR10Mark(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 32 12" fill="currentColor" {...props}>
+    <svg viewBox="0 0 40 12" fill="currentColor" {...props}>
       <text
-        x="16"
+        x="20"
         y="9"
         fontSize="10"
         fontWeight="900"
@@ -89,9 +89,9 @@ function DolbyVisionMark(props: SVGProps<SVGSVGElement>) {
 
 function AtmosMark(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 28 12" fill="currentColor" {...props}>
+    <svg viewBox="0 0 40 12" fill="currentColor" {...props}>
       <text
-        x="14"
+        x="20"
         y="9"
         fontSize="9"
         fontWeight="900"
@@ -107,9 +107,9 @@ function AtmosMark(props: SVGProps<SVGSVGElement>) {
 
 function AV1Mark(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 20 12" fill="currentColor" {...props}>
+    <svg viewBox="0 0 24 12" fill="currentColor" {...props}>
       <text
-        x="10"
+        x="12"
         y="9"
         fontSize="10"
         fontWeight="900"

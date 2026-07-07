@@ -1,10 +1,4 @@
-import {
-  OVERLAY_POSITIONS,
-  OVERLAY_REGISTRY,
-  OverlayIcon,
-  getPreset,
-  isOverlaySuppressed,
-} from "@/lib/overlays";
+import { OverlayIcon, WORDMARK_TEXT, getPreset, orderedOverlaysForPosition } from "@/lib/overlays";
 import type {
   CardOverlayPrefs,
   OverlayData,
@@ -14,19 +8,9 @@ import type {
   OverlayPreset,
 } from "@/lib/overlays";
 
-function positionClasses(pos: OverlayPosition, variant: "poster" | "wide"): string {
-  const bottom = variant === "wide" ? "bottom-6" : "bottom-2";
-  switch (pos) {
-    case "top-left":
-      return "top-2 left-2 items-start";
-    case "top-right":
-      return "top-2 right-2 items-end";
-    case "bottom-left":
-      return `${bottom} left-2 items-start`;
-    case "bottom-right":
-      return `${bottom} right-2 items-end`;
-  }
-}
+// Corner stacks render at most this many badges; anything further down the
+// user's order is dropped rather than colliding with the opposite corner.
+const MAX_BADGES_PER_CORNER = 3;
 
 interface CardOverlaysProps {
   data: OverlayData;
@@ -61,47 +45,93 @@ function resolveBadge(
   };
 }
 
+// A wordmark icon (HDR10, ATMOS, ...) spells its text as the mark itself; when
+// the label says the same thing, showing both reads "HDR10 HDR10".
+function labelRedundantWithIcon(badge: ResolvedBadge): boolean {
+  if (!badge.iconId) return false;
+  const mark = WORDMARK_TEXT[badge.iconId];
+  return mark !== undefined && mark.toLowerCase() === badge.label.trim().toLowerCase();
+}
+
+function BadgeStack({
+  badges,
+  align,
+  preset,
+  extraClass = "",
+}: {
+  badges: ResolvedBadge[];
+  align: "start" | "end";
+  preset: OverlayPreset;
+  extraClass?: string;
+}) {
+  return (
+    <div
+      className={`flex min-w-0 flex-col ${align === "start" ? "items-start" : "items-end"} ${preset.gapClass} ${extraClass}`}
+    >
+      {badges.map((badge) => (
+        <span
+          key={badge.def.id}
+          className={`inline-flex max-w-full items-center gap-1 ${preset.badgeClass}`}
+          style={preset.badgeStyle(badge.accentColor)}
+        >
+          {badge.iconId && (
+            <OverlayIcon iconId={badge.iconId} size={preset.iconSize} className="shrink-0" />
+          )}
+          {!labelRedundantWithIcon(badge) && <span className="truncate">{badge.label}</span>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Each card edge renders as ONE flex row holding the left and right corner
+// stacks. Sharing a row lets flexbox divide the card width between opposing
+// corners (min-w-0 + truncate), so wide badges shrink instead of overlapping.
 export default function CardOverlays({ data, prefs, variant = "poster" }: CardOverlaysProps) {
   const preset = getPreset(prefs.preset);
-  const groups = new Map<OverlayPosition, ResolvedBadge[]>();
+  const resolve = (pos: OverlayPosition): ResolvedBadge[] =>
+    orderedOverlaysForPosition(prefs, pos)
+      .map((def) => {
+        const config = prefs.items[def.id];
+        return resolveBadge(def, data, preset, config?.accentColor, config?.showIcon);
+      })
+      .filter((badge): badge is ResolvedBadge => badge !== null)
+      .slice(0, MAX_BADGES_PER_CORNER);
 
-  for (const def of OVERLAY_REGISTRY) {
-    const config = prefs.items[def.id];
-    if (!config?.enabled) continue;
-    if (isOverlaySuppressed(def.id, prefs)) continue;
-    const badge = resolveBadge(def, data, preset, config.accentColor, config.showIcon);
-    if (!badge) continue;
-    const list = groups.get(config.position) ?? [];
-    list.push(badge);
-    groups.set(config.position, list);
-  }
-
-  if (groups.size === 0) return null;
+  const topLeft = resolve("top-left");
+  const topRight = resolve("top-right");
+  const bottomLeft = resolve("bottom-left");
+  const bottomRight = resolve("bottom-right");
+  const wide = variant === "wide";
 
   return (
     <>
-      {OVERLAY_POSITIONS.map((pos) => {
-        const badges = groups.get(pos);
-        if (!badges?.length) return null;
-
-        return (
-          <div
-            key={pos}
-            className={`pointer-events-none absolute z-10 flex flex-col ${preset.gapClass} ${positionClasses(pos, variant)}`}
-          >
-            {badges.map((badge) => (
-              <span
-                key={badge.def.id}
-                className={`inline-flex items-center gap-1 ${preset.badgeClass}`}
-                style={preset.badgeStyle(badge.accentColor)}
-              >
-                {badge.iconId && <OverlayIcon iconId={badge.iconId} size={preset.iconSize} />}
-                {!badge.def.iconOnly && badge.label}
-              </span>
-            ))}
-          </div>
-        );
-      })}
+      {(topLeft.length > 0 || topRight.length > 0) && (
+        <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-start justify-between gap-2">
+          <BadgeStack badges={topLeft} align="start" preset={preset} />
+          <BadgeStack badges={topRight} align="end" preset={preset} />
+        </div>
+      )}
+      {(bottomLeft.length > 0 || bottomRight.length > 0) && (
+        <div className="pointer-events-none absolute inset-x-2 bottom-2 z-10 flex items-end justify-between gap-2">
+          {/* Wide cards keep the bottom edge clear for the progress bar. */}
+          <BadgeStack
+            badges={bottomLeft}
+            align="start"
+            preset={preset}
+            extraClass={wide ? "mb-4" : ""}
+          />
+          {/* The card menu button (MediaItemMenu) owns the bottom-right
+              corner — always visible on touch devices — so this stack sits
+              above it. */}
+          <BadgeStack
+            badges={bottomRight}
+            align="end"
+            preset={preset}
+            extraClass={wide ? "mb-12" : "mb-10"}
+          />
+        </div>
+      )}
     </>
   );
 }
