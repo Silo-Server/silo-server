@@ -213,4 +213,44 @@ describe("useSubtitleTracks", () => {
     // Reset dropped the old window's cues and loaded the new window's.
     await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["late"]));
   });
+
+  it("rebuilds the track when the stream restarts (generation bump)", async () => {
+    // Fresh response per call: vttResponse's streamed body is single-use, and
+    // the rebuild issues a second fetch.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nhi\n\n")),
+    );
+
+    const videoRef = makeVideoRef(1);
+    const anchorRef = { current: 0 };
+    const durationRef = { current: 7200 };
+    const { rerender } = renderHook(
+      ({ generation }) =>
+        useSubtitleTracks(
+          videoRef,
+          [srtTrack],
+          1,
+          0,
+          0,
+          durationRef,
+          anchorRef,
+          undefined,
+          null,
+          generation,
+        ),
+      { initialProps: { generation: 0 } },
+    );
+
+    await waitFor(() => expect(createdTracks).toHaveLength(1));
+    await waitFor(() => expect(createdTracks[0]!.cues).toHaveLength(1));
+
+    // A transcode restart (e.g. selecting a text track that turns off PGS
+    // burn-in) reloads the <video> element and orphans the track built moments
+    // earlier; a generation bump must rebuild it against the new stream so the
+    // text subtitles still render.
+    rerender({ generation: 1 });
+
+    await waitFor(() => expect(createdTracks).toHaveLength(2));
+    await waitFor(() => expect(createdTracks[1]!.cues).toHaveLength(1));
+  });
 });

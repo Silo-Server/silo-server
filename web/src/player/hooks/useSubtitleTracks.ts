@@ -98,6 +98,16 @@ export function useSubtitleTracks(
   // Identifies the current live translation job. Changing it (a new job) rebuilds
   // the track and resets the dedup set so cues from a prior run never linger.
   liveTrackKey?: string | null,
+  // Bumped whenever the underlying media stream is (re)started — a quality,
+  // audio, or subtitle-burn-in switch tears down the <video> element and
+  // reloads it. A programmatic TextTrack built moments before that reload is
+  // orphaned by the browser (it survives quality switches only because it was
+  // built against an already-stable stream). Changing this rebuilds the track
+  // against the settled new stream, so selecting a text track in the same
+  // action that restarts the transcode (turning off bitmap burn-in) still
+  // renders. The initial stream does not bump it, leaving session start on the
+  // existing activeUrl-driven build.
+  streamGeneration = 0,
 ): string[] {
   const [activeCueTexts, setActiveCueTexts] = useState<string[]>([]);
 
@@ -362,8 +372,10 @@ export function useSubtitleTracks(
     // `subtitleDelayMs` and `streamOriginSeconds` are intentionally excluded —
     // nudging delay or remapping the timeline must not tear down and refetch
     // the track. The update effects below shift existing cues in place instead.
+    // `streamGeneration` IS included: a stream restart reloads the <video>
+    // element and orphans the current track, so it must be rebuilt.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeUrl, activeCodec, activeLang, activeIsLive, liveTrackKey, videoRef]);
+  }, [activeUrl, activeCodec, activeLang, activeIsLive, liveTrackKey, streamGeneration, videoRef]);
 
   // Re-base already-loaded cues when the media timeline remaps — e.g. a
   // copy-mode session restarting at a new position after an out-of-window
