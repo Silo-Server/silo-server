@@ -1,9 +1,11 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +16,9 @@ import (
 var (
 	resolvedFFmpegPath string
 	ffmpegOnce         sync.Once
+
+	doviRPUAvailable bool
+	doviRPUOnce      sync.Once
 )
 
 // ffmpegBinary returns the path to the ffmpeg binary.
@@ -28,6 +33,32 @@ func ffmpegBinary() string {
 		resolvedFFmpegPath = "ffmpeg"
 	})
 	return resolvedFFmpegPath
+}
+
+// supportsDoviRPUFilter reports whether the resolved ffmpeg binary ships the
+// dovi_rpu bitstream filter (FFmpeg 7.1+). Probed once per process.
+func supportsDoviRPUFilter() bool {
+	doviRPUOnce.Do(func() {
+		out, err := exec.Command(ffmpegBinary(), "-hide_banner", "-bsfs").Output()
+		doviRPUAvailable = err == nil && bytes.Contains(out, []byte("dovi_rpu"))
+		if !doviRPUAvailable {
+			slog.Warn("ffmpeg lacks the dovi_rpu bitstream filter (needs FFmpeg 7.1+); " +
+				"Dolby Vision profile 7 remuxes will keep their dangling dual-layer RPUs")
+		}
+	})
+	return doviRPUAvailable
+}
+
+// remuxDVProfile neutralizes a Dolby Vision profile the local ffmpeg cannot
+// handle. Profile 7 is the only profile that triggers an RPU strip in
+// buildRemuxArgs; when the dovi_rpu filter is unavailable the remux must
+// still start (an unknown bitstream filter aborts ffmpeg immediately), so
+// fall back to the pre-strip behavior instead of failing playback.
+func remuxDVProfile(dvProfile int, canStripRPU bool) int {
+	if dvProfile == 7 && !canStripRPU {
+		return 0
+	}
+	return dvProfile
 }
 
 // RemuxSession represents a running ffmpeg remux process that copies
@@ -135,7 +166,8 @@ func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds 
 	ctx, cancel := context.WithCancel(ctx)
 
 	bin := ffmpegBinary()
-	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile)
+	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex,
+		remuxDVProfile(dvProfile, supportsDoviRPUFilter()))
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()

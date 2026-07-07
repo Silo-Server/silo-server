@@ -777,6 +777,13 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	if session == nil || session.DisableProgressPersistence {
 		return
 	}
+	// Position 0 carries no resume information (mirrors persistStopAndHistory
+	// and the jellycompat report path). Progress is last-write-wins, so an
+	// early zero heartbeat — e.g. before a client finishes seeking to its
+	// resume point — must not wipe the stored resume position.
+	if session.Position <= 0 {
+		return
+	}
 
 	file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
 	targetID := playbackProgressTarget(file)
@@ -1405,6 +1412,7 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 			// Resolve media path if possible.
 			if effectiveFile != nil {
 				tokenClaims.MediaPath = effectiveFile.FilePath
+				tokenClaims.DVProfile = effectiveFile.PrimaryDVProfile()
 			}
 
 			tokenClaims.TranscodeAudio = session.TranscodeAudio
@@ -1821,6 +1829,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				MediaPath:       file.FilePath,
 				TranscodeAudio:  updatedSession.TranscodeAudio,
 				AudioTrackIndex: req.AudioTrackIndex,
+				DVProfile:       file.PrimaryDVProfile(),
 			}
 			if plan.TranscodeNode != nil {
 				tokenClaims.TranscodeNode = plan.TranscodeNode.URL

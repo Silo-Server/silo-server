@@ -243,6 +243,7 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		TranscodeAudio:  source.TranscodeAudio,
 		AudioTrackIndex: audioTrackIndex,
 		TranscodeNode:   transcodeNodeURL,
+		DVProfile:       file.PrimaryDVProfile(),
 	}
 	token, err := streamtoken.Sign(claims, h.JWTSecret, 24*time.Hour)
 	if err != nil {
