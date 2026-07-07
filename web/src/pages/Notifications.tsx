@@ -18,6 +18,7 @@ import {
 } from "@/hooks/queries/notifications";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { preferredDateLocale } from "@/lib/datetime";
 
 function formatNotificationTime(value: string): string {
   const date = new Date(value);
@@ -40,7 +41,7 @@ function formatNotificationTime(value: string): string {
   if (diffDays < 7) {
     return `${diffDays}d ago`;
   }
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" });
 }
 
 function notificationTitle(notification: AppNotification): string {

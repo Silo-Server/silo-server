@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -110,9 +111,16 @@ type watchTogetherPingMessage struct {
 	ClientSentAt string `json:"client_sent_at"`
 }
 
+// watchTogetherRoomConn serializes every write to the underlying gorilla
+// connection. gorilla/websocket does not support concurrent writers, and room
+// broadcasts arrive from other members' goroutines, so all writes — including
+// pong/error replies from the read loop — must go through this wrapper.
 type watchTogetherRoomConn struct {
 	conn    *websocket.Conn
 	writeMu sync.Mutex
+	// pingSentAtNano is the send time of the most recent protocol-level ping,
+	// used to measure round-trip latency when the pong arrives.
+	pingSentAtNano atomic.Int64
 }
 
 func (c *watchTogetherRoomConn) WriteJSON(v any) error {
@@ -130,7 +138,33 @@ func (c *watchTogetherRoomConn) Close() error {
 func (c *watchTogetherRoomConn) WritePing() error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	c.pingSentAtNano.Store(time.Now().UnixNano())
 	return writeWebSocketControl(c.conn, websocket.PingMessage, nil)
+}
+
+// TakePingSentAt returns and clears the send time of the last unanswered
+// protocol-level ping.
+func (c *watchTogetherRoomConn) TakePingSentAt() time.Time {
+	nano := c.pingSentAtNano.Swap(0)
+	if nano == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nano)
+}
+
+func (c *watchTogetherRoomConn) WriteError(code, message string) {
+	_ = c.WriteJSON(map[string]string{
+		"type":    "error",
+		"code":    code,
+		"message": message,
+	})
+}
+
+func (c *watchTogetherRoomConn) writeRoomClosed(reason string) {
+	_ = c.WriteJSON(map[string]string{
+		"type":   "room_closed",
+		"reason": reason,
+	})
 }
 
 func NewWatchTogetherHandler(
@@ -653,19 +687,33 @@ func (h *WatchTogetherHandler) HandleRoomWebSocket(w http.ResponseWriter, r *htt
 
 	reg, snapshot, err := h.Service.Connect(ctx, roomID, claims.UserID, profileID, realtimeConn)
 	if err != nil {
+		// Terminal failures use room_closed so clients stop reconnecting
+		// instead of retrying a room that will never come back.
 		if errors.Is(err, watchtogether.ErrRoomNotFound) {
-			writeWebSocketError(conn, "not_found", "Room not found")
+			realtimeConn.writeRoomClosed("not_found")
 		} else if errors.Is(err, watchtogether.ErrRoomClosed) {
-			writeWebSocketError(conn, "gone", "Room is no longer active")
+			realtimeConn.writeRoomClosed("ended")
 		} else {
-			writeWebSocketError(conn, "internal_error", "Failed to connect room socket")
+			realtimeConn.WriteError("internal_error", "Failed to connect room socket")
 		}
 		return
 	}
 	defer h.Service.Disconnect(reg, false)
 
 	configureWebSocket(conn)
+	// Measure round-trip latency from protocol-level ping/pong on the server
+	// clock; client-reported timestamps are subject to clock skew and cannot
+	// be trusted for command scheduling.
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(wsPingInterval + wsPongTimeout))
+		if sentAt := realtimeConn.TakePingSentAt(); !sentAt.IsZero() {
+			_ = h.Service.HandlePingForConnection(ctx, reg, claims.UserID, profileID, time.Since(sentAt).Milliseconds())
+		}
+		return nil
+	})
 	startWebSocketPingLoop(ctx, realtimeConn.WritePing)
+	// Prime an RTT sample right away instead of waiting for the first tick.
+	_ = realtimeConn.WritePing()
 
 	if err := realtimeConn.WriteJSON(map[string]any{
 		"type": "snapshot",
@@ -680,15 +728,15 @@ func (h *WatchTogetherHandler) HandleRoomWebSocket(w http.ResponseWriter, r *htt
 			return
 		}
 
-		if err := h.handleRoomClientMessage(ctx, conn, reg, claims.UserID, profileID, data); err != nil {
-			writeWebSocketError(conn, "bad_request", err.Error())
+		if err := h.handleRoomClientMessage(ctx, realtimeConn, reg, claims.UserID, profileID, data); err != nil {
+			realtimeConn.WriteError("bad_request", err.Error())
 		}
 	}
 }
 
 func (h *WatchTogetherHandler) handleRoomClientMessage(
 	ctx context.Context,
-	conn *websocket.Conn,
+	rc *watchTogetherRoomConn,
 	reg *watchtogether.Registration,
 	userID int,
 	profileID string,
@@ -768,16 +816,11 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return err
 		}
-		clientSentAt, err := time.Parse(time.RFC3339Nano, msg.ClientSentAt)
-		if err != nil {
-			return errors.New("client_sent_at must be RFC3339Nano")
-		}
+		// The echoed timestamps only serve the client's clock-offset estimate;
+		// latency for command scheduling is measured server-side from
+		// protocol-level ping/pong.
 		now := time.Now().UTC()
-		pingMS := now.Sub(clientSentAt.UTC()).Milliseconds()
-		if pingMS > 0 {
-			_ = h.Service.HandlePingForConnection(ctx, reg, userID, profileID, pingMS)
-		}
-		return writeWebSocketJSON(conn, map[string]string{
+		return rc.WriteJSON(map[string]string{
 			"type":               "pong",
 			"client_sent_at":     msg.ClientSentAt,
 			"server_received_at": now.Format(time.RFC3339Nano),

@@ -108,6 +108,9 @@ var SensitiveSettingKeys = map[string]bool{
 	// value by the notifications system; clients receive the public half via
 	// the capability endpoint, never from the settings store).
 	"notifications.web_push.vapid_keypair": true,
+
+	// Silo push relay bearer credential for APNs/FCM delivery.
+	"notifications.push_relay_api_key": true,
 }
 
 // EncryptedSettingsRepo decorates a raw settings store, transparently

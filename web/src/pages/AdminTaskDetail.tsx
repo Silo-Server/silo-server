@@ -22,6 +22,7 @@ import {
   type MetadataRefreshMetrics,
 } from "@/hooks/queries/admin/tasks";
 import type { ExecutionResult, TriggerConfig, TriggerType } from "@/api/types";
+import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 
 const REFRESH_REASON_LABELS: Record<string, string> = {
   episode_incomplete: "Episode incomplete",
@@ -63,7 +64,7 @@ function formatDuration(ms: number): string {
 }
 
 function formatDateTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleString();
+  return formatPreferredDateTime(dateStr);
 }
 
 function formatOptionalDateTime(dateStr?: string | null): string {

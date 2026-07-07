@@ -5,8 +5,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { formatFileSize, extractSourceHint } from "./versionFormatUtils";
-import { resolutionScore, mapAudioLabel } from "./versionRankingUtils";
+import { formatFileSize, mapAudioLabel } from "@/lib/mediaFormat";
+import { extractSourceHint } from "./versionFormatUtils";
+import { resolutionScore } from "./versionRankingUtils";
 
 // ---------------------------------------------------------------------------
 // Exported helper functions (also used by tests)

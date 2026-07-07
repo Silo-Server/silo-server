@@ -125,8 +125,16 @@ func TestCollectScannedRoots_ContradictorySingleMovieFileBecomesAmbiguous(t *tes
 }
 
 func TestShouldSkipMovieSupplementalDir(t *testing.T) {
-	if !shouldSkipMovieSupplementalDir("/movies/Movie (2000)/Featurettes") {
-		t.Fatal("expected Featurettes directory to be skipped")
+	// Extras-shaped directories are walked now (classified into media_extras
+	// downstream); only never-playable noise stays skipped.
+	if shouldSkipMovieSupplementalDir("/movies/Movie (2000)/Featurettes") {
+		t.Fatal("expected Featurettes directory to be walked for extras classification")
+	}
+	if !shouldSkipMovieSupplementalDir("/movies/Movie (2000)/Sample") {
+		t.Fatal("expected Sample directory to be skipped")
+	}
+	if !shouldSkipMovieSupplementalDir("/movies/Movie (2000)/Subs") {
+		t.Fatal("expected Subs directory to be skipped")
 	}
 	if shouldSkipMovieSupplementalDir("/movies/Movie (2000)/Season 1") {
 		t.Fatal("did not expect Season 1 directory to be skipped")

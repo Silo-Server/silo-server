@@ -18,17 +18,26 @@ import (
 )
 
 type testCompatSessionManager struct {
-	sessions        map[string]*playback.Session
-	audioTrackCalls []compatAudioTrackCall
-	progressCalls   int
-	stopCalls       []string
-	startCalls      int
+	sessions            map[string]*playback.Session
+	audioTrackCalls     []compatAudioTrackCall
+	progressCalls       int
+	progressUpdates     []compatProgressCall
+	stopCalls           []string
+	startCalls          int
+	beginTransportCalls []string
+	endTransportCalls   []string
 }
 
 type compatAudioTrackCall struct {
 	sessionID       string
 	audioTrackIndex int
 	method          playback.PlayMethod
+}
+
+type compatProgressCall struct {
+	sessionID string
+	position  float64
+	isPaused  bool
 }
 
 func (m *testCompatSessionManager) StartSession(userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error) {
@@ -49,8 +58,38 @@ func (m *testCompatSessionManager) StartSession(userID int, profileID string, fi
 	return session, nil
 }
 
-func (m *testCompatSessionManager) UpdateProgress(string, float64, bool) error {
+func (m *testCompatSessionManager) UpdateProgress(sessionID string, position float64, isPaused bool) error {
 	m.progressCalls++
+	m.progressUpdates = append(m.progressUpdates, compatProgressCall{
+		sessionID: sessionID,
+		position:  position,
+		isPaused:  isPaused,
+	})
+	if m.sessions != nil {
+		if _, ok := m.sessions[sessionID]; !ok {
+			return playback.ErrSessionNotFound
+		}
+	}
+	return nil
+}
+
+func (m *testCompatSessionManager) BeginTransport(sessionID string) error {
+	m.beginTransportCalls = append(m.beginTransportCalls, sessionID)
+	if m.sessions != nil {
+		if _, ok := m.sessions[sessionID]; !ok {
+			return playback.ErrSessionNotFound
+		}
+	}
+	return nil
+}
+
+func (m *testCompatSessionManager) EndTransport(sessionID string) error {
+	m.endTransportCalls = append(m.endTransportCalls, sessionID)
+	if m.sessions != nil {
+		if _, ok := m.sessions[sessionID]; !ok {
+			return playback.ErrSessionNotFound
+		}
+	}
 	return nil
 }
 
@@ -200,7 +239,7 @@ func TestHandlePlaybackReport_UpdatesSelectedAudioStreamAndUpstreamTrack(t *test
 	handler := &PlaybackHandler{
 		playbackStore: playbackStore,
 		sessionMgr:    sessionMgr,
-		transcodes:    make(map[string]*playback.TranscodeSession),
+		tm:            playback.NewTranscodeManager(),
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(`{"PlaySessionId":"play-1","MediaSourceId":"`+source.ID+`","AudioStreamIndex":2,"PositionTicks":30000000}`))
@@ -254,7 +293,7 @@ func TestEnsureTranscodeSession_UsesSelectedAudioTrack(t *testing.T) {
 		fileResolver:  testCompatFileResolver{file: &models.MediaFile{ID: version.FileID, FilePath: filePath}},
 		TranscodeDir:  t.TempDir(),
 		FFmpegPath:    writeCompatTestFFmpeg(t),
-		transcodes:    make(map[string]*playback.TranscodeSession),
+		tm:            playback.NewTranscodeManager(),
 	}
 
 	transcodeSession, err := handler.ensureTranscodeSession(context.Background(), "play-1", "upstream-1", source)
@@ -288,9 +327,16 @@ func TestStartRemoteTranscode_IncludesSelectedAudioTrack(t *testing.T) {
 	}))
 	defer server.Close()
 
-	handler := &PlaybackHandler{JWTSecret: "secret"}
+	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
+	playbackStore.Put(PlaybackSession{ID: "play-1", UpstreamSessionID: "upstream-1"})
+	handler := &PlaybackHandler{
+		JWTSecret:     "secret",
+		playbackStore: playbackStore,
+		tm:            playback.NewTranscodeManager(),
+	}
 	if err := handler.startRemoteTranscode(
 		context.Background(),
+		"play-1",
 		"upstream-1",
 		source,
 		&models.MediaFile{ID: version.FileID, FilePath: filePath},

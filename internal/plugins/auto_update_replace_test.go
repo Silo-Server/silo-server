@@ -38,6 +38,7 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 		installer,
 		host,
 		nil,
+		nil,
 	)
 
 	summary, err := service.Check(context.Background(), AutoUpdateOptions{
@@ -62,6 +63,114 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 	if len(host.stopped) != 1 || host.stopped[0] != 41 {
 		t.Fatalf("stopped installations = %#v, want [41]", host.stopped)
 	}
+}
+
+func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
+	newOnChangeService := func(installations *fakeAutoUpdateInstallations, opts AutoUpdateOptions, calls *int) (AutoUpdateSummary, error) {
+		catalog := &fakeAutoUpdateCatalog{
+			entries: []CatalogEntry{{
+				RepositoryID: 7,
+				Manifest: &pluginv1.PluginManifest{
+					PluginId: "silo.tmdb",
+					Version:  "1.1.0",
+				},
+			}},
+			resolved: &ResolvedCatalogInstall{
+				RepositoryID: 7,
+				ArchiveURL:   "https://plugins.example.test/tmdb",
+				Checksum:     "deadbeef",
+			},
+		}
+		service := NewAutoUpdateService(
+			&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+			installations,
+			catalog,
+			&fakeAutoUpdateInstaller{},
+			&fakeAutoUpdateHost{},
+			nil,
+			func(context.Context) { *calls++ },
+		)
+		return service.Check(context.Background(), opts)
+	}
+
+	t.Run("applied auto-update fires onChange", func(t *testing.T) {
+		var calls int
+		installations := &fakeAutoUpdateInstallations{
+			list: []*Installation{{ID: 41, PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
+		}
+		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
+		if err != nil {
+			t.Fatalf("Check() returned error: %v", err)
+		}
+		if summary.UpdatesApplied != 1 {
+			t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
+		}
+		if calls != 1 {
+			t.Fatalf("onChange calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("notify update fires onChange", func(t *testing.T) {
+		var calls int
+		installations := &fakeAutoUpdateInstallations{
+			list: []*Installation{{ID: 42, PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "notify", Enabled: true}},
+		}
+		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
+		if err != nil {
+			t.Fatalf("Check() returned error: %v", err)
+		}
+		if summary.UpdatesAvailable != 1 {
+			t.Fatalf("UpdatesAvailable = %d, want 1", summary.UpdatesAvailable)
+		}
+		if calls != 1 {
+			t.Fatalf("onChange calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("no mutation does not fire onChange", func(t *testing.T) {
+		var calls int
+		installations := &fakeAutoUpdateInstallations{
+			list: []*Installation{{ID: 43, PluginID: "silo.tmdb", Version: "1.1.0", UpdatePolicy: "auto", Enabled: true}},
+		}
+		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
+		if err != nil {
+			t.Fatalf("Check() returned error: %v", err)
+		}
+		if summary.UpdatesApplied != 0 || summary.UpdatesAvailable != 0 {
+			t.Fatalf("unexpected mutation summary: %+v", summary)
+		}
+		if calls != 0 {
+			t.Fatalf("onChange calls = %d, want 0", calls)
+		}
+	})
+
+	t.Run("nil onChange is safe after mutation", func(t *testing.T) {
+		installations := &fakeAutoUpdateInstallations{
+			list: []*Installation{{ID: 44, PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
+		}
+		service := NewAutoUpdateService(
+			&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+			installations,
+			&fakeAutoUpdateCatalog{
+				entries: []CatalogEntry{{
+					RepositoryID: 7,
+					Manifest:     &pluginv1.PluginManifest{PluginId: "silo.tmdb", Version: "1.1.0"},
+				}},
+				resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
+			},
+			&fakeAutoUpdateInstaller{},
+			&fakeAutoUpdateHost{},
+			nil,
+			nil,
+		)
+		summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+		if err != nil {
+			t.Fatalf("Check() with nil onChange returned error: %v", err)
+		}
+		if summary.UpdatesApplied != 1 {
+			t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
+		}
+	})
 }
 
 func TestCompareVersions(t *testing.T) {
@@ -112,6 +221,7 @@ func TestAutoUpdateMultiDigitVersion(t *testing.T) {
 		catalog,
 		installer,
 		host,
+		nil,
 		nil,
 	)
 

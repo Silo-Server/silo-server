@@ -106,24 +106,86 @@ func (r *Resolver) ResolveMissingSubtree(ctx context.Context, subtreePath, trigg
 	if strings.TrimSpace(subtreePath) == "" || cleanPath == "." {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path is required"}
 	}
-	folders, err := r.folders.List(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("listing libraries for scan: %w", err)
-	}
-	folder, matchedRoot, err := MatchFolderForPath(cleanPath, folders)
+	folder, matchedRoot, err := r.matchEnabledFolder(ctx, cleanPath)
 	if err != nil {
 		return nil, err
-	}
-	if folder != nil && !folder.Enabled {
-		return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled"}
 	}
 	if filepath.Clean(cleanPath) == filepath.Clean(matchedRoot) {
 		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Subtree path must be below a library root"}
 	}
-	if trigger = strings.TrimSpace(trigger); trigger == "" {
-		trigger = "path"
+	return &Target{Folder: folder, Mode: ModeSubtree, Path: cleanPath, Trigger: normalizeTrigger(trigger)}, nil
+}
+
+// matchEnabledFolder lists the configured libraries and returns the enabled
+// folder (and its matched root) that owns the given path. Shared by the
+// resolvers that accept paths which may no longer exist on disk.
+func (r *Resolver) matchEnabledFolder(ctx context.Context, cleanPath string) (*models.MediaFolder, string, error) {
+	folders, err := r.folders.List(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("listing libraries for scan: %w", err)
 	}
-	return &Target{Folder: folder, Mode: ModeSubtree, Path: cleanPath, Trigger: trigger}, nil
+	folder, matchedRoot, err := MatchFolderForPath(cleanPath, folders)
+	if err != nil {
+		return nil, "", err
+	}
+	if folder != nil && !folder.Enabled {
+		return nil, "", &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled"}
+	}
+	return folder, matchedRoot, nil
+}
+
+func normalizeTrigger(trigger string) string {
+	if trigger = strings.TrimSpace(trigger); trigger == "" {
+		return "path"
+	}
+	return trigger
+}
+
+// ResolveVanishedPath resolves a change for a path that no longer exists on
+// disk (a file deleted by an upgrade/replacement, or a removed directory) to a
+// reconciling scan target. Paths with a supported video extension map to a
+// subtree scan of their parent directory; other paths map to a subtree scan of
+// the path itself. The scoped scan marks the vanished files missing so stale
+// versions stop being offered for playback.
+//
+// Two guards keep this from turning transient storage loss into cleanup:
+// the path must actually be gone (a still-existing path is rejected — use
+// Resolve), and the matched library root must still exist on disk so an
+// unmounted share never resolves to a reconciling scan.
+func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string) (*Target, error) {
+	if r == nil || r.folders == nil {
+		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available"}
+	}
+	cleanPath := filepath.Clean(path)
+	if strings.TrimSpace(path) == "" || cleanPath == "." {
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path is required"}
+	}
+	if _, err := os.Lstat(cleanPath); err == nil {
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path still exists"}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// Only a confirmed ENOENT counts as vanished. Permission or other
+		// stat failures must not reconcile still-existing files as missing.
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path could not be inspected"}
+	}
+	folder, matchedRoot, err := r.matchEnabledFolder(ctx, cleanPath)
+	if err != nil {
+		return nil, err
+	}
+	if info, statErr := os.Stat(matchedRoot); statErr != nil || !info.IsDir() {
+		return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library root is not available"}
+	}
+	trigger = normalizeTrigger(trigger)
+
+	scope := cleanPath
+	if scanner.SupportsVideoFile(cleanPath) {
+		scope = filepath.Dir(cleanPath)
+	}
+	if filepath.Clean(scope) == filepath.Clean(matchedRoot) {
+		// A vanished entry directly under the root reconciles via a full
+		// library scan, which keeps the empty-root guard in play.
+		return &Target{Folder: folder, Mode: ModeLibrary, Trigger: trigger}, nil
+	}
+	return &Target{Folder: folder, Mode: ModeSubtree, Path: scope, Trigger: trigger}, nil
 }
 
 func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*models.MediaFolder, usePathFolders bool) (*Target, error) {

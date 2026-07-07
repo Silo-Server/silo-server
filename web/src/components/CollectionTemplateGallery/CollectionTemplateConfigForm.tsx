@@ -8,7 +8,11 @@ import {
 } from "@/hooks/queries/admin/collections";
 import { useProfiles } from "@/hooks/queries/profiles";
 import type { Library } from "@/api/types";
-import { libraryEligibilityForMediaKind, mediaKindLabel } from "@/lib/collectionTemplates";
+import {
+  COLLECTION_MAX_ITEMS,
+  libraryEligibilityForMediaKind,
+  mediaKindLabel,
+} from "@/lib/collectionTemplates";
 import type { CollectionTemplate, LibraryEligibility } from "@/lib/collectionTemplates";
 import {
   CollectionLibraryPicker,
@@ -308,7 +312,7 @@ export function CollectionTemplateConfigForm({
             id="template-limit"
             type="number"
             min={1}
-            max={200}
+            max={COLLECTION_MAX_ITEMS}
             step={1}
             inputMode="numeric"
             value={limit}

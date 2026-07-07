@@ -44,6 +44,11 @@ const (
 	SectionTrendingDiscover SectionType = "trending_discover"
 
 	SectionAdminCuratedList SectionType = "admin_curated_list"
+
+	SectionReturningShows SectionType = "returning_shows"
+	SectionGenreRoulette  SectionType = "genre_roulette"
+	SectionAnniversaries  SectionType = "anniversaries"
+	SectionShortWatches   SectionType = "short_watches"
 )
 
 // ValidSectionTypes is the set of all valid section type values.
@@ -77,6 +82,10 @@ var ValidSectionTypes = map[SectionType]bool{
 	SectionMostWatched:         true,
 	SectionTrendingDiscover:    true,
 	SectionAdminCuratedList:    true,
+	SectionReturningShows:      true,
+	SectionGenreRoulette:       true,
+	SectionAnniversaries:       true,
+	SectionShortWatches:        true,
 }
 
 // PageSection is an admin-defined section stored in PostgreSQL.
@@ -135,6 +144,14 @@ type ResolvedSection struct {
 	IsCustom    bool            `json:"is_custom"`
 	Customized  bool            `json:"customized"`
 	Hidden      bool            `json:"hidden,omitempty"`
+
+	// SuppressNextUp, when true on a continue-watching section, skips the
+	// next-up injection (and the combined series collapse/sort that pairs with
+	// it) so the section returns in-progress resume points only. Callers that
+	// need a strict "resume" view — e.g. the Jellyfin /UserItems/Resume
+	// compatibility endpoint, which must never surface not-yet-started items —
+	// set this; admin/home rendering leaves it false to keep next-up cards.
+	SuppressNextUp bool `json:"-"`
 }
 
 // FilterConfig represents the rule-group filter structure.

@@ -16,6 +16,9 @@ const STORAGE_KEYS = {
   UI_TEXT_WEIGHT: "silo-ui-text-weight",
   UI_HIGH_CONTRAST: "silo-ui-high-contrast",
   UI_CUSTOM_THEME_VARS: "silo-custom-theme-vars",
+  UI_DATE_FORMAT: "silo-ui-date-format",
+  UI_TIME_FORMAT: "silo-ui-time-format",
+  UI_DATETIME_FORMAT_OWNER: "silo-ui-datetime-format-owner",
   UI_CUSTOM_CSS: "silo-custom-css",
   CALENDAR_PRESET: "calendar:preset",
 } as const;

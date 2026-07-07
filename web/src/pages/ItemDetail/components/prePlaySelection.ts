@@ -14,12 +14,11 @@ import { resolveVersionAudioLanguage } from "@/player/utils/effectiveAudioLangua
 import { getLanguageName } from "@/player/utils/languageNames";
 import { normalizeSubtitleMode } from "@/player/utils/subtitleMode";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
-import { formatChannels } from "./versionFormatUtils";
+import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
 import {
   buildVersionSubtitleInventory,
   type VersionSubtitleInventoryRow,
 } from "./versionSubtitleInventory";
-import { mapAudioLabel } from "./versionRankingUtils";
 
 export interface PrePlaySubtitleCandidate extends VersionSubtitleInventoryRow {
   selection: PrePlaySubtitleSelection;

@@ -99,7 +99,6 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 	resolver := &countingCompatImageResolver{}
 	detailSvc := &catalog.DetailService{}
 	detailSvc.SetImageResolver(resolver)
-	svc := &directContentService{detailSvc: detailSvc}
 
 	items := []upstreamListItem{
 		{
@@ -115,7 +114,7 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 		},
 	}
 
-	svc.presignListItems(context.Background(), items)
+	presignCompatListItems(context.Background(), detailSvc, items)
 
 	if resolver.singleCalls != 0 {
 		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
@@ -144,6 +143,100 @@ func TestPresignListItemsBatchResolvesImages(t *testing.T) {
 	}
 	if got := items[1].StillURL; got != "batch:card:plug://still-2" {
 		t.Fatalf("StillURL = %q", got)
+	}
+}
+
+// TestPresignSeasonsBatchResolvesImages pins Fix #2c: presignSeasons must issue
+// exactly one PresignImageURLsWithExpiry batch for the whole season collection
+// (one image type), not one singular call per season.
+func TestPresignSeasonsBatchResolvesImages(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	svc := &directContentService{detailSvc: detailSvc}
+
+	seasons := []upstreamSeason{
+		{ContentID: "s1", PosterURL: "plug://poster-1"},
+		{ContentID: "s2", PosterURL: "plug://poster-2"},
+		{ContentID: "s3", PosterURL: "plug://poster-3"},
+	}
+
+	svc.presignSeasons(context.Background(), seasons)
+
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	if resolver.batchCalls != 1 {
+		t.Fatalf("batch image resolver calls = %d, want 1 (one poster batch for %d seasons)", resolver.batchCalls, len(seasons))
+	}
+	if got := seasons[0].PosterURL; got != "batch:card:plug://poster-1" {
+		t.Fatalf("season[0] PosterURL = %q", got)
+	}
+	if got := seasons[2].PosterURL; got != "batch:card:plug://poster-3" {
+		t.Fatalf("season[2] PosterURL = %q", got)
+	}
+}
+
+// TestPresignEpisodesBatchResolvesImages pins Fix #2c for episodes: one still
+// batch for the whole collection regardless of episode count.
+func TestPresignEpisodesBatchResolvesImages(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	svc := &directContentService{detailSvc: detailSvc}
+
+	episodes := []upstreamEpisode{
+		{ContentID: "e1", StillURL: "plug://still-1"},
+		{ContentID: "e2", StillURL: "plug://still-2"},
+		{ContentID: "e3", StillURL: "plug://still-3"},
+	}
+
+	svc.presignEpisodes(context.Background(), episodes)
+
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	if resolver.batchCalls != 1 {
+		t.Fatalf("batch image resolver calls = %d, want 1 (one still batch for %d episodes)", resolver.batchCalls, len(episodes))
+	}
+	if got := episodes[1].StillURL; got != "batch:card:plug://still-2" {
+		t.Fatalf("episode[1] StillURL = %q", got)
+	}
+}
+
+// TestCompatListItemsFromModelsBatchesPresign pins Fix #2b for the cached
+// home/Latest rail path: the loop builds the whole page first, then presigns in
+// one batch per populated image type independent of item count.
+func TestCompatListItemsFromModelsBatchesPresign(t *testing.T) {
+	resolver := &countingCompatImageResolver{}
+	detailSvc := &catalog.DetailService{}
+	detailSvc.SetImageResolver(resolver)
+	h := &ItemsHandler{detailSvc: detailSvc}
+
+	mediaItems := []*models.MediaItem{
+		{ContentID: "m1", Type: "movie", Title: "One", PosterPath: "plug://poster-1", BackdropPath: "plug://backdrop-1"},
+		{ContentID: "m2", Type: "movie", Title: "Two", PosterPath: "plug://poster-2", BackdropPath: "plug://backdrop-2"},
+		{ContentID: "m3", Type: "movie", Title: "Three", PosterPath: "plug://poster-3", BackdropPath: "plug://backdrop-3"},
+	}
+
+	items := h.compatListItemsFromModels(context.Background(), catalog.AccessFilter{}, mediaItems)
+
+	if len(items) != 3 {
+		t.Fatalf("expected 3 list items; got %d", len(items))
+	}
+	if resolver.singleCalls != 0 {
+		t.Fatalf("single image resolver calls = %d, want 0", resolver.singleCalls)
+	}
+	// poster + backdrop are populated across the rail; logo/still are empty and
+	// therefore skipped. The count is bounded by image type, not the 3 items.
+	if resolver.batchCalls != 2 {
+		t.Fatalf("batch image resolver calls = %d, want 2 (poster+backdrop, independent of item count)", resolver.batchCalls)
+	}
+	if got := items[0].PosterURL; got != "batch:card:plug://poster-1" {
+		t.Fatalf("items[0] PosterURL = %q", got)
+	}
+	if got := items[2].BackdropURL; got != "batch:card:plug://backdrop-3" {
+		t.Fatalf("items[2] BackdropURL = %q", got)
 	}
 }
 
@@ -229,6 +322,12 @@ func (s *progressCountingStore) GetProgress(context.Context, string, string) (*u
 func (s *progressCountingStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) ListProgressSince(context.Context, string, string) ([]userstore.WatchProgress, string, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error {
 	panic("unused")
 }
@@ -278,7 +377,7 @@ func (s *progressCountingStore) IsFavorite(context.Context, string, string) (boo
 func (s *progressCountingStore) AddToWatchlist(context.Context, string, string) error {
 	panic("unused")
 }
-func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) error {
+func (s *progressCountingStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s *progressCountingStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
@@ -430,14 +529,20 @@ func (s *progressCountingStore) DeleteLibraryPlaybackPreference(context.Context,
 // stubBrowseSource is a deterministic browseSource for testing
 // directContentService without a Postgres pool.
 type stubBrowseSource struct {
-	items []*models.MediaItem
-	total int
-	calls []stubBrowseCall
+	items            []*models.MediaItem
+	total            int
+	calls            []stubBrowseCall
+	crossLibraryCall []stubCrossLibraryCall
 }
 
 type stubBrowseCall struct {
 	filters      catalog.BrowseFilters
 	includeTotal bool
+}
+
+type stubCrossLibraryCall struct {
+	base       catalog.BrowseFilters
+	libraryIDs []int
 }
 
 func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseFilters, includeTotal bool) (*catalog.BrowseResult, error) {
@@ -452,6 +557,95 @@ func (s *stubBrowseSource) BrowsePage(_ context.Context, filters catalog.BrowseF
 	return &catalog.BrowseResult{
 		Items:   append([]*models.MediaItem(nil), s.items[start:end]...),
 		Total:   total,
+		HasMore: end < len(s.items),
+	}, nil
+}
+
+func TestBrowseItems_RecentlyAddedNoParentFansOutAcrossLibraries(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{
+			{ID: 1, Name: "Movies", Type: "movie"},
+			{ID: 3, Name: "TV", Type: "series"},
+		},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 1 {
+		t.Fatalf("cross-library calls = %d, want 1", got)
+	}
+	if got := len(browse.calls); got != 0 {
+		t.Fatalf("BrowsePage calls = %d, want 0 (fast path should not use it)", got)
+	}
+	if got := browse.crossLibraryCall[0].libraryIDs; len(got) != 2 || got[0] != 1 || got[1] != 3 {
+		t.Fatalf("library IDs = %v, want [1 3]", got)
+	}
+}
+
+func TestBrowseItems_RecentlyAddedWithOffsetFallsBackToBrowsePage(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(40), total: 40}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{
+			{ID: 1, Name: "Movies", Type: "movie"},
+			{ID: 3, Name: "TV", Type: "series"},
+		},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("offset", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 0 {
+		t.Fatalf("cross-library calls = %d, want 0 for offset>0", got)
+	}
+	if got := len(browse.calls); got == 0 {
+		t.Fatal("BrowsePage calls = 0, want offset>0 to fall back to BrowsePage")
+	}
+}
+
+func TestBrowseItems_RecentlyAddedSingleLibraryUsesBrowsePage(t *testing.T) {
+	browse := &stubBrowseSource{items: makeBrowseTestMediaItems(10), total: 10}
+	svc := newDirectContentServiceForTest(browse, nil)
+	svc.folderRepo = &stubFolderSource{
+		enabled: []*models.MediaFolder{{ID: 1, Name: "Movies", Type: "movie"}},
+	}
+
+	session := &Session{StreamAppUserID: 1, ProfileID: "p1"}
+	params := url.Values{}
+	params.Set("limit", "5")
+	params.Set("sort", "recently_added")
+
+	if _, err := svc.BrowseItems(context.Background(), session, params); err != nil {
+		t.Fatalf("BrowseItems: %v", err)
+	}
+	if got := len(browse.crossLibraryCall); got != 0 {
+		t.Fatalf("cross-library calls = %d, want 0 with a single library", got)
+	}
+	if got := len(browse.calls); got == 0 {
+		t.Fatal("BrowsePage calls = 0, want single-library path to use BrowsePage")
+	}
+}
+
+func (s *stubBrowseSource) BrowseRecentlyAddedAcrossLibraries(_ context.Context, base catalog.BrowseFilters, libraryIDs []int) (*catalog.BrowseResult, error) {
+	s.crossLibraryCall = append(s.crossLibraryCall, stubCrossLibraryCall{base: base, libraryIDs: libraryIDs})
+	end := min(max(base.Limit, 0), len(s.items))
+	return &catalog.BrowseResult{
+		Items:   append([]*models.MediaItem(nil), s.items[:end]...),
+		Total:   s.total,
 		HasMore: end < len(s.items),
 	}, nil
 }

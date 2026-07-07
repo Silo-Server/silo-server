@@ -93,6 +93,7 @@ export function useUpdateUser() {
       queryClient.invalidateQueries({ queryKey: adminKeys.users() });
       queryClient.invalidateQueries({ queryKey: adminKeys.userDetail(variables.id) });
       queryClient.invalidateQueries({ queryKey: adminKeys.userProfiles(variables.id) });
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroups() });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to save");
@@ -107,6 +108,7 @@ export function useDeleteUser() {
     onSuccess: () => {
       toast.success("User deleted");
       queryClient.invalidateQueries({ queryKey: adminKeys.users() });
+      queryClient.invalidateQueries({ queryKey: adminKeys.accessGroups() });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to delete");

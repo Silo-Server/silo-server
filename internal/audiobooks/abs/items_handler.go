@@ -2,6 +2,7 @@ package abs
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -126,9 +127,14 @@ func (h *Handler) handleSimilarItems(w http.ResponseWriter, r *http.Request) {
 
 // handleItemsInProgress — GET /abs/api/me/items-in-progress
 //
-// Returns the Continue Listening shelf. Queries the ProgressStore for in-
-// progress rows, then hydrates each with a summary LibraryItem from the
-// catalog. Items without a matching catalog entry are skipped silently.
+// Matches server/controllers/MeController.js `getAllLibraryItemsInProgress`:
+// the envelope is `{ libraryItems: [...] }` and each entry is the item's
+// `toOldJSONMinified()` shape spread with a flat `progressLastUpdate` (ms)
+// field — real ABS does NOT wrap progress in a nested `userMediaProgress`
+// object for this endpoint (that shape belongs to other responses, e.g.
+// item-detail). Queries the ProgressStore for in-progress rows, then
+// hydrates each with a minified LibraryItem from the catalog. Items
+// without a matching catalog entry are skipped silently.
 func (h *Handler) handleItemsInProgress(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
 	if !ok || a.UserID == "" {
@@ -174,25 +180,21 @@ func (h *Handler) handleItemsInProgress(w http.ResponseWriter, r *http.Request) 
 		if si == nil {
 			continue
 		}
-		li := siloItemToLibraryItem(si, lib, baseURL)
-		items = append(items, map[string]any{
-			"id":        li.ID,
-			"libraryId": li.LibraryID,
-			"folderId":  li.FolderID,
-			"mediaType": li.MediaType,
-			"media":     li.Media,
-			"numTracks": li.NumTracks,
-			"addedAt":   li.AddedAt,
-			"updatedAt": li.UpdatedAt,
-			"userMediaProgress": map[string]any{
-				"id":            a.UserID + "-" + p.ContentID,
-				"libraryItemId": p.ContentID,
-				"currentTime":   p.CurrentSeconds,
-				"progress":      p.ProgressPct,
-				"isFinished":    p.IsFinished,
-				"lastUpdate":    p.UpdatedAt.UnixMilli(),
-			},
-		})
+		mli := Minify(siloItemToLibraryItem(si, lib, baseURL))
+		wire := minifiedItemToWireMap(mli)
+		wire["progressLastUpdate"] = p.UpdatedAt.UnixMilli()
+		items = append(items, wire)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"libraryItems": items})
+}
+
+// minifiedItemToWireMap reuses the json tags on MinifiedLibraryItem so a
+// caller can merge extra keys (e.g. progressLastUpdate) into it inside a
+// heterogeneous map[string]any envelope, mirroring the spread-operator
+// pattern real ABS uses (`{ ...libraryItem.toOldJSONMinified(), ... }`).
+func minifiedItemToWireMap(mli MinifiedLibraryItem) map[string]any {
+	b, _ := json.Marshal(mli)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	return m
 }

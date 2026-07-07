@@ -180,8 +180,16 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 		return nil, fmt.Errorf("encode provider ids for plugin search: %w", err)
 	}
 
+	// The plugin search contract carries a single free-text Query. When the
+	// caller supplies an author hint (ebooks), fold it in so title-only matches
+	// that need disambiguation — or messy filename titles — can still resolve.
+	queryText := strings.TrimSpace(query.Title)
+	if author := strings.TrimSpace(query.Author); author != "" {
+		queryText = strings.TrimSpace(queryText + " " + author)
+	}
+
 	response, err := client.Search(ctx, &pluginv1.SearchMetadataRequest{
-		Query:       query.Title,
+		Query:       queryText,
 		ItemType:    query.ContentType,
 		Year:        int32(query.Year),
 		ProviderIds: providerIDs,
@@ -254,6 +262,7 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		ContentRating:     response.GetItem().GetContentRating(),
 		Ratings:           ratingsFromStruct(response.GetItem().GetRatings()),
 		People:            peopleFromRecords(response.GetItem().GetPeople()),
+		Videos:            videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
 		PosterPath:        response.GetItem().GetPosterPath(),
 		PosterThumbhash:   response.GetItem().GetPosterThumbhash(),
 		BackdropPath:      response.GetItem().GetBackdropPath(),
@@ -579,6 +588,42 @@ func structFromStringMap(value map[string]string) (*structpb.Struct, error) {
 		return nil, nil
 	}
 	return structpb.NewStruct(converted)
+}
+
+// videosFromRecords maps SDK VideoRecords into domain RemoteVideos, stamping
+// the returning provider's slug and normalizing unknown kinds to "other".
+// Plugins built against an SDK without the videos field simply return an
+// empty list (proto3 zero value) — nil here, no error.
+func videosFromRecords(providerSlug string, records []*pluginv1.VideoRecord) []RemoteVideo {
+	if len(records) == 0 {
+		return nil
+	}
+
+	videos := make([]RemoteVideo, 0, len(records))
+	for _, record := range records {
+		if record == nil || record.GetSiteKey() == "" {
+			continue
+		}
+		// The provider key is the DB dedup key; fall back to the site key so a
+		// plugin omitting provider ids cannot collide on the empty string.
+		providerKey := record.GetProviderKey()
+		if providerKey == "" {
+			providerKey = record.GetSiteKey()
+		}
+		videos = append(videos, RemoteVideo{
+			Provider:    providerSlug,
+			ProviderKey: providerKey,
+			Kind:        models.NormalizeExtraKind(record.GetKind()),
+			Site:        strings.ToLower(record.GetSite()),
+			SiteKey:     record.GetSiteKey(),
+			Name:        record.GetName(),
+			Language:    record.GetLanguage(),
+			IsOfficial:  record.GetIsOfficial(),
+			SizeHint:    int(record.GetSizeHint()),
+			PublishedAt: record.GetPublishedAt(),
+		})
+	}
+	return videos
 }
 
 func peopleFromRecords(records []*pluginv1.PersonRecord) []models.ItemPerson {

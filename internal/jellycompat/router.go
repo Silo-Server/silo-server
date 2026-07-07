@@ -15,7 +15,9 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
 
@@ -77,6 +79,15 @@ func NewRouter(deps Dependencies) chi.Router {
 		// Smart (live-query) collections derive membership at read time, so the
 		// BoxSet children path needs a query executor to resolve them.
 		itemsHandler.queryExecutor = &catalog.QueryExecutor{Pool: deps.DB}
+		// Continue Watching (Resume) fast path: serve via the capped native
+		// continue-watching fetcher instead of an unbounded progress scan. This is
+		// the section subsystem's read-time fetcher only — no hub-section/virtual-
+		// library exposure is wired here. The continue-watching path needs only
+		// StoreProvider (progress); CollectionRepo/NextUpRepo are deliberately
+		// left unset as they serve other section types.
+		sf := sections.NewFetcher(deps.DB)
+		sf.StoreProvider = deps.UserStoreProvider
+		itemsHandler.sectionsFetcher = sf
 	}
 	itemsHandler.posterPresigner = deps.PosterPresigner
 	itemsHandler.presignTTL = deps.PresignTTL
@@ -97,8 +108,18 @@ func NewRouter(deps Dependencies) chi.Router {
 	}
 	playbackHandler.NodePlanner = deps.NodePlanner
 	playbackHandler.JWTSecret = deps.JWTSecret
+	// Compat transcode reconstruct is driven by the recipe carried in the durable
+	// compat playback store (jellycompat_playback_sessions); no separate native
+	// recipe table is needed.
+	if cleaned, err := playbackHandler.CleanupOrphanedTranscodes(); err != nil {
+		slog.Warn("jellycompat transcode cleanup failed", "dir", playbackHandler.TranscodeDir, "error", err)
+	} else if cleaned > 0 {
+		slog.Info("jellycompat transcode cleanup removed orphaned dirs", "dir", playbackHandler.TranscodeDir, "count", cleaned)
+	}
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
+	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore
+	playbackHandler.SessionSyncer = deps.SessionSyncer
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.S3Client = deps.S3Client
@@ -162,12 +183,12 @@ func NewRouter(deps Dependencies) chi.Router {
 			r.Get("/Shows/{id}/Similar", itemsHandler.HandleSimilar)
 			r.Get("/Items/{id}/ThemeMedia", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
-			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleItemStub)
+			r.Get("/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Users/{userId}/Items/{id}/ThemeMedia", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/ThemeSongs", itemsHandler.HandleThemeSongsStub)
-			r.Get("/Users/{userId}/Items/{id}/SpecialFeatures", itemsHandler.HandleItemStub)
+			r.Get("/Users/{userId}/Items/{id}/SpecialFeatures", itemsHandler.HandleSpecialFeatures)
 			r.Get("/Users/{userId}/Items/{id}/Intros", itemsHandler.HandleItemStub)
 			r.Get("/Users/{userId}/Items/{id}/LocalTrailers", itemsHandler.HandleLocalTrailers)
 			r.Get("/Items/{id}", itemsHandler.HandleItem)
@@ -285,7 +306,13 @@ func withDefaults(deps Dependencies) Dependencies {
 		}
 		deps.ImageCache = NewImageCache(cacheTTL, deps.Now)
 	}
-	playbackTTL := 6 * time.Hour
+	// Align the compat playback session's absolute lifetime with the absolute
+	// stream-token TTL (playback.MaxTokenTTL, 24h). This is an ABSOLUTE window
+	// from creation, not sliding/idle: the session need not outlive its token
+	// while token re-mint is unimplemented, and at 6h long content (audiobooks,
+	// movies) and paused-overnight sessions expired mid-playback even though the
+	// stream token was still valid. Overridable per-deployment via config.
+	playbackTTL := playback.MaxTokenTTL
 	if deps.Config != nil && deps.Config.JellyfinCompat.PlaybackSessionTTL > 0 {
 		playbackTTL = deps.Config.JellyfinCompat.PlaybackSessionTTL
 	}
@@ -293,7 +320,14 @@ func withDefaults(deps Dependencies) Dependencies {
 		deps.DeviceProfiles = NewDeviceProfileStore(playbackTTL, deps.Now)
 	}
 	if deps.PlaybackStore == nil {
-		deps.PlaybackStore = NewPlaybackSessionStore(playbackTTL, deps.Now)
+		// Back the compat playback store with Postgres when a pool is available so
+		// the PlaySessionId -> upstream-session mapping survives a restart and a
+		// Jellyfin client can resume; fall back to in-memory otherwise.
+		if deps.DB != nil {
+			deps.PlaybackStore = NewDurableCompatPlaybackStore(deps.DB, playbackTTL, deps.Now)
+		} else {
+			deps.PlaybackStore = NewPlaybackSessionStore(playbackTTL, deps.Now)
+		}
 	}
 	if deps.HTTPClient == nil {
 		deps.HTTPClient = &http.Client{Timeout: 30 * time.Second}

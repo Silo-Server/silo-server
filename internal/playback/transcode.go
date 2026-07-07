@@ -74,6 +74,17 @@ type TranscodeSession struct {
 	restartCount         int
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
+	restartHook          func(context.Context)
+}
+
+// SetRestartHook registers a callback fired after every successful Restart.
+// The owning handler uses it to re-arm the transcode throttler and the exit
+// monitor; firing it from Restart itself keeps every restart caller (web
+// segment recovery, audio switch, jellycompat seek) consistent.
+func (s *TranscodeSession) SetRestartHook(fn func(context.Context)) {
+	s.mu.Lock()
+	s.restartHook = fn
+	s.mu.Unlock()
 }
 
 // SegmentProgress describes the media ffmpeg has actually produced on disk.
@@ -104,6 +115,13 @@ type SegmentRecoveryDecision struct {
 // segments (2s) allow the player to start quickly while still maintaining
 // efficient HTTP delivery. This matches the approach used by Plex.
 const defaultSegmentDuration = 2
+
+// DefaultSegmentDuration is the exported segment length used when a transcode
+// request does not specify one. Callers minting a reconstruct recipe must embed
+// a concrete (>0) value so the token passes the node's completeness gate and the
+// embedded length matches what the node actually produces.
+const DefaultSegmentDuration = defaultSegmentDuration
+
 const maxPersistedFFmpegLines = 2000
 const maxPersistedFFmpegBytes = 256 * 1024
 const maxPersistedFFmpegChars = 2000
@@ -283,27 +301,8 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	args = appendAudioArgs(args, opts)
 
 	// Subtitle burn-in and resolution scaling — only when encoding video.
-	// When burn-in is active, the subtitle filter chain includes scaling
-	// (and hw download/upload for QSV/VAAPI). Otherwise, standalone scaling.
 	if !isVideoCopy {
-		if opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0 {
-			args = appendSubtitleBurnInArgs(args, opts)
-		} else if opts.HWAccel == "qsv" {
-			scale := qsvScaleFilter(opts.TargetResolution)
-			args = append(args, "-vf", scale)
-		} else if opts.HWAccel == "vaapi" {
-			scale := vaapiScaleFilter(opts.TargetResolution)
-			args = append(args, "-vf", scale)
-		} else if opts.HWAccel == "nvenc" {
-			scale := nvencScaleFilter(opts.TargetResolution)
-			args = append(args, "-vf", scale)
-		} else if opts.TargetResolution != "" {
-			scale := resolutionToScale(opts.TargetResolution)
-			if scale != "" {
-				args = append(args, "-vf", scale)
-			}
-		}
-
+		args = appendVideoFilterArgs(args, opts)
 		args = appendSegmentBoundaryArgs(args, opts)
 	}
 
@@ -579,6 +578,30 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 		}
 	}
 
+	return args
+}
+
+// appendVideoFilterArgs appends the -vf selection for an encoding (non-copy)
+// video stream: the subtitle burn-in chain (which includes scaling and hw
+// download/upload for QSV/VAAPI) or the hwaccel-appropriate standalone scale
+// filter. The ONE home of this decision — the HLS builder and the single-file
+// prepare builder must always produce identical filter chains (a fix landing
+// in only one of them silently ships wrong cached artifacts).
+func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
+	switch {
+	case opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0:
+		return appendSubtitleBurnInArgs(args, opts)
+	case opts.HWAccel == "qsv":
+		return append(args, "-vf", qsvScaleFilter(opts.TargetResolution))
+	case opts.HWAccel == "vaapi":
+		return append(args, "-vf", vaapiScaleFilter(opts.TargetResolution))
+	case opts.HWAccel == "nvenc":
+		return append(args, "-vf", nvencScaleFilter(opts.TargetResolution))
+	case opts.TargetResolution != "":
+		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
+			return append(args, "-vf", scale)
+		}
+	}
 	return args
 }
 
@@ -1159,10 +1182,18 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	}
 
 	switch {
+	// Restarting must be checked before Running: the restart window runs
+	// with running=false, and a concurrent segment request must wait out
+	// the in-flight restart rather than trigger another one. Dueling
+	// restarts keep preempting the segment the player is blocked on,
+	// which surfaces as a seek/intro-skip freeze (issue #243).
+	case progress.Restarting:
+		decision.Wait = true
+		decision.WaitTimeout = activeSegmentWait
+		decision.RestartOnTimeout = false
+		decision.Reason = "transcode_restarting"
 	case !progress.Running:
 		decision.Reason = "transcode_not_running"
-	case progress.Restarting:
-		decision.Reason = "transcode_restarting"
 	case segNum < progress.StartSegmentNumber:
 		decision.Reason = "before_start_segment"
 	case segNum <= progress.ProducedHead:
@@ -1275,6 +1306,20 @@ func (s *TranscodeSession) GetSegment(name string) (string, error) {
 
 // Close terminates the ffmpeg process and removes the temporary output directory.
 func (s *TranscodeSession) Close() error {
+	return s.shutdown(true)
+}
+
+// CloseProcess terminates the ffmpeg process but leaves the output directory in
+// place. It is used when another session owns the same output directory (e.g. a
+// concurrent reconstruct race loser): tearing down this duplicate must not wipe
+// the segments and init.mp4 the winning session is actively serving.
+func (s *TranscodeSession) CloseProcess() error {
+	return s.shutdown(false)
+}
+
+// shutdown kills the ffmpeg process and, when removeOutput is true, removes the
+// temporary output directory.
+func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	s.StopThrottler()
 	// Cancel the context to kill the process (no mutex needed for cancel).
 	if s.cancel != nil {
@@ -1295,7 +1340,7 @@ func (s *TranscodeSession) Close() error {
 	s.running = false
 
 	// Clean up temporary directory.
-	if s.outputDir != "" {
+	if removeOutput && s.outputDir != "" {
 		if err := os.RemoveAll(s.outputDir); err != nil {
 			return fmt.Errorf("remove output dir: %w", err)
 		}
@@ -1376,12 +1421,20 @@ func (s *TranscodeSession) cleanStaleSegments(startSegment int) {
 // copy-mode sessions, stale segments at or after the restart point are
 // cleaned to prevent serving data from the wrong timeline position.
 func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, startSegment int) error {
-	s.StopThrottler()
 	s.mu.Lock()
+	// Single-flight: a second caller arriving while a restart is in
+	// progress must not kill the process the first restart just started.
+	// It returns immediately and the caller falls through to
+	// WaitForSegment, which polls through the in-flight restart.
+	if s.restarting {
+		s.mu.Unlock()
+		return nil
+	}
 	s.restarting = true
 	cancelCurrent := s.cancel
 	done := s.done
 	s.mu.Unlock()
+	s.StopThrottler()
 
 	// Kill current process without removing output directory.
 	if cancelCurrent != nil {
@@ -1457,6 +1510,7 @@ func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, sta
 	s.stdinPipe = stdinPipe
 	s.lastRequestedSegment = startSegment
 	s.done = make(chan struct{})
+	hook := s.restartHook
 	s.mu.Unlock()
 
 	go func() {
@@ -1469,6 +1523,10 @@ func (s *TranscodeSession) Restart(ctx context.Context, seekSeconds float64, sta
 		s.logWaitResult(ctx, waitErr)
 		close(s.done)
 	}()
+
+	if hook != nil {
+		hook(ctx)
+	}
 
 	return nil
 }
@@ -1588,6 +1646,82 @@ func rewriteMapURI(line []byte, segPrefix, suffix string) ([]byte, error) {
 	return result, nil
 }
 
+// AppendManifestQueryParam appends a single "key=value" query parameter to every
+// segment and #EXT-X-MAP init URI in an HLS media playlist, preserving any query
+// the URI already carries (using "?" or "&" as appropriate). The value is
+// appended verbatim — callers must supply a URL-safe value (a signed stream token
+// is base64url and safe). A manifest without a valid #EXTM3U header is returned
+// unchanged so a non-manifest body is never corrupted.
+//
+// It exists for the API proxy boundary: a transcode node builds its manifest from
+// the forwarded request query, which deliberately omits the signed stream token
+// ("st") so the token never reaches the node URL or its logs. That leaves the
+// node-built segment URIs token-less, so a later segment fetch after a node/API
+// restart cannot reconstruct the session. Re-injecting the client-facing token
+// here keeps reconstruction working without ever exposing it to the node.
+func AppendManifestQueryParam(manifest []byte, key, value string) []byte {
+	if key == "" || validateManifestHeader(manifest) != nil {
+		return manifest
+	}
+	param := key + "=" + value
+	lines := bytes.Split(manifest, []byte("\n"))
+	for i, line := range lines {
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			continue
+		}
+		if bytes.HasPrefix(trimmed, []byte("#EXT-X-MAP:")) {
+			lines[i] = appendMapURIQueryParam(trimmed, param)
+			continue
+		}
+		if trimmed[0] == '#' {
+			continue
+		}
+		lines[i] = appendURIQueryParam(trimmed, param)
+	}
+	return bytes.Join(lines, []byte("\n"))
+}
+
+// appendURIQueryParam appends a "key=value" param to a bare URI line.
+func appendURIQueryParam(uri []byte, param string) []byte {
+	sep := []byte("?")
+	if bytes.IndexByte(uri, '?') >= 0 {
+		sep = []byte("&")
+	}
+	out := make([]byte, 0, len(uri)+len(sep)+len(param))
+	out = append(out, uri...)
+	out = append(out, sep...)
+	out = append(out, param...)
+	return out
+}
+
+// appendMapURIQueryParam appends a "key=value" param to the URI inside an
+// #EXT-X-MAP tag. A line without a well-formed URI attribute is returned
+// unchanged.
+func appendMapURIQueryParam(line []byte, param string) []byte {
+	uriStart := bytes.Index(line, []byte(`URI="`))
+	if uriStart < 0 {
+		return line
+	}
+	uriStart += 5 // skip past URI="
+	uriEnd := bytes.IndexByte(line[uriStart:], '"')
+	if uriEnd < 0 {
+		return line
+	}
+	uriEnd += uriStart
+
+	sep := []byte("?")
+	if bytes.IndexByte(line[uriStart:uriEnd], '?') >= 0 {
+		sep = []byte("&")
+	}
+	result := make([]byte, 0, len(line)+len(sep)+len(param))
+	result = append(result, line[:uriEnd]...)
+	result = append(result, sep...)
+	result = append(result, param...)
+	result = append(result, line[uriEnd:]...)
+	return result
+}
+
 func (s *TranscodeSession) manifestTimeoutError(timeout time.Duration) error {
 	s.mu.Lock()
 	running := s.running
@@ -1668,6 +1802,15 @@ func (s *TranscodeSession) RestartSeekTarget(segNum int) (float64, bool, error) 
 		case err != nil && !errors.Is(err, ErrManifestNotReady):
 			return 0, false, err
 		}
+		// Copy-mode fragments have variable durations, so the encoded
+		// `seg×dur` math would seek FFmpeg to the wrong source time and
+		// desync A/V after restart. When the manifest can't resolve this
+		// segment yet (ok=false with no error, including ErrManifestNotReady
+		// in a freshly reconstructed window), report the seek target as
+		// unresolved (0, false, nil) rather than guessing. The caller treats
+		// this as a retryable miss so the session keeps producing manifest
+		// until real timing is available.
+		return 0, false, nil
 	}
 
 	segDuration := defaultSegmentDuration

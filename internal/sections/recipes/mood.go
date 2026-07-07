@@ -96,6 +96,52 @@ func (moodRecipe) Definition() RecipeDefinition {
 	}
 }
 
+// ShortWatchesParams configures short_watches: movies that fit in a short
+// evening slot, capped by runtime.
+type ShortWatchesParams struct {
+	MaxMinutes int     `json:"max_minutes,omitempty"` // default 95
+	MinRating  float64 `json:"min_rating,omitempty"`  // default 6.0
+}
+
+type shortWatchesRecipe struct{}
+
+func (shortWatchesRecipe) Type() string                   { return "short_watches" }
+func (shortWatchesRecipe) NewParams() any                 { return &ShortWatchesParams{} }
+func (shortWatchesRecipe) DefaultCacheTTL() time.Duration { return 6 * time.Hour }
+func (shortWatchesRecipe) Resolve(rc ResolverContext) (ResolvedItems, error) {
+	return delegateResolve("short_watches", rc)
+}
+func (shortWatchesRecipe) Validate(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var p ShortWatchesParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	if p.MaxMinutes < 0 {
+		return errors.New("short_watches: max_minutes must be >= 0")
+	}
+	return nil
+}
+func (shortWatchesRecipe) Definition() RecipeDefinition {
+	return RecipeDefinition{
+		Type:            "short_watches",
+		Category:        CategoryMood,
+		AvoidDuplicates: true,
+		Presets: []GalleryPreset{
+			{
+				Key:              "short_watches_default",
+				DisplayName:      "Short & Sweet",
+				Icon:             "⏱️",
+				DescriptionShort: "Well-rated movies under 95 minutes.",
+				DefaultParams:    json.RawMessage(`{"max_minutes":95}`),
+			},
+		},
+	}
+}
+
 func init() {
 	Register(moodRecipe{})
+	Register(shortWatchesRecipe{})
 }

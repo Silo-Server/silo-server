@@ -60,6 +60,12 @@ function SuggestionCard({
           type="button"
           onClick={onVoteToggle}
           disabled={isLoading}
+          aria-pressed={suggestion.voted_by_me}
+          aria-label={
+            suggestion.voted_by_me
+              ? `Remove vote for ${suggestion.title}`
+              : `Vote for ${suggestion.title}`
+          }
           className={`absolute top-2 right-2 z-10 flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold tabular-nums backdrop-blur-sm transition-all duration-200 ${
             suggestion.voted_by_me
               ? "border-primary/40 bg-primary/20 text-primary"
@@ -72,12 +78,13 @@ function SuggestionCard({
 
         {/* Host: Play overlay */}
         {isHost ? (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-200 group-hover/suggestion:bg-black/40 group-hover/suggestion:opacity-100">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-200 group-focus-within/suggestion:bg-black/40 group-focus-within/suggestion:opacity-100 group-hover/suggestion:bg-black/40 group-hover/suggestion:opacity-100">
             <button
               type="button"
               onClick={onPromote}
               disabled={isLoading}
-              className="pointer-events-auto z-10 flex size-10 items-center justify-center rounded-full border border-white/30 bg-white/15 text-white backdrop-blur-sm transition-transform duration-200 group-hover/suggestion:scale-100"
+              aria-label={`Play ${suggestion.title} for everyone`}
+              className="pointer-events-auto z-10 flex size-10 items-center justify-center rounded-full border border-white/30 bg-white/15 text-white backdrop-blur-sm transition-transform duration-200 group-hover/suggestion:scale-100 focus-visible:opacity-100"
             >
               <Play className="size-4 fill-white" />
             </button>
@@ -90,7 +97,8 @@ function SuggestionCard({
             type="button"
             onClick={onDelete}
             disabled={isLoading}
-            className="absolute top-2 left-2 z-10 flex size-6 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 group-hover/suggestion:opacity-100 hover:border-red-500/40 hover:bg-red-500/20 hover:text-red-300"
+            aria-label={`Remove suggestion ${suggestion.title}`}
+            className="absolute top-2 left-2 z-10 flex size-6 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/60 opacity-0 backdrop-blur-sm transition-all duration-200 group-focus-within/suggestion:opacity-100 group-hover/suggestion:opacity-100 hover:border-red-500/40 hover:bg-red-500/20 hover:text-red-300 focus-visible:opacity-100"
             title="Remove suggestion"
           >
             <Trash2 className="size-3" />

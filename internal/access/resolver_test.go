@@ -86,7 +86,13 @@ func (s stubStore) GetProgress(context.Context, string, string) (*userstore.Watc
 func (s stubStore) ListProgress(context.Context, string, string, int, int) ([]userstore.WatchProgress, error) {
 	panic("unused")
 }
+func (s stubStore) ListProgressFiltered(context.Context, string, string, []string, *int, int, int) ([]userstore.WatchProgress, error) {
+	panic("unused")
+}
 func (s stubStore) ListProgressByMediaItems(context.Context, string, []string) (map[string]userstore.WatchProgress, error) {
+	panic("unused")
+}
+func (s stubStore) ListProgressSince(context.Context, string, string) ([]userstore.WatchProgress, string, error) {
 	panic("unused")
 }
 func (s stubStore) AddHistory(context.Context, userstore.WatchHistoryEntry) error { panic("unused") }
@@ -132,7 +138,7 @@ func (s stubStore) ListFavoritesByMediaItems(context.Context, string, []string) 
 }
 func (s stubStore) IsFavorite(context.Context, string, string) (bool, error) { panic("unused") }
 func (s stubStore) AddToWatchlist(context.Context, string, string) error     { panic("unused") }
-func (s stubStore) AddToWatchlistAt(context.Context, string, string, time.Time) error {
+func (s stubStore) AddToWatchlistAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s stubStore) RemoveWatchedFromWatchlist(context.Context, string) (bool, error) {
@@ -419,4 +425,44 @@ func TestResolver_DisabledLibraries_NoProfile(t *testing.T) {
 	if len(scope.DisabledLibraryIDs) != 1 || scope.DisabledLibraryIDs[0] != 7 {
 		t.Fatalf("DisabledLibraryIDs = %v, want [7]", scope.DisabledLibraryIDs)
 	}
+}
+
+func TestResolver_AppliesGroupPolicy(t *testing.T) {
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{
+			ID:                   1,
+			LibraryIDs:           []int{1, 2, 3},
+			MaxPlaybackQuality:   PlaybackQuality4K,
+			AccessPolicyRevision: 5,
+		}},
+		stubStoreProvider{store: stubStore{}},
+		nil,
+		stubGroupProvider{group: &GroupPolicy{
+			LibraryIDs:               []int{2, 4},
+			MaxPlaybackQuality:       PlaybackQualityStandard,
+			DownloadAllowed:          true,
+			DownloadTranscodeAllowed: true,
+			RequestsAllowed:          true,
+		}},
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if !scope.LibrariesRestricted || len(scope.AllowedLibraryIDs) != 1 || scope.AllowedLibraryIDs[0] != 2 {
+		t.Fatalf("scope libraries = restricted %t ids %#v, want [2]", scope.LibrariesRestricted, scope.AllowedLibraryIDs)
+	}
+	if scope.MaxPlaybackQuality != PlaybackQualityStandard {
+		t.Fatalf("MaxPlaybackQuality = %q, want %q", scope.MaxPlaybackQuality, PlaybackQualityStandard)
+	}
+}
+
+type stubGroupProvider struct {
+	group *GroupPolicy
+	err   error
+}
+
+func (p stubGroupProvider) GetPolicyForUser(context.Context, int) (*GroupPolicy, error) {
+	return p.group, p.err
 }

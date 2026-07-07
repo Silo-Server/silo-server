@@ -72,22 +72,28 @@ var queryFieldDefs = map[string]queryFieldDef{
 }
 
 var querySortDefs = map[string]querySortDef{
-	"title":              {columnSQL: "LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))", defaultOrder: "asc", titleSortOnly: true},
-	"added_at":           {defaultOrder: "desc"},
-	"release_date":       {columnSQL: "COALESCE(%s.release_date::text, NULLIF(BTRIM(%s.first_air_date), ''))", defaultOrder: "desc", nullsLast: true},
-	"last_air_date":      {columnSQL: "last_air_date", defaultOrder: "desc", nullsLast: true},
-	"year":               {columnSQL: "year", defaultOrder: "desc"},
-	"content_rating":     {defaultOrder: "asc"},
-	"runtime":            {columnSQL: "runtime", defaultOrder: "desc", nullsLast: true},
-	"rating_imdb":        {columnSQL: "rating_imdb", defaultOrder: "desc", nullsLast: true},
-	"rating_tmdb":        {columnSQL: "rating_tmdb", defaultOrder: "desc", nullsLast: true},
-	"rating_rt_critic":   {columnSQL: "rating_rt_critic", defaultOrder: "desc", nullsLast: true},
-	"rating_rt_audience": {columnSQL: "rating_rt_audience", defaultOrder: "desc", nullsLast: true},
-	"resolution":         {defaultOrder: "desc", nullsLast: true},
-	"bitrate":            {defaultOrder: "desc", nullsLast: true},
-	"progress":           {defaultOrder: "desc", nullsLast: true, personalized: true},
-	"date_viewed":        {defaultOrder: "desc", nullsLast: true, personalized: true},
-	"plays":              {defaultOrder: "desc", nullsLast: true, personalized: true},
+	"title":         {columnSQL: "LOWER(COALESCE(NULLIF(BTRIM(%s.sort_title), ''), %s.title))", defaultOrder: "asc", titleSortOnly: true},
+	"added_at":      {defaultOrder: "desc"},
+	"release_date":  {columnSQL: "COALESCE(%s.release_date::text, NULLIF(BTRIM(%s.first_air_date), ''))", defaultOrder: "desc", nullsLast: true},
+	"last_air_date": {columnSQL: "last_air_date", defaultOrder: "desc", nullsLast: true},
+	// Latest Episodes (issue #202): series ordered by when their newest
+	// episode FILE arrived (denormalized media_items.latest_episode_added_at,
+	// maintained on the episode_libraries insert paths). Distinct from
+	// added_at (when the series itself was first added) and last_air_date
+	// (when the newest episode aired).
+	"latest_episode_added": {columnSQL: "latest_episode_added_at", defaultOrder: "desc", nullsLast: true},
+	"year":                 {columnSQL: "year", defaultOrder: "desc"},
+	"content_rating":       {defaultOrder: "asc"},
+	"runtime":              {columnSQL: "runtime", defaultOrder: "desc", nullsLast: true},
+	"rating_imdb":          {columnSQL: "rating_imdb", defaultOrder: "desc", nullsLast: true},
+	"rating_tmdb":          {columnSQL: "rating_tmdb", defaultOrder: "desc", nullsLast: true},
+	"rating_rt_critic":     {columnSQL: "rating_rt_critic", defaultOrder: "desc", nullsLast: true},
+	"rating_rt_audience":   {columnSQL: "rating_rt_audience", defaultOrder: "desc", nullsLast: true},
+	"resolution":           {defaultOrder: "desc", nullsLast: true},
+	"bitrate":              {defaultOrder: "desc", nullsLast: true},
+	"progress":             {defaultOrder: "desc", nullsLast: true, personalized: true},
+	"date_viewed":          {defaultOrder: "desc", nullsLast: true, personalized: true},
+	"plays":                {defaultOrder: "desc", nullsLast: true, personalized: true},
 	// Audiobook-native sorts. nullsLast so items without an author /
 	// narrator / series association still appear (sorted to the end).
 	"author":   {defaultOrder: "asc", nullsLast: true},
@@ -182,6 +188,26 @@ type QueryRule struct {
 type QuerySort struct {
 	Field string `json:"field"`
 	Order string `json:"order"`
+}
+
+// NormalizePersonalListSort validates the optional sort configured on a
+// watchlist/favorites section and applies the field's default order when none
+// is given. Returns false when the field is empty or unsupported, meaning the
+// list's stored order should be kept. "added_at" means the date the item was
+// added to the list (not to the library) and is resolved from the list
+// entries rather than the query executor.
+func NormalizePersonalListSort(field, order string) (QuerySort, bool) {
+	field = strings.ToLower(strings.TrimSpace(field))
+	switch field {
+	case "title", "release_date", "year", "rating_imdb", "added_at":
+	default:
+		return QuerySort{}, false
+	}
+	order = strings.ToLower(strings.TrimSpace(order))
+	if order != "asc" && order != "desc" {
+		order = querySortDefs[field].defaultOrder
+	}
+	return QuerySort{Field: field, Order: order}, true
 }
 
 func (q QueryDefinition) Normalize() QueryDefinition {
@@ -321,6 +347,24 @@ func QuerySortRequiresProfile(field string) bool {
 func QueryFieldRequiresProfile(field string) bool {
 	def, ok := queryFieldDefs[strings.ToLower(strings.TrimSpace(field))]
 	return ok && def.personalized
+}
+
+// IsPersonalized reports whether the definition references any per-profile
+// state: a rule field (in any group) or the sort field that injects a
+// profile-scoped EXISTS(... user_id/profile_id ...) predicate — the
+// personalized fields (watched, favorited, in_watchlist, in_progress,
+// last_watched) and sorts (progress, date_viewed, plays). A personalized
+// definition's membership/ordering differs per profile, so it must never be
+// served from a user-agnostic shared cache keyed only by access scope.
+func (q QueryDefinition) IsPersonalized() bool {
+	for _, group := range q.Groups {
+		for _, rule := range group.Rules {
+			if QueryFieldRequiresProfile(rule.Field) {
+				return true
+			}
+		}
+	}
+	return QuerySortRequiresProfile(q.Sort.Field)
 }
 
 func NormalizeLegacySectionFilter(config json.RawMessage) (QueryDefinition, error) {

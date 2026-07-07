@@ -276,19 +276,19 @@ func TestSeasonalTitleOverridePicksActiveThemeTitle(t *testing.T) {
 	}
 
 	// October — halloween fires.
-	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
 	if got != "Spooky Picks" {
 		t.Errorf("Oct 14 → %q, want Spooky Picks", got)
 	}
 
 	// December — christmas fires.
-	got = SeasonalTitleOverride(p, time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC))
+	got = SeasonalTitleOverride(p, time.Date(2026, 12, 20, 12, 0, 0, 0, time.UTC), nil)
 	if got != "Festive Films" {
 		t.Errorf("Dec 20 → %q, want Festive Films", got)
 	}
 
 	// April — nothing fires, no override.
-	got = SeasonalTitleOverride(p, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC))
+	got = SeasonalTitleOverride(p, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC), nil)
 	if got != "" {
 		t.Errorf("Apr 15 → %q, want empty", got)
 	}
@@ -301,7 +301,7 @@ func TestSeasonalTitleOverrideHandlesMissingEntry(t *testing.T) {
 		EnabledThemes: []string{"halloween", "christmas"},
 		ThemeTitles:   map[string]string{"christmas": "Festive Films"},
 	}
-	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
 	if got != "" {
 		t.Errorf("halloween active but no entry → %q, want empty (caller falls back to section Title)", got)
 	}
@@ -315,11 +315,11 @@ func TestSeasonalTitleOverrideLegacyMode(t *testing.T) {
 		Mode:        "auto",
 		ThemeTitles: map[string]string{"halloween": "Spooky"},
 	}
-	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC))
+	got := SeasonalTitleOverride(p, time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC), nil)
 	if got != "Spooky" {
 		t.Errorf("legacy in-season → %q, want Spooky", got)
 	}
-	got = SeasonalTitleOverride(p, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC))
+	got = SeasonalTitleOverride(p, time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC), nil)
 	if got != "" {
 		t.Errorf("legacy off-season → %q, want empty", got)
 	}
@@ -338,5 +338,81 @@ func TestSeasonalValidatesEnabledThemes(t *testing.T) {
 	bad := json.RawMessage(`{"enabled_themes":["halloween","made_up"]}`)
 	if err := rec.Validate(bad); err == nil {
 		t.Error("expected error for unknown theme in enabled_themes")
+	}
+}
+
+// TestFamilyMovieNightPredicate pins the window: Friday and Saturday from 5pm,
+// rejecting earlier hours and other weekdays.
+func TestFamilyMovieNightPredicate(t *testing.T) {
+	pred, ok := SeasonalPredicates["family_movie_night"]
+	if !ok {
+		t.Fatal("family_movie_night predicate not found")
+	}
+
+	// 2026-04-10 is a Friday, 2026-04-11 a Saturday, 2026-04-12 a Sunday.
+	friEvening := time.Date(2026, time.April, 10, 19, 0, 0, 0, time.UTC)
+	if !pred(friEvening) {
+		t.Error("should match Friday 7pm")
+	}
+	satFivePM := time.Date(2026, time.April, 11, 17, 0, 0, 0, time.UTC)
+	if !pred(satFivePM) {
+		t.Error("should match Saturday 5pm (inclusive)")
+	}
+	friAfternoon := time.Date(2026, time.April, 10, 16, 59, 0, 0, time.UTC)
+	if pred(friAfternoon) {
+		t.Error("should reject Friday 4:59pm")
+	}
+	sunEvening := time.Date(2026, time.April, 12, 19, 0, 0, 0, time.UTC)
+	if pred(sunEvening) {
+		t.Error("should reject Sunday evening")
+	}
+}
+
+// TestActiveSeasonalThemeWhereSkipsUnusable verifies that an in-season theme
+// failing the usable filter yields to a lower-priority in-season theme instead
+// of blacking out the section — the December regression where an enabled
+// christmas theme without query support suppressed halloween/saturday rails.
+func TestActiveSeasonalThemeWhereSkipsUnusable(t *testing.T) {
+	enabled := []string{"christmas", "saturday_morning"}
+	// A Saturday morning in December: christmas outranks saturday_morning.
+	saturdayInDecember := time.Date(2026, time.December, 12, 9, 0, 0, 0, time.UTC)
+
+	got := ActiveSeasonalThemeWhere(enabled, saturdayInDecember, nil)
+	if got != "christmas" {
+		t.Fatalf("nil filter should pick christmas, got %q", got)
+	}
+
+	noChristmas := func(theme string) bool { return theme != "christmas" }
+	got = ActiveSeasonalThemeWhere(enabled, saturdayInDecember, noChristmas)
+	if got != "saturday_morning" {
+		t.Errorf("filtered selection should fall through to saturday_morning, got %q", got)
+	}
+
+	nothingUsable := func(string) bool { return false }
+	if got := ActiveSeasonalThemeWhere(enabled, saturdayInDecember, nothingUsable); got != "" {
+		t.Errorf("expected no theme when nothing is usable, got %q", got)
+	}
+}
+
+// TestSeasonalTitleOverrideHonorsUsableFilter verifies the title override
+// follows the same filtered selection as the fetcher: when the top-priority
+// in-season theme is unusable, the override comes from the theme that
+// actually resolves.
+func TestSeasonalTitleOverrideHonorsUsableFilter(t *testing.T) {
+	p := SeasonalThemedParams{
+		EnabledThemes: []string{"christmas", "saturday_morning"},
+		ThemeTitles: map[string]string{
+			"christmas":        "Christmas Movies",
+			"saturday_morning": "Saturday Cartoons",
+		},
+	}
+	saturdayInDecember := time.Date(2026, time.December, 12, 9, 0, 0, 0, time.UTC)
+
+	if got := SeasonalTitleOverride(p, saturdayInDecember, nil); got != "Christmas Movies" {
+		t.Errorf("nil filter: got %q, want Christmas Movies", got)
+	}
+	noChristmas := func(theme string) bool { return theme != "christmas" }
+	if got := SeasonalTitleOverride(p, saturdayInDecember, noChristmas); got != "Saturday Cartoons" {
+		t.Errorf("filtered: got %q, want Saturday Cartoons", got)
 	}
 }

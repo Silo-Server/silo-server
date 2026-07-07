@@ -13,6 +13,12 @@ const (
 	collectionSourceFetchMax        = 500
 )
 
+// MaxExplicitItemLimit is the largest explicit per-collection item limit the
+// import APIs accept. Sync never scans more than collectionSourceFetchMax
+// source entries, so a larger explicit limit could never be satisfied anyway.
+// Mirrored by COLLECTION_MAX_ITEMS in web/src/lib/collectionTemplates.ts.
+const MaxExplicitItemLimit = collectionSourceFetchMax
+
 func SourceFetchLimit(itemLimit *int) int {
 	if itemLimit == nil || *itemLimit <= 0 {
 		return 0

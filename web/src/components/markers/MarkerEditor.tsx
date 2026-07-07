@@ -20,6 +20,7 @@ import type {
 import { MARKER_KINDS, MARKER_LABELS, formatClock, parseClock } from "@/lib/markers";
 import { useItemMarkerHistory, useItemMarkers, useSetItemMarkers } from "@/hooks/queries/markers";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { formatTime, preferredDateLocale } from "@/lib/datetime";
 
 interface MarkerEditorProps {
   itemId: string;
@@ -244,10 +245,6 @@ function formatHistoryRange(marker: MarkerSegment | null): string {
 function formatHistoryDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const day = date.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" });
+  return `${day}, ${formatTime(date)}`;
 }

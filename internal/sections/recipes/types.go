@@ -3,6 +3,8 @@ package recipes
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -112,6 +114,17 @@ type ResolvedItems struct {
 	Suppressed    bool          // when true, dispatcher omits the section
 	LayoutHint    string        // poster | landscape | hero | square
 	CacheTTL      time.Duration // 0 = use DefaultCacheTTL
+}
+
+// oneOf validates an enum-style string param against its allowed values.
+// Shared by recipe validators so allowed-value checks read identically.
+func oneOf(field, value string, allowed ...string) error {
+	for _, a := range allowed {
+		if value == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s: invalid value %q (want one of %s)", field, value, strings.Join(allowed, "|"))
 }
 
 // Recipe is the contract every section type implements.

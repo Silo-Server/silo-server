@@ -1,3 +1,4 @@
+import { compactHdrSuffix, prettyResolution } from "@/lib/mediaFormat";
 import type { OverlayDef, OverlayIconId } from "../types";
 
 // Tech overlays — derived from the media file (codec, container, resolution,
@@ -8,27 +9,6 @@ function hdrIcon(value: string | undefined): OverlayIconId | null {
   if (value.includes("DV")) return "dolby-vision";
   if (value.includes("HDR10")) return "hdr10";
   return "hdr";
-}
-
-// Kometa-style pretty resolution label: "2160p" → "4K", others keep their
-// lowercase-p form ("1080p", "720p"). Unknown values are uppercased so they
-// at least look intentional.
-function prettyResolution(value: string | undefined): string | null {
-  if (!value) return null;
-  const v = value.toLowerCase().trim();
-  if (v === "") return null;
-  if (v === "2160p" || v === "4k" || v === "uhd") return "4K";
-  if (v === "4320p" || v === "8k") return "8K";
-  if (/^\d+p$/.test(v)) return v;
-  return value.toUpperCase();
-}
-
-// Compact HDR suffix used for the combined Resolution+HDR badge. Any
-// Dolby Vision variant collapses to "DV"; any other HDR variant to "HDR".
-function compactHdrSuffix(value: string | undefined): string | null {
-  if (!value) return null;
-  if (value.includes("DV")) return "DV";
-  return "HDR";
 }
 
 function audioIcon(value: string | undefined): OverlayIconId | null {

@@ -2,10 +2,15 @@ package playback_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/policy"
 )
 
 func TestSessionManager_StartStop(t *testing.T) {
@@ -286,6 +291,26 @@ func TestSessionManager_UserLimitProviderOverridesDefaults(t *testing.T) {
 	}
 }
 
+func TestSessionManager_GroupPolicyLimitUsesStricterValue(t *testing.T) {
+	user := &models.User{ID: 1, MaxStreams: 6, MaxTranscodes: 2}
+	group := &access.GroupPolicy{MaxStreams: 1, MaxTranscodes: 1, RequestsAllowed: true}
+	sm := playback.NewSessionManager(6, 2)
+	sm.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+		effective := access.ApplyGroupPolicy(user, group)
+		return playback.SessionLimits{
+			MaxStreams:    effective.MaxStreams,
+			MaxTranscodes: effective.MaxTranscodes,
+		}, nil
+	})
+
+	if _, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false); err != nil {
+		t.Fatalf("StartSession first stream: %v", err)
+	}
+	if _, err := sm.StartSession(1, "profile-1", 101, playback.PlayDirect, false); err != playback.ErrTooManyStreams {
+		t.Fatalf("StartSession second stream = %v, want ErrTooManyStreams", err)
+	}
+}
+
 func TestSessionManager_UserLimitProviderAppliesTranscodeLimitOnlyToTranscodes(t *testing.T) {
 	sm := playback.NewSessionManager(6, 2)
 	sm.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
@@ -300,6 +325,122 @@ func TestSessionManager_UserLimitProviderAppliesTranscodeLimitOnlyToTranscodes(t
 	}
 	if _, err := sm.StartSession(1, "profile-1", 102, playback.PlayDirect, false); err != nil {
 		t.Fatalf("StartSession direct while transcode limit hit: %v", err)
+	}
+}
+
+func TestSessionManager_PolicyAdmissionDeciderMatchesLegacy(t *testing.T) {
+	pdp := newPlaybackPolicyPDP(t)
+	ctx := context.Background()
+
+	for _, maxStreams := range []int{0, 1, 2} {
+		for _, maxTranscodes := range []int{0, 1, 2} {
+			for _, activeStreams := range []int{0, 1, 2} {
+				for _, activeTranscodes := range []int{0, 1, 2} {
+					if activeTranscodes > activeStreams {
+						continue
+					}
+					for _, method := range []playback.PlayMethod{playback.PlayDirect, playback.PlayTranscode} {
+						name := fmt.Sprintf("streams_%d_transcodes_%d_active_%d_%d_method_%s",
+							maxStreams, maxTranscodes, activeStreams, activeTranscodes, method)
+						t.Run(name, func(t *testing.T) {
+							limits := playback.SessionLimits{MaxStreams: maxStreams, MaxTranscodes: maxTranscodes}
+							legacy := seededSessionManager(t, activeStreams, activeTranscodes)
+							legacy.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+								return limits, nil
+							})
+							withPolicy := seededSessionManager(t, activeStreams, activeTranscodes)
+							withPolicy.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+								return limits, nil
+							})
+							withPolicy.SetAdmissionDecider(policy.NewPlaybackAdmissionDecider(pdp))
+
+							_, legacyErr := legacy.StartSessionWithContext(ctx, 1, "profile-1", 900, method, false)
+							_, policyErr := withPolicy.StartSessionWithContext(ctx, 1, "profile-1", 900, method, false)
+							if !sameAdmissionError(policyErr, legacyErr) {
+								t.Fatalf("policy admission error = %v, want legacy %v", policyErr, legacyErr)
+							}
+						})
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestSessionManager_AdmissionDeciderErrorDenies(t *testing.T) {
+	sm := playback.NewSessionManager(0, 0)
+	sm.SetAdmissionDecider(func(context.Context, playback.AdmissionRequest) (playback.AdmissionDecision, error) {
+		return playback.AdmissionDecision{}, errors.New("policy unavailable")
+	})
+
+	_, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if !errors.Is(err, playback.ErrPlaybackNotAllowed) {
+		t.Fatalf("StartSession with failing decider = %v, want ErrPlaybackNotAllowed", err)
+	}
+}
+
+func TestSessionManager_AdmissionReasonCodesMapToSentinelErrors(t *testing.T) {
+	cases := []struct {
+		name       string
+		reasonCode string
+		want       error
+	}{
+		{"max streams", playback.AdmissionReasonMaxStreamsExceeded, playback.ErrTooManyStreams},
+		{"max transcodes", playback.AdmissionReasonMaxTranscodesExceeded, playback.ErrTooManyTranscodes},
+		// A custom-override denial carries free text and the custom_denial
+		// code; it must not surface as a concurrency-limit error.
+		{"custom denial", "custom_denial", playback.ErrPlaybackNotAllowed},
+		{"empty code", "", playback.ErrPlaybackNotAllowed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sm := playback.NewSessionManager(0, 0)
+			sm.SetAdmissionDecider(func(context.Context, playback.AdmissionRequest) (playback.AdmissionDecision, error) {
+				return playback.AdmissionDecision{Allowed: false, Reason: "quiet hours", ReasonCode: tc.reasonCode}, nil
+			})
+			_, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("StartSession denial with code %q = %v, want %v", tc.reasonCode, err, tc.want)
+			}
+		})
+	}
+}
+
+func seededSessionManager(t *testing.T, activeStreams, activeTranscodes int) *playback.SessionManager {
+	t.Helper()
+	sm := playback.NewSessionManager(0, 0)
+	for i := 0; i < activeTranscodes; i++ {
+		if _, err := sm.StartSession(1, "profile-1", 100+i, playback.PlayTranscode, false); err != nil {
+			t.Fatalf("seed transcode %d: %v", i, err)
+		}
+	}
+	for i := activeTranscodes; i < activeStreams; i++ {
+		if _, err := sm.StartSession(1, "profile-1", 100+i, playback.PlayDirect, false); err != nil {
+			t.Fatalf("seed direct %d: %v", i, err)
+		}
+	}
+	return sm
+}
+
+func newPlaybackPolicyPDP(t *testing.T) *policy.PDP {
+	t.Helper()
+	engine, err := policy.NewEngine(context.Background())
+	if err != nil {
+		t.Fatalf("NewEngine() error: %v", err)
+	}
+	return policy.NewPDP(engine)
+}
+
+func sameAdmissionError(got, want error) bool {
+	switch {
+	case want == nil:
+		return got == nil
+	case errors.Is(want, playback.ErrTooManyStreams):
+		return errors.Is(got, playback.ErrTooManyStreams)
+	case errors.Is(want, playback.ErrTooManyTranscodes):
+		return errors.Is(got, playback.ErrTooManyTranscodes)
+	default:
+		return errors.Is(got, want)
 	}
 }
 
@@ -506,10 +647,13 @@ func TestUpdateStreamState(t *testing.T) {
 		TranscodeAudio:    true,
 		ClientIP:          "10.0.0.10",
 		StreamBitrateKbps: 4200,
-		TargetResolution:  "1080p",
-		TargetVideoCodec:  "h264",
-		TargetAudioCodec:  "aac",
-		TargetBitrateKbps: 4000,
+		TargetResolution:   "1080p",
+		TargetVideoCodec:   "h264",
+		TargetAudioCodec:   "aac",
+		TargetBitrateKbps:  4000,
+		SubtitleTrackIndex: 3,
+		SubtitleBurnIn:     true,
+		SegmentDuration:    4,
 	})
 	if err != nil {
 		t.Fatalf("UpdateStreamState: %v", err)
@@ -548,6 +692,15 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 	if got.TargetBitrateKbps != 4000 {
 		t.Errorf("TargetBitrateKbps = %d, want 4000", got.TargetBitrateKbps)
+	}
+	if got.SubtitleTrackIndex != 3 {
+		t.Errorf("SubtitleTrackIndex = %d, want 3", got.SubtitleTrackIndex)
+	}
+	if !got.SubtitleBurnIn {
+		t.Error("SubtitleBurnIn = false, want true")
+	}
+	if got.SegmentDuration != 4 {
+		t.Errorf("SegmentDuration = %d, want 4", got.SegmentDuration)
 	}
 }
 

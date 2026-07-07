@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -49,19 +50,40 @@ var ignoredDirNames = map[string]bool{
 	".downloads":   true,
 }
 
+// ignoredMovieSupplementalDirNames holds movie-library directory names whose
+// contents are never playable content (noise). Extras-shaped directories
+// (Trailers/, Featurettes/, ...) are NOT in this set: they are walked and
+// classified via extrasDirKinds instead of discarded.
 var ignoredMovieSupplementalDirNames = map[string]bool{
-	"sample":            true,
-	"samples":           true,
-	"extra":             true,
-	"extras":            true,
-	"featurette":        true,
-	"featurettes":       true,
-	"behind the scenes": true,
-	"deleted scenes":    true,
-	"trailer":           true,
-	"trailers":          true,
-	"subs":              true,
-	"subtitles":         true,
+	"sample":    true,
+	"samples":   true,
+	"subs":      true,
+	"subtitles": true,
+}
+
+// extrasDirKinds classifies supplemental directory names (normalized via
+// normalizeScannerDirLabel) into the shared extra-kind vocabulary. The set
+// mirrors the Jellyfin/Plex extras folder convention.
+var extrasDirKinds = map[string]models.ExtraKind{
+	"extra":             models.ExtraKindOther,
+	"extras":            models.ExtraKindOther,
+	"other":             models.ExtraKindOther,
+	"others":            models.ExtraKindOther,
+	"featurette":        models.ExtraKindFeaturette,
+	"featurettes":       models.ExtraKindFeaturette,
+	"behind the scenes": models.ExtraKindBehindTheScenes,
+	"deleted scene":     models.ExtraKindDeletedScene,
+	"deleted scenes":    models.ExtraKindDeletedScene,
+	"trailer":           models.ExtraKindTrailer,
+	"trailers":          models.ExtraKindTrailer,
+	"teaser":            models.ExtraKindTeaser,
+	"teasers":           models.ExtraKindTeaser,
+	"clip":              models.ExtraKindClip,
+	"clips":             models.ExtraKindClip,
+	"bloopers":          models.ExtraKindBloopers,
+	"interviews":        models.ExtraKindOther,
+	"scenes":            models.ExtraKindOther,
+	"shorts":            models.ExtraKindOther,
 }
 
 func normalizeScannerDirLabel(name string) string {
@@ -105,31 +127,38 @@ type scannerImageCacher interface {
 }
 
 type Scanner struct {
-	fileRepo           *FileRepository
-	rootSnapshotRepo   *ScannedRootRepository
-	groupSnapshotRepo  *ScannedGroupRepository
-	rootOverrideRepo   *MediaRootOverrideRepository
-	groupOverrideRepo  *MediaGroupOverrideRepository
-	locationRepo       *ObservedLocationRepository
-	groupLocationRepo  *GroupLocationRepository
-	folderRepo         *catalog.FolderRepository
-	libraryRepo        *catalog.LibraryItemRepository
-	episodeLibraryRepo *catalog.EpisodeLibraryRepository
-	itemRepo           *catalog.ItemRepository
-	personRepo         *catalog.PersonRepository
-	episodeRepo        *catalog.EpisodeRepository
-	ffprobePath        string
-	s3Client           *s3client.Client // public assets bucket (may be nil)
-	imageCacher        scannerImageCacher
+	fileRepo             *FileRepository
+	rootSnapshotRepo     *ScannedRootRepository
+	groupSnapshotRepo    *ScannedGroupRepository
+	rootOverrideRepo     *MediaRootOverrideRepository
+	groupOverrideRepo    *MediaGroupOverrideRepository
+	identityOverrideRepo *MediaIdentityOverrideRepository
+	locationRepo         *ObservedLocationRepository
+	groupLocationRepo    *GroupLocationRepository
+	folderRepo           *catalog.FolderRepository
+	libraryRepo          *catalog.LibraryItemRepository
+	episodeLibraryRepo   *catalog.EpisodeLibraryRepository
+	itemRepo             *catalog.ItemRepository
+	personRepo           *catalog.PersonRepository
+	episodeRepo          *catalog.EpisodeRepository
+	extraRepo            *catalog.ExtraRepository
+	ffprobePath          string
+	s3Client             *s3client.Client // public assets bucket (may be nil)
+	imageCacher          scannerImageCacher
 	// workers is atomic so admin settings changes can resize the per-scan
 	// worker pool while a scan is running (applies to the next scan).
 	workers             atomic.Int32
 	emptyTrashAfterScan bool
-	markerFetcher       func(context.Context, string) *IntroCreditsMarkers
-	metadataQueue       MetadataQueueProducer
-	movieQueueSyncer    MovieQueueSyncer
-	seriesQueueSyncer   SeriesQueueSyncer
-	literaryWorkLinker  LiteraryWorkLinker
+	// fileRemovalGrace is how long a file must have been marked missing before
+	// emptying trash hard-deletes its row. Missing files are hidden from
+	// clients immediately; the grace only delays losing per-file state so a
+	// file that reappears (flapping mount, reverted upgrade) restores cheaply.
+	fileRemovalGrace   time.Duration
+	markerFetcher      func(context.Context, string) *IntroCreditsMarkers
+	metadataQueue      MetadataQueueProducer
+	movieQueueSyncer   MovieQueueSyncer
+	seriesQueueSyncer  SeriesQueueSyncer
+	literaryWorkLinker LiteraryWorkLinker
 }
 
 // SetImageCacher installs the imagecache.Cacher used by book scanners to push
@@ -188,28 +217,34 @@ type SeriesQueueSyncer interface {
 }
 
 // NewScanner creates a new Scanner with the given dependencies.
-func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client.Client, workers int, emptyTrashAfterScan bool) *Scanner {
+func NewScanner(fileRepo *FileRepository, ffprobePath string, s3Client *s3client.Client, workers int, emptyTrashAfterScan bool, fileRemovalGrace time.Duration) *Scanner {
 	if workers < 1 {
 		workers = 8
 	}
+	if fileRemovalGrace < 0 {
+		fileRemovalGrace = 0
+	}
 	s := &Scanner{
-		fileRepo:            fileRepo,
-		rootSnapshotRepo:    NewScannedRootRepository(fileRepo.Pool()),
-		groupSnapshotRepo:   NewScannedGroupRepository(fileRepo.Pool()),
-		rootOverrideRepo:    NewMediaRootOverrideRepository(fileRepo.Pool()),
-		groupOverrideRepo:   NewMediaGroupOverrideRepository(fileRepo.Pool()),
-		locationRepo:        NewObservedLocationRepository(fileRepo.Pool()),
-		groupLocationRepo:   NewGroupLocationRepository(fileRepo.Pool()),
-		folderRepo:          catalog.NewFolderRepository(fileRepo.Pool()),
-		libraryRepo:         catalog.NewLibraryItemRepository(fileRepo.Pool()),
-		episodeLibraryRepo:  catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
-		itemRepo:            catalog.NewItemRepository(fileRepo.Pool()),
-		personRepo:          catalog.NewPersonRepository(fileRepo.Pool()),
-		episodeRepo:         catalog.NewEpisodeRepository(fileRepo.Pool()),
-		ffprobePath:         ffprobePath,
-		s3Client:            s3Client,
-		emptyTrashAfterScan: emptyTrashAfterScan,
-		markerFetcher:       nil,
+		fileRepo:             fileRepo,
+		rootSnapshotRepo:     NewScannedRootRepository(fileRepo.Pool()),
+		groupSnapshotRepo:    NewScannedGroupRepository(fileRepo.Pool()),
+		rootOverrideRepo:     NewMediaRootOverrideRepository(fileRepo.Pool()),
+		groupOverrideRepo:    NewMediaGroupOverrideRepository(fileRepo.Pool()),
+		identityOverrideRepo: NewMediaIdentityOverrideRepository(fileRepo.Pool()),
+		locationRepo:         NewObservedLocationRepository(fileRepo.Pool()),
+		groupLocationRepo:    NewGroupLocationRepository(fileRepo.Pool()),
+		folderRepo:           catalog.NewFolderRepository(fileRepo.Pool()),
+		libraryRepo:          catalog.NewLibraryItemRepository(fileRepo.Pool()),
+		episodeLibraryRepo:   catalog.NewEpisodeLibraryRepository(fileRepo.Pool()),
+		itemRepo:             catalog.NewItemRepository(fileRepo.Pool()),
+		personRepo:           catalog.NewPersonRepository(fileRepo.Pool()),
+		episodeRepo:          catalog.NewEpisodeRepository(fileRepo.Pool()),
+		extraRepo:            catalog.NewExtraRepository(fileRepo.Pool()),
+		ffprobePath:          ffprobePath,
+		s3Client:             s3Client,
+		emptyTrashAfterScan:  emptyTrashAfterScan,
+		fileRemovalGrace:     fileRemovalGrace,
+		markerFetcher:        nil,
 	}
 	s.SetWorkers(workers)
 	return s
@@ -257,7 +292,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
 
-	if isAudiobookLibraryType(folder.Type) {
+	if librarykind.IsAudiobook(folder.Type) {
 		if err := s.ScanAudiobookFolder(watchCtx, folder, true); err != nil {
 			return nil, err
 		}
@@ -267,7 +302,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
-	if isPodcastLibraryType(folder.Type) {
+	if librarykind.IsPodcast(folder.Type) {
 		if err := s.ScanPodcastFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
@@ -277,14 +312,14 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		return &ScanResult{}, nil
 	}
 
-	if isMangaLibraryType(folder.Type) {
+	if librarykind.IsManga(folder.Type) {
 		if err := s.ScanMangaFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
 	}
 
-	if isEbookLibraryType(folder.Type) {
+	if librarykind.IsEbook(folder.Type) {
 		if err := s.ScanEbookFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
@@ -300,7 +335,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 	cleanSubtree := filepath.Clean(subtreePath)
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
-	if isAudiobookLibraryType(folder.Type) {
+	if librarykind.IsAudiobook(folder.Type) {
 		scanRoot, err := cleanScopedAudiobookScanRoot(subtreePath)
 		if err != nil {
 			return nil, err
@@ -313,13 +348,13 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		}
 		return &ScanResult{}, nil
 	}
-	if isMangaLibraryType(folder.Type) {
+	if librarykind.IsManga(folder.Type) {
 		if err := s.scanMangaPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
 	}
-	if isEbookLibraryType(folder.Type) {
+	if librarykind.IsEbook(folder.Type) {
 		if err := s.scanEbookPaths(watchCtx, folder, []string{cleanSubtree}, false); err != nil {
 			return nil, err
 		}
@@ -346,49 +381,6 @@ func scopedFolderPaths(folder *models.MediaFolder, paths []string) *models.Media
 	return &clone
 }
 
-func isMovieLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "movie", "movies":
-		return true
-	default:
-		return false
-	}
-}
-func isAudiobookLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "audiobook", "audiobooks":
-		return true
-	default:
-		return false
-	}
-}
-func isPodcastLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "podcast", "podcasts":
-		return true
-	default:
-		return false
-	}
-}
-
-func isEbookLibraryType(libraryType string) bool {
-	switch strings.ToLower(strings.TrimSpace(libraryType)) {
-	case "ebook", "ebooks":
-		return true
-	default:
-		return false
-	}
-}
-
-func isMangaLibraryType(t string) bool {
-	switch strings.ToLower(strings.TrimSpace(t)) {
-	case "manga":
-		return true
-	default:
-		return false
-	}
-}
-
 // walkMode tells walkLogicalTree which file extensions to surface and
 // which library-specific filename heuristics (sample/extra skipping)
 // to apply.
@@ -407,15 +399,15 @@ const (
 // pass arbitrary types preserve their prior behavior.
 func walkModeFor(folderType string) walkMode {
 	switch {
-	case isMovieLibraryType(folderType):
+	case librarykind.IsMovie(folderType):
 		return walkModeMovie
-	case isAudiobookLibraryType(folderType):
+	case librarykind.IsAudiobook(folderType):
 		return walkModeAudiobook
-	case isPodcastLibraryType(folderType):
+	case librarykind.IsPodcast(folderType):
 		return walkModePodcast
-	case isEbookLibraryType(folderType):
+	case librarykind.IsEbook(folderType):
 		return walkModeEbook
-	case isMangaLibraryType(folderType):
+	case librarykind.IsManga(folderType):
 		// Manga chapters are .cbz/.cbr archives, surfaced by the ebook walk.
 		return walkModeEbook
 	default:
@@ -689,16 +681,23 @@ func (s *Scanner) scanPaths(
 	})
 
 	// Track which paths we see on disk so we can detect missing files.
+	// Extras count as seen (they own media_files rows) but are partitioned
+	// out of identity inference and match processing below.
 	seenPaths := make(map[string]bool, len(filePaths))
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(filePaths, folder.Type, folder.ID, rootOverrides)
-	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
+	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
+	if err != nil {
+		return nil, fmt.Errorf("loading identity overrides: %w", err)
+	}
+	groupInference := inferGroupAssignments(primaryPaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading group overrides: %w", err)
@@ -812,7 +811,7 @@ func (s *Scanner) scanPaths(
 		}
 	}()
 
-	for _, p := range filePaths {
+	for _, p := range primaryPaths {
 		pathCh <- p
 	}
 	close(pathCh)
@@ -846,6 +845,12 @@ func (s *Scanner) scanPaths(
 		return result, ctx.Err()
 	}
 
+	extraStats := s.processExtraFiles(ctx, folder, walkRoots, extraCandidates, existingByPath)
+	result.New += extraStats.New
+	result.Updated += extraStats.Updated
+	result.Unchanged += extraStats.Unchanged
+	result.Errors += extraStats.Errors
+
 	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
 	}
@@ -874,11 +879,12 @@ func (s *Scanner) scanPaths(
 		result.Missing++
 	}
 
-	// Empty trash: delete all files marked as missing for this folder.
-	// Safe because the empty-root guard (above) returns early when 0 files
-	// are found on disk, so we only reach here when the root is populated.
+	// Empty trash: delete files marked as missing for longer than the removal
+	// grace for this folder. Safe because the empty-root guard (above) returns
+	// early when 0 files are found on disk, so we only reach here when the
+	// root is populated.
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -1085,7 +1091,7 @@ func (s *Scanner) scanFolderByRoots(
 	}
 
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -1195,16 +1201,23 @@ func (s *Scanner) scanScope(
 		FilesDiscovered: len(filePaths),
 	})
 
+	// Extras count as seen (so reconciliation keeps their rows) but are
+	// partitioned out of identity inference and match processing.
 	seenPaths := make(map[string]bool, len(filePaths))
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
 	}
-	rootInference := inferRootAssignments(filePaths, folder.Type, folder.ID, rootOverrides)
-	groupInference := inferGroupAssignments(filePaths, folder.Type, folder.ID, rootInference.Assignments)
+	rootInference := inferRootAssignments(primaryPaths, folder.Type, folder.ID, rootOverrides)
+	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
+	if err != nil {
+		return nil, fmt.Errorf("loading identity overrides: %w", err)
+	}
+	groupInference := inferGroupAssignments(primaryPaths, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return nil, fmt.Errorf("loading group overrides: %w", err)
@@ -1289,7 +1302,7 @@ func (s *Scanner) scanScope(
 		}
 	}()
 
-	for _, p := range filePaths {
+	for _, p := range primaryPaths {
 		pathCh <- p
 	}
 	close(pathCh)
@@ -1313,6 +1326,14 @@ func (s *Scanner) scanScope(
 		Unchanged:       result.Unchanged,
 		Errors:          result.Errors,
 	})
+
+	if ctx.Err() == nil {
+		extraStats := s.processExtraFiles(ctx, folder, walkRoots, extraCandidates, existingByPath)
+		result.New += extraStats.New
+		result.Updated += extraStats.Updated
+		result.Unchanged += extraStats.Unchanged
+		result.Errors += extraStats.Errors
+	}
 
 	return &scopedScan{
 		walkRoots:      append([]string(nil), walkRoots...),
@@ -1484,15 +1505,30 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 	}
 
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
-		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-		SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
-		FROM media_files mf
-		JOIN episodes e ON e.content_id = mf.episode_id
-		WHERE mf.media_folder_id = $1
-		  AND mf.missing_since IS NULL
-		  AND mf.episode_id IS NOT NULL
-		GROUP BY mf.episode_id, mf.media_folder_id
-		ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+		WITH inserted AS (
+			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+			SELECT mf.episode_id, mf.media_folder_id, MIN(mf.created_at)
+			FROM media_files mf
+			JOIN episodes e ON e.content_id = mf.episode_id
+			WHERE mf.media_folder_id = $1
+			  AND mf.missing_since IS NULL
+			  AND mf.episode_id IS NOT NULL
+			GROUP BY mf.episode_id, mf.media_folder_id
+			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING episode_id, first_seen_at
+		)
+		-- Bump each parent series' latest-episode-added denorm for the
+		-- genuinely new links ("Latest Episodes" sort, issue #202).
+		UPDATE media_items mi
+		SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+		FROM (
+			SELECT e.series_id, MAX(i.first_seen_at) AS latest_added
+			FROM inserted i
+			JOIN episodes e ON e.content_id = i.episode_id
+			GROUP BY e.series_id
+		) sub
+		WHERE mi.content_id = sub.series_id
+		  AND mi.type = 'series'
 	`, folderID); err != nil {
 		return fmt.Errorf("restoring episode folder memberships: %w", err)
 	}
@@ -1507,7 +1543,8 @@ func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderI
 
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id)
-		SELECT DISTINCT mf.media_folder_id, mf.canonical_root_path, mf.content_id
+		SELECT DISTINCT ON (mf.media_folder_id, mf.canonical_root_path)
+			mf.media_folder_id, mf.canonical_root_path, mf.content_id
 		FROM media_files mf
 		JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
@@ -1592,7 +1629,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	}
 
 	cleanFile := filepath.Clean(filePath)
-	if isAudiobookLibraryType(folder.Type) {
+	if librarykind.IsAudiobook(folder.Type) {
 		if !SupportsAudioFile(cleanFile) {
 			return fmt.Errorf("unrecognized audio extension: %s", strings.ToLower(filepath.Ext(cleanFile)))
 		}
@@ -1618,6 +1655,25 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err == nil {
 		existingByPath[filePath] = scanStateFromMediaFile(existing)
 	}
+
+	// A local extra (Trailers/ dir, -trailer suffix, ...) bypasses identity
+	// inference and matching entirely.
+	if candidate, isExtra := classifyExtraPath(cleanFile, folder.Type); isExtra {
+		stats := s.processExtraFiles(ctx, folder, folder.Paths, []extraCandidate{candidate}, existingByPath)
+		if stats.Errors > 0 {
+			return fmt.Errorf("processing extra file %s failed", cleanFile)
+		}
+		// Converting a previously-primary row into an extra clears its
+		// content linkage; run the same membership cleanup a full scan would
+		// so stale library membership doesn't linger until the next scan.
+		if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+			return fmt.Errorf("syncing present library state for extra file: %w", err)
+		}
+		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID); err != nil {
+			return fmt.Errorf("reconciling library membership after extra file scan: %w", err)
+		}
+		return nil
+	}
 	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
 	if err != nil {
 		return fmt.Errorf("loading item statuses for file: %w", err)
@@ -1642,7 +1698,11 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	rootInference := inferRootAssignments([]string{filePath}, folder.Type, folder.ID, rootOverrides)
 	s.logRootInferenceDisagreements(rootInference.Assignments)
 
-	groupInference := inferGroupAssignments([]string{filePath}, folder.Type, folder.ID, rootInference.Assignments)
+	identityOverrides, err := s.loadIdentityOverrides(ctx, folder.ID)
+	if err != nil {
+		return fmt.Errorf("loading identity overrides for file: %w", err)
+	}
+	groupInference := inferGroupAssignments([]string{filePath}, folder.Type, folder.ID, rootInference.Assignments, identityOverrides)
 	groupOverrides, err := s.loadGroupOverrides(ctx, folder.ID)
 	if err != nil {
 		return fmt.Errorf("loading group overrides for file: %w", err)
@@ -2500,6 +2560,20 @@ func (s *Scanner) loadRootOverrides(
 		overridesByRoot[filepath.Clean(override.RootPath)] = override
 	}
 	return overridesByRoot, nil
+}
+
+func (s *Scanner) loadIdentityOverrides(
+	ctx context.Context,
+	folderID int,
+) (*identityOverrideSet, error) {
+	if s == nil || s.identityOverrideRepo == nil || folderID <= 0 {
+		return nil, nil
+	}
+	overrides, err := s.identityOverrideRepo.ListByFolder(ctx, folderID)
+	if err != nil {
+		return nil, err
+	}
+	return newIdentityOverrideSet(overrides), nil
 }
 
 func (s *Scanner) loadGroupOverrides(

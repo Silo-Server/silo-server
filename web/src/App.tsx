@@ -15,6 +15,7 @@ import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { ThemeProvider } from "@/hooks/useTheme";
+import { DateTimeFormatProvider, useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import { CustomThemeProvider } from "@/contexts/CustomThemeProvider";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -46,6 +47,7 @@ import RequestDetail from "@/pages/RequestDetail";
 import AdminDashboard from "@/pages/AdminDashboard";
 import AdminActivity from "@/pages/AdminActivity";
 import AdminLogs from "@/pages/AdminLogs";
+import AdminAccessGroups from "@/pages/AdminAccessGroups";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminRequests from "@/pages/AdminRequests";
 import AdminAutoscan from "@/pages/AdminAutoscan";
@@ -67,6 +69,7 @@ import AdminTaskDetail from "@/pages/AdminTaskDetail";
 import AdminPlugins from "@/pages/AdminPlugins";
 import AdminHistoryImport from "@/pages/AdminHistoryImport";
 import AdminRecommendations from "@/pages/AdminRecommendations";
+import AdminPolicyLayout from "@/pages/admin-policy/AdminPolicyLayout";
 import Recommendations from "@/pages/Recommendations";
 import RecommendationsSection from "@/pages/RecommendationsSection";
 import Calendar from "@/pages/Calendar";
@@ -142,8 +145,21 @@ function ScrollRestorationManager() {
   return null;
 }
 
+/**
+ * Builds a guard redirect target (e.g. "/login") that preserves the current
+ * location so the user returns to it after authenticating.
+ */
+function guardRedirectTarget(base: string, location: ReturnType<typeof useLocation>): string {
+  const destination = `${location.pathname}${location.search}`;
+  if (destination === "/" || destination === "") {
+    return base;
+  }
+  return `${base}?redirect=${encodeURIComponent(destination)}`;
+}
+
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading, setupLoading } = useAuth();
+  const location = useLocation();
   if (loading || setupLoading) {
     return (
       <div className="p-8" role="status" aria-live="polite">
@@ -152,7 +168,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to={guardRedirectTarget("/login", location)} replace />;
   return <>{children}</>;
 }
 
@@ -172,7 +188,8 @@ function SetupGate({ children }: { children: ReactNode }) {
 
 function RequireProfile({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
-  if (!profile) return <Navigate to="/profiles" replace />;
+  const location = useLocation();
+  if (!profile) return <Navigate to={guardRedirectTarget("/profiles", location)} replace />;
   return <>{children}</>;
 }
 
@@ -336,6 +353,14 @@ function LegacyUserCollectionRedirect() {
   );
 }
 
+// Re-renders the entire routed page tree when the date/time format
+// preference changes, so pages formatting dates via lib/datetime module state
+// pick up the new preference without per-component subscriptions.
+function ReactiveAppRoutes() {
+  useDateTimeFormat();
+  return <AppRoutes />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -399,12 +424,14 @@ function AppRoutes() {
                   <Route path="history-import" element={<AdminHistoryImport />} />
                   <Route path="users" element={<AdminUsers />} />
                   <Route path="users/:id" element={<AdminUserDetail />} />
+                  <Route path="access-groups" element={<AdminAccessGroups />} />
                   <Route path="devices" element={<AdminDevices />} />
                   <Route path="devices/:userId/:deviceId" element={<AdminDevices />} />
                   <Route path="nodes" element={<AdminNodes />} />
                   <Route path="sections" element={<AdminSections />} />
                   <Route path="plugins" element={<AdminPlugins />} />
                   <Route path="settings" element={<AdminSettingsLayout />} />
+                  <Route path="policy" element={<AdminPolicyLayout />} />
                   <Route path="recommendations" element={<AdminRecommendations />} />
                   <Route path="api-keys" element={<AdminApiKeys />} />
                   <Route path="subtitles" element={<AdminSubtitles />} />
@@ -590,21 +617,23 @@ export default function App() {
             <BrandingProvider>
               <ThemeProvider>
                 <CustomThemeProvider>
-                  <WatchPlaybackProvider>
-                    <AudiobookPlaybackProvider>
-                      <RealtimeEventsProvider>
-                        <RealtimeEventChannels />
-                        <ScrollRestorationManager />
-                        <RouteAnnouncer />
-                        <QueryCacheManager />
-                        <AppChrome />
-                        <AppRoutes />
-                        <WatchPlaybackHost />
-                        <WatchPlaybackBar />
-                        <Toaster />
-                      </RealtimeEventsProvider>
-                    </AudiobookPlaybackProvider>
-                  </WatchPlaybackProvider>
+                  <DateTimeFormatProvider>
+                    <WatchPlaybackProvider>
+                      <AudiobookPlaybackProvider>
+                        <RealtimeEventsProvider>
+                          <RealtimeEventChannels />
+                          <ScrollRestorationManager />
+                          <RouteAnnouncer />
+                          <QueryCacheManager />
+                          <AppChrome />
+                          <ReactiveAppRoutes />
+                          <WatchPlaybackHost />
+                          <WatchPlaybackBar />
+                          <Toaster />
+                        </RealtimeEventsProvider>
+                      </AudiobookPlaybackProvider>
+                    </WatchPlaybackProvider>
+                  </DateTimeFormatProvider>
                 </CustomThemeProvider>
               </ThemeProvider>
             </BrandingProvider>

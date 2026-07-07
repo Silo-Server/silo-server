@@ -372,21 +372,37 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 			SkipTotal:      req.SkipTotal,
 			UseSourceOrder: true,
 		}, access)
-	case "favorites":
+	case "favorites", "watchlist":
+		source := CatalogSourceFavorites
+		if section.SectionType == "watchlist" {
+			source = CatalogSourceWatchlist
+		}
+		// Personal list sections may carry optional type/library filters and a
+		// sort; apply them as an overlay query so the "see all" page matches
+		// the rail. Without a configured sort the stored list order is kept.
+		sectionFilters := parseCatalogSectionFilters(section.Config)
+		query := QueryDefinition{
+			MediaScope: sectionFilters.FilterType,
+			LibraryIDs: append([]int(nil), sectionFilters.LibraryIDs...),
+		}.Normalize()
+		if section.Scope == "library" && section.LibraryID != nil {
+			query.LibraryIDs = []int{*section.LibraryID}
+		}
+		useSourceOrder := true
+		if qs, ok := NormalizePersonalListSort(parseCatalogSectionSort(section.Config)); ok {
+			query.Sort = qs
+			// added_at (date added to the list) is applied by
+			// loadPersonalSourceIDs, which keeps the source order path;
+			// metadata sorts go through the query executor instead.
+			useSourceOrder = qs.Field == "added_at"
+		}
 		return r.resolvePersonalSource(ctx, CatalogRequest{
-			Source:         CatalogSourceFavorites,
+			Source:         source,
+			Query:          query,
 			Limit:          req.Limit,
 			Offset:         req.Offset,
 			SkipTotal:      req.SkipTotal,
-			UseSourceOrder: true,
-		}, access)
-	case "watchlist":
-		return r.resolvePersonalSource(ctx, CatalogRequest{
-			Source:         CatalogSourceWatchlist,
-			Limit:          req.Limit,
-			Offset:         req.Offset,
-			SkipTotal:      req.SkipTotal,
-			UseSourceOrder: true,
+			UseSourceOrder: useSourceOrder,
 		}, access)
 	case "recently_added":
 		return r.resolveSectionBrowseSource(ctx, req, access, section, "added_at", "desc")
@@ -1563,6 +1579,19 @@ func parseCatalogSectionFilters(config json.RawMessage) catalogSectionFilters {
 	return filters
 }
 
+// parseCatalogSectionSort extracts the optional flat sort/order keys from a
+// watchlist/favorites section config.
+func parseCatalogSectionSort(config json.RawMessage) (string, string) {
+	var cfg struct {
+		Sort  string `json:"sort"`
+		Order string `json:"order"`
+	}
+	if len(config) > 0 {
+		_ = json.Unmarshal(config, &cfg)
+	}
+	return cfg.Sort, cfg.Order
+}
+
 func normalizeCatalogSectionLibraryIDs(single *int, multiple []int) []int {
 	seen := map[int]struct{}{}
 	result := make([]int, 0, len(multiple)+1)
@@ -1669,6 +1698,52 @@ func catalogProfileCanAccessCollection(collection *userstore.Collection, profile
 	return false
 }
 
+// PersonalListEntry pairs a list member with the timestamp it was added to
+// the list (watchlist/favorites), as stored by the user store.
+type PersonalListEntry struct {
+	ID      string
+	AddedAt string
+}
+
+// OrderPersonalListIDs returns the entry IDs, reordered by list added_at when
+// that sort is requested; any other (or no) sort keeps the stored list order.
+// AddedAt strings from one store share a format, so lexicographic comparison
+// preserves chronology; entries with no timestamp sort last.
+func OrderPersonalListIDs(entries []PersonalListEntry, qs QuerySort) []string {
+	if qs.Field == "added_at" {
+		asc := qs.Order == "asc"
+		slices.SortStableFunc(entries, func(a, b PersonalListEntry) int {
+			if (a.AddedAt == "") != (b.AddedAt == "") {
+				if a.AddedAt != "" {
+					return -1
+				}
+				return 1
+			}
+			cmp := strings.Compare(a.AddedAt, b.AddedAt)
+			if !asc {
+				cmp = -cmp
+			}
+			return cmp
+		})
+	}
+	ids := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		ids = append(ids, entry.ID)
+	}
+	return ids
+}
+
+// watchlistVisibility builds the fully-watched-series display filter, falling
+// back to a pool-backed episode repository when none was injected (mirroring
+// the history path below).
+func (r *CatalogResolver) watchlistVisibility() *WatchlistVisibility {
+	episodes := r.episodeRepo
+	if episodes == nil && r.itemRepo != nil {
+		episodes = NewEpisodeRepository(r.itemRepo.pool)
+	}
+	return NewWatchlistVisibilityFromRepos(r.itemRepo, episodes)
+}
+
 func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store userstore.UserStore, req CatalogRequest, profileID string) ([]string, error) {
 	switch req.Source {
 	case CatalogSourceFavorites:
@@ -1676,25 +1751,41 @@ func (r *CatalogResolver) loadPersonalSourceIDs(ctx context.Context, store users
 		if err != nil {
 			return nil, err
 		}
-		ids := make([]string, 0, len(entries))
+		listed := make([]PersonalListEntry, 0, len(entries))
 		for _, entry := range entries {
-			ids = append(ids, entry.MediaItemID)
+			listed = append(listed, PersonalListEntry{ID: entry.MediaItemID, AddedAt: entry.AddedAt})
 		}
-		return ids, nil
+		return OrderPersonalListIDs(listed, req.Query.Sort), nil
 	case CatalogSourceWatchlist:
 		entries, err := store.ListWatchlist(ctx, profileID, 10000, 0)
 		if err != nil {
 			return nil, err
 		}
-		ids := make([]string, 0, len(entries))
+		entryIDs := make([]string, 0, len(entries))
 		for _, entry := range entries {
-			ids = append(ids, entry.MediaItemID)
+			entryIDs = append(entryIDs, entry.MediaItemID)
 		}
-		return ids, nil
+		hidden, err := r.watchlistVisibility().HiddenSeriesIDs(ctx, store, profileID, entryIDs)
+		if err != nil {
+			return nil, fmt.Errorf("filtering watched watchlist series: %w", err)
+		}
+		listed := make([]PersonalListEntry, 0, len(entries))
+		for _, entry := range entries {
+			if _, ok := hidden[entry.MediaItemID]; ok {
+				continue
+			}
+			listed = append(listed, PersonalListEntry{ID: entry.MediaItemID, AddedAt: entry.AddedAt})
+		}
+		return OrderPersonalListIDs(listed, req.Query.Sort), nil
 	case CatalogSourceHistory:
 		entries, err := store.ListHistory(ctx, profileID, 10000, 0)
 		if err != nil {
 			return nil, err
+		}
+		// The episode scope shows history at episode granularity; every other
+		// scope collapses episode watch events into their series display item.
+		if isEpisodeCatalogScope(req.Query.MediaScope) {
+			return HistoryEpisodeScopeIDs(entries), nil
 		}
 		return ResolveHistoryDisplayIDs(ctx, entries, NewEpisodeRepository(r.itemRepo.pool))
 	default:
@@ -1806,6 +1897,10 @@ func (r *CatalogResolver) fetchAccessibleItemsByID(ctx context.Context, contentI
 		return []*models.MediaItem{}, nil
 	}
 
+	if isEpisodeCatalogScope(req.Query.MediaScope) {
+		return r.fetchAccessibleEpisodeItemsByID(ctx, contentIDs, req, access)
+	}
+
 	filters, earlyEmpty, err := catalogBrowseFilters(req, access)
 	if err != nil {
 		return nil, err
@@ -1833,6 +1928,61 @@ func (r *CatalogResolver) fetchAccessibleItemsByID(ctx context.Context, contentI
 		ordered = append(ordered, item)
 	}
 	return ordered, nil
+}
+
+// fetchAccessibleEpisodeItemsByID is the episode-scope counterpart of
+// fetchAccessibleItemsByID. Episode rows are not present in media_items — they
+// hydrate through the episode catalog relation — so the browse-repository path
+// (which scans media_items and would match nothing) is replaced by the episode
+// query executor with the requested ids as the allowed-content set. Query
+// filters are applied in the same pass; sort and limit are stripped because
+// the caller re-imposes source order or its own sort downstream.
+func (r *CatalogResolver) fetchAccessibleEpisodeItemsByID(ctx context.Context, contentIDs []string, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {
+	filterDef := req.Query
+	filterDef.Sort = QuerySort{}
+	filterDef.Limit = nil
+
+	queryAccess := access
+	if access.AllowedContentIDs != nil {
+		queryAccess.AllowedContentIDs = intersectContentIDs(contentIDs, access.AllowedContentIDs)
+	} else {
+		queryAccess.AllowedContentIDs = contentIDs
+	}
+
+	executor := r.queryExecutorForScope(filterDef.MediaScope, nil)
+	items, _, err := executor.Preview(ctx, filterDef, queryAccess, len(contentIDs))
+	if err != nil {
+		return nil, err
+	}
+
+	byID := make(map[string]*models.MediaItem, len(items))
+	for _, item := range items {
+		if item != nil {
+			byID[item.ContentID] = item
+		}
+	}
+
+	ordered := make([]*models.MediaItem, 0, len(contentIDs))
+	for _, contentID := range contentIDs {
+		if item, ok := byID[contentID]; ok {
+			ordered = append(ordered, item)
+		}
+	}
+	return ordered, nil
+}
+
+func intersectContentIDs(ids []string, allowed []string) []string {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, id := range allowed {
+		allowedSet[id] = struct{}{}
+	}
+	intersection := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := allowedSet[id]; ok {
+			intersection = append(intersection, id)
+		}
+	}
+	return intersection
 }
 
 func (r *CatalogResolver) fetchAllBrowseCandidates(ctx context.Context, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {

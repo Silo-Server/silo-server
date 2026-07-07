@@ -112,7 +112,7 @@ func (r *SeasonRepository) Upsert(ctx context.Context, s *models.Season) error {
 		)
 		ON CONFLICT (series_id, season_number) DO UPDATE SET
 			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(seasons.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			poster_path = EXCLUDED.poster_path,
@@ -198,7 +198,7 @@ func (r *SeasonRepository) BulkUpsert(ctx context.Context, seasons []*models.Sea
 		)
 		ON CONFLICT (series_id, season_number) DO UPDATE SET
 			title = EXCLUDED.title,
-			default_metadata_language = COALESCE(NULLIF(seasons.default_metadata_language, ''), EXCLUDED.default_metadata_language),
+			default_metadata_language = COALESCE(NULLIF(EXCLUDED.default_metadata_language, ''), seasons.default_metadata_language),
 			overview = EXCLUDED.overview,
 			air_date = EXCLUDED.air_date,
 			poster_path = EXCLUDED.poster_path,

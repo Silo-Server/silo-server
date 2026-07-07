@@ -14,7 +14,26 @@ import (
 // per request. The 2xx/3xx path logs at Debug so a default-Info runtime
 // stays quiet during normal playback; non-2xx escalates to Warn so
 // failures still surface without an explicit log-level flip. Path is
-// captured query-less so ?token= and refresh tokens never land in logs.
+// captured query-less; the query is logged separately with
+// credential-bearing params redacted (see sanitizedQuery) so ?token=
+// and refresh tokens never land in logs.
+// sanitizedQuery renders the request query string with credential-bearing
+// params redacted, so pagination/sort/filter params are visible in debug
+// logs without ever landing tokens there.
+func sanitizedQuery(r *http.Request) string {
+	q := r.URL.Query()
+	if len(q) == 0 {
+		return ""
+	}
+	for k := range q {
+		switch strings.ToLower(k) {
+		case "token", "apikey", "api_key":
+			q.Set(k, "REDACTED")
+		}
+	}
+	return q.Encode()
+}
+
 func (h *Handler) accessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -45,6 +64,12 @@ func (h *Handler) accessLog(next http.Handler) http.Handler {
 			"auth", authKind,
 			"status", sw.status,
 			"dur_ms", time.Since(start).Milliseconds(),
+		}
+		if q := sanitizedQuery(r); q != "" {
+			args = append(args, "query", q)
+		}
+		if ua := r.Header.Get("User-Agent"); ua != "" {
+			args = append(args, "ua", ua)
 		}
 		if sw.status >= 400 {
 			slog.Warn("abs req failed", args...)

@@ -23,11 +23,15 @@ const SuppressedReasonSeriesBurst = "series_burst"
 const SuppressedReasonStale = "stale"
 
 // Release event kinds. Episode events carry the series/episode columns and
-// fan out to interested profiles; movie events carry ItemID only and exist
-// for the server-channel broadcast feed (no per-profile fanout in v1).
+// fan out to interested profiles; flat item kinds (movie, audiobook, ebook)
+// carry ItemID only and exist for the server-channel broadcast feed (no
+// per-profile fanout in v1). The flat kinds are described by the registry in
+// item_kind.go.
 const (
-	EventKindEpisode = "episode"
-	EventKindMovie   = "movie"
+	EventKindEpisode   = "episode"
+	EventKindMovie     = "movie"
+	EventKindAudiobook = "audiobook"
+	EventKindEbook     = "ebook"
 )
 
 // normalizeEventKind treats an unset kind as episode — the single home of
@@ -43,14 +47,14 @@ func normalizeEventKind(kind string) string {
 // ReleaseEvent is one logical "content became newly available in a library"
 // event. New episode events use dedupe_key
 // "episode:{library_id}:{series_id}:{episode_key}" so episode-id churn from a
-// series re-ID or episode-row re-mint does not create another release. Movie
-// events use "movie:{library_id}:{item_id}".
+// series re-ID or episode-row re-mint does not create another release. Flat
+// item kinds use "{kind}:{library_id}:{item_id}".
 type ReleaseEvent struct {
 	ID        string
 	LibraryID int
 	Kind      string
-	// ItemID is the media_items content id for movie events; empty for
-	// episode events.
+	// ItemID is the media_items content id for flat item kind events (movie,
+	// audiobook, ebook); empty for episode events.
 	ItemID           string
 	SeriesID         string
 	EpisodeID        string

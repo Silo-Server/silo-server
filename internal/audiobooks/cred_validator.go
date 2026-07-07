@@ -27,13 +27,13 @@ type SiloCredValidator struct {
 // Accepts two username formats:
 //
 //   - "alice"         — primary profile for user alice. profileID will be the
-//                       alice user's primary profile.
+//     alice user's primary profile.
 //   - "alice#kids"    — the "kids" household profile under user alice.
-//                       Authentication still uses alice's password; only the
-//                       profile selector differs. If alice has no profile
-//                       named "kids" (case-insensitive), returns
-//                       ErrInvalidCredentials so we don't leak which arm of
-//                       the user#profile pair was wrong.
+//     Authentication still uses alice's password; only the
+//     profile selector differs. If alice has no profile
+//     named "kids" (case-insensitive), returns
+//     ErrInvalidCredentials so we don't leak which arm of
+//     the user#profile pair was wrong.
 //
 // The ABS compat layer represents user/profile IDs as strings; we format the
 // integer user ID and UUID profile ID accordingly. Users with no profiles at
@@ -90,6 +90,37 @@ func (v *SiloCredValidator) Validate(
 	}
 
 	return userIDStr, profileID, displayName, nil
+}
+
+// ResolveUsername returns the ABS display name for (userID, profileID) without
+// re-authenticating — used by GET /me, which only has the token claims. It
+// mirrors Validate's display-name logic: the profile name when a profile is
+// set and named, otherwise the account username. Returns "" when unresolvable
+// so the caller falls back to the userID.
+func (v *SiloCredValidator) ResolveUsername(ctx context.Context, userID, profileID string) string {
+	if v.Pool == nil {
+		return ""
+	}
+	if strings.TrimSpace(profileID) != "" {
+		var name string
+		err := v.Pool.QueryRow(ctx,
+			`SELECT name FROM user_profiles WHERE id = $1`, profileID,
+		).Scan(&name)
+		if err == nil && strings.TrimSpace(name) != "" {
+			return name
+		}
+	}
+	uid, err := strconv.Atoi(userID)
+	if err != nil {
+		return ""
+	}
+	var username string
+	if err := v.Pool.QueryRow(ctx,
+		`SELECT username FROM users WHERE id = $1`, uid,
+	).Scan(&username); err == nil {
+		return username
+	}
+	return ""
 }
 
 // splitUserProfile separates a username like "alice#kids" into the

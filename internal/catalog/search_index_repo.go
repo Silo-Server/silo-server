@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -67,6 +68,25 @@ func (r *SearchIndexEventRepository) WithActiveProvider(provider string) *Search
 
 func (r *SearchIndexEventRepository) disabledByActiveProvider() bool {
 	return r != nil && r.activeProviderKnown && r.activeProvider != SearchProviderMeilisearch
+}
+
+// globalActiveSearchProvider latches the resolved catalog search provider for
+// the process. catalog.search.provider is restart-keyed, so the value cannot
+// change while the process runs; latching it lets the package-level
+// EnqueueSearchIndex* helpers (used from metadata, scanner, catalogseed, ...)
+// decide enqueue-or-skip without re-querying server_settings inside every
+// write transaction. Unset (early bootstrap, unit tests) falls back to the
+// settings query.
+var globalActiveSearchProvider atomic.Value // string
+
+// SetActiveSearchIndexProvider records the provider resolved at startup.
+// Called from server wiring after the catalog search service is constructed.
+func SetActiveSearchIndexProvider(provider string) {
+	provider = normalizeCatalogSearchProvider(provider)
+	if provider == "" {
+		provider = SearchProviderPostgres
+	}
+	globalActiveSearchProvider.Store(provider)
 }
 
 func (r *SearchIndexEventRepository) EnqueueUpsert(ctx context.Context, execer itemExecer, contentID string) error {
@@ -144,6 +164,9 @@ func (r *SearchIndexEventRepository) shouldEnqueue(ctx context.Context, execer i
 	}
 	if r.activeProviderKnown {
 		return r.activeProvider == SearchProviderMeilisearch, nil
+	}
+	if provider, ok := globalActiveSearchProvider.Load().(string); ok {
+		return provider == SearchProviderMeilisearch, nil
 	}
 	return searchIndexProviderEnabled(ctx, execer)
 }
@@ -313,6 +336,30 @@ func (r *SearchIndexEventRepository) PendingCount(ctx context.Context, provider 
 		WHERE provider = $1
 		  AND processed_at IS NULL
 	`, provider).Scan(&count)
+	if isSearchIndexSchemaUnavailable(err) {
+		return 0, nil
+	}
+	return count, err
+}
+
+// DeadLetterCount reports how many outbox events exhausted their retry budget
+// and were dead-lettered (MarkFailed sets processed_at with the final error
+// once attempts reach searchIndexEventMaxAttempts). Each one is an item whose
+// index document stays silently stale until the next rebuild, so the admin
+// status surfaces this count.
+func (r *SearchIndexEventRepository) DeadLetterCount(ctx context.Context, provider string) (int, error) {
+	if r == nil || r.pool == nil {
+		return 0, nil
+	}
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM catalog_search_index_events
+		WHERE provider = $1
+		  AND processed_at IS NOT NULL
+		  AND attempts >= $2
+		  AND last_error <> ''
+	`, provider, searchIndexEventMaxAttempts).Scan(&count)
 	if isSearchIndexSchemaUnavailable(err) {
 		return 0, nil
 	}

@@ -16,13 +16,17 @@ type MediaFolder struct {
 	AutoTranslateMetadata    bool   // AI-translate descriptions when providers lack this language
 	ChapterThumbnailsEnabled bool
 	IntroDetectionEnabled    bool
-	PosterPath               string     // S3 key for library poster image
-	LastScannedAt            *time.Time // nullable
-	ScanWarningCode          *string
-	ScanWarningMessage       *string
-	ScanWarningAt            *time.Time
-	AllowEmptyCleanupOnce    bool
-	SortOrder                int
+	// TrailerKinds is the allow-list of remote video kinds (ExtraKind values)
+	// fetched during metadata refresh for this library. Empty disables remote
+	// videos entirely.
+	TrailerKinds          []string
+	PosterPath            string     // S3 key for library poster image
+	LastScannedAt         *time.Time // nullable
+	ScanWarningCode       *string
+	ScanWarningMessage    *string
+	ScanWarningAt         *time.Time
+	AllowEmptyCleanupOnce bool
+	SortOrder             int
 }
 
 // MediaFile represents a row in the media_files table.
@@ -30,6 +34,7 @@ type MediaFile struct {
 	ID                           int
 	ContentID                    string // Sonyflake ID (nullable until matched)
 	EpisodeID                    string // FK to episodes.content_id (nullable)
+	ExtraID                      string // FK to media_extras.content_id (nullable); set only for local extras files, which keep ContentID/EpisodeID empty
 	SeasonNumber                 int    // parsed from filename (nullable)
 	EpisodeNumber                int    // parsed from filename (nullable)
 	MediaFolderID                int

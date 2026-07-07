@@ -17,9 +17,11 @@ import {
   ScrollText,
   Send,
   Server,
+  ShieldCheck,
   SkipForward,
   SlidersHorizontal,
   Users,
+  UsersRound,
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -38,6 +40,10 @@ export interface AdminNavItem extends SettingsSearchItem {
 }
 
 export type AdminNavGroup = SettingsSearchGroup<AdminNavItem>;
+
+export interface AdminNavVisibility {
+  policyEditorAvailable?: boolean;
+}
 
 export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
   {
@@ -151,6 +157,13 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
         href: "/admin/users",
       },
       {
+        label: "Access Groups",
+        description: "Shared access defaults: libraries, downloads, streams, permissions.",
+        keywords: ["groups", "roles", "permissions", "library access", "downloads", "limits"],
+        icon: UsersRound,
+        href: "/admin/access-groups",
+      },
+      {
         label: "Devices",
         description: "Registered devices, overrides, and per-device settings.",
         keywords: ["clients", "device overrides", "sessions"],
@@ -191,6 +204,13 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
         href: "/admin/plugins",
       },
       {
+        label: "Policy",
+        description: "OPA policy documents, vendor modules, simulations, and decision logs.",
+        keywords: ["opa", "rego", "authorization", "decision log", "access policy"],
+        icon: ShieldCheck,
+        href: "/admin/policy",
+      },
+      {
         label: "Nodes",
         description: "Stream nodes and remote worker status.",
         keywords: ["stream nodes", "workers", "transcode nodes"],
@@ -214,6 +234,15 @@ export const ADMIN_NAV_SECTIONS: AdminNavGroup[] = [
     ],
   },
 ];
+
+export function buildAdminNavSections(visibility: AdminNavVisibility = {}): AdminNavGroup[] {
+  return ADMIN_NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter(
+      (item) => item.href !== "/admin/policy" || visibility.policyEditorAvailable === true,
+    ),
+  }));
+}
 
 export function buildAdminPluginNavItems(
   installations: readonly PluginInstallation[] | undefined,
@@ -278,9 +307,10 @@ export function appendAdminSettingsNavSection(sections: readonly AdminNavGroup[]
 
 export function buildAdminCommandNavSections(
   installations: readonly PluginInstallation[] | undefined,
+  visibility: AdminNavVisibility = {},
 ): AdminNavGroup[] {
   return appendAdminPluginNavSection(
-    appendAdminSettingsNavSection(ADMIN_NAV_SECTIONS),
+    appendAdminSettingsNavSection(buildAdminNavSections(visibility)),
     installations,
   );
 }

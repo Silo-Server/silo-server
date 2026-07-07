@@ -11,6 +11,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // allDetailFields is a sentinel passed to itemFromList so detail views include all fields.
@@ -353,6 +354,14 @@ func (m *mapper) itemFromDetailWithFields(item upstreamItemDetail, isFavorite bo
 			})
 		}
 	}
+	// Remote provider trailers and local extras counts. The itemFromList base
+	// stamped RemoteTrailers as an empty slice; override with real data here
+	// on the detail path.
+	dto.RemoteTrailers = remoteTrailerDTOs(item.Videos)
+	localTrailers, specialFeatures := countLocalExtras(item.Extras)
+	dto.LocalTrailerCount = localTrailers
+	dto.SpecialFeatureCount = specialFeatures
+
 	if item.SeriesID != "" {
 		dto.SeriesID = m.codec.EncodeStringID(EncodedIDItem, item.SeriesID)
 	}
@@ -586,6 +595,10 @@ func jellyfinItemType(native string) string {
 		return "Episode"
 	case "season":
 		return "Season"
+	case "extra":
+		// Local extras have no dedicated BaseItemKind; plain Video is what
+		// Jellyfin uses for special features.
+		return "Video"
 	default:
 		if native == "" {
 			return ""
@@ -700,6 +713,50 @@ func compatChapters(chapters []catalog.VersionChapter, addedAt time.Time) []map[
 		items = append(items, item)
 	}
 	return items
+}
+
+// remoteTrailerDTOs maps remote provider videos of trailer kinds onto
+// Jellyfin's RemoteTrailers MediaUrl shape ({Url, Name}). Non-trailer kinds
+// (featurettes, clips, ...) have no Jellyfin remote surface and are omitted.
+func remoteTrailerDTOs(videos []catalog.ItemVideoInfo) []map[string]any {
+	trailers := []map[string]any{}
+	for _, v := range videos {
+		if v.Kind != string(models.ExtraKindTrailer) && v.Kind != string(models.ExtraKindTeaser) {
+			continue
+		}
+		var url string
+		switch v.Site {
+		case "youtube":
+			url = "https://www.youtube.com/watch?v=" + v.SiteKey
+		case "vimeo":
+			url = "https://vimeo.com/" + v.SiteKey
+		default:
+			continue
+		}
+		trailers = append(trailers, map[string]any{
+			"Url":  url,
+			"Name": v.Name,
+		})
+	}
+	return trailers
+}
+
+// countLocalExtras splits local extras into Jellyfin's LocalTrailerCount
+// (trailer/teaser kinds, surfaced via /LocalTrailers) and SpecialFeatureCount
+// (everything else, surfaced via /SpecialFeatures).
+func countLocalExtras(extras []catalog.ItemExtraInfo) (localTrailers, specialFeatures int) {
+	for _, e := range extras {
+		if isLocalTrailerKind(e.Kind) {
+			localTrailers++
+		} else {
+			specialFeatures++
+		}
+	}
+	return localTrailers, specialFeatures
+}
+
+func isLocalTrailerKind(kind string) bool {
+	return kind == string(models.ExtraKindTrailer) || kind == string(models.ExtraKindTeaser)
 }
 
 func minutesToTicks(minutes int) int64 {

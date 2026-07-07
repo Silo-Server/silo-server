@@ -22,6 +22,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/streamtoken"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -1162,6 +1163,244 @@ func TestHandleStartTranscode_PreservesRecomputedBaseMethodAfterFallback(t *test
 	}
 }
 
+// newRemoteAudioSwitchSession builds a session that is already an offloaded
+// (remote) transcode with a populated target recipe, mirroring the post-start
+// state HandleChangeAudioTrack sees for an offloaded transcode.
+func newRemoteAudioSwitchSession(t *testing.T, sessionMgr *playback.SessionManager, file *models.MediaFile, nodeURL string) string {
+	t.Helper()
+	session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayTranscode, true)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := sessionMgr.UpdateStreamState(session.ID, playback.SessionStreamState{
+		PlayMethod:        playback.PlayTranscode,
+		BasePlayMethod:    playback.PlayTranscode,
+		AudioTrackIndex:   0,
+		TranscodeAudio:    true,
+		TargetResolution:  "720p",
+		TargetVideoCodec:  "h264",
+		TargetAudioCodec:  "aac",
+		TargetBitrateKbps: 2000,
+		TranscodeHWAccel:  "none",
+	}); err != nil {
+		t.Fatalf("UpdateStreamState: %v", err)
+	}
+	if err := sessionMgr.SetTranscodeNodeURL(session.ID, nodeURL); err != nil {
+		t.Fatalf("SetTranscodeNodeURL: %v", err)
+	}
+	return session.ID
+}
+
+// TestHandleChangeAudioTrack_RemoteTranscodeRestartsNodeAndMintsFullRecipe
+// verifies BUG A + BUG B: an audio switch on an offloaded transcode POSTs a
+// fresh /transcode/start to the node carrying the NEW AudioTrackIndex (so the
+// node's ffmpeg actually switches tracks), and the returned proxy URL carries a
+// recipe-COMPLETE stream token (not identity-only) so a later node restart can
+// reconstruct with the switched audio.
+func TestHandleChangeAudioTrack_RemoteTranscodeRestartsNodeAndMintsFullRecipe(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	file := &models.MediaFile{
+		ID:         42,
+		ContentID:  "movie-1",
+		FilePath:   writePlaybackTestMediaFile(t, "movie.mkv"),
+		Resolution: "1080p",
+		CodecVideo: "h264",
+		CodecAudio: "aac",
+		Container:  "mkv",
+		Bitrate:    8000,
+		Duration:   3600,
+		AudioTracks: []models.AudioTrack{
+			{Codec: "aac", Default: true},
+			{Codec: "ac3"},
+		},
+	}
+
+	var remoteStartRequests int
+	var remoteStartReq transcodenode.TranscodeStartRequest
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/transcode/start" {
+			t.Errorf("unexpected remote request %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected", http.StatusBadRequest)
+			return
+		}
+		remoteStartRequests++
+		if err := json.NewDecoder(r.Body).Decode(&remoteStartReq); err != nil {
+			t.Errorf("decode remote start request: %v", err)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(w).Encode(transcodenode.TranscodeStartResponse{
+			SessionID: remoteStartReq.SessionID,
+			Status:    "accepted",
+			HWAccel:   "none",
+		})
+	}))
+	defer remote.Close()
+
+	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.JWTSecret = "test-secret"
+
+	group := "rack-a"
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{
+		ID: 1, Name: "proxy-1", Type: nodepool.NodeTypeProxy, URL: "http://proxy-1",
+		Enabled: true, Healthy: true, Group: &group,
+	}})
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{{
+		ID: 2, Name: "transcode-1", Type: nodepool.NodeTypeTranscode, URL: remote.URL,
+		Enabled: true, Healthy: true, Group: &group,
+	}})
+	handler.NodePlanner = nodepool.NewPlanner(proxies, transcodes)
+
+	sessionID := newRemoteAudioSwitchSession(t, sessionMgr, file, remote.URL)
+
+	changeReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/playback/"+sessionID+"/audio",
+		strings.NewReader(`{"audio_track_index":1,"position":120}`),
+	)
+	changeReq = changeReq.WithContext(newAuthorizedPlaybackContext())
+	changeReq = withPlaybackRouteParam(changeReq, "session_id", sessionID)
+
+	rr := httptest.NewRecorder()
+	handler.HandleChangeAudioTrack(rr, changeReq)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("change status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	// BUG A: the node must have been told to restart on the new track.
+	if remoteStartRequests != 1 {
+		t.Fatalf("remote /transcode/start calls = %d, want 1", remoteStartRequests)
+	}
+	if remoteStartReq.AudioTrackIndex != 1 {
+		t.Fatalf("remote AudioTrackIndex = %d, want 1", remoteStartReq.AudioTrackIndex)
+	}
+	if remoteStartReq.SessionID != sessionID {
+		t.Fatalf("remote SessionID = %q, want %q", remoteStartReq.SessionID, sessionID)
+	}
+	// Seek 120s with the node-default 2s segments => start segment 60.
+	if remoteStartReq.StartSegmentNumber != 60 {
+		t.Fatalf("remote StartSegmentNumber = %d, want 60", remoteStartReq.StartSegmentNumber)
+	}
+	if remoteStartReq.TargetResolution != "720p" || remoteStartReq.TargetCodecVideo != "h264" {
+		t.Fatalf("remote target recipe = %q/%q, want 720p/h264", remoteStartReq.TargetResolution, remoteStartReq.TargetCodecVideo)
+	}
+
+	var resp changeAudioResponse
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode change response: %v", err)
+	}
+
+	// BUG B: the returned proxy URL token must be recipe-COMPLETE.
+	prefix := "http://proxy-1/stream/transcode/"
+	suffix := "/master.m3u8"
+	if !strings.HasPrefix(resp.StreamURL, prefix) || !strings.HasSuffix(resp.StreamURL, suffix) {
+		t.Fatalf("stream URL = %q, want proxy transcode manifest URL", resp.StreamURL)
+	}
+	token := strings.TrimSuffix(strings.TrimPrefix(resp.StreamURL, prefix), suffix)
+	claims, err := streamtoken.Verify(token, handler.JWTSecret)
+	if err != nil {
+		t.Fatalf("verify stream token: %v", err)
+	}
+	if claims.AudioTrackIndex != 1 {
+		t.Fatalf("token AudioTrackIndex = %d, want 1", claims.AudioTrackIndex)
+	}
+	// Identity-only claims would leave these zero; a full recipe carries them.
+	if claims.TargetCodec != "h264" {
+		t.Fatalf("token TargetCodec (video) = %q, want h264 (recipe-complete)", claims.TargetCodec)
+	}
+	if claims.TargetCodecAudio != "aac" {
+		t.Fatalf("token TargetCodecAudio = %q, want aac (recipe-complete)", claims.TargetCodecAudio)
+	}
+	if claims.TargetRes != "720p" {
+		t.Fatalf("token TargetRes = %q, want 720p (recipe-complete)", claims.TargetRes)
+	}
+	if claims.TargetBitrateKbps != 2000 {
+		t.Fatalf("token TargetBitrateKbps = %d, want 2000 (recipe-complete)", claims.TargetBitrateKbps)
+	}
+	if claims.SeekSeconds != 120 {
+		t.Fatalf("token SeekSeconds = %v, want 120", claims.SeekSeconds)
+	}
+	if claims.StartSegmentNumber != 60 {
+		t.Fatalf("token StartSegmentNumber = %d, want 60", claims.StartSegmentNumber)
+	}
+	// SegmentDuration must be > 0: the node treats a zero/omitted value as an
+	// incomplete token and falls back to a recipe store the native path never
+	// populates, which would 404 on a node restart. This guards that regression.
+	if claims.SegmentDuration != playback.DefaultSegmentDuration {
+		t.Fatalf("token SegmentDuration = %d, want %d (recipe-complete)", claims.SegmentDuration, playback.DefaultSegmentDuration)
+	}
+	if claims.MediaPath != file.FilePath {
+		t.Fatalf("token MediaPath = %q, want %q", claims.MediaPath, file.FilePath)
+	}
+	if claims.TranscodeNode != remote.URL {
+		t.Fatalf("token TranscodeNode = %q, want %q", claims.TranscodeNode, remote.URL)
+	}
+}
+
+// TestHandleChangeAudioTrack_RemoteTranscodeNodeUnreachableSurfacesError
+// verifies the chosen error posture: when the transcode node cannot be reached
+// for the restart, the handler surfaces a 502 rather than returning a 200 that
+// clients (silo-android / silo-apple) would trust as "audio switched".
+func TestHandleChangeAudioTrack_RemoteTranscodeNodeUnreachableSurfacesError(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	file := &models.MediaFile{
+		ID:         42,
+		ContentID:  "movie-1",
+		FilePath:   writePlaybackTestMediaFile(t, "movie.mkv"),
+		Resolution: "1080p",
+		CodecVideo: "h264",
+		CodecAudio: "aac",
+		Container:  "mkv",
+		Bitrate:    8000,
+		Duration:   3600,
+		AudioTracks: []models.AudioTrack{
+			{Codec: "aac", Default: true},
+			{Codec: "ac3"},
+		},
+	}
+
+	// A node URL that nothing is listening on => connection refused.
+	deadNodeURL := "http://127.0.0.1:1"
+
+	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.JWTSecret = "test-secret"
+
+	group := "rack-a"
+	proxies := nodepool.NewProxyPool()
+	proxies.SetNodes([]*nodepool.Node{{
+		ID: 1, Name: "proxy-1", Type: nodepool.NodeTypeProxy, URL: "http://proxy-1",
+		Enabled: true, Healthy: true, Group: &group,
+	}})
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{{
+		ID: 2, Name: "transcode-1", Type: nodepool.NodeTypeTranscode, URL: deadNodeURL,
+		Enabled: true, Healthy: true, Group: &group,
+	}})
+	handler.NodePlanner = nodepool.NewPlanner(proxies, transcodes)
+
+	sessionID := newRemoteAudioSwitchSession(t, sessionMgr, file, deadNodeURL)
+
+	changeReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/v1/playback/"+sessionID+"/audio",
+		strings.NewReader(`{"audio_track_index":1,"position":0}`),
+	)
+	changeReq = changeReq.WithContext(newAuthorizedPlaybackContext())
+	changeReq = withPlaybackRouteParam(changeReq, "session_id", sessionID)
+
+	rr := httptest.NewRecorder()
+	handler.HandleChangeAudioTrack(rr, changeReq)
+
+	// Chosen posture: surface the failure (mirror HandleStartTranscode) so a 200
+	// never lies to the client about an audio switch that didn't happen.
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("change status = %d, want %d, body = %s", rr.Code, http.StatusBadGateway, rr.Body.String())
+	}
+}
+
 func TestHandleStartTranscode_LocalPathPropagatesSelectedAudioTrack(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
 	filePath := writePlaybackTestMediaFile(t, "movie.mkv")
@@ -1213,7 +1452,7 @@ func TestHandleStartTranscode_LocalPathPropagatesSelectedAudioTrack(t *testing.T
 		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
 	}
 
-	transcodeSession := handler.getTranscodeSession(startResp.SessionID)
+	transcodeSession := handler.tm.GetTranscodeSession(startResp.SessionID)
 	if transcodeSession == nil {
 		t.Fatal("expected local transcode session")
 	}
@@ -1264,7 +1503,7 @@ func TestHandleStartTranscode_MPEG2SeekedCopyRemainsCopyVideo(t *testing.T) {
 		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
 	}
 
-	transcodeSession := handler.getTranscodeSession(session.ID)
+	transcodeSession := handler.tm.GetTranscodeSession(session.ID)
 	if transcodeSession == nil {
 		t.Fatal("expected local transcode session")
 	}

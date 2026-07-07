@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 12
+const schemaVersion = 13
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -124,7 +124,35 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 13 {
+		if err := migrateToV13(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 13"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 13: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV13 replaces the v1 watch_progress stamp triggers with the current
+// bodies (CREATE TRIGGER IF NOT EXISTS never replaces an existing trigger, and
+// InitSchema runs before migrations, so this must drop AND recreate). v2 makes
+// the UPDATE trigger authoritative for event_at: a write that advances
+// updated_at without explicitly changing event_at advances the LWW key too,
+// so queued offline events older than that write can no longer win
+// SetProgressIfNewer and resurrect stale progress.
+func migrateToV13(tx *sql.Tx) error {
+	for _, trg := range []string{"watch_progress_stamp_ins", "watch_progress_stamp_upd"} {
+		if _, err := tx.Exec("DROP TRIGGER IF EXISTS " + trg); err != nil {
+			return fmt.Errorf("dropping %s: %w", trg, err)
+		}
+	}
+	if _, err := tx.Exec(watchProgressSyncTriggers); err != nil {
+		return fmt.Errorf("reinstalling watch_progress sync triggers: %w", err)
+	}
+	return nil
 }
 
 // migrateToV12 adds the nullable watchlist.sort_index column used to mirror a

@@ -37,6 +37,7 @@ type Store interface {
 type Resolver interface {
 	Resolve(ctx context.Context, req scantrigger.Request) (*scantrigger.Target, error)
 	ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*scantrigger.Target, error)
+	ResolveVanishedPath(ctx context.Context, path, trigger string) (*scantrigger.Target, error)
 }
 
 // Queuer enqueues resolved scan targets.
@@ -49,6 +50,10 @@ type resolveStats struct {
 	ChangesResolved int
 	TargetsClaimed  int
 	Suppressed      int
+	// TransientErrors counts resolve attempts that failed with an internal
+	// (non-RequestError) error — resolver/database faults that may clear on a
+	// later poll, as opposed to paths that are simply outside Silo's libraries.
+	TransientErrors int
 }
 
 // connectionResolver resolves a stored connection to concrete credentials.
@@ -121,12 +126,13 @@ func NewService(
 
 // PollOnce runs one autoscan cycle. Per-source failures are logged, recorded on
 // the source/event, and the loop continues; only settings/listing errors
-// propagate. The opaque next marker returned by the
-// provider is stored verbatim, but only when the cycle's work is genuinely
-// consumed: the provider returned no paths, or it returned paths and at least one
-// resolved+enqueued. When paths come back but NONE resolve to a library folder
-// (e.g. a freshly-enabled source with unconfigured rewrites) the marker is held
-// and an error recorded, so those imports aren't skipped forever.
+// propagate. The opaque next marker returned by the provider is stored
+// verbatim once the window's work is consumed — including windows whose paths
+// all resolve OUTSIDE Silo's libraries (routine for whole-volume filesystem
+// watchers; the event finishes as "unresolved" so it stays visible). The
+// marker is held only on genuine failures: provider errors, enqueue errors,
+// and windows where any resolve attempt failed internally (possibly
+// transient), so the affected imports are retried next poll.
 func (s *Service) PollOnce(ctx context.Context) error {
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
@@ -238,28 +244,49 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		//   - returned paths, resolved but all
 		//     suppressed (recently scanned /
 		//     debounced)                           → work is effectively done; advance.
-		//   - returned paths AND NOTHING resolved  → do NOT advance. This is the
-		//     freshly-enabled-source state (path_rewrites not configured yet); the
-		//     incoming paths don't map to any Silo library folder. Advancing here
-		//     would skip those imports forever. Surface why so the operator can fix
-		//     the rewrites, then a later poll re-reads the same window and resolves.
-		// (Some-but-not-all resolving counts as resolved — the unresolved paths are
-		// legitimately outside Silo's libraries, so advancing is correct.)
+		//   - ANY resolve attempt failed INTERNALLY (resolver/database fault —
+		//     possibly transient), whether or not other paths resolved → hold the
+		//     marker and record the error; a later poll re-reads the same window
+		//     once the fault clears. Advancing would silently skip the failed
+		//     paths. Targets that DID resolve were already enqueued above; the
+		//     re-read at worst re-scans them, which is safe.
+		//   - returned paths AND NOTHING resolved  → every path is outside Silo's
+		//     libraries (RequestError) — a benign, expected condition for
+		//     whole-volume filesystem watchers (e.g. CephFS), which observe
+		//     folders that are not registered as Silo libraries. Holding here
+		//     would pin the marker and permanently stall autoscan, so advance;
+		//     finish the event as "unresolved" so the condition stays visible in
+		//     poll history.
+		// (Some-but-not-all resolving still advances when the unresolved
+		// remainder is merely outside Silo's libraries.)
 		//
 		// NOTE: len(targets)==0 alone is NOT misconfiguration — paths can resolve
-		// yet be fully suppressed. Gate the error on resolvedAny, not targets.
-		if len(changes) > 0 && !resolvedAny {
-			msg := fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — check this source's path rewrites", len(changes))
+		// yet be fully suppressed. Gate on resolvedAny, not targets.
+		if stats.TransientErrors > 0 {
+			msg := fmt.Sprintf("%d resolve attempt(s) failed internally (%d of %d path(s) resolved) — holding marker to retry", stats.TransientErrors, stats.ChangesResolved, len(changes))
 			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
 				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
 			}
 			s.finishEvent(ctx, eventID, EventFinish{
-				Status:          EventStatusUnresolved,
+				Status:          EventStatusError,
 				ChangesReturned: len(changes),
+				ChangesResolved: stats.ChangesResolved,
+				TargetsClaimed:  stats.TargetsClaimed,
+				ScansCreated:    enqueue.Created,
+				ScansReused:     enqueue.Reused,
+				ScansSuppressed: stats.Suppressed,
 				ErrorMessage:    msg,
 				MarkerAfter:     marker,
 			})
 			continue // do NOT advance marker
+		}
+		status := EventStatusSuccess
+		var statusMsg string
+		if len(changes) > 0 && !resolvedAny {
+			status = EventStatusUnresolved
+			statusMsg = fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — advanced past them", len(changes))
+			slog.WarnContext(ctx, "autoscan: returned paths matched no library folder — advancing marker",
+				"source_id", src.ID, "changes", len(changes))
 		}
 		if aerr := s.store.AdvanceMarker(ctx, src.ID, next); aerr != nil {
 			slog.WarnContext(ctx, "autoscan: advance marker failed", "source_id", src.ID, "err", aerr)
@@ -277,13 +304,14 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			continue
 		}
 		s.finishEvent(ctx, eventID, EventFinish{
-			Status:          EventStatusSuccess,
+			Status:          status,
 			ChangesReturned: len(changes),
 			ChangesResolved: stats.ChangesResolved,
 			TargetsClaimed:  stats.TargetsClaimed,
 			ScansCreated:    enqueue.Created,
 			ScansReused:     enqueue.Reused,
 			ScansSuppressed: stats.Suppressed,
+			ErrorMessage:    statusMsg,
 			MarkerAfter:     next,
 		})
 	}
@@ -383,7 +411,7 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 	for _, change := range changes {
 		switch change.Scope {
 		case ChangeScopeFile, ChangeScopeSubtree:
-			target, ok := s.resolveChange(ctx, change)
+			target, ok := s.resolveChange(ctx, change, &stats)
 			if !ok {
 				continue
 			}
@@ -399,6 +427,13 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 
 	for _, dir := range uniqueParentDirs(legacyPaths) {
 		target, rerr := s.resolver.Resolve(ctx, scantrigger.Request{Path: dir, Trigger: scanTrigger})
+		if isRequestError(rerr) {
+			// The directory may have been removed (e.g. a deleted movie
+			// folder). Fall back to a reconciling scan of the vanished path so
+			// its files are marked missing promptly. Paths outside Silo's
+			// media folders still resolve to nothing and are skipped below.
+			target, rerr = s.resolver.ResolveVanishedPath(ctx, dir, scanTrigger)
+		}
 		if rerr != nil {
 			var reqErr *scantrigger.RequestError
 			if errors.As(rerr, &reqErr) {
@@ -406,6 +441,7 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 				// — an expected skip, not an error worth logging every cycle.
 				continue
 			}
+			stats.TransientErrors++
 			slog.WarnContext(ctx, "autoscan: resolve failed", "path", dir, "err", rerr)
 			continue
 		}
@@ -445,7 +481,15 @@ func collapseTargetsToLibraryScans(targets []scantrigger.Target) []scantrigger.T
 	return collapsed
 }
 
-func (s *Service) resolveChange(ctx context.Context, change Change) (*scantrigger.Target, bool) {
+// isRequestError reports whether err is a scantrigger.RequestError — the
+// resolver's "this path is not scannable as-is" signal, as opposed to an
+// internal failure.
+func isRequestError(err error) bool {
+	var reqErr *scantrigger.RequestError
+	return errors.As(err, &reqErr)
+}
+
+func (s *Service) resolveChange(ctx context.Context, change Change, stats *resolveStats) (*scantrigger.Target, bool) {
 	if change.SourcePath == "" {
 		return nil, false
 	}
@@ -461,6 +505,12 @@ func (s *Service) resolveChange(ctx context.Context, change Change) (*scantrigge
 		if err == nil && target != nil && target.Mode != scantrigger.ModeFile {
 			return nil, false
 		}
+		if isRequestError(err) {
+			// The file may have been deleted (upgrade/replacement). Fall back
+			// to a reconciling scan so the stale row is marked missing
+			// promptly instead of lingering until the next full library scan.
+			target, err = s.resolver.ResolveVanishedPath(ctx, change.SourcePath, scanTrigger)
+		}
 	default:
 		target, err = s.resolver.Resolve(ctx, scantrigger.Request{Path: change.SourcePath, Trigger: scanTrigger})
 	}
@@ -469,6 +519,7 @@ func (s *Service) resolveChange(ctx context.Context, change Change) (*scantrigge
 		if errors.As(err, &reqErr) {
 			return nil, false
 		}
+		stats.TransientErrors++
 		slog.WarnContext(ctx, "autoscan: resolve failed", "path", change.SourcePath, "scope", change.Scope, "err", err)
 		return nil, false
 	}

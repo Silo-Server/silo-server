@@ -89,7 +89,7 @@ func (r *SeriesRootMatchQueueRepository) EnqueueSeriesRoot(ctx context.Context, 
 		  AND mf.observed_root_path = $2
 		  AND folders.enabled = true
 		  AND lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows')
-		  AND mf.missing_since IS NULL
+		  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 		  AND mf.observed_root_path <> ''
 		  AND (
 			mf.content_id IS NULL OR mf.content_id = '' OR
@@ -119,7 +119,7 @@ func (r *SeriesRootMatchQueueRepository) EnqueueSeriesRoot(ctx context.Context, 
 				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
 				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
 			  )
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path <> ''
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
@@ -171,7 +171,7 @@ func (r *SeriesRootMatchQueueRepository) SyncForFolder(ctx context.Context, fold
 			lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
 			(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
 		  )
-		  AND mf.missing_since IS NULL
+		  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 		  AND mf.observed_root_path IS NOT NULL
 		  AND mf.observed_root_path <> ''
 		  AND (
@@ -201,7 +201,7 @@ func (r *SeriesRootMatchQueueRepository) SyncForFolder(ctx context.Context, fold
 				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
 				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
 			  )
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path <> ''
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
@@ -251,7 +251,7 @@ func (r *SeriesRootMatchQueueRepository) SyncInScope(ctx context.Context, folder
 				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
 				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
 			  )
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path IS NOT NULL
 			  AND mf.observed_root_path <> ''
 			  AND (
@@ -312,7 +312,7 @@ func (r *SeriesRootMatchQueueRepository) SyncInScope(ctx context.Context, folder
 				lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
 				(lower(trim(folders.type)) = 'mixed' AND lower(trim(mf.base_type)) = 'series')
 			  )
-			  AND mf.missing_since IS NULL
+			  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			  AND mf.observed_root_path <> ''
 			  AND (
 				mf.content_id IS NULL OR mf.content_id = '' OR
@@ -355,7 +355,7 @@ func (r *SeriesRootMatchQueueRepository) Claim(ctx context.Context, limit int) (
 					lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
 					lower(trim(mf.base_type)) = 'series'
 				  )
-				  AND mf.missing_since IS NULL
+				  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 				  AND mf.observed_root_path <> ''
 				  AND (
 					mf.content_id IS NULL OR mf.content_id = '' OR
@@ -385,7 +385,7 @@ func (r *SeriesRootMatchQueueRepository) Claim(ctx context.Context, limit int) (
 				FROM media_files mf
 				WHERE mf.media_folder_id = u.media_folder_id
 				  AND mf.observed_root_path = u.observed_root_path
-				  AND mf.missing_since IS NULL
+				  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			)) AS observed_file_count
 		FROM updated u
 		LEFT JOIN observed_media_locations loc
@@ -439,7 +439,7 @@ func (r *SeriesRootMatchQueueRepository) ClaimByFolderAndPathPrefix(
 					FROM media_files mf
 					WHERE mf.media_folder_id = q.media_folder_id
 					  AND mf.observed_root_path = q.observed_root_path
-					  AND mf.missing_since IS NULL
+					  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 					  AND (mf.file_path = $2 OR mf.file_path LIKE $3 ESCAPE '\')
 				)
 			  )
@@ -453,7 +453,7 @@ func (r *SeriesRootMatchQueueRepository) ClaimByFolderAndPathPrefix(
 					lower(trim(folders.type)) IN ('series', 'tv', 'show', 'tvshows') OR
 					lower(trim(mf.base_type)) = 'series'
 				  )
-				  AND mf.missing_since IS NULL
+				  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 				  AND mf.observed_root_path <> ''
 				  AND (
 					mf.content_id IS NULL OR mf.content_id = '' OR
@@ -484,7 +484,7 @@ func (r *SeriesRootMatchQueueRepository) ClaimByFolderAndPathPrefix(
 				FROM media_files mf
 				WHERE mf.media_folder_id = u.media_folder_id
 				  AND mf.observed_root_path = u.observed_root_path
-				  AND mf.missing_since IS NULL
+				  AND mf.missing_since IS NULL AND mf.extra_id IS NULL
 			)) AS observed_file_count
 		FROM updated u
 		LEFT JOIN observed_media_locations loc

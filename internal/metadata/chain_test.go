@@ -57,3 +57,39 @@ func TestProviderSupportsLevel(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractDefaultEnabled(t *testing.T) {
+	cases := []struct {
+		name         string
+		metadataJSON string
+		want         bool
+	}{
+		// Absent flag defaults to true so every existing plugin is seeded
+		// enabled exactly as before this flag existed.
+		{"no metadata defaults enabled", ``, true},
+		{"empty object defaults enabled", `{}`, true},
+		{"tmdb without flag defaults enabled", tmdbCapMetadata, true},
+		{"malformed json defaults enabled (fail-open)", `{not json`, true},
+
+		// A specialist provider opts out of being auto-enabled. The flag lives
+		// in the same "metadata" envelope as default_priority.
+		{"opt-out inside envelope", `{"metadata":{"default_priority":{"series":50},"default_enabled":false}}`, false},
+		{"opt-out at top level", `{"default_enabled":false}`, false},
+
+		// An explicit true is honored (and is the default anyway).
+		{"explicit true inside envelope", `{"metadata":{"default_enabled":true}}`, true},
+
+		// A non-boolean value is ignored, falling back to the enabled default.
+		{"non-boolean value defaults enabled", `{"metadata":{"default_enabled":"nope"}}`, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractDefaultEnabled([]byte(tc.metadataJSON))
+			if got != tc.want {
+				t.Fatalf("extractDefaultEnabled(%q) = %v, want %v",
+					tc.metadataJSON, got, tc.want)
+			}
+		})
+	}
+}

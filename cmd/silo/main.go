@@ -50,6 +50,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -68,6 +69,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
+	"github.com/Silo-Server/silo-server/internal/noderecipe"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -75,6 +77,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
@@ -615,6 +618,10 @@ func main() {
 		} else {
 			srv := transcodenode.NewServer(watcher, tracker)
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
+			// Read jellycompat reconstruction recipes central wrote at transcode
+			// start, so this node can rebuild a Jellyfin transcode after its own
+			// restart (the node hop token is recipe-less). Shares the offload Redis.
+			srv.SetRecipeStore(noderecipe.NewStore(redisClient, 0))
 			handler = srv.Handler()
 		}
 
@@ -670,6 +677,11 @@ func main() {
 		defer func() { _ = apiRedisClient.Close() }()
 	}
 
+	// Assigned below once the trusted-proxy config is seeded; captured by the
+	// OnServerSettingUpdated closure, which only runs on admin requests after
+	// startup completes.
+	var ipResolver *clientip.Resolver
+
 	deps := api.Dependencies{
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
@@ -695,13 +707,26 @@ func main() {
 			restartReqCh <- struct{}{}
 			return nil
 		},
-		OnServerSettingUpdated: func(_ context.Context, _, _ string) {
+		OnServerSettingUpdated: func(_ context.Context, key, _ string) {
+			// Key-scoped reload for the client-IP trust boundary: unlike the
+			// whole-config watcher reload below, this cannot be blocked by an
+			// unrelated malformed setting failing config.LoadFromDB. Uses a
+			// fresh context — the setting is already persisted, so the reload
+			// must not be skipped because the admin request was canceled.
+			if key == clientip.SettingTrustedProxies && ipResolver != nil {
+				if cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
+					slog.Warn("clientip config reload failed", "error", loadErr)
+				} else {
+					ipResolver.UpdateTrustedCIDRs(cidrs)
+				}
+			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
 			// then, leaving only the 60s poll).
 			configWatcher.RequestReload()
 		},
 	}
+	accessGroupStore := access.NewGroupStore(pool)
 	audiobooksService := audiobooks.New(&audiobooksSettingsAdapter{repo: settingsRepo})
 	absCompatEnabled, err := audiobooksService.ABSCompatEnabled(appCtx)
 	if err != nil {
@@ -824,7 +849,7 @@ func main() {
 		deps.FileRepo = fileRepo
 
 		ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
-		s := scanner.NewScanner(fileRepo, ffprobePath, deps.S3Public, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan)
+		s := scanner.NewScanner(fileRepo, ffprobePath, deps.S3Public, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan, cfg.Scanner.FileRemovalGrace)
 		s.SetSearchIndexProvider(activeCatalogSearchProvider)
 		configWatcher.OnChange(func(_, updated *config.Config) {
 			s.SetWorkers(updated.Scanner.Workers)
@@ -998,6 +1023,12 @@ func main() {
 			installer,
 			pluginHost,
 			slog.Default(),
+			// Auto-updates rewrite installation rows (new version-specific
+			// InstallPath/Version) and delete the old install dir without going
+			// through pluginService. Wire OnLifecycleChange so the service's
+			// installation cache is invalidated and later plugin RPCs re-read
+			// the fresh row instead of a stale one.
+			pluginService.OnLifecycleChange,
 		)
 		go func() {
 			defer close(pluginAutoUpdateDone)
@@ -1111,12 +1142,32 @@ func main() {
 		rootClaimRepo = catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo = catalog.NewGroupClaimRepository(deps.DB)
 		pluginResolver := metadata.NewPluginResolverAdapter(pluginService)
+		// Serve the metadata chain's plugin-installation enabled-check from the
+		// plugins service's in-memory installation cache. Declared as the
+		// interface type and only assigned when pluginService is non-nil so a
+		// nil *plugins.Service is passed as a genuine nil interface (not a
+		// typed-nil), letting buildProviders fall back to the pool query.
+		var installationEnabledChecker metadata.InstallationEnabledChecker
+		if pluginService != nil {
+			installationEnabledChecker = pluginService
+		}
 		metadataService = metadata.NewMetadataService(
-			chainRepo, pluginResolver,
+			chainRepo, pluginResolver, installationEnabledChecker,
 			itemRepo, providerIDRepo, episodeRepo, seasonRepo, libraryRepo, deps.FolderRepo,
 			personRepo,
 			deps.FileRepo, skippedRootRepo, staleIDRepo, rootClaimRepo,
 		)
+		// Drop the resolved-chain cache whenever a plugin is installed, enabled,
+		// disabled, updated, or uninstalled. The installation-enabled check is
+		// served from the plugins service's in-memory cache (invalidated on the
+		// same events), but resolveChainCached would otherwise keep serving a
+		// stale provider chain for up to chainCacheTTL after a provider's
+		// availability changes.
+		if pluginService != nil {
+			pluginService.AddLifecycleHook(func(context.Context) {
+				metadataService.InvalidateChainCache()
+			})
+		}
 		personRefreshService = metadata.NewPersonRefreshService(deps.DB, pluginResolver, personRepo)
 		personRefreshService.SetImageResolver(imageResolver)
 
@@ -1374,23 +1425,57 @@ func main() {
 		defer userStoreProvider.Close()
 	}
 
+	var policySystem *policy.System
+	if mode == "integrated" || mode == "api" {
+		policyDecisionLogger := policy.NewDecisionLogger(
+			deps.DB,
+			nodeID,
+			policy.WithDecisionLogLogger(slog.Default()),
+		)
+		policyDecisionLogger.SetVerbosity(cfg.Policy.DecisionLogVerbosity)
+		policyDecisionLogger.SetScopeSampleRate(cfg.Policy.DecisionLogScopeSampleRate)
+		policySystem = policy.NewSystem(
+			policy.NewPolicyStore(deps.DB),
+			deps.EventBus,
+			slog.Default(),
+			policy.WithSystemEvalTimeout(time.Duration(cfg.Policy.EvalTimeoutMS)*time.Millisecond),
+			policy.WithSystemDecisionLogger(policyDecisionLogger),
+		)
+		if err := policySystem.Start(appCtx); err != nil {
+			log.Fatalf("policy system start: %v", err)
+		}
+		deps.PolicySystem = policySystem
+		configWatcher.OnChange(func(_, updated *config.Config) {
+			policySystem.SetEvalTimeout(time.Duration(updated.Policy.EvalTimeoutMS) * time.Millisecond)
+			if logger := policySystem.DecisionLogger(); logger != nil {
+				logger.SetVerbosity(updated.Policy.DecisionLogVerbosity)
+				logger.SetScopeSampleRate(updated.Policy.DecisionLogScopeSampleRate)
+			}
+		})
+		defer policySystem.Stop()
+	}
+
 	// User-facing release notifications. The system reads user state through
 	// the raw store provider; the provider handed to everything downstream is
 	// wrapped so every favorites/watchlist/progress mutation (REST handlers,
 	// jellycompat, imports, playback) feeds the interest index.
 	var notificationSystem *notifications.System
 	if deps.DB != nil && userStoreProvider != nil {
-		notificationScopes := access.NewResolver(
-			auth.NewUserRepository(deps.DB),
-			userStoreProvider,
-			access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
-		)
+		userRepo := auth.NewUserRepository(deps.DB)
+		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
+		var notificationScopes notifications.ScopeResolver
+		if policySystem != nil {
+			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore)
+		} else {
+			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore)
+		}
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
 			settingsRepo,
 			userStoreProvider,
 			notificationScopes,
-			auth.NewUserRepository(deps.DB),
+			userRepo,
 			deps.EventsHub,
 			deps.RedisClient,
 			deps.SecretCipher,
@@ -1398,6 +1483,7 @@ func main() {
 		)
 		userStoreProvider = notifications.WrapUserStoreProvider(userStoreProvider, notificationSystem)
 		deps.Notifications = notificationSystem
+
 		if libraryIngestExecutor != nil {
 			libraryIngestExecutor.SetAvailabilityDetector(notificationSystem.Detector)
 		}
@@ -1428,11 +1514,18 @@ func main() {
 			if err != nil {
 				return playback.SessionLimits{}, err
 			}
+			effective, err := access.EffectivePolicyForUser(ctx, user, accessGroupStore)
+			if err != nil {
+				return playback.SessionLimits{}, err
+			}
 			return playback.SessionLimits{
-				MaxStreams:    user.MaxStreams,
-				MaxTranscodes: user.MaxTranscodes,
+				MaxStreams:    effective.MaxStreams,
+				MaxTranscodes: effective.MaxTranscodes,
 			}, nil
 		})
+		if policySystem != nil {
+			sessionMgr.SetAdmissionDecider(policy.NewPlaybackAdmissionDecider(policySystem.PDP()))
+		}
 	}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider
@@ -1450,10 +1543,12 @@ func main() {
 			}
 		})
 	}
-	// Auto-remove fully-watched items from the watchlist (standalone behavior,
+	// Auto-remove fully-watched movies from the watchlist (standalone behavior,
 	// default-on per profile), propagating removals to connected providers.
-	if itemRepo != nil && episodeRepo != nil && userStoreProvider != nil {
-		maintainer := watchlist.NewMaintainer(userStoreProvider, itemRepo, episodeRepo)
+	// Series are never removed; watchlist read paths hide fully-watched ones
+	// (catalog.WatchlistVisibility) so newly added episodes bring them back.
+	if itemRepo != nil && userStoreProvider != nil {
+		maintainer := watchlist.NewMaintainer(userStoreProvider, itemRepo)
 		if watchProviderService != nil {
 			maintainer.WithListEventDispatcher(watchProviderService)
 		}
@@ -1531,6 +1626,7 @@ func main() {
 			cfg.Recommendations.TasteProfilesCron,
 			cfg.Recommendations.CowatchCron,
 			cfg.Recommendations.RecommendationsCron,
+			cfg.Recommendations.EmbeddingsJobTimeout,
 		)
 		if err != nil {
 			slog.Error("failed to create recommendation worker", "error", err)
@@ -1547,8 +1643,40 @@ func main() {
 	if err != nil {
 		log.Fatalf("load trusted CIDRs: %v", err)
 	}
-	ipResolver := clientip.NewResolver(trustedCIDRs)
+	ipResolver = clientip.NewResolver(trustedCIDRs)
 	deps.ClientIPResolver = ipResolver
+	// Hot-reload trusted proxies on settings changes via two complementary
+	// paths. The direct event-bus subscription re-reads only the clientip key,
+	// so a malformed unrelated setting (which fails the whole-config reload)
+	// cannot leave stale trust CIDRs on Redis-backed multi-instance deploys.
+	_ = eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+		if event.Type != cache.EventSettingsChanged {
+			return
+		}
+		cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
+		if loadErr != nil {
+			slog.Warn("clientip config reload failed", "error", loadErr)
+			return
+		}
+		ipResolver.UpdateTrustedCIDRs(cidrs)
+	})
+	// The config watcher covers the Redis-less poll/RequestReload path, so
+	// admin UI edits apply without a restart on single-node deployments too.
+	configWatcher.OnChange(func(old, updated *config.Config) {
+		if old != nil && old.ClientIP.TrustedProxies == updated.ClientIP.TrustedProxies {
+			return
+		}
+		raw := updated.ClientIP.TrustedProxies
+		if raw == "" {
+			raw = clientip.DefaultTrustedProxies
+		}
+		cidrs, parseErr := clientip.ParseCIDRs(raw)
+		if parseErr != nil {
+			slog.Warn("clientip config reload failed", "error", parseErr)
+			return
+		}
+		ipResolver.UpdateTrustedCIDRs(cidrs)
+	})
 
 	// Step 6b: Create rate limiter.
 	if cfg.RateLimit.Enabled && deps.DB != nil {
@@ -1585,13 +1713,6 @@ func main() {
 			if event.Type == cache.EventSettingsChanged {
 				if reloadErr := rateLimitMW.Reload(context.Background()); reloadErr != nil {
 					slog.Warn("rate limit config reload from event failed", "error", reloadErr)
-				}
-				// Reload trusted proxies
-				cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
-				if loadErr != nil {
-					slog.Warn("clientip config reload failed", "error", loadErr)
-				} else {
-					ipResolver.UpdateTrustedCIDRs(cidrs)
 				}
 			}
 		})
@@ -1630,6 +1751,12 @@ func main() {
 		// Non-fatal: see the operational_logs partition incident. Writes fall
 		// back to the default partition and periodic cleanup retries.
 		slog.Warn("ensure activity log partitions; continuing in degraded mode", "error", err)
+	}
+	policyPM := partman.NewManager(pool, "policy_decisions", partman.Daily, 3)
+	if err := policyPM.EnsureFuturePartitions(appCtx); err != nil {
+		// Non-fatal: decision logs fall back to the default partition and
+		// periodic cleanup retries partition creation.
+		slog.Warn("ensure policy decision log partitions; continuing in degraded mode", "error", err)
 	}
 	var activityWriter activitylog.Writer
 	activityConsumer := activitylog.NewConsumer(pool, nil, logStreamHub)
@@ -1734,6 +1861,42 @@ func main() {
 		}
 		taskMgr.Register(tasks.NewActivityLogCleanupTask(deps.DB, settingsRepo, activityPM))
 		taskMgr.Register(tasks.NewOperationalLogCleanupTask(deps.DB, settingsRepo, opsPM))
+		taskMgr.Register(tasks.NewPolicyDecisionLogCleanupTask(deps.DB, settingsRepo, policyPM))
+		if deps.FileRepo != nil {
+			// Download prepare-to-file pipeline (Phase 3): a durable, leased encode
+			// queue hosted on the task manager. Built here (before Start) and shared
+			// with the API via deps so the download service can enqueue jobs.
+			artifactMgr := downloads.NewArtifactManager(
+				downloads.NewArtifactRepository(deps.DB),
+				downloads.NewRepository(deps.DB),
+				deps.FileRepo,
+				downloads.NewPlaybackPreparer(),
+				deps.NodeID,
+				func() *config.Config {
+					if deps.LiveConfig != nil {
+						if c := deps.LiveConfig(); c != nil {
+							return c
+						}
+					}
+					return deps.Config
+				},
+				func(ctx context.Context, d *downloads.Download) {
+					if deps.EventsHub == nil {
+						return
+					}
+					_ = deps.EventsHub.PublishJSON(ctx, evt.ChannelUserState, "download", map[string]any{
+						"download_id":   d.ID,
+						"status":        d.Status,
+						"media_item_id": d.ContentID,
+						"format":        d.Format,
+					}, evt.PublishOptions{UserID: d.UserID, ProfileID: d.ProfileID})
+				},
+			)
+			encodeTask := tasks.NewEncodeDownloadArtifactsTask(artifactMgr)
+			artifactMgr.SetKick(func() { _ = taskMgr.RunTask(appCtx, encodeTask.Key()) })
+			taskMgr.Register(encodeTask)
+			deps.ArtifactManager = artifactMgr
+		}
 		if notificationSystem != nil {
 			taskMgr.Register(tasks.NewSeedContentAvailabilityTask(notificationSystem))
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
@@ -1773,13 +1936,18 @@ func main() {
 		)
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
+		requestReconcileSvc.SetGroupPolicyProvider(accessGroupStore)
 		if userStoreProvider != nil {
-			reconcileResolver := access.NewResolver(
-				auth.NewUserRepository(deps.DB),
-				userStoreProvider,
-				access.NewProfileTokenService(cfg.Auth.JWTSecret, 0),
-			)
-			requestReconcileSvc.SetEntitlementResolver(mediarequests.NewAccessEntitlements(reconcileResolver))
+			userRepo := auth.NewUserRepository(deps.DB)
+			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
+			var reconcileResolver scopeResolver
+			if policySystem != nil {
+				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore)
+			} else {
+				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore)
+			}
+			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
 		if notificationSystem != nil {
 			requestReconcileSvc.SetFulfillmentNotifier(notifications.NewRequestFulfillmentNotifier(notificationSystem))
@@ -1879,6 +2047,12 @@ func main() {
 		if deps.ImageResolver != nil {
 			absDetailSvc.SetImageResolver(deps.ImageResolver)
 		}
+		var absScopeResolver scopeResolver
+		if policySystem != nil {
+			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore)
+		} else {
+			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore)
+		}
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -1888,7 +2062,7 @@ func main() {
 				Auth: absAuthSvc,
 				Pool: deps.DB,
 			},
-			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider),
+			AccessResolver: audiobooks.NewABSAccessResolver(absUserRepo, userStoreProvider, absScopeResolver, accessGroupStore),
 			Recs:           recommendations.NewRepo(deps.DB),
 			Detail:         absDetailSvc,
 			SessionMgr:     sessionMgr,
@@ -2147,6 +2321,10 @@ func main() {
 			JWTSecret:        cfg.Auth.JWTSecret,
 			RecWorker:        recWorker,
 			FrontendFS:       deps.FrontendFS,
+			// Hand remote-transcode recipes to the shared recipe store so a dedicated
+			// transcode node that restarts can rebuild a jellycompat session.
+			RecipeNodeStore: noderecipe.NewStore(apiRedisClient, 0),
+			SessionSyncer:   deps.SessionSyncer,
 		}
 
 		// Wire direct dependencies when DB is available.
@@ -2195,6 +2373,14 @@ func main() {
 			if compatSearchService != nil {
 				compatSearchService.StartCoverageRefresh(appCtx)
 				compatDeps.CatalogSearchProvider = compatSearchService.Provider()
+				// Latch the resolved provider for the package-level enqueue
+				// helpers (idempotent with the API router's latch; this also
+				// covers modes that wire jellycompat without the router).
+				activeSearchProvider := catalog.SearchProviderPostgres
+				if _, ok := compatSearchService.Provider().(*catalog.MeilisearchSearchProvider); ok {
+					activeSearchProvider = catalog.SearchProviderMeilisearch
+				}
+				catalog.SetActiveSearchIndexProvider(activeSearchProvider)
 			}
 
 			if deps.S3Public != nil {
@@ -2232,11 +2418,25 @@ func main() {
 			// user-disabled libraries, and rating/quality ceilings apply to
 			// the compat API exactly as they do to the native API.
 			if userStoreProvider != nil {
-				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(access.NewResolver(
-					userRepo,
-					userStoreProvider,
-					nil, // profile tokens unused: compat login already verifies PINs
-				))
+				var compatScopeResolver jellycompat.ScopeResolver
+				if policySystem != nil {
+					compatScopeResolver = policy.NewViewerResolver(
+						userRepo,
+						userStoreProvider,
+						nil, // profile tokens unused: compat login already verifies PINs
+						policySystem.PDP(),
+						accessGroupStore,
+					)
+				} else {
+					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+					compatScopeResolver = access.NewResolver(
+						userRepo,
+						userStoreProvider,
+						nil, // profile tokens unused: compat login already verifies PINs
+						accessGroupStore,
+					)
+				}
+				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 			}
 		}
 
@@ -2878,6 +3078,26 @@ func mapFolderTypeToMediaType(t string) string {
 	default:
 		return "mixed"
 	}
+}
+
+type scopeResolver interface {
+	Resolve(ctx context.Context, input access.ResolveInput) (access.Scope, error)
+}
+
+type scopeEntitlementResolver struct {
+	resolver scopeResolver
+}
+
+func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
+	scope, err := r.resolver.Resolve(ctx, access.ResolveInput{
+		UserID:              userID,
+		ProfileID:           profileID,
+		SkipPINVerification: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return scope.MaxPlaybackQuality, nil
 }
 
 // audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which

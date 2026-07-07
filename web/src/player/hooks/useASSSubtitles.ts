@@ -8,6 +8,13 @@ import {
   loadSubtitleFontBundle,
   loadSubtitleFallbackFontData,
 } from "../utils/subtitleFonts";
+// Liberation Sans (SIL OFL 1.1; license colocated as liberation-sans.LICENSE),
+// the font JASSUB uses as its built-in Latin default, taken verbatim from
+// jassub@2.4.2's dist/default.woff2. Vendored because jassub >= 2.5.4 still
+// references that file but no longer ships it in the npm package, which would
+// leave libass with no usable default font (queryFonts is disabled) and
+// silently render nothing.
+import liberationSansUrl from "../assets/liberation-sans.woff2?url";
 
 /**
  * Manages client-side ASS/SSA subtitle rendering via JASSUB (libass WASM).
@@ -149,6 +156,7 @@ export function useASSSubtitles(
         // Letting JASSUB probe it produces noisy console warnings for common ASS
         // style fonts without making playback reliable across clients.
         queryFonts: false,
+        availableFonts: { "liberation sans": liberationSansUrl },
         ...(fonts.length > 0
           ? {
               fonts,

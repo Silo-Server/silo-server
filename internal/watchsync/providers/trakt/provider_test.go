@@ -1,6 +1,7 @@
 package trakt
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -185,13 +186,38 @@ func TestRemoveHistorySendsTraktRemovePayload(t *testing.T) {
 	if len(movies) != 1 {
 		t.Fatalf("movies payload = %#v, want 1 movie", gotBody["movies"])
 	}
-	episodes, _ := gotBody["episodes"].([]any)
-	if len(episodes) != 1 {
-		t.Fatalf("episodes payload = %#v, want 1 episode", gotBody["episodes"])
+	// The episode carries only a series id + season/episode number, so it must
+	// land in the nested shows[] structure, not the flat episodes[] array.
+	if _, ok := gotBody["episodes"]; ok {
+		t.Fatalf("episodes payload unexpectedly present: %#v", gotBody["episodes"])
 	}
-	episode, _ := episodes[0].(map[string]any)
-	if episode["season"] != float64(0) || episode["number"] != float64(2) {
-		t.Fatalf("episode payload = %#v, want S00E02", episode)
+	shows, _ := gotBody["shows"].([]any)
+	if len(shows) != 1 {
+		t.Fatalf("shows payload = %#v, want 1 show", gotBody["shows"])
+	}
+	show, _ := shows[0].(map[string]any)
+	showIDs, _ := show["ids"].(map[string]any)
+	if showIDs["tvdb"] != float64(789) {
+		t.Fatalf("show ids = %#v, want tvdb 789", show["ids"])
+	}
+	seasons, _ := show["seasons"].([]any)
+	if len(seasons) != 1 {
+		t.Fatalf("seasons payload = %#v, want 1 season", show["seasons"])
+	}
+	season, _ := seasons[0].(map[string]any)
+	if season["number"] != float64(0) {
+		t.Fatalf("season payload = %#v, want season 0", season)
+	}
+	seasonEpisodes, _ := season["episodes"].([]any)
+	if len(seasonEpisodes) != 1 {
+		t.Fatalf("season episodes = %#v, want 1 episode", season["episodes"])
+	}
+	seasonEpisode, _ := seasonEpisodes[0].(map[string]any)
+	if seasonEpisode["number"] != float64(2) {
+		t.Fatalf("episode payload = %#v, want number 2", seasonEpisode)
+	}
+	if _, ok := seasonEpisode["watched_at"]; ok {
+		t.Fatalf("remove episode unexpectedly included watched_at: %#v", seasonEpisode)
 	}
 }
 
@@ -320,5 +346,163 @@ func TestHistoryPayloadsIncludeTVDBOnlyMovieIDs(t *testing.T) {
 	removePayload := buildHistoryRemovePayload([]watchsync.LocalPlay{play})
 	if len(removePayload.Movies) != 1 || removePayload.Movies[0].IDs.TVDB != 12345 {
 		t.Fatalf("remove payload movie IDs = %#v, want TVDB 12345", removePayload.Movies)
+	}
+}
+
+func TestHistoryEpisodeWithoutOwnIDsUsesNestedShowFallback(t *testing.T) {
+	play := watchsync.LocalPlay{
+		HistoryID:     "history-episode-no-ids",
+		Kind:          historyimport.KindEpisode,
+		SeriesTMDBID:  "999",
+		SeasonNumber:  2,
+		EpisodeNumber: 5,
+		WatchedAt:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	}
+
+	addPayload := buildHistoryPayload([]watchsync.LocalPlay{play})
+	if len(addPayload.Episodes) != 0 {
+		t.Fatalf("add payload episodes = %#v, want 0 (episode has no own id)", addPayload.Episodes)
+	}
+	if len(addPayload.Shows) != 1 {
+		t.Fatalf("add payload shows = %#v, want 1", addPayload.Shows)
+	}
+	addShow := addPayload.Shows[0]
+	if addShow.IDs.TMDB != 999 {
+		t.Fatalf("add payload show IDs = %#v, want show TMDB 999", addShow.IDs)
+	}
+	if len(addShow.Seasons) != 1 || addShow.Seasons[0].Number != 2 {
+		t.Fatalf("add payload seasons = %#v, want 1 season numbered 2", addShow.Seasons)
+	}
+	if len(addShow.Seasons[0].Episodes) != 1 || addShow.Seasons[0].Episodes[0].Number != 5 {
+		t.Fatalf("add payload episodes = %#v, want 1 episode numbered 5", addShow.Seasons[0].Episodes)
+	}
+	if addShow.Seasons[0].Episodes[0].WatchedAt != "2026-05-04T12:00:00Z" {
+		t.Fatalf("add payload episode watched_at = %q", addShow.Seasons[0].Episodes[0].WatchedAt)
+	}
+
+	addJSON, err := json.Marshal(addPayload)
+	if err != nil {
+		t.Fatalf("marshal add payload: %v", err)
+	}
+	if bytes.Contains(addJSON, []byte(`"episodes":[{"watched_at"`)) {
+		t.Fatalf("add payload JSON must not carry a flat episode with show sibling: %s", addJSON)
+	}
+	if !bytes.Contains(addJSON, []byte(`"shows":[{"ids":{"trakt":0,"slug":"","imdb":"","tmdb":999,"tvdb":0}`)) {
+		t.Fatalf("add payload JSON missing nested show: %s", addJSON)
+	}
+
+	removePayload := buildHistoryRemovePayload([]watchsync.LocalPlay{play})
+	if len(removePayload.Episodes) != 0 {
+		t.Fatalf("remove payload episodes = %#v, want 0", removePayload.Episodes)
+	}
+	if len(removePayload.Shows) != 1 {
+		t.Fatalf("remove payload shows = %#v, want 1", removePayload.Shows)
+	}
+	removeShow := removePayload.Shows[0]
+	if removeShow.IDs.TMDB != 999 {
+		t.Fatalf("remove payload show IDs = %#v, want show TMDB 999", removeShow.IDs)
+	}
+	if len(removeShow.Seasons) != 1 || removeShow.Seasons[0].Number != 2 {
+		t.Fatalf("remove payload seasons = %#v, want 1 season numbered 2", removeShow.Seasons)
+	}
+	if len(removeShow.Seasons[0].Episodes) != 1 || removeShow.Seasons[0].Episodes[0].Number != 5 {
+		t.Fatalf("remove payload episodes = %#v, want 1 episode numbered 5", removeShow.Seasons[0].Episodes)
+	}
+
+	removeJSON, err := json.Marshal(removePayload)
+	if err != nil {
+		t.Fatalf("marshal remove payload: %v", err)
+	}
+	if bytes.Contains(removeJSON, []byte(`"watched_at"`)) {
+		t.Fatalf("remove payload JSON must not carry watched_at: %s", removeJSON)
+	}
+}
+
+func TestHistoryNestedFallbackMergesEpisodesBySeason(t *testing.T) {
+	plays := []watchsync.LocalPlay{
+		{
+			Kind:          historyimport.KindEpisode,
+			SeriesTMDBID:  "999",
+			SeasonNumber:  1,
+			EpisodeNumber: 3,
+			WatchedAt:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+		},
+		{
+			Kind:          historyimport.KindEpisode,
+			SeriesTMDBID:  "999",
+			SeasonNumber:  1,
+			EpisodeNumber: 4,
+			WatchedAt:     time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC),
+		},
+	}
+
+	addPayload := buildHistoryPayload(plays)
+	if len(addPayload.Shows) != 1 {
+		t.Fatalf("shows = %#v, want 1 merged show", addPayload.Shows)
+	}
+	show := addPayload.Shows[0]
+	if len(show.Seasons) != 1 {
+		t.Fatalf("seasons = %#v, want 1 merged season", show.Seasons)
+	}
+	if len(show.Seasons[0].Episodes) != 2 {
+		t.Fatalf("episodes = %#v, want 2 episodes under one season", show.Seasons[0].Episodes)
+	}
+	if show.Seasons[0].Episodes[0].Number != 3 || show.Seasons[0].Episodes[1].Number != 4 {
+		t.Fatalf("episode numbers = %#v, want [3 4]", show.Seasons[0].Episodes)
+	}
+
+	removePayload := buildHistoryRemovePayload(plays)
+	if len(removePayload.Shows) != 1 || len(removePayload.Shows[0].Seasons) != 1 || len(removePayload.Shows[0].Seasons[0].Episodes) != 2 {
+		t.Fatalf("remove payload did not merge by show/season: %#v", removePayload.Shows)
+	}
+}
+
+func TestHistoryEpisodeWithRealIDsKeepsEpisodeIDs(t *testing.T) {
+	play := watchsync.LocalPlay{
+		HistoryID:     "history-episode-with-ids",
+		Kind:          historyimport.KindEpisode,
+		TVDBID:        "54321",
+		SeriesTMDBID:  "999",
+		SeasonNumber:  2,
+		EpisodeNumber: 5,
+		WatchedAt:     time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC),
+	}
+
+	addPayload := buildHistoryPayload([]watchsync.LocalPlay{play})
+	if len(addPayload.Episodes) != 1 {
+		t.Fatalf("add payload episodes = %#v, want 1", addPayload.Episodes)
+	}
+	if addPayload.Episodes[0].IDs.TVDB != 54321 {
+		t.Fatalf("add payload episode IDs = %#v, want TVDB 54321", addPayload.Episodes[0].IDs)
+	}
+	if len(addPayload.Shows) != 0 {
+		t.Fatalf("add payload shows = %#v, want none", addPayload.Shows)
+	}
+
+	addJSON, err := json.Marshal(addPayload)
+	if err != nil {
+		t.Fatalf("marshal add payload: %v", err)
+	}
+	if !bytes.Contains(addJSON, []byte(`"tvdb":54321`)) {
+		t.Fatalf("add payload JSON missing real episode id: %s", addJSON)
+	}
+
+	removePayload := buildHistoryRemovePayload([]watchsync.LocalPlay{play})
+	if len(removePayload.Episodes) != 1 {
+		t.Fatalf("remove payload episodes = %#v, want 1", removePayload.Episodes)
+	}
+	if removePayload.Episodes[0].IDs.TVDB != 54321 {
+		t.Fatalf("remove payload episode IDs = %#v, want TVDB 54321", removePayload.Episodes[0].IDs)
+	}
+	if len(removePayload.Shows) != 0 {
+		t.Fatalf("remove payload shows = %#v, want none", removePayload.Shows)
+	}
+
+	removeJSON, err := json.Marshal(removePayload)
+	if err != nil {
+		t.Fatalf("marshal remove payload: %v", err)
+	}
+	if !bytes.Contains(removeJSON, []byte(`"tvdb":54321`)) {
+		t.Fatalf("remove payload JSON missing real episode id: %s", removeJSON)
 	}
 }

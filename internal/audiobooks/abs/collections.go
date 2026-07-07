@@ -7,7 +7,7 @@ import (
 
 // CollectionStore is the narrow slice of user_personal_collections
 // (collection_type='manual') and user_personal_collection_items
-// (sub_item_id='') the collections handlers need. Implemented by
+// (sub_item_id=”) the collections handlers need. Implemented by
 // ABSCollectionStore in internal/audiobooks/abs_collection_store.go;
 // post-migration-156 it reads the unified canonical tables.
 type CollectionStore interface {
@@ -53,7 +53,7 @@ type Collection struct {
 
 // CollectionItem is the in-memory representation of a
 // user_personal_collection_items row scoped to a manual collection
-// (sub_item_id='').
+// (sub_item_id=”).
 type CollectionItem struct {
 	CollectionID  string
 	LibraryItemID string
@@ -69,6 +69,7 @@ type CollectionItem struct {
 func collectionToABS(c Collection, books []map[string]any) map[string]any {
 	out := map[string]any{
 		"id":          c.ID,
+		"libraryId":   VirtualLibraryID, // real ABS Collection.toOldJSON has libraryId; silo collections are cross-library user-personal
 		"userId":      c.UserID,
 		"name":        c.Name,
 		"description": c.Description,

@@ -15,6 +15,7 @@ import {
   useUpdateAdminUserDeviceSetting,
   useUpdateAdminUserSetting,
 } from "@/hooks/queries/admin/users";
+import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import { useAdminPlaybackHistory } from "@/hooks/queries/admin/history";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
@@ -85,6 +86,10 @@ import {
   type DeviceProfileTabEntry,
 } from "@/components/admin/deviceOverrides";
 import { toast } from "sonner";
+import {
+  formatDate as formatPreferredDate,
+  formatDateTime as formatDateTimePreferred,
+} from "@/lib/datetime";
 
 export default function AdminUserDetail() {
   const { id } = useParams<{ id: string }>();
@@ -246,6 +251,7 @@ export default function AdminUserDetail() {
 
 function OverviewTab({ user }: { user: AdminUser }) {
   const { data: libraries = [] } = useAdminLibraries();
+  const { data: accessGroups = [] } = useAccessGroups();
 
   const libraryNames =
     user.library_ids === null
@@ -258,6 +264,11 @@ function OverviewTab({ user }: { user: AdminUser }) {
               return lib ? lib.name : `#${id}`;
             })
             .join(", ");
+  const groupName =
+    user.access_group_id === null
+      ? "None"
+      : (accessGroups.find((group) => group.id === user.access_group_id)?.name ??
+        `#${user.access_group_id}`);
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -280,6 +291,7 @@ function OverviewTab({ user }: { user: AdminUser }) {
           <h3 className="text-sm font-medium">Permissions & Limits</h3>
         </div>
         <div className="divide-border divide-y">
+          <DetailRow label="Group" value={groupName} />
           <DetailRow label="Library Access" value={libraryNames} />
           <DetailRow
             label="Marker Editing"
@@ -895,6 +907,7 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
 
 function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void }) {
   const { data: libraries = [] } = useAdminLibraries();
+  const { data: accessGroups = [] } = useAccessGroups();
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
   const [password, setPassword] = useState("");
@@ -902,6 +915,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [enabled, setEnabled] = useState(user.enabled);
   const [permissions, setPermissions] = useState<string[]>(user.permissions ?? []);
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(user.library_ids);
+  const [accessGroupID, setAccessGroupID] = useState<number | null>(user.access_group_id);
   const [maxStreams, setMaxStreams] = useState(user.max_streams);
   const [maxTranscodes, setMaxTranscodes] = useState(user.max_transcodes);
   const [maxProfiles, setMaxProfiles] = useState(user.max_profiles);
@@ -912,9 +926,13 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
   const [downloadTranscodeAllowed, setDownloadTranscodeAllowed] = useState(
     user.download_transcode_allowed,
   );
+  const accessGroupSelectId = useId();
   const markerEditId = useId();
   const metadataCurationId = useId();
   const updateMutation = useUpdateUser();
+  const accessGroupValue = accessGroupID === null ? "none" : String(accessGroupID);
+  const selectedGroupMissing =
+    accessGroupID !== null && !accessGroups.some((group) => group.id === accessGroupID);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -925,6 +943,7 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
       permissions,
       enabled,
       library_ids: libraryIDs,
+      access_group_id: accessGroupID,
       max_streams: maxStreams,
       max_transcodes: maxTranscodes,
       max_profiles: maxProfiles,
@@ -1003,6 +1022,30 @@ function EditUserForm({ user, onClose }: { user: AdminUser; onClose: () => void 
           </TabsContent>
 
           <TabsContent value="access" className="mt-0 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor={accessGroupSelectId}>Group</Label>
+              <Select
+                value={accessGroupValue}
+                onValueChange={(value) => {
+                  setAccessGroupID(value === "none" ? null : Number(value));
+                }}
+              >
+                <SelectTrigger id={accessGroupSelectId} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No group</SelectItem>
+                  {selectedGroupMissing && (
+                    <SelectItem value={String(accessGroupID)}>#{accessGroupID}</SelectItem>
+                  )}
+                  {accessGroups.map((group) => (
+                    <SelectItem key={group.id} value={String(group.id)}>
+                      {group.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <LibraryAccessSelector
               libraries={libraries}
               value={libraryIDs}
@@ -1143,15 +1186,11 @@ function formatDuration(seconds: number | null) {
 function formatDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatPreferredDate(date, "medium");
 }
 
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return formatDateTimePreferred(date);
 }

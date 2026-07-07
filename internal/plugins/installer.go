@@ -256,6 +256,10 @@ func (i *Installer) replaceBinary(
 	if err != nil {
 		return nil, fmt.Errorf("serialize plugin manifest: %w", err)
 	}
+	archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
+	if err != nil {
+		return nil, fmt.Errorf("package plugin archive: %w", err)
+	}
 
 	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
@@ -289,7 +293,7 @@ func (i *Installer) replaceBinary(
 		return nil, err
 	}
 
-	if err := i.installations.SaveArchive(ctx, existing.ID, manifestBytes, checksum, binaryData); err != nil {
+	if err := i.installations.SaveArchive(ctx, existing.ID, manifestBytes, checksum, archiveBytes); err != nil {
 		return nil, fmt.Errorf("persist replacement plugin archive: %w", err)
 	}
 
@@ -412,6 +416,10 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 	if err != nil {
 		return nil, fmt.Errorf("serialize plugin manifest: %w", err)
 	}
+	archiveBytes, err := buildBinaryPluginArchive(manifestBytes, binaryData)
+	if err != nil {
+		return nil, fmt.Errorf("package plugin archive: %w", err)
+	}
 
 	installRoot := filepath.Join(i.baseDir, sanitizeFilesystemSegment(manifest.GetPluginId()), sanitizeFilesystemSegment(manifest.GetVersion()))
 	if err := os.MkdirAll(installRoot, 0755); err != nil {
@@ -461,7 +469,7 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 		return nil, fmt.Errorf("persist plugin installation: %w", err)
 	}
 
-	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, checksum, binaryData); err != nil {
+	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, checksum, archiveBytes); err != nil {
 		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
 			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr)
 		}

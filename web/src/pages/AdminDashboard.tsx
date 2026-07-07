@@ -6,6 +6,7 @@ import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialo
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { fetchAdminStats, useAdminStats, useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
+import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import {
   useAdminLibraries,
@@ -82,6 +83,7 @@ export default function AdminDashboard() {
   const librariesQuery = useAdminLibraries();
   const usersQuery = useAdminUsers();
   const { data: adminInstallations } = useAdminPluginInstallations();
+  const policyCapability = usePolicyCapability();
   const scanAll = useScanAllLibraries();
   const pageActivity = usePageActivity();
   const manualRefreshStartedAtRef = useRef<number | null>(null);
@@ -113,8 +115,11 @@ export default function AdminDashboard() {
     ? formatRelativeUpdatedLabel(relativeUpdatedNow, lastDashboardUpdatedAt)
     : null;
   const adminSearchSections = useMemo(
-    () => buildAdminCommandNavSections(adminInstallations),
-    [adminInstallations],
+    () =>
+      buildAdminCommandNavSections(adminInstallations, {
+        policyEditorAvailable: policyCapability.data?.editor_available === true,
+      }),
+    [adminInstallations, policyCapability.data?.editor_available],
   );
 
   useEffect(() => {

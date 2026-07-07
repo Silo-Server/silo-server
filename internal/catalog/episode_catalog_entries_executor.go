@@ -32,6 +32,31 @@ type episodeCatalogUserStatePlan struct {
 	requireProgressRatio bool
 }
 
+// applyEpisodeCatalogAccessFilter applies the section access constraints the
+// episode_catalog_entries table supports. The table has no `type` column, so
+// the compat audiobook/podcast media-type exclusion cannot be expressed here:
+// emitting `NOT (ece.type = ANY(...))` raised SQLSTATE 42703 and degraded the
+// whole query to empty. The exclusion is therefore dropped on this path.
+//
+// Dropping it is NOT a no-op masquerading as cosmetic: episode_catalog_entries
+// is NOT episodes-of-TV-series only — episode_libraries is populated from any
+// media_files row with a non-null episode_id, so podcast episodes
+// (media_items.type = 'podcast') also land here. What keeps non-TV episodes out
+// of episode-scoped results is library scoping plus the `si.type = 'series'`
+// guard in episodeCatalogSelectBody (hydration), not the media-type clause.
+// content_rating filtering is preserved here (that column exists).
+//
+// Because hydration's si.type='series' guard drops non-series rows AFTER the
+// page/count scans select them, the scan and hydration would otherwise diverge:
+// pages could under-fill and TotalRecordCount could count rows that never
+// render. episodeCatalogSeriesParentGuard re-expresses that same constraint at
+// the entry-scan level so both queries stay aligned with hydration.
+func applyEpisodeCatalogAccessFilter(access AccessFilter, whereParts *[]string, args *[]any, argIdx *int) {
+	access.ExcludedMediaTypes = nil // access is a value param; caller unaffected
+	ApplySectionAccessFilter("ece", access, whereParts, args, argIdx)
+	*whereParts = append(*whereParts, episodeCatalogSeriesParentGuard)
+}
+
 func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 	ctx context.Context,
 	def QueryDefinition,
@@ -84,7 +109,7 @@ func (e *QueryExecutor) tryEpisodeCatalogUserStatePreviewPage(
 		argIdx++
 	}
 
-	ApplySectionAccessFilter("ece", access, &whereParts, &args, &argIdx)
+	applyEpisodeCatalogAccessFilter(access, &whereParts, &args, &argIdx)
 
 	if e.SnapshotAt != nil {
 		whereParts = append(whereParts, fmt.Sprintf("ece.episode_created_at <= $%d", argIdx))
@@ -242,7 +267,7 @@ func (e *QueryExecutor) tryEpisodeCatalogEntriesPreviewPage(
 		argIdx++
 	}
 
-	ApplySectionAccessFilter("ece", access, &whereParts, &args, &argIdx)
+	applyEpisodeCatalogAccessFilter(access, &whereParts, &args, &argIdx)
 
 	if e.SnapshotAt != nil {
 		whereParts = append(whereParts, fmt.Sprintf("ece.episode_created_at <= $%d", argIdx))

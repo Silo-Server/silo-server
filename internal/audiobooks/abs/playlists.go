@@ -55,6 +55,7 @@ type PlaylistItem struct {
 func playlistToABS(p Playlist, items []map[string]any) map[string]any {
 	out := map[string]any{
 		"id":          p.ID,
+		"libraryId":   VirtualLibraryID, // real ABS Playlist.toOldJSON has libraryId; silo playlists are cross-library user-personal
 		"userId":      p.UserID,
 		"name":        p.Name,
 		"description": p.Description,

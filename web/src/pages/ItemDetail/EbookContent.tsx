@@ -20,7 +20,8 @@ import DetailHero from "./DetailHero";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
 import { getWatchedActionLabel } from "./watchedState";
-import { formatFileSize, formatPageCount, metadataLine } from "./components/versionFormatUtils";
+import { formatFileSize } from "@/lib/mediaFormat";
+import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
 
 function authorNames(item: ItemDetail): string[] {
   const extensionAuthors = (item.ebook?.authors ?? [])

@@ -40,6 +40,7 @@ const (
 	FieldContentRating
 	FieldImages
 	FieldAirSchedule
+	FieldVideos
 )
 
 // RefreshPriority controls queue ordering.
@@ -59,6 +60,14 @@ type ProcessRequest struct {
 	FolderID    string            // Which library folder
 	Language    string            // ISO 639-1 metadata language (resolved from folder)
 	Mode        RefreshMode
+	// AdoptLanguage makes Language the item's new canonical metadata
+	// language: the base row is rewritten in Language and
+	// default_metadata_language is restamped, instead of routing a
+	// non-canonical language to the localization tables. Set by
+	// folder-scoped manual refreshes when the library's configured
+	// language differs from the item's stamp, so changing a library's
+	// metadata language actually re-fetches titles/overviews.
+	AdoptLanguage bool
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -92,6 +101,7 @@ type MatchHints struct {
 // SearchQuery is passed to SearchProvider.Search().
 type SearchQuery struct {
 	Title                     string
+	Author                    string // optional creator hint (e.g. ebook author) folded into the search query
 	Year                      int
 	ContentType               string            // media_items.type value
 	ProviderIDs               map[string]string // Accumulated IDs from prior providers
@@ -184,6 +194,26 @@ type MetadataResult struct {
 	// ShowStatus is the publication/airing status ("Ongoing", "Completed",
 	// "Continuing", "Ended") when the provider reports one.
 	ShowStatus string
+	// Videos are remote promotional/supplemental videos (trailers, teasers,
+	// ...) hosted on external sites. Accumulated across providers with
+	// (Provider, ProviderKey) dedup, gated by FieldVideos and the library's
+	// trailer_kinds allow-list at persist time.
+	Videos []RemoteVideo
+}
+
+// RemoteVideo describes a provider-reported external video (YouTube trailer
+// etc.). It mirrors the SDK's VideoRecord and persists as an item_videos row.
+type RemoteVideo struct {
+	Provider    string // provider slug that returned this video
+	ProviderKey string // provider-native video id (dedup key)
+	Kind        models.ExtraKind
+	Site        string // hosting site, e.g. "youtube"
+	SiteKey     string // site-native video key (YouTube video id)
+	Name        string
+	Language    string // ISO 639-1, empty when unknown
+	IsOfficial  bool
+	SizeHint    int    // vertical resolution hint (e.g. 1080), 0 when unknown
+	PublishedAt string // RFC 3339, empty when unknown
 }
 
 // Ratings holds ratings from multiple sources.
@@ -243,6 +273,9 @@ type CacheImageResult struct {
 	BasePath  string // S3 key prefix
 	Thumbhash string // base64-encoded
 	Ext       string // file extension including dot (e.g. ".jpg", ".png")
+
+	UploadedVariants int
+	ExistingVariants int
 }
 
 // ImageCacher caches a remote image to object storage.

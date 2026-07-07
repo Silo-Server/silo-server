@@ -13,6 +13,57 @@ import (
 
 type fileGroupAssignment = naming.GroupIdentity
 
+// identityOverrideSet indexes path-scoped identity overrides for per-file
+// lookup during inference. File scope wins over root scope; among root
+// overrides the deepest matching root wins.
+type identityOverrideSet struct {
+	byFile map[string]*models.MediaIdentityOverride
+	byRoot map[string]*models.MediaIdentityOverride
+}
+
+func newIdentityOverrideSet(overrides []models.MediaIdentityOverride) *identityOverrideSet {
+	if len(overrides) == 0 {
+		return nil
+	}
+	set := &identityOverrideSet{
+		byFile: map[string]*models.MediaIdentityOverride{},
+		byRoot: map[string]*models.MediaIdentityOverride{},
+	}
+	for i := range overrides {
+		override := &overrides[i]
+		switch override.Scope {
+		case models.IdentityOverrideScopeFile:
+			if path := filepath.Clean(override.FilePath); path != "" && path != "." {
+				set.byFile[path] = override
+			}
+		case models.IdentityOverrideScopeRoot:
+			if path := filepath.Clean(override.RootPath); path != "" && path != "." {
+				set.byRoot[path] = override
+			}
+		}
+	}
+	return set
+}
+
+func (s *identityOverrideSet) lookup(filePath string) *models.MediaIdentityOverride {
+	if s == nil {
+		return nil
+	}
+	if override, ok := s.byFile[filePath]; ok {
+		return override
+	}
+	// Walk ancestor directories so the deepest matching root override wins.
+	for dir := filepath.Dir(filePath); ; dir = filepath.Dir(dir) {
+		if override, ok := s.byRoot[dir]; ok {
+			return override
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil
+		}
+	}
+}
+
 type groupInferenceResult struct {
 	Assignments    map[string]fileGroupAssignment
 	ScannedGroups  []models.ScannedMediaGroup
@@ -25,6 +76,7 @@ func inferGroupAssignments(
 	libraryType string,
 	folderID int,
 	rootAssignments map[string]fileRootAssignment,
+	identityOverrides *identityOverrideSet,
 ) groupInferenceResult {
 	assignments := make(map[string]fileGroupAssignment, len(filePaths))
 	groupBuckets := make(map[string][]fileGroupAssignment)
@@ -41,6 +93,16 @@ func inferGroupAssignments(
 			}
 		}
 		identity := naming.InferGroupIdentity(cleanPath, libraryType, rootAssignment)
+		if override := identityOverrides.lookup(cleanPath); override != nil {
+			naming.ApplyIdentityOverride(&identity, naming.IdentityOverride{
+				ForcedType:   override.ForcedType,
+				ForcedTitle:  override.ForcedTitle,
+				ForcedYear:   override.ForcedYear,
+				ForcedTmdbID: override.ForcedTmdbID,
+				ForcedImdbID: override.ForcedImdbID,
+				ForcedTvdbID: override.ForcedTvdbID,
+			})
+		}
 		assignments[cleanPath] = identity
 		groupBuckets[groupBucketKey(identity)] = append(groupBuckets[groupBucketKey(identity)], identity)
 		locationBuckets[identity.ObservedRootPath] = append(locationBuckets[identity.ObservedRootPath], identity)
@@ -76,7 +138,7 @@ func inferGroupAssignments(
 			SampleFilePath:         first.RepresentativePath,
 			SampleObservedRootPath: first.ObservedRootPath,
 			EvidenceJSON:           aggregateGroupEvidence(entries),
-			OverrideSource:         "none",
+			OverrideSource:         aggregateGroupOverrideSource(entries),
 		})
 
 		seenLocations := map[string]bool{}
@@ -160,16 +222,38 @@ func aggregateGroupState(entries []fileGroupAssignment) string {
 func aggregateLocationState(entries []fileGroupAssignment) string {
 	state := "resolved"
 	seenGroups := map[string]struct{}{}
+	nonOverriddenGroups := map[string]struct{}{}
 	for _, entry := range entries {
 		seenGroups[groupBucketKey(entry)] = struct{}{}
+		if !entry.Overridden {
+			nonOverriddenGroups[groupBucketKey(entry)] = struct{}{}
+		}
 		if entry.State == "ambiguous" {
 			state = "ambiguous"
 		}
 	}
-	if len(seenGroups) > 1 {
+	// A location split across groups is ambiguous only when the split was not
+	// operator-directed: identity overrides deliberately place files from one
+	// folder into different groups, and flagging that forever would make every
+	// resolved split look broken.
+	if len(seenGroups) > 1 && len(nonOverriddenGroups) > 1 {
 		state = "ambiguous"
 	}
 	return state
+}
+
+const (
+	overrideSourceNone   = "none"
+	overrideSourceManual = "manual"
+)
+
+func aggregateGroupOverrideSource(entries []fileGroupAssignment) string {
+	for _, entry := range entries {
+		if entry.Overridden {
+			return overrideSourceManual
+		}
+	}
+	return overrideSourceNone
 }
 
 func aggregateGroupEvidence(entries []fileGroupAssignment) []byte {
@@ -242,6 +326,6 @@ func applyGroupOverrideToSnapshot(group models.ScannedMediaGroup, override model
 	}
 	group.TypeConfidence = "high"
 	group.State = "resolved"
-	group.OverrideSource = "manual"
+	group.OverrideSource = overrideSourceManual
 	return group
 }

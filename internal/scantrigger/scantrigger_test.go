@@ -109,6 +109,158 @@ func TestResolverRejectsMissingSubtreeAtLibraryRoot(t *testing.T) {
 	}
 }
 
+func TestResolverResolvesVanishedFileToParentSubtree(t *testing.T) {
+	root := t.TempDir()
+	movieDir := filepath.Join(root, "Movie (2026)")
+	if err := os.Mkdir(movieDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	vanished := filepath.Join(movieDir, "Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      20,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	target, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+	if err != nil {
+		t.Fatalf("ResolveVanishedPath returned error: %v", err)
+	}
+	if target.Folder == nil || target.Folder.ID != 20 || target.Mode != ModeSubtree || target.Path != movieDir {
+		t.Fatalf("unexpected target: %#v", target)
+	}
+}
+
+func TestResolverResolvesVanishedDirToItself(t *testing.T) {
+	root := t.TempDir()
+	vanishedDir := filepath.Join(root, "Removed Movie (2026)")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      21,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	target, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanishedDir, "autoscan")
+	if err != nil {
+		t.Fatalf("ResolveVanishedPath returned error: %v", err)
+	}
+	if target.Folder == nil || target.Folder.ID != 21 || target.Mode != ModeSubtree || target.Path != vanishedDir {
+		t.Fatalf("unexpected target: %#v", target)
+	}
+}
+
+func TestResolverResolvesVanishedFileDirectlyUnderRootToLibraryScan(t *testing.T) {
+	root := t.TempDir()
+	vanished := filepath.Join(root, "Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      22,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	target, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+	if err != nil {
+		t.Fatalf("ResolveVanishedPath returned error: %v", err)
+	}
+	if target.Folder == nil || target.Folder.ID != 22 || target.Mode != ModeLibrary || target.Path != "" {
+		t.Fatalf("unexpected target: %#v", target)
+	}
+}
+
+func TestResolverRejectsVanishedPathWhenRootIsGone(t *testing.T) {
+	root := t.TempDir()
+	// Simulate an unmounted share: the configured root itself is gone.
+	goneRoot := filepath.Join(root, "mount")
+	vanished := filepath.Join(goneRoot, "Movie (2026)", "Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      23,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{goneRoot},
+	}}}
+
+	_, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusConflict || reqErr.Code != "conflict" {
+		t.Fatalf("unexpected error: %#v", reqErr)
+	}
+}
+
+func TestResolverRejectsVanishedPathInDisabledLibrary(t *testing.T) {
+	root := t.TempDir()
+	vanished := filepath.Join(root, "Movie (2026)", "Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      26,
+		Name:    "Movies",
+		Enabled: false,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusConflict || reqErr.Code != "conflict" {
+		t.Fatalf("unexpected error: %#v", reqErr)
+	}
+}
+
+func TestResolverRejectsVanishedPathOnNonNotExistStatError(t *testing.T) {
+	root := t.TempDir()
+	// A regular file where a directory is expected makes Lstat on a child
+	// path fail with ENOTDIR — a stat failure that is not ENOENT.
+	notADir := filepath.Join(root, "Movie (2026)")
+	if err := os.WriteFile(notADir, []byte("file, not dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(notADir, "Movie (2026).mkv")
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      25,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).ResolveVanishedPath(context.Background(), child, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusBadRequest {
+		t.Fatalf("unexpected error: %#v", reqErr)
+	}
+}
+
+func TestResolverRejectsVanishedPathThatStillExists(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "Movie (2026).mkv")
+	if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      24,
+		Name:    "Movies",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).ResolveVanishedPath(context.Background(), filePath, "autoscan")
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusBadRequest {
+		t.Fatalf("unexpected error: %#v", reqErr)
+	}
+}
+
 func TestResolverClassifiesVideoFile(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "Movie (2024).mkv")

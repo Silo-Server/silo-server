@@ -20,6 +20,7 @@ type User struct {
 	MaxProfiles               int
 	DownloadAllowed           bool
 	DownloadTranscodeAllowed  bool
+	AccessGroupID             *int64
 	CreatedAt                 time.Time
 	UpdatedAt                 time.Time
 }
@@ -34,11 +35,12 @@ type CreateUserInput struct {
 	Permissions               []string
 	LibraryIDs                []int
 	MaxPlaybackQuality        string
-	MaxStreams                *int  // nil = use DB default (6)
-	MaxTranscodes             *int  // nil = use DB default (2)
+	MaxStreams                *int  // nil = use DB default (0 = unrestricted at the user layer; the access group governs)
+	MaxTranscodes             *int  // nil = use DB default (0 = unrestricted at the user layer; the access group governs)
 	MaxProfiles               *int  // nil = use DB default (5); minimum 1
 	DownloadAllowed           *bool // nil = use DB default (true)
 	DownloadTranscodeAllowed  *bool // nil = use DB default (false)
+	AccessGroupID             *int64
 }
 
 // UpdateUserInput contains optional fields for updating a user.
@@ -58,4 +60,6 @@ type UpdateUserInput struct {
 	MaxProfiles               *int
 	DownloadAllowed           *bool
 	DownloadTranscodeAllowed  *bool
+	AccessGroupIDSet          bool
+	AccessGroupID             *int64
 }

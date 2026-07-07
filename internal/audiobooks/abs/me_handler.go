@@ -4,16 +4,17 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // handleMe — GET /abs/api/me (and /api/me)
 //
-// Minimal {id, username, defaultLibraryId} envelope — matches the
-// continuum-plugin-audiobooks shape exactly. ABS clients already
-// have the full user object from /login and /authorize; /me is just
-// a session-resume probe in real-ABS, so returning the rich user
-// envelope here is unnecessary and can confuse clients that pattern-
-// match on the minimal shape.
+// Real ABS returns req.user.toOldJSONForBrowser() — the FULL user object, the
+// same shape carried on the login/authorize envelope's `user`. A strict client
+// decodes /me with its User model, so a thin {id,username,...} map crashes it
+// on the first missing required key. Emit the shared absUserObject (minus the
+// login-only accessToken/refreshToken; /me still carries the `token` slot set
+// to the caller's presented bearer).
 func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	a, ok := absAuthFrom(r)
 	if !ok || a.UserID == "" {
@@ -32,11 +33,16 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		defaultLibID = audiobookLibraryID(libs[0])
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":               a.UserID,
-		"username":         a.UserID,
-		"defaultLibraryId": defaultLibID,
-	})
+	// Resolve the real display username; the token only carries the userID, so
+	// without this /me would report the numeric id as the username.
+	name := a.UserID
+	if h.deps.UsernameResolver != nil {
+		if resolved := h.deps.UsernameResolver(r.Context(), a.UserID, a.ProfileID); resolved != "" {
+			name = resolved
+		}
+	}
+
+	writeJSON(w, http.StatusOK, absUserObject(a.UserID, name, a.Token, defaultLibID, time.Now()))
 }
 
 // audiobookLibraryID returns the ABS-wire library ID string for an
@@ -59,9 +65,44 @@ func audiobookLibraryMap(lib AudiobookLibrary) map[string]any {
 	if name == "" {
 		name = VirtualLibraryName
 	}
+	id := audiobookLibraryID(lib)
 	return map[string]any{
-		"id":        audiobookLibraryID(lib),
-		"name":      name,
-		"mediaType": LibraryMediaType,
+		"id":   id,
+		"name": name,
+		// folders mirror real ABS LibraryFolder.toOldJSON {id,fullPath,libraryId,addedAt}.
+		// silo serves a single virtual folder per library.
+		"folders": []map[string]any{
+			{"id": VirtualFolderID, "fullPath": "/" + name, "libraryId": id, "addedAt": 0},
+		},
+		"displayOrder":    1,
+		"icon":            "audiobookshelf",
+		"mediaType":       LibraryMediaType,
+		"provider":        "audible",
+		"settings":        audiobookLibrarySettings(),
+		"lastScan":        nil,
+		"lastScanVersion": ServerVersion,
+		"createdAt":       0,
+		"lastUpdate":      0,
+	}
+}
+
+// audiobookLibrarySettings emits the real ABS library `settings` object.
+// It's a loose object clients read defensively; silo has no per-library
+// settings storage, so these are sensible audiobook defaults. coverAspectRatio
+// 1 = square (audiobook covers).
+func audiobookLibrarySettings() map[string]any {
+	return map[string]any{
+		"coverAspectRatio":                   1,
+		"disableWatcher":                     true,
+		"skipMatchingMediaWithAsin":          false,
+		"skipMatchingMediaWithIsbn":          false,
+		"autoScanCronExpression":             nil,
+		"audiobooksOnly":                     false,
+		"hideSingleBookSeries":               false,
+		"onlyShowLaterBooksInContinueSeries": false,
+		"metadataPrecedence":                 []string{},
+		"epubsAllowScriptedContent":          false,
+		"markAsFinishedPercentComplete":      nil,
+		"markAsFinishedTimeRemaining":        10,
 	}
 }

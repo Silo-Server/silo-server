@@ -164,6 +164,32 @@ describe("MangaContent", () => {
     expect(cta).toHaveAttribute("href", "/reader/ebook/v02?libraryId=7" + seriesBackTo);
   });
 
+  // Regression test for issue #188: partial progress on the resume target
+  // must surface as "Resume Reading", not "Start Reading".
+  it("shows a Resume Reading hero CTA when the target volume is partially read", () => {
+    render(
+      <MemoryRouter>
+        <MangaContent
+          item={mangaItem([
+            {
+              content_id: "v01",
+              title: "Railgun v01",
+              chapter_index: 1,
+              volume: "v01",
+              progress: 0.18,
+            },
+            { content_id: "v02", title: "Railgun v02", chapter_index: 2, volume: "v02" },
+          ])}
+          libraryId={7}
+        />
+      </MemoryRouter>,
+    );
+
+    const cta = screen.getByRole("link", { name: /Resume Reading/i });
+    expect(cta).toHaveTextContent("Volume 1");
+    expect(cta).toHaveAttribute("href", "/reader/ebook/v01?libraryId=7" + seriesBackTo);
+  });
+
   it("offers a Read Again CTA from the start once every chapter is read", () => {
     render(
       <MemoryRouter>

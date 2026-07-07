@@ -267,7 +267,7 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 		},
 	}
 
-	accumulator, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "t"}, providers)
+	accumulator, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "t"}, providers, nil)
 
 	if len(errs) != 2 || !errors.Is(errs[0], searchErr) || !errors.Is(errs[1], getErr) {
 		t.Fatalf("provider errors = %v, want both broken-provider errors", errs)
@@ -277,6 +277,63 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 	}
 	if ids["openlibrary"] != "OL1M" {
 		t.Fatalf("accumulated IDs = %v, want search-result openlibrary ID", ids)
+	}
+}
+
+type fakeProviderIDOwner struct {
+	ownerByID map[string]string // provider_id -> owning content id
+	err       error
+}
+
+func (f *fakeProviderIDOwner) FindContentIDByProviderIDs(_ context.Context, ids map[string]string, _ string, exclude string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	for _, v := range ids {
+		if owner, ok := f.ownerByID[v]; ok && owner != exclude {
+			return owner, nil
+		}
+	}
+	return "", nil
+}
+
+func TestCollectEbookMetadataSkipsProviderIDOwnedByAnotherItem(t *testing.T) {
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{
+			slug:    "bookinfo",
+			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
+			result:  &metadata.MetadataResult{HasMetadata: true, Overview: "book one"},
+		},
+	}
+	owner := &fakeProviderIDOwner{ownerByID: map[string]string{"40817436": "other-book"}}
+
+	_, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
+
+	if len(errs) != 0 {
+		t.Fatalf("unexpected provider errors: %v", errs)
+	}
+	if _, ok := ids["bookinfo"]; ok {
+		t.Fatalf("provider id owned by another item was claimed: %v", ids)
+	}
+}
+
+func TestCollectEbookMetadataSurfacesOwnershipCheckError(t *testing.T) {
+	checkErr := errors.New("db down")
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{
+			slug:    "bookinfo",
+			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
+		},
+	}
+	owner := &fakeProviderIDOwner{err: checkErr}
+
+	_, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
+
+	if len(errs) != 1 || !errors.Is(errs[0], checkErr) {
+		t.Fatalf("provider errors = %v, want the ownership-check error", errs)
+	}
+	if _, ok := ids["bookinfo"]; ok {
+		t.Fatalf("provider id claimed despite failed ownership check: %v", ids)
 	}
 }
 
@@ -570,4 +627,34 @@ func (f *fakeEbookImageCacher) CacheImage(_ context.Context, req metadata.CacheI
 		Thumbhash: "thumb",
 		Ext:       ".webp",
 	}, nil
+}
+
+func TestCleanEbookSearchTitle(t *testing.T) {
+	cases := []struct {
+		title, author, want string
+	}{
+		{"Exit Strategy_ The Murderbot Di - Martha Wells", "Martha Wells", "Exit Strategy The Murderbot Di"},
+		{"LTB.067_-_Micky_Maus_Superstar", "", "LTB.067 - Micky Maus Superstar"},
+		{"Club Dark Lace_ Complete Dark Lace", "", "Club Dark Lace Complete Dark Lace"},
+		{"All of Us - A. F. Carter", "a. f. carter", "All of Us"},
+		// A " - <token>" that is not the trailing author must be preserved.
+		{"Alice - Bob and Carol", "Bob", "Alice - Bob and Carol"},
+		{"Plain Title", "Some Author", "Plain Title"},
+		{"  spaced   out  ", "", "spaced out"},
+		// Series/volume markers are kept (unwrapped) so distinct volumes search
+		// distinctly instead of collapsing onto one provider work.
+		{"Just One Night (The Raven Brothers Book 4)", "", "Just One Night The Raven Brothers Book 4"},
+		{"Mistborn (The Mistborn Saga #1)", "", "Mistborn The Mistborn Saga #1"},
+		{"The Wheel of Time (Book 1)", "", "The Wheel of Time Book 1"},
+		{"The Wheel of Time (Book 2)", "", "The Wheel of Time Book 2"},
+		{"White Out [Badlands Thriller]", "", "White Out [Badlands Thriller]"},
+		{"Salem's Lot (2019)", "", "Salem's Lot"},
+		{"The Hobbit (Illustrated)", "", "The Hobbit (Illustrated)"},
+		{"Exit Strategy_ Murderbot Di - Martha Wells (Book 4)", "Martha Wells", "Exit Strategy Murderbot Di"},
+	}
+	for _, tc := range cases {
+		if got := cleanEbookSearchTitle(tc.title, tc.author); got != tc.want {
+			t.Errorf("cleanEbookSearchTitle(%q,%q)=%q want %q", tc.title, tc.author, got, tc.want)
+		}
+	}
 }

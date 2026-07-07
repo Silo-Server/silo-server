@@ -42,7 +42,8 @@ import DetailHero from "./DetailHero";
 import HeroCrewLine from "./components/HeroCrewLine";
 import MetadataBadges from "./components/MetadataBadges";
 import ScoreRow from "./components/ScoreRow";
-import { formatFileSize, formatPageCount, metadataLine } from "./components/versionFormatUtils";
+import { formatFileSize } from "@/lib/mediaFormat";
+import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
 
 function genreHref(genre: string, libraryId?: number): string {
   const params = new URLSearchParams();
@@ -271,8 +272,12 @@ export default function MangaContent({
   const anyRead = chapterRows.some((chapter) => chapter.read === true);
   const resume = useMemo(() => firstUnreadChapter(entries), [entries]);
   const fallbackStart = entries.length > 0 ? flattenFirst(entries) : null;
+  const resumeInProgress = (resume?.chapter.progress ?? 0) > 0;
   const cta = resume
-    ? { ...resume, verb: anyRead ? "Continue" : "Start Reading" }
+    ? {
+        ...resume,
+        verb: resumeInProgress ? "Resume Reading" : anyRead ? "Continue" : "Start Reading",
+      }
     : fallbackStart
       ? { ...fallbackStart, verb: "Read Again" }
       : null;

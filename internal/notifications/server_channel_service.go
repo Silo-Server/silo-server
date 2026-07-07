@@ -47,6 +47,8 @@ type ServerChannelInput struct {
 	Enabled                *bool
 	NotifyNewMovies        *bool
 	NotifyNewEpisodes      *bool
+	NotifyNewAudiobooks    *bool
+	NotifyNewEbooks        *bool
 	NotifyRequestSubmitted *bool
 	NotifyRequestApproved  *bool
 	NotifyRequestDeclined  *bool
@@ -98,6 +100,8 @@ func (s *ServerChannelService) Create(ctx context.Context, createdByUserID int, 
 		Enabled:                boolOrDefault(input.Enabled, true),
 		NotifyNewMovies:        boolOrDefault(input.NotifyNewMovies, true),
 		NotifyNewEpisodes:      boolOrDefault(input.NotifyNewEpisodes, true),
+		NotifyNewAudiobooks:    boolOrDefault(input.NotifyNewAudiobooks, true),
+		NotifyNewEbooks:        boolOrDefault(input.NotifyNewEbooks, true),
 		NotifyRequestSubmitted: boolOrDefault(input.NotifyRequestSubmitted, false),
 		NotifyRequestApproved:  boolOrDefault(input.NotifyRequestApproved, false),
 		NotifyRequestDeclined:  boolOrDefault(input.NotifyRequestDeclined, false),
@@ -177,6 +181,12 @@ func (s *ServerChannelService) Update(ctx context.Context, id string, input Serv
 	}
 	if input.NotifyNewEpisodes != nil {
 		ch.NotifyNewEpisodes = *input.NotifyNewEpisodes
+	}
+	if input.NotifyNewAudiobooks != nil {
+		ch.NotifyNewAudiobooks = *input.NotifyNewAudiobooks
+	}
+	if input.NotifyNewEbooks != nil {
+		ch.NotifyNewEbooks = *input.NotifyNewEbooks
 	}
 	if input.NotifyRequestSubmitted != nil {
 		ch.NotifyRequestSubmitted = *input.NotifyRequestSubmitted
@@ -261,26 +271,41 @@ func (s *ServerChannelService) Test(ctx context.Context, id string) (*WebhookTes
 	return s.sender.sendContent(ctx, ch, sampleContentGroups(), true).testResult(), nil
 }
 
-// sampleContentGroups is the fixture used for test sends.
+// sampleContentGroups is the fixture used for test sends: one group per flat
+// item kind plus an episode group, so a test post exercises every render
+// path the channel can receive.
 func sampleContentGroups() []ContentGroup {
-	return []ContentGroup{
-		{
-			Kind:      EventKindMovie,
+	groups := make([]ContentGroup, 0, len(flatItemKinds)+1)
+	for _, k := range flatItemKinds {
+		meta := ContentMeta{Title: "Silo Test " + capitalize(k.ItemType), Year: 2026}
+		if k.Kind != EventKindMovie {
+			meta.Author = "Test Author"
+		}
+		groups = append(groups, ContentGroup{
+			Kind:      k.Kind,
 			LibraryID: 1,
-			ItemID:    "test-movie",
-			Meta:      ContentMeta{Title: "Silo Test Movie", Year: 2026},
-		},
-		{
-			Kind:      EventKindEpisode,
-			LibraryID: 1,
-			SeriesID:  "test-series",
-			Meta:      ContentMeta{Title: "Silo Test Series"},
-			Episodes: []ReleaseEvent{
-				{Kind: EventKindEpisode, LibraryID: 1, SeriesID: "test-series",
-					SeasonNumber: 1, EpisodeNumber: 1, EpisodeKey: EpisodeKey(1, 1)},
-				{Kind: EventKindEpisode, LibraryID: 1, SeriesID: "test-series",
-					SeasonNumber: 1, EpisodeNumber: 2, EpisodeKey: EpisodeKey(1, 2)},
-			},
-		},
+			ItemID:    "test-" + k.Kind,
+			Meta:      meta,
+		})
 	}
+	return append(groups, ContentGroup{
+		Kind:      EventKindEpisode,
+		LibraryID: 1,
+		SeriesID:  "test-series",
+		Meta:      ContentMeta{Title: "Silo Test Series"},
+		Episodes: []ReleaseEvent{
+			{Kind: EventKindEpisode, LibraryID: 1, SeriesID: "test-series",
+				SeasonNumber: 1, EpisodeNumber: 1, EpisodeKey: EpisodeKey(1, 1)},
+			{Kind: EventKindEpisode, LibraryID: 1, SeriesID: "test-series",
+				SeasonNumber: 1, EpisodeNumber: 2, EpisodeKey: EpisodeKey(1, 2)},
+		},
+	})
+}
+
+// capitalize upper-cases the first ASCII letter of a display noun.
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
 }

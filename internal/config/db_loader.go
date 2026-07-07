@@ -218,6 +218,10 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.S3.UserDB.AccessKey = stringOr(m, "s3.user_db_access_key", "")
 	cfg.S3.UserDB.SecretKey = stringOr(m, "s3.user_db_secret_key", "")
 
+	// Client IP resolution ("" = clientip package defaults). Kept in the
+	// config snapshot so the nodeconfig watcher hot-reloads the resolver.
+	cfg.ClientIP.TrustedProxies = stringOr(m, "clientip.trusted_proxies", "")
+
 	// TMDB collection presets (independent of metadata providers)
 	cfg.TMDBAPIKey = stringOr(m, "tmdb.api_key", "")
 
@@ -269,6 +273,16 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 		return nil, err
 	}
 	cfg.Scanner.EmptyTrashAfterScan = emptyTrash
+	fileRemovalGrace, err := durationOr(m, "scanner.file_removal_grace", 24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	if fileRemovalGrace < 0 {
+		slog.Warn("negative scanner.file_removal_grace setting; missing files will be deleted immediately",
+			"value", m["scanner.file_removal_grace"])
+		fileRemovalGrace = 0
+	}
+	cfg.Scanner.FileRemovalGrace = fileRemovalGrace
 
 	// Matcher
 	matcherWorkers, err := intOr(m, "matcher.workers", 8)
@@ -302,7 +316,7 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 
 	// Playback
 	cfg.Playback.FFmpegPath = stringOr(m, "playback.ffmpeg_path", "/usr/lib/jellyfin-ffmpeg/ffmpeg")
-	cfg.Playback.TranscodeDir = stringOr(m, "playback.transcode_dir", "/tmp/silo-transcode")
+	cfg.Playback.TranscodeDir = stringOr(m, "playback.transcode_dir", DefaultTranscodeDir)
 	cfg.Playback.HWAccel = stringOr(m, "playback.hw_accel", "auto")
 	cfg.Playback.HWDevice = stringOr(m, "playback.hw_device", "")
 	chapterThumbnailWorkers, err := intOr(m, "playback.chapter_thumbnail_workers", 1)
@@ -413,6 +427,10 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	}())
 	cfg.Recommendations.EmbeddingAuthToken = stringOr(m, "recommendations.embedding_auth_token", stringOr(m, "recommendations.openai_api_key", ""))
 	cfg.Recommendations.EmbeddingsCron = stringOr(m, "recommendations.embeddings_cron", "0 3 * * *")
+	cfg.Recommendations.EmbeddingsJobTimeout, err = durationOr(m, "recommendations.embeddings_job_timeout", 24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
 	cfg.Recommendations.TasteProfilesCron = stringOr(m, "recommendations.taste_profiles_cron", "0 4 * * *")
 	cfg.Recommendations.RecommendationsCron = stringOr(m, "recommendations.recommendations_cron", "0 5 * * *")
 	tasteDecayHalfLife, err := floatOr(m, "recommendations.taste_decay_half_life_days", 180)
@@ -564,6 +582,54 @@ func LoadFromDB(m map[string]string) (*Config, error) {
 	cfg.Download.MaxConcurrentPerUser = maxConcurrent
 	cfg.Download.MaxPerPeriod = maxPerPeriod
 	cfg.Download.PeriodDuration = periodDuration
+
+	// Downloads v2 (offline sync). Default-off; the prepare-to-file pipeline that
+	// consumes these ships in Phase 3.
+	downloadTranscodeEnabled, err := boolOr(m, "download.transcode_enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	maxConcurrentPrepares, err := intOr(m, "download.max_concurrent_prepares", 2)
+	if err != nil {
+		return nil, err
+	}
+	artifactMaxBytes, err := int64Or(m, "download.artifact_max_bytes", 0)
+	if err != nil {
+		return nil, err
+	}
+	if maxConcurrentPrepares < 0 {
+		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.max_concurrent_prepares")
+	}
+	if artifactMaxBytes < 0 {
+		return nil, fmt.Errorf("invalid value for %q: must be non-negative", "download.artifact_max_bytes")
+	}
+	cfg.Download.TranscodeEnabled = downloadTranscodeEnabled
+	cfg.Download.ArtifactDir = stringOr(m, "download.artifact_dir", "")
+	cfg.Download.MaxConcurrentPrepares = maxConcurrentPrepares
+	cfg.Download.ArtifactMaxBytes = artifactMaxBytes
+
+	// Policy
+	policyEvalTimeoutMS, err := intOr(m, "policy.eval_timeout_ms", 25)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.EvalTimeoutMS = policyEvalTimeoutMS
+	policyEditorEnabled, err := boolOr(m, "policy.editor_enabled", false)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.EditorEnabled = policyEditorEnabled
+	cfg.Policy.DecisionLogVerbosity = stringOr(m, "policy.decision_log_verbosity", "digest")
+	policyDecisionLogScopeSampleRate, err := intOr(m, "policy.decision_log_scope_sample_rate", 50)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.DecisionLogScopeSampleRate = policyDecisionLogScopeSampleRate
+	policyDecisionLogRetentionDays, err := intOr(m, "policy.decision_log_retention_days", 14)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Policy.DecisionLogRetentionDays = policyDecisionLogRetentionDays
 
 	return cfg, nil
 }

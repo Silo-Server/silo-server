@@ -15,6 +15,7 @@ type MediaFileAuthorizer struct {
 	FileResolver  FilePathResolver
 	ItemAccess    PlaybackItemAccessChecker
 	EpisodeLookup PlaybackEpisodeLookup
+	ExtraLookup   PlaybackExtraLookup
 }
 
 // Authorize returns the media file when the caller may access it, or catalog.ErrItemNotFound.
@@ -49,6 +50,25 @@ func (a *MediaFileAuthorizer) Authorize(r *http.Request, fileID int) (*models.Me
 		}
 	case file.ContentID != "":
 		if err := a.ItemAccess.EnsureAccessible(r.Context(), file.ContentID, filter); err != nil {
+			return nil, err
+		}
+	case file.ExtraID != "":
+		// Local extras authorize through their parent item, like episodes
+		// authorize through their series.
+		if a.ExtraLookup == nil {
+			return nil, fmt.Errorf("extra lookup not configured")
+		}
+		extra, err := a.ExtraLookup.GetByID(r.Context(), file.ExtraID)
+		if err != nil {
+			if errors.Is(err, catalog.ErrExtraNotFound) {
+				return nil, catalog.ErrItemNotFound
+			}
+			return nil, err
+		}
+		if extra == nil {
+			return nil, catalog.ErrItemNotFound
+		}
+		if err := a.ItemAccess.EnsureAccessible(r.Context(), extra.ParentID, filter); err != nil {
 			return nil, err
 		}
 	default:

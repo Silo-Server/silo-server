@@ -9,7 +9,6 @@ import {
   useDeleteUser,
 } from "@/hooks/queries/admin/users";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,6 +64,7 @@ import {
   hasAssignedPermission,
   setAssignedPermission,
 } from "@/lib/permissions";
+import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -74,7 +74,6 @@ export default function AdminUsers() {
   const { data: users = [], isLoading } = useAdminUsers();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
-  const [defaultsOpen, setDefaultsOpen] = useState(false);
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<AdminUser | null>(null);
   const deleteMutation = useDeleteUser();
   const [search, setSearch] = useState("");
@@ -147,19 +146,11 @@ export default function AdminUsers() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Dialog open={defaultsOpen} onOpenChange={setDefaultsOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Settings2 className="mr-1 h-4 w-4" /> User Defaults
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Default New User Settings</DialogTitle>
-              </DialogHeader>
-              <UserDefaultsForm onClose={() => setDefaultsOpen(false)} />
-            </DialogContent>
-          </Dialog>
+          <Button variant="outline" size="sm" asChild>
+            <Link to="/admin/access-groups">
+              <Settings2 className="mr-1 h-4 w-4" /> Access Groups
+            </Link>
+          </Button>
           <Dialog
             open={dialogOpen}
             onOpenChange={(open) => {
@@ -482,19 +473,13 @@ function parseTime(value?: string | null) {
 function formatDateTime(value?: string | null, fallback = "-") {
   const timestamp = parseTime(value);
   if (timestamp === null) return fallback;
-  return new Date(timestamp).toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return formatDateTimePreferred(timestamp, { dateStyle: "medium", seconds: false });
 }
 
 function formatFullDateTime(value?: string | null) {
   const timestamp = parseTime(value);
   if (timestamp === null) return "";
-  return new Date(timestamp).toLocaleString();
+  return formatDateTimePreferred(timestamp);
 }
 
 function formatRelativeTime(value?: string | null, fallback = "-") {
@@ -523,7 +508,6 @@ function formatRelativeTime(value?: string | null, fallback = "-") {
 }
 
 function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => void }) {
-  const { data: settings } = useAdminServerSettings();
   const { data: libraries = [] } = useAdminLibraries();
   const [username, setUsername] = useState(user?.username ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
@@ -534,26 +518,17 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
     user?.permissions ?? [PERMISSION_MARKER_EDIT],
   );
   const [libraryIDs, setLibraryIDs] = useState<number[] | null>(user?.library_ids ?? null);
-  const [maxStreams, setMaxStreams] = useState<number>(
-    user?.max_streams ?? Number(settings?.["defaults.max_streams"] ?? "6"),
-  );
-  const [maxTranscodes, setMaxTranscodes] = useState<number>(
-    user?.max_transcodes ?? Number(settings?.["defaults.max_transcodes"] ?? "2"),
-  );
-  const [maxProfiles, setMaxProfiles] = useState<number>(
-    user?.max_profiles ?? Number(settings?.["defaults.max_profiles"] ?? "5"),
-  );
+  // New users start unrestricted at the user layer (0 / any / allowed); the
+  // access group is the source of default policy and composes on top.
+  const [maxStreams, setMaxStreams] = useState<number>(user?.max_streams ?? 0);
+  const [maxTranscodes, setMaxTranscodes] = useState<number>(user?.max_transcodes ?? 0);
+  const [maxProfiles, setMaxProfiles] = useState<number>(user?.max_profiles ?? 5);
   const [maxPlaybackQualityPreset, setMaxPlaybackQualityPreset] = useState<PlaybackQualityPreset>(
-    playbackQualityPresetFromValue(
-      user?.max_playback_quality ?? settings?.["defaults.max_playback_quality"],
-    ),
+    playbackQualityPresetFromValue(user?.max_playback_quality),
   );
-  const [downloadAllowed, setDownloadAllowed] = useState(
-    user?.download_allowed ?? settings?.["defaults.download_allowed"] !== "false",
-  );
+  const [downloadAllowed, setDownloadAllowed] = useState(user?.download_allowed ?? true);
   const [downloadTranscodeAllowed, setDownloadTranscodeAllowed] = useState(
-    user?.download_transcode_allowed ??
-      settings?.["defaults.download_transcode_allowed"] === "true",
+    user?.download_transcode_allowed ?? true,
   );
   const usernameId = useId();
   const emailId = useId();
@@ -823,137 +798,5 @@ function UserForm({ user, onClose }: { user: AdminUser | null; onClose: () => vo
         </Button>
       </div>
     </form>
-  );
-}
-
-function UserDefaultsForm({ onClose }: { onClose: () => void }) {
-  const { data: settings } = useAdminServerSettings();
-  const updateSetting = useUpdateServerSetting();
-  const [isSaving, setIsSaving] = useState(false);
-
-  const [maxStreams, setMaxStreams] = useState(Number(settings?.["defaults.max_streams"] ?? "6"));
-  const [maxTranscodes, setMaxTranscodes] = useState(
-    Number(settings?.["defaults.max_transcodes"] ?? "2"),
-  );
-  const [maxProfiles, setMaxProfiles] = useState(
-    Number(settings?.["defaults.max_profiles"] ?? "5"),
-  );
-  const [maxPlaybackQualityPreset, setMaxPlaybackQualityPreset] = useState<PlaybackQualityPreset>(
-    playbackQualityPresetFromValue(settings?.["defaults.max_playback_quality"]),
-  );
-  const [downloadAllowed, setDownloadAllowed] = useState(
-    settings?.["defaults.download_allowed"] !== "false",
-  );
-  const [downloadTranscodeAllowed, setDownloadTranscodeAllowed] = useState(
-    settings?.["defaults.download_transcode_allowed"] === "true",
-  );
-  const defMaxStreamsId = useId();
-  const defMaxTranscodesId = useId();
-  const defMaxProfilesId = useId();
-  const defMaxPlaybackQualityId = useId();
-  const defDownloadAllowedId = useId();
-  const defDownloadTranscodeAllowedId = useId();
-
-  function handleSave() {
-    setIsSaving(true);
-    const updates = [
-      { key: "defaults.max_streams", value: String(maxStreams) },
-      { key: "defaults.max_transcodes", value: String(maxTranscodes) },
-      { key: "defaults.max_profiles", value: String(maxProfiles) },
-      {
-        key: "defaults.max_playback_quality",
-        value: playbackQualityValueFromPreset(maxPlaybackQualityPreset),
-      },
-      { key: "defaults.download_allowed", value: String(downloadAllowed) },
-      { key: "defaults.download_transcode_allowed", value: String(downloadTranscodeAllowed) },
-    ];
-    Promise.all(updates.map((u) => updateSetting.mutateAsync(u)))
-      .then(() => onClose())
-      .finally(() => setIsSaving(false));
-  }
-
-  return (
-    <div className="space-y-4">
-      <p className="text-muted-foreground text-sm">
-        These defaults will pre-fill the form when creating new users.
-      </p>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label htmlFor={defMaxStreamsId}>Max Streams</Label>
-          <Input
-            id={defMaxStreamsId}
-            type="number"
-            min={0}
-            value={maxStreams}
-            onChange={(e) => setMaxStreams(Number(e.target.value))}
-          />
-          <p className="text-muted-foreground text-xs">0 = unlimited</p>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor={defMaxTranscodesId}>Max Transcodes</Label>
-          <Input
-            id={defMaxTranscodesId}
-            type="number"
-            min={0}
-            value={maxTranscodes}
-            onChange={(e) => setMaxTranscodes(Number(e.target.value))}
-          />
-          <p className="text-muted-foreground text-xs">0 = unlimited</p>
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor={defMaxProfilesId}>Max Profiles</Label>
-          <Input
-            id={defMaxProfilesId}
-            type="number"
-            min={1}
-            value={maxProfiles}
-            onChange={(e) => setMaxProfiles(Number(e.target.value))}
-          />
-        </div>
-      </div>
-      <div className="space-y-1">
-        <Label htmlFor={defMaxPlaybackQualityId}>Max Playback Quality</Label>
-        <Select
-          value={maxPlaybackQualityPreset}
-          onValueChange={(value) => setMaxPlaybackQualityPreset(value as PlaybackQualityPreset)}
-        >
-          <SelectTrigger id={defMaxPlaybackQualityId}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PLAYBACK_QUALITY_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-muted-foreground text-xs">
-          {
-            PLAYBACK_QUALITY_OPTIONS.find((option) => option.value === maxPlaybackQualityPreset)
-              ?.description
-          }
-        </p>
-      </div>
-      <div className="flex items-center justify-between">
-        <Label htmlFor={defDownloadAllowedId}>Downloads Allowed</Label>
-        <Switch
-          id={defDownloadAllowedId}
-          checked={downloadAllowed}
-          onCheckedChange={setDownloadAllowed}
-        />
-      </div>
-      <div className="flex items-center justify-between">
-        <Label htmlFor={defDownloadTranscodeAllowedId}>Download Transcode Allowed</Label>
-        <Switch
-          id={defDownloadTranscodeAllowedId}
-          checked={downloadTranscodeAllowed}
-          onCheckedChange={setDownloadTranscodeAllowed}
-        />
-      </div>
-      <Button onClick={handleSave} className="w-full" disabled={isSaving}>
-        {isSaving ? "Saving..." : "Save Defaults"}
-      </Button>
-    </div>
   );
 }

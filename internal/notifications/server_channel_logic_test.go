@@ -28,10 +28,14 @@ func episodeEvent(id string, libraryID int, seriesID string, season, episode int
 }
 
 func movieEvent(id string, libraryID int, itemID string) ReleaseEvent {
+	return itemEvent(id, libraryID, EventKindMovie, itemID)
+}
+
+func itemEvent(id string, libraryID int, kind, itemID string) ReleaseEvent {
 	return ReleaseEvent{
 		ID:        id,
 		LibraryID: libraryID,
-		Kind:      EventKindMovie,
+		Kind:      kind,
 		ItemID:    itemID,
 	}
 }
@@ -128,12 +132,73 @@ func TestGroupContentEvents(t *testing.T) {
 			t.Fatalf("unexpected groups %+v", groups)
 		}
 	})
+
+	t.Run("audiobooks and ebooks render like movies with author metadata", func(t *testing.T) {
+		metas := map[string]ContentMeta{
+			"book-1": {Title: "Project Hail Mary", Year: 2021, Author: "Andy Weir"},
+		}
+		groups := GroupContentEvents([]ReleaseEvent{
+			itemEvent("1", 1, EventKindAudiobook, "book-1"),
+		}, metas)
+		if len(groups) != 1 || groups[0].Kind != EventKindAudiobook {
+			t.Fatalf("unexpected groups %+v", groups)
+		}
+		if got := contentGroupTitle(groups[0]); got != "Project Hail Mary (2021)" {
+			t.Fatalf("unexpected audiobook title %q", got)
+		}
+		if groups[0].Meta.Author != "Andy Weir" {
+			t.Fatalf("author not carried: %+v", groups[0].Meta)
+		}
+	})
+
+	t.Run("same item id in two kinds never cross-dedupes", func(t *testing.T) {
+		events := []ReleaseEvent{
+			itemEvent("1", 1, EventKindAudiobook, "item-1"),
+			itemEvent("2", 1, EventKindEbook, "item-1"),
+		}
+		if groups := GroupContentEvents(events, nil); len(groups) != 2 {
+			t.Fatalf("got %d groups, want 2 (dedupe must be kind-scoped)", len(groups))
+		}
+	})
+
+	t.Run("same audiobook in two libraries announces once", func(t *testing.T) {
+		events := []ReleaseEvent{
+			itemEvent("1", 1, EventKindAudiobook, "book-1"),
+			itemEvent("2", 2, EventKindAudiobook, "book-1"),
+		}
+		if groups := GroupContentEvents(events, nil); len(groups) != 1 {
+			t.Fatalf("got %d groups, want 1 (cross-library dedupe)", len(groups))
+		}
+	})
+
+	t.Run("missing flat item titles fall back per kind", func(t *testing.T) {
+		groups := GroupContentEvents([]ReleaseEvent{
+			itemEvent("1", 1, EventKindAudiobook, "a"),
+			itemEvent("2", 1, EventKindEbook, "b"),
+		}, nil)
+		if groups[0].Meta.Title != "New audiobook" || groups[1].Meta.Title != "New ebook" {
+			t.Fatalf("unexpected fallbacks %q / %q", groups[0].Meta.Title, groups[1].Meta.Title)
+		}
+	})
+
+	t.Run("unknown future kinds are skipped, not misrendered", func(t *testing.T) {
+		events := []ReleaseEvent{
+			itemEvent("1", 1, "music", "album-1"),
+			movieEvent("2", 1, "movie-1"),
+		}
+		groups := GroupContentEvents(events, titles)
+		if len(groups) != 1 || groups[0].Kind != EventKindMovie {
+			t.Fatalf("unexpected groups %+v", groups)
+		}
+	})
 }
 
 func TestServerChannelWantsToggles(t *testing.T) {
 	ch := ServerChannel{
 		NotifyNewMovies:        true,
 		NotifyNewEpisodes:      false,
+		NotifyNewAudiobooks:    true,
+		NotifyNewEbooks:        false,
 		NotifyRequestSubmitted: true,
 		NotifyRequestFulfilled: false,
 	}
@@ -143,8 +208,10 @@ func TestServerChannelWantsToggles(t *testing.T) {
 	}{
 		{EventKindMovie, true},
 		{EventKindEpisode, false},
-		{"", false},          // legacy rows follow the episode toggle
-		{"audiobook", false}, // unknown future kinds are never announced
+		{EventKindAudiobook, true},
+		{EventKindEbook, false},
+		{"", false},      // legacy rows follow the episode toggle
+		{"music", false}, // unknown future kinds are never announced
 	}
 	for _, tc := range cases {
 		if got := ch.WantsContentKind(tc.kind); got != tc.want {
@@ -242,6 +309,89 @@ func TestBuildServerChannelDiscordContent(t *testing.T) {
 	movie := decoded.Embeds[1]
 	if movie.URL != "" || movie.Thumbnail != nil {
 		t.Fatalf("metadata-less movie must omit url/thumbnail, got %+v", movie)
+	}
+}
+
+func TestBuildServerChannelDiscordContentAudiobook(t *testing.T) {
+	metas := map[string]ContentMeta{
+		"book-1": {
+			Title:  "Project Hail Mary",
+			Year:   2021,
+			Type:   "audiobook",
+			Author: "Andy Weir",
+			Genres: []string{"Sci-Fi"},
+		},
+		"ebook-1": {Title: "The Martian", Year: 2011, Type: "ebook", Author: "Andy Weir"},
+	}
+	groups := GroupContentEvents([]ReleaseEvent{
+		itemEvent("1", 1, EventKindAudiobook, "book-1"),
+		itemEvent("2", 1, EventKindEbook, "ebook-1"),
+	}, metas)
+
+	body, err := BuildServerChannelDiscordContent(groups, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Embeds []discordEmbed `json:"embeds"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Embeds) != 2 {
+		t.Fatalf("got %d embeds, want 2", len(decoded.Embeds))
+	}
+
+	audiobook := decoded.Embeds[0]
+	if audiobook.Author == nil || audiobook.Author.Name != "New audiobook available on Silo" {
+		t.Fatalf("unexpected author line %+v", audiobook.Author)
+	}
+	if audiobook.Title != "Project Hail Mary (2021)" {
+		t.Fatalf("unexpected title %q", audiobook.Title)
+	}
+	if len(audiobook.Fields) != 2 ||
+		audiobook.Fields[0].Name != "Author" || audiobook.Fields[0].Value != "Andy Weir" ||
+		audiobook.Fields[1].Name != "Genres" || audiobook.Fields[1].Value != "Sci-Fi" {
+		t.Fatalf("unexpected fields %+v", audiobook.Fields)
+	}
+
+	ebook := decoded.Embeds[1]
+	if ebook.Author == nil || ebook.Author.Name != "New ebook available on Silo" {
+		t.Fatalf("unexpected ebook author line %+v", ebook.Author)
+	}
+	if len(ebook.Fields) != 1 || ebook.Fields[0].Name != "Author" {
+		t.Fatalf("unexpected ebook fields %+v", ebook.Fields)
+	}
+}
+
+func TestBuildServerChannelGenericContentAudiobook(t *testing.T) {
+	metas := map[string]ContentMeta{
+		"book-1": {Title: "Project Hail Mary", Year: 2021, Author: "Andy Weir"},
+	}
+	groups := GroupContentEvents([]ReleaseEvent{
+		itemEvent("1", 4, EventKindAudiobook, "book-1"),
+	}, metas)
+
+	body, err := BuildServerChannelGenericContent(groups, "chan-1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded serverChannelContentBody
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Items) != 1 {
+		t.Fatalf("got %d items, want 1", len(decoded.Items))
+	}
+	item := decoded.Items[0]
+	if item.Kind != EventKindAudiobook || item.ItemID != "book-1" ||
+		item.Title != "Project Hail Mary" || item.Year != 2021 ||
+		item.Author != "Andy Weir" || item.LibraryID != 4 {
+		t.Fatalf("unexpected audiobook item %+v", item)
+	}
+	// Flat items never carry episode span fields.
+	if item.EpisodeCount != 0 || item.SeriesID != "" {
+		t.Fatalf("unexpected episode fields on flat item %+v", item)
 	}
 }
 
@@ -441,11 +591,17 @@ func TestReleaseDedupeKeysAreDisjoint(t *testing.T) {
 	if episodeKey != "episode:3:series-abc:2000004" {
 		t.Fatalf("unexpected episode dedupe key %q", episodeKey)
 	}
-	if MovieDedupeKey(3, "series-abc:2000004") == episodeKey {
+	if ItemDedupeKey(EventKindMovie, 3, "series-abc:2000004") == episodeKey {
 		t.Fatal("movie and episode dedupe keys must live in separate keyspaces")
 	}
-	if got := MovieDedupeKey(3, "abc"); got != "movie:3:abc" {
+	if got := ItemDedupeKey(EventKindMovie, 3, "abc"); got != "movie:3:abc" {
 		t.Fatalf("unexpected movie dedupe key %q", got)
+	}
+	if got := ItemDedupeKey(EventKindAudiobook, 3, "abc"); got != "audiobook:3:abc" {
+		t.Fatalf("unexpected audiobook dedupe key %q", got)
+	}
+	if ItemDedupeKey(EventKindAudiobook, 3, "abc") == ItemDedupeKey(EventKindEbook, 3, "abc") {
+		t.Fatal("flat kinds must keep disjoint dedupe keyspaces")
 	}
 }
 
@@ -457,15 +613,17 @@ func TestPartitionEventsByKind(t *testing.T) {
 		legacy,
 		movieEvent("3", 1, "m"),
 		episodeEvent("4", 1, "s", 1, 3),
+		itemEvent("5", 1, EventKindAudiobook, "b"),
+		itemEvent("6", 1, EventKindEbook, "e"),
 	}
 	episodes, others := PartitionEventsByKind(events)
-	if len(episodes) != 3 || len(others) != 1 {
-		t.Fatalf("got %d/%d, want 3 episodes and 1 other", len(episodes), len(others))
+	if len(episodes) != 3 || len(others) != 3 {
+		t.Fatalf("got %d/%d, want 3 episodes and 3 others", len(episodes), len(others))
 	}
 	if episodes[0].ID != "1" || episodes[1].ID != "2" || episodes[2].ID != "4" {
 		t.Fatalf("episode order not preserved: %+v", episodes)
 	}
-	if others[0].ID != "3" {
+	if others[0].ID != "3" || others[1].ID != "5" || others[2].ID != "6" {
 		t.Fatalf("unexpected non-episode partition: %+v", others)
 	}
 

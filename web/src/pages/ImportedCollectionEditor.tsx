@@ -53,6 +53,7 @@ import {
 import { CollectionLibraryPicker } from "@/pages/adminCollectionsShared";
 
 import { isCollectionReadOnly } from "./userCollectionsShared";
+import { formatDate as formatPreferredDate } from "@/lib/datetime";
 
 type ImportedType = Extract<UserCollectionType, "mdblist" | "tmdb" | "trakt">;
 
@@ -1057,11 +1058,7 @@ function formatAbsoluteDate(iso: string | undefined): string | null {
   if (!iso) return null;
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
-  return new Date(t).toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
+  return formatPreferredDate(t, "medium") || null;
 }
 
 function readSourceConfigLimit(collection: Collection): number | null {

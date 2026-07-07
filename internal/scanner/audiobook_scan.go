@@ -153,6 +153,12 @@ func (s *Scanner) audiobookFolderShouldSkip(ctx context.Context, folder *models.
 	if contentID == "" {
 		return "", false, nil
 	}
+	// All files must share the same content_id; fragmented folders need reconcile.
+	for _, mf := range existing[1:] {
+		if mf.ContentID != contentID {
+			return "", false, nil
+		}
+	}
 	items, err := s.itemRepo.GetByIDs(ctx, []string{contentID})
 	if err != nil {
 		return "", false, fmt.Errorf("get item for skip check: %w", err)
@@ -495,7 +501,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 	}
 
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
 		if err != nil {
 			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}

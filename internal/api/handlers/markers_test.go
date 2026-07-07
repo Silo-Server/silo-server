@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
 
@@ -208,9 +209,6 @@ func TestGetItemMarkersUsesFirstAuthorizedFile(t *testing.T) {
 
 func TestGetFileMarkersDoesNotRequireMarkerEditPermission(t *testing.T) {
 	h := newMarkersHandler(nil)
-	h.Users = fakeMarkerUsers{
-		7: &models.User{ID: 7, Role: "user", Enabled: true, Permissions: nil},
-	}
 	req := httptest.NewRequest(http.MethodGet, "/markers/files/5", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("fileId", "5")
@@ -225,17 +223,33 @@ func TestGetFileMarkersDoesNotRequireMarkerEditPermission(t *testing.T) {
 	}
 }
 
+// The marker_edit gate lives in the router middleware (see
+// apimw.PolicyPermissionMiddleware.RequireMarkerEdit), so these tests wrap the
+// handler exactly like the /markers write routes do.
+func markerEditGatedHandler(t *testing.T, writer *fakeMarkerWriter, user *models.User) http.Handler {
+	t.Helper()
+	h := newMarkersHandler(writer)
+	engine, err := policy.NewEngine(context.Background())
+	if err != nil {
+		t.Fatalf("NewEngine() error: %v", err)
+	}
+	gate := apimw.NewPolicyPermissionMiddleware(
+		fakeMarkerUsers{user.ID: user},
+		nil,
+		nil,
+		policy.NewPDP(engine),
+	)
+	return gate.RequireMarkerEdit(http.HandlerFunc(h.HandleSetFileMarkers))
+}
+
 func TestSetFileMarkersRejectsUserWithoutMarkerEditPermission(t *testing.T) {
 	writer := &fakeMarkerWriter{}
-	h := newMarkersHandler(writer)
-	h.Users = fakeMarkerUsers{
-		7: &models.User{ID: 7, Role: "user", Enabled: true, Permissions: nil},
-	}
+	gated := markerEditGatedHandler(t, writer, &models.User{ID: 7, Role: "user", Enabled: true, Permissions: nil})
 	req := markerPutRequest(`{"intro":{"start":0,"end":60}}`)
 	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "user", TokenType: auth.TokenTypeAccess}))
 
 	rec := httptest.NewRecorder()
-	h.HandleSetFileMarkers(rec, req)
+	gated.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
@@ -247,15 +261,12 @@ func TestSetFileMarkersRejectsUserWithoutMarkerEditPermission(t *testing.T) {
 
 func TestSetFileMarkersAllowsUserWithMarkerEditPermission(t *testing.T) {
 	writer := &fakeMarkerWriter{}
-	h := newMarkersHandler(writer)
-	h.Users = fakeMarkerUsers{
-		7: &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{"marker_edit"}},
-	}
+	gated := markerEditGatedHandler(t, writer, &models.User{ID: 7, Role: "user", Enabled: true, Permissions: []string{"marker_edit"}})
 	req := markerPutRequest(`{"intro":{"start":0,"end":60}}`)
 	req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7, Role: "user", TokenType: auth.TokenTypeAccess}))
 
 	rec := httptest.NewRecorder()
-	h.HandleSetFileMarkers(rec, req)
+	gated.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())

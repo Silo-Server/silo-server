@@ -16,15 +16,22 @@ import (
 )
 
 const (
-	meilisearchDefaultBatchSize        = 100
-	meilisearchDefaultCandidateScanCap = 1000
-	meilisearchDefaultDeepOffsetLimit  = 500
+	meilisearchSearchBatchSize         = 100
+	meilisearchCandidateScanCap        = 1000
+	meilisearchDeepOffsetLimit         = 500
 	meilisearchShortHybridMinTerms     = 2
 	meilisearchStrictMatchingTermCount = 2
 	meilisearchTitleOnlyTermCount      = 2
 	meilisearchCircuitCooldown         = 30 * time.Second
 	meilisearchQueryVectorCacheTTL     = 15 * time.Minute
 	meilisearchQueryVectorCacheMax     = 1024
+	// meilisearchIndexStateCacheTTL bounds how long the provider serves the
+	// cached catalog_search_index_state row (and the informational pending
+	// count) before refetching. The state only changes on rebuild/sync, so this
+	// keeps two Postgres round trips off every search request; a failed search
+	// invalidates the cache immediately so a swapped-away index is repaired on
+	// the next request rather than after the TTL.
+	meilisearchIndexStateCacheTTL = 3 * time.Second
 	// semanticCapabilityProbeTTL rate-limits the embedder capability check
 	// (settings fetch + hybrid probe) so a healthy index is validated at most
 	// once per window. The probe is advisory only and never trips the circuit.
@@ -49,10 +56,6 @@ type MeilisearchProviderConfig struct {
 	Index            string
 	Timeout          time.Duration
 	MatchingStrategy string
-	BatchSize        int
-	CandidateScanCap int
-	DeepOffsetLimit  int
-	CircuitCooldown  time.Duration
 	IndexTypes       []string
 	SemanticEnabled  bool
 	SemanticRatio    float64
@@ -72,8 +75,20 @@ type MeilisearchSearchProvider struct {
 	unhealthyUntil  time.Time
 	unhealthyReason string
 	lastFallback    string
-	vectorCache     map[string]cachedCatalogSearchQueryVector
-	vectorCacheSeq  int64
+
+	// vecMu guards the query-vector cache. It is separate from mu so cache
+	// reads/writes on the semantic path never contend with the circuit-breaker
+	// state that mu protects.
+	vecMu          sync.Mutex
+	vectorCache    map[string]cachedCatalogSearchQueryVector
+	vectorCacheSeq int64
+
+	// stateMu guards the cached index state + pending count (see
+	// meilisearchIndexStateCacheTTL).
+	stateMu       sync.Mutex
+	cachedState   SearchIndexState
+	cachedPending int
+	stateCachedAt time.Time
 
 	// capMu guards the rate-limited semantic capability cache. It is separate
 	// from mu so a capability probe can never contend with or mutate the
@@ -106,18 +121,6 @@ func NewMeilisearchSearchProvider(
 	}
 	if config.MatchingStrategy == "" {
 		config.MatchingStrategy = DefaultMeilisearchMatchingStrategy
-	}
-	if config.BatchSize <= 0 {
-		config.BatchSize = meilisearchDefaultBatchSize
-	}
-	if config.CandidateScanCap <= 0 {
-		config.CandidateScanCap = meilisearchDefaultCandidateScanCap
-	}
-	if config.DeepOffsetLimit <= 0 {
-		config.DeepOffsetLimit = meilisearchDefaultDeepOffsetLimit
-	}
-	if config.CircuitCooldown <= 0 {
-		config.CircuitCooldown = meilisearchCircuitCooldown
 	}
 	config.IndexTypes = normalizeCatalogSearchItemTypes(config.IndexTypes)
 	if config.SemanticRatio < 0 || config.SemanticRatio > 1 {
@@ -159,10 +162,10 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 	if !p.indexCoversRequest(req.ItemTypes) {
 		return p.fallbackSearch(ctx, req, "meilisearch index does not cover requested media scope")
 	}
-	if req.Offset > p.config.DeepOffsetLimit {
+	if req.Offset > meilisearchDeepOffsetLimit {
 		return p.fallbackSearch(ctx, req, "deep offset exceeds meilisearch scan policy")
 	}
-	state, err := p.stateRepo.GetState(ctx, SearchProviderMeilisearch)
+	state, pending, err := p.indexState(ctx)
 	if err != nil {
 		p.markFallback("index state unavailable")
 		return p.fallback.Search(ctx, req)
@@ -173,13 +176,13 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 	if state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(p.config.Embedder, p.config.IndexTypes, p.config.SemanticEnabled) {
 		return p.fallbackSearch(ctx, req, "meilisearch index schema mismatch")
 	}
-	pending := 0
-	if count, err := p.stateRepo.PendingCount(ctx, SearchProviderMeilisearch); err == nil && count > 0 {
-		pending = count
-	}
 
 	result, err := p.searchMeilisearch(ctx, req, state.ActiveIndexUID)
 	if err != nil {
+		// The cached state may point at an index a rebuild just swapped away
+		// and deleted; drop it so the next request refetches instead of
+		// failing for the rest of the TTL.
+		p.invalidateIndexState()
 		if p.shouldTripCircuit(err) {
 			p.tripCircuit(err)
 		}
@@ -214,17 +217,50 @@ func (p *MeilisearchSearchProvider) indexCoversRequest(itemTypes []string) bool 
 	return true
 }
 
+// indexState returns the active index state and pending outbox depth, cached
+// for meilisearchIndexStateCacheTTL so the search hot path is not charged two
+// Postgres round trips per request. Errors are never cached — a failed refresh
+// falls through to the caller and the next request retries immediately.
+func (p *MeilisearchSearchProvider) indexState(ctx context.Context) (SearchIndexState, int, error) {
+	p.stateMu.Lock()
+	if !p.stateCachedAt.IsZero() && time.Since(p.stateCachedAt) < meilisearchIndexStateCacheTTL {
+		state, pending := p.cachedState, p.cachedPending
+		p.stateMu.Unlock()
+		return state, pending, nil
+	}
+	p.stateMu.Unlock()
+
+	state, err := p.stateRepo.GetState(ctx, SearchProviderMeilisearch)
+	if err != nil {
+		return SearchIndexState{}, 0, err
+	}
+	pending := 0
+	if count, err := p.stateRepo.PendingCount(ctx, SearchProviderMeilisearch); err == nil && count > 0 {
+		pending = count
+	}
+
+	p.stateMu.Lock()
+	p.cachedState = state
+	p.cachedPending = pending
+	p.stateCachedAt = time.Now()
+	p.stateMu.Unlock()
+	return state, pending, nil
+}
+
+func (p *MeilisearchSearchProvider) invalidateIndexState() {
+	p.stateMu.Lock()
+	p.stateCachedAt = time.Time{}
+	p.stateMu.Unlock()
+}
+
 func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req CatalogSearchRequest, indexUID string) (*CatalogSearchResult, error) {
 	target := req.Offset + req.Limit + 1
 	if target <= 0 {
 		target = 1
 	}
-	batchSize := p.config.BatchSize
+	batchSize := meilisearchSearchBatchSize
 	if batchSize < req.Limit+1 {
 		batchSize = req.Limit + 1
-	}
-	if batchSize <= 0 {
-		batchSize = meilisearchDefaultBatchSize
 	}
 
 	var accessible []*models.MediaItem
@@ -235,11 +271,11 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	baseSearchReq, semanticFallback := p.buildMeilisearchSearchRequest(ctx, req)
 
 	for len(accessible) < target && !exhausted {
-		if scanned >= p.config.CandidateScanCap {
+		if scanned >= meilisearchCandidateScanCap {
 			return nil, fmt.Errorf("meilisearch candidate scan cap reached")
 		}
 		nextLimit := batchSize
-		if remaining := p.config.CandidateScanCap - scanned; remaining < nextLimit {
+		if remaining := meilisearchCandidateScanCap - scanned; remaining < nextLimit {
 			nextLimit = remaining
 		}
 		searchReq := baseSearchReq
@@ -285,7 +321,10 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 		}
 		accessible = append(accessible, orderItemsByIDPosition(hydrated, position)...)
 
-		if meiliOffset >= estimatedTotalHits || len(resp.Hits) < nextLimit {
+		// A short page is the only reliable end-of-results signal.
+		// estimatedTotalHits is an estimate and may undercount; treating it as
+		// authoritative could stop pagination early and drop real results.
+		if len(resp.Hits) < nextLimit {
 			exhausted = true
 		}
 	}
@@ -308,7 +347,6 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	} else if estimatedTotalHits == 0 {
 		total = 0
 	}
-	p.markFallback(semanticFallback)
 	// Derive Mode/SemanticUsed from the POST-downgrade request: the hybrid
 	// downgrade above nils baseSearchReq.Hybrid on error, so a hybrid request
 	// that fell back to keyword correctly reports keyword / semantic_used=false.
@@ -416,13 +454,13 @@ func (p *MeilisearchSearchProvider) cachedQueryVector(ctx context.Context, query
 	cacheKey := strings.ToLower(normalized)
 	now := time.Now()
 
-	p.mu.Lock()
+	p.vecMu.Lock()
 	if cached, ok := p.vectorCache[cacheKey]; ok && now.Before(cached.expiresAt) {
 		vector := cloneFloat32Slice(cached.vector)
-		p.mu.Unlock()
+		p.vecMu.Unlock()
 		return vector, nil
 	}
-	p.mu.Unlock()
+	p.vecMu.Unlock()
 
 	vector, err := p.config.Vectorizer.EmbedSearchQuery(ctx, normalized)
 	if err != nil {
@@ -433,8 +471,8 @@ func (p *MeilisearchSearchProvider) cachedQueryVector(ctx context.Context, query
 		return nil, err
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.vecMu.Lock()
+	defer p.vecMu.Unlock()
 	if p.vectorCache == nil {
 		p.vectorCache = make(map[string]cachedCatalogSearchQueryVector)
 	}
@@ -496,7 +534,7 @@ func (p *MeilisearchSearchProvider) circuitBlocked(now time.Time) (string, bool)
 func (p *MeilisearchSearchProvider) tripCircuit(cause error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.unhealthyUntil = time.Now().Add(p.config.CircuitCooldown)
+	p.unhealthyUntil = time.Now().Add(meilisearchCircuitCooldown)
 	p.unhealthyReason = cause.Error()
 	p.lastFallback = cause.Error()
 }
@@ -534,10 +572,7 @@ func (p *MeilisearchSearchProvider) shouldTripCircuit(err error) bool {
 			httpErr.StatusCode >= http.StatusInternalServerError
 	}
 	var decodeErr *meilisearchDecodeError
-	if errors.As(err, &decodeErr) {
-		return true
-	}
-	return false
+	return errors.As(err, &decodeErr)
 }
 
 func (p *MeilisearchSearchProvider) Status() CatalogSearchMeiliStatus {

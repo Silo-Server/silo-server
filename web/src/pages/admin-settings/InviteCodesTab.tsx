@@ -34,6 +34,7 @@ import {
 import { Copy, Plus, PlusCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { formatDate } from "@/lib/datetime";
 
 export default function InviteCodesTab() {
   const { data: codes = [], isLoading } = useAdminInviteCodes();
@@ -195,7 +196,7 @@ export default function InviteCodesTab() {
                 </div>
               </TableCell>
               <TableCell className="text-muted-foreground text-xs">
-                {new Date(code.created_at).toLocaleDateString()}
+                {formatDate(code.created_at)}
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-1">

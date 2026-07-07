@@ -1,32 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatFileSize,
-  formatPageCount,
-  formatChannels,
-  formatBitrate,
-  formatLanguageName,
-  extractSourceHint,
-} from "./versionFormatUtils";
-
-describe("formatFileSize", () => {
-  it("formats bytes in GB", () => {
-    expect(formatFileSize(2 * 1024 ** 3)).toBe("2.0 GB");
-    expect(formatFileSize(1.5 * 1024 ** 3)).toBe("1.5 GB");
-  });
-
-  it("formats bytes in MB", () => {
-    expect(formatFileSize(512 * 1024 ** 2)).toBe("512.0 MB");
-    expect(formatFileSize(1.5 * 1024 ** 2)).toBe("1.5 MB");
-  });
-
-  it("returns empty string for zero", () => {
-    expect(formatFileSize(0)).toBe("");
-  });
-
-  it("returns empty string for negative values", () => {
-    expect(formatFileSize(-100)).toBe("");
-  });
-});
+import { formatPageCount, formatLanguageName, extractSourceHint } from "./versionFormatUtils";
 
 describe("formatPageCount", () => {
   it("formats singular and plural ebook page counts", () => {
@@ -37,47 +10,6 @@ describe("formatPageCount", () => {
   it("returns empty string for missing page counts", () => {
     expect(formatPageCount(0)).toBe("");
     expect(formatPageCount(undefined)).toBe("");
-  });
-});
-
-describe("formatChannels", () => {
-  it("maps 8 channels to 7.1", () => {
-    expect(formatChannels(8)).toBe("7.1");
-  });
-
-  it("maps 6 channels to 5.1", () => {
-    expect(formatChannels(6)).toBe("5.1");
-  });
-
-  it("maps 2 channels to stereo", () => {
-    expect(formatChannels(2)).toBe("stereo");
-  });
-
-  it("returns empty string for undefined", () => {
-    expect(formatChannels(undefined)).toBe("");
-  });
-
-  it("returns empty string for zero", () => {
-    expect(formatChannels(0)).toBe("");
-  });
-
-  it("formats other channel counts with ch suffix", () => {
-    expect(formatChannels(4)).toBe("4 ch");
-  });
-});
-
-describe("formatBitrate", () => {
-  it("formats bitrate with kbps suffix", () => {
-    expect(formatBitrate(1000)).toBe("1,000 kbps");
-    expect(formatBitrate(55000)).toBe("55,000 kbps");
-  });
-
-  it("returns empty string for zero", () => {
-    expect(formatBitrate(0)).toBe("");
-  });
-
-  it("returns empty string for undefined", () => {
-    expect(formatBitrate(undefined)).toBe("");
   });
 });
 

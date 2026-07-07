@@ -18,10 +18,10 @@ func TestBuildWebPushPayload(t *testing.T) {
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Title != "New episode of Severance" {
+		if payload.Title != "The latest episode of Severance S02E01 just dropped!" {
 			t.Fatalf("unexpected title %q", payload.Title)
 		}
-		if payload.Body != "S2E1 — Hello, Ms. Cobel" {
+		if payload.Body != "Hello, Ms. Cobel" {
 			t.Fatalf("unexpected body %q", payload.Body)
 		}
 		if payload.URL != "/item/episode-456" {
@@ -79,6 +79,41 @@ func TestBuildWebPushPayload(t *testing.T) {
 		}
 		if payload.Title != "Silo notification" || payload.URL != "/notifications" {
 			t.Fatalf("unexpected payload: %+v", payload)
+		}
+	})
+}
+
+func TestBuildNotificationDisplay(t *testing.T) {
+	t.Run("episode available", func(t *testing.T) {
+		display := BuildNotificationDisplay(webhookTestRow())
+		if display.DeliveryID != "01DELIVERY" ||
+			display.Title != "The latest episode of Severance S02E01 just dropped!" ||
+			display.Body != "Hello, Ms. Cobel" ||
+			display.ThreadID != "series:series-123" ||
+			display.Category != "episode_available" ||
+			display.URL != "/item/episode-456" {
+			t.Fatalf("display = %+v", display)
+		}
+	})
+
+	t.Run("request declined", func(t *testing.T) {
+		row := requestDeclinedTestRow()
+		display := BuildNotificationDisplay(row)
+		if display.Title != "Dune was declined" ||
+			display.Body != "Reason: Already available in 4K" ||
+			display.ThreadID != "request:01REQ" ||
+			display.Category != "request_declined" ||
+			display.URL != "/notifications" {
+			t.Fatalf("display = %+v", display)
+		}
+	})
+
+	t.Run("unknown type", func(t *testing.T) {
+		display := BuildNotificationDisplay(DeliveryRow{Delivery: Delivery{ID: "01X", Type: "future.type"}})
+		if display.Title != genericNotificationTitle ||
+			display.Category != "future_type" ||
+			display.URL != "/notifications" {
+			t.Fatalf("display = %+v", display)
 		}
 	})
 }

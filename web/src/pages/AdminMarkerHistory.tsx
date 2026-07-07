@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { useAllMarkerEditHistory } from "@/hooks/queries/admin/markers";
 import { MARKER_LABELS, formatClock } from "@/lib/markers";
+import { formatTime, preferredDateLocale } from "@/lib/datetime";
 
 const LIMIT_OPTIONS = ["25", "50", "100"] as const;
 
@@ -178,12 +179,8 @@ function formatHistoryRange(marker: MarkerSegment | null): string {
 function formatHistoryDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const day = date.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" });
+  return `${day}, ${formatTime(date)}`;
 }
 
 function fileName(path: string | undefined): string {

@@ -1,5 +1,5 @@
 import type { AdminSession } from "@/api/types";
-import { formatCodecLabel } from "@/player/playback-info";
+import { formatCodecLabel } from "@/lib/mediaFormat";
 
 export function formatDecisionLabel(decision?: string): string {
   switch (decision) {

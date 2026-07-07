@@ -15,6 +15,7 @@ package audiobooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -382,19 +383,18 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	// Phase 1: Search — collect provider IDs.
 	searchQuery := metadata.SearchQuery{
 		Title:       item.Title,
+		Author:      item.Author,
 		Year:        item.Year,
 		ContentType: "audiobook",
 		ProviderIDs: accumulatedIDs,
 		Language:    item.Language,
 	}
-	// Include author in the search query title hint when present.
-	// The audnexus plugin uses title+author for ASIN lookup.
-	if item.Author != "" {
-		searchQuery.Title = item.Title
-		// Some plugins accept author via the generic extras pathway; others rely
-		// on the title field only. We pass it as a secondary field (no standard
-		// slot exists in SearchQuery yet).
-	}
+
+	// Track whether any provider errored during this item's enrichment. When
+	// nothing is accumulated AND at least one provider errored, we return an
+	// error WITHOUT stamping last_refreshed so the sweep retries the item later
+	// rather than burning it terminally on a transient provider failure.
+	var providerErrs []error
 
 	for _, p := range providers {
 		sp, ok := p.(metadata.SearchProvider)
@@ -408,6 +408,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 				"content_id", item.ContentID,
 				"error", searchErr,
 			)
+			providerErrs = append(providerErrs, fmt.Errorf("%s search: %w", p.Slug(), searchErr))
 			continue
 		}
 		if len(results) == 0 {
@@ -449,6 +450,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 				"content_id", item.ContentID,
 				"error", getErr,
 			)
+			providerErrs = append(providerErrs, fmt.Errorf("%s metadata: %w", p.Slug(), getErr))
 			continue
 		}
 		if result == nil || !result.HasMetadata {
@@ -467,8 +469,20 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		)
 	}
 
-	// Nothing found — stamp last_refreshed so we skip on the next sweep.
+	// Nothing found.
 	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
+		if err := ctx.Err(); err != nil {
+			// A cancelled sweep says nothing about the item or the providers.
+			return err
+		}
+		if len(providerErrs) > 0 {
+			// Transient provider trouble must not stamp the item terminally;
+			// surfacing an error lets the sweep retry it later instead.
+			return fmt.Errorf("no metadata obtained, %d provider error(s): %w",
+				len(providerErrs), errors.Join(providerErrs...))
+		}
+		// Providers ran cleanly but nothing matched — stamp last_refreshed so we
+		// skip on the next sweep.
 		slog.Info("audiobook enrichment: no metadata found",
 			"content_id", item.ContentID,
 			"title", item.Title,

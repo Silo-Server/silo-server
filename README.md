@@ -1,8 +1,17 @@
 # Silo
 
-A self-hosted media streaming server with a React frontend and Go backend. Supports direct play, remuxing, and hardware-accelerated transcoding. Includes optional Jellyfin/Emby-compatible app support for clients such as VidHub and Findroid.
+Silo is a self-hosted media streaming server for your movies, shows, music, and books. Point it at your media folders and stream to your devices — at home or away — with direct play, remuxing, and hardware-accelerated transcoding handled automatically.
 
-Join the community on [Discord](https://discord.gg/4RxuUQAEnW).
+Join the community on [Discord](https://discord.gg/4RxuUQAEnW). If Silo is useful to you, consider [sponsoring the project](https://github.com/sponsors/quick104) — see [Supporting Silo](#supporting-silo).
+
+## Highlights
+
+- **Plays your media, your way** — direct play when the device supports it, remux or hardware-accelerated transcode (including NVENC) when it doesn't.
+- **Web app included** — a full-featured web client and admin interface ship with the server.
+- **Works with apps you already use** — optional Jellyfin/Emby-compatible API supports clients such as VidHub, Findroid, and Infuse.
+- **Household profiles** — multiple profiles per account, with per-profile watch state and parental controls.
+- **Plugin-driven metadata** — match and enrich your libraries with providers like TMDB and TVDB, installed as plugins.
+- **Fast setup** — one `docker compose up -d` brings up the whole stack; everything else is configured in the admin UI.
 
 ## Deploy with Docker (recommended)
 
@@ -105,165 +114,6 @@ Silo is externally stateful by default rather than fully stateless. Durable appl
 Migrating an existing Continuum Docker install should be done with the preflight
 helper and cutover guide in [docs/continuum-to-silo-docker-migration.md](docs/continuum-to-silo-docker-migration.md).
 
-## Build from Source
-
-### Prerequisites
-
-- **Go** 1.24+
-- **Bun** 1.0+
-- **PostgreSQL** 18+
-- **FFmpeg** (for transcoding support)
-
-### Quick Start
-
-1. **Start PostgreSQL** (skip if you already have one running)
-
-   ```sh
-   docker compose up -d postgres redis
-   ```
-
-   The main compose file still expects `MEDIA_ROOT` to be set even if you only want the bundled PostgreSQL and Redis services, so set that in `.env` first.
-
-2. **Configure the database connection**
-
-   ```sh
-   cp .env.example .env
-   ```
-
-   Edit `.env` and set `DATABASE_URL` to point to your PostgreSQL instance.
-
-3. **Build and run**
-
-   ```sh
-   make build
-   ./silo
-   ```
-
-   The server starts at `http://localhost:8080` by default. All other settings are configured through the admin UI.
-
-## Development
-
-Local development remains intentionally separate from the deploy-oriented compose setup. Use [docker-compose.yml](docker-compose.yml) and the existing source-build workflow for local development.
-
-```sh
-# Run the frontend dev server (hot reload, proxies API to :8090)
-make dev-frontend
-
-# Run the Go backend
-make dev-backend
-```
-
-If you are developing `Silo` and `silo-plugin-sdk` together, keep using the local [`go.work`](go.work) workspace. That workspace is a developer convenience only. CI and release builds run with `GOWORK=off`, so any new SDK helper used here must be pushed and tagged in `silo-plugin-sdk` before this repo can merge or release the change.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations, merge request guidance, and the policy for AI-assisted submissions.
-
-Plugin authors should start with [docs/architecture/plugin-development.md](docs/architecture/plugin-development.md), which covers the RPC plugin package format, generated proto workflow, SDK import paths, route and asset exposure, and auth or user-config integration points.
-
-## Reporting Issues
-
-If you are reporting a bug, install problem, or performance issue, start with the admin workflow and reproduction steps, not Claude/Codex analysis.
-
-Please include:
-
-- What you were trying to do
-- Exact steps you took
-- What you expected to happen
-- What actually happened
-- What exact action is slow or broken (`save`, `scan`, `browse`, `import`, `playback`, etc.)
-- Whether it happens every time or only sometimes
-- The library, media type, filter, setting, or value involved
-- Version, branch, commit, and deployment details if you know them
-- Screenshots, recordings, or log snippets if relevant
-
-If you used Claude/Codex for debugging, put that under `Technical notes` at the end. Suspected files, SQL output, stack traces, and root-cause theories can be helpful, but only after the workflow and repro steps are clear.
-
-Use this template:
-
-```text
-Goal:
-Steps:
-Expected:
-Actual:
-What is slow/broken:
-Scope:
-Version/branch:
-Deployment:
-Technical notes:
-```
-
-### Make Targets
-
-| Target | Description |
-|---|---|
-| `make build` | Build frontend + Go binary |
-| `make frontend` | Build frontend only |
-| `make dev-frontend` | Vite dev server with HMR |
-| `make dev-backend` | Run Go backend (integrated mode) |
-| `make dev-proxy` | Run a standalone proxy node |
-| `make dev-transcode` | Run a standalone transcode node |
-| `make migrate-create NAME=add_thing` | Create a timestamped Goose SQL migration |
-| `make migrate-validate` | Validate Goose migration files without touching a database |
-| `make migrate-status` | Show Goose migration status using Silo's bootstrapping runner |
-| `make migrate-up` | Apply pending Goose migrations using Silo's bootstrapping runner |
-| `make clean` | Remove build artifacts |
-
-### Database Migrations
-
-PostgreSQL schema migrations are managed by Goose. Migration SQL files live in
-`migrations/sql/` and use Goose annotations. Converted legacy migrations keep
-their original numeric versions so existing `schema_versions` rows can bootstrap
-cleanly into Goose without replaying old SQL. New migrations should be created
-with timestamped filenames:
-
-```sh
-make migrate-create NAME=add_thing
-make migrate-validate
-```
-
-Do not run `goose fix`; timestamped migrations are the repository policy because
-they avoid version collisions across parallel PRs. The existing `001`-style
-files are historical compatibility records, not the naming pattern for new work.
-Runtime migrations are applied by the integrated/API server only. Proxy and
-transcode modes never mutate schema.
-For existing installs, use `make migrate-status` and `make migrate-up` rather
-than invoking the Goose CLI directly; those targets copy legacy
-`schema_versions` rows into `public.goose_db_version` under the migration lock
-before reading or applying migrations. Set `ENV_FILE=path/to/.env` when the
-database URL should be read from a non-default env file.
-
-### Running Tests
-
-```sh
-# Go tests (uses testcontainers — Docker must be running)
-go test ./...
-
-# Frontend tests
-cd web && bun test
-```
-
-### Linting
-
-```sh
-# Go
-golangci-lint run
-
-# Frontend
-cd web && bun run lint
-cd web && bun run format:check
-```
-
-## License & Trademarks
-
-Silo's source code is licensed under the **GNU Affero General Public License
-v3.0 or later** (`AGPL-3.0-or-later`) — see [LICENSE](LICENSE).
-
-The **Silo name, logo, and wordmark are trademarks of Silo Media L.L.C.** and
-are **not** covered by the AGPL. You're free to fork and redistribute the code,
-but forks and redistributions must not use the Silo brand as their identity and
-must remove or replace the brand assets. Publishing a Silo-branded app to an app
-store requires written permission. See [TRADEMARK.md](TRADEMARK.md) for what's
-permitted — including referential use like "compatible with Silo."
-
 ## Configuration
 
 Silo requires only a `DATABASE_URL` when running from source or against external infrastructure. In the default Docker Compose path, the stack wires the database and Redis URLs for you. All other settings — libraries, metadata providers, transcoding, users — are managed through the admin UI after first launch.
@@ -277,7 +127,7 @@ Silo requires only a `DATABASE_URL` when running from source or against external
 | `proxy` | Stream proxy node that connects to the shared deployment database and Redis |
 | `transcode` | HLS transcode worker node that connects to the shared deployment database and Redis |
 
-## PostgreSQL Auto-Tuning
+### PostgreSQL Auto-Tuning
 
 The default Docker Compose stack does not require a checked-in `postgresql.conf`.
 It enables Silo's [pgtune](https://github.com/le0pard/pgtune)-style OLTP tuning
@@ -329,20 +179,93 @@ change PostgreSQL server settings. Settings already written with `ALTER SYSTEM`
 remain in `postgresql.auto.conf`; reset those PostgreSQL parameters if you later
 move fully to a custom `postgresql.conf`.
 
-## Project Structure
+## Build from Source
 
+If you prefer running Silo without Docker:
+
+1. **Install prerequisites**: Go 1.24+, Bun 1.0+, PostgreSQL 18+, and FFmpeg.
+
+2. **Start PostgreSQL and Redis** (skip if you already have them running)
+
+   ```sh
+   docker compose up -d postgres redis
+   ```
+
+   The main compose file still expects `MEDIA_ROOT` to be set even if you only want the bundled PostgreSQL and Redis services, so set that in `.env` first.
+
+3. **Configure the database connection**
+
+   ```sh
+   cp .env.example .env
+   ```
+
+   Edit `.env` and set `DATABASE_URL` to point to your PostgreSQL instance.
+
+4. **Build and run**
+
+   ```sh
+   make build
+   ./silo
+   ```
+
+   The server starts at `http://localhost:8080` by default. All other settings are configured through the admin UI.
+
+## Reporting Issues
+
+If you are reporting a bug, install problem, or performance issue, start with the admin workflow and reproduction steps, not Claude/Codex analysis.
+
+Please include:
+
+- What you were trying to do
+- Exact steps you took
+- What you expected to happen
+- What actually happened
+- What exact action is slow or broken (`save`, `scan`, `browse`, `import`, `playback`, etc.)
+- Whether it happens every time or only sometimes
+- The library, media type, filter, setting, or value involved
+- Version, branch, commit, and deployment details if you know them
+- Screenshots, recordings, or log snippets if relevant
+
+If you used Claude/Codex for debugging, put that under `Technical notes` at the end. Suspected files, SQL output, stack traces, and root-cause theories can be helpful, but only after the workflow and repro steps are clear.
+
+Use this template:
+
+```text
+Goal:
+Steps:
+Expected:
+Actual:
+What is slow/broken:
+Scope:
+Version/branch:
+Deployment:
+Technical notes:
 ```
-cmd/silo/       Entry point
-internal/
-  api/               HTTP router, handlers, middleware
-  auth/              JWT authentication and sessions
-  catalog/           Media item, episode, season repositories
-  config/            YAML + env var configuration
-  jellycompat/       Jellyfin/Emby protocol compatibility
-  metadata/          Plugin-driven metadata matching and enrichment
-  playback/          Direct play, remux, transcode session management
-  scanner/           Media file discovery and FFProbe
-  worker/            Background jobs (scan, match, reconcile)
-web/                 React + TypeScript frontend (Vite, Tailwind, shadcn/ui)
-migrations/sql/      Goose-managed PostgreSQL schema migrations
-```
+
+## Contributing & Development
+
+Silo is open source and contributions are welcome. See [DEVELOPMENT.md](DEVELOPMENT.md) for building from source in a dev workflow, running tests, database migrations, and project layout, and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution expectations, merge request guidance, and the policy for AI-assisted submissions.
+
+## Supporting Silo
+
+Silo is an open-source hobby project, developed in spare time and funded out of pocket. If you'd like to support development, you can sponsor via [GitHub Sponsors](https://github.com/sponsors/quick104).
+
+Donations go directly toward the costs of building and running the project:
+
+- AI development tooling subscriptions (Claude, Codex) used to build and maintain Silo
+- Push notification relay infrastructure
+- Future development costs
+
+Sponsoring is entirely optional — Silo is and will remain free and open source. Bug reports, contributions, and feedback are just as valuable.
+
+## License & Trademarks
+
+Silo's source code is licensed under the **GNU Affero General Public License
+v3.0 or later** (`AGPL-3.0-or-later`) — see [LICENSE](LICENSE).
+
+The **Silo name, logo, and wordmark are trademarks of Silo Media L.L.C.** and
+are **not** covered by the AGPL. You're free to fork and redistribute the code,
+but forks and redistributions must not use the Silo brand as their identity and
+must remove or replace the brand assets. Publishing a Silo-branded app to an app
+store requires written permission. See [TRADEMARK.md](TRADEMARK.md) for what's
+permitted — including referential use like "compatible with Silo."

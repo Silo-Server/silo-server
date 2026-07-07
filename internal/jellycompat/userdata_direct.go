@@ -95,13 +95,10 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 		}
 	}
 
-	// Presign artwork only for the page being returned.
+	// Presign artwork only for the page being returned, batching each image
+	// type into one PresignImageURLsWithExpiry call for the whole page.
 	result := slicePage(ordered, offset, limit)
-	for i := range result {
-		result[i].PosterURL = compatPresignImage(s.detailSvc, ctx, result[i].PosterURL, "poster", compatCardImageSize)
-		result[i].BackdropURL = compatPresignImage(s.detailSvc, ctx, result[i].BackdropURL, "backdrop", compatCardImageSize)
-		result[i].LogoURL = compatPresignImage(s.detailSvc, ctx, result[i].LogoURL, "logo", compatCardImageSize)
-	}
+	presignCompatListItems(ctx, s.detailSvc, result)
 	if result == nil {
 		result = []upstreamListItem{}
 	}
@@ -170,6 +167,24 @@ func (s *directUserDataService) ListProgress(ctx context.Context, session *Sessi
 	entries, err := store.ListProgress(ctx, session.ProfileID, status, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list progress: %w", err)
+	}
+
+	result := make([]upstreamProgress, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, toUpstreamProgress(entry))
+	}
+	return result, nil
+}
+
+func (s *directUserDataService) ListProgressFiltered(ctx context.Context, session *Session, status string, types []string, libraryID *int, limit, offset int) ([]upstreamProgress, error) {
+	store, err := s.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return nil, fmt.Errorf("open user store: %w", err)
+	}
+
+	entries, err := store.ListProgressFiltered(ctx, session.ProfileID, status, types, libraryID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list filtered progress: %w", err)
 	}
 
 	result := make([]upstreamProgress, 0, len(entries))

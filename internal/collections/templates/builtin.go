@@ -8,7 +8,12 @@ package templates
 // Sync cadences favour conservative defaults — a heavy library does not need
 // "Trending" to refresh more than every six hours, and TMDB rate-limits make
 // hourly refreshes wasteful for shared servers.
-const builtinDefaultLimit = 50
+//
+// builtinDefaultLimit caps the matched items per collection. Sync scans up to
+// 4× the limit from the source list (see collectionutil.SourceFetchLimit), so
+// finite canonical lists (IMDb Top 250, Criterion) carry explicit larger
+// limits — the shared default would silently truncate them.
+const builtinDefaultLimit = 100
 
 var builtinTemplates = []Template{
 	// ── Trending (TMDB) ─────────────────────────────────────────────────────
@@ -105,7 +110,7 @@ var builtinTemplates = []Template{
 	{
 		ID:                  "trakt_popular_movies",
 		Title:               "Trakt Popular Movies",
-		Description:         "Trakt's all-time most-watched movies.",
+		Description:         "Trakt's most popular movies of all time, ranked by user ratings.",
 		Icon:                "🌟",
 		Category:            CategoryPopular,
 		Source:              SourceTrakt,
@@ -117,7 +122,7 @@ var builtinTemplates = []Template{
 	{
 		ID:                  "trakt_popular_shows",
 		Title:               "Trakt Popular Shows",
-		Description:         "Trakt's all-time most-watched shows.",
+		Description:         "Trakt's most popular shows of all time, ranked by user ratings.",
 		Icon:                "🌟",
 		Category:            CategoryPopular,
 		Source:              SourceTrakt,
@@ -346,7 +351,7 @@ var builtinTemplates = []Template{
 		Category:            CategoryTopRated,
 		Source:              SourceMDBList,
 		MediaKind:           MediaMovie,
-		DefaultLimit:        builtinDefaultLimit,
+		DefaultLimit:        250,
 		DefaultSyncSchedule: "0 5 * * 0",
 		MDBList:             &MDBListSpec{URL: "https://mdblist.com/lists/snoak/imdb-top-250-movies/json"},
 	},
@@ -358,7 +363,7 @@ var builtinTemplates = []Template{
 		Category:            CategoryTopRated,
 		Source:              SourceMDBList,
 		MediaKind:           MediaTV,
-		DefaultLimit:        builtinDefaultLimit,
+		DefaultLimit:        250,
 		DefaultSyncSchedule: "0 5 * * 0",
 		MDBList:             &MDBListSpec{URL: "https://mdblist.com/lists/snoak/imdb-top-250-shows/json"},
 	},
@@ -600,10 +605,13 @@ var builtinTemplates = []Template{
 	// ── Charts (MDBList) ───────────────────────────────────────────────────
 	// 1000s band. "Top Rated Movies" is already covered by the existing
 	// `mdblist_imdb_top_250_movies` template under CategoryTopRated, so this
-	// chart only contributes a Popular-Movies entry.
+	// chart only contributes the MovieMeter entry. Its title must NOT be
+	// "Popular Movies": bundle apply dedupes by slugified title per library,
+	// and `tmdb_popular_movies` already owns the popular-movies slug — a
+	// duplicate title would make this template silently skip in all_defaults.
 	{
 		ID:                  "mdblist_charts_popular_movies",
-		Title:               "Popular Movies",
+		Title:               "IMDb MovieMeter Top 100",
 		Description:         "IMDb MovieMeter's most-popular movies right now, kept in sync from MDBList (linaspurinis).",
 		Icon:                "📊",
 		Category:            CategoryPopular,
@@ -756,41 +764,46 @@ var builtinTemplates = []Template{
 	// 9000s band. Studio and distributor catalogs the operator's PMM
 	// `movies_misc` set typically includes.
 	{
-		ID:                  "mdblist_misc_criterion_collection",
-		Title:               "Criterion Collection",
-		Description:         "The complete Criterion Collection of films, kept in sync from MDBList (shtluck).",
-		Icon:                "🎞️",
-		Category:            CategoryEditorial,
-		Source:              SourceMDBList,
-		MediaKind:           MediaMovie,
-		DefaultLimit:        builtinDefaultLimit,
+		// Repointed 2026-07: the original shtluck list was deleted on MDBList.
+		ID:          "mdblist_misc_criterion_collection",
+		Title:       "Criterion Collection",
+		Description: "The Criterion Collection of films, kept in sync from MDBList (reptauros).",
+		Icon:        "🎞️",
+		Category:    CategoryEditorial,
+		Source:      SourceMDBList,
+		MediaKind:   MediaMovie,
+		// No limit: this is a catalog list (~1000 entries) — the collection
+		// should hold every Criterion title the library owns, not a top-N.
+		DefaultLimit:        0,
 		DefaultSortOrder:    9001,
 		DefaultSyncSchedule: "0 5 * * 0",
 		Tags:                []string{"editorial", "studio"},
-		MDBList:             &MDBListSpec{URL: "https://mdblist.com/lists/shtluck/the-complete-criterion-collection/json"},
+		MDBList:             &MDBListSpec{URL: "https://mdblist.com/lists/reptauros/the-criterion-collection/json"},
 	},
 	{
-		ID:                  "mdblist_misc_a24",
-		Title:               "A24",
-		Description:         "Films distributed by A24, kept in sync from MDBList (irvingbeano).",
-		Icon:                "🎬",
-		Category:            CategoryEditorial,
-		Source:              SourceMDBList,
-		MediaKind:           MediaMovie,
-		DefaultLimit:        builtinDefaultLimit,
+		// Repointed 2026-07: the original irvingbeano list was deleted on MDBList.
+		ID:          "mdblist_misc_a24",
+		Title:       "A24",
+		Description: "Films distributed by A24, kept in sync from MDBList (InShaneMagic).",
+		Icon:        "🎬",
+		Category:    CategoryEditorial,
+		Source:      SourceMDBList,
+		MediaKind:   MediaMovie,
+		// No limit: catalog list (~150 entries) — hold every owned A24 film.
+		DefaultLimit:        0,
 		DefaultSortOrder:    9002,
 		DefaultSyncSchedule: "0 5 * * 0",
 		Tags:                []string{"editorial", "studio"},
-		MDBList:             &MDBListSpec{URL: "https://mdblist.com/lists/irvingbeano/a24/json"},
+		MDBList:             &MDBListSpec{URL: "https://mdblist.com/lists/inshanemagic/a24-films/json"},
 	},
 	{
 		ID:                  "mdblist_misc_ifc_films",
 		Title:               "IFC Films",
-		Description:         "IFC Films catalog spanning movies and series (MDBList by notamongo5).",
+		Description:         "IFC Films movie catalog (MDBList by notamongo5).",
 		Icon:                "🎬",
 		Category:            CategoryEditorial,
 		Source:              SourceMDBList,
-		MediaKind:           MediaMixed,
+		MediaKind:           MediaMovie,
 		DefaultLimit:        builtinDefaultLimit,
 		DefaultSortOrder:    9003,
 		DefaultSyncSchedule: "0 5 * * 0",

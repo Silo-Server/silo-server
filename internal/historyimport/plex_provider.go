@@ -7,13 +7,21 @@ import (
 )
 
 type PlexServerProvider struct {
-	client  *PlexClient
-	baseURL string
-	token   string
+	client       *PlexClient
+	baseURL      string
+	token        string
+	accountToken string
 }
 
 func NewPlexServerProvider(client *PlexClient, baseURL, token string) *PlexServerProvider {
 	return &PlexServerProvider{client: client, baseURL: baseURL, token: token}
+}
+
+// WithAccountToken enables account-level fetches (the watchlist). Empty
+// disables them: server-token-only imports still work, minus the watchlist.
+func (p *PlexServerProvider) WithAccountToken(token string) *PlexServerProvider {
+	p.accountToken = token
+	return p
 }
 
 func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
@@ -68,6 +76,21 @@ func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, err
 	for _, record := range merged {
 		records = append(records, record)
 	}
+	// The account watchlist rides along with the history import. Best
+	// effort: a watchlist fetch failure downgrades to a warning so the
+	// watch-history import still completes (issue #245).
+	if p.accountToken != "" {
+		items, watchlistWarnings, err := p.client.FetchWatchlist(ctx, p.accountToken)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("watchlist fetch failed: %v", err))
+		} else {
+			warnings = append(warnings, watchlistWarnings...)
+			for _, item := range items {
+				records = append(records, NormalizePlexWatchlistItem(item))
+			}
+		}
+	}
+
 	return records, warnings, nil
 }
 

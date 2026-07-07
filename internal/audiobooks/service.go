@@ -3,6 +3,8 @@ package audiobooks
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abssocket"
@@ -145,11 +147,20 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 		socketServer = abssocket.New(secretFn, tokenValidator, nil, nil)
 	}
 
+	// GET /me only has the token's userID; source a resolver from the concrete
+	// SiloCredValidator (which holds the pgx pool) so /me can show the real
+	// display username instead of the numeric id.
+	var usernameResolver func(ctx context.Context, userID, profileID string) string
+	if scv, ok := deps.Auth.(*SiloCredValidator); ok {
+		usernameResolver = scv.ResolveUsername
+	}
+
 	h := abs.New(abs.Dependencies{
 		MediaStore:           mediaStore,
 		TokenStore:           tokenStore,
 		CredValidator:        deps.Auth,
 		AccessResolver:       deps.AccessResolver,
+		UsernameResolver:     usernameResolver,
 		Config:               configProvider,
 		Publisher:            nil, // EventPublisher: no-op stub; Socket.io handles realtime
 		Recommender:          buildABSRecommender(deps),
@@ -170,6 +181,26 @@ func (s *Service) BuildABSHandler(deps ABSHandlerDeps) *abs.Handler {
 			return deps.Detail.PresignImageURL(ctx, path, "poster", variant)
 		},
 	})
+	// Keep the audiobook author materialized view fresh in the background so the
+	// /authors endpoint stays a fast indexed read as scans add authors. The
+	// migration populates it initially; this refreshes it on a cadence.
+	if deps.Pool != nil && mediaStore != nil {
+		go func() {
+			ctx := context.Background()
+			time.Sleep(30 * time.Second) // let startup settle before the first refresh
+			if err := mediaStore.RefreshAuthorCounts(ctx); err != nil {
+				slog.Warn("abs: initial author-count refresh failed", "err", err)
+			}
+			ticker := time.NewTicker(15 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				if err := mediaStore.RefreshAuthorCounts(ctx); err != nil {
+					slog.Warn("abs: author-count refresh failed", "err", err)
+				}
+			}
+		}()
+	}
+
 	s.ABSHandler = h
 	return h
 }

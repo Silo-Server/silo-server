@@ -255,6 +255,7 @@ export default function ProfileCustomizeHome() {
       <RecipeGalleryModal
         open={galleryOpen}
         onClose={() => setGalleryOpen(false)}
+        hideAdminOnly
         onPick={(def, preset) => {
           setGalleryOpen(false);
           setPicked({ def, preset });

@@ -26,6 +26,13 @@ type FileVersionFetcher interface {
 	GetByEpisodeID(ctx context.Context, episodeID string) ([]*models.MediaFile, error)
 }
 
+// extraFileFetcher is the optional FileVersionFetcher extension used to
+// resolve files backing local extras (media_extras rows). The concrete
+// *scanner.FileRepository implements it; test fakes may omit it.
+type extraFileFetcher interface {
+	GetByExtraID(ctx context.Context, extraID string) ([]*models.MediaFile, error)
+}
+
 type PlaybackProbeEnsurer interface {
 	Ensure(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error)
 }
@@ -153,6 +160,14 @@ type ItemDetail struct {
 	Versions         []FileVersion     `json:"versions"`
 	PlaybackVariants []PlaybackVariant `json:"playback_variants,omitempty"`
 
+	// Remote provider videos (YouTube trailers, teasers, ...) for
+	// movies/series, ordered for display (trailers first, official first).
+	Videos []ItemVideoInfo `json:"videos,omitempty"`
+
+	// Local extras (scanner-discovered trailers, featurettes, deleted
+	// scenes, ...) playable via their own content_id through /watch.
+	Extras []ItemExtraInfo `json:"extras,omitempty"`
+
 	// Root folder paths for series items (admin-only).
 	FolderPaths []string `json:"folder_paths,omitempty"`
 
@@ -193,6 +208,29 @@ type ItemDetail struct {
 
 	// Manga-specific detail. Present only when Type == "manga".
 	Manga *MangaDetailExtension `json:"manga,omitempty"`
+}
+
+// ItemVideoInfo is the API shape of a remote provider video. It exposes the
+// site reference (site + site_key) rather than internal row identity so
+// clients can build embed/watch URLs without further lookups.
+type ItemVideoInfo struct {
+	Kind       string `json:"kind"`
+	Site       string `json:"site"`
+	SiteKey    string `json:"site_key"`
+	Name       string `json:"name,omitempty"`
+	Language   string `json:"language,omitempty"`
+	IsOfficial bool   `json:"is_official"`
+}
+
+// ItemExtraInfo is the API shape of a local extra. ContentID is a playable
+// watch target (same /watch flow as any item); FileID backs download/direct
+// stream affordances.
+type ItemExtraInfo struct {
+	ContentID       string `json:"content_id"`
+	Kind            string `json:"kind"`
+	Title           string `json:"title,omitempty"`
+	DurationSeconds int    `json:"duration_seconds,omitempty"`
+	FileID          int    `json:"file_id,omitempty"`
 }
 
 type AudiobookDetailExtension struct {
@@ -545,6 +583,8 @@ type DetailService struct {
 		GetByID(ctx context.Context, id int) (*models.MediaFolder, error)
 	}
 	fileFetcher       FileVersionFetcher
+	videoRepo         *VideoRepository
+	extraRepo         *ExtraRepository
 	rootClaimRepo     *RootClaimRepository
 	groupClaimRepo    *GroupClaimRepository
 	imageResolver     ImageResolver
@@ -571,6 +611,8 @@ func NewDetailService(
 		itemLocRepo:    NewMediaItemLocalizationRepository(itemRepo.pool),
 		seasonLocRepo:  NewSeasonLocalizationRepository(itemRepo.pool),
 		episodeLocRepo: NewEpisodeLocalizationRepository(itemRepo.pool),
+		videoRepo:      NewVideoRepository(itemRepo.pool),
+		extraRepo:      NewExtraRepository(itemRepo.pool),
 		fileFetcher:    fileFetcher,
 	}
 }
@@ -677,7 +719,22 @@ func (s *DetailService) PendingTranslationLanguage(ctx context.Context, item *mo
 		return ""
 	}
 	loc, err := s.itemLocRepo.Get(ctx, item.ContentID, language)
-	if err != nil || (loc != nil && loc.Overview != "") {
+	if err != nil {
+		return ""
+	}
+	return pendingTranslationLanguageWith(item, language, loc)
+}
+
+// pendingTranslationLanguageWith is the shared core of PendingTranslationLanguage:
+// it decides the pending-translation language for an item given a pre-resolved
+// presentation language and the item's localization row (nil when none exists).
+// The batch detail path reuses it after a single bulk localization lookup so it
+// yields an identical result to the per-item method.
+func pendingTranslationLanguageWith(item *models.MediaItem, language string, loc *models.MediaItemLocalization) string {
+	if item == nil || strings.TrimSpace(item.Overview) == "" || language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) {
+		return ""
+	}
+	if loc != nil && loc.Overview != "" {
 		return ""
 	}
 	return language
@@ -744,10 +801,22 @@ func (s *DetailService) LocalizeItemModel(ctx context.Context, item *models.Medi
 		return cloneMediaItem(item), err
 	}
 	loc, err := s.itemLocRepo.Get(ctx, item.ContentID, language)
-	if err != nil || loc == nil {
+	if err != nil {
 		return cloneMediaItem(item), err
 	}
-	return applyItemLocalization(item, loc), nil
+	return s.localizeItemModelWith(item, language, loc), nil
+}
+
+// localizeItemModelWith applies a pre-resolved localization to item, returning a
+// clone when there is nothing to localize (no language, base language already
+// matches, no localization repo, or no localization row). Shared core of
+// LocalizeItemModel so the batch detail path produces identical models after a
+// single bulk localization lookup.
+func (s *DetailService) localizeItemModelWith(item *models.MediaItem, language string, loc *models.MediaItemLocalization) *models.MediaItem {
+	if language == "" || sameMetadataLanguage(item.DefaultMetadataLanguage, language) || s.itemLocRepo == nil || loc == nil {
+		return cloneMediaItem(item)
+	}
+	return applyItemLocalization(item, loc)
 }
 
 // LocalizeItemModels applies presentation-language localization to a batch of
@@ -876,7 +945,7 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		if err := s.validatePresentationItemAccess(ctx, filter, contentID); err != nil {
 			return nil, err
 		}
-		return s.buildMediaItemDetail(ctx, item, contentID, filter)
+		return s.buildMediaItemDetail(ctx, item, contentID, filter, nil)
 	case !errors.Is(err, ErrItemNotFound):
 		return nil, err
 	}
@@ -905,7 +974,11 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 	episode, err := s.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
 		if errors.Is(err, ErrEpisodeNotFound) {
-			return nil, ErrItemNotFound
+			// Fourth tier: a local extra. Serving it from GetItemDetail keeps
+			// per-item consumers that resolve arbitrary content ids
+			// (jellycompat PlaybackInfo in particular) playable without a
+			// separate lookup path.
+			return s.buildExtraItemDetail(ctx, contentID, filter)
 		}
 		return nil, err
 	}
@@ -920,6 +993,72 @@ func (s *DetailService) GetItemDetail(ctx context.Context, contentID string, fil
 		return nil, err
 	}
 	return s.buildEpisodeDetail(ctx, episode, seriesCtx, filter)
+}
+
+// buildExtraItemDetail resolves a local extra as a minimal ItemDetail:
+// title/kind plus the ordinary playback surface (versions, subtitles) built
+// from its backing files. Access control is the parent item's.
+func (s *DetailService) buildExtraItemDetail(ctx context.Context, contentID string, filter AccessFilter) (*ItemDetail, error) {
+	if s.extraRepo == nil {
+		return nil, ErrItemNotFound
+	}
+	extra, err := s.extraRepo.GetByID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, ErrExtraNotFound) {
+			return nil, ErrItemNotFound
+		}
+		return nil, err
+	}
+	if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
+		return nil, err
+	}
+	if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
+		return nil, err
+	}
+	fetcher, ok := s.fileFetcher.(extraFileFetcher)
+	if !ok {
+		return nil, ErrItemNotFound
+	}
+	files, err := fetcher.GetByExtraID(ctx, extra.ContentID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching extra files: %w", err)
+	}
+	files = FilterMediaFilesByAccess(files, filter)
+	files = s.preparePlaybackFiles(ctx, files)
+
+	detail := &ItemDetail{
+		ContentID: extra.ContentID,
+		Type:      "extra",
+		Title:     extra.Title,
+		Genres:    []string{},
+		Cast:      []CastCredit{},
+		Crew:      []CrewCredit{},
+		Studios:   []string{},
+		Networks:  []string{},
+	}
+	detail.Versions, detail.PlaybackVariants, detail.Subtitles, detail.Intro, detail.Credits, detail.Recap, detail.Preview = s.buildPlaybackInfo(
+		ctx,
+		files,
+		filter,
+		extra.ContentID,
+	)
+	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
+		if localized, locErr := s.LocalizeItemModel(ctx, parent, filter); locErr == nil {
+			parent = localized
+		}
+		if detail.Title == "" {
+			detail.Title = parent.Title
+		}
+		// Series fields only for series-owned extras: clients treat a
+		// populated series_id as episodic context (post-roll/next-episode
+		// flows), which is wrong for a movie's extras.
+		if parent.Type == "series" {
+			detail.SeriesID = extra.ParentID
+			detail.SeriesTitle = parent.Title
+		}
+		detail.Year = parent.Year
+	}
+	return detail, nil
 }
 
 // seriesDetailContext caches series-level lookups so a batched episode-detail
@@ -1005,6 +1144,259 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 	return result, nil
 }
 
+// fileVersionBatchFetcher is the optional batch form of FileVersionFetcher.
+// When the configured fetcher implements it, GetItemDetailsByIDs loads every
+// page item's media files in one query instead of one per item. Fetchers that
+// don't implement it (e.g. some test fakes) transparently fall back to the
+// per-item GetByContentID path inside buildMediaItemDetail.
+type fileVersionBatchFetcher interface {
+	ListByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error)
+}
+
+// GetItemDetailsByIDs returns full item details for the given content IDs,
+// batching the shared per-item lookups that GetItemDetail otherwise issues
+// one-at-a-time: row load (GetByIDs), access checks (EnsureAccessibleIDs +
+// presentation-library membership), localization, credits, media files, and
+// work summaries. The detail produced for each id is byte-for-byte identical to
+// calling GetItemDetail(id): the same builder (buildMediaItemDetail) assembles
+// it, only fed pre-resolved inputs via itemDetailPrefetch. Any input building
+// block missing a batch form falls back to its inline per-item lookup, so the
+// output never drifts from the unbatched path.
+//
+// IDs that are not item-typed media (e.g. episodes or seasons — handled by
+// GetEpisodeDetailsForSeries / GetItemDetail respectively), are access-filtered,
+// or fail to build are simply absent from the result map, mirroring
+// GetItemDetail returning an error so callers fall back to list-level rendering.
+func (s *DetailService) GetItemDetailsByIDs(ctx context.Context, contentIDs []string, filter AccessFilter) (map[string]*ItemDetail, error) {
+	result := make(map[string]*ItemDetail, len(contentIDs))
+	if len(contentIDs) == 0 {
+		return result, nil
+	}
+
+	items, err := s.itemRepo.GetByIDs(ctx, contentIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return result, nil
+	}
+
+	foundIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		foundIDs = append(foundIDs, item.ContentID)
+	}
+
+	// Access checks, batched to match GetItemDetail's per-item EnsureAccessible
+	// and validatePresentationItemAccess exactly.
+	accessible, err := s.itemRepo.EnsureAccessibleIDs(ctx, foundIDs, filter)
+	if err != nil {
+		return nil, err
+	}
+	presentationOK := func(string) bool { return true }
+	if filter.PresentationLibraryID != nil {
+		membership, err := s.itemRepo.GetItemsInLibrary(ctx, foundIDs, *filter.PresentationLibraryID)
+		if err != nil {
+			return nil, err
+		}
+		presentationOK = func(id string) bool { return membership[id] }
+	}
+
+	visible := make([]*models.MediaItem, 0, len(items))
+	visibleIDs := make([]string, 0, len(items))
+	nonSeriesIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		if !accessible[item.ContentID] || !presentationOK(item.ContentID) {
+			continue
+		}
+		visible = append(visible, item)
+		visibleIDs = append(visibleIDs, item.ContentID)
+		if item.Type != "series" {
+			nonSeriesIDs = append(nonSeriesIDs, item.ContentID)
+		}
+	}
+	if len(visible) == 0 {
+		return result, nil
+	}
+
+	// Localization: resolve the presentation language once, then one bulk
+	// localization lookup. A resolution failure surfaces the same wrapped error
+	// GetItemDetail would produce from buildMediaItemDetail, so the caller
+	// degrades to the per-item path.
+	language, err := s.resolvePresentationLanguage(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("localizing item detail: %w", err)
+	}
+	var locByID map[string]*models.MediaItemLocalization
+	if language != "" && s.itemLocRepo != nil {
+		locByID, err = s.itemLocRepo.GetByContentIDs(ctx, visibleIDs, language)
+		if err != nil {
+			return nil, fmt.Errorf("localizing item detail: %w", err)
+		}
+	}
+
+	// Credits for the whole page in one query.
+	var creditsByID map[string][]models.ItemPerson
+	if s.personRepo != nil {
+		creditsByID, err = s.personRepo.ListForItems(ctx, visibleIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Media files (playable versions) for non-series items in one query, when the
+	// fetcher supports batching.
+	var filesByID map[string][]*models.MediaFile
+	batchFetcher, haveFileBatch := s.fileFetcher.(fileVersionBatchFetcher)
+	if haveFileBatch && len(nonSeriesIDs) > 0 {
+		filesByID, err = batchFetcher.ListByContentIDs(ctx, nonSeriesIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Remote videos and local extras for movie/series items in two queries.
+	movieSeriesIDs := make([]string, 0, len(visible))
+	for _, item := range visible {
+		if item.Type == "movie" || item.Type == "series" {
+			movieSeriesIDs = append(movieSeriesIDs, item.ContentID)
+		}
+	}
+	var videosByID map[string][]models.ItemVideo
+	var extrasByID map[string][]ExtraWithFile
+	if len(movieSeriesIDs) > 0 {
+		if s.videoRepo != nil {
+			videosByID, err = s.videoRepo.ListByContentIDs(ctx, movieSeriesIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if s.extraRepo != nil {
+			extrasByID, err = s.extraRepo.ListWithFilesByParentIDs(ctx, movieSeriesIDs)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// Work summaries for the whole page in one query, when the provider supports
+	// batching (ListSummariesForContentIDs is the documented batch equivalent of
+	// GetSummaryForContentID).
+	var workSummaries map[string]*WorkSummary
+	batchSummary, haveWorkSummaryBatch := s.workSummary.(WorkSummaryBatchProvider)
+	if haveWorkSummaryBatch {
+		workSummaries, err = batchSummary.ListSummariesForContentIDs(ctx, visibleIDs, filter)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, item := range visible {
+		id := item.ContentID
+		loc := locByID[id]
+		pending := ""
+		if s.itemLocRepo != nil {
+			pending = pendingTranslationLanguageWith(item, language, loc)
+		}
+		pf := &itemDetailPrefetch{
+			haveLocalization:   true,
+			pendingTranslation: pending,
+			localizedItem:      s.localizeItemModelWith(item, language, loc),
+			haveCredits:        s.personRepo != nil,
+		}
+		if s.personRepo != nil {
+			pf.castCredits, pf.crewCredits = splitCastCrew(s.personCredits(ctx, creditsByID[id]))
+		}
+		if item.Type != "series" && haveFileBatch {
+			pf.haveFiles = true
+			pf.files = filesByID[id]
+		}
+		if haveWorkSummaryBatch {
+			pf.haveWorkSummary = true
+			pf.workSummary = workSummaries[id]
+		}
+		if item.Type == "movie" || item.Type == "series" {
+			if s.videoRepo != nil {
+				pf.haveVideos = true
+				pf.videos = videosByID[id]
+			}
+			if s.extraRepo != nil {
+				pf.haveExtras = true
+				pf.extras = extrasByID[id]
+			}
+		}
+		detail, err := s.buildMediaItemDetail(ctx, item, id, filter, pf)
+		if err != nil {
+			// Skip rather than fail the batch; the caller falls back to list
+			// rendering for any id missing from the result, matching the
+			// per-item path where one item's build error never breaks the page.
+			continue
+		}
+		result[id] = detail
+	}
+	return result, nil
+}
+
+// fetchItemVideos returns the item's remote videos in API shape, honoring a
+// batch prefetch when present. Lookup failures degrade to an empty section.
+func (s *DetailService) fetchItemVideos(ctx context.Context, contentID string, pf *itemDetailPrefetch) []ItemVideoInfo {
+	var videos []models.ItemVideo
+	if pf != nil && pf.haveVideos {
+		videos = pf.videos
+	} else if s.videoRepo != nil {
+		fetched, err := s.videoRepo.GetByContentID(ctx, contentID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to fetch item videos", "content_id", contentID, "error", err)
+			return nil
+		}
+		videos = fetched
+	}
+	if len(videos) == 0 {
+		return nil
+	}
+	infos := make([]ItemVideoInfo, 0, len(videos))
+	for _, v := range videos {
+		infos = append(infos, ItemVideoInfo{
+			Kind:       string(v.Kind),
+			Site:       v.Site,
+			SiteKey:    v.SiteKey,
+			Name:       v.Name,
+			Language:   v.Language,
+			IsOfficial: v.IsOfficial,
+		})
+	}
+	return infos
+}
+
+// fetchItemExtras returns the item's local extras in API shape, honoring a
+// batch prefetch when present. Lookup failures degrade to an empty section.
+func (s *DetailService) fetchItemExtras(ctx context.Context, contentID string, pf *itemDetailPrefetch) []ItemExtraInfo {
+	var extras []ExtraWithFile
+	if pf != nil && pf.haveExtras {
+		extras = pf.extras
+	} else if s.extraRepo != nil {
+		fetched, err := s.extraRepo.ListWithFilesByParentID(ctx, contentID)
+		if err != nil {
+			slog.WarnContext(ctx, "failed to fetch item extras", "content_id", contentID, "error", err)
+			return nil
+		}
+		extras = fetched
+	}
+	if len(extras) == 0 {
+		return nil
+	}
+	infos := make([]ItemExtraInfo, 0, len(extras))
+	for _, e := range extras {
+		infos = append(infos, ItemExtraInfo{
+			ContentID:       e.ContentID,
+			Kind:            string(e.Kind),
+			Title:           e.Title,
+			DurationSeconds: e.Duration,
+			FileID:          e.FileID,
+		})
+	}
+	return infos
+}
+
 // fetchCredits returns cast and crew credits for the given content ID.
 func (s *DetailService) fetchCredits(ctx context.Context, contentID string) ([]CastCredit, []CrewCredit) {
 	if s.personRepo == nil {
@@ -1018,14 +1410,49 @@ func (s *DetailService) fetchCredits(ctx context.Context, contentID string) ([]C
 	return splitCastCrew(credits)
 }
 
-func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.MediaItem, contentID string, filter AccessFilter) (*ItemDetail, error) {
-	pendingTranslation := s.PendingTranslationLanguage(ctx, item, filter)
-	localizedItem, err := s.LocalizeItemModel(ctx, item, filter)
-	if err != nil {
-		return nil, fmt.Errorf("localizing item detail: %w", err)
+// itemDetailPrefetch carries per-item lookups that GetItemDetailsByIDs resolves
+// once for a whole page so buildMediaItemDetail can skip the equivalent per-item
+// queries. Each piece is opt-in via its "have" flag: when unset, the builder
+// falls back to its normal inline lookup, so the result is byte-for-byte
+// identical to the unbatched GetItemDetail path regardless of which pieces were
+// prefetched. A nil prefetch reproduces the original per-item behavior exactly.
+type itemDetailPrefetch struct {
+	haveLocalization   bool
+	pendingTranslation string
+	localizedItem      *models.MediaItem
+	haveCredits        bool
+	castCredits        []CastCredit
+	crewCredits        []CrewCredit
+	haveFiles          bool
+	files              []*models.MediaFile
+	haveWorkSummary    bool
+	workSummary        *WorkSummary
+	haveVideos         bool
+	videos             []models.ItemVideo
+	haveExtras         bool
+	extras             []ExtraWithFile
+}
+
+func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.MediaItem, contentID string, filter AccessFilter, pf *itemDetailPrefetch) (*ItemDetail, error) {
+	var pendingTranslation string
+	if pf != nil && pf.haveLocalization {
+		pendingTranslation = pf.pendingTranslation
+		item = pf.localizedItem
+	} else {
+		pendingTranslation = s.PendingTranslationLanguage(ctx, item, filter)
+		localizedItem, err := s.LocalizeItemModel(ctx, item, filter)
+		if err != nil {
+			return nil, fmt.Errorf("localizing item detail: %w", err)
+		}
+		item = localizedItem
 	}
-	item = localizedItem
-	castCredits, crewCredits := s.fetchCredits(ctx, contentID)
+	var castCredits []CastCredit
+	var crewCredits []CrewCredit
+	if pf != nil && pf.haveCredits {
+		castCredits, crewCredits = pf.castCredits, pf.crewCredits
+	} else {
+		castCredits, crewCredits = s.fetchCredits(ctx, contentID)
+	}
 	detail := &ItemDetail{
 		ContentID:                  item.ContentID,
 		Type:                       item.Type,
@@ -1076,9 +1503,15 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 	// For series, each episode file shares the series content_id, so
 	// GetByContentID would return every episode — not alternate encodings.
 	if item.Type != "series" {
-		files, err := s.fileFetcher.GetByContentID(ctx, contentID)
-		if err != nil {
-			return nil, fmt.Errorf("fetching file versions: %w", err)
+		var files []*models.MediaFile
+		if pf != nil && pf.haveFiles {
+			files = pf.files
+		} else {
+			fetched, err := s.fileFetcher.GetByContentID(ctx, contentID)
+			if err != nil {
+				return nil, fmt.Errorf("fetching file versions: %w", err)
+			}
+			files = fetched
 		}
 
 		files = FilterMediaFilesByAccess(files, filter)
@@ -1093,6 +1526,12 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			item.ContentID,
 		)
 		detail.OverlaySummary = overlays.BuildSummary(files)
+	}
+
+	// Trailers/extras apply to movies and series only.
+	if item.Type == "movie" || item.Type == "series" {
+		detail.Videos = s.fetchItemVideos(ctx, contentID, pf)
+		detail.Extras = s.fetchItemExtras(ctx, contentID, pf)
 	}
 
 	if item.Type == "audiobook" {
@@ -1149,7 +1588,11 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		}
 	}
 
-	applyWorkSummary(ctx, detail, s.workSummary, filter)
+	if pf != nil && pf.haveWorkSummary {
+		applyWorkSummaryValue(detail, pf.workSummary)
+	} else {
+		applyWorkSummary(ctx, detail, s.workSummary, filter)
+	}
 	return detail, nil
 }
 
@@ -1158,7 +1601,17 @@ func applyWorkSummary(ctx context.Context, detail *ItemDetail, provider WorkSumm
 		return
 	}
 	summary, err := provider.GetSummaryForContentID(ctx, detail.ContentID, filter)
-	if err != nil || summary == nil {
+	if err != nil {
+		return
+	}
+	applyWorkSummaryValue(detail, summary)
+}
+
+// applyWorkSummaryValue copies a resolved work summary onto the detail. Shared by
+// the per-item (applyWorkSummary) and batched (GetItemDetailsByIDs) paths so a
+// summary fetched in bulk applies identically. A nil summary is a no-op.
+func applyWorkSummaryValue(detail *ItemDetail, summary *WorkSummary) {
+	if detail == nil || summary == nil {
 		return
 	}
 	detail.WorkID = summary.WorkID
@@ -1991,6 +2444,11 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 
 	episode, err := s.episodeRepo.GetByID(ctx, contentID)
 	if err != nil {
+		// Third fallback tier: a local extra (media_extras). Access is the
+		// parent item's; playback reuses the ordinary file/versions pipeline.
+		if errors.Is(err, ErrEpisodeNotFound) {
+			return s.buildExtraWatchDetail(ctx, contentID, filter)
+		}
 		return nil, err
 	}
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
@@ -2052,6 +2510,66 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		detail.Year = series.Year
 	}
 
+	return detail, nil
+}
+
+// buildExtraWatchDetail resolves a local extra (media_extras) as a watch
+// target. Access control is the parent item's library membership, mirroring
+// how episodes gate on their series.
+func (s *DetailService) buildExtraWatchDetail(ctx context.Context, contentID string, filter AccessFilter) (*WatchDetail, error) {
+	if s.extraRepo == nil {
+		return nil, ErrItemNotFound
+	}
+	extra, err := s.extraRepo.GetByID(ctx, contentID)
+	if err != nil {
+		if errors.Is(err, ErrExtraNotFound) {
+			return nil, ErrItemNotFound
+		}
+		return nil, err
+	}
+	if err := s.itemRepo.EnsureAccessible(ctx, extra.ParentID, filter); err != nil {
+		return nil, err
+	}
+	if err := s.validatePresentationItemAccess(ctx, filter, extra.ParentID); err != nil {
+		return nil, err
+	}
+	fetcher, ok := s.fileFetcher.(extraFileFetcher)
+	if !ok {
+		return nil, ErrItemNotFound
+	}
+	files, err := fetcher.GetByExtraID(ctx, extra.ContentID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching extra watch files: %w", err)
+	}
+	files = FilterMediaFilesByAccess(files, filter)
+	files = s.preparePlaybackFiles(ctx, files)
+	s.queueWatchPlaybackFiles(ctx, extra.ContentID, "extra", files)
+	detail := s.newWatchDetail(
+		ctx,
+		extra.ContentID,
+		"extra",
+		extra.Title,
+		"",
+		files,
+		filter,
+		extra.ParentID,
+	)
+	if parent, parentErr := s.itemRepo.GetByID(ctx, extra.ParentID); parentErr == nil {
+		if localized, locErr := s.LocalizeItemModel(ctx, parent, filter); locErr == nil {
+			parent = localized
+		}
+		if detail.Title == "" {
+			detail.Title = parent.Title
+		}
+		// Series fields only for series-owned extras: players treat a
+		// populated SeriesID as episodic context (post-roll/next-episode
+		// flows), which is wrong for a movie's extras.
+		if parent.Type == "series" {
+			detail.SeriesID = extra.ParentID
+			detail.SeriesTitle = parent.Title
+		}
+		detail.Year = parent.Year
+	}
 	return detail, nil
 }
 

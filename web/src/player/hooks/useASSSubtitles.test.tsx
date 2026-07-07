@@ -130,7 +130,7 @@ describe("useASSSubtitles font fallback", () => {
     expect(opts.subContent).not.toContain("Trebuchet MS");
   });
 
-  it("keeps JASSUB's built-in default for a Latin (German) ASS track", async () => {
+  it("keeps the Liberation Sans default for a Latin (German) ASS track", async () => {
     renderHook(() => useASSSubtitles(makeVideoRef(), [germanTrack], 6, false, 0, 0));
 
     await waitFor(() => expect(constructorOpts).toHaveLength(1));
@@ -138,6 +138,10 @@ describe("useASSSubtitles font fallback", () => {
     const opts = constructorOpts[0]!;
     expect(opts.defaultFont).toBeUndefined();
     expect(opts.fonts).toBeUndefined();
+    // jassub >= 2.5.4 no longer ships its built-in default font file, so the
+    // hook must always supply Liberation Sans itself or Latin tracks render
+    // nothing (queryFonts is disabled).
+    expect(opts.availableFonts).toEqual({ "liberation sans": expect.any(String) });
   });
 
   it("passes fetched ASS content into JASSUB", async () => {

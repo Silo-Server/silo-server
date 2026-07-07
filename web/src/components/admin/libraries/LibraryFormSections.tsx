@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FolderOpen,
   FolderSearch,
+  Loader2,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { LANGUAGES } from "@/player/utils/languageNames";
 
 import { LIBRARY_TYPES } from "./libraryTypes";
@@ -301,6 +303,42 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
           onCheckedChange={form.setAutoTranslateMetadata}
         />
       </div>
+      <div className="space-y-1.5">
+        <Label>Trailer &amp; extras types</Label>
+        <p className="text-muted-foreground text-xs">
+          Video types fetched from metadata providers during refresh. Uncheck everything to disable
+          remote trailers for this library.
+        </p>
+        <div
+          className="grid grid-cols-1 gap-1.5 sm:grid-cols-2"
+          role="group"
+          aria-label="Trailer and extras types"
+        >
+          {PROVIDER_TRAILER_KINDS.map((kind) => {
+            const checked = form.trailerKinds.includes(kind);
+            return (
+              <label
+                key={kind}
+                className={cn(
+                  "flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm",
+                  checked
+                    ? "border-border bg-muted text-foreground"
+                    : "border-border/50 bg-muted/30 text-muted-foreground",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => form.toggleTrailerKind(kind)}
+                  className="h-3.5 w-3.5"
+                  style={{ accentColor: "var(--primary)" }}
+                />
+                {extraKindGroupLabel(kind)}
+              </label>
+            );
+          })}
+        </div>
+      </div>
       {form.contentLevels.length > 0 && (
         <div className="space-y-1.5">
           <Label>Provider Priority</Label>
@@ -308,7 +346,12 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
             Providers are asked in order from top to bottom. Uncheck a provider to skip it for that
             level.
           </p>
-          {form.hasMetadataProviders ? (
+          {form.chainLoading ? (
+            <div className="border-border bg-surface text-muted-foreground flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-xs">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading providers…
+            </div>
+          ) : form.hasMetadataProviders ? (
             form.contentLevels.map((level) => (
               <ProviderLevelSection
                 key={level}

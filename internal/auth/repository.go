@@ -52,7 +52,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 const allColumns = `id, email, username, password_hash, local_password_login_enabled, role, permissions, enabled,
 	library_ids, max_playback_quality, access_policy_revision,
 	max_streams, max_transcodes, max_profiles, download_allowed,
-	download_transcode_allowed, created_at, updated_at`
+	download_transcode_allowed, access_group_id, created_at, updated_at`
 
 // scanUser scans a single row into a *models.User.
 func scanUser(row pgx.Row) (*models.User, error) {
@@ -74,6 +74,7 @@ func scanUser(row pgx.Row) (*models.User, error) {
 		&u.MaxProfiles,
 		&u.DownloadAllowed,
 		&u.DownloadTranscodeAllowed,
+		&u.AccessGroupID,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
@@ -108,6 +109,7 @@ func scanUsers(rows pgx.Rows) ([]*models.User, error) {
 			&u.MaxProfiles,
 			&u.DownloadAllowed,
 			&u.DownloadTranscodeAllowed,
+			&u.AccessGroupID,
 			&u.CreatedAt,
 			&u.UpdatedAt,
 		)
@@ -177,11 +179,22 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 		cols = append(cols, "download_transcode_allowed")
 		args = append(args, *input.DownloadTranscodeAllowed)
 	}
+	if input.AccessGroupID != nil {
+		cols = append(cols, "access_group_id")
+		args = append(args, *input.AccessGroupID)
+	}
 
 	// Build placeholders: $1, $2, ..., $N
 	placeholders := make([]string, len(args))
 	for i := range args {
 		placeholders[i] = fmt.Sprintf("$%d", i+1)
+	}
+	// Admins stay ungrouped: scope/action decisions are role-blind, so the
+	// default group's ceilings would cap the server owner (mirrors the
+	// exclusion in the assign_default_group_to_existing_users migration).
+	if input.AccessGroupID == nil && input.Role != "admin" {
+		cols = append(cols, "access_group_id")
+		placeholders = append(placeholders, "(SELECT id FROM access_groups WHERE is_default)")
 	}
 
 	query := fmt.Sprintf("INSERT INTO users (%s) VALUES (%s) RETURNING %s",
@@ -311,6 +324,12 @@ func (r *UserRepository) Update(ctx context.Context, id int, input models.Update
 	if input.DownloadTranscodeAllowed != nil {
 		setClauses = append(setClauses, fmt.Sprintf("download_transcode_allowed = $%d", argIndex))
 		args = append(args, *input.DownloadTranscodeAllowed)
+		argIndex++
+	}
+	if input.AccessGroupIDSet {
+		setClauses = append(setClauses, fmt.Sprintf("access_group_id = $%d", argIndex))
+		accessPolicyPredicates = append(accessPolicyPredicates, fmt.Sprintf("access_group_id IS DISTINCT FROM $%d", argIndex))
+		args = append(args, input.AccessGroupID)
 		argIndex++
 	}
 

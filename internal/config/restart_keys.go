@@ -47,6 +47,7 @@ var restartRequiredKeys = map[string]bool{
 	"scanner.max_concurrent_libraries":     true,
 	"scanner.max_concurrent_scoped":        true,
 	"scanner.empty_trash_after_scan":       true,
+	"scanner.file_removal_grace":           true,
 	"matcher.enable_tv_series_root_queue":  true,
 	"matcher.enable_tv_series_group_queue": true,
 

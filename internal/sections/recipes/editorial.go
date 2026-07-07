@@ -59,12 +59,14 @@ type EditorialSpotlightParams struct {
 	LibraryID       *int            `json:"library_id,omitempty"`
 }
 
+// Note: "franchise" is intentionally absent — the fetcher has no franchise
+// data source yet, so accepting it would validate configs that can never
+// resolve. Re-add once franchise/collection grouping data lands.
 var validSubjectTypes = map[string]bool{
-	"director":  true,
-	"studio":    true,
-	"actor":     true,
-	"era":       true,
-	"franchise": true,
+	"director": true,
+	"studio":   true,
+	"actor":    true,
+	"era":      true,
 }
 
 type editorialSpotlightRecipe struct{}
@@ -92,16 +94,9 @@ func (editorialSpotlightRecipe) Validate(raw json.RawMessage) error {
 		return fmt.Errorf("editorial_spotlight: unknown subject_type %q", p.SubjectType)
 	}
 
-	// Default empty cadence to weekly before validating.
-	if p.RotationCadence == "" {
-		p.RotationCadence = CadenceWeekly
-	}
-
-	switch p.RotationCadence {
-	case CadenceDaily, CadenceWeekly, CadenceMonthly:
-		// valid
-	default:
-		return fmt.Errorf("editorial_spotlight: invalid rotation_cadence %q (want daily|weekly|monthly)", p.RotationCadence)
+	if err := oneOf("editorial_spotlight: rotation_cadence", string(p.RotationCadence),
+		"", string(CadenceDaily), string(CadenceWeekly), string(CadenceMonthly)); err != nil {
+		return err
 	}
 
 	if !p.AutoRotate && p.Subject == "" {
@@ -144,6 +139,99 @@ func (editorialSpotlightRecipe) Definition() RecipeDefinition {
 	}
 }
 
+// GenreRouletteParams configures genre_roulette: a deterministic rotating
+// spotlight on one of the library's top genres, using the same bucket hashing
+// as editorial_spotlight so every client sees the same genre for the whole
+// rotation window.
+type GenreRouletteParams struct {
+	RotationCadence RotationCadence `json:"rotation_cadence,omitempty"` // daily | weekly (default) | monthly
+	MinRating       float64         `json:"min_rating,omitempty"`       // default 6.0
+}
+
+type genreRouletteRecipe struct{}
+
+func (genreRouletteRecipe) Type() string                   { return "genre_roulette" }
+func (genreRouletteRecipe) NewParams() any                 { return &GenreRouletteParams{} }
+func (genreRouletteRecipe) DefaultCacheTTL() time.Duration { return 6 * time.Hour }
+func (genreRouletteRecipe) Resolve(rc ResolverContext) (ResolvedItems, error) {
+	return delegateResolve("genre_roulette", rc)
+}
+func (genreRouletteRecipe) Validate(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var p GenreRouletteParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	return oneOf("genre_roulette: rotation_cadence", string(p.RotationCadence),
+		"", string(CadenceDaily), string(CadenceWeekly), string(CadenceMonthly))
+}
+func (genreRouletteRecipe) Definition() RecipeDefinition {
+	return RecipeDefinition{
+		Type:             "genre_roulette",
+		Category:         CategoryEditorial,
+		SupportsRotation: true,
+		Presets: []GalleryPreset{
+			{
+				Key:              "genre_roulette_weekly",
+				DisplayName:      "Genre Roulette",
+				Icon:             "🎰",
+				DescriptionShort: "A different genre from your library every week.",
+				DefaultParams:    json.RawMessage(`{"rotation_cadence":"weekly"}`),
+			},
+		},
+	}
+}
+
+// AnniversariesParams configures anniversaries: titles celebrating a round
+// release anniversary this month (e.g. released exactly 10/20/25 years ago).
+type AnniversariesParams struct {
+	// MilestoneYears keeps only anniversaries that are a multiple of this many
+	// years (default 5, so 5th/10th/15th/... anniversaries qualify). Set to 1
+	// to include every anniversary.
+	MilestoneYears int `json:"milestone_years,omitempty"`
+}
+
+type anniversariesRecipe struct{}
+
+func (anniversariesRecipe) Type() string                   { return "anniversaries" }
+func (anniversariesRecipe) NewParams() any                 { return &AnniversariesParams{} }
+func (anniversariesRecipe) DefaultCacheTTL() time.Duration { return 24 * time.Hour }
+func (anniversariesRecipe) Resolve(rc ResolverContext) (ResolvedItems, error) {
+	return delegateResolve("anniversaries", rc)
+}
+func (anniversariesRecipe) Validate(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var p AnniversariesParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	if p.MilestoneYears < 0 {
+		return errors.New("anniversaries: milestone_years must be >= 0")
+	}
+	return nil
+}
+func (anniversariesRecipe) Definition() RecipeDefinition {
+	return RecipeDefinition{
+		Type:     "anniversaries",
+		Category: CategoryEditorial,
+		Presets: []GalleryPreset{
+			{
+				Key:              "anniversaries_default",
+				DisplayName:      "Anniversaries",
+				Icon:             "🎂",
+				DescriptionShort: "Titles celebrating a milestone release anniversary this month.",
+				DefaultParams:    json.RawMessage(`{"milestone_years":5}`),
+			},
+		},
+	}
+}
+
 func init() {
 	Register(editorialSpotlightRecipe{})
+	Register(genreRouletteRecipe{})
+	Register(anniversariesRecipe{})
 }

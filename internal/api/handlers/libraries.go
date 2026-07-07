@@ -183,6 +183,9 @@ type createLibraryRequest struct {
 	MetadataLanguage         string   `json:"metadata_language,omitempty"`
 	ChapterThumbnailsEnabled bool     `json:"chapter_thumbnails_enabled,omitempty"`
 	IntroDetectionEnabled    bool     `json:"intro_detection_enabled,omitempty"`
+	// TrailerKinds is the allow-list of remote video kinds fetched during
+	// metadata refresh; omitted = default (all provider kinds).
+	TrailerKinds []string `json:"trailer_kinds,omitempty"`
 }
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
@@ -195,6 +198,9 @@ type updateLibraryRequest struct {
 	AutoTranslateMetadata    *bool     `json:"auto_translate_metadata,omitempty"`
 	ChapterThumbnailsEnabled *bool     `json:"chapter_thumbnails_enabled,omitempty"`
 	IntroDetectionEnabled    *bool     `json:"intro_detection_enabled,omitempty"`
+	// TrailerKinds is the allow-list of remote video kinds fetched during
+	// metadata refresh (ExtraKind values); empty array disables remote videos.
+	TrailerKinds *[]string `json:"trailer_kinds,omitempty"`
 }
 
 // scanRequest represents the JSON body for POST /scan.
@@ -231,6 +237,7 @@ type libraryResponse struct {
 	ChapterThumbnailsEnabled   bool       `json:"chapter_thumbnails_enabled"`
 	ChapterThumbnailsSupported bool       `json:"chapter_thumbnails_supported"`
 	IntroDetectionEnabled      bool       `json:"intro_detection_enabled"`
+	TrailerKinds               []string   `json:"trailer_kinds"`
 	SortOrder                  int        `json:"sort_order"`
 	PosterURL                  string     `json:"poster_url,omitempty"`
 	LastScannedAt              *time.Time `json:"last_scanned_at,omitempty"`
@@ -299,6 +306,9 @@ type libraryRootResponse struct {
 	FirstSeenAt    time.Time       `json:"first_seen_at"`
 	LastSeenAt     time.Time       `json:"last_seen_at"`
 	ActiveOverride *rootOverride   `json:"active_override,omitempty"`
+	// ContentID is the catalog item this group matched to, when known — it
+	// lets the admin UI jump from an ambiguous root to the item's split flow.
+	ContentID string `json:"content_id,omitempty"`
 }
 
 type rootOverride struct {
@@ -343,6 +353,10 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 	if paths == nil {
 		paths = []string{}
 	}
+	trailerKinds := f.TrailerKinds
+	if trailerKinds == nil {
+		trailerKinds = []string{}
+	}
 	return libraryResponse{
 		ID:                         f.ID,
 		Paths:                      paths,
@@ -354,6 +368,7 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		ChapterThumbnailsEnabled:   f.ChapterThumbnailsEnabled,
 		ChapterThumbnailsSupported: false,
 		IntroDetectionEnabled:      f.IntroDetectionEnabled,
+		TrailerKinds:               trailerKinds,
 		SortOrder:                  f.SortOrder,
 		LastScannedAt:              f.LastScannedAt,
 		ScanWarningCode:            f.ScanWarningCode,
@@ -561,6 +576,7 @@ func (h *LibraryHandler) HandleCreateLibrary(w http.ResponseWriter, r *http.Requ
 		MetadataLanguage:         req.MetadataLanguage,
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
+		TrailerKinds:             req.TrailerKinds,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrDuplicatePath) {
@@ -658,6 +674,7 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 		AutoTranslateMetadata:    req.AutoTranslateMetadata,
 		ChapterThumbnailsEnabled: req.ChapterThumbnailsEnabled,
 		IntroDetectionEnabled:    req.IntroDetectionEnabled,
+		TrailerKinds:             req.TrailerKinds,
 	})
 	if err != nil {
 		if errors.Is(err, catalog.ErrFolderNotFound) {
@@ -684,6 +701,26 @@ func (h *LibraryHandler) HandleUpdateLibrary(w http.ResponseWriter, r *http.Requ
 	if h.SectionRepo != nil && oldFolder.Name != folder.Name {
 		if syncErr := h.SectionRepo.SyncGeneratedHomeLibraryRecentTitles(r.Context(), id, oldFolder.Name, folder.Name); syncErr != nil {
 			slog.Warn("sync generated home section titles", "library_id", id, "error", syncErr)
+		}
+	}
+
+	// Re-fetch metadata when the library's metadata language changed, so
+	// existing items adopt the new language instead of keeping the one
+	// stamped at first match. Quick mode suffices: the refresh item lister
+	// includes complete-but-language-mismatched items.
+	if h.JobRepo != nil && !strings.EqualFold(strings.TrimSpace(oldFolder.MetadataLanguage), strings.TrimSpace(folder.MetadataLanguage)) {
+		job, jobErr := h.JobRepo.CreateLibraryRefresh(r.Context(), currentAdminUserID(r), adminjob.LibraryRefreshRequest{
+			LibraryID:   folder.ID,
+			LibraryName: folder.Name,
+			Mode:        adminjob.LibraryRefreshModeQuick,
+		}, "Queued metadata refresh after library language change")
+		if jobErr != nil {
+			var conflict *adminjob.ActiveJobConflictError
+			if !errors.As(jobErr, &conflict) {
+				slog.Warn("queue language-change metadata refresh failed", "library_id", folder.ID, "error", jobErr)
+			}
+		} else {
+			publishEventJob(r.Context(), h.EventsHub, "job.created", job)
 		}
 	}
 
@@ -1968,6 +2005,44 @@ func (h *LibraryHandler) HandleGetLibraryProviders(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, map[string]any{"levels": levels})
 }
 
+// HandleGetLibraryProviderDefaults handles GET /libraries/provider-defaults.
+// It returns the provider chain that would be seeded for a new library of the
+// given type, grouped by content level and in seeded order. The admin UI
+// renders this while creating a library instead of re-deriving the chain from
+// plugin manifests client-side, so the displayed defaults and the chain the
+// server seeds on create can never disagree.
+func (h *LibraryHandler) HandleGetLibraryProviderDefaults(w http.ResponseWriter, r *http.Request) {
+	libraryType := r.URL.Query().Get("library_type")
+	levels := metadataContentLevelsForLibraryType(libraryType)
+	if len(levels) == 0 {
+		// A type the server doesn't seed chains for (unknown, or one like
+		// podcasts with no metadata content levels) simply has no defaults.
+		writeJSON(w, http.StatusOK, map[string]any{"levels": map[string][]chainLevelEntry{}})
+		return
+	}
+
+	if h.ChainRepo == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Provider chain management is not configured")
+		return
+	}
+
+	out := make(map[string][]chainLevelEntry, len(levels))
+	for _, level := range levels {
+		out[level] = []chainLevelEntry{}
+	}
+	for _, e := range h.seedDefaultChain(r.Context(), libraryType) {
+		out[e.ContentLevel] = append(out[e.ContentLevel], chainLevelEntry{
+			PluginInstallationID: e.PluginInstallationID,
+			CapabilityID:         e.CapabilityID,
+			ProviderSlug:         e.CapabilityID,
+			Priority:             e.Priority,
+			Enabled:              e.Enabled,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"levels": out})
+}
+
 // HandleSetLibraryProviders handles PUT /libraries/{id}/providers.
 // It replaces the entire provider chain for the given library.
 func (h *LibraryHandler) HandleSetLibraryProviders(w http.ResponseWriter, r *http.Request) {
@@ -2045,50 +2120,73 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 
 	var entries []metadata.ChainEntry
 	for _, level := range levels {
-		type candidate struct {
-			installationID int
-			capabilityID   string
-			priority       int
-			enabled        bool
-		}
-		var candidates []candidate
-
+		candidates := make([]seedCandidate, 0, len(caps))
 		for _, c := range caps {
-			defaultPriority := metadata.LookupDefaultPriority(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
-			if defaultPriority > 0 {
-				candidates = append(candidates, candidate{
-					installationID: c.PluginInstallationID,
-					capabilityID:   c.CapabilityID,
-					priority:       defaultPriority,
-					enabled:        true,
-				})
-			} else {
-				// Plugin doesn't declare this level — include but disabled.
-				candidates = append(candidates, candidate{
-					installationID: c.PluginInstallationID,
-					capabilityID:   c.CapabilityID,
-					priority:       999,
-					enabled:        false,
-				})
-			}
-		}
-
-		sort.Slice(candidates, func(i, j int) bool {
-			return candidates[i].priority < candidates[j].priority
-		})
-
-		for i, cand := range candidates {
-			entries = append(entries, metadata.ChainEntry{
-				PluginInstallationID: cand.installationID,
-				CapabilityID:         cand.capabilityID,
-				CapabilityType:       "metadata_provider.v1",
-				ContentLevel:         level,
-				Priority:             i,
-				Enabled:              cand.enabled,
+			p := metadata.LookupSeedPlacement(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
+			candidates = append(candidates, seedCandidate{
+				installationID:   c.PluginInstallationID,
+				capabilityID:     c.CapabilityID,
+				supportsLevel:    p.SupportsLevel,
+				declaredPriority: p.DefaultPriority,
+				defaultEnabled:   p.DefaultEnabled,
 			})
+		}
+		entries = append(entries, buildSeededChainEntries(level, candidates)...)
+	}
+
+	return entries
+}
+
+// seedCandidate is a metadata provider under consideration for a freshly seeded
+// chain at one content level, carrying the manifest-declared values that decide
+// its placement.
+type seedCandidate struct {
+	installationID   int
+	capabilityID     string
+	supportsLevel    bool // provider handles this content level (declared it, or is a legacy catch-all)
+	declaredPriority int  // manifest default_priority for this level; 0 = level not declared
+	defaultEnabled   bool // manifest default_enabled; false = specialist opts out of auto-enable
+}
+
+// buildSeededChainEntries orders the providers for one content level and assigns
+// positional priorities. Providers that do not handle this level are dropped
+// outright — a single-purpose provider (e.g. audiobook/ebook/manga metadata)
+// never clutters a library type it cannot serve. Of the remaining providers, one
+// that declares this level (declaredPriority>0) is placed by that priority and
+// seeded enabled unless it opted out via default_enabled; a legacy provider that
+// declares no levels at all is parked last and disabled. Keeping an opted-out
+// provider at its declared priority (rather than forcing it last) means that when
+// a user does enable it, it slots in where the manifest intends instead of
+// jumping to the top of the chain.
+func buildSeededChainEntries(level string, candidates []seedCandidate) []metadata.ChainEntry {
+	ranked := make([]seedCandidate, 0, len(candidates))
+	for _, c := range candidates {
+		if !c.supportsLevel {
+			continue
+		}
+		if c.declaredPriority > 0 {
+			ranked = append(ranked, c)
+		} else {
+			// Legacy provider that declares no levels — park last, disabled.
+			ranked = append(ranked, seedCandidate{installationID: c.installationID, capabilityID: c.capabilityID, supportsLevel: true, declaredPriority: 999, defaultEnabled: false})
 		}
 	}
 
+	sort.SliceStable(ranked, func(i, j int) bool {
+		return ranked[i].declaredPriority < ranked[j].declaredPriority
+	})
+
+	entries := make([]metadata.ChainEntry, len(ranked))
+	for i, c := range ranked {
+		entries[i] = metadata.ChainEntry{
+			PluginInstallationID: c.installationID,
+			CapabilityID:         c.capabilityID,
+			CapabilityType:       "metadata_provider.v1",
+			ContentLevel:         level,
+			Priority:             i,
+			Enabled:              c.declaredPriority > 0 && c.defaultEnabled,
+		}
+	}
 	return entries
 }
 
@@ -2293,6 +2391,29 @@ func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	contentIDByGroup := map[string]string{}
+	if h.pool != nil {
+		claimRows, err := h.pool.Query(r.Context(), `
+			SELECT group_key_version, content_group_key, content_id
+			FROM media_item_groups
+			WHERE media_folder_id = $1
+		`, libraryID)
+		if err != nil {
+			slog.Warn("listing group claims", "library_id", libraryID, "error", err)
+		} else {
+			defer claimRows.Close()
+			for claimRows.Next() {
+				var version int
+				var groupKey, contentID string
+				if err := claimRows.Scan(&version, &groupKey, &contentID); err != nil {
+					slog.Warn("scanning group claim", "library_id", libraryID, "error", err)
+					break
+				}
+				contentIDByGroup[groupOverrideLookupKey(version, groupKey)] = contentID
+			}
+		}
+	}
+
 	items := make([]libraryRootResponse, 0, len(groups))
 	for _, group := range groups {
 		rootPath := strings.TrimSpace(group.SampleObservedRootPath)
@@ -2317,6 +2438,7 @@ func (h *LibraryHandler) HandleListRoots(w http.ResponseWriter, r *http.Request)
 			OverrideSource: group.OverrideSource,
 			FirstSeenAt:    group.FirstSeenAt,
 			LastSeenAt:     group.LastSeenAt,
+			ContentID:      contentIDByGroup[groupOverrideLookupKey(group.GroupKeyVersion, group.ContentGroupKey)],
 		}
 		if override, ok := overrideByGroup[groupOverrideLookupKey(group.GroupKeyVersion, group.ContentGroupKey)]; ok {
 			resp.ActiveOverride = &rootOverride{
@@ -2359,7 +2481,7 @@ func (h *LibraryHandler) HandleUpsertRootOverride(w http.ResponseWriter, r *http
 	}
 	if location == nil || location.PrimaryContentGroupKey == "" {
 		if location != nil && location.ContentGroupCount > 1 {
-			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains multiple logical groups; override the group after splitting or selecting a specific item")
+			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains files from multiple items; resolve it with the item split flow (POST /admin/items/{id}/split)")
 			return
 		}
 		writeError(w, http.StatusNotFound, "not_found", "Root not found")
@@ -2417,7 +2539,7 @@ func (h *LibraryHandler) HandleDeleteRootOverride(w http.ResponseWriter, r *http
 	}
 	if location == nil || location.PrimaryContentGroupKey == "" {
 		if location != nil && location.ContentGroupCount > 1 {
-			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains multiple logical groups; delete the override from a specific group instead")
+			writeError(w, http.StatusConflict, "ambiguous_root", "Root contains files from multiple items; manage its identity overrides via the item split flow instead")
 			return
 		}
 		writeError(w, http.StatusNotFound, "not_found", "Root not found")
@@ -2495,10 +2617,15 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 		)`
 	}
 
+	// Manga chapters carry their series' match state; the chapter rows
+	// themselves stay 'pending' and are resolved through the manga series,
+	// so they must not surface as actionable unmatched items here.
+	mangaChapterGuard := ` AND ` + catalog.MangaChapterExclusionWhere("mi")
+
 	countSQL := `
 		SELECT COUNT(*)
 		FROM media_items mi
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')`
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')` + mangaChapterGuard
 	countSQL += filter
 
 	var total int
@@ -2521,10 +2648,10 @@ func (h *LibraryHandler) HandleListUnmatchedItems(w http.ResponseWriter, r *http
 			WHERE mil.content_id = mi.content_id
 			LIMIT 1
 		) lib ON true
-		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s
+		WHERE mi.status IN ('unmatched', 'pending', 'ambiguous')%s%s
 		ORDER BY mi.title ASC, mi.content_id ASC
 		LIMIT $%d OFFSET $%d
-	`, filter, len(filterArgs)+1, len(filterArgs)+2)
+	`, mangaChapterGuard, filter, len(filterArgs)+1, len(filterArgs)+2)
 
 	rows, err := h.pool.Query(r.Context(), listSQL, listArgs...)
 	if err != nil {

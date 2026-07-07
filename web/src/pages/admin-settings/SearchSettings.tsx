@@ -13,6 +13,7 @@ import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
 import { SettingField } from "./SettingField";
+import { formatDateTime } from "@/lib/datetime";
 
 const MEILI_KEYS = [
   "catalog.search.meilisearch.url",
@@ -289,6 +290,13 @@ export default function SearchSettings() {
                 </>
               )}
               <StatusRow label="Pending Events" value={String(status.index.pending_events)} />
+              {status.index.dead_lettered_events > 0 && (
+                <StatusRow
+                  label="Dead-lettered Events"
+                  value={String(status.index.dead_lettered_events)}
+                  badge="stale until rebuild"
+                />
+              )}
               <StatusRow
                 label="Last Sync"
                 value={formatStatusDate(status.index.last_sync_at) || "Never"}
@@ -336,7 +344,7 @@ function formatStatusDate(value?: string) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleString();
+  return formatDateTime(date);
 }
 
 function formatIndexedTypes(value?: string[]) {

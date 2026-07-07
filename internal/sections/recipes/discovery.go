@@ -2,7 +2,6 @@ package recipes
 
 import (
 	"encoding/json"
-	"errors"
 	"time"
 )
 
@@ -108,6 +107,10 @@ func (awardWinnersRecipe) Definition() RecipeDefinition {
 		Type:            "award_winners",
 		Category:        CategoryDiscovery,
 		AvoidDuplicates: true,
+		// The resolver is a stub until award metadata exists (see
+		// fetchAwardWinners). Hidden keeps existing saved sections resolvable
+		// (they render empty) without advertising presets that can't work.
+		Hidden: true,
 		Presets: []GalleryPreset{
 			{
 				Key:              "aw_oscar",
@@ -173,7 +176,8 @@ func (forgottenFavoritesRecipe) Definition() RecipeDefinition {
 
 // FormatShowcaseParams configures the format_showcase resolver.
 type FormatShowcaseParams struct {
-	Format string `json:"format"` // 4k | dolby_vision | hdr
+	Format string `json:"format"`         // 4k | dolby_vision | hdr
+	Sort   string `json:"sort,omitempty"` // rating (default) | recent
 }
 
 type formatShowcaseRecipe struct{}
@@ -192,12 +196,10 @@ func (formatShowcaseRecipe) Validate(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
-	switch p.Format {
-	case "", "4k", "dolby_vision", "hdr":
-		return nil
-	default:
-		return errors.New("format_showcase: unknown format")
+	if err := oneOf("format_showcase: format", p.Format, "", "4k", "dolby_vision", "hdr"); err != nil {
+		return err
 	}
+	return oneOf("format_showcase: sort", p.Sort, "", "rating", "recent")
 }
 func (formatShowcaseRecipe) Definition() RecipeDefinition {
 	return RecipeDefinition{
@@ -206,6 +208,7 @@ func (formatShowcaseRecipe) Definition() RecipeDefinition {
 		AvoidDuplicates: false,
 		Presets: []GalleryPreset{
 			{Key: "fs_4k", DisplayName: "4K Showcase", Icon: "🎥", DescriptionShort: "Titles available in 4K UHD.", DefaultParams: json.RawMessage(`{"format":"4k"}`)},
+			{Key: "fs_4k_recent", DisplayName: "New in 4K", Icon: "🎥", DescriptionShort: "Recently added 4K UHD titles.", DefaultParams: json.RawMessage(`{"format":"4k","sort":"recent"}`)},
 			{Key: "fs_dv", DisplayName: "Dolby Vision Picks", Icon: "🌈", DescriptionShort: "Dolby Vision titles.", DefaultParams: json.RawMessage(`{"format":"dolby_vision"}`)},
 			{Key: "fs_hdr", DisplayName: "HDR Highlights", Icon: "✨", DescriptionShort: "HDR-mastered titles.", DefaultParams: json.RawMessage(`{"format":"hdr"}`)},
 		},

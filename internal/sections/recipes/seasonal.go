@@ -49,6 +49,18 @@ func weekdayBeforeHour(weekday time.Weekday, hour int) DatePredicate {
 	}
 }
 
+// weekdaysFromHour returns a predicate that matches times on any of the given
+// weekdays at or after the given hour (24-hour, e.g. 17 for 5pm).
+func weekdaysFromHour(hour int, weekdays ...time.Weekday) DatePredicate {
+	set := make(map[time.Weekday]bool, len(weekdays))
+	for _, d := range weekdays {
+		set[d] = true
+	}
+	return func(t time.Time) bool {
+		return set[t.Weekday()] && t.Hour() >= hour
+	}
+}
+
 // SeasonalPredicates maps theme names to their date predicates.
 // Themes without a predicate here are not supported.
 var SeasonalPredicates = map[string]DatePredicate{
@@ -60,6 +72,7 @@ var SeasonalPredicates = map[string]DatePredicate{
 	"summer":             inMonths(time.June, time.July, time.August),
 	"summer_blockbuster": inMonths(time.June, time.July, time.August),
 	"saturday_morning":   weekdayBeforeHour(time.Saturday, 13),
+	"family_movie_night": weekdaysFromHour(17, time.Friday, time.Saturday),
 }
 
 // SeasonalThemeOrder lists themes from most-specific to most-general. When
@@ -73,6 +86,7 @@ var SeasonalThemeOrder = []string{
 	"christmas",
 	"halloween",
 	"saturday_morning",
+	"family_movie_night",
 	"summer_blockbuster",
 	"summer",
 }
@@ -174,6 +188,13 @@ func (seasonalRecipe) Definition() RecipeDefinition {
 					`{"enabled_themes":["halloween","christmas","valentines","st_patricks","thanksgiving","summer_blockbuster","saturday_morning"]}`,
 				),
 			},
+			{
+				Key:              "se_family_movie_night",
+				DisplayName:      "Family Movie Night",
+				Icon:             "🍿",
+				DescriptionShort: "Family picks on Friday and Saturday evenings.",
+				DefaultParams:    json.RawMessage(`{"enabled_themes":["family_movie_night"]}`),
+			},
 		},
 	}
 }
@@ -181,12 +202,14 @@ func (seasonalRecipe) Definition() RecipeDefinition {
 // SeasonalTitleOverride returns the per-theme display name for the active
 // theme, or "" when no override is configured (or no theme is active). The
 // fetcher applies the override only when non-empty, so callers can fall back
-// to the section's saved Title.
-func SeasonalTitleOverride(p SeasonalThemedParams, now time.Time) string {
+// to the section's saved Title. The usable filter must match the one passed
+// to ActiveSeasonalThemeWhere so the override tracks the theme that actually
+// resolved; pass nil to consider every theme usable.
+func SeasonalTitleOverride(p SeasonalThemedParams, now time.Time, usable func(theme string) bool) string {
 	var theme string
 	switch {
 	case len(p.EnabledThemes) > 0:
-		theme = ActiveSeasonalTheme(p.EnabledThemes, now)
+		theme = ActiveSeasonalThemeWhere(p.EnabledThemes, now, usable)
 	case p.Theme != "":
 		// Legacy mode — only honour an override if the predicate currently fires.
 		pred, ok := SeasonalPredicates[p.Theme]
@@ -204,6 +227,16 @@ func SeasonalTitleOverride(p SeasonalThemedParams, now time.Time) string {
 // predicate matches `now`. Returns "" when no enabled theme is in season.
 // Themes not in SeasonalThemeOrder are skipped silently.
 func ActiveSeasonalTheme(enabled []string, now time.Time) string {
+	return ActiveSeasonalThemeWhere(enabled, now, nil)
+}
+
+// ActiveSeasonalThemeWhere is ActiveSeasonalTheme with an extra usable filter:
+// an in-season theme that fails the filter is skipped so a lower-priority
+// in-season theme can win instead. The fetcher passes "has an executable
+// query" here so a theme without backing data never blacks out the section
+// during its own window (e.g. an enabled theme whose query support hasn't
+// landed yet outranking one that works). A nil filter accepts every theme.
+func ActiveSeasonalThemeWhere(enabled []string, now time.Time, usable func(theme string) bool) string {
 	if len(enabled) == 0 {
 		return ""
 	}
@@ -213,6 +246,9 @@ func ActiveSeasonalTheme(enabled []string, now time.Time) string {
 	}
 	for _, t := range SeasonalThemeOrder {
 		if !enabledSet[t] {
+			continue
+		}
+		if usable != nil && !usable(t) {
 			continue
 		}
 		pred, ok := SeasonalPredicates[t]

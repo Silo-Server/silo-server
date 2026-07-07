@@ -34,6 +34,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/policy"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -50,6 +51,10 @@ type UserRepository interface {
 	Update(ctx context.Context, id int, input models.UpdateUserInput) error
 	Delete(ctx context.Context, id int) error
 	GetByID(ctx context.Context, id int) (*models.User, error)
+}
+
+type AccessGroupValidator interface {
+	Get(ctx context.Context, id int64) (*access.Group, error)
 }
 
 // ServerSettingsStore provides access to server-wide admin settings.
@@ -96,6 +101,7 @@ type AdminHandler struct {
 	ItemRefreshResolver          ItemRefreshScopeResolver
 	ImpersonationService         ImpersonationService
 	RealtimeHub                  *notifications.Hub
+	AccessGroups                 AccessGroupValidator
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
 	OnUserSessionsRevoked        func(ctx context.Context, userID int)
@@ -212,6 +218,26 @@ type updateUserRequest struct {
 	MaxProfiles              *int                   `json:"max_profiles,omitempty"`
 	DownloadAllowed          *bool                  `json:"download_allowed,omitempty"`
 	DownloadTranscodeAllowed *bool                  `json:"download_transcode_allowed,omitempty"`
+	AccessGroupID            updateAccessGroupField `json:"access_group_id,omitempty"`
+}
+
+type updateAccessGroupField struct {
+	Set   bool
+	Value *int64
+}
+
+func (f *updateAccessGroupField) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		f.Value = nil
+		return nil
+	}
+	var value int64
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	f.Value = &value
+	return nil
 }
 
 // adminUserResponse represents a user in admin JSON responses.
@@ -229,6 +255,7 @@ type adminUserResponse struct {
 	MaxProfiles              int        `json:"max_profiles"`
 	DownloadAllowed          bool       `json:"download_allowed"`
 	DownloadTranscodeAllowed bool       `json:"download_transcode_allowed"`
+	AccessGroupID            *int64     `json:"access_group_id"`
 	CreatedAt                time.Time  `json:"created_at"`
 	UpdatedAt                time.Time  `json:"updated_at"`
 	LastActiveAt             *time.Time `json:"last_active_at,omitempty"`
@@ -279,7 +306,7 @@ func (h *AdminHandler) presignPosterURL(r *http.Request, path string) string {
 
 // toAdminUserResponse converts a User model to an admin API response.
 func toAdminUserResponse(u *models.User) adminUserResponse {
-	return adminUserResponse{
+	resp := adminUserResponse{
 		ID:                       u.ID,
 		Username:                 u.Username,
 		Email:                    u.Email,
@@ -296,6 +323,11 @@ func toAdminUserResponse(u *models.User) adminUserResponse {
 		CreatedAt:                u.CreatedAt,
 		UpdatedAt:                u.UpdatedAt,
 	}
+	if u.AccessGroupID != nil {
+		id := *u.AccessGroupID
+		resp.AccessGroupID = &id
+	}
+	return resp
 }
 
 func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) (map[int]time.Time, error) {
@@ -482,6 +514,26 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "bad_request", "max_profiles must be at least 1")
 		return
 	}
+	if req.AccessGroupID.Set {
+		if req.AccessGroupID.Value != nil && *req.AccessGroupID.Value <= 0 {
+			writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
+			return
+		}
+		if req.AccessGroupID.Value != nil {
+			if h.AccessGroups == nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "Access groups are not configured")
+				return
+			}
+			if _, err := h.AccessGroups.Get(r.Context(), *req.AccessGroupID.Value); err != nil {
+				if errors.Is(err, access.ErrGroupNotFound) {
+					writeError(w, http.StatusUnprocessableEntity, "unprocessable_entity", "Invalid access_group_id")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to validate access group")
+				return
+			}
+		}
+	}
 	var permissions *[]string
 	if req.Permissions.Set {
 		normalized, err := auth.NormalizePermissions(req.Permissions.Value)
@@ -506,6 +558,8 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		MaxProfiles:              req.MaxProfiles,
 		DownloadAllowed:          req.DownloadAllowed,
 		DownloadTranscodeAllowed: req.DownloadTranscodeAllowed,
+		AccessGroupIDSet:         req.AccessGroupID.Set,
+		AccessGroupID:            req.AccessGroupID.Value,
 	}
 
 	var currentUser *models.User
@@ -803,7 +857,8 @@ func updateMayRequireSessionRevocation(input models.UpdateUserInput) bool {
 		input.Role != nil ||
 		input.Enabled != nil ||
 		input.Permissions != nil ||
-		input.MaxPlaybackQuality != nil
+		input.MaxPlaybackQuality != nil ||
+		input.AccessGroupIDSet
 }
 
 func updateRequiresSessionRevocation(current *models.User, input models.UpdateUserInput) bool {
@@ -826,7 +881,17 @@ func updateRequiresSessionRevocation(current *models.User, input models.UpdateUs
 		access.NormalizePlaybackQuality(*input.MaxPlaybackQuality) != access.NormalizePlaybackQuality(current.MaxPlaybackQuality) {
 		return true
 	}
+	if input.AccessGroupIDSet && !accessGroupIDEqual(input.AccessGroupID, current.AccessGroupID) {
+		return true
+	}
 	return false
+}
+
+func accessGroupIDEqual(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func (h *AdminHandler) revokeUserSessions(ctx context.Context, userID int) error {
@@ -871,7 +936,7 @@ func (h *AdminHandler) HandleListUnmatched(w http.ResponseWriter, r *http.Reques
 	rows, err := h.pool.Query(r.Context(),
 		`SELECT id, media_folder_id, file_path, file_size, container
 		 FROM media_files
-		 WHERE content_id IS NULL
+		 WHERE content_id IS NULL AND extra_id IS NULL
 		 ORDER BY id ASC
 		 LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
@@ -2091,21 +2156,6 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if key == "defaults.max_playback_quality" {
-		normalized, ok := access.ParsePlaybackQualityPreset(req.Value)
-		if !ok {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid max_playback_quality")
-			return
-		}
-		req.Value = normalized
-	}
-	if key == "defaults.max_profiles" {
-		n, err := strconv.Atoi(req.Value)
-		if err != nil || n < 1 {
-			writeError(w, http.StatusBadRequest, "bad_request", "defaults.max_profiles must be an integer >= 1")
-			return
-		}
-	}
 	switch key {
 	case markers.SettingMode, markers.SettingLazyPlayback:
 		if normalized, err := markers.NormalizeSetting(key, req.Value); err != nil {
@@ -2114,6 +2164,14 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 		} else {
 			req.Value = normalized
 		}
+	case clientip.SettingTrustedProxies:
+		normalized, err := clientip.NormalizeCIDRList(req.Value)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"clientip.trusted_proxies must be a comma-separated list of CIDRs: "+err.Error())
+			return
+		}
+		req.Value = normalized
 	case "ai.asr_base_url":
 		if llm.IsChatOnlyGateway(req.Value) {
 			writeError(w, http.StatusBadRequest, "bad_request",
@@ -2129,6 +2187,38 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 				"metadata_ai.on_view must be off, button, or auto")
 			return
 		}
+	case policy.SettingDecisionLogVerbosity:
+		switch strings.TrimSpace(strings.ToLower(req.Value)) {
+		case policy.DecisionLogVerbosityDigest, policy.DecisionLogVerbosityVerbose:
+			req.Value = strings.TrimSpace(strings.ToLower(req.Value))
+		default:
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"policy.decision_log_verbosity must be digest or verbose")
+			return
+		}
+	case "policy.editor_enabled":
+		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "policy.editor_enabled must be true or false")
+			return
+		}
+		req.Value = strconv.FormatBool(enabled)
+	case policy.SettingDecisionLogScopeSampleRate:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"policy.decision_log_scope_sample_rate must be an integer greater than 0")
+			return
+		}
+		req.Value = strconv.Itoa(n)
+	case policy.SettingDecisionLogRetentionDays:
+		n, err := strconv.Atoi(strings.TrimSpace(req.Value))
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"policy.decision_log_retention_days must be an integer greater than 0")
+			return
+		}
+		req.Value = strconv.Itoa(n)
 	case "subtitle_ai.transcribe_quota_jobs":
 		if n, err := strconv.Atoi(req.Value); err != nil || n < 0 {
 			writeError(w, http.StatusBadRequest, "bad_request",
@@ -2141,6 +2231,21 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 				"subtitle_ai.transcribe_quota_period must be day, week, or month")
 			return
 		}
+	case notifications.SettingApplePushDeliveryEnabled:
+		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "notifications.apple_push_delivery_enabled must be true or false")
+			return
+		}
+		req.Value = strconv.FormatBool(enabled)
+	case notifications.SettingPushRelayURL, notifications.SettingPushRelayDeploymentID, notifications.SettingPushRelayAPIKey:
+		// The registration flow persists the relay URL, deployment id, and API
+		// key together; a direct write to any of them desyncs the stored URL
+		// from the credentials the relay minted for it (and feeds an arbitrary
+		// id into the next rotation request).
+		writeError(w, http.StatusBadRequest, "bad_request",
+			key+" is managed by the push relay registration flow; use POST /admin/notifications/push/relay/register")
+		return
 	case catalog.SearchSettingProvider:
 		switch strings.TrimSpace(strings.ToLower(req.Value)) {
 		case catalog.SearchProviderPostgres, catalog.SearchProviderMeilisearch:

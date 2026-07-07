@@ -53,6 +53,32 @@ func TestLoadFromDBJellyfinWebEnabledDefaultsToTrue(t *testing.T) {
 	}
 }
 
+func TestLoadFromDBPolicyEditorEnabledDefaultsFalse(t *testing.T) {
+	cfg, err := LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if cfg.Policy.EditorEnabled {
+		t.Fatal("Policy.EditorEnabled = true, want default false")
+	}
+
+	cfg, err = LoadFromDB(map[string]string{"policy.editor_enabled": "true"})
+	if err != nil {
+		t.Fatalf("LoadFromDB() returned error: %v", err)
+	}
+	if !cfg.Policy.EditorEnabled {
+		t.Fatal("Policy.EditorEnabled = false, want configured true")
+	}
+
+	_, err = LoadFromDB(map[string]string{"policy.editor_enabled": "maybe"})
+	if err == nil {
+		t.Fatal("LoadFromDB() error = nil, want invalid bool error")
+	}
+	if !strings.Contains(err.Error(), "policy.editor_enabled") {
+		t.Fatalf("LoadFromDB() error = %v, want key name", err)
+	}
+}
+
 func TestLoadFromDBAudiobookshelfCompatFlagGatesCompatListener(t *testing.T) {
 	cfg, err := LoadFromDB(map[string]string{})
 	if err != nil {

@@ -421,6 +421,7 @@ export interface HistoryImportRun {
   unmatched: number;
   progress_updated: number;
   history_created: number;
+  watchlist_added: number;
   skipped: number;
   warnings: string[];
   unmatched_samples: HistoryImportUnmatchedSample[];
@@ -479,6 +480,7 @@ export interface CreateHistoryImportRunRequest {
   plex_server_id?: string;
   plex_base_url?: string;
   plex_token?: string;
+  plex_account_token?: string;
 }
 
 export interface CreateHistoryImportSourceRequest {
@@ -953,6 +955,10 @@ export interface VersionVideoTrack {
   title?: string;
   codec?: string;
   dolby_vision?: string;
+  dv_profile?: number;
+  dv_bl_compat_id?: number;
+  dv_el_present?: boolean;
+  hdr10_plus?: boolean;
   profile?: string;
   level?: number;
   width?: number;
@@ -962,6 +968,7 @@ export interface VersionVideoTrack {
   frame_rate?: string;
   bitrate?: number;
   video_range?: string;
+  video_range_type?: string;
   color_primaries?: string;
   color_space?: string;
   color_transfer?: string;
@@ -1079,6 +1086,29 @@ export type MarkerSegmentInput = { start?: number | null; end?: number | null };
  */
 export type SetMarkersRequest = Partial<Record<MarkerKind, MarkerSegmentInput | null>>;
 
+/**
+ * Remote provider video (trailer, teaser, featurette, ...) attached to an
+ * item. Kinds: "trailer", "teaser", "featurette", "clip", "behind_the_scenes",
+ * "bloopers", "deleted_scene", "other".
+ */
+export interface ItemVideo {
+  kind: string;
+  site: string;
+  site_key: string;
+  name?: string;
+  language?: string;
+  is_official: boolean;
+}
+
+/** Local extras file attached to an item; content_id is a watchable target. */
+export interface ItemExtra {
+  content_id: string;
+  kind: string;
+  title?: string;
+  duration_seconds?: number;
+  file_id?: number;
+}
+
 export interface ItemDetail {
   content_id: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
@@ -1145,6 +1175,11 @@ export interface ItemDetail {
 
   // Root folder paths for series items (admin-only).
   folder_paths?: string[];
+
+  // Remote provider videos, pre-sorted (trailers first, official first).
+  videos?: ItemVideo[];
+  // Local extras files, pre-sorted by kind.
+  extras?: ItemExtra[];
 
   // Playback.
   versions: FileVersion[];
@@ -1343,6 +1378,7 @@ export interface QuerySort {
     | "added_at"
     | "release_date"
     | "last_air_date"
+    | "latest_episode_added"
     | "year"
     | "content_rating"
     | "runtime"
@@ -1630,9 +1666,12 @@ export interface ImportTraktCollectionRequest {
   library_ids?: number[];
   title: string;
   description?: string;
-  preset: "trending" | "popular" | "recommended";
-  media_type: "movie" | "tv";
+  // preset/media_type drive a discovery-feed collection; list_url drives a
+  // user-authored Trakt list. Exactly one path is used per request.
+  preset?: "trending" | "popular" | "recommended";
+  media_type?: "movie" | "tv";
   profile_id?: string;
+  list_url?: string;
   limit?: number;
   featured?: boolean;
   poster_url?: string;
@@ -2195,6 +2234,38 @@ export interface RequestListParams {
 }
 
 // Admin
+export interface AccessGroup {
+  id: number;
+  name: string;
+  description: string;
+  library_ids: number[] | null;
+  max_playback_quality: string;
+  download_allowed: boolean;
+  download_transcode_allowed: boolean;
+  max_streams: number;
+  max_transcodes: number;
+  allowed_permissions: string[] | null;
+  requests_allowed: boolean;
+  is_default: boolean;
+  member_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AccessGroupInput {
+  name?: string;
+  description?: string;
+  library_ids?: number[] | null;
+  max_playback_quality?: string;
+  download_allowed?: boolean;
+  download_transcode_allowed?: boolean;
+  max_streams?: number;
+  max_transcodes?: number;
+  allowed_permissions?: string[] | null;
+  requests_allowed?: boolean;
+  is_default?: boolean;
+}
+
 export interface AdminUser {
   id: number;
   username: string;
@@ -2203,6 +2274,7 @@ export interface AdminUser {
   permissions: string[];
   enabled: boolean;
   library_ids: number[] | null;
+  access_group_id: number | null;
   max_playback_quality: string;
   max_streams: number;
   max_transcodes: number;
@@ -2239,6 +2311,7 @@ export interface UpdateUserRequest {
   permissions?: string[];
   enabled?: boolean;
   library_ids?: number[] | null;
+  access_group_id?: number | null;
   max_playback_quality?: string;
   max_streams?: number;
   max_transcodes?: number;
@@ -2521,6 +2594,8 @@ export interface ServerNotificationChannel {
   enabled: boolean;
   notify_new_movies: boolean;
   notify_new_episodes: boolean;
+  notify_new_audiobooks: boolean;
+  notify_new_ebooks: boolean;
   notify_request_submitted: boolean;
   notify_request_approved: boolean;
   notify_request_declined: boolean;
@@ -2543,6 +2618,8 @@ export interface ServerNotificationChannelInput {
   enabled?: boolean;
   notify_new_movies?: boolean;
   notify_new_episodes?: boolean;
+  notify_new_audiobooks?: boolean;
+  notify_new_ebooks?: boolean;
   notify_request_submitted?: boolean;
   notify_request_approved?: boolean;
   notify_request_declined?: boolean;
@@ -2770,6 +2847,8 @@ export interface Library {
   chapter_thumbnails_enabled: boolean;
   chapter_thumbnails_supported: boolean;
   intro_detection_enabled: boolean;
+  /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
+  trailer_kinds: string[];
   sort_order: number;
   poster_url?: string;
   last_scanned_at: string | null;
@@ -2901,6 +2980,8 @@ export interface LibraryRoot {
   first_seen_at: string;
   last_seen_at: string;
   active_override?: LibraryRootOverride;
+  /** Catalog item this group matched to, when known. */
+  content_id?: string;
 }
 
 export interface LibraryRootsResponse {
@@ -2940,6 +3021,7 @@ export interface CreateLibraryRequest {
   auto_translate_metadata?: boolean;
   chapter_thumbnails_enabled?: boolean;
   intro_detection_enabled?: boolean;
+  trailer_kinds?: string[];
 }
 
 export interface UpdateLibraryRequest extends Partial<CreateLibraryRequest> {}
@@ -4091,6 +4173,68 @@ export interface ItemMatchApplyRequest {
   library_id?: number;
 }
 
+// Split/merge (wrong version-grouping repair) types
+
+export interface ItemFile {
+  id: number;
+  library_id: number;
+  file_path: string;
+  observed_root_path: string;
+  season_number?: number;
+  episode_number?: number;
+}
+
+export interface ItemFilesResponse {
+  files: ItemFile[];
+}
+
+export type SplitHistoryMode = "evidence" | "keep" | "move_all";
+
+export interface ItemSplitTarget {
+  provider_ids?: Record<string, string>;
+  content_id?: string;
+  unmatched?: boolean;
+  title?: string;
+  year?: number;
+}
+
+export interface ItemSplitRequest {
+  file_ids: number[];
+  target: ItemSplitTarget;
+  history_mode?: SplitHistoryMode;
+  persist_override?: boolean;
+  dry_run?: boolean;
+}
+
+export interface ReattributionReport {
+  playback_session_log: number;
+  downloads: number;
+  progress_moved: number;
+  progress_conflicts: number;
+  history_moved: number;
+  history_stayed: number;
+  history_ambiguous: number;
+  intent_moved: number;
+  episode_pairs_moved: number;
+  ambiguous_history?: {
+    user_id: number;
+    profile_id: string;
+    watched_at: string;
+  }[];
+}
+
+export interface ItemSplitResponse {
+  dry_run: boolean;
+  source_content_id: string;
+  target_content_id: string;
+  target_created: boolean;
+  files_moved: number;
+  root_overrides: string[];
+  file_overrides: string[];
+  episode_pairs: number;
+  reattribution: ReattributionReport;
+}
+
 // Image selector types
 export interface RemoteImage {
   provider_id: string;
@@ -4151,4 +4295,108 @@ export interface FilesystemBrowseResponse {
   path: string;
   parent: string;
   entries: FilesystemBrowseEntry[];
+}
+
+// --- Policy Engine ---
+
+export interface PolicyCapability {
+  enabled: boolean;
+  editor_available: boolean;
+  decision_types: string[];
+  generation: number;
+}
+
+export interface PolicyVendorModule {
+  path: string;
+  source: string;
+}
+
+export interface PolicyCompileIssue {
+  row: number;
+  col: number;
+  message: string;
+}
+
+export interface PolicyVersionSummary {
+  id: number;
+  document_id: number;
+  version_number: number;
+  source_sha256: string;
+  compiled_ok: boolean;
+  compile_error?: string;
+  created_by_user_id?: number;
+  comment?: string;
+  created_at: string;
+}
+
+export interface PolicyVersion extends PolicyVersionSummary {
+  source?: string;
+}
+
+export interface PolicyDocument {
+  id: number;
+  domain: string;
+  name: string;
+  enabled: boolean;
+  active_version_id?: number;
+  active_version?: PolicyVersion;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyCreateVersionResult {
+  id: number;
+  version_number: number;
+  compiled_ok: boolean;
+}
+
+export interface PolicyActivateVersionResult {
+  active_version_id: number;
+  generation: number;
+}
+
+export interface PolicySetDocumentEnabledResult {
+  id: number;
+  enabled: boolean;
+  generation: number;
+}
+
+export interface PolicyValidateResult {
+  compiled_ok: boolean;
+  errors: PolicyCompileIssue[];
+}
+
+export interface PolicySimulateRequest {
+  domain: string;
+  source?: string;
+  input: unknown;
+}
+
+export interface PolicySimulateResult {
+  decision: unknown;
+  eval_time_ns: number;
+  generation: number;
+}
+
+export interface PolicyDecisionEntry {
+  id: number;
+  timestamp: string;
+  decision_name: string;
+  policy_generation: number;
+  user_id?: number;
+  profile_id?: string;
+  session_id?: string;
+  request_id?: string;
+  node_id?: string;
+  allowed: boolean | null;
+  eval_time_ns: number;
+  input_digest: string;
+  input_sample?: unknown;
+  result_sample?: unknown;
+  error?: string;
+}
+
+export interface PolicyDecisionListResult {
+  entries: PolicyDecisionEntry[];
+  next_cursor?: string;
 }

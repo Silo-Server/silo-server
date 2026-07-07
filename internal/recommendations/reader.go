@@ -159,6 +159,8 @@ func (r *Reader) GetBecauseYouWatched(ctx context.Context, userID int, profileID
 
 // GetTasteMatchRow returns the strongest matching personalized cluster row for a genre,
 // falling back to the global genre sampler when no personalized cluster matches.
+// An empty genre auto-picks: every taste cluster qualifies (strongest first),
+// and the global fallback uses the server-wide top genre.
 func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, genre string, limit int, filter catalog.AccessFilter) (*ForYouRow, error) {
 	limit = normalizeRecommendationLimit(limit)
 
@@ -169,6 +171,10 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 
 	matching := make([]TasteCluster, 0, len(clusters))
 	for _, cluster := range clusters {
+		if genre == "" {
+			matching = append(matching, cluster)
+			continue
+		}
 		for _, dominantGenre := range cluster.DominantGenres {
 			if dominantGenre == genre {
 				matching = append(matching, cluster)
@@ -198,9 +204,20 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 		}
 		rows = trimRows(rows, limit)
 		if len(rows) == 0 {
-			return nil, nil
+			// This cluster's cached items were entirely filtered out (e.g.
+			// access restrictions) — try the next-strongest cluster instead of
+			// giving up before the global fallback below.
+			continue
 		}
 		return &rows[0], nil
+	}
+
+	if genre == "" {
+		topGenres, err := r.repo.GetTopGenres(ctx, 1)
+		if err != nil || len(topGenres) == 0 {
+			return nil, err
+		}
+		genre = topGenres[0]
 	}
 
 	items, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypeGenreSamplerPrefix+genre, "")

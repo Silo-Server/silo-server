@@ -44,8 +44,10 @@ func TestBuildRecentlyAddedQueryKeepsGenericPathForMultiLibraryConfig(t *testing
 	}, nil, nil, catalog.AccessFilter{})
 
 	for _, want := range []string{
-		"FROM media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id",
-		"mil.media_folder_id IN ($2, $3)",
+		"FROM media_items mi",
+		// Library scope is a semi-join so an item in several selected
+		// libraries yields one row (see buildLibraryScope).
+		"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE mil_scope_in.content_id = mi.content_id AND mil_scope_in.media_folder_id = ANY($2))",
 		"ORDER BY mi.created_at DESC, mi.content_id ASC",
 	} {
 		if !strings.Contains(query, want) {

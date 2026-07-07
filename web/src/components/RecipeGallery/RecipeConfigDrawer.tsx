@@ -56,9 +56,12 @@ export default function RecipeConfigDrawer({
     (params.source_preset === "trending" || params.source_preset === "popular");
   const collectionMissing =
     def.type === "collection" && collectionID.trim() === "" && !isAutoBackedTraktPreset;
+  const curatedListEmpty =
+    def.type === "admin_curated_list" &&
+    (!Array.isArray(params.item_ids) || params.item_ids.length === 0);
 
   const handleAdd = () => {
-    if (collectionMissing) {
+    if (collectionMissing || curatedListEmpty) {
       return;
     }
     const payload = {
@@ -120,6 +123,10 @@ export default function RecipeConfigDrawer({
         </p>
       ) : null}
 
+      {curatedListEmpty ? (
+        <p className="mt-2 text-xs text-amber-300">Add at least one title to the curated list.</p>
+      ) : null}
+
       <div className="mt-4">
         <label className="mb-1 block text-xs text-white/70">Item limit</label>
         <input
@@ -166,7 +173,7 @@ export default function RecipeConfigDrawer({
         <button
           type="button"
           onClick={handleAdd}
-          disabled={collectionMissing}
+          disabled={collectionMissing || curatedListEmpty}
           className="rounded bg-indigo-600 px-3 py-1 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           Add section

@@ -3,6 +3,7 @@ package scanner
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
@@ -85,7 +86,9 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 		book, err = parseEbookCBZ(path)
 	case ".pdf":
 		book, err = parseEbookPDF(path)
-	case ".mobi", ".azw", ".azw3", ".cbr":
+	case ".mobi", ".azw", ".azw3":
+		book, err = parseEbookMOBI(path)
+	case ".cbr":
 		book = parsedEbook{Format: strings.TrimPrefix(format, ".")}
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))
@@ -440,6 +443,168 @@ func parseEbookCBZ(path string) (parsedEbook, error) {
 		}
 	}
 	return book, nil
+}
+
+// maxMOBIHeaderScanSize bounds how much of a MOBI/AZW file we read. All
+// metadata (PalmDOC header, MOBI header, EXTH records, full title) lives in
+// record 0 at the file start, so a fixed window covers it without streaming the
+// whole book.
+const maxMOBIHeaderScanSize = 256 * 1024
+
+// MOBI/AZW/AZW3 share the Palm Database (PDB) container: a PDB header, a record
+// offset list, then record 0 holding the PalmDOC header (16 bytes), the MOBI
+// header, and the optional EXTH metadata block. parseEbookMOBI extracts the
+// title, authors, and ISBN that Calibre and most tools write into EXTH, so these
+// formats no longer fall back to the filename with no author or identifier.
+func parseEbookMOBI(path string) (parsedEbook, error) {
+	book := parsedEbook{Format: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")}
+	file, err := os.Open(path)
+	if err != nil {
+		return book, err
+	}
+	defer file.Close()
+
+	header := make([]byte, maxMOBIHeaderScanSize)
+	n, err := io.ReadFull(file, header)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return book, err
+	}
+	header = header[:n]
+	// PDB record count (uint16 BE @76) and first record-info entry (@78) give
+	// the offset of record 0, which holds the headers.
+	if len(header) < 78+8 {
+		return book, nil
+	}
+	if binary.BigEndian.Uint16(header[76:78]) < 1 {
+		return book, nil
+	}
+	rec0Off := int(binary.BigEndian.Uint32(header[78:82]))
+	if rec0Off <= 0 || rec0Off >= len(header) {
+		return book, nil
+	}
+
+	// PDB database name (bytes 0..31, NUL-padded) is the last-resort title.
+	pdbName := decodeMOBIString(trimTrailingNUL(header[0:32]), 65001)
+
+	rec0 := header[rec0Off:]
+	if len(rec0) < 16+8 || string(rec0[16:20]) != "MOBI" {
+		if pdbName != "" {
+			book.Title = pdbName
+		}
+		return book, nil
+	}
+	mobi := rec0[16:] // skip the 16-byte PalmDOC header
+
+	mobiHeaderLen := int(binary.BigEndian.Uint32(mobi[4:8]))
+	var encoding uint32
+	if len(mobi) >= 16 {
+		encoding = binary.BigEndian.Uint32(mobi[12:16]) // 65001=UTF-8, else CP1252
+	}
+
+	// Full title: offset (relative to rec0 start) and length at MOBI+0x44/0x48.
+	if len(mobi) >= 0x4C {
+		nameOff := int(binary.BigEndian.Uint32(mobi[0x44:0x48]))
+		nameLen := int(binary.BigEndian.Uint32(mobi[0x48:0x4C]))
+		if nameOff > 0 && nameLen > 0 && nameOff+nameLen <= len(rec0) {
+			book.Title = decodeMOBIString(rec0[nameOff:nameOff+nameLen], encoding)
+		}
+	}
+
+	// The EXTH metadata block, when present, immediately follows the MOBI header.
+	// Detect it by its "EXTH" magic rather than the header flag, whose offset
+	// varies across MOBI versions.
+	if mobiHeaderLen > 0 && mobiHeaderLen+4 <= len(mobi) &&
+		string(mobi[mobiHeaderLen:mobiHeaderLen+4]) == "EXTH" {
+		parseMOBIEXTH(mobi[mobiHeaderLen:], encoding, &book)
+	}
+
+	if book.Title == "" {
+		book.Title = pdbName
+	}
+	return book, nil
+}
+
+// parseMOBIEXTH walks the EXTH record list, pulling the metadata fields the
+// catalog/enricher uses. EXTH record types: 100 author, 101 publisher,
+// 103 description, 104 ISBN, 503 updated title, 524 language.
+func parseMOBIEXTH(data []byte, encoding uint32, book *parsedEbook) {
+	if len(data) < 12 || string(data[0:4]) != "EXTH" {
+		return
+	}
+	// data carries the rest of record 0, not just the EXTH block. Bound parsing
+	// to the declared EXTH length so a bad record count can't walk full-text
+	// bytes and assign junk metadata.
+	exthLen := int(binary.BigEndian.Uint32(data[4:8]))
+	if exthLen < 12 || exthLen > len(data) {
+		return
+	}
+	data = data[:exthLen]
+	count := int(binary.BigEndian.Uint32(data[8:12]))
+	pos := 12
+	var isbn string
+	for i := 0; i < count; i++ {
+		if pos+8 > len(data) {
+			break
+		}
+		recType := binary.BigEndian.Uint32(data[pos : pos+4])
+		recLen := int(binary.BigEndian.Uint32(data[pos+4 : pos+8]))
+		if recLen < 8 || pos+recLen > len(data) {
+			break
+		}
+		payload := data[pos+8 : pos+recLen]
+		pos += recLen
+
+		switch recType {
+		case 100: // author
+			book.Authors = append(book.Authors, splitEbookAuthors(decodeMOBIString(payload, encoding))...)
+		case 101: // publisher
+			if book.Publisher == "" {
+				book.Publisher = decodeMOBIString(payload, encoding)
+			}
+		case 103: // description
+			if book.Description == "" {
+				book.Description = cleanEbookDescription(decodeMOBIString(payload, encoding))
+			}
+		case 104: // ISBN
+			if isbn == "" {
+				isbn = decodeMOBIString(payload, encoding)
+			}
+		case 503: // updated title (overrides the MOBI full-name title)
+			if t := decodeMOBIString(payload, encoding); t != "" {
+				book.Title = t
+			}
+		case 524: // language
+			if book.Language == "" {
+				book.Language = decodeMOBIString(payload, encoding)
+			}
+		}
+	}
+	if isbn != "" {
+		if normalized := normalizeEbookISBN(isbn); normalized != "" {
+			book.ISBN = normalized
+		}
+	}
+}
+
+// decodeMOBIString decodes EXTH/header bytes using the MOBI text-encoding code
+// (65001 = UTF-8, anything else defaults to CP1252, the MOBI default).
+func decodeMOBIString(data []byte, encoding uint32) string {
+	if len(data) == 0 {
+		return ""
+	}
+	if encoding != 65001 {
+		if decoded, err := charmap.Windows1252.NewDecoder().Bytes(data); err == nil {
+			return strings.TrimSpace(string(decoded))
+		}
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func trimTrailingNUL(b []byte) []byte {
+	if i := bytes.IndexByte(b, 0); i >= 0 {
+		return b[:i]
+	}
+	return b
 }
 
 // naturalPathLess orders archive entry names case-insensitively with digit

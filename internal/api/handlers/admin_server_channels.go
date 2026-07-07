@@ -41,6 +41,8 @@ type serverChannelResponse struct {
 	Enabled                bool       `json:"enabled"`
 	NotifyNewMovies        bool       `json:"notify_new_movies"`
 	NotifyNewEpisodes      bool       `json:"notify_new_episodes"`
+	NotifyNewAudiobooks    bool       `json:"notify_new_audiobooks"`
+	NotifyNewEbooks        bool       `json:"notify_new_ebooks"`
 	NotifyRequestSubmitted bool       `json:"notify_request_submitted"`
 	NotifyRequestApproved  bool       `json:"notify_request_approved"`
 	NotifyRequestDeclined  bool       `json:"notify_request_declined"`
@@ -65,6 +67,8 @@ func serverChannelToResponse(ch notifications.ServerChannel) serverChannelRespon
 		Enabled:                ch.Enabled,
 		NotifyNewMovies:        ch.NotifyNewMovies,
 		NotifyNewEpisodes:      ch.NotifyNewEpisodes,
+		NotifyNewAudiobooks:    ch.NotifyNewAudiobooks,
+		NotifyNewEbooks:        ch.NotifyNewEbooks,
 		NotifyRequestSubmitted: ch.NotifyRequestSubmitted,
 		NotifyRequestApproved:  ch.NotifyRequestApproved,
 		NotifyRequestDeclined:  ch.NotifyRequestDeclined,
@@ -86,6 +90,8 @@ type serverChannelRequest struct {
 	Enabled                *bool   `json:"enabled"`
 	NotifyNewMovies        *bool   `json:"notify_new_movies"`
 	NotifyNewEpisodes      *bool   `json:"notify_new_episodes"`
+	NotifyNewAudiobooks    *bool   `json:"notify_new_audiobooks"`
+	NotifyNewEbooks        *bool   `json:"notify_new_ebooks"`
 	NotifyRequestSubmitted *bool   `json:"notify_request_submitted"`
 	NotifyRequestApproved  *bool   `json:"notify_request_approved"`
 	NotifyRequestDeclined  *bool   `json:"notify_request_declined"`
@@ -100,6 +106,8 @@ func (r serverChannelRequest) toInput() notifications.ServerChannelInput {
 		Enabled:                r.Enabled,
 		NotifyNewMovies:        r.NotifyNewMovies,
 		NotifyNewEpisodes:      r.NotifyNewEpisodes,
+		NotifyNewAudiobooks:    r.NotifyNewAudiobooks,
+		NotifyNewEbooks:        r.NotifyNewEbooks,
 		NotifyRequestSubmitted: r.NotifyRequestSubmitted,
 		NotifyRequestApproved:  r.NotifyRequestApproved,
 		NotifyRequestDeclined:  r.NotifyRequestDeclined,

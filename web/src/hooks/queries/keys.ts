@@ -319,6 +319,7 @@ export const calendarKeys = {
 export const downloadKeys = {
   all: ["downloads"] as const,
   list: () => ["downloads", "list"] as const,
+  capability: () => ["downloads", "capability"] as const,
 };
 
 export const themeKeys = {
@@ -330,6 +331,8 @@ export const themeKeys = {
 
 export const adminKeys = {
   users: () => ["admin", "users"] as const,
+  accessGroups: () => ["admin", "accessGroups"] as const,
+  accessGroup: (id: number) => ["admin", "accessGroups", id] as const,
   serverNotificationChannels: () => ["admin", "notifications", "serverChannels"] as const,
   userDetail: (userId: number) => ["admin", "users", userId] as const,
   userProfiles: (userId?: number) => ["admin", "users", userId, "profiles"] as const,
@@ -361,6 +364,8 @@ export const adminKeys = {
   collectionTemplates: () => ["admin", "collections", "templates"] as const,
   collectionTemplateBundles: () => ["admin", "collections", "templateBundles"] as const,
   libraryProviders: (id: number) => ["admin", "libraries", id, "providers"] as const,
+  libraryProviderDefaults: (libraryType: string) =>
+    ["admin", "libraries", "provider-defaults", libraryType] as const,
   nodes: () => ["admin", "nodes"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
@@ -387,6 +392,17 @@ export const adminKeys = {
   ipUsers: (ip: string, days?: number) => ["admin", "ips", ip, days] as const,
   operationalLogs: (params: Record<string, unknown>) => ["admin", "logs", "app", params] as const,
   auditLogs: (params: Record<string, unknown>) => ["admin", "logs", "audit", params] as const,
+  policyCapability: () => ["policy", "capability"] as const,
+  policyVendor: () => ["admin", "policy", "vendor"] as const,
+  policyDocuments: () => ["admin", "policy", "documents"] as const,
+  policyDocument: (id?: number) => ["admin", "policy", "documents", id ?? "none"] as const,
+  policyVersions: (id?: number) =>
+    ["admin", "policy", "documents", id ?? "none", "versions"] as const,
+  policyVersion: (id?: number, version?: number) =>
+    ["admin", "policy", "documents", id ?? "none", "versions", version ?? "none"] as const,
+  policyDecisions: (params: Record<string, unknown>) =>
+    ["admin", "policy", "decisions", params] as const,
+  policyDecision: (id?: number) => ["admin", "policy", "decisions", id ?? "none"] as const,
   subtitleProviders: () => ["admin", "subtitleProviders"] as const,
   downloadedSubtitles: (params: {
     provider?: string;

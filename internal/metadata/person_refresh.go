@@ -72,7 +72,9 @@ func (s *PersonRefreshService) RefreshPerson(ctx context.Context, id int64) (*mo
 		return nil, fmt.Errorf("person refresh providers are not configured")
 	}
 
-	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool)
+	// Person refresh is a background path; the nil checker falls back to a
+	// direct pool query rather than the hot-path installation cache.
+	providers, err := resolveEnabledProviders(ctx, s.pluginResolver, s.pool, nil)
 	if err != nil {
 		return nil, fmt.Errorf("resolve person providers: %w", err)
 	}
@@ -167,6 +169,11 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 	}
 
 	if err := s.repo.Update(ctx, refreshed); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The row was merged into another person concurrently; there is no
+			// longer anything to refresh under this id.
+			return nil, ErrPersonNotFound
+		}
 		return nil, fmt.Errorf("update person %d: %w", id, err)
 	}
 	s.enqueuePersonPhoto(ctx, refreshed, accumulator.ProviderIDs, photoProviderID)

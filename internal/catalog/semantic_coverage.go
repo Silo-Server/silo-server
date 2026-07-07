@@ -58,7 +58,7 @@ type catalogTypeCoverage struct {
 const semanticCoverageEligibleByTypeSQL = `
 SELECT mi.type, COUNT(*) AS eligible
 FROM media_items mi
-WHERE NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = mi.content_id)
+WHERE ` + catalogSearchExcludeMangaChaptersSQL + `
   AND ($1::text[] IS NULL OR mi.type = ANY($1))
   AND (mi.status = 'matched' OR mi.type IN ('audiobook','ebook'))
 GROUP BY mi.type`
@@ -72,7 +72,7 @@ const semanticCoverageVectorizedByTypeSQL = `
 SELECT mi.type, COUNT(*) AS vectorized
 FROM media_item_embeddings e
 JOIN media_items mi ON mi.content_id = e.media_item_id
-WHERE NOT EXISTS (SELECT 1 FROM manga_chapters mc WHERE mc.chapter_content_id = mi.content_id)
+WHERE ` + catalogSearchExcludeMangaChaptersSQL + `
   AND ($1::text[] IS NULL OR mi.type = ANY($1))
   AND (mi.status = 'matched' OR mi.type IN ('audiobook','ebook'))
   AND ($2 = '' OR e.model = $2)

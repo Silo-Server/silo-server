@@ -284,9 +284,10 @@ func (r *LibraryItemRepository) FilterAccessibleContentIDs(ctx context.Context, 
 // handles the "permits nothing" early-outs.
 //
 // The structure mirrors ItemRepository.EnsureAccessible: select FROM the owning
-// media_items row, join media_item_libraries only when the viewer is
-// library-restricted, and resolve episodes through their parent series so an
-// episode is gated on EnsureAccessible(series_id)-equivalent membership.
+// media_items row, gate library membership through the shared per-item
+// EXISTS / NOT EXISTS predicates (libraryAccessConditions), and resolve
+// episodes through their parent series so an episode is gated on
+// EnsureAccessible(series_id)-equivalent membership.
 func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, allowedRatings []string) (string, []any) {
 	args := []any{contentIDs}
 	var allowedIdx, disabledIdx, ratingIdx int
@@ -303,36 +304,16 @@ func buildFilterAccessibleContentIDsSQL(contentIDs []string, allowedFolderIDs, d
 		ratingIdx = len(args)
 	}
 
-	needsLibJoin := allowedIdx > 0 || disabledIdx > 0
-
-	// folderConds builds the membership predicate against the media_item_libraries
-	// alias (mil), shared verbatim by the item and episode branches. Only called
-	// when needsLibJoin, so it always yields at least one condition.
-	folderConds := func() string {
-		conds := make([]string, 0, 2)
-		if allowedIdx > 0 {
-			conds = append(conds, fmt.Sprintf("mil.media_folder_id = ANY($%d)", allowedIdx))
-		}
-		if disabledIdx > 0 {
-			conds = append(conds, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", disabledIdx))
-		}
-		return strings.Join(conds, " AND ")
-	}
-
 	// Item branch gates the media item directly; episode branch resolves the
 	// parent series and gates on it (mirroring EnsureAccessible(series_id)).
+	// Both branches share the same placeholder indexes.
 	itemFrom := "media_items mi"
 	episodeFrom := "episodes e JOIN media_items mi ON mi.content_id = e.series_id"
 	itemConds := []string{"mi.content_id = req.content_id"}
 	episodeConds := []string{"e.content_id = req.content_id"}
 
-	if needsLibJoin {
-		itemFrom += " JOIN media_item_libraries mil ON mil.content_id = mi.content_id"
-		episodeFrom += " JOIN media_item_libraries mil ON mil.content_id = e.series_id"
-		fc := folderConds()
-		itemConds = append(itemConds, fc)
-		episodeConds = append(episodeConds, fc)
-	}
+	itemConds = append(itemConds, libraryAccessConditions("mi.content_id", allowedIdx, disabledIdx)...)
+	episodeConds = append(episodeConds, libraryAccessConditions("e.series_id", allowedIdx, disabledIdx)...)
 	if ratingIdx > 0 {
 		rc := fmt.Sprintf("mi.content_rating = ANY($%d)", ratingIdx)
 		itemConds = append(itemConds, rc)

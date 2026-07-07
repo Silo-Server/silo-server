@@ -42,6 +42,7 @@ export interface CatalogSearchStatus {
     document_count: number;
     vector_document_count: number;
     pending_events: number;
+    dead_lettered_events: number;
     last_rebuild_at?: string;
     last_sync_at?: string;
     last_processed_event_id: number;

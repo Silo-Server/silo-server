@@ -304,6 +304,11 @@ func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
 		return
 	}
+	entries, err = h.filterHiddenWatchlistSeries(r.Context(), store, profileID, entries)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
+		return
+	}
 
 	items, err := resolveItems(h, r, entries, func(e userstore.WatchlistEntry) string { return e.MediaItemID })
 	if err != nil {
@@ -312,6 +317,34 @@ func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http
 	}
 
 	writeJSON(w, http.StatusOK, itemsListResponse{Items: items})
+}
+
+// filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
+// The entries stay in the store (and on synced providers) so a newly added
+// episode makes the series reappear; only the display surface hides them.
+func (h *PersonalDataHandler) filterHiddenWatchlistSeries(ctx context.Context, store userstore.UserStore, profileID string, entries []userstore.WatchlistEntry) ([]userstore.WatchlistEntry, error) {
+	if h.episodeRepo == nil || len(entries) == 0 {
+		return entries, nil
+	}
+	entryIDs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entryIDs = append(entryIDs, entry.MediaItemID)
+	}
+	visibility := catalog.NewWatchlistVisibility(h.itemRepo, h.episodeRepo)
+	hidden, err := visibility.HiddenSeriesIDs(ctx, store, profileID, entryIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(hidden) == 0 {
+		return entries, nil
+	}
+	filtered := entries[:0]
+	for _, entry := range entries {
+		if _, ok := hidden[entry.MediaItemID]; !ok {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered, nil
 }
 
 // HandleCheckWatchlist handles GET /watchlist/{item_id}.

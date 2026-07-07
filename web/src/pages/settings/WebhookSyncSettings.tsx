@@ -421,7 +421,7 @@ export default function WebhookSyncSettings() {
 
     void (async () => {
       try {
-        const servers = await completePlexAuthentication(pinID, returnedPlexPinCode);
+        const { servers } = await completePlexAuthentication(pinID, returnedPlexPinCode);
         if (cancelled) {
           return;
         }

@@ -22,6 +22,7 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 	maxStreams := 4
 	permissions := []string{"metadata_curation"}
 	samePermissions := []string{"download"}
+	groupID := int64(5)
 
 	current := &models.User{
 		Role:               "user",
@@ -95,6 +96,16 @@ func TestUpdateRequiresSessionRevocation(t *testing.T) {
 			name: "password",
 			in:   models.UpdateUserInput{Password: &password},
 			want: true,
+		},
+		{
+			name: "access group set",
+			in:   models.UpdateUserInput{AccessGroupIDSet: true, AccessGroupID: &groupID},
+			want: true,
+		},
+		{
+			name: "access group unchanged",
+			in:   models.UpdateUserInput{AccessGroupIDSet: true, AccessGroupID: nil},
+			want: false,
 		},
 		{
 			name: "non access fields",

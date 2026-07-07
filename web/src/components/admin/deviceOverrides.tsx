@@ -19,6 +19,7 @@ import {
 } from "@/lib/settingsManifest";
 import { cn } from "@/lib/utils";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
+import { formatDate } from "@/lib/datetime";
 
 export const UNKNOWN_PROFILE_ID = "unknown-profile";
 
@@ -96,7 +97,7 @@ export function formatRelative(iso: string | undefined): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.round(h / 24);
   if (d < 30) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return formatDate(iso);
 }
 
 export function shortenId(id: string, visible = 8): string {

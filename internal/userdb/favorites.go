@@ -116,17 +116,25 @@ func ListFavoritesByMediaItems(db *sql.DB, profileID string, mediaItemIDs []stri
 // AddToWatchlist adds a media item to a profile's watchlist.
 // If the item is already on the watchlist, the operation is a no-op.
 func AddToWatchlist(db *sql.DB, profileID, mediaItemID string) error {
-	return AddToWatchlistAt(db, profileID, mediaItemID, time.Now().UTC())
+	_, err := AddToWatchlistAt(db, profileID, mediaItemID, time.Now().UTC())
+	return err
 }
 
 // AddToWatchlistAt adds a media item to a profile's watchlist with an explicit
 // added-at timestamp (used when importing from an external provider).
-func AddToWatchlistAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Time) error {
-	_, err := db.Exec(
+func AddToWatchlistAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	result, err := db.Exec(
 		`INSERT OR IGNORE INTO watchlist (profile_id, media_item_id, added_at) VALUES (?, ?, ?)`,
 		profileID, mediaItemID, addedAt.UTC().Format(time.RFC3339),
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // RemoveFromWatchlist removes a media item from a profile's watchlist.

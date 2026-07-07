@@ -29,6 +29,7 @@ type Service struct {
 	jellyfin   *JellyfinClient
 	plex       *PlexClient
 	watchState *watchstate.Service
+	stores     userstore.UserStoreProvider
 	bgContext  context.Context
 
 	// runSemaphore limits concurrent run goroutines to maxConcurrentRuns.
@@ -51,6 +52,7 @@ func NewService(bgContext context.Context, repo *Repository, storeProvider users
 		jellyfin:     NewJellyfinClient(),
 		plex:         NewPlexClient(),
 		watchState:   watchstate.NewService(storeProvider),
+		stores:       storeProvider,
 		bgContext:    bgContext,
 		runSemaphore: make(chan struct{}, maxConcurrentRuns),
 		runCancels:   make(map[string]context.CancelFunc),
@@ -252,7 +254,7 @@ func (s *Service) CreateRun(ctx context.Context, userID int, input CreateRunInpu
 		}
 		sourceType = SourceTypePlex
 		connectionMode = mode
-		provider = NewPlexServerProvider(s.plex, auth.BaseURL, auth.Token)
+		provider = NewPlexServerProvider(s.plex, auth.BaseURL, auth.Token).WithAccountToken(auth.AccountToken)
 
 	default:
 		return nil, fmt.Errorf("unsupported source type")
@@ -365,14 +367,18 @@ func (s *Service) resolvePlexAuth(ctx context.Context, userID int, input CreateR
 		if err := s.repo.ConsumePlexSession(ctx, session.ID); err != nil {
 			return nil, "", err
 		}
-		return &plexAuth{BaseURL: baseURL, Token: server.AccessToken}, ConnectionModePlexOAuth, nil
+		return &plexAuth{BaseURL: baseURL, Token: server.AccessToken, AccountToken: session.AuthToken}, ConnectionModePlexOAuth, nil
 	}
 
 	if input.PlexBaseURL != "" {
 		if input.PlexToken == "" {
 			return nil, "", fmt.Errorf("plex_token is required for browser Plex imports")
 		}
-		return &plexAuth{BaseURL: input.PlexBaseURL, Token: input.PlexToken}, ConnectionModePlexOAuth, nil
+		// Prefer the explicit account token: in the browser OAuth flow
+		// PlexToken is a PMS access token, which account-level APIs (the
+		// watchlist) reject. Falling back to PlexToken keeps manually pasted
+		// plex.tv account tokens working.
+		return &plexAuth{BaseURL: input.PlexBaseURL, Token: input.PlexToken, AccountToken: firstNonEmpty(input.PlexAccountToken, input.PlexToken)}, ConnectionModePlexOAuth, nil
 	}
 	if input.PlexToken != "" {
 		return nil, "", fmt.Errorf("plex_base_url is required for browser Plex imports")
@@ -392,10 +398,28 @@ func (s *Service) resolvePlexAuth(ctx context.Context, userID int, input CreateR
 		if input.PlexToken == "" {
 			return nil, "", fmt.Errorf("plex_token is required for predefined Plex sources")
 		}
-		return &plexAuth{BaseURL: source.BaseURL, Token: input.PlexToken}, ConnectionModePredefined, nil
+		return &plexAuth{BaseURL: source.BaseURL, Token: input.PlexToken, AccountToken: firstNonEmpty(input.PlexAccountToken, input.PlexToken)}, ConnectionModePredefined, nil
 	}
 
 	return nil, "", fmt.Errorf("plex_session_id, plex_base_url, or source_id is required for Plex imports")
+}
+
+// addToWatchlist puts a matched watchlist import onto the importing
+// profile's watchlist (idempotent: the store insert is ON CONFLICT DO
+// NOTHING, so re-imports do not duplicate or reorder entries).
+func (s *Service) addToWatchlist(ctx context.Context, userID int, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	if s.stores == nil {
+		return false, fmt.Errorf("watchlist import: user store provider not configured")
+	}
+	store, err := s.stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("watchlist import: open user store: %w", err)
+	}
+	inserted, err := store.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
+	if err != nil {
+		return false, fmt.Errorf("watchlist import: add %s: %w", mediaItemID, err)
+	}
+	return inserted, nil
 }
 
 func (s *Service) executeRun(run *Run, provider Provider) {
@@ -480,6 +504,19 @@ func (s *Service) executeRun(run *Run, provider Provider) {
 			continue
 		}
 		summary.Matched++
+
+		// Watchlist entries carry no watch state: the matched item joins the
+		// importing profile's watchlist and the progress pipeline is skipped.
+		if record.Watchlisted {
+			inserted, err := s.addToWatchlist(ctx, run.UserID, run.ProfileID, match.MediaItemID, record.UpdatedAt)
+			if err != nil {
+				summary.Warnings = append(summary.Warnings, err.Error())
+			} else if inserted {
+				summary.WatchlistAdded++
+			}
+			s.persistProgressMaybe(ctx, run.ID, summary, i+1, len(records))
+			continue
+		}
 
 		shouldWriteProgress := true
 		localProgress, err := s.repo.GetProgress(ctx, run.UserID, run.ProfileID, match.MediaItemID)

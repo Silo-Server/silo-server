@@ -130,6 +130,8 @@ type ImageCacheRunStats struct {
 	Failed           int
 	Skipped          int
 	DeletedSucceeded int
+	UploadedVariants int
+	ExistingVariants int
 	RuntimeLimited   bool
 }
 
@@ -140,6 +142,8 @@ func (s *ImageCacheRunStats) add(other ImageCacheRunStats) {
 	s.Failed += other.Failed
 	s.Skipped += other.Skipped
 	s.DeletedSucceeded += other.DeletedSucceeded
+	s.UploadedVariants += other.UploadedVariants
+	s.ExistingVariants += other.ExistingVariants
 }
 
 // RunOnce claims and processes one batch of already-queued jobs. It does not
@@ -189,9 +193,9 @@ loop:
 		go func(job *models.MetadataImageCacheJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			outcome := p.processOne(ctx, job)
+			result := p.processOne(ctx, job)
 			mu.Lock()
-			switch outcome {
+			switch result.outcome {
 			case "succeeded":
 				stats.Succeeded++
 			case "skipped":
@@ -199,6 +203,8 @@ loop:
 			default:
 				stats.Failed++
 			}
+			stats.UploadedVariants += result.uploadedVariants
+			stats.ExistingVariants += result.existingVariants
 			mu.Unlock()
 		}(job)
 	}
@@ -335,14 +341,20 @@ func (p *ImageCacheProcessor) markSucceeded(parent context.Context, job *models.
 	}
 }
 
-func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.MetadataImageCacheJob) string {
+type imageCacheProcessResult struct {
+	outcome          string
+	uploadedVariants int
+	existingVariants int
+}
+
+func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.MetadataImageCacheJob) imageCacheProcessResult {
 	if job == nil {
-		return "skipped"
+		return imageCacheProcessResult{outcome: "skipped"}
 	}
 	imageType, err := imageCacheJobImageType(job.ImageType)
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
-		return "failed"
+		return imageCacheProcessResult{outcome: "failed"}
 	}
 
 	// Confirm the target still references this job's source before uploading.
@@ -353,23 +365,23 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 	current, err := p.jobs.CurrentTargetSourcePath(ctx, job)
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
-		return "failed"
+		return imageCacheProcessResult{outcome: "failed"}
 	}
 	if current != job.SourcePath {
 		p.markSucceeded(ctx, job)
-		return "skipped"
+		return imageCacheProcessResult{outcome: "skipped"}
 	}
 
 	downloadURL := job.SourcePath
 	if isProviderImagePath(downloadURL) {
 		if p.resolver == nil {
 			p.markFailed(ctx, job, "missing image resolver")
-			return "failed"
+			return imageCacheProcessResult{outcome: "failed"}
 		}
 		downloadURL = p.resolver.ResolveImageURL(ctx, job.SourcePath, "original")
 		if downloadURL == "" {
 			p.markFailed(ctx, job, "image resolver returned empty URL")
-			return "failed"
+			return imageCacheProcessResult{outcome: "failed"}
 		}
 	}
 
@@ -385,54 +397,65 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 	})
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
-		return "failed"
+		return imageCacheProcessResult{outcome: "failed"}
 	}
 
 	if result == nil {
 		p.markFailed(ctx, job, "image cache returned no result")
-		return "failed"
+		return imageCacheProcessResult{outcome: "failed"}
+	}
+	processResult := imageCacheProcessResult{
+		uploadedVariants: result.UploadedVariants,
+		existingVariants: result.ExistingVariants,
 	}
 	cachedPath := cachedOriginalImagePath(result.BasePath, result.Ext)
 	if cachedPath == "" {
 		p.markFailed(ctx, job, "image cache returned empty stored path")
-		return "failed"
+		processResult.outcome = "failed"
+		return processResult
 	}
 	var updated bool
 	switch job.TargetType {
 	case ImageCacheTargetItem:
 		if p.targets.Items == nil {
 			p.markFailed(ctx, job, "missing item updater")
-			return "failed"
+			processResult.outcome = "failed"
+			return processResult
 		}
 		updated, err = p.targets.Items.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.ImageType, job.SourcePath, cachedPath, result.Thumbhash)
 	case ImageCacheTargetItemLocalization:
 		if p.targets.ItemLocalizations == nil {
 			p.markFailed(ctx, job, "missing item localization updater")
-			return "failed"
+			processResult.outcome = "failed"
+			return processResult
 		}
 		updated, err = p.targets.ItemLocalizations.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.TargetLanguage, job.ImageType, job.SourcePath, cachedPath, result.Thumbhash)
 	case ImageCacheTargetSeason:
 		if p.targets.Seasons == nil {
 			p.markFailed(ctx, job, "missing season updater")
-			return "failed"
+			processResult.outcome = "failed"
+			return processResult
 		}
 		updated, err = p.targets.Seasons.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.SourcePath, cachedPath, result.Thumbhash)
 	case ImageCacheTargetSeasonLocalization:
 		if p.targets.SeasonLocalizations == nil {
 			p.markFailed(ctx, job, "missing season localization updater")
-			return "failed"
+			processResult.outcome = "failed"
+			return processResult
 		}
 		updated, err = p.targets.SeasonLocalizations.UpdateArtworkIfSourceMatches(ctx, job.TargetContentID, job.TargetLanguage, job.SourcePath, cachedPath, result.Thumbhash)
 	case ImageCacheTargetEpisode:
 		if p.targets.Episodes == nil {
 			p.markFailed(ctx, job, "missing episode updater")
-			return "failed"
+			processResult.outcome = "failed"
+			return processResult
 		}
 		updated, err = p.targets.Episodes.UpdateStillIfSourceMatches(ctx, job.TargetContentID, job.SourcePath, cachedPath, result.Thumbhash)
 	case ImageCacheTargetPerson:
 		if p.targets.People == nil {
 			p.markFailed(ctx, job, "missing person updater")
-			return "failed"
+			processResult.outcome = "failed"
+			return processResult
 		}
 		personID, parseErr := strconv.ParseInt(job.TargetContentID, 10, 64)
 		if parseErr != nil {
@@ -445,14 +468,17 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 	}
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
-		return "failed"
+		processResult.outcome = "failed"
+		return processResult
 	}
 	if !updated {
 		p.markSucceeded(ctx, job)
-		return "skipped"
+		processResult.outcome = "skipped"
+		return processResult
 	}
 	p.markSucceeded(ctx, job)
-	return "succeeded"
+	processResult.outcome = "succeeded"
+	return processResult
 }
 
 func imageCacheJobImageType(value string) (ImageType, error) {

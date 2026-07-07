@@ -32,6 +32,15 @@ type StreamHandler struct {
 	EventsHub     *evt.Hub
 	AdminStore    PlaybackAdminStore
 	SessionSyncer PlaybackSessionSyncer
+	// TM is the shared transcode/reconstruct manager (same instance as the
+	// PlaybackHandler's). It lets a direct/remux stream rebuild its playback
+	// Session from the recipe card after a server restart instead of 404-ing.
+	// May be nil (tests / minimal setups) — reconstruct is then simply off.
+	TM *playback.TranscodeManager
+	// JWTSecret verifies the stream token carried on the serve URL (?st=), which
+	// is the reconstruction descriptor for direct/remux after a restart. Empty
+	// disables token-based reconstruct (tests / minimal setups).
+	JWTSecret string
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
@@ -54,6 +63,10 @@ func NewStreamHandler(sessionMgr SessionManagerInterface, fileResolver FilePathR
 	return &StreamHandler{
 		sessionMgr:   sessionMgr,
 		fileResolver: fileResolver,
+		// A bare manager (no recipe store) behaves as "no reconstruct" — plain
+		// GetSession + ownership — so HandleStream has a single code path. The
+		// router overwrites this with the shared manager to enable reconstruct.
+		TM: playback.NewTranscodeManager(),
 	}
 }
 
@@ -75,14 +88,22 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	setPlaybackSessionLogContext(r, sessionID)
 
-	session, err := h.sessionMgr.GetSession(sessionID)
-	if err != nil {
+	// Look up the session, reconstructing it from the recipe card on a not-found
+	// miss (e.g. after a server restart) so a direct/remux stream resumes instead
+	// of 404-ing. The client re-supplies its position (HTTP Range for direct, the
+	// ?seek= query for remux), so no runtime beyond the Session needs rebuilding.
+	// Without a token (or signing secret) reconstruct is off, collapsing to a
+	// plain GetSession + ownership check.
+	card := streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, h.JWTSecret)
+	session, status := h.TM.LoadOrReconstructSession(r.Context(), h.sessionMgr.GetSession, sessionID, userID, card)
+	switch status {
+	case playback.SessionMissing:
 		writePlaybackSessionNotFound(w)
 		return
-	}
-
-	// Verify session ownership.
-	if session.UserID != userID {
+	case playback.SessionLoadFailed:
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load playback session")
+		return
+	case playback.SessionForbidden:
 		writeError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return
 	}
@@ -240,37 +261,49 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	// Check downloaded subtitles (from S3).
 	if h.SubtitleRepo != nil && h.S3Client != nil {
 		downloaded, err := h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), file.ID)
-		if err == nil {
-			downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
-			if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
-				dl := downloaded[downloadedIndex]
-				data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, dl.S3Key)
-				if err != nil {
-					writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
-					return
-				}
+		if err != nil {
+			// A DB failure here must not masquerade as "track not found":
+			// surface it as an internal error (with a server-side signal)
+			// so the real failure is diagnosable instead of looking like an
+			// intermittent 404 to the client.
+			slog.ErrorContext(r.Context(), "list downloaded subtitles failed",
+				"file_id", file.ID,
+				"track", trackIndex,
+				"error", err,
+			)
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list downloaded subtitles")
+			return
+		}
 
-				// Serve ASS/SSA downloaded subtitles as raw data.
-				if playback.IsASS(string(dl.Format)) {
-					playback.ServeSubtitle(w, data, "ass")
-					return
-				}
-
-				// If the subtitle is already VTT, serve directly.
-				if dl.Format == subtitles.FormatVTT {
-					playback.ServeSubtitle(w, data, "vtt")
-					return
-				}
-
-				// Convert to VTT using the playback conversion pipeline.
-				vttData, err := playback.ConvertToVTT(data, string(dl.Format))
-				if err != nil {
-					writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
-					return
-				}
-				playback.ServeSubtitle(w, vttData, "vtt")
+		downloadedIndex := embeddedIndex - len(file.SubtitleTracks)
+		if downloadedIndex >= 0 && downloadedIndex < len(downloaded) {
+			dl := downloaded[downloadedIndex]
+			data, err := h.S3Client.GetObject(r.Context(), h.S3Bucket, dl.S3Key)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "s3_error", "Failed to load subtitle from storage")
 				return
 			}
+
+			// Serve ASS/SSA downloaded subtitles as raw data.
+			if playback.IsASS(string(dl.Format)) {
+				playback.ServeSubtitle(w, data, "ass")
+				return
+			}
+
+			// If the subtitle is already VTT, serve directly.
+			if dl.Format == subtitles.FormatVTT {
+				playback.ServeSubtitle(w, data, "vtt")
+				return
+			}
+
+			// Convert to VTT using the playback conversion pipeline.
+			vttData, err := playback.ConvertToVTT(data, string(dl.Format))
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
+				return
+			}
+			playback.ServeSubtitle(w, vttData, "vtt")
+			return
 		}
 	}
 

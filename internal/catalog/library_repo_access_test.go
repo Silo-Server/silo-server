@@ -31,16 +31,17 @@ func TestBuildFilterAccessibleContentIDsSQL_AllowedLibrariesOnly(t *testing.T) {
 	if !strings.Contains(sql, "mil.media_folder_id = ANY($2)") {
 		t.Errorf("expected allowed libraries bound at $2; got %s", sql)
 	}
-	// Item branch joins membership on the item's own content_id; episode branch
-	// resolves the parent series and joins membership on series_id.
-	if !strings.Contains(sql, "JOIN media_item_libraries mil ON mil.content_id = mi.content_id") {
-		t.Errorf("expected item membership join on mi.content_id; got %s", sql)
+	// Item branch gates membership on the item's own content_id; episode branch
+	// resolves the parent series and gates membership on series_id. Both use
+	// independent EXISTS predicates (libraryAccessConditions), not a join.
+	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") {
+		t.Errorf("expected item membership EXISTS on mi.content_id; got %s", sql)
 	}
 	if !strings.Contains(sql, "episodes e JOIN media_items mi ON mi.content_id = e.series_id") {
 		t.Errorf("expected episode branch to resolve parent series; got %s", sql)
 	}
-	if !strings.Contains(sql, "JOIN media_item_libraries mil ON mil.content_id = e.series_id") {
-		t.Errorf("expected episode membership join on series_id; got %s", sql)
+	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = e.series_id AND mil.media_folder_id = ANY($2))") {
+		t.Errorf("expected episode membership EXISTS on series_id; got %s", sql)
 	}
 	// Episodes must NOT be gated on episode_libraries — that diverges from the
 	// detail endpoint's EnsureAccessible(series_id).
@@ -83,11 +84,13 @@ func TestBuildFilterAccessibleContentIDsSQL_DisabledLibrariesOnly(t *testing.T) 
 	if len(args) != 2 {
 		t.Fatalf("expected 2 args (ids, disabled libs); got %d (%v)", len(args), args)
 	}
-	if !strings.Contains(sql, "NOT (mil.media_folder_id = ANY($2))") {
-		t.Errorf("expected disabled libraries as NOT ANY($2); got %s", sql)
+	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($2))") {
+		t.Errorf("expected disabled libraries as per-item NOT EXISTS; got %s", sql)
 	}
-	if !strings.Contains(sql, "JOIN media_item_libraries mil") {
-		t.Errorf("expected membership join for disabled-library restriction; got %s", sql)
+	// Disabled-only scopes still require positive membership so orphan items
+	// stay hidden from restricted viewers (see libraryAccessConditions).
+	if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)") {
+		t.Errorf("expected membership EXISTS for disabled-library restriction; got %s", sql)
 	}
 }
 
@@ -103,7 +106,7 @@ func TestBuildFilterAccessibleContentIDsSQL_AllowedDisabledAndRatingPlaceholders
 	}
 	for _, want := range []string{
 		"mil.media_folder_id = ANY($2)",
-		"NOT (mil.media_folder_id = ANY($3))",
+		"NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($3))",
 		"mi.content_rating = ANY($4)",
 	} {
 		if !strings.Contains(sql, want) {

@@ -15,7 +15,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -94,6 +93,8 @@ type SessionManagerInterface interface {
 	StopSession(sessionID string) error
 	GetSession(sessionID string) (*playback.Session, error)
 	SetTranscodeNodeURL(sessionID, url string) error
+	BeginTransport(sessionID string) error
+	EndTransport(sessionID string) error
 }
 
 type sessionStarterContext interface {
@@ -110,13 +111,21 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
+// PlaybackSessionSyncer flushes the in-memory native-session snapshot into the
+// shared admin live-session table (playback_sessions_sync). Without it, compat
+// session starts and stops only become visible on the periodic reconciler
+// tick, leaving ghost rows in the activity dashboard for several seconds.
+type PlaybackSessionSyncer interface {
+	SyncNow(ctx context.Context) error
+}
+
 // PlaybackHandler serves Jellyfin playback negotiation endpoints.
 type PlaybackHandler struct {
 	cfg                     *config.Config
 	content                 ContentService
 	codec                   *ResourceIDCodec
 	deviceProfiles          *DeviceProfileStore
-	playbackStore           *PlaybackSessionStore
+	playbackStore           CompatPlaybackStore
 	sessionMgr              SessionManagerInterface
 	fileResolver            FilePathResolver
 	storeProvider           userstore.UserStoreProvider
@@ -127,12 +136,35 @@ type PlaybackHandler struct {
 	FFmpegPath              string
 	HWAccel                 string
 	TranscodeDir            string
-	transcodeMu             sync.RWMutex
-	transcodes              map[string]*playback.TranscodeSession
-	SubtitleRepo            subtitles.Repository // optional; enables downloaded subtitles
-	S3Client                subtitles.S3Client   // optional; for serving S3 subtitles
-	S3Bucket                string               // bucket for subtitle storage
-	SettingsRepo            SettingsReader       // optional; reads watched threshold setting
+	// tm is the shared transcode-session lifecycle (live map, reconstruct) — the
+	// same type the native handler uses, so jellycompat gets the reconstruct cap
+	// and node-affinity rule for free. The reconstruction recipe is carried in the
+	// compat playback store (PlaybackSession.Recipe), since Jellyfin clients cannot
+	// round-trip a native stream token.
+	tm            *playback.TranscodeManager
+	SubtitleRepo  subtitles.Repository  // optional; enables downloaded subtitles
+	S3Client      subtitles.S3Client    // optional; for serving S3 subtitles
+	S3Bucket      string                // bucket for subtitle storage
+	SettingsRepo  SettingsReader        // optional; reads watched threshold setting
+	SessionSyncer PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
+	// RecipeNodeStore hands a remote transcode's reconstruction recipe to the
+	// control-plane recipe store (Redis) so a dedicated transcode node that
+	// restarts can rebuild ffmpeg from it. The node-hop token is server-minted and
+	// could carry the recipe, but it is mutated in place and the client can't be
+	// driven to refresh a stale token, so the node reconstructs from this
+	// server-authoritative store instead (see internal/noderecipe). Optional
+	// (nil disables it — integrated/no-node deployments need no handoff).
+	RecipeNodeStore recipeNodePutter
+}
+
+// recipeNodePutter persists and removes a remote transcode's reconstruction
+// recipe in a control-plane store keyed by upstream session id. *noderecipe.Store
+// implements it. Delete is nil-safe and treats a missing key as a no-op success;
+// it is called on deliberate teardown so a stopped session cannot be resurrected
+// from a leaked recipe.
+type recipeNodePutter interface {
+	Put(ctx context.Context, sessionID string, card playback.RecipeCard) error
+	Delete(ctx context.Context, sessionID string) error
 }
 
 // playbackThresholds reads the playback.watched_threshold and
@@ -177,7 +209,7 @@ func NewPlaybackHandler(
 	content ContentService,
 	codec *ResourceIDCodec,
 	deviceProfiles *DeviceProfileStore,
-	playbackStore *PlaybackSessionStore,
+	playbackStore CompatPlaybackStore,
 	sessionMgr SessionManagerInterface,
 	fileResolver FilePathResolver,
 	storeProvider userstore.UserStoreProvider,
@@ -205,14 +237,52 @@ func NewPlaybackHandler(
 		FFmpegPath:     ffmpegPath,
 		HWAccel:        hwAccel,
 		TranscodeDir:   transcodeDir,
-		transcodes:     make(map[string]*playback.TranscodeSession),
+		tm:             playback.NewTranscodeManager(),
 	}
-	if cleaned, err := playback.CleanupOrphanedTranscodeDirs(h.TranscodeDir, nil); err != nil {
-		slog.Warn("jellycompat transcode cleanup failed", "dir", h.TranscodeDir, "error", err)
-	} else if cleaned > 0 {
-		slog.Info("jellycompat transcode cleanup removed orphaned dirs", "dir", h.TranscodeDir, "count", cleaned)
+	// Wire the shared transcode manager with closures so it reads the handler's
+	// (late-set) JWTSecret lazily, matching the native handler.
+	h.tm.JWTSecretFn = func() string { return h.JWTSecret }
+	h.tm.Config = func() playback.TranscodeRuntimeConfig {
+		return playback.TranscodeRuntimeConfig{
+			TranscodeDir: h.TranscodeDir,
+			FFmpegPath:   h.FFmpegPath,
+			HWAccel:      h.HWAccel,
+		}
+	}
+	if reg, ok := sessionMgr.(interface {
+		GetSession(string) (*playback.Session, error)
+		RegisterReconstructed(*playback.Session) *playback.Session
+		RegisterReconstructedWithLimits(context.Context, *playback.Session) (*playback.Session, error)
+	}); ok {
+		h.tm.Sessions = reg
+	}
+	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
+		// ffmpeg crash: drop the dead transcode and stop the upstream native
+		// session. The recipe stays in the compat store so a resume reconstructs.
+		nodeURL := ""
+		if h.sessionMgr != nil {
+			if up, err := h.sessionMgr.GetSession(sessionID); err == nil && up != nil {
+				nodeURL = up.TranscodeNodeURL
+			}
+		}
+		// Guarded close is the authoritative gate: only tear down if the live entry
+		// is still the crashed one. We must NOT stop the upstream session before this
+		// check — if a successor reconstructed under the same id between ffmpeg's exit
+		// and here, an early StopSession would orphan its ffmpeg (live transcode, no
+		// session). Only stop the upstream session when the compare-and-delete matched
+		// the dead transcode. The recipe stays in the compat store either way so a
+		// resume reconstructs.
+		if h.sessionMgr != nil && h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
+			_ = h.sessionMgr.StopSession(sessionID)
+		}
 	}
 	return h
+}
+
+// CleanupOrphanedTranscodes removes stale per-session transcode dirs, sparing
+// those whose recipe card still exists. Delegates to the shared manager.
+func (h *PlaybackHandler) CleanupOrphanedTranscodes() (int, error) {
+	return h.tm.CleanupOrphanedTranscodes()
 }
 
 // buildProxyRedirectURL signs a stream token and builds the redirect URL for
@@ -289,6 +359,7 @@ func clampSeekSeconds(seekSeconds float64, sources []PlaybackMediaSource) float6
 
 func (h *PlaybackHandler) startRemoteTranscode(
 	ctx context.Context,
+	playSessionID string,
 	upstreamSessionID string,
 	source PlaybackMediaSource,
 	file *models.MediaFile,
@@ -349,6 +420,92 @@ func (h *PlaybackHandler) startRemoteTranscode(
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
 		return fmt.Errorf("remote transcode start rejected: status %d", resp.StatusCode)
+	}
+
+	// Mirror the byte-affecting opts sent to the node into a RecipeCard and persist
+	// it for restart resilience. The node-hop token is identity-only by design (see
+	// internal/noderecipe), and central serves Jellyfin clients that carry no native
+	// token of their own, so without a persisted recipe a node or central restart
+	// cannot rebuild ffmpeg and segment serves 404.
+	opts := playback.TranscodeOpts{
+		SessionID:          upstreamSessionID,
+		InputPath:          reqBody.InputPath,
+		SeekSeconds:        reqBody.SeekSeconds,
+		StartSegmentNumber: reqBody.StartSegmentNumber,
+		TargetCodecVideo:   reqBody.TargetCodecVideo,
+		TargetCodecAudio:   reqBody.TargetCodecAudio,
+		SegmentDuration:    reqBody.SegmentDuration,
+		HWAccel:            reqBody.HWAccel,
+		AudioTrackIndex:    reqBody.AudioTrackIndex,
+		TotalDuration:      reqBody.TotalDuration,
+	}
+	if source.TranscodeAudio {
+		opts.TargetCodecVideo = "copy"
+	}
+
+	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
+		// Roll back the already-started node ffmpeg so it isn't leaked.
+		h.tm.CloseTranscodeSession(upstreamSessionID, transcodeNodeURL)
+		return err
+	}
+
+	return nil
+}
+
+// persistTranscodeRecipe builds the reconstruction recipe from the upstream
+// session's identity and persists it for restart resilience. It is shared by the
+// local (ensureLocalTranscode) and remote (startRemoteTranscode) transcode paths
+// so both stores stay in lock-step.
+//
+// The recipe is recorded in the compat store in the same Update that marks the
+// transcode started — a failed write leaves neither set — and then best-effort
+// handed to the node recipe store (Redis) for dedicated transcode nodes. The node
+// URL is taken from the upstream session (bound before start on the remote path),
+// so it is "" for integrated transcodes and the node-store write is skipped.
+// A Jellyfin client carries no native token of its own and the node-hop token is
+// deliberately identity-only (see internal/noderecipe), so the persisted recipe is
+// the only way a node or central restart can rebuild ffmpeg.
+//
+// Returns an error only when the compat-store Update fails; the caller owns
+// rolling back its (local or remote) transcode in that case. A missing upstream
+// session (a start/build race, or no session manager in tests) is logged and the
+// live transcode is left serving — only restart resilience is forfeited.
+func (h *PlaybackHandler) persistTranscodeRecipe(
+	ctx context.Context,
+	playSessionID, upstreamSessionID string,
+	opts playback.TranscodeOpts,
+) error {
+	var recipe *playback.RecipeCard
+	if h.sessionMgr != nil {
+		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
+			card := playback.NewRecipeCard(upstream.UserID, upstream.ProfileID, upstream.MediaFileID, upstream.TranscodeNodeURL, opts)
+			recipe = &card
+		}
+	}
+	if recipe == nil {
+		slog.Warn("transcode recipe not persisted: upstream session unavailable",
+			"playback_session_id", upstreamSessionID)
+	}
+
+	if err := h.playbackStore.Update(playSessionID, func(current *PlaybackSession) error {
+		current.TranscodeStarted = true
+		current.Recipe = recipe
+		return nil
+	}); err != nil {
+		return fmt.Errorf("update playback session: %w", err)
+	}
+
+	// Hand the recipe to the control-plane store (Redis) so a dedicated transcode
+	// node that restarts can rebuild ffmpeg from it. Bounded and best effort: a
+	// stalled write must not hang the manifest request, and a failed write only
+	// forfeits node-restart resilience for this session, never the start.
+	if recipe != nil && recipe.TranscodeNodeURL != "" && h.RecipeNodeStore != nil {
+		putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		if err := h.RecipeNodeStore.Put(putCtx, upstreamSessionID, *recipe); err != nil {
+			slog.Warn("persist node transcode recipe failed", "error", err,
+				"playback_session_id", upstreamSessionID, "node", recipe.TranscodeNodeURL)
+		}
 	}
 	return nil
 }
@@ -554,7 +711,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	allowVideoCopy := boolDefault(req.AllowVideoStreamCopy, true)
 	allowAudioCopy := boolDefault(req.AllowAudioStreamCopy, true)
 
-	audioIndex := defaultAudioStreamIndex(version)
+	audioIndex := preferredAudioStreamIndex(version, profile)
 	subtitleIndex := defaultSubtitleStreamIndex(version)
 	selectedAudioIndex := audioIndex
 	if req.AudioStreamIndex != nil && isValidCompatAudioStreamIndex(version, int(*req.AudioStreamIndex)) {
@@ -717,7 +874,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			Codec:                  strings.ToLower(track.Codec),
 			Language:               track.Language,
 			TimeBase:               "1/1000",
-			DisplayTitle:           firstNonEmpty(track.Title, track.EmbeddedTitle, track.Language, track.Codec),
+			DisplayTitle:           audioTrackDisplayTitle(track),
 			Title:                  firstNonEmpty(track.Title, track.EmbeddedTitle),
 			IsDefault:              isDefault,
 			IsExternal:             false,
@@ -787,6 +944,120 @@ func defaultAudioStreamIndex(version catalog.FileVersion) *int {
 	}
 	value := len(version.VideoTracks)
 	return &value
+}
+
+// losslessPassthroughCodecs are audio codecs that require dedicated hardware
+// passthrough (AV receiver or decoder chip) and cannot be decoded by
+// software-only players like ExoPlayer on most Android TV devices.
+var losslessPassthroughCodecs = map[string]bool{
+	"truehd": true,
+	"mlp":    true,
+}
+
+// compatFallbackCodecs are broadly supported audio codecs suitable for
+// software decoding. Lower index = higher preference.
+var compatFallbackCodecRank = map[string]int{
+	"eac3":      1,
+	"ac3":       2,
+	"dts":       3,
+	"aac":       4,
+	"flac":      5,
+	"opus":      6,
+	"vorbis":    7,
+	"mp3":       8,
+	"pcm_s16le": 9,
+	"pcm_s24le": 10,
+}
+
+// preferredAudioStreamIndex returns the best audio stream index for the given
+// device profile. When the default audio track is a lossless passthrough codec
+// (TrueHD, MLP) and the profile does not explicitly list that codec as
+// supported, it selects the most compatible fallback track (same language
+// preferred). This prevents Android TV and similar clients from receiving a
+// TrueHD stream they cannot decode when an AC3/EAC3 fallback is present.
+func preferredAudioStreamIndex(version catalog.FileVersion, profile DeviceProfile) *int {
+	defaultIdx := defaultAudioStreamIndex(version)
+	if defaultIdx == nil {
+		return defaultIdx
+	}
+
+	defaultTrackIdx := *defaultIdx - len(version.VideoTracks)
+	if defaultTrackIdx < 0 || defaultTrackIdx >= len(version.AudioTracks) {
+		return defaultIdx
+	}
+	defaultTrack := version.AudioTracks[defaultTrackIdx]
+	if !losslessPassthroughCodecs[normalizeCompatToken(defaultTrack.Codec)] {
+		return defaultIdx // not a passthrough codec; keep default
+	}
+
+	// Check whether the profile explicitly lists this lossless codec as
+	// supported in any DirectPlayProfile. An empty AudioCodec field is a
+	// wildcard that many clients use to mean "try anything" — but for
+	// lossless passthrough codecs we cannot assume the device can actually
+	// decode them, so we do not treat wildcard as explicit support.
+	defaultCodec := normalizeCompatToken(defaultTrack.Codec)
+	for _, p := range profile.DirectPlayProfiles {
+		if !matchesVideoType(p.Type) {
+			continue
+		}
+		if strings.TrimSpace(p.AudioCodec) == "" {
+			continue // wildcard — not explicit support for lossless
+		}
+		for part := range strings.SplitSeq(p.AudioCodec, ",") {
+			if normalizeCompatToken(part) == defaultCodec {
+				return defaultIdx // profile explicitly supports this lossless codec
+			}
+		}
+	}
+
+	// Profile does not explicitly support this lossless codec. Find the best
+	// compatible fallback with the same language as the default track.
+	defaultLang := strings.ToLower(strings.TrimSpace(defaultTrack.Language))
+
+	bestIdx := -1
+	bestRank := 0
+
+	for i, track := range version.AudioTracks {
+		rank, ok := compatFallbackCodecRank[normalizeCompatToken(track.Codec)]
+		if !ok {
+			continue
+		}
+		lang := strings.ToLower(strings.TrimSpace(track.Language))
+		sameLang := lang == defaultLang
+		// Prefer same-language tracks; within each group prefer lower rank number.
+		if bestIdx == -1 {
+			bestIdx = i
+			bestRank = rank
+			if sameLang {
+				bestRank = -rank // negative signals same-language preference
+			}
+		} else {
+			currentSameLang := bestRank < 0
+			if sameLang && !currentSameLang {
+				// Upgrade from cross-language to same-language.
+				bestIdx = i
+				bestRank = -rank
+			} else if sameLang == currentSameLang {
+				// Same language group — pick lower rank (higher quality).
+				effectiveRank := rank
+				effectiveBest := bestRank
+				if sameLang {
+					effectiveRank = -rank
+					effectiveBest = bestRank // already negative
+				}
+				if effectiveRank < effectiveBest {
+					bestIdx = i
+					bestRank = effectiveRank
+				}
+			}
+		}
+	}
+
+	if bestIdx >= 0 {
+		idx := len(version.VideoTracks) + bestIdx
+		return &idx
+	}
+	return defaultIdx
 }
 
 func effectiveCompatAudioStreamIndex(source PlaybackMediaSource) *int {
@@ -953,6 +1224,79 @@ func parseCompatFrameRate(raw string) float64 {
 		}
 	}
 	return 0
+}
+
+func audioTrackDisplayTitle(track models.AudioTrack) string {
+	lang := compatLanguageName(track.Language)
+	codec := audioCodecDisplayName(track.Codec)
+	channels := audioChannelsDisplayName(track.Channels)
+	title := strings.TrimSpace(codec + " " + channels)
+	if lang != "" {
+		title = lang + " - " + title
+	}
+	// Append embedded title only when it adds info beyond codec/channels (e.g. "Commentary").
+	embedded := strings.TrimSpace(firstNonEmpty(track.Title, track.EmbeddedTitle))
+	if !isGenericAudioLabel(embedded) {
+		title += " - " + embedded
+	}
+	return title
+}
+
+func audioCodecDisplayName(codec string) string {
+	switch normalizeCompatToken(codec) {
+	case "truehd":
+		return "TrueHD"
+	case "mlp":
+		return "MLP"
+	case "ac3":
+		return "AC3"
+	case "eac3":
+		return "EAC3"
+	case "dts":
+		return "DTS"
+	case "dtshd", "dtshd_ma":
+		return "DTS-HD MA"
+	case "aac":
+		return "AAC"
+	case "mp3":
+		return "MP3"
+	case "flac":
+		return "FLAC"
+	case "opus":
+		return "Opus"
+	case "vorbis":
+		return "Vorbis"
+	case "pcms16le", "pcms24le", "pcms32le", "pcmf32le":
+		return "PCM"
+	default:
+		return strings.ToUpper(strings.TrimSpace(codec))
+	}
+}
+
+func audioChannelsDisplayName(channels int) string {
+	switch channels {
+	case 1:
+		return "Mono"
+	case 2:
+		return "Stereo"
+	case 6:
+		return "5.1"
+	case 8:
+		return "7.1"
+	default:
+		if channels > 0 {
+			return fmt.Sprintf("%d ch", channels)
+		}
+		return ""
+	}
+}
+
+func isGenericAudioLabel(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "stereo", "mono", "5.1", "7.1", "surround", "5.1 surround", "7.1 surround":
+		return true
+	}
+	return false
 }
 
 func compatSubtitleDisplayTitle(track catalog.VersionSubtitleTrack) string {

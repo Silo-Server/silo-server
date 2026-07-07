@@ -182,7 +182,7 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		}
 		switch record.Name {
 		case playback.CommandStop, playback.CommandTerminate:
-			err := h.stopPlaybackSessionByID(context.Background(), sessionID)
+			err := h.stopPlaybackSessionByID(context.Background(), sessionID, true)
 			if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 				slog.Error("failed to stop playback after realtime completion", "session", sessionID, "playback_session_id", sessionID, "error", err)
 			}

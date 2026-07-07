@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/pathscope"
@@ -42,7 +44,7 @@ func NewFileRepository(pool *pgxpool.Pool) *FileRepository {
 }
 
 // fileColumns is the list of columns returned by all SELECT queries.
-const fileColumns = `id, content_id, episode_id, season_number, episode_number,
+const fileColumns = `id, content_id, episode_id, extra_id, season_number, episode_number,
 	media_folder_id, canonical_root_path, observed_root_path, content_group_key, group_key_version,
 	base_title, base_year, base_type, identity_confidence, identity_json,
 	file_path, file_size, file_modified_at, file_hash,
@@ -65,7 +67,7 @@ const overlayFileColumns = `content_id, episode_id, media_folder_id, file_path,
 
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
-const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.season_number, mf.episode_number,
+const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.season_number, mf.episode_number,
 	mf.media_folder_id, mf.canonical_root_path, mf.observed_root_path, mf.content_group_key, mf.group_key_version,
 	mf.base_title, mf.base_year, mf.base_type, mf.identity_confidence, mf.identity_json,
 	mf.file_path, mf.file_size, mf.file_modified_at, mf.file_hash,
@@ -87,6 +89,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	var f models.MediaFile
 	var contentID *string
 	var episodeID *string
+	var extraID *string
 	var seasonNumber, episodeNumber *int
 	var canonicalRootPath *string
 	var observedRootPath, contentGroupKey, baseTitle, baseType, identityConfidence *string
@@ -120,6 +123,7 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 		&f.ID,
 		&contentID,
 		&episodeID,
+		&extraID,
 		&seasonNumber,
 		&episodeNumber,
 		&f.MediaFolderID,
@@ -212,6 +216,9 @@ func scanMediaFile(row pgx.Row) (*models.MediaFile, error) {
 	}
 	if episodeID != nil {
 		f.EpisodeID = *episodeID
+	}
+	if extraID != nil {
+		f.ExtraID = *extraID
 	}
 	if seasonNumber != nil {
 		f.SeasonNumber = *seasonNumber
@@ -392,6 +399,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		var f models.MediaFile
 		var contentID *string
 		var episodeID *string
+		var extraID *string
 		var seasonNumber, episodeNumber *int
 		var canonicalRootPath *string
 		var observedRootPath, contentGroupKey, baseTitle, baseType, identityConfidence *string
@@ -425,6 +433,7 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&f.ID,
 			&contentID,
 			&episodeID,
+			&extraID,
 			&seasonNumber,
 			&episodeNumber,
 			&f.MediaFolderID,
@@ -513,6 +522,9 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		}
 		if episodeID != nil {
 			f.EpisodeID = *episodeID
+		}
+		if extraID != nil {
+			f.ExtraID = *extraID
 		}
 		if seasonNumber != nil {
 			f.SeasonNumber = *seasonNumber
@@ -818,6 +830,10 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 	if mf.EpisodeID != "" {
 		episodeID = &mf.EpisodeID
 	}
+	var extraID *string
+	if mf.ExtraID != "" {
+		extraID = &mf.ExtraID
+	}
 	var fileHash *string
 	if mf.FileHash != "" {
 		fileHash = &mf.FileHash
@@ -844,7 +860,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 	}
 
 	query := `INSERT INTO media_files (
-		content_id, episode_id, season_number, episode_number,
+		content_id, episode_id, extra_id, season_number, episode_number,
 		media_folder_id, canonical_root_path, observed_root_path, content_group_key, group_key_version,
 		base_title, base_year, base_type, identity_confidence, identity_json,
 		file_path, file_size, file_modified_at, file_hash,
@@ -856,23 +872,36 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		multi_episode_start, multi_episode_end,
 		probe_source, probe_updated_at, missing_since
 	) VALUES (
-		$1, $2, $3, $4,
-		$5, $6, $7, $8, $9,
-		$10, $11, $12, $13, $14,
-		$15, $16, $17, $18,
-		$19, $20, $21, $22, $23, $24,
-		$25, $26, $27, $28, $29, $30, $31,
-		$32, $33, $34, $35, $36, $37,
-		$38, $39, $40, $41,
-		$42, $43, $44, $45,
-		$46, $47,
-		$48, $49, $50
+		$1, $2, $3, $4, $5,
+		$6, $7, $8, $9, $10,
+		$11, $12, $13, $14, $15,
+		$16, $17, $18, $19,
+		$20, $21, $22, $23, $24, $25,
+		$26, $27, $28, $29, $30, $31, $32,
+		$33, $34, $35, $36, $37, $38,
+		$39, $40, $41, $42,
+		$43, $44, $45, $46,
+		$47, $48,
+		$49, $50, $51
 	)
 	ON CONFLICT (file_path) DO UPDATE SET
-		content_id = COALESCE(EXCLUDED.content_id, media_files.content_id),
-		episode_id = COALESCE(EXCLUDED.episode_id, media_files.episode_id),
-		season_number = COALESCE(EXCLUDED.season_number, media_files.season_number),
-		episode_number = COALESCE(EXCLUDED.episode_number, media_files.episode_number),
+		content_id = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.content_id, media_files.content_id)
+		END,
+		episode_id = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.episode_id, media_files.episode_id)
+		END,
+		extra_id = EXCLUDED.extra_id,
+		season_number = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.season_number, media_files.season_number)
+		END,
+		episode_number = CASE
+			WHEN EXCLUDED.extra_id IS NOT NULL THEN NULL
+			ELSE COALESCE(EXCLUDED.episode_number, media_files.episode_number)
+		END,
 		media_folder_id = EXCLUDED.media_folder_id,
 		canonical_root_path = EXCLUDED.canonical_root_path,
 		observed_root_path = EXCLUDED.observed_root_path,
@@ -919,6 +948,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 	row := r.pool.QueryRow(ctx, query,
 		contentID,
 		episodeID,
+		extraID,
 		nilIfZero(mf.SeasonNumber),
 		nilIfZero(mf.EpisodeNumber),
 		mf.MediaFolderID,
@@ -1842,7 +1872,7 @@ func (r *FileRepository) GetByHash(ctx context.Context, hash string) (*models.Me
 func (r *FileRepository) GetUnmatched(ctx context.Context, limit int) ([]*models.MediaFile, error) {
 	query := `SELECT ` + mfFileColumns + ` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
-		WHERE (mf.content_id IS NULL OR mf.content_id = '')
+		WHERE (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 		  AND mf.missing_since IS NULL
 		  AND mf.match_suppressed_at IS NULL
 		  AND folders.enabled = true
@@ -1880,7 +1910,7 @@ func (r *FileRepository) ClaimUnmatched(ctx context.Context, limit int) ([]*mode
 				END AS is_series_group
 			FROM media_files mf
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
-			WHERE (mf.content_id IS NULL OR mf.content_id = '')
+			WHERE (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
@@ -1911,7 +1941,7 @@ func (r *FileRepository) ClaimUnmatched(ctx context.Context, limit int) ([]*mode
 		touched AS (
 			UPDATE media_files mf
 			SET match_attempted_at = NOW()
-			WHERE (mf.content_id IS NULL OR mf.content_id = '')
+			WHERE (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND EXISTS (
@@ -1951,7 +1981,7 @@ func (r *FileRepository) ClaimUnmatchedNonSeries(ctx context.Context, limit int)
 			SELECT mf.id
 			FROM media_files mf
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
-			WHERE (mf.content_id IS NULL OR mf.content_id = '')
+			WHERE (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
@@ -1996,7 +2026,7 @@ func (r *FileRepository) ClaimUnmatchedMixed(ctx context.Context, limit int) ([]
 			SELECT mf.id
 			FROM media_files mf
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
-			WHERE (mf.content_id IS NULL OR mf.content_id = '')
+			WHERE (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
@@ -2064,7 +2094,7 @@ func (r *FileRepository) CountUnmatchedMatchBacklogByFolder(ctx context.Context,
 		FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.media_folder_id = $1
-		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 		  AND mf.missing_since IS NULL
 		  AND mf.match_suppressed_at IS NULL
 		  AND folders.enabled = true
@@ -2105,7 +2135,7 @@ func (r *FileRepository) ListUnmatchedMatchBacklogByFolder(ctx context.Context, 
 		FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.media_folder_id = $1
-		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 		  AND mf.missing_since IS NULL
 		  AND mf.match_suppressed_at IS NULL
 		  AND folders.enabled = true
@@ -2144,7 +2174,7 @@ func (r *FileRepository) SuppressUnmatchedMatchBacklogByFolder(ctx context.Conte
 		FROM media_folders folders
 		WHERE folders.id = mf.media_folder_id
 		  AND mf.media_folder_id = $1
-		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 		  AND mf.missing_since IS NULL
 		  AND mf.match_suppressed_at IS NULL
 		  AND folders.enabled = true
@@ -2176,7 +2206,7 @@ func (r *FileRepository) RetryUnmatchedMatchBacklogByFolder(ctx context.Context,
 		FROM media_folders folders
 		WHERE folders.id = mf.media_folder_id
 		  AND mf.media_folder_id = $1
-		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 		  AND mf.missing_since IS NULL
 		  AND folders.enabled = true
 		  AND (
@@ -2210,7 +2240,7 @@ func (r *FileRepository) GetUnmatchedByFolderAndPathPrefix(ctx context.Context, 
 	query := `SELECT ` + mfFileColumns + ` FROM media_files mf
 		JOIN media_folders folders ON folders.id = mf.media_folder_id
 		WHERE mf.media_folder_id = $1
-		  AND (mf.content_id IS NULL OR mf.content_id = '')
+		  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 		  AND mf.missing_since IS NULL
 		  AND mf.match_suppressed_at IS NULL
 		  AND folders.enabled = true
@@ -2265,7 +2295,7 @@ func (r *FileRepository) ClaimUnmatchedByFolderAndPathPrefix(
 			FROM media_files mf
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			WHERE mf.media_folder_id = $1
-			  AND (mf.content_id IS NULL OR mf.content_id = '')
+			  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
@@ -2306,7 +2336,7 @@ func (r *FileRepository) ClaimUnmatchedByFolderAndPathPrefix(
 			UPDATE media_files mf
 			SET match_attempted_at = NOW()
 			WHERE mf.media_folder_id = $1
-			  AND (mf.content_id IS NULL OR mf.content_id = '')
+			  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND EXISTS (
@@ -2359,7 +2389,7 @@ func (r *FileRepository) ClaimUnmatchedNonSeriesByFolderAndPathPrefix(
 			FROM media_files mf
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			WHERE mf.media_folder_id = $1
-			  AND (mf.content_id IS NULL OR mf.content_id = '')
+			  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
@@ -2426,7 +2456,7 @@ func (r *FileRepository) ClaimUnmatchedMixedByFolderAndPathPrefix(
 			FROM media_files mf
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
 			WHERE mf.media_folder_id = $1
-			  AND (mf.content_id IS NULL OR mf.content_id = '')
+			  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
 			  AND mf.missing_since IS NULL
 			  AND mf.match_suppressed_at IS NULL
 			  AND folders.enabled = true
@@ -2497,26 +2527,17 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 	return nil
 }
 
-// DeleteMissing deletes media files that have been missing longer than the grace period.
+// DeleteMissingByFolder deletes media files in the given folder that have been
+// marked missing for longer than the grace period. Missing files are already
+// hidden from clients; the grace only delays deleting the row so a file that
+// reappears within the window restores without re-probing or re-matching.
+// A zero grace deletes all missing-marked rows immediately.
 // Returns the number of rows deleted.
-func (r *FileRepository) DeleteMissing(ctx context.Context, gracePeriod time.Duration) (int, error) {
+func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
 	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE missing_since IS NOT NULL AND missing_since < $1",
-		cutoff,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("deleting missing files: %w", err)
-	}
-	return int(tag.RowsAffected()), nil
-}
-
-// DeleteMissingByFolder deletes all media files marked as missing in the given folder.
-// Returns the number of rows deleted.
-func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int) (int, error) {
-	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL",
-		folderID,
+		"DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2",
+		folderID, cutoff,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("deleting missing files for folder %d: %w", folderID, err)
@@ -2672,6 +2693,88 @@ func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) (
 	return scanMediaFiles(rows)
 }
 
+// GetByExtraID returns the live files backing a local extra
+// (media_extras.content_id). Extras files carry no content_id/episode_id, so
+// this is their only ownership lookup.
+func (r *FileRepository) GetByExtraID(ctx context.Context, extraID string) ([]*models.MediaFile, error) {
+	query := `SELECT ` + fileColumns + ` FROM media_files
+		WHERE extra_id = $1 AND missing_since IS NULL
+		ORDER BY id ASC`
+	rows, err := r.pool.Query(ctx, query, extraID)
+	if err != nil {
+		return nil, fmt.Errorf("querying files by extra_id: %w", err)
+	}
+	defer rows.Close()
+
+	return scanMediaFiles(rows)
+}
+
+// FindParentContentIDForStem finds the owning content id of a primary file in
+// dir whose filename stem matches exactly ("Movie A" matches "Movie A.mkv").
+// Used to bind suffix-classified extras ("Movie A-trailer.mkv") in flat
+// multi-item directories.
+func (r *FileRepository) FindParentContentIDForStem(ctx context.Context, folderID int, dir, stem string) (string, error) {
+	pattern := pathscope.EscapeLike(filepath.Join(dir, stem)) + ".%"
+	var parentID *string
+	err := r.pool.QueryRow(ctx, `
+		SELECT COALESCE(e.series_id, mf.content_id)
+		FROM media_files mf
+		LEFT JOIN episodes e ON e.content_id = mf.episode_id
+		WHERE mf.media_folder_id = $1
+		  AND mf.file_path LIKE $2 ESCAPE '\'
+		  AND mf.extra_id IS NULL
+		  AND (mf.content_id IS NOT NULL OR mf.episode_id IS NOT NULL)
+		ORDER BY mf.id ASC
+		LIMIT 1`, folderID, pattern).Scan(&parentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("finding parent by stem: %w", err)
+	}
+	if parentID == nil {
+		return "", nil
+	}
+	return *parentID, nil
+}
+
+// FindUnambiguousParentContentIDForDir returns the single content id owning
+// the primary files under dir, or "" when the directory holds no matched
+// content or more than one distinct item (ambiguous — caller defers).
+func (r *FileRepository) FindUnambiguousParentContentIDForDir(ctx context.Context, folderID int, dir string) (string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT COALESCE(e.series_id, mf.content_id) AS parent_id
+		FROM media_files mf
+		LEFT JOIN episodes e ON e.content_id = mf.episode_id
+		WHERE mf.media_folder_id = $1
+		  AND mf.file_path LIKE $2 ESCAPE '\'
+		  AND mf.extra_id IS NULL
+		  AND (mf.content_id IS NOT NULL OR mf.episode_id IS NOT NULL)
+		LIMIT 2`, folderID, pathPrefixLike(dir))
+	if err != nil {
+		return "", fmt.Errorf("finding parent by dir: %w", err)
+	}
+	defer rows.Close()
+
+	parents := make([]string, 0, 2)
+	for rows.Next() {
+		var parentID *string
+		if err := rows.Scan(&parentID); err != nil {
+			return "", fmt.Errorf("scanning parent id: %w", err)
+		}
+		if parentID != nil && *parentID != "" {
+			parents = append(parents, *parentID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterating parent ids: %w", err)
+	}
+	if len(parents) != 1 {
+		return "", nil
+	}
+	return parents[0], nil
+}
+
 // ListByContentIDs returns media files grouped by content ID for the given
 // content IDs, excluding files that are marked missing.
 func (r *FileRepository) ListByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error) {
@@ -2824,7 +2927,7 @@ func (r *FileRepository) UpdateContentIDByPathPrefix(ctx context.Context, folder
 		SET content_id = $1, updated_at = NOW()
 		WHERE media_folder_id = $2
 		  AND missing_since IS NULL
-		  AND (content_id IS NULL OR content_id = '')
+		  AND (content_id IS NULL OR content_id = '') AND extra_id IS NULL
 		  AND (file_path = $3 OR file_path LIKE $4 ESCAPE '\')
 	`, contentID, folderID, pathPrefix, pathPrefixLike(pathPrefix))
 	if err != nil {
@@ -2842,6 +2945,7 @@ func (r *FileRepository) UpdateContentIDByObservedRootPath(ctx context.Context, 
 		WHERE media_folder_id = $2
 		  AND observed_root_path = $3
 		  AND missing_since IS NULL
+		  AND extra_id IS NULL
 		  AND (content_id IS NULL OR content_id <> $1)
 	`, contentID, folderID, observedRootPath)
 	if err != nil {
@@ -2861,8 +2965,16 @@ func (r *FileRepository) ClearContentID(ctx context.Context, fileID int) error {
 // ClearContentLinksByPathPrefix removes content and episode link fields for
 // present files beneath a specific root path in one media folder.
 func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, folderID int, pathPrefix string) (int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin clearing media file content links transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
 	var cleared int
-	err := r.pool.QueryRow(ctx, `
+	var oldEpisodeIDs []string
+	var affectedSeriesIDs []string
+	err = tx.QueryRow(ctx, `
 		WITH previous AS (
 			SELECT id, media_folder_id, episode_id AS old_episode_id
 			FROM media_files
@@ -2885,16 +2997,28 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 				updated_at = NOW()
 			WHERE id IN (SELECT id FROM previous)
 			RETURNING id
-		),
-		deleted AS (
+		)
+		SELECT COUNT(*)::int,
+		       COALESCE(
+			       array_agg(DISTINCT p.old_episode_id) FILTER (WHERE p.old_episode_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       ),
+		       COALESCE(
+			       array_agg(DISTINCT e.series_id) FILTER (WHERE e.series_id IS NOT NULL),
+			       ARRAY[]::text[]
+		       )
+		FROM cleared c
+		JOIN previous p ON p.id = c.id
+		LEFT JOIN episodes e ON e.content_id = p.old_episode_id
+	`, folderID, pathPrefix, pathPrefixLike(pathPrefix)).Scan(&cleared, &oldEpisodeIDs, &affectedSeriesIDs)
+	if err != nil {
+		return 0, fmt.Errorf("clearing media file content links by path prefix: %w", err)
+	}
+	if len(oldEpisodeIDs) > 0 {
+		if _, err := tx.Exec(ctx, `
 			DELETE FROM episode_libraries el
-			USING (
-				SELECT DISTINCT media_folder_id, old_episode_id AS episode_id
-				FROM previous
-				WHERE old_episode_id IS NOT NULL
-			) touched
-			WHERE el.media_folder_id = touched.media_folder_id
-			  AND el.episode_id = touched.episode_id
+			WHERE el.media_folder_id = $1
+			  AND el.episode_id = ANY($2::text[])
 			  AND NOT EXISTS (
 				SELECT 1
 				FROM media_files mf
@@ -2902,24 +3026,47 @@ func (r *FileRepository) ClearContentLinksByPathPrefix(ctx context.Context, fold
 				  AND mf.episode_id = el.episode_id
 				  AND mf.missing_since IS NULL
 			  )
-		)
-		SELECT COUNT(*) FROM cleared
-	`, folderID, pathPrefix, pathPrefixLike(pathPrefix)).Scan(&cleared)
-	if err != nil {
-		return 0, fmt.Errorf("clearing media file content links by path prefix: %w", err)
+		`, folderID, oldEpisodeIDs); err != nil {
+			return 0, fmt.Errorf("deleting stale episode library links by path prefix: %w", err)
+		}
+		if err := catalog.RecomputeSeriesLatestEpisodeAdded(ctx, tx, affectedSeriesIDs); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit clearing media file content links transaction: %w", err)
 	}
 	return cleared, nil
 }
 
 // UpdateEpisodeLink sets the episode linkage fields on a media file.
 func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, episodeID string, seasonNum, episodeNum int) error {
-	_, err := r.pool.Exec(ctx, `
-		WITH previous AS (
-			SELECT media_folder_id, episode_id AS old_episode_id
-			FROM media_files
-			WHERE id = $4
-		),
-		updated AS (
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin episode link transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var folderID int
+	var oldEpisodeID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT media_folder_id, episode_id
+		FROM media_files
+		WHERE id = $1
+		FOR UPDATE
+	`, fileID).Scan(&folderID, &oldEpisodeID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("loading existing episode link: %w", err)
+	}
+
+	// The INSERT is the top-level statement: a data-modifying CTE can only be
+	// referenced by later query parts if it has a RETURNING clause, so a
+	// trailing "SELECT COUNT(*) FROM inserted" is invalid PostgreSQL and made
+	// this statement error on every call.
+	if _, err := tx.Exec(ctx, `
+		WITH updated AS (
 			UPDATE media_files
 			SET episode_id = $1,
 				season_number = $2,
@@ -2927,30 +3074,51 @@ func (r *FileRepository) UpdateEpisodeLink(ctx context.Context, fileID int, epis
 				updated_at = NOW()
 			WHERE id = $4
 			RETURNING episode_id, media_folder_id, created_at, missing_since
-		),
-		inserted AS (
-			INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
-			SELECT episode_id, media_folder_id, created_at
-			FROM updated
-			WHERE episode_id IS NOT NULL
-			  AND missing_since IS NULL
-			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 		)
-		DELETE FROM episode_libraries el
-		USING previous p
-		WHERE p.old_episode_id IS NOT NULL
-		  AND p.old_episode_id <> $1
-		  AND el.media_folder_id = p.media_folder_id
-		  AND el.episode_id = p.old_episode_id
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM media_files mf
-			WHERE mf.media_folder_id = el.media_folder_id
-			  AND mf.episode_id = el.episode_id
-			  AND mf.missing_since IS NULL
-		  )
-	`, episodeID, seasonNum, episodeNum, fileID)
-	return err
+		INSERT INTO episode_libraries (episode_id, media_folder_id, first_seen_at)
+		SELECT episode_id, media_folder_id, created_at
+		FROM updated
+		WHERE episode_id IS NOT NULL
+		  AND missing_since IS NULL
+		ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+	`, episodeID, seasonNum, episodeNum, fileID); err != nil {
+		return fmt.Errorf("updating episode link: %w", err)
+	}
+
+	affectedEpisodeIDs := []string{episodeID}
+	if oldEpisodeID != nil && *oldEpisodeID != episodeID {
+		affectedEpisodeIDs = append(affectedEpisodeIDs, *oldEpisodeID)
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM episode_libraries el
+			WHERE el.media_folder_id = $1
+			  AND el.episode_id = $2
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM media_files mf
+				WHERE mf.media_folder_id = el.media_folder_id
+				  AND mf.episode_id = el.episode_id
+				  AND mf.missing_since IS NULL
+			  )
+		`, folderID, *oldEpisodeID); err != nil {
+			return fmt.Errorf("deleting old episode library link: %w", err)
+		}
+	}
+
+	var affectedSeriesIDs []string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(array_agg(DISTINCT series_id), ARRAY[]::text[])
+		FROM episodes
+		WHERE content_id = ANY($1::text[])
+	`, affectedEpisodeIDs).Scan(&affectedSeriesIDs); err != nil {
+		return fmt.Errorf("collecting affected episode series: %w", err)
+	}
+	if err := catalog.RecomputeSeriesLatestEpisodeAdded(ctx, tx, affectedSeriesIDs); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit episode link transaction: %w", err)
+	}
+	return nil
 }
 
 // BulkLinkEpisodesBySeries links all already-numbered files for a series to
@@ -2982,6 +3150,18 @@ func (r *FileRepository) BulkLinkEpisodesBySeries(ctx context.Context, seriesCon
 			FROM updated
 			GROUP BY episode_id, media_folder_id
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
+			RETURNING first_seen_at
+		),
+		-- Bump the series' latest-episode-added denorm for genuinely new
+		-- links only ("Latest Episodes" sort, issue #202). All inserted
+		-- rows belong to $1, so no per-series grouping is needed.
+		bumped AS (
+			UPDATE media_items mi
+			SET latest_episode_added_at = GREATEST(COALESCE(mi.latest_episode_added_at, sub.latest_added), sub.latest_added)
+			FROM (SELECT MAX(first_seen_at) AS latest_added FROM inserted) sub
+			WHERE mi.content_id = $1
+			  AND mi.type = 'series'
+			  AND sub.latest_added IS NOT NULL
 		)
 		SELECT COUNT(*) FROM updated
 	`, seriesContentID).Scan(&linked)

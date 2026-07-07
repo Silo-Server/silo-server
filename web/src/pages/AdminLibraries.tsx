@@ -117,6 +117,7 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { formatJobProgress } from "@/components/adminCatalogMaintenanceFormatters";
+import { formatDateTime } from "@/lib/datetime";
 
 // Keep toast lifetime and delayed state cleanup coordinated so visible feedback
 // disappears before state is cleared.
@@ -457,13 +458,11 @@ export default function AdminLibraries() {
                         <TableCell className="text-muted-foreground text-xs">
                           <div className="space-y-1">
                             <div>
-                              {lib.last_scanned_at
-                                ? new Date(lib.last_scanned_at).toLocaleString()
-                                : "Never"}
+                              {lib.last_scanned_at ? formatDateTime(lib.last_scanned_at) : "Never"}
                             </div>
                             {lib.scan_warning_at ? (
                               <div className="text-destructive text-[11px]">
-                                Warning: {new Date(lib.scan_warning_at).toLocaleString()}
+                                Warning: {formatDateTime(lib.scan_warning_at)}
                               </div>
                             ) : null}
                           </div>
@@ -1370,14 +1369,27 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                     {root.observed_file_count}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => setEditingRoot(root)}
-                    >
-                      Override
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => setEditingRoot(root)}
+                      >
+                        Override
+                      </Button>
+                      {root.content_id ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          asChild
+                          title="Open the matched item; use its Split Versions action to separate wrongly merged files"
+                        >
+                          <Link to={`/item/${encodeURIComponent(root.content_id)}`}>Resolve</Link>
+                        </Button>
+                      ) : null}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))
@@ -1714,10 +1726,10 @@ function SkippedRootsSection({ skippedRoots }: { skippedRoots: LibrarySkippedRoo
                       {root.file_count}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-xs tabular-nums">
-                      {new Date(root.first_seen_at).toLocaleString()}
+                      {formatDateTime(root.first_seen_at)}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-xs tabular-nums">
-                      {new Date(root.last_seen_at).toLocaleString()}
+                      {formatDateTime(root.last_seen_at)}
                     </TableCell>
                   </TableRow>
                   {isExpanded && (
@@ -2018,10 +2030,10 @@ function StaleIDsSection({ staleIDs }: { staleIDs: StaleMediaID[] }) {
                 </TableCell>
                 <TableCell className="font-mono text-xs">{s.provider_id}</TableCell>
                 <TableCell className="text-muted-foreground text-xs tabular-nums">
-                  {new Date(s.first_seen_at).toLocaleString()}
+                  {formatDateTime(s.first_seen_at)}
                 </TableCell>
                 <TableCell className="text-muted-foreground text-xs tabular-nums">
-                  {new Date(s.last_seen_at).toLocaleString()}
+                  {formatDateTime(s.last_seen_at)}
                 </TableCell>
                 <TableCell>
                   <Button

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -15,6 +16,7 @@ import (
 
 type archiveStore interface {
 	GetArchive(ctx context.Context, installationID int) (*InstallationArchive, error)
+	SaveArchive(ctx context.Context, installationID int, manifestJSON []byte, checksum string, archiveBytes []byte) error
 }
 
 type ArchiveCache struct {
@@ -46,7 +48,10 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 
 	reader, manifestBytes, manifest, err := openPluginArchive(archive.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("open stored plugin archive for installation %d: %w", installation.ID, err)
+		reader, manifestBytes, manifest, err = c.recoverLegacyBinaryArchive(ctx, installation.ID, archive, err)
+		if err != nil {
+			return nil, fmt.Errorf("open stored plugin archive for installation %d: %w", installation.ID, err)
+		}
 	}
 	if archive.Checksum != manifest.GetChecksum() {
 		return nil, fmt.Errorf("stored plugin archive checksum mismatch for installation %d", installation.ID)
@@ -86,6 +91,51 @@ func (c *ArchiveCache) Ensure(ctx context.Context, installation *Installation) (
 	}
 
 	return manifest, nil
+}
+
+func (c *ArchiveCache) recoverLegacyBinaryArchive(
+	ctx context.Context,
+	installationID int,
+	archive *InstallationArchive,
+	openErr error,
+) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
+	if archive == nil || len(archive.ManifestJSON) == 0 || len(archive.Bytes) == 0 {
+		return nil, nil, nil, openErr
+	}
+
+	manifest, err := LoadManifestBytes(archive.ManifestJSON)
+	if err != nil {
+		return nil, nil, nil, openErr
+	}
+
+	checksum := sha256.Sum256(archive.Bytes)
+	actualChecksum := hex.EncodeToString(checksum[:])
+	if actualChecksum != archive.Checksum || actualChecksum != manifest.GetChecksum() {
+		return nil, nil, nil, openErr
+	}
+
+	archiveBytes, err := buildBinaryPluginArchive(archive.ManifestJSON, archive.Bytes)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w; recover legacy raw binary archive: %v", openErr, err)
+	}
+
+	reader, manifestBytes, manifest, err := openPluginArchive(archiveBytes)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w; recover legacy raw binary archive: %v", openErr, err)
+	}
+
+	// Persist the repaired archive so future preloads skip recovery, but don't
+	// fail startup over a write error — the in-memory archive is already valid
+	// and recovery will retry on the next preload.
+	if err := c.archives.SaveArchive(ctx, installationID, manifestBytes, manifest.GetChecksum(), archiveBytes); err != nil {
+		slog.Warn(
+			"failed to persist recovered legacy plugin archive; will retry on next preload",
+			"installation_id", installationID,
+			"error", err,
+		)
+	}
+
+	return reader, manifestBytes, manifest, nil
 }
 
 func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
@@ -133,6 +183,41 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 	}
 
 	return reader, manifestBytes, manifest, nil
+}
+
+func buildBinaryPluginArchive(manifestBytes []byte, binaryData []byte) ([]byte, error) {
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+
+	if err := writeArchiveEntry(writer, "manifest.json", manifestBytes); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err := writeArchiveEntry(writer, "plugin", binaryData); err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("close plugin archive: %w", err)
+	}
+
+	archiveBytes := buffer.Bytes()
+	if _, _, _, err := openPluginArchive(archiveBytes); err != nil {
+		return nil, fmt.Errorf("validate plugin archive: %w", err)
+	}
+
+	return archiveBytes, nil
+}
+
+func writeArchiveEntry(writer *zip.Writer, name string, data []byte) error {
+	entry, err := writer.Create(name)
+	if err != nil {
+		return fmt.Errorf("create plugin archive entry %q: %w", name, err)
+	}
+	if _, err := entry.Write(data); err != nil {
+		return fmt.Errorf("write plugin archive entry %q: %w", name, err)
+	}
+	return nil
 }
 
 func extractArchiveFiles(reader *zip.Reader, root string) error {

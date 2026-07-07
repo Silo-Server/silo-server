@@ -26,7 +26,7 @@ func (noopMediaStore) GetAudiobookByID(context.Context, string, catalog.AccessFi
 func (noopMediaStore) GetAudiobooksByIDs(context.Context, []string, catalog.AccessFilter) (map[string]*models.MediaItem, error) {
 	return map[string]*models.MediaItem{}, nil
 }
-func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+func (noopMediaStore) ListAudiobooks(context.Context, int64, int, int, catalog.AccessFilter, Filter) ([]*models.MediaItem, int, error) {
 	return nil, 0, nil
 }
 func (noopMediaStore) GetMediaFiles(context.Context, string, catalog.AccessFilter) ([]*models.MediaFile, error) {
@@ -50,11 +50,11 @@ func (noopMediaStore) ListRecentlyAdded(context.Context, int64, int, catalog.Acc
 func (noopMediaStore) ListDiscover(context.Context, int64, int, catalog.AccessFilter) ([]*models.MediaItem, error) {
 	return nil, nil
 }
-func (noopMediaStore) ListLibraryAuthors(context.Context, int64, int, catalog.AccessFilter) ([]AuthorSummary, error) {
-	return nil, nil
+func (noopMediaStore) ListLibraryAuthors(context.Context, int64, int, int, string, bool, catalog.AccessFilter) ([]AuthorSummary, int, error) {
+	return nil, 0, nil
 }
-func (noopMediaStore) ListLibrarySeries(context.Context, int64, int, catalog.AccessFilter) ([]SeriesSummary, error) {
-	return nil, nil
+func (noopMediaStore) ListLibrarySeries(context.Context, int64, int, int, catalog.AccessFilter) ([]SeriesSummary, int, error) {
+	return nil, 0, nil
 }
 func (noopMediaStore) GetAuthorByID(context.Context, string, catalog.AccessFilter) (Author, error) {
 	return Author{}, ErrNotFound
@@ -207,6 +207,70 @@ func TestHandleRefresh_BodyToken_Works(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestHandleRefresh_ReturnsFullLoginEnvelope guards that /auth/refresh returns
+// the SAME payload shape as /login (real ABS behavior) — not a thin token map —
+// so strict clients can decode it with their login model.
+func TestHandleRefresh_ReturnsFullLoginEnvelope(t *testing.T) {
+	h, store, cfg := newRefreshTestHandler(t)
+	refresh, _ := mintAndPersistRefresh(t, store, cfg, "5")
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", nil)
+	req.Header.Set("x-refresh-token", refresh)
+	rec := httptest.NewRecorder()
+	h.handleRefresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, k := range []string{"user", "userDefaultLibraryId", "serverSettings", "Source", "ereaderDevices"} {
+		if _, ok := resp[k]; !ok {
+			t.Errorf("refresh envelope missing top-level %q", k)
+		}
+	}
+	// x-refresh-token present → token in body, not a cookie.
+	if user, _ := resp["user"].(map[string]any); user["refreshToken"] == nil {
+		t.Errorf("user.refreshToken should be in body when x-refresh-token sent")
+	}
+}
+
+// TestHandleRefresh_NoHeader_SetsCookie: without x-refresh-token the rotated
+// refresh token is delivered as the refresh_token cookie and nulled in the body.
+func TestHandleRefresh_NoHeader_SetsCookie(t *testing.T) {
+	h, store, cfg := newRefreshTestHandler(t)
+	refresh, _ := mintAndPersistRefresh(t, store, cfg, "6")
+
+	body := bytes.NewBufferString(`{"refreshToken":"` + refresh + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.handleRefresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == "refresh_token" {
+			got = c
+		}
+	}
+	if got == nil || got.Value == "" {
+		t.Fatalf("refresh_token cookie not set")
+	}
+	if !got.HttpOnly {
+		t.Errorf("refresh_token cookie should be HttpOnly")
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if user, _ := resp["user"].(map[string]any); user["refreshToken"] != nil {
+		t.Errorf("user.refreshToken should be null when delivered via cookie")
 	}
 }
 

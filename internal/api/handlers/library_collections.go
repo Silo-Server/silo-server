@@ -487,13 +487,16 @@ type importTMDBDiscoverSpecBody struct {
 }
 
 type importTraktRequest struct {
-	LibraryID         int    `json:"library_id"`
-	LibraryIDs        []int  `json:"library_ids"`
-	Title             string `json:"title"`
-	Description       string `json:"description"`
-	Preset            string `json:"preset"`
-	MediaType         string `json:"media_type"`
-	ProfileID         string `json:"profile_id,omitempty"`
+	LibraryID   int    `json:"library_id"`
+	LibraryIDs  []int  `json:"library_ids"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Preset      string `json:"preset"`
+	MediaType   string `json:"media_type"`
+	ProfileID   string `json:"profile_id,omitempty"`
+	// ListURL selects a user-authored Trakt list
+	// (https://trakt.tv/users/{user}/lists/{slug}) instead of a preset.
+	ListURL           string `json:"list_url,omitempty"`
 	Limit             *int   `json:"limit,omitempty"`
 	Featured          bool   `json:"featured"`
 	PosterURL         string `json:"poster_url"`
@@ -2996,10 +2999,20 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 		writeError(w, http.StatusBadRequest, "bad_request", "library_id/library_ids and title are required")
 		return
 	}
-	preset, mediaType, profileID, err := normalizeTraktPresetRequest(req.Preset, req.MediaType, req.ProfileID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+	listURL := strings.TrimSpace(req.ListURL)
+	var preset, mediaType, profileID string
+	if listURL != "" {
+		if _, _, err := catalog.ParseTraktListURL(listURL); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+	} else {
+		var err error
+		preset, mediaType, profileID, err = normalizeTraktPresetRequest(req.Preset, req.MediaType, req.ProfileID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
 	}
 	if req.Limit != nil && *req.Limit <= 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "limit must be greater than 0")
@@ -3015,7 +3028,16 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 		syncSchedule = &s
 	}
 
-	sourceConfig, err := buildTraktSourceConfig(preset, mediaType, profileID, req.Limit)
+	var sourceConfig json.RawMessage
+	var sourceURL string
+	var err error
+	if listURL != "" {
+		sourceConfig, err = buildTraktListSourceConfig(listURL, req.Limit)
+		sourceURL = listURL
+	} else {
+		sourceConfig, err = buildTraktSourceConfig(preset, mediaType, profileID, req.Limit)
+		sourceURL = buildTraktSourceURL(preset, mediaType, profileID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build source config")
 		return
@@ -3036,7 +3058,7 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 		Visibility:       "visible",
 		Featured:         req.Featured,
 		PosterURL:        req.PosterURL,
-		SourceURL:        buildTraktSourceURL(preset, mediaType, profileID),
+		SourceURL:        sourceURL,
 		SourceConfig:     sourceConfig,
 		ManagementMode:   managementMode,
 		ManagementSource: managementSource,
@@ -3493,6 +3515,25 @@ func buildTMDBDiscoverSourceConfig(mediaType string, spec importTMDBDiscoverSpec
 // source_config.
 func buildTMDBDiscoverSourceURL(mediaType, sortBy string) string {
 	return fmt.Sprintf("tmdb://discover/%s?sort_by=%s", mediaType, sortBy)
+}
+
+// buildTraktListSourceConfig builds the source config for a user-authored
+// Trakt list (mode trakt_list, issue #214).
+func buildTraktListSourceConfig(listURL string, limit *int) (json.RawMessage, error) {
+	payload := struct {
+		Mode     string `json:"mode"`
+		Provider string `json:"provider"`
+		URL      string `json:"url"`
+		ListURL  string `json:"list_url"`
+		Limit    *int   `json:"limit,omitempty"`
+	}{
+		Mode:     "trakt_list",
+		Provider: "trakt",
+		URL:      listURL,
+		ListURL:  listURL,
+		Limit:    limit,
+	}
+	return json.Marshal(payload)
 }
 
 func buildTraktSourceConfig(preset, mediaType, profileID string, limit *int) (json.RawMessage, error) {

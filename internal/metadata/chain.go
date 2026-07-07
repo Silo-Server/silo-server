@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// InstallationEnabledChecker answers whether a plugin installation is enabled.
+// It mirrors the structural-dependency style of pluginMetadataResolver /
+// PluginResolverAdapter so the metadata package can consult the plugins
+// service's in-memory installation cache without importing (and creating an
+// import cycle with) the plugins package. *plugins.Service satisfies it via
+// IsInstallationEnabled.
+type InstallationEnabledChecker interface {
+	IsInstallationEnabled(ctx context.Context, installationID int) (bool, error)
+}
+
+// installationEnabled reports whether a plugin installation is enabled. When a
+// checker is supplied it is served from the plugins service's cache (no DB
+// read); when nil it falls back to a direct pool query so tests and non-plugin
+// builds keep working unchanged.
+func installationEnabled(
+	ctx context.Context,
+	checker InstallationEnabledChecker,
+	pool *pgxpool.Pool,
+	installationID int,
+) (bool, error) {
+	if checker != nil {
+		return checker.IsInstallationEnabled(ctx, installationID)
+	}
+	var enabled bool
+	err := pool.QueryRow(ctx,
+		"SELECT enabled FROM plugin_installations WHERE id = $1",
+		installationID,
+	).Scan(&enabled)
+	return enabled, err
+}
+
 // ChainEntry represents a single entry in a library's provider chain.
 type ChainEntry struct {
 	PluginInstallationID int
@@ -144,14 +175,15 @@ func (r *ChainRepository) DeleteChain(ctx context.Context, folderID int) error {
 }
 
 // AppendProviderToAllChains adds a provider to every existing library chain
-// (per content level) that doesn't already include it. The defaultPriority
-// callback returns the plugin's declared priority for a content level (0 means
-// the plugin doesn't declare that level — the entry is still added but disabled).
+// (per content level) that it serves and doesn't already include it. The
+// placement callback resolves the plugin's manifest intent for a content level:
+// levels it does not support are skipped entirely, and it is appended enabled
+// only when it declares the level and opts into default_enabled.
 func (r *ChainRepository) AppendProviderToAllChains(
 	ctx context.Context,
 	pluginInstallationID int,
 	capabilityID string,
-	defaultPriority func(contentLevel string) int,
+	placement func(contentLevel string) SeedPlacement,
 ) error {
 	// Find every distinct (folder, level) pair that has chain entries.
 	rows, err := r.pool.Query(ctx,
@@ -179,6 +211,15 @@ func (r *ChainRepository) AppendProviderToAllChains(
 	}
 
 	for _, g := range groups {
+		// Only attach the provider to levels it actually serves. A single-purpose
+		// provider (e.g. audiobook/ebook/manga metadata, or a sports provider that
+		// only declares series levels) must not clutter every library's chain with
+		// a disabled row for content it cannot handle.
+		p := placement(g.contentLevel)
+		if !p.SupportsLevel {
+			continue
+		}
+
 		// Check if the provider is already in this chain.
 		var exists bool
 		err := r.pool.QueryRow(ctx,
@@ -207,8 +248,11 @@ func (r *ChainRepository) AppendProviderToAllChains(
 			return fmt.Errorf("getting max priority: %w", err)
 		}
 
-		dp := defaultPriority(g.contentLevel)
-		enabled := dp > 0
+		// A provider joins an existing library disabled unless it declares this
+		// level and opts into being enabled by default. This keeps a specialist
+		// (default_enabled=false) one click away instead of silently taking over
+		// established libraries the moment it is installed.
+		enabled := p.DefaultPriority > 0 && p.DefaultEnabled
 
 		_, err = r.pool.Exec(ctx,
 			`INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, capability_type, content_level, priority, enabled)
@@ -231,12 +275,31 @@ func (r *ChainRepository) AppendProviderToAllChains(
 // ordered by their plugin manifest default_priority for the given content level.
 //
 // Providers whose underlying plugin installation is disabled are silently skipped.
+//
+// The enabled-check falls back to a direct pool query. Callers on the hot path
+// (MetadataService.resolveChainCached) use ResolveChainWithChecker to serve it
+// from the plugins service's in-memory installation cache instead.
 func ResolveChain(
 	ctx context.Context,
 	folderID int,
 	contentLevel string,
 	chainRepo *ChainRepository,
 	resolver pluginMetadataResolver,
+) ([]Provider, error) {
+	return ResolveChainWithChecker(ctx, folderID, contentLevel, chainRepo, resolver, nil)
+}
+
+// ResolveChainWithChecker is ResolveChain with an optional
+// InstallationEnabledChecker threaded through the enabled-check. A nil checker
+// preserves the direct pool-query behavior, so existing callers and tests are
+// unaffected.
+func ResolveChainWithChecker(
+	ctx context.Context,
+	folderID int,
+	contentLevel string,
+	chainRepo *ChainRepository,
+	resolver pluginMetadataResolver,
+	checker InstallationEnabledChecker,
 ) ([]Provider, error) {
 	chainEntries, err := chainRepo.GetChain(ctx, folderID, contentLevel)
 	if err != nil {
@@ -253,10 +316,10 @@ func ResolveChain(
 	chainEntries = enabledEntries
 
 	if len(chainEntries) > 0 {
-		return resolveChainEntries(ctx, chainEntries, resolver, chainRepo.pool), nil
+		return resolveChainEntries(ctx, chainEntries, resolver, chainRepo.pool, checker), nil
 	}
 
-	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool)
+	providers, err := resolveEnabledProvidersByPriority(ctx, contentLevel, resolver, chainRepo.pool, checker)
 	if err != nil {
 		return nil, err
 	}
@@ -276,12 +339,13 @@ func resolveEnabledProviders(
 	ctx context.Context,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) ([]Provider, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
-	return buildProviders(ctx, caps, resolver, pool), nil
+	return buildProviders(ctx, caps, resolver, pool, checker), nil
 }
 
 // resolveEnabledProvidersByPriority returns all enabled providers sorted by
@@ -292,6 +356,7 @@ func resolveEnabledProvidersByPriority(
 	contentLevel string,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) ([]Provider, error) {
 	caps, err := ListEnabledMetadataCapabilities(ctx, pool)
 	if err != nil {
@@ -335,7 +400,7 @@ func resolveEnabledProvidersByPriority(
 	for i, item := range items {
 		sorted[i] = item.cap
 	}
-	return buildProviders(ctx, sorted, resolver, pool), nil
+	return buildProviders(ctx, sorted, resolver, pool, checker), nil
 }
 
 // providerSupportsLevel reports whether a metadata provider should participate
@@ -388,6 +453,61 @@ func extractDefaultPriority(metadataJSON []byte, contentLevel string) int {
 		return int(v)
 	}
 	return 0
+}
+
+// extractDefaultEnabled reports whether a provider should be enabled by default
+// when a chain is first seeded for a new library. It defaults to true when the
+// flag is absent or unparseable, so every plugin predating this flag keeps its
+// original seeded-enabled behavior. A specialist provider (e.g. a sports
+// metadata source that should not compete with general providers on every
+// library) sets metadata.default_enabled=false to be seeded installed-but-off,
+// leaving it one click away for users who want it. The flag lives in the same
+// "metadata" envelope as default_priority.
+func extractDefaultEnabled(metadataJSON []byte) bool {
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(metadataJSON, &meta); err != nil {
+		return true
+	}
+	raw, ok := meta["default_enabled"]
+	if !ok {
+		if innerRaw, innerOK := meta["metadata"]; innerOK {
+			var inner map[string]json.RawMessage
+			if err := json.Unmarshal(innerRaw, &inner); err == nil {
+				raw, ok = inner["default_enabled"]
+			}
+		}
+	}
+	if !ok {
+		return true
+	}
+	var enabled bool
+	if err := json.Unmarshal(raw, &enabled); err != nil {
+		return true
+	}
+	return enabled
+}
+
+// SeedPlacement captures how a provider's manifest wants it placed when a chain
+// is first seeded for a content level: whether it handles the level at all, its
+// declared priority, and whether it should be enabled by default.
+type SeedPlacement struct {
+	SupportsLevel   bool
+	DefaultPriority int
+	DefaultEnabled  bool
+}
+
+// LookupSeedPlacement resolves a provider's seed placement for one content level
+// from its capability manifest with a single metadata fetch. SupportsLevel uses
+// the same rule as the chain-less fallback (providerSupportsLevel): a provider
+// that enumerates levels is eligible only for the ones it lists; a provider that
+// declares none stays eligible everywhere.
+func LookupSeedPlacement(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID, contentLevel string) SeedPlacement {
+	md := lookupCapabilityMetadata(ctx, pool, pluginInstallationID, capabilityID)
+	return SeedPlacement{
+		SupportsLevel:   providerSupportsLevel(md, contentLevel),
+		DefaultPriority: extractDefaultPriority(md, contentLevel),
+		DefaultEnabled:  extractDefaultEnabled(md),
+	}
 }
 
 // declaredPriorityLevels parses a capability's default_priority map. The map may
@@ -453,6 +573,7 @@ func resolveChainEntries(
 	entries []ChainEntry,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) []Provider {
 	caps := make([]CapabilityInfo, 0, len(entries))
 	for _, e := range entries {
@@ -463,7 +584,7 @@ func resolveChainEntries(
 			DisplayName:          displayName,
 		})
 	}
-	return buildProviders(ctx, caps, resolver, pool)
+	return buildProviders(ctx, caps, resolver, pool, checker)
 }
 
 // buildProviders constructs Provider instances from capability info, skipping
@@ -473,14 +594,11 @@ func buildProviders(
 	caps []CapabilityInfo,
 	resolver pluginMetadataResolver,
 	pool *pgxpool.Pool,
+	checker InstallationEnabledChecker,
 ) []Provider {
 	providers := make([]Provider, 0, len(caps))
 	for _, c := range caps {
-		var enabled bool
-		err := pool.QueryRow(ctx,
-			"SELECT enabled FROM plugin_installations WHERE id = $1",
-			c.PluginInstallationID,
-		).Scan(&enabled)
+		enabled, err := installationEnabled(ctx, checker, pool, c.PluginInstallationID)
 		if err != nil || !enabled {
 			slog.Debug("skipping metadata provider: plugin installation disabled",
 				"installation_id", c.PluginInstallationID, "capability_id", c.CapabilityID)

@@ -46,6 +46,7 @@ type itemsQuery struct {
 	requestedFields        map[string]bool // parsed from Fields param
 	fieldsExplicit         bool            // true when Fields was in the request
 	startItemID            string          // raw encoded ID from StartItemId param
+	adjacentTo             string          // raw encoded ID from AdjacentTo param
 }
 
 func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
@@ -117,6 +118,9 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.wantsBoxSets = includeItemTypesContain(rawItemTypes, "boxset")
 	result.wantsViews = includeItemTypesContain(rawItemTypes, "collectionfolder")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
+	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
+		result.sort = "created_at"
+	}
 	if len(result.itemTypes) > 0 {
 		result.itemType = result.itemTypes[0]
 	}
@@ -171,6 +175,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.needsDetailFields = requestedFieldsNeedDetail(result.requestedFields)
 
 	result.startItemID = strings.TrimSpace(q.Get("StartItemId"))
+	result.adjacentTo = strings.TrimSpace(q.Get("AdjacentTo"))
 
 	// Diagnostic: when the request stays on the list path, emit a Debug log
 	// listing any requested Fields that mapping.go's itemFromList does not
@@ -384,6 +389,10 @@ func hasNonEmptyValues(values []string) bool {
 	return false
 }
 
+func itemTypesOnlySeries(itemTypes []string) bool {
+	return len(itemTypes) == 1 && itemTypes[0] == "series"
+}
+
 // includeItemTypesContain reports whether a raw IncludeItemTypes value list
 // contains the given (lowercase) type, before mapIncludeItemTypes drops
 // entries it cannot map to catalog types (e.g. BoxSet).
@@ -432,8 +441,12 @@ func mapSortBy(raw string) string {
 		return "rating_imdb"
 	case "random":
 		return "random"
-	case "dateplayed", "datelastcontentadded":
+	case "dateplayed":
 		return "created_at"
+	case "datelastcontentadded":
+		// Jellyfin's standard "Latest" sort for TV libraries: shows ordered
+		// by their most recently added episode (issue #202).
+		return "latest_episode_added"
 	default:
 		return "created_at"
 	}

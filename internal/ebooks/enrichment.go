@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -330,7 +331,11 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 		return fmt.Errorf("%w: no metadata providers configured for folder %d", errEnrichmentSkipped, item.FolderID)
 	}
 
-	accumulator, accumulatedIDs, providerErrs := collectEbookMetadata(ctx, item, providers)
+	var owner providerIDOwnerLookup
+	if e.providerIDs != nil {
+		owner = e.providerIDs
+	}
+	accumulator, accumulatedIDs, providerErrs := collectEbookMetadata(ctx, item, providers, owner)
 
 	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
 		if err := ctx.Err(); err != nil {
@@ -367,11 +372,21 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 	return nil
 }
 
+// providerIDOwnerLookup reports the content item (if any) that already owns a
+// given set of durable provider IDs. *catalog.ProviderIDRepository satisfies it.
+type providerIDOwnerLookup interface {
+	FindContentIDByProviderIDs(ctx context.Context, providerIDs map[string]string, itemType, excludeContentID string) (string, error)
+}
+
 // collectEbookMetadata queries every provider in the chain and accumulates
 // IDs and metadata. Individual provider failures are collected (not fatal) so
 // the caller can distinguish "providers answered, no match" from "providers
-// were unreachable".
-func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) (*metadata.MetadataResult, map[string]string, []error) {
+// were unreachable". When owner is non-nil, a search-result provider ID already
+// claimed by a different content item is skipped: distinct books that resolve to
+// the same provider work (e.g. two series volumes searched as the bare series
+// name) must not steal each other's identity, which would mis-tag the loser and
+// violate the (provider, provider_id, item_type) uniqueness constraint on persist.
+func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, owner providerIDOwnerLookup) (*metadata.MetadataResult, map[string]string, []error) {
 	searchQuery, accumulatedIDs := buildEbookSearchQuery(item)
 	var providerErrs []error
 
@@ -394,11 +409,32 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 			continue
 		}
 		for k, v := range results[0].ProviderIDs {
-			if v != "" {
-				if _, exists := accumulatedIDs[k]; !exists {
-					accumulatedIDs[k] = v
+			if v == "" {
+				continue
+			}
+			if _, exists := accumulatedIDs[k]; exists {
+				continue
+			}
+			if owner != nil {
+				ownerID, ownErr := owner.FindContentIDByProviderIDs(ctx, map[string]string{k: v}, ebookContentType(), item.ContentID)
+				if ownErr != nil {
+					// Don't claim an ID we couldn't verify is free, and surface
+					// the error so the item retries rather than terminally
+					// stamping as "no match".
+					providerErrs = append(providerErrs, fmt.Errorf("%s ownership check %s=%s: %w", p.Slug(), k, v, ownErr))
+					continue
+				}
+				if ownerID != "" {
+					slog.Info("ebook enrichment: provider id already owned by another item; skipping match",
+						"provider", k,
+						"provider_id", v,
+						"content_id", item.ContentID,
+						"owned_by", ownerID,
+					)
+					continue
 				}
 			}
+			accumulatedIDs[k] = v
 		}
 		slog.Debug("ebook enrichment: search result",
 			"provider", p.Slug(),
@@ -770,13 +806,71 @@ func filterEbookPeople(people []models.ItemPerson) []models.ItemPerson {
 	return authors
 }
 
+// cleanEbookSearchTitle normalizes a stored title for provider search. Scanner
+// titles are often filesystem-derived: underscores stand in for colons or
+// spaces ("Exit Strategy_ The Murderbot" / "LTB_067_Micky_Maus"), and
+// path-fallback titles keep a trailing " - <Author>" segment. Both wreck a
+// title search, so collapse underscores to spaces and drop a trailing author
+// suffix (the author is searched as its own field).
+// ebookTrailingGroupRE matches a single trailing (...) or [...] group.
+var ebookTrailingGroupRE = regexp.MustCompile(`\s*[\(\[]([^\)\]]*)[\)\]]\s*$`)
+
+// ebookSeriesNoiseRE flags a parenthetical as series/edition noise rather than
+// part of the real title: a book/volume/part marker, a "#N", or a bare year.
+var ebookSeriesNoiseRE = regexp.MustCompile(`(?i)\b(book|bk|vol|volume|series|part|saga|edition|novella?)\b|#\s*\d|^\s*\d{1,4}\s*$|\b(19|20)\d{2}\b`)
+
+// ebookYearOnlyRE matches a parenthetical that is nothing but a year. Years are
+// already carried by SearchQuery.Year, so they are dropped from the text rather
+// than folded back in.
+var ebookYearOnlyRE = regexp.MustCompile(`^\s*(19|20)\d{2}\s*$`)
+
+func cleanEbookSearchTitle(title, author string) string {
+	title = strings.ReplaceAll(title, "_", " ")
+	if a := strings.TrimSpace(author); a != "" {
+		// Strip the author only when it is a true trailing suffix (optionally
+		// followed by a series/volume parenthetical). Anchoring to the end avoids
+		// truncating valid title text when " - <author>" appears mid-title.
+		authorSuffixRE := regexp.MustCompile(`(?i)\s-\s*` + regexp.QuoteMeta(a) + `(?:\s*[\(\[][^)\]]*[\)\]])*\s*$`)
+		title = authorSuffixRE.ReplaceAllString(title, "")
+	}
+	// Normalize trailing series/edition parentheticals. A bare year ("(2019)")
+	// is dropped because SearchQuery.Year already carries it. A series/volume
+	// marker ("(The Raven Brothers Book 4)", "[#3]") is UNWRAPPED — its words
+	// are kept, only the brackets removed — because the volume number is the
+	// per-volume disambiguator: dropping it makes every entry in a series search
+	// as the bare series name and collapse onto a single provider work. Other
+	// parentheticals ("(Illustrated)") are meaningful title text and survive.
+	for {
+		m := ebookTrailingGroupRE.FindStringSubmatch(title)
+		if m == nil {
+			break
+		}
+		inner := strings.TrimSpace(m[1])
+		base := strings.TrimSpace(title[:len(title)-len(m[0])])
+		if base == "" {
+			break // never reduce the title to nothing
+		}
+		if ebookYearOnlyRE.MatchString(inner) {
+			title = base
+			continue // peel stacked groups (e.g. a year behind a series marker)
+		}
+		if ebookSeriesNoiseRE.MatchString(inner) {
+			title = base + " " + inner
+			break
+		}
+		break // meaningful parenthetical — leave intact
+	}
+	return strings.Join(strings.Fields(title), " ")
+}
+
 func buildEbookSearchQuery(item enrichmentItemRow) (metadata.SearchQuery, map[string]string) {
 	accumulatedIDs := filterEbookProviderIDs(item.ProviderIDs)
 	if accumulatedIDs == nil {
 		accumulatedIDs = map[string]string{}
 	}
 	return metadata.SearchQuery{
-		Title:       item.Title,
+		Title:       cleanEbookSearchTitle(item.Title, item.Author),
+		Author:      item.Author,
 		Year:        item.Year,
 		ContentType: ebookContentType(),
 		ProviderIDs: accumulatedIDs,

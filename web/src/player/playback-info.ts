@@ -1,3 +1,11 @@
+import {
+  dolbyVisionLabel,
+  formatBitrate,
+  formatCodecLabel,
+  formatFileSize,
+  formatMbpsFromKbps,
+  formatSampleRate,
+} from "@/lib/mediaFormat";
 import type {
   PlaybackSessionPlaybackInfo,
   PlayMethod,
@@ -41,21 +49,6 @@ interface BuildPlaybackInfoSectionsInput {
   requestedVersion?: PlayerFileVersion;
   runtimeStats: RuntimePlaybackStats;
 }
-
-const CODEC_LABELS: Record<string, string> = {
-  aac: "AAC",
-  ac3: "AC3",
-  av1: "AV1",
-  dts: "DTS",
-  dtshd: "DTS-HD",
-  eac3: "EAC3",
-  flac: "FLAC",
-  h264: "H.264",
-  hevc: "HEVC",
-  mp3: "MP3",
-  opus: "Opus",
-  truehd: "TrueHD",
-};
 
 export function buildPlaybackInfoSections({
   streamUrl,
@@ -132,7 +125,10 @@ export function buildPlaybackInfoSections({
         },
         {
           label: "Size",
-          value: formatFileSize(currentSourceVersion?.file_size),
+          value: formatFileSize(currentSourceVersion?.file_size, {
+            iecUnits: true,
+            fallback: "—",
+          }),
         },
         {
           label: "Bitrate",
@@ -156,7 +152,7 @@ export function buildPlaybackInfoSections({
         },
         {
           label: "Audio bitrate",
-          value: formatKbps(audioTrack?.bitrate),
+          value: formatBitrate(audioTrack?.bitrate, "—"),
         },
         {
           label: "Audio channels",
@@ -164,7 +160,7 @@ export function buildPlaybackInfoSections({
         },
         {
           label: "Audio sample rate",
-          value: formatSampleRate(audioTrack?.sample_rate),
+          value: formatSampleRate(audioTrack?.sample_rate, "—"),
         },
       ],
     },
@@ -331,9 +327,7 @@ export function formatVideoRangeType(
   track?: PlayerVideoTrack,
 ): string {
   if (track?.dolby_vision) {
-    const dolbyVision = track.dolby_vision.toLowerCase().startsWith("dolby vision")
-      ? track.dolby_vision
-      : `Dolby Vision ${track.dolby_vision}`;
+    const dolbyVision = dolbyVisionLabel(track.dolby_vision);
     return track.video_range ? `${dolbyVision} (${track.video_range})` : dolbyVision;
   }
   if (track?.video_range) {
@@ -362,45 +356,6 @@ export function formatOriginalAudioCodec(
 export function formatAudioChannels(version?: PlayerFileVersion, track?: PlayerAudioTrack): string {
   const channels = track?.channels ?? version?.audio_channels;
   return isPositive(channels) ? String(channels) : "—";
-}
-
-export function formatSampleRate(sampleRate?: number): string {
-  return isPositive(sampleRate) ? `${sampleRate.toLocaleString()} Hz` : "—";
-}
-
-export function formatKbps(kbps?: number): string {
-  return isPositive(kbps) ? `${Math.round(kbps).toLocaleString()} kbps` : "—";
-}
-
-export function formatMbpsFromKbps(kbps?: number): string {
-  return isPositive(kbps) ? `${(kbps / 1000).toFixed(1)} Mbps` : "—";
-}
-
-export function formatFileSize(bytes?: number): string {
-  if (!isPositive(bytes)) {
-    return "—";
-  }
-  if (bytes >= 1024 ** 3) {
-    return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
-  }
-  if (bytes >= 1024 ** 2) {
-    return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
-  }
-  if (bytes >= 1024) {
-    return `${(bytes / 1024).toFixed(1)} KiB`;
-  }
-  return `${bytes} B`;
-}
-
-export function formatCodecLabel(codec?: string): string {
-  if (!codec) {
-    return "—";
-  }
-  const normalized = codec.trim();
-  if (!normalized) {
-    return "—";
-  }
-  return CODEC_LABELS[normalized.toLowerCase()] ?? normalized.toUpperCase();
 }
 
 function pickVideoTrack(version: PlayerFileVersion): PlayerVideoTrack | undefined {

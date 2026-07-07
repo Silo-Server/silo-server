@@ -232,6 +232,13 @@ func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID s
 	if !ok {
 		return ManualSyncResult{}, fmt.Errorf("watch provider connection not found")
 	}
+	// A manual sync against a rate-limited provider would fail immediately
+	// while still spending the account's request quota, so honor the deferral.
+	if conn.RateLimitedUntil != nil {
+		if remaining := conn.RateLimitedUntil.Sub(s.now()); remaining > 0 {
+			return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: ceilSeconds(remaining)}
+		}
+	}
 
 	for {
 		active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID)
@@ -571,6 +578,15 @@ func (s *Service) SyncDueConnections(ctx context.Context) error {
 		return fmt.Errorf("list due watch provider connections: %w", err)
 	}
 	for _, conn := range conns {
+		// Re-read each connection before syncing: an earlier connection in
+		// this batch may have rate-limited the shared provider account and
+		// deferred its siblings after the snapshot was taken.
+		if current, ok, err := s.repo.GetConnectionByID(ctx, conn.ID); err == nil && ok {
+			conn = current
+		}
+		if conn.RateLimitedUntil != nil && conn.RateLimitedUntil.After(s.now()) {
+			continue
+		}
 		if err := s.SyncConnection(ctx, conn, "scheduled"); err != nil {
 			slog.Warn("watch provider connection sync failed", "provider", conn.Provider, "user_id", conn.UserID, "profile_id", conn.ProfileID, "error", err)
 		}
@@ -663,6 +679,11 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		}
 		return completed, err
 	}
+	// An expired deferral is cleared in memory here; the first successful
+	// flow persists the cleared value through its UpsertConnection call.
+	if conn.RateLimitedUntil != nil && !conn.RateLimitedUntil.After(s.now()) {
+		conn.RateLimitedUntil = nil
+	}
 	conn, err = s.refreshConnectionIfNeeded(ctx, provider, cfg, conn)
 	if err != nil {
 		run.Status = string(SyncRunStatusFailed)
@@ -674,7 +695,17 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 		return completed, err
 	}
 
+	// The first RateLimitedError stops the remaining flows: the provider
+	// rejects everything until its quota window resets, so continuing would
+	// only burn more of the account's request budget.
 	var flowErrors []string
+	var rateLimited *RateLimitedError
+	recordFlowError := func(label string, err error) {
+		flowErrors = append(flowErrors, label+": "+err.Error())
+		if rle, ok := AsRateLimited(err); ok && rateLimited == nil {
+			rateLimited = &rle
+		}
+	}
 	if conn.ImportWatchedEnabled && provider.Capabilities().ImportWatched {
 		importer, ok := provider.(WatchedImporter)
 		if !ok {
@@ -685,7 +716,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.InboundWatchedImported = result.Imported
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
-				flowErrors = append(flowErrors, "watched import: "+err.Error())
+				recordFlowError("watched import", err)
 			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
 				flowErrors = append(flowErrors, "watched import connection refresh: "+refreshErr.Error())
 			} else {
@@ -693,7 +724,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			}
 		}
 	}
-	if conn.ImportProgressEnabled && provider.Capabilities().ImportProgress {
+	if rateLimited == nil && conn.ImportProgressEnabled && provider.Capabilities().ImportProgress {
 		importer, ok := provider.(ProgressImporter)
 		if !ok {
 			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement progress import", conn.Provider))
@@ -703,7 +734,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.InboundProgressImported = result.Imported
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
-				flowErrors = append(flowErrors, "progress import: "+err.Error())
+				recordFlowError("progress import", err)
 			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
 				flowErrors = append(flowErrors, "progress import connection refresh: "+refreshErr.Error())
 			} else {
@@ -711,7 +742,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			}
 		}
 	}
-	if conn.ExportWatchedEnabled && provider.Capabilities().ExportWatched {
+	if rateLimited == nil && conn.ExportWatchedEnabled && provider.Capabilities().ExportWatched {
 		exporter, ok := provider.(WatchedExporter)
 		if !ok {
 			flowErrors = append(flowErrors, fmt.Sprintf("provider %q does not implement watched export", conn.Provider))
@@ -720,7 +751,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			run.OutboundFound = result.LocalFound
 			run.OutboundSent = result.Sent
 			if err != nil {
-				flowErrors = append(flowErrors, "watched export: "+err.Error())
+				recordFlowError("watched export", err)
 			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
 				flowErrors = append(flowErrors, "watched export connection refresh: "+refreshErr.Error())
 			} else {
@@ -730,40 +761,48 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 	}
 	// Favorites and watchlist share one pipeline, run per list kind.
 	for _, b := range s.listBindings() {
+		if rateLimited != nil {
+			break
+		}
 		caps := provider.Capabilities()
 		if b.importEnabled(conn) && b.capImport(caps) {
 			result, err := s.importList(ctx, conn, cfg, provider, b)
 			b.setImportCounts(&run, result.Found, result.Imported)
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
-				flowErrors = append(flowErrors, string(b.kind)+" import: "+err.Error())
+				recordFlowError(string(b.kind)+" import", err)
 			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
 				flowErrors = append(flowErrors, string(b.kind)+" import connection refresh: "+refreshErr.Error())
 			} else {
 				conn = refreshed
 			}
 		}
-		if b.exportEnabled(conn) && b.capExport(caps) {
+		if rateLimited == nil && b.exportEnabled(conn) && b.capExport(caps) {
 			result, err := s.exportList(ctx, conn, cfg, provider, b)
 			b.setExportCounts(&run, result.LocalFound, result.Sent)
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			if err != nil {
-				flowErrors = append(flowErrors, string(b.kind)+" export: "+err.Error())
+				recordFlowError(string(b.kind)+" export", err)
 			} else if refreshed, refreshErr := s.reloadConnection(ctx, conn); refreshErr != nil {
 				flowErrors = append(flowErrors, string(b.kind)+" export connection refresh: "+refreshErr.Error())
 			} else {
 				conn = refreshed
 			}
 		}
-		if b.removalsEnabled(conn) && b.capRemove(caps) {
+		if rateLimited == nil && b.removalsEnabled(conn) && b.capRemove(caps) {
 			removed, err := s.removePendingListItems(ctx, conn, cfg, provider, b)
 			b.setRemovalCount(&run, removed)
 			if err != nil {
-				flowErrors = append(flowErrors, string(b.kind)+" removal: "+err.Error())
+				recordFlowError(string(b.kind)+" removal", err)
 			}
 		}
 	}
 
+	if rateLimited != nil {
+		if err := s.deferRateLimitedConnection(ctx, conn, *rateLimited); err != nil {
+			flowErrors = append(flowErrors, "record rate limit deferral: "+err.Error())
+		}
+	}
 	if len(flowErrors) > 0 {
 		run.Status = string(SyncRunStatusFailed)
 		run.Error = strings.Join(flowErrors, "; ")
@@ -775,6 +814,42 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 	}
 	run.Status = string(SyncRunStatusSuccess)
 	return s.completeSyncRun(ctx, run)
+}
+
+// deferRateLimitedConnection records when the provider's rate limit is
+// expected to clear so scheduled syncs skip the connection until then. The
+// provider limit applies to the API key/account rather than the Silo profile,
+// so the deferral is stamped on every connection bound to the same provider
+// account. The pending export/removal rows are left untouched and picked up
+// by the first run after the deferral expires.
+func (s *Service) deferRateLimitedConnection(ctx context.Context, conn Connection, rle RateLimitedError) error {
+	fresh, err := s.reloadConnection(ctx, conn)
+	if err != nil {
+		return err
+	}
+	retryAfter := rle.RetryAfter
+	if retryAfter <= 0 {
+		retryAfter = time.Hour
+	}
+	until := s.now().Add(retryAfter)
+	lastError := fmt.Sprintf("%s; sync deferred until %s", rle.Error(), until.Format(time.RFC3339))
+	deferred := 1
+	if strings.TrimSpace(fresh.ProviderAccountID) != "" {
+		deferred, err = s.repo.DeferConnectionsForAccount(ctx, fresh.Provider, fresh.ProviderAccountID, until, lastError)
+		if err != nil {
+			return err
+		}
+	} else {
+		fresh.RateLimitedUntil = &until
+		fresh.LastError = lastError
+		if _, err := s.repo.UpsertConnection(ctx, fresh); err != nil {
+			return err
+		}
+	}
+	slog.Info("watch provider sync deferred by rate limit",
+		"provider", conn.Provider, "user_id", conn.UserID, "profile_id", conn.ProfileID,
+		"until", until, "connections_deferred", deferred)
+	return nil
 }
 
 func (s *Service) reloadConnection(ctx context.Context, conn Connection) (Connection, error) {
@@ -815,7 +890,10 @@ func retryAfterSeconds(now time.Time, reference time.Time, cooldown time.Duratio
 	if reference.IsZero() {
 		return 0
 	}
-	remaining := cooldown - now.Sub(reference)
+	return ceilSeconds(cooldown - now.Sub(reference))
+}
+
+func ceilSeconds(remaining time.Duration) int {
 	if remaining <= 0 {
 		return 0
 	}
@@ -1258,6 +1336,11 @@ func (s *Service) ExportWatched(
 		}
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
 		if err != nil {
+			// Rate-limited plays are not failures: leave them pending so the
+			// next run (after the deferral) retries without churning state.
+			if _, limited := AsRateLimited(err); limited {
+				return result, err
+			}
 			for _, export := range pending {
 				_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", err.Error())
 			}
@@ -1360,6 +1443,10 @@ func (s *Service) exportLocalPlays(
 	}
 	exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
 	if err != nil {
+		// Leave rate-limited plays pending; the next scheduled sync retries.
+		if _, limited := AsRateLimited(err); limited {
+			return err
+		}
 		for _, export := range exportByHistoryID {
 			_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", err.Error())
 		}

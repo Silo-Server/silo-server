@@ -25,6 +25,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, Pencil, Trash2, RefreshCw, Info, AlertTriangle } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { formatDateTime } from "@/lib/datetime";
 
 type NodeType = "proxy" | "transcode";
 
@@ -159,9 +160,7 @@ function NodeSection({
                       </TableCell>
                     )}
                     <TableCell className="text-muted-foreground text-xs">
-                      {node.last_health_check
-                        ? new Date(node.last_health_check).toLocaleString()
-                        : "Never"}
+                      {node.last_health_check ? formatDateTime(node.last_health_check) : "Never"}
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">

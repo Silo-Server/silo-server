@@ -34,9 +34,15 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onPick: (def: RecipeDefinition, preset: GalleryPreset) => void;
+  /**
+   * Hide recipes flagged admin_only by the backend. Set on profile-facing
+   * surfaces (customize home, home settings); the admin sections page shows
+   * everything.
+   */
+  hideAdminOnly?: boolean;
 }
 
-export default function RecipeGalleryModal({ open, onClose, onPick }: Props) {
+export default function RecipeGalleryModal({ open, onClose, onPick, hideAdminOnly }: Props) {
   const [catalog, setCatalog] = useState<Partial<Record<Category, RecipeDefinition[]>>>({});
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<Category | "all">("all");
@@ -54,6 +60,7 @@ export default function RecipeGalleryModal({ open, onClose, onPick }: Props) {
     for (const cat of Object.keys(catalog) as Category[]) {
       if (activeCategory !== "all" && activeCategory !== cat) continue;
       for (const def of catalog[cat] ?? []) {
+        if (hideAdminOnly && def.admin_only) continue;
         for (const preset of def.presets ?? []) {
           const s = search.trim() ? score(search.trim(), preset) : 1;
           if (s === 0) continue;
@@ -65,7 +72,7 @@ export default function RecipeGalleryModal({ open, onClose, onPick }: Props) {
       rows.sort((a, b) => b.score - a.score);
     }
     return rows;
-  }, [catalog, search, activeCategory]);
+  }, [catalog, search, activeCategory, hideAdminOnly]);
 
   if (!open) return null;
 

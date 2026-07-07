@@ -70,9 +70,59 @@ func TestStats_Sessions_List_Paginated(t *testing.T) {
 	if env["total"] != float64(3) {
 		t.Errorf("total = %v, want 3", env["total"])
 	}
-	results, _ := env["results"].([]any)
-	if len(results) != 3 {
-		t.Errorf("results len = %d, want 3", len(results))
+	sessions, _ := env["sessions"].([]any)
+	if len(sessions) != 3 {
+		t.Errorf("sessions len = %d, want 3", len(sessions))
+	}
+}
+
+// TestStats_Sessions_List_EnvelopeShape asserts the response matches the
+// exact envelope real audiobookshelf's MeController.getListeningSessions
+// returns ({total, numPages, page, itemsPerPage, sessions}), and that each
+// session object carries the PlaybackSession.toJSON() keys strict clients
+// (Flutter/Swift decoders) require: mediaType, mediaMetadata, displayTitle.
+func TestStats_Sessions_List_EnvelopeShape(t *testing.T) {
+	fake := &statsFakeStore{closed: []ABSPlaybackSession{
+		{ID: "s1", UserID: "1", ContentID: "book-1", TimeListeningSeconds: 120, CurrentPositionSeconds: 45.5},
+	}}
+	h := New(Dependencies{MediaStore: noopMediaStore{}, PlaybackSessionStore: fake})
+
+	rec := dispatchABSWithParams(http.MethodGet, "/api/me/listening-sessions", nil, nil, "1", "", h.handleListeningSessions)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var env map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	for _, key := range []string{"total", "numPages", "page", "itemsPerPage", "sessions"} {
+		if _, ok := env[key]; !ok {
+			t.Errorf("envelope missing key %q; body=%s", key, rec.Body.String())
+		}
+	}
+	if _, ok := env["results"]; ok {
+		t.Errorf("envelope must not carry the pagedEnvelope 'results' key")
+	}
+
+	sessions, _ := env["sessions"].([]any)
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	sess, _ := sessions[0].(map[string]any)
+	if sess["mediaType"] != "book" {
+		t.Errorf("mediaType = %v, want book", sess["mediaType"])
+	}
+	if _, ok := sess["mediaMetadata"].(map[string]any); !ok {
+		t.Errorf("mediaMetadata missing or wrong type: %v", sess["mediaMetadata"])
+	}
+	if _, ok := sess["displayTitle"]; !ok {
+		t.Errorf("displayTitle missing")
+	}
+	for _, key := range []string{"id", "userId", "libraryId", "libraryItemId", "bookId", "episodeId",
+		"chapters", "displayAuthor", "coverPath", "duration", "playMethod", "mediaPlayer",
+		"deviceInfo", "serverVersion", "date", "dayOfWeek", "timeListening", "startTime",
+		"currentTime", "startedAt", "updatedAt"} {
+		if _, ok := sess[key]; !ok {
+			t.Errorf("session missing key %q; body=%s", key, rec.Body.String())
+		}
 	}
 }
 

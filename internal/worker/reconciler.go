@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -74,6 +75,14 @@ type Reconciler struct {
 	EventBus        cache.EventBus
 	EventsHub       *evt.Hub
 	PreSync         PreSyncHook
+	// syncMu guards syncRunning/syncPending. Session syncs are coalesced onto a
+	// single owner so concurrent callers (the periodic tick plus request-path
+	// start/stop triggers) can never commit an older session snapshot after a
+	// newer one — which would resurrect stopped sessions or drop freshly
+	// started ones — and so request goroutines never queue behind a slow sync.
+	syncMu      sync.Mutex
+	syncRunning bool
+	syncPending bool
 }
 
 // NewReconciler creates a new Reconciler with sensible defaults. The default
@@ -434,14 +443,56 @@ func (r *Reconciler) tick() {
 	}
 }
 
-// SyncNow runs one immediate session reconciliation using the current local
-// session snapshot. When nodeName is configured, an empty snapshot still
-// clears any rows previously reported by that node.
+// SyncNow reconciles the current local session snapshot into the shared
+// table. When nodeName is configured, an empty snapshot still clears any rows
+// previously reported by that node.
+//
+// Syncs are coalesced: only one reconciliation runs at a time, and a call that
+// arrives while one is in flight returns immediately after asking the running
+// owner for one follow-up pass with a fresh snapshot. The follow-up capture
+// happens after the caller's state change, so its effect is never lost, and
+// snapshots always commit in capture order.
 func (r *Reconciler) SyncNow(ctx context.Context) error {
 	if r.sessionProvider == nil {
 		return nil
 	}
 
+	r.syncMu.Lock()
+	if r.syncRunning {
+		// The in-flight sync may have captured a snapshot that predates this
+		// caller's state change; have the owner run one more pass.
+		r.syncPending = true
+		r.syncMu.Unlock()
+		return nil
+	}
+	r.syncRunning = true
+	// The fresh capture below supersedes any pass queued before ownership.
+	r.syncPending = false
+	r.syncMu.Unlock()
+
+	err := r.syncOnce(ctx)
+	for {
+		r.syncMu.Lock()
+		// Leave a queued pass for the next caller (the periodic tick at the
+		// latest) rather than burning it on an already-expired context.
+		if !r.syncPending || ctx.Err() != nil {
+			r.syncRunning = false
+			r.syncMu.Unlock()
+			return err
+		}
+		r.syncPending = false
+		r.syncMu.Unlock()
+		if passErr := r.syncOnce(ctx); err == nil {
+			err = passErr
+		}
+	}
+}
+
+// syncOnce captures one session snapshot and reconciles it.
+func (r *Reconciler) syncOnce(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	sessions := r.sessionProvider()
 	if len(sessions) == 0 {
 		if r.nodeName == "" {

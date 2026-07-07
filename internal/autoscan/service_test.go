@@ -156,6 +156,10 @@ func (passthroughConnRes) Resolve(context.Context, Connection) (ResolvedConnecti
 type fakeResolver struct{}
 
 func (fakeResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if strings.Contains(req.Path, "vanished") {
+		// Mimic the real resolver's stat failure for deleted paths.
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "Path does not exist"}
+	}
 	if strings.HasPrefix(req.Path, "/mnt/media/") {
 		mode := scantrigger.ModeSubtree
 		if filepath.Ext(req.Path) == ".mkv" {
@@ -171,6 +175,19 @@ func (fakeResolver) ResolveMissingSubtree(_ context.Context, subtreePath, trigge
 		return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: subtreePath, Trigger: trigger}, nil
 	}
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+
+func (fakeResolver) ResolveVanishedPath(_ context.Context, path, trigger string) (*scantrigger.Target, error) {
+	if !strings.HasPrefix(path, "/mnt/media/") {
+		return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+	}
+	// Mimic the real resolver: vanished video files reconcile via their parent
+	// directory; other vanished paths reconcile as themselves.
+	scope := path
+	if filepath.Ext(path) == ".mkv" {
+		scope = filepath.Dir(path)
+	}
+	return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: scope, Trigger: trigger}, nil
 }
 
 type distinctFolderResolver struct{}
@@ -205,6 +222,10 @@ func (distinctFolderResolver) ResolveMissingSubtree(_ context.Context, subtreePa
 	}, nil
 }
 
+func (distinctFolderResolver) ResolveVanishedPath(_ context.Context, path, trigger string) (*scantrigger.Target, error) {
+	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+
 // unresolvableResolver treats every path as outside Silo's media folders,
 // returning a RequestError — the "none resolved → misconfiguration" signal.
 type unresolvableResolver struct{}
@@ -214,6 +235,41 @@ func (unresolvableResolver) Resolve(_ context.Context, req scantrigger.Request) 
 }
 func (unresolvableResolver) ResolveMissingSubtree(context.Context, string, string) (*scantrigger.Target, error) {
 	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+func (unresolvableResolver) ResolveVanishedPath(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, &scantrigger.RequestError{Status: 400, Code: "bad_request", Message: "outside media folders"}
+}
+
+// mixedTransientResolver resolves /mnt/media/ paths normally and fails every
+// other path with a plain (non-RequestError) internal error — the mixed
+// "some resolved, some failed transiently" poll window.
+type mixedTransientResolver struct{}
+
+func (mixedTransientResolver) Resolve(_ context.Context, req scantrigger.Request) (*scantrigger.Target, error) {
+	if strings.HasPrefix(req.Path, "/mnt/media/") {
+		return &scantrigger.Target{Folder: &models.MediaFolder{ID: 7}, Mode: scantrigger.ModeSubtree, Path: req.Path, Trigger: req.Trigger}, nil
+	}
+	return nil, errors.New("listing folders: connection timeout")
+}
+func (mixedTransientResolver) ResolveMissingSubtree(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, errors.New("listing folders: connection timeout")
+}
+func (mixedTransientResolver) ResolveVanishedPath(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, errors.New("listing folders: connection timeout")
+}
+
+// transientFailureResolver fails every resolve with a plain (non-RequestError)
+// error, simulating an internal fault such as a database timeout.
+type transientFailureResolver struct{}
+
+func (transientFailureResolver) Resolve(context.Context, scantrigger.Request) (*scantrigger.Target, error) {
+	return nil, errors.New("listing folders: connection timeout")
+}
+func (transientFailureResolver) ResolveMissingSubtree(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, errors.New("listing folders: connection timeout")
+}
+func (transientFailureResolver) ResolveVanishedPath(context.Context, string, string) (*scantrigger.Target, error) {
+	return nil, errors.New("listing folders: connection timeout")
 }
 
 // denySuppressor resolves paths normally but denies every claim, simulating a
@@ -488,6 +544,71 @@ func TestPollOnceStructuredSubtreeChangeEnqueuesExactSubtree(t *testing.T) {
 	}
 }
 
+func TestPollOnceFileChangeForDeletedPathFallsBackToSubtreeScan(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
+		}},
+	}
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{
+			SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv",
+			Scope:      ChangeScopeFile,
+		}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 fallback subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
+		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
+	}
+	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie-vanished (2026)" {
+		t.Fatalf("subtree path = %q", got)
+	}
+	if _, ok := store.advanced["s1"]; !ok {
+		t.Fatalf("expected marker advanced for s1")
+	}
+}
+
+func TestPollOnceLegacyChangeForDeletedDirFallsBackToSubtreeScan(t *testing.T) {
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.cephfs", CapabilityID: "cephfs", Enabled: true,
+			PathRewrites: []PathRewrite{{From: "/ceph/movies", To: "/mnt/media/movies"}},
+		}},
+	}
+	// Legacy/auto changes collapse to the parent dir before resolving; a
+	// removed movie folder makes that dir vanish too.
+	prov := &fakeProvider{changes: map[string][]Change{
+		"cephfs": {{
+			SourcePath: "/ceph/movies/Movie-vanished (2026)/Movie-vanished (2026).mkv",
+			Scope:      ChangeScopeAuto,
+		}},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := newService(store, prov, q, allowSuppressor{})
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("expected 1 fallback subtree scan, got %d: %+v", len(q.enqueued), q.enqueued)
+	}
+	if got := q.enqueued[0].Mode; got != scantrigger.ModeSubtree {
+		t.Fatalf("mode = %q, want %q", got, scantrigger.ModeSubtree)
+	}
+	if got := q.enqueued[0].Path; got != "/mnt/media/movies/Movie-vanished (2026)" {
+		t.Fatalf("subtree path = %q", got)
+	}
+}
+
 func TestPollOnceCollapsesLargeTargetBatchToLibraryScans(t *testing.T) {
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
@@ -622,11 +743,11 @@ func TestPollOnceStoresOpaqueMarkerVerbatim(t *testing.T) {
 	}
 }
 
-func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
-	// A freshly-enabled source with no path_rewrites: the provider returns paths
-	// that don't map to any Silo library folder (the resolver RequestErrors on
-	// every path). The marker must NOT advance (so the imports aren't skipped
-	// forever) and an explaining error is recorded.
+func TestPollOnceAdvancesMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
+	// A filesystem watcher (e.g. CephFS) may return paths from folders that are
+	// not registered as Silo libraries. The marker must ADVANCE so autoscan does
+	// not stall permanently; no source error is recorded, but the event finishes
+	// as "unresolved" so the condition stays visible in poll history.
 	store := &fakeStore{
 		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
 		sources: []Source{{
@@ -649,15 +770,11 @@ func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	if len(q.enqueued) != 0 {
 		t.Fatalf("nothing should enqueue when no path resolves, got %d", len(q.enqueued))
 	}
-	if _, ok := store.advanced["s1"]; ok {
-		t.Fatalf("marker must NOT advance when paths returned but none resolved")
+	if got := store.advanced["s1"]; got != "m1" {
+		t.Fatalf("marker must advance when paths returned but none resolved, got %q", got)
 	}
-	msg, ok := store.recorded["s1"]
-	if !ok || msg == "" {
-		t.Fatalf("expected an explaining error recorded for s1, got %q ok=%v", msg, ok)
-	}
-	if want := "returned 2 path(s)"; !strings.Contains(msg, want) {
-		t.Fatalf("recorded error %q should mention %q", msg, want)
+	if msg, ok := store.recorded["s1"]; ok {
+		t.Fatalf("no error should be recorded when advancing past unresolvable paths, got %q", msg)
 	}
 	if len(store.events) != 1 {
 		t.Fatalf("expected one finished event, got %d", len(store.events))
@@ -669,8 +786,99 @@ func TestPollOnceHoldsMarkerWhenPathsReturnedButNoneResolve(t *testing.T) {
 	if event.ChangesReturned != 2 || event.ChangesResolved != 0 || event.TargetsClaimed != 0 {
 		t.Fatalf("event counts = %+v", event)
 	}
-	if !strings.Contains(event.ErrorMessage, "returned 2 path(s)") {
-		t.Fatalf("event error = %q", event.ErrorMessage)
+	if !strings.Contains(event.ErrorMessage, "none matched a Silo library folder") {
+		t.Fatalf("event message = %q", event.ErrorMessage)
+	}
+	if event.MarkerAfter != "m1" {
+		t.Fatalf("event marker after = %q, want %q", event.MarkerAfter, "m1")
+	}
+}
+
+func TestPollOnceHoldsMarkerOnTransientResolveFailure(t *testing.T) {
+	// Nothing resolved because the resolver failed INTERNALLY (e.g. a database
+	// fault), not because the paths are outside Silo's libraries. Advancing
+	// would silently skip real imports, so the marker must HOLD and an error be
+	// recorded; the window is retried once the fault clears.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
+			"/mnt/media/Show/S01/E01.mkv",
+			"/mnt/media/Show/S01/E02.mkv",
+		},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := NewService(store, prov, passthroughConnRes{}, transientFailureResolver{}, q, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 0 {
+		t.Fatalf("nothing should enqueue when no path resolves, got %d", len(q.enqueued))
+	}
+	if got, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance on transient resolve failure, advanced to %q", got)
+	}
+	msg, ok := store.recorded["s1"]
+	if !ok || !strings.Contains(msg, "failed internally") {
+		t.Fatalf("expected recorded transient-failure error, got %q ok=%v", msg, ok)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.Status != EventStatusError {
+		t.Fatalf("event status = %q, want %q", event.Status, EventStatusError)
+	}
+	if event.ChangesReturned != 2 || event.ChangesResolved != 0 {
+		t.Fatalf("event counts = %+v", event)
+	}
+}
+
+func TestPollOnceHoldsMarkerWhenSomeResolveAndOthersFailTransiently(t *testing.T) {
+	// One path resolves and enqueues, another fails with an internal
+	// (non-RequestError) resolver fault. The resolved target's scan must still
+	// be enqueued, but the marker must HOLD and an error be recorded so the
+	// failed path is retried next poll instead of being skipped.
+	store := &fakeStore{
+		settings: Settings{Enabled: true, DefaultPollIntervalSeconds: 600, DebounceSeconds: 60},
+		sources: []Source{{
+			ID: "s1", PluginID: "silo.autoscan.arr", CapabilityID: "arr", ConnectionID: strptr("c1"), Enabled: true,
+		}},
+	}
+	prov := &fakeProvider{paths: map[string][]string{
+		"arr": {
+			"/mnt/media/Show/S01/E01.mkv",
+			"/data/other/Movie/movie.mkv",
+		},
+	}, nextMarker: "m1"}
+	q := &recordingQueuer{}
+	svc := NewService(store, prov, passthroughConnRes{}, mixedTransientResolver{}, q, allowSuppressor{}, nil)
+	if err := svc.PollOnce(context.Background()); err != nil {
+		t.Fatalf("PollOnce: %v", err)
+	}
+	if len(q.enqueued) != 1 {
+		t.Fatalf("the resolved target should still enqueue, got %d", len(q.enqueued))
+	}
+	if got, ok := store.advanced["s1"]; ok {
+		t.Fatalf("marker must NOT advance when any resolve attempt failed transiently, advanced to %q", got)
+	}
+	msg, ok := store.recorded["s1"]
+	if !ok || !strings.Contains(msg, "failed internally") {
+		t.Fatalf("expected recorded transient-failure error, got %q ok=%v", msg, ok)
+	}
+	if len(store.events) != 1 {
+		t.Fatalf("expected one finished event, got %d", len(store.events))
+	}
+	event := store.events[0]
+	if event.Status != EventStatusError {
+		t.Fatalf("event status = %q, want %q", event.Status, EventStatusError)
+	}
+	if event.ChangesReturned != 2 || event.ChangesResolved != 1 {
+		t.Fatalf("event counts = %+v", event)
 	}
 }
 

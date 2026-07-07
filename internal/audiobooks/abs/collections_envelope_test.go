@@ -25,7 +25,7 @@ func TestCollectionEnvelope_HasRequiredKeys(t *testing.T) {
 	body, _ := json.Marshal(out)
 	js := string(body)
 	for _, key := range []string{
-		`"id":`, `"userId":`, `"name":`, `"description":`,
+		`"id":`, `"libraryId":`, `"userId":`, `"name":`, `"description":`,
 		`"isPublic":`, `"lastUpdate":`, `"createdAt":`, `"books":`,
 	} {
 		if !strings.Contains(js, key) {

@@ -29,14 +29,20 @@ type Resolver struct {
 	users        UserRepository
 	storeFactory userstore.UserStoreProvider
 	tokens       ProfileTokenValidator
+	groups       GroupPolicyProvider
 }
 
 // NewResolver creates a new scope resolver.
-func NewResolver(users UserRepository, storeFactory userstore.UserStoreProvider, tokens ProfileTokenValidator) *Resolver {
+func NewResolver(users UserRepository, storeFactory userstore.UserStoreProvider, tokens ProfileTokenValidator, groups ...GroupPolicyProvider) *Resolver {
+	var groupProvider GroupPolicyProvider
+	if len(groups) > 0 {
+		groupProvider = groups[0]
+	}
 	return &Resolver{
 		users:        users,
 		storeFactory: storeFactory,
 		tokens:       tokens,
+		groups:       groupProvider,
 	}
 }
 
@@ -46,13 +52,17 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	if err != nil {
 		return Scope{}, fmt.Errorf("loading user %d: %w", input.UserID, err)
 	}
+	effective, err := EffectivePolicyForUser(ctx, user, r.groups)
+	if err != nil {
+		return Scope{}, fmt.Errorf("loading access group policy for user %d: %w", input.UserID, err)
+	}
 
 	scope := Scope{
 		UserID:              user.ID,
 		ProfileID:           input.ProfileID,
-		AllowedLibraryIDs:   cloneInts(user.LibraryIDs),
-		LibrariesRestricted: user.LibraryIDs != nil,
-		MaxPlaybackQuality:  NormalizePlaybackQuality(user.MaxPlaybackQuality),
+		AllowedLibraryIDs:   cloneInts(effective.LibraryIDs),
+		LibrariesRestricted: effective.LibraryIDs != nil,
+		MaxPlaybackQuality:  NormalizePlaybackQuality(effective.MaxPlaybackQuality),
 		PolicyRevision:      user.AccessPolicyRevision,
 		ProfileVerified:     input.ProfileID == "",
 	}
@@ -74,26 +84,16 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.MaxContentRating = profile.MaxContentRating
 		scope.MaxPlaybackQuality = MinQuality(scope.MaxPlaybackQuality, NormalizePlaybackQuality(profile.MaxPlaybackQuality))
 		scope.PreferredMetadataLanguage = profile.PreferredMetadataLanguage
-		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(user.LibraryIDs, profile)
-		scope.ProfileVerified = profile.PINHash == "" || input.SkipPINVerification
-
-		if profile.PINHash != "" && !input.SkipPINVerification {
-			if r.tokens == nil {
-				return Scope{}, ErrProfileUnverified
-			}
-			claims, err := r.tokens.Validate(input.ProfileToken)
-			if err != nil {
-				return Scope{}, err
-			}
-			if claims.UserID != user.ID || claims.SessionID != input.SessionID || claims.ProfileID != profile.ID || claims.PolicyRevision != user.AccessPolicyRevision {
-				return Scope{}, ErrProfileUnverified
-			}
-			scope.ProfileVerified = true
+		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
+		verified, err := VerifyProfileForRequest(profile, input, user.ID, user.AccessPolicyRevision, r.tokens)
+		if err != nil {
+			return Scope{}, err
 		}
+		scope.ProfileVerified = verified
 	}
 
 	// Apply user-level disabled library IDs setting.
-	disabled := loadDisabledLibraryIDs(ctx, store)
+	disabled := DisabledLibraryIDs(ctx, store)
 	if len(disabled) > 0 {
 		if scope.AllowedLibraryIDs != nil {
 			// Restricted user: subtract disabled IDs from the allowed set.
@@ -108,8 +108,39 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	return scope, nil
 }
 
-// loadDisabledLibraryIDs reads and parses the disabled_library_ids user setting.
-func loadDisabledLibraryIDs(ctx context.Context, store userstore.UserStore) []int {
+// VerifyProfileForRequest applies the legacy profile PIN/token verification
+// checks for a resolved profile and returns whether the profile is verified for
+// the request.
+func VerifyProfileForRequest(
+	profile *userstore.Profile,
+	input ResolveInput,
+	userID int,
+	policyRevision int64,
+	tokens ProfileTokenValidator,
+) (bool, error) {
+	if profile == nil {
+		return input.ProfileID == "", nil
+	}
+
+	profileVerified := profile.PINHash == "" || input.SkipPINVerification
+	if profile.PINHash != "" && !input.SkipPINVerification {
+		if tokens == nil {
+			return false, ErrProfileUnverified
+		}
+		claims, err := tokens.Validate(input.ProfileToken)
+		if err != nil {
+			return false, err
+		}
+		if claims.UserID != userID || claims.SessionID != input.SessionID || claims.ProfileID != profile.ID || claims.PolicyRevision != policyRevision {
+			return false, ErrProfileUnverified
+		}
+		profileVerified = true
+	}
+	return profileVerified, nil
+}
+
+// DisabledLibraryIDs reads and parses the disabled_library_ids user setting.
+func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore) []int {
 	raw, err := store.GetSetting(ctx, settingKeyDisabledLibraryIDs)
 	if err != nil || raw == "" {
 		return nil

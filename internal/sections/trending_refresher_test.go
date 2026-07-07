@@ -64,6 +64,10 @@ type fakeTrakt struct {
 	errByType   map[string]error
 }
 
+func (f fakeTrakt) GetUserList(context.Context, string, string, int, string) ([]catalog.TraktCollectionEntry, error) {
+	return nil, nil
+}
+
 func (f fakeTrakt) GetCollectionPreset(_ context.Context, _, mediaType string, _ int, _ string) ([]catalog.TraktCollectionEntry, error) {
 	if err := f.errByType[mediaType]; err != nil {
 		return nil, err

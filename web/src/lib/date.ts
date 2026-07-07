@@ -1,3 +1,5 @@
+import { formatDate } from "@/lib/datetime";
+
 /**
  * Compact relative-time label ("just now", "5m ago", "3h ago", "2d ago").
  * Returns null for missing or unparseable values.
@@ -26,7 +28,7 @@ export function formatRelativeTime(value: string | null): string | null {
 
 export function formatBirthDate(dateStr: string): string {
   const date = new Date(dateStr + "T00:00:00");
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return formatDate(date, "medium");
 }
 
 export function computeAge(birthStr: string, deathStr?: string): number {

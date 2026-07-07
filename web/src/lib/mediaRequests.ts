@@ -6,6 +6,7 @@ import type {
   RequestMediaResult,
   RequestMediaType,
 } from "@/api/types";
+import { formatDate } from "@/lib/datetime";
 
 export const REQUEST_STATUSES: Array<MediaRequestStatus | "all"> = [
   "all",
@@ -121,9 +122,5 @@ export function requestInputFromMediaResult(item: RequestMediaResult): CreateMed
 }
 
 export function formatRequestDate(request: Pick<MediaRequest, "created_at">): string {
-  return new Date(request.created_at).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDate(request.created_at, "medium");
 }

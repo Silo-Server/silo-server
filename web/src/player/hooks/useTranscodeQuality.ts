@@ -69,7 +69,10 @@ interface UseTranscodeQualityResult {
 
 export const COMPATIBILITY_QUALITY_ID = "compatibility";
 
-function formatBitrate(kbps: number): string {
+// Quality-menu bitrate label: Mbps with collapsed integers ("8 Mbps", not
+// "8.0 Mbps") — a deliberately different display policy than the canonical
+// formatBitrate/formatMbpsFromKbps in @/lib/mediaFormat.
+function formatQualityBitrate(kbps: number): string {
   if (kbps >= 1000) {
     const mbps = kbps / 1000;
     return mbps % 1 === 0 ? `${mbps} Mbps` : `${mbps.toFixed(1)} Mbps`;
@@ -111,7 +114,7 @@ function buildQualityOptions(
 
   // Original quality option.
   const methodLabel = playMethodLabel(playMethod);
-  const bitrateLabel = version.bitrate > 0 ? formatBitrate(version.bitrate) : "";
+  const bitrateLabel = version.bitrate > 0 ? formatQualityBitrate(version.bitrate) : "";
   const sublabelParts = [methodLabel, bitrateLabel].filter(Boolean);
 
   options.push({
@@ -145,7 +148,7 @@ function buildQualityOptions(
     options.push({
       id: tier.id,
       label: tier.label,
-      sublabel: `~${formatBitrate(tier.bitrate)}`,
+      sublabel: `~${formatQualityBitrate(tier.bitrate)}`,
       resolution: tier.resolution,
       bitrateKbps: tier.bitrate,
       isOriginal: false,
