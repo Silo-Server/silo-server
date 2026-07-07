@@ -158,7 +158,7 @@ export function useLibraryForm({
   const { data: currentChain } = useLibraryProviders(library?.id ?? null);
   // The server computes default chains (same logic that seeds them on create),
   // so the form never re-derives defaults from plugin manifests client-side.
-  const { data: providerDefaults } = useLibraryProviderDefaults(type);
+  const { data: providerDefaults, isLoading: defaultsLoading } = useLibraryProviderDefaults(type);
 
   const isPending =
     createMutation.isPending || updateMutation.isPending || setChainMutation.isPending;
@@ -177,6 +177,11 @@ export function useLibraryForm({
     return mergeChainWithDefaults(levelChainsFromResponse(currentChain), defaultLevelChains, type);
   }, [currentChain, defaultLevelChains, levelChains, library, type]);
   const activeLevelChains = chainDirty ? levelChains : resolvedLevelChains;
+  // The chain editor has nothing truthful to show until the server chain (for
+  // an existing library) and the type's defaults have arrived; local edits
+  // always render immediately.
+  const chainLoading =
+    !chainDirty && (defaultsLoading || (library !== null && currentChain === undefined));
 
   const allErrors = useMemo<LibraryFormErrors>(() => {
     const next: LibraryFormErrors = {};
@@ -325,6 +330,7 @@ export function useLibraryForm({
     setIntroDetectionEnabled,
     contentLevels: contentLevelsForType(type),
     activeLevelChains,
+    chainLoading,
     reorderLevel,
     toggleLevelProvider,
     hasMetadataProviders: hasMetadataProviderCapability(installations),

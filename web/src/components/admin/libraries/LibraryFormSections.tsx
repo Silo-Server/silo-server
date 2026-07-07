@@ -7,6 +7,7 @@ import {
   ChevronRight,
   FolderOpen,
   FolderSearch,
+  Loader2,
   Plus,
   Trash2,
 } from "lucide-react";
@@ -308,7 +309,12 @@ export function MetadataFields({ form }: { form: LibraryFormController }) {
             Providers are asked in order from top to bottom. Uncheck a provider to skip it for that
             level.
           </p>
-          {form.hasMetadataProviders ? (
+          {form.chainLoading ? (
+            <div className="border-border bg-surface text-muted-foreground flex items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-xs">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading providers…
+            </div>
+          ) : form.hasMetadataProviders ? (
             form.contentLevels.map((level) => (
               <ProviderLevelSection
                 key={level}
