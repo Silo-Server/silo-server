@@ -16,6 +16,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
+	"github.com/Silo-Server/silo-server/internal/collectionutil"
 	"github.com/Silo-Server/silo-server/internal/mdblist"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
@@ -430,8 +431,9 @@ func validateOptionalLimit(limit *int, w http.ResponseWriter) bool {
 	if limit == nil {
 		return true
 	}
-	if *limit <= 0 || *limit > 200 {
-		writeError(w, http.StatusBadRequest, "bad_request", "limit must be between 1 and 200")
+	if *limit <= 0 || *limit > collectionutil.MaxExplicitItemLimit {
+		writeError(w, http.StatusBadRequest, "bad_request",
+			fmt.Sprintf("limit must be between 1 and %d", collectionutil.MaxExplicitItemLimit))
 		return false
 	}
 	return true

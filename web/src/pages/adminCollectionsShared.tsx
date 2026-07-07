@@ -2,7 +2,11 @@ import { useEffect, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import type { CreateLibraryCollectionRequest, Library, LibraryCollection } from "@/api/types";
 import { normalizeQueryDefinition } from "@/api/types";
-import { libraryEligibilityForMediaKind, type LibraryEligibility } from "@/lib/collectionTemplates";
+import {
+  COLLECTION_MAX_ITEMS,
+  libraryEligibilityForMediaKind,
+  type LibraryEligibility,
+} from "@/lib/collectionTemplates";
 import {
   useCreateAdminCollection,
   useDeleteCollectionImage,
@@ -852,7 +856,7 @@ export function TMDBPresetForm({
             id="tmdb-limit"
             type="number"
             min={1}
-            max={200}
+            max={COLLECTION_MAX_ITEMS}
             step={1}
             inputMode="numeric"
             value={limit}
@@ -1123,7 +1127,7 @@ export function TraktPresetForm({
             id="trakt-limit"
             type="number"
             min={1}
-            max={200}
+            max={COLLECTION_MAX_ITEMS}
             step={1}
             inputMode="numeric"
             value={limit}
@@ -1688,7 +1692,7 @@ export function CollectionEditForm({
                 id="collection-tmdb-limit"
                 type="number"
                 min={1}
-                max={200}
+                max={COLLECTION_MAX_ITEMS}
                 step={1}
                 inputMode="numeric"
                 value={tmdbLimit}
@@ -1741,7 +1745,7 @@ export function CollectionEditForm({
                     id="collection-trakt-limit"
                     type="number"
                     min={1}
-                    max={200}
+                    max={COLLECTION_MAX_ITEMS}
                     step={1}
                     inputMode="numeric"
                     value={traktLimit}
@@ -1806,7 +1810,7 @@ export function CollectionEditForm({
                     id="collection-trakt-limit"
                     type="number"
                     min={1}
-                    max={200}
+                    max={COLLECTION_MAX_ITEMS}
                     step={1}
                     inputMode="numeric"
                     value={traktLimit}

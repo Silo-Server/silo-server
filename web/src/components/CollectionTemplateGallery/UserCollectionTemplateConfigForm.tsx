@@ -20,7 +20,11 @@ import {
   COLLECTION_WATCH_FILTER_OPTIONS,
   displayFiltersToQueryDefinition,
 } from "@/lib/collectionDisplayFilters";
-import { libraryEligibilityForMediaKind, mediaKindLabel } from "@/lib/collectionTemplates";
+import {
+  COLLECTION_MAX_ITEMS,
+  libraryEligibilityForMediaKind,
+  mediaKindLabel,
+} from "@/lib/collectionTemplates";
 import type { CollectionTemplate } from "@/lib/collectionTemplates";
 import {
   CollectionLibraryPicker,
@@ -313,7 +317,7 @@ export function UserCollectionTemplateConfigForm({ template, onCancel, onCreated
             id="user-template-limit"
             type="number"
             min={1}
-            max={200}
+            max={COLLECTION_MAX_ITEMS}
             step={1}
             inputMode="numeric"
             value={limit}
