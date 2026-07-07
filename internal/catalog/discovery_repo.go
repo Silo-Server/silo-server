@@ -29,7 +29,11 @@ type RatingFilter struct {
 	// Limit caps the number of rows returned. Zero or negative means no limit.
 	Limit int
 	// LibraryID, when non-nil, restricts results to items in that library.
+	// Takes precedence over LibraryIDs.
 	LibraryID *int
+	// LibraryIDs, when non-empty, restricts results to items in any of these
+	// libraries (multi-library section scope).
+	LibraryIDs []int
 	// Filter carries viewer-level access constraints (content rating ceiling,
 	// allowed/disabled library sets).
 	Filter AccessFilter
@@ -48,7 +52,7 @@ func buildRatingThresholdQuery(f RatingFilter) (string, []any) {
 	args = append(args, f.Min)
 	argIdx++
 
-	if ok := appendDiscoveryLibraryScope(&conditions, &args, &argIdx, f.LibraryID, f.Filter); !ok {
+	if ok := appendDiscoveryLibraryScope(&conditions, &args, &argIdx, f.LibraryID, f.LibraryIDs, f.Filter); !ok {
 		return "", nil
 	}
 
@@ -96,12 +100,22 @@ func (r *DiscoveryRepository) ListByRatingThreshold(ctx context.Context, f Ratin
 type UnplayedFilter struct {
 	// MinRating is the minimum rating_imdb value (inclusive).
 	MinRating float64
+	// MaxPlays is the maximum number of watch-history events the viewer may
+	// have for an item before it stops counting as a hidden gem. Zero (the
+	// default) keeps the strict "never started" semantics.
+	MaxPlays int
 	// Limit caps the number of rows returned. Zero or negative means no limit.
 	Limit int
 	// UserID and ProfileID identify the viewer whose watch history is checked.
 	// Both are required; the function returns an error if either is absent.
 	UserID    int
 	ProfileID string
+	// LibraryID, when non-nil, restricts results to items in that library.
+	// Takes precedence over LibraryIDs.
+	LibraryID *int
+	// LibraryIDs, when non-empty, restricts results to items in any of these
+	// libraries (multi-library section scope).
+	LibraryIDs []int
 	// Filter carries viewer-level access constraints.
 	Filter AccessFilter
 }
@@ -119,18 +133,31 @@ func buildUnplayedHighRatedQuery(f UnplayedFilter) (string, []any) {
 	args = append(args, f.MinRating)
 	argIdx++
 
-	// Items the user has any watch history entry for are excluded.
-	conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (
-		SELECT 1
-		FROM user_watch_history uwh
-		WHERE uwh.user_id = $%d
-		  AND uwh.profile_id = $%d
-		  AND uwh.media_item_id = mi.content_id
-	)`, argIdx, argIdx+1))
-	args = append(args, f.UserID, f.ProfileID)
-	argIdx += 2
+	// Items the viewer has watched more than MaxPlays times are excluded.
+	// MaxPlays 0 (the default) reduces to the strict "never started" check.
+	if f.MaxPlays > 0 {
+		conditions = append(conditions, fmt.Sprintf(`(
+			SELECT COUNT(*)
+			FROM user_watch_history uwh
+			WHERE uwh.user_id = $%d
+			  AND uwh.profile_id = $%d
+			  AND uwh.media_item_id = mi.content_id
+		) <= $%d`, argIdx, argIdx+1, argIdx+2))
+		args = append(args, f.UserID, f.ProfileID, f.MaxPlays)
+		argIdx += 3
+	} else {
+		conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (
+			SELECT 1
+			FROM user_watch_history uwh
+			WHERE uwh.user_id = $%d
+			  AND uwh.profile_id = $%d
+			  AND uwh.media_item_id = mi.content_id
+		)`, argIdx, argIdx+1))
+		args = append(args, f.UserID, f.ProfileID)
+		argIdx += 2
+	}
 
-	if ok := appendDiscoveryLibraryScope(&conditions, &args, &argIdx, nil, f.Filter); !ok {
+	if ok := appendDiscoveryLibraryScope(&conditions, &args, &argIdx, f.LibraryID, f.LibraryIDs, f.Filter); !ok {
 		return "", nil
 	}
 
@@ -193,6 +220,12 @@ type ForgottenFavoritesFilter struct {
 	// Both are required; the function returns an error if either is absent.
 	UserID    int
 	ProfileID string
+	// LibraryID, when non-nil, restricts results to items in that library.
+	// Takes precedence over LibraryIDs.
+	LibraryID *int
+	// LibraryIDs, when non-empty, restricts results to items in any of these
+	// libraries (multi-library section scope).
+	LibraryIDs []int
 	// Filter carries viewer-level access constraints.
 	Filter AccessFilter
 }
@@ -224,7 +257,7 @@ func buildForgottenFavoritesQuery(f ForgottenFavoritesFilter) (string, []any) {
 	args = append(args, f.UserID, f.ProfileID, f.LookbackDays)
 	argIdx += 3
 
-	if ok := appendDiscoveryLibraryScope(&conditions, &args, &argIdx, nil, f.Filter); !ok {
+	if ok := appendDiscoveryLibraryScope(&conditions, &args, &argIdx, f.LibraryID, f.LibraryIDs, f.Filter); !ok {
 		return "", nil
 	}
 
@@ -276,25 +309,37 @@ func appendDiscoveryLibraryScope(
 	args *[]any,
 	argIdx *int,
 	libraryID *int,
+	libraryIDs []int,
 	filter AccessFilter,
 ) bool {
-	if libraryID != nil {
-		whereSQL, scopeArgs, ok := buildLibraryScopeJoin([]int{*libraryID}, nil, *argIdx, "", "mi.content_id")
-		if ok {
-			*conditions = append(*conditions, whereSQL)
-			*args = append(*args, scopeArgs...)
-			*argIdx += len(scopeArgs)
-		}
-		return true
+	// Section-level scope: a single pinned library wins over a multi-library set.
+	var scope []int
+	switch {
+	case libraryID != nil:
+		scope = []int{*libraryID}
+	case len(libraryIDs) > 0:
+		scope = libraryIDs
 	}
 
-	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+	// Intersect the section scope with the viewer's allowed set so a scoped
+	// section can never widen access beyond what the viewer may see.
+	allowed := filter.AllowedLibraryIDs
+	if len(scope) > 0 {
+		if allowed != nil {
+			allowed = intersectInts(scope, allowed)
+			if len(allowed) == 0 {
+				return false
+			}
+		} else {
+			allowed = scope
+		}
+	} else if allowed != nil && len(allowed) == 0 {
 		return false
 	}
 
 	// buildLibraryScopeJoin uses semi-joins: disabled libraries are an item-level
 	// exclusion, matching the rest of catalog access filtering and avoiding row fanout.
-	if filter.AllowedLibraryIDs == nil && len(filter.DisabledLibraryIDs) > 0 {
+	if len(allowed) == 0 && len(filter.DisabledLibraryIDs) > 0 {
 		// In deny-only mode, require at least one library membership. Without this,
 		// stale or provisional media_items rows with no membership pass NOT EXISTS.
 		*conditions = append(*conditions,
@@ -303,7 +348,7 @@ func appendDiscoveryLibraryScope(
 	}
 
 	whereSQL, scopeArgs, ok := buildLibraryScopeJoin(
-		filter.AllowedLibraryIDs,
+		allowed,
 		filter.DisabledLibraryIDs,
 		*argIdx,
 		"",

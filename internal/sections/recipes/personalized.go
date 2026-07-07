@@ -78,7 +78,9 @@ func (similarUsersRecipe) Definition() RecipeDefinition {
 	}
 }
 
-// TasteMatchParams optionally narrows by genre.
+// TasteMatchParams optionally narrows by genre. When Genre is empty the
+// recommendation reader auto-picks the profile's strongest taste cluster
+// (falling back to the server-wide top genre).
 type TasteMatchParams struct {
 	Genre string `json:"genre"`
 }
@@ -104,7 +106,45 @@ func (tasteMatchRecipe) Definition() RecipeDefinition {
 		Category:        CategoryPersonalized,
 		AvoidDuplicates: true,
 		Presets: []GalleryPreset{
-			{Key: "taste_top", DisplayName: "Top Picks Today", Icon: "🎯", DescriptionShort: "Today's best matches for your taste.", DefaultParams: json.RawMessage(`{}`)},
+			{Key: "taste_top", DisplayName: "Top Picks Today", Icon: "🎯", DescriptionShort: "Best matches for your strongest taste — set a genre to narrow it.", DefaultParams: json.RawMessage(`{}`)},
+		},
+	}
+}
+
+// ReturningShowsParams configures returning_shows: series the profile has
+// watched that received a brand-new season within the lookback window.
+type ReturningShowsParams struct {
+	LookbackDays int `json:"lookback_days,omitempty"` // default 30
+}
+
+type returningShowsRecipe struct{}
+
+func (returningShowsRecipe) Type() string                   { return "returning_shows" }
+func (returningShowsRecipe) NewParams() any                 { return &ReturningShowsParams{} }
+func (returningShowsRecipe) DefaultCacheTTL() time.Duration { return time.Hour }
+func (returningShowsRecipe) Resolve(rc ResolverContext) (ResolvedItems, error) {
+	return delegateResolve("returning_shows", rc)
+}
+func (returningShowsRecipe) Validate(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var p ReturningShowsParams
+	return json.Unmarshal(raw, &p)
+}
+func (returningShowsRecipe) Definition() RecipeDefinition {
+	return RecipeDefinition{
+		Type:            "returning_shows",
+		Category:        CategoryPersonalized,
+		AvoidDuplicates: true,
+		Presets: []GalleryPreset{
+			{
+				Key:              "returning_shows_default",
+				DisplayName:      "Returning Shows",
+				Icon:             "🔁",
+				DescriptionShort: "Shows you've watched with a brand-new season in your library.",
+				DefaultParams:    json.RawMessage(`{"lookback_days":30}`),
+			},
 		},
 	}
 }
@@ -114,4 +154,5 @@ func init() {
 	Register(becauseRecipe{})
 	Register(similarUsersRecipe{})
 	Register(tasteMatchRecipe{})
+	Register(returningShowsRecipe{})
 }

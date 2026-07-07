@@ -44,6 +44,11 @@ const (
 	SectionTrendingDiscover SectionType = "trending_discover"
 
 	SectionAdminCuratedList SectionType = "admin_curated_list"
+
+	SectionReturningShows SectionType = "returning_shows"
+	SectionGenreRoulette  SectionType = "genre_roulette"
+	SectionAnniversaries  SectionType = "anniversaries"
+	SectionShortWatches   SectionType = "short_watches"
 )
 
 // ValidSectionTypes is the set of all valid section type values.
@@ -77,6 +82,10 @@ var ValidSectionTypes = map[SectionType]bool{
 	SectionMostWatched:         true,
 	SectionTrendingDiscover:    true,
 	SectionAdminCuratedList:    true,
+	SectionReturningShows:      true,
+	SectionGenreRoulette:       true,
+	SectionAnniversaries:       true,
+	SectionShortWatches:        true,
 }
 
 // PageSection is an admin-defined section stored in PostgreSQL.

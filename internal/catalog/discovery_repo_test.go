@@ -462,3 +462,98 @@ func assertIntSliceArg(t *testing.T, args []any, idx int, want []int) {
 }
 
 func mustQuery(query string, _ []any) string { return query }
+
+func TestUnplayedHighRated_LibraryScopeIntersectsViewerAccess(t *testing.T) {
+	lib := 5
+	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
+		MinRating: 7.5,
+		UserID:    1,
+		ProfileID: "p1",
+		LibraryID: &lib,
+		Filter:    AccessFilter{AllowedLibraryIDs: []int{7, 9}},
+	})
+	// Section scope {5} ∩ viewer-allowed {7,9} is empty: no query at all.
+	if query != "" {
+		t.Fatalf("expected empty query for disjoint scope, got %q", query)
+	}
+	_ = args
+}
+
+func TestUnplayedHighRated_MultiLibraryScope(t *testing.T) {
+	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
+		MinRating:  7.5,
+		UserID:     1,
+		ProfileID:  "p1",
+		LibraryIDs: []int{3, 4},
+	})
+	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY(") {
+		t.Errorf("expected library semi-join for multi-library scope, query: %s", query)
+	}
+	found := false
+	for _, arg := range args {
+		if ids, ok := arg.([]int); ok && len(ids) == 2 && ids[0] == 3 && ids[1] == 4 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected [3 4] library ids in args, got %v", args)
+	}
+}
+
+func TestUnplayedHighRated_MaxPlaysUsesCountThreshold(t *testing.T) {
+	query, args := buildUnplayedHighRatedQuery(UnplayedFilter{
+		MinRating: 7.5,
+		MaxPlays:  2,
+		UserID:    1,
+		ProfileID: "p1",
+	})
+	if !strings.Contains(query, "SELECT COUNT(*)") {
+		t.Errorf("MaxPlays > 0 should use a COUNT threshold: %s", query)
+	}
+	// The strict never-started NOT EXISTS over watch history must be replaced
+	// by the COUNT form (the manga-exclusion NOT EXISTS is unrelated).
+	if strings.Contains(query, "NOT EXISTS (\n\t\t\tSELECT 1\n\t\t\tFROM user_watch_history") {
+		t.Errorf("MaxPlays > 0 should not use the never-started NOT EXISTS: %s", query)
+	}
+	found := false
+	for _, arg := range args {
+		if v, ok := arg.(int); ok && v == 2 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected max plays 2 in args, got %v", args)
+	}
+}
+
+func TestForgottenFavorites_SingleLibraryScope(t *testing.T) {
+	lib := 3
+	query, _ := buildForgottenFavoritesQuery(ForgottenFavoritesFilter{
+		LookbackDays: 365,
+		UserID:       1,
+		ProfileID:    "p1",
+		LibraryID:    &lib,
+	})
+	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY(") {
+		t.Errorf("expected library semi-join for single-library scope, query: %s", query)
+	}
+}
+
+func TestRatingThreshold_MultiLibraryScope(t *testing.T) {
+	query, args := buildRatingThresholdQuery(RatingFilter{
+		Min:        8.0,
+		LibraryIDs: []int{2, 6},
+	})
+	if !strings.Contains(query, "mil_scope_in.media_folder_id = ANY(") {
+		t.Errorf("expected library semi-join for multi-library scope, query: %s", query)
+	}
+	found := false
+	for _, arg := range args {
+		if ids, ok := arg.([]int); ok && len(ids) == 2 && ids[0] == 2 && ids[1] == 6 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected [2 6] library ids in args, got %v", args)
+	}
+}

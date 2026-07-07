@@ -272,11 +272,15 @@ func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, librar
 		result, err = f.fetchNextInSeriesSection(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
 		return result, err
 	}
-	if resolved.SectionType == SectionEditorialSpotlight {
+	if resolved.SectionType == SectionEditorialSpotlight || resolved.SectionType == SectionGenreRoulette {
 		var items []*models.MediaItem
 		var total int
 		var title string
-		items, total, title, err = f.fetchEditorialSpotlightWithTitle(ctx, resolved, libraryID, libraryIDs, filter)
+		if resolved.SectionType == SectionEditorialSpotlight {
+			items, total, title, err = f.fetchEditorialSpotlightWithTitle(ctx, resolved, libraryID, libraryIDs, filter)
+		} else {
+			items, total, title, err = f.fetchGenreRouletteWithTitle(ctx, resolved, libraryID, libraryIDs, filter)
+		}
 		if err != nil {
 			return SectionWithItems{}, err
 		}
@@ -370,7 +374,9 @@ func (f *Fetcher) seasonalTitleOverride(resolved ResolvedSection) string {
 	if f.Clock != nil {
 		now = f.Clock.Now()
 	}
-	return recipes.SeasonalTitleOverride(p, now)
+	// Same usable filter as fetchSeasonalThemed so the override tracks the
+	// theme that actually resolved.
+	return recipes.SeasonalTitleOverride(p, now, seasonalThemeHasQuery)
 }
 
 func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
@@ -1249,6 +1255,10 @@ func (f *Fetcher) userAgnosticSectionFetcher(t SectionType) userAgnosticSectionF
 		return f.fetchTrendingDiscover
 	case SectionAdminCuratedList:
 		return f.fetchAdminCuratedList
+	case SectionShortWatches:
+		return f.fetchShortWatches
+	case SectionAnniversaries:
+		return f.fetchAnniversaries
 	default:
 		return nil
 	}
@@ -1273,6 +1283,10 @@ func (f *Fetcher) fetchSection(ctx context.Context, s ResolvedSection, libraryID
 		return f.fetchForgottenFavorites(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionEditorialSpotlight:
 		return f.fetchEditorialSpotlight(ctx, s, libraryID, libraryIDs, filter)
+	case SectionGenreRoulette:
+		return f.fetchGenreRoulette(ctx, s, libraryID, libraryIDs, filter)
+	case SectionReturningShows:
+		return f.fetchReturningShows(ctx, s, libraryID, libraryIDs, userID, profileID, filter)
 	case SectionProfileActivityFeed:
 		return f.fetchProfileActivityFeed(ctx, s, libraryID, libraryIDs, profileID, filter)
 	case SectionWatchlist, SectionFavorites:
@@ -1664,7 +1678,7 @@ func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSect
 		}
 		scoredItems = row.Items
 	case SectionBecauseYouWatched:
-		items, err := f.RecommendationReader.GetBecauseYouWatched(ctx, userID, profileID, cfg.SourceItemID, s.ItemLimit, filter)
+		items, err := f.RecommendationReader.GetBecauseYouWatched(ctx, userID, profileID, cfg.anchor(), s.ItemLimit, filter)
 		if err != nil {
 			return []*models.MediaItem{}, 0, err
 		}
@@ -1676,10 +1690,9 @@ func (f *Fetcher) fetchRecommendationSection(ctx context.Context, s ResolvedSect
 		}
 		scoredItems = items
 	case SectionTasteMatch:
-		if strings.TrimSpace(cfg.Genre) == "" {
-			return []*models.MediaItem{}, 0, nil
-		}
-		row, err := f.RecommendationReader.GetTasteMatchRow(ctx, userID, profileID, cfg.Genre, s.ItemLimit, filter)
+		// An empty genre is valid: the reader auto-picks the profile's
+		// strongest taste cluster (falling back to the server top genre).
+		row, err := f.RecommendationReader.GetTasteMatchRow(ctx, userID, profileID, strings.TrimSpace(cfg.Genre), s.ItemLimit, filter)
 		if err != nil || row == nil {
 			return []*models.MediaItem{}, 0, err
 		}
@@ -1722,11 +1735,14 @@ func (f *Fetcher) fetchHiddenGems(ctx context.Context, s ResolvedSection, librar
 
 	repo := catalog.NewDiscoveryRepository(f.pool)
 	items, err := repo.ListUnplayedHighRated(ctx, catalog.UnplayedFilter{
-		MinRating: p.MinRating,
-		Limit:     s.ItemLimit,
-		UserID:    userID,
-		ProfileID: profileID,
-		Filter:    filter,
+		MinRating:  p.MinRating,
+		MaxPlays:   p.MaxPlayCount,
+		Limit:      s.ItemLimit,
+		UserID:     userID,
+		ProfileID:  profileID,
+		LibraryID:  libraryID,
+		LibraryIDs: libraryIDs,
+		Filter:     filter,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -1745,10 +1761,11 @@ func (f *Fetcher) fetchCriticallyAcclaimed(ctx context.Context, s ResolvedSectio
 
 	repo := catalog.NewDiscoveryRepository(f.pool)
 	items, err := repo.ListByRatingThreshold(ctx, catalog.RatingFilter{
-		Min:       p.MinScore,
-		Limit:     s.ItemLimit,
-		LibraryID: libraryID,
-		Filter:    filter,
+		Min:        p.MinScore,
+		Limit:      s.ItemLimit,
+		LibraryID:  libraryID,
+		LibraryIDs: libraryIDs,
+		Filter:     filter,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -1781,6 +1798,8 @@ func (f *Fetcher) fetchForgottenFavorites(ctx context.Context, s ResolvedSection
 		Limit:        s.ItemLimit,
 		UserID:       userID,
 		ProfileID:    profileID,
+		LibraryID:    libraryID,
+		LibraryIDs:   libraryIDs,
 		Filter:       filter,
 	})
 	if err != nil {
@@ -1867,9 +1886,14 @@ func (f *Fetcher) fetchFormatShowcase(ctx context.Context, s ResolvedSection, li
 		limit = 20
 	}
 
+	orderBy := "mi.rating_imdb DESC NULLS LAST, mi.content_id ASC"
+	if p.Sort == "recent" {
+		orderBy = "mi.created_at DESC, mi.content_id ASC"
+	}
+
 	query := fmt.Sprintf(
-		`SELECT %s FROM %s %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC LIMIT $%d`,
-		itemColumns("mi"), fromClause, whereClause, argIdx,
+		`SELECT %s FROM %s %s ORDER BY %s LIMIT $%d`,
+		itemColumns("mi"), fromClause, whereClause, orderBy, argIdx,
 	)
 	args = append(args, limit)
 
@@ -2100,9 +2124,6 @@ func (f *Fetcher) editorialCandidates(ctx context.Context, subjectType string, l
 		// Auto-rotate excludes the current decade — incomplete data + stylistic skew.
 		// "2020s" is still accepted as a manually-pinned subject via eraToYearRange.
 		return []string{"1970s", "1980s", "1990s", "2000s", "2010s"}, nil
-	case "franchise":
-		// TODO: franchise data not yet available; auto-rotate returns empty.
-		return nil, nil
 	default:
 		return nil, fmt.Errorf("editorial_spotlight: unsupported subject_type %q", subjectType)
 	}
@@ -2209,8 +2230,21 @@ func (f *Fetcher) topStudioCandidates(ctx context.Context, libraryID *int, libra
 }
 
 type recommendationSectionConfig struct {
+	// SourceItemID is the historical key for the because_you_watched anchor;
+	// AnchorItemID is the name the recipe params and web UI use. Both are
+	// honored so sections saved through either surface pin correctly.
 	SourceItemID string `json:"source_item_id"`
+	AnchorItemID string `json:"anchor_item_id"`
 	Genre        string `json:"genre"`
+}
+
+// anchor returns the pinned because_you_watched anchor item, preferring the
+// legacy key when both are present. Empty means auto-pick.
+func (c recommendationSectionConfig) anchor() string {
+	if strings.TrimSpace(c.SourceItemID) != "" {
+		return strings.TrimSpace(c.SourceItemID)
+	}
+	return strings.TrimSpace(c.AnchorItemID)
 }
 
 func parseRecommendationSectionConfig(config json.RawMessage) recommendationSectionConfig {
@@ -3319,10 +3353,13 @@ func (f *Fetcher) fetchSeasonalThemed(ctx context.Context, s ResolvedSection, li
 	}
 
 	// Resolve which theme to use. Multi-theme mode wins when populated.
+	// Selection skips themes without an executable query so a data-less theme
+	// never blacks out the section during its own window (see
+	// ActiveSeasonalThemeWhere).
 	var theme string
 	switch {
 	case len(p.EnabledThemes) > 0:
-		theme = recipes.ActiveSeasonalTheme(p.EnabledThemes, now)
+		theme = recipes.ActiveSeasonalThemeWhere(p.EnabledThemes, now, seasonalThemeHasQuery)
 		if theme == "" {
 			// No enabled theme is currently in season — hide the section.
 			return []*models.MediaItem{}, 0, nil
@@ -3347,9 +3384,11 @@ func (f *Fetcher) fetchSeasonalThemed(ctx context.Context, s ResolvedSection, li
 
 	def, hasQuery := seasonalQueryDef(theme)
 	if !hasQuery {
-		// Theme exists but has no executable genre query yet (christmas,
-		// st_patricks, thanksgiving need keyword/tag column support).
-		// Return empty until that data lands.
+		if keywords := seasonalKeywordTitles[theme]; len(keywords) > 0 {
+			return f.fetchSeasonalKeywordItems(ctx, keywords, s, libraryID, libraryIDs, filter)
+		}
+		// Legacy single-theme path can still pin a theme without an
+		// executable query. Return empty until that data lands.
 		return []*models.MediaItem{}, 0, nil
 	}
 
@@ -3380,8 +3419,10 @@ func (f *Fetcher) fetchSeasonalThemed(ctx context.Context, s ResolvedSection, li
 }
 
 // seasonalQueryDef returns a catalog.QueryDefinition for the given theme and
-// whether an executable query exists. Themes that require a keyword/tag column
-// (christmas, st_patricks, thanksgiving) return false until that data lands.
+// whether an executable query exists. Holiday themes without genre signal
+// (christmas, st_patricks, thanksgiving) use title-keyword matching as an
+// interim heuristic until a proper keyword/tag column lands — imperfect but
+// far better than the section going dark during the holiday itself.
 func seasonalQueryDef(theme string) (catalog.QueryDefinition, bool) {
 	newDef := func(rules ...catalog.QueryRule) catalog.QueryDefinition {
 		return catalog.QueryDefinition{
@@ -3415,12 +3456,85 @@ func seasonalQueryDef(theme string) (catalog.QueryDefinition, bool) {
 			rule("genre", "contains", "Animation"),
 			rule("genre", "contains", "Family"),
 		), true
-	case "christmas", "st_patricks", "thanksgiving":
-		// TODO: needs keyword/tag column to filter by theme-specific keywords.
-		return catalog.QueryDefinition{}, false
+	case "family_movie_night":
+		return newDef(
+			rule("genre", "contains", "Family"),
+			rule("genre", "contains", "Animation"),
+		), true
 	default:
 		return catalog.QueryDefinition{}, false
 	}
+}
+
+// seasonalKeywordTitles maps holiday themes without genre signal to title
+// keywords, matched case-insensitively as substrings. An interim heuristic
+// until a proper keyword/tag column lands — imperfect, but far better than
+// the section going dark during the holiday itself.
+var seasonalKeywordTitles = map[string][]string{
+	"christmas":    {"christmas", "santa", "xmas", "nutcracker", "scrooge", "grinch", "noel"},
+	"st_patricks":  {"st. patrick", "leprechaun", "shamrock"},
+	"thanksgiving": {"thanksgiving"},
+}
+
+// seasonalThemeHasQuery reports whether a theme can produce items (either a
+// genre query or a title-keyword fallback). Passed to
+// ActiveSeasonalThemeWhere so multi-theme selection never picks a theme that
+// would resolve to nothing.
+func seasonalThemeHasQuery(theme string) bool {
+	if _, ok := seasonalQueryDef(theme); ok {
+		return true
+	}
+	return len(seasonalKeywordTitles[theme]) > 0
+}
+
+// fetchSeasonalKeywordItems resolves a keyword-based seasonal theme with a
+// direct title ILIKE query (the QueryDefinition system has no title filter
+// field). Ordering favors well-rated titles.
+func (f *Fetcher) fetchSeasonalKeywordItems(ctx context.Context, keywords []string, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	patterns := make([]string, 0, len(keywords))
+	for _, kw := range keywords {
+		patterns = append(patterns, "%"+kw+"%")
+	}
+	conditions = append(conditions, fmt.Sprintf("mi.title ILIKE ANY($%d)", argIdx))
+	args = append(args, patterns)
+	argIdx++
+
+	conditions = append(conditions, "mi.type IN ('movie','series')")
+
+	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
+	conditions = append(conditions, libConditions...)
+	args = append(args, libArgs...)
+	argIdx = newArgIdx
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+
+	conditions = append(conditions, catalog.MangaChapterExclusionWhere("mi"))
+
+	limit := s.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM %s WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC LIMIT $%d`,
+		itemColumns("mi"), fromClause, strings.Join(conditions, " AND "), argIdx,
+	)
+	args = append(args, limit)
+
+	rows, err := f.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetching seasonal keyword items: %w", err)
+	}
+	defer rows.Close()
+
+	items, err := scanMediaItems(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, len(items), nil
 }
 
 // fetchMoodCollection returns items for a mood_collection section.
@@ -3474,6 +3588,346 @@ func (f *Fetcher) fetchMoodCollection(ctx context.Context, s ResolvedSection, li
 		return nil, 0, fmt.Errorf("mood_collection query: %w", err)
 	}
 	return items, len(items), nil
+}
+
+// fetchShortWatches returns well-rated movies whose runtime fits under the
+// configured cap — a "fits in a short evening" rail.
+func (f *Fetcher) fetchShortWatches(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	var p recipes.ShortWatchesParams
+	if len(s.Config) > 0 {
+		_ = json.Unmarshal(s.Config, &p)
+	}
+	if p.MaxMinutes <= 0 {
+		p.MaxMinutes = 95
+	}
+	minRating := p.MinRating
+	if minRating == 0 {
+		minRating = 6.0
+	}
+
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	conditions = append(conditions,
+		"mi.type = 'movie'",
+		fmt.Sprintf("mi.runtime > 0 AND mi.runtime <= $%d", argIdx),
+	)
+	args = append(args, p.MaxMinutes)
+	argIdx++
+
+	conditions = append(conditions, fmt.Sprintf("mi.rating_imdb >= $%d", argIdx))
+	args = append(args, minRating)
+	argIdx++
+
+	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
+	conditions = append(conditions, libConditions...)
+	args = append(args, libArgs...)
+	argIdx = newArgIdx
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+
+	limit := s.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM %s WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC LIMIT $%d`,
+		itemColumns("mi"), fromClause, strings.Join(conditions, " AND "), argIdx,
+	)
+	args = append(args, limit)
+
+	rows, err := f.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetching short watches: %w", err)
+	}
+	defer rows.Close()
+
+	items, err := scanMediaItems(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, len(items), nil
+}
+
+// fetchAnniversaries returns movies whose release month matches the current
+// month and whose age is a round milestone (default: multiples of 5 years).
+// Series are excluded: first_air_date is a free-text column, so anniversary
+// math on it would be unreliable.
+func (f *Fetcher) fetchAnniversaries(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	var p recipes.AnniversariesParams
+	if len(s.Config) > 0 {
+		_ = json.Unmarshal(s.Config, &p)
+	}
+	milestone := p.MilestoneYears
+	if milestone <= 0 {
+		milestone = 5
+	}
+
+	now := f.now()
+
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	conditions = append(conditions,
+		"mi.type = 'movie'",
+		"mi.release_date IS NOT NULL",
+		fmt.Sprintf("EXTRACT(MONTH FROM mi.release_date)::int = $%d", argIdx),
+		fmt.Sprintf("EXTRACT(YEAR FROM mi.release_date)::int < $%d", argIdx+1),
+	)
+	args = append(args, int(now.Month()), now.Year())
+	argIdx += 2
+
+	if milestone > 1 {
+		conditions = append(conditions, fmt.Sprintf("($%d - EXTRACT(YEAR FROM mi.release_date)::int) %% $%d = 0", argIdx, argIdx+1))
+		args = append(args, now.Year(), milestone)
+		argIdx += 2
+	}
+
+	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
+	conditions = append(conditions, libConditions...)
+	args = append(args, libArgs...)
+	argIdx = newArgIdx
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+
+	limit := s.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM %s WHERE %s ORDER BY mi.rating_imdb DESC NULLS LAST, mi.content_id ASC LIMIT $%d`,
+		itemColumns("mi"), fromClause, strings.Join(conditions, " AND "), argIdx,
+	)
+	args = append(args, limit)
+
+	rows, err := f.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetching anniversaries: %w", err)
+	}
+	defer rows.Close()
+
+	items, err := scanMediaItems(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, len(items), nil
+}
+
+// fetchReturningShows returns series the profile has watched that received a
+// brand-new season (episodes in a season newer than any the profile has
+// watched, with at least one present file) within the lookback window,
+// newest arrivals first.
+func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	if userID <= 0 || profileID == "" {
+		return []*models.MediaItem{}, 0, nil
+	}
+
+	var p recipes.ReturningShowsParams
+	if len(s.Config) > 0 {
+		_ = json.Unmarshal(s.Config, &p)
+	}
+	days := p.LookbackDays
+	if days <= 0 {
+		days = 30
+	}
+
+	var conditions []string
+	var args []any
+
+	// $1..$3 are shared by several subqueries below.
+	args = append(args, userID, profileID, days)
+	argIdx := 4
+
+	conditions = append(conditions,
+		"mi.type = 'series'",
+		// The profile has watched at least one episode of this series...
+		`EXISTS (
+			SELECT 1
+			FROM episodes we
+			JOIN user_watch_history uwh ON uwh.media_item_id = we.content_id
+			WHERE we.series_id = mi.content_id
+			  AND uwh.user_id = $1
+			  AND uwh.profile_id = $2
+		)`,
+		// ...and a season newer than any they've watched arrived recently
+		// with at least one playable file.
+		`EXISTS (
+			SELECT 1
+			FROM episodes ne
+			WHERE ne.series_id = mi.content_id
+			  AND ne.season_number > 0
+			  AND ne.created_at > NOW() - ($3 || ' days')::interval
+			  AND ne.season_number > COALESCE((
+				SELECT MAX(we2.season_number)
+				FROM episodes we2
+				JOIN user_watch_history uwh2 ON uwh2.media_item_id = we2.content_id
+				WHERE we2.series_id = mi.content_id
+				  AND uwh2.user_id = $1
+				  AND uwh2.profile_id = $2
+			  ), 0)
+			  AND EXISTS (
+				SELECT 1 FROM media_files mf
+				WHERE mf.episode_id = ne.content_id
+				  AND mf.missing_since IS NULL
+			  )
+		)`,
+	)
+
+	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
+	conditions = append(conditions, libConditions...)
+	args = append(args, libArgs...)
+	argIdx = newArgIdx
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+
+	limit := s.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM %s WHERE %s
+		ORDER BY (
+			SELECT MAX(ord.created_at)
+			FROM episodes ord
+			WHERE ord.series_id = mi.content_id
+			  AND ord.created_at > NOW() - ($3 || ' days')::interval
+		) DESC NULLS LAST, mi.content_id ASC
+		LIMIT $%d`,
+		itemColumns("mi"), fromClause, strings.Join(conditions, " AND "), argIdx,
+	)
+	args = append(args, limit)
+
+	rows, err := f.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("fetching returning shows: %w", err)
+	}
+	defer rows.Close()
+
+	items, err := scanMediaItems(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, len(items), nil
+}
+
+// fetchGenreRoulette is the title-less fallback used by fetchSection; FetchOne
+// intercepts genre_roulette to surface the rotating genre in the row title,
+// mirroring the editorial_spotlight flow.
+func (f *Fetcher) fetchGenreRoulette(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
+	items, total, _, err := f.fetchGenreRouletteWithTitle(ctx, s, libraryID, libraryIDs, filter)
+	return items, total, err
+}
+
+// fetchGenreRouletteWithTitle picks one of the library's top genres with the
+// same deterministic bucket hashing as editorial_spotlight and returns its
+// best-rated titles plus a display title carrying the active genre.
+func (f *Fetcher) fetchGenreRouletteWithTitle(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, string, error) {
+	var p recipes.GenreRouletteParams
+	if len(s.Config) > 0 {
+		_ = json.Unmarshal(s.Config, &p)
+	}
+	minRating := p.MinRating
+	if minRating == 0 {
+		minRating = 6.0
+	}
+
+	cands, err := f.cachedEditorialCandidates(ctx, "genre_roulette", libraryID, libraryIDs, filter, editorialCandidateCacheTTL, f.genreRouletteCandidates)
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("genre_roulette candidates: %w", err)
+	}
+	if len(cands) == 0 {
+		return []*models.MediaItem{}, 0, "", nil
+	}
+
+	days := editorialCadenceDays(p.RotationCadence)
+	libKey := "all"
+	if libraryID != nil {
+		libKey = strconv.Itoa(*libraryID)
+	}
+	idx := recipes.RotationIndex(f.now(), "genre_roulette|"+libKey, len(cands), days)
+	genre := cands[idx]
+
+	def := catalog.QueryDefinition{
+		Match: "all",
+		Groups: []catalog.QueryGroup{
+			{Match: "all", Rules: []catalog.QueryRule{
+				{Field: "genre", Op: "contains", Value: genre},
+				{Field: "rating_imdb", Op: "gte", Value: minRating},
+			}},
+		},
+	}
+
+	switch {
+	case libraryID != nil:
+		def.LibraryIDs = []int{*libraryID}
+	case libraryIDs != nil:
+		def.LibraryIDs = append([]int(nil), libraryIDs...)
+	}
+
+	limit := s.ItemLimit
+	if limit <= 0 {
+		limit = 20
+	}
+	def.Limit = &limit
+
+	executor := &catalog.QueryExecutor{Pool: f.pool}
+	items, _, _, err := executor.PreviewPage(ctx, def.Normalize(), filter, limit, 0, false)
+	if err != nil {
+		return nil, 0, "", fmt.Errorf("genre_roulette query: %w", err)
+	}
+	return items, len(items), editorialSpotlightDisplayTitle(s.Title, genre), nil
+}
+
+// genreRouletteCandidates returns the most common genres in scope, mirroring
+// topStudioCandidates. The subjectType parameter is fixed ("genre_roulette")
+// and only exists to satisfy the shared candidate-loader signature.
+func (f *Fetcher) genreRouletteCandidates(ctx context.Context, _ string, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]string, error) {
+	var conditions []string
+	var args []any
+	argIdx := 1
+
+	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
+	conditions = append(conditions, libConditions...)
+	args = append(args, libArgs...)
+	argIdx = newArgIdx
+	catalog.ApplySectionAccessFilter("mi", filter, &conditions, &args, &argIdx)
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "AND " + strings.Join(conditions, " AND ")
+	}
+
+	args = append(args, editorialCandidateLimit)
+	query := fmt.Sprintf(`
+		SELECT genre
+		FROM (
+			SELECT unnest(mi.genres) AS genre
+			FROM %s
+			WHERE mi.genres IS NOT NULL
+			%s
+		) sub
+		GROUP BY genre
+		ORDER BY COUNT(*) DESC
+		LIMIT $%d
+	`, fromClause, whereClause, argIdx)
+
+	rows, err := f.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying top genres: %w", err)
+	}
+	defer rows.Close()
+
+	var genres []string
+	for rows.Next() {
+		var genre string
+		if err := rows.Scan(&genre); err != nil {
+			return nil, fmt.Errorf("scanning genre name: %w", err)
+		}
+		genres = append(genres, genre)
+	}
+	return genres, rows.Err()
 }
 
 // mangaChapterSeriesMetaQuery resolves the owning manga series for chapter

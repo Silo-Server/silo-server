@@ -577,6 +577,7 @@ export default function HomeScreenSettings() {
       <RecipeGalleryModal
         open={galleryOpen}
         onClose={() => setGalleryOpen(false)}
+        hideAdminOnly
         onPick={(def, preset) => {
           setGalleryOpen(false);
           setPickedRecipe({ def, preset });

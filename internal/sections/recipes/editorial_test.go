@@ -103,13 +103,14 @@ func TestEditorialSpotlightAcceptsEraWithSubject(t *testing.T) {
 	}
 }
 
-func TestEditorialSpotlightAcceptsFranchiseWithSubject(t *testing.T) {
+func TestEditorialSpotlightRejectsFranchise(t *testing.T) {
 	rec, _ := Get("editorial_spotlight")
-	// Franchise data isn't wired up yet, but the validator must accept it
-	// so persisted configs round-trip cleanly.
+	// No franchise data source exists, so the fetcher can never resolve a
+	// franchise subject — accepting it here would let admins save a section
+	// that errors at fetch time. Reject until the data lands.
 	raw := json.RawMessage(`{"subject_type":"franchise","subject":"Marvel"}`)
-	if err := rec.Validate(raw); err != nil {
-		t.Errorf("valid franchise params rejected: %v", err)
+	if err := rec.Validate(raw); err == nil {
+		t.Error("franchise subject_type should be rejected until franchise data exists")
 	}
 }
 

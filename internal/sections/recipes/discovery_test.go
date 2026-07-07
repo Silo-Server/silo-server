@@ -126,10 +126,10 @@ func TestFormatShowcaseRecipeDefinition(t *testing.T) {
 	if def.AvoidDuplicates {
 		t.Errorf("format_showcase should not set AvoidDuplicates")
 	}
-	if len(def.Presets) != 3 {
-		t.Fatalf("expected 3 presets, got %d", len(def.Presets))
+	if len(def.Presets) != 4 {
+		t.Fatalf("expected 4 presets, got %d", len(def.Presets))
 	}
-	keys := map[string]bool{"fs_4k": false, "fs_dv": false, "fs_hdr": false}
+	keys := map[string]bool{"fs_4k": false, "fs_4k_recent": false, "fs_dv": false, "fs_hdr": false}
 	for _, p := range def.Presets {
 		keys[p.Key] = true
 	}
