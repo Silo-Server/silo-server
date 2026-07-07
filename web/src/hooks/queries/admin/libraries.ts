@@ -485,6 +485,21 @@ export function useLibraryProviders(libraryId: number | null) {
   });
 }
 
+// useLibraryProviderDefaults fetches the provider chain the server would seed
+// for a new library of the given type — the single source of truth the create
+// form renders instead of re-deriving defaults from plugin manifests.
+export function useLibraryProviderDefaults(libraryType: string) {
+  return useQuery({
+    queryKey: adminKeys.libraryProviderDefaults(libraryType),
+    queryFn: () =>
+      api<LibraryProviderChainResponse>(
+        `/libraries/provider-defaults?library_type=${encodeURIComponent(libraryType)}`,
+      ).then((d) => d ?? { levels: {} }),
+    enabled: libraryType !== "",
+    staleTime: ADMIN_STALE_TIME,
+  });
+}
+
 export function useSetLibraryProviders() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -1988,6 +1988,44 @@ func (h *LibraryHandler) HandleGetLibraryProviders(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, map[string]any{"levels": levels})
 }
 
+// HandleGetLibraryProviderDefaults handles GET /libraries/provider-defaults.
+// It returns the provider chain that would be seeded for a new library of the
+// given type, grouped by content level and in seeded order. The admin UI
+// renders this while creating a library instead of re-deriving the chain from
+// plugin manifests client-side, so the displayed defaults and the chain the
+// server seeds on create can never disagree.
+func (h *LibraryHandler) HandleGetLibraryProviderDefaults(w http.ResponseWriter, r *http.Request) {
+	libraryType := r.URL.Query().Get("library_type")
+	levels := metadataContentLevelsForLibraryType(libraryType)
+	if len(levels) == 0 {
+		// A type the server doesn't seed chains for (unknown, or one like
+		// podcasts with no metadata content levels) simply has no defaults.
+		writeJSON(w, http.StatusOK, map[string]any{"levels": map[string][]chainLevelEntry{}})
+		return
+	}
+
+	if h.ChainRepo == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Provider chain management is not configured")
+		return
+	}
+
+	out := make(map[string][]chainLevelEntry, len(levels))
+	for _, level := range levels {
+		out[level] = []chainLevelEntry{}
+	}
+	for _, e := range h.seedDefaultChain(r.Context(), libraryType) {
+		out[e.ContentLevel] = append(out[e.ContentLevel], chainLevelEntry{
+			PluginInstallationID: e.PluginInstallationID,
+			CapabilityID:         e.CapabilityID,
+			ProviderSlug:         e.CapabilityID,
+			Priority:             e.Priority,
+			Enabled:              e.Enabled,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"levels": out})
+}
+
 // HandleSetLibraryProviders handles PUT /libraries/{id}/providers.
 // It replaces the entire provider chain for the given library.
 func (h *LibraryHandler) HandleSetLibraryProviders(w http.ResponseWriter, r *http.Request) {

@@ -1742,6 +1742,7 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Post("/{id}/metadata-match-queue/retry", libraryHandler.HandleRetryMetadataMatchQueue)
 							r.Post("/{id}/metadata-match-queue/cancel", libraryHandler.HandleCancelMetadataMatchQueue)
 							r.Post("/{id}/refresh-metadata", libraryHandler.HandleRefreshLibraryMetadata)
+							r.Get("/provider-defaults", libraryHandler.HandleGetLibraryProviderDefaults)
 							r.Get("/{id}/providers", libraryHandler.HandleGetLibraryProviders)
 							r.Put("/{id}/providers", libraryHandler.HandleSetLibraryProviders)
 							r.Put("/{id}/poster", libraryHandler.HandleUploadPoster)

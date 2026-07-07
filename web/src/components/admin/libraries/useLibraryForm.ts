@@ -1,8 +1,14 @@
 import { useMemo, useState } from "react";
 
-import type { CreateLibraryRequest, Library, PluginInstallation } from "@/api/types";
+import type {
+  CreateLibraryRequest,
+  Library,
+  LibraryProviderChainResponse,
+  PluginInstallation,
+} from "@/api/types";
 import {
   useCreateLibrary,
+  useLibraryProviderDefaults,
   useLibraryProviders,
   useSetLibraryProviders,
   useUpdateLibrary,
@@ -16,51 +22,15 @@ export type LevelChainItem = {
   enabled: boolean;
 };
 
-export type MetadataProvider = {
-  plugin_installation_id: number;
-  capability_id: string;
-  slug: string;
-  defaultPriority: Record<string, number>;
-  defaultEnabled: boolean;
-};
-
-// metadataProvidersFromInstallations flattens enabled plugin installations into
-// the metadata providers used to seed a library's provider chain. The provider
-// slug is the capability id — the same value the server returns for a saved
-// chain (provider_slug = capability_id) — so a provider reads identically
-// whether the chain is freshly defaulted or loaded from the server, instead of
-// showing the display name ("TMDB") before save and the id ("tmdb") after.
-export function metadataProvidersFromInstallations(
-  installations: PluginInstallation[],
-): MetadataProvider[] {
-  const result: MetadataProvider[] = [];
-  for (const inst of installations) {
-    if (!inst.enabled) continue;
-    for (const cap of inst.capabilities ?? []) {
-      if (cap.type !== "metadata_provider.v1") continue;
-      const dp =
-        (cap.metadata?.default_priority as Record<string, number>) ??
-        ((cap.metadata?.metadata as Record<string, unknown>)?.default_priority as Record<
-          string,
-          number
-        >) ??
-        {};
-      // Same precedence and fail-open rule as the server's extractDefaultEnabled:
-      // top-level flag wins over the "metadata" envelope, and anything that is
-      // not literally boolean false means enabled.
-      const rawEnabled =
-        cap.metadata?.default_enabled ??
-        (cap.metadata?.metadata as Record<string, unknown> | undefined)?.default_enabled;
-      result.push({
-        plugin_installation_id: inst.id,
-        capability_id: cap.id,
-        slug: cap.id,
-        defaultPriority: dp,
-        defaultEnabled: typeof rawEnabled === "boolean" ? rawEnabled : true,
-      });
-    }
-  }
-  return result;
+// hasMetadataProviderCapability reports whether any enabled plugin installation
+// exposes a metadata provider — used only to decide between the chain editor
+// and the "install a plugin" empty state. The chain contents themselves come
+// from the server.
+export function hasMetadataProviderCapability(installations: PluginInstallation[]): boolean {
+  return installations.some(
+    (inst) =>
+      inst.enabled && (inst.capabilities ?? []).some((cap) => cap.type === "metadata_provider.v1"),
+  );
 }
 
 export interface LibraryFormErrors {
@@ -104,86 +74,41 @@ export function contentLevelLabel(level: string): string {
     .join(" ");
 }
 
-// A provider that declares a non-empty default_priority map enumerates the
-// content levels it supports; one that declares none is a legacy catch-all,
-// eligible everywhere but ranked after every declaring provider.
-const LEGACY_CATCH_ALL_PRIORITY = 999;
-
-function declaredPriority(provider: MetadataProvider, level: string): number {
-  const p = provider.defaultPriority[level] ?? 0;
-  return p > 0 ? p : 0;
-}
-
-function providerSupportsLevel(provider: MetadataProvider, level: string): boolean {
-  if (Object.keys(provider.defaultPriority).length === 0) return true;
-  return declaredPriority(provider, level) > 0;
-}
-
-// buildDefaultLevelChains mirrors the server's seeding rules
-// (buildSeededChainEntries in internal/api/handlers/libraries.go): a chain the
-// user customizes before saving replaces the server-seeded one, so the two must
-// agree. Providers that don't handle a level are dropped outright; a declaring
-// provider is ranked by its declared priority and enabled unless it opted out
-// via default_enabled; a legacy catch-all is parked last and disabled.
-export function buildDefaultLevelChains(
-  metadataProviders: MetadataProvider[],
-  libraryType: string,
-): Record<string, LevelChainItem[]> {
-  const defaultChain: Record<string, LevelChainItem[]> = {};
-  for (const level of contentLevelsForType(libraryType)) {
-    const ranked = metadataProviders
-      .filter((provider) => providerSupportsLevel(provider, level))
-      .map((provider) => {
-        const priority = declaredPriority(provider, level);
-        return priority > 0
-          ? { provider, priority, enabled: provider.defaultEnabled }
-          : { provider, priority: LEGACY_CATCH_ALL_PRIORITY, enabled: false };
-      })
-      .sort((a, b) => a.priority - b.priority);
-    defaultChain[level] = ranked.map(({ provider, enabled }) => ({
-      plugin_installation_id: provider.plugin_installation_id,
-      capability_id: provider.capability_id,
-      provider_slug: provider.slug,
-      enabled,
-    }));
-  }
-  return defaultChain;
-}
-
-function buildLevelChainsFromServer(
-  currentChain: {
-    levels?: Record<
-      string,
-      Array<{
-        plugin_installation_id: number;
-        capability_id: string;
-        provider_slug: string;
-        enabled: boolean;
-      }>
-    >;
-  } | null,
-  metadataProviders: MetadataProvider[],
-  libraryType: string,
+// levelChainsFromResponse converts a provider-chain API response (a library's
+// saved chain, or the server-computed defaults for a library type) into the
+// editor's per-level item lists, preserving server priority order.
+export function levelChainsFromResponse(
+  response: LibraryProviderChainResponse | null | undefined,
 ): Record<string, LevelChainItem[]> {
   const mapped: Record<string, LevelChainItem[]> = {};
-  if (currentChain?.levels) {
-    for (const [level, entries] of Object.entries(currentChain.levels)) {
-      mapped[level] = entries.map((entry) => ({
+  for (const [level, entries] of Object.entries(response?.levels ?? {})) {
+    mapped[level] = [...entries]
+      .sort((a, b) => a.priority - b.priority)
+      .map((entry) => ({
         plugin_installation_id: entry.plugin_installation_id,
         capability_id: entry.capability_id,
         provider_slug: entry.provider_slug,
         enabled: entry.enabled,
       }));
-    }
-  }
-
-  const defaults = buildDefaultLevelChains(metadataProviders, libraryType);
-  for (const level of contentLevelsForType(libraryType)) {
-    if (!mapped[level] || mapped[level].length === 0) {
-      mapped[level] = defaults[level] ?? [];
-    }
   }
   return mapped;
+}
+
+// mergeChainWithDefaults fills content levels the saved chain doesn't cover
+// (e.g. a library created before a level existed) with the server-computed
+// defaults, without touching levels the chain already defines.
+export function mergeChainWithDefaults(
+  chain: Record<string, LevelChainItem[]>,
+  defaults: Record<string, LevelChainItem[]>,
+  libraryType: string,
+): Record<string, LevelChainItem[]> {
+  const merged = { ...chain };
+  for (const level of contentLevelsForType(libraryType)) {
+    if (!merged[level] || merged[level].length === 0) {
+      merged[level] = defaults[level] ?? [];
+    }
+  }
+  return merged;
 }
 
 function buildProviderChainBody(activeLevelChains: Record<string, LevelChainItem[]>) {
@@ -231,18 +156,16 @@ export function useLibraryForm({
   const setChainMutation = useSetLibraryProviders();
   const { installations } = useAdminPlugins();
   const { data: currentChain } = useLibraryProviders(library?.id ?? null);
-
-  const metadataProviders = useMemo(
-    () => metadataProvidersFromInstallations(installations),
-    [installations],
-  );
+  // The server computes default chains (same logic that seeds them on create),
+  // so the form never re-derives defaults from plugin manifests client-side.
+  const { data: providerDefaults } = useLibraryProviderDefaults(type);
 
   const isPending =
     createMutation.isPending || updateMutation.isPending || setChainMutation.isPending;
 
   const defaultLevelChains = useMemo(
-    () => buildDefaultLevelChains(metadataProviders, type),
-    [metadataProviders, type],
+    () => levelChainsFromResponse(providerDefaults),
+    [providerDefaults],
   );
   const resolvedLevelChains = useMemo(() => {
     if (!library) {
@@ -251,8 +174,8 @@ export function useLibraryForm({
     if (currentChain === undefined) {
       return levelChains;
     }
-    return buildLevelChainsFromServer(currentChain, metadataProviders, type);
-  }, [currentChain, defaultLevelChains, levelChains, library, metadataProviders, type]);
+    return mergeChainWithDefaults(levelChainsFromResponse(currentChain), defaultLevelChains, type);
+  }, [currentChain, defaultLevelChains, levelChains, library, type]);
   const activeLevelChains = chainDirty ? levelChains : resolvedLevelChains;
 
   const allErrors = useMemo<LibraryFormErrors>(() => {
@@ -290,8 +213,11 @@ export function useLibraryForm({
   function handleTypeChange(newType: string) {
     setType(newType);
     if (!library) {
-      setLevelChains(buildDefaultLevelChains(metadataProviders, newType));
-      setChainDirty(true);
+      // Drop any local chain edits: the new type's defaults come from the
+      // server, and with a clean chain the create flow lets the server-seeded
+      // chain stand instead of writing one back.
+      setLevelChains({});
+      setChainDirty(false);
     }
   }
 
@@ -401,7 +327,7 @@ export function useLibraryForm({
     activeLevelChains,
     reorderLevel,
     toggleLevelProvider,
-    hasMetadataProviders: metadataProviders.length > 0,
+    hasMetadataProviders: hasMetadataProviderCapability(installations),
     errors,
     isPending,
     submit,

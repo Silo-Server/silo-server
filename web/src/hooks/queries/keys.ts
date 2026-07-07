@@ -362,6 +362,8 @@ export const adminKeys = {
   collectionTemplates: () => ["admin", "collections", "templates"] as const,
   collectionTemplateBundles: () => ["admin", "collections", "templateBundles"] as const,
   libraryProviders: (id: number) => ["admin", "libraries", id, "providers"] as const,
+  libraryProviderDefaults: (libraryType: string) =>
+    ["admin", "libraries", "provider-defaults", libraryType] as const,
   nodes: () => ["admin", "nodes"] as const,
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
