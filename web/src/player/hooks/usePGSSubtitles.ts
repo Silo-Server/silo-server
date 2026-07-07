@@ -15,10 +15,12 @@ import {
 // back up to source pixels, so the ±(source/scanWidth) rounding is invisible.
 const SCAN_WIDTH = 480;
 
-// Each windowed .sup fetch covers this many source-time seconds. ffmpeg's
-// startup cost dominates the extract, so a big window is nearly free and
-// keeps re-fetches rare. Matches the server's ?duration= cap.
-const WINDOW_DURATION = 3600;
+// Each windowed .sup fetch covers this many source-time seconds. Until the
+// server's full-track cache is warm, draining a window means sequentially
+// reading the interleaved source across it (~GB per 10 minutes of remux), so
+// windows are kept modest; once cached, a window costs milliseconds and the
+// extra re-fetches are free.
+const WINDOW_DURATION = 600;
 // Pull back this many seconds from the playback position when requesting a
 // window. PGS epochs can straddle a seek point; the backoff bounds the worst
 // case to one dropped cue.
