@@ -2341,10 +2341,14 @@ export function VideoPlayer({
       />
 
       {/* Subtitle overlay — suppressed when JASSUB (ASS) is rendering; bitmap
-          tracks are burned into the video server-side and never reach here */}
+          tracks are burned into the video server-side and never reach here.
+          z-[5] keeps cues above the video but BELOW the controls layer (z-10)
+          so the bottom HUD paints over them instead of the cues cluttering the
+          control bar. When controls are hidden the whole HUD layer is
+          opacity-0, so the cues are fully visible. */}
       {!isDetached && !isASSActive && activeCueTexts.length > 0 && (
         <div
-          className="pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center gap-1"
+          className="pointer-events-none absolute inset-x-0 z-[5] flex flex-col items-center gap-1"
           style={{ ...containerStyle, ...subtitlePositionStyle }}
         >
           {activeCueTexts.map((text, i) => (
