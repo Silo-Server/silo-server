@@ -3215,31 +3215,35 @@ func (f *Fetcher) fetchMostWatched(ctx context.Context, s ResolvedSection, libra
 	return items, len(items), nil
 }
 
+// buildLibraryScope returns the FROM clause and membership predicates that
+// constrain a section query to the requested library scope. Membership is
+// checked with EXISTS / NOT EXISTS semi-joins rather than a row join: an item
+// present in several in-scope libraries must produce exactly ONE result row
+// (rails without a GROUP BY would otherwise return duplicates that eat limit
+// slots), and the deny check must be item-level — with a row join, an item
+// linked to both an allowed and a disabled library passes via the allowed
+// membership row (see catalog audit 2026-05-01 §3 Pattern D, the same reason
+// catalog's buildLibraryScopeJoin uses semi-joins).
 func buildLibraryScope(libraryID *int, libraryIDs []int, configLibraryIDs []int, disabledLibraryIDs []int, argIdx int) (string, []string, []any, int) {
 	fromClause := "media_items mi"
 	var conditions []string
 	var args []any
 
-	needsJoin := libraryID != nil || libraryIDs != nil || len(configLibraryIDs) > 0 || len(disabledLibraryIDs) > 0
-
-	if needsJoin {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-	}
-
-	if libraryID != nil {
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = $%d", argIdx))
-		args = append(args, *libraryID)
+	memberOfAny := func(ids []int) {
+		conditions = append(conditions, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_in WHERE mil_scope_in.content_id = mi.content_id AND mil_scope_in.media_folder_id = ANY($%d))",
+			argIdx,
+		))
+		args = append(args, append([]int(nil), ids...))
 		argIdx++
 	}
 
+	if libraryID != nil {
+		memberOfAny([]int{*libraryID})
+	}
+
 	if len(configLibraryIDs) > 0 && libraryID == nil {
-		placeholders := make([]string, len(configLibraryIDs))
-		for i, id := range configLibraryIDs {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, id)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id IN (%s)", strings.Join(placeholders, ", ")))
+		memberOfAny(configLibraryIDs)
 	}
 
 	if libraryIDs != nil {
@@ -3247,23 +3251,25 @@ func buildLibraryScope(libraryID *int, libraryIDs []int, configLibraryIDs []int,
 			conditions = append(conditions, "1 = 0")
 			return fromClause, conditions, args, argIdx
 		}
-		placeholders := make([]string, len(libraryIDs))
-		for i, id := range libraryIDs {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, id)
-			argIdx++
-		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id IN (%s)", strings.Join(placeholders, ", ")))
+		memberOfAny(libraryIDs)
 	}
 
 	if len(disabledLibraryIDs) > 0 {
-		placeholders := make([]string, len(disabledLibraryIDs))
-		for i, id := range disabledLibraryIDs {
-			placeholders[i] = fmt.Sprintf("$%d", argIdx)
-			args = append(args, id)
-			argIdx++
+		if libraryID == nil && libraryIDs == nil && len(configLibraryIDs) == 0 {
+			// Deny-only mode: still require at least one library membership so
+			// stale or provisional media_items rows with no membership don't
+			// become visible through a vacuous NOT EXISTS (mirrors
+			// appendDiscoveryLibraryScope in package catalog).
+			conditions = append(conditions,
+				"EXISTS (SELECT 1 FROM media_item_libraries mil_scope_any WHERE mil_scope_any.content_id = mi.content_id)",
+			)
 		}
-		conditions = append(conditions, fmt.Sprintf("mil.media_folder_id NOT IN (%s)", strings.Join(placeholders, ", ")))
+		conditions = append(conditions, fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM media_item_libraries mil_scope_out WHERE mil_scope_out.content_id = mi.content_id AND mil_scope_out.media_folder_id = ANY($%d))",
+			argIdx,
+		))
+		args = append(args, append([]int(nil), disabledLibraryIDs...))
+		argIdx++
 	}
 
 	return fromClause, conditions, args, argIdx
@@ -3733,12 +3739,46 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 		days = 30
 	}
 
+	// The new-season file check below must only count files in libraries the
+	// viewer can actually reach: section scope intersected with the viewer's
+	// allowed set, minus disabled libraries. Without this, a file that only
+	// exists in an out-of-scope folder would surface the series here.
+	scopeIDs := libraryIDs
+	if libraryID != nil {
+		scopeIDs = []int{*libraryID}
+	}
+	allowedFolders := filter.AllowedLibraryIDs
+	if len(scopeIDs) > 0 {
+		if allowedFolders != nil {
+			allowedFolders = intersectLibraryIDs(scopeIDs, allowedFolders)
+			if len(allowedFolders) == 0 {
+				return []*models.MediaItem{}, 0, nil
+			}
+		} else {
+			allowedFolders = scopeIDs
+		}
+	} else if allowedFolders != nil && len(allowedFolders) == 0 {
+		return []*models.MediaItem{}, 0, nil
+	}
+
 	var conditions []string
 	var args []any
 
 	// $1..$3 are shared by several subqueries below.
 	args = append(args, userID, profileID, days)
 	argIdx := 4
+
+	fileScopeCond := ""
+	if len(allowedFolders) > 0 {
+		fileScopeCond += fmt.Sprintf("\n\t\t\t\t  AND mf.media_folder_id = ANY($%d)", argIdx)
+		args = append(args, allowedFolders)
+		argIdx++
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		fileScopeCond += fmt.Sprintf("\n\t\t\t\t  AND NOT (mf.media_folder_id = ANY($%d))", argIdx)
+		args = append(args, filter.DisabledLibraryIDs)
+		argIdx++
+	}
 
 	conditions = append(conditions,
 		"mi.type = 'series'",
@@ -3752,8 +3792,8 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 			  AND uwh.profile_id = $2
 		)`,
 		// ...and a season newer than any they've watched arrived recently
-		// with at least one playable file.
-		`EXISTS (
+		// with at least one playable file in an in-scope library.
+		fmt.Sprintf(`EXISTS (
 			SELECT 1
 			FROM episodes ne
 			WHERE ne.series_id = mi.content_id
@@ -3770,9 +3810,9 @@ func (f *Fetcher) fetchReturningShows(ctx context.Context, s ResolvedSection, li
 			  AND EXISTS (
 				SELECT 1 FROM media_files mf
 				WHERE mf.episode_id = ne.content_id
-				  AND mf.missing_since IS NULL
+				  AND mf.missing_since IS NULL%s
 			  )
-		)`,
+		)`, fileScopeCond),
 	)
 
 	fromClause, libConditions, libArgs, newArgIdx := buildLibraryScope(libraryID, libraryIDs, nil, filter.DisabledLibraryIDs, argIdx)
@@ -3843,8 +3883,17 @@ func (f *Fetcher) fetchGenreRouletteWithTitle(ctx context.Context, s ResolvedSec
 
 	days := editorialCadenceDays(p.RotationCadence)
 	libKey := "all"
-	if libraryID != nil {
+	switch {
+	case libraryID != nil:
 		libKey = strconv.Itoa(*libraryID)
+	case len(libraryIDs) > 0:
+		// Multi-library scopes must not share one rotation bucket, or two
+		// differently-scoped roulette rows would always advance in lockstep.
+		parts := make([]string, len(libraryIDs))
+		for i, id := range libraryIDs {
+			parts[i] = strconv.Itoa(id)
+		}
+		libKey = strings.Join(parts, ",")
 	}
 	idx := recipes.RotationIndex(f.now(), "genre_roulette|"+libKey, len(cands), days)
 	genre := cands[idx]

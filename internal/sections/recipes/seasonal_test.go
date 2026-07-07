@@ -393,3 +393,26 @@ func TestActiveSeasonalThemeWhereSkipsUnusable(t *testing.T) {
 		t.Errorf("expected no theme when nothing is usable, got %q", got)
 	}
 }
+
+// TestSeasonalTitleOverrideHonorsUsableFilter verifies the title override
+// follows the same filtered selection as the fetcher: when the top-priority
+// in-season theme is unusable, the override comes from the theme that
+// actually resolves.
+func TestSeasonalTitleOverrideHonorsUsableFilter(t *testing.T) {
+	p := SeasonalThemedParams{
+		EnabledThemes: []string{"christmas", "saturday_morning"},
+		ThemeTitles: map[string]string{
+			"christmas":        "Christmas Movies",
+			"saturday_morning": "Saturday Cartoons",
+		},
+	}
+	saturdayInDecember := time.Date(2026, time.December, 12, 9, 0, 0, 0, time.UTC)
+
+	if got := SeasonalTitleOverride(p, saturdayInDecember, nil); got != "Christmas Movies" {
+		t.Errorf("nil filter: got %q, want Christmas Movies", got)
+	}
+	noChristmas := func(theme string) bool { return theme != "christmas" }
+	if got := SeasonalTitleOverride(p, saturdayInDecember, noChristmas); got != "Saturday Cartoons" {
+		t.Errorf("filtered: got %q, want Saturday Cartoons", got)
+	}
+}

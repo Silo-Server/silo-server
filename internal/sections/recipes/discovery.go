@@ -2,7 +2,6 @@ package recipes
 
 import (
 	"encoding/json"
-	"errors"
 	"time"
 )
 
@@ -197,17 +196,10 @@ func (formatShowcaseRecipe) Validate(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
-	switch p.Format {
-	case "", "4k", "dolby_vision", "hdr":
-	default:
-		return errors.New("format_showcase: unknown format")
+	if err := oneOf("format_showcase: format", p.Format, "", "4k", "dolby_vision", "hdr"); err != nil {
+		return err
 	}
-	switch p.Sort {
-	case "", "rating", "recent":
-		return nil
-	default:
-		return errors.New("format_showcase: sort must be rating or recent")
-	}
+	return oneOf("format_showcase: sort", p.Sort, "", "rating", "recent")
 }
 func (formatShowcaseRecipe) Definition() RecipeDefinition {
 	return RecipeDefinition{

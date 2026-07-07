@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { CollectionSearchableSelect } from "@/components/CollectionSearchableSelect";
 import LibraryMultiSelect from "@/components/LibraryMultiSelect";
 import { useAllUserCollections } from "@/hooks/queries/useAllUserCollections";
 import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { createCatalogSearchState, fetchCatalogPage } from "@/hooks/queries/catalog";
-import { catalogKeys } from "@/hooks/queries/keys";
+import { fetchWatchDetail } from "@/hooks/queries/items";
+import { catalogKeys, itemKeys } from "@/hooks/queries/keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import type { BrowseItem } from "@/api/types";
 import type { RecipeDefinition } from "@/lib/recipes";
@@ -413,15 +414,18 @@ function NumberParamField({
       <input
         type="number"
         min={1}
+        step={1}
         className="w-full rounded border border-white/15 bg-white/5 px-3 py-2 text-sm"
         placeholder={placeholder}
         value={value}
         onChange={(e) => {
           const parsed = Number(e.target.value);
+          // All numeric recipe params are Go ints server-side; storing a
+          // fractional value would fail JSON unmarshalling at save time.
           onChange({
             ...params,
             [paramKey]:
-              e.target.value && Number.isFinite(parsed) && parsed > 0 ? parsed : undefined,
+              e.target.value && Number.isInteger(parsed) && parsed > 0 ? parsed : undefined,
           });
         }}
       />
@@ -433,10 +437,15 @@ function NumberParamField({
 const CURATED_SEARCH_LIMIT = 10;
 const CURATED_SEARCH_DEBOUNCE_MS = 250;
 
+function curatedItemLabel(title: string, year?: number): string {
+  return year ? `${title} (${year})` : title;
+}
+
 // CuratedItemsParamField builds the ordered item_ids list for
 // admin_curated_list sections: catalog search on top, the picked (ordered)
-// list below. Titles for picked items are remembered locally from search
-// results; items persisted before this drawer opened fall back to their id.
+// list below. Titles for freshly added items come from the search result;
+// items persisted before this drawer opened are hydrated from the item
+// detail endpoint, falling back to the raw id while loading.
 function CuratedItemsParamField({ params, onChange }: ParamFieldProps) {
   const [query, setQuery] = useState("");
   const [labels, setLabels] = useState<Record<string, string>>({});
@@ -446,6 +455,24 @@ function CuratedItemsParamField({ params, onChange }: ParamFieldProps) {
     ? params.item_ids.filter((id): id is string => typeof id === "string")
     : [];
   const picked = new Set(itemIDs);
+
+  // Hydrate display titles for ids we have no label for (pre-existing config
+  // being edited). Cached under the same key as the watch-detail hook.
+  const unlabeled = itemIDs.filter((id) => !(id in labels));
+  const detailQueries = useQueries({
+    queries: unlabeled.map((id) => ({
+      queryKey: itemKeys.watchDetail(id),
+      queryFn: ({ signal }: { signal?: AbortSignal }) =>
+        fetchWatchDetail(id, undefined, undefined, { signal }),
+      staleTime: 5 * 60 * 1000,
+      retry: false,
+    })),
+  });
+  const hydratedLabels: Record<string, string> = {};
+  unlabeled.forEach((id, i) => {
+    const detail = detailQueries[i]?.data;
+    if (detail) hydratedLabels[id] = curatedItemLabel(detail.title, detail.year);
+  });
 
   const searchState = useMemo(
     () => createCatalogSearchState("query", { q: debounced || undefined }),
@@ -471,7 +498,7 @@ function CuratedItemsParamField({ params, onChange }: ParamFieldProps) {
     if (picked.has(item.content_id)) return;
     setLabels((prev) => ({
       ...prev,
-      [item.content_id]: item.year ? `${item.title} (${item.year})` : item.title,
+      [item.content_id]: curatedItemLabel(item.title, item.year),
     }));
     onChange({ ...params, item_ids: [...itemIDs, item.content_id] });
   }
@@ -503,6 +530,8 @@ function CuratedItemsParamField({ params, onChange }: ParamFieldProps) {
         />
         {debounced.length === 0 ? null : results.isLoading ? (
           <div className="mt-2 text-xs text-white/50">Searching…</div>
+        ) : results.isError ? (
+          <div className="mt-2 text-xs text-amber-300">Search failed — try again.</div>
         ) : found.length === 0 ? (
           <div className="mt-2 text-xs text-white/50">No matches.</div>
         ) : (
@@ -546,7 +575,9 @@ function CuratedItemsParamField({ params, onChange }: ParamFieldProps) {
           <ul className="divide-y divide-white/10 rounded border border-white/10">
             {itemIDs.map((id, idx) => (
               <li key={id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <span className="min-w-0 flex-1 truncate">{labels[id] ?? id}</span>
+                <span className="min-w-0 flex-1 truncate">
+                  {labels[id] ?? hydratedLabels[id] ?? id}
+                </span>
                 <button
                   type="button"
                   onClick={() => move(id, -1)}

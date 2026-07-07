@@ -204,7 +204,10 @@ func (r *Reader) GetTasteMatchRow(ctx context.Context, userID int, profileID, ge
 		}
 		rows = trimRows(rows, limit)
 		if len(rows) == 0 {
-			return nil, nil
+			// This cluster's cached items were entirely filtered out (e.g.
+			// access restrictions) — try the next-strongest cluster instead of
+			// giving up before the global fallback below.
+			continue
 		}
 		return &rows[0], nil
 	}

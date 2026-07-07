@@ -94,16 +94,9 @@ func (editorialSpotlightRecipe) Validate(raw json.RawMessage) error {
 		return fmt.Errorf("editorial_spotlight: unknown subject_type %q", p.SubjectType)
 	}
 
-	// Default empty cadence to weekly before validating.
-	if p.RotationCadence == "" {
-		p.RotationCadence = CadenceWeekly
-	}
-
-	switch p.RotationCadence {
-	case CadenceDaily, CadenceWeekly, CadenceMonthly:
-		// valid
-	default:
-		return fmt.Errorf("editorial_spotlight: invalid rotation_cadence %q (want daily|weekly|monthly)", p.RotationCadence)
+	if err := oneOf("editorial_spotlight: rotation_cadence", string(p.RotationCadence),
+		"", string(CadenceDaily), string(CadenceWeekly), string(CadenceMonthly)); err != nil {
+		return err
 	}
 
 	if !p.AutoRotate && p.Subject == "" {
@@ -171,12 +164,8 @@ func (genreRouletteRecipe) Validate(raw json.RawMessage) error {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
-	switch p.RotationCadence {
-	case "", CadenceDaily, CadenceWeekly, CadenceMonthly:
-		return nil
-	default:
-		return fmt.Errorf("genre_roulette: invalid rotation_cadence %q (want daily|weekly|monthly)", p.RotationCadence)
-	}
+	return oneOf("genre_roulette: rotation_cadence", string(p.RotationCadence),
+		"", string(CadenceDaily), string(CadenceWeekly), string(CadenceMonthly))
 }
 func (genreRouletteRecipe) Definition() RecipeDefinition {
 	return RecipeDefinition{

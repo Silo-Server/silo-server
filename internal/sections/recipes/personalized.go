@@ -2,6 +2,7 @@ package recipes
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -130,7 +131,13 @@ func (returningShowsRecipe) Validate(raw json.RawMessage) error {
 		return nil
 	}
 	var p ReturningShowsParams
-	return json.Unmarshal(raw, &p)
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return err
+	}
+	if p.LookbackDays < 0 {
+		return errors.New("returning_shows: lookback_days must be >= 0")
+	}
+	return nil
 }
 func (returningShowsRecipe) Definition() RecipeDefinition {
 	return RecipeDefinition{
