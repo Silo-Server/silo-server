@@ -44,6 +44,17 @@ const DV_BL_COMPAT_LABELS: Record<number, string> = {
   6: "HDR10",
 };
 
+// Compatibility details recoverable from the scanner-derived video_range_type
+// enum when ffprobe omitted the explicit DV side-data fields (probe.go still
+// classifies profile-8 files via color_transfer in that case).
+const DV_RANGE_TYPE_DETAILS: Record<string, string> = {
+  DOVIWithEL: "EL",
+  DOVIWithELHDR10Plus: "EL",
+  DOVIWithHDR10: "HDR10 compatible",
+  DOVIWithSDR: "SDR compatible",
+  DOVIWithHLG: "HLG compatible",
+};
+
 export function formatDolbyVisionLabel(track: VersionVideoTrack): string {
   const raw = track.dolby_vision?.trim() ?? "";
   if (!raw && !track.dv_profile) return "";
@@ -54,6 +65,10 @@ export function formatDolbyVisionLabel(track: VersionVideoTrack): string {
   const details = [compat ? `${compat} compatible` : "", track.dv_el_present ? "EL" : ""].filter(
     Boolean,
   );
+  if (details.length === 0) {
+    const rangeDetail = DV_RANGE_TYPE_DETAILS[track.video_range_type?.trim() ?? ""];
+    if (rangeDetail) details.push(rangeDetail);
+  }
 
   return details.length > 0 ? `${base} (${details.join(", ")})` : base;
 }
@@ -78,12 +93,14 @@ export function formatVideoRangeLabel(track: VersionVideoTrack): string {
   if (dolbyVision) {
     return track.hdr10_plus ? `${dolbyVision} · HDR10+` : dolbyVision;
   }
-  if (track.hdr10_plus) return "HDR10+";
 
   const rangeType = track.video_range_type?.trim();
-  if (rangeType) return VIDEO_RANGE_TYPE_LABELS[rangeType] ?? rangeType;
+  if (rangeType) {
+    const label = VIDEO_RANGE_TYPE_LABELS[rangeType] ?? rangeType;
+    return track.hdr10_plus && !label.includes("HDR10+") ? `${label} · HDR10+` : label;
+  }
 
-  return track.video_range?.trim() ?? "";
+  return track.hdr10_plus ? "HDR10+" : (track.video_range?.trim() ?? "");
 }
 
 export function formatVideoLevel(codec?: string, level?: number): string {

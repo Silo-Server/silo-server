@@ -96,6 +96,28 @@ describe("formatDolbyVisionLabel", () => {
       "Dolby Vision Profile 8.2 (SDR compatible)",
     );
   });
+
+  it("falls back to video_range_type for compatibility when DV side-data fields are missing", () => {
+    expect(
+      formatDolbyVisionLabel({ dolby_vision: "Profile 8", video_range_type: "DOVIWithHDR10" }),
+    ).toBe("Dolby Vision Profile 8 (HDR10 compatible)");
+    expect(
+      formatDolbyVisionLabel({ dolby_vision: "Profile 8", video_range_type: "DOVIWithHLG" }),
+    ).toBe("Dolby Vision Profile 8 (HLG compatible)");
+    expect(formatDolbyVisionLabel({ dolby_vision: "Profile 5", video_range_type: "DOVI" })).toBe(
+      "Dolby Vision Profile 5",
+    );
+  });
+
+  it("prefers explicit DV side-data fields over the video_range_type fallback", () => {
+    expect(
+      formatDolbyVisionLabel({
+        dolby_vision: "Profile 8.2",
+        dv_bl_compat_id: 2,
+        video_range_type: "DOVIWithHDR10",
+      }),
+    ).toBe("Dolby Vision Profile 8.2 (SDR compatible)");
+  });
 });
 
 describe("formatVideoRangeLabel", () => {
@@ -112,6 +134,18 @@ describe("formatVideoRangeLabel", () => {
 
   it("reports plain HDR10+ without Dolby Vision", () => {
     expect(formatVideoRangeLabel({ hdr10_plus: true })).toBe("HDR10+");
+    expect(formatVideoRangeLabel({ hdr10_plus: true, video_range_type: "HDR10Plus" })).toBe(
+      "HDR10+",
+    );
+  });
+
+  it("keeps the DV hint from video_range_type when hdr10_plus is set without raw DV fields", () => {
+    expect(formatVideoRangeLabel({ hdr10_plus: true, video_range_type: "DOVIWithHDR10Plus" })).toBe(
+      "Dolby Vision · HDR10+",
+    );
+    expect(formatVideoRangeLabel({ hdr10_plus: true, video_range_type: "HDR10" })).toBe(
+      "HDR10 · HDR10+",
+    );
   });
 
   it("maps video_range_type enum values to friendly labels", () => {
