@@ -48,6 +48,7 @@ type Claims struct {
 	StartSegmentNumber int     `json:"ssn,omitempty"`
 	SubtitleTrackIndex int     `json:"sti,omitempty"`
 	SubtitleBurnIn     bool    `json:"sbi,omitempty"`
+	SubtitleCodec      string  `json:"sbc,omitempty"`
 	TargetBitrateKbps  int     `json:"tbr,omitempty"`
 	TotalDuration      float64 `json:"dur,omitempty"`
 	FastStart          bool    `json:"fs,omitempty"`

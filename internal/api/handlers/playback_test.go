@@ -1522,6 +1522,76 @@ func TestHandleStartTranscode_MPEG2SeekedCopyRemainsCopyVideo(t *testing.T) {
 	}
 }
 
+func TestHandleStartTranscode_BitmapBurnInForcesEncodeAndResolvesCodec(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	filePath := writePlaybackTestMediaFile(t, "movie-pgs.mkv")
+	file := &models.MediaFile{
+		ID:         42,
+		ContentID:  "movie-1",
+		FilePath:   filePath,
+		Resolution: "1080p",
+		CodecVideo: "h264",
+		CodecAudio: "aac",
+		Container:  "mkv",
+		Bitrate:    8000,
+		Duration:   3600,
+		AudioTracks: []models.AudioTrack{
+			{Codec: "aac", Default: true},
+		},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Language: "en", Codec: "subrip"},
+			{Index: 1, Language: "en", Codec: "hdmv_pgs_subtitle"},
+		},
+	}
+	session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayRemux, true)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	handler := NewPlaybackHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+
+	// A remux "original" restart that adds PGS burn-in still asks for codec
+	// copy — the server must force an encoding transcode and resolve the
+	// track's bitmap codec for the ffmpeg arg builder.
+	transcodeReq := httptest.NewRequest(
+		"POST",
+		"/api/v1/playback/transcode/start",
+		strings.NewReader(`{"session_id":"`+session.ID+`","seek_seconds":125.0,"target_resolution":"","target_codec_video":"copy","target_codec_audio":"aac","target_bitrate_kbps":0,"segment_duration":2,"subtitle_track_index":1,"subtitle_burn_in":true}`),
+	)
+	transcodeReq = transcodeReq.WithContext(newAuthorizedPlaybackContext())
+
+	transcodeRR := httptest.NewRecorder()
+	handler.HandleStartTranscode(transcodeRR, transcodeReq)
+	if transcodeRR.Code != 202 {
+		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
+	}
+
+	transcodeSession := handler.tm.GetTranscodeSession(session.ID)
+	if transcodeSession == nil {
+		t.Fatal("expected local transcode session")
+	}
+	t.Cleanup(func() {
+		_ = transcodeSession.Close()
+	})
+	opts := transcodeSession.Opts()
+	if got := opts.TargetCodecVideo; got != "h264" {
+		t.Fatalf("burn-in target video codec = %q, want h264 (encode forced)", got)
+	}
+	if !opts.SubtitleBurnIn || opts.SubtitleTrackIndex != 1 {
+		t.Fatalf("burn-in selection lost: burnIn=%v index=%d", opts.SubtitleBurnIn, opts.SubtitleTrackIndex)
+	}
+	if got := opts.SubtitleCodec; got != "hdmv_pgs_subtitle" {
+		t.Fatalf("burn-in subtitle codec = %q, want hdmv_pgs_subtitle", got)
+	}
+	// Encode-forced restarts must snap the ffmpeg start to the segment
+	// boundary (timeline alignment contract).
+	if got := opts.SeekSeconds; got != 124.0 {
+		t.Fatalf("burn-in aligned seek = %v, want 124.0 (125.0 snapped to the segment boundary)", got)
+	}
+}
+
 func TestHandleStartPlayback_MarksMissingFileAndSkipsSessionCreation(t *testing.T) {
 	sessionMgr := playback.NewSessionManager(0, 0)
 	marker := &recordingMissingMarker{}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { parseVTT, type ParsedCue } from "../utils/parseVTT";
 import type { PlayerSubtitleInfo } from "../types";
-import { isASSCodec, isPGSCodec } from "../utils/subtitleCodecs";
+import { isASSCodec, isBitmapCodec } from "../utils/subtitleCodecs";
 import { toMediaTime } from "../utils/mediaTimeline";
 
 // Each subtitle fetch covers this many source-time seconds. Matches the
@@ -142,8 +142,9 @@ export function useSubtitleTracks(
     setActiveCueTexts([]);
 
     // Skip entirely for ASS/SSA (JASSUB renders those via useASSSubtitles)
-    // and PGS (libpgs renders those via usePGSSubtitles).
-    if (isASSCodec(activeCodec) || isPGSCodec(activeCodec)) {
+    // and bitmap codecs (PGS/DVD/DVB are burned into the video server-side;
+    // rendering text cues for them would double up on screen).
+    if (isASSCodec(activeCodec) || isBitmapCodec(activeCodec)) {
       return;
     }
     // Need either a URL to stream from or a live cue source.

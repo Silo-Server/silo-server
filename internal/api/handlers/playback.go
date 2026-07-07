@@ -1701,13 +1701,11 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 
 	embeddedOffset := len(file.ExternalSubtitles)
 	for i, track := range file.SubtitleTracks {
-		// PGS bitmap tracks are deliverable as .sup streams for
-		// client-side rendering; DVD/DVB bitmap tracks still have no
-		// non-burn-in delivery path, so they stay hidden.
-		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) {
-			continue
-		}
-
+		// All embedded tracks are listed, including bitmap codecs: PGS is
+		// deliverable as a .sup stream for client-side rendering (Apple),
+		// and every bitmap codec (PGS/DVD/DVB) is deliverable via server-side
+		// burn-in — the web player restarts the transcode with
+		// subtitle_burn_in when one is selected.
 		urls = append(urls, subtitleURL{
 			Index:           embeddedOffset + i,
 			Language:        track.Language,
@@ -2078,6 +2076,10 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				}
 				subtitleTrackIndex := session.SubtitleTrackIndex
 				subtitleBurnIn := session.SubtitleBurnIn
+				subtitleCodec := ""
+				if subtitleBurnIn && subtitleTrackIndex >= 0 {
+					subtitleCodec = embeddedSubtitleCodec(file, subtitleTrackIndex)
+				}
 				startSegment := computeStartSegment(seekSeconds, segmentDuration)
 
 				// Derive the encode recipe the same way HandleStartTranscode
@@ -2100,6 +2102,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 					AudioTrackIndex:    req.AudioTrackIndex,
 					SubtitleTrackIndex: subtitleTrackIndex,
 					SubtitleBurnIn:     subtitleBurnIn,
+					SubtitleCodec:      subtitleCodec,
 					TotalDuration:      float64(file.Duration),
 				}
 				if strings.TrimSpace(nodeReq.HWAccel) == "" {
@@ -2155,6 +2158,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 					AudioTrackIndex:    nodeReq.AudioTrackIndex,
 					SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
 					SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
+					SubtitleCodec:      nodeReq.SubtitleCodec,
 					TotalDuration:      nodeReq.TotalDuration,
 				})
 				resp.StreamURL = h.buildProxyManifestURL(card, proxyNode)
@@ -2253,6 +2257,16 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 	}
 
 	return file, nil
+}
+
+// embeddedSubtitleCodec returns the probed codec of the embedded subtitle
+// track at the given ffmpeg-relative subtitle ordinal (the same index the
+// subtitles=si=N / [0:s:N] filters use), or "" when out of range.
+func embeddedSubtitleCodec(file *models.MediaFile, ffmpegSubtitleIndex int) string {
+	if file == nil || ffmpegSubtitleIndex < 0 || ffmpegSubtitleIndex >= len(file.SubtitleTracks) {
+		return ""
+	}
+	return file.SubtitleTracks[ffmpegSubtitleIndex].Codec
 }
 
 // computeStartSegment returns the HLS segment number corresponding to a seek
@@ -2443,6 +2457,21 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		req.TargetCodecVideo = "h264"
 	}
 
+	// Subtitle burn-in composites subtitles into the video frames, which is
+	// impossible with -c:v copy. If the requested recipe would stream-copy
+	// video (e.g. a remux "original" restart that adds burn-in), force an
+	// encoding transcode so the burned frames are actually produced instead of
+	// the subtitle selection being silently dropped by the filter stage.
+	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 && strings.EqualFold(req.TargetCodecVideo, "copy") {
+		slog.Info("forcing video transcode for subtitle burn-in request",
+			"playback_session_id", req.SessionID,
+			"subtitle_track_index", req.SubtitleTrackIndex,
+			"requested_target_codec_video", req.TargetCodecVideo,
+			"effective_target_codec_video", "h264",
+		)
+		req.TargetCodecVideo = "h264"
+	}
+
 	// 4K transcode guard: if source is 4K and allow_4k_transcode is disabled,
 	// switch to an alternate non-4K file version for transcoding.
 	// Skip the guard when target_codec_video is "copy" — no actual video
@@ -2480,6 +2509,15 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Resolve the burn-in track's probed codec so the ffmpeg arg builder can
+	// route bitmap codecs (PGS/DVD/DVB) to the overlay filter_complex pipeline
+	// instead of the text-only libass subtitles filter. Derived server-side
+	// from the effective file rather than trusted from the client.
+	subtitleCodec := ""
+	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
+		subtitleCodec = embeddedSubtitleCodec(file, req.SubtitleTrackIndex)
+	}
+
 	// Determine whether to run locally or forward to a remote transcode node.
 	var plan nodepool.Plan
 	if h.NodePlanner != nil {
@@ -2512,6 +2550,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			AudioTrackIndex:    session.AudioTrackIndex,
 			SubtitleTrackIndex: req.SubtitleTrackIndex,
 			SubtitleBurnIn:     req.SubtitleBurnIn,
+			SubtitleCodec:      subtitleCodec,
 			TotalDuration:      float64(file.Duration),
 		}
 
@@ -2573,6 +2612,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			AudioTrackIndex:    nodeReq.AudioTrackIndex,
 			SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
 			SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
+			SubtitleCodec:      nodeReq.SubtitleCodec,
 			TotalDuration:      nodeReq.TotalDuration,
 		})
 		manifestURL := h.buildProxyManifestURL(card, plan.ProxyNode)
@@ -2628,6 +2668,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		AudioTrackIndex:    session.AudioTrackIndex,
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
+		SubtitleCodec:      subtitleCodec,
 		TotalDuration:      float64(file.Duration),
 		FastStart:          true,
 		NodeType:           "integrated",

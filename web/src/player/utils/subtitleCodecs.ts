@@ -8,8 +8,8 @@ export function isASSCodec(codec: string | undefined): boolean {
 }
 
 /**
- * Codecs that indicate PGS (Blu-ray bitmap) subtitles. Rendered client-side
- * by libpgs from a .sup stream served by the backend.
+ * Codecs that indicate PGS (Blu-ray bitmap) subtitles. Like all bitmap
+ * codecs, PGS is burned into the video server-side when selected.
  */
 const PGS_CODECS = new Set(["pgs", "hdmv_pgs_subtitle"]);
 

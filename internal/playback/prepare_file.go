@@ -114,7 +114,7 @@ func buildPrepareFileArgs(opts TranscodeOpts, outputPath string) []string {
 	)
 	args = append(args, "-i", opts.InputPath)
 	args = append(args, "-map_metadata", "-1", "-map_chapters", "-1")
-	args = appendStreamSelectionArgs(args, opts.AudioTrackIndex)
+	args = appendStreamSelectionArgs(args, opts)
 
 	if isVideoCopy {
 		args = append(args, "-c:v", "copy")

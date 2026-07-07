@@ -26,7 +26,7 @@ func TestSubtitleURLExt(t *testing.T) {
 	}
 }
 
-func TestBuildSubtitleURLs_IncludesPGSButNotOtherBitmaps(t *testing.T) {
+func TestBuildSubtitleURLs_IncludesAllBitmapTracks(t *testing.T) {
 	file := &models.MediaFile{
 		SubtitleTracks: []models.SubtitleTrack{
 			{Index: 0, Language: "en", Codec: "subrip"},
@@ -38,8 +38,10 @@ func TestBuildSubtitleURLs_IncludesPGSButNotOtherBitmaps(t *testing.T) {
 
 	urls := buildSubtitleURLs("sess-1", file, nil)
 
-	if len(urls) != 2 {
-		t.Fatalf("expected 2 subtitle URLs (text + PGS), got %d: %+v", len(urls), urls)
+	// Every bitmap track is deliverable now that server-side burn-in supports
+	// bitmap codecs; PGS additionally streams as .sup for client rendering.
+	if len(urls) != 4 {
+		t.Fatalf("expected 4 subtitle URLs (text + PGS + DVD + DVB), got %d: %+v", len(urls), urls)
 	}
 
 	srt := urls[0]
@@ -56,6 +58,13 @@ func TestBuildSubtitleURLs_IncludesPGSButNotOtherBitmaps(t *testing.T) {
 	}
 	if pgs.FontBundleURL != "" {
 		t.Errorf("PGS track must not advertise a font bundle, got %q", pgs.FontBundleURL)
+	}
+
+	if dvd := urls[2]; dvd.Codec != "dvd_subtitle" || dvd.Index != 2 {
+		t.Errorf("expected DVD bitmap track to be listed for burn-in selection, got %+v", dvd)
+	}
+	if dvb := urls[3]; dvb.Codec != "dvb_subtitle" || dvb.Index != 3 {
+		t.Errorf("expected DVB bitmap track to be listed for burn-in selection, got %+v", dvb)
 	}
 }
 

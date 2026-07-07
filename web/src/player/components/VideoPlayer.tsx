@@ -14,7 +14,7 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
-import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
+import { isBitmapCodec } from "../utils/subtitleCodecs";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
 import { useSubtitlePositionStyle } from "../hooks/useSubtitlePositionStyle";
 import { useNextEpisode } from "../hooks/useNextEpisode";
@@ -1626,20 +1626,42 @@ export function VideoPlayer({
     subtitleDelayMs,
   );
 
-  // -- PGS (Blu-ray bitmap) subtitle rendering via libpgs --
-  // Shares the text overlay's appearance settings; the compositor applies
-  // the geometric prefs (size, position, background box) to the bitmaps.
-  // isLoadingCues: the hook has paused (or is bridging) playback while a
-  // window of bitmap cues extracts; surface the indicator below.
-  const { isActive: isPGSActive, isLoadingCues: pgsCuesLoading } = usePGSSubtitles(
-    videoRef,
-    subtitleUrls,
-    activeSubtitleIndex,
-    isDetached,
-    streamOriginSeconds,
-    subtitleDelayMs,
-    subtitleSettings,
+  // -- Bitmap (PGS/DVD/DVB) subtitle burn-in --
+  // Bitmap tracks are composited into the video server-side (the "Plex
+  // route"): selecting one restarts the transcode with subtitle_burn_in at
+  // the current aligned position, reusing the same restart machinery as a
+  // quality/audio switch (including its loading state). No client-side
+  // renderer runs for these tracks — useSubtitleTracks skips bitmap codecs.
+  const externalSubtitleCount = useMemo(
+    () => subtitleUrls.filter((track) => track.source === "external").length,
+    [subtitleUrls],
   );
+  const activeSubtitleTrack =
+    activeSubtitleIndex !== null
+      ? (effectiveSubtitleTracks.find((track) => track.index === activeSubtitleIndex) ?? null)
+      : null;
+  // ffmpeg's burn-in filters index subtitle streams only, so translate the
+  // session-wide track index (external tracks list first) into the embedded
+  // subtitle ordinal.
+  const burnInSubtitleOrdinal =
+    activeSubtitleTrack &&
+    activeSubtitleTrack.source === "embedded" &&
+    isBitmapCodec(activeSubtitleTrack.codec)
+      ? activeSubtitleTrack.index - externalSubtitleCount
+      : null;
+  const setSubtitleBurnIn = transcodeQuality.setSubtitleBurnIn;
+  useEffect(() => {
+    // Until the element has media loaded (an auto-selected bitmap preference
+    // at session start, or a stream restart), currentTime still reads 0
+    // rather than the resume/seek target — use the intended position instead,
+    // exactly like the subtitle window fetcher does.
+    const video = videoRef.current;
+    const position =
+      video && video.readyState > 0
+        ? currentTimeRef.current
+        : (subtitleFetchAnchorRef.current ?? 0);
+    setSubtitleBurnIn(burnInSubtitleOrdinal, position);
+  }, [burnInSubtitleOrdinal, setSubtitleBurnIn]);
 
   // -- Auto-select subtitle track based on mode --
   useEffect(() => {
@@ -2281,8 +2303,9 @@ export function VideoPlayer({
         style={!isPlayerReady ? { visibility: "hidden" } : undefined}
       />
 
-      {/* Subtitle overlay — suppressed when JASSUB (ASS) or libpgs (PGS) is rendering */}
-      {!isDetached && !isASSActive && !isPGSActive && activeCueTexts.length > 0 && (
+      {/* Subtitle overlay — suppressed when JASSUB (ASS) is rendering; bitmap
+          tracks are burned into the video server-side and never reach here */}
+      {!isDetached && !isASSActive && activeCueTexts.length > 0 && (
         <div
           className="pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center gap-1"
           style={{ ...containerStyle, ...subtitlePositionStyle }}
@@ -2316,17 +2339,6 @@ export function VideoPlayer({
           onSkip={nextEpisode.skipToNext}
           onCancel={nextEpisode.cancelAutoPlay}
         />
-      )}
-
-      {/* PGS subtitle window extraction indicator — usePGSSubtitles holds
-          playback while cue data loads; mirror the translation indicator. */}
-      {!isDetached && pgsCuesLoading && (
-        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-          <div className="flex items-center gap-3 rounded-lg bg-black/80 px-4 py-3 text-sm text-white shadow-lg">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-            Loading subtitles…
-          </div>
-        </div>
       )}
 
       {/* Live translation buffering indicator */}

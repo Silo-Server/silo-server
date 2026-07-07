@@ -211,6 +211,181 @@ func TestBuildFFmpegArgs_MPEG4Part2DisablesHardwareDecode(t *testing.T) {
 	}
 }
 
+func TestBuildFFmpegArgs_BitmapBurnInCPUUsesOverlayFilterComplex(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-pgs",
+		SourceVideoCodec:   "h264",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "none",
+		TargetResolution:   "1080p",
+		SubtitleTrackIndex: 2,
+		SubtitleBurnIn:     true,
+		SubtitleCodec:      "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	// Overlay runs at native resolution first, then scales.
+	want := "-filter_complex [0:v:0][0:s:2]overlay=eof_action=pass,scale=-2:1080[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("bitmap burn-in should use overlay filter_complex %q: %s", want, joined)
+	}
+	// The graph output replaces the raw video stream mapping.
+	if !strings.Contains(joined, "-map [vout]") {
+		t.Fatalf("bitmap burn-in should map the filter graph output: %s", joined)
+	}
+	if strings.Contains(joined, "-map 0:v:0") {
+		t.Fatalf("bitmap burn-in must not also map the raw video stream: %s", joined)
+	}
+	// -vf and -filter_complex on the same video stream is an ffmpeg error.
+	if strings.Contains(joined, "-vf ") {
+		t.Fatalf("bitmap burn-in must not emit -vf alongside -filter_complex: %s", joined)
+	}
+	if strings.Contains(joined, "subtitles=") {
+		t.Fatalf("bitmap burn-in must not use the libass subtitles filter: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v libx264") {
+		t.Fatalf("bitmap burn-in requires a video encode: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_BitmapBurnInNoScaleKeepsNativeResolution(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-pgs-native",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "none",
+		SubtitleTrackIndex: 0,
+		SubtitleBurnIn:     true,
+		SubtitleCodec:      "dvd_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-filter_complex [0:v:0][0:s:0]overlay=eof_action=pass[vout]") {
+		t.Fatalf("native-resolution bitmap burn-in should overlay without scaling: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_BitmapBurnInVAAPIRoundTripsThroughCPU(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-pgs-vaapi",
+		SourceVideoCodec:   "h264",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "vaapi",
+		TargetResolution:   "720p",
+		SubtitleTrackIndex: 1,
+		SubtitleBurnIn:     true,
+		SubtitleCodec:      "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	want := "-filter_complex [0:v:0]hwdownload,format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("vaapi bitmap burn-in should hwdownload → overlay → hwupload %q: %s", want, joined)
+	}
+	if !strings.Contains(joined, "-map [vout]") {
+		t.Fatalf("vaapi bitmap burn-in should map the filter graph output: %s", joined)
+	}
+	if strings.Contains(joined, "-vf ") {
+		t.Fatalf("vaapi bitmap burn-in must not emit -vf: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_vaapi") {
+		t.Fatalf("vaapi bitmap burn-in should keep the hardware encoder: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_TextBurnInStillUsesSubtitlesFilter(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-srt",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "none",
+		TargetResolution:   "1080p",
+		SubtitleTrackIndex: 1,
+		SubtitleBurnIn:     true,
+		SubtitleCodec:      "subrip",
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-vf scale=-2:1080,subtitles='/media/movie.mkv':si=1") {
+		t.Fatalf("text burn-in should keep the libass subtitles -vf path: %s", joined)
+	}
+	if strings.Contains(joined, "-filter_complex") {
+		t.Fatalf("text burn-in must not switch to filter_complex: %s", joined)
+	}
+	if !strings.Contains(joined, "-map 0:v:0") {
+		t.Fatalf("text burn-in should keep the raw video stream mapping: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_LegacyBurnInWithoutCodecKeepsTextPath(t *testing.T) {
+	// Recipe cards / tokens minted before SubtitleCodec existed decode with an
+	// empty codec; they must reconstruct the exact same (text) command line.
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-legacy",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "none",
+		SubtitleTrackIndex: 0,
+		SubtitleBurnIn:     true,
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "subtitles='/media/movie.mkv':si=0") {
+		t.Fatalf("legacy burn-in without codec should keep the subtitles filter: %s", joined)
+	}
+	if strings.Contains(joined, "-filter_complex") {
+		t.Fatalf("legacy burn-in without codec must not use filter_complex: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_BitmapBurnInWithCopyVideoIsInert(t *testing.T) {
+	// The API layer forces an encode before starting a burn-in transcode; if a
+	// copy recipe slips through anyway the builder must stay a valid copy
+	// command (no filter graph, raw stream mapping) rather than emit filters
+	// against an unencoded stream.
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-copy-burnin",
+		TargetCodecVideo:   "copy",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		SubtitleTrackIndex: 0,
+		SubtitleBurnIn:     true,
+		SubtitleCodec:      "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-c:v copy") {
+		t.Fatalf("copy recipe should stay codec copy: %s", joined)
+	}
+	// Note: "-filter_complex_threads" is a legitimate copy-mode arg; only the
+	// filter graph option itself must be absent.
+	if strings.Contains(joined, "-filter_complex ") || strings.Contains(joined, "overlay") {
+		t.Fatalf("copy recipe must not emit a filter graph: %s", joined)
+	}
+	if !strings.Contains(joined, "-map 0:v:0") {
+		t.Fatalf("copy recipe should map the raw video stream: %s", joined)
+	}
+}
+
 func TestResolveEffectiveTranscodeHWAccel(t *testing.T) {
 	t.Parallel()
 

@@ -85,9 +85,6 @@ importers:
       jassub:
         specifier: ^2.5.6
         version: 2.5.6
-      libpgs:
-        specifier: ^0.8.1
-        version: 0.8.1
       lucide-react:
         specifier: ^0.576.0
         version: 0.576.0(react@19.2.4)
@@ -2341,9 +2338,6 @@ packages:
 
   lfa-ponyfill@1.1.0:
     resolution: {integrity: sha512-YS3/DmyDdywWwoEu1ZacAudqkJ4q7WtKE9+bWlaSuEoVrXva7ChIJHMJYs19zyVc1H198pzqAreQU0r/+YNeew==}
-
-  libpgs@0.8.1:
-    resolution: {integrity: sha512-Z8WCvHRYr37QjU8b2WqiJpCvnoojbYPtoE4FktwdI+m+b1QkNIKqrYQrlPKG1xvYyQWgV1j+16xjFOhun4nBUA==}
 
   lightningcss-android-arm64@1.31.1:
     resolution: {integrity: sha512-HXJF3x8w9nQ4jbXRiNppBCqeZPIAfUo8zE/kOEGbW5NZvGc/K7nMxbhIr+YlFlHW5mpbg/YFPdbnCh1wAXCKFg==}
@@ -5224,8 +5218,6 @@ snapshots:
       type-check: 0.4.0
 
   lfa-ponyfill@1.1.0: {}
-
-  libpgs@0.8.1: {}
 
   lightningcss-android-arm64@1.31.1:
     optional: true
