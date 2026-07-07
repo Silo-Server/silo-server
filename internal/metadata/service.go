@@ -5445,6 +5445,7 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 	if item.SeasonCount != nil {
 		result.SeasonCount = *item.SeasonCount
 	}
+	result.ShowStatus = item.ShowStatus
 
 	return result
 }
@@ -5514,6 +5515,16 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	}
 	if r.SeasonCount > 0 {
 		item.SeasonCount = &r.SeasonCount
+	}
+
+	// show_status is shared by two value domains: the series lifecycle
+	// (normalized here) and the manga publication domain (normalized by the
+	// manga enrichment pipeline). Pass non-series values through untouched so
+	// a round-trip through itemToMetadataResult can never mangle them.
+	if contentType == "series" {
+		item.ShowStatus = NormalizeShowStatus(r.ShowStatus)
+	} else {
+		item.ShowStatus = r.ShowStatus
 	}
 
 	return item

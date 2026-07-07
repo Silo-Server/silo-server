@@ -345,7 +345,7 @@ type MediaItem struct {
 	LastAirDate                  *string // ISO date (series only), nullable
 	AirTime                      *string // Series broadcast time (e.g. "20:00"), nullable
 	AirTimezone                  *string // Series broadcast timezone (IANA name, e.g. "America/New_York"), nullable
-	ShowStatus                   string  // Series lifecycle: "returning", "ended", "cancelled", "in_production", or "" if unknown (series only)
+	ShowStatus                   string  // Series lifecycle: "returning", "ended", "cancelled", "in_production", "upcoming", or "" if unknown (series; manga uses its own domain, e.g. "Ongoing")
 	People                       []ItemPerson
 	AudiobookSeries              []AudiobookSeriesMembership
 	MatchedAt                    *time.Time

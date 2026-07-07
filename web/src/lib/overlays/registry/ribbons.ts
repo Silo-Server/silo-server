@@ -12,6 +12,7 @@ function formatShowStatus(value: string | undefined): string | null {
   switch (value.toLowerCase()) {
     case "returning":
     case "returning series":
+    case "continuing":
     case "in_production":
     case "in production":
       return "Returning";
@@ -20,6 +21,9 @@ function formatShowStatus(value: string | undefined): string | null {
     case "cancelled":
     case "canceled":
       return "Cancelled";
+    case "upcoming":
+    case "planned":
+      return "Upcoming";
     default:
       return value;
   }
