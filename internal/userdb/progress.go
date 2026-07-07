@@ -30,9 +30,13 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 		position = 0 // match MarkWatched() — completed rows hold no resume point
 	}
 	// Mirrors the Postgres pgstore UpdateProgress: `completed` is a one-way
-	// watched latch; position resets to 0 on completion so a rewatch
-	// heartbeat on a completed row re-enters Continue Watching through plain
-	// MAX while the watched flag survives.
+	// watched latch; position resets to 0 on completion so `position_seconds
+	// > 0` means "has a resume point". Position itself is last-write-wins —
+	// a deliberate backward seek is a legitimate resume point (the old MAX
+	// clamp made "rewind and stop" resume at the stale, later position).
+	// Rewatching a completed row still re-enters Continue Watching (stored
+	// position is 0, any heartbeat replaces it) while the watched flag
+	// survives.
 	query := `
 		INSERT INTO watch_progress (profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at)
 		SELECT ?, ?, ?, ?, ?, ` + visibleTimestampSQL + `
@@ -43,7 +47,7 @@ func UpdateProgress(db *sql.DB, profileID, mediaItemID string, position, duratio
 		WHERE true
 		ON CONFLICT(profile_id, media_item_id) DO UPDATE SET
 			position_seconds = CASE WHEN excluded.completed = 1 THEN 0
-				ELSE MAX(excluded.position_seconds, watch_progress.position_seconds) END,
+				ELSE excluded.position_seconds END,
 			duration_seconds = excluded.duration_seconds,
 			completed = CASE WHEN excluded.completed = 1
 				THEN 1 ELSE watch_progress.completed END,

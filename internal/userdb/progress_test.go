@@ -441,3 +441,33 @@ func TestClearProgressBatch_CompactsDirtyInput(t *testing.T) {
 		t.Fatalf("watch_progress row count = %d, want 1", count)
 	}
 }
+
+// Backward seeks are legitimate resume points: UpdateProgress is
+// last-write-wins on position (the old MAX clamp made "rewind and stop"
+// resume at the stale later position). Mirrors the pgstore expectation.
+func TestUpdateProgressBackwardSeekPersists(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if err := InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+
+	noThreshold := userstore.ProgressThresholds{}
+	if err := UpdateProgress(db, "p1", "movie-1", 2400, 7200, noThreshold); err != nil {
+		t.Fatalf("UpdateProgress(forward): %v", err)
+	}
+	if err := UpdateProgress(db, "p1", "movie-1", 600, 7200, noThreshold); err != nil {
+		t.Fatalf("UpdateProgress(backward): %v", err)
+	}
+
+	wp, err := GetProgress(db, "p1", "movie-1")
+	if err != nil {
+		t.Fatalf("GetProgress: %v", err)
+	}
+	if wp.PositionSeconds != 600 {
+		t.Errorf("PositionSeconds = %v, want 600 (last write wins)", wp.PositionSeconds)
+	}
+}
