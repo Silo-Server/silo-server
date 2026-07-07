@@ -62,10 +62,23 @@ func TestBuiltinTemplatesValidate(t *testing.T) {
 	}
 }
 
-func TestBuiltinTemplatesDefaultToFiftyItems(t *testing.T) {
+func TestBuiltinTemplateDefaultLimits(t *testing.T) {
+	// Finite canonical lists override the shared default: top-N truncation
+	// would contradict what their titles promise. Catalog lists (Criterion,
+	// A24) carry no limit at all so the collection holds every owned title.
+	overrides := map[string]int{
+		"mdblist_imdb_top_250_movies":       250,
+		"mdblist_imdb_top_250_shows":        250,
+		"mdblist_misc_criterion_collection": 0,
+		"mdblist_misc_a24":                  0,
+	}
 	for _, tmpl := range List() {
-		if tmpl.DefaultLimit != builtinDefaultLimit {
-			t.Errorf("template %q default_limit = %d, want %d", tmpl.ID, tmpl.DefaultLimit, builtinDefaultLimit)
+		want := builtinDefaultLimit
+		if override, ok := overrides[tmpl.ID]; ok {
+			want = override
+		}
+		if tmpl.DefaultLimit != want {
+			t.Errorf("template %q default_limit = %d, want %d", tmpl.ID, tmpl.DefaultLimit, want)
 		}
 	}
 }

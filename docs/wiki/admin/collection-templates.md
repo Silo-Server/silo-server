@@ -63,9 +63,10 @@ The default registry covers TMDB and Trakt's public discovery feeds plus a
 | Editorial          | Trakt Recommended Movies/Shows (per profile), Mindfuck Movies, Top Documentary Movies, Top Horror Movies (MDBList) |
 | Custom             | MDBList — bring your own JSON URL                                                                               |
 
-TMDB and Trakt templates default to 20 items; MDBList templates default to 50
-because the underlying lists tend to be longer (IMDb Top 250, full streaming
-catalogs, etc.). Every template ships with a conservative sync cadence — every
+Templates default to 100 items. Finite canonical lists override that so the
+collection can hold what the title promises: the IMDb Top 250 templates use
+250, and catalog lists (Criterion Collection, A24) ship with no limit at all
+so they match every owned title. Every template ships with a conservative sync cadence — every
 6 hours for trending, daily for popular and streaming services, weekly for
 top-rated and editorial picks — and a "featured" hint where appropriate. All
 defaults are editable in the small confirmation drawer before the collection
