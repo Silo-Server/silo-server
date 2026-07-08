@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -213,6 +214,32 @@ func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check profile permissions")
 }
 
+// profileNameConflicts reports whether a profile other than excludeID already
+// uses name within this account's store, comparing the trimmed forms
+// case-insensitively so "Laura" and " laura " count as the same household
+// member. Scoping is per account by construction: callers pass the profile
+// list of a single user's store, so another account's profiles can never
+// conflict.
+//
+// This is a check-then-write guard with no store-level uniqueness constraint
+// (the userstore's dual Postgres/SQLite backends carry no unique index on
+// name), so two concurrent requests can both pass and insert duplicates —
+// the same window the profile_limit_reached check accepts. Good enough for
+// interactive profile management; a functional unique index is the fix if
+// that ever stops being true.
+func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
+	trimmed := strings.TrimSpace(name)
+	for _, p := range profiles {
+		if p.ID == excludeID {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(p.Name), trimmed) {
+			return true
+		}
+	}
+	return false
+}
+
 // isAllowedSelfServiceProfileUpdate reports whether a non-admin update request
 // only touches fields the user is allowed to change on their own profiles.
 // Admin-only fields (access policy: library restrictions, content rating,
@@ -272,7 +299,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if req.Name == "" {
+	if strings.TrimSpace(req.Name) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Profile name is required")
 		return
 	}
@@ -346,6 +373,16 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	if profileNameConflicts(existingProfiles, req.Name, "") {
+		writeError(
+			w,
+			http.StatusConflict,
+			"name_conflict",
+			"A profile with this name already exists",
+		)
+		return
+	}
+
 	showForcedSubtitles := true
 	if req.ShowForcedSubtitles != nil {
 		showForcedSubtitles = *req.ShowForcedSubtitles
@@ -353,8 +390,10 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 
 	profileID := uuid.New().String()
 	profile := userstore.Profile{
-		ID:                         profileID,
-		Name:                       req.Name,
+		ID: profileID,
+		// Store the trimmed form the conflict check compared, so " Laura "
+		// doesn't persist with stray whitespace.
+		Name:                       strings.TrimSpace(req.Name),
 		Avatar:                     avatarRef,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
@@ -497,6 +536,31 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 				http.StatusForbidden,
 				"forbidden",
 				"Profile access settings require the primary profile or admin access",
+			)
+			return
+		}
+	}
+
+	if req.Name != nil {
+		// Normalize to the trimmed form up front: the conflict check compares
+		// it and the store persists it, so " Laura " never lands verbatim.
+		trimmedName := strings.TrimSpace(*req.Name)
+		if trimmedName == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "Profile name is required")
+			return
+		}
+		req.Name = &trimmedName
+		existingProfiles, err := store.ListProfiles(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
+			return
+		}
+		if profileNameConflicts(existingProfiles, *req.Name, profileID) {
+			writeError(
+				w,
+				http.StatusConflict,
+				"name_conflict",
+				"A profile with this name already exists",
 			)
 			return
 		}
