@@ -882,7 +882,8 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			IsHearingImpaired:      false,
 			IsTextSubtitleStream:   false,
 			SupportsExternalStream: false,
-			AudioSpatialFormat:     "None",
+			Profile:                track.Profile,
+			AudioSpatialFormat:     compatAudioSpatialFormat(track.Profile),
 			Channels:               track.Channels,
 			BitRate:                track.Bitrate,
 		})
@@ -1226,9 +1227,29 @@ func parseCompatFrameRate(raw string) float64 {
 	return 0
 }
 
+// compatAudioSpatialFormat mirrors Jellyfin's MediaStream.AudioSpatialFormat,
+// derived from the ffprobe profile string by case-insensitive substring match.
+func compatAudioSpatialFormat(profile string) string {
+	lower := strings.ToLower(profile)
+	switch {
+	case strings.Contains(lower, "dolby atmos"):
+		return "DolbyAtmos"
+	case strings.Contains(lower, "dts:x"):
+		return "DTSX"
+	default:
+		return "None"
+	}
+}
+
 func audioTrackDisplayTitle(track models.AudioTrack) string {
 	lang := compatLanguageName(track.Language)
+	// Jellyfin prefers the ffprobe profile over the codec name in audio display
+	// titles (e.g. "DTS-HD MA", "Dolby Digital Plus + Dolby Atmos"), except the
+	// uninformative AAC "LC" profile.
 	codec := audioCodecDisplayName(track.Codec)
+	if profile := strings.TrimSpace(track.Profile); profile != "" && !strings.EqualFold(profile, "lc") {
+		codec = profile
+	}
 	channels := audioChannelsDisplayName(track.Channels)
 	title := strings.TrimSpace(codec + " " + channels)
 	if lang != "" {
