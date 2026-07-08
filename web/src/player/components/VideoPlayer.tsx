@@ -16,7 +16,8 @@ import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { isBitmapCodec } from "../utils/subtitleCodecs";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
-import { useSubtitlePositionStyle } from "../hooks/useSubtitlePositionStyle";
+import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
+import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
 import { useNextEpisode } from "../hooks/useNextEpisode";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { COMPATIBILITY_QUALITY_ID, useTranscodeQuality } from "../hooks/useTranscodeQuality";
@@ -1619,10 +1620,19 @@ export function VideoPlayer({
 
   // -- Subtitle appearance --
   const { settings: subtitleSettings, containerStyle, cueStyle } = useSubtitleAppearance();
-  const subtitlePositionStyle = useSubtitlePositionStyle(
+  const { positionStyle: subtitlePositionStyle, fontScale: subtitleFontScale } = useSubtitleLayout(
     containerRef,
     videoRef,
     subtitleSettings.position,
+  );
+  // Scale cue text with the rendered video so subtitles stay proportionally
+  // the same size as the window grows or shrinks.
+  const scaledCueStyle = useMemo(
+    () => ({
+      ...cueStyle,
+      fontSize: computeSubtitleFontSize(subtitleSettings.fontSize, subtitleFontScale),
+    }),
+    [cueStyle, subtitleSettings.fontSize, subtitleFontScale],
   );
 
   // Measure the bottom control bar so bottom-anchored subtitles can lift just
@@ -2402,7 +2412,7 @@ export function VideoPlayer({
             <span
               key={i}
               className="inline-block rounded px-3 py-1 text-center leading-snug"
-              style={{ ...cueStyle, whiteSpace: "pre-line" }}
+              style={{ ...scaledCueStyle, whiteSpace: "pre-line" }}
             >
               {text}
             </span>

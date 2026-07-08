@@ -137,13 +137,30 @@ export function parseSubtitleAppearance(json: string | null): SubtitleAppearance
 
 // ─── Style Computation ──────────────────────────────────────────────────────
 
-const FONT_SIZE_MAP: Record<SubtitleAppearance["fontSize"], string> = {
-  small: "1.25rem",
-  medium: "1.6rem",
-  large: "2rem",
-  xlarge: "2.5rem",
-  xxlarge: "3rem",
+// Base cue font sizes in px at the 16:9 reference frame height below. The
+// player scales these proportionally with the rendered video so subtitles
+// keep the same relative size as the window grows or shrinks.
+const FONT_SIZE_MAP: Record<SubtitleAppearance["fontSize"], number> = {
+  small: 20,
+  medium: 26,
+  large: 32,
+  xlarge: 40,
+  xxlarge: 48,
 };
+
+/** Reference frame height (px) at which FONT_SIZE_MAP values apply as-is. */
+export const SUBTITLE_REFERENCE_HEIGHT = 720;
+
+/** Floor so cues stay legible in very small windows. */
+const MIN_SUBTITLE_FONT_PX = 12;
+
+export function computeSubtitleFontSize(
+  fontSize: SubtitleAppearance["fontSize"],
+  fontScale = 1,
+): string {
+  const px = Math.max(MIN_SUBTITLE_FONT_PX, Math.round(FONT_SIZE_MAP[fontSize] * fontScale));
+  return `${px}px`;
+}
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
   const clean = hex.replace("#", "");
@@ -191,12 +208,12 @@ export interface SubtitleStyles {
   cueStyle: CSSProperties;
 }
 
-export function computeSubtitleStyles(settings: SubtitleAppearance): SubtitleStyles {
+export function computeSubtitleStyles(settings: SubtitleAppearance, fontScale = 1): SubtitleStyles {
   const containerStyle: CSSProperties = computePositionStyle(settings.position);
   const cueStyle: CSSProperties = {};
 
   // Font
-  cueStyle.fontSize = FONT_SIZE_MAP[settings.fontSize];
+  cueStyle.fontSize = computeSubtitleFontSize(settings.fontSize, fontScale);
   cueStyle.fontFamily = settings.fontFamily;
   cueStyle.color = settings.fontColor;
 
@@ -235,6 +252,43 @@ function computePositionStyle(position: SubtitleAppearance["position"]): CSSProp
 }
 
 /**
+ * Height (px) of a 16:9 reference frame centered on the actually-rendered
+ * video area (object-fit: contain), or null before measurements are known.
+ * The frame matches the shorter dimension of the video so it never contracts
+ * inside it; for wider-than-16:9 content it extends into the letterbox.
+ */
+function resolveSubtitleReferenceHeight(
+  playerWidth: number,
+  playerHeight: number,
+  videoAspect: number,
+): number | null {
+  if (!Number.isFinite(videoAspect) || videoAspect <= 0 || playerWidth <= 0 || playerHeight <= 0) {
+    return null;
+  }
+
+  // Rendered video dimensions inside the player (object-fit: contain).
+  const playerAspect = playerWidth / playerHeight;
+  const videoHeight = playerAspect > videoAspect ? playerHeight : playerWidth / videoAspect;
+  const videoWidth = playerAspect > videoAspect ? playerHeight * videoAspect : playerWidth;
+
+  return videoAspect >= 16 / 9 ? videoWidth * (9 / 16) : videoHeight;
+}
+
+/**
+ * Font scale factor for the rendered video size: 1 at the 720px reference
+ * height, growing/shrinking proportionally with the window so subtitles keep
+ * the same size relative to the video. Falls back to 1 until measured.
+ */
+export function computeSubtitleFontScale(
+  playerWidth: number,
+  playerHeight: number,
+  videoAspect: number,
+): number {
+  const refHeight = resolveSubtitleReferenceHeight(playerWidth, playerHeight, videoAspect);
+  return refHeight === null ? 1 : refHeight / SUBTITLE_REFERENCE_HEIGHT;
+}
+
+/**
  * Aspect-aware positioning. Anchors subtitles relative to a 16:9 reference
  * frame centered on the actually-rendered video area (object-fit: contain).
  * This keeps "Lower Third" and "Bottom" visually consistent regardless of
@@ -247,19 +301,10 @@ export function computeSubtitlePositionStyle(
   playerHeight: number,
   videoAspect: number,
 ): CSSProperties {
-  if (!Number.isFinite(videoAspect) || videoAspect <= 0 || playerWidth <= 0 || playerHeight <= 0) {
+  const refHeight = resolveSubtitleReferenceHeight(playerWidth, playerHeight, videoAspect);
+  if (refHeight === null) {
     return computePositionStyle(position);
   }
-
-  // Rendered video dimensions inside the player (object-fit: contain).
-  const playerAspect = playerWidth / playerHeight;
-  const videoHeight = playerAspect > videoAspect ? playerHeight : playerWidth / videoAspect;
-  const videoWidth = playerAspect > videoAspect ? playerHeight * videoAspect : playerWidth;
-
-  // 16:9 reference frame: match the shorter dimension of the video so the
-  // frame never contracts inside it. For wider-than-16:9 content, this
-  // extends the reference into the letterbox above/below the video.
-  const refHeight = videoAspect >= 16 / 9 ? videoWidth * (9 / 16) : videoHeight;
 
   // Reference frame is centered on the video, which is itself centered in
   // the player container — so the reference is centered in the player too.
