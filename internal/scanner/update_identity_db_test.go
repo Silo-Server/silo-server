@@ -103,6 +103,13 @@ func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 	if updated.ObservedRootPath != "/new/root" {
 		t.Errorf("observed_root_path = %q, want /new/root", updated.ObservedRootPath)
 	}
+	if updated.CanonicalRootPath != "/new/root" {
+		t.Errorf("canonical_root_path = %q, want /new/root", updated.CanonicalRootPath)
+	}
+	if updated.BaseTitle != "Movie" || updated.BaseYear != 2020 || updated.BaseType != "movie" {
+		t.Errorf("base title/year/type = %q/%d/%q, want Movie/2020/movie",
+			updated.BaseTitle, updated.BaseYear, updated.BaseType)
+	}
 	if updated.MediaFolderID != movedFolderID {
 		t.Errorf("media_folder_id = %d, want moved folder %d", updated.MediaFolderID, movedFolderID)
 	}
