@@ -75,6 +75,7 @@ func NewCatalogSearchServiceFromSettings(
 		MatchingStrategy: settings.MatchingStrategy,
 		IndexTypes:       settings.IndexTypes,
 		SemanticEnabled:  settings.SemanticEnabled,
+		BinaryQuantized:  settings.BinaryQuantized,
 		SemanticRatio:    settings.SemanticRatio,
 		Embedder:         settings.Embedder,
 		Vectorizer:       queryVectorizer,
@@ -144,11 +145,12 @@ func (s *CatalogSearchService) Status(ctx context.Context) CatalogSearchRuntimeS
 			MatchingStrategy: settings.MatchingStrategy,
 			IndexTypes:       settings.IndexTypes,
 			SemanticEnabled:  settings.SemanticEnabled,
+			BinaryQuantized:  settings.BinaryQuantized,
 			SemanticRatio:    settings.SemanticRatio,
 			Embedder:         settings.Embedder,
 		},
 		Index: CatalogSearchIndexStateStatus{
-			ExpectedSchemaVersion: catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled),
+			ExpectedSchemaVersion: catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized),
 		},
 		Tasks: []CatalogSearchTaskLink{
 			{Key: "sync_catalog_search_index", Name: "Sync Catalog Search Index", Href: "/admin/tasks/sync_catalog_search_index"},
