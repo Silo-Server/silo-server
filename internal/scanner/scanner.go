@@ -69,8 +69,9 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 // Deliberately absent: the plural "others", which is in neither convention.
 // Convention labels can also appear as content-scope folder names ("movies/
 // other/<Movie>/<file>", "movies/shorts/..."); those never classify as extras
-// because classifyExtraPath only honors a convention-named dir inside a title
-// folder, never one at or directly under a library root.
+// because extrasClassifier only honors a convention-named dir owned by a
+// title folder — one that holds media of its own, which library roots and
+// organizational folders do not.
 var extrasDirKinds = map[string]models.ExtraKind{
 	"extra":             models.ExtraKindOther,
 	"extras":            models.ExtraKindOther,
@@ -693,7 +694,7 @@ func (s *Scanner) scanPaths(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, walkRootSet(folder.Paths))
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -1213,7 +1214,7 @@ func (s *Scanner) scanScope(
 	for _, p := range filePaths {
 		seenPaths[p] = true
 	}
-	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, walkRootSet(folder.Paths))
+	primaryPaths, extraCandidates := partitionExtraPaths(filePaths, folder.Type, folder.Paths)
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, reconcileRoots)
 	if err != nil {
 		return nil, fmt.Errorf("loading root overrides: %w", err)
@@ -1664,7 +1665,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 
 	// A local extra (Trailers/ dir, -trailer suffix, ...) bypasses identity
 	// inference and matching entirely.
-	if candidate, isExtra := classifyExtraPath(cleanFile, folder.Type, walkRootSet(folder.Paths)); isExtra {
+	if candidate, isExtra := newWatchExtrasClassifier(folder.Type, folder.Paths).classify(cleanFile); isExtra {
 		stats := s.processExtraFiles(ctx, folder, []extraCandidate{candidate}, existingByPath)
 		if stats.Errors > 0 {
 			return fmt.Errorf("processing extra file %s failed", cleanFile)
