@@ -555,6 +555,26 @@ type subtitleDefaults struct {
 	TrackSignature *userstore.SubtitleTrackSignature
 }
 
+func (d subtitleDefaults) applyToItemDetail(detail *ItemDetail) {
+	detail.EffectiveSubtitleLanguage = d.Language
+	detail.HasEffectiveSubtitleLang = d.HasLanguage
+	detail.EffectiveSubtitleMode = d.Mode
+	detail.HasEffectiveSubtitleMode = d.HasMode
+	detail.EffectiveShowForcedSubtitles = d.ShowForced
+	detail.HasEffectiveShowForcedSubtitles = d.HasShowForced
+	detail.EffectiveSubtitleTrackSignature = d.TrackSignature
+}
+
+func (d subtitleDefaults) applyToWatchDetail(detail *WatchDetail) {
+	detail.EffectiveSubtitleLanguage = d.Language
+	detail.HasEffectiveSubtitleLang = d.HasLanguage
+	detail.EffectiveSubtitleMode = d.Mode
+	detail.HasEffectiveSubtitleMode = d.HasMode
+	detail.EffectiveShowForcedSubtitles = d.ShowForced
+	detail.HasEffectiveShowForcedSubtitles = d.HasShowForced
+	detail.EffectiveSubtitleTrackSignature = d.TrackSignature
+}
+
 type versionDefaults struct {
 	Resolution string
 	HDR        bool
@@ -1526,6 +1546,14 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			item.ContentID,
 		)
 		detail.OverlaySummary = overlays.BuildSummary(files)
+		// Movie pre-play selectors need the same effective subtitle defaults
+		// the watch payload resolves — including any per-item override saved
+		// from a previous play — so the item detail can't omit them. Scoped to
+		// movies: episodes resolve theirs in buildEpisodeDetail, and other
+		// types have no subtitle selector to feed.
+		if item.Type == "movie" {
+			s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files).applyToItemDetail(detail)
+		}
 	}
 
 	// Trailers/extras apply to movies and series only.
@@ -2365,14 +2393,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		episode.SeriesID,
 	)
 	detail.OverlaySummary = overlays.BuildSummary(files)
-	defaults := s.effectiveSubtitleDefaults(ctx, filter, episode.SeriesID, files)
-	detail.EffectiveSubtitleLanguage = defaults.Language
-	detail.HasEffectiveSubtitleLang = defaults.HasLanguage
-	detail.EffectiveSubtitleMode = defaults.Mode
-	detail.HasEffectiveSubtitleMode = defaults.HasMode
-	detail.EffectiveShowForcedSubtitles = defaults.ShowForced
-	detail.HasEffectiveShowForcedSubtitles = defaults.HasShowForced
-	detail.EffectiveSubtitleTrackSignature = defaults.TrackSignature
+	s.effectiveSubtitleDefaults(ctx, filter, episode.SeriesID, files).applyToItemDetail(detail)
 	if seriesCtx.versionPref.HasAny {
 		if seriesCtx.versionPref.Resolution != "" {
 			detail.EffectiveVersionResolution = stringPtr(seriesCtx.versionPref.Resolution)
@@ -2425,14 +2446,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 			item.ContentID,
 		)
 		detail.Year = item.Year
-		defaults := s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files)
-		detail.EffectiveSubtitleLanguage = defaults.Language
-		detail.HasEffectiveSubtitleLang = defaults.HasLanguage
-		detail.EffectiveSubtitleMode = defaults.Mode
-		detail.HasEffectiveSubtitleMode = defaults.HasMode
-		detail.EffectiveShowForcedSubtitles = defaults.ShowForced
-		detail.HasEffectiveShowForcedSubtitles = defaults.HasShowForced
-		detail.EffectiveSubtitleTrackSignature = defaults.TrackSignature
+		s.effectiveSubtitleDefaults(ctx, filter, item.ContentID, files).applyToWatchDetail(detail)
 		return detail, nil
 	case !errors.Is(err, ErrItemNotFound):
 		return nil, err
@@ -2483,14 +2497,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 	detail.SeasonNumber = episode.SeasonNumber
 	detail.EpisodeNumber = episode.EpisodeNumber
 	detail.SeriesID = episode.SeriesID
-	defaults := s.effectiveSubtitleDefaults(ctx, filter, episode.SeriesID, files)
-	detail.EffectiveSubtitleLanguage = defaults.Language
-	detail.HasEffectiveSubtitleLang = defaults.HasLanguage
-	detail.EffectiveSubtitleMode = defaults.Mode
-	detail.HasEffectiveSubtitleMode = defaults.HasMode
-	detail.EffectiveShowForcedSubtitles = defaults.ShowForced
-	detail.HasEffectiveShowForcedSubtitles = defaults.HasShowForced
-	detail.EffectiveSubtitleTrackSignature = defaults.TrackSignature
+	s.effectiveSubtitleDefaults(ctx, filter, episode.SeriesID, files).applyToWatchDetail(detail)
 	if versionPref := s.effectiveVersionDefaults(ctx, filter, episode.SeriesID); versionPref.HasAny {
 		if versionPref.Resolution != "" {
 			detail.EffectiveVersionResolution = stringPtr(versionPref.Resolution)

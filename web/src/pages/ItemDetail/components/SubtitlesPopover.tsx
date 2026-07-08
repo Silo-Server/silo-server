@@ -182,7 +182,11 @@ export default function SubtitlesPopover({
   onResetSelection,
 }: SubtitlesPopoverProps) {
   const [open, setOpen] = useState(false);
-  const downloadedQuery = useDownloadedSubtitles(open ? version?.file_id : undefined);
+  // Downloaded subtitles normally load lazily on open, but when the saved
+  // preference points at one, the closed trigger's Auto summary needs them
+  // to reflect the override.
+  const needsDownloaded = open || preferredSubtitleTrackSignature?.source === "downloaded";
+  const downloadedQuery = useDownloadedSubtitles(needsDownloaded ? version?.file_id : undefined);
   const isInteractive = Boolean(onSelectSubtitle || onSelectSubtitleOff || onResetSelection);
 
   const candidates = useMemo(
