@@ -197,6 +197,7 @@ export function buildAudioSections(version: FileVersion): MediaSpecSection[] {
     pushRow(rows, "Title", trackTitle(track));
     pushRow(rows, "Language", formatLanguageName(track.language));
     pushRow(rows, "Codec", track.codec ? mapAudioLabel(track.codec) : "");
+    pushRow(rows, "Profile", track.profile);
     pushRow(rows, "Layout", track.layout);
     pushRow(rows, "Channels", formatChannels(track.channels));
     pushRow(rows, "Bitrate", formatBitrate(track.bitrate));

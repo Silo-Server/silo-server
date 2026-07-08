@@ -302,6 +302,7 @@ describe("buildAudioSections", () => {
             embedded_title: "TrueHD Atmos 7.1",
             language: "eng",
             codec: "truehd",
+            profile: "Dolby TrueHD + Dolby Atmos",
             layout: "7.1",
             channels: 8,
             bitrate: 4_500,
@@ -320,12 +321,14 @@ describe("buildAudioSections", () => {
     expect(rowValue(first.rows, "Title")).toBe("TrueHD Atmos 7.1");
     expect(rowValue(first.rows, "Language")).toBe("English");
     expect(rowValue(first.rows, "Codec")).toBe("TrueHD");
+    expect(rowValue(first.rows, "Profile")).toBe("Dolby TrueHD + Dolby Atmos");
     expect(rowValue(first.rows, "Layout")).toBe("7.1");
     expect(rowValue(first.rows, "Channels")).toBe("7.1");
     expect(rowValue(first.rows, "Sample Rate")).toBe("48,000 Hz");
     expect(rowValue(first.rows, "Bit Depth")).toBe("24-bit");
     expect(rowValue(first.rows, "Default")).toBe("Yes");
     expect(rowValue(sectionAt(sections, 1).rows, "Default")).toBeNull();
+    expect(rowValue(sectionAt(sections, 1).rows, "Profile")).toBeNull();
   });
 });
 
