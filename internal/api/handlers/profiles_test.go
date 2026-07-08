@@ -203,6 +203,34 @@ func TestHandleCreateProfile_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestHandleCreateProfile_RejectsWhitespaceOnlyName(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	req := newAuthorizedProfileRequestWithRole(
+		http.MethodPost,
+		"/profiles",
+		`{"name":"   "}`,
+		"user",
+		"profile-1",
+	)
+	rr := httptest.NewRecorder()
+
+	handler.HandleCreateProfile(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	profiles, err := store.ListProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("list profiles: %v", err)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("profile count = %d, want 1", len(profiles))
+	}
+}
+
 func TestHandleCreateProfile_TrimsStoredName(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
@@ -564,6 +592,62 @@ func TestHandleUpdateProfile_AllowsKeepingOwnNameOnUpdate(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleUpdateProfile_RejectsWhitespaceOnlyName(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	req := newAuthorizedProfileRequestWithRole(
+		http.MethodPut,
+		"/profiles/profile-1",
+		`{"name":"   "}`,
+		"user",
+		"profile-1",
+	)
+	rr := httptest.NewRecorder()
+
+	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-1"))
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	profile, err := store.GetProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if profile == nil || profile.Name != "Main" {
+		t.Fatalf("profile name changed despite rejection: %+v", profile)
+	}
+}
+
+func TestHandleUpdateProfile_TrimsStoredNameOnRename(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	req := newAuthorizedProfileRequestWithRole(
+		http.MethodPut,
+		"/profiles/profile-1",
+		`{"name":" Laura "}`,
+		"user",
+		"profile-1",
+	)
+	rr := httptest.NewRecorder()
+
+	handler.HandleUpdateProfile(rr, withProfileRouteParam(req, "id", "profile-1"))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	profile, err := store.GetProfile(context.Background(), "profile-1")
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if profile == nil || profile.Name != "Laura" {
+		t.Fatalf("stored name not trimmed: %+v", profile)
 	}
 }
 

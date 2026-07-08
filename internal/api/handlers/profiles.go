@@ -214,6 +214,13 @@ func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
 // member. Scoping is per account by construction: callers pass the profile
 // list of a single user's store, so another account's profiles can never
 // conflict.
+//
+// This is a check-then-write guard with no store-level uniqueness constraint
+// (the userstore's dual Postgres/SQLite backends carry no unique index on
+// name), so two concurrent requests can both pass and insert duplicates —
+// the same window the profile_limit_reached check accepts. Good enough for
+// interactive profile management; a functional unique index is the fix if
+// that ever stops being true.
 func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
 	trimmed := strings.TrimSpace(name)
 	for _, p := range profiles {
