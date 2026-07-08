@@ -203,6 +203,37 @@ func TestHandleCreateProfile_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+func TestHandleCreateProfile_TrimsStoredName(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	req := newAuthorizedProfileRequestWithRole(
+		http.MethodPost,
+		"/profiles",
+		`{"name":" Laura "}`,
+		"user",
+		"profile-1",
+	)
+	rr := httptest.NewRecorder()
+
+	handler.HandleCreateProfile(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	profiles, err := store.ListProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("list profiles: %v", err)
+	}
+	for _, p := range profiles {
+		if p.Name == "Laura" {
+			return
+		}
+	}
+	t.Fatalf("no profile stored with trimmed name, profiles: %+v", profiles)
+}
+
 func TestHandleCreateProfile_BlocksNonPrimaryNonAdmin(t *testing.T) {
 	store := newProfileTestStore(t)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {

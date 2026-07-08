@@ -377,8 +377,10 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 
 	profileID := uuid.New().String()
 	profile := userstore.Profile{
-		ID:                         profileID,
-		Name:                       req.Name,
+		ID: profileID,
+		// Store the trimmed form the conflict check compared, so " Laura "
+		// doesn't persist with stray whitespace.
+		Name:                       strings.TrimSpace(req.Name),
 		Avatar:                     avatarRef,
 		IsChild:                    req.IsChild,
 		MaxContentRating:           req.MaxContentRating,
@@ -527,10 +529,14 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 	}
 
 	if req.Name != nil {
-		if strings.TrimSpace(*req.Name) == "" {
+		// Normalize to the trimmed form up front: the conflict check compares
+		// it and the store persists it, so " Laura " never lands verbatim.
+		trimmedName := strings.TrimSpace(*req.Name)
+		if trimmedName == "" {
 			writeError(w, http.StatusBadRequest, "bad_request", "Profile name is required")
 			return
 		}
+		req.Name = &trimmedName
 		existingProfiles, err := store.ListProfiles(r.Context())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
