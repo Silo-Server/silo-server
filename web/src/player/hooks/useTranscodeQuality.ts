@@ -186,6 +186,13 @@ export function useTranscodeQuality({
   const [error, setError] = useState<string | null>(null);
   const [switchedFileId, setSwitchedFileId] = useState<number | null>(null);
   const switchAbortRef = useRef<AbortController | null>(null);
+  // Pending (macrotask-deferred) transcode start dispatch. Restart triggers can
+  // stack up in one tick — e.g. on mount the auto-start effect fires, then
+  // subtitle auto-selection restores a burned-in bitmap track and fires again —
+  // and each server call kills and respawns ffmpeg. Deferring the network
+  // dispatch by one macrotask lets the last call in a tick win, so the server
+  // sees a single start with the final parameters.
+  const dispatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manifestVersionRef = useRef(0);
   const autoStartKeyRef = useRef<string | null>(null);
   // Embedded subtitle ordinal being burned into the video, or null. Kept in a
@@ -211,6 +218,10 @@ export function useTranscodeQuality({
   useEffect(() => {
     switchAbortRef.current?.abort();
     switchAbortRef.current = null;
+    if (dispatchTimerRef.current != null) {
+      clearTimeout(dispatchTimerRef.current);
+      dispatchTimerRef.current = null;
+    }
     autoStartKeyRef.current = null;
     setActiveQualityId("original");
     setTranscodeStreamUrl(null);
@@ -225,14 +236,31 @@ export function useTranscodeQuality({
     setBurnInSubtitleIndex(null);
   }, [sessionId, selectedVersion?.file_id, playMethod]);
 
+  // On unmount, cancel any in-flight or still-deferred start so a stray
+  // transcode/start can't land after the session's exit DELETE.
+  useEffect(
+    () => () => {
+      switchAbortRef.current?.abort();
+      if (dispatchTimerRef.current != null) {
+        clearTimeout(dispatchTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const startTranscode = useCallback(
     (qualityId: string, currentPosition: number, forceRestart = false) => {
       if (!sessionId) return;
       if (!forceRestart && qualityId === activeQualityId) return;
 
-      // Abort any in-progress switch (POST + polling).
+      // Abort any in-progress switch (POST + polling) and supersede any
+      // dispatch still waiting on its macrotask.
       switchAbortRef.current?.abort();
       switchAbortRef.current = null;
+      if (dispatchTimerRef.current != null) {
+        clearTimeout(dispatchTimerRef.current);
+        dispatchTimerRef.current = null;
+      }
 
       // Clear the guard's file switch when reverting to original quality.
       // The backend will set a new switched_file_id in the response if needed.
@@ -304,7 +332,7 @@ export function useTranscodeQuality({
       // from the deleted output directory and throws bufferAppendErrors.
       setTranscodeStreamUrl(null);
 
-      (async () => {
+      const dispatch = async () => {
         try {
           // When "Original" is selected on a remux base, use codec copy (no
           // video re-encoding). Transcode bases still encode video because the
@@ -340,7 +368,7 @@ export function useTranscodeQuality({
           const resp = await playerFetch<TranscodeStartResponse>(
             config,
             "/playback/transcode/start",
-            { method: "POST", body: JSON.stringify(body) },
+            { method: "POST", body: JSON.stringify(body), signal: abortController.signal },
           );
 
           if (abortController.signal.aborted) return;
@@ -402,7 +430,11 @@ export function useTranscodeQuality({
             setIsTranscoding(false);
           }
         }
-      })();
+      };
+      dispatchTimerRef.current = setTimeout(() => {
+        dispatchTimerRef.current = null;
+        void dispatch();
+      }, 0);
     },
     [sessionId, activeQualityId, qualityOptions, config, effectiveVersion, playMethod],
   );
