@@ -36,13 +36,21 @@ const extrasDirAncestorDepth = 2
 // Directory names win over filename suffixes. For non-movie libraries a file
 // carrying a parseable SxxExx episode token is never an extra: series
 // "Extras/SxxExx" files keep their documented season-0 mapping.
-func classifyExtraPath(path, folderType string) (extraCandidate, bool) {
+//
+// libraryRootSet holds the library's configured root paths (folder.Paths,
+// cleaned). A supplemental-named directory sitting at library-scope depth is
+// content organization ("movies/other/<Movie>/..."), not the extras
+// convention, and never classifies — see supplementalDirAtScopeDepth.
+func classifyExtraPath(path, folderType string, libraryRootSet map[string]bool) (extraCandidate, bool) {
 	candidate := extraCandidate{Path: path}
 
 	dir := filepath.Dir(path)
 	for depth := 0; depth < extrasDirAncestorDepth; depth++ {
 		label := normalizeScannerDirLabel(filepath.Base(dir))
 		if kind, ok := extrasDirKinds[label]; ok {
+			if supplementalDirAtScopeDepth(dir, libraryRootSet) {
+				break
+			}
 			candidate.Kind = kind
 			candidate.SupplementalDir = dir
 			break
@@ -74,14 +82,51 @@ func classifyExtraPath(path, folderType string) (extraCandidate, bool) {
 	return candidate, true
 }
 
+// supplementalDirAtScopeDepth reports whether a matched supplemental directory
+// sits at library-scope depth rather than inside a title folder: the directory
+// itself, any supplemental-named ancestor above it, or the first
+// non-supplemental ancestor is a library root. The Jellyfin/Plex conventions
+// place extras folders inside a movie/show folder; a scope-level folder that
+// happens to carry a convention name ("movies/other/", "movies/shorts/") is
+// content organization whose titles must stay primary. Without this guard such
+// scopes were classified as extras whose parent can never resolve (library
+// roots never bind), deferring every file beneath them on every scan.
+func supplementalDirAtScopeDepth(dir string, libraryRootSet map[string]bool) bool {
+	dir = filepath.Clean(dir)
+	for {
+		if libraryRootSet[dir] {
+			return true
+		}
+		if extrasDirKinds[normalizeScannerDirLabel(filepath.Base(dir))] == "" {
+			// First non-supplemental ancestor reached without hitting a root.
+			return false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
+}
+
+// walkRootSet builds the cleaned-path set used for scope checks against the
+// library's configured roots.
+func walkRootSet(roots []string) map[string]bool {
+	set := make(map[string]bool, len(roots))
+	for _, root := range roots {
+		set[filepath.Clean(root)] = true
+	}
+	return set
+}
+
 // partitionExtraPaths splits walked paths into primary content and extras.
 // Primary paths feed the existing root/group inference and matching pipeline
 // untouched; extras are processed separately and never influence identity.
-func partitionExtraPaths(paths []string, folderType string) ([]string, []extraCandidate) {
+func partitionExtraPaths(paths []string, folderType string, libraryRootSet map[string]bool) ([]string, []extraCandidate) {
 	primary := paths[:0:0]
 	var extras []extraCandidate
 	for _, p := range paths {
-		if candidate, ok := classifyExtraPath(p, folderType); ok {
+		if candidate, ok := classifyExtraPath(p, folderType, libraryRootSet); ok {
 			extras = append(extras, candidate)
 			continue
 		}
@@ -107,7 +152,6 @@ type extrasScanStats struct {
 func (s *Scanner) processExtraFiles(
 	ctx context.Context,
 	folder *models.MediaFolder,
-	walkRoots []string,
 	extras []extraCandidate,
 	existingByPath map[string]*scanStateFile,
 ) extrasScanStats {
@@ -116,10 +160,10 @@ func (s *Scanner) processExtraFiles(
 		return stats
 	}
 
-	rootSet := make(map[string]bool, len(walkRoots))
-	for _, root := range walkRoots {
-		rootSet[filepath.Clean(root)] = true
-	}
+	// Parent binding is scoped by the library's configured roots, not the
+	// (possibly narrower) walk roots of a scoped scan: a movie folder targeted
+	// directly by a subtree scan must still bind its own extras.
+	rootSet := walkRootSet(folder.Paths)
 
 	for _, candidate := range extras {
 		if ctx.Err() != nil {

@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -15,7 +16,8 @@ import (
 // TestUpdateIdentityPreservesProbeData covers the scanner's metadata-only update
 // path (issue #319 hardening): rewriting a file's derived identity/grouping must
 // persist the new root/group columns while leaving probe data, file bytes, and
-// content linkage untouched — no ffprobe, no probe-column churn.
+// content linkage untouched — no ffprobe, no probe-column churn. Like every
+// scan write it must clear match suppression, and it must follow folder moves.
 func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -33,15 +35,20 @@ func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 	path := fmt.Sprintf("/tmp/ui-%d/Movie (2020) {tvdb-1}/Movie (2020).mkv", suffix)
 	probedAt := time.Now().Add(-72 * time.Hour).UTC().Truncate(time.Second)
 
-	var folderID int
+	var folderID, movedFolderID int
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO media_folders (type, name, enabled) VALUES ('movies', 'UI Test', true) RETURNING id
 	`).Scan(&folderID); err != nil {
 		t.Fatalf("seed folder: %v", err)
 	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_folders (type, name, enabled) VALUES ('movies', 'UI Test Moved', true) RETURNING id
+	`).Scan(&movedFolderID); err != nil {
+		t.Fatalf("seed moved folder: %v", err)
+	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = $1`, folderID)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = $1`, folderID)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = ANY($1)`, []int{folderID, movedFolderID})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{folderID, movedFolderID})
 	})
 
 	var fileID int
@@ -51,21 +58,23 @@ func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 			observed_root_path, canonical_root_path, content_group_key, group_key_version,
 			base_title, base_year, base_type,
 			codec_video, codec_audio, resolution, container, duration, bitrate,
-			video_tracks, audio_tracks, chapters, probe_source, probe_updated_at
+			video_tracks, audio_tracks, chapters, probe_source, probe_updated_at,
+			match_suppressed_at
 		) VALUES (
 			$1, $2, $3, 123456,
 			'/old/root', '/old/root', 'v1|movie|movie|2020', 1,
 			'Movie', 2020, 'movie',
 			'h264', 'aac', '1080p', 'mkv', 7200, 5000,
-			'[{"index":0}]'::jsonb, '[{"index":1}]'::jsonb, '[]'::jsonb, 'local', $4
+			'[{"index":0}]'::jsonb, '[{"index":1}]'::jsonb, '[]'::jsonb, 'local', $4,
+			NOW()
 		) RETURNING id
 	`, contentID, folderID, path, probedAt).Scan(&fileID); err != nil {
 		t.Fatalf("seed media file: %v", err)
 	}
 
 	repo := NewFileRepository(pool)
-	updated, err := repo.UpdateIdentity(ctx, models.MediaFile{
-		MediaFolderID:     folderID,
+	updatedID, err := repo.UpdateIdentity(ctx, models.MediaFile{
+		MediaFolderID:     movedFolderID,
 		FilePath:          path,
 		ObservedRootPath:  "/new/root",
 		CanonicalRootPath: "/new/root",
@@ -78,6 +87,14 @@ func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateIdentity: %v", err)
 	}
+	if updatedID != fileID {
+		t.Errorf("UpdateIdentity id = %d, want %d", updatedID, fileID)
+	}
+
+	updated, err := repo.GetByPath(ctx, path)
+	if err != nil {
+		t.Fatalf("GetByPath after UpdateIdentity: %v", err)
+	}
 
 	// Identity/grouping columns rewritten.
 	if updated.ContentGroupKey != "v1|movie|anchor|tvdb-1" {
@@ -85,6 +102,9 @@ func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 	}
 	if updated.ObservedRootPath != "/new/root" {
 		t.Errorf("observed_root_path = %q, want /new/root", updated.ObservedRootPath)
+	}
+	if updated.MediaFolderID != movedFolderID {
+		t.Errorf("media_folder_id = %d, want moved folder %d", updated.MediaFolderID, movedFolderID)
 	}
 
 	// Probe data and linkage preserved.
@@ -108,5 +128,26 @@ func TestUpdateIdentityPreservesProbeData(t *testing.T) {
 	}
 	if updated.FileSize != 123456 {
 		t.Errorf("file_size = %d, want preserved 123456", updated.FileSize)
+	}
+
+	// Match suppression cleared like any other scan write, so the fresh
+	// identity re-enters the match backlog.
+	var suppressed bool
+	if err := pool.QueryRow(ctx, `
+		SELECT match_suppressed_at IS NOT NULL FROM media_files WHERE id = $1
+	`, fileID).Scan(&suppressed); err != nil {
+		t.Fatalf("read match_suppressed_at: %v", err)
+	}
+	if suppressed {
+		t.Error("match_suppressed_at still set, want cleared by identity update")
+	}
+
+	// A vanished row surfaces as ErrFileNotFound so the scanner can fall back
+	// to the full upsert path.
+	if _, err := repo.UpdateIdentity(ctx, models.MediaFile{
+		MediaFolderID: folderID,
+		FilePath:      path + ".does-not-exist",
+	}); !errors.Is(err, ErrFileNotFound) {
+		t.Errorf("UpdateIdentity on missing row: err = %v, want ErrFileNotFound", err)
 	}
 }

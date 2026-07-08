@@ -842,22 +842,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 	if mf.ProbeSource != "" {
 		probeSource = &mf.ProbeSource
 	}
-	var editionConfidence *float64
-	if mf.EditionConfidence != nil {
-		editionConfidence = mf.EditionConfidence
-	}
-	groupKeyVersion := mf.GroupKeyVersion
-	if groupKeyVersion == 0 {
-		groupKeyVersion = 1
-	}
-	identityConfidence := mf.IdentityConfidence
-	if identityConfidence == "" {
-		identityConfidence = "low"
-	}
-	identityJSON := mf.IdentityJSON
-	if len(identityJSON) == 0 {
-		identityJSON = []byte("{}")
-	}
+	groupKeyVersion, identityConfidence, identityJSON := identityColumnDefaults(mf)
 
 	query := `INSERT INTO media_files (
 		content_id, episode_id, extra_id, season_number, episode_number,
@@ -986,7 +971,7 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 		mf.MarkersConfidence,
 		mf.EditionRaw,
 		mf.EditionKey,
-		editionConfidence,
+		mf.EditionConfidence,
 		mf.EditionSource,
 		mf.PresentationKind,
 		mf.PresentationGroupKey,
@@ -1002,60 +987,74 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 	return scanMediaFile(row)
 }
 
-// UpdateIdentity rewrites only the derived root/group/identity and
-// edition/presentation columns of an existing media_files row. Probe data,
-// file bytes/mtime/hash, subtitles, chapters, markers, and content/episode/
-// extra linkage are left untouched. It backs the scanner's metadata-only
-// update path: an identity or content-group-key reclassification must persist
-// the new grouping without re-running (or disturbing) ffprobe. Column handling
-// mirrors Upsert's ON CONFLICT assignments for the same columns so the two
-// paths converge on identical values.
-func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile) (*models.MediaFile, error) {
-	groupKeyVersion := mf.GroupKeyVersion
+// identityColumnDefaults normalizes the identity/grouping zero values the way
+// every media_files write must persist them. Upsert and UpdateIdentity both go
+// through it so the full and metadata-only scan paths converge on identical
+// stored values.
+func identityColumnDefaults(mf models.MediaFile) (groupKeyVersion int, identityConfidence string, identityJSON []byte) {
+	groupKeyVersion = mf.GroupKeyVersion
 	if groupKeyVersion == 0 {
 		groupKeyVersion = 1
 	}
-	identityConfidence := mf.IdentityConfidence
+	identityConfidence = mf.IdentityConfidence
 	if identityConfidence == "" {
 		identityConfidence = "low"
 	}
-	identityJSON := mf.IdentityJSON
+	identityJSON = mf.IdentityJSON
 	if len(identityJSON) == 0 {
 		identityJSON = []byte("{}")
 	}
-	var editionConfidence *float64
-	if mf.EditionConfidence != nil {
-		editionConfidence = mf.EditionConfidence
-	}
+	return groupKeyVersion, identityConfidence, identityJSON
+}
+
+// UpdateIdentity rewrites only the derived root/group/identity and
+// edition/presentation columns of an existing media_files row, returning the
+// row id. Probe data, file bytes/mtime/hash, subtitles, chapters, markers, and
+// content/episode/extra linkage are left untouched. It backs the scanner's
+// metadata-only update path: an identity or content-group-key reclassification
+// must persist the new grouping without re-running (or disturbing) ffprobe.
+// Column handling mirrors Upsert's ON CONFLICT assignments for the same
+// columns so the two paths converge on identical values; like any scan write,
+// it clears match suppression so the fresh identity re-enters the match
+// backlog. Only the id is returned — this runs once per file during
+// library-wide grouping migrations, and returning the full row would drag the
+// track/chapter JSONB payloads along for millions of rows. Returns
+// ErrFileNotFound when the row no longer exists.
+func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile) (int, error) {
+	groupKeyVersion, identityConfidence, identityJSON := identityColumnDefaults(mf)
 
 	query := `UPDATE media_files SET
-		canonical_root_path = $2,
-		observed_root_path = $3,
-		content_group_key = $4,
-		group_key_version = $5,
-		base_title = $6,
-		base_year = $7,
-		base_type = $8,
-		identity_confidence = $9,
-		identity_json = $10,
-		season_number = COALESCE($11, season_number),
-		episode_number = COALESCE($12, episode_number),
-		edition_raw = $13,
-		edition_key = $14,
-		edition_confidence = $15,
-		edition_source = $16,
-		presentation_kind = $17,
-		presentation_group_key = $18,
-		presentation_part_index = $19,
-		presentation_part_total = $20,
-		multi_episode_start = $21,
-		multi_episode_end = $22,
+		media_folder_id = $2,
+		canonical_root_path = $3,
+		observed_root_path = $4,
+		content_group_key = $5,
+		group_key_version = $6,
+		base_title = $7,
+		base_year = $8,
+		base_type = $9,
+		identity_confidence = $10,
+		identity_json = $11,
+		season_number = COALESCE($12, season_number),
+		episode_number = COALESCE($13, episode_number),
+		edition_raw = $14,
+		edition_key = $15,
+		edition_confidence = $16,
+		edition_source = $17,
+		presentation_kind = $18,
+		presentation_group_key = $19,
+		presentation_part_index = $20,
+		presentation_part_total = $21,
+		multi_episode_start = $22,
+		multi_episode_end = $23,
+		match_suppressed_at = NULL,
 		updated_at = NOW()
 	WHERE file_path = $1
-	RETURNING ` + fileColumns
+	RETURNING id`
 
-	row := r.pool.QueryRow(ctx, query,
+	var id int
+	err := r.pool.QueryRow(ctx, query,
 		mf.FilePath,
+		mf.MediaFolderID,
 		mf.CanonicalRootPath,
 		mf.ObservedRootPath,
 		mf.ContentGroupKey,
@@ -1069,7 +1068,7 @@ func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile
 		nilIfZero(mf.EpisodeNumber),
 		mf.EditionRaw,
 		mf.EditionKey,
-		editionConfidence,
+		mf.EditionConfidence,
 		mf.EditionSource,
 		mf.PresentationKind,
 		mf.PresentationGroupKey,
@@ -1077,8 +1076,14 @@ func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile
 		nilIfZero(mf.PresentationPartTotal),
 		nilIfZero(mf.MultiEpisodeStart),
 		nilIfZero(mf.MultiEpisodeEnd),
-	)
-	return scanMediaFile(row)
+	).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrFileNotFound
+		}
+		return 0, fmt.Errorf("updating media file identity: %w", err)
+	}
+	return id, nil
 }
 
 type ChapterThumbnailFailureState struct {

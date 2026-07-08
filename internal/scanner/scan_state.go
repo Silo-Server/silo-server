@@ -28,6 +28,7 @@ type scanStateFile struct {
 	FilePath              string
 	FileSize              int64
 	FileModifiedAt        *time.Time
+	FileHash              string
 	CodecVideo            string
 	CodecAudio            string
 	Resolution            string
@@ -54,7 +55,7 @@ type scanStateFile struct {
 const scanStateColumns = `id, content_id, extra_id,
 	canonical_root_path, observed_root_path, content_group_key, group_key_version,
 	base_title, base_year, base_type, identity_confidence, identity_json,
-	file_path, file_size, file_modified_at,
+	file_path, file_size, file_modified_at, file_hash,
 	codec_video, codec_audio, resolution, container, duration,
 	edition_raw, edition_key, edition_confidence, edition_source,
 	presentation_kind, presentation_group_key, presentation_part_index,
@@ -81,6 +82,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	var identityConfidence *string
 	var identityJSON []byte
 	var fileModifiedAt *time.Time
+	var fileHash *string
 	var codecVideo, codecAudio, resolution, container *string
 	var duration *int
 	var editionRaw, editionKey, editionSource *string
@@ -105,6 +107,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		&state.FilePath,
 		&state.FileSize,
 		&fileModifiedAt,
+		&fileHash,
 		&codecVideo,
 		&codecAudio,
 		&resolution,
@@ -164,6 +167,9 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		state.IdentityJSON = append([]byte(nil), identityJSON...)
 	}
 	state.FileModifiedAt = fileModifiedAt
+	if fileHash != nil {
+		state.FileHash = *fileHash
+	}
 	if codecVideo != nil {
 		state.CodecVideo = *codecVideo
 	}
@@ -276,6 +282,7 @@ func scanStateFromMediaFile(file *models.MediaFile) *scanStateFile {
 		FilePath:              file.FilePath,
 		FileSize:              file.FileSize,
 		FileModifiedAt:        file.FileModifiedAt,
+		FileHash:              file.FileHash,
 		CodecVideo:            file.CodecVideo,
 		CodecAudio:            file.CodecAudio,
 		Resolution:            file.Resolution,

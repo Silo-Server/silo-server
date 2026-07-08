@@ -178,6 +178,32 @@ func TestIdentityOnlyUpdateReasons(t *testing.T) {
 	}
 }
 
+func TestIdentityOnlyFastPathEligible(t *testing.T) {
+	t.Parallel()
+
+	identityReasons := []string{"group_assignment_changed"}
+	cases := []struct {
+		name     string
+		existing scanStateFile
+		reasons  []string
+		want     bool
+	}{
+		{"probed primary row", scanStateFile{FileHash: "abc"}, identityReasons, true},
+		{"non-identity reasons need full path", scanStateFile{FileHash: "abc"}, []string{"size_changed"}, false},
+		// A row still linked as an extra is being reclassified as primary;
+		// only the full upsert clears extra_id so matching can pick it up.
+		{"former extra needs full path", scanStateFile{ExtraID: "extra-1", FileHash: "abc"}, identityReasons, false},
+		// A hash-less row needs the full path once to backfill OSHash and the
+		// hash-keyed S3 markers.
+		{"missing hash needs full path", scanStateFile{}, identityReasons, false},
+	}
+	for _, tc := range cases {
+		if got := identityOnlyFastPathEligible(&tc.existing, tc.reasons); got != tc.want {
+			t.Errorf("%s: identityOnlyFastPathEligible = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func testStringSliceContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
