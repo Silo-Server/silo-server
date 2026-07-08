@@ -157,18 +157,21 @@ func MediaScopeMatchesItemType(scope, itemType string) bool {
 	return false
 }
 
-const (
-	DefaultSmartCollectionItemLimit = 100
-	MaxSmartCollectionItemLimit     = 500
-)
+// DefaultSmartCollectionItemLimit applies when a smart collection sets no
+// explicit limit. Smart collections are deliberately uncapped: an unset
+// limit resolves the full result set. The large sentinel keeps the int
+// plumbing (SQL LIMIT) intact everywhere a concrete value is required.
+const DefaultSmartCollectionItemLimit = 10_000_000
 
+// ApplySmartCollectionItemLimit fills in the default item limit when a smart
+// collection's query definition does not set one. An explicit positive limit
+// is honored as-is: membership size is an admin decision, and every read path
+// that serves collection items either paginates in SQL or scales with the
+// actual collection size rather than this value.
 func ApplySmartCollectionItemLimit(def QueryDefinition) QueryDefinition {
 	limit := DefaultSmartCollectionItemLimit
 	if def.Limit != nil && *def.Limit > 0 {
 		limit = *def.Limit
-	}
-	if limit > MaxSmartCollectionItemLimit {
-		limit = MaxSmartCollectionItemLimit
 	}
 	def.Limit = &limit
 	return def
