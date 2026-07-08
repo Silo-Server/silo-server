@@ -20,6 +20,7 @@ type fakeObjectChecker struct {
 	mu       sync.Mutex
 	missing  map[string]bool
 	erroring map[string]bool
+	errorAll bool
 	checked  map[string]int
 }
 
@@ -32,7 +33,7 @@ func (f *fakeObjectChecker) ObjectExists(_ context.Context, _ string, key string
 		f.checked = map[string]int{}
 	}
 	f.checked[key]++
-	if f.erroring[key] {
+	if f.errorAll || f.erroring[key] {
 		return false, errors.New("simulated storage error")
 	}
 	return !f.missing[key], nil
@@ -216,14 +217,25 @@ func TestArtworkReconcileLeavesRowsAloneOnStorageErrors(t *testing.T) {
 
 	suffix := time.Now().UnixNano()
 	contentID := fmt.Sprintf("arc-err-%d", suffix)
+	okContentID := fmt.Sprintf("arc-err-ok-%d", suffix)
 	cachedKey := fmt.Sprintf("tmdb/movies/%s/poster/original.webp", contentID)
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO media_items (content_id, type, title, status, genres, poster_path, poster_source_path)
-		VALUES ($1, 'movie', 'ARC Err', 'matched', '{}'::text[], $2, 'https://img.example/err.jpg')
-	`, contentID, cachedKey); err != nil {
-		t.Fatalf("seed item: %v", err)
+	okKey := fmt.Sprintf("tmdb/movies/%s/poster/original.webp", okContentID)
+	seed := func(id, key string) {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_items (content_id, type, title, status, genres, poster_path, poster_source_path)
+			VALUES ($1, 'movie', 'ARC Err', 'matched', '{}'::text[], $2, 'https://img.example/err.jpg')
+		`, id, key); err != nil {
+			t.Fatalf("seed item %s: %v", id, err)
+		}
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID) })
+	// The healthy sibling keeps the probe from concluding storage is
+	// unreachable (an all-errored probe aborts before any sweep runs), so
+	// the sweep-level skip-on-error behavior is what gets exercised.
+	seed(contentID, cachedKey)
+	seed(okContentID, okKey)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{contentID, okContentID})
+	})
 
 	checker := &fakeObjectChecker{erroring: map[string]bool{cachedKey: true}}
 	stats, err := NewArtworkCacheReconciler(pool, checker).Run(ctx, nil)
@@ -240,5 +252,44 @@ func TestArtworkReconcileLeavesRowsAloneOnStorageErrors(t *testing.T) {
 	}
 	if posterPath != cachedKey {
 		t.Fatalf("poster_path = %q, want untouched %q after storage error", posterPath, cachedKey)
+	}
+}
+
+func TestArtworkReconcileAbortsWhenStorageUnreachable(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	suffix := time.Now().UnixNano()
+	contentID := fmt.Sprintf("arc-down-%d", suffix)
+	cachedKey := fmt.Sprintf("tmdb/movies/%s/poster/original.webp", contentID)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, status, genres, poster_path, poster_source_path)
+		VALUES ($1, 'movie', 'ARC Down', 'matched', '{}'::text[], $2, 'https://img.example/down.jpg')
+	`, contentID, cachedKey); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID) })
+
+	// Every probe HEAD errors: storage is unreachable, which must abort the
+	// run (missing ≠ unreachable) and leave the row untouched.
+	checker := &fakeObjectChecker{errorAll: true}
+	if _, err := NewArtworkCacheReconciler(pool, checker).Run(ctx, nil); err == nil {
+		t.Fatal("Run with unreachable storage returned nil error")
+	}
+
+	var posterPath string
+	if err := pool.QueryRow(ctx, `SELECT poster_path FROM media_items WHERE content_id = $1`, contentID).Scan(&posterPath); err != nil {
+		t.Fatalf("read item: %v", err)
+	}
+	if posterPath != cachedKey {
+		t.Fatalf("poster_path = %q, want untouched %q after unreachable storage", posterPath, cachedKey)
 	}
 }

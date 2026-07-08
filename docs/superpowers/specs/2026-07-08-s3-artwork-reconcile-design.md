@@ -92,10 +92,15 @@ skips the fingerprint check and always sweeps — this doubles as disaster recov
 
 ### Phase 1 — probe
 
-HEAD (via the existing `s3client.Client.ObjectExists`) a random sample of ~100 stored
-cached keys across all surfaces. Because the DB stores the full key of the `original`
-variant (e.g. `tmdb/movies/550/poster/original.webp`), the stored path is exactly the
-key to check — no guessing.
+The probe runs first (before any counting): HEAD (via the existing
+`s3client.Client.ObjectExists`) a sample of ~200 stored cached keys across all
+surfaces, taken with plain `LIMIT` sampling — `ORDER BY random()` would full-scan and
+sort every surface, and the probe only has to answer "does this bucket hold the cache
+at all". Because the DB stores the full key of the `original` variant (e.g.
+`tmdb/movies/550/poster/original.webp`), the stored path is exactly the key to check —
+no guessing. Progress-denominator `count(*)` queries run only in verify mode; bulk
+mode reports `RowsAffected` and never pays for counts. Probe errors are reported but
+tracked against a separate baseline so they cannot consume the sweep's error budget.
 
 - **≥95% missing** → "bulk reset" mode: skip per-row verification and reset all cached
   rows by SQL alone (the data plainly was not migrated). The threshold is not 100% so a
@@ -229,11 +234,19 @@ uploaded.
   matches; manual runs always sweep).
 - `internal/branding/service.go` — `ReconcileMissingAssets` verifies and clears the
   four branding refs; composed into the task rather than the reconciler so `metadata`
-  does not import `branding`.
+  does not import `branding`. It runs *after* the fingerprint is certified and its
+  errors are non-fatal (reported in the task message): a transient failure on a
+  4-object check must never discard a completed catalog sweep and force it to repeat.
 - Fingerprint lives in `server_settings` under `s3.public_storage_identity`
   (plaintext; encrypted values are GCM-bound to their key name, which complicates any
   future rename for zero benefit). It is seeded with `SetIfAbsent` at wiring time in
-  `cmd/silo`, so first boot adopts the current identity without a sweep.
+  `cmd/silo`, so first boot adopts the current identity without a sweep. Normalization
+  mirrors real S3 semantics: endpoint/bucket are case-folded, but the key prefix keeps
+  its case (S3 keys are case-sensitive — a case-only prefix edit is a real move) and is
+  slash-trimmed exactly like `s3client.NormalizeKeyPrefix` applies it.
+- The task manager's conditional-task preflight fails **closed**: a `ShouldRun` error
+  skips the run (and the task's `ShouldRun` retries transient settings reads), so a
+  startup DB blip cannot fail open into a full catalog sweep.
 - No schema migration: the fingerprint is a `server_settings` row and all reset
   operations use existing columns.
 - `s3client.Client` prepends `KeyPrefix` internally, so the reconciler passes DB-stored

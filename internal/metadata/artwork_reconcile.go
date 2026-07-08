@@ -161,7 +161,53 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 
 	surfaces := artworkSweepSurfaces()
 
-	progress(0, "Counting cached artwork")
+	// Probe before anything else: it decides the mode, and in bulk mode the
+	// per-surface count(*) queries (full scans on unindexable predicates)
+	// are never needed — bulk resets report their own RowsAffected.
+	progress(0, "Probing object storage")
+	if err := r.probe(ctx, surfaces, &stats); err != nil {
+		return stats, err
+	}
+	if stats.Sampled == 0 {
+		progress(100, "No cached artwork to verify")
+		return stats, nil
+	}
+
+	// Probe errors are reported in stats but must not consume the sweep's
+	// error budget: a flaky-but-reachable probe would otherwise abort the
+	// sweep long before it saw its own 200 errors.
+	errorBase := stats.Errors
+
+	if shouldBulkReset(stats.Sampled, stats.SampleMissing) {
+		stats.Mode = "bulk_reset"
+		progress(5, fmt.Sprintf("Probe found %d/%d objects missing; resetting cached artwork", stats.SampleMissing, stats.Sampled))
+		steps := len(surfaces) + 1
+		for i, s := range surfaces {
+			pct := 5 + 90*float64(i+1)/float64(steps)
+			if s.alwaysVerify {
+				// Small upload-holding tables: never blind-reset; a surviving
+				// upload's row is the last pointer to its object.
+				if err := r.sweepSurface(ctx, s, &stats, errorBase, func(done int) {
+					progress(pct, fmt.Sprintf("Verifying %s (%d rows)", s.name, done))
+				}); err != nil {
+					return stats, err
+				}
+				continue
+			}
+			if err := r.bulkResetSurface(ctx, s, &stats); err != nil {
+				return stats, err
+			}
+			progress(pct, fmt.Sprintf("Reset %s", s.name))
+		}
+		if err := r.bulkResetChapterThumbnails(ctx, &stats); err != nil {
+			return stats, err
+		}
+		progress(95, "Reset chapter thumbnails")
+		return stats, nil
+	}
+
+	// Verify mode: count cached rows once so progress has a denominator.
+	progress(2, "Counting cached artwork")
 	totals := make([]int, len(surfaces))
 	total := 0
 	for i, s := range surfaces {
@@ -182,17 +228,6 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 		return stats, nil
 	}
 
-	progress(1, fmt.Sprintf("Probing object storage (%d cached images)", total))
-	if err := r.probe(ctx, surfaces, &stats); err != nil {
-		return stats, err
-	}
-
-	bulk := shouldBulkReset(stats.Sampled, stats.SampleMissing)
-	if bulk {
-		stats.Mode = "bulk_reset"
-		progress(5, fmt.Sprintf("Probe found %d/%d objects missing; resetting cached artwork", stats.SampleMissing, stats.Sampled))
-	}
-
 	done := 0
 	report := func(surfaceName string) func(int) {
 		return func(surfaceDone int) {
@@ -205,27 +240,14 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 		if totals[i] == 0 {
 			continue
 		}
-		if bulk && !s.alwaysVerify {
-			if err := r.bulkResetSurface(ctx, s, &stats); err != nil {
-				return stats, err
-			}
-			done += totals[i]
-			progress(5+90*float64(done)/float64(total), fmt.Sprintf("Reset %s", s.name))
-			continue
-		}
-		if err := r.sweepSurface(ctx, s, &stats, report(s.name)); err != nil {
+		if err := r.sweepSurface(ctx, s, &stats, errorBase, report(s.name)); err != nil {
 			return stats, err
 		}
 		done += totals[i]
 	}
 
 	if chapterTotal > 0 {
-		if bulk {
-			if err := r.bulkResetChapterThumbnails(ctx, &stats); err != nil {
-				return stats, err
-			}
-			progress(95, "Reset chapter thumbnails")
-		} else if err := r.sweepChapterThumbnails(ctx, &stats, report("chapter thumbnails")); err != nil {
+		if err := r.sweepChapterThumbnails(ctx, &stats, errorBase, report("chapter thumbnails")); err != nil {
 			return stats, err
 		}
 	}
@@ -257,10 +279,15 @@ func (r *ArtworkCacheReconciler) probe(ctx context.Context, surfaces []artworkSw
 	if perSurface < 1 {
 		perSurface = 1
 	}
+	// Plain LIMIT sampling (no ORDER BY random(), which would full-scan and
+	// sort every surface): the probe only has to answer "does the bucket
+	// hold this cache at all", and any N stored keys answer that. Partial
+	// migrations that skew the sample simply land in per-row verify mode,
+	// which handles them correctly anyway.
 	var keys []string
 	for _, s := range surfaces {
 		q := fmt.Sprintf(
-			`SELECT %s FROM %s WHERE %s ORDER BY random() LIMIT $1`,
+			`SELECT %s FROM %s WHERE %s LIMIT $1`,
 			s.pathCol, s.table, s.cachedPredicate(),
 		)
 		sampled, err := r.queryStrings(ctx, q, perSurface)
@@ -273,7 +300,7 @@ func (r *ArtworkCacheReconciler) probe(ctx context.Context, surfaces []artworkSw
 		SELECT e->>'thumbnail_path'
 		FROM media_files, jsonb_array_elements(chapters) e
 		WHERE chapters IS NOT NULL AND coalesce(e->>'thumbnail_path', '') <> ''
-		ORDER BY random() LIMIT $1
+		LIMIT $1
 	`, perSurface)
 	if err != nil {
 		return fmt.Errorf("artwork reconcile: sampling chapter thumbnails: %w", err)
@@ -413,7 +440,7 @@ type sweptRow struct {
 	remoteSource bool
 }
 
-func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats, onProgress func(done int)) error {
+func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats, errorBase int, onProgress func(done int)) error {
 	var cursor []string
 	done := 0
 	for {
@@ -429,8 +456,8 @@ func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSwee
 		if err := r.verifyAndReset(ctx, s, rows, stats); err != nil {
 			return err
 		}
-		if stats.Errors > artworkReconcileErrorBudget {
-			return fmt.Errorf("artwork reconcile: aborting after %d storage errors (errored rows were left untouched)", stats.Errors)
+		if stats.Errors-errorBase > artworkReconcileErrorBudget {
+			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.Errors-errorBase)
 		}
 		done += len(rows)
 		onProgress(done)
@@ -593,14 +620,19 @@ func (r *ArtworkCacheReconciler) bulkResetChapterThumbnails(ctx context.Context,
 	return nil
 }
 
-func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, stats *ArtworkReconcileStats, onProgress func(done int)) error {
+// chapterFileRow is one media_files row in the chapter thumbnail sweep.
+// Chapters are decoded as generic maps so fields this code does not know
+// about survive a rewrite.
+type chapterFileRow struct {
+	id       int64
+	raw      []byte
+	chapters []map[string]any
+}
+
+func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, stats *ArtworkReconcileStats, errorBase int, onProgress func(done int)) error {
 	cursor := int64(0)
 	done := 0
 	for {
-		type fileRow struct {
-			id       int64
-			chapters []byte
-		}
 		rows, err := r.pool.Query(ctx, `
 			SELECT id, chapters FROM media_files
 			WHERE `+chapterThumbnailFilesPredicate+` AND id > $1
@@ -609,10 +641,10 @@ func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, sta
 		if err != nil {
 			return fmt.Errorf("artwork reconcile: fetching chapter thumbnail batch: %w", err)
 		}
-		batch := make([]fileRow, 0, artworkReconcileBatchSize)
+		batch := make([]chapterFileRow, 0, artworkReconcileBatchSize)
 		for rows.Next() {
-			var f fileRow
-			if err := rows.Scan(&f.id, &f.chapters); err != nil {
+			var f chapterFileRow
+			if err := rows.Scan(&f.id, &f.raw); err != nil {
 				rows.Close()
 				return fmt.Errorf("artwork reconcile: scanning chapter thumbnail batch: %w", err)
 			}
@@ -627,85 +659,91 @@ func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, sta
 		}
 		cursor = batch[len(batch)-1].id
 
-		for _, f := range batch {
-			if err := r.reconcileFileChapters(ctx, f.id, f.chapters, stats); err != nil {
-				return err
-			}
-			if stats.Errors > artworkReconcileErrorBudget {
-				return fmt.Errorf("artwork reconcile: aborting after %d storage errors (errored rows were left untouched)", stats.Errors)
-			}
+		if err := r.reconcileChapterBatch(ctx, batch, stats); err != nil {
+			return err
+		}
+		if stats.Errors-errorBase > artworkReconcileErrorBudget {
+			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.Errors-errorBase)
 		}
 		done += len(batch)
 		onProgress(done)
 	}
 }
 
-// reconcileFileChapters verifies every thumbnail in one file's chapters array
-// and rewrites the array if any object is missing. Chapters are decoded as
-// generic maps so fields this code does not know about survive the rewrite.
-func (r *ArtworkCacheReconciler) reconcileFileChapters(ctx context.Context, fileID int64, rawChapters []byte, stats *ArtworkReconcileStats) error {
-	var chapters []map[string]any
-	if err := json.Unmarshal(rawChapters, &chapters); err != nil {
-		stats.Errors++
-		slog.Warn("artwork reconcile: unparseable chapters JSON; skipping file", "file_id", fileID, "error", err)
-		return nil
-	}
-
-	indices := make([]int, 0, len(chapters))
-	keys := make([]string, 0, len(chapters))
-	for i, ch := range chapters {
-		path, _ := ch["thumbnail_path"].(string)
-		if strings.TrimSpace(path) == "" {
+// reconcileChapterBatch verifies every chapter thumbnail across the whole
+// batch in one HEAD fan-out — per-file checking would cap effective
+// concurrency at one file's handful of chapters — then rewrites only the
+// files whose arrays changed.
+func (r *ArtworkCacheReconciler) reconcileChapterBatch(ctx context.Context, batch []chapterFileRow, stats *ArtworkReconcileStats) error {
+	type chapterRef struct{ file, chapter int }
+	var keys []string
+	var refs []chapterRef
+	for fi := range batch {
+		f := &batch[fi]
+		if err := json.Unmarshal(f.raw, &f.chapters); err != nil {
+			stats.Errors++
+			slog.Warn("artwork reconcile: unparseable chapters JSON; skipping file", "file_id", f.id, "error", err)
+			f.chapters = nil
 			continue
 		}
-		indices = append(indices, i)
-		keys = append(keys, path)
+		for ci, ch := range f.chapters {
+			path, _ := ch["thumbnail_path"].(string)
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			keys = append(keys, path)
+			refs = append(refs, chapterRef{file: fi, chapter: ci})
+		}
 	}
 	if len(keys) == 0 {
 		return nil
 	}
 
 	verdicts := r.headKeys(ctx, keys)
-	changed := false
+	changed := make(map[int]bool, len(batch))
 	for vi, v := range verdicts {
 		stats.Checked++
+		ref := refs[vi]
 		switch {
 		case v.err != nil:
 			stats.Errors++
 			slog.Warn("artwork reconcile: chapter thumbnail check failed; leaving chapter untouched",
-				"file_id", fileID, "key", keys[vi], "error", v.err)
+				"file_id", batch[ref.file].id, "key", keys[vi], "error", v.err)
 		case v.missing:
-			ch := chapters[indices[vi]]
+			ch := batch[ref.file].chapters[ref.chapter]
 			ch["thumbnail_path"] = ""
 			ch["thumbnail_thumbhash"] = ""
 			delete(ch, "thumbnail_retry_after")
 			delete(ch, "thumbnail_failed_at")
 			delete(ch, "thumbnail_last_error")
-			changed = true
+			changed[ref.file] = true
 			stats.Cleared++
 		default:
 			stats.Verified++
 		}
 	}
-	if !changed {
-		return nil
-	}
 
-	updated, err := json.Marshal(chapters)
-	if err != nil {
-		return fmt.Errorf("artwork reconcile: encoding chapters for file %d: %w", fileID, err)
-	}
-	// Guard on the original JSON so a concurrent thumbnail-service write wins.
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE media_files
-		SET chapters = $1::jsonb, chapter_thumbnail_retry_after = NULL
-		WHERE id = $2 AND chapters = $3::jsonb
-	`, updated, fileID, rawChapters)
-	if err != nil {
-		return fmt.Errorf("artwork reconcile: updating chapters for file %d: %w", fileID, err)
-	}
-	if tag.RowsAffected() == 0 {
-		slog.Debug("artwork reconcile: chapters changed concurrently; skipped", "file_id", fileID)
+	for fi := range batch {
+		if !changed[fi] {
+			continue
+		}
+		f := batch[fi]
+		updated, err := json.Marshal(f.chapters)
+		if err != nil {
+			return fmt.Errorf("artwork reconcile: encoding chapters for file %d: %w", f.id, err)
+		}
+		// Guard on the original JSON so a concurrent thumbnail-service write wins.
+		tag, err := r.pool.Exec(ctx, `
+			UPDATE media_files
+			SET chapters = $1::jsonb, chapter_thumbnail_retry_after = NULL
+			WHERE id = $2 AND chapters = $3::jsonb
+		`, updated, f.id, f.raw)
+		if err != nil {
+			return fmt.Errorf("artwork reconcile: updating chapters for file %d: %w", f.id, err)
+		}
+		if tag.RowsAffected() == 0 {
+			slog.Debug("artwork reconcile: chapters changed concurrently; skipped", "file_id", f.id)
+		}
 	}
 	return nil
 }

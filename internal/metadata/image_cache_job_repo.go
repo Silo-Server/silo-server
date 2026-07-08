@@ -546,7 +546,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 	// cached relative path. The destination check makes the cached row itself the
 	// durable dedup marker, so pruning succeeded job rows does not cause the whole
 	// catalog to be re-downloaded once the rows age out.
-	rows, err := r.pool.Query(ctx, `
+	query := strings.ReplaceAll(`
 		WITH all_candidates AS (
 			SELECT
 				'poster'::text AS image_type,
@@ -563,7 +563,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 				mi.imdb_id
 			FROM media_items mi
 			WHERE mi.poster_source_path LIKE '%://%'
-			  AND lower(mi.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(mi.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (mi.poster_path LIKE '%://%' OR coalesce(mi.poster_path, '') = '')
 			UNION ALL
 			SELECT
@@ -581,7 +581,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 				mi.imdb_id
 			FROM media_items mi
 			WHERE mi.backdrop_source_path LIKE '%://%'
-			  AND lower(mi.backdrop_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(mi.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (mi.backdrop_path LIKE '%://%' OR coalesce(mi.backdrop_path, '') = '')
 			UNION ALL
 			SELECT
@@ -599,7 +599,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 				mi.imdb_id
 			FROM media_items mi
 			WHERE mi.logo_source_path LIKE '%://%'
-			  AND lower(mi.logo_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(mi.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (mi.logo_path LIKE '%://%' OR coalesce(mi.logo_path, '') = '')
 			UNION ALL
 			SELECT
@@ -618,7 +618,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_item_localizations loc
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.poster_source_path LIKE '%://%'
-			  AND lower(loc.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')
 			UNION ALL
 			SELECT
@@ -637,7 +637,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_item_localizations loc
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.backdrop_source_path LIKE '%://%'
-			  AND lower(loc.backdrop_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(loc.backdrop_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (loc.backdrop_path LIKE '%://%' OR coalesce(loc.backdrop_path, '') = '')
 			UNION ALL
 			SELECT
@@ -656,7 +656,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM media_item_localizations loc
 			JOIN media_items mi ON mi.content_id = loc.content_id
 			WHERE loc.logo_source_path LIKE '%://%'
-			  AND lower(loc.logo_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(loc.logo_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (loc.logo_path LIKE '%://%' OR coalesce(loc.logo_path, '') = '')
 			UNION ALL
 			SELECT
@@ -675,7 +675,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM seasons s
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE s.poster_source_path LIKE '%://%'
-			  AND lower(s.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(s.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (s.poster_path LIKE '%://%' OR coalesce(s.poster_path, '') = '')
 			UNION ALL
 			SELECT
@@ -695,7 +695,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			JOIN seasons s ON s.content_id = loc.season_content_id
 			JOIN media_items mi ON mi.content_id = s.series_id
 			WHERE loc.poster_source_path LIKE '%://%'
-			  AND lower(loc.poster_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(loc.poster_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (loc.poster_path LIKE '%://%' OR coalesce(loc.poster_path, '') = '')
 			UNION ALL
 			SELECT
@@ -714,7 +714,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 			FROM episodes e
 			JOIN media_items mi ON mi.content_id = e.series_id
 			WHERE e.still_source_path LIKE '%://%'
-			  AND lower(e.still_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(e.still_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (e.still_path LIKE '%://%' OR coalesce(e.still_path, '') = '')
 			UNION ALL
 			SELECT
@@ -732,7 +732,7 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 				p.imdb_id
 			FROM people p
 			WHERE p.photo_source_path LIKE '%://%'
-			  AND lower(p.photo_source_path) NOT LIKE ALL (ARRAY['s3://%', 'file://%', 'local://%', 'upload://%', 'generated://%'])
+			  AND lower(p.photo_source_path) NOT LIKE ALL (@nonProviderSchemes)
 			  AND (p.photo_path LIKE '%://%' OR coalesce(p.photo_path, '') = '')
 		),
 		candidates AS (
@@ -759,7 +759,8 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 		       COALESCE(tvdb_id, '') AS tvdb_id,
 		       COALESCE(imdb_id, '') AS imdb_id
 		FROM candidates
-	`, limit)
+	`, "@nonProviderSchemes", nonProviderImageSchemesSQL)
+	rows, err := r.pool.Query(ctx, query, limit)
 	if err != nil {
 		return 0, fmt.Errorf("enqueueing existing provider artwork: %w", err)
 	}

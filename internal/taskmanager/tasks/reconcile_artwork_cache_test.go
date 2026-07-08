@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -58,10 +59,21 @@ func (f *fakeProgress) Report(_ float64, message string)   { f.lastMessage = mes
 func (f *fakeProgress) SetResultData(data json.RawMessage) { f.resultData = data }
 
 func TestArtworkStorageIdentityNormalizes(t *testing.T) {
-	a := ArtworkStorageIdentity(" https://S3.Example.com ", "Assets", " silo/Prod ")
+	// Endpoint and bucket are case-insensitive; whitespace is trimmed.
+	a := ArtworkStorageIdentity(" https://S3.Example.com ", "Assets", "silo/prod")
 	b := ArtworkStorageIdentity("https://s3.example.com", "assets", "silo/prod")
 	if a != b {
 		t.Fatalf("identity not normalized: %q != %q", a, b)
+	}
+	// The key prefix is slash-insensitive (the s3client trims slashes, so
+	// 'art' and '/art/' are the same storage location)...
+	if ArtworkStorageIdentity("e", "b", "art") != ArtworkStorageIdentity("e", "b", " /art/ ") {
+		t.Fatal("slash-only prefix differences must not change the identity")
+	}
+	// ...but case-SENSITIVE: S3 object keys are case-sensitive, so a
+	// case-only prefix edit is a real storage move and must reconcile.
+	if ArtworkStorageIdentity("e", "b", "Art") == ArtworkStorageIdentity("e", "b", "art") {
+		t.Fatal("case-only prefix differences are real storage moves and must change the identity")
 	}
 	if a == ArtworkStorageIdentity("https://s3.example.com", "assets", "") {
 		t.Fatal("key prefix must participate in the identity")
@@ -135,14 +147,21 @@ func TestReconcileArtworkCacheExecuteIncludesBranding(t *testing.T) {
 		t.Fatalf("Cleared = %d, want 3 (1 artwork + 2 branding)", stats.Cleared)
 	}
 
-	// A branding failure must abort before the fingerprint is certified.
-	failing := NewReconcileArtworkCacheTask(runner, &fakeSettingsStore{values: map[string]string{}},
+	// A branding failure must NOT discard the completed sweep: the
+	// fingerprint is certified first and the failure is reported in the
+	// message instead, so the full catalog sweep never repeats over a
+	// transient error on a 4-object branding check.
+	fpStore := &fakeSettingsStore{values: map[string]string{}}
+	failing := NewReconcileArtworkCacheTask(runner, fpStore,
 		&fakeBrandingReconciler{err: errors.New("storage unreachable")}, "id")
-	fpStore := failing.settings.(*fakeSettingsStore)
-	if err := failing.Execute(context.Background(), &fakeProgress{}); err == nil {
-		t.Fatal("Execute with failing branding reconcile returned nil error")
+	failingProgress := &fakeProgress{}
+	if err := failing.Execute(context.Background(), failingProgress); err != nil {
+		t.Fatalf("Execute with failing branding reconcile = %v, want nil (non-fatal)", err)
 	}
-	if got := fpStore.values[ArtworkStorageIdentityKey]; got != "" {
-		t.Fatalf("fingerprint after failed branding reconcile = %q, want empty", got)
+	if got := fpStore.values[ArtworkStorageIdentityKey]; got != "id" {
+		t.Fatalf("fingerprint after branding failure = %q, want certified %q", got, "id")
+	}
+	if !strings.Contains(failingProgress.lastMessage, "branding asset check failed") {
+		t.Fatalf("completion message %q does not surface the branding failure", failingProgress.lastMessage)
 	}
 }
