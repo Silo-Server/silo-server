@@ -92,7 +92,7 @@ describe("useTranscodeQuality", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [body] = sentBodies();
+    const body = sentBodies()[0]!;
     expect(body.subtitle_burn_in).toBe(true);
     expect(body.subtitle_track_index).toBe(3);
     // Burn-in composites into the frames, so codec copy must be off.
