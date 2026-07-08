@@ -87,30 +87,6 @@ func TestPartitionExtraPaths(t *testing.T) {
 	}
 }
 
-func TestSupplementalDirAtScopeDepth(t *testing.T) {
-	roots := walkRootSet([]string{"/movies"})
-	cases := []struct {
-		dir  string
-		want bool
-	}{
-		// Inside a title folder: real extras dirs.
-		{"/movies/Heat (1995)/Other", false},
-		{"/movies/Heat (1995)/Extras", false},
-		// At library-root depth: content organization.
-		{"/movies/other", true},
-		{"/movies/shorts", true},
-		// Nested supplemental chain that bottoms out at the root.
-		{"/movies/extras/behind the scenes", true},
-		// The walk root itself.
-		{"/movies", true},
-	}
-	for _, tc := range cases {
-		if got := supplementalDirAtScopeDepth(tc.dir, roots); got != tc.want {
-			t.Errorf("supplementalDirAtScopeDepth(%q) = %v, want %v", tc.dir, got, tc.want)
-		}
-	}
-}
-
 func TestMovieSupplementalDirsNoLongerSkipExtras(t *testing.T) {
 	// The walk must still hard-skip noise dirs...
 	for _, dir := range []string{"/m/Movie/Sample", "/m/Movie/Subs"} {

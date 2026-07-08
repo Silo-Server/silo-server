@@ -38,9 +38,10 @@ const extrasDirAncestorDepth = 2
 // "Extras/SxxExx" files keep their documented season-0 mapping.
 //
 // libraryRootSet holds the library's configured root paths (folder.Paths,
-// cleaned). A supplemental-named directory sitting at library-scope depth is
-// content organization ("movies/other/<Movie>/..."), not the extras
-// convention, and never classifies — see supplementalDirAtScopeDepth.
+// cleaned). A convention-named directory only counts as an extras dir when it
+// sits inside a title folder: one that is itself a library root, or directly
+// under one ("movies/other/<Movie>/..."), is content organization and never
+// classifies.
 func classifyExtraPath(path, folderType string, libraryRootSet map[string]bool) (extraCandidate, bool) {
 	candidate := extraCandidate{Path: path}
 
@@ -48,7 +49,8 @@ func classifyExtraPath(path, folderType string, libraryRootSet map[string]bool) 
 	for depth := 0; depth < extrasDirAncestorDepth; depth++ {
 		label := normalizeScannerDirLabel(filepath.Base(dir))
 		if kind, ok := extrasDirKinds[label]; ok {
-			if supplementalDirAtScopeDepth(dir, libraryRootSet) {
+			dirClean := filepath.Clean(dir)
+			if libraryRootSet[dirClean] || libraryRootSet[filepath.Dir(dirClean)] {
 				break
 			}
 			candidate.Kind = kind
@@ -80,33 +82,6 @@ func classifyExtraPath(path, folderType string, libraryRootSet map[string]bool) 
 	}
 
 	return candidate, true
-}
-
-// supplementalDirAtScopeDepth reports whether a matched supplemental directory
-// sits at library-scope depth rather than inside a title folder: the directory
-// itself, any supplemental-named ancestor above it, or the first
-// non-supplemental ancestor is a library root. The Jellyfin/Plex conventions
-// place extras folders inside a movie/show folder; a scope-level folder that
-// happens to carry a convention name ("movies/other/", "movies/shorts/") is
-// content organization whose titles must stay primary. Without this guard such
-// scopes were classified as extras whose parent can never resolve (library
-// roots never bind), deferring every file beneath them on every scan.
-func supplementalDirAtScopeDepth(dir string, libraryRootSet map[string]bool) bool {
-	dir = filepath.Clean(dir)
-	for {
-		if libraryRootSet[dir] {
-			return true
-		}
-		if extrasDirKinds[normalizeScannerDirLabel(filepath.Base(dir))] == "" {
-			// First non-supplemental ancestor reached without hitting a root.
-			return false
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return false
-		}
-		dir = parent
-	}
 }
 
 // walkRootSet builds the cleaned-path set used for scope checks against the

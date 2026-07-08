@@ -69,8 +69,8 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 // Deliberately absent: the plural "others", which is in neither convention.
 // Convention labels can also appear as content-scope folder names ("movies/
 // other/<Movie>/<file>", "movies/shorts/..."); those never classify as extras
-// because supplementalDirAtScopeDepth rejects supplemental dirs sitting at
-// library-root depth.
+// because classifyExtraPath only honors a convention-named dir inside a title
+// folder, never one at or directly under a library root.
 var extrasDirKinds = map[string]models.ExtraKind{
 	"extra":             models.ExtraKindOther,
 	"extras":            models.ExtraKindOther,
