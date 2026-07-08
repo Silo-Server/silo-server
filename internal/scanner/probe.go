@@ -211,6 +211,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				EmbeddedTitle: s.Tags["title"],
 				Language:      lang.Canonical(s.Tags["language"]),
 				Codec:         s.CodecName,
+				Profile:       s.Profile,
 				Layout:        s.ChannelLayout,
 				Channels:      s.Channels,
 				Bitrate:       parseNumeric(s.BitRate) / 1000,

@@ -2599,6 +2599,7 @@ func toAudioTrackRecords(tracks []models.AudioTrack) []AudioTrackRecord {
 			EmbeddedTitle: track.EmbeddedTitle,
 			Language:      track.Language,
 			Codec:         track.Codec,
+			Profile:       track.Profile,
 			Layout:        track.Layout,
 			Channels:      track.Channels,
 			Bitrate:       track.Bitrate,

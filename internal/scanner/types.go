@@ -69,6 +69,7 @@ type AudioTrackInfo struct {
 	EmbeddedTitle string
 	Language      string
 	Codec         string
+	Profile       string
 	Layout        string
 	Channels      int
 	Bitrate       int

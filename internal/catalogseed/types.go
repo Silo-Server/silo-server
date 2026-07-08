@@ -169,6 +169,7 @@ type AudioTrackRecord struct {
 	EmbeddedTitle string `json:"embedded_title,omitempty"`
 	Language      string `json:"language,omitempty"`
 	Codec         string `json:"codec,omitempty"`
+	Profile       string `json:"profile,omitempty"`
 	Layout        string `json:"layout,omitempty"`
 	Channels      int    `json:"channels,omitempty"`
 	Bitrate       int    `json:"bitrate,omitempty"`

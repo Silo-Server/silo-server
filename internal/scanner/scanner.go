@@ -2874,6 +2874,7 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 			EmbeddedTitle: at.EmbeddedTitle,
 			Language:      at.Language,
 			Codec:         at.Codec,
+			Profile:       at.Profile,
 			Layout:        at.Layout,
 			Channels:      at.Channels,
 			Bitrate:       at.Bitrate,
