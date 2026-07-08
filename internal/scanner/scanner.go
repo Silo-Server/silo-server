@@ -64,11 +64,17 @@ var ignoredMovieSupplementalDirNames = map[string]bool{
 // extrasDirKinds classifies supplemental directory names (normalized via
 // normalizeScannerDirLabel) into the shared extra-kind vocabulary. The set
 // mirrors the Jellyfin/Plex extras folder convention.
+//
+// Deliberately absent: the generic labels "other"/"others". They are not part
+// of the Jellyfin/Plex convention and collide with real content-scope folder
+// names — a library organized as "movies/other/<Movie>/<file>" would see every
+// title two levels under "other" misclassified as an extra, dropped from
+// primary matching, and deferred every scan (parent unresolvable). The
+// ExtraKindOther *kind* is still reachable via genuine convention labels below
+// (extra/extras/interviews/scenes/shorts).
 var extrasDirKinds = map[string]models.ExtraKind{
 	"extra":             models.ExtraKindOther,
 	"extras":            models.ExtraKindOther,
-	"other":             models.ExtraKindOther,
-	"others":            models.ExtraKindOther,
 	"featurette":        models.ExtraKindFeaturette,
 	"featurettes":       models.ExtraKindFeaturette,
 	"behind the scenes": models.ExtraKindBehindTheScenes,

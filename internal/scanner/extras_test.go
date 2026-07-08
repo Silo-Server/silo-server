@@ -25,6 +25,12 @@ func TestClassifyExtraPathMovieLibrary(t *testing.T) {
 		// Ancestor lookup is depth-bounded: a library living under a dir
 		// named "Extras" must not classify everything.
 		{"/data/Extras/Movies/Heat (1995)/Heat (1995).mkv", "", "", false},
+		// A content-scope folder literally named "other"/"others" is NOT an
+		// extras dir: titles organized beneath it stay primary content and must
+		// not be misclassified as extras (regression for the /movies/other
+		// re-probe/defer storm).
+		{"/movies/other/Heat (1995)/Heat (1995).mkv", "", "", false},
+		{"/movies/others/Heat (1995)/Heat (1995).mkv", "", "", false},
 	}
 	for _, tc := range cases {
 		candidate, ok := classifyExtraPath(tc.path, "movies")
