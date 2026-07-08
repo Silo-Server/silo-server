@@ -1837,14 +1837,11 @@ func main() {
 	// the artwork reconcile task. S3 is optional — pass a nil AssetStore (not
 	// the typed-nil *s3client.Client) when it isn't configured so text branding
 	// still works without it.
-	var brandingSvc *branding.Service
-	if settingsRepo != nil {
-		var brandingStore branding.AssetStore
-		if deps.S3Public != nil {
-			brandingStore = deps.S3Public
-		}
-		brandingSvc = branding.NewService(settingsRepo, brandingStore)
+	var brandingStore branding.AssetStore
+	if deps.S3Public != nil {
+		brandingStore = deps.S3Public
 	}
+	brandingSvc := branding.NewService(settingsRepo, brandingStore)
 
 	// Wire up task manager for admin task API.
 	if needsWorkers && deps.DB != nil {
@@ -1925,7 +1922,7 @@ func main() {
 		if metadataImageCacheProcessor != nil {
 			taskMgr.Register(tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor))
 		}
-		if deps.S3Public != nil && settingsRepo != nil {
+		if deps.S3Public != nil {
 			identity := tasks.ArtworkStorageIdentity(cfg.S3.Public.Endpoint, cfg.S3.Public.Bucket, cfg.S3.Public.KeyPrefix)
 			// Seed the fingerprint on first boot so an unchanged storage
 			// identity never triggers a sweep. On the boot after a provider
@@ -2225,10 +2222,8 @@ func main() {
 
 	// Expose the branding service (constructed before the task manager) to the
 	// API and the frontend handler.
-	if brandingSvc != nil {
-		deps.BrandingService = brandingSvc
-		server.Branding = brandingSvc
-	}
+	deps.BrandingService = brandingSvc
+	server.Branding = brandingSvc
 
 	router := api.NewRouter(deps)
 

@@ -42,12 +42,13 @@ func (f *fakeReconcileRunner) Run(context.Context, func(float64, string)) (metad
 }
 
 type fakeBrandingReconciler struct {
+	checked int
 	cleared int
 	err     error
 }
 
-func (f *fakeBrandingReconciler) ReconcileMissingAssets(context.Context) (int, error) {
-	return f.cleared, f.err
+func (f *fakeBrandingReconciler) ReconcileMissingAssets(context.Context) (int, int, error) {
+	return f.checked, f.cleared, f.err
 }
 
 type fakeProgress struct {
@@ -131,10 +132,28 @@ func TestReconcileArtworkCacheExecutePersistsFingerprintOnlyOnSuccess(t *testing
 	}
 }
 
+func TestReconcileArtworkCacheExecuteDoesNotCertifyOnSweepErrors(t *testing.T) {
+	// Rows skipped on storage errors were never verified, so the sweep did
+	// not fully cover the catalog: the fingerprint must stay stale so the
+	// next startup retries.
+	store := &fakeSettingsStore{values: map[string]string{ArtworkStorageIdentityKey: "old"}}
+	runner := &fakeReconcileRunner{stats: metadata.ArtworkReconcileStats{
+		Mode: "verify", Verified: 10, Errors: 3, SweepErrors: 3,
+	}}
+	branding := &fakeBrandingReconciler{checked: 4}
+	task := NewReconcileArtworkCacheTask(runner, store, branding, "new")
+	if err := task.Execute(context.Background(), &fakeProgress{}); err == nil {
+		t.Fatal("Execute with sweep errors returned nil error")
+	}
+	if got := store.values[ArtworkStorageIdentityKey]; got != "old" {
+		t.Fatalf("fingerprint after sweep errors = %q, want unchanged %q", got, "old")
+	}
+}
+
 func TestReconcileArtworkCacheExecuteIncludesBranding(t *testing.T) {
 	store := &fakeSettingsStore{values: map[string]string{}}
 	runner := &fakeReconcileRunner{stats: metadata.ArtworkReconcileStats{Mode: "verify", Cleared: 1}}
-	task := NewReconcileArtworkCacheTask(runner, store, &fakeBrandingReconciler{cleared: 2}, "id")
+	task := NewReconcileArtworkCacheTask(runner, store, &fakeBrandingReconciler{checked: 4, cleared: 2}, "id")
 	progress := &fakeProgress{}
 	if err := task.Execute(context.Background(), progress); err != nil {
 		t.Fatalf("Execute = %v, want nil", err)
@@ -145,6 +164,9 @@ func TestReconcileArtworkCacheExecuteIncludesBranding(t *testing.T) {
 	}
 	if stats.Cleared != 3 {
 		t.Fatalf("Cleared = %d, want 3 (1 artwork + 2 branding)", stats.Cleared)
+	}
+	if stats.Checked != 4 {
+		t.Fatalf("Checked = %d, want 4 (all probed branding assets, not just cleared ones)", stats.Checked)
 	}
 
 	// A branding failure must NOT discard the completed sweep: the

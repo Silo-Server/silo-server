@@ -100,7 +100,12 @@ at all". Because the DB stores the full key of the `original` variant (e.g.
 `tmdb/movies/550/poster/original.webp`), the stored path is exactly the key to check —
 no guessing. Progress-denominator `count(*)` queries run only in verify mode; bulk
 mode reports `RowsAffected` and never pays for counts. Probe errors are reported but
-tracked against a separate baseline so they cannot consume the sweep's error budget.
+tracked separately (`sweep_errors` vs `errors`) so they cannot consume the sweep's
+error budget. Two reliability guards protect bulk mode from a degraded probe: a run
+aborts outright when more than half the probe requests error (an outage is not a
+miss), and bulk reset requires a minimum number of *successful* samples
+(`artworkReconcileBulkMinSample`) — a probe thinned out by transport errors takes the
+safe per-row path instead.
 
 - **≥95% missing** → "bulk reset" mode: skip per-row verification and reset all cached
   rows by SQL alone (the data plainly was not migrated). The threshold is not 100% so a
@@ -112,7 +117,8 @@ tracked against a separate baseline so they cannot consume the sweep's error bud
 ### Phase 2 — sweep and reset
 
 Iterate every surface that stores cached public-bucket keys, in batches with keyset
-pagination and a bounded HEAD concurrency (e.g. 32 in flight), reporting progress
+pagination and a bounded HEAD concurrency (`artworkReconcileHeadWorkers`, 16 in
+flight, each attempt under its own timeout), reporting progress
 through the task's `ProgressReporter`:
 
 | Surface | Cached columns | Recovery when object is missing |
@@ -158,7 +164,10 @@ uploaded.
 
 ### Phase 4 — report and finalize
 
-- Update the fingerprint row to the new identity.
+- Update the fingerprint row to the new identity — but only when the sweep completed
+  with zero sweep errors. Skipped-on-error rows were never verified, so a run with
+  sweep errors reports its partial results (applied resets are durable) and leaves
+  the fingerprint stale for the next startup to retry.
 - Task completion message: verified / re-queued / cleared counts, plus structured
   result data (JSON) persisted with the execution record for the Tasks UI.
 - No durable inbox notification: the notifications system has no free-form admin

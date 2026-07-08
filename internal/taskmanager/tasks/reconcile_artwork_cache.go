@@ -52,7 +52,7 @@ type ArtworkReconcileRunner interface {
 // missing. Satisfied by *branding.Service; may be nil when branding has no
 // storage.
 type BrandingAssetReconciler interface {
-	ReconcileMissingAssets(ctx context.Context) (cleared int, err error)
+	ReconcileMissingAssets(ctx context.Context) (checked, cleared int, err error)
 }
 
 // ReconcileArtworkCacheTask verifies cached artwork against the currently
@@ -130,19 +130,31 @@ func (t *ReconcileArtworkCacheTask) Execute(ctx context.Context, progress taskma
 		return fmt.Errorf("reconciling artwork cache: %w", err)
 	}
 
-	// Only a completed sweep certifies the current storage; an aborted one
-	// leaves the old fingerprint so the next startup retries. Certify before
-	// the branding check: a transient failure on that 4-object pass must not
-	// discard a completed catalog sweep and force it to repeat every boot.
+	// Only a clean, completed sweep certifies the current storage. Sweep
+	// errors mean rows were skipped unverified, so the fingerprint stays
+	// stale and the next startup retries; resets already applied this run
+	// are durable either way.
+	if stats.SweepErrors > 0 {
+		if data, marshalErr := json.Marshal(stats); marshalErr == nil {
+			progress.SetResultData(data)
+		}
+		return fmt.Errorf(
+			"artwork reconcile: %d rows skipped on storage errors (verified %d, re-queued %d, cleared %d); storage identity left uncertified so the next startup retries",
+			stats.SweepErrors, stats.Verified, stats.Requeued, stats.Cleared,
+		)
+	}
+	// Certify before the branding check: a transient failure on that
+	// 4-object pass must not discard a completed catalog sweep and force it
+	// to repeat every boot.
 	if setErr := t.settings.Set(ctx, ArtworkStorageIdentityKey, t.identity); setErr != nil {
 		return fmt.Errorf("persisting artwork storage identity: %w", setErr)
 	}
 
 	brandingNote := ""
 	if t.branding != nil {
-		brandingCleared, brandingErr := t.branding.ReconcileMissingAssets(ctx)
+		brandingChecked, brandingCleared, brandingErr := t.branding.ReconcileMissingAssets(ctx)
 		stats.Cleared += brandingCleared
-		stats.Checked += brandingCleared
+		stats.Checked += brandingChecked
 		if brandingErr != nil {
 			stats.Errors++
 			brandingNote = fmt.Sprintf("; branding asset check failed: %v (re-run the task to retry)", brandingErr)
@@ -165,7 +177,9 @@ func (t *ReconcileArtworkCacheTask) Execute(ctx context.Context, progress taskma
 		)
 	}
 	if stats.Errors > 0 {
-		message += fmt.Sprintf(", %d rows skipped on storage errors", stats.Errors)
+		// SweepErrors is zero here (checked above), so these are probe or
+		// branding errors — reported, but they don't reduce sweep coverage.
+		message += fmt.Sprintf(", %d storage errors during probing", stats.Errors)
 	}
 	progress.Report(100, message+brandingNote)
 	return nil

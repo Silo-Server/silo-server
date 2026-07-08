@@ -28,11 +28,18 @@ const (
 	artworkReconcileSampleTarget = 200
 	artworkReconcileBatchSize    = 500
 	artworkReconcileHeadWorkers  = 16
+	artworkReconcileHeadTimeout  = 15 * time.Second
 	artworkReconcileErrorBudget  = 200
 	// artworkReconcileBulkThreshold: when at least this fraction of sampled
 	// objects is missing, skip per-row verification for the large regenerable
 	// surfaces and reset every cached row.
 	artworkReconcileBulkThreshold = 0.95
+	// artworkReconcileBulkMinSample: bulk reset additionally requires this
+	// many *successful* probe samples. A probe degraded by transport errors
+	// (errored requests are excluded from the sample) must not bulk-reset the
+	// catalog off a handful of surviving 404s; small catalogs below this bar
+	// simply take the per-row verify path, which is cheap at that size.
+	artworkReconcileBulkMinSample = 25
 )
 
 // ArtworkReconcileStats summarizes one reconcile run.
@@ -45,6 +52,11 @@ type ArtworkReconcileStats struct {
 	Requeued      int    `json:"requeued"` // reset to provider source; re-cached by the image cache pipeline
 	Cleared       int    `json:"cleared"`  // no re-downloadable source; refilled by scans/enrichment or re-uploaded by an admin
 	Errors        int    `json:"errors"`
+	// SweepErrors is the subset of Errors from the sweep itself (skipped
+	// rows). Probe errors don't reduce sweep completeness — probed keys are
+	// re-checked by the sweep — so callers deciding whether the reconcile
+	// fully covered the catalog must look here, not at Errors.
+	SweepErrors int `json:"sweep_errors"`
 }
 
 // artworkSweepSurface describes one cached-path column the reconciler sweeps.
@@ -173,11 +185,6 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 		return stats, nil
 	}
 
-	// Probe errors are reported in stats but must not consume the sweep's
-	// error budget: a flaky-but-reachable probe would otherwise abort the
-	// sweep long before it saw its own 200 errors.
-	errorBase := stats.Errors
-
 	if shouldBulkReset(stats.Sampled, stats.SampleMissing) {
 		stats.Mode = "bulk_reset"
 		progress(5, fmt.Sprintf("Probe found %d/%d objects missing; resetting cached artwork", stats.SampleMissing, stats.Sampled))
@@ -187,7 +194,7 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 			if s.alwaysVerify {
 				// Small upload-holding tables: never blind-reset; a surviving
 				// upload's row is the last pointer to its object.
-				if err := r.sweepSurface(ctx, s, &stats, errorBase, func(done int) {
+				if err := r.sweepSurface(ctx, s, &stats, func(done int) {
 					progress(pct, fmt.Sprintf("Verifying %s (%d rows)", s.name, done))
 				}); err != nil {
 					return stats, err
@@ -240,14 +247,14 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 		if totals[i] == 0 {
 			continue
 		}
-		if err := r.sweepSurface(ctx, s, &stats, errorBase, report(s.name)); err != nil {
+		if err := r.sweepSurface(ctx, s, &stats, report(s.name)); err != nil {
 			return stats, err
 		}
 		done += totals[i]
 	}
 
 	if chapterTotal > 0 {
-		if err := r.sweepChapterThumbnails(ctx, &stats, errorBase, report("chapter thumbnails")); err != nil {
+		if err := r.sweepChapterThumbnails(ctx, &stats, report("chapter thumbnails")); err != nil {
 			return stats, err
 		}
 	}
@@ -258,9 +265,11 @@ func (r *ArtworkCacheReconciler) Run(ctx context.Context, progress func(percent 
 // verification. Probe HEADs are ground truth, so a near-total miss rate
 // means the bucket plainly does not hold the cache; the threshold is below
 // 1.0 only so a handful of coincidentally-present keys cannot force millions
-// of pointless per-row checks.
+// of pointless per-row checks. The minimum-sample bar keeps a probe thinned
+// out by transport errors (or a tiny catalog) on the safe per-row path.
 func shouldBulkReset(sampled, missing int) bool {
-	return sampled > 0 && float64(missing) >= artworkReconcileBulkThreshold*float64(sampled)
+	return sampled >= artworkReconcileBulkMinSample &&
+		float64(missing) >= artworkReconcileBulkThreshold*float64(sampled)
 }
 
 func (r *ArtworkCacheReconciler) countCached(ctx context.Context, s artworkSweepSurface) (int, error) {
@@ -314,8 +323,12 @@ func (r *ArtworkCacheReconciler) probe(ctx context.Context, surfaces []artworkSw
 	stats.Sampled = present + missing
 	stats.SampleMissing = missing
 	stats.Errors += errored
-	if errored == len(keys) {
-		return fmt.Errorf("artwork reconcile: object storage unreachable: all %d probe requests failed", errored)
+	// A probe that mostly errors is not a probe of the cache, it is a probe
+	// of an outage: errored requests are excluded from the sample, so acting
+	// on the survivors could bulk-reset the catalog off a handful of 404s.
+	// Abort and leave the fingerprint stale; the next startup retries.
+	if errored*2 > len(keys) {
+		return fmt.Errorf("artwork reconcile: object storage unreliable: %d/%d probe requests failed", errored, len(keys))
 	}
 	return nil
 }
@@ -383,7 +396,11 @@ func (r *ArtworkCacheReconciler) objectExistsWithRetry(ctx context.Context, buck
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		exists, err := r.s3.ObjectExists(ctx, bucket, key)
+		// Per-attempt deadline: a stalled HEAD must fail this attempt and
+		// move on, not hold the retry loop open until the run's context dies.
+		attemptCtx, cancel := context.WithTimeout(ctx, artworkReconcileHeadTimeout)
+		exists, err := r.s3.ObjectExists(attemptCtx, bucket, key)
+		cancel()
 		if err == nil {
 			return exists, nil
 		}
@@ -440,7 +457,7 @@ type sweptRow struct {
 	remoteSource bool
 }
 
-func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats, errorBase int, onProgress func(done int)) error {
+func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSweepSurface, stats *ArtworkReconcileStats, onProgress func(done int)) error {
 	var cursor []string
 	done := 0
 	for {
@@ -456,8 +473,8 @@ func (r *ArtworkCacheReconciler) sweepSurface(ctx context.Context, s artworkSwee
 		if err := r.verifyAndReset(ctx, s, rows, stats); err != nil {
 			return err
 		}
-		if stats.Errors-errorBase > artworkReconcileErrorBudget {
-			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.Errors-errorBase)
+		if stats.SweepErrors > artworkReconcileErrorBudget {
+			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.SweepErrors)
 		}
 		done += len(rows)
 		onProgress(done)
@@ -520,6 +537,7 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 		switch {
 		case v.err != nil:
 			stats.Errors++
+			stats.SweepErrors++
 			slog.Warn("artwork reconcile: object check failed; leaving row untouched",
 				"surface", s.name, "key", batch[i].path, "error", v.err)
 		case v.missing:
@@ -629,7 +647,7 @@ type chapterFileRow struct {
 	chapters []map[string]any
 }
 
-func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, stats *ArtworkReconcileStats, errorBase int, onProgress func(done int)) error {
+func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, stats *ArtworkReconcileStats, onProgress func(done int)) error {
 	cursor := int64(0)
 	done := 0
 	for {
@@ -662,8 +680,8 @@ func (r *ArtworkCacheReconciler) sweepChapterThumbnails(ctx context.Context, sta
 		if err := r.reconcileChapterBatch(ctx, batch, stats); err != nil {
 			return err
 		}
-		if stats.Errors-errorBase > artworkReconcileErrorBudget {
-			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.Errors-errorBase)
+		if stats.SweepErrors > artworkReconcileErrorBudget {
+			return fmt.Errorf("artwork reconcile: aborting after %d sweep storage errors (errored rows were left untouched)", stats.SweepErrors)
 		}
 		done += len(batch)
 		onProgress(done)
@@ -682,6 +700,7 @@ func (r *ArtworkCacheReconciler) reconcileChapterBatch(ctx context.Context, batc
 		f := &batch[fi]
 		if err := json.Unmarshal(f.raw, &f.chapters); err != nil {
 			stats.Errors++
+			stats.SweepErrors++
 			slog.Warn("artwork reconcile: unparseable chapters JSON; skipping file", "file_id", f.id, "error", err)
 			f.chapters = nil
 			continue
@@ -707,6 +726,7 @@ func (r *ArtworkCacheReconciler) reconcileChapterBatch(ctx context.Context, batc
 		switch {
 		case v.err != nil:
 			stats.Errors++
+			stats.SweepErrors++
 			slog.Warn("artwork reconcile: chapter thumbnail check failed; leaving chapter untouched",
 				"file_id", batch[ref.file].id, "key", keys[vi], "error", v.err)
 		case v.missing:

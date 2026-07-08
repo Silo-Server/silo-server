@@ -49,8 +49,14 @@ func TestShouldBulkReset(t *testing.T) {
 	if !shouldBulkReset(100, 95) {
 		t.Fatal("95% missing must trigger bulk reset")
 	}
-	if !shouldBulkReset(10, 10) {
-		t.Fatal("all-missing probe must trigger bulk reset")
+	// A probe thinned below the minimum successful-sample bar (transport
+	// errors, tiny catalog) must take the safe per-row path even at a 100%
+	// miss rate — a handful of surviving 404s is not a mandate to bulk-reset.
+	if shouldBulkReset(artworkReconcileBulkMinSample-1, artworkReconcileBulkMinSample-1) {
+		t.Fatal("below-minimum sample must not trigger bulk reset")
+	}
+	if !shouldBulkReset(artworkReconcileBulkMinSample, artworkReconcileBulkMinSample) {
+		t.Fatal("all-missing probe at the minimum sample size must trigger bulk reset")
 	}
 }
 
