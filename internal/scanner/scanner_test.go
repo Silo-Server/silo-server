@@ -152,6 +152,58 @@ func TestScanStateUpdateReasons_DetectsExternalSubtitleInventoryChange(t *testin
 	}
 }
 
+func TestIdentityOnlyUpdateReasons(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		reasons []string
+		want    bool
+	}{
+		{"empty", nil, false},
+		{"group only", []string{"group_assignment_changed"}, true},
+		{"root only", []string{"root_assignment_changed"}, true},
+		{"group and root", []string{"group_assignment_changed", "root_assignment_changed"}, true},
+		{"group plus mtime needs reprobe", []string{"group_assignment_changed", "mtime_changed"}, false},
+		{"probe repair needs reprobe", []string{"probe_repair"}, false},
+		{"size change needs reprobe", []string{"size_changed"}, false},
+		{"was missing needs reprobe", []string{"was_missing"}, false},
+		{"subtitle change is not identity-only", []string{"external_subtitle_changed"}, false},
+		{"group plus subtitle needs full path", []string{"group_assignment_changed", "external_subtitle_changed"}, false},
+	}
+	for _, tc := range cases {
+		if got := identityOnlyUpdateReasons(tc.reasons); got != tc.want {
+			t.Errorf("identityOnlyUpdateReasons(%#v) = %v, want %v", tc.reasons, got, tc.want)
+		}
+	}
+}
+
+func TestIdentityOnlyFastPathEligible(t *testing.T) {
+	t.Parallel()
+
+	identityReasons := []string{"group_assignment_changed"}
+	cases := []struct {
+		name     string
+		existing scanStateFile
+		reasons  []string
+		want     bool
+	}{
+		{"probed primary row", scanStateFile{FileHash: "abc"}, identityReasons, true},
+		{"non-identity reasons need full path", scanStateFile{FileHash: "abc"}, []string{"size_changed"}, false},
+		// A row still linked as an extra is being reclassified as primary;
+		// only the full upsert clears extra_id so matching can pick it up.
+		{"former extra needs full path", scanStateFile{ExtraID: "extra-1", FileHash: "abc"}, identityReasons, false},
+		// A hash-less row needs the full path once to backfill OSHash and the
+		// hash-keyed S3 markers.
+		{"missing hash needs full path", scanStateFile{}, identityReasons, false},
+	}
+	for _, tc := range cases {
+		if got := identityOnlyFastPathEligible(&tc.existing, tc.reasons); got != tc.want {
+			t.Errorf("%s: identityOnlyFastPathEligible = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func testStringSliceContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
