@@ -1002,6 +1002,85 @@ func (r *FileRepository) Upsert(ctx context.Context, mf models.MediaFile) (*mode
 	return scanMediaFile(row)
 }
 
+// UpdateIdentity rewrites only the derived root/group/identity and
+// edition/presentation columns of an existing media_files row. Probe data,
+// file bytes/mtime/hash, subtitles, chapters, markers, and content/episode/
+// extra linkage are left untouched. It backs the scanner's metadata-only
+// update path: an identity or content-group-key reclassification must persist
+// the new grouping without re-running (or disturbing) ffprobe. Column handling
+// mirrors Upsert's ON CONFLICT assignments for the same columns so the two
+// paths converge on identical values.
+func (r *FileRepository) UpdateIdentity(ctx context.Context, mf models.MediaFile) (*models.MediaFile, error) {
+	groupKeyVersion := mf.GroupKeyVersion
+	if groupKeyVersion == 0 {
+		groupKeyVersion = 1
+	}
+	identityConfidence := mf.IdentityConfidence
+	if identityConfidence == "" {
+		identityConfidence = "low"
+	}
+	identityJSON := mf.IdentityJSON
+	if len(identityJSON) == 0 {
+		identityJSON = []byte("{}")
+	}
+	var editionConfidence *float64
+	if mf.EditionConfidence != nil {
+		editionConfidence = mf.EditionConfidence
+	}
+
+	query := `UPDATE media_files SET
+		canonical_root_path = $2,
+		observed_root_path = $3,
+		content_group_key = $4,
+		group_key_version = $5,
+		base_title = $6,
+		base_year = $7,
+		base_type = $8,
+		identity_confidence = $9,
+		identity_json = $10,
+		season_number = COALESCE($11, season_number),
+		episode_number = COALESCE($12, episode_number),
+		edition_raw = $13,
+		edition_key = $14,
+		edition_confidence = $15,
+		edition_source = $16,
+		presentation_kind = $17,
+		presentation_group_key = $18,
+		presentation_part_index = $19,
+		presentation_part_total = $20,
+		multi_episode_start = $21,
+		multi_episode_end = $22,
+		updated_at = NOW()
+	WHERE file_path = $1
+	RETURNING ` + fileColumns
+
+	row := r.pool.QueryRow(ctx, query,
+		mf.FilePath,
+		mf.CanonicalRootPath,
+		mf.ObservedRootPath,
+		mf.ContentGroupKey,
+		groupKeyVersion,
+		mf.BaseTitle,
+		mf.BaseYear,
+		mf.BaseType,
+		identityConfidence,
+		identityJSON,
+		nilIfZero(mf.SeasonNumber),
+		nilIfZero(mf.EpisodeNumber),
+		mf.EditionRaw,
+		mf.EditionKey,
+		editionConfidence,
+		mf.EditionSource,
+		mf.PresentationKind,
+		mf.PresentationGroupKey,
+		nilIfZero(mf.PresentationPartIndex),
+		nilIfZero(mf.PresentationPartTotal),
+		nilIfZero(mf.MultiEpisodeStart),
+		nilIfZero(mf.MultiEpisodeEnd),
+	)
+	return scanMediaFile(row)
+}
+
 type ChapterThumbnailFailureState struct {
 	Apply        bool
 	RetryAfter   *time.Time

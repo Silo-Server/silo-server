@@ -1899,6 +1899,30 @@ func (s *Scanner) processFile(
 		if len(updateReasons) == 0 {
 			return actionUnchanged, nil, nil
 		}
+
+		// Metadata-only fast path: when the only thing that changed is the
+		// derived identity/grouping (root or content-group-key reassignment),
+		// the media bytes are untouched and existing probe data is still valid.
+		// Rewrite just the identity columns in place — no ffprobe, no OSHash,
+		// no probe-column churn. This decouples identity/grouping-scheme changes
+		// from probing: a library-wide group-key scheme bump (see #319) converges
+		// the stored keys on the next scan without a full-library ffprobe storm.
+		if identityOnlyUpdateReasons(updateReasons) {
+			mf := models.MediaFile{
+				MediaFolderID: folder.ID,
+				FilePath:      filePath,
+			}
+			populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
+			updated, updErr := s.fileRepo.UpdateIdentity(ctx, mf)
+			if updErr != nil {
+				return 0, nil, fmt.Errorf("updating identity for file %s: %w", filePath, updErr)
+			}
+			if err := s.enqueueMetadataWork(ctx, folder, updated); err != nil {
+				return 0, nil, fmt.Errorf("enqueueing metadata work for file %s: %w", filePath, err)
+			}
+			return actionUpdated, updateReasons, nil
+		}
+
 		action := actionUpdated
 		// Gather hints (OSHash only).
 		hints := s.gatherHints(filePath)
@@ -1925,49 +1949,7 @@ func (s *Scanner) processFile(
 			FileModifiedAt: &fileModifiedAt,
 			FileHash:       fileHash,
 		}
-		if assignment.RootPath != "" {
-			mf.CanonicalRootPath = filepath.Clean(assignment.RootPath)
-		} else if root, ok := naming.DetectCanonicalRoot(filePath, folder.Type); ok {
-			mf.CanonicalRootPath = filepath.Clean(root.RootPath)
-		}
-		mf.ObservedRootPath = filepath.Clean(groupAssignment.ObservedRootPath)
-		mf.ContentGroupKey = groupAssignment.ContentGroupKey
-		mf.GroupKeyVersion = groupAssignment.GroupKeyVersion
-		mf.BaseTitle = groupAssignment.BaseTitle
-		mf.BaseYear = groupAssignment.BaseYear
-		mf.BaseType = groupAssignment.BaseType
-		mf.IdentityConfidence = groupAssignment.Confidence
-		mf.IdentityJSON = append([]byte(nil), groupAssignment.EvidenceJSON...)
-		if filenameHints := naming.ParseFilename(filePath, folder.Type); filenameHints != nil &&
-			filenameHints.Type == "series" && filenameHints.EpisodeNum > 0 {
-			mf.SeasonNumber = filenameHints.SeasonNum
-			mf.EpisodeNumber = filenameHints.EpisodeNum
-		}
-		variantHints := naming.ParseVariantHints(filePath, folder.Type)
-		if existing != nil && existing.EditionSource == "import" && existing.EditionKey != "" {
-			variantHints = &naming.VariantHints{
-				EditionRaw:            existing.EditionRaw,
-				EditionKey:            existing.EditionKey,
-				EditionSource:         existing.EditionSource,
-				EditionConfidence:     existing.EditionConfidence,
-				PresentationKind:      existing.PresentationKind,
-				PresentationGroupKey:  existing.PresentationGroupKey,
-				PresentationPartIndex: existing.PresentationPartIndex,
-				MultiEpisodeStart:     existing.MultiEpisodeStart,
-				MultiEpisodeEnd:       existing.MultiEpisodeEnd,
-			}
-		}
-		if variantHints != nil {
-			mf.EditionRaw = variantHints.EditionRaw
-			mf.EditionKey = variantHints.EditionKey
-			mf.EditionConfidence = variantHints.EditionConfidence
-			mf.EditionSource = variantHints.EditionSource
-			mf.PresentationKind = variantHints.PresentationKind
-			mf.PresentationGroupKey = variantHints.PresentationGroupKey
-			mf.PresentationPartIndex = variantHints.PresentationPartIndex
-			mf.MultiEpisodeStart = variantHints.MultiEpisodeStart
-			mf.MultiEpisodeEnd = variantHints.MultiEpisodeEnd
-		}
+		populateScanIdentity(&mf, filePath, folder.Type, assignment, groupAssignment, existing)
 
 		// Apply probe data if available.
 		if probe != nil {
@@ -2141,6 +2123,83 @@ func (s *Scanner) processFile(
 	}
 
 	return action, nil, nil
+}
+
+// populateScanIdentity fills mf's derived root/group/identity and
+// edition/presentation columns from freshly inferred scan assignments. Every
+// field it sets is derived from the file's path and sibling layout — never from
+// ffprobe — so the full update path and the metadata-only update path share it.
+func populateScanIdentity(
+	mf *models.MediaFile,
+	filePath string,
+	folderType string,
+	assignment fileRootAssignment,
+	groupAssignment fileGroupAssignment,
+	existing *scanStateFile,
+) {
+	if assignment.RootPath != "" {
+		mf.CanonicalRootPath = filepath.Clean(assignment.RootPath)
+	} else if root, ok := naming.DetectCanonicalRoot(filePath, folderType); ok {
+		mf.CanonicalRootPath = filepath.Clean(root.RootPath)
+	}
+	mf.ObservedRootPath = filepath.Clean(groupAssignment.ObservedRootPath)
+	mf.ContentGroupKey = groupAssignment.ContentGroupKey
+	mf.GroupKeyVersion = groupAssignment.GroupKeyVersion
+	mf.BaseTitle = groupAssignment.BaseTitle
+	mf.BaseYear = groupAssignment.BaseYear
+	mf.BaseType = groupAssignment.BaseType
+	mf.IdentityConfidence = groupAssignment.Confidence
+	mf.IdentityJSON = append([]byte(nil), groupAssignment.EvidenceJSON...)
+	if filenameHints := naming.ParseFilename(filePath, folderType); filenameHints != nil &&
+		filenameHints.Type == "series" && filenameHints.EpisodeNum > 0 {
+		mf.SeasonNumber = filenameHints.SeasonNum
+		mf.EpisodeNumber = filenameHints.EpisodeNum
+	}
+	variantHints := naming.ParseVariantHints(filePath, folderType)
+	if existing != nil && existing.EditionSource == "import" && existing.EditionKey != "" {
+		variantHints = &naming.VariantHints{
+			EditionRaw:            existing.EditionRaw,
+			EditionKey:            existing.EditionKey,
+			EditionSource:         existing.EditionSource,
+			EditionConfidence:     existing.EditionConfidence,
+			PresentationKind:      existing.PresentationKind,
+			PresentationGroupKey:  existing.PresentationGroupKey,
+			PresentationPartIndex: existing.PresentationPartIndex,
+			MultiEpisodeStart:     existing.MultiEpisodeStart,
+			MultiEpisodeEnd:       existing.MultiEpisodeEnd,
+		}
+	}
+	if variantHints != nil {
+		mf.EditionRaw = variantHints.EditionRaw
+		mf.EditionKey = variantHints.EditionKey
+		mf.EditionConfidence = variantHints.EditionConfidence
+		mf.EditionSource = variantHints.EditionSource
+		mf.PresentationKind = variantHints.PresentationKind
+		mf.PresentationGroupKey = variantHints.PresentationGroupKey
+		mf.PresentationPartIndex = variantHints.PresentationPartIndex
+		mf.MultiEpisodeStart = variantHints.MultiEpisodeStart
+		mf.MultiEpisodeEnd = variantHints.MultiEpisodeEnd
+	}
+}
+
+// identityOnlyUpdateReasons reports whether every update reason is a pure
+// identity/grouping reclassification (root or content-group-key reassignment)
+// that can be persisted without re-probing the media bytes. Any other reason —
+// size/mtime change, a reappeared file, missing-probe repair, or a subtitle
+// sidecar change — needs the full update path that re-reads the file. Returns
+// false for an empty slice (nothing to update).
+func identityOnlyUpdateReasons(reasons []string) bool {
+	if len(reasons) == 0 {
+		return false
+	}
+	for _, reason := range reasons {
+		switch reason {
+		case "group_assignment_changed", "root_assignment_changed":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func scanStateUpdateReasons(

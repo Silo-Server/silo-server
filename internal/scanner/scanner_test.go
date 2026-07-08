@@ -152,6 +152,32 @@ func TestScanStateUpdateReasons_DetectsExternalSubtitleInventoryChange(t *testin
 	}
 }
 
+func TestIdentityOnlyUpdateReasons(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		reasons []string
+		want    bool
+	}{
+		{"empty", nil, false},
+		{"group only", []string{"group_assignment_changed"}, true},
+		{"root only", []string{"root_assignment_changed"}, true},
+		{"group and root", []string{"group_assignment_changed", "root_assignment_changed"}, true},
+		{"group plus mtime needs reprobe", []string{"group_assignment_changed", "mtime_changed"}, false},
+		{"probe repair needs reprobe", []string{"probe_repair"}, false},
+		{"size change needs reprobe", []string{"size_changed"}, false},
+		{"was missing needs reprobe", []string{"was_missing"}, false},
+		{"subtitle change is not identity-only", []string{"external_subtitle_changed"}, false},
+		{"group plus subtitle needs full path", []string{"group_assignment_changed", "external_subtitle_changed"}, false},
+	}
+	for _, tc := range cases {
+		if got := identityOnlyUpdateReasons(tc.reasons); got != tc.want {
+			t.Errorf("identityOnlyUpdateReasons(%#v) = %v, want %v", tc.reasons, got, tc.want)
+		}
+	}
+}
+
 func testStringSliceContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
