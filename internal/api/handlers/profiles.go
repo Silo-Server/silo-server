@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -207,6 +208,25 @@ func writeProfileManagementPermissionError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check profile permissions")
 }
 
+// profileNameConflicts reports whether a profile other than excludeID already
+// uses name within this account's store, comparing the trimmed forms
+// case-insensitively so "Laura" and " laura " count as the same household
+// member. Scoping is per account by construction: callers pass the profile
+// list of a single user's store, so another account's profiles can never
+// conflict.
+func profileNameConflicts(profiles []userstore.Profile, name, excludeID string) bool {
+	trimmed := strings.TrimSpace(name)
+	for _, p := range profiles {
+		if p.ID == excludeID {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(p.Name), trimmed) {
+			return true
+		}
+	}
+	return false
+}
+
 // isAllowedSelfServiceProfileUpdate reports whether a non-admin update request
 // only touches fields the user is allowed to change on their own profiles.
 // Admin-only fields (access policy: library restrictions, content rating,
@@ -266,7 +286,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if req.Name == "" {
+	if strings.TrimSpace(req.Name) == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "Profile name is required")
 		return
 	}
@@ -338,6 +358,16 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 			)
 			return
 		}
+	}
+
+	if profileNameConflicts(existingProfiles, req.Name, "") {
+		writeError(
+			w,
+			http.StatusConflict,
+			"name_conflict",
+			"A profile with this name already exists",
+		)
+		return
 	}
 
 	showForcedSubtitles := true
@@ -491,6 +521,27 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 				http.StatusForbidden,
 				"forbidden",
 				"Profile access settings require the primary profile or admin access",
+			)
+			return
+		}
+	}
+
+	if req.Name != nil {
+		if strings.TrimSpace(*req.Name) == "" {
+			writeError(w, http.StatusBadRequest, "bad_request", "Profile name is required")
+			return
+		}
+		existingProfiles, err := store.ListProfiles(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list profiles")
+			return
+		}
+		if profileNameConflicts(existingProfiles, *req.Name, profileID) {
+			writeError(
+				w,
+				http.StatusConflict,
+				"name_conflict",
+				"A profile with this name already exists",
 			)
 			return
 		}
