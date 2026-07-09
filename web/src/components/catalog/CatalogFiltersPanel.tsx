@@ -8,7 +8,10 @@ import {
 } from "@/components/collections/CollectionGuidedRulesEditor";
 import { useCatalogFilters } from "@/hooks/queries/catalog";
 import type { QuerySortRelevanceScope } from "@/lib/querySortOptions";
-import type { CatalogSearchState } from "@/pages/catalogSearchParams";
+import {
+  catalogSourceSupportsSourceOrder,
+  type CatalogSearchState,
+} from "@/pages/catalogSearchParams";
 
 import ActiveFilterBadges from "./ActiveFilterBadges";
 import CatalogFilterBar, { CATALOG_SOURCE_ORDER_SORT_FIELD } from "./CatalogFilterBar";
@@ -48,7 +51,8 @@ export default function CatalogFiltersPanel({
   const isLocked = state.source === "section";
   const isCollectionSource =
     state.source === "library_collection" || state.source === "user_collection";
-  const usesSourceOrder = isCollectionSource && state.uses_source_order;
+  const supportsSourceOrder = catalogSourceSupportsSourceOrder(state.source);
+  const usesSourceOrder = supportsSourceOrder && state.uses_source_order;
 
   const qd = state.query_definition ?? createEmptyQueryDefinition();
   const guidedState = useMemo(() => queryDefinitionToGuidedState(qd), [qd]);
@@ -81,7 +85,7 @@ export default function CatalogFiltersPanel({
   function update(patch: Partial<GuidedFormState>) {
     const next = { ...toolbarGuidedState, ...patch };
     const nextUsesSourceOrder =
-      isCollectionSource && next.sortField === CATALOG_SOURCE_ORDER_SORT_FIELD;
+      supportsSourceOrder && next.sortField === CATALOG_SOURCE_ORDER_SORT_FIELD;
     const nextForQuery = nextUsesSourceOrder
       ? { ...next, sortField: guidedState.sortField, sortOrder: guidedState.sortOrder }
       : next;
@@ -105,7 +109,9 @@ export default function CatalogFiltersPanel({
         sortRelevanceScope={sortRelevanceScope}
         resultCountLabel={resultCountLabel}
         resultCountLoading={resultCountLoading}
-        sourceOrderLabel={isCollectionSource ? "Collection Order" : undefined}
+        sourceOrderLabel={
+          isCollectionSource ? "Collection Order" : supportsSourceOrder ? "List Order" : undefined
+        }
         allowEpisodeMediaScope={!isCollectionSource}
       />
 

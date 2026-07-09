@@ -114,7 +114,7 @@ func (s *Service) GetConnectionStatus(ctx context.Context, userID int, profileID
 		ImportWatchlistEnabled:       true,
 		ExportWatchlistEnabled:       true,
 		SyncWatchlistRemovalsEnabled: false,
-		SyncWatchlistOrderEnabled:    false,
+		SyncWatchlistOrderEnabled:    true,
 		ScrobbleEnabled:              true,
 	}
 	if connected {
@@ -550,14 +550,15 @@ func (s *Service) persistConnection(
 		// opt-in. Toggles a provider can't serve are skipped at sync time via
 		// the capability check, so enabling them here is harmless.
 		conn = Connection{
-			ImportWatchedEnabled:   true,
-			ImportProgressEnabled:  true,
-			ExportWatchedEnabled:   true,
-			ImportFavoritesEnabled: true,
-			ExportFavoritesEnabled: true,
-			ImportWatchlistEnabled: true,
-			ExportWatchlistEnabled: true,
-			ScrobbleEnabled:        true,
+			ImportWatchedEnabled:      true,
+			ImportProgressEnabled:     true,
+			ExportWatchedEnabled:      true,
+			ImportFavoritesEnabled:    true,
+			ExportFavoritesEnabled:    true,
+			ImportWatchlistEnabled:    true,
+			ExportWatchlistEnabled:    true,
+			SyncWatchlistOrderEnabled: true,
+			ScrobbleEnabled:           true,
 		}
 	}
 	conn.Provider = providerKey

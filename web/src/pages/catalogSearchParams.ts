@@ -67,6 +67,13 @@ function isCollectionSource(source: CatalogSource): boolean {
   return source === "library_collection" || source === "user_collection";
 }
 
+// Sources whose default ordering is the stored list order rather than a sort
+// field. The watchlist's stored order can mirror a watch provider's list
+// order (e.g. MDBList) via sort_index.
+export function catalogSourceSupportsSourceOrder(source: CatalogSource): boolean {
+  return isCollectionSource(source) || source === "watchlist";
+}
+
 export function catalogSourceAllowsOverlay(source: CatalogSource): boolean {
   return overlaySources.has(source);
 }
@@ -164,7 +171,7 @@ export function parseCatalogSearchParams(searchParams: URLSearchParams): Catalog
         : undefined,
     limit: queryLimit,
   });
-  baseState.uses_source_order = isCollectionSource(source) && !hasExplicitSort;
+  baseState.uses_source_order = catalogSourceSupportsSourceOrder(source) && !hasExplicitSort;
 
   return baseState;
 }
@@ -185,6 +192,7 @@ export function buildQueryCatalogHref(q?: string): string {
 export function buildPersonalCatalogHref(source: "favorites" | "watchlist" | "history"): string {
   return buildCatalogHref({
     source,
+    uses_source_order: catalogSourceSupportsSourceOrder(source),
     query_definition: createEmptyQueryDefinition(),
   });
 }
@@ -327,6 +335,9 @@ export function buildCatalogApiSearchParams(state: CatalogSearchState): URLSearc
     state.query_definition.sort.field &&
     (state.query_definition.sort.field !== "added_at" ||
       (state.source === "query" && effectiveLibraryID != null) ||
+      // Watchlist defaults to source order, so an explicit Date Added pick
+      // must be sent to distinguish it (the server maps it to list added-at).
+      state.source === "watchlist" ||
       state.source === "library_collection" ||
       state.source === "user_collection")
   ) {
