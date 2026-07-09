@@ -58,6 +58,7 @@ type MeilisearchProviderConfig struct {
 	MatchingStrategy string
 	IndexTypes       []string
 	SemanticEnabled  bool
+	BinaryQuantized  bool
 	SemanticRatio    float64
 	Embedder         string
 	Vectorizer       CatalogSearchQueryVectorizer
@@ -173,7 +174,7 @@ func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearc
 	if strings.TrimSpace(state.ActiveIndexUID) == "" {
 		return p.fallbackSearch(ctx, req, "meilisearch index has not been built")
 	}
-	if state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(p.config.Embedder, p.config.IndexTypes, p.config.SemanticEnabled) {
+	if state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(p.config.Embedder, p.config.IndexTypes, p.config.SemanticEnabled, p.config.BinaryQuantized) {
 		return p.fallbackSearch(ctx, req, "meilisearch index schema mismatch")
 	}
 
@@ -591,6 +592,7 @@ func (p *MeilisearchSearchProvider) Status() CatalogSearchMeiliStatus {
 		MatchingStrategy: p.config.MatchingStrategy,
 		IndexTypes:       p.config.IndexTypes,
 		SemanticEnabled:  p.config.SemanticEnabled,
+		BinaryQuantized:  p.config.BinaryQuantized,
 		SemanticRatio:    p.config.SemanticRatio,
 		Embedder:         p.config.Embedder,
 	}

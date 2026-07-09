@@ -89,7 +89,7 @@ func (i *CatalogSearchIndexer) ShouldSyncRun(ctx context.Context) (bool, error) 
 	if err != nil {
 		return false, err
 	}
-	if state.ActiveIndexUID == "" || state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled) {
+	if state.ActiveIndexUID == "" || state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized) {
 		return false, nil
 	}
 	pending, err := i.events.PendingCount(ctx, SearchProviderMeilisearch)
@@ -131,7 +131,7 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 	if err != nil {
 		return stats, err
 	}
-	if state.ActiveIndexUID == "" || state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled) {
+	if state.ActiveIndexUID == "" || state.SchemaVersion != catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized) {
 		stats.Skipped = true
 		stats.Reason = "active search index is missing or stale; run rebuild_catalog_search_index"
 		setSearchIndexTaskResult(progress, stats)
@@ -166,7 +166,7 @@ func (i *CatalogSearchIndexer) SyncOutbox(ctx context.Context, progress SearchIn
 
 	upsertIDs, deleteIDs := coalesceSearchIndexEvents(events)
 	reportSearchIndexProgress(progress, 20, "Building changed catalog search documents")
-	docs, err := i.LoadDocumentsByIDs(ctx, upsertIDs, settings.IndexTypes, settings.Embedder, settings.SemanticEnabled)
+	docs, err := i.LoadDocumentsByIDs(ctx, upsertIDs, settings.IndexTypes, settings.Embedder, settings.SemanticEnabled, settings.BinaryQuantized)
 	if err != nil {
 		_ = i.events.MarkFailed(ctx, ids, err)
 		return stats, err
@@ -283,7 +283,7 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 	if err := client.WaitTask(ctx, taskID); err != nil {
 		return stats, err
 	}
-	taskID, err = client.UpdateSettings(ctx, buildIndexUID, catalogSearchMeilisearchSettings(settings.Embedder, settings.SemanticEnabled))
+	taskID, err = client.UpdateSettings(ctx, buildIndexUID, catalogSearchMeilisearchSettings(settings.Embedder, settings.SemanticEnabled, settings.BinaryQuantized))
 	if err != nil {
 		return stats, err
 	}
@@ -294,7 +294,7 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 	lastID := ""
 	queuedTasks := make([]queuedMeilisearchTask, 0, settings.RebuildQueueDepth)
 	for {
-		docs, err := i.LoadDocumentsAfter(ctx, lastID, settings.RebuildBatchSize, settings.IndexTypes, settings.Embedder, settings.SemanticEnabled)
+		docs, err := i.LoadDocumentsAfter(ctx, lastID, settings.RebuildBatchSize, settings.IndexTypes, settings.Embedder, settings.SemanticEnabled, settings.BinaryQuantized)
 		if err != nil {
 			return stats, err
 		}
@@ -339,7 +339,7 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 	// active index as idempotent upserts on the next sync. The reverse order
 	// would mark events processed while the old index is still active, losing
 	// those changes from the served index until the next rebuild.
-	if err := i.events.UpdateStateAfterRebuild(ctx, SearchProviderMeilisearch, buildIndexUID, catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled), docCount, rebuildEventHighWater); err != nil {
+	if err := i.events.UpdateStateAfterRebuild(ctx, SearchProviderMeilisearch, buildIndexUID, catalogSearchMeilisearchSchemaVersion(settings.Embedder, settings.IndexTypes, settings.SemanticEnabled, settings.BinaryQuantized), docCount, rebuildEventHighWater); err != nil {
 		return stats, err
 	}
 	if err := i.events.MarkProcessedThrough(ctx, SearchProviderMeilisearch, rebuildEventHighWater); err != nil {
@@ -532,7 +532,7 @@ func (i *CatalogSearchIndexer) CheckConnection(ctx context.Context, settings Cat
 	return client.Health(ctx)
 }
 
-func catalogSearchMeilisearchSettings(embedder string, semanticEnabled bool) map[string]any {
+func catalogSearchMeilisearchSettings(embedder string, semanticEnabled, binaryQuantized bool) map[string]any {
 	settings := map[string]any{
 		"displayedAttributes":  []string{"content_id", "type"},
 		"filterableAttributes": []string{"type"},
@@ -558,7 +558,7 @@ func catalogSearchMeilisearchSettings(embedder string, semanticEnabled bool) map
 		if err != nil {
 			embedder = DefaultMeilisearchEmbedder
 		}
-		settings["embedders"] = catalogSearchMeilisearchEmbedderSettings(embedder)
+		settings["embedders"] = catalogSearchMeilisearchEmbedderSettings(embedder, binaryQuantized)
 	}
 	return settings
 }
@@ -627,7 +627,7 @@ type catalogSearchDocument struct {
 	Vectors       map[string][]float32 `json:"_vectors,omitempty"`
 }
 
-func (i *CatalogSearchIndexer) LoadDocumentsAfter(ctx context.Context, afterContentID string, limit int, itemTypes []string, embedder string, semanticEnabled bool) ([]catalogSearchDocument, error) {
+func (i *CatalogSearchIndexer) LoadDocumentsAfter(ctx context.Context, afterContentID string, limit int, itemTypes []string, embedder string, semanticEnabled, binaryQuantized bool) ([]catalogSearchDocument, error) {
 	if i == nil || i.pool == nil || limit <= 0 {
 		return nil, nil
 	}
@@ -653,14 +653,14 @@ func (i *CatalogSearchIndexer) LoadDocumentsAfter(ctx context.Context, afterCont
 	if err != nil {
 		return nil, err
 	}
-	setCatalogSearchDocumentSchemaVersion(docs, catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, semanticEnabled))
+	setCatalogSearchDocumentSchemaVersion(docs, catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, semanticEnabled, binaryQuantized))
 	if err := i.attachDocumentVectors(ctx, docs, embedder, semanticEnabled); err != nil {
 		return nil, err
 	}
 	return docs, nil
 }
 
-func (i *CatalogSearchIndexer) LoadDocumentsByIDs(ctx context.Context, contentIDs []string, itemTypes []string, embedder string, semanticEnabled bool) ([]catalogSearchDocument, error) {
+func (i *CatalogSearchIndexer) LoadDocumentsByIDs(ctx context.Context, contentIDs []string, itemTypes []string, embedder string, semanticEnabled, binaryQuantized bool) ([]catalogSearchDocument, error) {
 	contentIDs = compactNonEmptyStrings(contentIDs)
 	if i == nil || i.pool == nil || len(contentIDs) == 0 {
 		return nil, nil
@@ -686,7 +686,7 @@ func (i *CatalogSearchIndexer) LoadDocumentsByIDs(ctx context.Context, contentID
 	if err != nil {
 		return nil, err
 	}
-	setCatalogSearchDocumentSchemaVersion(docs, catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, semanticEnabled))
+	setCatalogSearchDocumentSchemaVersion(docs, catalogSearchMeilisearchSchemaVersion(embedder, itemTypes, semanticEnabled, binaryQuantized))
 	if err := i.attachDocumentVectors(ctx, docs, embedder, semanticEnabled); err != nil {
 		return nil, err
 	}

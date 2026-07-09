@@ -128,7 +128,7 @@ func TestCatalogSearchDocumentVectorsUseEmbedderAndOptOutMissing(t *testing.T) {
 }
 
 func TestCatalogSearchMeilisearchSettingsOmitEmbeddersWhenSemanticDisabled(t *testing.T) {
-	settings := catalogSearchMeilisearchSettings("silo_recommendations", false)
+	settings := catalogSearchMeilisearchSettings("silo_recommendations", false, false)
 
 	if _, ok := settings["embedders"]; ok {
 		t.Fatalf("semantic-disabled settings should not include embedders: %#v", settings["embedders"])
@@ -139,7 +139,7 @@ func TestCatalogSearchMeilisearchSettingsOmitEmbeddersWhenSemanticDisabled(t *te
 }
 
 func TestCatalogSearchMeilisearchSettingsIncludeEmbeddersWhenSemanticEnabled(t *testing.T) {
-	settings := catalogSearchMeilisearchSettings("custom_embedder", true)
+	settings := catalogSearchMeilisearchSettings("custom_embedder", true, false)
 
 	embedders, ok := settings["embedders"].(map[string]any)
 	if !ok {
@@ -512,7 +512,7 @@ func TestMeilisearchProviderCachesIndexStateAcrossRequests(t *testing.T) {
 	store := &countingMeilisearchIndexStateStore{
 		state: SearchIndexState{
 			ActiveIndexUID: "search-index",
-			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false),
+			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false),
 		},
 		pending: 3,
 	}
@@ -557,7 +557,7 @@ func TestMeilisearchProviderInvalidatesStateCacheOnSearchFailure(t *testing.T) {
 	store := &countingMeilisearchIndexStateStore{
 		state: SearchIndexState{
 			ActiveIndexUID: "search-index",
-			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false),
+			SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false),
 		},
 	}
 	provider := &MeilisearchSearchProvider{
@@ -607,7 +607,7 @@ func TestMeilisearchProviderUsesActiveIndexWhenPendingUpdatesExist(t *testing.T)
 		stateRepo: fakeMeilisearchIndexStateStore{
 			state: SearchIndexState{
 				ActiveIndexUID: "search-index",
-				SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false),
+				SchemaVersion:  catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false),
 			},
 			pending: 7,
 		},
@@ -683,8 +683,8 @@ func TestNormalizeCatalogSearchIndexTypesValueFormatsCanonicalList(t *testing.T)
 }
 
 func TestMeilisearchSchemaVersionChangesWithEmbedder(t *testing.T) {
-	defaultVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false)
-	customVersion := catalogSearchMeilisearchSchemaVersion("custom_embedder", nil, false)
+	defaultVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
+	customVersion := catalogSearchMeilisearchSchemaVersion("custom_embedder", nil, false, false)
 	if defaultVersion == customVersion {
 		t.Fatal("schema version should change when embedder changes")
 	}
@@ -694,8 +694,8 @@ func TestMeilisearchSchemaVersionChangesWithEmbedder(t *testing.T) {
 }
 
 func TestMeilisearchSchemaVersionChangesWithIndexTypes(t *testing.T) {
-	allTypesVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false)
-	videoOnlyVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, []string{"movie", "series"}, false)
+	allTypesVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
+	videoOnlyVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, []string{"movie", "series"}, false, false)
 	if allTypesVersion == videoOnlyVersion {
 		t.Fatal("schema version should change when indexed media scope changes")
 	}
@@ -707,8 +707,8 @@ func TestMeilisearchSchemaVersionChangesWithSemanticEnabled(t *testing.T) {
 	// rebuild. Without this, enabling semantic without a rebuild leaves indexed
 	// documents missing _vectors while the Postgres coverage gate reports ready,
 	// silently degrading hybrid ranking.
-	disabledVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false)
-	enabledVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true)
+	disabledVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
+	enabledVersion := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true, false)
 	if disabledVersion == enabledVersion {
 		t.Fatal("schema version should change when semantic search is toggled")
 	}
@@ -759,4 +759,36 @@ type fakeModelVectorizer struct {
 
 func (f *fakeModelVectorizer) ActiveEmbeddingModel(_ context.Context) (string, error) {
 	return f.model, nil
+}
+
+func TestCatalogSearchMeilisearchSchemaVersionBinaryQuantized(t *testing.T) {
+	plain := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true, false)
+	quantized := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, true, true)
+	if plain == quantized {
+		t.Fatal("binary quantization must change the schema version")
+	}
+}
+
+func TestCatalogSearchMeilisearchSchemaVersionBinaryQuantizedIgnoredWhenSemanticDisabled(t *testing.T) {
+	// With semantic search off, the index carries no embedders (see
+	// catalogSearchMeilisearchSettings), so binary quantization has no on-index
+	// effect and must not shift the schema version — otherwise toggling it would
+	// force a pointless full rebuild of a vector-less index. It must also stay
+	// byte-identical to a pre-flag index so upgrades don't spuriously invalidate.
+	off := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
+	on := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, true)
+	if off != on {
+		t.Fatal("binary quantization must not change the schema version when semantic search is disabled")
+	}
+}
+
+func TestCatalogSearchMeilisearchEmbedderSettingsBinaryQuantized(t *testing.T) {
+	off := catalogSearchMeilisearchEmbedderSettings("e", false)["e"].(map[string]any)
+	if _, ok := off["binaryQuantized"]; ok {
+		t.Fatal("binaryQuantized key must be absent when off (preserves legacy index settings shape)")
+	}
+	on := catalogSearchMeilisearchEmbedderSettings("e", true)["e"].(map[string]any)
+	if on["binaryQuantized"] != true {
+		t.Fatal("binaryQuantized must be set when enabled")
+	}
 }

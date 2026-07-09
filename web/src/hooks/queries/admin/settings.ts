@@ -32,6 +32,7 @@ export interface CatalogSearchStatus {
     matching_strategy: string;
     index_types?: string[];
     semantic_enabled: boolean;
+    binary_quantized: boolean;
     semantic_ratio: number;
     embedder: string;
   };

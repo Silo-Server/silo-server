@@ -84,6 +84,7 @@ var restartRequiredKeys = map[string]bool{
 	"catalog.search.meilisearch.semantic_enabled":  true,
 	"catalog.search.meilisearch.semantic_ratio":    true,
 	"catalog.search.meilisearch.embedder":          true,
+	"catalog.search.meilisearch.binary_quantized":  true,
 }
 
 // restartRequiredPrefixes covers whole namespaces of infrastructure settings:
