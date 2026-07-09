@@ -149,7 +149,10 @@ func BuildAutoscanService(
 		scantrigger.NewResolver(folderRepo),
 		queue,
 		autoscan.NewRedisSuppressor(redisClient),
-		PluginScanSourceLister{installationStore},
+		autoscan.WithBuiltinSources(
+			PluginScanSourceLister{installationStore},
+			autoscan.BuiltinArrWebhookSource(),
+		),
 	)
 	// Wire the connection-test + rewrite-suggester deps: a (long-timeout)
 	// arr root-folder/status client and a Silo media-folder lister.
