@@ -34,6 +34,16 @@ type fakeAutoscanStore struct {
 	listRunningFn      func() ([]autoscan.Event, error)
 	queueSummaryFn     func() (autoscan.QueueSummary, error)
 	latestEventAtFn    func() (*time.Time, error)
+
+	createWebhookFn func(string) (autoscan.WebhookEndpoint, string, error)
+	rotateWebhookFn func(string) (autoscan.WebhookEndpoint, string, error)
+	deleteWebhookFn func(string) error
+	getWebhookFn    func(string) (autoscan.WebhookEndpoint, error)
+	listWebhooksFn  func() ([]autoscan.WebhookEndpoint, error)
+	revealTokenFn   func(string) (string, error)
+	resolveTokenFn  func(string) (autoscan.Source, autoscan.WebhookEndpoint, error)
+	touchedSources  []string
+	webhookErrs     map[string]string
 }
 
 func (f *fakeAutoscanStore) GetSettings(context.Context) (autoscan.Settings, error) {
@@ -162,6 +172,68 @@ func (f *fakeAutoscanStore) LatestEventAt(context.Context) (*time.Time, error) {
 	return nil, nil
 }
 
+func (f *fakeAutoscanStore) CreateWebhookEndpoint(_ context.Context, sourceID string) (autoscan.WebhookEndpoint, string, error) {
+	if f.createWebhookFn != nil {
+		return f.createWebhookFn(sourceID)
+	}
+	return autoscan.WebhookEndpoint{SourceID: sourceID}, "", nil
+}
+
+func (f *fakeAutoscanStore) RotateWebhookEndpoint(_ context.Context, sourceID string) (autoscan.WebhookEndpoint, string, error) {
+	if f.rotateWebhookFn != nil {
+		return f.rotateWebhookFn(sourceID)
+	}
+	return autoscan.WebhookEndpoint{SourceID: sourceID}, "", nil
+}
+
+func (f *fakeAutoscanStore) DeleteWebhookEndpoint(_ context.Context, sourceID string) error {
+	if f.deleteWebhookFn != nil {
+		return f.deleteWebhookFn(sourceID)
+	}
+	return nil
+}
+
+func (f *fakeAutoscanStore) GetWebhookEndpoint(_ context.Context, sourceID string) (autoscan.WebhookEndpoint, error) {
+	if f.getWebhookFn != nil {
+		return f.getWebhookFn(sourceID)
+	}
+	return autoscan.WebhookEndpoint{}, autoscan.ErrNotFound
+}
+
+func (f *fakeAutoscanStore) ListWebhookEndpoints(context.Context) ([]autoscan.WebhookEndpoint, error) {
+	if f.listWebhooksFn != nil {
+		return f.listWebhooksFn()
+	}
+	return nil, nil
+}
+
+func (f *fakeAutoscanStore) RevealWebhookToken(_ context.Context, sourceID string) (string, error) {
+	if f.revealTokenFn != nil {
+		return f.revealTokenFn(sourceID)
+	}
+	return "", autoscan.ErrNotFound
+}
+
+func (f *fakeAutoscanStore) ResolveWebhookToken(_ context.Context, token string) (autoscan.Source, autoscan.WebhookEndpoint, error) {
+	if f.resolveTokenFn != nil {
+		return f.resolveTokenFn(token)
+	}
+	return autoscan.Source{}, autoscan.WebhookEndpoint{}, autoscan.ErrNotFound
+}
+
+func (f *fakeAutoscanStore) TouchWebhookReceived(_ context.Context, sourceID string) error {
+	f.touchedSources = append(f.touchedSources, sourceID)
+	return nil
+}
+
+func (f *fakeAutoscanStore) RecordWebhookError(_ context.Context, sourceID, msg string) error {
+	if f.webhookErrs == nil {
+		f.webhookErrs = map[string]string{}
+	}
+	f.webhookErrs[sourceID] = msg
+	return nil
+}
+
 // fakeTriggerUpdater records the last UpdateTriggers call so a test can assert
 // the handler reschedules the poll task with the new interval.
 type fakeTriggerUpdater struct {
@@ -197,6 +269,11 @@ type fakeAutoscanTriggerer struct {
 	// send happens-before the test's receive, so reading `called` afterwards is
 	// race-free.
 	done chan struct{}
+	// ingested records IngestChanges calls; ingestResult/ingestErr drive the
+	// response.
+	ingested     []autoscan.ChangeIngest
+	ingestResult autoscan.IngestResult
+	ingestErr    error
 }
 
 func (f *fakeAutoscanTriggerer) PollOnce(context.Context) error {
@@ -221,6 +298,11 @@ func (f *fakeAutoscanTriggerer) TestConnectionByID(context.Context, string) (aut
 
 func (f *fakeAutoscanTriggerer) SuggestRewrites(context.Context, string) (autoscan.RewriteSuggestions, error) {
 	return f.suggestions, f.suggestErr
+}
+
+func (f *fakeAutoscanTriggerer) IngestChanges(_ context.Context, in autoscan.ChangeIngest) (autoscan.IngestResult, error) {
+	f.ingested = append(f.ingested, in)
+	return f.ingestResult, f.ingestErr
 }
 
 func newAutoscanRequest(method, target, body, id string) *http.Request {

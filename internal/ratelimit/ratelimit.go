@@ -72,6 +72,9 @@ func DefaultConfig() Config {
 			"device_start":  {RequestsPerMinute: 20, Burst: 10},
 			"device_lookup": {RequestsPerMinute: 60, Burst: 20},
 			"device_poll":   {RequestsPerMinute: 120, Burst: 30},
+			// Public autoscan webhook intake. Generous: arr fires one delivery
+			// per imported file, so season packs are legitimate bursts.
+			"autoscan_webhook": {RequestsPerMinute: 60, Burst: 30},
 		},
 	}
 }
