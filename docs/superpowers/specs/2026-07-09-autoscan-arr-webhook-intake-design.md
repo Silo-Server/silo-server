@@ -245,6 +245,17 @@ Secret handling:
   `autoscan_webhook_endpoints.source_id`.
 - Never log the token or full URL.
 
+### `autoscan_webhook_deliveries`
+
+Persist each actionable parsed delivery before returning `202`. Rows store the
+source, provider event type, normalized changes, original receive time, retry
+attempt count/backoff, and a bounded lease owner/time. The request attempts the
+delivery immediately; transient resolver/database/queue failures release it for
+an internal retry task. Workers claim due rows with `FOR UPDATE SKIP LOCKED`, so
+multiple API nodes can drain the queue without double-owning a delivery. A
+successful consume deletes the row; deleting the source cascades its pending
+deliveries.
+
 ## API
 
 All admin endpoints are additive under `/api/v1/admin/autoscan`.
@@ -327,6 +338,11 @@ Responses:
 - `405 Method Not Allowed`: non-POST.
 - `413 Payload Too Large`: body exceeds the configured cap.
 - `429 Too Many Requests`: per-token or per-IP rate limit exceeded.
+- `500 Internal Server Error`: the delivery could not be durably persisted.
+
+Sonarr/Radarr do not replay failed notification events. Silo must therefore
+persist actionable deliveries before `202` and retry ingest failures internally;
+HTTP error responses are not a delivery retry mechanism.
 
 The body should be small; cap at 256 KiB unless real payload fixtures prove that
 is too low.
@@ -462,6 +478,11 @@ The parser should dedupe exact paths before returning changes.
 - Never include token in event logs or regular app logs.
 - Preserve current duplicate suppression. Duplicate webhook deliveries should
   at worst create suppressed Autoscan events, not duplicate scan storms.
+- Honor configured burst capacity in both in-memory and Redis rate-limit
+  backends; season-pack imports commonly deliver more than one event per second.
+- Keep transient ingest failures in the durable delivery queue with bounded
+  exponential backoff. A short-interval hidden task reclaims due or abandoned
+  leases and retries them independently of the poll cadence.
 - **Webhook deliveries must NOT be single-flighted and dropped.** The
   running-event exclusion in `CreateEvent` (advisory lock + running-row check)
   exists to stop overlapping polls of the same marker window. Poll cycles can
@@ -553,6 +574,9 @@ Backend:
   it for webhook mode and rejects poll mode for it.
 - `IngestChanges` applies rewrites and enqueues the same targets as polling for
   equivalent changes.
+- Actionable deliveries are persisted before processing; transient failures
+  return `202`, remain queued, and are consumed by the retry task.
+- Delivery leases are ownership-guarded and reclaimable after worker failure.
 - Concurrent/burst webhook deliveries for one source all ingest — none are
   dropped by the running-event exclusion; duplicate targets are suppressed by
   the suppressor claim.
@@ -562,6 +586,8 @@ Backend:
 - Invalid token returns 404; malformed payload for valid token returns 400.
 - Body cap returns 413.
 - Rate limit returns 429.
+- Redis rate limiting honors the configured webhook burst allowance.
+- Upgrade payloads reconcile both the new file and arr's `deletedFiles` paths.
 - Token rotation invalidates old token and accepts new token.
 - Parser fixture tests for Sonarr Download, Rename, EpisodeFileDelete, Test.
 - Parser fixture tests for Radarr Download, Rename, MovieFileDelete, Test.

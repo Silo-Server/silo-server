@@ -575,9 +575,14 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	sourceConfig := normalizeSourceConfig(in.SourceConfig)
-	if err := validateWebhookProvider(sourceConfig); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+	if deliveryMode == autoscan.DeliveryModeWebhook {
+		if err := validateWebhookProvider(sourceConfig); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		if provider, ok := sourceConfig["webhook_provider"]; ok {
+			sourceConfig["webhook_provider"] = strings.ToLower(strings.TrimSpace(provider))
+		}
 	}
 	// Validate the (plugin_id, capability_id) is a currently-installed
 	// scan_source capability — a source may only be created against an installed
@@ -712,9 +717,14 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	sourceConfig := normalizeSourceConfig(in.SourceConfig)
-	if err := validateWebhookProvider(sourceConfig); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
+	if deliveryMode == autoscan.DeliveryModeWebhook {
+		if err := validateWebhookProvider(sourceConfig); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		if provider, ok := sourceConfig["webhook_provider"]; ok {
+			sourceConfig["webhook_provider"] = strings.ToLower(strings.TrimSpace(provider))
+		}
 	}
 	// connection_id is a full-state field: nil means unbind, a UUID string
 	// means bind. A whitespace-only string is normalised to nil (unbound).

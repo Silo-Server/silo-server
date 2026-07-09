@@ -22,6 +22,10 @@ type fakeStore struct {
 	createdEvents  []EventCreate
 	events         []EventFinish
 	createEventErr error
+	deliveries     []WebhookDelivery
+	retried        []WebhookDelivery
+	completed      []int64
+	webhookErrors  map[string]string
 }
 
 func (f *fakeStore) GetSettings(context.Context) (Settings, error) { return f.settings, nil }
@@ -62,6 +66,58 @@ func (f *fakeStore) CreateEvent(_ context.Context, event EventCreate) (int64, er
 }
 func (f *fakeStore) FinishEvent(_ context.Context, event EventFinish) error {
 	f.events = append(f.events, event)
+	return nil
+}
+func (f *fakeStore) CreateWebhookDelivery(_ context.Context, in ChangeIngest) (WebhookDelivery, error) {
+	delivery := WebhookDelivery{
+		ID:                int64(len(f.deliveries) + 1),
+		SourceID:          in.SourceID,
+		ProviderEventType: in.ProviderEventType,
+		Changes:           append([]Change(nil), in.Changes...),
+		ReceivedAt:        in.ReceivedAt,
+		AttemptCount:      1,
+		LockedBy:          "immediate",
+	}
+	f.deliveries = append(f.deliveries, delivery)
+	return delivery, nil
+}
+func (f *fakeStore) ClaimWebhookDeliveries(_ context.Context, workerID string, limit int) ([]WebhookDelivery, error) {
+	if limit > len(f.retried) {
+		limit = len(f.retried)
+	}
+	out := append([]WebhookDelivery(nil), f.retried[:limit]...)
+	f.retried = f.retried[limit:]
+	for i := range out {
+		out[i].AttemptCount++
+		out[i].LockedBy = workerID
+	}
+	return out, nil
+}
+func (f *fakeStore) CompleteWebhookDelivery(_ context.Context, id int64, _ string) error {
+	f.completed = append(f.completed, id)
+	return nil
+}
+func (f *fakeStore) RetryWebhookDelivery(_ context.Context, id int64, lockedBy string, _ time.Duration, _ string) error {
+	for _, delivery := range f.deliveries {
+		if delivery.ID == id {
+			delivery.LockedBy = lockedBy
+			f.retried = append(f.retried, delivery)
+			break
+		}
+	}
+	return nil
+}
+func (f *fakeStore) RecordWebhookError(_ context.Context, sourceID, msg string) error {
+	if f.webhookErrors == nil {
+		f.webhookErrors = map[string]string{}
+	}
+	f.webhookErrors[sourceID] = msg
+	return nil
+}
+func (f *fakeStore) ClearWebhookError(_ context.Context, sourceID string) error {
+	if f.webhookErrors != nil {
+		delete(f.webhookErrors, sourceID)
+	}
 	return nil
 }
 

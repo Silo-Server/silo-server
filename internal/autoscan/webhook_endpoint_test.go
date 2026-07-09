@@ -196,3 +196,53 @@ func TestCreateEventSkipRunningCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookDeliveryDurableRetryLifecycle(t *testing.T) {
+	ctx, repo, src := newWebhookDBTest(t)
+	var tableName *string
+	if err := repo.pool.QueryRow(ctx, `SELECT to_regclass('public.autoscan_webhook_deliveries')::text`).Scan(&tableName); err != nil {
+		t.Fatalf("check autoscan_webhook_deliveries table: %v", err)
+	}
+	if tableName == nil || *tableName == "" {
+		t.Skip("test database has not applied the autoscan webhook delivery queue migration")
+	}
+
+	delivery, err := repo.CreateWebhookDelivery(ctx, ChangeIngest{
+		SourceID:          src.ID,
+		ProviderEventType: "Download",
+		Changes:           []Change{{SourcePath: "/data/movie.mkv", Scope: ChangeScopeFile}},
+	})
+	if err != nil {
+		t.Fatalf("create delivery: %v", err)
+	}
+	if delivery.ID == 0 || delivery.AttemptCount != 1 || delivery.LockedBy == "" {
+		t.Fatalf("created delivery = %+v", delivery)
+	}
+	if err := repo.RetryWebhookDelivery(ctx, delivery.ID, delivery.LockedBy, 0, "temporary"); err != nil {
+		t.Fatalf("schedule retry: %v", err)
+	}
+
+	claimed, err := repo.ClaimWebhookDeliveries(ctx, "worker-2", 10)
+	if err != nil {
+		t.Fatalf("claim delivery: %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].ID != delivery.ID || claimed[0].AttemptCount != 2 || claimed[0].LockedBy != "worker-2" {
+		t.Fatalf("claimed = %+v", claimed)
+	}
+	if len(claimed[0].Changes) != 1 || claimed[0].Changes[0].SourcePath != "/data/movie.mkv" {
+		t.Fatalf("changes did not round-trip: %+v", claimed[0].Changes)
+	}
+	if err := repo.CompleteWebhookDelivery(ctx, delivery.ID, "stale-worker"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stale lease completion must be rejected, got %v", err)
+	}
+	if err := repo.CompleteWebhookDelivery(ctx, delivery.ID, "worker-2"); err != nil {
+		t.Fatalf("complete delivery: %v", err)
+	}
+	claimed, err = repo.ClaimWebhookDeliveries(ctx, "worker-3", 10)
+	if err != nil {
+		t.Fatalf("claim after complete: %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("completed delivery was reclaimed: %+v", claimed)
+	}
+}

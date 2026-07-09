@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
+	"github.com/google/uuid"
 )
 
 const (
@@ -31,6 +32,12 @@ type Store interface {
 	RecordError(ctx context.Context, sourceID, msg string) error
 	CreateEvent(ctx context.Context, event EventCreate) (int64, error)
 	FinishEvent(ctx context.Context, event EventFinish) error
+	CreateWebhookDelivery(ctx context.Context, in ChangeIngest) (WebhookDelivery, error)
+	ClaimWebhookDeliveries(ctx context.Context, workerID string, limit int) ([]WebhookDelivery, error)
+	CompleteWebhookDelivery(ctx context.Context, id int64, lockedBy string) error
+	RetryWebhookDelivery(ctx context.Context, id int64, lockedBy string, delay time.Duration, msg string) error
+	RecordWebhookError(ctx context.Context, sourceID, msg string) error
+	ClearWebhookError(ctx context.Context, sourceID string) error
 }
 
 // Resolver maps a Silo-native path to a concrete scan target (library folder).
@@ -396,19 +403,114 @@ type IngestResult struct {
 	Enqueued   int
 	Suppressed int
 	Unresolved bool
+	// Pending reports that the delivery was accepted durably but its immediate
+	// ingest failed. The retry task will process it again inside Silo.
+	Pending bool
 }
 
-// IngestChanges feeds webhook-delivered changes through the same
-// rewrite/resolve/suppress/enqueue/event pipeline as polling. No marker is
-// involved and the running-event exclusion is skipped: deliveries carry
-// distinct payloads and must never be dropped (the suppressor's atomic claim
-// is the duplicate-scan guard). Callers gate on source/global enabled state;
-// this only rejects sources that are not webhook-mode. A returned error means
-// the delivery genuinely failed and the sender should retry it.
+var errWebhookDeliveryDisabled = errors.New("autoscan: webhook delivery disabled")
+
+const (
+	webhookRetryBaseDelay = 5 * time.Second
+	webhookRetryMaxDelay  = 10 * time.Minute
+)
+
+func webhookRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := webhookRetryBaseDelay
+	for i := 1; i < attempt && delay < webhookRetryMaxDelay; i++ {
+		delay *= 2
+		if delay >= webhookRetryMaxDelay {
+			return webhookRetryMaxDelay
+		}
+	}
+	return delay
+}
+
+// IngestChanges durably records a webhook delivery before attempting the same
+// rewrite/resolve/suppress/enqueue/event pipeline as polling. A transient
+// processing failure leaves the delivery queued for an internal retry and is
+// surfaced as Pending rather than depending on Sonarr/Radarr to replay it.
 func (s *Service) IngestChanges(ctx context.Context, in ChangeIngest) (IngestResult, error) {
+	delivery, err := s.store.CreateWebhookDelivery(ctx, in)
+	if err != nil {
+		return IngestResult{}, err
+	}
+	return s.processWebhookDelivery(ctx, delivery), nil
+}
+
+// RetryPendingWebhookDeliveries claims and consumes a bounded batch of durable
+// deliveries. Repository leases make concurrent nodes safe; individual ingest
+// failures are rescheduled and do not abort the rest of the batch.
+func (s *Service) RetryPendingWebhookDeliveries(ctx context.Context, limit int) (int, error) {
+	deliveries, err := s.store.ClaimWebhookDeliveries(ctx, uuid.NewString(), limit)
+	if err != nil {
+		return 0, err
+	}
+	for _, delivery := range deliveries {
+		s.processWebhookDelivery(ctx, delivery)
+	}
+	return len(deliveries), nil
+}
+
+func (s *Service) processWebhookDelivery(ctx context.Context, delivery WebhookDelivery) IngestResult {
+	result, ingestErr := s.ingestChangesNow(ctx, ChangeIngest{
+		SourceID:          delivery.SourceID,
+		ProviderEventType: delivery.ProviderEventType,
+		Changes:           delivery.Changes,
+		ReceivedAt:        delivery.ReceivedAt,
+	})
+	if ingestErr == nil {
+		if err := s.store.CompleteWebhookDelivery(ctx, delivery.ID, delivery.LockedBy); err != nil {
+			result.Pending = true
+			slog.WarnContext(ctx, "autoscan: complete webhook delivery failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
+		} else {
+			if err := s.store.ClearWebhookError(ctx, delivery.SourceID); err != nil {
+				slog.WarnContext(ctx, "autoscan: clear webhook error failed", "component", "autoscan", "source_id", delivery.SourceID, "err", err)
+			}
+		}
+		return result
+	}
+	if errors.Is(ingestErr, errWebhookDeliveryDisabled) {
+		// A source/global disable is a pause, not a reason to discard work that
+		// was already accepted while enabled. Keep it pending without surfacing a
+		// delivery error and try again after the operator re-enables Autoscan.
+		result.Pending = true
+		if err := s.store.RetryWebhookDelivery(ctx, delivery.ID, delivery.LockedBy, time.Minute, ""); err != nil {
+			slog.WarnContext(ctx, "autoscan: pause webhook retry failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
+		}
+		return result
+	}
+
+	result.Pending = true
+	if err := s.store.RetryWebhookDelivery(
+		ctx,
+		delivery.ID,
+		delivery.LockedBy,
+		webhookRetryDelay(delivery.AttemptCount),
+		ingestErr.Error(),
+	); err != nil {
+		// The durable row remains leased and becomes reclaimable when the lease
+		// expires, so a bookkeeping failure here still cannot lose the delivery.
+		slog.WarnContext(ctx, "autoscan: schedule webhook retry failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
+	}
+	if err := s.store.RecordWebhookError(ctx, delivery.SourceID, ingestErr.Error()); err != nil {
+		slog.WarnContext(ctx, "autoscan: record webhook error failed", "component", "autoscan", "source_id", delivery.SourceID, "err", err)
+	}
+	return result
+}
+
+// ingestChangesNow performs one webhook consume attempt. It is deliberately
+// separate from IngestChanges so retries do not create nested delivery rows.
+func (s *Service) ingestChangesNow(ctx context.Context, in ChangeIngest) (IngestResult, error) {
 	settings, err := s.store.GetSettings(ctx)
 	if err != nil {
 		return IngestResult{}, err
+	}
+	if !settings.Enabled {
+		return IngestResult{}, errWebhookDeliveryDisabled
 	}
 	src, err := s.store.GetSource(ctx, in.SourceID)
 	if err != nil {
@@ -416,6 +518,9 @@ func (s *Service) IngestChanges(ctx context.Context, in ChangeIngest) (IngestRes
 	}
 	if src.DeliveryMode != DeliveryModeWebhook {
 		return IngestResult{}, fmt.Errorf("autoscan: source %s is not a webhook source", src.ID)
+	}
+	if !src.Enabled {
+		return IngestResult{}, errWebhookDeliveryDisabled
 	}
 	startedAt := in.ReceivedAt
 	if startedAt.IsZero() {

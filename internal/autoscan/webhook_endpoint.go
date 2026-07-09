@@ -262,3 +262,17 @@ func (r *Repository) RecordWebhookError(ctx context.Context, sourceID, msg strin
 	}
 	return nil
 }
+
+// ClearWebhookError removes stale delivery failure state after a queued retry
+// succeeds. last_received_at remains the time the provider actually delivered
+// the webhook rather than being rewritten as a processing timestamp.
+func (r *Repository) ClearWebhookError(ctx context.Context, sourceID string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE autoscan_webhook_endpoints
+		SET last_error_at = NULL, last_error_message = ''
+		WHERE source_id = $1`, sourceID)
+	if err != nil {
+		return fmt.Errorf("clear autoscan webhook error: %w", err)
+	}
+	return nil
+}

@@ -2021,6 +2021,7 @@ func main() {
 				intervalMs = int64(settings.DefaultPollIntervalSeconds) * 1000
 			}
 			taskMgr.Register(tasks.NewAutoscanPollTask(autoscanSvc, intervalMs))
+			taskMgr.Register(tasks.NewAutoscanWebhookRetryTask(autoscanSvc))
 		}
 		reconcileProviderIDRepo := catalog.NewProviderIDRepository(deps.DB)
 		reconcileEpisodeRepo := catalog.NewEpisodeRepository(deps.DB)

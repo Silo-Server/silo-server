@@ -107,6 +107,41 @@ func TestParseRadarrDownload(t *testing.T) {
 	}
 }
 
+func TestParseUpgradeIncludesReplacedFiles(t *testing.T) {
+	for name, body := range map[string]string{
+		"sonarr": `{
+			"eventType": "Download",
+			"series": {"path": "/data/tv/Show"},
+			"episodeFile": {"path": "/data/tv/Show/new.mkv"},
+			"deletedFiles": [{"path": "/data/tv/Show/old.mkv"}],
+			"isUpgrade": true
+		}`,
+		"radarr": `{
+			"eventType": "Download",
+			"movie": {"folderPath": "/data/movies/Movie"},
+			"movieFile": {"path": "/data/movies/Movie/new.mkv"},
+			"deletedFiles": [{"path": "/data/movies/Movie/old.mkv"}],
+			"isUpgrade": true
+		}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			parsed, err := Parse(ProviderAuto, []byte(body))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			got := paths(parsed.Changes)
+			if len(got) != 2 || got[1] == "" || got[1] == got[0] {
+				t.Fatalf("upgrade paths = %v, want new and replaced file", got)
+			}
+			for _, change := range parsed.Changes {
+				if change.Scope != autoscan.ChangeScopeFile {
+					t.Fatalf("upgrade change = %+v, want file scope", change)
+				}
+			}
+		})
+	}
+}
+
 func TestParseRadarrRename(t *testing.T) {
 	parsed, err := Parse(ProviderAuto, fixture(t, "radarr_rename.json"))
 	if err != nil {

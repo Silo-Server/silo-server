@@ -192,7 +192,7 @@ func TestWebhookDeliveryOversizedBodyIs413(t *testing.T) {
 	}
 }
 
-func TestWebhookDeliveryIngestFailureIs500(t *testing.T) {
+func TestWebhookDeliveryDurableAcceptanceFailureIs500(t *testing.T) {
 	store := webhookStore(webhookSource(true), true)
 	svc := &fakeAutoscanTriggerer{ingestErr: context.DeadlineExceeded}
 	h := NewAutoscanHandler(store, svc)
@@ -201,10 +201,23 @@ func TestWebhookDeliveryIngestFailureIs500(t *testing.T) {
 	h.HandleWebhookDelivery(rec, newWebhookDeliveryRequest(testWebhookToken, sonarrDownloadBody))
 
 	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 so the sender retries", rec.Code)
+		t.Fatalf("status = %d, want 500 when the delivery could not be persisted", rec.Code)
 	}
 	if store.webhookErrs["src-1"] == "" {
 		t.Fatal("ingest failure must be recorded on the endpoint")
+	}
+}
+
+func TestWebhookDeliveryPendingRetryIsAccepted(t *testing.T) {
+	store := webhookStore(webhookSource(true), true)
+	svc := &fakeAutoscanTriggerer{ingestResult: autoscan.IngestResult{Pending: true}}
+	h := NewAutoscanHandler(store, svc)
+
+	rec := httptest.NewRecorder()
+	h.HandleWebhookDelivery(rec, newWebhookDeliveryRequest(testWebhookToken, sonarrDownloadBody))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 for a durably queued retry", rec.Code)
 	}
 }
 
@@ -303,6 +316,35 @@ func TestValidateWebhookProvider(t *testing.T) {
 	}
 	if err := validateWebhookProvider(map[string]string{}); err != nil {
 		t.Fatalf("absent provider must validate: %v", err)
+	}
+}
+
+func TestUpdatePollSourceAllowsPluginWebhookProviderKey(t *testing.T) {
+	existing := autoscan.Source{
+		ID:           "src-1",
+		PluginID:     "example.plugin",
+		CapabilityID: "source",
+		DeliveryMode: autoscan.DeliveryModePoll,
+	}
+	var saved autoscan.Source
+	store := &fakeAutoscanStore{
+		getSourceFn: func(string) (autoscan.Source, error) { return existing, nil },
+		updateSourceFn: func(source autoscan.Source) (autoscan.Source, error) {
+			saved = source
+			return source, nil
+		},
+	}
+	h := NewAutoscanHandler(store, &fakeAutoscanTriggerer{})
+	body := `{"enabled":true,"delivery_mode":"poll","path_rewrites":[],"source_config":{"webhook_provider":"plugin-specific"}}`
+
+	rec := httptest.NewRecorder()
+	h.HandleUpdateSource(rec, newAutoscanRequest(http.MethodPut, "/admin/autoscan/sources/src-1", body, "src-1"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	if got := saved.SourceConfig["webhook_provider"]; got != "plugin-specific" {
+		t.Fatalf("plugin source config = %q, want unchanged", got)
 	}
 }
 

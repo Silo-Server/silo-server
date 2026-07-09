@@ -84,7 +84,9 @@ type webhookAccepted struct {
 // 404 for any unknown token (no existence hints), 202 for anything accepted —
 // including test events, unsupported event types, and disabled sources — so
 // arr never marks a configured webhook unhealthy for a Silo-side state it
-// cannot act on. 500 signals a genuinely failed ingest that arr should retry.
+// cannot act on. Actionable deliveries are durably queued before the 202, so
+// transient ingest failures are retried inside Silo rather than delegated to
+// arr (which does not replay failed notification events).
 //
 // The token, request URL, and body are never logged.
 func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +147,9 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 		ReceivedAt:        receivedAt,
 	})
 	if err != nil {
-		slog.WarnContext(r.Context(), "autoscan: webhook ingest failed", "component", "api",
+		// The only error from IngestChanges is failure to durably accept the
+		// delivery. Processing errors are queued internally and return Pending.
+		slog.WarnContext(r.Context(), "autoscan: webhook delivery acceptance failed", "component", "api",
 			"source_id", source.ID,
 			"provider", parsed.Provider,
 			"event_type", parsed.EventType,
@@ -153,8 +157,16 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 			"err", err,
 		)
 		_ = h.repo.RecordWebhookError(r.Context(), source.ID, err.Error())
-		writeError(w, http.StatusInternalServerError, "internal_error", "Ingest failed; retry the delivery")
+		writeError(w, http.StatusInternalServerError, "internal_error", "Could not durably accept delivery")
 		return
+	}
+	if result.Pending {
+		slog.WarnContext(r.Context(), "autoscan: webhook delivery queued for retry", "component", "api",
+			"source_id", source.ID,
+			"provider", parsed.Provider,
+			"event_type", parsed.EventType,
+			"paths", len(parsed.Changes),
+		)
 	}
 	slog.DebugContext(r.Context(), "autoscan: webhook delivery ingested", "component", "api",
 		"source_id", source.ID,
@@ -164,6 +176,7 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 		"enqueued", result.Enqueued,
 		"suppressed", result.Suppressed,
 		"unresolved", result.Unresolved,
+		"pending", result.Pending,
 	)
 	writeJSON(w, http.StatusAccepted, webhookAccepted{Status: "accepted"})
 }

@@ -9,7 +9,7 @@ import (
 type Rate struct {
 	RequestsPerSecond float64
 	RequestsPerMinute float64
-	Burst             int // max burst for token bucket (in-memory); ignored by Redis
+	Burst             int // immediate burst allowance (token bucket or Redis second window)
 }
 
 // AllowResult contains the result of a rate limit check.

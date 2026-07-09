@@ -41,8 +41,8 @@ const (
 // Change is one raw provider/source-namespace path returned by a scan_source
 // plugin. The host applies PathRewrites before resolving the changed path.
 type Change struct {
-	SourcePath string
-	Scope      ChangeScope
+	SourcePath string      `json:"source_path"`
+	Scope      ChangeScope `json:"scope"`
 }
 
 // DeliveryMode selects how a source's changes reach the host: the host polls
@@ -83,6 +83,20 @@ type WebhookEndpoint struct {
 	LastReceivedAt   *time.Time
 	LastErrorAt      *time.Time
 	LastErrorMessage string
+}
+
+// WebhookDelivery is one durably accepted ARR webhook delivery waiting to be
+// consumed. LockedBy is an opaque lease owner; repository completion/failure
+// updates are ownership-guarded so an expired worker cannot finalize a delivery
+// that another node reclaimed.
+type WebhookDelivery struct {
+	ID                int64
+	SourceID          string
+	ProviderEventType string
+	Changes           []Change
+	ReceivedAt        time.Time
+	AttemptCount      int
+	LockedBy          string
 }
 
 type EventStatus string

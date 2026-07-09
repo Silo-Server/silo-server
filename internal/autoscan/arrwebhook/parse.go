@@ -63,6 +63,11 @@ type payload struct {
 	MovieFile         *fileRef  `json:"movieFile"`
 	MovieFiles        []fileRef `json:"movieFiles"`
 	RenamedMovieFiles []fileRef `json:"renamedMovieFiles"`
+
+	// Download/import payloads include the files replaced by an upgrade. They
+	// must be reconciled as vanished paths even when a separate "file delete for
+	// upgrade" notification is not enabled in arr.
+	DeletedFiles []fileRef `json:"deletedFiles"`
 }
 
 // importEventTypes are the events that carry newly imported files.
@@ -154,6 +159,7 @@ func filePaths(p payload, includePrevious bool) []autoscan.Change {
 	}
 	refs = append(refs, p.MovieFiles...)
 	refs = append(refs, p.RenamedMovieFiles...)
+	refs = append(refs, p.DeletedFiles...)
 
 	seen := make(map[string]struct{})
 	var changes []autoscan.Change
