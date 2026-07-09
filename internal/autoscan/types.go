@@ -45,6 +45,14 @@ type Change struct {
 	Scope      ChangeScope
 }
 
+// DeliveryMode selects how a source's changes reach the host: the host polls
+// the plugin (`poll`, the default), or the provider POSTs to a Silo webhook
+// endpoint (`webhook`) and the plugin is never invoked.
+const (
+	DeliveryModePoll    = "poll"
+	DeliveryModeWebhook = "webhook"
+)
+
 // Source ties a scan_source plugin capability to a connection plus the
 // host-owned scheduling/bookkeeping state.
 type Source struct {
@@ -53,6 +61,7 @@ type Source struct {
 	CapabilityID        string
 	ConnectionID        *string // nil until an operator binds a connection
 	Enabled             bool
+	DeliveryMode        string        // DeliveryModePoll or DeliveryModeWebhook
 	PollIntervalSeconds *int          // nil => use settings default
 	PathRewrites        []PathRewrite // host-owned raw->Silo prefix rewrites
 	SourceConfig        map[string]string
@@ -60,6 +69,20 @@ type Source struct {
 	Marker              *string // opaque; nil on first run
 	LastRunAt           *time.Time
 	LastError           *string
+}
+
+// WebhookEndpoint is the admin-visible state of a source's webhook endpoint.
+// The plaintext token and its lookup hash never live on this struct; creation
+// and rotation return the token separately, and redisplay goes through
+// RevealWebhookToken.
+type WebhookEndpoint struct {
+	SourceID         string
+	SecretSuffix     string
+	CreatedAt        time.Time
+	RotatedAt        *time.Time
+	LastReceivedAt   *time.Time
+	LastErrorAt      *time.Time
+	LastErrorMessage string
 }
 
 type EventStatus string
@@ -72,31 +95,40 @@ const (
 )
 
 type Event struct {
-	ID              int64
-	SourceID        *string
-	PluginID        string
-	CapabilityID    string
-	StartedAt       time.Time
-	CompletedAt     time.Time
-	DurationMS      int64
-	Status          EventStatus
-	ChangesReturned int
-	ChangesResolved int
-	TargetsClaimed  int
-	ScansCreated    int
-	ScansReused     int
-	ScansSuppressed int
-	ErrorMessage    string
-	MarkerBefore    *string
-	MarkerAfter     *string
+	ID                int64
+	SourceID          *string
+	PluginID          string
+	CapabilityID      string
+	StartedAt         time.Time
+	CompletedAt       time.Time
+	DurationMS        int64
+	Status            EventStatus
+	DeliveryMode      string
+	ProviderEventType string
+	ChangesReturned   int
+	ChangesResolved   int
+	TargetsClaimed    int
+	ScansCreated      int
+	ScansReused       int
+	ScansSuppressed   int
+	ErrorMessage      string
+	MarkerBefore      *string
+	MarkerAfter       *string
 }
 
 type EventCreate struct {
-	SourceID     string
-	PluginID     string
-	CapabilityID string
-	StartedAt    time.Time
-	MarkerBefore string
+	SourceID          string
+	PluginID          string
+	CapabilityID      string
+	StartedAt         time.Time
+	MarkerBefore      string
+	DeliveryMode      string // "" defaults to DeliveryModePoll
+	ProviderEventType string
+	// SkipRunningCheck bypasses the running-event single-flight exclusion.
+	// Poll cycles may be skipped when an event is already running (their
+	// marker window is re-read next cycle); webhook deliveries carry no
+	// marker, so dropping one loses it forever — they always set this.
+	SkipRunningCheck bool
 }
 
 type EventFinish struct {
