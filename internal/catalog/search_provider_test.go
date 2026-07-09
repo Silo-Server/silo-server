@@ -769,6 +769,19 @@ func TestCatalogSearchMeilisearchSchemaVersionBinaryQuantized(t *testing.T) {
 	}
 }
 
+func TestCatalogSearchMeilisearchSchemaVersionBinaryQuantizedIgnoredWhenSemanticDisabled(t *testing.T) {
+	// With semantic search off, the index carries no embedders (see
+	// catalogSearchMeilisearchSettings), so binary quantization has no on-index
+	// effect and must not shift the schema version — otherwise toggling it would
+	// force a pointless full rebuild of a vector-less index. It must also stay
+	// byte-identical to a pre-flag index so upgrades don't spuriously invalidate.
+	off := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, false)
+	on := catalogSearchMeilisearchSchemaVersion(DefaultMeilisearchEmbedder, nil, false, true)
+	if off != on {
+		t.Fatal("binary quantization must not change the schema version when semantic search is disabled")
+	}
+}
+
 func TestCatalogSearchMeilisearchEmbedderSettingsBinaryQuantized(t *testing.T) {
 	off := catalogSearchMeilisearchEmbedderSettings("e", false)["e"].(map[string]any)
 	if _, ok := off["binaryQuantized"]; ok {

@@ -198,7 +198,7 @@ export default function SearchSettings() {
             onChange={(value) =>
               form.setValue("catalog.search.meilisearch.binary_quantized", value)
             }
-            hint="~30x smaller vector storage with a small semantic-relevance cost. Changing this requires a full index rebuild (Rebuild Catalog Search Index) before sync resumes."
+            hint="~30x smaller raw vectors (overall index size roughly halves) with a small semantic-relevance cost. Only affects the index when Semantic Search is enabled. Changing this requires a full index rebuild (Rebuild Catalog Search Index) before sync resumes."
             disabled={!meiliEnabled}
           />
           <div className="py-3">

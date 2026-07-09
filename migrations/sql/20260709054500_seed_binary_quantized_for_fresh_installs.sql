@@ -1,11 +1,12 @@
 -- +goose Up
 -- +goose StatementBegin
--- Binary quantization defaults ON for fresh installations only. Existing
--- deployments (any active catalog search index) are left unset (= off):
--- flipping quantization changes the index schema-version identity, which
--- closes the incremental-sync gate until a full rebuild runs — that must
--- never happen implicitly on upgrade. Fresh installs have no index yet, so
--- their first rebuild simply starts quantized.
+-- Binary quantization defaults ON for any install with no active catalog
+-- search index — fresh installs, and also deployments that configured
+-- Meilisearch but never built an index. Deployments with an active index are
+-- left unset (= off): flipping quantization changes the index schema-version
+-- identity, which closes the incremental-sync gate until a full rebuild runs
+-- — that must never happen implicitly on upgrade. Installs with no index yet
+-- have no gate to close, so their first rebuild simply starts quantized.
 INSERT INTO server_settings (key, value)
 SELECT 'catalog.search.meilisearch.binary_quantized', 'true'
 WHERE NOT EXISTS (

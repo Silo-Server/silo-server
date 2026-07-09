@@ -2334,6 +2334,13 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		req.Value = embedder
+	case catalog.SearchSettingMeilisearchBinaryQuantized:
+		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "catalog.search.meilisearch.binary_quantized must be true or false")
+			return
+		}
+		req.Value = strconv.FormatBool(enabled)
 	}
 
 	if err := h.SettingsRepo.Set(r.Context(), key, req.Value); err != nil {

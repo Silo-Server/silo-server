@@ -476,9 +476,13 @@ func catalogSearchMeilisearchSchemaVersion(embedder string, itemTypes []string, 
 		strings.Join(normalizeCatalogSearchItemTypes(itemTypes), ","),
 		semanticEnabled,
 	)
-	// Appended only when set so pre-existing indexes built before this flag
-	// existed keep their schema version while it stays off.
-	if binaryQuantized {
+	// Gated on semanticEnabled because binary quantization only affects the
+	// embedder settings (catalogSearchMeilisearchSettings), which are omitted
+	// entirely when semantic search is off — so with no vectors on the index
+	// the flag has no on-index effect and must not force a rebuild. Appended
+	// only when both are set, so pre-existing indexes built before this flag
+	// existed (and any index with semantic off) keep their schema version.
+	if semanticEnabled && binaryQuantized {
 		identity += ";binary_quantized=true"
 	}
 	h := fnv.New32a()
