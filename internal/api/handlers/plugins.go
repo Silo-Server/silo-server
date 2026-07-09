@@ -77,6 +77,10 @@ type pluginRepositoryRequest struct {
 	Enabled     *bool  `json:"enabled,omitempty"`
 }
 
+type pluginCatalogSettingsRequest struct {
+	IncludeApprovedCommunityPlugins *bool `json:"include_approved_community_plugins"`
+}
+
 type pluginInstallationCreateRequest struct {
 	RepositoryID *int   `json:"repository_id,omitempty"`
 	PluginID     string `json:"plugin_id,omitempty"`
@@ -122,6 +126,8 @@ type pluginRepositoryResponse struct {
 	URL           string     `json:"url"`
 	DisplayName   string     `json:"display_name"`
 	Enabled       bool       `json:"enabled"`
+	SourceKind    string     `json:"source_kind"`
+	Managed       bool       `json:"managed"`
 	LastFetchedAt *time.Time `json:"last_fetched_at,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -132,6 +138,10 @@ type pluginCatalogResponse struct {
 	PluginID           string                   `json:"plugin_id"`
 	Version            string                   `json:"version"`
 	ArchiveURL         string                   `json:"archive_url"`
+	SourceKind         string                   `json:"source_kind"`
+	RepositoryName     string                   `json:"repository_name"`
+	RepoURL            string                   `json:"repo_url,omitempty"`
+	Presentation       *pluginPresentationJSON  `json:"presentation,omitempty"`
 	Capabilities       []pluginCapabilityJSON   `json:"capabilities"`
 	GlobalConfigSchema []pluginConfigSchemaJSON `json:"global_config_schema"`
 	UserConfigSchema   []pluginConfigSchemaJSON `json:"user_config_schema"`
@@ -149,6 +159,11 @@ type pluginInstallationResponse struct {
 	Enabled            bool                     `json:"enabled"`
 	UpdatePolicy       string                   `json:"update_policy"`
 	AvailableVersion   *string                  `json:"available_version,omitempty"`
+	SourceKind         string                   `json:"source_kind"`
+	RepositoryName     string                   `json:"repository_name,omitempty"`
+	RepoURL            string                   `json:"repo_url,omitempty"`
+	Presentation       *pluginPresentationJSON  `json:"presentation,omitempty"`
+	UpdatesPaused      bool                     `json:"updates_paused"`
 	Capabilities       []pluginCapabilityJSON   `json:"capabilities"`
 	GlobalConfigSchema []pluginConfigSchemaJSON `json:"global_config_schema"`
 	UserConfigSchema   []pluginConfigSchemaJSON `json:"user_config_schema"`
@@ -160,6 +175,28 @@ type pluginInstallationResponse struct {
 	TaskBindings       []pluginTaskBindingJSON  `json:"task_bindings"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
+}
+
+type pluginCatalogSettingsResponse struct {
+	IncludeApprovedCommunityPlugins bool `json:"include_approved_community_plugins"`
+	ApprovedCommunityPluginCount    int  `json:"approved_community_plugin_count"`
+	InstalledCommunityPluginCount   int  `json:"installed_community_plugin_count"`
+	MigratedPluginCount             int  `json:"migrated_plugin_count"`
+	CommunityUpdatesPaused          bool `json:"community_updates_paused"`
+}
+
+type pluginPresentationJSON struct {
+	DisplayName         string `json:"display_name"`
+	Summary             string `json:"summary"`
+	DescriptionMarkdown string `json:"description_markdown"`
+	SetupMarkdown       string `json:"setup_markdown"`
+	HomepageURL         string `json:"homepage_url"`
+	SourceURL           string `json:"source_url"`
+	SupportURL          string `json:"support_url"`
+	ChangelogURL        string `json:"changelog_url"`
+	PublisherName       string `json:"publisher_name"`
+	PublisherURL        string `json:"publisher_url"`
+	LicenseSPDX         string `json:"license_spdx"`
 }
 
 type pluginConfigSchemaJSON struct {
@@ -335,6 +372,10 @@ func (h *PluginHandler) HandleCreateRepository(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, "bad_request", "url and display_name are required")
 		return
 	}
+	if req.URL == plugins.DefaultRepositoryURL || req.URL == plugins.ApprovedCommunityRepositoryURL {
+		writeError(w, http.StatusBadRequest, "managed_repository", "Use catalog settings to manage built-in plugin repositories")
+		return
+	}
 
 	repository, err := h.repositories.Create(r.Context(), plugins.CreateRepositoryInput{
 		URL:         req.URL,
@@ -378,6 +419,10 @@ func (h *PluginHandler) HandleUpdateRepository(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusNotFound, "not_found", "Plugin repository not found")
 			return
 		}
+		if errors.Is(err, plugins.ErrManagedRepositoryReadOnly) {
+			writeError(w, http.StatusConflict, "managed_repository", "Managed plugin repositories are controlled by catalog settings")
+			return
+		}
 		slog.ErrorContext(r.Context(), "updating plugin repository", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plugin repository")
 		return
@@ -405,12 +450,52 @@ func (h *PluginHandler) HandleDeleteRepository(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusNotFound, "not_found", "Plugin repository not found")
 			return
 		}
+		if errors.Is(err, plugins.ErrManagedRepositoryReadOnly) {
+			writeError(w, http.StatusConflict, "managed_repository", "Managed plugin repositories cannot be deleted")
+			return
+		}
 		slog.ErrorContext(r.Context(), "deleting plugin repository", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete plugin repository")
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *PluginHandler) HandleGetCatalogSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := h.repositories.GetCatalogSettings(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "loading plugin catalog settings", "component", "api", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin catalog settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, toPluginCatalogSettingsResponse(settings))
+}
+
+func (h *PluginHandler) HandlePutCatalogSettings(w http.ResponseWriter, r *http.Request) {
+	var req pluginCatalogSettingsRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Request body must contain one JSON object")
+		return
+	}
+	if req.IncludeApprovedCommunityPlugins == nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "include_approved_community_plugins is required")
+		return
+	}
+
+	settings, err := h.repositories.SetIncludeApprovedCommunity(r.Context(), *req.IncludeApprovedCommunityPlugins)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "updating plugin catalog settings", "component", "api", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plugin catalog settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, toPluginCatalogSettingsResponse(settings))
 }
 
 func (h *PluginHandler) HandleCatalog(w http.ResponseWriter, r *http.Request) {
@@ -423,11 +508,20 @@ func (h *PluginHandler) HandleCatalog(w http.ResponseWriter, r *http.Request) {
 
 	response := make([]pluginCatalogResponse, 0, len(entries))
 	for _, entry := range entries {
+		presentation := toPluginPresentationJSON(entry.Manifest.GetPresentation())
+		repoURL := entry.RepoURL
+		if repoURL == "" && presentation != nil {
+			repoURL = presentation.SourceURL
+		}
 		response = append(response, pluginCatalogResponse{
 			RepositoryID:       entry.RepositoryID,
 			PluginID:           entry.Manifest.GetPluginId(),
 			Version:            entry.Manifest.GetVersion(),
 			ArchiveURL:         entry.ArchiveURL,
+			SourceKind:         entry.SourceKind,
+			RepositoryName:     entry.RepositoryDisplayName,
+			RepoURL:            repoURL,
+			Presentation:       presentation,
 			Capabilities:       capabilitiesToJSON(entry.Manifest.GetCapabilities()),
 			GlobalConfigSchema: configSchemasToJSON(entry.Manifest.GetGlobalConfigSchema()),
 			UserConfigSchema:   configSchemasToJSON(entry.Manifest.GetUserConfigSchema()),
@@ -1162,6 +1256,17 @@ func (h *PluginHandler) buildInstallationResponses(
 	ctx context.Context,
 	installations []*plugins.Installation,
 ) ([]pluginInstallationResponse, error) {
+	repositories, err := h.repositories.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	repositoriesByID := make(map[int]*plugins.Repository, len(repositories))
+	for _, repository := range repositories {
+		if repository != nil {
+			repositoriesByID[repository.ID] = repository
+		}
+	}
+
 	authBindings, err := h.configs.ListAuthBindings(ctx)
 	if err != nil {
 		return nil, err
@@ -1178,6 +1283,7 @@ func (h *PluginHandler) buildInstallationResponses(
 			nil,
 			authBindings,
 			taskBindings,
+			repositoriesByID,
 		)
 		if err != nil {
 			return nil, err
@@ -1192,6 +1298,17 @@ func (h *PluginHandler) buildInstallationResponse(
 	installation *plugins.Installation,
 	manifest *pluginv1.PluginManifest,
 ) (pluginInstallationResponse, error) {
+	repositoriesByID := make(map[int]*plugins.Repository, 1)
+	if installation.RepositoryID != nil {
+		repository, err := h.repositories.GetByID(ctx, *installation.RepositoryID)
+		if err != nil && !errors.Is(err, plugins.ErrRepositoryNotFound) {
+			return pluginInstallationResponse{}, err
+		}
+		if repository != nil {
+			repositoriesByID[repository.ID] = repository
+		}
+	}
+
 	authBindings, err := h.configs.ListAuthBindings(ctx)
 	if err != nil {
 		return pluginInstallationResponse{}, err
@@ -1206,6 +1323,7 @@ func (h *PluginHandler) buildInstallationResponse(
 		manifest,
 		authBindings,
 		taskBindings,
+		repositoriesByID,
 	)
 }
 
@@ -1215,6 +1333,7 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	manifest *pluginv1.PluginManifest,
 	authBindings []*plugins.AuthBinding,
 	taskBindings []*plugins.TaskBinding,
+	repositoriesByID map[int]*plugins.Repository,
 ) (pluginInstallationResponse, error) {
 	if manifest == nil {
 		var err error
@@ -1239,13 +1358,29 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		routes             []pluginRouteJSON
 		assets             []pluginAssetJSON
 		metadata           map[string]any
+		sourceKind         = plugins.RepositorySourceExternal
+		repositoryName     string
+		updatesPaused      bool
 	)
+	if installation.RepositoryID != nil {
+		repository := repositoriesByID[*installation.RepositoryID]
+		if repository != nil {
+			sourceKind = repository.SourceKind
+			repositoryName = repository.DisplayName
+			updatesPaused = repository.SourceKind == plugins.RepositorySourceApprovedCommunity && !repository.Enabled
+		}
+	}
 	if manifest != nil {
 		globalConfigSchema = configSchemasToJSON(manifest.GetGlobalConfigSchema())
 		userConfigSchema = configSchemasToJSON(manifest.GetUserConfigSchema())
 		routes = routesToJSON(manifest.GetHttpRoutes())
 		assets = assetsToJSON(manifest.GetAssets())
 		metadata = structToMap(manifest.GetMetadata())
+	}
+	presentation := toPluginPresentationJSON(manifest.GetPresentation())
+	repoURL := ""
+	if presentation != nil {
+		repoURL = presentation.SourceURL
 	}
 
 	return pluginInstallationResponse{
@@ -1257,6 +1392,11 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 		Enabled:            installation.Enabled,
 		UpdatePolicy:       installation.UpdatePolicy,
 		AvailableVersion:   installation.AvailableVersion,
+		SourceKind:         sourceKind,
+		RepositoryName:     repositoryName,
+		RepoURL:            repoURL,
+		Presentation:       presentation,
+		UpdatesPaused:      updatesPaused,
 		Capabilities:       capabilities,
 		GlobalConfigSchema: globalConfigSchema,
 		UserConfigSchema:   userConfigSchema,
@@ -1271,15 +1411,46 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	}, nil
 }
 
+func toPluginPresentationJSON(presentation *pluginv1.PluginPresentation) *pluginPresentationJSON {
+	if presentation == nil {
+		return nil
+	}
+	return &pluginPresentationJSON{
+		DisplayName:         presentation.GetDisplayName(),
+		Summary:             presentation.GetSummary(),
+		DescriptionMarkdown: presentation.GetDescriptionMarkdown(),
+		SetupMarkdown:       presentation.GetSetupMarkdown(),
+		HomepageURL:         presentation.GetHomepageUrl(),
+		SourceURL:           presentation.GetSourceUrl(),
+		SupportURL:          presentation.GetSupportUrl(),
+		ChangelogURL:        presentation.GetChangelogUrl(),
+		PublisherName:       presentation.GetPublisherName(),
+		PublisherURL:        presentation.GetPublisherUrl(),
+		LicenseSPDX:         presentation.GetLicenseSpdx(),
+	}
+}
+
 func toPluginRepositoryResponse(repository *plugins.Repository) pluginRepositoryResponse {
 	return pluginRepositoryResponse{
 		ID:            repository.ID,
 		URL:           repository.URL,
 		DisplayName:   repository.DisplayName,
 		Enabled:       repository.Enabled,
+		SourceKind:    repository.SourceKind,
+		Managed:       repository.ManagedKey != nil,
 		LastFetchedAt: repository.LastFetchedAt,
 		CreatedAt:     repository.CreatedAt,
 		UpdatedAt:     repository.UpdatedAt,
+	}
+}
+
+func toPluginCatalogSettingsResponse(settings plugins.CatalogSettings) pluginCatalogSettingsResponse {
+	return pluginCatalogSettingsResponse{
+		IncludeApprovedCommunityPlugins: settings.IncludeApprovedCommunityPlugins,
+		ApprovedCommunityPluginCount:    settings.ApprovedCommunityPluginCount,
+		InstalledCommunityPluginCount:   settings.InstalledCommunityPluginCount,
+		MigratedPluginCount:             settings.MigratedPluginCount,
+		CommunityUpdatesPaused:          settings.CommunityUpdatesPaused,
 	}
 }
 

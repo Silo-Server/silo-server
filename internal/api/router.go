@@ -2598,6 +2598,8 @@ func NewRouter(deps Dependencies) chi.Router {
 									restartStatus,
 								)
 								r.Route("/plugins", func(r chi.Router) {
+									r.Get("/catalog-settings", pluginHandler.HandleGetCatalogSettings)
+									r.Put("/catalog-settings", pluginHandler.HandlePutCatalogSettings)
 									r.Get("/repositories", pluginHandler.HandleListRepositories)
 									r.Post("/repositories", pluginHandler.HandleCreateRepository)
 									r.Put("/repositories/{id}", pluginHandler.HandleUpdateRepository)

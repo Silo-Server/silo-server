@@ -437,6 +437,7 @@ export const adminKeys = {
   markerFileHistory: (fileId: number) => ["admin", "markerHistory", "files", fileId] as const,
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
+  pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
   unmatchedItems: (page?: number, search?: string) =>
     page != null

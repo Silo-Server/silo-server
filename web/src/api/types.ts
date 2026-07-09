@@ -3312,9 +3312,25 @@ export interface PluginRepository {
   url: string;
   display_name: string;
   enabled: boolean;
+  source_kind: "silo" | "approved_community" | "external";
+  managed: boolean;
   last_fetched_at?: string | null;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface PluginPresentation {
+  display_name: string;
+  summary: string;
+  description_markdown: string;
+  setup_markdown: string;
+  homepage_url: string;
+  source_url: string;
+  support_url: string;
+  changelog_url: string;
+  publisher_name: string;
+  publisher_url: string;
+  license_spdx: string;
 }
 
 export interface PluginCatalogEntry {
@@ -3322,6 +3338,10 @@ export interface PluginCatalogEntry {
   plugin_id: string;
   version: string;
   archive_url: string;
+  source_kind: "silo" | "approved_community" | "external";
+  repository_name: string;
+  repo_url?: string;
+  presentation?: PluginPresentation;
   capabilities: PluginCapability[];
   global_config_schema: PluginConfigSchema[];
   user_config_schema: PluginConfigSchema[];
@@ -3348,9 +3368,26 @@ export interface PluginInstallation {
   task_bindings: PluginTaskBinding[];
   update_policy: string;
   available_version?: string | null;
+  source_kind: "silo" | "approved_community" | "external";
+  repository_name?: string;
+  repo_url?: string;
+  presentation?: PluginPresentation;
+  updates_paused: boolean;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;
+}
+
+export interface PluginCatalogSettings {
+  include_approved_community_plugins: boolean;
+  approved_community_plugin_count: number;
+  installed_community_plugin_count: number;
+  migrated_plugin_count: number;
+  community_updates_paused: boolean;
+}
+
+export interface UpdatePluginCatalogSettingsRequest {
+  include_approved_community_plugins: boolean;
 }
 
 export interface CreatePluginRepositoryRequest {

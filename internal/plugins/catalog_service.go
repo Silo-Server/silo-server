@@ -25,6 +25,7 @@ type PlatformBinary struct {
 
 type CatalogPackage struct {
 	Manifest     *pluginv1.PluginManifest  `json:"manifest"`
+	RepoURL      string                    `json:"repo_url,omitempty"`
 	ArchiveURL   string                    `json:"archive_url,omitempty"`
 	ChecksumsURL string                    `json:"checksums_url,omitempty"`
 	Binaries     map[string]PlatformBinary `json:"binaries,omitempty"`
@@ -35,10 +36,13 @@ type RepositoryIndex struct {
 }
 
 type CatalogEntry struct {
-	RepositoryID int
-	Manifest     *pluginv1.PluginManifest
-	ArchiveURL   string
-	Checksum     string
+	RepositoryID          int
+	RepositoryDisplayName string
+	SourceKind            string
+	Manifest              *pluginv1.PluginManifest
+	RepoURL               string
+	ArchiveURL            string
+	Checksum              string
 }
 
 type InstallCatalogRequest struct {
@@ -141,7 +145,7 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 				continue
 			}
 
-			key := capabilityKey(entry.Manifest.GetPluginId(), entry.Manifest.GetVersion())
+			key := fmt.Sprintf("%d:%s", entry.RepositoryID, capabilityKey(entry.Manifest.GetPluginId(), entry.Manifest.GetVersion()))
 			if _, exists := catalogByVersion[key]; exists {
 				continue
 			}
@@ -310,10 +314,13 @@ func (s *CatalogService) catalogEntryFromPackage(repository *Repository, pkg Cat
 		}
 
 		return CatalogEntry{
-			RepositoryID: repository.ID,
-			Manifest:     pkg.Manifest,
-			ArchiveURL:   resolvedURL,
-			Checksum:     checksum,
+			RepositoryID:          repository.ID,
+			RepositoryDisplayName: repository.DisplayName,
+			SourceKind:            repository.SourceKind,
+			Manifest:              pkg.Manifest,
+			RepoURL:               pkg.RepoURL,
+			ArchiveURL:            resolvedURL,
+			Checksum:              checksum,
 		}, true, nil
 	}
 
@@ -332,9 +339,12 @@ func (s *CatalogService) catalogEntryFromPackage(repository *Repository, pkg Cat
 		return CatalogEntry{}, false, err
 	}
 	return CatalogEntry{
-		RepositoryID: repository.ID,
-		Manifest:     pkg.Manifest,
-		ArchiveURL:   resolvedURL,
+		RepositoryID:          repository.ID,
+		RepositoryDisplayName: repository.DisplayName,
+		SourceKind:            repository.SourceKind,
+		Manifest:              pkg.Manifest,
+		RepoURL:               pkg.RepoURL,
+		ArchiveURL:            resolvedURL,
 	}, true, nil
 }
 
