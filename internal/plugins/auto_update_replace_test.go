@@ -10,7 +10,7 @@ import (
 func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 	installations := &fakeAutoUpdateInstallations{
 		list: []*Installation{
-			{ID: 41, PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true},
+			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true},
 		},
 	}
 	host := &fakeAutoUpdateHost{}
@@ -96,7 +96,7 @@ func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
 	t.Run("applied auto-update fires onChange", func(t *testing.T) {
 		var calls int
 		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 41, PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
+			list: []*Installation{{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
 		}
 		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
 		if err != nil {
@@ -113,7 +113,7 @@ func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
 	t.Run("notify update fires onChange", func(t *testing.T) {
 		var calls int
 		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 42, PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "notify", Enabled: true}},
+			list: []*Installation{{ID: 42, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "notify", Enabled: true}},
 		}
 		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
 		if err != nil {
@@ -130,7 +130,7 @@ func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
 	t.Run("no mutation does not fire onChange", func(t *testing.T) {
 		var calls int
 		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 43, PluginID: "silo.tmdb", Version: "1.1.0", UpdatePolicy: "auto", Enabled: true}},
+			list: []*Installation{{ID: 43, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.1.0", UpdatePolicy: "auto", Enabled: true}},
 		}
 		summary, err := newOnChangeService(installations, AutoUpdateOptions{}, &calls)
 		if err != nil {
@@ -146,7 +146,7 @@ func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
 
 	t.Run("nil onChange is safe after mutation", func(t *testing.T) {
 		installations := &fakeAutoUpdateInstallations{
-			list: []*Installation{{ID: 44, PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
+			list: []*Installation{{ID: 44, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true}},
 		}
 		service := NewAutoUpdateService(
 			&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
@@ -197,7 +197,7 @@ func TestCompareVersions(t *testing.T) {
 
 func TestAutoUpdateMultiDigitVersion(t *testing.T) {
 	installations := &fakeAutoUpdateInstallations{
-		list: []*Installation{{ID: 50, PluginID: "silo.tmdb", Version: "1.2.9", UpdatePolicy: "auto", Enabled: true}},
+		list: []*Installation{{ID: 50, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.2.9", UpdatePolicy: "auto", Enabled: true}},
 	}
 	host := &fakeAutoUpdateHost{}
 	installer := &fakeAutoUpdateInstaller{}
@@ -234,6 +234,79 @@ func TestAutoUpdateMultiDigitVersion(t *testing.T) {
 	}
 	if summary.UpdatesApplied != 1 {
 		t.Fatalf("UpdatesApplied = %d, want 1 (1.2.10 should be newer than 1.2.9)", summary.UpdatesApplied)
+	}
+}
+
+func TestAutoUpdateServiceKeepsUpdatesPinnedToInstallationRepository(t *testing.T) {
+	installations := &fakeAutoUpdateInstallations{
+		list: []*Installation{{
+			ID:           60,
+			RepositoryID: pluginRepositoryID(7),
+			PluginID:     "silo.requests.arr",
+			Version:      "1.0.0",
+			UpdatePolicy: "auto",
+			Enabled:      true,
+		}},
+	}
+	catalog := &fakeAutoUpdateCatalog{
+		entries: []CatalogEntry{
+			{RepositoryID: 7, Manifest: &pluginv1.PluginManifest{PluginId: "silo.requests.arr", Version: "1.1.0"}},
+			{RepositoryID: 8, Manifest: &pluginv1.PluginManifest{PluginId: "silo.requests.arr", Version: "9.0.0"}},
+		},
+		resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/arr", Checksum: "deadbeef"},
+	}
+	service := NewAutoUpdateService(
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}, {ID: 8, Enabled: true}}},
+		installations,
+		catalog,
+		&fakeAutoUpdateInstaller{},
+		&fakeAutoUpdateHost{},
+		nil,
+		nil,
+	)
+
+	summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+	if err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if summary.UpdatesApplied != 1 {
+		t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
+	}
+	if len(catalog.resolveRequests) != 1 {
+		t.Fatalf("resolve requests = %d, want 1", len(catalog.resolveRequests))
+	}
+	request := catalog.resolveRequests[0]
+	if request.RepositoryID != 7 || request.Version != "1.1.0" {
+		t.Fatalf("resolved repository/version = %d/%s, want 7/1.1.0", request.RepositoryID, request.Version)
+	}
+}
+
+func TestAutoUpdateServiceDoesNotAttachUploadsToCatalogRepositories(t *testing.T) {
+	service := NewAutoUpdateService(
+		&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
+		&fakeAutoUpdateInstallations{list: []*Installation{{
+			ID:           61,
+			PluginID:     "silo.requests.arr",
+			Version:      "1.0.0",
+			UpdatePolicy: "auto",
+			Enabled:      true,
+		}}},
+		&fakeAutoUpdateCatalog{entries: []CatalogEntry{{
+			RepositoryID: 7,
+			Manifest:     &pluginv1.PluginManifest{PluginId: "silo.requests.arr", Version: "2.0.0"},
+		}}},
+		&fakeAutoUpdateInstaller{},
+		&fakeAutoUpdateHost{},
+		nil,
+		nil,
+	)
+
+	summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+	if err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if summary.UpdatesApplied != 0 || summary.UpdatesAvailable != 0 {
+		t.Fatalf("upload unexpectedly received catalog update: %+v", summary)
 	}
 }
 
@@ -277,16 +350,22 @@ func (f *fakeAutoUpdateInstallations) Delete(_ context.Context, id int) error {
 }
 
 type fakeAutoUpdateCatalog struct {
-	entries  []CatalogEntry
-	resolved *ResolvedCatalogInstall
+	entries         []CatalogEntry
+	resolved        *ResolvedCatalogInstall
+	resolveRequests []InstallCatalogRequest
 }
 
 func (f *fakeAutoUpdateCatalog) Fetch(context.Context) ([]CatalogEntry, error) {
 	return f.entries, nil
 }
 
-func (f *fakeAutoUpdateCatalog) ResolveInstall(_ context.Context, _ InstallCatalogRequest) (*ResolvedCatalogInstall, error) {
+func (f *fakeAutoUpdateCatalog) ResolveInstall(_ context.Context, request InstallCatalogRequest) (*ResolvedCatalogInstall, error) {
+	f.resolveRequests = append(f.resolveRequests, request)
 	return f.resolved, nil
+}
+
+func pluginRepositoryID(id int) *int {
+	return &id
 }
 
 type replaceBinaryCall struct {

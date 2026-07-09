@@ -8,6 +8,7 @@ import type {
   CreatePluginRepositoryRequest,
   InstallPluginRequest,
   PluginCatalogEntry,
+  PluginCatalogSettings,
   PluginInstallation,
   PluginRepository,
   PluginTaskBindingUpdateResponse,
@@ -15,6 +16,7 @@ import type {
   SavePluginConfigRequest,
   SavePluginTaskBindingRequest,
   UpdatePluginInstallationRequest,
+  UpdatePluginCatalogSettingsRequest,
   UpdatePluginRepositoryRequest,
 } from "@/api/types";
 import {
@@ -31,6 +33,7 @@ function invalidatePluginQueries(queryClient: ReturnType<typeof useQueryClient>)
   queryClient.invalidateQueries({ queryKey: adminKeys.pluginRepositories() });
   queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalog() });
   queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() });
+  queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalogSettings() });
 }
 
 // useAdminPluginInstallations is a slim hook for callers (e.g. AdminSidebar)
@@ -66,15 +69,48 @@ export function useAdminPlugins() {
     staleTime: ADMIN_STALE_TIME,
   });
 
+  const catalogSettingsQuery = useQuery({
+    queryKey: adminKeys.pluginCatalogSettings(),
+    queryFn: () => api<PluginCatalogSettings>("/admin/plugins/catalog-settings"),
+    staleTime: ADMIN_STALE_TIME,
+  });
+
   return {
     repositories: repositoriesQuery.data ?? [],
     catalog: catalogQuery.data ?? [],
     installations: installationsQuery.data ?? [],
+    catalogSettings: catalogSettingsQuery.data,
     isLoading:
-      repositoriesQuery.isLoading || catalogQuery.isLoading || installationsQuery.isLoading,
+      repositoriesQuery.isLoading ||
+      catalogQuery.isLoading ||
+      installationsQuery.isLoading ||
+      catalogSettingsQuery.isLoading,
     isFetching:
-      repositoriesQuery.isFetching || catalogQuery.isFetching || installationsQuery.isFetching,
+      repositoriesQuery.isFetching ||
+      catalogQuery.isFetching ||
+      installationsQuery.isFetching ||
+      catalogSettingsQuery.isFetching,
   };
+}
+
+export function useUpdatePluginCatalogSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdatePluginCatalogSettingsRequest) =>
+      api<PluginCatalogSettings>("/admin/plugins/catalog-settings", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      toast.success("Plugin catalog settings updated");
+      invalidatePluginQueries(queryClient);
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update plugin catalog settings",
+      );
+    },
+  });
 }
 
 export function useCreatePluginRepository() {

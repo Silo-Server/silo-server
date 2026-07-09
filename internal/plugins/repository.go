@@ -12,12 +12,15 @@ import (
 )
 
 var ErrRepositoryNotFound = errors.New("plugin repository not found")
+var ErrManagedRepositoryReadOnly = errors.New("managed plugin repository is read-only")
 
 type Repository struct {
 	ID            int
 	URL           string
 	DisplayName   string
 	Enabled       bool
+	ManagedKey    *string
+	SourceKind    string
 	LastFetchedAt *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -44,7 +47,7 @@ func NewRepositoryStore(pool *pgxpool.Pool) *RepositoryStore {
 	return &RepositoryStore{pool: pool}
 }
 
-const repositoryColumns = `id, url, display_name, enabled, last_fetched_at, created_at, updated_at`
+const repositoryColumns = `id, url, display_name, enabled, managed_key, source_kind, last_fetched_at, created_at, updated_at`
 
 func scanRepository(row pgx.Row) (*Repository, error) {
 	var repository Repository
@@ -54,6 +57,8 @@ func scanRepository(row pgx.Row) (*Repository, error) {
 		&repository.URL,
 		&repository.DisplayName,
 		&repository.Enabled,
+		&repository.ManagedKey,
+		&repository.SourceKind,
 		&lastFetchedAt,
 		&repository.CreatedAt,
 		&repository.UpdatedAt,
@@ -111,6 +116,16 @@ func (s *RepositoryStore) List(ctx context.Context) ([]*Repository, error) {
 }
 
 func (s *RepositoryStore) Update(ctx context.Context, id int, input UpdateRepositoryInput) error {
+	if input.URL != nil || input.DisplayName != nil || input.Enabled != nil {
+		repository, err := s.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if repository.ManagedKey != nil {
+			return ErrManagedRepositoryReadOnly
+		}
+	}
+
 	var setClauses []string
 	var args []any
 	argIndex := 1
@@ -160,6 +175,14 @@ func (s *RepositoryStore) Update(ctx context.Context, id int, input UpdateReposi
 }
 
 func (s *RepositoryStore) Delete(ctx context.Context, id int) error {
+	repository, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if repository.ManagedKey != nil {
+		return ErrManagedRepositoryReadOnly
+	}
+
 	tag, err := s.pool.Exec(ctx, `DELETE FROM plugin_repositories WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("deleting plugin repository: %w", err)

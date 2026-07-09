@@ -55,16 +55,15 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-const (
-	DefaultRepositoryURL  = "https://raw.githubusercontent.com/Silo-Server/silo-plugins/main/manifest.json"
-	DefaultRepositoryName = "Silo Official Plugins"
-)
-
 var defaultPluginIDs = []string{"silo.tmdb", "silo.tvdb"}
 
 type autoUpdateRepositoryStore interface {
 	List(ctx context.Context) ([]*Repository, error)
 	Create(ctx context.Context, input CreateRepositoryInput) (*Repository, error)
+}
+
+type managedRepositoryReconciler interface {
+	ReconcileManaged(ctx context.Context) (ManagedRepositoryReconcileResult, error)
 }
 
 type autoUpdateInstallationStore interface {
@@ -105,8 +104,8 @@ type AutoUpdateSummary struct {
 	Failures                []string `json:"failures,omitempty"`
 }
 
-// AutoUpdateService seeds the default plugin repository, auto-installs default
-// plugins, and auto-updates installed plugins at server startup.
+// AutoUpdateService reconciles managed plugin repositories, auto-installs
+// default plugins, and auto-updates installed plugins at server startup.
 type AutoUpdateService struct {
 	repositories  autoUpdateRepositoryStore
 	installations autoUpdateInstallationStore
@@ -157,13 +156,11 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 	var summary AutoUpdateSummary
 
 	if opts.SeedDefaultRepository {
-		seeded, err := s.seedDefaultRepository(ctx)
+		seeded, err := s.ensureManagedRepositoryRows(ctx)
 		if err != nil {
 			return summary, err
 		}
-		if seeded {
-			summary.RepositoriesSeeded++
-		}
+		summary.RepositoriesSeeded += seeded
 	}
 
 	entries, err := s.catalog.Fetch(ctx)
@@ -178,33 +175,29 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 	}
 	summary.InstalledPlugins = len(installed)
 
-	installedByPluginID := make(map[string]*Installation, len(installed))
+	installedPluginIDs := make(map[string]struct{}, len(installed))
 	for _, inst := range installed {
 		if inst == nil {
 			continue
 		}
-		installedByPluginID[inst.PluginID] = inst
+		installedPluginIDs[inst.PluginID] = struct{}{}
 	}
 
-	latestByPluginID := latestCatalogEntries(entries)
-	for pluginID, entry := range latestByPluginID {
-		existing, isInstalled := installedByPluginID[pluginID]
-
-		if !isInstalled {
-			if opts.AutoInstallDefaults {
-				installedDefault, err := s.handleNewPlugin(ctx, pluginID, entry)
-				if err != nil {
-					summary.recordFailure("auto-install default plugin %s: %v", pluginID, err)
-				} else if installedDefault {
-					summary.DefaultPluginsInstalled++
-				}
-			}
+	latestByRepositoryPlugin := latestCatalogEntriesByRepository(entries)
+	for _, existing := range installed {
+		if existing == nil || existing.RepositoryID == nil {
 			continue
 		}
-
+		entry, ok := latestByRepositoryPlugin[repositoryPluginKey{
+			RepositoryID: *existing.RepositoryID,
+			PluginID:     existing.PluginID,
+		}]
+		if !ok {
+			continue
+		}
 		outcome, err := s.handleExistingPlugin(ctx, existing, entry)
 		if err != nil {
-			summary.recordFailure("process plugin update %s: %v", pluginID, err)
+			summary.recordFailure("process plugin update %s: %v", existing.PluginID, err)
 			continue
 		}
 		switch outcome {
@@ -212,6 +205,25 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 			summary.UpdatesApplied++
 		case autoUpdateOutcomeNotified:
 			summary.UpdatesAvailable++
+		}
+	}
+
+	if opts.AutoInstallDefaults {
+		latestOfficial := latestCatalogEntriesForSource(entries, RepositorySourceSilo)
+		for _, pluginID := range defaultPluginIDs {
+			if _, installed := installedPluginIDs[pluginID]; installed {
+				continue
+			}
+			entry, ok := latestOfficial[pluginID]
+			if !ok {
+				continue
+			}
+			installedDefault, err := s.handleNewPlugin(ctx, pluginID, entry)
+			if err != nil {
+				summary.recordFailure("auto-install default plugin %s: %v", pluginID, err)
+			} else if installedDefault {
+				summary.DefaultPluginsInstalled++
+			}
 		}
 	}
 
@@ -239,10 +251,10 @@ func (s *AutoUpdateService) notifyChanged(ctx context.Context) {
 	s.onChange(ctx)
 }
 
-// Run seeds the default repository if needed, fetches the catalog, auto-installs
-// default plugins that are not yet installed, and processes updates for installed
-// plugins according to their update policy. All errors are logged rather than
-// returned so that startup is never blocked.
+// Run reconciles managed repositories, fetches the catalog, auto-installs
+// default plugins that are not yet installed, and processes updates for
+// installed plugins according to their update policy. All errors are logged
+// rather than returned so that startup is never blocked.
 func (s *AutoUpdateService) Run(ctx context.Context) error {
 	summary, err := s.Check(ctx, AutoUpdateOptions{
 		SeedDefaultRepository: true,
@@ -258,15 +270,28 @@ func (s *AutoUpdateService) Run(ctx context.Context) error {
 	return nil
 }
 
-// seedDefaultRepository creates the official plugin repository when no
-// repositories are configured.
-func (s *AutoUpdateService) seedDefaultRepository(ctx context.Context) (bool, error) {
+// ensureManagedRepositoryRows reconciles built-in repositories. The fallback
+// preserves the legacy fake-store contract used by isolated unit tests.
+func (s *AutoUpdateService) ensureManagedRepositoryRows(ctx context.Context) (int, error) {
+	if reconciler, ok := s.repositories.(managedRepositoryReconciler); ok {
+		result, err := reconciler.ReconcileManaged(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if result.RepositoriesCreated > 0 {
+			s.logger.InfoContext(ctx, "reconciled managed plugin repositories",
+				"repositories_created", result.RepositoriesCreated,
+			)
+		}
+		return result.RepositoriesCreated, nil
+	}
+
 	repos, err := s.repositories.List(ctx)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	if len(repos) > 0 {
-		return false, nil
+		return 0, nil
 	}
 
 	enabled := true
@@ -276,14 +301,14 @@ func (s *AutoUpdateService) seedDefaultRepository(ctx context.Context) (bool, er
 		Enabled:     &enabled,
 	})
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 
 	s.logger.InfoContext(ctx, "seeded default plugin repository",
 		"url", DefaultRepositoryURL,
 		"name", DefaultRepositoryName,
 	)
-	return true, nil
+	return 1, nil
 }
 
 // handleNewPlugin auto-installs a plugin if it is in the default plugin list.
@@ -398,16 +423,38 @@ func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *In
 	return nil
 }
 
-// latestCatalogEntries returns a map from plugin ID to the catalog entry with
-// the highest version string for that plugin.
-func latestCatalogEntries(entries []CatalogEntry) map[string]CatalogEntry {
-	latest := make(map[string]CatalogEntry, len(entries))
+type repositoryPluginKey struct {
+	RepositoryID int
+	PluginID     string
+}
+
+func latestCatalogEntriesByRepository(entries []CatalogEntry) map[repositoryPluginKey]CatalogEntry {
+	latest := make(map[repositoryPluginKey]CatalogEntry, len(entries))
 	for _, entry := range entries {
+		if entry.Manifest == nil {
+			continue
+		}
 		pluginID := entry.Manifest.GetPluginId()
-		if existing, ok := latest[pluginID]; ok {
+		key := repositoryPluginKey{RepositoryID: entry.RepositoryID, PluginID: pluginID}
+		if existing, ok := latest[key]; ok {
 			if compareVersions(entry.Manifest.GetVersion(), existing.Manifest.GetVersion()) <= 0 {
 				continue
 			}
+		}
+		latest[key] = entry
+	}
+	return latest
+}
+
+func latestCatalogEntriesForSource(entries []CatalogEntry, sourceKind string) map[string]CatalogEntry {
+	latest := make(map[string]CatalogEntry, len(entries))
+	for _, entry := range entries {
+		if entry.Manifest == nil || entry.SourceKind != sourceKind {
+			continue
+		}
+		pluginID := entry.Manifest.GetPluginId()
+		if existing, ok := latest[pluginID]; ok && compareVersions(entry.Manifest.GetVersion(), existing.Manifest.GetVersion()) <= 0 {
+			continue
 		}
 		latest[pluginID] = entry
 	}

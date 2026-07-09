@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -156,7 +158,61 @@ func NewService(
 }
 
 func (s *Service) FetchCatalog(ctx context.Context) ([]CatalogEntry, error) {
-	return s.catalog.Fetch(ctx)
+	entries, err := s.catalog.Fetch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return catalogEntriesForDiscovery(entries), nil
+}
+
+func catalogEntriesForDiscovery(entries []CatalogEntry) []CatalogEntry {
+	selected := make(map[string]CatalogEntry, len(entries))
+	for _, entry := range entries {
+		if entry.Manifest == nil {
+			continue
+		}
+		pluginID := entry.Manifest.GetPluginId()
+		if isApprovedCommunityPlugin(pluginID) && entry.SourceKind != RepositorySourceApprovedCommunity {
+			continue
+		}
+
+		existing, ok := selected[pluginID]
+		if !ok || catalogEntryPreferredForDiscovery(entry, existing) {
+			selected[pluginID] = entry
+		}
+	}
+
+	result := make([]CatalogEntry, 0, len(selected))
+	for _, entry := range selected {
+		result = append(result, entry)
+	}
+	slices.SortFunc(result, func(left, right CatalogEntry) int {
+		return strings.Compare(left.Manifest.GetPluginId(), right.Manifest.GetPluginId())
+	})
+	return result
+}
+
+func catalogEntryPreferredForDiscovery(candidate, current CatalogEntry) bool {
+	candidatePrecedence := repositorySourcePrecedence(candidate.SourceKind)
+	currentPrecedence := repositorySourcePrecedence(current.SourceKind)
+	if candidatePrecedence != currentPrecedence {
+		return candidatePrecedence < currentPrecedence
+	}
+	if candidate.RepositoryID != current.RepositoryID {
+		return candidate.RepositoryID < current.RepositoryID
+	}
+	return compareVersions(candidate.Manifest.GetVersion(), current.Manifest.GetVersion()) > 0
+}
+
+func repositorySourcePrecedence(sourceKind string) int {
+	switch sourceKind {
+	case RepositorySourceSilo:
+		return 0
+	case RepositorySourceApprovedCommunity:
+		return 1
+	default:
+		return 2
+	}
 }
 
 func (s *Service) InstallLocal(ctx context.Context, req InstallArchiveRequest) (*InstallResult, error) {
