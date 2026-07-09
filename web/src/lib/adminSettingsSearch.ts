@@ -143,6 +143,8 @@ export const ADMIN_SETTINGS_GROUPS: AdminSettingsSearchGroup[] = [
           "vectors",
           "embeddings",
           "embedder",
+          "binary quantization",
+          "quantized",
         ],
         settings: settingIndex(
           "Preferred Provider",
