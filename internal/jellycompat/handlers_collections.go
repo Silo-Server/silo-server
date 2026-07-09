@@ -119,6 +119,7 @@ func (h *ItemsHandler) collectionsViewVisible(ctx context.Context, libraries []u
 // the BoxSet children path is unit-testable without a database.
 type smartCollectionQueryExecutor interface {
 	Preview(ctx context.Context, def catalog.QueryDefinition, access catalog.AccessFilter, limit int) ([]*models.MediaItem, int, error)
+	PreviewPage(ctx context.Context, def catalog.QueryDefinition, access catalog.AccessFilter, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, error)
 }
 
 // visibleLibraryIDSet returns the set of library IDs the session may see on
@@ -416,6 +417,49 @@ func (h *ItemsHandler) handleBoxSetChildren(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Smart (live-query) collections have no curated position order — their
+	// members come straight from the query's own ordering, and their membership
+	// is deliberately uncapped (an admin decision). Without an explicit client
+	// sort we page that query directly in SQL rather than resolving the entire
+	// membership and slicing one page locally, so per-request work stays
+	// proportional to the page size instead of the collection size. The
+	// explicit-sort case falls through to the browse allowlist path below, which
+	// re-sorts the whole membership.
+	if catalog.IsLiveQueryType(collection.CollectionType) && !query.sortExplicit {
+		routeID := h.codec.EncodeStringID(EncodedIDCollection, collection.ID)
+		pageIDs, total, ok, pageErr := h.smartCollectionContentIDPage(
+			r.Context(), session, collection, query.startIndex, query.limit)
+		if pageErr != nil {
+			writeCompatUpstreamError(w, pageErr)
+			return
+		}
+		if !ok {
+			writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
+			return
+		}
+		if len(pageIDs) == 0 {
+			// Empty membership, or a page past the end: preserve the real total
+			// so clients that paged beyond the last item still see the size.
+			result := emptyQueryResult(query.startIndex)
+			result.TotalRecordCount = total
+			writeJSON(w, http.StatusOK, result)
+			return
+		}
+		itemsByID, fetchErr := h.fetchCompatItemsByContentIDs(r.Context(), session, pageIDs, nil)
+		if fetchErr != nil {
+			writeCompatUpstreamError(w, fetchErr)
+			return
+		}
+		ordered := make([]upstreamListItem, 0, len(pageIDs))
+		for _, contentID := range pageIDs {
+			if item, itemOK := itemsByID[contentID]; itemOK {
+				ordered = append(ordered, item)
+			}
+		}
+		h.writeCollectionItemsPage(w, r, session, query, routeID, ordered, total)
+		return
+	}
+
 	// Smart (live-query) collections derive membership from a query at read
 	// time and store no rows in library_collection_items, so ListItems returns
 	// nothing for them — that previously left smart-collection BoxSets showing a
@@ -501,15 +545,16 @@ func (h *ItemsHandler) writeCollectionItemsPage(w http.ResponseWriter, r *http.R
 	})
 }
 
-// smartCollectionContentIDs resolves a live-query (smart) collection's members
-// at read time, mirroring the web API's loadLiveCollectionItems. The returned
-// content IDs are in the smart query's own order and access-filtered for the
-// session; the caller reuses the same hydration path as stored collections. A
-// malformed or invalid query definition degrades to no children rather than an
-// error so a single bad collection never 500s a browse.
-func (h *ItemsHandler) smartCollectionContentIDs(ctx context.Context, session *Session, c *models.LibraryCollection) ([]string, error) {
+// prepareSmartCollectionQuery resolves a smart (live-query) collection's stored
+// query definition into an executable form: normalized, validated, item-limited,
+// and intersected with the collection's own bound library scope, plus the
+// session access filter. ok is false when the collection has no executable
+// query — no executor wired, a malformed or invalid definition, or an empty
+// library intersection — so callers degrade to no children rather than error
+// and a single bad collection never 500s a browse.
+func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session *Session, c *models.LibraryCollection) (catalog.QueryDefinition, catalog.AccessFilter, bool) {
 	if h.queryExecutor == nil {
-		return nil, nil
+		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
 
 	var def catalog.QueryDefinition
@@ -517,14 +562,14 @@ func (h *ItemsHandler) smartCollectionContentIDs(ctx context.Context, session *S
 		if err := json.Unmarshal(c.QueryDefinition, &def); err != nil {
 			slog.DebugContext(ctx, "jellycompat smart collection query definition unmarshal failed", "component", "jellycompat",
 				"collection_id", c.ID, "error", err)
-			return nil, nil
+			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 		}
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(false, false); err != nil {
 		slog.DebugContext(ctx, "jellycompat smart collection query definition invalid", "component", "jellycompat",
 			"collection_id", c.ID, "error", err)
-		return nil, nil
+		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 	}
 	def = catalog.ApplySmartCollectionItemLimit(def)
 
@@ -532,16 +577,54 @@ func (h *ItemsHandler) smartCollectionContentIDs(ctx context.Context, session *S
 	case len(c.LibraryIDs) > 0:
 		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, c.LibraryIDs)
 		if len(def.LibraryIDs) == 0 {
-			return nil, nil
+			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 		}
 	case c.LibraryID > 0:
 		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{c.LibraryID})
 		if len(def.LibraryIDs) == 0 {
-			return nil, nil
+			return catalog.QueryDefinition{}, catalog.AccessFilter{}, false
 		}
 	}
 
-	access := h.resolveAccessFilter(ctx, session)
+	return def, h.resolveAccessFilter(ctx, session), true
+}
+
+// smartCollectionContentIDPage resolves a single page of a smart collection's
+// member content IDs directly in SQL (OFFSET/LIMIT over the query's own order),
+// plus the total membership count. This bounds per-request work to one page
+// regardless of collection size — the membership is uncapped, so materializing
+// every member to serve one browse page would scale memory and latency with the
+// collection. ok is false when the collection has no executable query.
+func (h *ItemsHandler) smartCollectionContentIDPage(ctx context.Context, session *Session, c *models.LibraryCollection, offset, limit int) (contentIDs []string, total int, ok bool, err error) {
+	def, access, prepared := h.prepareSmartCollectionQuery(ctx, session, c)
+	if !prepared {
+		return nil, 0, false, nil
+	}
+
+	items, total, _, err := h.queryExecutor.PreviewPage(ctx, def, access, limit, offset, true)
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	contentIDs = make([]string, 0, len(items))
+	for _, item := range items {
+		contentIDs = append(contentIDs, item.ContentID)
+	}
+	return contentIDs, total, true, nil
+}
+
+// smartCollectionContentIDs resolves a live-query (smart) collection's full
+// member set at read time, mirroring the web API's loadLiveCollectionItems. The
+// returned content IDs are in the smart query's own order and access-filtered
+// for the session. Used by the explicit-sort browse path, which re-sorts and
+// paginates the membership as an allowlist; the default (no explicit sort) path
+// uses smartCollectionContentIDPage to page directly in SQL.
+func (h *ItemsHandler) smartCollectionContentIDs(ctx context.Context, session *Session, c *models.LibraryCollection) ([]string, error) {
+	def, access, ok := h.prepareSmartCollectionQuery(ctx, session, c)
+	if !ok {
+		return nil, nil
+	}
+
 	items, total, err := h.queryExecutor.Preview(ctx, def, access, 1)
 	if err != nil {
 		return nil, err
