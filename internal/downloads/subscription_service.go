@@ -93,7 +93,7 @@ func (s *Service) CreateSubscription(ctx context.Context, userID int, req Subscr
 	// be retried by syncing or re-monitoring. So log it rather than failing.
 	registered, err := s.syncSubscription(ctx, stored)
 	if err != nil {
-		slog.Warn("download subscription initial sync failed", "subscription_id", stored.ID, "error", err)
+		slog.WarnContext(ctx, "download subscription initial sync failed", "component", "downloads", "subscription_id", stored.ID, "error", err)
 	}
 	return &SubscriptionResult{Subscription: stored, Registered: registered}, nil
 }
@@ -200,7 +200,7 @@ func (s *Service) UpdateSubscription(ctx context.Context, userID int, profileID,
 	}
 	registered, err := s.syncSubscription(ctx, sub)
 	if err != nil {
-		slog.Warn("download subscription update sync failed", "subscription_id", sub.ID, "error", err)
+		slog.WarnContext(ctx, "download subscription update sync failed", "component", "downloads", "subscription_id", sub.ID, "error", err)
 	}
 	return &SubscriptionResult{Subscription: sub, Registered: registered}, nil
 }
@@ -250,7 +250,7 @@ func (s *Service) SyncSubscriptions(ctx context.Context, userID int, profileID, 
 		}
 		n, err := s.syncSubscription(ctx, sub)
 		if err != nil {
-			slog.Warn("download subscription sync failed", "subscription_id", sub.ID, "error", err)
+			slog.WarnContext(ctx, "download subscription sync failed", "component", "downloads", "subscription_id", sub.ID, "error", err)
 			continue
 		}
 		total += n
@@ -294,7 +294,7 @@ func (s *Service) capItemsToStorage(ctx context.Context, sub *Subscription, item
 	}
 	used, err := s.repo.SumManagedFileSize(ctx, sub.UserID, sub.ProfileID, sub.DeviceID)
 	if err != nil {
-		slog.Warn("download subscription storage gate: sum failed; skipping cap", "subscription_id", sub.ID, "error", err)
+		slog.WarnContext(ctx, "download subscription storage gate: sum failed; skipping cap", "component", "downloads", "subscription_id", sub.ID, "error", err)
 		return items
 	}
 	kept := make([]managedItem, 0, len(items))

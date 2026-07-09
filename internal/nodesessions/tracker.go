@@ -116,12 +116,12 @@ func (tr *Tracker) Track(ctx context.Context, info SessionInfo) {
 	}
 	data, err := json.Marshal(info)
 	if err != nil {
-		slog.Debug("session track marshal failed", "error", err)
+		slog.DebugContext(ctx, "session track marshal failed", "component", "nodesessions", "error", err)
 		return
 	}
 	key := tr.redisKey(info.SessionID)
 	if err := tr.rdb.Set(ctx, key, data, sessionTTL).Err(); err != nil {
-		slog.Debug("session track set failed", "error", err, "session", info.SessionID)
+		slog.DebugContext(ctx, "session track set failed", "component", "nodesessions", "error", err, "session", info.SessionID)
 		return
 	}
 
@@ -148,11 +148,11 @@ func (tr *Tracker) Touch(ctx context.Context, info SessionInfo) {
 
 	data, err := json.Marshal(info)
 	if err != nil {
-		slog.Debug("session touch marshal failed", "error", err)
+		slog.DebugContext(ctx, "session touch marshal failed", "component", "nodesessions", "error", err)
 		return
 	}
 	if err := tr.rdb.Set(ctx, tr.redisKey(info.SessionID), data, sessionTTL).Err(); err != nil {
-		slog.Debug("session touch set failed", "error", err, "session", info.SessionID)
+		slog.DebugContext(ctx, "session touch set failed", "component", "nodesessions", "error", err, "session", info.SessionID)
 	}
 }
 
@@ -167,7 +167,7 @@ func (tr *Tracker) Remove(ctx context.Context, sessionID string) {
 	tr.mu.Unlock()
 
 	if err := tr.rdb.Del(ctx, tr.redisKey(sessionID)).Err(); err != nil {
-		slog.Debug("session remove failed", "error", err, "session", sessionID)
+		slog.DebugContext(ctx, "session remove failed", "component", "nodesessions", "error", err, "session", sessionID)
 	}
 }
 
@@ -199,7 +199,7 @@ func (tr *Tracker) Cleanup(ctx context.Context) {
 		pipe.Del(ctx, tr.redisKey(id))
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
-		slog.Debug("session cleanup pipeline failed", "error", err)
+		slog.DebugContext(ctx, "session cleanup pipeline failed", "component", "nodesessions", "error", err)
 	}
 }
 
@@ -252,6 +252,6 @@ func (tr *Tracker) refreshAll(ctx context.Context) {
 		pipe.Expire(ctx, tr.redisKey(id), sessionTTL)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
-		slog.Debug("session refresh pipeline failed", "error", err)
+		slog.DebugContext(ctx, "session refresh pipeline failed", "component", "nodesessions", "error", err)
 	}
 }

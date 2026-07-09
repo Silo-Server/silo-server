@@ -174,7 +174,7 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		// lease expires and the retry worker reclaims it, instead of
 		// permanently failing the delivery over a database blip.
 		if ctx.Err() == nil {
-			s.logger.Warn("webhook delivery lookup failed",
+			s.logger.WarnContext(ctx, "webhook delivery lookup failed",
 				"attempt_id", attempt.ID,
 				"delivery_id", attempt.NotificationDeliveryID,
 				"error", err)
@@ -194,7 +194,7 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		_ = s.webhooks.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeDelivered,
 			attemptNumber, &result.HTTPStatus, "", nil)
 		if err := s.webhooks.RecordSuccess(ctx, hook.ID); err != nil {
-			s.logger.Warn("webhook success bookkeeping failed", "webhook_id", hook.ID, "error", err)
+			s.logger.WarnContext(ctx, "webhook success bookkeeping failed", "webhook_id", hook.ID, "error", err)
 		}
 		return
 	}
@@ -204,7 +204,7 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		status = &result.HTTPStatus
 	}
 	if err := s.webhooks.RecordFailure(ctx, hook.ID, status, result.Message); err != nil {
-		s.logger.Warn("webhook failure bookkeeping failed", "webhook_id", hook.ID, "error", err)
+		s.logger.WarnContext(ctx, "webhook failure bookkeeping failed", "webhook_id", hook.ID, "error", err)
 	}
 
 	if result.HTTPStatus > 0 && !retryableHTTPStatus(result.HTTPStatus) {
@@ -238,7 +238,7 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 func (s *webhookSender) maybeDisableAfter4xx(ctx context.Context, hook *Webhook, result webhookSendResult) {
 	recent, err := s.webhooks.RecentFinalOutcomes(ctx, hook.ID, autoDisableConsecutive4xx)
 	if err != nil {
-		s.logger.Warn("webhook 4xx history lookup failed", "webhook_id", hook.ID, "error", err)
+		s.logger.WarnContext(ctx, "webhook 4xx history lookup failed", "webhook_id", hook.ID, "error", err)
 		return
 	}
 	if len(recent) < autoDisableConsecutive4xx {
@@ -263,10 +263,10 @@ func (s *webhookSender) disableWebhook(ctx context.Context, hook *Webhook, resul
 		fullReason = fmt.Sprintf("%s (last error: %s)", reason, result.Message)
 	}
 	if err := s.webhooks.Disable(ctx, hook.ID, fullReason); err != nil {
-		s.logger.Error("webhook auto-disable failed", "webhook_id", hook.ID, "error", err)
+		s.logger.ErrorContext(ctx, "webhook auto-disable failed", "webhook_id", hook.ID, "error", err)
 		return
 	}
-	s.logger.Warn("webhook auto-disabled",
+	s.logger.WarnContext(ctx, "webhook auto-disabled",
 		"webhook_id", hook.ID, "url_host", hook.URLHost, "reason", fullReason)
 
 	noticeFlags, err := json.Marshal(map[string]any{
@@ -290,7 +290,7 @@ func (s *webhookSender) disableWebhook(ctx context.Context, hook *Webhook, resul
 	// Nil WebhookFilter: the notice must never re-dispatch as a webhook, or a
 	// broken webhook would loop forever.
 	if _, err := s.operational(ctx, notice, OperationalDispatch{}); err != nil {
-		s.logger.Warn("webhook auto-disable notice dispatch failed", "webhook_id", hook.ID, "error", err)
+		s.logger.WarnContext(ctx, "webhook auto-disable notice dispatch failed", "webhook_id", hook.ID, "error", err)
 	}
 }
 

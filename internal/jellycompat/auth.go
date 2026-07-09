@@ -84,7 +84,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := ExtractToken(r)
 		if !ok {
-			slog.Warn("jellycompat auth: no token in request",
+			slog.WarnContext(r.Context(), "jellycompat auth: no token in request", "component", "jellycompat",
 				"path", r.URL.Path,
 				"auth_header_present", r.Header.Get("Authorization") != "",
 				"x_emby_auth_present", r.Header.Get("X-Emby-Authorization") != "",
@@ -95,7 +95,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 
 		session, ok := a.sessions.Get(token)
 		if !ok {
-			slog.Warn("jellycompat auth: session not found",
+			slog.WarnContext(r.Context(), "jellycompat auth: session not found", "component", "jellycompat",
 				"path", r.URL.Path,
 				"token_prefix", safeTokenPrefix(token),
 			)
@@ -112,7 +112,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 			newPair, err := a.authService.Refresh(refreshCtx, session.StreamAppRefreshToken)
 			cancel()
 			if err != nil {
-				slog.Warn("jellycompat auth: token refresh failed, revoking session",
+				slog.WarnContext(r.Context(), "jellycompat auth: token refresh failed, revoking session", "component", "jellycompat",
 					"path", r.URL.Path,
 					"token_prefix", safeTokenPrefix(token),
 					"error", err,
@@ -128,7 +128,7 @@ func (a *Authenticator) RequireSession(next http.Handler) http.Handler {
 				return nil
 			})
 			if updateErr != nil {
-				slog.Warn("jellycompat auth: session update after refresh failed",
+				slog.WarnContext(r.Context(), "jellycompat auth: session update after refresh failed", "component", "jellycompat",
 					"token_prefix", safeTokenPrefix(token),
 					"error", updateErr,
 				)

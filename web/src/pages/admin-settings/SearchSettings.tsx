@@ -28,6 +28,7 @@ const MEILI_KEYS = [
   "catalog.search.meilisearch.semantic_enabled",
   "catalog.search.meilisearch.semantic_ratio",
   "catalog.search.meilisearch.embedder",
+  "catalog.search.meilisearch.binary_quantized",
 ];
 
 const KEYS = ["catalog.search.provider", ...MEILI_KEYS];
@@ -190,6 +191,16 @@ export default function SearchSettings() {
             onChange={(value) => form.setValue("catalog.search.meilisearch.embedder", value)}
             disabled={!meiliEnabled}
           />
+          <SettingField
+            label="Binary Quantized Vectors"
+            type="toggle"
+            value={form.getValue("catalog.search.meilisearch.binary_quantized") || "false"}
+            onChange={(value) =>
+              form.setValue("catalog.search.meilisearch.binary_quantized", value)
+            }
+            hint="~30x smaller raw vectors (overall index size roughly halves) with a small semantic-relevance cost. Only affects the index when Semantic Search is enabled. Changing this requires a full index rebuild (Rebuild Catalog Search Index) before sync resumes."
+            disabled={!meiliEnabled}
+          />
           <div className="py-3">
             <ConnectionCheckAction
               onClick={handleCheckConnection}
@@ -228,6 +239,10 @@ export default function SearchSettings() {
               <StatusRow
                 label="Indexed Types"
                 value={formatIndexedTypes(status.meilisearch.index_types)}
+              />
+              <StatusRow
+                label="Binary Quantized"
+                value={status.meilisearch.binary_quantized ? "Enabled" : "Disabled"}
               />
               <StatusRow
                 label="Semantic Search"

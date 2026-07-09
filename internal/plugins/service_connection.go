@@ -47,8 +47,8 @@ var runPluginConnectionCheck = func(
 	}
 	capability := metadataProviderConnectionCheckCapability(manifest, capabilityID)
 	if !metadataProviderSupportsConnectionProbe(capability, "movie") {
-		slog.Debug(
-			"skipping metadata provider connection check for unsupported probe type",
+		slog.DebugContext(ctx,
+			"skipping metadata provider connection check for unsupported probe type", "component", "plugins",
 			"plugin_id", manifest.GetPluginId(),
 			"capability_id", capabilityID,
 			"item_type", "movie",
@@ -134,8 +134,8 @@ func (s *Service) TestGlobalConfig(
 
 	defer func() {
 		if stopErr := s.host.Stop(testInstallationID); stopErr != nil && !errors.Is(stopErr, pluginhost.ErrClientNotFound) {
-			slog.Warn(
-				"stopping temporary plugin connection check instance failed",
+			slog.WarnContext(ctx,
+				"stopping temporary plugin connection check instance failed", "component", "plugins",
 				"installation_id", installationID,
 				"test_installation_id", testInstallationID,
 				"error", stopErr,

@@ -105,7 +105,7 @@ func (w *serverChannelWorker) Run(ctx context.Context) {
 func (w *serverChannelWorker) runPass(ctx context.Context) {
 	channels, err := w.repo.ListEnabledForContent(ctx)
 	if err != nil {
-		w.logger.Error("server channel pass: list channels failed", "error", err)
+		w.logger.ErrorContext(ctx, "server channel pass: list channels failed", "error", err)
 		return
 	}
 	if len(channels) == 0 {
@@ -128,7 +128,7 @@ func (w *serverChannelWorker) runPass(ctx context.Context) {
 		pending, err := w.releases.HasEventsSince(ctx,
 			Cursor{CreatedAt: ch.WatermarkCreatedAt, ID: ch.WatermarkID}, batchAge)
 		if err != nil {
-			w.logger.Warn("server channel pass: pending check failed", "channel_id", ch.ID, "error", err)
+			w.logger.WarnContext(ctx, "server channel pass: pending check failed", "channel_id", ch.ID, "error", err)
 			continue
 		}
 		if !pending {
@@ -137,7 +137,7 @@ func (w *serverChannelWorker) runPass(ctx context.Context) {
 		sent, err := w.processChannel(ctx, ch.ID, batchAge)
 		if err != nil {
 			failures++
-			w.logger.Warn("server channel sweep failed", "channel_id", ch.ID, "error", err)
+			w.logger.WarnContext(ctx, "server channel sweep failed", "channel_id", ch.ID, "error", err)
 			continue
 		}
 		if sent {
@@ -237,7 +237,7 @@ func (w *serverChannelWorker) processChannel(ctx context.Context, channelID stri
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
-	w.logger.Info("server channel content posted",
+	w.logger.InfoContext(ctx, "server channel content posted",
 		"channel_id", ch.ID, "url_host", ch.URLHost,
 		"events", len(fresh), "groups", len(groups))
 	return true, nil
@@ -339,7 +339,7 @@ func (w *serverChannelWorker) PostRequestEvent(ctx context.Context, event string
 	}
 	channels, err := w.requestEventChannels(ctx)
 	if err != nil {
-		w.logger.Warn("server channel request post: list channels failed", "error", err)
+		w.logger.WarnContext(ctx, "server channel request post: list channels failed", "error", err)
 		return
 	}
 	// Request posters are raw TMDB paths rendered by the Discord builder;
@@ -371,7 +371,7 @@ func (w *serverChannelWorker) PostRequestEvent(ctx context.Context, event string
 		result := w.sender.sendRequest(ctx, &ch, event, info)
 		if result.OK {
 			if err := w.repo.RecordSendSuccess(ctx, ch.ID); err != nil {
-				w.logger.Warn("server channel success bookkeeping failed", "channel_id", ch.ID, "error", err)
+				w.logger.WarnContext(ctx, "server channel success bookkeeping failed", "channel_id", ch.ID, "error", err)
 			}
 			continue
 		}
@@ -380,9 +380,9 @@ func (w *serverChannelWorker) PostRequestEvent(ctx context.Context, event string
 			status = &result.HTTPStatus
 		}
 		if err := w.repo.RecordSendFailure(ctx, ch.ID, status, result.Message); err != nil {
-			w.logger.Warn("server channel failure bookkeeping failed", "channel_id", ch.ID, "error", err)
+			w.logger.WarnContext(ctx, "server channel failure bookkeeping failed", "channel_id", ch.ID, "error", err)
 		}
-		w.logger.Warn("server channel request post failed",
+		w.logger.WarnContext(ctx, "server channel request post failed",
 			"channel_id", ch.ID, "event", event, "status", result.HTTPStatus, "message", result.Message)
 	}
 }

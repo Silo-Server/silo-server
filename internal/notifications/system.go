@@ -372,7 +372,7 @@ func (s *System) Start(ctx context.Context) {
 		go func() {
 			defer s.wg.Done()
 			if _, err := s.WebPush.PublicKey(ctx); err != nil && ctx.Err() == nil {
-				s.logger.Error("web push VAPID provisioning failed", "error", err)
+				s.logger.ErrorContext(ctx, "web push VAPID provisioning failed", "error", err)
 			}
 		}()
 	}
@@ -519,7 +519,7 @@ func (s *System) SeedAvailability(ctx context.Context, progress func(percent int
 			report(passBase+(i+1)*passSpan/max(len(libraryIDs), 1),
 				fmt.Sprintf("Seeded library %d %s availability (%d new rows)", libraryID, pass.kind, inserted))
 		}
-		s.logger.Info("availability seeding completed",
+		s.logger.InfoContext(ctx, "availability seeding completed",
 			"kind", pass.kind, "libraries", len(libraryIDs), "availability_rows", totalSeeded)
 	}
 	report(100, "Availability seeding completed")
@@ -568,12 +568,12 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 		}
 		store, err := s.stores.ForUser(ctx, user.ID)
 		if err != nil {
-			s.logger.Warn("interest rebuild: open user store failed", "user_id", user.ID, "error", err)
+			s.logger.WarnContext(ctx, "interest rebuild: open user store failed", "user_id", user.ID, "error", err)
 			continue
 		}
 		profiles, err := store.ListProfiles(ctx)
 		if err != nil {
-			s.logger.Warn("interest rebuild: list profiles failed", "user_id", user.ID, "error", err)
+			s.logger.WarnContext(ctx, "interest rebuild: list profiles failed", "user_id", user.ID, "error", err)
 			continue
 		}
 		sort.Slice(profiles, func(i, j int) bool { return profiles[i].ID < profiles[j].ID })
@@ -587,7 +587,7 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				s.logger.Warn("interest rebuild: profile failed",
+				s.logger.WarnContext(ctx, "interest rebuild: profile failed",
 					"user_id", user.ID, "profile_id", profile.ID, "error", err)
 			}
 			if err := s.saveBackfillCheckpoint(ctx, interestRebuildTask, key); err != nil {
@@ -602,7 +602,7 @@ func (s *System) RebuildInterest(ctx context.Context, progress func(percent int,
 	if err := s.completeBackfillCheckpoint(ctx, interestRebuildTask); err != nil {
 		return err
 	}
-	s.logger.Info("interest rebuild completed", "profiles", processed)
+	s.logger.InfoContext(ctx, "interest rebuild completed", "profiles", processed)
 	return nil
 }
 
@@ -687,7 +687,7 @@ func (s *System) rebuildProfileInterest(ctx context.Context, store userstore.Use
 			return ctx.Err()
 		}
 		if err := s.Interest.RecomputeSeries(ctx, userID, profileID, seriesID); err != nil {
-			s.logger.Warn("interest rebuild: series recompute failed",
+			s.logger.WarnContext(ctx, "interest rebuild: series recompute failed",
 				"user_id", userID, "profile_id", profileID, "series_id", seriesID, "error", err)
 		}
 	}

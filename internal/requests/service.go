@@ -89,7 +89,7 @@ func (s *Service) populateRequesterIdentity(ctx context.Context, req *Request) {
 	}
 	email, username, err := s.requesterIdentity.ResolveRequester(ctx, req.RequestedByUserID)
 	if err != nil {
-		slog.WarnContext(ctx, "requests: requester identity resolve failed; attributing to admin", "user_id", req.RequestedByUserID, "error", err)
+		slog.WarnContext(ctx, "requests: requester identity resolve failed; attributing to admin", "component", "requests", "user_id", req.RequestedByUserID, "error", err)
 		return
 	}
 	req.RequesterEmail, req.RequesterUsername = email, username
@@ -171,7 +171,7 @@ func (s *Service) resolveRouterConnections(ctx context.Context, fc *fulfillConte
 		// in.APIKeyRef was decrypted by the repo on read; empty means unconfigured.
 		apiKey := strings.TrimSpace(in.APIKeyRef)
 		if apiKey == "" {
-			slog.WarnContext(ctx, "requests: skipping router connection with no api key", "connection_id", in.ID)
+			slog.WarnContext(ctx, "requests: skipping router connection with no api key", "component", "requests", "connection_id", in.ID)
 			continue
 		}
 		// Lock on the first SUCCESSFULLY resolved connection so a skipped
@@ -714,7 +714,7 @@ func (s *Service) ReconcileRequests(ctx context.Context, limit int) (ReconcileRe
 		}
 		change, err := s.reconcileRequest(ctx, *req, fc)
 		if err != nil {
-			slog.WarnContext(ctx, "request reconcile failed",
+			slog.WarnContext(ctx, "request reconcile failed", "component", "requests",
 				"request_id", req.ID,
 				"media_type", req.MediaType,
 				"tmdb_id", req.TMDBID,
@@ -1406,7 +1406,7 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	returned := map[Quality]bool{}
 	for _, rt := range targets {
 		if !validQuality[rt.Quality] {
-			slog.WarnContext(ctx, "requests: plugin returned unknown quality; skipping", "request_id", req.ID, "quality", string(rt.Quality))
+			slog.WarnContext(ctx, "requests: plugin returned unknown quality; skipping", "component", "requests", "request_id", req.ID, "quality", string(rt.Quality))
 			continue
 		}
 		if returned[rt.Quality] || healthy[rt.Quality] {
@@ -1414,7 +1414,7 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		}
 		if rt.ConnectionID != "" {
 			if _, ok := connKind[rt.ConnectionID]; !ok {
-				slog.WarnContext(ctx, "requests: plugin returned unknown connection id; skipping target", "request_id", req.ID, "connection_id", rt.ConnectionID)
+				slog.WarnContext(ctx, "requests: plugin returned unknown connection id; skipping target", "component", "requests", "request_id", req.ID, "connection_id", rt.ConnectionID)
 				continue
 			}
 		}

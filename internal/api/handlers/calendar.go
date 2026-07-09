@@ -241,7 +241,7 @@ func (h *CalendarHandler) resolveWatched(ctx context.Context, af catalog.AccessF
 	}
 	watched, err := h.personal.ListWatchedItemIDs(ctx, af.UserID, af.ProfileID, ids)
 	if err != nil {
-		slog.WarnContext(ctx, "calendar watched overlay failed", "error", err)
+		slog.WarnContext(ctx, "calendar watched overlay failed", "component", "api", "error", err)
 		return map[string]bool{}
 	}
 	return watched

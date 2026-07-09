@@ -164,7 +164,7 @@ func (c *SessionCleaner) CleanStale(ctx context.Context) (int, error) {
 	c.absPruneMu.Unlock()
 	if abndPruneDue {
 		if err := c.closeAbandonedABSSessions(ctx); err != nil {
-			slog.Warn("abs session cleanup failed", "error", err)
+			slog.WarnContext(ctx, "abs session cleanup failed", "component", "worker", "error", err)
 			c.absPruneMu.Lock()
 			if c.lastABSSessionPrune.Equal(pruneStartedAt) {
 				c.lastABSSessionPrune = previousABSSessionPrune

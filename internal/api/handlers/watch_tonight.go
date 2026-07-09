@@ -83,12 +83,12 @@ func (h *RecommendationsHandler) HandleWatchTonight(w http.ResponseWriter, r *ht
 	wg.Wait()
 
 	if recErr != nil {
-		slog.Error("WatchTonight: recommendations fetch failed", "user_id", userID, "error", recErr)
+		slog.ErrorContext(r.Context(), "WatchTonight: recommendations fetch failed", "component", "api", "user_id", userID, "error", recErr)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
 		return
 	}
 	if liveErr != nil {
-		slog.Warn("WatchTonight: live CW/NextUp fetch failed, continuing with recs only", "user_id", userID, "error", liveErr)
+		slog.WarnContext(r.Context(), "WatchTonight: live CW/NextUp fetch failed, continuing with recs only", "component", "api", "user_id", userID, "error", liveErr)
 	}
 
 	// Filter out already-watched and low-rated items from rec candidates.
@@ -295,7 +295,7 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(r *http.Request, userID in
 	if h.WatchTonightFetcher != nil {
 		nuItems, nuMeta, nuErr := h.WatchTonightFetcher.FetchNextUpItems(ctx, userID, profileID, nil, nil, filter, limit)
 		if nuErr != nil {
-			slog.Warn("WatchTonight: next-up fetch failed", "user_id", userID, "error", nuErr)
+			slog.WarnContext(r.Context(), "WatchTonight: next-up fetch failed", "component", "api", "user_id", userID, "error", nuErr)
 		} else {
 			for _, item := range nuItems {
 				meta, ok := nuMeta[item.ContentID]
@@ -331,7 +331,7 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 	// Fetch movies/series from media_items table.
 	mediaItems, err := h.Fetcher.FetchItemsByContentIDs(ctx, contentIDs, filter)
 	if err != nil {
-		slog.Error("WatchTonight: fetch items failed", "error", err)
+		slog.ErrorContext(r.Context(), "WatchTonight: fetch items failed", "component", "api", "error", err)
 		return nil, nil, nil, nil
 	}
 
@@ -343,7 +343,7 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 	// Also fetch episodes — CW/Next-Up content IDs are typically episode IDs.
 	episodeItems, epMeta, epErr := h.Fetcher.FetchEpisodesByContentIDs(ctx, contentIDs, filter)
 	if epErr != nil {
-		slog.Error("WatchTonight: fetch episodes failed", "error", epErr)
+		slog.ErrorContext(r.Context(), "WatchTonight: fetch episodes failed", "component", "api", "error", epErr)
 	} else {
 		for _, item := range episodeItems {
 			itemMap[item.ContentID] = item
@@ -354,7 +354,7 @@ func (h *RecommendationsHandler) enrichItems(r *http.Request, userID int, profil
 
 	overlays, err := h.Fetcher.ListOverlaySummaries(ctx, contentIDs, filter)
 	if err != nil {
-		slog.Error("WatchTonight: overlay summaries failed", "error", err)
+		slog.ErrorContext(r.Context(), "WatchTonight: overlay summaries failed", "component", "api", "error", err)
 	} else {
 		overlayMap = overlays
 	}

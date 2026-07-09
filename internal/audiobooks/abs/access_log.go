@@ -72,10 +72,10 @@ func (h *Handler) accessLog(next http.Handler) http.Handler {
 			args = append(args, "ua", ua)
 		}
 		if sw.status >= 400 {
-			slog.Warn("abs req failed", args...)
+			slog.WarnContext(r.Context(), "abs req failed", append([]any{"component", "audiobooks"}, args...)...)
 			return
 		}
-		slog.Debug("abs req", append(args, "bytes", sw.bytes)...)
+		slog.DebugContext(r.Context(), "abs req", append([]any{"component", "audiobooks"}, append(args, "bytes", sw.bytes)...)...)
 	})
 }
 

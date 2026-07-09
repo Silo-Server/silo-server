@@ -186,7 +186,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	// for Chapters/MediaSources/People to trigger detail).
 	if !result.needsDetailFields {
 		if missing := unsatisfiedListFields(result.requestedFields); len(missing) > 0 {
-			slog.DebugContext(r.Context(), "jellycompat unsatisfied fields",
+			slog.DebugContext(r.Context(), "jellycompat unsatisfied fields", "component", "jellycompat",
 				"path", r.URL.Path,
 				"fields", missing,
 				"hint", "list-path response will omit these; add a detail-required field (e.g. MediaSources) to switch paths")

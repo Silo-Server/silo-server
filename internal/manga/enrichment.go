@@ -162,14 +162,14 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	slog.Info("manga enrichment: sweep started",
+	slog.InfoContext(ctx, "manga enrichment: sweep started", "component", "manga",
 		"count", len(items),
 		"workers", e.workers,
 	)
 
 	stats := e.runBatch(ctx, items, e.enrichItem, e.recordEnrichFailure)
 
-	slog.Info("manga enrichment: sweep complete",
+	slog.InfoContext(ctx, "manga enrichment: sweep complete", "component", "manga",
 		"attempted", len(items),
 		"enriched", stats.enriched,
 		"no_match", stats.noMatch,
@@ -215,7 +215,7 @@ func (e *Enricher) runBatch(
 				}
 				if err := enrichFn(ctx, item); err != nil {
 					if errors.Is(err, errEnrichmentSkipped) {
-						slog.Debug("manga enrichment: item skipped",
+						slog.DebugContext(ctx, "manga enrichment: item skipped", "component", "manga",
 							"content_id", item.ContentID,
 							"title", item.Title,
 							"reason", err,
@@ -226,7 +226,7 @@ func (e *Enricher) runBatch(
 						atomic.AddInt64(&stats.noMatch, 1)
 						continue
 					}
-					slog.Warn("manga enrichment: item failed",
+					slog.WarnContext(ctx, "manga enrichment: item failed", "component", "manga",
 						"content_id", item.ContentID,
 						"title", item.Title,
 						"error", err,
@@ -397,7 +397,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 			return fmt.Errorf("no metadata obtained, %d provider error(s): %w",
 				len(providerErrs), errors.Join(providerErrs...))
 		}
-		slog.Info("manga enrichment: no metadata found",
+		slog.InfoContext(ctx, "manga enrichment: no metadata found", "component", "manga",
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
@@ -412,7 +412,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 	}
 	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
 
-	slog.Info("manga enrichment: enriched",
+	slog.InfoContext(ctx, "manga enrichment: enriched", "component", "manga",
 		"content_id", item.ContentID,
 		"title", item.Title,
 		"poster", accumulator.PosterPath != "",
@@ -452,7 +452,7 @@ func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemR
 			return fmt.Errorf("no secondary metadata obtained, %d provider error(s): %w",
 				len(providerErrs), errors.Join(providerErrs...))
 		}
-		slog.Info("manga enrichment: no secondary metadata available",
+		slog.InfoContext(ctx, "manga enrichment: no secondary metadata available", "component", "manga",
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
@@ -469,7 +469,7 @@ func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemR
 		e.enqueueRemoteImage(ctx, item.ContentID, result.BackdropPath, metadata.ImageBackdrop)
 	}
 
-	slog.Info("manga enrichment: secondary metadata added",
+	slog.InfoContext(ctx, "manga enrichment: secondary metadata added", "component", "manga",
 		"content_id", item.ContentID,
 		"title", item.Title,
 		"backdrop", upd.BackdropPath != nil,
@@ -502,7 +502,7 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		}
 		results, searchErr := sp.Search(ctx, searchQuery)
 		if searchErr != nil {
-			slog.Warn("manga enrichment: search error",
+			slog.WarnContext(ctx, "manga enrichment: search error", "component", "manga",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"error", searchErr,
@@ -520,7 +520,7 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 				}
 			}
 		}
-		slog.Debug("manga enrichment: search result",
+		slog.DebugContext(ctx, "manga enrichment: search result", "component", "manga",
 			"provider", p.Slug(),
 			"content_id", item.ContentID,
 			"matched_ids", accumulatedIDs,
@@ -538,7 +538,7 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		}
 		result, getErr := mp.GetMetadata(ctx, buildMangaMetadataRequest(accumulator.ProviderIDs, item.Language))
 		if getErr != nil {
-			slog.Warn("manga enrichment: GetMetadata error",
+			slog.WarnContext(ctx, "manga enrichment: GetMetadata error", "component", "manga",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"error", getErr,
@@ -556,7 +556,7 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		// would fail the no-match check below and be discarded + stamped.
 		accumulator.HasMetadata = true
 
-		slog.Debug("manga enrichment: metadata received",
+		slog.DebugContext(ctx, "manga enrichment: metadata received", "component", "manga",
 			"provider", p.Slug(),
 			"content_id", item.ContentID,
 			"has_poster", result.PosterPath != "",
@@ -610,7 +610,7 @@ func (e *Enricher) cacheRemoteImage(ctx context.Context, contentID, url string, 
 		ImageType:   imageType,
 	})
 	if err != nil {
-		slog.Warn("manga enrichment: image cache failed, keeping provider URL",
+		slog.WarnContext(ctx, "manga enrichment: image cache failed, keeping provider URL", "component", "manga",
 			"content_id", contentID,
 			"url", url,
 			"error", err,
@@ -618,7 +618,7 @@ func (e *Enricher) cacheRemoteImage(ctx context.Context, contentID, url string, 
 		return url, ""
 	}
 	if cached == nil {
-		slog.Warn("manga enrichment: image cache returned no result, keeping provider URL",
+		slog.WarnContext(ctx, "manga enrichment: image cache returned no result, keeping provider URL", "component", "manga",
 			"content_id", contentID,
 			"url", url,
 		)
@@ -718,7 +718,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	providerIDs = filterMangaProviderIDs(providerIDs)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
-			slog.Warn("manga enrichment: failed to persist provider IDs",
+			slog.WarnContext(ctx, "manga enrichment: failed to persist provider IDs", "component", "manga",
 				"content_id", contentID,
 				"error", err,
 			)
@@ -732,7 +732,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	authors := filterMangaPeople(result.People)
 	if len(authors) > 0 && e.personRepo != nil && e.itemRepo != nil {
 		if err := e.persistPeople(ctx, contentID, authors); err != nil {
-			slog.Warn("manga enrichment: failed to persist people",
+			slog.WarnContext(ctx, "manga enrichment: failed to persist people", "component", "manga",
 				"content_id", contentID,
 				"error", err,
 			)
@@ -768,7 +768,7 @@ func (e *Enricher) enqueueRemoteImage(ctx context.Context, contentID, sourcePath
 		ImageType:         metadata.ImageTypeToString(imageType),
 	}})
 	if err != nil {
-		slog.Warn("manga enrichment: failed to enqueue image cache job",
+		slog.WarnContext(ctx, "manga enrichment: failed to enqueue image cache job", "component", "manga",
 			"content_id", contentID,
 			"image_type", metadata.ImageTypeToString(imageType),
 			"error", err,
@@ -828,7 +828,7 @@ func (e *Enricher) recordEnrichFailure(ctx context.Context, item enrichmentItemR
 			failures   = manga_enrichment_state.failures + 1,
 			updated_at = NOW()
 	`, item.ContentID); err != nil {
-		slog.Warn("manga enrichment: failed to record enrichment failure",
+		slog.WarnContext(ctx, "manga enrichment: failed to record enrichment failure", "component", "manga",
 			"content_id", item.ContentID,
 			"error", err,
 		)

@@ -74,7 +74,7 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		p.IsPublic = *body.IsPublic
 	}
 	if err := h.deps.PlaylistStore.CreatePlaylist(r.Context(), p); err != nil {
-		slog.Error("abs playlist create failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs playlist create failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "playlist persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -98,12 +98,12 @@ func (h *Handler) handleCreatePlaylist(w http.ResponseWriter, r *http.Request) {
 		// MediaStore lookup so typos don't create orphan rows.
 		if it.EpisodeID == "" {
 			if mi, mErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access); mErr != nil || mi == nil {
-				slog.Debug("abs playlist create-items: skipping unknown audiobook", "id", it.LibraryItemID)
+				slog.DebugContext(r.Context(), "abs playlist create-items: skipping unknown audiobook", "component", "audiobooks", "id", it.LibraryItemID)
 				continue
 			}
 		}
 		if addErr := h.deps.PlaylistStore.AddPlaylistItem(r.Context(), p.ID, it.LibraryItemID, it.EpisodeID); addErr != nil {
-			slog.Debug("abs playlist create-items: store error", "err", addErr, "id", it.LibraryItemID)
+			slog.DebugContext(r.Context(), "abs playlist create-items: store error", "component", "audiobooks", "err", addErr, "id", it.LibraryItemID)
 		}
 	}
 
@@ -139,7 +139,7 @@ func (h *Handler) playlistItems(r *http.Request, playlistID string) []map[string
 	}
 	rows, err := h.deps.PlaylistStore.ListPlaylistItems(r.Context(), playlistID)
 	if err != nil {
-		slog.Warn("abs playlist list-items failed", "err", err, "playlist", playlistID)
+		slog.WarnContext(r.Context(), "abs playlist list-items failed", "component", "audiobooks", "err", err, "playlist", playlistID)
 		return []map[string]any{}
 	}
 	access, _, _ := h.accessFilterFromRequest(r)
@@ -197,7 +197,7 @@ func (h *Handler) handleListLibraryPlaylists(w http.ResponseWriter, r *http.Requ
 	}
 	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
-		slog.Error("abs library playlist list failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs library playlist list failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "playlist list failed", http.StatusInternalServerError)
 		return
 	}
@@ -227,7 +227,7 @@ func (h *Handler) handleListPlaylists(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.deps.PlaylistStore.ListUserPlaylists(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
-		slog.Error("abs playlist list failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs playlist list failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "playlist list failed", http.StatusInternalServerError)
 		return
 	}
@@ -257,7 +257,7 @@ func (h *Handler) handleGetPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs playlist get failed", "err", err)
+		slog.ErrorContext(r.Context(), "abs playlist get failed", "component", "audiobooks", "err", err)
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
@@ -283,7 +283,7 @@ func (h *Handler) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs playlist get-for-update failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist get-for-update failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
@@ -306,7 +306,7 @@ func (h *Handler) handleUpdatePlaylist(w http.ResponseWriter, r *http.Request) {
 		p.IsPublic = *body.IsPublic
 	}
 	if err := h.deps.PlaylistStore.UpdatePlaylist(r.Context(), p); err != nil {
-		slog.Error("abs playlist update failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist update failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -342,7 +342,7 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
-		slog.Error("abs playlist get-for-add failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist get-for-add failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
@@ -372,7 +372,7 @@ func (h *Handler) handleAddPlaylistItem(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := h.deps.PlaylistStore.AddPlaylistItem(r.Context(), id, body.LibraryItemID, body.EpisodeID); err != nil {
-		slog.Error("abs playlist add-item failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist add-item failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -405,12 +405,12 @@ func (h *Handler) handleDeletePlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs playlist get-for-delete failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist get-for-delete failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
 	if err := h.deps.PlaylistStore.DeletePlaylist(r.Context(), id); err != nil {
-		slog.Error("abs playlist delete failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist delete failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist delete failed", http.StatusInternalServerError)
 		return
 	}
@@ -446,7 +446,7 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err != nil {
-		slog.Error("abs playlist get-for-batch-add failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist get-for-batch-add failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
@@ -459,24 +459,24 @@ func (h *Handler) handleBatchAddPlaylistItems(w http.ResponseWriter, r *http.Req
 
 	for _, it := range body.Items {
 		if it.LibraryItemID == "" {
-			slog.Debug("abs playlist batch-add: skipping empty libraryItemId")
+			slog.DebugContext(r.Context(), "abs playlist batch-add: skipping empty libraryItemId", slog.String("component", "audiobooks"))
 			continue
 		}
 		// Audiobook validation; episode items skip.
 		if it.EpisodeID == "" {
 			access, accessErr := h.accessFilterForAuth(r.Context(), a)
 			if accessErr != nil {
-				slog.Debug("abs playlist batch-add: skipping access-denied audiobook", "id", it.LibraryItemID, "err", accessErr)
+				slog.DebugContext(r.Context(), "abs playlist batch-add: skipping access-denied audiobook", "component", "audiobooks", "id", it.LibraryItemID, "err", accessErr)
 				continue
 			}
 			item, lookupErr := h.deps.MediaStore.GetAudiobookByID(r.Context(), it.LibraryItemID, access)
 			if lookupErr != nil || item == nil {
-				slog.Debug("abs playlist batch-add: skipping unknown audiobook", "id", it.LibraryItemID)
+				slog.DebugContext(r.Context(), "abs playlist batch-add: skipping unknown audiobook", "component", "audiobooks", "id", it.LibraryItemID)
 				continue
 			}
 		}
 		if addErr := h.deps.PlaylistStore.AddPlaylistItem(r.Context(), id, it.LibraryItemID, it.EpisodeID); addErr != nil {
-			slog.Debug("abs playlist batch-add: store error", "err", addErr, "id", it.LibraryItemID)
+			slog.DebugContext(r.Context(), "abs playlist batch-add: store error", "component", "audiobooks", "err", addErr, "id", it.LibraryItemID)
 		}
 	}
 
@@ -508,7 +508,7 @@ func (h *Handler) handleBatchRemovePlaylistItems(w http.ResponseWriter, r *http.
 		return
 	}
 	if err != nil {
-		slog.Error("abs playlist get-for-batch-remove failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist get-for-batch-remove failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
@@ -521,7 +521,7 @@ func (h *Handler) handleBatchRemovePlaylistItems(w http.ResponseWriter, r *http.
 
 	for _, it := range body.Items {
 		if rmErr := h.deps.PlaylistStore.RemovePlaylistItem(r.Context(), id, it.LibraryItemID, it.EpisodeID); rmErr != nil {
-			slog.Debug("abs playlist batch-remove: store error", "err", rmErr, "id", it.LibraryItemID)
+			slog.DebugContext(r.Context(), "abs playlist batch-remove: store error", "component", "audiobooks", "err", rmErr, "id", it.LibraryItemID)
 		}
 	}
 
@@ -577,13 +577,13 @@ func (h *Handler) removePlaylistItemImpl(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if err != nil {
-		slog.Error("abs playlist get-for-remove failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs playlist get-for-remove failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "playlist get failed", http.StatusInternalServerError)
 		return
 	}
 
 	if err := h.deps.PlaylistStore.RemovePlaylistItem(r.Context(), id, libItem, episodeIDFromURL); err != nil {
-		slog.Error("abs playlist remove-item failed", "err", err, "id", id, "item", libItem, "episode", episodeIDFromURL)
+		slog.ErrorContext(r.Context(), "abs playlist remove-item failed", "component", "audiobooks", "err", err, "id", id, "item", libItem, "episode", episodeIDFromURL)
 		http.Error(w, "playlist delete failed", http.StatusInternalServerError)
 		return
 	}
@@ -615,14 +615,14 @@ func (h *Handler) removePlaylistItemImpl(w http.ResponseWriter, r *http.Request,
 func (h *Handler) autoDeleteIfEmpty(w http.ResponseWriter, r *http.Request, userID, playlistID string, original Playlist) bool {
 	items, err := h.deps.PlaylistStore.ListPlaylistItems(r.Context(), playlistID)
 	if err != nil {
-		slog.Warn("abs playlist auto-delete: count failed", "err", err, "id", playlistID)
+		slog.WarnContext(r.Context(), "abs playlist auto-delete: count failed", "component", "audiobooks", "err", err, "id", playlistID)
 		return false
 	}
 	if len(items) > 0 {
 		return false
 	}
 	if err := h.deps.PlaylistStore.DeletePlaylist(r.Context(), playlistID); err != nil {
-		slog.Warn("abs playlist auto-delete: delete failed", "err", err, "id", playlistID)
+		slog.WarnContext(r.Context(), "abs playlist auto-delete: delete failed", "component", "audiobooks", "err", err, "id", playlistID)
 		return false
 	}
 	h.publish(userID, "playlist_removed", map[string]any{"id": playlistID})

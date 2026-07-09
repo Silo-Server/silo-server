@@ -33,7 +33,7 @@ func (h *Handler) setHideFromContinue(w http.ResponseWriter, r *http.Request, hi
 	}
 	item, err := h.deps.MediaStore.GetAudiobookByID(r.Context(), itemID, access)
 	if err != nil {
-		slog.Error("abs continue item lookup failed", "err", err, "user", a.UserID, "item", itemID)
+		slog.ErrorContext(r.Context(), "abs continue item lookup failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", itemID)
 		http.Error(w, "item lookup failed", http.StatusInternalServerError)
 		return
 	}
@@ -46,7 +46,7 @@ func (h *Handler) setHideFromContinue(w http.ResponseWriter, r *http.Request, hi
 		return
 	}
 	if err := h.deps.ProgressStore.SetHideFromContinue(r.Context(), a.UserID, a.ProfileID, itemID, hide); err != nil {
-		slog.Error("abs continue toggle failed", "err", err, "user", a.UserID, "item", itemID, "hide", hide)
+		slog.ErrorContext(r.Context(), "abs continue toggle failed", "component", "audiobooks", "err", err, "user", a.UserID, "item", itemID, "hide", hide)
 		http.Error(w, "continue toggle failed", http.StatusInternalServerError)
 		return
 	}

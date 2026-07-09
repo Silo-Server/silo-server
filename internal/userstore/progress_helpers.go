@@ -61,6 +61,29 @@ func parseHistoryTimestamp(value string) time.Time {
 	return parsed
 }
 
+// SeriesWatchCounts is the aggregate episode watch state for one series, as
+// computed by SeriesEpisodeRollupStore.
+type SeriesWatchCounts struct {
+	TotalEpisodes   int
+	WatchedCount    int
+	InProgressCount int
+}
+
+// SeriesEpisodeRollupStore is an optional store capability: compute the
+// per-series episode watch-state rollup (total / watched / in-progress
+// episode counts) in SQL instead of materializing every episode of every
+// series and batching per-episode progress lookups through
+// ListProgressWithCompletedHistory. Implemented by the Postgres store, where
+// episodes and progress live in the same database; SQLite-backed stores fall
+// back to the chunked in-memory path. Semantics must match
+// ListProgressWithCompletedHistory + catalog.EpisodeRollupUserData: an episode
+// is watched when its visible progress row is completed or a visible completed
+// history row exists, and in-progress when it is not watched and its visible
+// progress row has position_seconds > 0.
+type SeriesEpisodeRollupStore interface {
+	SeriesEpisodeWatchCounts(ctx context.Context, profileID string, seriesIDs []string) (map[string]SeriesWatchCounts, error)
+}
+
 // CompletedHistoryItemMap returns the latest completed-history item row for a
 // scoped item query. Lookup failures degrade to an empty map so user-data
 // enrichment can keep returning progress rows.

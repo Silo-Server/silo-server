@@ -163,7 +163,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 				return fmt.Errorf("chat API error: %s", parsed.Error.Message)
 			}
 			if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
-				slog.Warn("AI chat returned no choices, retrying",
+				slog.WarnContext(ctx, "AI chat returned no choices, retrying", "component", "ai",
 					"model", cfg.ChatModel, "response_bytes", len(respBody))
 				return fmt.Errorf("chat API returned no choices")
 			}
@@ -231,7 +231,7 @@ func (c *Client) doWithRetry(ctx context.Context, httpClient *http.Client, label
 		switch {
 		case resp.StatusCode == http.StatusTooManyRequests:
 			wait := rateLimitBackoff(resp, attempt)
-			slog.Warn("rate limited by AI API, waiting", "api", label, "attempt", attempt+1, "wait", wait)
+			slog.WarnContext(ctx, "rate limited by AI API, waiting", "component", "ai", "api", label, "attempt", attempt+1, "wait", wait)
 			lastErr = fmt.Errorf("%s returned 429: %s", label, Truncate(string(respBody), 300))
 			if waitErr := sleepCtx(ctx, wait); waitErr != nil {
 				return waitErr

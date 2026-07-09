@@ -93,14 +93,14 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 			applyHealth(n.ID, healthy, activeJobs, egressKbps, time.Now())
 
 			if n.Healthy && !healthy {
-				slog.Warn("stream node unhealthy", "id", n.ID, "name", n.Name, "url", n.URL)
+				slog.WarnContext(ctx, "stream node unhealthy", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
 			} else if !n.Healthy && healthy {
-				slog.Info("stream node recovered", "id", n.ID, "name", n.Name, "url", n.URL)
+				slog.InfoContext(ctx, "stream node recovered", "component", "nodepool", "id", n.ID, "name", n.Name, "url", n.URL)
 			}
 
 			if hc.repo != nil {
 				if err := hc.repo.UpdateHealth(ctx, n.ID, healthy, activeJobs, egressKbps); err != nil {
-					slog.Error("failed to persist node health", "id", n.ID, "error", err)
+					slog.ErrorContext(ctx, "failed to persist node health", "component", "nodepool", "id", n.ID, "error", err)
 				}
 			}
 		})

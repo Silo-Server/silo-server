@@ -118,7 +118,7 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 
 	client, err := p.service.HTTPRoutesClient(r.Context(), installationID, capabilityID)
 	if err != nil {
-		slog.Error("plugin HTTPRoutesClient failed", "installation_id", installationID, "capability_id", capabilityID, "error", err)
+		slog.ErrorContext(r.Context(), "plugin HTTPRoutesClient failed", "component", "plugins", "installation_id", installationID, "capability_id", capabilityID, "error", err)
 		http.Error(w, "plugin routes unavailable", http.StatusBadGateway)
 		return
 	}

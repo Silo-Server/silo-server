@@ -252,7 +252,7 @@ func (s *Scanner) processExtraFiles(
 
 		info, err := os.Stat(candidate.Path)
 		if err != nil {
-			slog.Warn("scanner: extra stat failed", "path", candidate.Path, "error", err)
+			slog.WarnContext(ctx, "scanner: extra stat failed", "component", "scanner", "path", candidate.Path, "error", err)
 			stats.Errors++
 			continue
 		}
@@ -260,12 +260,12 @@ func (s *Scanner) processExtraFiles(
 		extraID := contentid.ForLocal(candidate.Path)
 		parentID, err := s.resolveExtraParent(ctx, folder.ID, candidate, rootSet)
 		if err != nil {
-			slog.Warn("scanner: extra parent lookup failed", "path", candidate.Path, "error", err)
+			slog.WarnContext(ctx, "scanner: extra parent lookup failed", "component", "scanner", "path", candidate.Path, "error", err)
 			stats.Errors++
 			continue
 		}
 		if parentID == "" {
-			slog.Debug("scanner: extra parent unresolved, deferring",
+			slog.DebugContext(ctx, "scanner: extra parent unresolved, deferring", "component", "scanner",
 				"path", candidate.Path, "kind", candidate.Kind)
 			stats.Skipped++
 			continue
@@ -280,7 +280,7 @@ func (s *Scanner) processExtraFiles(
 			Kind:      candidate.Kind,
 			Title:     naming.ExtraTitleFromFile(candidate.Path),
 		}); err != nil {
-			slog.Warn("scanner: extra upsert failed", "path", candidate.Path, "error", err)
+			slog.WarnContext(ctx, "scanner: extra upsert failed", "component", "scanner", "path", candidate.Path, "error", err)
 			stats.Errors++
 			continue
 		}
@@ -320,7 +320,7 @@ func (s *Scanner) processExtraFiles(
 		// is set, so a pre-existing primary row (e.g. a "-trailer" file
 		// previously scanned as a movie version) converts in one statement.
 		if _, err := s.fileRepo.Upsert(ctx, mf); err != nil {
-			slog.Warn("scanner: extra file upsert failed", "path", candidate.Path, "error", err)
+			slog.WarnContext(ctx, "scanner: extra file upsert failed", "component", "scanner", "path", candidate.Path, "error", err)
 			stats.Errors++
 			continue
 		}
@@ -333,7 +333,7 @@ func (s *Scanner) processExtraFiles(
 	}
 
 	if stats.New+stats.Updated+stats.Skipped+stats.Errors > 0 {
-		slog.Info("scanner: processed extras",
+		slog.InfoContext(ctx, "scanner: processed extras", "component", "scanner",
 			"folder_id", folder.ID,
 			"new", stats.New,
 			"updated", stats.Updated,

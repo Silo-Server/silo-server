@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 type Handler struct {
@@ -185,14 +187,10 @@ func redactAttrs(attrs map[string]any) map[string]any {
 	return redacted
 }
 
+// shouldRedact delegates to the shared logredact detection so the DB path and
+// the console/file/OTLP sinks stay in lock-step on what counts as a secret key.
 func shouldRedact(key string) bool {
-	key = strings.ToLower(key)
-	for _, marker := range []string{"password", "secret", "token", "api_key", "apikey", "authorization", "cookie"} {
-		if strings.Contains(key, marker) {
-			return true
-		}
-	}
-	return false
+	return logredact.SecretKey(key)
 }
 
 func cloneMap(src map[string]any) map[string]any {

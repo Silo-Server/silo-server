@@ -181,7 +181,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	drainerErrCh := make(chan error, 1)
 	var drainerWG sync.WaitGroup
 	if len(matchScopes) > 0 {
-		slog.Info("library ingest: concurrent scoped matching started",
+		slog.InfoContext(ctx, "library ingest: concurrent scoped matching started", "component", "libraryingest",
 			"folder_id", folder.ID,
 			"mode", mode,
 			"scope_count", len(matchScopes),
@@ -249,7 +249,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		stopDrainers()
 		drainerWG.Wait()
 		if len(matchScopes) > 0 {
-			slog.Info("library ingest: concurrent scoped matching stopped",
+			slog.InfoContext(ctx, "library ingest: concurrent scoped matching stopped", "component", "libraryingest",
 				"folder_id", folder.ID,
 				"mode", mode,
 				"scope_count", len(matchScopes),
@@ -269,7 +269,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		if settleWindow <= 0 {
 			settleWindow = scopedTVDrainSettleWindow
 		}
-		slog.Info("library ingest: waiting for tv queue settle window",
+		slog.InfoContext(ctx, "library ingest: waiting for tv queue settle window", "component", "libraryingest",
 			"folder_id", folder.ID,
 			"mode", mode,
 			"wait", settleWindow,
@@ -288,7 +288,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 	stopDrainers()
 	drainerWG.Wait()
 	if len(matchScopes) > 0 {
-		slog.Info("library ingest: concurrent scoped matching stopped",
+		slog.InfoContext(ctx, "library ingest: concurrent scoped matching stopped", "component", "libraryingest",
 			"folder_id", folder.ID,
 			"mode", mode,
 			"scope_count", len(matchScopes),
@@ -415,7 +415,7 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		Errors:       scanResultCount(scanResult, func(value *scanner.ScanResult) int { return value.Errors }),
 	})
 
-	slog.Info("library ingest: completed",
+	slog.InfoContext(ctx, "library ingest: completed", "component", "libraryingest",
 		"folder_id", folder.ID,
 		"mode", mode,
 		"scope", claim.path,

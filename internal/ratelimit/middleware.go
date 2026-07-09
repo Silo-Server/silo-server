@@ -72,7 +72,7 @@ func (mw *Middleware) Reload(ctx context.Context) error {
 		}
 	}
 
-	slog.Info("rate limit config reloaded", "enabled", cfg.Enabled, "global_rps", cfg.GlobalReqPerSecond)
+	slog.InfoContext(ctx, "rate limit config reloaded", "component", "ratelimit", "enabled", cfg.Enabled, "global_rps", cfg.GlobalReqPerSecond)
 	return nil
 }
 

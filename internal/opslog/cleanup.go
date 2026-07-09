@@ -186,13 +186,13 @@ func LoadCleanupInterval(ctx context.Context, store SettingsStore) time.Duration
 func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, pm PartitionManager) int64 {
 	policy, err := LoadRetentionPolicy(ctx, store)
 	if err != nil {
-		slog.Warn("opslog cleanup policy error", "error", err)
+		slog.WarnContext(ctx, "opslog cleanup policy error", "component", "opslog", "error", err)
 		policy = DefaultRetentionPolicy()
 	}
 
 	if pm != nil {
 		if err := pm.EnsureFuturePartitions(ctx); err != nil {
-			slog.Warn("opslog ensure future partitions error", "error", err)
+			slog.WarnContext(ctx, "opslog ensure future partitions error", "component", "opslog", "error", err)
 		}
 	}
 
@@ -206,22 +206,22 @@ func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, p
 	if pm != nil {
 		partitionCleanupFailed := false
 		if dropped, err := pm.DropExpiredPartitions(ctx, cutoff); err != nil {
-			slog.Warn("opslog partition cleanup error", "error", err)
+			slog.WarnContext(ctx, "opslog partition cleanup error", "component", "opslog", "error", err)
 			partitionCleanupFailed = true
 		} else if len(dropped) > 0 {
-			slog.Info("opslog dropped expired partitions", "partitions", dropped)
+			slog.InfoContext(ctx, "opslog dropped expired partitions", "component", "opslog", "partitions", dropped)
 		}
 		if deleted, err := pm.DeleteExpiredRowsFromDefault(ctx, cutoff); err != nil {
-			slog.Warn("opslog default partition cleanup error", "error", err)
+			slog.WarnContext(ctx, "opslog default partition cleanup error", "component", "opslog", "error", err)
 			partitionCleanupFailed = true
 		} else {
 			totalDeleted += deleted
 			if deleted > 0 {
-				slog.Info("opslog default partition cleanup completed", "deleted", deleted)
+				slog.InfoContext(ctx, "opslog default partition cleanup completed", "component", "opslog", "deleted", deleted)
 			}
 		}
 		if partitionCleanupFailed {
-			slog.Warn("opslog partition cleanup degraded, falling back to row deletes", "retention_days", policy.Global.RetentionDays)
+			slog.WarnContext(ctx, "opslog partition cleanup degraded, falling back to row deletes", "component", "opslog", "retention_days", policy.Global.RetentionDays)
 			totalDeleted += pruneByAgeBefore(ctx, pool, cutoff, "", "")
 		}
 	} else {
@@ -231,8 +231,8 @@ func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, p
 	totalDeleted += pruneBySizeCap(ctx, pool, policy.Global.MaxSizeMB, "", "")
 
 	if totalDeleted > 0 {
-		slog.Info(
-			"opslog cleanup completed",
+		slog.InfoContext(ctx,
+			"opslog cleanup completed", "component", "opslog",
 			"deleted", totalDeleted,
 			"retention_days", policy.Global.RetentionDays,
 			"max_rows", policy.Global.MaxRows,
@@ -267,7 +267,10 @@ func pruneByAgeBefore(ctx context.Context, pool *pgxpool.Pool, cutoff time.Time,
 
 		result, err := pool.Exec(ctx, query, args...)
 		if err != nil {
-			slog.Warn("opslog age cleanup error", "error", err, "component", component, "level", level)
+			// target_component/target_level describe the retention-policy scope
+			// being pruned; the plain "component" key is reserved for routing
+			// the log line itself (see Handler.Handle).
+			slog.WarnContext(ctx, "opslog age cleanup error", "component", "opslog", "error", err, "target_component", component, "target_level", level)
 			return totalDeleted
 		}
 		deleted := result.RowsAffected()
@@ -315,7 +318,7 @@ func pruneByRowCap(ctx context.Context, pool *pgxpool.Pool, maxRows int64, compo
 				LIMIT $%d
 			)`, nextArg2, filters2, nextArg2+1), args2...)
 		if err != nil {
-			slog.Warn("opslog row-cap cleanup error", "error", err, "component", component, "level", level)
+			slog.WarnContext(ctx, "opslog row-cap cleanup error", "component", "opslog", "error", err, "target_component", component, "target_level", level)
 			return totalDeleted
 		}
 		deleted := result.RowsAffected()
@@ -403,7 +406,7 @@ func pruneBySizeCap(ctx context.Context, pool *pgxpool.Pool, maxSizeMB int64, co
 				LIMIT $%d
 			)`, nextArg4, filters4, nextArg4+1), args4...)
 		if err != nil {
-			slog.Warn("opslog size-cap cleanup error", "error", err, "component", component, "level", level)
+			slog.WarnContext(ctx, "opslog size-cap cleanup error", "component", "opslog", "error", err, "target_component", component, "target_level", level)
 			return totalDeleted
 		}
 		deleted := result.RowsAffected()

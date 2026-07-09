@@ -59,7 +59,7 @@ func (s *CollectionSyncScheduler) RunOnce(ctx context.Context) (json.RawMessage,
 		return marshalResult(CollectionSyncResult{}), nil
 	}
 
-	s.logger.Info("collection sync scheduler: starting",
+	s.logger.InfoContext(ctx, "collection sync scheduler: starting",
 		"due", len(due),
 	)
 
@@ -81,7 +81,7 @@ func (s *CollectionSyncScheduler) RunOnce(ctx context.Context) (json.RawMessage,
 
 	_ = g.Wait()
 
-	s.logger.Info("collection sync scheduler: complete",
+	s.logger.InfoContext(ctx, "collection sync scheduler: complete",
 		"due", result.Due,
 		"synced", result.Synced,
 		"failed", result.Failed,
@@ -95,7 +95,7 @@ func (s *CollectionSyncScheduler) RunOnce(ctx context.Context) (json.RawMessage,
 func (s *CollectionSyncScheduler) syncOne(ctx context.Context, collection *models.LibraryCollection, mu *sync.Mutex, result *CollectionSyncResult) {
 	// Guard against concurrent sync of the same collection (e.g., manual trigger).
 	if _, loaded := s.inFlight.LoadOrStore(collection.ID, struct{}{}); loaded {
-		s.logger.Info("collection sync scheduler: skipping (already in flight)",
+		s.logger.InfoContext(ctx, "collection sync scheduler: skipping (already in flight)",
 			"collection_id", collection.ID,
 			"title", collection.Title,
 		)
@@ -117,7 +117,7 @@ func (s *CollectionSyncScheduler) syncOne(ctx context.Context, collection *model
 	if collection.SyncSchedule != nil {
 		next := ComputeNextSyncAtFrom(*collection.SyncSchedule, completedAt)
 		if err := s.repo.UpdateNextSyncAt(ctx, collection.ID, next); err != nil {
-			s.logger.Error("collection sync scheduler: failed to advance schedule",
+			s.logger.ErrorContext(ctx, "collection sync scheduler: failed to advance schedule",
 				"collection_id", collection.ID,
 				"error", err,
 			)
@@ -129,7 +129,7 @@ func (s *CollectionSyncScheduler) syncOne(ctx context.Context, collection *model
 
 	if syncErr != nil {
 		result.Failed++
-		s.logger.Error("collection sync scheduler: sync failed",
+		s.logger.ErrorContext(ctx, "collection sync scheduler: sync failed",
 			"collection_id", collection.ID,
 			"title", collection.Title,
 			"duration", completedAt.Sub(startedAt).Round(time.Millisecond),
@@ -137,7 +137,7 @@ func (s *CollectionSyncScheduler) syncOne(ctx context.Context, collection *model
 		)
 	} else {
 		result.Synced++
-		s.logger.Info("collection sync scheduler: synced",
+		s.logger.InfoContext(ctx, "collection sync scheduler: synced",
 			"collection_id", collection.ID,
 			"title", collection.Title,
 			"duration", completedAt.Sub(startedAt).Round(time.Millisecond),

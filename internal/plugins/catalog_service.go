@@ -112,7 +112,7 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 
 		index, err := s.fetchRepositoryIndex(ctx, repository.URL)
 		if err != nil {
-			slog.Warn("skipping broken plugin repository",
+			slog.WarnContext(ctx, "skipping broken plugin repository", "component", "plugins",
 				"repository_id", repository.ID,
 				"repository_url", repository.URL,
 				"error", err,
@@ -128,7 +128,7 @@ func (s *CatalogService) Fetch(ctx context.Context) ([]CatalogEntry, error) {
 		for _, pkg := range index.Plugins {
 			entry, ok, err := s.catalogEntryFromPackage(repository, pkg)
 			if err != nil {
-				slog.Warn("skipping invalid plugin catalog entry",
+				slog.WarnContext(ctx, "skipping invalid plugin catalog entry", "component", "plugins",
 					"repository_id", repository.ID,
 					"repository_url", repository.URL,
 					"plugin_id", manifestPluginID(pkg.Manifest),

@@ -249,11 +249,11 @@ func (s *AutoUpdateService) Run(ctx context.Context) error {
 		AutoInstallDefaults:   true,
 	})
 	if err != nil {
-		s.logger.Warn("failed to run plugin auto-update", "error", err)
+		s.logger.WarnContext(ctx, "failed to run plugin auto-update", "error", err)
 		return nil
 	}
 	for _, failure := range summary.Failures {
-		s.logger.Warn("plugin auto-update operation failed", "error", failure)
+		s.logger.WarnContext(ctx, "plugin auto-update operation failed", "error", failure)
 	}
 	return nil
 }
@@ -279,7 +279,7 @@ func (s *AutoUpdateService) seedDefaultRepository(ctx context.Context) (bool, er
 		return false, err
 	}
 
-	s.logger.Info("seeded default plugin repository",
+	s.logger.InfoContext(ctx, "seeded default plugin repository",
 		"url", DefaultRepositoryURL,
 		"name", DefaultRepositoryName,
 	)
@@ -293,7 +293,7 @@ func (s *AutoUpdateService) handleNewPlugin(ctx context.Context, pluginID string
 	}
 
 	version := entry.Manifest.GetVersion()
-	s.logger.Info("auto-installing default plugin",
+	s.logger.InfoContext(ctx, "auto-installing default plugin",
 		"plugin_id", pluginID,
 		"version", version,
 	)
@@ -371,7 +371,7 @@ func (s *AutoUpdateService) autoUpdatePlugin(ctx context.Context, existing *Inst
 		return fmt.Errorf("install updated plugin %s from %s to %s: %w", pluginID, oldVersion, newVersion, err)
 	}
 
-	s.logger.Info("auto-updated plugin",
+	s.logger.InfoContext(ctx, "auto-updated plugin",
 		"plugin_id", pluginID,
 		"old_version", oldVersion,
 		"new_version", newVersion,
@@ -390,7 +390,7 @@ func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *In
 		return fmt.Errorf("record available version for plugin %s: %w", existing.PluginID, err)
 	}
 
-	s.logger.Info("update available for plugin",
+	s.logger.InfoContext(ctx, "update available for plugin",
 		"plugin_id", existing.PluginID,
 		"installed_version", existing.Version,
 		"available_version", newVersion,

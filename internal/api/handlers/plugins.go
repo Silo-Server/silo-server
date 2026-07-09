@@ -313,7 +313,7 @@ type pluginChunkedUploadSessionResponse struct {
 func (h *PluginHandler) HandleListRepositories(w http.ResponseWriter, r *http.Request) {
 	repositories, err := h.repositories.List(r.Context())
 	if err != nil {
-		slog.Error("listing plugin repositories", "error", err)
+		slog.ErrorContext(r.Context(), "listing plugin repositories", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plugin repositories")
 		return
 	}
@@ -342,7 +342,7 @@ func (h *PluginHandler) HandleCreateRepository(w http.ResponseWriter, r *http.Re
 		Enabled:     req.Enabled,
 	})
 	if err != nil {
-		slog.Error("creating plugin repository", "error", err)
+		slog.ErrorContext(r.Context(), "creating plugin repository", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create plugin repository")
 		return
 	}
@@ -378,14 +378,14 @@ func (h *PluginHandler) HandleUpdateRepository(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusNotFound, "not_found", "Plugin repository not found")
 			return
 		}
-		slog.Error("updating plugin repository", "error", err)
+		slog.ErrorContext(r.Context(), "updating plugin repository", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plugin repository")
 		return
 	}
 
 	repository, err := h.repositories.GetByID(r.Context(), id)
 	if err != nil {
-		slog.Error("loading updated plugin repository", "error", err)
+		slog.ErrorContext(r.Context(), "loading updated plugin repository", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin repository")
 		return
 	}
@@ -405,7 +405,7 @@ func (h *PluginHandler) HandleDeleteRepository(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusNotFound, "not_found", "Plugin repository not found")
 			return
 		}
-		slog.Error("deleting plugin repository", "error", err)
+		slog.ErrorContext(r.Context(), "deleting plugin repository", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete plugin repository")
 		return
 	}
@@ -416,7 +416,7 @@ func (h *PluginHandler) HandleDeleteRepository(w http.ResponseWriter, r *http.Re
 func (h *PluginHandler) HandleCatalog(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.service.FetchCatalog(r.Context())
 	if err != nil {
-		slog.Error("fetching plugin catalog", "error", err)
+		slog.ErrorContext(r.Context(), "fetching plugin catalog", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch plugin catalog")
 		return
 	}
@@ -443,14 +443,14 @@ func (h *PluginHandler) HandleCatalog(w http.ResponseWriter, r *http.Request) {
 func (h *PluginHandler) HandleListInstallations(w http.ResponseWriter, r *http.Request) {
 	installations, err := h.installations.List(r.Context())
 	if err != nil {
-		slog.Error("listing plugin installations", "error", err)
+		slog.ErrorContext(r.Context(), "listing plugin installations", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plugin installations")
 		return
 	}
 
 	response, err := h.buildInstallationResponses(r.Context(), installations)
 	if err != nil {
-		slog.Error("building plugin installations response", "error", err)
+		slog.ErrorContext(r.Context(), "building plugin installations response", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build plugin installation response")
 		return
 	}
@@ -497,7 +497,7 @@ func (h *PluginHandler) HandleCreateInstallation(w http.ResponseWriter, r *http.
 		})
 	}
 	if err != nil {
-		slog.Error("installing plugin archive", "error", err)
+		slog.ErrorContext(r.Context(), "installing plugin archive", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to install plugin")
 		return
 	}
@@ -506,7 +506,7 @@ func (h *PluginHandler) HandleCreateInstallation(w http.ResponseWriter, r *http.
 
 	response, err := h.buildInstallationResponse(r.Context(), result.Installation, result.Manifest)
 	if err != nil {
-		slog.Error("building installed plugin response", "error", err)
+		slog.ErrorContext(r.Context(), "building installed plugin response", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build plugin installation response")
 		return
 	}
@@ -530,7 +530,7 @@ func (h *PluginHandler) HandleUploadInstallation(w http.ResponseWriter, r *http.
 
 	tempFile, err := os.CreateTemp("", "silo-plugin-*.zip")
 	if err != nil {
-		slog.Error("creating temp plugin upload file", "error", err)
+		slog.ErrorContext(r.Context(), "creating temp plugin upload file", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process plugin upload")
 		return
 	}
@@ -541,20 +541,20 @@ func (h *PluginHandler) HandleUploadInstallation(w http.ResponseWriter, r *http.
 	}()
 
 	if _, err := io.Copy(tempFile, file); err != nil {
-		slog.Error("writing temp plugin upload file", "filename", header.Filename, "error", err)
+		slog.ErrorContext(r.Context(), "writing temp plugin upload file", "component", "api", "filename", header.Filename, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process plugin upload")
 		return
 	}
 
 	if err := tempFile.Close(); err != nil {
-		slog.Error("closing temp plugin upload file", "filename", header.Filename, "error", err)
+		slog.ErrorContext(r.Context(), "closing temp plugin upload file", "component", "api", "filename", header.Filename, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to process plugin upload")
 		return
 	}
 
 	result, err := h.installUploadedPlugin(r.Context(), tempPath)
 	if err != nil {
-		slog.Error("installing uploaded plugin", "filename", header.Filename, "error", err)
+		slog.ErrorContext(r.Context(), "installing uploaded plugin", "component", "api", "filename", header.Filename, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to install uploaded plugin")
 		return
 	}
@@ -619,7 +619,7 @@ func (h *PluginHandler) HandleCompleteChunkedUpload(w http.ResponseWriter, r *ht
 
 	result, err := h.installUploadedPlugin(r.Context(), upload.Path)
 	if err != nil {
-		slog.Error("installing chunked plugin upload",
+		slog.ErrorContext(r.Context(), "installing chunked plugin upload", "component", "api",
 			"filename", upload.Filename,
 			"upload_id", upload.ID,
 			"error", err,
@@ -664,7 +664,7 @@ func (h *PluginHandler) writeUploadedPluginResponse(w http.ResponseWriter, r *ht
 
 	response, err := h.buildInstallationResponse(r.Context(), result.Installation, result.Manifest)
 	if err != nil {
-		slog.Error("building uploaded plugin response", "error", err)
+		slog.ErrorContext(r.Context(), "building uploaded plugin response", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build plugin installation response")
 		return
 	}
@@ -681,7 +681,7 @@ func (h *PluginHandler) syncMetadataProviders(ctx context.Context, installation 
 
 	caps, err := h.installations.ListCapabilities(ctx, installation.ID)
 	if err != nil {
-		slog.Error("listing capabilities for metadata provider sync",
+		slog.ErrorContext(ctx, "listing capabilities for metadata provider sync", "component", "api",
 			"installation_id", installation.ID, "error", err)
 		return
 	}
@@ -693,7 +693,7 @@ func (h *PluginHandler) syncMetadataProviders(ctx context.Context, installation 
 		if err := h.chainRepo.AppendProviderToAllChains(ctx, installation.ID, cap.ID, func(level string) metadata.SeedPlacement {
 			return metadata.LookupSeedPlacement(ctx, h.chainRepo.Pool(), installation.ID, cap.ID, level)
 		}); err != nil {
-			slog.Warn("failed to append provider to library chains",
+			slog.WarnContext(ctx, "failed to append provider to library chains", "component", "api",
 				"installation_id", installation.ID,
 				"capability_id", cap.ID,
 				"error", err)
@@ -779,14 +779,14 @@ func (h *PluginHandler) HandleUpdateInstallation(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
 			return
 		}
-		slog.Error("loading current plugin installation", "error", err)
+		slog.ErrorContext(r.Context(), "loading current plugin installation", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin installation")
 		return
 	}
 
 	if req.Enabled != nil && !*req.Enabled && currentInstallation.Enabled && h.service != nil {
 		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
-			slog.Error("stopping plugin before disable", "installation_id", id, "error", err)
+			slog.ErrorContext(r.Context(), "stopping plugin before disable", "component", "api", "installation_id", id, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to disable plugin installation")
 			return
 		}
@@ -800,7 +800,7 @@ func (h *PluginHandler) HandleUpdateInstallation(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
 			return
 		}
-		slog.Error("updating plugin installation", "error", err)
+		slog.ErrorContext(r.Context(), "updating plugin installation", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plugin installation")
 		return
 	}
@@ -813,14 +813,14 @@ func (h *PluginHandler) HandleUpdateInstallation(w http.ResponseWriter, r *http.
 
 	installation, err := h.installations.GetByID(r.Context(), id)
 	if err != nil {
-		slog.Error("loading updated plugin installation", "error", err)
+		slog.ErrorContext(r.Context(), "loading updated plugin installation", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin installation")
 		return
 	}
 
 	response, err := h.buildInstallationResponse(r.Context(), installation, nil)
 	if err != nil {
-		slog.Error("building updated plugin installation response", "error", err)
+		slog.ErrorContext(r.Context(), "building updated plugin installation response", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build plugin installation response")
 		return
 	}
@@ -841,7 +841,7 @@ func (h *PluginHandler) HandleApplyUpdate(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
 			return
 		}
-		slog.Error("apply plugin update", "installation_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "apply plugin update", "component", "api", "installation_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update plugin")
 		return
 	}
@@ -850,7 +850,7 @@ func (h *PluginHandler) HandleApplyUpdate(w http.ResponseWriter, r *http.Request
 
 	response, err := h.buildInstallationResponse(r.Context(), installation, nil)
 	if err != nil {
-		slog.Error("building updated plugin installation response", "error", err)
+		slog.ErrorContext(r.Context(), "building updated plugin installation response", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build response")
 		return
 	}
@@ -884,7 +884,7 @@ func (h *PluginHandler) HandlePutInstallationConfig(w http.ResponseWriter, r *ht
 		case errors.Is(err, plugins.ErrInstallationNotFound):
 			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
 		default:
-			slog.Error("setting plugin global config", "installation_id", id, "error", err)
+			slog.ErrorContext(r.Context(), "setting plugin global config", "component", "api", "installation_id", id, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save plugin config")
 		}
 		return
@@ -929,7 +929,7 @@ func (h *PluginHandler) HandleTestInstallationConfig(w http.ResponseWriter, r *h
 			return
 		}
 
-		slog.Error("testing plugin config", "installation_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "testing plugin config", "component", "api", "installation_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to test plugin config")
 		return
 	}
@@ -965,7 +965,7 @@ func (h *PluginHandler) HandlePutAuthBinding(w http.ResponseWriter, r *http.Requ
 		AutoProvision:  req.AutoProvision,
 		DefaultLogin:   req.DefaultLogin,
 	}); err != nil {
-		slog.Error("saving plugin auth binding", "error", err)
+		slog.ErrorContext(r.Context(), "saving plugin auth binding", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save auth binding")
 		return
 	}
@@ -998,7 +998,7 @@ func (h *PluginHandler) HandlePutTaskBinding(w http.ResponseWriter, r *http.Requ
 		Enabled:        req.Enabled,
 		Trigger:        req.Trigger,
 	}); err != nil {
-		slog.Error("saving plugin task binding", "error", err)
+		slog.ErrorContext(r.Context(), "saving plugin task binding", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save task binding")
 		return
 	}
@@ -1019,7 +1019,7 @@ func (h *PluginHandler) HandleDeleteInstallation(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
 			return
 		}
-		slog.Error("deleting plugin installation", "error", err)
+		slog.ErrorContext(r.Context(), "deleting plugin installation", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete plugin installation")
 		return
 	}
@@ -1048,7 +1048,7 @@ func manifestHasUserNavigableRoute(manifest *pluginv1.PluginManifest) bool {
 func (h *PluginHandler) HandleListUserPluginSettings(w http.ResponseWriter, r *http.Request) {
 	installations, err := h.installations.ListEnabled(r.Context())
 	if err != nil {
-		slog.Error("listing enabled plugin installations", "error", err)
+		slog.ErrorContext(r.Context(), "listing enabled plugin installations", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list plugin settings")
 		return
 	}
@@ -1059,7 +1059,7 @@ func (h *PluginHandler) HandleListUserPluginSettings(w http.ResponseWriter, r *h
 	for _, installation := range installations {
 		manifest, err := plugins.LoadManifestFile(plugins.InstalledManifestPath(installation.InstallPath))
 		if err != nil {
-			slog.Error("loading plugin manifest", "installation_id", installation.ID, "error", err)
+			slog.ErrorContext(r.Context(), "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
 			return
 		}
@@ -1087,7 +1087,7 @@ func (h *PluginHandler) HandleGetUserPluginSettings(w http.ResponseWriter, r *ht
 	userID := apimw.GetUserID(r.Context())
 	values, err := h.userConfig.Get(r.Context(), userID, id)
 	if err != nil {
-		slog.Error("loading plugin user config", "installation_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "loading plugin user config", "component", "api", "installation_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
 		return
 	}
@@ -1135,7 +1135,7 @@ func (h *PluginHandler) loadUserConfigInstallation(
 			writeError(w, http.StatusNotFound, "not_found", "Plugin installation not found")
 			return nil, nil, err
 		}
-		slog.Error("loading plugin installation", "installation_id", installationID, "error", err)
+		slog.ErrorContext(r.Context(), "loading plugin installation", "component", "api", "installation_id", installationID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin installation")
 		return nil, nil, err
 	}
@@ -1146,7 +1146,7 @@ func (h *PluginHandler) loadUserConfigInstallation(
 
 	manifest, err := h.loadInstallationManifest(r.Context(), installation)
 	if err != nil {
-		slog.Error("loading plugin manifest", "installation_id", installationID, "error", err)
+		slog.ErrorContext(r.Context(), "loading plugin manifest", "component", "api", "installation_id", installationID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
 		return nil, nil, err
 	}

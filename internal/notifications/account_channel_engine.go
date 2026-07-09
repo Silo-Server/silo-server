@@ -270,7 +270,7 @@ func (w *accountChannelWorker[K]) Run(ctx context.Context) {
 func (w *accountChannelWorker[K]) runPass(ctx context.Context) {
 	recipients, err := w.channel.listRecipients(ctx)
 	if err != nil {
-		w.logger.Error("channel pass: list recipients failed", "error", err)
+		w.logger.ErrorContext(ctx, "channel pass: list recipients failed", "error", err)
 		return
 	}
 	if len(recipients) == 0 {
@@ -301,7 +301,7 @@ func (w *accountChannelWorker[K]) runPass(ctx context.Context) {
 			pending, err := w.channel.hasPendingSince(ctx, rec.Key,
 				Cursor{CreatedAt: rec.WatermarkCreatedAt, ID: rec.WatermarkID})
 			if err != nil {
-				w.logger.Warn("channel pass: pending check failed", "recipient", rec.Key, "error", err)
+				w.logger.WarnContext(ctx, "channel pass: pending check failed", "recipient", rec.Key, "error", err)
 				continue
 			}
 			if !pending {
@@ -316,7 +316,7 @@ func (w *accountChannelWorker[K]) runPass(ctx context.Context) {
 				pending, err := w.channel.hasTransactionalPendingSince(ctx, rec.Key,
 					Cursor{CreatedAt: rec.WatermarkCreatedAt, ID: rec.WatermarkID})
 				if err != nil {
-					w.logger.Warn("channel pass: transactional pending check failed",
+					w.logger.WarnContext(ctx, "channel pass: transactional pending check failed",
 						"recipient", rec.Key, "error", err)
 					continue
 				}
@@ -332,7 +332,7 @@ func (w *accountChannelWorker[K]) runPass(ctx context.Context) {
 				return // channel turned off mid-pass; nothing else will send either
 			}
 			failures++
-			w.logger.Warn("channel send failed", "recipient", rec.Key, "mode", mode, "error", err)
+			w.logger.WarnContext(ctx, "channel send failed", "recipient", rec.Key, "mode", mode, "error", err)
 		}
 	}
 }
@@ -492,7 +492,7 @@ func (w *accountChannelWorker[K]) processRecipient(ctx context.Context, rec acco
 			}
 			return err
 		}
-		w.logger.Info("notification sent",
+		w.logger.InfoContext(ctx, "notification sent",
 			"recipient", rec.Key, "mode", mode, "items", len(items))
 	}
 

@@ -178,9 +178,9 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		if src.ConnectionID != nil {
 			resolved, cerr := s.resolveConnection(ctx, *src.ConnectionID)
 			if cerr != nil {
-				slog.WarnContext(ctx, "autoscan: resolve connection failed", "source_id", src.ID, "err", cerr)
+				slog.WarnContext(ctx, "autoscan: resolve connection failed", "component", "autoscan", "source_id", src.ID, "err", cerr)
 				if rerr := s.store.RecordError(ctx, src.ID, cerr.Error()); rerr != nil {
-					slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+					slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
 				}
 				s.finishEvent(ctx, eventID, EventFinish{
 					Status:       EventStatusError,
@@ -193,9 +193,9 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		}
 		changes, next, perr := s.provider.PollChanges(ctx, src.PluginID, src.CapabilityID, marker, conn, src.SourceConfig)
 		if perr != nil {
-			slog.WarnContext(ctx, "autoscan: poll changes failed", "source_id", src.ID, "err", perr)
+			slog.WarnContext(ctx, "autoscan: poll changes failed", "component", "autoscan", "source_id", src.ID, "err", perr)
 			if rerr := s.store.RecordError(ctx, src.ID, perr.Error()); rerr != nil {
-				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+				slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
 			}
 			s.finishEvent(ctx, eventID, EventFinish{
 				Status:       EventStatusError,
@@ -209,7 +209,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, ttl)
 		if len(targets) > maxAutoscanTargetsPerPoll {
 			collapsed := collapseTargetsToLibraryScans(targets)
-			slog.WarnContext(ctx, "autoscan: collapsed large scan target batch to library scans",
+			slog.WarnContext(ctx, "autoscan: collapsed large scan target batch to library scans", "component", "autoscan",
 				"source_id", src.ID,
 				"targets", len(targets),
 				"collapsed_targets", len(collapsed),
@@ -223,7 +223,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			enqueue, eerr = s.enqueueScanTargets(ctx, targets, eventID)
 			if eerr != nil {
 				s.releaseClaims(ctx, claimed)
-				slog.WarnContext(ctx, "autoscan: enqueue failed", "source_id", src.ID, "err", eerr)
+				slog.WarnContext(ctx, "autoscan: enqueue failed", "component", "autoscan", "source_id", src.ID, "err", eerr)
 				s.finishEvent(ctx, eventID, EventFinish{
 					Status:          EventStatusError,
 					ChangesReturned: len(changes),
@@ -265,7 +265,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 		if stats.TransientErrors > 0 {
 			msg := fmt.Sprintf("%d resolve attempt(s) failed internally (%d of %d path(s) resolved) — holding marker to retry", stats.TransientErrors, stats.ChangesResolved, len(changes))
 			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
-				slog.WarnContext(ctx, "autoscan: record error failed", "source_id", src.ID, "err", rerr)
+				slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
 			}
 			s.finishEvent(ctx, eventID, EventFinish{
 				Status:          EventStatusError,
@@ -289,7 +289,7 @@ func (s *Service) PollOnce(ctx context.Context) error {
 				"source_id", src.ID, "changes", len(changes))
 		}
 		if aerr := s.store.AdvanceMarker(ctx, src.ID, next); aerr != nil {
-			slog.WarnContext(ctx, "autoscan: advance marker failed", "source_id", src.ID, "err", aerr)
+			slog.WarnContext(ctx, "autoscan: advance marker failed", "component", "autoscan", "source_id", src.ID, "err", aerr)
 			s.finishEvent(ctx, eventID, EventFinish{
 				Status:          EventStatusError,
 				ChangesReturned: len(changes),
@@ -359,10 +359,10 @@ func (s *Service) createEvent(ctx context.Context, src Source, marker string, st
 	})
 	if err != nil {
 		if errors.Is(err, ErrPollAlreadyRunning) {
-			slog.DebugContext(ctx, "autoscan: source poll already running", "source_id", src.ID)
+			slog.DebugContext(ctx, "autoscan: source poll already running", "component", "autoscan", "source_id", src.ID)
 			return 0, false
 		}
-		slog.WarnContext(ctx, "autoscan: create event failed", "source_id", src.ID, "err", err)
+		slog.WarnContext(ctx, "autoscan: create event failed", "component", "autoscan", "source_id", src.ID, "err", err)
 		return 0, true
 	}
 	return id, true
@@ -378,7 +378,7 @@ func (s *Service) finishEvent(ctx context.Context, eventID int64, finish EventFi
 		finish.Status = EventStatusSuccess
 	}
 	if err := s.store.FinishEvent(ctx, finish); err != nil {
-		slog.WarnContext(ctx, "autoscan: finish event failed", "event_id", eventID, "err", err)
+		slog.WarnContext(ctx, "autoscan: finish event failed", "component", "autoscan", "event_id", eventID, "err", err)
 	}
 }
 
@@ -442,7 +442,7 @@ func (s *Service) resolveAndClaim(ctx context.Context, changes []Change, ttl tim
 				continue
 			}
 			stats.TransientErrors++
-			slog.WarnContext(ctx, "autoscan: resolve failed", "path", dir, "err", rerr)
+			slog.WarnContext(ctx, "autoscan: resolve failed", "component", "autoscan", "path", dir, "err", rerr)
 			continue
 		}
 		if target == nil || target.Folder == nil {
@@ -520,7 +520,7 @@ func (s *Service) resolveChange(ctx context.Context, change Change, stats *resol
 			return nil, false
 		}
 		stats.TransientErrors++
-		slog.WarnContext(ctx, "autoscan: resolve failed", "path", change.SourcePath, "scope", change.Scope, "err", err)
+		slog.WarnContext(ctx, "autoscan: resolve failed", "component", "autoscan", "path", change.SourcePath, "scope", change.Scope, "err", err)
 		return nil, false
 	}
 	if target == nil || target.Folder == nil {
@@ -559,7 +559,7 @@ func (s *Service) claimTarget(
 func (s *Service) releaseClaims(ctx context.Context, claimed []string) {
 	for _, k := range claimed {
 		if rerr := s.suppress.Release(ctx, k); rerr != nil {
-			slog.WarnContext(ctx, "autoscan: release claim failed", "key", k, "err", rerr)
+			slog.WarnContext(ctx, "autoscan: release claim failed", "component", "autoscan", "key", k, "err", rerr)
 		}
 	}
 }

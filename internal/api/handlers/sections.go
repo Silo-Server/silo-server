@@ -388,7 +388,7 @@ func (h *SectionHandler) deleteUnreferencedSectionManagedCollection(ctx context.
 	collection, err := h.CollectionRepo.GetByID(ctx, collectionID)
 	if err != nil {
 		if !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
-			slog.Warn("failed to load section-managed collection during section delete", "collection_id", collectionID, "error", err)
+			slog.WarnContext(ctx, "failed to load section-managed collection during section delete", "component", "api", "collection_id", collectionID, "error", err)
 		}
 		return
 	}
@@ -397,14 +397,14 @@ func (h *SectionHandler) deleteUnreferencedSectionManagedCollection(ctx context.
 	}
 	refs, err := h.repo.CountLibraryCollectionReferences(ctx, collectionID, "")
 	if err != nil {
-		slog.Warn("failed to count section-managed collection references", "collection_id", collectionID, "error", err)
+		slog.WarnContext(ctx, "failed to count section-managed collection references", "component", "api", "collection_id", collectionID, "error", err)
 		return
 	}
 	if refs > 0 {
 		return
 	}
 	if err := h.CollectionRepo.Delete(ctx, collectionID); err != nil && !errors.Is(err, catalog.ErrLibraryCollectionNotFound) {
-		slog.Warn("failed to delete unreferenced section-managed collection", "collection_id", collectionID, "error", err)
+		slog.WarnContext(ctx, "failed to delete unreferenced section-managed collection", "component", "api", "collection_id", collectionID, "error", err)
 	}
 }
 
@@ -608,7 +608,7 @@ func (h *SectionHandler) HandleHomeSectionItems(w http.ResponseWriter, r *http.R
 
 		withItems, fetchErr := h.fetcher.FetchOne(r.Context(), s, nil, libraryIDs, userID, profileID, accessFilter)
 		if fetchErr != nil {
-			slog.Error("fetching section items", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
+			slog.ErrorContext(r.Context(), "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
 			withItems = sections.SectionWithItems{
 				ResolvedSection: s,
 				Items:           []*models.MediaItem{},
@@ -690,7 +690,7 @@ func (h *SectionHandler) HandleLibrarySectionItems(w http.ResponseWriter, r *htt
 
 		withItems, fetchErr := h.fetcher.FetchOne(r.Context(), s, &libraryID, nil, userID, profileID, accessFilter)
 		if fetchErr != nil {
-			slog.Error("fetching section items", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
+			slog.ErrorContext(r.Context(), "fetching section items", "component", "api", "section_id", s.ID, "type", s.SectionType, "error", fetchErr)
 			withItems = sections.SectionWithItems{
 				ResolvedSection: s,
 				Items:           []*models.MediaItem{},
@@ -782,7 +782,7 @@ func (h *SectionHandler) loadResolvedLibrarySections(r *http.Request, libraryID 
 	if len(adminSections) == 0 {
 		defaults, defaultsErr := h.defaultLibrarySections(r.Context(), libraryID)
 		if defaultsErr != nil {
-			slog.Warn("loading typed library section defaults", "library_id", libraryID, "error", defaultsErr)
+			slog.WarnContext(r.Context(), "loading typed library section defaults", "component", "api", "library_id", libraryID, "error", defaultsErr)
 			adminSections = sections.DefaultLibrarySections(&libraryID)
 		} else {
 			adminSections = defaults
@@ -1224,7 +1224,7 @@ func (h *SectionHandler) buildSectionsResponse(r *http.Request, withItems []sect
 	if len(contentIDs) > 0 && h.fetcher != nil {
 		summaries, err := h.fetcher.ListOverlaySummaries(r.Context(), contentIDs, requestAccessFilter(r))
 		if err != nil {
-			slog.Error("loading overlay summaries", "error", err)
+			slog.ErrorContext(r.Context(), "loading overlay summaries", "component", "api", "error", err)
 		} else {
 			overlaySummaries = summaries
 		}
@@ -1305,7 +1305,7 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 	}
 	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
 	if err != nil {
-		slog.Warn("loading section manga chapter metadata", "error", err)
+		slog.WarnContext(ctx, "loading section manga chapter metadata", "component", "api", "error", err)
 		return map[string]sections.SectionItemMeta{}
 	}
 	return meta
@@ -1341,7 +1341,7 @@ func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withIte
 
 	_, meta, err := h.episodeFetcher.FetchEpisodesByContentIDs(ctx, ids, filter)
 	if err != nil {
-		slog.Warn("loading section episode metadata", "error", err)
+		slog.WarnContext(ctx, "loading section episode metadata", "component", "api", "error", err)
 		return map[string]sections.SectionItemMeta{}
 	}
 	return meta
@@ -1622,7 +1622,7 @@ func (h *SectionHandler) HandleRestoreDefaults(w http.ResponseWriter, r *http.Re
 	if req.Scope == "home" {
 		defaults, err = h.defaultHomeSections(r.Context())
 		if err != nil {
-			slog.Error("loading default home sections", "error", err)
+			slog.ErrorContext(r.Context(), "loading default home sections", "component", "api", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load libraries")
 			return
 		}
@@ -1633,7 +1633,7 @@ func (h *SectionHandler) HandleRestoreDefaults(w http.ResponseWriter, r *http.Re
 				writeError(w, http.StatusNotFound, "not_found", "Library not found")
 				return
 			}
-			slog.Error("loading default library sections", "library_id", *req.LibraryID, "error", err)
+			slog.ErrorContext(r.Context(), "loading default library sections", "component", "api", "library_id", *req.LibraryID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load library")
 			return
 		}
@@ -1641,7 +1641,7 @@ func (h *SectionHandler) HandleRestoreDefaults(w http.ResponseWriter, r *http.Re
 
 	created, err := h.repo.RestoreDefaults(r.Context(), req.Scope, req.LibraryID, defaults)
 	if err != nil {
-		slog.Error("restoring default sections", "scope", req.Scope, "error", err)
+		slog.ErrorContext(r.Context(), "restoring default sections", "component", "api", "scope", req.Scope, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to restore defaults")
 		return
 	}
@@ -1653,7 +1653,7 @@ func (h *SectionHandler) HandleRestoreDefaults(w http.ResponseWriter, r *http.Re
 			libraryIDStr = strconv.Itoa(*req.LibraryID)
 		}
 		if err := h.repo.ClearAllProfileOverrides(r.Context(), req.Scope, libraryIDStr); err != nil {
-			slog.Error("clearing profile overrides", "scope", req.Scope, "error", err)
+			slog.ErrorContext(r.Context(), "clearing profile overrides", "component", "api", "scope", req.Scope, "error", err)
 			// Don't fail the whole request — sections were already restored.
 		}
 	}

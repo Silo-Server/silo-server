@@ -173,7 +173,7 @@ func (h *SubtitleSearchHandler) HandleDownload(w http.ResponseWriter, r *http.Re
 		HearingImpaired: req.HearingImpaired,
 	})
 	if err != nil {
-		slog.Error("subtitle download failed", "provider", req.Provider, "subtitle_id", req.SubtitleID, "error", err)
+		slog.ErrorContext(r.Context(), "subtitle download failed", "component", "api", "provider", req.Provider, "subtitle_id", req.SubtitleID, "error", err)
 		writeError(w, http.StatusInternalServerError, "download_error", "Failed to download subtitle")
 		return
 	}
@@ -242,7 +242,7 @@ func (h *SubtitleSearchHandler) HandleUpload(w http.ResponseWriter, r *http.Requ
 		case strings.Contains(err.Error(), "exceeds maximum size"):
 			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Subtitle file must be under 5 MB")
 		default:
-			slog.Error("subtitle upload failed", "media_file_id", mediaFileID, "error", err)
+			slog.ErrorContext(r.Context(), "subtitle upload failed", "component", "api", "media_file_id", mediaFileID, "error", err)
 			writeError(w, http.StatusInternalServerError, "upload_error", "Failed to upload subtitle")
 		}
 		return

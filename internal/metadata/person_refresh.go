@@ -126,7 +126,7 @@ func (s *PersonRefreshService) refreshPersonWithProviders(
 			Language:    "en",
 		})
 		if err != nil {
-			slog.Warn("person refresh: provider detail lookup failed",
+			slog.WarnContext(ctx, "person refresh: provider detail lookup failed", "component", "metadata",
 				"provider", provider.Slug(),
 				"person_id", id,
 				"error", err,
@@ -207,7 +207,7 @@ func (s *PersonRefreshService) enqueuePersonPhoto(ctx context.Context, person mo
 		ContentType:       "people",
 		ImageType:         ImageCacheImageProfile,
 	}); err != nil {
-		slog.Warn("person refresh: failed to enqueue photo cache job",
+		slog.WarnContext(ctx, "person refresh: failed to enqueue photo cache job", "component", "metadata",
 			"person_id", person.ID,
 			"provider", providerID,
 			"error", err,

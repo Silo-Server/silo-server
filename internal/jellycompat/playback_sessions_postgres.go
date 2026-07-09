@@ -272,7 +272,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 	}
 	data, err := json.Marshal(session)
 	if err != nil {
-		slog.Warn("marshal compat playback session failed", "error", err, "play_session_id", session.ID)
+		slog.WarnContext(ctx, "marshal compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", session.ID)
 		return
 	}
 	expiresAt := session.ExpiresAt
@@ -280,7 +280,7 @@ func (d *DurableCompatPlaybackStore) upsert(ctx context.Context, session Playbac
 		expiresAt = d.now().Add(d.ttl)
 	}
 	if _, err := d.pool.Exec(ctx, upsertSessionQuery, session.ID, session.CompatToken, session.UserID, data, expiresAt); err != nil {
-		slog.Warn("persist compat playback session failed", "error", err, "play_session_id", session.ID)
+		slog.WarnContext(ctx, "persist compat playback session failed", "component", "jellycompat", "error", err, "play_session_id", session.ID)
 	}
 }
 

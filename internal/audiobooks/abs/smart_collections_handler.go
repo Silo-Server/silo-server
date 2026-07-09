@@ -76,14 +76,14 @@ func (h *Handler) handleCreateSmartCollection(w http.ResponseWriter, r *http.Req
 	}
 	qdBytes, err := json.Marshal(qd)
 	if err != nil {
-		slog.Error("abs smart collection marshal query_def failed", "err", err)
+		slog.ErrorContext(r.Context(), "abs smart collection marshal query_def failed", "component", "audiobooks", "err", err)
 		http.Error(w, "smart collection persist failed", http.StatusInternalServerError)
 		return
 	}
 	c.QueryDef = qdBytes
 
 	if err := h.deps.SmartCollectionStore.CreateSmartCollection(r.Context(), c); err != nil {
-		slog.Error("abs smart collection create failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs smart collection create failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "smart collection persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -107,7 +107,7 @@ func (h *Handler) handleListSmartCollections(w http.ResponseWriter, r *http.Requ
 	}
 	rows, err := h.deps.SmartCollectionStore.ListUserSmartCollections(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
-		slog.Error("abs smart collection list failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs smart collection list failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "smart collection list failed", http.StatusInternalServerError)
 		return
 	}
@@ -134,7 +134,7 @@ func (h *Handler) handleGetSmartCollection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err != nil {
-		slog.Error("abs smart collection get failed", "err", err)
+		slog.ErrorContext(r.Context(), "abs smart collection get failed", "component", "audiobooks", "err", err)
 		http.Error(w, "smart collection get failed", http.StatusInternalServerError)
 		return
 	}
@@ -158,7 +158,7 @@ func (h *Handler) handleUpdateSmartCollection(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err != nil {
-		slog.Error("abs smart collection get-for-update failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs smart collection get-for-update failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "smart collection get failed", http.StatusInternalServerError)
 		return
 	}
@@ -191,14 +191,14 @@ func (h *Handler) handleUpdateSmartCollection(w http.ResponseWriter, r *http.Req
 		}
 		qdBytes, mErr := json.Marshal(qd)
 		if mErr != nil {
-			slog.Error("abs smart collection marshal query_def failed", "err", mErr)
+			slog.ErrorContext(r.Context(), "abs smart collection marshal query_def failed", "component", "audiobooks", "err", mErr)
 			http.Error(w, "smart collection persist failed", http.StatusInternalServerError)
 			return
 		}
 		c.QueryDef = qdBytes
 	}
 	if err := h.deps.SmartCollectionStore.UpdateSmartCollection(r.Context(), c); err != nil {
-		slog.Error("abs smart collection update failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs smart collection update failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "smart collection persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -226,12 +226,12 @@ func (h *Handler) handleDeleteSmartCollection(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err != nil {
-		slog.Error("abs smart collection get-for-delete failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs smart collection get-for-delete failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "smart collection get failed", http.StatusInternalServerError)
 		return
 	}
 	if err := h.deps.SmartCollectionStore.DeleteSmartCollection(r.Context(), id); err != nil {
-		slog.Error("abs smart collection delete failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs smart collection delete failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "smart collection delete failed", http.StatusInternalServerError)
 		return
 	}
@@ -260,7 +260,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err != nil {
-		slog.Error("abs smart collection items get failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs smart collection items get failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "smart collection get failed", http.StatusInternalServerError)
 		return
 	}
@@ -268,7 +268,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 	var qd smartcoll.QueryDefinition
 	if len(c.QueryDef) > 0 {
 		if uErr := json.Unmarshal(c.QueryDef, &qd); uErr != nil {
-			slog.Error("abs smart collection invalid stored query_def", "err", uErr, "id", id)
+			slog.ErrorContext(r.Context(), "abs smart collection invalid stored query_def", "component", "audiobooks", "err", uErr, "id", id)
 			http.Error(w, "smart collection get failed", http.StatusInternalServerError)
 			return
 		}
@@ -287,7 +287,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 	}
 	allLibs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
 	if err != nil {
-		slog.Warn("abs smart collection libraries fetch failed", "err", err, "id", id)
+		slog.WarnContext(r.Context(), "abs smart collection libraries fetch failed", "component", "audiobooks", "err", err, "id", id)
 		allLibs = nil
 	}
 	libByID := make(map[int64]AudiobookLibrary, len(allLibs))
@@ -327,7 +327,7 @@ func (h *Handler) handleSmartCollectionItems(w http.ResponseWriter, r *http.Requ
 	for _, lib := range targetLibs {
 		items, _, lerr := h.deps.MediaStore.ListAudiobooks(r.Context(), lib.ID, 0, 0, access, Filter{})
 		if lerr != nil {
-			slog.Warn("abs smart collection list-audiobooks failed", "err", lerr, "library", lib.ID)
+			slog.WarnContext(r.Context(), "abs smart collection list-audiobooks failed", "component", "audiobooks", "err", lerr, "library", lib.ID)
 			continue
 		}
 		for _, mi := range items {

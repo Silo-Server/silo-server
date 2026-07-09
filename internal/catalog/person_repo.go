@@ -754,7 +754,7 @@ func (r *PersonRepository) resolveExternalIDConflict(
 		// Writing the row's own current value back can never violate the unique
 		// index, so this field will not re-trigger the conflict.
 		setExternalIDField(p, field, externalIDValue(people[p.ID], field))
-		slog.Warn("person merge: declining to merge, preserving survivor's existing id",
+		slog.WarnContext(ctx, "person merge: declining to merge, preserving survivor's existing id", "component", "catalog",
 			"person_id", p.ID, "partner_id", partnerID, "field", field, "value", value,
 			"person_name", p.Name, "partner_name", partner.Name)
 		return true, nil
@@ -784,7 +784,7 @@ func (r *PersonRepository) resolveExternalIDConflict(
 		return false, fmt.Errorf("delete merged person %d: %w", partnerID, err)
 	}
 
-	slog.Info("person merge: folded duplicate person",
+	slog.InfoContext(ctx, "person merge: folded duplicate person", "component", "catalog",
 		"survivor_id", p.ID, "merged_id", partnerID, "field", field, "value", value)
 	return true, nil
 }

@@ -334,7 +334,7 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 	// mismatches the card owner is refused. Either way the reconstructed session is
 	// bound to card.UserID, never to the request's user.
 	if requestUserID != 0 && requestUserID != card.UserID {
-		slog.Warn("transcode reconstruct ownership rejected",
+		slog.WarnContext(ctx, "transcode reconstruct ownership rejected", "component", "playback",
 			"session", sessionID, "playback_session_id", sessionID,
 			"request_user", requestUserID, "card_user", card.UserID)
 		return nil
@@ -378,7 +378,7 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		// transcode limit) must still refuse: a replayed token cannot reconstruct
 		// past the cap a fresh StartSession would enforce.
 		if errors.Is(err, ErrTooManyStreams) || errors.Is(err, ErrTooManyTranscodes) {
-			slog.Warn("playback session reconstruct refused by admission cap",
+			slog.WarnContext(ctx, "playback session reconstruct refused by admission cap", "component", "playback",
 				"session", sessionID, "playback_session_id", sessionID,
 				"user", card.UserID, "method", method, "error", err)
 			return nil
@@ -389,12 +389,12 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		// collapse a recoverable dependency error into a permanent 404 and stop
 		// playback for a user who is within their limits. The cap will re-apply on
 		// the next fresh StartSession once the provider recovers.
-		slog.Warn("playback session reconstruct admitting despite unevaluated limits (degraded; limit provider unavailable)",
+		slog.WarnContext(ctx, "playback session reconstruct admitting despite unevaluated limits (degraded; limit provider unavailable)", "component", "playback",
 			"session", sessionID, "playback_session_id", sessionID,
 			"user", card.UserID, "method", method, "error", err)
 		session = m.Sessions.RegisterReconstructed(s)
 	}
-	slog.Info("playback session reconstructed from recipe card",
+	slog.InfoContext(ctx, "playback session reconstructed from recipe card", "component", "playback",
 		"session", sessionID, "playback_session_id", sessionID, "user", card.UserID, "method", method)
 	return session
 }
@@ -550,7 +550,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 	transcodeSession, err := StartTranscode(context.WithoutCancel(ctx), opts)
 	slotRelease()
 	if err != nil {
-		slog.Error("reconstruct transcode start failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
+		slog.ErrorContext(ctx, "reconstruct transcode start failed", "component", "playback", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return nil
 	}
 
@@ -581,7 +581,7 @@ func (m *TranscodeManager) doReconstructTranscode(ctx context.Context, sessionID
 		m.StartThrottler(ctx, transcodeSession)
 	}
 	m.MonitorLocalTranscodeExit(sessionID, transcodeSession)
-	slog.Info("transcode process reconstructed from recipe card",
+	slog.InfoContext(ctx, "transcode process reconstructed from recipe card", "component", "playback",
 		"session", sessionID, "playback_session_id", sessionID,
 		"requested_segment", requestedSegment, "start_segment_number", opts.StartSegmentNumber)
 	return transcodeSession

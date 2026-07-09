@@ -275,7 +275,7 @@ func (t *semanticCoverageTracker) Refresh(ctx context.Context) error {
 		m, err := t.models.ActiveEmbeddingModel(ctx)
 		if err != nil {
 			// Retain last-good: do not publish on a provider error.
-			slog.Warn("catalog semantic coverage: active model lookup failed; retaining last snapshot", "err", err)
+			slog.WarnContext(ctx, "catalog semantic coverage: active model lookup failed; retaining last snapshot", "component", "catalog", "err", err)
 			return err
 		}
 		model = m
@@ -307,7 +307,7 @@ func (t *semanticCoverageTracker) Refresh(ctx context.Context) error {
 	types, err := t.fetch(ctx, model)
 	if err != nil {
 		// Retain last-good: do not overwrite a healthy snapshot with zeros.
-		slog.Warn("catalog semantic coverage: count query failed; retaining last snapshot", "err", err)
+		slog.WarnContext(ctx, "catalog semantic coverage: count query failed; retaining last snapshot", "component", "catalog", "err", err)
 		return err
 	}
 
@@ -364,7 +364,7 @@ func (t *semanticCoverageTracker) Snapshot() *semanticCoverageSnapshot {
 // the loop (the last-good snapshot is retained by Refresh).
 func (t *semanticCoverageTracker) Run(ctx context.Context) {
 	if err := t.Refresh(ctx); err != nil {
-		slog.Warn("catalog semantic coverage: initial refresh failed", "err", err)
+		slog.WarnContext(ctx, "catalog semantic coverage: initial refresh failed", "component", "catalog", "err", err)
 	}
 	ticker := time.NewTicker(semanticCoverageRefreshInterval)
 	defer ticker.Stop()
@@ -374,7 +374,7 @@ func (t *semanticCoverageTracker) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := t.Refresh(ctx); err != nil {
-				slog.Warn("catalog semantic coverage: refresh failed", "err", err)
+				slog.WarnContext(ctx, "catalog semantic coverage: refresh failed", "component", "catalog", "err", err)
 			}
 		}
 	}

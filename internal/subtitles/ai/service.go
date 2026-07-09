@@ -278,7 +278,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		return
 	}
 	if err := s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, 0, "Loading subtitle"); err != nil {
-		s.logger.Warn("failed to mark subtitle ai job running", "job", job.ID, "error", err)
+		s.logger.WarnContext(ctx, "failed to mark subtitle ai job running", "job", job.ID, "error", err)
 	}
 
 	cues, sourceLang, err := s.loadSource(ctx, job)
@@ -338,7 +338,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 // language can use it as a plain text source without re-running ASR.
 func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 	if err := s.repo.UpdateProgress(ctx, job.ID, JobStatusRunning, 0, "Preparing audio"); err != nil {
-		s.logger.Warn("failed to mark subtitle ai job running", "job", job.ID, "error", err)
+		s.logger.WarnContext(ctx, "failed to mark subtitle ai job running", "job", job.ID, "error", err)
 	}
 
 	file, err := s.files.GetByID(ctx, job.MediaFileID)
@@ -462,7 +462,7 @@ func (s *Service) runTranscribe(ctx context.Context, job *Job) {
 
 	if job.Kind == JobKindTranscribe {
 		if err := s.repo.CompleteJob(storeCtx, job.ID, transcript.ID); err != nil {
-			s.logger.Warn("failed to mark subtitle ai job complete", "job", job.ID, "error", err)
+			s.logger.WarnContext(ctx, "failed to mark subtitle ai job complete", "job", job.ID, "error", err)
 		}
 		if streaming {
 			s.notifier.TranslationCompleted(storeCtx, job.SessionID, job.MediaFileID, job.ID, trackKey,
@@ -571,7 +571,7 @@ func (s *Service) finishTranslatedTrack(
 	}
 
 	if err := s.repo.CompleteJob(storeCtx, job.ID, sub.ID); err != nil {
-		s.logger.Warn("failed to mark subtitle ai job complete", "job", job.ID, "error", err)
+		s.logger.WarnContext(ctx, "failed to mark subtitle ai job complete", "job", job.ID, "error", err)
 	}
 
 	if s.notifier != nil {
@@ -617,14 +617,14 @@ func (s *Service) finishWithErrorNotify(ctx context.Context, job *Job, err error
 		msg = "cancelled"
 	}
 	if dbErr := s.repo.FailJob(context.WithoutCancel(ctx), job.ID, status, msg); dbErr != nil {
-		s.logger.Warn("failed to record subtitle ai job failure", "job", job.ID, "error", dbErr)
+		s.logger.WarnContext(ctx, "failed to record subtitle ai job failure", "job", job.ID, "error", dbErr)
 	}
 	if notify && job.SessionID != "" && s.notifier != nil {
 		s.notifier.TranslationFailed(context.WithoutCancel(ctx), job.SessionID, job.MediaFileID, job.ID,
 			liveTrackKey(job.ID), msg)
 	}
 	if status == JobStatusFailed {
-		s.logger.Warn("subtitle ai job failed", "job", job.ID, "media_file", job.MediaFileID, "error", err)
+		s.logger.WarnContext(ctx, "subtitle ai job failed", "job", job.ID, "media_file", job.MediaFileID, "error", err)
 	}
 }
 

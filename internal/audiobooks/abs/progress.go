@@ -372,7 +372,7 @@ func (h *Handler) handleSessionSync(w http.ResponseWriter, r *http.Request) {
 		if err := h.deps.ProgressStore.UpdateProgressPosition(
 			r.Context(), a.UserID, a.ProfileID, sess.ContentID, p.CurrentTime,
 		); err != nil {
-			slog.Warn("abs session sync: update progress position failed",
+			slog.WarnContext(r.Context(), "abs session sync: update progress position failed", "component", "audiobooks",
 				"session_id", sid, "content_id", sess.ContentID, "error", err)
 		}
 	}

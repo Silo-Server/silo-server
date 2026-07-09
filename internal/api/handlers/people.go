@@ -128,7 +128,7 @@ func (h *PeopleHandler) HandleGetPerson(w http.ResponseWriter, r *http.Request) 
 
 	person, err := h.personRepo.Get(r.Context(), id)
 	if err != nil {
-		slog.Warn("people: get person failed", "id", id, "id_str", idStr, "error", err)
+		slog.WarnContext(r.Context(), "people: get person failed", "component", "api", "id", id, "id_str", idStr, "error", err)
 		writeError(w, http.StatusNotFound, "not_found", "person not found")
 		return
 	}
@@ -201,7 +201,7 @@ func (h *PeopleHandler) HandleAdminRefreshPerson(w http.ResponseWriter, r *http.
 		case errors.Is(err, metadata.ErrPersonMetadataNotFound):
 			writeError(w, http.StatusBadGateway, "provider_error", "No person metadata found")
 		default:
-			slog.Warn("people: admin refresh failed", "id", id, "error", err)
+			slog.WarnContext(r.Context(), "people: admin refresh failed", "component", "api", "id", id, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to refresh person")
 		}
 		return
@@ -281,7 +281,7 @@ func (h *PeopleHandler) HandleAdminUpdatePerson(w http.ResponseWriter, r *http.R
 	}
 
 	if err := h.personRepo.Update(r.Context(), *person); err != nil {
-		slog.Error("people: admin update failed", "id", id, "error", err)
+		slog.ErrorContext(r.Context(), "people: admin update failed", "component", "api", "id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update person")
 		return
 	}

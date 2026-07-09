@@ -214,7 +214,7 @@ func (s *directUserDataService) FilterResumeProgress(ctx context.Context, sessio
 	// Dismissal lookup failures degrade to showing the entries, matching the
 	// first-party fetcher.
 	if dismissals, err := store.ListHomeDismissals(ctx, session.ProfileID, userstore.HomeSurfaceContinueWatching); err != nil {
-		slog.Error("listing continue watching dismissals", "profile_id", session.ProfileID, "error", err)
+		slog.ErrorContext(ctx, "listing continue watching dismissals", "component", "jellycompat", "profile_id", session.ProfileID, "error", err)
 	} else {
 		progress = catalog.NewHomeDismissalIndex(dismissals).FilterProgress(progress)
 	}

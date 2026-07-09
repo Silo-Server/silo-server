@@ -266,7 +266,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 			// surface it as an internal error (with a server-side signal)
 			// so the real failure is diagnosable instead of looking like an
 			// intermittent 404 to the client.
-			slog.ErrorContext(r.Context(), "list downloaded subtitles failed",
+			slog.ErrorContext(r.Context(), "list downloaded subtitles failed", "component", "api",
 				"file_id", file.ID,
 				"track", trackIndex,
 				"error", err,
@@ -373,7 +373,7 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 
 	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), file.FilePath, h.ffmpegPath())
 	if err != nil {
-		slog.WarnContext(r.Context(), "subtitle font extraction failed",
+		slog.WarnContext(r.Context(), "subtitle font extraction failed", "component", "api",
 			"file_id", file.ID,
 			"track", trackIndex,
 			"error", err,
@@ -386,7 +386,7 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(playback.EncodeSubtitleFontBundle(fonts)); err != nil {
-		slog.WarnContext(r.Context(), "subtitle font response encode failed", "error", err)
+		slog.WarnContext(r.Context(), "subtitle font response encode failed", "component", "api", "error", err)
 	}
 }
 
@@ -395,7 +395,7 @@ func (h *StreamHandler) syncSessionsNow(ctx context.Context, reason string) {
 		return
 	}
 	if err := h.SessionSyncer.SyncNow(ctx); err != nil {
-		slog.Error("failed to sync sessions", "reason", reason, "error", err)
+		slog.ErrorContext(ctx, "failed to sync sessions", "component", "api", "reason", reason, "error", err)
 	}
 }
 
@@ -409,7 +409,7 @@ func (h *StreamHandler) finalizeSessionAbort(ctx context.Context, session *playb
 
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {
-			slog.Error("failed to delete synced session", "session", session.ID, "error", err)
+			slog.ErrorContext(ctx, "failed to delete synced session", "component", "api", "session", session.ID, "error", err)
 		}
 	}
 	if syncNow {
@@ -438,7 +438,7 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 		h.abortPlaybackSession(ctx, session)
 		return
 	}
-	slog.Warn("stream transport startup failed",
+	slog.WarnContext(ctx, "stream transport startup failed", "component", "api",
 		"session", session.ID,
 		"file_id", session.MediaFileID,
 		"error", err,
@@ -471,7 +471,7 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		seek = subtitleSeekPosition(r, session)
 		duration = subtitleWindowDuration(r)
 	}
-	slog.InfoContext(r.Context(), "subtitle stream requested",
+	slog.InfoContext(r.Context(), "subtitle stream requested", "component", "api",
 		"file_id", file.ID,
 		"embedded_index", embeddedIndex,
 		"track_language", track.Language,

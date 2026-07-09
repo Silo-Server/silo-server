@@ -180,7 +180,7 @@ func (t *RefreshMetadataTask) refreshBatch(
 				mu.Unlock()
 
 				if err != nil {
-					slog.Warn("refresh task: failed",
+					slog.WarnContext(ctx, "refresh task: failed", "component", "taskmanager",
 						"target_type", job.candidate.TargetType,
 						"content_id", job.candidate.ContentID,
 						"error", err)

@@ -68,7 +68,7 @@ func (m *Maintainer) WithListEventDispatcher(d listEventDispatcher) *Maintainer 
 
 // HandleWatchedCompleted reacts to completed watches asynchronously so it never
 // blocks the caller's watch-recording path.
-func (m *Maintainer) HandleWatchedCompleted(_ context.Context, userID int, profileID string, mediaItemIDs []string) {
+func (m *Maintainer) HandleWatchedCompleted(ctx context.Context, userID int, profileID string, mediaItemIDs []string) {
 	if m == nil || m.storeFor == nil || userID == 0 || profileID == "" || len(mediaItemIDs) == 0 {
 		return
 	}
@@ -77,7 +77,7 @@ func (m *Maintainer) HandleWatchedCompleted(_ context.Context, userID int, profi
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		if err := m.process(ctx, userID, profileID, ids); err != nil {
-			slog.Warn("watchlist auto-remove failed", "user_id", userID, "profile_id", profileID, "error", err)
+			slog.WarnContext(ctx, "watchlist auto-remove failed", "component", "watchlist", "user_id", userID, "profile_id", profileID, "error", err)
 		}
 	}()
 }

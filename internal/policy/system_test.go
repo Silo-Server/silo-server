@@ -2,7 +2,6 @@ package policy
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"sync"
 	"testing"
@@ -141,7 +140,7 @@ func newStartedPolicySystem(t *testing.T, ctx context.Context, store *PolicyStor
 }
 
 func policyTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
+	return slog.New(slog.DiscardHandler)
 }
 
 func activatePolicyVersion(t *testing.T, ctx context.Context, store *PolicyStore, documentID int64, sha string) (int64, int64) {

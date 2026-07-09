@@ -271,7 +271,7 @@ func (p *Provider) fetchPlayback(ctx context.Context, cfg watchsync.ServerConfig
 }
 
 func (p *Provider) FetchHistory(ctx context.Context, cfg watchsync.ServerConfig, conn watchsync.Connection) ([]watchsync.RemotePlay, error) {
-	slog.WarnContext(ctx, "simkl full watched fetch used for export dedupe", "provider", p.Key())
+	slog.WarnContext(ctx, "simkl full watched fetch used for export dedupe", "component", "watchsync", "provider", p.Key())
 	batch, err := p.fetchWatchedBatch(ctx, cfg, conn, false)
 	if err != nil {
 		return nil, err

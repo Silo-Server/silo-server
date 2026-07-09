@@ -122,7 +122,7 @@ func (h *OAuthHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 		// Linking is wired in a follow-up — see TODO below.
 	})
 	if err != nil {
-		slog.Warn("oauth init_authorize failed", "installation_id", installID, "error", err)
+		slog.WarnContext(r.Context(), "oauth init_authorize failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Error(w, "plugin init_authorize failed", http.StatusBadGateway)
 		return
 	}
@@ -143,7 +143,7 @@ func (h *OAuthHandler) HandleInit(w http.ResponseWriter, r *http.Request) {
 		// and set LinkingUserID here.
 	}
 	if err := h.deps.Store.Insert(r.Context(), sess); err != nil {
-		slog.Warn("oauth session insert failed", "installation_id", installID, "error", err)
+		slog.WarnContext(r.Context(), "oauth session insert failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Error(w, "store insert failed", http.StatusInternalServerError)
 		return
 	}
@@ -198,7 +198,7 @@ func (h *OAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		ProviderState: psStruct,
 	})
 	if err != nil {
-		slog.Warn("oauth exchange_code failed", "installation_id", installID, "error", err)
+		slog.WarnContext(r.Context(), "oauth exchange_code failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Redirect(w, r, "/login?error=oauth_failed&reason=exchange_failed", http.StatusFound)
 		return
 	}
@@ -223,19 +223,19 @@ func (h *OAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		IP:             clientIP(r),
 	})
 	if err != nil {
-		slog.Warn("oauth login completion failed", "installation_id", installID, "error", err)
+		slog.WarnContext(r.Context(), "oauth login completion failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Redirect(w, r, "/login?error=oauth_failed&reason=login_failed", http.StatusFound)
 		return
 	}
 
 	if h.deps.CompletionStore == nil {
-		slog.Warn("oauth completion store is unavailable", "installation_id", installID)
+		slog.WarnContext(r.Context(), "oauth completion store is unavailable", "component", "auth", "installation_id", installID)
 		http.Redirect(w, r, "/login?error=oauth_failed&reason=completion_unavailable", http.StatusFound)
 		return
 	}
 	completionCode, err := randomHex(32)
 	if err != nil {
-		slog.Warn("oauth completion code generation failed", "installation_id", installID, "error", err)
+		slog.WarnContext(r.Context(), "oauth completion code generation failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Redirect(w, r, "/login?error=oauth_failed&reason=completion_failed", http.StatusFound)
 		return
 	}
@@ -248,7 +248,7 @@ func (h *OAuthHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		NextURL:      sess.NextURL,
 		ExpiresAt:    now.Add(time.Minute),
 	}); err != nil {
-		slog.Warn("oauth completion insert failed", "installation_id", installID, "error", err)
+		slog.WarnContext(r.Context(), "oauth completion insert failed", "component", "auth", "installation_id", installID, "error", err)
 		http.Redirect(w, r, "/login?error=oauth_failed&reason=completion_failed", http.StatusFound)
 		return
 	}

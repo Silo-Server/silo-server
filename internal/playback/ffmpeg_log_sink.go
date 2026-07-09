@@ -81,7 +81,7 @@ func (s *SlogFFmpegLogSink) WriteEvent(ctx context.Context, sessionID string, at
 	if attrs.DroppedLines > 0 {
 		args = append(args, ffmpegDroppedLinesKey, attrs.DroppedLines)
 	}
-	s.logger.InfoContext(ctx, message, args...)
+	s.logger.InfoContext(ctx, "ffmpeg event", args...)
 }
 
 func (s *SlogFFmpegLogSink) baseArgs(sessionID string, attrs FFmpegLogAttrs) []any {

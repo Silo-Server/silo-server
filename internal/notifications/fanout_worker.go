@@ -123,7 +123,7 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 			processed, err := w.processBatch(ctx)
 			if err != nil {
 				if ctx.Err() == nil {
-					w.logger.Error("fanout batch failed", "error", err)
+					w.logger.ErrorContext(ctx, "fanout batch failed", "error", err)
 				}
 				break
 			}
@@ -220,12 +220,12 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (int, error) {
 	// Failures here are tolerable: the durable rows appear on reconnect.
 	for _, row := range dispatchRows {
 		if err := w.dispatcher.Dispatch(ctx, row); err != nil {
-			w.logger.Warn("notification dispatch failed",
+			w.logger.WarnContext(ctx, "notification dispatch failed",
 				"delivery_id", row.ID, "profile_id", row.ProfileID, "error", err)
 		}
 	}
 
-	w.logger.Info("fanout batch processed",
+	w.logger.InfoContext(ctx, "fanout batch processed",
 		"claimed", len(claimed),
 		"non_episode", len(others),
 		"fanned_out", len(fanout),
@@ -457,7 +457,7 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 		}
 	}
 	if rateLimited > 0 {
-		w.logger.Warn("webhook deliveries rate limited", "skipped", rateLimited)
+		w.logger.WarnContext(ctx, "webhook deliveries rate limited", "skipped", rateLimited)
 	}
 	return w.webhooks.EnqueueAttempts(ctx, tx, attempts)
 }

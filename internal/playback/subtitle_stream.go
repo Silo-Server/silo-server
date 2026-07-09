@@ -85,7 +85,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	copyErr := copyAndFlush(opts.Writer, stdout)
 
 	waitErr := cmd.Wait()
-	slog.Debug("subtitle stream extract finished",
+	slog.DebugContext(ctx, "subtitle stream extract finished", "component", "playback",
 		"track", opts.TrackIndex,
 		"seek", opts.SeekSeconds,
 		"elapsed_ms", time.Since(start).Milliseconds(),
@@ -213,7 +213,7 @@ func LogSubtitleStreamError(ctx context.Context, err error, fileID, trackIndex i
 		// Normal client disconnect mid-stream — don't warn.
 		return
 	}
-	slog.Warn("subtitle stream extract failed",
+	slog.WarnContext(ctx, "subtitle stream extract failed", "component", "playback",
 		"file_id", fileID,
 		"track", trackIndex,
 		"error", err,

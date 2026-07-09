@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -36,6 +37,47 @@ func TestBuildListNextUpQuery_PrefersRecentCompletedOverOlderPartialProgress(t *
 
 	if len(args) != 3 {
 		t.Fatalf("expected default arg count, got %d", len(args))
+	}
+}
+
+func TestBuildListNextUpQuery_GlobalBoundsAnchorScan(t *testing.T) {
+	t.Parallel()
+
+	query, _ := buildListNextUpQuery(NextUpQuery{
+		UserID:    7,
+		ProfileID: "profile-1",
+	}, 20)
+
+	// The global query must derive series anchors from a bounded
+	// recent-completions scan, not the profile's entire completed history.
+	if !strings.Contains(query, "recent_completed AS (") {
+		t.Fatalf("expected global query to scan recent completions, got:\n%s", query)
+	}
+	if !strings.Contains(query, fmt.Sprintf("LIMIT %d", nextUpAnchorMaxRows)) {
+		t.Fatalf("expected global anchor scan bounded at %d rows, got:\n%s", nextUpAnchorMaxRows, query)
+	}
+}
+
+func TestBuildListNextUpQuery_SeriesScopedKeepsUnboundedAnchor(t *testing.T) {
+	t.Parallel()
+
+	query, args := buildListNextUpQuery(NextUpQuery{
+		UserID:    7,
+		ProfileID: "profile-1",
+		SeriesID:  "series-42",
+	}, 20)
+
+	// The show-detail tile must anchor on the series' last completed episode
+	// no matter how long ago it was watched: the recency bound would make a
+	// long-idle series' tile disappear.
+	if strings.Contains(query, "recent_completed AS (") {
+		t.Fatalf("series-scoped query must not bound the anchor scan, got:\n%s", query)
+	}
+	if !strings.Contains(query, "AND e.series_id = $4") {
+		t.Fatalf("series-scoped query must filter by series_id, got:\n%s", query)
+	}
+	if len(args) != 4 {
+		t.Fatalf("expected 4 args with SeriesID, got %d (%v)", len(args), args)
 	}
 }
 

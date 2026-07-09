@@ -136,7 +136,7 @@ func (h *SubtitleAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 		case errors.Is(err, ai.ErrInvalidRequest):
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		default:
-			slog.Error("failed to enqueue subtitle translation",
+			slog.ErrorContext(r.Context(), "failed to enqueue subtitle translation", "component", "api",
 				"media_file_id", req.MediaFileID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start translation")
 		}
@@ -193,7 +193,7 @@ func quotaExceededMessage(err error) string {
 func (h *SubtitleAIHandler) HandleQuota(w http.ResponseWriter, r *http.Request) {
 	quota, err := h.service.TranscribeQuota(r.Context(), apimw.GetUserID(r.Context()), h.quotaExempt(r))
 	if err != nil {
-		slog.Error("failed to load transcription quota", "error", err)
+		slog.ErrorContext(r.Context(), "failed to load transcription quota", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load transcription quota")
 		return
 	}

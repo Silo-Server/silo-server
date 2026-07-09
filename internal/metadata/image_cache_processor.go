@@ -213,7 +213,7 @@ loop:
 	if len(unstarted) > 0 {
 		requeueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		if err := p.jobs.RequeueClaimed(requeueCtx, unstarted, workerID); err != nil {
-			p.logger.Warn("metadata image cache: failed to requeue unstarted jobs", "count", len(unstarted), "error", err)
+			p.logger.WarnContext(ctx, "metadata image cache: failed to requeue unstarted jobs", "count", len(unstarted), "error", err)
 		}
 		cancel()
 	}
@@ -315,7 +315,7 @@ func (p *ImageCacheProcessor) cleanupSucceeded(ctx context.Context, stats *Image
 	defer cancel()
 	deleted, err := p.jobs.DeleteSucceededBefore(cleanupCtx, time.Now().Add(-30*24*time.Hour), 1000)
 	if err != nil {
-		p.logger.Warn("metadata image cache: failed to delete old succeeded jobs", "error", err)
+		p.logger.WarnContext(ctx, "metadata image cache: failed to delete old succeeded jobs", "error", err)
 	} else {
 		stats.DeletedSucceeded = deleted
 	}
@@ -329,7 +329,7 @@ func (p *ImageCacheProcessor) markFailed(parent context.Context, job *models.Met
 	writeCtx, cancel := terminalJobContext(parent)
 	defer cancel()
 	if err := p.jobs.MarkFailed(writeCtx, job.ID, job.AttemptCount, job.LockedBy, errText); err != nil {
-		p.logger.Warn("metadata image cache: failed to mark job failed", "job_id", job.ID, "error", err)
+		p.logger.WarnContext(parent, "metadata image cache: failed to mark job failed", "job_id", job.ID, "error", err)
 	}
 }
 
@@ -337,7 +337,7 @@ func (p *ImageCacheProcessor) markSucceeded(parent context.Context, job *models.
 	writeCtx, cancel := terminalJobContext(parent)
 	defer cancel()
 	if err := p.jobs.MarkSucceeded(writeCtx, job.ID, job.LockedBy); err != nil {
-		p.logger.Warn("metadata image cache: failed to mark job succeeded", "job_id", job.ID, "error", err)
+		p.logger.WarnContext(parent, "metadata image cache: failed to mark job succeeded", "job_id", job.ID, "error", err)
 	}
 }
 

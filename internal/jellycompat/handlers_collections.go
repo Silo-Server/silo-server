@@ -108,7 +108,7 @@ func (h *ItemsHandler) collectionsViewVisible(ctx context.Context, libraries []u
 	}
 	visible, err := h.collections.AnyVisibleInLibraries(ctx, ids)
 	if err != nil {
-		slog.DebugContext(ctx, "jellycompat collections view existence check failed", "error", err)
+		slog.DebugContext(ctx, "jellycompat collections view existence check failed", "component", "jellycompat", "error", err)
 		return false
 	}
 	return visible
@@ -515,14 +515,14 @@ func (h *ItemsHandler) smartCollectionContentIDs(ctx context.Context, session *S
 	var def catalog.QueryDefinition
 	if len(c.QueryDefinition) > 0 {
 		if err := json.Unmarshal(c.QueryDefinition, &def); err != nil {
-			slog.DebugContext(ctx, "jellycompat smart collection query definition unmarshal failed",
+			slog.DebugContext(ctx, "jellycompat smart collection query definition unmarshal failed", "component", "jellycompat",
 				"collection_id", c.ID, "error", err)
 			return nil, nil
 		}
 	}
 	def = def.Normalize()
 	if err := def.ValidateWithOptions(false, false); err != nil {
-		slog.DebugContext(ctx, "jellycompat smart collection query definition invalid",
+		slog.DebugContext(ctx, "jellycompat smart collection query definition invalid", "component", "jellycompat",
 			"collection_id", c.ID, "error", err)
 		return nil, nil
 	}

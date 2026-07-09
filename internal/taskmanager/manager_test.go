@@ -211,7 +211,7 @@ func TestTaskManagerStartSeedsCleanupTaskDefaults(t *testing.T) {
 		triggerRepo,
 		fakeExecutionRepository{},
 		newFakeTrigger,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 	)
 
 	manager.Register(taskdefs.NewActivityLogCleanupTask(nil, settings, nil))
@@ -252,7 +252,7 @@ func TestTaskManagerStartPreservesExistingTriggers(t *testing.T) {
 		triggerRepo,
 		fakeExecutionRepository{},
 		newFakeTrigger,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 	)
 
 	manager.Register(stubTask{
@@ -291,7 +291,7 @@ func TestTaskManagerRunTaskNotifiesAfterTriggerRearm(t *testing.T) {
 		triggerRepo,
 		fakeExecutionRepository{},
 		newFakeTrigger,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 	)
 	manager.AddObserver(observer)
 	manager.Register(stubTask{key: taskKey})
@@ -351,7 +351,7 @@ func TestTaskManagerTriggerSkipsConditionalTaskWithoutHistory(t *testing.T) {
 		triggerRepo,
 		historyRepo,
 		factory,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 	)
 	task := &conditionalStubTask{
 		stubTask:        stubTask{key: "conditional"},

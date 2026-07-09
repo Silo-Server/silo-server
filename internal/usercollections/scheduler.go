@@ -55,7 +55,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
 		return marshalResult(result), nil
 	}
 
-	s.logger.Info("user collection sync scheduler: starting", "due", len(due))
+	s.logger.InfoContext(ctx, "user collection sync scheduler: starting", "due", len(due))
 
 	var (
 		mu      sync.Mutex
@@ -72,7 +72,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) (json.RawMessage, error) {
 	}
 	_ = g.Wait()
 
-	s.logger.Info("user collection sync scheduler: complete",
+	s.logger.InfoContext(ctx, "user collection sync scheduler: complete",
 		"due", result.Due, "synced", result.Synced,
 		"failed", result.Failed, "skipped", result.Skipped,
 	)
@@ -120,7 +120,7 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 	defer mu.Unlock()
 	if err != nil {
 		result.Failed++
-		s.logger.Error("user collection sync scheduler: sync failed",
+		s.logger.ErrorContext(ctx, "user collection sync scheduler: sync failed",
 			"user_id", dc.UserID,
 			"collection_id", dc.CollectionID,
 			"duration", dur,
@@ -130,7 +130,7 @@ func (s *Scheduler) syncOne(ctx context.Context, dc dueCollection, mu *sync.Mute
 		return
 	}
 	result.Synced++
-	s.logger.Info("user collection sync scheduler: synced",
+	s.logger.InfoContext(ctx, "user collection sync scheduler: synced",
 		"user_id", dc.UserID,
 		"collection_id", dc.CollectionID,
 		"duration", dur,
@@ -145,7 +145,7 @@ func (s *Scheduler) advanceAfterFailure(ctx context.Context, dc dueCollection, a
 		`UPDATE user_personal_collections SET next_sync_at = $1 WHERE user_id = $2 AND id = $3`,
 		next, dc.UserID, dc.CollectionID,
 	); err != nil {
-		s.logger.Error("user collection sync scheduler: failed to advance next_sync_at after failure",
+		s.logger.ErrorContext(ctx, "user collection sync scheduler: failed to advance next_sync_at after failure",
 			"user_id", dc.UserID,
 			"collection_id", dc.CollectionID,
 			"error", err,

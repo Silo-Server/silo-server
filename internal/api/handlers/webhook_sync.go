@@ -381,7 +381,7 @@ func (h *WebhookSyncHandler) HandleWebhook(w http.ResponseWriter, r *http.Reques
 			BodyExcerpt:  logContext.BodyExcerpt,
 			Attrs:        webhookEventAttrs(logContext, result),
 		}); logErr != nil {
-			slog.Warn("webhook sync: failed to persist webhook event log", "connection_id", result.ConnectionID, "error", logErr)
+			slog.WarnContext(r.Context(), "webhook sync: failed to persist webhook event log", "component", "api", "connection_id", result.ConnectionID, "error", logErr)
 		}
 	}
 	logWebhookDelivery(result, logContext, statusCode, err)

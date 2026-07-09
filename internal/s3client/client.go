@@ -430,7 +430,7 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 			// Fall back to individual deletes if batch is not supported.
 			for _, key := range batch {
 				if delErr := c.DeleteObject(ctx, bucket, key); delErr != nil {
-					slog.Warn("s3 DeleteObjects fallback: failed to delete", "key", key, "error", delErr)
+					slog.WarnContext(ctx, "s3 DeleteObjects fallback: failed to delete", "component", "s3client", "key", key, "error", delErr)
 					continue
 				}
 				deleted++
@@ -442,7 +442,7 @@ func (c *Client) DeleteObjects(ctx context.Context, bucket string, keys []string
 		if out != nil {
 			deleted -= len(out.Errors)
 			for _, e := range out.Errors {
-				slog.Warn("s3 DeleteObjects: partial failure",
+				slog.WarnContext(ctx, "s3 DeleteObjects: partial failure", "component", "s3client",
 					"key", aws.ToString(e.Key), "code", aws.ToString(e.Code), "message", aws.ToString(e.Message))
 			}
 		}

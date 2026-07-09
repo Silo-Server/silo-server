@@ -1560,7 +1560,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			if s.groupClaimRepo != nil {
 				paths, err := s.groupClaimRepo.ListObservedRootsByContentID(ctx, contentID)
 				if err != nil {
-					slog.WarnContext(ctx, "failed to fetch series group locations", "content_id", contentID, "error", err)
+					slog.WarnContext(ctx, "failed to fetch series group locations", "component", "catalog", "content_id", contentID, "error", err)
 				} else if len(paths) > 0 {
 					detail.FolderPaths = paths
 				}
@@ -1568,7 +1568,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 			if len(detail.FolderPaths) == 0 && s.rootClaimRepo != nil {
 				roots, err := s.rootClaimRepo.ListByContentID(ctx, contentID)
 				if err != nil {
-					slog.WarnContext(ctx, "failed to fetch series root claims", "content_id", contentID, "error", err)
+					slog.WarnContext(ctx, "failed to fetch series root claims", "component", "catalog", "content_id", contentID, "error", err)
 				} else if len(roots) > 0 {
 					paths := make([]string, len(roots))
 					for i, root := range roots {
@@ -1581,7 +1581,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		if len(detail.FolderPaths) == 0 && s.fileFetcher != nil {
 			files, err := s.fileFetcher.GetByContentID(ctx, contentID)
 			if err != nil {
-				slog.WarnContext(ctx, "failed to fetch series files for folder paths", "content_id", contentID, "error", err)
+				slog.WarnContext(ctx, "failed to fetch series files for folder paths", "component", "catalog", "content_id", contentID, "error", err)
 			} else {
 				detail.FolderPaths = seriesFolderPathsFromFiles(files)
 			}
@@ -1844,7 +1844,7 @@ func (s *DetailService) fetchMangaChapters(ctx context.Context, seriesContentID 
 		chapters = append(chapters, ch)
 	}
 	if err := rows.Err(); err != nil {
-		slog.Warn("manga chapters: row iteration error", "series", seriesContentID, "error", err)
+		slog.WarnContext(ctx, "manga chapters: row iteration error", "component", "catalog", "series", seriesContentID, "error", err)
 	}
 	// Presign every chapter poster in one batch rather than per chapter — a
 	// long-running series has hundreds of chapters.
@@ -3350,8 +3350,8 @@ func (s *DetailService) queueWatchPlaybackFiles(
 		return
 	}
 
-	slog.Info(
-		"queueing chapter thumbnails",
+	slog.InfoContext(ctx,
+		"queueing chapter thumbnails", "component", "catalog",
 		"source",
 		"watch_detail",
 		"content_id",
@@ -3459,7 +3459,7 @@ func (s *DetailService) PresignURLWithExpiry(ctx context.Context, path string, v
 		return ResolvedImageURL{URL: s.imageResolver.ResolveImageURL(ctx, path, variant)}
 	}
 
-	slog.Warn("image path could not be resolved", "path", path)
+	slog.WarnContext(ctx, "image path could not be resolved", "component", "catalog", "path", path)
 	return ResolvedImageURL{}
 }
 

@@ -632,7 +632,7 @@ func (s *MetadataService) itemLibrariesAgreeOnLanguage(ctx context.Context, cont
 	}
 	languages, err := s.libraryRepo.GetDistinctMetadataLanguagesForItem(ctx, contentID)
 	if err != nil {
-		slog.Warn("metadata: failed to look up library languages for adoption gate; keeping current stamp",
+		slog.WarnContext(ctx, "metadata: failed to look up library languages for adoption gate; keeping current stamp", "component", "metadata",
 			"content_id", contentID, "error", err)
 		return false
 	}
@@ -691,7 +691,7 @@ func (s *MetadataService) resolveFolderLanguage(ctx context.Context, folderID in
 	}
 	folder, err := s.folderRepo.GetByID(ctx, folderID)
 	if err != nil {
-		slog.Warn("metadata: failed to look up folder language, defaulting to English",
+		slog.WarnContext(ctx, "metadata: failed to look up folder language, defaulting to English", "component", "metadata",
 			"folder_id", folderID, "error", err)
 		return "en"
 	}
@@ -716,7 +716,7 @@ func (s *MetadataService) resolveAllowedVideoKinds(ctx context.Context, contentI
 	} else if s.libraryRepo != nil {
 		ids, err := s.libraryRepo.GetFolderIDsForItem(ctx, contentID)
 		if err != nil {
-			slog.Warn("metadata: resolving item libraries for video kinds failed",
+			slog.WarnContext(ctx, "metadata: resolving item libraries for video kinds failed", "component", "metadata",
 				"content_id", contentID, "error", err)
 			return nil
 		}
@@ -932,7 +932,7 @@ func (s *MetadataService) canUseObservedRootForDirectorySidecars(
 	}
 	location, err := s.observedLocationRepo.Get(ctx, folderID, cleanRoot)
 	if err != nil {
-		slog.Warn("metadata: observed location lookup failed",
+		slog.WarnContext(ctx, "metadata: observed location lookup failed", "component", "metadata",
 			"folder_id", folderID,
 			"observed_root_path", cleanRoot,
 			"error", err,
@@ -1160,11 +1160,11 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				) {
 					continue
 				}
-				slog.Warn("metadata: search provider error",
+				slog.WarnContext(ctx, "metadata: search provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
 				continue
 			}
-			slog.Debug("metadata: provider search result",
+			slog.DebugContext(ctx, "metadata: provider search result", "component", "metadata",
 				"provider", p.Slug(),
 				"query_title", searchQuery.Title,
 				"query_year", searchQuery.Year,
@@ -1172,7 +1172,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			)
 			for _, result := range results {
 				if searchResultConflictsWithTrustedIDs(accumulatedIDs, result.ProviderIDs) {
-					slog.Warn("metadata: skipping conflicting search result",
+					slog.WarnContext(ctx, "metadata: skipping conflicting search result", "component", "metadata",
 						"provider", p.Slug(),
 						"title", req.Hints.Title,
 						"year", req.Hints.Year,
@@ -1186,7 +1186,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 
 		candidates := NormalizeCandidates(allResults, contentType)
-		slog.Debug("metadata: search candidates assembled",
+		slog.DebugContext(ctx, "metadata: search candidates assembled", "component", "metadata",
 			"query_title", searchQuery.Title,
 			"query_year", searchQuery.Year,
 			"raw_results", len(allResults),
@@ -1276,7 +1276,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				) {
 					continue
 				}
-				slog.Warn("metadata: refresh search error",
+				slog.WarnContext(ctx, "metadata: refresh search error", "component", "metadata",
 					"provider", p.Slug(), "error", searchErr)
 				continue
 			}
@@ -1351,7 +1351,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			) {
 				continue
 			}
-			slog.Warn("metadata: provider error",
+			slog.WarnContext(ctx, "metadata: provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)
 			continue
 		}
@@ -1382,7 +1382,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			) {
 				continue
 			}
-			slog.Warn("metadata: image provider error",
+			slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)
 			continue
 		}
@@ -1418,7 +1418,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				) {
 					continue
 				}
-				slog.Warn("metadata: season provider error",
+				slog.WarnContext(ctx, "metadata: season provider error", "component", "metadata",
 					"provider", p.Slug(), "error", err)
 				continue
 			}
@@ -1451,7 +1451,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						) {
 							continue
 						}
-						slog.Warn("metadata: episode provider error",
+						slog.WarnContext(ctx, "metadata: episode provider error", "component", "metadata",
 							"provider", p.Slug(), "season", season.SeasonNumber, "error", err)
 						continue
 					}
@@ -1469,7 +1469,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			for slug, providerID := range provider404s {
 				if providerID != "" {
 					if err := s.staleIDRepo.Upsert(ctx, req.ContentID, slug, providerID); err != nil {
-						slog.Warn("metadata: failed to record stale ID",
+						slog.WarnContext(ctx, "metadata: failed to record stale ID", "component", "metadata",
 							"content_id", req.ContentID, "provider", slug, "provider_id", providerID, "error", err)
 					}
 				}
@@ -1497,7 +1497,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	followUpContentID := refreshFollowUpContentID(req.ContentID, result)
 	if s.staleIDRepo != nil && followUpContentID != "" && provider404s != nil {
 		if delErr := s.staleIDRepo.DeleteByContentID(ctx, followUpContentID); delErr != nil {
-			slog.Warn("metadata: failed to clear stale IDs after refresh",
+			slog.WarnContext(ctx, "metadata: failed to clear stale IDs after refresh", "component", "metadata",
 				"content_id", followUpContentID, "error", delErr)
 		}
 		for slug, providerID := range provider404s {
@@ -1505,7 +1505,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				continue
 			}
 			if upsertErr := s.staleIDRepo.Upsert(ctx, followUpContentID, slug, providerID); upsertErr != nil {
-				slog.Warn("metadata: failed to persist stale provider ID after partial refresh",
+				slog.WarnContext(ctx, "metadata: failed to persist stale provider ID after partial refresh", "component", "metadata",
 					"content_id", followUpContentID,
 					"provider", slug,
 					"provider_id", providerID,
@@ -1515,7 +1515,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	}
 	if result != nil && strings.TrimSpace(result.ContentID) != "" {
 		if syncErr := s.syncRefreshDebtForItem(ctx, result.ContentID); syncErr != nil {
-			slog.Warn("metadata: failed to sync refresh debt after successful metadata refresh",
+			slog.WarnContext(ctx, "metadata: failed to sync refresh debt after successful metadata refresh", "component", "metadata",
 				"content_id", result.ContentID,
 				"error", syncErr)
 		}
@@ -1783,7 +1783,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		personIDs, err := s.personRepo.BatchFindOrCreate(ctx, persons)
 		if err != nil {
-			slog.Warn("metadata: batch find/create people failed", "error", err)
+			slog.WarnContext(ctx, "metadata: batch find/create people failed", "component", "metadata", "error", err)
 		} else {
 			for i := range item.People {
 				item.People[i].Person.ID = personIDs[i]
@@ -1797,7 +1797,7 @@ func (s *MetadataService) mergeAndPersist(
 			}
 		}
 		if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
-			slog.Warn("metadata: failed to replace people", "content_id", contentID, "error", err)
+			slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
 		}
 	}
 
@@ -1811,7 +1811,7 @@ func (s *MetadataService) mergeAndPersist(
 		filtered := filterVideosByKinds(accumulator.Videos, allowed)
 		if len(filtered) > 0 || mergeMode == MergeReplaceUnlocked {
 			if err := s.videoRepo.ReplaceByContentID(ctx, contentID, itemVideosFromRemote(contentID, filtered)); err != nil {
-				slog.Warn("metadata: failed to replace item videos", "content_id", contentID, "error", err)
+				slog.WarnContext(ctx, "metadata: failed to replace item videos", "component", "metadata", "content_id", contentID, "error", err)
 			}
 		}
 	}
@@ -1832,7 +1832,7 @@ func (s *MetadataService) mergeAndPersist(
 		if len(seasons) > 0 {
 			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
 		} else if err := s.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
-			slog.Warn("metadata: failed to synthesize fallback series structure",
+			slog.WarnContext(ctx, "metadata: failed to synthesize fallback series structure", "component", "metadata",
 				"content_id", contentID, "error", err)
 		}
 	}
@@ -2169,14 +2169,14 @@ func (s *MetadataService) recordRefreshFailure(ctx context.Context, contentID st
 		return
 	}
 	if err := s.itemRepo.IncrementRefreshFailure(ctx, contentID); err != nil && !errors.Is(err, catalog.ErrItemNotFound) {
-		slog.Warn("metadata: failed to record refresh failure",
+		slog.WarnContext(ctx, "metadata: failed to record refresh failure", "component", "metadata",
 			"content_id", contentID,
 			"refresh_error", refreshErr,
 			"error", err)
 		return
 	}
 	if err := s.syncRefreshDebtFailure(ctx, contentID, refreshErr, incrementDebtAttempt); err != nil {
-		slog.Warn("metadata: failed to sync refresh debt after refresh failure",
+		slog.WarnContext(ctx, "metadata: failed to sync refresh debt after refresh failure", "component", "metadata",
 			"content_id", contentID,
 			"refresh_error", refreshErr,
 			"error", err)
@@ -2195,7 +2195,7 @@ func (s *MetadataService) recordRefreshTargetFailure(ctx context.Context, target
 		return
 	}
 	if err := s.syncRefreshDebtTargetFailure(ctx, targetType, contentID, refreshErr, incrementDebtAttempt); err != nil {
-		slog.Warn("metadata: failed to sync refresh debt after target refresh failure",
+		slog.WarnContext(ctx, "metadata: failed to sync refresh debt after target refresh failure", "component", "metadata",
 			"target_type", targetType,
 			"content_id", contentID,
 			"refresh_error", refreshErr,
@@ -2625,7 +2625,7 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 			) {
 				continue
 			}
-			slog.Warn("metadata: target refresh search error",
+			slog.WarnContext(ctx, "metadata: target refresh search error", "component", "metadata",
 				"provider", p.Slug(), "error", searchErr)
 			continue
 		}
@@ -2670,7 +2670,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			if handleProvider404(nil, providerIDs, p.Slug(), err, "season", seasonNumber) {
 				continue
 			}
-			slog.Warn("metadata: target season provider error",
+			slog.WarnContext(ctx, "metadata: target season provider error", "component", "metadata",
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
@@ -2704,7 +2704,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			if handleChildProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
 			}
-			slog.Warn("metadata: target episode provider error",
+			slog.WarnContext(ctx, "metadata: target episode provider error", "component", "metadata",
 				"provider", p.Slug(), "season", seasonNumber, "error", err)
 			continue
 		}
@@ -2732,7 +2732,7 @@ func (s *MetadataService) enqueueImageCacheJobs(ctx context.Context, targetKind,
 	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if _, err := s.imageCacheJobs.EnqueueBatch(enqueueCtx, inputs); err != nil {
-		slog.Warn("metadata: failed to enqueue image cache jobs",
+		slog.WarnContext(ctx, "metadata: failed to enqueue image cache jobs", "component", "metadata",
 			"target_kind", targetKind, "target_id", targetID, "count", len(inputs), "error", err)
 	}
 }
@@ -2826,12 +2826,12 @@ func (s *MetadataService) resolveImageURLForCache(ctx context.Context, path stri
 		return path, true
 	}
 	if s.imageResolver == nil {
-		slog.Warn("metadata: cannot cache plugin image without resolver", "url", path)
+		slog.WarnContext(ctx, "metadata: cannot cache plugin image without resolver", "component", "metadata", "url", path)
 		return "", false
 	}
 	resolved := s.imageResolver.ResolveImageURL(ctx, path, "original")
 	if resolved == "" {
-		slog.Warn("metadata: resolver returned empty URL for image", "url", path)
+		slog.WarnContext(ctx, "metadata: resolver returned empty URL for image", "component", "metadata", "url", path)
 		return "", false
 	}
 	return resolved, true
@@ -3277,7 +3277,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		for _, season := range seasons {
 			existingSeason, err := s.seasonRepo.GetBySeriesAndNumber(ctx, seriesID, season.SeasonNumber)
 			if err != nil && !errors.Is(err, catalog.ErrSeasonNotFound) {
-				slog.Warn("metadata: failed to load season before upsert",
+				slog.WarnContext(ctx, "metadata: failed to load season before upsert", "component", "metadata",
 					"series_id", seriesID, "season", season.SeasonNumber, "error", err)
 				continue
 			}
@@ -3322,7 +3322,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			} else {
 				sid, genErr := deriveSeasonContentID(seriesID, providerSeason.SeasonNumber)
 				if genErr != nil {
-					slog.Warn("metadata: failed to generate season id",
+					slog.WarnContext(ctx, "metadata: failed to generate season id", "component", "metadata",
 						"series_id", seriesID, "season", season.SeasonNumber, "error", genErr)
 					continue
 				}
@@ -3334,7 +3334,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				}
 			}
 			if err := s.seasonRepo.Upsert(ctx, dbSeason); err != nil {
-				slog.Warn("metadata: failed to upsert season",
+				slog.WarnContext(ctx, "metadata: failed to upsert season", "component", "metadata",
 					"series_id", seriesID, "season", season.SeasonNumber, "error", err)
 				continue
 			}
@@ -3343,7 +3343,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			if !isCanonicalWrite && s.seasonLocalizationRepo != nil {
 				existingLoc, locErr := s.seasonLocalizationRepo.Get(ctx, dbSeason.ContentID, language)
 				if locErr != nil {
-					slog.Warn("metadata: failed to load season localization",
+					slog.WarnContext(ctx, "metadata: failed to load season localization", "component", "metadata",
 						"series_id", seriesID, "season", season.SeasonNumber, "error", locErr)
 				}
 				loc := buildSeasonLocalizationRecord(
@@ -3354,7 +3354,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					mergeMode,
 				)
 				if err := s.seasonLocalizationRepo.Upsert(ctx, loc); err != nil {
-					slog.Warn("metadata: failed to upsert season localization",
+					slog.WarnContext(ctx, "metadata: failed to upsert season localization", "component", "metadata",
 						"series_id", seriesID, "season", season.SeasonNumber, "error", err)
 				} else {
 					addSeasonLocalizationImageJob(dbSeason, loc)
@@ -3413,14 +3413,14 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			} else {
 				sid, genErr := deriveSeasonContentID(seriesID, ep.SeasonNumber)
 				if genErr != nil {
-					slog.Warn("metadata: failed to generate implicit season id",
+					slog.WarnContext(ctx, "metadata: failed to generate implicit season id", "component", "metadata",
 						"series_id", seriesID, "season", ep.SeasonNumber, "error", genErr)
 					continue
 				}
 				seasonModel.ContentID = sid
 			}
 			if err := s.seasonRepo.Upsert(ctx, seasonModel); err != nil {
-				slog.Warn("metadata: failed to upsert implicit season",
+				slog.WarnContext(ctx, "metadata: failed to upsert implicit season", "component", "metadata",
 					"series_id", seriesID, "season", ep.SeasonNumber, "error", err)
 				continue
 			}
@@ -3434,7 +3434,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		for _, ep := range episodes {
 			existingEpisode, err := s.episodeRepo.GetBySeriesAndNumber(ctx, seriesID, ep.SeasonNumber, ep.EpisodeNumber)
 			if err != nil && !errors.Is(err, catalog.ErrEpisodeNotFound) {
-				slog.Warn("metadata: failed to load episode before upsert",
+				slog.WarnContext(ctx, "metadata: failed to load episode before upsert", "component", "metadata",
 					"series_id", seriesID, "season", ep.SeasonNumber, "episode", ep.EpisodeNumber, "error", err)
 				continue
 			}
@@ -3485,7 +3485,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			} else {
 				eid, genErr := deriveEpisodeContentID(seriesID, providerEpisode.SeasonNumber, providerEpisode.EpisodeNumber)
 				if genErr != nil {
-					slog.Warn("metadata: failed to generate episode id",
+					slog.WarnContext(ctx, "metadata: failed to generate episode id", "component", "metadata",
 						"series_id", seriesID, "season", ep.SeasonNumber,
 						"episode", ep.EpisodeNumber, "error", genErr)
 					continue
@@ -3506,7 +3506,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				dbEp.RatingIMDB = &v
 			}
 			if err := s.episodeRepo.Upsert(ctx, dbEp); err != nil {
-				slog.Warn("metadata: failed to upsert episode",
+				slog.WarnContext(ctx, "metadata: failed to upsert episode", "component", "metadata",
 					"series_id", seriesID, "season", ep.SeasonNumber,
 					"episode", ep.EpisodeNumber, "error", err)
 				continue
@@ -3515,7 +3515,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			if !isCanonicalWrite && s.episodeLocalizationRepo != nil {
 				existingLoc, locErr := s.episodeLocalizationRepo.Get(ctx, dbEp.ContentID, language)
 				if locErr != nil {
-					slog.Warn("metadata: failed to load episode localization",
+					slog.WarnContext(ctx, "metadata: failed to load episode localization", "component", "metadata",
 						"series_id", seriesID, "season", ep.SeasonNumber,
 						"episode", ep.EpisodeNumber, "error", locErr)
 				}
@@ -3526,7 +3526,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 					providerEpisode,
 					mergeMode,
 				)); err != nil {
-					slog.Warn("metadata: failed to upsert episode localization",
+					slog.WarnContext(ctx, "metadata: failed to upsert episode localization", "component", "metadata",
 						"series_id", seriesID, "season", ep.SeasonNumber,
 						"episode", ep.EpisodeNumber, "error", err)
 				}
@@ -3538,7 +3538,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	s.enqueueSeriesChildImages(ctx, seriesID, imageJobs)
 
 	if err := s.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
-		slog.Warn("metadata: failed to ensure series episode links",
+		slog.WarnContext(ctx, "metadata: failed to ensure series episode links", "component", "metadata",
 			"series_id", seriesID, "error", err)
 	}
 	s.refreshSeriesEpisodeMetadataState(ctx, seriesID, time.Now())
@@ -3712,7 +3712,7 @@ func (s *MetadataService) ensureSeriesEpisodeLinksCore(ctx context.Context, seri
 		return nil
 	}
 
-	slog.Info("metadata: entering fallback episode synthesis for incomplete series", "series_id", seriesID)
+	slog.InfoContext(ctx, "metadata: entering fallback episode synthesis for incomplete series", "component", "metadata", "series_id", seriesID)
 	if err := s.synthesizeFallbackSeriesStructure(ctx, seriesID); err != nil {
 		return err
 	}
@@ -3804,7 +3804,7 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			if item, itemErr := s.itemRepo.GetByID(ctx, seriesID); itemErr == nil {
 				seriesItem = item
 			} else if !errors.Is(itemErr, catalog.ErrItemNotFound) {
-				slog.Warn("metadata: failed to load series item for air-date episode preference",
+				slog.WarnContext(ctx, "metadata: failed to load series item for air-date episode preference", "component", "metadata",
 					"series_id", seriesID,
 					"error", itemErr)
 			}
@@ -3825,7 +3825,7 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 			selected, ok := selectAirDateEpisodeCandidate(candidates, seriesItem)
 			if !ok {
 				if len(candidates) > 1 {
-					slog.Warn("metadata: skipped ambiguous air-date episode link",
+					slog.WarnContext(ctx, "metadata: skipped ambiguous air-date episode link", "component", "metadata",
 						"series_id", seriesID,
 						"file_id", file.ID,
 						"file_path", file.FilePath,
@@ -3844,7 +3844,7 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 				if suppressMissing && errors.Is(err, catalog.ErrEpisodeNotFound) {
 					continue
 				}
-				slog.Warn("metadata: failed to resolve episode for file",
+				slog.WarnContext(ctx, "metadata: failed to resolve episode for file", "component", "metadata",
 					"series_id", seriesID,
 					"file_id", file.ID,
 					"file_path", file.FilePath,
@@ -3856,7 +3856,7 @@ func (s *MetadataService) linkSeriesFilesToEpisodesWithOptions(ctx context.Conte
 		}
 
 		if err := linker.UpdateEpisodeLink(ctx, file.ID, episode.ContentID, seasonNum, episodeNum); err != nil {
-			slog.Warn("metadata: failed to link file to episode",
+			slog.WarnContext(ctx, "metadata: failed to link file to episode", "component", "metadata",
 				"series_id", seriesID,
 				"file_id", file.ID,
 				"file_path", file.FilePath,
@@ -3937,7 +3937,7 @@ type episodeLinkHint struct {
 func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, seriesID string, incomplete bool, lastCheckedAt *time.Time) {
 	item, err := s.itemRepo.GetByID(ctx, seriesID)
 	if err != nil {
-		slog.Warn("metadata: failed to load series item for episode metadata state",
+		slog.WarnContext(ctx, "metadata: failed to load series item for episode metadata state", "component", "metadata",
 			"series_id", seriesID, "error", err)
 		return
 	}
@@ -3945,7 +3945,7 @@ func (s *MetadataService) updateEpisodeMetadataState(ctx context.Context, series
 	item.EpisodeMetadataIncomplete = incomplete
 	item.EpisodeMetadataLastCheckedAt = lastCheckedAt
 	if err := s.itemRepo.Upsert(ctx, item); err != nil {
-		slog.Warn("metadata: failed to update episode metadata state",
+		slog.WarnContext(ctx, "metadata: failed to update episode metadata state", "component", "metadata",
 			"series_id", seriesID, "error", err)
 	}
 }
@@ -3957,7 +3957,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 
 	episodes, err := s.episodeRepo.ListBySeries(ctx, seriesID)
 	if err != nil {
-		slog.Warn("metadata: failed to list series episodes for completeness check",
+		slog.WarnContext(ctx, "metadata: failed to list series episodes for completeness check", "component", "metadata",
 			"series_id", seriesID, "error", err)
 		return
 	}
@@ -3968,7 +3968,7 @@ func (s *MetadataService) refreshSeriesEpisodeMetadataState(ctx context.Context,
 			incomplete = true
 		}
 		if err := s.syncVisibleEpisodeRefreshDebt(ctx, episode, now); err != nil {
-			slog.Warn("metadata: failed to sync episode refresh debt",
+			slog.WarnContext(ctx, "metadata: failed to sync episode refresh debt", "component", "metadata",
 				"series_id", seriesID,
 				"episode_id", episode.ContentID,
 				"error", err)
@@ -4224,7 +4224,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if s.scannedGroupRepo != nil && contentGroupKey != "" {
 		scannedGroup, err := s.scannedGroupRepo.Get(ctx, folderID, groupKeyVersion, contentGroupKey)
 		if err != nil {
-			slog.Warn("metadata: scanned group lookup failed",
+			slog.WarnContext(ctx, "metadata: scanned group lookup failed", "component", "metadata",
 				"folder_id", folderID,
 				"group_key_version", groupKeyVersion,
 				"content_group_key", contentGroupKey,
@@ -4260,7 +4260,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	if s.groupOverrideRepo != nil && contentGroupKey != "" {
 		override, err := s.groupOverrideRepo.Get(ctx, folderID, groupKeyVersion, contentGroupKey)
 		if err != nil {
-			slog.Warn("metadata: group override lookup failed",
+			slog.WarnContext(ctx, "metadata: group override lookup failed", "component", "metadata",
 				"folder_id", folderID,
 				"group_key_version", groupKeyVersion,
 				"content_group_key", contentGroupKey,
@@ -4333,7 +4333,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 		// Clear any legacy skipped-root record since we now have provider IDs.
 		if s != nil && s.skippedRootRepo != nil {
 			if err := s.skippedRootRepo.Delete(ctx, folderID, contentRootPath); err != nil {
-				slog.Warn("metadata: failed to clear skipped root",
+				slog.WarnContext(ctx, "metadata: failed to clear skipped root", "component", "metadata",
 					"folder_id", folderID,
 					"root_path", observedRootPath,
 					"error", err)
@@ -4518,7 +4518,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	// Link file, claim root, and create library membership.
 	if err := s.fileRepo.UpdateContentID(ctx, file.ID, contentID); err != nil {
 		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
-			slog.Warn("metadata: failed to clean up unlinked skeleton",
+			slog.WarnContext(ctx, "metadata: failed to clean up unlinked skeleton", "component", "metadata",
 				"content_id", contentID,
 				"file_id", file.ID,
 				"folder_id", folderID,
@@ -4529,7 +4529,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 	if _, err := s.folderTypeForSkeleton(ctx, folderID); err != nil {
 		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
-			slog.Warn("metadata: failed to clear file link after disabled skeleton folder",
+			slog.WarnContext(ctx, "metadata: failed to clear file link after disabled skeleton folder", "component", "metadata",
 				"content_id", contentID,
 				"file_id", file.ID,
 				"folder_id", folderID,
@@ -4537,7 +4537,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			)
 		}
 		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
-			slog.Warn("metadata: failed to clean up skeleton for disabled folder",
+			slog.WarnContext(ctx, "metadata: failed to clean up skeleton for disabled folder", "component", "metadata",
 				"content_id", contentID,
 				"file_id", file.ID,
 				"folder_id", folderID,
@@ -4548,7 +4548,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 	}
 	if err := s.upsertLibraryMembership(ctx, contentID, folderID); err != nil {
 		if clearErr := s.fileRepo.UpdateContentID(ctx, file.ID, ""); clearErr != nil {
-			slog.Warn("metadata: failed to clear file link after skeleton membership failure",
+			slog.WarnContext(ctx, "metadata: failed to clear file link after skeleton membership failure", "component", "metadata",
 				"content_id", contentID,
 				"file_id", file.ID,
 				"folder_id", folderID,
@@ -4556,7 +4556,7 @@ func (s *MetadataService) createOrFindSkeleton(ctx context.Context, file *models
 			)
 		}
 		if cleanupErr := s.deleteCreatedSkeleton(ctx, contentID); cleanupErr != nil {
-			slog.Warn("metadata: failed to clean up membershipless skeleton",
+			slog.WarnContext(ctx, "metadata: failed to clean up membershipless skeleton", "component", "metadata",
 				"content_id", contentID,
 				"file_id", file.ID,
 				"folder_id", folderID,
@@ -4597,7 +4597,7 @@ func (s *MetadataService) recordSkippedRoot(ctx context.Context, folderID int, r
 		return
 	}
 	if err := s.skippedRootRepo.UpsertObservedFile(ctx, folderID, rootPath, reason, sampleFilePath); err != nil {
-		slog.Warn("metadata: failed to record skipped root",
+		slog.WarnContext(ctx, "metadata: failed to record skipped root", "component", "metadata",
 			"folder_id", folderID,
 			"root_path", rootPath,
 			"reason", reason,
@@ -4649,7 +4649,7 @@ func (s *MetadataService) claimRoot(ctx context.Context, folderID int, rootPath,
 		return
 	}
 	if err := s.rootClaimRepo.ClaimRoot(ctx, folderID, rootPath, contentID); err != nil {
-		slog.Warn("metadata: failed to claim root path",
+		slog.WarnContext(ctx, "metadata: failed to claim root path", "component", "metadata",
 			"folder_id", folderID,
 			"root_path", rootPath,
 			"content_id", contentID,
@@ -4689,7 +4689,7 @@ func (s *MetadataService) claimConfirmedSeriesRootOwnership(
 		}
 		seenGroups[claimKey] = struct{}{}
 		if err := s.groupClaimRepo.ClaimGroup(ctx, folderID, file.GroupKeyVersion, groupKey, contentID); err != nil {
-			slog.Warn("metadata: failed to claim confirmed series group",
+			slog.WarnContext(ctx, "metadata: failed to claim confirmed series group", "component", "metadata",
 				"folder_id", folderID,
 				"group_key_version", file.GroupKeyVersion,
 				"content_group_key", groupKey,
@@ -4859,7 +4859,7 @@ func (s *MetadataService) rebindItemByProviderIDsLocked(
 	if err := s.rebindItemToExistingItem(ctx, sourceContentID, existing.ContentID, allowMatchedSource); err != nil {
 		return "", err
 	}
-	slog.Info("metadata: rebound skeleton to existing item",
+	slog.InfoContext(ctx, "metadata: rebound skeleton to existing item", "component", "metadata",
 		"from_content_id", sourceContentID,
 		"to_content_id", existing.ContentID,
 		"item_type", itemType,
@@ -5783,7 +5783,7 @@ func (s *MetadataService) cacheItemImages(ctx context.Context, item *models.Medi
 				ImageType:   j.field.imageType,
 			})
 			if err != nil {
-				slog.Warn("metadata: image cache failed, keeping CDN URL",
+				slog.WarnContext(ctx, "metadata: image cache failed, keeping CDN URL", "component", "metadata",
 					"url", j.url, "error", err)
 				return
 			}
@@ -5907,7 +5907,7 @@ func (s *MetadataService) FetchItemImages(ctx context.Context, providerIDs map[s
 			Language:    language,
 		})
 		if err != nil {
-			slog.Warn("fetch item images: provider error",
+			slog.WarnContext(ctx, "fetch item images: provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)
 			providerErrors[p.Slug()] = err.Error()
 			continue

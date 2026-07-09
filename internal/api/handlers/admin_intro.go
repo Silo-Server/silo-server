@@ -92,7 +92,7 @@ func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "bad_request", "Item must be an episode")
 			return
 		}
-		h.logger.Error("admin intro: resolve episode failed", "episode_id", episodeID, "error", err)
+		h.logger.ErrorContext(r.Context(), "admin intro: resolve episode failed", "episode_id", episodeID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve episode")
 		return
 	}
@@ -110,7 +110,7 @@ func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.
 	}
 	raw, err := h.Settings.Get(r.Context(), markers.SettingMode)
 	if err != nil {
-		h.logger.Error("admin markers: load mode failed", "episode_id", episodeID, "error", err)
+		h.logger.ErrorContext(r.Context(), "admin markers: load mode failed", "episode_id", episodeID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load marker settings")
 		return
 	}
@@ -135,17 +135,17 @@ func (h *AdminIntroHandler) handleEpisodeMarkers(w http.ResponseWriter, r *http.
 	go func() {
 		defer h.inFlight.Delete(episodeID)
 		start := time.Now()
-		h.logger.Info("admin markers: episode refresh started", "episode_id", episodeID, "action", action)
+		h.logger.InfoContext(r.Context(), "admin markers: episode refresh started", "episode_id", episodeID, "action", action)
 		summary, err := h.analyzer.AnalyzeEpisode(h.baseContext, episodeID)
 		if err != nil {
-			h.logger.Error("admin markers: episode refresh failed",
+			h.logger.ErrorContext(r.Context(), "admin markers: episode refresh failed",
 				"episode_id", episodeID,
 				"action", action,
 				"duration", time.Since(start),
 				"error", err)
 			return
 		}
-		h.logger.Info("admin markers: episode refresh finished",
+		h.logger.InfoContext(r.Context(), "admin markers: episode refresh finished",
 			"episode_id", episodeID,
 			"action", action,
 			"duration", time.Since(start),
@@ -168,7 +168,7 @@ func (h *AdminIntroHandler) notifyEpisodeMarkerUpdates(ctx context.Context, epis
 	}
 	files, err := h.FileResolver.GetByEpisodeID(ctx, episodeID)
 	if err != nil {
-		h.logger.Warn("admin markers: reload episode files for marker update failed",
+		h.logger.WarnContext(ctx, "admin markers: reload episode files for marker update failed",
 			"episode_id", episodeID,
 			"action", action,
 			"error", err)
@@ -179,7 +179,7 @@ func (h *AdminIntroHandler) notifyEpisodeMarkerUpdates(ctx context.Context, epis
 			continue
 		}
 		h.MarkerUpdateNotifier.MarkersUpdated(ctx, file)
-		h.logger.Info("admin markers: emitted marker update",
+		h.logger.InfoContext(ctx, "admin markers: emitted marker update",
 			"episode_id", episodeID,
 			"action", action,
 			"file_id", file.ID)

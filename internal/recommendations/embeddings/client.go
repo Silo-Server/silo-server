@@ -136,7 +136,7 @@ func (c *Client) embedOpenAI(ctx context.Context, texts []string) ([][]float32, 
 				return nil, fmt.Errorf("embedding API returned %d: %s", resp.StatusCode, string(respBody))
 			}
 			wait := rateLimitBackoff(resp, attempt)
-			slog.Warn("rate limited by embedding API, waiting", "attempt", attempt+1, "wait", wait)
+			slog.WarnContext(ctx, "rate limited by embedding API, waiting", "component", "recommendations", "attempt", attempt+1, "wait", wait)
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -219,7 +219,7 @@ func (c *Client) embedGemini(ctx context.Context, texts []string) ([][]float32, 
 				return nil, fmt.Errorf("gemini embedding API returned %d: %s", resp.StatusCode, string(respBody))
 			}
 			wait := rateLimitBackoff(resp, attempt)
-			slog.Warn("rate limited by gemini embedding API, waiting", "attempt", attempt+1, "wait", wait)
+			slog.WarnContext(ctx, "rate limited by gemini embedding API, waiting", "component", "recommendations", "attempt", attempt+1, "wait", wait)
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()

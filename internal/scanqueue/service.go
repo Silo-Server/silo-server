@@ -475,7 +475,7 @@ func (s *Service) heartbeatLoop(ctx context.Context, runID string, stop <-chan s
 			err := s.repo.TouchHeartbeat(touchCtx, runID)
 			cancel()
 			if err != nil && !errors.Is(err, ErrScanRunNotFound) {
-				slog.Warn("scan queue: failed to touch heartbeat", "scan_id", runID, "error", err)
+				slog.WarnContext(ctx, "scan queue: failed to touch heartbeat", "component", "scanqueue", "scan_id", runID, "error", err)
 			}
 		}
 	}

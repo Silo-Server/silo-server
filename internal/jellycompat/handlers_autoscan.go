@@ -62,7 +62,7 @@ func (h *AutoscanHandler) HandleVirtualFolders(w http.ResponseWriter, r *http.Re
 	}
 	folders, err := h.folders.List(r.Context())
 	if err != nil {
-		slog.Error("jellycompat autoscan: listing libraries", "error", err)
+		slog.ErrorContext(r.Context(), "jellycompat autoscan: listing libraries", "component", "jellycompat", "error", err)
 		writeError(w, http.StatusInternalServerError, "InternalServerError", "Failed to list libraries")
 		return
 	}
@@ -128,7 +128,7 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 		if err != nil {
 			if parentTarget, handled, fallbackErr := resolveAutoscanParentTarget(r.Context(), resolver, path, err); handled {
 				if fallbackErr != nil {
-					slog.Warn("jellycompat autoscan: media update parent path rejected",
+					slog.WarnContext(r.Context(), "jellycompat autoscan: media update parent path rejected", "component", "jellycompat",
 						"path", path,
 						"parent_path", filepath.Dir(filepath.Clean(path)),
 						"update_type", update.UpdateType,
@@ -138,7 +138,7 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 					return
 				}
 				if parentTarget != nil {
-					slog.Debug("jellycompat autoscan: media update falling back to parent scan",
+					slog.DebugContext(r.Context(), "jellycompat autoscan: media update falling back to parent scan", "component", "jellycompat",
 						"path", path,
 						"parent_path", parentTarget.Path,
 						"parent_mode", parentTarget.Mode,
@@ -149,14 +149,14 @@ func (h *AutoscanHandler) HandleMediaUpdated(w http.ResponseWriter, r *http.Requ
 				continue
 			}
 			if softAutoscanUpdateError(err) {
-				slog.Debug("jellycompat autoscan: media update ignored",
+				slog.DebugContext(r.Context(), "jellycompat autoscan: media update ignored", "component", "jellycompat",
 					"path", path,
 					"update_type", update.UpdateType,
 					"error", err,
 				)
 				continue
 			}
-			slog.Warn("jellycompat autoscan: media update path rejected",
+			slog.WarnContext(r.Context(), "jellycompat autoscan: media update path rejected", "component", "jellycompat",
 				"path", path,
 				"update_type", update.UpdateType,
 				"error", err,

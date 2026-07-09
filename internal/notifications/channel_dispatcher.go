@@ -34,8 +34,8 @@ func (d *channelDispatcher[A]) dispatch(deliveryID string) {
 	select {
 	case d.queue <- deliveryID:
 	default:
-		d.logger.Warn(d.channel+" dispatch queue full; deferring to retry worker",
-			"delivery_id", deliveryID)
+		d.logger.Warn("dispatch queue full; deferring to retry worker",
+			"channel", d.channel, "delivery_id", deliveryID)
 	}
 }
 
@@ -72,7 +72,7 @@ func (d *channelDispatcher[A]) processDelivery(ctx context.Context, deliveryID s
 	attempts, err := d.claimPending(ctx, deliveryID)
 	if err != nil {
 		if ctx.Err() == nil {
-			d.logger.Warn(d.channel+" attempt claim failed", "delivery_id", deliveryID, "error", err)
+			d.logger.WarnContext(ctx, "attempt claim failed", "channel", d.channel, "delivery_id", deliveryID, "error", err)
 		}
 		return
 	}
@@ -111,7 +111,7 @@ func runRetrySweep[A any](
 			attempts, err := claim(ctx, limit)
 			if err != nil {
 				if ctx.Err() == nil {
-					logger.Warn(channel+" retry claim failed", "error", err)
+					logger.WarnContext(ctx, "retry claim failed", "channel", channel, "error", err)
 				}
 				break
 			}

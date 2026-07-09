@@ -126,7 +126,19 @@ type meilisearchEmbedderSettings struct {
 }
 
 const (
-	defaultMeilisearchTaskWaitTimeout = 5 * time.Minute
+	// defaultMeilisearchTaskWaitTimeout bounds how long WaitTask polls a
+	// single Meilisearch task when the caller supplies no deadline. Semantic
+	// (vector-embedded) batches can legitimately take many minutes on modest
+	// hardware — and Meilisearch auto-batches consecutive queued document
+	// tasks, so the oldest task's wall-clock completion covers the whole
+	// fused unit. Prod rebuilds died mid-batch with "context deadline
+	// exceeded" at the previous 5-minute value (2026-06-29 twice, 2026-07-08
+	// twice), leaving incremental sync gated on a stale schema version.
+	// Terminal task states (succeeded/failed/canceled) still end the wait
+	// immediately — this only caps waiting on a task that is genuinely still
+	// processing, where giving up guarantees rebuild failure and gains
+	// nothing.
+	defaultMeilisearchTaskWaitTimeout = 2 * time.Hour
 	meilisearchTaskPollInterval       = time.Second
 )
 

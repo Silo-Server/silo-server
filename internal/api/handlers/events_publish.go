@@ -15,7 +15,7 @@ func publishEventJob(ctx context.Context, hub *evt.Hub, eventName string, job *m
 	if err := hub.PublishJSON(ctx, evt.ChannelJobs, eventName, job, evt.PublishOptions{
 		AdminOnly: true,
 	}); err != nil {
-		slog.Warn("events: failed to publish job event", "job_id", job.ID, "event", eventName, "error", err)
+		slog.WarnContext(ctx, "events: failed to publish job event", "component", "api", "job_id", job.ID, "event", eventName, "error", err)
 	}
 }
 
@@ -28,6 +28,6 @@ func publishEventMetadataUpdate(ctx context.Context, hub *evt.Hub, libraryID int
 		"content_id": contentID,
 		"change":     "metadata_updated",
 	}, evt.PublishOptions{}); err != nil {
-		slog.Warn("events: failed to publish metadata update", "library_id", libraryID, "content_id", contentID, "error", err)
+		slog.WarnContext(ctx, "events: failed to publish metadata update", "component", "api", "library_id", libraryID, "content_id", contentID, "error", err)
 	}
 }

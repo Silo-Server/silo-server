@@ -47,37 +47,37 @@ func CleanupDecisionLogsOnce(
 	cutoff := time.Now().UTC().AddDate(0, 0, -days)
 	if pm != nil {
 		if err := pm.EnsureFuturePartitions(ctx); err != nil {
-			slog.Warn("policy decision log ensure future partitions error", "error", err)
+			slog.WarnContext(ctx, "policy decision log ensure future partitions error", "component", "policy", "error", err)
 			firstErr = err
 		}
 
 		partitionCleanupFailed := false
 		totalDeleted := int64(0)
 		if dropped, err := pm.DropExpiredPartitions(ctx, cutoff); err != nil {
-			slog.Warn("policy decision log partition cleanup error", "error", err)
+			slog.WarnContext(ctx, "policy decision log partition cleanup error", "component", "policy", "error", err)
 			partitionCleanupFailed = true
 			if firstErr == nil {
 				firstErr = err
 			}
 		} else if len(dropped) > 0 {
-			slog.Info("policy decision log dropped expired partitions", "partitions", dropped)
+			slog.InfoContext(ctx, "policy decision log dropped expired partitions", "component", "policy", "partitions", dropped)
 		}
 
 		if deleted, err := pm.DeleteExpiredRowsFromDefault(ctx, cutoff); err != nil {
-			slog.Warn("policy decision log default partition cleanup error", "error", err)
+			slog.WarnContext(ctx, "policy decision log default partition cleanup error", "component", "policy", "error", err)
 			partitionCleanupFailed = true
 			if firstErr == nil {
 				firstErr = err
 			}
 		} else if deleted > 0 {
 			totalDeleted += deleted
-			slog.Info("policy decision log default partition cleanup completed", "deleted", deleted, "retention_days", days)
+			slog.InfoContext(ctx, "policy decision log default partition cleanup completed", "component", "policy", "deleted", deleted, "retention_days", days)
 		}
 
 		if !partitionCleanupFailed {
 			return totalDeleted, firstErr
 		}
-		slog.Warn("policy decision log partition cleanup degraded, falling back to row deletes", "retention_days", days)
+		slog.WarnContext(ctx, "policy decision log partition cleanup degraded, falling back to row deletes", "component", "policy", "retention_days", days)
 	}
 
 	total, err := deleteExpiredDecisionRowsBefore(ctx, pool, cutoff)
@@ -85,7 +85,7 @@ func CleanupDecisionLogsOnce(
 		firstErr = err
 	}
 	if total > 0 {
-		slog.Info("policy decision log cleanup completed", "deleted", total, "retention_days", days)
+		slog.InfoContext(ctx, "policy decision log cleanup completed", "component", "policy", "deleted", total, "retention_days", days)
 	}
 	return total, firstErr
 }
@@ -105,7 +105,7 @@ func deleteExpiredDecisionRowsBefore(ctx context.Context, pool *pgxpool.Pool, cu
 			)
 			`, cutoff, decisionLogCleanupBatchSize)
 		if err != nil {
-			slog.Warn("policy decision log cleanup error", "error", err)
+			slog.WarnContext(ctx, "policy decision log cleanup error", "component", "policy", "error", err)
 			return total, err
 		}
 		deleted := result.RowsAffected()

@@ -233,13 +233,13 @@ func (r *PluginImageResolver) ResolveImageURLsWithExpiry(ctx context.Context, pa
 			}
 			sources := sourcesSnapshot[pluginID]
 			if len(sources) == 0 {
-				slog.Warn("no image resolver registered for scheme", "scheme", pluginID)
+				slog.WarnContext(ctx, "no image resolver registered for scheme", "component", "metadata", "scheme", pluginID)
 				return map[string]catalog.ResolvedImageURL{}, nil
 			}
 			return r.resolvePluginBatchWithFallback(ctx, pluginID, sources, entries, variant), nil
 		})
 		if err != nil {
-			slog.Error("image batch resolution failed", "plugin_id", pluginID, "error", err)
+			slog.ErrorContext(ctx, "image batch resolution failed", "component", "metadata", "plugin_id", pluginID, "error", err)
 			continue
 		}
 
@@ -276,14 +276,14 @@ func (r *PluginImageResolver) resolvePluginBatchWithFallback(
 		resolvedBatch, err := r.resolvePluginBatch(ctx, source.source, remaining, variant)
 		if err != nil {
 			if status.Code(err) == codes.Unimplemented {
-				slog.Debug("plugin image resolver source does not implement image resolution",
+				slog.DebugContext(ctx, "plugin image resolver source does not implement image resolution", "component", "metadata",
 					"scheme", pluginID,
 					"source_kind", source.kind,
 					"installation_id", source.installationID,
 					"capability_id", source.capabilityID)
 				continue
 			}
-			slog.Error("plugin batch image resolution failed",
+			slog.ErrorContext(ctx, "plugin batch image resolution failed", "component", "metadata",
 				"scheme", pluginID,
 				"source_kind", source.kind,
 				"installation_id", source.installationID,
@@ -320,7 +320,7 @@ func (r *PluginImageResolver) resolveS3Batch(
 	for _, entry := range entries {
 		url, err := presigner.PresignGetURL(ctx, presigner.Bucket(), entry.originalPath, ttl)
 		if err != nil {
-			slog.Error("s3 image resolution failed", "path", entry.originalPath, "error", err)
+			slog.ErrorContext(ctx, "s3 image resolution failed", "component", "metadata", "path", entry.originalPath, "error", err)
 			continue
 		}
 		expiry := expiresAt

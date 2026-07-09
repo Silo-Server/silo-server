@@ -620,12 +620,12 @@ func (h *Handler) bearerAuth(next http.Handler) http.Handler {
 			raw = r.URL.Query().Get("token")
 		}
 		if raw == "" {
-			slog.Debug("abs bearerAuth: no token", "path", r.URL.Path, "remote", r.RemoteAddr)
+			slog.DebugContext(r.Context(), "abs bearerAuth: no token", "component", "audiobooks", "path", r.URL.Path, "remote", r.RemoteAddr)
 			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return
 		}
 		if h.deps.Config == nil || h.deps.TokenStore == nil {
-			slog.Warn("abs bearerAuth: deps not wired",
+			slog.WarnContext(r.Context(), "abs bearerAuth: deps not wired", "component", "audiobooks",
 				"have_config", h.deps.Config != nil,
 				"have_token_store", h.deps.TokenStore != nil,
 				"path", r.URL.Path)
@@ -634,50 +634,50 @@ func (h *Handler) bearerAuth(next http.Handler) http.Handler {
 		}
 		secret, err := h.deps.Config.JWTSecret(r.Context())
 		if err != nil {
-			slog.Error("abs bearerAuth: jwt secret fetch failed", "err", err, "path", r.URL.Path)
+			slog.ErrorContext(r.Context(), "abs bearerAuth: jwt secret fetch failed", "component", "audiobooks", "err", err, "path", r.URL.Path)
 			http.Error(w, "config unavailable", http.StatusInternalServerError)
 			return
 		}
 		claims, err := ParseToken(secret, raw)
 		if err != nil {
-			slog.Debug("abs bearerAuth: parse failed", "err", err, "path", r.URL.Path)
+			slog.DebugContext(r.Context(), "abs bearerAuth: parse failed", "component", "audiobooks", "err", err, "path", r.URL.Path)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 		if claims.Type != "access" {
-			slog.Debug("abs bearerAuth: wrong token type", "type", claims.Type, "path", r.URL.Path)
+			slog.DebugContext(r.Context(), "abs bearerAuth: wrong token type", "component", "audiobooks", "type", claims.Type, "path", r.URL.Path)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 		row, err := h.deps.TokenStore.GetTokenByJTI(r.Context(), claims.JTI)
 		if err != nil {
-			slog.Debug("abs bearerAuth: jti lookup failed",
+			slog.DebugContext(r.Context(), "abs bearerAuth: jti lookup failed", "component", "audiobooks",
 				"jti", claims.JTI, "err", err, "path", r.URL.Path)
 			http.Error(w, "token revoked", http.StatusUnauthorized)
 			return
 		}
 		if row.RevokedAt != nil {
-			slog.Debug("abs bearerAuth: jti revoked", "jti", claims.JTI, "path", r.URL.Path)
+			slog.DebugContext(r.Context(), "abs bearerAuth: jti revoked", "component", "audiobooks", "jti", claims.JTI, "path", r.URL.Path)
 			http.Error(w, "token revoked", http.StatusUnauthorized)
 			return
 		}
 		if row.UserID != "" && row.UserID != claims.UserID {
-			slog.Debug("abs bearerAuth: token user mismatch", "jti", claims.JTI, "path", r.URL.Path)
+			slog.DebugContext(r.Context(), "abs bearerAuth: token user mismatch", "component", "audiobooks", "jti", claims.JTI, "path", r.URL.Path)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 		if row.ProfileID != "" && row.ProfileID != claims.ProfileID {
-			slog.Debug("abs bearerAuth: token profile mismatch", "jti", claims.JTI, "path", r.URL.Path)
+			slog.DebugContext(r.Context(), "abs bearerAuth: token profile mismatch", "component", "audiobooks", "jti", claims.JTI, "path", r.URL.Path)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 		if row.Type != "" && row.Type != "access" {
-			slog.Debug("abs bearerAuth: persisted token type mismatch", "type", row.Type, "path", r.URL.Path)
+			slog.DebugContext(r.Context(), "abs bearerAuth: persisted token type mismatch", "component", "audiobooks", "type", row.Type, "path", r.URL.Path)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 		if !row.ExpiresAt.IsZero() && time.Now().After(row.ExpiresAt) {
-			slog.Debug("abs bearerAuth: persisted token expired", "jti", claims.JTI, "path", r.URL.Path)
+			slog.DebugContext(r.Context(), "abs bearerAuth: persisted token expired", "component", "audiobooks", "jti", claims.JTI, "path", r.URL.Path)
 			http.Error(w, "token expired", http.StatusUnauthorized)
 			return
 		}

@@ -108,7 +108,7 @@ func (d *AvailabilityDetector) flatKindOps(k flatItemKind) availabilityKindOps {
 func (d *AvailabilityDetector) runKind(ctx context.Context, libraryID int, fullLibrary bool, scopePaths []string, ops availabilityKindOps) {
 	seeded, err := d.releases.IsContentSeeded(ctx, libraryID, ops.kind)
 	if err != nil {
-		d.logger.Warn("seed state lookup failed",
+		d.logger.WarnContext(ctx, "seed state lookup failed",
 			"library_id", libraryID, "kind", ops.kind, "error", err)
 		return
 	}
@@ -126,23 +126,23 @@ func (d *AvailabilityDetector) runKind(ctx context.Context, libraryID int, fullL
 		inserted, events, err = ops.recordForPaths(ctx, libraryID, scopePaths, false)
 	}
 	if err != nil {
-		d.logger.Warn("availability detection failed",
+		d.logger.WarnContext(ctx, "availability detection failed",
 			"library_id", libraryID, "kind", ops.kind, "error", err)
 		return
 	}
 
 	if fullLibrary && !seeded {
 		if err := d.releases.MarkContentSeeded(ctx, libraryID, ops.kind); err != nil {
-			d.logger.Warn("seed marker write failed",
+			d.logger.WarnContext(ctx, "seed marker write failed",
 				"library_id", libraryID, "kind", ops.kind, "error", err)
 		} else {
-			d.logger.Info("library availability seeded",
+			d.logger.InfoContext(ctx, "library availability seeded",
 				"library_id", libraryID, "kind", ops.kind, "availability_rows", inserted)
 		}
 	}
 
 	if inserted > 0 || events > 0 {
-		d.logger.Info("availability recorded",
+		d.logger.InfoContext(ctx, "availability recorded",
 			"library_id", libraryID,
 			"kind", ops.kind,
 			"full_library", fullLibrary,

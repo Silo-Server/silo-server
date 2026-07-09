@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"testing"
@@ -113,7 +112,7 @@ func TestDispatchOperationalEnqueuesApplePushAttempts(t *testing.T) {
 		Deliveries:     NewDeliveryRepository(pool),
 		pushDeviceRepo: NewPushDeviceRepository(pool),
 		dispatcher:     NewMultiDispatcher(),
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		logger:         slog.New(slog.DiscardHandler),
 	}
 
 	inserted, err := system.DispatchOperational(ctx, Delivery{

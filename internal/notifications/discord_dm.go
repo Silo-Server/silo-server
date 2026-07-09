@@ -248,7 +248,7 @@ func (s *System) CompleteDiscordLink(ctx context.Context, userID int, code, redi
 	if err := s.DiscordPrefs.SetIdentity(ctx, userID, user.ID, user.Username); err != nil {
 		return discord.User{}, err
 	}
-	s.logger.Info("discord account linked", "user_id", userID, "discord_user_id", user.ID)
+	s.logger.InfoContext(ctx, "discord account linked", "user_id", userID, "discord_user_id", user.ID)
 	return user, nil
 }
 

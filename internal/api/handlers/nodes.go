@@ -77,7 +77,7 @@ type checkNodeResult struct {
 func (h *NodeHandler) HandleListNodes(w http.ResponseWriter, r *http.Request) {
 	nodes, err := h.repo.List(r.Context())
 	if err != nil {
-		slog.Error("listing nodes", "error", err)
+		slog.ErrorContext(r.Context(), "listing nodes", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list nodes")
 		return
 	}
@@ -102,7 +102,7 @@ func (h *NodeHandler) HandleCreateNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
-		slog.Error("creating node", "error", err)
+		slog.ErrorContext(r.Context(), "creating node", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create node")
 		return
 	}
@@ -131,7 +131,7 @@ func (h *NodeHandler) HandleUpdateNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "Node not found")
 			return
 		}
-		slog.Error("updating node", "error", err)
+		slog.ErrorContext(r.Context(), "updating node", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update node")
 		return
 	}
@@ -154,7 +154,7 @@ func (h *NodeHandler) HandleDeleteNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "Node not found")
 			return
 		}
-		slog.Error("deleting node", "error", err)
+		slog.ErrorContext(r.Context(), "deleting node", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete node")
 		return
 	}
@@ -177,7 +177,7 @@ func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not_found", "Node not found")
 			return
 		}
-		slog.Error("fetching node for check", "error", err)
+		slog.ErrorContext(r.Context(), "fetching node for check", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch node")
 		return
 	}
@@ -185,7 +185,7 @@ func (h *NodeHandler) HandleCheckNode(w http.ResponseWriter, r *http.Request) {
 	healthy, activeJobs, egressKbps := nodepool.CheckNode(r.Context(), node)
 
 	if err := h.repo.UpdateHealth(r.Context(), id, healthy, activeJobs, egressKbps); err != nil {
-		slog.Error("persisting health check result", "node_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "persisting health check result", "component", "api", "node_id", id, "error", err)
 	}
 
 	writeJSON(w, http.StatusOK, checkNodeResult{
@@ -362,7 +362,7 @@ func (h *NodeHandler) reloadPools(ctx context.Context) {
 	proxyNodes, proxyErr := h.lister.ListEnabled(ctx, nodepool.NodeTypeProxy)
 	transcodeNodes, tcErr := h.lister.ListEnabled(ctx, nodepool.NodeTypeTranscode)
 	if proxyErr != nil || tcErr != nil {
-		slog.Warn("node pool reload failed", "proxy_err", proxyErr, "transcode_err", tcErr)
+		slog.WarnContext(ctx, "node pool reload failed", "component", "api", "proxy_err", proxyErr, "transcode_err", tcErr)
 		return
 	}
 	if h.proxyPool != nil {

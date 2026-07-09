@@ -97,7 +97,7 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 			return s.finalize(ctx, attempt, PushOutcomeFailed, "", "push device deleted", nil, "", nil)
 		}
 		if ctx.Err() == nil {
-			s.logger.Warn("push device lookup failed", "attempt_id", attempt.ID, "error", err)
+			s.logger.WarnContext(ctx, "push device lookup failed", "attempt_id", attempt.ID, "error", err)
 		}
 		return nil
 	}
@@ -108,7 +108,7 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 		row, err := s.deliveries.GetRowByID(ctx, *attempt.NotificationDeliveryID)
 		if err != nil {
 			if ctx.Err() == nil {
-				s.logger.Warn("push delivery lookup failed",
+				s.logger.WarnContext(ctx, "push delivery lookup failed",
 					"attempt_id", attempt.ID,
 					"delivery_id", *attempt.NotificationDeliveryID,
 					"error", err)
@@ -164,7 +164,7 @@ func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, 
 	attemptNumber := attempt.AttemptNumber + 1
 	updated, err := s.devices.FinalizePushAttempt(ctx, attempt.ID, outcome, attemptNumber, relayRequestID, statusPtr, reason, message, nextRetryAt)
 	if err != nil && ctx.Err() == nil {
-		s.logger.Warn("finalize push attempt failed", "attempt_id", attempt.ID, "error", err)
+		s.logger.WarnContext(ctx, "finalize push attempt failed", "attempt_id", attempt.ID, "error", err)
 	}
 	return updated
 }

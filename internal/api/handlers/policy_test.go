@@ -458,7 +458,7 @@ func newStartedPolicyHandlerSystem(t *testing.T, ctx context.Context, store *pol
 	system := policy.NewSystem(
 		store,
 		bus,
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 		policy.WithSystemPollInterval(time.Hour),
 	)
 	if err := system.Start(ctx); err != nil {
@@ -611,7 +611,7 @@ func TestPolicyActivateReportsLocalReloadFailureDB(t *testing.T) {
 	system := policy.NewSystem(
 		policy.NewPolicyStore(badPool),
 		&cache.NoopEventBus{},
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 		policy.WithSystemPollInterval(time.Hour),
 	)
 	if err := system.Start(ctx); err != nil {

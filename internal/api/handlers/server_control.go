@@ -70,7 +70,7 @@ func (h *ServerControlHandler) HandleRestart(w http.ResponseWriter, r *http.Requ
 			})
 			return
 		}
-		slog.Error("server restart request failed", "error", err)
+		slog.ErrorContext(r.Context(), "server restart request failed", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to request server restart")
 		return
 	}

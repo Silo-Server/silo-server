@@ -378,7 +378,7 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if total > len(pageAuthors) && r.URL.Query().Get("page") == "" {
-		slog.Warn("abs authors truncated for non-paginated request",
+		slog.WarnContext(r.Context(), "abs authors truncated for non-paginated request", "component", "audiobooks",
 			"library", lib.ID, "total", total, "returned", len(pageAuthors))
 	}
 	libID := audiobookLibraryID(lib)
@@ -432,7 +432,7 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if total > len(pageSeries) && r.URL.Query().Get("page") == "" {
-		slog.Warn("abs series truncated for non-paginated request",
+		slog.WarnContext(r.Context(), "abs series truncated for non-paginated request", "component", "audiobooks",
 			"library", lib.ID, "total", total, "returned", len(pageSeries))
 	}
 	libID := audiobookLibraryID(lib)

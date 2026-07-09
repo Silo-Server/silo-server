@@ -136,7 +136,7 @@ func (h *Handler) handleDeleteItemProgress(w http.ResponseWriter, r *http.Reques
 	}
 	contentID := chi.URLParam(r, "libraryItemId")
 	if err := h.deps.ProgressStore.DeleteProgress(r.Context(), a.UserID, a.ProfileID, contentID); err != nil {
-		slog.Warn("abs delete progress failed", "err", err, "content", contentID)
+		slog.WarnContext(r.Context(), "abs delete progress failed", "component", "audiobooks", "err", err, "content", contentID)
 		http.Error(w, "delete progress failed", http.StatusInternalServerError)
 		return
 	}

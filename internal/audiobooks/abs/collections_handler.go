@@ -63,7 +63,7 @@ func (h *Handler) handleCreateCollection(w http.ResponseWriter, r *http.Request)
 		c.IsPublic = *body.IsPublic
 	}
 	if err := h.deps.CollectionStore.CreateCollection(r.Context(), c); err != nil {
-		slog.Error("abs collection create failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs collection create failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "collection persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -73,7 +73,7 @@ func (h *Handler) handleCreateCollection(w http.ResponseWriter, r *http.Request)
 	if errors.Is(err, ErrNotFound) {
 		persisted = c
 	} else if err != nil {
-		slog.Warn("abs collection get-after-create failed", "err", err, "id", c.ID)
+		slog.WarnContext(r.Context(), "abs collection get-after-create failed", "component", "audiobooks", "err", err, "id", c.ID)
 		persisted = c
 	}
 	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
@@ -99,7 +99,7 @@ func (h *Handler) collectionBooks(r *http.Request, collectionID string) []map[st
 	}
 	rows, err := h.deps.CollectionStore.ListCollectionItems(r.Context(), collectionID)
 	if err != nil {
-		slog.Warn("abs collection list-items failed", "err", err, "collection", collectionID)
+		slog.WarnContext(r.Context(), "abs collection list-items failed", "component", "audiobooks", "err", err, "collection", collectionID)
 		return []map[string]any{}
 	}
 	lib := h.resolveDefaultLibrary(r.Context())
@@ -159,7 +159,7 @@ func (h *Handler) handleListLibraryCollections(w http.ResponseWriter, r *http.Re
 	}
 	rows, err := h.deps.CollectionStore.ListUserCollections(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
-		slog.Error("abs library collection list failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs library collection list failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "collection list failed", http.StatusInternalServerError)
 		return
 	}
@@ -200,7 +200,7 @@ func (h *Handler) handleListCollections(w http.ResponseWriter, r *http.Request) 
 	}
 	rows, err := h.deps.CollectionStore.ListUserCollections(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
-		slog.Error("abs collection list failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs collection list failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "collection list failed", http.StatusInternalServerError)
 		return
 	}
@@ -235,7 +235,7 @@ func (h *Handler) handleGetCollection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs collection get failed", "err", err)
+		slog.ErrorContext(r.Context(), "abs collection get failed", "component", "audiobooks", "err", err)
 		http.Error(w, "collection get failed", http.StatusInternalServerError)
 		return
 	}
@@ -262,7 +262,7 @@ func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err != nil {
-		slog.Error("abs collection get-for-update failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs collection get-for-update failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "collection get failed", http.StatusInternalServerError)
 		return
 	}
@@ -287,14 +287,14 @@ func (h *Handler) handleUpdateCollection(w http.ResponseWriter, r *http.Request)
 		c.IsPublic = *body.IsPublic
 	}
 	if err := h.deps.CollectionStore.UpdateCollection(r.Context(), c); err != nil {
-		slog.Error("abs collection update failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs collection update failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "collection persist failed", http.StatusInternalServerError)
 		return
 	}
 
 	persisted, err := h.deps.CollectionStore.GetCollection(r.Context(), id)
 	if err != nil {
-		slog.Warn("abs collection get-after-update failed", "err", err, "id", id)
+		slog.WarnContext(r.Context(), "abs collection get-after-update failed", "component", "audiobooks", "err", err, "id", id)
 		persisted = c
 	}
 	writeJSON(w, http.StatusOK, h.collectionFullShape(r, persisted))
@@ -327,7 +327,7 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		slog.Error("abs collection get-for-add failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs collection get-for-add failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "collection get failed", http.StatusInternalServerError)
 		return
 	}
@@ -345,7 +345,7 @@ func (h *Handler) handleAddCollectionBook(w http.ResponseWriter, r *http.Request
 	}
 
 	if err := h.deps.CollectionStore.AddCollectionItem(r.Context(), id, bookID); err != nil {
-		slog.Error("abs collection add-item failed", "err", err, "id", id, "book", bookID)
+		slog.ErrorContext(r.Context(), "abs collection add-item failed", "component", "audiobooks", "err", err, "id", id, "book", bookID)
 		http.Error(w, "collection persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -384,13 +384,13 @@ func (h *Handler) handleRemoveCollectionBook(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if err != nil {
-		slog.Error("abs collection get-for-remove failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs collection get-for-remove failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "collection get failed", http.StatusInternalServerError)
 		return
 	}
 
 	if err := h.deps.CollectionStore.RemoveCollectionItem(r.Context(), id, bookID); err != nil {
-		slog.Error("abs collection remove-item failed", "err", err, "id", id, "book", bookID)
+		slog.ErrorContext(r.Context(), "abs collection remove-item failed", "component", "audiobooks", "err", err, "id", id, "book", bookID)
 		http.Error(w, "collection delete failed", http.StatusInternalServerError)
 		return
 	}
@@ -422,12 +422,12 @@ func (h *Handler) handleDeleteCollection(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err != nil {
-		slog.Error("abs collection get-for-delete failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs collection get-for-delete failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "collection get failed", http.StatusInternalServerError)
 		return
 	}
 	if err := h.deps.CollectionStore.DeleteCollection(r.Context(), id); err != nil {
-		slog.Error("abs collection delete failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs collection delete failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "collection delete failed", http.StatusInternalServerError)
 		return
 	}

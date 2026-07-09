@@ -32,6 +32,7 @@ const (
 	SearchSettingMeilisearchSemanticEnabled  = "catalog.search.meilisearch.semantic_enabled"
 	SearchSettingMeilisearchSemanticRatio    = "catalog.search.meilisearch.semantic_ratio"
 	SearchSettingMeilisearchEmbedder         = "catalog.search.meilisearch.embedder"
+	SearchSettingMeilisearchBinaryQuantized  = "catalog.search.meilisearch.binary_quantized"
 
 	DefaultMeilisearchIndex            = "silo_media_items"
 	DefaultMeilisearchTimeoutMS        = 800
@@ -44,6 +45,7 @@ const (
 	DefaultMeilisearchSemanticEnabled   = false
 	DefaultMeilisearchSemanticRatio     = 0.50
 	DefaultMeilisearchEmbedder          = "silo_recommendations"
+	DefaultMeilisearchBinaryQuantized   = false
 
 	MaxMeilisearchSyncBatchSize     = 10000
 	MaxMeilisearchRebuildBatchSize  = 25000
@@ -147,6 +149,7 @@ type CatalogSearchSettings struct {
 	SemanticEnabled   bool
 	SemanticRatio     float64
 	Embedder          string
+	BinaryQuantized   bool
 }
 
 func DefaultCatalogSearchSettings() CatalogSearchSettings {
@@ -161,6 +164,7 @@ func DefaultCatalogSearchSettings() CatalogSearchSettings {
 		SemanticEnabled:   DefaultMeilisearchSemanticEnabled,
 		SemanticRatio:     DefaultMeilisearchSemanticRatio,
 		Embedder:          DefaultMeilisearchEmbedder,
+		BinaryQuantized:   DefaultMeilisearchBinaryQuantized,
 	}
 }
 
@@ -238,6 +242,13 @@ func CatalogSearchSettingsFromMap(values map[string]string) (CatalogSearchSettin
 			return settings, fmt.Errorf("%s must be true or false", SearchSettingMeilisearchSemanticEnabled)
 		}
 		settings.SemanticEnabled = enabled
+	}
+	if raw := strings.TrimSpace(values[SearchSettingMeilisearchBinaryQuantized]); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return settings, fmt.Errorf("%s must be true or false", SearchSettingMeilisearchBinaryQuantized)
+		}
+		settings.BinaryQuantized = enabled
 	}
 	if raw := strings.TrimSpace(values[SearchSettingMeilisearchSemanticRatio]); raw != "" {
 		ratio, err := strconv.ParseFloat(raw, 64)
@@ -399,6 +410,7 @@ type CatalogSearchMeiliStatus struct {
 	MatchingStrategy string     `json:"matching_strategy"`
 	IndexTypes       []string   `json:"index_types,omitempty"`
 	SemanticEnabled  bool       `json:"semantic_enabled"`
+	BinaryQuantized  bool       `json:"binary_quantized"`
 	SemanticRatio    float64    `json:"semantic_ratio"`
 	Embedder         string     `json:"embedder"`
 }
@@ -429,13 +441,18 @@ type CatalogSearchStatusProvider interface {
 	Status(ctx context.Context) CatalogSearchRuntimeStatus
 }
 
-func catalogSearchMeilisearchEmbedderSettings(embedder string) map[string]any {
-	return map[string]any{
-		embedder: map[string]any{
-			"source":     "userProvided",
-			"dimensions": embeddingvectors.CanonicalDimensions,
-		},
+func catalogSearchMeilisearchEmbedderSettings(embedder string, binaryQuantized bool) map[string]any {
+	cfg := map[string]any{
+		"source":     "userProvided",
+		"dimensions": embeddingvectors.CanonicalDimensions,
 	}
+	if binaryQuantized {
+		// One-way per index: Meilisearch cannot de-quantize an index in
+		// place, so turning this off again requires a rebuild, exactly like
+		// turning it on. The schema-version hash enforces both transitions.
+		cfg["binaryQuantized"] = true
+	}
+	return map[string]any{embedder: cfg}
 }
 
 // catalogSearchMeilisearchSchemaVersion derives the expected index schema
@@ -447,19 +464,28 @@ func catalogSearchMeilisearchEmbedderSettings(embedder string) map[string]any {
 // rebuilt rather than serving silently degraded hybrid ranking. A mismatch forces
 // a rebuild (SyncOutbox skips, the provider falls back to keyword) and surfaces as
 // an ExpectedSchemaVersion divergence in the admin status.
-func catalogSearchMeilisearchSchemaVersion(embedder string, itemTypes []string, semanticEnabled bool) int {
+func catalogSearchMeilisearchSchemaVersion(embedder string, itemTypes []string, semanticEnabled, binaryQuantized bool) int {
 	embedder, err := NormalizeCatalogSearchEmbedderName(embedder)
 	if err != nil {
 		embedder = DefaultMeilisearchEmbedder
 	}
-	h := fnv.New32a()
-	_, _ = fmt.Fprintf(
-		h,
+	identity := fmt.Sprintf(
 		"embedder=%s;dimensions=%d;index_types=%s;semantic=%t",
 		embedder,
 		embeddingvectors.CanonicalDimensions,
 		strings.Join(normalizeCatalogSearchItemTypes(itemTypes), ","),
 		semanticEnabled,
 	)
+	// Gated on semanticEnabled because binary quantization only affects the
+	// embedder settings (catalogSearchMeilisearchSettings), which are omitted
+	// entirely when semantic search is off — so with no vectors on the index
+	// the flag has no on-index effect and must not force a rebuild. Appended
+	// only when both are set, so pre-existing indexes built before this flag
+	// existed (and any index with semantic off) keep their schema version.
+	if semanticEnabled && binaryQuantized {
+		identity += ";binary_quantized=true"
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(identity))
 	return SearchMeilisearchSchemaVersion*1_000_000 + int(h.Sum32()%1_000_000)
 }

@@ -79,13 +79,13 @@ func (s *Store) Get(ctx context.Context, sessionID string) (*playback.RecipeCard
 	data, err := s.rdb.Get(ctx, key(sessionID)).Bytes()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
-			slog.Warn("load node recipe failed", "error", err, "playback_session_id", sessionID)
+			slog.WarnContext(ctx, "load node recipe failed", "component", "noderecipe", "error", err, "playback_session_id", sessionID)
 		}
 		return nil, false
 	}
 	var card playback.RecipeCard
 	if err := json.Unmarshal(data, &card); err != nil {
-		slog.Warn("decode node recipe failed", "error", err, "playback_session_id", sessionID)
+		slog.WarnContext(ctx, "decode node recipe failed", "component", "noderecipe", "error", err, "playback_session_id", sessionID)
 		return nil, false
 	}
 	return &card, true

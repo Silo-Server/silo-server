@@ -459,7 +459,7 @@ func (r *Reader) GetDiscoverRows(ctx context.Context, userID int, profileID stri
 		excludeGenres := make(map[string]struct{})
 		clusters, clusterErr := r.repo.GetTasteClusters(ctx, userID, profileID)
 		if clusterErr != nil {
-			slog.Warn("GetDiscoverRows: failed to load taste clusters for genre exclusion", "user_id", userID, "profile_id", profileID, "error", clusterErr)
+			slog.WarnContext(ctx, "GetDiscoverRows: failed to load taste clusters for genre exclusion", "component", "recommendations", "user_id", userID, "profile_id", profileID, "error", clusterErr)
 		}
 		for _, c := range clusters {
 			for _, g := range c.DominantGenres {

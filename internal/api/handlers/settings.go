@@ -685,7 +685,7 @@ func (h *SettingsHandler) registerRequestDevice(
 		DeviceName:     device.DeviceName,
 		DevicePlatform: device.DevicePlatform,
 	}); err != nil {
-		slog.Warn("failed to register request device",
+		slog.WarnContext(ctx, "failed to register request device", "component", "api",
 			"profile_id", profileID,
 			"device_id", device.DeviceID,
 			"error", err,

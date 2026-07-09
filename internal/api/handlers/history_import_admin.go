@@ -64,7 +64,7 @@ func (h *HistoryImportHandler) HandleAdminDiscoverUsers(w http.ResponseWriter, r
 	}
 	users, err := h.service.DiscoverExternalUsers(r.Context(), id)
 	if err != nil {
-		slog.Error("history import: discover external users failed", "source_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "history import: discover external users failed", "component", "api", "source_id", id, "error", err)
 		h.writeDiscoverError(w, err)
 		return
 	}
@@ -281,7 +281,7 @@ func (h *HistoryImportHandler) HandleAdminPlexLogin(w http.ResponseWriter, r *ht
 	}
 	token, err := h.service.AuthenticatePlex(r.Context(), req.Username, req.Password)
 	if err != nil {
-		slog.Error("history import: plex login failed", "error", err)
+		slog.ErrorContext(r.Context(), "history import: plex login failed", "component", "api", "error", err)
 		h.writeDiscoverError(w, err)
 		return
 	}

@@ -4,6 +4,7 @@ import {
   buildCatalogApiSearchParams,
   buildCatalogHref,
   buildPersonCatalogHref,
+  buildPersonalCatalogHref,
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
 } from "./catalogSearchParams";
@@ -86,6 +87,20 @@ describe("parseCatalogSearchParams", () => {
     expect(state.query_definition.sort).toEqual({ field: "title", order: "asc" });
   });
 
+  it("defaults the watchlist to source order until a sort is chosen", () => {
+    expect(parseCatalogSearchParams(params("source=watchlist")).uses_source_order).toBe(true);
+    expect(parseCatalogSearchParams(params("source=watchlist&sort=title")).uses_source_order).toBe(
+      false,
+    );
+    expect(
+      parseCatalogSearchParams(params("source=watchlist&sort=added_at&order=desc"))
+        .uses_source_order,
+    ).toBe(false);
+    // Other personal sources keep their existing behavior.
+    expect(parseCatalogSearchParams(params("source=favorites")).uses_source_order).toBe(false);
+    expect(parseCatalogSearchParams(params("source=history")).uses_source_order).toBe(false);
+  });
+
   it("normalizes legacy sort aliases in catalog URLs", () => {
     expect(
       parseCatalogSearchParams(params("source=query&sort=sort_title")).query_definition.sort,
@@ -125,6 +140,37 @@ describe("buildCatalogHref", () => {
         },
       }).toString(),
     ).toBe("source=query&library_id=2&sort=added_at&order=desc");
+  });
+
+  it("omits the sort for watchlist source order but keeps an explicit Date Added", () => {
+    const sourceOrdered = buildCatalogApiSearchParams({
+      source: "watchlist",
+      uses_source_order: true,
+      query_definition: {
+        library_ids: [],
+        match: "all",
+        groups: [],
+        sort: { field: "added_at", order: "desc" },
+      },
+    });
+    expect(sourceOrdered.toString()).toBe("source=watchlist");
+
+    const explicitAddedAt = buildCatalogApiSearchParams({
+      source: "watchlist",
+      uses_source_order: false,
+      query_definition: {
+        library_ids: [],
+        match: "all",
+        groups: [],
+        sort: { field: "added_at", order: "desc" },
+      },
+    });
+    expect(explicitAddedAt.toString()).toBe("source=watchlist&sort=added_at&order=desc");
+  });
+
+  it("builds source-ordered personal catalog hrefs without a sort param", () => {
+    expect(buildPersonalCatalogHref("watchlist")).toBe("/catalog?source=watchlist");
+    expect(buildPersonalCatalogHref("favorites")).toBe("/catalog?source=favorites");
   });
 
   it("builds collection catalog URLs with overlay params", () => {

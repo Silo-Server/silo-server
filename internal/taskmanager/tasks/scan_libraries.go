@@ -86,7 +86,7 @@ func (t *ScanLibrariesTask) Execute(ctx context.Context, progress taskmanager.Pr
 
 		created, enqueueErr := t.queuer.EnqueueLibraryScan(ctx, folder.ID, "task:scan_libraries")
 		if enqueueErr != nil {
-			slog.Error("scan task: failed to enqueue library scan", "folder_id", folder.ID, "name", folder.Name, "error", enqueueErr)
+			slog.ErrorContext(ctx, "scan task: failed to enqueue library scan", "component", "taskmanager", "folder_id", folder.ID, "name", folder.Name, "error", enqueueErr)
 			mu.Lock()
 			summary.Errors++
 			mu.Unlock()

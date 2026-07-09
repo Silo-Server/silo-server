@@ -478,7 +478,7 @@ func walkLogicalTree(
 
 	info, err := os.Lstat(physicalPath)
 	if err != nil {
-		slog.Warn("scanner: walk lstat failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		slog.WarnContext(ctx, "scanner: walk lstat failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 		recordWalkFailure(walkFailures)
 		return nil
 	}
@@ -486,13 +486,13 @@ func walkLogicalTree(
 	if info.Mode()&os.ModeSymlink != 0 {
 		resolved, err := filepath.EvalSymlinks(physicalPath)
 		if err != nil {
-			slog.Warn("scanner: symlink resolve failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+			slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 			recordWalkFailure(walkFailures)
 			return nil
 		}
 		targetInfo, err := os.Stat(resolved)
 		if err != nil {
-			slog.Warn("scanner: symlink stat failed", "path", logicalPath, "resolved_path", resolved, "error", err)
+			slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalPath, "resolved_path", resolved, "error", err)
 			recordWalkFailure(walkFailures)
 			return nil
 		}
@@ -520,7 +520,7 @@ func walkLogicalTree(
 
 	canonicalDir, err := canonicalWalkPath(physicalPath)
 	if err != nil {
-		slog.Warn("scanner: canonical path resolution failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		slog.WarnContext(ctx, "scanner: canonical path resolution failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 		recordWalkFailure(walkFailures)
 		return nil
 	}
@@ -538,7 +538,7 @@ func walkLogicalTree(
 
 	entries, err := os.ReadDir(physicalPath)
 	if err != nil {
-		slog.Warn("scanner: directory read failed", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		slog.WarnContext(ctx, "scanner: directory read failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
 		recordWalkFailure(walkFailures)
 		return nil
 	}
@@ -555,13 +555,13 @@ func walkLogicalTree(
 		if entry.Type()&os.ModeSymlink != 0 {
 			resolved, err := filepath.EvalSymlinks(physicalChild)
 			if err != nil {
-				slog.Warn("scanner: symlink resolve failed", "path", logicalChild, "physical_path", physicalChild, "error", err)
+				slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalChild, "physical_path", physicalChild, "error", err)
 				recordWalkFailure(walkFailures)
 				continue
 			}
 			targetInfo, err := os.Stat(resolved)
 			if err != nil {
-				slog.Warn("scanner: symlink stat failed", "path", logicalChild, "resolved_path", resolved, "error", err)
+				slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalChild, "resolved_path", resolved, "error", err)
 				recordWalkFailure(walkFailures)
 				continue
 			}
@@ -674,7 +674,7 @@ func (s *Scanner) scanPaths(
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots: %w", walkErr)
 	}
-	slog.Info("scanner: discovered files",
+	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
@@ -758,17 +758,17 @@ func (s *Scanner) scanPaths(
 				}
 				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path], subtitleCache)
 				if processErr != nil {
-					slog.Error("scanner: file processing failed", "path", path, "error", processErr)
+					slog.ErrorContext(ctx, "scanner: file processing failed", "component", "scanner", "path", path, "error", processErr)
 					errorCount.Add(1)
 					continue
 				}
 				switch action {
 				case actionNew:
 					newCount.Add(1)
-					slog.Debug("scanner: new file added", "path", path)
+					slog.DebugContext(ctx, "scanner: new file added", "component", "scanner", "path", path)
 				case actionUpdated:
 					updatedCount.Add(1)
-					slog.Debug("scanner: file updated", "path", path, "reasons", updateReasons)
+					slog.DebugContext(ctx, "scanner: file updated", "component", "scanner", "path", path, "reasons", updateReasons)
 				case actionUnchanged:
 					unchangedCount.Add(1)
 				}
@@ -792,7 +792,7 @@ func (s *Scanner) scanPaths(
 			case <-ticker.C:
 				processed := int(processedCount.Load())
 				total := len(filePaths)
-				slog.Info("scanner: processing progress",
+				slog.InfoContext(ctx, "scanner: processing progress", "component", "scanner",
 					"folder_id", folder.ID,
 					"scope", firstScope(reconcileRoots),
 					"processed", processed,
@@ -875,7 +875,7 @@ func (s *Scanner) scanPaths(
 		// Only mark as missing if not already marked.
 		if existing.MissingSince == nil {
 			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
-				slog.Error("scanner: failed to mark file missing",
+				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
 					"path", existing.FilePath,
 					"error", err,
 				)
@@ -896,7 +896,7 @@ func (s *Scanner) scanPaths(
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
 		if trashed > 0 {
-			slog.Info("scanner: emptied trash", "folder_id", folder.ID, "deleted", trashed)
+			slog.InfoContext(ctx, "scanner: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 		}
 		result.FilesDeleted += trashed
 	}
@@ -926,7 +926,7 @@ func (s *Scanner) scanPaths(
 			if err := s.seriesQueueSyncer.SyncForFolder(ctx, folder.ID); err != nil {
 				return nil, fmt.Errorf("syncing series match queue for folder %d: %w", folder.ID, err)
 			}
-			slog.Info("metadata: series root queue sync",
+			slog.InfoContext(ctx, "metadata: series root queue sync", "component", "scanner",
 				"folder_id", folder.ID,
 				"scope", "folder",
 			)
@@ -935,7 +935,7 @@ func (s *Scanner) scanPaths(
 				if err := s.seriesQueueSyncer.SyncInScope(ctx, folder.ID, scopePath); err != nil {
 					return nil, fmt.Errorf("syncing series match queue for scope %q: %w", scopePath, err)
 				}
-				slog.Info("metadata: series root queue sync",
+				slog.InfoContext(ctx, "metadata: series root queue sync", "component", "scanner",
 					"folder_id", folder.ID,
 					"scope", scopePath,
 				)
@@ -947,7 +947,7 @@ func (s *Scanner) scanPaths(
 			if err := s.movieQueueSyncer.SyncForFolder(ctx, folder.ID); err != nil {
 				return nil, fmt.Errorf("syncing movie match queue for folder %d: %w", folder.ID, err)
 			}
-			slog.Info("metadata: movie file queue sync",
+			slog.InfoContext(ctx, "metadata: movie file queue sync", "component", "scanner",
 				"folder_id", folder.ID,
 				"scope", "folder",
 			)
@@ -956,7 +956,7 @@ func (s *Scanner) scanPaths(
 				if err := s.movieQueueSyncer.SyncInScope(ctx, folder.ID, scopePath); err != nil {
 					return nil, fmt.Errorf("syncing movie match queue for scope %q: %w", scopePath, err)
 				}
-				slog.Info("metadata: movie file queue sync",
+				slog.InfoContext(ctx, "metadata: movie file queue sync", "component", "scanner",
 					"folder_id", folder.ID,
 					"scope", scopePath,
 				)
@@ -1103,7 +1103,7 @@ func (s *Scanner) scanFolderByRoots(
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
 		if trashed > 0 {
-			slog.Info("scanner: emptied trash", "folder_id", folder.ID, "deleted", trashed)
+			slog.InfoContext(ctx, "scanner: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 		}
 		result.FilesDeleted += trashed
 	}
@@ -1134,7 +1134,7 @@ func (s *Scanner) scanFolderByRoots(
 		if err := s.seriesQueueSyncer.SyncForFolder(ctx, folder.ID); err != nil {
 			return nil, fmt.Errorf("syncing series match queue for folder %d: %w", folder.ID, err)
 		}
-		slog.Info("metadata: series root queue sync",
+		slog.InfoContext(ctx, "metadata: series root queue sync", "component", "scanner",
 			"folder_id", folder.ID,
 			"scope", "folder",
 		)
@@ -1148,7 +1148,7 @@ func (s *Scanner) scanFolderByRoots(
 		if err := s.movieQueueSyncer.SyncForFolder(ctx, folder.ID); err != nil {
 			return nil, fmt.Errorf("syncing movie match queue for folder %d: %w", folder.ID, err)
 		}
-		slog.Info("metadata: movie file queue sync",
+		slog.InfoContext(ctx, "metadata: movie file queue sync", "component", "scanner",
 			"folder_id", folder.ID,
 			"scope", "folder",
 		)
@@ -1195,7 +1195,7 @@ func (s *Scanner) scanScope(
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots for %q: %w", reconcileRoots[0], walkErr)
 	}
-	slog.Info("scanner: discovered files",
+	slog.InfoContext(ctx, "scanner: discovered files", "component", "scanner",
 		"folder_id", folder.ID,
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
@@ -1249,17 +1249,17 @@ func (s *Scanner) scanScope(
 				}
 				action, updateReasons, processErr := s.processFile(ctx, path, folder, existingByPath, existingContentStatuses, rootInference.Assignments[path], groupInference.Assignments[path], subtitleCache)
 				if processErr != nil {
-					slog.Error("scanner: file processing failed", "path", path, "error", processErr)
+					slog.ErrorContext(ctx, "scanner: file processing failed", "component", "scanner", "path", path, "error", processErr)
 					errorCount.Add(1)
 					continue
 				}
 				switch action {
 				case actionNew:
 					newCount.Add(1)
-					slog.Debug("scanner: new file added", "path", path)
+					slog.DebugContext(ctx, "scanner: new file added", "component", "scanner", "path", path)
 				case actionUpdated:
 					updatedCount.Add(1)
-					slog.Debug("scanner: file updated", "path", path, "reasons", updateReasons)
+					slog.DebugContext(ctx, "scanner: file updated", "component", "scanner", "path", path, "reasons", updateReasons)
 				case actionUnchanged:
 					unchangedCount.Add(1)
 				}
@@ -1283,7 +1283,7 @@ func (s *Scanner) scanScope(
 			case <-ticker.C:
 				processed := int(processedCount.Load())
 				total := len(filePaths)
-				slog.Info("scanner: processing progress",
+				slog.InfoContext(ctx, "scanner: processing progress", "component", "scanner",
 					"folder_id", folder.ID,
 					"scope", firstScope(reconcileRoots),
 					"processed", processed,
@@ -1383,7 +1383,7 @@ func (s *Scanner) applyScopedScan(
 		}
 		if existing.MissingSince == nil {
 			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
-				slog.Error("scanner: failed to mark file missing",
+				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
 					"path", existing.FilePath,
 					"error", err,
 				)
@@ -1738,7 +1738,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if err := s.seriesQueueSyncer.SyncInScope(ctx, folder.ID, scopePath); err != nil {
 			return fmt.Errorf("syncing series match queue for file: %w", err)
 		}
-		slog.Info("metadata: series root queue sync",
+		slog.InfoContext(ctx, "metadata: series root queue sync", "component", "scanner",
 			"folder_id", folder.ID,
 			"scope", scopePath,
 		)
@@ -1747,7 +1747,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if err := s.movieQueueSyncer.SyncInScope(ctx, folder.ID, filepath.Clean(filePath)); err != nil {
 			return fmt.Errorf("syncing movie match queue for file: %w", err)
 		}
-		slog.Info("metadata: movie file queue sync",
+		slog.InfoContext(ctx, "metadata: movie file queue sync", "component", "scanner",
 			"folder_id", folder.ID,
 			"scope", filepath.Clean(filePath),
 		)
@@ -1764,7 +1764,7 @@ func (s *Scanner) watchFolderContext(ctx context.Context, folderID int) (context
 	watchCtx, cancel := context.WithCancel(ctx)
 	enabled, err := s.folderEnabledState(watchCtx, folderID)
 	if err != nil {
-		slog.Warn("scanner: failed to load folder state", "folder_id", folderID, "error", err)
+		slog.WarnContext(ctx, "scanner: failed to load folder state", "component", "scanner", "folder_id", folderID, "error", err)
 		cancel()
 		return watchCtx, cancel
 	}
@@ -1784,7 +1784,7 @@ func (s *Scanner) watchFolderContext(ctx context.Context, folderID int) (context
 			case <-ticker.C:
 				enabled, err := s.folderEnabledState(watchCtx, folderID)
 				if err != nil {
-					slog.Warn("scanner: failed to refresh folder state", "folder_id", folderID, "error", err)
+					slog.WarnContext(ctx, "scanner: failed to refresh folder state", "component", "scanner", "folder_id", folderID, "error", err)
 					continue
 				}
 				if !enabled {
@@ -1878,7 +1878,7 @@ func (s *Scanner) processFile(
 		var subErr error
 		externalSubs, subErr = subtitleCache.Detect(filePath)
 		if subErr != nil {
-			slog.Warn("scanner: subtitle detection failed", "path", filePath, "error", subErr)
+			slog.WarnContext(ctx, "scanner: subtitle detection failed", "component", "scanner", "path", filePath, "error", subErr)
 			externalSubs = nil
 			externalSubsChecked = false
 			return externalSubs
@@ -2002,7 +2002,7 @@ func (s *Scanner) processFile(
 				return 0, nil, fmt.Errorf("upserting markers for file %s: %w", filePath, markerErr)
 			}
 			if !applied {
-				slog.Debug("scanner: skipped lower-priority s3 markers", "path", filePath, "hash", fileHash)
+				slog.DebugContext(ctx, "scanner: skipped lower-priority s3 markers", "component", "scanner", "path", filePath, "hash", fileHash)
 			}
 		}
 
@@ -2086,7 +2086,7 @@ func (s *Scanner) processFile(
 			return 0, nil, fmt.Errorf("upserting markers for file %s: %w", filePath, markerErr)
 		}
 		if !applied {
-			slog.Debug("scanner: skipped lower-priority s3 markers", "path", filePath, "hash", fileHash)
+			slog.DebugContext(ctx, "scanner: skipped lower-priority s3 markers", "component", "scanner", "path", filePath, "hash", fileHash)
 		}
 	}
 
@@ -2436,7 +2436,7 @@ func (s *Scanner) enqueueMetadataWork(ctx context.Context, folder *models.MediaF
 		if err := s.metadataQueue.EnqueueMovieFile(ctx, file.ID); err != nil {
 			return err
 		}
-		slog.Debug("metadata queue: movie file enqueued",
+		slog.DebugContext(ctx, "metadata queue: movie file enqueued", "component", "scanner",
 			"folder_id", folder.ID,
 			"file_id", file.ID,
 			"path", file.FilePath,
@@ -2448,7 +2448,7 @@ func (s *Scanner) enqueueMetadataWork(ctx context.Context, folder *models.MediaF
 		if err := s.metadataQueue.EnqueueSeriesRoot(ctx, folder.ID, file.ObservedRootPath); err != nil {
 			return err
 		}
-		slog.Debug("metadata queue: series root touched",
+		slog.DebugContext(ctx, "metadata queue: series root touched", "component", "scanner",
 			"folder_id", folder.ID,
 			"observed_root_path", file.ObservedRootPath,
 			"file_id", file.ID,
@@ -2940,7 +2940,7 @@ func (s *Scanner) probeFile(ctx context.Context, filePath string) (*ProbeData, s
 	if s.ffprobePath != "" {
 		probe, err := ProbeFile(ctx, s.ffprobePath, filePath)
 		if err != nil {
-			slog.Warn("scanner: ffprobe failed", "path", filePath, "error", err)
+			slog.WarnContext(ctx, "scanner: ffprobe failed", "component", "scanner", "path", filePath, "error", err)
 			return nil, "local"
 		}
 		return probe, "local"
@@ -2964,7 +2964,7 @@ func (s *Scanner) fetchMarkers(ctx context.Context, fileHash string) *IntroCredi
 
 	var markers IntroCreditsMarkers
 	if err := json.Unmarshal(data, &markers); err != nil {
-		slog.Warn("scanner: markers JSON parse failed",
+		slog.WarnContext(ctx, "scanner: markers JSON parse failed", "component", "scanner",
 			"hash", fileHash,
 			"error", err,
 		)

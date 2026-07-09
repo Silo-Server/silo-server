@@ -32,7 +32,7 @@ func NewSubtitleReadyNotifier(sessions subtitleReadySessionLookup, hub *Realtime
 
 // SubtitleReady notifies active sessions for the file that a new subtitle track
 // with the given downloaded-subtitle ID is available.
-func (n *SubtitleReadyNotifier) SubtitleReady(_ context.Context, mediaFileID, subtitleID int, language, label string) {
+func (n *SubtitleReadyNotifier) SubtitleReady(ctx context.Context, mediaFileID, subtitleID int, language, label string) {
 	if n == nil || mediaFileID <= 0 || subtitleID <= 0 {
 		return
 	}
@@ -43,40 +43,40 @@ func (n *SubtitleReadyNotifier) SubtitleReady(_ context.Context, mediaFileID, su
 		}
 		event, err := NewSubtitleReadyEvent(session.ID, mediaFileID, subtitleID, language, label)
 		if err != nil {
-			slog.Warn("failed to encode subtitle ready realtime event",
+			slog.WarnContext(ctx, "failed to encode subtitle ready realtime event", "component", "playback",
 				"session_id", session.ID, "file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
 			continue
 		}
 		if err := n.hub.Send(session.ID, event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
-			slog.Warn("failed to deliver subtitle ready realtime event",
+			slog.WarnContext(ctx, "failed to deliver subtitle ready realtime event", "component", "playback",
 				"session_id", session.ID, "file_id", mediaFileID, "subtitle_id", subtitleID, "error", err)
 		}
 	}
 }
 
 // TranslationStarted tells one session a live translation has begun.
-func (n *SubtitleReadyNotifier) TranslationStarted(_ context.Context, sessionID string, fileID int, jobID int64, trackKey, language, label string, totalCues int) {
+func (n *SubtitleReadyNotifier) TranslationStarted(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey, language, label string, totalCues int) {
 	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationStartedEvent(sessionID, fileID, jobID, trackKey, language, label, totalCues)
 	})
 }
 
 // TranslationCues pushes a batch of translated cues to one session.
-func (n *SubtitleReadyNotifier) TranslationCues(_ context.Context, sessionID string, fileID int, jobID int64, trackKey string, cues []StreamCue, done, total int) {
+func (n *SubtitleReadyNotifier) TranslationCues(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey string, cues []StreamCue, done, total int) {
 	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationCuesEvent(sessionID, fileID, jobID, trackKey, cues, done, total)
 	})
 }
 
 // TranslationCompleted tells one session a live translation finished.
-func (n *SubtitleReadyNotifier) TranslationCompleted(_ context.Context, sessionID string, fileID int, jobID int64, trackKey string, subtitleID int, language, label string) {
+func (n *SubtitleReadyNotifier) TranslationCompleted(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey string, subtitleID int, language, label string) {
 	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationCompletedEvent(sessionID, fileID, jobID, trackKey, subtitleID, language, label)
 	})
 }
 
 // TranslationFailed tells one session a live translation failed.
-func (n *SubtitleReadyNotifier) TranslationFailed(_ context.Context, sessionID string, fileID int, jobID int64, trackKey, message string) {
+func (n *SubtitleReadyNotifier) TranslationFailed(ctx context.Context, sessionID string, fileID int, jobID int64, trackKey, message string) {
 	n.sendTranslation(sessionID, func() (EventEnvelope, error) {
 		return NewSubtitleTranslationFailedEvent(sessionID, fileID, jobID, trackKey, message)
 	})

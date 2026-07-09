@@ -108,7 +108,7 @@ func markPlaybackFileMissing(
 
 	if marker != nil {
 		if err := marker.MarkMissing(ctx, file.ID, since); err != nil {
-			slog.Warn("failed to mark playback file missing",
+			slog.WarnContext(ctx, "failed to mark playback file missing", "component", "api",
 				"file_id", file.ID,
 				"path", file.FilePath,
 				"error", err,

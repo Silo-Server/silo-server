@@ -128,8 +128,10 @@ func (c *ArchiveCache) recoverLegacyBinaryArchive(
 	// fail startup over a write error — the in-memory archive is already valid
 	// and recovery will retry on the next preload.
 	if err := c.archives.SaveArchive(ctx, installationID, manifestBytes, manifest.GetChecksum(), archiveBytes); err != nil {
-		slog.Warn(
+		slog.WarnContext(
+			ctx,
 			"failed to persist recovered legacy plugin archive; will retry on next preload",
+			"component", "plugins",
 			"installation_id", installationID,
 			"error", err,
 		)

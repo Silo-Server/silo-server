@@ -120,7 +120,7 @@ func (h *Handler) handleSyncLocalSessions(w http.ResponseWriter, r *http.Request
 	for _, raw := range body.Sessions {
 		var sess localPlaybackSession
 		if err := json.Unmarshal(raw, &sess); err != nil {
-			slog.Warn("abs local session sync: skipping malformed session", "error", err)
+			slog.WarnContext(r.Context(), "abs local session sync: skipping malformed session", "component", "audiobooks", "error", err)
 			results = append(results, localSyncResult{Success: false, Error: "invalid session"})
 			continue
 		}
@@ -155,7 +155,7 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 	item, err := h.deps.MediaStore.GetAudiobookByID(ctx, sess.LibraryItemID, access)
 	if err != nil || item == nil {
 		if err != nil {
-			slog.Warn("abs local session sync: media lookup failed",
+			slog.WarnContext(ctx, "abs local session sync: media lookup failed", "component", "audiobooks",
 				"library_item_id", sess.LibraryItemID, "error", err)
 		}
 		res.Error = "Media item not found"
@@ -195,7 +195,7 @@ func (h *Handler) syncOneLocalSession(ctx context.Context, a ctxAuth, access cat
 			)
 		}
 		if syncErr != nil {
-			slog.Warn("abs local session sync: persist progress position failed",
+			slog.WarnContext(ctx, "abs local session sync: persist progress position failed", "component", "audiobooks",
 				"library_item_id", sess.LibraryItemID, "error", syncErr)
 		} else {
 			res.ProgressSynced = true
