@@ -17,6 +17,37 @@ func TestParseCatalogMediaScope_AllowsManga(t *testing.T) {
 	}
 }
 
+func TestParseCatalogRequest_PersonalSourceOrder(t *testing.T) {
+	cases := []struct {
+		name           string
+		values         url.Values
+		useSourceOrder bool
+	}{
+		{"watchlist default", url.Values{"source": {"watchlist"}}, true},
+		// added_at means "date added to the list" and is applied on the
+		// source-order path by loadPersonalSourceIDs.
+		{"watchlist explicit added_at", url.Values{"source": {"watchlist"}, "sort": {"added_at"}, "order": {"desc"}}, true},
+		{"favorites explicit added_at", url.Values{"source": {"favorites"}, "sort": {"added_at"}}, true},
+		{"watchlist metadata sort", url.Values{"source": {"watchlist"}, "sort": {"title"}}, false},
+		// History ID loading ignores the sort, so it keeps the executor path.
+		{"history explicit added_at", url.Values{"source": {"history"}, "sort": {"added_at"}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := ParseCatalogRequest(tc.values)
+			if err != nil {
+				t.Fatalf("ParseCatalogRequest returned error: %v", err)
+			}
+			if req.UseSourceOrder != tc.useSourceOrder {
+				t.Fatalf("UseSourceOrder = %v, want %v", req.UseSourceOrder, tc.useSourceOrder)
+			}
+			if sort := tc.values.Get("sort"); sort != "" && req.Query.Sort.Field != sort {
+				t.Fatalf("sort field = %q, want %q", req.Query.Sort.Field, sort)
+			}
+		})
+	}
+}
+
 func TestParseCatalogRequest_AllowsCollectionOverlayParams(t *testing.T) {
 	values := url.Values{
 		"source":                     {"user_collection"},

@@ -83,7 +83,13 @@ func ParseCatalogRequest(values url.Values) (CatalogRequest, error) {
 		req.NamePrefix = overlay.namePrefix
 		req.SearchQuery = overlay.searchQuery
 		req.Query = overlay.query
-		req.UseSourceOrder = !overlay.hasExplicitSort
+		// On personal lists an explicit "added_at" sort means the date the item
+		// was added to the list, which loadPersonalSourceIDs applies on the
+		// source-order path; the query executor would sort by the library's
+		// created_at instead. History ID loading ignores the sort, so it stays
+		// on the executor path.
+		req.UseSourceOrder = !overlay.hasExplicitSort ||
+			(req.Source != CatalogSourceHistory && req.Query.Sort.Field == "added_at")
 	case CatalogSourcePerson:
 		req.PersonID = ParseInt64Param(values.Get("person_id"))
 		if req.PersonID <= 0 {
