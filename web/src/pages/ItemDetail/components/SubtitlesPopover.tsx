@@ -15,10 +15,11 @@ import type {
 import { getLanguageName } from "@/player/utils/languageNames";
 import {
   buildPrePlaySubtitleCandidates,
-  formatSubtitleCandidateSummary,
+  formatSubtitlePillSummary,
   resolveSelectedAudioLanguage,
   resolveAutoSubtitleSelection,
   subtitleSelectionEquals,
+  type PrePlaySubtitleCandidate,
 } from "./prePlaySelection";
 
 interface SubtitlesPopoverProps {
@@ -160,10 +161,22 @@ function formatExplicitSelectionSummary(
   selection: PrePlaySubtitleSelection | null | undefined,
 ): string {
   if (!selection) return "Off";
-  return formatSubtitleCandidateSummary({
+  return formatSubtitlePillSummary({
+    label: selection.label,
     languageLabel: getLanguageName(selection.language ?? "") || selection.language || "Unknown",
+    codec: selection.codec,
     forced: selection.forced,
     hearingImpaired: selection.hearing_impaired,
+  });
+}
+
+function formatCandidatePillSummary(candidate: PrePlaySubtitleCandidate): string {
+  return formatSubtitlePillSummary({
+    label: candidate.selection.label,
+    languageLabel: candidate.languageLabel,
+    codec: candidate.codec,
+    forced: candidate.forced,
+    hearingImpaired: candidate.hearingImpaired,
   });
 }
 
@@ -221,12 +234,26 @@ export default function SubtitlesPopover({
 
   if (!version) return null;
 
+  // A stored track signature means a manual override is saved for this item;
+  // present the resolved track as the selection rather than an "Auto" guess.
+  const overrideCandidate =
+    selectionMode === "auto" && preferredSubtitleTrackSignature ? autoCandidate : null;
+
   const activeSummary =
     selectionMode === "auto"
-      ? `Auto: ${autoCandidate?.summary ?? "Off"}`
+      ? overrideCandidate
+        ? formatCandidatePillSummary(overrideCandidate)
+        : `Auto: ${autoCandidate ? formatCandidatePillSummary(autoCandidate) : "Off"}`
       : selectionMode === "off"
         ? "Off"
         : formatExplicitSelectionSummary(explicitSelection);
+
+  const activeListSelection =
+    !isInteractive || selectionMode === "off"
+      ? null
+      : selectionMode === "explicit"
+        ? explicitSelection
+        : (overrideCandidate?.selection ?? null);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -237,7 +264,7 @@ export default function SubtitlesPopover({
         >
           <Captions className="size-3.5" />
           Subs
-          <span className="text-muted-foreground max-w-20 truncate text-[11px] font-normal sm:max-w-24">
+          <span className="text-muted-foreground max-w-44 truncate text-[11px] font-normal sm:max-w-64">
             {isInteractive ? activeSummary : candidates.all.length}
           </span>
           <ChevronDown className="text-muted-foreground size-3" />
@@ -248,9 +275,13 @@ export default function SubtitlesPopover({
           {isInteractive && (
             <>
               <SelectionRow
-                active={selectionMode === "auto"}
+                active={selectionMode === "auto" && !overrideCandidate}
                 title="Auto"
-                description={autoCandidate?.summary ?? "Off"}
+                description={
+                  overrideCandidate
+                    ? "Reset to profile defaults"
+                    : (autoCandidate?.summary ?? "Off")
+                }
                 onSelect={onResetSelection}
               />
               <SelectionRow
@@ -263,17 +294,13 @@ export default function SubtitlesPopover({
           <SubtitleSection
             title="Embedded"
             rows={candidates.embedded}
-            activeSelection={
-              isInteractive && selectionMode === "explicit" ? explicitSelection : null
-            }
+            activeSelection={activeListSelection}
             onSelectSubtitle={onSelectSubtitle}
           />
           <SubtitleSection
             title="External"
             rows={candidates.external}
-            activeSelection={
-              isInteractive && selectionMode === "explicit" ? explicitSelection : null
-            }
+            activeSelection={activeListSelection}
             onSelectSubtitle={onSelectSubtitle}
           />
           {downloadedQuery.isLoading ? (
@@ -285,9 +312,7 @@ export default function SubtitlesPopover({
             <SubtitleSection
               title="Downloaded"
               rows={candidates.downloaded}
-              activeSelection={
-                isInteractive && selectionMode === "explicit" ? explicitSelection : null
-              }
+              activeSelection={activeListSelection}
               onSelectSubtitle={onSelectSubtitle}
             />
           )}

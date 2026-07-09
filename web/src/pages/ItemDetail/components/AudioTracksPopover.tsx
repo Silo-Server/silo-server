@@ -97,7 +97,7 @@ export default function AudioTracksPopover({
         >
           <Volume2 className="size-3.5" />
           Audio
-          <span className="text-muted-foreground max-w-24 truncate text-[11px] font-normal sm:max-w-28">
+          <span className="text-muted-foreground max-w-44 truncate text-[11px] font-normal sm:max-w-64">
             {isInteractive
               ? selectionMode === "auto"
                 ? `Auto: ${autoSummary}`

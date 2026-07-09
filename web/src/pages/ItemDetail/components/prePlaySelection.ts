@@ -66,6 +66,29 @@ export function formatSubtitleCandidateSummary(
   return subtitleSummaryParts(row).join(" ");
 }
 
+export interface SubtitlePillSummarySource {
+  label?: string;
+  languageLabel?: string;
+  codec?: string;
+  forced?: boolean;
+  hearingImpaired?: boolean;
+}
+
+/**
+ * Rich single-line summary for the closed selector pill: the track's name
+ * with (SDH)/(Forced) markers (skipped when the name already carries them,
+ * e.g. embedded "English (CC)" titles) and the subtitle format.
+ */
+export function formatSubtitlePillSummary(source: SubtitlePillSummarySource): string {
+  const name = source.label?.trim() || source.languageLabel?.trim() || "Unknown";
+  const parts = [name];
+  if (source.hearingImpaired && !/\b(?:sdh|cc|hi)\b/i.test(name)) parts.push("(SDH)");
+  if (source.forced && !/forced/i.test(name)) parts.push("(Forced)");
+  const text = parts.join(" ");
+  const codec = source.codec?.trim();
+  return codec ? `${text} · ${codec.toUpperCase()}` : text;
+}
+
 export function getAutoAudioTrackIndex(version: FileVersion | null | undefined): number {
   const tracks = version?.audio_tracks ?? [];
   if (tracks.length === 0) {
