@@ -688,6 +688,86 @@ func (s *PostgresUserStore) ListProgressByMediaItems(ctx context.Context, profil
 	return result, nil
 }
 
+// Compile-time capability check: the Postgres store computes series episode
+// rollups in SQL (see userstore.SeriesEpisodeRollupStore).
+var _ userstore.SeriesEpisodeRollupStore = (*PostgresUserStore)(nil)
+
+// SeriesEpisodeWatchCounts aggregates per-series episode watch state in one
+// query. It replaces the ListBySeriesIDs + chunked
+// ListProgressWithCompletedHistory fanout that materialized every episode of
+// every requested series (a 50-series page of an episode-heavy library
+// expanded to 32k episode rows and ~65 sequential queries, ~17s measured).
+//
+// Semantics mirror the chunked path exactly:
+//   - episodes count when they are available (episode_libraries row — the same
+//     predicate as catalog's episode listings);
+//   - a progress row is visible unless hidden via user_history_hidden_items
+//     (updated_at <= hidden_before), matching ListProgressByMediaItems;
+//   - watched = visible completed progress OR a visible completed history row
+//     (watched_at <= hidden_before hides it), matching the completed-history
+//     fold in userstore.ListProgressWithCompletedHistory;
+//   - in-progress = not watched and visible position_seconds > 0, matching
+//     catalog.EpisodeRollupUserData.
+//
+// Series with no available episodes produce no row, so callers keep the same
+// "no rollup" behavior the episode-list path had for them.
+func (s *PostgresUserStore) SeriesEpisodeWatchCounts(ctx context.Context, profileID string, seriesIDs []string) (map[string]userstore.SeriesWatchCounts, error) {
+	result := make(map[string]userstore.SeriesWatchCounts, len(seriesIDs))
+	if len(seriesIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT e.series_id,
+		       COUNT(*)::int,
+		       COUNT(*) FILTER (WHERE ws.watched)::int,
+		       COUNT(*) FILTER (WHERE NOT ws.watched AND ws.resumable)::int
+		FROM episodes e
+		LEFT JOIN user_watch_progress p
+		       ON p.user_id = $1 AND p.profile_id = $2 AND p.media_item_id = e.content_id
+		      AND NOT EXISTS (
+		          SELECT 1 FROM user_history_hidden_items hh
+		          WHERE hh.user_id = p.user_id AND hh.profile_id = p.profile_id
+		            AND hh.media_item_id = p.media_item_id AND p.updated_at <= hh.hidden_before
+		      )
+		CROSS JOIN LATERAL (
+		    SELECT
+		        COALESCE(p.completed, FALSE) OR EXISTS (
+		            SELECT 1 FROM user_watch_history h
+		            WHERE h.user_id = $1 AND h.profile_id = $2 AND h.media_item_id = e.content_id
+		              AND h.completed = TRUE
+		              AND NOT EXISTS (
+		                  SELECT 1 FROM user_history_hidden_items hh
+		                  WHERE hh.user_id = h.user_id AND hh.profile_id = h.profile_id
+		                    AND hh.media_item_id = h.media_item_id AND h.watched_at <= hh.hidden_before
+		              )
+		        ) AS watched,
+		        COALESCE(p.position_seconds, 0) > 0 AS resumable
+		) ws
+		WHERE e.series_id = ANY($3::text[])
+		  AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)
+		GROUP BY e.series_id`,
+		s.userID, profileID, seriesIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("aggregating series episode watch counts: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var seriesID string
+		var counts userstore.SeriesWatchCounts
+		if err := rows.Scan(&seriesID, &counts.TotalEpisodes, &counts.WatchedCount, &counts.InProgressCount); err != nil {
+			return nil, fmt.Errorf("scanning series episode watch counts: %w", err)
+		}
+		result[seriesID] = counts
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating series episode watch counts: %w", err)
+	}
+	return result, nil
+}
+
 func (s *PostgresUserStore) UpdateProgressHints(ctx context.Context, profileID, mediaItemID string, hints userstore.VersionHints) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE user_watch_progress

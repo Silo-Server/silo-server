@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestCompletedProgressSnapshotsPagesThroughConfiguredStore(t *testing.T) {
 	}
 	store := &stubProgressLister{entries: entries}
 
-	snapshots, err := CompletedProgressSnapshots(context.Background(), store, "p1")
+	snapshots, err := CompletedProgressSnapshots(context.Background(), store, "p1", time.Time{})
 	if err != nil {
 		t.Fatalf("CompletedProgressSnapshots: %v", err)
 	}
@@ -56,6 +57,63 @@ func TestCompletedProgressSnapshotsPagesThroughConfiguredStore(t *testing.T) {
 	}
 	if store.calls[1] != (progressListCall{profileID: "p1", status: "completed", limit: supersededProgressPageSize, offset: supersededProgressPageSize}) {
 		t.Fatalf("second ListProgress call = %+v", store.calls[1])
+	}
+}
+
+func TestCompletedProgressSnapshotsStopsAtCutoff(t *testing.T) {
+	t.Parallel()
+
+	// Newest-first, spanning two full pages: the store hands rows back in
+	// updated_at DESC order the same way the completed listing query does.
+	entries := make([]userstore.WatchProgress, 2*supersededProgressPageSize)
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := range entries {
+		entries[i] = userstore.WatchProgress{
+			MediaItemID: "done-" + strconv.Itoa(i),
+			UpdatedAt:   base.Add(time.Duration(-i) * time.Minute).Format(time.RFC3339),
+		}
+	}
+	store := &stubProgressLister{entries: entries}
+
+	// Cut off inside the first page: only rows strictly newer than the cutoff
+	// are returned, and paging stops without ever reading the second page.
+	cutoff := base.Add(-10 * time.Minute)
+	snapshots, err := CompletedProgressSnapshots(context.Background(), store, "p1", cutoff)
+	if err != nil {
+		t.Fatalf("CompletedProgressSnapshots: %v", err)
+	}
+	if len(snapshots) != 10 {
+		t.Fatalf("completed snapshots count = %d, want 10 (rows newer than cutoff)", len(snapshots))
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("ListProgress calls = %+v, want a single page before the cutoff halts paging", store.calls)
+	}
+}
+
+func TestCompletedProgressSnapshotsHaltsAtPageCap(t *testing.T) {
+	t.Parallel()
+
+	// More completed history than the page cap allows, all newer than the
+	// (zero) cutoff so nothing halts the walk except the cap itself.
+	entries := make([]userstore.WatchProgress, (supersededProgressMaxPages+1)*supersededProgressPageSize)
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := range entries {
+		entries[i] = userstore.WatchProgress{
+			MediaItemID: "done-" + strconv.Itoa(i),
+			UpdatedAt:   base.Add(time.Duration(-i) * time.Second).Format(time.RFC3339),
+		}
+	}
+	store := &stubProgressLister{entries: entries}
+
+	snapshots, err := CompletedProgressSnapshots(context.Background(), store, "p1", time.Time{})
+	if err != nil {
+		t.Fatalf("CompletedProgressSnapshots: %v", err)
+	}
+	if len(store.calls) != supersededProgressMaxPages {
+		t.Fatalf("ListProgress calls = %d, want %d (page cap)", len(store.calls), supersededProgressMaxPages)
+	}
+	if len(snapshots) != supersededProgressMaxPages*supersededProgressPageSize {
+		t.Fatalf("completed snapshots count = %d, want %d (capped pages)", len(snapshots), supersededProgressMaxPages*supersededProgressPageSize)
 	}
 }
 

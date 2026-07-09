@@ -640,8 +640,20 @@ func (s *directContentService) enrichDetailUserData(ctx context.Context, store u
 
 	// A series never has a progress row of its own, so roll watch state up from
 	// its episodes (mirrors applySeasonUserData) to give clients Played/
-	// UnplayedItemCount at the series level.
+	// UnplayedItemCount at the series level. Postgres-backed stores aggregate
+	// the rollup in SQL; the chunked per-episode path remains as fallback.
 	if result.UserData == nil && strings.EqualFold(result.Type, "series") && s.episodeRepo != nil {
+		if rollupStore, ok := store.(userstore.SeriesEpisodeRollupStore); ok {
+			counts, err := rollupStore.SeriesEpisodeWatchCounts(ctx, profileID, []string{contentID})
+			if err == nil {
+				// A series absent from counts has no available episodes; the
+				// zero-value counts produce the same empty rollup the
+				// episode-list path returned for it.
+				result.UserData = catalog.SeasonUserDataFromCounts(counts[contentID])
+				return
+			}
+			slog.Warn("series watch rollup query failed, falling back to per-episode rollup", "error", err)
+		}
 		if episodesBySeries, epErr := s.episodeRepo.ListBySeriesIDs(ctx, []string{contentID}); epErr == nil {
 			episodes := episodesBySeries[contentID]
 			episodeIDs := modelEpisodeContentIDs(episodes)
@@ -1028,6 +1040,28 @@ func (s *directContentService) enrichSeriesListUserData(ctx context.Context, ses
 	if len(seriesIDs) > maxSeriesUserDataRollups {
 		seriesIDs = seriesIDs[:maxSeriesUserDataRollups]
 	}
+
+	// Fast path: Postgres-backed stores aggregate the rollup in one SQL query
+	// instead of loading every episode of every series and batching progress
+	// lookups (a 50-series page of an episode-heavy library expanded to 32k
+	// episode rows and ~65 sequential queries). A rollup failure falls through
+	// to the chunked path below.
+	if rollupStore, ok := store.(userstore.SeriesEpisodeRollupStore); ok {
+		counts, err := rollupStore.SeriesEpisodeWatchCounts(ctx, session.ProfileID, seriesIDs)
+		if err == nil {
+			for i := range items {
+				if items[i].UserData != nil || !strings.EqualFold(items[i].Type, "series") {
+					continue
+				}
+				if c, ok := counts[items[i].ContentID]; ok {
+					items[i].UserData = catalog.SeasonUserDataFromCounts(c)
+				}
+			}
+			return
+		}
+		slog.Warn("series watch rollup query failed, falling back to per-episode rollup", "error", err)
+	}
+
 	episodesBySeries, err := s.episodeRepo.ListBySeriesIDs(ctx, seriesIDs)
 	if err != nil {
 		return
