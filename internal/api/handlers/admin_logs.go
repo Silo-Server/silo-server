@@ -245,7 +245,7 @@ func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *ht
 		}
 		result, err := h.opsRepo.List(context.Background(), appOpts)
 		if err != nil {
-			slog.Error("admin log stream operational snapshot failed", "error", err)
+			slog.ErrorContext(r.Context(), "admin log stream operational snapshot failed", "component", "api", "error", err)
 			h.writeStreamError(conn, stream, "internal_error", "Failed to query operational logs")
 			return
 		}
@@ -285,7 +285,7 @@ func (h *AdminLogsHandler) HandleLogStreamWebSocket(w http.ResponseWriter, r *ht
 		}
 		result, err := h.auditRepo.List(context.Background(), auditOpts)
 		if err != nil {
-			slog.Error("admin log stream audit snapshot failed", "error", err)
+			slog.ErrorContext(r.Context(), "admin log stream audit snapshot failed", "component", "api", "error", err)
 			h.writeStreamError(conn, stream, "internal_error", "Failed to query audit logs")
 			return
 		}

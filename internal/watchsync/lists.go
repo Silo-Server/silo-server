@@ -573,7 +573,7 @@ func (s *Service) HandleLocalListEvent(ctx context.Context, event LocalListEvent
 		bg, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		if err := s.processLocalListEvent(bg, event); err != nil {
-			slog.Warn("failed to dispatch local list provider event", "list", event.List, "change", event.Change, "user_id", event.UserID, "profile_id", event.ProfileID, "error", err)
+			slog.WarnContext(ctx, "failed to dispatch local list provider event", "component", "watchsync", "list", event.List, "change", event.Change, "user_id", event.UserID, "profile_id", event.ProfileID, "error", err)
 		}
 	}()
 	return nil

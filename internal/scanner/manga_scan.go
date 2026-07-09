@@ -53,7 +53,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	workers := ebookScanWorkers()
-	slog.Info("manga scan: starting",
+	slog.InfoContext(ctx, "manga scan: starting", "component", "scanner",
 		"folder_id", folder.ID,
 		"candidates", len(candidates),
 		"workers", workers,
@@ -93,7 +93,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 					failMu.Lock()
 					failures = append(failures, fmt.Errorf("%s: %w", path, err))
 					failMu.Unlock()
-					slog.Warn("manga scan: file failed",
+					slog.WarnContext(ctx, "manga scan: file failed", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", path,
 						"error", err,
@@ -103,7 +103,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 				if n%500 == 0 || n == int64(len(candidates)) {
 					failedCount := atomic.LoadInt64(&failed)
 					skippedCount := atomic.LoadInt64(&skipped)
-					slog.Info("manga scan: progress",
+					slog.InfoContext(ctx, "manga scan: progress", "component", "scanner",
 						"folder_id", folder.ID,
 						"processed", n,
 						"failed", failedCount,
@@ -135,7 +135,7 @@ func (s *Scanner) scanMangaPaths(ctx context.Context, folder *models.MediaFolder
 		return cancelErr
 	}
 
-	slog.Info("manga scan: completed",
+	slog.InfoContext(ctx, "manga scan: completed", "component", "scanner",
 		"folder_id", folder.ID,
 		"processed", atomic.LoadInt64(&processed),
 		"failed", atomic.LoadInt64(&failed),
@@ -215,7 +215,7 @@ func (s *Scanner) deleteOrphanedMangaSeries(ctx context.Context, folderID int) e
 		return fmt.Errorf("commit orphaned manga series delete tx: %w", err)
 	}
 	if len(deletedIDs) > 0 {
-		slog.Info("manga scan: removed orphaned series", "folder_id", folderID, "deleted", len(deletedIDs))
+		slog.InfoContext(ctx, "manga scan: removed orphaned series", "component", "scanner", "folder_id", folderID, "deleted", len(deletedIDs))
 	}
 	return nil
 }
@@ -237,7 +237,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 
 	_, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
 	if skipErr != nil {
-		slog.Warn("manga scan: skip-check failed, falling through",
+		slog.WarnContext(ctx, "manga scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
 			"path", filePath,
 			"error", skipErr,
@@ -277,7 +277,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 			return "", fmt.Errorf("upsert manga chapter file: %w", err)
 		}
 		if err := applyEbookLocalCover(ctx, s.itemRepo, s.imageCacher, contentID, filePath, &parsed); err != nil {
-			slog.Warn("manga scan: local cover upload failed",
+			slog.WarnContext(ctx, "manga scan: local cover upload failed", "component", "scanner",
 				"folder_id", folder.ID,
 				"content_id", contentID,
 				"path", filePath,
@@ -317,7 +317,7 @@ func (s *Scanner) reconcileMangaFile(ctx context.Context, folder *models.MediaFo
 		}
 	}
 
-	slog.Debug("manga scan: indexed",
+	slog.DebugContext(ctx, "manga scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
 		"chapter_id", chapterID,
 		"series_id", seriesID,
@@ -403,7 +403,7 @@ func (s *Scanner) findOrCreateMangaSeries(ctx context.Context, folderID int, ser
 			_, delErr := tx.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, id)
 			if delErr != nil {
 				_ = tx.Rollback(ctx)
-				slog.Warn("manga scan: failed to delete duplicate series item",
+				slog.WarnContext(ctx, "manga scan: failed to delete duplicate series item", "component", "scanner",
 					"folder_id", folderID,
 					"content_id", id,
 					"error", delErr,

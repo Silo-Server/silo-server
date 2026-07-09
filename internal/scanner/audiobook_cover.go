@@ -76,7 +76,7 @@ func ExtractAndUploadAudiobookCover(
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		slog.Debug("audiobook cover: ffmpeg failed (likely no embedded artwork)",
+		slog.DebugContext(ctx, "audiobook cover: ffmpeg failed (likely no embedded artwork)", "component", "scanner",
 			"path", audioFilePath, "error", err, "stderr", stderr.String())
 		return "", ""
 	}
@@ -86,7 +86,7 @@ func ExtractAndUploadAudiobookCover(
 	}
 	basePath, ext, thumbhash, err := cacher.CacheAudiobookCover(ctx, data, contentID)
 	if err != nil {
-		slog.Warn("audiobook cover: imagecache upload failed",
+		slog.WarnContext(ctx, "audiobook cover: imagecache upload failed", "component", "scanner",
 			"path", audioFilePath, "error", err)
 		return "", ""
 	}

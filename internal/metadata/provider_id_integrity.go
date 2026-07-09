@@ -62,7 +62,7 @@ func (r *ProviderIDIntegrityRepairer) Run(ctx context.Context, batchSize int) (P
 			outcome, err := r.repairDriftRow(ctx, row)
 			if err != nil {
 				stats.Errors++
-				slog.Warn("metadata: provider-id drift row repair failed",
+				slog.WarnContext(ctx, "metadata: provider-id drift row repair failed", "component", "metadata",
 					"content_id", row.ContentID,
 					"item_type", row.ItemType,
 					"status", row.Status,

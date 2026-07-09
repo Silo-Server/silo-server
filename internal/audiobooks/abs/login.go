@@ -87,7 +87,7 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		if errors.Is(err, auth.ErrInvalidCredentials) || errors.Is(err, auth.ErrUserDisabled) {
 			http.Error(w, "invalid username or password", http.StatusUnauthorized)
 		} else {
-			slog.Error("abs login: cred validator failed", "username", body.Username, "err", err)
+			slog.ErrorContext(r.Context(), "abs login: cred validator failed", "component", "audiobooks", "username", body.Username, "err", err)
 			http.Error(w, "login service unavailable", http.StatusServiceUnavailable)
 		}
 		return
@@ -102,7 +102,7 @@ func (h *Handler) handleStandaloneLogin(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	slog.Debug("abs standalone login: validator OK",
+	slog.DebugContext(r.Context(), "abs standalone login: validator OK", "component", "audiobooks",
 		"username", body.Username, "user_id", userID, "profile_id", profileID)
 	h.completeLogin(w, r, userID, profileID, displayName)
 }
@@ -175,7 +175,7 @@ func (h *Handler) completeLogin(w http.ResponseWriter, r *http.Request, userID, 
 		return
 	}
 
-	slog.Debug("abs completeLogin: tokens persisted",
+	slog.DebugContext(r.Context(), "abs completeLogin: tokens persisted", "component", "audiobooks",
 		"user_id", userID, "access_jti", accessJTI, "refresh_jti", refreshJTI)
 
 	// Real ABS delivers the refresh token in the body when the client opts in
@@ -512,13 +512,13 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		if claims != nil {
 			claimsType = claims.Type
 		}
-		slog.Debug("abs refresh: parse/type failed", "err", err, "type", claimsType)
+		slog.DebugContext(r.Context(), "abs refresh: parse/type failed", "component", "audiobooks", "err", err, "type", claimsType)
 		http.Error(w, "invalid refresh token", http.StatusUnauthorized)
 		return
 	}
 	row, err := h.deps.TokenStore.RevokeTokenIfActive(r.Context(), claims.JTI)
 	if err != nil {
-		slog.Debug("abs refresh: jti revoke failed", "jti", claims.JTI, "err", err)
+		slog.DebugContext(r.Context(), "abs refresh: jti revoke failed", "component", "audiobooks", "jti", claims.JTI, "err", err)
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "refresh token revoked", http.StatusUnauthorized)
 		} else {
@@ -556,13 +556,13 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	newRefreshJTI := ulid.Make().String()
 	access, err := IssueAccessToken(secret, claims.UserID, claims.ProfileID, newAccessJTI, accessTTL)
 	if err != nil {
-		slog.Error("abs refresh: mint access failed", "user", claims.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "abs refresh: mint access failed", "component", "audiobooks", "user", claims.UserID, "err", err)
 		http.Error(w, "token mint failed", http.StatusInternalServerError)
 		return
 	}
 	refresh, err := IssueRefreshToken(secret, claims.UserID, claims.ProfileID, newRefreshJTI, refreshTTL)
 	if err != nil {
-		slog.Error("abs refresh: mint refresh failed", "user", claims.UserID, "err", err)
+		slog.ErrorContext(r.Context(), "abs refresh: mint refresh failed", "component", "audiobooks", "user", claims.UserID, "err", err)
 		http.Error(w, "token mint failed", http.StatusInternalServerError)
 		return
 	}
@@ -571,7 +571,7 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		ID: newAccessJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		Type: "access", JTI: newAccessJTI, ExpiresAt: now.Add(accessTTL),
 	}); err != nil {
-		slog.Error("abs refresh: persist access failed", "user", claims.UserID, "jti", newAccessJTI, "err", err)
+		slog.ErrorContext(r.Context(), "abs refresh: persist access failed", "component", "audiobooks", "user", claims.UserID, "jti", newAccessJTI, "err", err)
 		http.Error(w, "token persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -579,11 +579,11 @@ func (h *Handler) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		ID: newRefreshJTI, UserID: claims.UserID, ProfileID: claims.ProfileID,
 		Type: "refresh", JTI: newRefreshJTI, ExpiresAt: now.Add(refreshTTL),
 	}); err != nil {
-		slog.Error("abs refresh: persist refresh failed", "user", claims.UserID, "jti", newRefreshJTI, "err", err)
+		slog.ErrorContext(r.Context(), "abs refresh: persist refresh failed", "component", "audiobooks", "user", claims.UserID, "jti", newRefreshJTI, "err", err)
 		http.Error(w, "token persist failed", http.StatusInternalServerError)
 		return
 	}
-	slog.Debug("abs refresh: rotated", "user", claims.UserID,
+	slog.DebugContext(r.Context(), "abs refresh: rotated", "component", "audiobooks", "user", claims.UserID,
 		"old_jti", claims.JTI, "new_access_jti", newAccessJTI, "new_refresh_jti", newRefreshJTI)
 
 	// Real ABS /auth/refresh returns the SAME payload as /login. Return the
@@ -639,22 +639,22 @@ func (h *Handler) revokeLogoutPrincipal(r *http.Request) {
 	}
 	secret, err := h.deps.Config.JWTSecret(r.Context())
 	if err != nil {
-		slog.Debug("abs logout: jwt secret fetch failed", "err", err)
+		slog.DebugContext(r.Context(), "abs logout: jwt secret fetch failed", "component", "audiobooks", "err", err)
 		return
 	}
 	claims, err := ParseToken(secret, raw)
 	if err != nil || claims.JTI == "" {
-		slog.Debug("abs logout: parse failed", "err", err)
+		slog.DebugContext(r.Context(), "abs logout: parse failed", "component", "audiobooks", "err", err)
 		return
 	}
 	if err := h.deps.TokenStore.RevokeTokensForPrincipal(r.Context(), claims.UserID, claims.ProfileID); err != nil {
-		slog.Warn("abs logout: revoke principal tokens failed", "jti", claims.JTI, "user", claims.UserID, "err", err)
+		slog.WarnContext(r.Context(), "abs logout: revoke principal tokens failed", "component", "audiobooks", "jti", claims.JTI, "user", claims.UserID, "err", err)
 		return
 	}
 	if h.deps.PlaybackSessionStore != nil {
 		if err := h.deps.PlaybackSessionStore.CloseOpenSessionsForPrincipal(r.Context(), claims.UserID, claims.ProfileID); err != nil {
-			slog.Warn("abs logout: close sessions failed", "user", claims.UserID, "profile", claims.ProfileID, "err", err)
+			slog.WarnContext(r.Context(), "abs logout: close sessions failed", "component", "audiobooks", "user", claims.UserID, "profile", claims.ProfileID, "err", err)
 		}
 	}
-	slog.Debug("abs logout: revoked principal tokens", "jti", claims.JTI, "user", claims.UserID)
+	slog.DebugContext(r.Context(), "abs logout: revoked principal tokens", "component", "audiobooks", "jti", claims.JTI, "user", claims.UserID)
 }

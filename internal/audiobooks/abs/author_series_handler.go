@@ -18,7 +18,7 @@ func (h *Handler) handleAuthorDetail(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		slog.Warn("abs author access resolution failed", "err", err, "id", id)
+		slog.WarnContext(r.Context(), "abs author access resolution failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -28,7 +28,7 @@ func (h *Handler) handleAuthorDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs author detail failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs author detail failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "author get failed", http.StatusInternalServerError)
 		return
 	}
@@ -49,7 +49,7 @@ func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
-		slog.Warn("abs series access resolution failed", "err", err, "id", id)
+		slog.WarnContext(r.Context(), "abs series access resolution failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -59,7 +59,7 @@ func (h *Handler) handleSeriesDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs series detail failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs series detail failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "series get failed", http.StatusInternalServerError)
 		return
 	}

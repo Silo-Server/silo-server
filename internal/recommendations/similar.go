@@ -50,7 +50,7 @@ func (e *Engine) SimilarItems(ctx context.Context, itemID string, limit int) ([]
 	// 2. Fetch source metadata for validation pipeline.
 	sourceMeta, err := e.repo.GetItemMetadata(ctx, itemID)
 	if err != nil {
-		slog.Warn("could not fetch source metadata, skipping validation", "item_id", itemID, "error", err)
+		slog.WarnContext(ctx, "could not fetch source metadata, skipping validation", "component", "recommendations", "item_id", itemID, "error", err)
 	}
 	sourceType := ""
 	if sourceMeta != nil {
@@ -422,7 +422,7 @@ func (e *Engine) embedBatch(ctx context.Context, items []*models.MediaItem, text
 
 			// Batch failed — fall back to embedding one at a time so a single
 			// oversized item doesn't block the entire job.
-			slog.Warn("batch embed failed, falling back to single-item mode", "error", err, "batch_size", len(chunkItems))
+			slog.WarnContext(ctx, "batch embed failed, falling back to single-item mode", "component", "recommendations", "error", err, "batch_size", len(chunkItems))
 			for i, item := range chunkItems {
 				if ctx.Err() != nil {
 					return total, ctx.Err()
@@ -436,7 +436,7 @@ func (e *Engine) embedBatch(ctx context.Context, items []*models.MediaItem, text
 					if ctx.Err() != nil {
 						return total, ctx.Err()
 					}
-					slog.Warn("skipping item, embed failed", "item_id", item.ContentID, "error", embedErr)
+					slog.WarnContext(ctx, "skipping item, embed failed", "component", "recommendations", "item_id", item.ContentID, "error", embedErr)
 					continue
 				}
 				if len(vecs) > 0 {
@@ -444,7 +444,7 @@ func (e *Engine) embedBatch(ctx context.Context, items []*models.MediaItem, text
 						return total, fmt.Errorf("embed item %s: %w", item.ContentID, err)
 					}
 					if storeErr := e.repo.UpsertEmbedding(ctx, item.ContentID, vecs[0], model, single); storeErr != nil {
-						slog.Warn("skipping item, store failed", "item_id", item.ContentID, "error", storeErr)
+						slog.WarnContext(ctx, "skipping item, store failed", "component", "recommendations", "item_id", item.ContentID, "error", storeErr)
 						continue
 					}
 					total++
@@ -461,7 +461,7 @@ func (e *Engine) embedBatch(ctx context.Context, items []*models.MediaItem, text
 				return total, fmt.Errorf("embed item %s: %w", item.ContentID, err)
 			}
 			if err := e.repo.UpsertEmbedding(ctx, item.ContentID, vectors[i], model, chunkTexts[i]); err != nil {
-				slog.Warn("skipping item, store failed", "item_id", item.ContentID, "error", err)
+				slog.WarnContext(ctx, "skipping item, store failed", "component", "recommendations", "item_id", item.ContentID, "error", err)
 				continue
 			}
 			total++
@@ -480,7 +480,7 @@ func (e *Engine) hydrateItemPeople(ctx context.Context, items []*models.MediaIte
 
 	peopleMap, err := e.personRepo.ListForItems(ctx, ids)
 	if err != nil {
-		slog.Warn("failed to hydrate item people for embeddings", "error", err)
+		slog.WarnContext(ctx, "failed to hydrate item people for embeddings", "component", "recommendations", "error", err)
 		return
 	}
 

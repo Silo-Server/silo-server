@@ -55,11 +55,11 @@ func StartSessionCleanupWithPlaybackStore(ctx context.Context, repo *SessionRepo
 			case <-ticker.C:
 				authDeleted, playbackDeleted, err := cleanupExpiredCompatState(ctx, repo, playbackExpirer, time.Now())
 				if err != nil {
-					slog.Warn("jellycompat session cleanup failed", "error", err)
+					slog.WarnContext(ctx, "jellycompat session cleanup failed", "component", "jellycompat", "error", err)
 					continue
 				}
 				if authDeleted > 0 || playbackDeleted > 0 {
-					slog.Debug("jellycompat session cleanup", "auth_sessions", authDeleted, "playback_sessions", playbackDeleted)
+					slog.DebugContext(ctx, "jellycompat session cleanup", "component", "jellycompat", "auth_sessions", authDeleted, "playback_sessions", playbackDeleted)
 				}
 			}
 		}

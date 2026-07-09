@@ -204,8 +204,8 @@ func (s *Service) Start(ctx context.Context) {
 	}
 
 	resolvedAccel, resolvedDevice := s.resolveHWConfig()
-	slog.Info(
-		"chapter thumbnail service started",
+	slog.InfoContext(ctx,
+		"chapter thumbnail service started", "component", "chapterthumbs",
 		"workers",
 		s.workerCount,
 		"priority_workers",
@@ -280,7 +280,7 @@ func (s *Service) BackfillMissing(ctx context.Context, limit int) (int, error) {
 			continue
 		}
 		if _, err := s.processRequest(ctx, ChapterThumbnailRequest{FileID: file.ID}, false); err != nil {
-			slog.Warn("chapter thumbnail backfill failed", "file_id", file.ID, "error", err)
+			slog.WarnContext(ctx, "chapter thumbnail backfill failed", "component", "chapterthumbs", "file_id", file.ID, "error", err)
 			continue
 		}
 		processed++
@@ -296,7 +296,7 @@ func (s *Service) worker(ctx context.Context, priorityOnly bool) {
 		}
 		requeueNormal, err := s.processRequest(ctx, req, priorityOnly)
 		if err != nil {
-			slog.Warn("chapter thumbnail generation failed", "file_id", req.FileID, "error", err)
+			slog.WarnContext(ctx, "chapter thumbnail generation failed", "component", "chapterthumbs", "file_id", req.FileID, "error", err)
 		}
 		notifyPriority, notifyNormal := s.finishProcessing(req.FileID)
 		if notifyPriority {
@@ -315,7 +315,7 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 	file, err := s.fileRepo.GetByID(ctx, req.FileID)
 	if err != nil || file == nil {
 		if err == nil {
-			slog.Info("chapter thumbnail request skipped", "file_id", req.FileID, "priority", priority, "reason", "file_not_found")
+			slog.InfoContext(ctx, "chapter thumbnail request skipped", "component", "chapterthumbs", "file_id", req.FileID, "priority", priority, "reason", "file_not_found")
 		}
 		return false, err
 	}
@@ -323,13 +323,13 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 	folder, err := s.folderRepo.GetByID(ctx, file.MediaFolderID)
 	if err != nil || folder == nil {
 		if err == nil {
-			slog.Info("chapter thumbnail request skipped", "file_id", req.FileID, "priority", priority, "reason", "folder_not_found")
+			slog.InfoContext(ctx, "chapter thumbnail request skipped", "component", "chapterthumbs", "file_id", req.FileID, "priority", priority, "reason", "folder_not_found")
 		}
 		return false, err
 	}
 	if !folder.Enabled || !folder.ChapterThumbnailsEnabled {
-		slog.Info(
-			"chapter thumbnail request skipped",
+		slog.InfoContext(ctx,
+			"chapter thumbnail request skipped", "component", "chapterthumbs",
 			"file_id",
 			req.FileID,
 			"priority",
@@ -344,8 +344,8 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 
 	now := s.now()
 	if file.ChapterThumbnailRetryAfter != nil && file.ChapterThumbnailRetryAfter.After(now) {
-		slog.Info(
-			"chapter thumbnail request skipped",
+		slog.InfoContext(ctx,
+			"chapter thumbnail request skipped", "component", "chapterthumbs",
 			"file_id",
 			req.FileID,
 			"priority",
@@ -363,14 +363,14 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		return false, err
 	}
 	if len(file.Chapters) == 0 {
-		slog.Info("chapter thumbnail request skipped", "file_id", req.FileID, "priority", priority, "reason", "no_chapters")
+		slog.InfoContext(ctx, "chapter thumbnail request skipped", "component", "chapterthumbs", "file_id", req.FileID, "priority", priority, "reason", "no_chapters")
 		return false, nil
 	}
 
 	hdrPolicy := s.chapterThumbnailHDRPolicy(ctx)
 	if needsTonemap(file) && hdrPolicy == chapterThumbnailHDRPolicyDisabled {
-		slog.Info(
-			"chapter thumbnail request skipped",
+		slog.InfoContext(ctx,
+			"chapter thumbnail request skipped", "component", "chapterthumbs",
 			"file_id",
 			req.FileID,
 			"priority",
@@ -383,8 +383,8 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 
 	selected := selectChapterCandidates(file.Chapters, req.TargetSeconds, priority, s.batchSize(priority), now)
 	if len(selected) == 0 {
-		slog.Info(
-			"chapter thumbnail request skipped",
+		slog.InfoContext(ctx,
+			"chapter thumbnail request skipped", "component", "chapterthumbs",
 			"file_id",
 			req.FileID,
 			"priority",
@@ -395,8 +395,8 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		return false, nil
 	}
 
-	slog.Info(
-		"chapter thumbnail processing started",
+	slog.InfoContext(ctx,
+		"chapter thumbnail processing started", "component", "chapterthumbs",
 		"file_id",
 		req.FileID,
 		"priority",
@@ -422,8 +422,8 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 		chapter := updated.Chapters[candidate.offset]
 		frame, reason, err := s.extractFrame(ctx, &updated, chapterCaptureTime(chapter), hdrPolicy)
 		if err != nil {
-			slog.Warn(
-				"chapter thumbnail extract failed",
+			slog.WarnContext(ctx,
+				"chapter thumbnail extract failed", "component", "chapterthumbs",
 				"file_id",
 				updated.ID,
 				"chapter_index",
@@ -438,8 +438,8 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 			failed++
 			if shouldApplyFileFailure(reason) {
 				hardFileFailure = buildPersistentFileFailure(&updated, now, reason, err)
-				slog.Warn(
-					"chapter thumbnail file marked failed",
+				slog.WarnContext(ctx,
+					"chapter thumbnail file marked failed", "component", "chapterthumbs",
 					"file_id",
 					updated.ID,
 					"reason",
@@ -454,8 +454,8 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 
 		path, thumbhash, err := s.uploadChapterThumbnail(ctx, updated.ID, chapter.Index, frame)
 		if err != nil {
-			slog.Warn(
-				"chapter thumbnail upload failed",
+			slog.WarnContext(ctx,
+				"chapter thumbnail upload failed", "component", "chapterthumbs",
 				"file_id",
 				updated.ID,
 				"chapter_index",
@@ -519,8 +519,8 @@ func (s *Service) processRequest(ctx context.Context, req ChapterThumbnailReques
 	}
 
 	requeue := hardFileFailure == nil && hasEligibleMissingChapter(updated.Chapters, now)
-	slog.Info(
-		"chapter thumbnail processing finished",
+	slog.InfoContext(ctx,
+		"chapter thumbnail processing finished", "component", "chapterthumbs",
 		"file_id",
 		req.FileID,
 		"priority",
@@ -547,7 +547,7 @@ func (s *Service) ensureChapters(ctx context.Context, file *models.MediaFile, no
 	}
 
 	reason := classifyProbeError(err)
-	slog.Warn("chapter thumbnail probe failed", "file_id", file.ID, "reason", reason, "error", err)
+	slog.WarnContext(ctx, "chapter thumbnail probe failed", "component", "chapterthumbs", "file_id", file.ID, "reason", reason, "error", err)
 	if applyErr := s.applyFileFailure(ctx, file, now, reason, err); applyErr != nil {
 		return file, applyErr
 	}
@@ -596,8 +596,8 @@ func (s *Service) extractFrame(
 	node, release, nodeReason := s.reserveRemoteNode(ctx)
 	if node == nil {
 		if mode == chapterThumbnailExecutionPreferTranscode {
-			slog.Info(
-				"chapter thumbnail remote execution unavailable; falling back to local",
+			slog.InfoContext(ctx,
+				"chapter thumbnail remote execution unavailable; falling back to local", "component", "chapterthumbs",
 				"file_path",
 				file.FilePath,
 				"reason",
@@ -620,8 +620,8 @@ func (s *Service) extractFrame(
 	}
 
 	if mode == chapterThumbnailExecutionPreferTranscode && isInfrastructureRemoteFailure(reason) {
-		slog.Warn(
-			"chapter thumbnail remote extraction failed; falling back to local",
+		slog.WarnContext(ctx,
+			"chapter thumbnail remote extraction failed; falling back to local", "component", "chapterthumbs",
 			"file_path",
 			file.FilePath,
 			"node",
@@ -888,8 +888,8 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 			normalDepth := len(s.queuedNormal)
 			inProgress := len(s.inProgress)
 			s.mu.Unlock()
-			slog.Info(
-				"chapter thumbnail dequeued",
+			slog.InfoContext(ctx,
+				"chapter thumbnail dequeued", "component", "chapterthumbs",
 				"file_id",
 				req.FileID,
 				"priority",
@@ -913,8 +913,8 @@ func (s *Service) nextRequest(ctx context.Context, priorityOnly bool) (ChapterTh
 				normalDepth := len(s.queuedNormal)
 				inProgress := len(s.inProgress)
 				s.mu.Unlock()
-				slog.Info(
-					"chapter thumbnail dequeued",
+				slog.InfoContext(ctx,
+					"chapter thumbnail dequeued", "component", "chapterthumbs",
 					"file_id",
 					req.FileID,
 					"priority",

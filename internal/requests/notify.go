@@ -65,7 +65,7 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 	}
 	candidates, err := s.store.ListFulfilledUnnotified(ctx, notifyFulfilledLimit)
 	if err != nil {
-		slog.WarnContext(ctx, "request fulfill-notify: list candidates failed", "err", err)
+		slog.WarnContext(ctx, "request fulfill-notify: list candidates failed", "component", "requests", "err", err)
 		return
 	}
 	for _, req := range candidates {
@@ -74,7 +74,7 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 		}
 		matches, err := s.lookupPresence(ctx, req.MediaType, []PresenceCandidate{requestPresenceCandidate(*req)})
 		if err != nil {
-			slog.WarnContext(ctx, "request fulfill-notify: presence lookup failed",
+			slog.WarnContext(ctx, "request fulfill-notify: presence lookup failed", "component", "requests",
 				"request_id", req.ID, "tmdb_id", req.TMDBID, "err", err)
 			continue
 		}
@@ -83,12 +83,12 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 			continue // not in the catalog yet; retry next run
 		}
 		if err := s.notifier.NotifyFulfilled(ctx, *req, match.ContentID); err != nil {
-			slog.WarnContext(ctx, "request fulfill-notify: dispatch failed",
+			slog.WarnContext(ctx, "request fulfill-notify: dispatch failed", "component", "requests",
 				"request_id", req.ID, "err", err)
 			continue
 		}
 		if err := s.store.MarkFulfilledNotified(ctx, req.ID); err != nil {
-			slog.WarnContext(ctx, "request fulfill-notify: mark failed",
+			slog.WarnContext(ctx, "request fulfill-notify: mark failed", "component", "requests",
 				"request_id", req.ID, "err", err)
 		}
 	}

@@ -79,7 +79,7 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		slog.Error("websocket upgrade failed", "error", err, "session", sessionID, "playback_session_id", sessionID)
+		slog.ErrorContext(r.Context(), "websocket upgrade failed", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		return
 	}
 
@@ -87,7 +87,7 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 	registration := h.RealtimeHub.Register(sessionID, realtimeConn)
 	if registration == nil {
 		conn.Close()
-		slog.Warn("failed to register realtime websocket", "session", sessionID, "playback_session_id", sessionID)
+		slog.WarnContext(r.Context(), "failed to register realtime websocket", "component", "api", "session", sessionID, "playback_session_id", sessionID)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *PlaybackHandler) HandleSessionWebSocket(w http.ResponseWriter, r *http.
 			break
 		}
 		if err := h.handleRealtimeClientMessage(sessionID, data); err != nil {
-			slog.Warn("invalid realtime client message", "session", sessionID, "playback_session_id", sessionID, "error", err)
+			slog.WarnContext(r.Context(), "invalid realtime client message", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 		}
 	}
 }

@@ -228,7 +228,7 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string
 				}
 				if walkErr != nil {
 					scan.walkFailures++
-					slog.Warn("audiobook scan: walk error", "path", path, "error", walkErr)
+					slog.WarnContext(ctx, "audiobook scan: walk error", "component", "scanner", "path", path, "error", walkErr)
 					return nil
 				}
 				if !d.IsDir() {
@@ -237,7 +237,7 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string
 				entries, err := os.ReadDir(path)
 				if err != nil {
 					scan.walkFailures++
-					slog.Warn("audiobook scan: read dir failed", "path", path, "error", err)
+					slog.WarnContext(ctx, "audiobook scan: read dir failed", "component", "scanner", "path", path, "error", err)
 					return nil
 				}
 				hadAudio := false
@@ -261,7 +261,7 @@ func collectAudiobookRootScans(ctx context.Context, folderID int, roots []string
 			}
 		}
 		if scan.failed() {
-			slog.Warn("audiobook scan: root walk incomplete; root excluded from missing-file reconciliation",
+			slog.WarnContext(ctx, "audiobook scan: root walk incomplete; root excluded from missing-file reconciliation", "component", "scanner",
 				"folder_id", folderID,
 				"root", cleanRoot,
 				"walk_failures", scan.walkFailures,
@@ -327,10 +327,10 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		// empty-walk guard requires operator confirmation before deleting.
 		if len(reconcileRoots) > 0 {
 			if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, sawFiles, fullScan); err != nil {
-				slog.Warn("audiobook scan: missing-file reconcile failed", "folder_id", folder.ID, "error", err)
+				slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 			}
 		} else if len(scans) > 0 {
-			slog.Warn("audiobook scan: every root walk failed; skipping missing-file reconciliation",
+			slog.WarnContext(ctx, "audiobook scan: every root walk failed; skipping missing-file reconciliation", "component", "scanner",
 				"folder_id", folder.ID)
 		}
 		return nil
@@ -340,7 +340,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 	// (hundreds of ms each), so single-threaded scans of a large library
 	// take days. Worker pool brings this to ~hours.
 	workers := audiobookScanWorkers()
-	slog.Info("audiobook scan: starting",
+	slog.InfoContext(ctx, "audiobook scan: starting", "component", "scanner",
 		"folder_id", folder.ID,
 		"candidates", len(candidates),
 		"workers", workers,
@@ -378,7 +378,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 					failMu.Lock()
 					failures = append(failures, fmt.Errorf("%s: %w", path, err))
 					failMu.Unlock()
-					slog.Warn("audiobook scan: folder failed",
+					slog.WarnContext(ctx, "audiobook scan: folder failed", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", path,
 						"error", err,
@@ -386,7 +386,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 				}
 				n := atomic.AddInt64(&processed, 1)
 				if n%500 == 0 {
-					slog.Info("audiobook scan: progress",
+					slog.InfoContext(ctx, "audiobook scan: progress", "component", "scanner",
 						"folder_id", folder.ID,
 						"processed", n,
 						"failed", atomic.LoadInt64(&failed),
@@ -414,7 +414,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 		return cancelErr
 	}
 
-	slog.Info("audiobook scan: completed",
+	slog.InfoContext(ctx, "audiobook scan: completed", "component", "scanner",
 		"folder_id", folder.ID,
 		"processed", atomic.LoadInt64(&processed),
 		"failed", atomic.LoadInt64(&failed),
@@ -432,7 +432,7 @@ func (s *Scanner) ScanAudiobookFolder(ctx context.Context, folder *models.MediaF
 	// Reconcile files that vanished from disk now that the full walk's
 	// seenPaths is known and the scan completed without cancellation.
 	if err := s.reconcileAudiobookMissingFiles(ctx, folder, reconcileRoots, seenPaths, sawFiles, fullScan); err != nil {
-		slog.Warn("audiobook scan: missing-file reconcile failed", "folder_id", folder.ID, "error", err)
+		slog.WarnContext(ctx, "audiobook scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	return nil
 }
@@ -471,7 +471,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 				return err
 			}
 			if !allowed {
-				slog.Warn("audiobook scan: walk saw zero files but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed",
+				slog.WarnContext(ctx, "audiobook scan: walk saw zero files but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed", "component", "scanner",
 					"folder_id", folder.ID, "existing_files", existingCount)
 				return nil
 			}
@@ -491,7 +491,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 			}
 			if mf.MissingSince == nil {
 				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
-					slog.Error("audiobook scan: failed to mark file missing",
+					slog.ErrorContext(ctx, "audiobook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue
 				}
@@ -506,7 +506,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
 		if trashed > 0 {
-			slog.Info("audiobook scan: emptied trash", "folder_id", folder.ID, "deleted", trashed)
+			slog.InfoContext(ctx, "audiobook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 		}
 	}
 
@@ -521,7 +521,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 		}
 	}
 	if missing > 0 || removedMemberships > 0 || deletedItems > 0 {
-		slog.Info("audiobook scan: reconciled missing files",
+		slog.InfoContext(ctx, "audiobook scan: reconciled missing files", "component", "scanner",
 			"folder_id", folder.ID, "missing", missing,
 			"memberships_removed", removedMemberships, "items_deleted", deletedItems)
 	}
@@ -531,7 +531,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.MediaFolder, folderPath string, skipped *int64) error {
 	existingContentID, isUnchanged, skipErr := s.audiobookFolderShouldSkip(ctx, folder, folderPath)
 	if skipErr != nil {
-		slog.Warn("audiobook scan: skip-check failed, falling through",
+		slog.WarnContext(ctx, "audiobook scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
 			"path", folderPath,
 			"error", skipErr,
@@ -557,7 +557,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		return fmt.Errorf("upsert audiobook files: %w", err)
 	}
 	if err := applyAudiobookSidecarCover(ctx, s.itemRepo, s.imageCacher, contentID, folderPath); err != nil {
-		slog.Warn("audiobook scan: sidecar cover upload failed",
+		slog.WarnContext(ctx, "audiobook scan: sidecar cover upload failed", "component", "scanner",
 			"folder_id", folder.ID,
 			"content_id", contentID,
 			"path", folderPath,
@@ -566,7 +566,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 	}
 	if len(parsed.Files) > 0 && s.fileRepo != nil {
 		if _, err := applyAudiobookEmbeddedCover(ctx, s.itemRepo, s.fileRepo.Pool(), FFmpegPathFromFFprobe(s.ffprobePath), s.imageCacher, parsed.Files[0].Path, contentID); err != nil {
-			slog.Warn("audiobook scan: embedded cover failed",
+			slog.WarnContext(ctx, "audiobook scan: embedded cover failed", "component", "scanner",
 				"folder_id", folder.ID,
 				"content_id", contentID,
 				"path", parsed.Files[0].Path,
@@ -601,7 +601,7 @@ func (s *Scanner) reconcileAudiobookFolder(ctx context.Context, folder *models.M
 		}
 	}
 	s.autoLinkLiteraryWork(ctx, contentID)
-	slog.Info("audiobook scan: indexed",
+	slog.InfoContext(ctx, "audiobook scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
 		"content_id", contentID,
 		"title", parsed.Title,

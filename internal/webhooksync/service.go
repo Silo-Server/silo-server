@@ -67,7 +67,7 @@ func (s *Service) ListConnections(ctx context.Context, userID int) ([]Connection
 		if _, available, err := provider.DiscoverUsers(ctx, &connections[i], nil); err == nil {
 			connections[i].AccountDiscoveryAvailable = available
 			if err := s.repo.SetDiscoveryAvailable(ctx, connections[i].ID, available); err != nil {
-				slog.Warn("webhook sync: failed to persist discovery availability", "connection_id", connections[i].ID, "error", err)
+				slog.WarnContext(ctx, "webhook sync: failed to persist discovery availability", "component", "webhooksync", "connection_id", connections[i].ID, "error", err)
 			}
 		}
 	}
@@ -244,7 +244,7 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 		result.MediaKind = event.MediaKind
 	}
 	if err := s.repo.MarkWebhookReceived(ctx, conn.ID); err != nil {
-		slog.Warn("webhook sync: failed to mark receipt", "connection_id", conn.ID, "error", err)
+		slog.WarnContext(ctx, "webhook sync: failed to mark receipt", "component", "webhooksync", "connection_id", conn.ID, "error", err)
 	}
 	if event == nil || !event.Apply {
 		result.Outcome = OutcomeIgnored
@@ -252,7 +252,7 @@ func (s *Service) ProcessWebhook(ctx context.Context, secret string, r *http.Req
 		return result, nil
 	}
 	if err := s.repo.UpsertSeenUser(ctx, conn.ID, event.UserID, event.UserName); err != nil {
-		slog.Warn("webhook sync: failed to upsert seen external user", "connection_id", conn.ID, "external_user_id", event.UserID, "error", err)
+		slog.WarnContext(ctx, "webhook sync: failed to upsert seen external user", "component", "webhooksync", "connection_id", conn.ID, "external_user_id", event.UserID, "error", err)
 	}
 
 	if mapping, err := s.repo.GetMappingByUser(ctx, conn.ID, event.UserID); err != nil {

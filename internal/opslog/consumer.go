@@ -63,14 +63,14 @@ func (c *Consumer) drainRedis(ctx context.Context) {
 	for {
 		entries, err := c.popRedisBatch(ctx)
 		if err != nil {
-			slog.Warn("opslog: Redis pop error", "error", err)
+			slog.WarnContext(ctx, "opslog: Redis pop error", "component", "opslog", "error", err)
 			return
 		}
 		if len(entries) == 0 {
 			return
 		}
 		if err := c.insertBatchWithRetry(ctx, entries); err != nil {
-			slog.Error("opslog: batch insert failed after retries, dropping batch", "error", err, "count", len(entries))
+			slog.ErrorContext(ctx, "opslog: batch insert failed after retries, dropping batch", "component", "opslog", "error", err, "count", len(entries))
 		}
 	}
 }
@@ -88,7 +88,7 @@ func (c *Consumer) popRedisBatch(ctx context.Context) ([]Entry, error) {
 	for _, raw := range result {
 		var entry Entry
 		if err := json.Unmarshal([]byte(raw), &entry); err != nil {
-			slog.Warn("opslog: skipping malformed entry", "error", err)
+			slog.WarnContext(ctx, "opslog: skipping malformed entry", "component", "opslog", "error", err)
 			continue
 		}
 		entries = append(entries, entry)
@@ -101,7 +101,7 @@ func (c *Consumer) insertBatchWithRetry(ctx context.Context, entries []Entry) er
 	for attempt := 0; attempt < c.maxRetries; attempt++ {
 		if err := c.insertBatch(ctx, entries); err != nil {
 			lastErr = err
-			slog.Warn("opslog: batch insert attempt failed", "attempt", attempt+1, "error", err)
+			slog.WarnContext(ctx, "opslog: batch insert attempt failed", "component", "opslog", "attempt", attempt+1, "error", err)
 			time.Sleep(time.Duration(attempt+1) * time.Second)
 			continue
 		}
@@ -121,7 +121,7 @@ func (c *Consumer) RunMemory(ctx context.Context, ch <-chan Entry) {
 		case <-ctx.Done():
 			if len(batch) > 0 {
 				if err := c.insertBatch(context.Background(), batch); err != nil {
-					slog.Warn("opslog batch insert failed", "entries", len(batch), "error", err)
+					slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
 				}
 			}
 			return
@@ -129,7 +129,7 @@ func (c *Consumer) RunMemory(ctx context.Context, ch <-chan Entry) {
 			if !ok {
 				if len(batch) > 0 {
 					if err := c.insertBatch(context.Background(), batch); err != nil {
-						slog.Warn("opslog batch insert failed", "entries", len(batch), "error", err)
+						slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
 					}
 				}
 				return
@@ -137,14 +137,14 @@ func (c *Consumer) RunMemory(ctx context.Context, ch <-chan Entry) {
 			batch = append(batch, entry)
 			if len(batch) >= c.batchSize {
 				if err := c.insertBatch(ctx, batch); err != nil {
-					slog.Warn("opslog batch insert failed", "entries", len(batch), "error", err)
+					slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
 				}
 				batch = batch[:0]
 			}
 		case <-ticker.C:
 			if len(batch) > 0 {
 				if err := c.insertBatch(ctx, batch); err != nil {
-					slog.Warn("opslog batch insert failed", "entries", len(batch), "error", err)
+					slog.WarnContext(ctx, "opslog batch insert failed", "component", "opslog", "entries", len(batch), "error", err)
 				}
 				batch = batch[:0]
 			}
@@ -215,7 +215,7 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
 
 	for _, entry := range inserted {
 		if err := c.streamHub.PublishAppend(ctx, logstream.StreamApp, entry); err != nil {
-			slog.Warn("opslog: failed to publish log stream append", "error", err, "id", entry.ID)
+			slog.WarnContext(ctx, "opslog: failed to publish log stream append", "component", "opslog", "error", err, "id", entry.ID)
 		}
 	}
 

@@ -222,7 +222,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 			return
 		}
 		if err := h.stopPlaybackSessionByID(ctx, sessionID, false); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.Error("failed to stop playback after local transcode exit", "session", sessionID, "error", err, "playback_session_id", sessionID)
+			slog.ErrorContext(ctx, "failed to stop playback after local transcode exit", "component", "api", "session", sessionID, "error", err, "playback_session_id", sessionID)
 		}
 	}
 	if reg, ok := sessionMgr.(interface {
@@ -496,7 +496,7 @@ func (h *PlaybackHandler) ensurePlaybackProbe(ctx context.Context, file *models.
 	}
 	repaired, err := h.ProbeEnsurer.Ensure(ctx, file)
 	if err != nil {
-		slog.Warn("playback probe repair failed", "file_id", file.ID, "path", file.FilePath, "error", err)
+		slog.WarnContext(ctx, "playback probe repair failed", "component", "api", "file_id", file.ID, "path", file.FilePath, "error", err)
 		return file
 	}
 	if repaired != nil {
@@ -921,13 +921,13 @@ func (h *PlaybackHandler) restoreSessionProgress(
 
 	store, err := h.StoreProvider.ForUser(ctx, session.UserID)
 	if err != nil {
-		slog.Error("failed to get user store", "user_id", session.UserID, "error", err)
+		slog.ErrorContext(ctx, "failed to get user store", "component", "api", "user_id", session.UserID, "error", err)
 		return
 	}
 
 	progress, err := store.GetProgress(ctx, session.ProfileID, targetID)
 	if err != nil {
-		slog.Error("failed to load progress", "target", targetID, "error", err)
+		slog.ErrorContext(ctx, "failed to load progress", "component", "api", "target", targetID, "error", err)
 		return
 	}
 
@@ -936,7 +936,7 @@ func (h *PlaybackHandler) restoreSessionProgress(
 	}
 
 	if err := h.sessionMgr.UpdateProgress(session.ID, progress.PositionSeconds, false); err != nil {
-		slog.Error("failed to restore progress", "session", session.ID, "error", err)
+		slog.ErrorContext(ctx, "failed to restore progress", "component", "api", "session", session.ID, "error", err)
 		return
 	}
 
@@ -972,13 +972,13 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 
 	store, err := h.StoreProvider.ForUser(ctx, session.UserID)
 	if err != nil {
-		slog.Error("failed to get user store", "user_id", session.UserID, "error", err)
+		slog.ErrorContext(ctx, "failed to get user store", "component", "api", "user_id", session.UserID, "error", err)
 		return
 	}
 
 	duration := float64(file.Duration)
 	if err := store.UpdateProgress(ctx, session.ProfileID, targetID, session.Position, duration, h.playbackThresholds(ctx)); err != nil {
-		slog.Error("failed to persist progress", "session", session.ID, "error", err)
+		slog.ErrorContext(ctx, "failed to persist progress", "component", "api", "session", session.ID, "error", err)
 	} else {
 		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
 	}
@@ -990,7 +990,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 		CodecVideo: file.CodecVideo,
 		EditionKey: file.EditionKey,
 	}); err != nil {
-		slog.Error("failed to persist version hints", "session", session.ID, "error", err)
+		slog.ErrorContext(ctx, "failed to persist version hints", "component", "api", "session", session.ID, "error", err)
 	}
 }
 
@@ -1025,7 +1025,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 		EditionKey: file.EditionKey,
 	}, thresholds)
 	if err != nil {
-		slog.Error("failed to persist playback stop", "session", session.ID, "error", err)
+		slog.ErrorContext(ctx, "failed to persist playback stop", "component", "api", "session", session.ID, "error", err)
 	} else {
 		triggerProfileRefresh(ctx, h.profileStaler, h.profileRefreshRequester, session.UserID, session.ProfileID)
 	}
@@ -1091,11 +1091,11 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 	if h.StoreProvider != nil {
 		store, storeErr := h.StoreProvider.ForUser(ctx, session.UserID)
 		if storeErr != nil {
-			slog.Error("failed to get user store for admin history", "session", session.ID, "error", storeErr)
+			slog.ErrorContext(ctx, "failed to get user store for admin history", "component", "api", "session", session.ID, "error", storeErr)
 		} else if store != nil {
 			profile, profileErr := store.GetProfile(ctx, session.ProfileID)
 			if profileErr != nil {
-				slog.Error("failed to load profile for admin history", "session", session.ID, "error", profileErr)
+				slog.ErrorContext(ctx, "failed to load profile for admin history", "component", "api", "session", session.ID, "error", profileErr)
 			} else if profile != nil && strings.TrimSpace(profile.Name) != "" {
 				profileName = profile.Name
 			}
@@ -1135,7 +1135,7 @@ func (h *PlaybackHandler) syncSessionsNow(ctx context.Context, reason string) {
 		return
 	}
 	if err := h.SessionSyncer.SyncNow(ctx); err != nil {
-		slog.Error("failed to sync sessions", "reason", reason, "error", err)
+		slog.ErrorContext(ctx, "failed to sync sessions", "component", "api", "reason", reason, "error", err)
 	}
 }
 
@@ -1163,25 +1163,25 @@ func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *play
 		event.Completed = stopResult.Completed
 		if stopResult.Completed {
 			if err := h.WatchScrobbler.ScrobbleStop(ctx, event); err != nil {
-				slog.Warn("failed to queue watch provider stop scrobble", "session", session.ID, "error", err)
+				slog.WarnContext(ctx, "failed to queue watch provider stop scrobble", "component", "api", "session", session.ID, "error", err)
 			}
 		} else if !stopResult.SkippedBelowMinResume {
 			if err := h.WatchScrobbler.ScrobblePause(ctx, event); err != nil {
-				slog.Warn("failed to queue watch provider pause scrobble", "session", session.ID, "error", err)
+				slog.WarnContext(ctx, "failed to queue watch provider pause scrobble", "component", "api", "session", session.ID, "error", err)
 			}
 		}
 	}
 	if entry, buildErr := h.buildAdminHistoryEntry(ctx, session); buildErr != nil {
-		slog.Error("failed to build admin history", "session", session.ID, "error", buildErr)
+		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", buildErr)
 	} else if entry != nil && h.AdminStore != nil {
 		if err := h.AdminStore.RecordHistory(ctx, *entry); err != nil {
-			slog.Error("failed to record admin history", "session", session.ID, "error", err)
+			slog.ErrorContext(ctx, "failed to record admin history", "component", "api", "session", session.ID, "error", err)
 		}
 	}
 
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {
-			slog.Error("failed to delete synced session", "session", session.ID, "error", err)
+			slog.ErrorContext(ctx, "failed to delete synced session", "component", "api", "session", session.ID, "error", err)
 		}
 	}
 
@@ -1205,7 +1205,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 			if targetID != "" {
 				event := h.scrobbleEventForSession(ctx, session, targetID, float64(file.Duration), session.Position)
 				if err := h.WatchScrobbler.ScrobblePause(ctx, event); err != nil {
-					slog.Warn("failed to queue watch provider abort scrobble", "session", session.ID, "error", err)
+					slog.WarnContext(ctx, "failed to queue watch provider abort scrobble", "component", "api", "session", session.ID, "error", err)
 				}
 			}
 		}
@@ -1213,7 +1213,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 
 	if h.AdminStore != nil {
 		if err := h.AdminStore.DeleteSession(ctx, session.ID); err != nil {
-			slog.Error("failed to delete synced session", "session", session.ID, "error", err)
+			slog.ErrorContext(ctx, "failed to delete synced session", "component", "api", "session", session.ID, "error", err)
 		}
 	}
 
@@ -1266,7 +1266,7 @@ func (h *PlaybackHandler) persistSeriesPlaybackPreference(
 
 	store, err := h.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
-		slog.Error("failed to access user store for series playback preference", "user_id", userID, "error", err)
+		slog.ErrorContext(ctx, "failed to access user store for series playback preference", "component", "api", "user_id", userID, "error", err)
 		return
 	}
 
@@ -1277,7 +1277,7 @@ func (h *PlaybackHandler) persistSeriesPlaybackPreference(
 		HDR:        file.HDR,
 		CodecVideo: file.CodecVideo,
 	}); err != nil {
-		slog.Error("failed to persist series playback preference", "series_id", seriesID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(ctx, "failed to persist series playback preference", "component", "api", "series_id", seriesID, "profile_id", profileID, "error", err)
 	}
 }
 
@@ -1299,7 +1299,7 @@ func (h *PlaybackHandler) persistAudioPreference(
 
 	store, err := h.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
-		slog.Error("failed to access user store for audio preference", "user_id", userID, "error", err)
+		slog.ErrorContext(ctx, "failed to access user store for audio preference", "component", "api", "user_id", userID, "error", err)
 		return
 	}
 
@@ -1311,7 +1311,7 @@ func (h *PlaybackHandler) persistAudioPreference(
 		AudioLanguage:   track.Language,
 		TrackSignature:  playback.AudioTrackSignatureFromTrack(track),
 	}); err != nil {
-		slog.Error("failed to persist audio preference", "series_id", seriesID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(ctx, "failed to persist audio preference", "component", "api", "series_id", seriesID, "profile_id", profileID, "error", err)
 	}
 }
 
@@ -1444,7 +1444,7 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	)
 	if requestedFile != nil && effectiveFile != nil && requestedFile.ID != effectiveFile.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
-			slog.Warn("requested playback file preflight failed; continuing with alternate file",
+			slog.WarnContext(r.Context(), "requested playback file preflight failed; continuing with alternate file", "component", "api",
 				"requested_file_id", requestedFile.ID,
 				"effective_file_id", effectiveFile.ID,
 				"error", err,
@@ -1498,14 +1498,14 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	setPlaybackSessionLogContext(r, session.ID)
 	if req.DisableProgressPersistence {
 		if err := h.sessionMgr.SetProgressPersistenceDisabled(session.ID, true); err != nil {
-			slog.Error("failed to disable progress persistence", "session", session.ID, "error", err)
+			slog.ErrorContext(r.Context(), "failed to disable progress persistence", "component", "api", "session", session.ID, "error", err)
 		} else {
 			session.DisableProgressPersistence = true
 		}
 	}
 
 	if err := h.sessionMgr.UpdateAudioTrack(session.ID, audioTrackIndex, session.PlayMethod); err != nil {
-		slog.Error("failed to set audio track", "session", session.ID, "error", err)
+		slog.ErrorContext(r.Context(), "failed to set audio track", "component", "api", "session", session.ID, "error", err)
 	}
 	targetAudioCodec := ""
 	if session.TranscodeAudio {
@@ -1527,7 +1527,7 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		StreamBitrateKbps: streamBitrateKbps,
 		TargetAudioCodec:  targetAudioCodec,
 	}); err != nil {
-		slog.Error("failed to set stream state", "session", session.ID, "error", err)
+		slog.ErrorContext(r.Context(), "failed to set stream state", "component", "api", "session", session.ID, "error", err)
 	}
 	session.AudioTrackIndex = audioTrackIndex
 	session.ClientIP = clientip.FromContext(r.Context())
@@ -1537,7 +1537,7 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 
 	if req.StartPosition != nil {
 		if err := h.sessionMgr.UpdateProgress(session.ID, *req.StartPosition, false); err != nil {
-			slog.Error("failed to set explicit start position", "session", session.ID, "error", err)
+			slog.ErrorContext(r.Context(), "failed to set explicit start position", "component", "api", "session", session.ID, "error", err)
 		} else {
 			session.Position = *req.StartPosition
 			session.IsPaused = false
@@ -1550,13 +1550,13 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		if targetID != "" {
 			event := h.scrobbleEventForSession(r.Context(), session, targetID, float64(effectiveFile.Duration), session.Position)
 			if err := h.WatchScrobbler.ScrobbleStart(r.Context(), event); err != nil {
-				slog.Warn("failed to queue watch provider start scrobble", "session", session.ID, "error", err)
+				slog.WarnContext(r.Context(), "failed to queue watch provider start scrobble", "component", "api", "session", session.ID, "error", err)
 			}
 		}
 	}
 	if h.ChapterThumbnailQueuer != nil && effectiveFile != nil {
-		slog.Info(
-			"queueing chapter thumbnails",
+		slog.InfoContext(r.Context(),
+			"queueing chapter thumbnails", "component", "api",
 			"source",
 			"playback_start",
 			"content_id",
@@ -1808,10 +1808,10 @@ func (h *PlaybackHandler) HandleUpdateProgress(w http.ResponseWriter, r *http.Re
 					event := h.scrobbleEventForSession(r.Context(), sess, targetID, float64(file.Duration), sess.Position)
 					if sess.IsPaused {
 						if err := h.WatchScrobbler.ScrobblePause(r.Context(), event); err != nil {
-							slog.Warn("failed to queue watch provider pause scrobble", "session", sessionID, "error", err)
+							slog.WarnContext(r.Context(), "failed to queue watch provider pause scrobble", "component", "api", "session", sessionID, "error", err)
 						}
 					} else if err := h.WatchScrobbler.ScrobbleStart(r.Context(), event); err != nil {
-						slog.Warn("failed to queue watch provider resume scrobble", "session", sessionID, "error", err)
+						slog.WarnContext(r.Context(), "failed to queue watch provider resume scrobble", "component", "api", "session", sessionID, "error", err)
 					}
 				}
 			}
@@ -1946,7 +1946,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 	} else if transcodeAudio {
 		targetAudioCodec = "aac"
 	}
-	slog.Info("audio switch computed playback state",
+	slog.InfoContext(r.Context(), "audio switch computed playback state", "component", "api",
 		"playback_session_id", sessionID,
 		"previous_base_play_method", baseMethod,
 		"new_base_play_method", newMethod,
@@ -1989,7 +1989,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 			startSegment := computeStartSegment(seekSeconds, ts.Opts().SegmentDuration)
 			// Throttler + exit monitor re-arm via the session's restart hook.
 			if restartErr := h.tm.RestartSessionLocked(context.WithoutCancel(r.Context()), sessionID, ts, seekSeconds, startSegment); restartErr != nil {
-				slog.Error("failed to restart transcode for audio switch", "session", sessionID, "error", restartErr)
+				slog.ErrorContext(r.Context(), "failed to restart transcode for audio switch", "component", "api", "session", sessionID, "error", restartErr)
 			}
 		}
 	}
@@ -2109,7 +2109,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				defer cancel()
 				httpReq, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, nodeURL+"/transcode/start", bytes.NewReader(body))
 				if reqErr != nil {
-					slog.Error("failed to build remote transcode restart for audio switch", "session", sessionID, "node", nodeURL, "error", reqErr)
+					slog.ErrorContext(r.Context(), "failed to build remote transcode restart for audio switch", "component", "api", "session", sessionID, "node", nodeURL, "error", reqErr)
 					writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build transcode request")
 					return
 				}
@@ -2118,20 +2118,20 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 
 				nodeResp, doErr := http.DefaultClient.Do(httpReq)
 				if doErr != nil {
-					slog.Error("remote transcode restart for audio switch failed", "session", sessionID, "node", nodeURL, "error", doErr)
+					slog.ErrorContext(r.Context(), "remote transcode restart for audio switch failed", "component", "api", "session", sessionID, "node", nodeURL, "error", doErr)
 					writeError(w, http.StatusBadGateway, "transcode_node_unavailable", "Transcode node is unavailable")
 					return
 				}
 				defer nodeResp.Body.Close()
 				if nodeResp.StatusCode != http.StatusAccepted {
-					slog.Error("remote transcode restart for audio switch rejected", "session", sessionID, "node", nodeURL, "status", nodeResp.StatusCode)
+					slog.ErrorContext(r.Context(), "remote transcode restart for audio switch rejected", "component", "api", "session", sessionID, "node", nodeURL, "status", nodeResp.StatusCode)
 					writeError(w, http.StatusBadGateway, "transcode_start_failed", "Transcode node rejected the request")
 					return
 				}
 
 				var startResp transcodenode.TranscodeStartResponse
 				if decErr := json.NewDecoder(nodeResp.Body).Decode(&startResp); decErr != nil {
-					slog.Warn("remote transcode restart response decode failed", "session", sessionID, "node", nodeURL, "error", decErr)
+					slog.WarnContext(r.Context(), "remote transcode restart response decode failed", "component", "api", "session", sessionID, "node", nodeURL, "error", decErr)
 				}
 				effectiveHWAccel := strings.TrimSpace(startResp.HWAccel)
 				if effectiveHWAccel == "" {
@@ -2281,7 +2281,7 @@ type transcodeStartState struct {
 func (h *PlaybackHandler) finalizeTranscodeStart(r *http.Request, st transcodeStartState) {
 	if st.switchedFileID != nil {
 		if err := h.sessionMgr.SetEffectiveMediaFileID(st.req.SessionID, *st.switchedFileID); err != nil {
-			slog.Error("failed to update effective media file", "session", st.req.SessionID, "error", err, "playback_session_id", st.req.SessionID)
+			slog.ErrorContext(r.Context(), "failed to update effective media file", "component", "api", "session", st.req.SessionID, "error", err, "playback_session_id", st.req.SessionID)
 		}
 	}
 
@@ -2292,7 +2292,7 @@ func (h *PlaybackHandler) finalizeTranscodeStart(r *http.Request, st transcodeSt
 	transcodeAudio := st.req.TargetCodecAudio != "" && !strings.EqualFold(st.req.TargetCodecAudio, "copy")
 	baseMethod := semanticPlayMethod(st.session)
 
-	slog.Info("transcode start preserved base playback state",
+	slog.InfoContext(r.Context(), "transcode start preserved base playback state", "component", "api",
 		"playback_session_id", st.req.SessionID,
 		"base_play_method", baseMethod,
 		"transport_play_method", playback.PlayTranscode,
@@ -2328,7 +2328,7 @@ func (h *PlaybackHandler) finalizeTranscodeStart(r *http.Request, st transcodeSt
 		SubtitleBurnIn:     st.req.SubtitleBurnIn,
 		SegmentDuration:    segmentDuration,
 	}); err != nil {
-		slog.Error("failed to update transcode stream state", "session", st.req.SessionID, "error", err, "playback_session_id", st.req.SessionID)
+		slog.ErrorContext(r.Context(), "failed to update transcode stream state", "component", "api", "session", st.req.SessionID, "error", err, "playback_session_id", st.req.SessionID)
 	}
 
 	h.syncSessionsNow(r.Context(), "transcode_start")
@@ -2377,7 +2377,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	}
 	abortCurrentSession := func(reason string, cause error) {
 		if abortErr := h.abortPlaybackSession(r.Context(), session); abortErr != nil && !errors.Is(abortErr, playback.ErrSessionNotFound) {
-			slog.Error("failed to abort playback session",
+			slog.ErrorContext(r.Context(), "failed to abort playback session", "component", "api",
 				"session", req.SessionID,
 				"reason", reason,
 				"cause", cause,
@@ -2411,7 +2411,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// advancing. MPEG-2 compatibility HLS is allowed to keep copy-video so Apple
 	// devices can avoid a full video transcode for those files.
 	if req.SeekSeconds > 0 && strings.EqualFold(req.TargetCodecVideo, "copy") && !playback.IsMPEG2VideoCodec(file.CodecVideo) {
-		slog.Info("forcing video transcode for seeked copy request",
+		slog.InfoContext(r.Context(), "forcing video transcode for seeked copy request", "component", "api",
 			"playback_session_id", req.SessionID,
 			"seek_seconds", req.SeekSeconds,
 			"source_video_codec", file.CodecVideo,
@@ -2443,7 +2443,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	}
 	if requestedFile != nil && file != nil && requestedFile.ID != file.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
-			slog.Warn("requested transcode file preflight failed; continuing with alternate file",
+			slog.WarnContext(r.Context(), "requested transcode file preflight failed; continuing with alternate file", "component", "api",
 				"requested_file_id", requestedFile.ID,
 				"effective_file_id", file.ID,
 				"error", err,
@@ -2472,7 +2472,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	if tcNode != nil {
 		// Remote transcode: forward to the assigned node.
 		if err := h.sessionMgr.SetTranscodeNodeURL(req.SessionID, tcNode.URL); err != nil {
-			slog.Error("set transcode node URL", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+			slog.ErrorContext(r.Context(), "set transcode node URL", "component", "api", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
 		}
 
 		nodeReq := transcodenode.TranscodeStartRequest{
@@ -2507,20 +2507,20 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 
 		resp, err := http.DefaultClient.Do(httpReq)
 		if err != nil {
-			slog.Error("remote transcode start failed", "error", err, "node", tcNode.URL, "session", req.SessionID, "playback_session_id", req.SessionID)
+			slog.ErrorContext(r.Context(), "remote transcode start failed", "component", "api", "error", err, "node", tcNode.URL, "session", req.SessionID, "playback_session_id", req.SessionID)
 			writeError(w, http.StatusBadGateway, "transcode_node_unavailable", "Transcode node is unavailable")
 			return
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusAccepted {
-			slog.Error("remote transcode start rejected", "status", resp.StatusCode, "node", tcNode.URL)
+			slog.ErrorContext(r.Context(), "remote transcode start rejected", "component", "api", "status", resp.StatusCode, "node", tcNode.URL)
 			writeError(w, http.StatusBadGateway, "transcode_start_failed", "Transcode node rejected the request")
 			return
 		}
 		var nodeResp transcodenode.TranscodeStartResponse
 		if err := json.NewDecoder(resp.Body).Decode(&nodeResp); err != nil {
-			slog.Warn("remote transcode start response decode failed",
+			slog.WarnContext(r.Context(), "remote transcode start response decode failed", "component", "api",
 				"error", err,
 				"node", tcNode.URL,
 				"session", req.SessionID,
@@ -2702,7 +2702,7 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 
 	manifest, err := transcodeSession.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	if err != nil {
-		slog.Error("build transcode manifest", "error", err, "session", sessionID, "playback_session_id", sessionID)
+		slog.ErrorContext(r.Context(), "build transcode manifest", "component", "api", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Transcode manifest not ready")
 		return
 	}
@@ -2770,7 +2770,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			if !decision.Progress.LastProducedAt.IsZero() {
 				lastProducedAgeMS = now.Sub(decision.Progress.LastProducedAt).Milliseconds()
 			}
-			slog.Info("transcode segment missing",
+			slog.InfoContext(r.Context(), "transcode segment missing", "component", "api",
 				"segment", segmentName,
 				"requested_segment", segNum,
 				"produced_head", decision.Progress.ProducedHead,
@@ -2784,7 +2784,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 				"playback_session_id", sessionID,
 			)
 			if decision.Wait {
-				slog.Info("transcode segment wait",
+				slog.InfoContext(r.Context(), "transcode segment wait", "component", "api",
 					"segment", segmentName,
 					"requested_segment", segNum,
 					"produced_head", decision.Progress.ProducedHead,
@@ -2799,7 +2799,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 				)
 				segmentPath, err = transcodeSession.WaitForSegment(segmentName, decision.WaitTimeout)
 				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-					slog.Info("transcode segment wait timeout",
+					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "api",
 						"segment", segmentName,
 						"requested_segment", segNum,
 						"produced_head", decision.Progress.ProducedHead,
@@ -2822,7 +2822,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				seekSeconds, ok, seekErr := transcodeSession.RestartSeekTarget(segNum)
 				if seekErr != nil && !errors.Is(seekErr, playback.ErrManifestNotReady) {
-					slog.Error("resolve transcode seek target", "error", seekErr, "segment", segmentName, "session", sessionID, "playback_session_id", sessionID)
+					slog.ErrorContext(r.Context(), "resolve transcode seek target", "component", "api", "error", seekErr, "segment", segmentName, "session", sessionID, "playback_session_id", sessionID)
 				}
 
 				// Copy-mode with an unresolved seek target (ok=false, no error)
@@ -2836,7 +2836,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 				}
 
 				if ok {
-					slog.Info("transcode seek restart",
+					slog.InfoContext(r.Context(), "transcode seek restart", "component", "api",
 						"segment", segmentName,
 						"requested_segment", segNum,
 						"produced_head", decision.Progress.ProducedHead,
@@ -2949,13 +2949,13 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 			req.Header.Set("X-Silo-Stream-Token", stToken)
 			validToken = stToken
 		} else if verifyErr != nil {
-			slog.Warn("stream token not forwarded to transcode node", "error", verifyErr, "playback_session_id", sessionID)
+			slog.WarnContext(r.Context(), "stream token not forwarded to transcode node", "component", "api", "error", verifyErr, "playback_session_id", sessionID)
 		}
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		slog.Error("proxy to transcode node", "error", err, "url", targetURL, "playback_session_id", sessionID)
+		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "api", "error", err, "url", targetURL, "playback_session_id", sessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}
@@ -2970,7 +2970,7 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 	if validToken != "" && resp.StatusCode == http.StatusOK && strings.HasSuffix(path, ".m3u8") {
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			slog.Error("read transcode node manifest", "error", readErr, "url", targetURL, "playback_session_id", sessionID)
+			slog.ErrorContext(r.Context(), "read transcode node manifest", "component", "api", "error", readErr, "url", targetURL, "playback_session_id", sessionID)
 			http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 			return
 		}

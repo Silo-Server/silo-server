@@ -342,7 +342,7 @@ func (h *ProgressHandler) HandleSyncProgress(w http.ResponseWriter, r *http.Requ
 			now := time.Now()
 			eventAt := clampEventAt(client, now)
 			if !client.IsZero() && client.After(now.Add(progressClockSkew)) {
-				slog.Warn("clamped future-dated progress event time",
+				slog.WarnContext(r.Context(), "clamped future-dated progress event time", "component", "api",
 					"profile_id", profileID, "media_item_id", item.MediaItemID)
 			}
 			pos, completed, skip := userstore.ResolveProgressState(item.Position, item.Duration, thresholds)

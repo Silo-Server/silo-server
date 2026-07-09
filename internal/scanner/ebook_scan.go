@@ -95,7 +95,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots []string) ([
 			}
 		}
 		if scan.failed() {
-			slog.Warn("ebook scan: root walk incomplete; root excluded from missing-file reconciliation",
+			slog.WarnContext(ctx, "ebook scan: root walk incomplete; root excluded from missing-file reconciliation", "component", "scanner",
 				"folder_id", folderID,
 				"root", cleanRoot,
 				"walk_failures", scan.walkFailures,
@@ -146,7 +146,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	}
 
 	workers := ebookScanWorkers()
-	slog.Info("ebook scan: starting",
+	slog.InfoContext(ctx, "ebook scan: starting", "component", "scanner",
 		"folder_id", folder.ID,
 		"candidates", len(candidates),
 		"workers", workers,
@@ -186,7 +186,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 					failMu.Lock()
 					failures = append(failures, fmt.Errorf("%s: %w", path, err))
 					failMu.Unlock()
-					slog.Warn("ebook scan: file failed",
+					slog.WarnContext(ctx, "ebook scan: file failed", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", path,
 						"error", err,
@@ -196,7 +196,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 				if n%500 == 0 || n == int64(len(candidates)) {
 					failedCount := atomic.LoadInt64(&failed)
 					skippedCount := atomic.LoadInt64(&skipped)
-					slog.Info("ebook scan: progress",
+					slog.InfoContext(ctx, "ebook scan: progress", "component", "scanner",
 						"folder_id", folder.ID,
 						"processed", n,
 						"failed", failedCount,
@@ -228,7 +228,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 		return cancelErr
 	}
 
-	slog.Info("ebook scan: completed",
+	slog.InfoContext(ctx, "ebook scan: completed", "component", "scanner",
 		"folder_id", folder.ID,
 		"processed", atomic.LoadInt64(&processed),
 		"failed", atomic.LoadInt64(&failed),
@@ -288,7 +288,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 	reconcileRoots, sawFiles := splitEbookReconcileRoots(scans)
 	if len(reconcileRoots) == 0 {
 		if len(scans) > 0 {
-			slog.Warn("ebook scan: every root walk failed; skipping missing-file reconciliation",
+			slog.WarnContext(ctx, "ebook scan: every root walk failed; skipping missing-file reconciliation", "component", "scanner",
 				"folder_id", folder.ID,
 			)
 		}
@@ -317,7 +317,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 				return err
 			}
 			if !allowed {
-				slog.Warn("ebook scan: walk saw zero ebooks but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed",
+				slog.WarnContext(ctx, "ebook scan: walk saw zero ebooks but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed", "component", "scanner",
 					"folder_id", folder.ID,
 					"existing_files", existingCount,
 					"full_scan", fullScan,
@@ -363,7 +363,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 			}
 			if mf.MissingSince == nil {
 				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
-					slog.Error("ebook scan: failed to mark file missing",
+					slog.ErrorContext(ctx, "ebook scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", mf.FilePath,
 						"error", err,
@@ -381,7 +381,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
 		if trashed > 0 {
-			slog.Info("ebook scan: emptied trash", "folder_id", folder.ID, "deleted", trashed)
+			slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 		}
 	}
 
@@ -399,7 +399,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 	}
 
 	if missing > 0 || removedMemberships > 0 || deletedItems > 0 {
-		slog.Info("ebook scan: reconciled missing files",
+		slog.InfoContext(ctx, "ebook scan: reconciled missing files", "component", "scanner",
 			"folder_id", folder.ID,
 			"missing", missing,
 			"memberships_removed", removedMemberships,
@@ -435,7 +435,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 
 	existingContentID, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
 	if skipErr != nil {
-		slog.Warn("ebook scan: skip-check failed, falling through",
+		slog.WarnContext(ctx, "ebook scan: skip-check failed, falling through", "component", "scanner",
 			"folder_id", folder.ID,
 			"path", filePath,
 			"error", skipErr,
@@ -481,7 +481,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		return fmt.Errorf("upsert ebook file: %w", err)
 	}
 	if err := applyEbookLocalCover(ctx, s.itemRepo, s.imageCacher, contentID, filePath, &parsed); err != nil {
-		slog.Warn("ebook scan: local cover upload failed",
+		slog.WarnContext(ctx, "ebook scan: local cover upload failed", "component", "scanner",
 			"folder_id", folder.ID,
 			"content_id", contentID,
 			"path", filePath,
@@ -503,7 +503,7 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		}
 	}
 	s.autoLinkLiteraryWork(ctx, contentID)
-	slog.Info("ebook scan: indexed",
+	slog.InfoContext(ctx, "ebook scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
 		"content_id", contentID,
 		"title", parsed.Title,
@@ -519,11 +519,11 @@ func (s *Scanner) autoLinkLiteraryWork(ctx context.Context, contentID string) {
 	}
 	workID, linked, err := s.literaryWorkLinker.AutoLinkContent(ctx, contentID)
 	if err != nil {
-		slog.Warn("literary work auto-link failed", "content_id", contentID, "error", err)
+		slog.WarnContext(ctx, "literary work auto-link failed", "component", "scanner", "content_id", contentID, "error", err)
 		return
 	}
 	if linked {
-		slog.Info("literary work auto-linked", "content_id", contentID, "work_id", workID)
+		slog.InfoContext(ctx, "literary work auto-linked", "component", "scanner", "content_id", contentID, "work_id", workID)
 	}
 }
 

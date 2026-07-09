@@ -53,7 +53,7 @@ func (h *RecommendationsHandler) HandleTasteSeedItems(w http.ResponseWriter, r *
 	// Fetch a page-sized window of candidate IDs ordered by engagement + rating.
 	candidateIDs, err := h.recsRepo.GetTasteSeedCandidates(r.Context(), limit, offset)
 	if err != nil {
-		slog.Error("TasteSeedItems: candidate query failed", "user_id", userID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(r.Context(), "TasteSeedItems: candidate query failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch taste seed candidates")
 		return
 	}
@@ -66,7 +66,7 @@ func (h *RecommendationsHandler) HandleTasteSeedItems(w http.ResponseWriter, r *
 	// Hydrate items, applying the user's library/content-rating access filter.
 	mediaItems, err := h.Fetcher.FetchItemsByContentIDs(r.Context(), candidateIDs, filter)
 	if err != nil {
-		slog.Error("TasteSeedItems: hydrate failed", "user_id", userID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(r.Context(), "TasteSeedItems: hydrate failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to hydrate taste seed items")
 		return
 	}
@@ -136,7 +136,7 @@ func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.
 
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
 	if err != nil || store == nil {
-		slog.Error("TasteSeed: failed to load user store", "user_id", userID, "error", err)
+		slog.ErrorContext(r.Context(), "TasteSeed: failed to load user store", "component", "api", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load user store")
 		return
 	}
@@ -149,7 +149,7 @@ func (h *RecommendationsHandler) HandleTasteSeed(w http.ResponseWriter, r *http.
 		if err := store.AddFavorite(r.Context(), profileID, id); err != nil {
 			// Don't fail the whole request on a single item error — log and
 			// continue so the user's other picks still seed their profile.
-			slog.Warn("TasteSeed: failed to add favorite", "user_id", userID, "profile_id", profileID, "item_id", id, "error", err)
+			slog.WarnContext(r.Context(), "TasteSeed: failed to add favorite", "component", "api", "user_id", userID, "profile_id", profileID, "item_id", id, "error", err)
 			continue
 		}
 		added++

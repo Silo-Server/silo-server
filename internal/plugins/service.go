@@ -118,8 +118,8 @@ func (s *Service) OnLifecycleChange(ctx context.Context) {
 		func(hook func(context.Context)) {
 			defer func() {
 				if recovered := recover(); recovered != nil {
-					slog.Error(
-						"plugin lifecycle hook panicked; continuing",
+					slog.ErrorContext(ctx,
+						"plugin lifecycle hook panicked; continuing", "component", "plugins",
 						"panic", recovered,
 						"stack", string(debug.Stack()),
 					)
@@ -279,7 +279,7 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 	if err := s.installations.Update(ctx, installationID, UpdateInstallationInput{
 		AvailableVersion: &empty,
 	}); err != nil {
-		slog.Warn("failed to clear available_version after update",
+		slog.WarnContext(ctx, "failed to clear available_version after update", "component", "plugins",
 			"installation_id", installationID, "error", err)
 	}
 
@@ -408,8 +408,8 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 		}
 		if _, err := s.ensureLoadedInstallation(ctx, installation); err != nil {
 			if errors.Is(err, ErrArchiveNotFound) {
-				slog.Warn(
-					"plugin preload skipped: archive not found for enabled installation",
+				slog.WarnContext(ctx,
+					"plugin preload skipped: archive not found for enabled installation", "component", "plugins",
 					"installation_id", installation.ID,
 					"plugin_id", installation.PluginID,
 					"version", installation.Version,
@@ -681,7 +681,7 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int) (plugi
 	if err == nil {
 		installedManifest, manifestErr := LoadManifestFile(InstalledManifestPath(installation.InstallPath))
 		if manifestErr != nil {
-			slog.Warn("plugin installed manifest unavailable; reusing healthy client",
+			slog.WarnContext(ctx, "plugin installed manifest unavailable; reusing healthy client", "component", "plugins",
 				"installation_id", installation.ID,
 				"plugin_id", installation.PluginID,
 				"version", installation.Version,
@@ -693,7 +693,7 @@ func (s *Service) doEnsureClient(ctx context.Context, installationID int) (plugi
 		if cachedManifest != nil && proto.Equal(cachedManifest, installedManifest) {
 			return client, nil
 		}
-		slog.Warn("plugin client manifest drift detected; restarting",
+		slog.WarnContext(ctx, "plugin client manifest drift detected; restarting", "component", "plugins",
 			"installation_id", installation.ID,
 			"plugin_id", installation.PluginID,
 			"cached_plugin_id", manifestPluginID(cachedManifest),

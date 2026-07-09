@@ -66,13 +66,13 @@ func (m *TaskManager) Start(ctx context.Context) {
 
 		configs, err := m.triggerRepo.GetTriggers(ctx, key)
 		if err != nil {
-			m.logger.Error("failed to load triggers", "task", key, "error", err)
+			m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
 		}
 		if len(configs) == 0 {
 			configs = w.task.DefaultTriggers()
 			if len(configs) > 0 {
 				if err := m.triggerRepo.SetTriggers(ctx, key, configs); err != nil {
-					m.logger.Error("failed to persist default triggers", "task", key, "error", err)
+					m.logger.ErrorContext(ctx, "failed to persist default triggers", "task", key, "error", err)
 				}
 			}
 		}
@@ -82,7 +82,7 @@ func (m *TaskManager) Start(ctx context.Context) {
 		go m.triggerLoop(ctx, w)
 	}
 
-	m.logger.Info("task manager started", "tasks", len(m.tasks))
+	m.logger.InfoContext(ctx, "task manager started", "tasks", len(m.tasks))
 }
 
 // triggerLoop listens on all trigger channels for a worker and runs the task
@@ -148,7 +148,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 
 		shouldRun, shouldRunErr := m.shouldRunScheduledTask(ctx, w)
 		if shouldRunErr != nil {
-			m.logger.Warn("scheduled task preflight failed; running task",
+			m.logger.WarnContext(ctx, "scheduled task preflight failed; running task",
 				"task", w.task.Key(), "error", shouldRunErr)
 		}
 		if shouldRunErr == nil && !shouldRun {
@@ -169,7 +169,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 
 		if result != nil {
 			if insertErr := m.historyRepo.Insert(ctx, *result); insertErr != nil {
-				m.logger.Error("failed to persist execution result",
+				m.logger.ErrorContext(ctx, "failed to persist execution result",
 					"task", w.task.Key(), "error", insertErr)
 			}
 		}
@@ -241,7 +241,7 @@ func (m *TaskManager) RunTask(ctx context.Context, key string) error {
 
 	if result != nil {
 		if insertErr := m.historyRepo.Insert(ctx, *result); insertErr != nil {
-			m.logger.Error("failed to persist execution result", "task", key, "error", insertErr)
+			m.logger.ErrorContext(ctx, "failed to persist execution result", "task", key, "error", insertErr)
 		}
 	}
 

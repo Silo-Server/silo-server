@@ -140,7 +140,7 @@ func (h *RecommendationsHandler) HandleForYouMain(w http.ResponseWriter, r *http
 
 	row, err := h.reader.GetForYouMain(r.Context(), userID, profileID, limit, filter)
 	if err != nil {
-		slog.Error("ForYouMain failed", "user_id", userID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(r.Context(), "ForYouMain failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
 		return
 	}
@@ -166,7 +166,7 @@ func (h *RecommendationsHandler) HandleForYouRows(w http.ResponseWriter, r *http
 
 	rows, err := h.reader.GetForYouRows(r.Context(), userID, profileID, limit, filter)
 	if err != nil {
-		slog.Error("ForYouRows failed", "user_id", userID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(r.Context(), "ForYouRows failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
 		return
 	}
@@ -457,7 +457,7 @@ func (h *RecommendationsHandler) HandleDiscover(w http.ResponseWriter, r *http.R
 
 	rows, err := h.reader.GetDiscoverRows(r.Context(), userID, profileID, 20, filter)
 	if err != nil {
-		slog.Error("Discover failed", "user_id", userID, "profile_id", profileID, "error", err)
+		slog.ErrorContext(r.Context(), "Discover failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch recommendations")
 		return
 	}
@@ -473,8 +473,8 @@ func (h *RecommendationsHandler) HandleDiscover(w http.ResponseWriter, r *http.R
 		rows,
 	)
 	if upcomingErr != nil {
-		slog.Warn(
-			"Discover: schedule-aware blending unavailable; falling back to legacy rows",
+		slog.WarnContext(r.Context(),
+			"Discover: schedule-aware blending unavailable; falling back to legacy rows", "component", "api",
 			"user_id",
 			userID,
 			"profile_id",
@@ -558,8 +558,8 @@ func (h *RecommendationsHandler) HandleSection(w http.ResponseWriter, r *http.Re
 
 	row, err := h.reader.GetSection(r.Context(), userID, profileID, kind, key, limit, filter)
 	if err != nil {
-		slog.Error(
-			"Section failed",
+		slog.ErrorContext(r.Context(),
+			"Section failed", "component", "api",
 			"user_id", userID,
 			"profile_id", profileID,
 			"kind", kind,
@@ -627,7 +627,7 @@ func (h *RecommendationsHandler) loadItemEnrichment(
 
 	mediaItems, err := h.Fetcher.FetchItemsByContentIDs(ctx, ids, filter)
 	if err != nil {
-		slog.Error("Recommendations: fetch items failed", "error", err)
+		slog.ErrorContext(ctx, "Recommendations: fetch items failed", "component", "api", "error", err)
 		return nil, err
 	}
 	for _, mi := range mediaItems {
@@ -636,7 +636,7 @@ func (h *RecommendationsHandler) loadItemEnrichment(
 
 	overlays, overlayErr := h.Fetcher.ListOverlaySummaries(ctx, ids, filter)
 	if overlayErr != nil {
-		slog.Error("Recommendations: overlay summaries failed", "error", overlayErr)
+		slog.ErrorContext(ctx, "Recommendations: overlay summaries failed", "component", "api", "error", overlayErr)
 	} else {
 		out.overlays = overlays
 	}

@@ -593,7 +593,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {
 		if cleanupErr := deleteUploadedAvatarObjects(r.Context(), h.AvatarStore, userID, profileID); cleanupErr != nil {
-			slog.Warn("profile avatar cleanup failed after update", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
+			slog.WarnContext(r.Context(), "profile avatar cleanup failed after update", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
 		}
 	}
 
@@ -656,14 +656,14 @@ func (h *ProfileHandler) HandleDeleteProfile(w http.ResponseWriter, r *http.Requ
 	}
 	if isUploadedAvatarRef(profile.Avatar) {
 		if cleanupErr := deleteUploadedAvatarObjects(r.Context(), h.AvatarStore, userID, profileID); cleanupErr != nil {
-			slog.Warn("profile avatar cleanup failed after delete", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
+			slog.WarnContext(r.Context(), "profile avatar cleanup failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", cleanupErr)
 		}
 	}
 	if h.DeviceLibraryPurger != nil {
 		purgeCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
 		defer cancel()
 		if purgeErr := h.DeviceLibraryPurger.PurgeProfileDevices(purgeCtx, userID, profileID); purgeErr != nil {
-			slog.Warn("profile device-library purge failed after delete", "user_id", userID, "profile_id", profileID, "error", purgeErr)
+			slog.WarnContext(r.Context(), "profile device-library purge failed after delete", "component", "api", "user_id", userID, "profile_id", profileID, "error", purgeErr)
 		}
 	}
 
@@ -806,7 +806,7 @@ func (h *ProfileHandler) HandleListHouseholdSessions(w http.ResponseWriter, r *h
 
 	sessions, err := h.SessionsReader.Load(r.Context(), r, PlaybackSessionsQuery{UserID: userID})
 	if err != nil {
-		slog.Error("failed to list household playback sessions", "user_id", userID, "error", err)
+		slog.ErrorContext(r.Context(), "failed to list household playback sessions", "component", "api", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list playback sessions")
 		return
 	}

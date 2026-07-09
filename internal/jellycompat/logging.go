@@ -54,7 +54,7 @@ func requestLoggerMiddleware(next http.Handler) http.Handler {
 			routePattern = routeCtx.RoutePattern()
 		}
 
-		slog.Info("jellycompat request",
+		slog.InfoContext(r.Context(), "jellycompat request", "component", "jellycompat",
 			"request_id", middleware.GetReqID(r.Context()),
 			"method", r.Method,
 			"path", r.URL.Path,

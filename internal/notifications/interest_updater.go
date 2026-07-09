@@ -134,7 +134,7 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 		}
 		seriesID, ok, err := u.resolveSeriesID(ctx, mutation.itemID)
 		if err != nil {
-			u.logger.Warn("interest series resolution failed",
+			u.logger.WarnContext(ctx, "interest series resolution failed",
 				"item_id", mutation.itemID, "error", err)
 			requeue[mutation] = failures + 1
 			continue
@@ -152,7 +152,7 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 		err = u.RecomputeSeries(recomputeCtx, mutation.userID, mutation.profileID, seriesID)
 		cancel()
 		if err != nil {
-			u.logger.Warn("interest recompute failed",
+			u.logger.WarnContext(ctx, "interest recompute failed",
 				"user_id", mutation.userID, "profile_id", mutation.profileID,
 				"series_id", seriesID, "error", err)
 			requeue[mutation] = failures + 1
@@ -165,7 +165,7 @@ func (u *InterestUpdater) flush(ctx context.Context) {
 	u.mu.Lock()
 	for mutation, failures := range requeue {
 		if failures >= interestMaxFlushAttempts {
-			u.logger.Warn("interest mutation dropped after repeated failures",
+			u.logger.WarnContext(ctx, "interest mutation dropped after repeated failures",
 				"item_id", mutation.itemID, "profile_id", mutation.profileID)
 			continue
 		}

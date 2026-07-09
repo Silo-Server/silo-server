@@ -62,7 +62,7 @@ func (s *System) requesterDiscordID(ctx context.Context, userID int) string {
 	}
 	prefs, err := s.DiscordPrefs.Get(ctx, userID)
 	if err != nil {
-		s.logger.Warn("server channel request post: discord identity lookup failed",
+		s.logger.WarnContext(ctx, "server channel request post: discord identity lookup failed",
 			"user_id", userID, "error", err)
 		return ""
 	}

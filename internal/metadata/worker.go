@@ -153,11 +153,11 @@ func (w *MatchWorker) processUnmatched(ctx context.Context) {
 	if w.enableTVSeriesRootQueue && w.seriesClaimer != nil {
 		jobs, err := w.seriesClaimer.Claim(ctx, w.claimBatchSize())
 		if err != nil {
-			slog.Error("metadata: failed to claim unmatched series roots", "error", err)
+			slog.ErrorContext(ctx, "metadata: failed to claim unmatched series roots", "component", "metadata", "error", err)
 		} else if len(jobs) > 0 {
-			slog.Info("metadata: processing unmatched series roots", "count", len(jobs))
+			slog.InfoContext(ctx, "metadata: processing unmatched series roots", "component", "metadata", "count", len(jobs))
 			if _, err := w.processSeriesRoots(ctx, jobs); err != nil {
-				slog.Error("metadata: failed to process unmatched series roots", "error", err)
+				slog.ErrorContext(ctx, "metadata: failed to process unmatched series roots", "component", "metadata", "error", err)
 			}
 		}
 	}
@@ -165,23 +165,23 @@ func (w *MatchWorker) processUnmatched(ctx context.Context) {
 	if w.movieClaimer != nil {
 		files, err := w.movieClaimer.Claim(ctx, w.claimBatchSize())
 		if err != nil {
-			slog.Error("metadata: failed to claim queued movie files", "error", err)
+			slog.ErrorContext(ctx, "metadata: failed to claim queued movie files", "component", "metadata", "error", err)
 		} else if len(files) > 0 {
-			slog.Info("metadata: processing queued movie files", "count", len(files))
+			slog.InfoContext(ctx, "metadata: processing queued movie files", "component", "metadata", "count", len(files))
 			w.processQueuedMovieFiles(ctx, files)
 		}
 	}
 
 	files, err := w.claimBackgroundFiles(ctx)
 	if err != nil {
-		slog.Error("metadata: failed to list unmatched files", "error", err)
+		slog.ErrorContext(ctx, "metadata: failed to list unmatched files", "component", "metadata", "error", err)
 		return
 	}
 	if len(files) == 0 {
 		return
 	}
 
-	slog.Info("metadata: processing unmatched files", "count", len(files))
+	slog.InfoContext(ctx, "metadata: processing unmatched files", "component", "metadata", "count", len(files))
 	w.processFiles(ctx, files)
 }
 
@@ -192,7 +192,7 @@ func (w *MatchWorker) processFile(ctx context.Context, file *models.MediaFile) {
 			defer cancel()
 
 			if err := w.fileLister.MarkMatchAttempted(stampCtx, file.ID); err != nil {
-				slog.Warn("metadata: failed to record match attempt",
+				slog.WarnContext(ctx, "metadata: failed to record match attempt", "component", "metadata",
 					"file_id", file.ID,
 					"path", file.FilePath,
 					"error", err)
@@ -204,7 +204,7 @@ func (w *MatchWorker) processFile(ctx context.Context, file *models.MediaFile) {
 
 func (w *MatchWorker) processFileWithFolderCache(ctx context.Context, file *models.MediaFile, folderEnabledCache *sync.Map, deferredSeriesLinks *sync.Map) {
 	if !w.folderEnabled(ctx, file.MediaFolderID, folderEnabledCache) {
-		slog.Info("metadata: skipping file in disabled library",
+		slog.InfoContext(ctx, "metadata: skipping file in disabled library", "component", "metadata",
 			"file_id", file.ID,
 			"path", file.FilePath,
 			"folder_id", file.MediaFolderID,
@@ -215,7 +215,7 @@ func (w *MatchWorker) processFileWithFolderCache(ctx context.Context, file *mode
 	// Phase 0: Create skeleton item or find existing.
 	skeleton, err := w.service.createOrFindSkeleton(ctx, file, file.MediaFolderID)
 	if err != nil {
-		slog.Warn("metadata: skeleton creation failed",
+		slog.WarnContext(ctx, "metadata: skeleton creation failed", "component", "metadata",
 			"file_id", file.ID, "path", file.FilePath, "error", err)
 		return
 	}
@@ -230,7 +230,7 @@ func (w *MatchWorker) processFileWithFolderCache(ctx context.Context, file *mode
 		} else if skeleton.Type == "series" {
 			// Fallback for callers that don't provide a deferred map.
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, skeleton.ContentID); err != nil {
-				slog.Warn("metadata: failed to ensure series episode links",
+				slog.WarnContext(ctx, "metadata: failed to ensure series episode links", "component", "metadata",
 					"content_id", skeleton.ContentID,
 					"file_id", file.ID,
 					"path", file.FilePath,
@@ -246,14 +246,14 @@ func (w *MatchWorker) processFileWithFolderCache(ctx context.Context, file *mode
 	req := w.buildProcessRequestForGroup(ctx, file, skeleton, nil)
 	result, err := w.service.Process(ctx, req)
 	if err != nil {
-		slog.Warn("metadata: enrichment failed",
+		slog.WarnContext(ctx, "metadata: enrichment failed", "component", "metadata",
 			"file_id", file.ID, "path", file.FilePath, "error", err)
 		w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched", "content_id", skeleton.ContentID, "file_id", file.ID, "path", file.FilePath)
 		// For series items, synthesize fallback episode structure so episodes
 		// are visible even when no provider match was found.
 		if skeleton.Type == "series" {
 			if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
-				slog.Warn("metadata: fallback episode synthesis failed after enrichment error",
+				slog.WarnContext(ctx, "metadata: fallback episode synthesis failed after enrichment error", "component", "metadata",
 					"content_id", skeleton.ContentID, "error", fbErr)
 			}
 		}
@@ -265,7 +265,7 @@ func (w *MatchWorker) processFileWithFolderCache(ctx context.Context, file *mode
 		// Same fallback synthesis for series when no provider data was returned.
 		if skeleton.Type == "series" {
 			if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
-				slog.Warn("metadata: fallback episode synthesis failed for unmatched series",
+				slog.WarnContext(ctx, "metadata: fallback episode synthesis failed for unmatched series", "component", "metadata",
 					"content_id", skeleton.ContentID, "error", fbErr)
 			}
 		}
@@ -281,7 +281,7 @@ func (w *MatchWorker) buildProcessRequestForGroup(ctx context.Context, represent
 		if skeleton != nil && skeleton.Type == "series" && w.service != nil && w.service.fileRepo != nil {
 			loadedFiles, err := w.service.fileRepo.ListByObservedRootPath(ctx, representative.MediaFolderID, skeleton.ObservedRootPath)
 			if err != nil {
-				slog.Warn("metadata: failed to load observed-root files",
+				slog.WarnContext(ctx, "metadata: failed to load observed-root files", "component", "metadata",
 					"folder_id", representative.MediaFolderID,
 					"observed_root_path", skeleton.ObservedRootPath,
 					"error", err,
@@ -451,7 +451,7 @@ func (w *MatchWorker) ProcessAllByFolderAndPathPrefix(ctx context.Context, folde
 	if err != nil {
 		return 0, err
 	}
-	slog.Info("metadata: scoped matcher selected",
+	slog.InfoContext(ctx, "metadata: scoped matcher selected", "component", "metadata",
 		"folder_id", folderID,
 		"path_prefix", pathPrefix,
 		"matcher_path", scopedMatcherPath(useSeriesQueue, useMovieQueue),
@@ -547,7 +547,7 @@ func (w *MatchWorker) processFiles(ctx context.Context, files []*models.MediaFil
 			}
 			contentID := key.(string)
 			if err := w.service.ensureSeriesEpisodeLinks(ctx, contentID); err != nil {
-				slog.Warn("metadata: deferred series episode link failed",
+				slog.WarnContext(ctx, "metadata: deferred series episode link failed", "component", "metadata",
 					"content_id", contentID, "error", err)
 			}
 			return true
@@ -567,7 +567,7 @@ func (w *MatchWorker) isMatchSuppressed(ctx context.Context, file *models.MediaF
 	}
 	suppressed, err := checker.IsMatchSuppressed(ctx, file.ID)
 	if err != nil {
-		slog.Warn("metadata: failed to check match suppression",
+		slog.WarnContext(ctx, "metadata: failed to check match suppression", "component", "metadata",
 			"file_id", file.ID,
 			"path", file.FilePath,
 			"error", err,
@@ -575,7 +575,7 @@ func (w *MatchWorker) isMatchSuppressed(ctx context.Context, file *models.MediaF
 		return true
 	}
 	if suppressed {
-		slog.Info("metadata: skipping suppressed unmatched file",
+		slog.InfoContext(ctx, "metadata: skipping suppressed unmatched file", "component", "metadata",
 			"file_id", file.ID,
 			"path", file.FilePath,
 		)
@@ -628,13 +628,13 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 	if err != nil {
 		queueErr := truncateSeriesQueueError(err.Error())
 		if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, queueErr); updateErr != nil {
-			slog.Warn("metadata: failed to update movie queue error",
+			slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
 				"error", updateErr,
 			)
 		}
-		slog.Warn("metadata: movie queue skeleton creation failed",
+		slog.WarnContext(ctx, "metadata: movie queue skeleton creation failed", "component", "metadata",
 			"file_id", file.ID,
 			"path", file.FilePath,
 			"error", err,
@@ -648,7 +648,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		// future enqueues (see movieQueueFileEligibleCond), so this drains rows
 		// claimed before the skipped root was recorded.
 		if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
-			slog.Warn("metadata: failed to delete skipped movie queue row",
+			slog.WarnContext(ctx, "metadata: failed to delete skipped movie queue row", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
 				"error", err,
@@ -659,7 +659,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 	}
 	if skeleton == nil || strings.TrimSpace(skeleton.ContentID) == "" {
 		if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, truncateSeriesQueueError("movie queue claimed without a content id")); updateErr != nil {
-			slog.Warn("metadata: failed to update movie queue error",
+			slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
 				"error", updateErr,
@@ -669,7 +669,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 	}
 	if skeleton.ItemStatus == "ambiguous" {
 		if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
-			slog.Warn("metadata: failed to delete ambiguous movie queue row",
+			slog.WarnContext(ctx, "metadata: failed to delete ambiguous movie queue row", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
 				"error", err,
@@ -685,13 +685,13 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		if processErr != nil {
 			queueErr := truncateSeriesQueueError(processErr.Error())
 			if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, queueErr); updateErr != nil {
-				slog.Warn("metadata: failed to update movie queue error",
+				slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 					"file_id", file.ID,
 					"path", file.FilePath,
 					"error", updateErr,
 				)
 			}
-			slog.Warn("metadata: enrichment failed",
+			slog.WarnContext(ctx, "metadata: enrichment failed", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
 				"error", processErr,
@@ -700,7 +700,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 			return false
 		} else if result != nil && !result.Updated {
 			if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, truncateSeriesQueueError(ErrMetadataNotFound.Error())); updateErr != nil {
-				slog.Warn("metadata: failed to update movie queue error",
+				slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 					"file_id", file.ID,
 					"path", file.FilePath,
 					"error", updateErr,
@@ -713,7 +713,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 	}
 
 	if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
-		slog.Warn("metadata: failed to delete movie queue row",
+		slog.WarnContext(ctx, "metadata: failed to delete movie queue row", "component", "metadata",
 			"file_id", file.ID,
 			"path", file.FilePath,
 			"error", err,
@@ -868,7 +868,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath); err != nil {
 			return 0, err
 		}
-		slog.Info("metadata: series root dropped because files disappeared",
+		slog.InfoContext(ctx, "metadata: series root dropped because files disappeared", "component", "metadata",
 			"folder_id", job.MediaFolderID,
 			"observed_root_path", job.ObservedRootPath,
 		)
@@ -892,7 +892,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, queueErr); updateErr != nil {
 						return 0, updateErr
 					}
-					slog.Warn("metadata: enrichment failed",
+					slog.WarnContext(ctx, "metadata: enrichment failed", "component", "metadata",
 						"file_id", representative.ID,
 						"path", representative.FilePath,
 						"error", processErr)
@@ -901,7 +901,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 						"file_id", representative.ID,
 						"path", representative.FilePath)
 					if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
-						slog.Warn("metadata: fallback episode synthesis failed after series root enrichment error",
+						slog.WarnContext(ctx, "metadata: fallback episode synthesis failed after series root enrichment error", "component", "metadata",
 							"content_id", skeleton.ContentID, "error", fbErr)
 					}
 					return 0, nil
@@ -915,7 +915,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 						"file_id", representative.ID,
 						"path", representative.FilePath)
 					if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
-						slog.Warn("metadata: fallback episode synthesis failed for unmatched series root",
+						slog.WarnContext(ctx, "metadata: fallback episode synthesis failed for unmatched series root", "component", "metadata",
 							"content_id", skeleton.ContentID, "error", fbErr)
 					}
 					return 0, nil
@@ -928,7 +928,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 					// dedup moves its seasons+episodes to the survivor, then deletes the
 					// source row). The episodes are already reattached, so there is nothing
 					// to link here — benign; finish normally instead of failing the batch.
-					slog.Info("metadata: series item gone during episode-link ensure (likely concurrent merge); skipping",
+					slog.InfoContext(ctx, "metadata: series item gone during episode-link ensure (likely concurrent merge); skipping", "component", "metadata",
 						"content_id", representative.ContentID,
 						"folder_id", job.MediaFolderID,
 						"observed_root_path", job.ObservedRootPath)
@@ -952,7 +952,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, queueErr); updateErr != nil {
 			return 0, updateErr
 		}
-		slog.Warn("metadata: series root skeleton creation failed",
+		slog.WarnContext(ctx, "metadata: series root skeleton creation failed", "component", "metadata",
 			"folder_id", job.MediaFolderID,
 			"observed_root_path", job.ObservedRootPath,
 			"sample_file_path", job.SampleFilePath,
@@ -979,7 +979,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 			if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, queueErr); updateErr != nil {
 				return 0, updateErr
 			}
-			slog.Warn("metadata: enrichment failed",
+			slog.WarnContext(ctx, "metadata: enrichment failed", "component", "metadata",
 				"file_id", representative.ID,
 				"path", representative.FilePath,
 				"error", processErr)
@@ -991,7 +991,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 				"observed_root_path", job.ObservedRootPath,
 			)
 			if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
-				slog.Warn("metadata: fallback episode synthesis failed after enrichment error",
+				slog.WarnContext(ctx, "metadata: fallback episode synthesis failed after enrichment error", "component", "metadata",
 					"content_id", skeleton.ContentID,
 					"error", fbErr,
 				)
@@ -1009,7 +1009,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 				"observed_root_path", job.ObservedRootPath,
 			)
 			if fbErr := w.service.SynthesizeFallbackEpisodes(ctx, skeleton.ContentID); fbErr != nil {
-				slog.Warn("metadata: fallback episode synthesis failed for unmatched series",
+				slog.WarnContext(ctx, "metadata: fallback episode synthesis failed for unmatched series", "component", "metadata",
 					"content_id", skeleton.ContentID,
 					"error", fbErr,
 				)
@@ -1032,7 +1032,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	if strings.TrimSpace(finalContentID) != "" {
 		if err := w.service.ensureSeriesEpisodeLinks(ctx, finalContentID); err != nil {
 			if errors.Is(err, catalog.ErrItemNotFound) {
-				slog.Info("metadata: series item gone during episode-link ensure (likely concurrent merge); skipping",
+				slog.InfoContext(ctx, "metadata: series item gone during episode-link ensure (likely concurrent merge); skipping", "component", "metadata",
 					"content_id", finalContentID,
 					"folder_id", job.MediaFolderID,
 					"observed_root_path", job.ObservedRootPath)
@@ -1052,7 +1052,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		return 0, err
 	}
 
-	slog.Info("metadata: series root completed",
+	slog.InfoContext(ctx, "metadata: series root completed", "component", "metadata",
 		"folder_id", job.MediaFolderID,
 		"observed_root_path", job.ObservedRootPath,
 		"content_id", finalContentID,
@@ -1067,7 +1067,7 @@ func (w *MatchWorker) logStatusUpdateFailure(ctx context.Context, contentID, sta
 	}
 	if err := w.service.updateItemStatus(ctx, contentID, status); err != nil {
 		args := append([]any{"content_id", contentID, "status", status, "error", err}, attrs...)
-		slog.Warn("metadata: failed to update item status", args...)
+		slog.WarnContext(ctx, "metadata: failed to update item status", append([]any{"component", "metadata"}, args...)...)
 	}
 }
 
@@ -1088,7 +1088,7 @@ func (w *MatchWorker) collapseClaimedSeriesBatch(ctx context.Context, files []*m
 		if !ok {
 			folder, err := w.service.folderRepo.GetByID(ctx, file.MediaFolderID)
 			if err != nil {
-				slog.Warn("metadata: failed to load folder type for batch compaction",
+				slog.WarnContext(ctx, "metadata: failed to load folder type for batch compaction", "component", "metadata",
 					"folder_id", file.MediaFolderID,
 					"file_id", file.ID,
 					"error", err,
@@ -1136,7 +1136,7 @@ func (w *MatchWorker) folderEnabled(ctx context.Context, folderID int, cache *sy
 	enabled := true
 	folder, err := w.service.folderRepo.GetByID(ctx, folderID)
 	if err != nil {
-		slog.Warn("metadata: failed to load folder state during match",
+		slog.WarnContext(ctx, "metadata: failed to load folder state during match", "component", "metadata",
 			"folder_id", folderID,
 			"error", err,
 		)
@@ -1299,7 +1299,7 @@ func (w *MatchWorker) RetryUnmatchedItemsByFolderAndPathPrefix(ctx context.Conte
 		})
 		if processErr != nil {
 			stillUnmatched++
-			slog.Warn("metadata: scoped retry failed",
+			slog.WarnContext(ctx, "metadata: scoped retry failed", "component", "metadata",
 				"content_id", contentID,
 				"folder_id", folderID,
 				"path_prefix", pathPrefix,
@@ -1317,7 +1317,7 @@ func (w *MatchWorker) RetryUnmatchedItemsByFolderAndPathPrefix(ctx context.Conte
 		return retried, stillUnmatched, repairErr
 	} else if repaired > 0 {
 		retried += repaired
-		slog.Info("metadata: repaired matched duplicate items in scope",
+		slog.InfoContext(ctx, "metadata: repaired matched duplicate items in scope", "component", "metadata",
 			"folder_id", folderID,
 			"path_prefix", pathPrefix,
 			"repaired_items", repaired,
@@ -1340,7 +1340,7 @@ func (w *MatchWorker) publishCatalogItemChanged(ctx context.Context, libraryID i
 		ContentID: contentID,
 		Change:    change,
 	}); err != nil {
-		slog.Warn("metadata: failed to publish catalog item change",
+		slog.WarnContext(ctx, "metadata: failed to publish catalog item change", "component", "metadata",
 			"content_id", contentID,
 			"library_id", libraryID,
 			"change", change,

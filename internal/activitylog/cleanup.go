@@ -71,35 +71,35 @@ func CleanupOnce(ctx context.Context, pool *pgxpool.Pool, store SettingsStore, p
 	cutoff := time.Now().UTC().AddDate(0, 0, -days)
 	if pm != nil {
 		if err := pm.EnsureFuturePartitions(ctx); err != nil {
-			slog.Warn("activitylog ensure future partitions error", "error", err)
+			slog.WarnContext(ctx, "activitylog ensure future partitions error", "component", "activitylog", "error", err)
 		}
 
 		partitionCleanupFailed := false
 		totalDeleted := int64(0)
 		if dropped, err := pm.DropExpiredPartitions(ctx, cutoff); err != nil {
-			slog.Warn("activitylog partition cleanup error", "error", err)
+			slog.WarnContext(ctx, "activitylog partition cleanup error", "component", "activitylog", "error", err)
 			partitionCleanupFailed = true
 		} else if len(dropped) > 0 {
-			slog.Info("activitylog dropped expired partitions", "partitions", dropped)
+			slog.InfoContext(ctx, "activitylog dropped expired partitions", "component", "activitylog", "partitions", dropped)
 		}
 
 		if deleted, err := pm.DeleteExpiredRowsFromDefault(ctx, cutoff); err != nil {
-			slog.Warn("activitylog default partition cleanup error", "error", err)
+			slog.WarnContext(ctx, "activitylog default partition cleanup error", "component", "activitylog", "error", err)
 			partitionCleanupFailed = true
 		} else if deleted > 0 {
 			totalDeleted += deleted
-			slog.Info("activitylog default partition cleanup completed", "deleted", deleted, "retention_days", days)
+			slog.InfoContext(ctx, "activitylog default partition cleanup completed", "component", "activitylog", "deleted", deleted, "retention_days", days)
 		}
 
 		if !partitionCleanupFailed {
 			return totalDeleted
 		}
-		slog.Warn("activitylog partition cleanup degraded, falling back to row deletes", "retention_days", days)
+		slog.WarnContext(ctx, "activitylog partition cleanup degraded, falling back to row deletes", "component", "activitylog", "retention_days", days)
 	}
 
 	total := deleteExpiredRowsBefore(ctx, pool, cutoff)
 	if total > 0 {
-		slog.Info("activitylog cleanup completed", "deleted", total, "retention_days", days)
+		slog.InfoContext(ctx, "activitylog cleanup completed", "component", "activitylog", "deleted", total, "retention_days", days)
 	}
 	return total
 }
@@ -116,7 +116,7 @@ func deleteExpiredRowsBefore(ctx context.Context, pool *pgxpool.Pool, cutoff tim
 			)
 			`, cutoff, cleanupBatchSize)
 		if err != nil {
-			slog.Warn("activitylog cleanup error", "error", err)
+			slog.WarnContext(ctx, "activitylog cleanup error", "component", "activitylog", "error", err)
 			return total
 		}
 		deleted := result.RowsAffected()

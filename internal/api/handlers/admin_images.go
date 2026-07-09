@@ -191,7 +191,7 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
 		}
-		slog.Error("admin images: resolve content ID failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item")
 		return
 	}
@@ -201,7 +201,7 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 	lookupContentID := resolved.parentItem.ContentID
 	folderID, err := h.resolveImageFolderID(r.Context(), lookupContentID)
 	if err != nil {
-		slog.Error("admin images: resolve folder failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin images: resolve folder failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Could not determine library for item")
 		return
 	}
@@ -221,7 +221,7 @@ func (h *AdminImageHandler) HandleGetItemImages(w http.ResponseWriter, r *http.R
 		r.Context(), providerIDs, resolved.parentItem.Type, language, folderID,
 	)
 	if err != nil {
-		slog.Error("admin images: fetch failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin images: fetch failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to fetch images")
 		return
 	}
@@ -298,7 +298,7 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
 		}
-		slog.Error("admin images: resolve content ID failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin images: resolve content ID failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item")
 		return
 	}
@@ -339,7 +339,7 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		EpisodeNumber: episodeNumber,
 	})
 	if err != nil {
-		slog.Error("admin images: apply failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin images: apply failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply image")
 		return
 	}
@@ -356,7 +356,7 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 
 	// Persist to the correct table.
 	if err := h.persistImageUpdate(r.Context(), contentID, resolved, &upd); err != nil {
-		slog.Error("admin images: persist failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin images: persist failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Image cached but failed to update item")
 		return
 	}
@@ -366,7 +366,7 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		parentLocked := mergeLockedField(resolved.parentItem.LockedFields, int(metadata.FieldImages))
 		parentUpd := catalog.MetadataUpdate{LockedFields: &parentLocked}
 		if lockErr := h.detailSvc.UpdateMediaItemMetadata(r.Context(), resolved.parentItem.ContentID, &parentUpd); lockErr != nil {
-			slog.Error("admin images: failed to lock FieldImages on parent series",
+			slog.ErrorContext(r.Context(), "admin images: failed to lock FieldImages on parent series", "component", "api",
 				"content_id", contentID, "parent_id", resolved.parentItem.ContentID, "error", lockErr)
 		}
 	}

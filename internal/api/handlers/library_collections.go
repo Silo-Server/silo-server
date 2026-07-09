@@ -131,7 +131,7 @@ func (h *LibraryCollectionHandler) storeBundledTemplatePoster(
 	)
 	if err != nil || !stored {
 		if err != nil {
-			slog.Warn("failed to store bundled template poster",
+			slog.WarnContext(ctx, "failed to store bundled template poster", "component", "api",
 				"collection_id", collectionID,
 				"poster_path", posterPath,
 				"error", err,
@@ -151,7 +151,7 @@ func (h *LibraryCollectionHandler) storeBundledTemplatePoster(
 		input.PosterFromTemplate = &fromTemplate
 	}
 	if err := h.repo.Update(ctx, input); err != nil {
-		slog.Warn("failed to persist bundled template poster",
+		slog.WarnContext(ctx, "failed to persist bundled template poster", "component", "api",
 			"collection_id", collectionID,
 			"poster_path", posterPath,
 			"stored_path", storedPath,
@@ -175,7 +175,7 @@ func (h *LibraryCollectionHandler) GenerateCollectionPoster(ctx context.Context,
 		return collage.ErrNotEnoughImages
 	}
 
-	slog.Info("collage: generating poster", "collection_id", collectionID, "item_poster_count", len(paths))
+	slog.InfoContext(ctx, "collage: generating poster", "component", "api", "collection_id", collectionID, "item_poster_count", len(paths))
 
 	// Resolve poster paths to fetchable URLs.
 	resolved := h.detailSvc.PresignImageURLs(ctx, paths, "poster", "small")
@@ -191,14 +191,14 @@ func (h *LibraryCollectionHandler) GenerateCollectionPoster(ctx context.Context,
 		}
 		data, err := h.fetchImageURL(ctx, url)
 		if err != nil {
-			slog.Debug("collage: failed to fetch poster image", "url", url, "error", err)
+			slog.DebugContext(ctx, "collage: failed to fetch poster image", "component", "api", "url", url, "error", err)
 			fetchFailed++
 			continue
 		}
 		imageData = append(imageData, data)
 	}
 	if fetchFailed > 0 && len(imageData) == 0 {
-		slog.Warn("collage: all poster image fetches failed",
+		slog.WarnContext(ctx, "collage: all poster image fetches failed", "component", "api",
 			"collection_id", collectionID, "total", len(paths), "failed", fetchFailed)
 	}
 
@@ -210,7 +210,7 @@ func (h *LibraryCollectionHandler) GenerateCollectionPoster(ctx context.Context,
 
 	// Delete any existing auto-generated images before uploading new ones.
 	if err := h.deleteCollectionImages(ctx, collectionID, "poster"); err != nil {
-		slog.Warn("collage: failed to clean up old poster images", "collection_id", collectionID, "error", err)
+		slog.WarnContext(ctx, "collage: failed to clean up old poster images", "component", "api", "collection_id", collectionID, "error", err)
 	}
 
 	// Process through the standard image pipeline (generates WebP variants + thumbhash).
@@ -231,7 +231,7 @@ func (h *LibraryCollectionHandler) GenerateCollectionPoster(ctx context.Context,
 		return fmt.Errorf("updating collection poster: %w", err)
 	}
 
-	slog.Info("collage: poster generated successfully", "collection_id", collectionID, "s3_path", s3Path)
+	slog.InfoContext(ctx, "collage: poster generated successfully", "component", "api", "collection_id", collectionID, "s3_path", s3Path)
 	return nil
 }
 
@@ -1372,9 +1372,9 @@ func (h *LibraryCollectionHandler) HandleDeleteCollectionImage(w http.ResponseWr
 	if imageType == "poster" && h.service.CollageGen != nil {
 		if err := h.GenerateCollectionPoster(r.Context(), collectionID); err != nil {
 			if errors.Is(err, collage.ErrNotEnoughImages) {
-				slog.Debug("collage: not enough images to regenerate after delete", "collection_id", collectionID)
+				slog.DebugContext(r.Context(), "collage: not enough images to regenerate after delete", "component", "api", "collection_id", collectionID)
 			} else {
-				slog.Warn("collage: failed to regenerate poster after delete", "collection_id", collectionID, "error", err)
+				slog.WarnContext(r.Context(), "collage: failed to regenerate poster after delete", "component", "api", "collection_id", collectionID, "error", err)
 			}
 		}
 	}
@@ -1420,12 +1420,12 @@ func (h *LibraryCollectionHandler) deleteServerCollection(ctx context.Context, c
 		prefix := fmt.Sprintf("collection-images/%s/", collectionID)
 		keys, err := h.s3GP.ListObjects(ctx, h.s3GP.Bucket(), prefix)
 		if err != nil {
-			slog.Warn("collection delete: listing S3 images failed; image keys may leak",
+			slog.WarnContext(ctx, "collection delete: listing S3 images failed; image keys may leak", "component", "api",
 				"collection_id", collectionID, "prefix", prefix, "error", err)
 		}
 		for _, key := range keys {
 			if err := h.s3GP.DeleteObject(ctx, h.s3GP.Bucket(), key); err != nil {
-				slog.Warn("collection delete: removing S3 image failed; key leaks",
+				slog.WarnContext(ctx, "collection delete: removing S3 image failed; key leaks", "component", "api",
 					"collection_id", collectionID, "key", key, "error", err)
 			}
 		}
@@ -1569,7 +1569,7 @@ func (h *LibraryCollectionHandler) HandleSyncAdminCollection(w http.ResponseWrit
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		}
-		slog.Error("collection sync failed", "collection_id", collectionID, "error", err)
+		slog.ErrorContext(r.Context(), "collection sync failed", "component", "api", "collection_id", collectionID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to sync collection")
 		return
 	}
@@ -1817,7 +1817,7 @@ func (h *LibraryCollectionHandler) applyTemplateBundle(
 					Reason:      err.Error(),
 				})
 			} else {
-				slog.Warn("listing existing collections before template bundle apply",
+				slog.WarnContext(ctx, "listing existing collections before template bundle apply", "component", "api",
 					"bundle_id", bundle.ID,
 					"library_id", library.ID,
 					"error", err,
@@ -1839,7 +1839,7 @@ func (h *LibraryCollectionHandler) applyTemplateBundle(
 			// trips the in-use guard and the admin sees a misleading wall of
 			// "collection_in_use" errors.
 			if err := h.SectionRepo.DeleteGeneratedTemplateBundleFeaturedSections(ctx, bundle.ID, libraryIDs); err != nil {
-				slog.Error("deleting generated template bundle featured sections", "bundle_id", bundle.ID, "error", err)
+				slog.ErrorContext(ctx, "deleting generated template bundle featured sections", "component", "api", "bundle_id", bundle.ID, "error", err)
 				return applyTemplateBundleResponse{}, newTemplateBundleApplyError(http.StatusInternalServerError, "delete_setup_failed", "Failed to clear generated featured sections before delete")
 			}
 		}
@@ -2060,7 +2060,7 @@ func (h *LibraryCollectionHandler) ensureTemplatePoster(
 		return
 	}
 	if stored, _, _, err := h.storeBundledTemplatePoster(ctx, collection.ID, posterPath, true); err != nil {
-		slog.Warn("failed to store template poster",
+		slog.WarnContext(ctx, "failed to store template poster", "component", "api",
 			"collection_id", collection.ID,
 			"template_id", tmpl.ID,
 			"poster_path", posterPath,
@@ -2081,7 +2081,7 @@ func (h *LibraryCollectionHandler) ensureTemplatePoster(
 		PosterAutoGenerated: &notAutoGenerated,
 		PosterFromTemplate:  &fromTemplate,
 	}); err != nil {
-		slog.Warn("failed to apply template poster",
+		slog.WarnContext(ctx, "failed to apply template poster", "component", "api",
 			"collection_id", collection.ID,
 			"template_id", tmpl.ID,
 			"poster_path", posterPath,
@@ -2188,7 +2188,7 @@ func (h *LibraryCollectionHandler) advanceTemplateBundleSyncSchedules(
 		}
 		next := catalog.ComputeNextSyncAtFrom(*item.SyncSchedule, now)
 		if err := h.repo.UpdateNextSyncAt(ctx, item.CollectionID, next); err != nil {
-			slog.Warn("template bundle async sync: failed to advance schedule",
+			slog.WarnContext(ctx, "template bundle async sync: failed to advance schedule", "component", "api",
 				"collection_id", item.CollectionID,
 				"template_id", item.Entry.TemplateID,
 				"error", err,
@@ -2213,7 +2213,7 @@ func (h *LibraryCollectionHandler) syncTemplateBundleCollections(
 		eg.Go(func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
-					slog.Error("template bundle sync worker panic",
+					slog.ErrorContext(ctx, "template bundle sync worker panic", "component", "api",
 						"collection_id", item.CollectionID,
 						"template_id", item.Entry.TemplateID,
 						"panic", r,
@@ -3081,7 +3081,7 @@ func (h *LibraryCollectionHandler) HandleImportTraktCollection(w http.ResponseWr
 
 	run, err := h.service.SyncCollection(r.Context(), collection.ID)
 	if err != nil {
-		slog.Error("failed to sync imported Trakt collection",
+		slog.ErrorContext(r.Context(), "failed to sync imported Trakt collection", "component", "api",
 			"collection_id", collection.ID,
 			"library_id", req.LibraryID,
 			"title", req.Title,

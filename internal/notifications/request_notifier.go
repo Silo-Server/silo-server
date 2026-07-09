@@ -170,7 +170,7 @@ func (n *RequestLifecycleNotifier) dispatchPersonal(ctx context.Context, req req
 	go func() {
 		defer cancel()
 		if err := n.system.dispatchRequestLifecycle(dispatchCtx, req, deliveryType); err != nil {
-			n.system.logger.Warn("request lifecycle delivery failed",
+			n.system.logger.WarnContext(ctx, "request lifecycle delivery failed",
 				"request_id", req.ID, "type", deliveryType, "error", err)
 		}
 	}()

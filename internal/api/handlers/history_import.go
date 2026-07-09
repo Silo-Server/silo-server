@@ -50,7 +50,7 @@ func (h *HistoryImportHandler) HandleLoginConnect(w http.ResponseWriter, r *http
 
 	session, err := h.service.LoginConnect(r.Context(), userID, req)
 	if err != nil {
-		slog.Error("history import emby connect login failed", "user_id", userID, "error", err)
+		slog.ErrorContext(r.Context(), "history import emby connect login failed", "component", "api", "user_id", userID, "error", err)
 		h.writeHistoryImportError(w, err)
 		return
 	}
@@ -120,7 +120,7 @@ func (h *HistoryImportHandler) HandleCreatePlexPin(w http.ResponseWriter, r *htt
 	}
 	pin, err := h.service.CreatePlexPin(r.Context(), userID)
 	if err != nil {
-		slog.Error("history import plex pin creation failed", "user_id", userID, "error", err)
+		slog.ErrorContext(r.Context(), "history import plex pin creation failed", "component", "api", "user_id", userID, "error", err)
 		h.writeHistoryImportError(w, err)
 		return
 	}

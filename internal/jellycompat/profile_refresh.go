@@ -16,7 +16,7 @@ type profileRefreshRequester interface {
 func triggerProfileRefresh(ctx context.Context, staler profileStaler, requester profileRefreshRequester, userID int, profileID string) {
 	if staler != nil {
 		if err := staler.MarkProfileStale(ctx, userID, profileID); err != nil {
-			slog.Warn("failed to mark profile stale", "user_id", userID, "profile_id", profileID, "error", err)
+			slog.WarnContext(ctx, "failed to mark profile stale", "component", "jellycompat", "user_id", userID, "profile_id", profileID, "error", err)
 		}
 	}
 	if requester != nil {

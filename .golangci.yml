@@ -23,12 +23,27 @@ linters:
     - ineffassign
     - misspell
     - nilerr
+    - sloglint
     - staticcheck
     - unconvert
     - unused
     - wastedassign
 
   settings:
+    sloglint:
+      # Require the context-carrying slog variants (InfoContext, …) wherever a
+      # context.Context is in scope, so log records correlate with the active
+      # OpenTelemetry trace. "scope" (not "all") allows the plain Info/… form in
+      # background/init code where no ctx exists. Enforced repo-wide after the
+      # phase-3 sweep converted the ~1,159 legacy call sites.
+      context: "scope"
+      # Message must be a constant, not a built string; move dynamic parts to attrs.
+      static-msg: true
+      # Attribute keys are snake_case (component, request_id, trace_id, …).
+      key-naming-case: snake
+      # Don't mix key-value pairs and slog.Attr in one call.
+      no-mixed-args: true
+
     errcheck:
       check-type-assertions: true
 

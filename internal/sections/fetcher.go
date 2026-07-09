@@ -466,7 +466,7 @@ func (f *Fetcher) fetchContinueWatchingSection(ctx context.Context, resolved Res
 	if ContinueTypeAllowsNextUp(continueType) && nextUpMode == "combined" {
 		nextUpItems, nextUpMeta, nextUpErr := f.FetchNextUpItems(ctx, userID, profileID, effectiveLibID, effectiveLibraryIDs, filter, limit)
 		if nextUpErr != nil {
-			slog.Error("fetching next-up items", "error", nextUpErr)
+			slog.ErrorContext(ctx, "fetching next-up items", "component", "sections", "error", nextUpErr)
 		} else {
 			orderedItems = append(orderedItems, nextUpItems...)
 			maps.Copy(itemMeta, nextUpMeta)
@@ -971,7 +971,7 @@ func episodeOrdinal(meta SectionItemMeta) int {
 func (f *Fetcher) listContinueWatchingDismissals(ctx context.Context, store userstore.UserStore, profileID string) catalog.HomeDismissalIndex {
 	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceContinueWatching)
 	if err != nil {
-		slog.Error("listing continue watching dismissals", "profile_id", profileID, "error", err)
+		slog.ErrorContext(ctx, "listing continue watching dismissals", "component", "sections", "profile_id", profileID, "error", err)
 		return catalog.HomeDismissalIndex{}
 	}
 	return catalog.NewHomeDismissalIndex(dismissals)
@@ -984,13 +984,13 @@ func (f *Fetcher) filterNextUpDismissals(ctx context.Context, userID int, profil
 
 	store, err := f.StoreProvider.ForUser(ctx, userID)
 	if err != nil {
-		slog.Error("getting user store for next-up dismissals", "profile_id", profileID, "error", err)
+		slog.ErrorContext(ctx, "getting user store for next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
 		return results
 	}
 
 	dismissals, err := store.ListHomeDismissals(ctx, profileID, userstore.HomeSurfaceNextUp)
 	if err != nil {
-		slog.Error("listing next-up dismissals", "profile_id", profileID, "error", err)
+		slog.ErrorContext(ctx, "listing next-up dismissals", "component", "sections", "profile_id", profileID, "error", err)
 		return results
 	}
 	if len(dismissals) == 0 {
@@ -1030,7 +1030,7 @@ func (f *Fetcher) FetchAll(ctx context.Context, resolved []ResolvedSection, libr
 		if libraryIDs != nil {
 			attrs = append(attrs, "library_ids", append([]int(nil), libraryIDs...))
 		}
-		slog.Warn("slow aggregate section fetch", attrs...)
+		slog.WarnContext(ctx, "slow aggregate section fetch", append([]any{"component", "sections"}, attrs...)...)
 	}
 	return results
 }
@@ -1056,7 +1056,7 @@ func fetchAllWithRunner(ctx context.Context, resolved []ResolvedSection, maxConc
 
 			result, err := runner(ctx, sec)
 			if err != nil {
-				slog.Error("fetching section items", "section_id", sec.ID, "type", sec.SectionType, "error", err)
+				slog.ErrorContext(ctx, "fetching section items", "component", "sections", "section_id", sec.ID, "type", sec.SectionType, "error", err)
 				result = SectionWithItems{
 					ResolvedSection: sec,
 					Items:           []*models.MediaItem{},
@@ -4029,7 +4029,7 @@ func (f *Fetcher) applyMangaChapterSeriesMeta(ctx context.Context, items []*mode
 	}
 	seriesMeta, err := f.FetchMangaChapterSeriesMeta(ctx, ids)
 	if err != nil {
-		slog.Warn("continue-reading: manga series linkage lookup failed", "error", err)
+		slog.WarnContext(ctx, "continue-reading: manga series linkage lookup failed", "component", "sections", "error", err)
 		return
 	}
 	for chapterID, sm := range seriesMeta {

@@ -182,7 +182,7 @@ func (s *Service) BulkCreateAdminRuns(ctx context.Context, sourceID int) (*BulkR
 		mappingID := mapping.ID
 		provider, err := s.buildAdminProvider(source, token, mapping.ExternalUserID)
 		if err != nil {
-			slog.Error("history import bulk: failed to build provider", "mapping_id", mappingID, "error", err)
+			slog.ErrorContext(ctx, "history import bulk: failed to build provider", "component", "historyimport", "mapping_id", mappingID, "error", err)
 			result.Errors++
 			continue
 		}
@@ -200,7 +200,7 @@ func (s *Service) BulkCreateAdminRuns(ctx context.Context, sourceID int) (*BulkR
 		}
 		created, err := s.repo.CreateRun(ctx, run)
 		if err != nil {
-			slog.Error("history import bulk: failed to create run", "mapping_id", mappingID, "error", err)
+			slog.ErrorContext(ctx, "history import bulk: failed to create run", "component", "historyimport", "mapping_id", mappingID, "error", err)
 			result.Errors++
 			continue
 		}

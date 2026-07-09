@@ -22,7 +22,7 @@ func (h *Handler) handleListeningStats(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := h.deps.PlaybackSessionStore.AggregateStats(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
-		slog.Error("abs listening stats failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs listening stats failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "stats unavailable", http.StatusInternalServerError)
 		return
 	}
@@ -50,7 +50,7 @@ func (h *Handler) handleListeningSessions(w http.ResponseWriter, r *http.Request
 	}
 	sessions, total, err := h.deps.PlaybackSessionStore.ListClosedSessions(r.Context(), a.UserID, a.ProfileID, itemsPerPage, page*itemsPerPage)
 	if err != nil {
-		slog.Error("abs listening sessions failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs listening sessions failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "sessions unavailable", http.StatusInternalServerError)
 		return
 	}
@@ -64,7 +64,7 @@ func (h *Handler) handleListeningSessions(w http.ResponseWriter, r *http.Request
 	if h.deps.MediaStore != nil && len(sessions) > 0 {
 		access, aerr := h.accessFilterForAuth(r.Context(), a)
 		if aerr != nil {
-			slog.Debug("abs listening sessions: resolve access failed", "user", a.UserID, "err", aerr)
+			slog.DebugContext(r.Context(), "abs listening sessions: resolve access failed", "component", "audiobooks", "user", a.UserID, "err", aerr)
 		} else {
 			contentIDs := make([]string, 0, len(sessions))
 			for _, s := range sessions {
@@ -72,7 +72,7 @@ func (h *Handler) handleListeningSessions(w http.ResponseWriter, r *http.Request
 			}
 			hydrated, herr := h.deps.MediaStore.GetAudiobooksByIDs(r.Context(), contentIDs, access)
 			if herr != nil {
-				slog.Debug("abs listening sessions: hydrate media items failed", "user", a.UserID, "err", herr)
+				slog.DebugContext(r.Context(), "abs listening sessions: hydrate media items failed", "component", "audiobooks", "user", a.UserID, "err", herr)
 			} else {
 				items = hydrated
 			}
@@ -111,9 +111,9 @@ func (h *Handler) handleListeningSessionDetail(w http.ResponseWriter, r *http.Re
 	if h.deps.MediaStore != nil {
 		access, aerr := h.accessFilterForAuth(r.Context(), a)
 		if aerr != nil {
-			slog.Debug("abs listening session detail: resolve access failed", "user", a.UserID, "err", aerr)
+			slog.DebugContext(r.Context(), "abs listening session detail: resolve access failed", "component", "audiobooks", "user", a.UserID, "err", aerr)
 		} else if fetched, ferr := h.deps.MediaStore.GetAudiobookByID(r.Context(), sess.ContentID, access); ferr != nil {
-			slog.Debug("abs listening session detail: hydrate media item failed", "user", a.UserID, "content_id", sess.ContentID, "err", ferr)
+			slog.DebugContext(r.Context(), "abs listening session detail: hydrate media item failed", "component", "audiobooks", "user", a.UserID, "content_id", sess.ContentID, "err", ferr)
 		} else {
 			item = fetched
 		}

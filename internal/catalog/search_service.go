@@ -24,7 +24,7 @@ func NewCatalogSearchService(
 ) *CatalogSearchService {
 	settings, err := LoadCatalogSearchSettings(ctx, settingsStore)
 	if err != nil {
-		slog.Warn("catalog search: failed to load settings; using postgres", "err", err)
+		slog.WarnContext(ctx, "catalog search: failed to load settings; using postgres", "component", "catalog", "err", err)
 		settings = DefaultCatalogSearchSettings()
 	}
 	return NewCatalogSearchServiceFromSettings(settings, itemRepo, stateRepo, vectorizer...)

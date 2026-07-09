@@ -284,7 +284,7 @@ func (h *UserCollectionImportHandler) storeBundledTemplatePoster(
 	)
 	if err != nil || !stored {
 		if err != nil {
-			slog.Warn("failed to store bundled user collection poster",
+			slog.WarnContext(r.Context(), "failed to store bundled user collection poster", "component", "api",
 				"collection_id", collection.ID,
 				"poster_path", posterPath,
 				"error", err,
@@ -299,7 +299,7 @@ func (h *UserCollectionImportHandler) storeBundledTemplatePoster(
 		PosterURL:        &storedPath,
 		PosterThumbhash:  &thumbhash,
 	}); err != nil {
-		slog.Warn("failed to persist bundled user collection poster",
+		slog.WarnContext(r.Context(), "failed to persist bundled user collection poster", "component", "api",
 			"collection_id", collection.ID,
 			"poster_path", posterPath,
 			"stored_path", storedPath,

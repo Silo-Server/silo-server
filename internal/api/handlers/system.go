@@ -42,7 +42,7 @@ func (h *SystemHandler) HandleHWAccel(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusOK, info)
 				return
 			}
-			slog.Warn("hw-accel: remote node probe failed, falling back to local",
+			slog.WarnContext(r.Context(), "hw-accel: remote node probe failed, falling back to local", "component", "api",
 				"node", node.URL, "error", err)
 		}
 	}

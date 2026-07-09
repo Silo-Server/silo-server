@@ -140,7 +140,7 @@ func (r *Refresher) RefreshDue(ctx context.Context, s Store) (int, error) {
 		}
 		attempted++
 		if err := r.RefreshOne(ctx, s, f); err != nil {
-			slog.Warn("podcast feed refresh failed",
+			slog.WarnContext(ctx, "podcast feed refresh failed", "component", "audiobooks",
 				"media_item_id", f.MediaItemID,
 				"feed_url", f.FeedURL,
 				"err", err.Error(),
@@ -173,7 +173,7 @@ func (r *Refresher) RefreshOne(ctx context.Context, s Store, f PodcastFeed) erro
 		return err
 	}
 	_ = s.MarkFeedRefreshed(ctx, f.MediaItemID, "")
-	slog.Debug("podcast feed refreshed",
+	slog.DebugContext(ctx, "podcast feed refreshed", "component", "audiobooks",
 		"media_item_id", f.MediaItemID,
 		"episodes", count,
 	)
@@ -258,7 +258,7 @@ func (r *Refresher) upsertItems(ctx context.Context, s Store, f PodcastFeed, fee
 			StillPath:       coverFromItem(item),
 		}
 		if err := s.UpsertPodcastEpisode(ctx, ep); err != nil {
-			slog.Warn("podcast episode upsert failed",
+			slog.WarnContext(ctx, "podcast episode upsert failed", "component", "audiobooks",
 				"media_item_id", f.MediaItemID,
 				"guid", guid,
 				"err", err.Error(),

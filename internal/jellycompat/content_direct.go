@@ -741,7 +741,7 @@ func (s *directContentService) GetItemDetailsByIDs(ctx context.Context, session 
 				// below, which degrade one id at a time exactly like the
 				// pre-batch path did.
 				leafBatchFailed = true
-				slog.Warn("jellycompat: batch leaf progress lookup failed; falling back to per-item lookups",
+				slog.WarnContext(ctx, "jellycompat: batch leaf progress lookup failed; falling back to per-item lookups", "component", "jellycompat",
 					"error", err, "leaf_count", len(leafIDs))
 			}
 		}

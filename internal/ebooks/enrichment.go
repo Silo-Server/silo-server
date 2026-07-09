@@ -145,14 +145,14 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	slog.Info("ebook enrichment: sweep started",
+	slog.InfoContext(ctx, "ebook enrichment: sweep started", "component", "ebooks",
 		"count", len(items),
 		"workers", e.workers,
 	)
 
 	enriched := e.runBatch(ctx, items, e.enrichItem, e.recordEnrichFailure)
 
-	slog.Info("ebook enrichment: sweep complete",
+	slog.InfoContext(ctx, "ebook enrichment: sweep complete", "component", "ebooks",
 		"attempted", len(items),
 		"enriched", enriched,
 	)
@@ -188,14 +188,14 @@ func (e *Enricher) runBatch(
 				}
 				if err := enrichFn(ctx, item); err != nil {
 					if errors.Is(err, errEnrichmentSkipped) {
-						slog.Debug("ebook enrichment: item skipped",
+						slog.DebugContext(ctx, "ebook enrichment: item skipped", "component", "ebooks",
 							"content_id", item.ContentID,
 							"title", item.Title,
 							"reason", err,
 						)
 						continue
 					}
-					slog.Warn("ebook enrichment: item failed",
+					slog.WarnContext(ctx, "ebook enrichment: item failed", "component", "ebooks",
 						"content_id", item.ContentID,
 						"title", item.Title,
 						"error", err,
@@ -348,7 +348,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 			return fmt.Errorf("no metadata obtained, %d provider error(s): %w",
 				len(providerErrs), errors.Join(providerErrs...))
 		}
-		slog.Info("ebook enrichment: no metadata found",
+		slog.InfoContext(ctx, "ebook enrichment: no metadata found", "component", "ebooks",
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
@@ -361,7 +361,7 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
 	e.autoLinkLiteraryWork(ctx, item.ContentID)
 
-	slog.Info("ebook enrichment: enriched",
+	slog.InfoContext(ctx, "ebook enrichment: enriched", "component", "ebooks",
 		"content_id", item.ContentID,
 		"title", item.Title,
 		"poster", accumulator.PosterPath != "",
@@ -397,7 +397,7 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		}
 		results, searchErr := sp.Search(ctx, searchQuery)
 		if searchErr != nil {
-			slog.Warn("ebook enrichment: search error",
+			slog.WarnContext(ctx, "ebook enrichment: search error", "component", "ebooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"error", searchErr,
@@ -425,7 +425,7 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 					continue
 				}
 				if ownerID != "" {
-					slog.Info("ebook enrichment: provider id already owned by another item; skipping match",
+					slog.InfoContext(ctx, "ebook enrichment: provider id already owned by another item; skipping match", "component", "ebooks",
 						"provider", k,
 						"provider_id", v,
 						"content_id", item.ContentID,
@@ -436,7 +436,7 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 			}
 			accumulatedIDs[k] = v
 		}
-		slog.Debug("ebook enrichment: search result",
+		slog.DebugContext(ctx, "ebook enrichment: search result", "component", "ebooks",
 			"provider", p.Slug(),
 			"content_id", item.ContentID,
 			"matched_ids", accumulatedIDs,
@@ -454,7 +454,7 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		}
 		result, getErr := mp.GetMetadata(ctx, buildEbookMetadataRequest(accumulator.ProviderIDs, item.Language))
 		if getErr != nil {
-			slog.Warn("ebook enrichment: GetMetadata error",
+			slog.WarnContext(ctx, "ebook enrichment: GetMetadata error", "component", "ebooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"error", getErr,
@@ -468,7 +468,7 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		mergeEnrichmentProviderIDs(accumulator, result)
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
 
-		slog.Debug("ebook enrichment: metadata received",
+		slog.DebugContext(ctx, "ebook enrichment: metadata received", "component", "ebooks",
 			"provider", p.Slug(),
 			"content_id", item.ContentID,
 			"has_poster", result.PosterPath != "",
@@ -485,11 +485,11 @@ func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
 	}
 	workID, linked, err := e.workLinker.AutoLinkContent(ctx, contentID)
 	if err != nil {
-		slog.Warn("ebook enrichment: literary work auto-link failed", "content_id", contentID, "error", err)
+		slog.WarnContext(ctx, "ebook enrichment: literary work auto-link failed", "component", "ebooks", "content_id", contentID, "error", err)
 		return
 	}
 	if linked {
-		slog.Info("ebook enrichment: literary work auto-linked", "content_id", contentID, "work_id", workID)
+		slog.InfoContext(ctx, "ebook enrichment: literary work auto-linked", "component", "ebooks", "content_id", contentID, "work_id", workID)
 	}
 }
 
@@ -512,7 +512,7 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 		ImageType:   metadata.ImagePoster,
 	})
 	if err != nil {
-		slog.Warn("ebook enrichment: poster cache failed, keeping provider URL",
+		slog.WarnContext(ctx, "ebook enrichment: poster cache failed, keeping provider URL", "component", "ebooks",
 			"content_id", contentID,
 			"url", result.PosterPath,
 			"error", err,
@@ -520,7 +520,7 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 		return
 	}
 	if cached == nil {
-		slog.Warn("ebook enrichment: poster cache returned no result, keeping provider URL",
+		slog.WarnContext(ctx, "ebook enrichment: poster cache returned no result, keeping provider URL", "component", "ebooks",
 			"content_id", contentID,
 			"url", result.PosterPath,
 		)
@@ -564,7 +564,7 @@ func (e *Enricher) enqueueRemoteArtwork(ctx context.Context, contentID string, r
 	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if _, err := e.imageCacheJobs.EnqueueBatch(enqueueCtx, inputs); err != nil {
-		slog.Warn("ebook enrichment: failed to enqueue image cache jobs",
+		slog.WarnContext(ctx, "ebook enrichment: failed to enqueue image cache jobs", "component", "ebooks",
 			"content_id", contentID,
 			"count", len(inputs),
 			"error", err,
@@ -659,7 +659,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	providerIDs = filterEbookProviderIDs(providerIDs)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
-			slog.Warn("ebook enrichment: failed to persist provider IDs",
+			slog.WarnContext(ctx, "ebook enrichment: failed to persist provider IDs", "component", "ebooks",
 				"content_id", contentID,
 				"error", err,
 			)
@@ -673,7 +673,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	authors := filterEbookPeople(result.People)
 	if len(authors) > 0 && e.personRepo != nil && e.itemRepo != nil {
 		if err := e.persistPeople(ctx, contentID, authors); err != nil {
-			slog.Warn("ebook enrichment: failed to persist people",
+			slog.WarnContext(ctx, "ebook enrichment: failed to persist people", "component", "ebooks",
 				"content_id", contentID,
 				"error", err,
 			)
@@ -731,7 +731,7 @@ func (e *Enricher) recordEnrichFailure(ctx context.Context, item enrichmentItemR
 			failures   = ebook_enrichment_state.failures + 1,
 			updated_at = NOW()
 	`, item.ContentID); err != nil {
-		slog.Warn("ebook enrichment: failed to record enrichment failure",
+		slog.WarnContext(ctx, "ebook enrichment: failed to record enrichment failure", "component", "ebooks",
 			"content_id", item.ContentID,
 			"error", err,
 		)

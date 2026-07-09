@@ -351,7 +351,7 @@ func (i *CatalogSearchIndexer) Rebuild(ctx context.Context, progress SearchIndex
 	if err != nil {
 		// The new index is already active; a failed cleanup costs disk on the
 		// Meilisearch instance, not correctness, and the next rebuild retries.
-		slog.Warn("catalog search: failed to remove superseded meilisearch indexes", "err", err, "removed", removed)
+		slog.WarnContext(ctx, "catalog search: failed to remove superseded meilisearch indexes", "component", "catalog", "err", err, "removed", removed)
 	}
 	setSearchIndexTaskResult(progress, stats)
 	reportSearchIndexProgress(progress, 100, fmt.Sprintf("Rebuilt catalog search index with %d documents", docCount))

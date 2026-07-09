@@ -140,7 +140,7 @@ func (h *AdminSplitHandler) HandleListItemFiles(w http.ResponseWriter, r *http.R
 	}
 	files, err := h.loadItemFiles(r.Context(), contentID)
 	if err != nil {
-		slog.Error("admin split: listing item files", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin split: listing item files", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load item files")
 		return
 	}
@@ -196,7 +196,7 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 
 	files, err := h.loadItemFiles(ctx, sourceID)
 	if err != nil {
-		slog.Error("admin split: loading item files", "content_id", sourceID, "error", err)
+		slog.ErrorContext(ctx, "admin split: loading item files", "component", "api", "content_id", sourceID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load item files")
 		return
 	}
@@ -234,7 +234,7 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 	// Everything transactional happens here; a dry run rolls back at the end.
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
-		slog.Error("admin split: begin transaction", "error", err)
+		slog.ErrorContext(ctx, "admin split: begin transaction", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start split")
 		return
 	}
@@ -242,13 +242,13 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 
 	if target.created {
 		if err := insertSkeletonItem(ctx, tx, target, sourceItem); err != nil {
-			slog.Error("admin split: creating target item", "target", target.contentID, "error", err)
+			slog.ErrorContext(ctx, "admin split: creating target item", "component", "api", "target", target.contentID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create target item")
 			return
 		}
 	}
 	if err := moveFilesToItem(ctx, tx, target.contentID, moved); err != nil {
-		slog.Error("admin split: moving files", "target", target.contentID, "error", err)
+		slog.ErrorContext(ctx, "admin split: moving files", "component", "api", "target", target.contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to move files")
 		return
 	}
@@ -258,7 +258,7 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 	if persistOverride && target.hasForcedIdentity() {
 		rootOverrides, fileOverrides, err = h.persistOverrides(ctx, tx, moved, target, middleware.GetUserID(ctx))
 		if err != nil {
-			slog.Error("admin split: persisting overrides", "error", err)
+			slog.ErrorContext(ctx, "admin split: persisting overrides", "component", "api", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to persist identity overrides")
 			return
 		}
@@ -272,18 +272,18 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 		EpisodePairs:  episodePairs,
 	})
 	if err != nil {
-		slog.Error("admin split: reattributing user state", "error", err)
+		slog.ErrorContext(ctx, "admin split: reattributing user state", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reattribute user state")
 		return
 	}
 
 	if !req.DryRun {
 		if err := tx.Commit(ctx); err != nil {
-			slog.Error("admin split: commit", "error", err)
+			slog.ErrorContext(ctx, "admin split: commit", "component", "api", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit split")
 			return
 		}
-		slog.Info("admin split: item split",
+		slog.InfoContext(ctx, "admin split: item split", "component", "api",
 			"actor_user_id", middleware.GetUserID(ctx),
 			"source_content_id", sourceID,
 			"target_content_id", target.contentID,
@@ -337,18 +337,18 @@ func (h *AdminSplitHandler) HandleMergeItem(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusNotFound, "not_found", "Item not found")
 			return
 		}
-		slog.Warn("admin merge: failed", "source", sourceID, "target", req.Into, "error", err)
+		slog.WarnContext(r.Context(), "admin merge: failed", "component", "api", "source", sourceID, "target", req.Into, "error", err)
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	slog.Info("admin merge: item merged",
+	slog.InfoContext(r.Context(), "admin merge: item merged", "component", "api",
 		"actor_user_id", middleware.GetUserID(r.Context()),
 		"source_content_id", sourceID,
 		"target_content_id", req.Into,
 	)
 	if h.refresher != nil {
 		if err := h.refresher.RefreshItem(context.WithoutCancel(r.Context()), req.Into); err != nil {
-			slog.Warn("admin merge: target refresh failed", "content_id", req.Into, "error", err)
+			slog.WarnContext(r.Context(), "admin merge: target refresh failed", "component", "api", "content_id", req.Into, "error", err)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"merged_into": req.Into})

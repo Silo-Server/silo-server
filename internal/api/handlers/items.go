@@ -205,7 +205,7 @@ func (h *ItemsHandler) requestStaleMetadataRefresh(ctx context.Context, targetTy
 		return
 	}
 	if err := h.metadataRefreshRequester.RequestStaleMetadataRefresh(ctx, targetType, contentID); err != nil {
-		slog.Warn("catalog: failed to request stale metadata refresh",
+		slog.WarnContext(ctx, "catalog: failed to request stale metadata refresh", "component", "api",
 			"target_type", targetType,
 			"content_id", contentID,
 			"error", err)
@@ -457,7 +457,7 @@ func (h *ItemsHandler) dispatchLocalWatchEvent(
 		ProfileID: profileID,
 		Plays:     plays,
 	}); err != nil {
-		slog.Warn("failed to queue local watch provider event", "kind", kind, "user_id", userID, "profile_id", profileID, "error", err)
+		slog.WarnContext(ctx, "failed to queue local watch provider event", "component", "api", "kind", kind, "user_id", userID, "profile_id", profileID, "error", err)
 	}
 }
 
@@ -1830,7 +1830,7 @@ func (h *ItemsHandler) accessFilter(r *http.Request) catalog.AccessFilter {
 		if userID != 0 {
 			user, userErr := h.UserRepo.GetByID(r.Context(), userID)
 			if userErr != nil {
-				slog.Error("looking up user for library access", "error", userErr)
+				slog.ErrorContext(r.Context(), "looking up user for library access", "component", "api", "error", userErr)
 			} else {
 				if user.LibraryIDs != nil {
 					libraryIDs = user.LibraryIDs
@@ -2004,7 +2004,7 @@ func (h *ItemsHandler) requestCanViewFilePaths(r *http.Request) bool {
 	}
 	user, err := h.UserRepo.GetByID(r.Context(), claims.UserID)
 	if err != nil {
-		slog.WarnContext(r.Context(), "checking file path visibility permissions", "user_id", claims.UserID, "error", err)
+		slog.WarnContext(r.Context(), "checking file path visibility permissions", "component", "api", "user_id", claims.UserID, "error", err)
 		return false
 	}
 	return auth.HasEffectivePermission(user, auth.PermissionMetadataCuration)

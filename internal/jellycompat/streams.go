@@ -409,7 +409,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 			if !decision.Progress.LastProducedAt.IsZero() {
 				lastProducedAgeMS = now.Sub(decision.Progress.LastProducedAt).Milliseconds()
 			}
-			slog.Info("transcode segment missing",
+			slog.InfoContext(r.Context(), "transcode segment missing", "component", "jellycompat",
 				"segment", segmentFile,
 				"requested_segment", segNum,
 				"produced_head", decision.Progress.ProducedHead,
@@ -423,7 +423,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				"playback_session_id", playSession.UpstreamSessionID,
 			)
 			if decision.Wait {
-				slog.Info("transcode segment wait",
+				slog.InfoContext(r.Context(), "transcode segment wait", "component", "jellycompat",
 					"segment", segmentFile,
 					"requested_segment", segNum,
 					"produced_head", decision.Progress.ProducedHead,
@@ -438,7 +438,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				)
 				segmentPath, err = transcodeSession.WaitForSegment(segmentFile, decision.WaitTimeout)
 				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-					slog.Info("transcode segment wait timeout",
+					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "jellycompat",
 						"segment", segmentFile,
 						"requested_segment", segNum,
 						"produced_head", decision.Progress.ProducedHead,
@@ -457,7 +457,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				seekSeconds, ok, seekErr := transcodeSession.RestartSeekTarget(segNum)
 				if seekErr != nil && !errors.Is(seekErr, playback.ErrManifestNotReady) {
-					slog.Error("resolve transcode seek target",
+					slog.ErrorContext(r.Context(), "resolve transcode seek target", "component", "jellycompat",
 						"error", seekErr,
 						"segment", segmentFile,
 						"play_session", playSessionID,
@@ -477,7 +477,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				}
 
 				if ok {
-					slog.Info("transcode seek restart",
+					slog.InfoContext(r.Context(), "transcode seek restart", "component", "jellycompat",
 						"segment", segmentFile,
 						"requested_segment", segNum,
 						"produced_head", decision.Progress.ProducedHead,
@@ -805,7 +805,7 @@ func (h *PlaybackHandler) teardownPlaySession(ctx context.Context, playSession *
 		delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
 		defer cancel()
 		if err := h.RecipeNodeStore.Delete(delCtx, playSession.UpstreamSessionID); err != nil {
-			slog.Warn("delete node transcode recipe failed", "error", err,
+			slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
 				"playback_session_id", playSession.UpstreamSessionID)
 		}
 	}
@@ -830,7 +830,7 @@ func (h *PlaybackHandler) syncSessionsNow(ctx context.Context, reason string) {
 	ctx, cancel := context.WithTimeout(ctx, compatSessionSyncTimeout)
 	defer cancel()
 	if err := h.SessionSyncer.SyncNow(ctx); err != nil {
-		slog.Error("jellycompat: failed to sync sessions", "reason", reason, "error", err)
+		slog.ErrorContext(ctx, "jellycompat: failed to sync sessions", "component", "jellycompat", "reason", reason, "error", err)
 	}
 }
 
@@ -904,7 +904,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 				audioTrackIndex = resolvedAudioTrackIndex
 			}
 			if syncErr := h.syncUpstreamAudioSelection(playSession, *updatedSource); syncErr != nil {
-				slog.Warn("jellycompat audio selection sync failed",
+				slog.WarnContext(r.Context(), "jellycompat audio selection sync failed", "component", "jellycompat",
 					"play_session_id", playSession.ID,
 					"upstream_session_id", playSession.UpstreamSessionID,
 					"error", syncErr,
@@ -912,14 +912,14 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 			}
 			restarted, restartErr := h.restartCompatTranscodeForAudioSelection(r.Context(), playSession, *updatedSource, positionSeconds)
 			if restartErr != nil {
-				slog.Warn("jellycompat audio selection restart failed",
+				slog.WarnContext(r.Context(), "jellycompat audio selection restart failed", "component", "jellycompat",
 					"play_session_id", playSession.ID,
 					"upstream_session_id", playSession.UpstreamSessionID,
 					"error", restartErr,
 				)
 			}
 			audioRestarted = restarted
-			slog.Info("jellycompat audio selection updated",
+			slog.InfoContext(r.Context(), "jellycompat audio selection updated", "component", "jellycompat",
 				"play_session_id", playSession.ID,
 				"media_source_id", updatedSource.ID,
 				"audio_stream_index", selectedAudioStreamIndex,
@@ -1011,7 +1011,7 @@ func (h *PlaybackHandler) reviveUpstreamForReport(ctx context.Context, session *
 	}
 	revived, err := h.ensureUpstreamPlayback(ctx, session, playSession.ID, *source, playSession.UpstreamPlayMethod)
 	if err != nil {
-		slog.Warn("jellycompat upstream session revive failed",
+		slog.WarnContext(ctx, "jellycompat upstream session revive failed", "component", "jellycompat",
 			"play_session_id", playSession.ID,
 			"upstream_session_id", playSession.UpstreamSessionID,
 			"error", err,
@@ -1093,7 +1093,7 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 		if h.RecipeNodeStore != nil {
 			delCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
 			if err := h.RecipeNodeStore.Delete(delCtx, oldUpstreamSessionID); err != nil {
-				slog.Warn("delete node transcode recipe failed", "error", err,
+				slog.WarnContext(ctx, "delete node transcode recipe failed", "component", "jellycompat", "error", err,
 					"playback_session_id", oldUpstreamSessionID)
 			}
 			cancel()
@@ -1380,7 +1380,7 @@ func (h *PlaybackHandler) restartCompatTranscodeForAudioSelection(
 		// not the live stream.
 		opts := transcodeSession.Opts()
 		if err := h.persistTranscodeRecipe(context.WithoutCancel(ctx), playSession.ID, playSession.UpstreamSessionID, opts); err != nil {
-			slog.Warn("persist audio-restarted transcode recipe", "error", err,
+			slog.WarnContext(ctx, "persist audio-restarted transcode recipe", "component", "jellycompat", "error", err,
 				"playback_session_id", playSession.ID)
 		}
 		return true, nil

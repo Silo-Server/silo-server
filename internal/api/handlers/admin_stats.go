@@ -219,7 +219,7 @@ func queryAdminStats(ctx context.Context, pool *pgxpool.Pool) (AdminStats, error
 
 	activity, err := queryWatchProviderActivity(ctx, pool)
 	if err != nil {
-		slog.Warn("failed to query watch provider admin stats", "error", err)
+		slog.WarnContext(ctx, "failed to query watch provider admin stats", "component", "api", "error", err)
 		activity = WatchProviderActivity{}
 	}
 

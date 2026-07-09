@@ -72,7 +72,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 	var currentTime float64
 	currentTime, err = resolveResumeTime(r.Context(), h.deps.ProgressStore, a.UserID, a.ProfileID, contentID)
 	if err != nil {
-		slog.Debug("play: progress lookup failed", "user", a.UserID, "item", contentID, "err", err)
+		slog.DebugContext(r.Context(), "play: progress lookup failed", "component", "audiobooks", "user", a.UserID, "item", contentID, "err", err)
 		// currentTime is already 0 on error path; safe to continue.
 	}
 
@@ -107,7 +107,7 @@ func (h *Handler) handlePlayStart(w http.ResponseWriter, r *http.Request) {
 			// Non-fatal: log but still return the manifest so the client
 			// can play. Heartbeat/close calls will fail with 404 until the
 			// next play_start lands cleanly.
-			slog.Warn("abs play: persist session failed",
+			slog.WarnContext(r.Context(), "abs play: persist session failed", "component", "audiobooks",
 				"session_id", sessionID, "content_id", contentID, "err", err)
 		}
 	}

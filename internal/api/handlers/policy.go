@@ -678,7 +678,7 @@ func (h *PolicyHandler) notifyChanged(r *http.Request) policyApplyStatus {
 	}
 	status := h.system.ApplyChanged(r.Context())
 	if err := status.Err(); err != nil {
-		slog.Error("policy notify changed failed", "error", err, "failed_step", status.FailedStep())
+		slog.ErrorContext(r.Context(), "policy notify changed failed", "component", "api", "error", err, "failed_step", status.FailedStep())
 	}
 	return policyApplyStatus{
 		Applied:          status.Applied(),

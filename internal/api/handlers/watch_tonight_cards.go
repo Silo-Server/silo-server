@@ -219,7 +219,7 @@ func (h *RecommendationsHandler) HandleWatchTonightCards(w http.ResponseWriter, 
 func (h *RecommendationsHandler) buildContinueCards(r *http.Request, userID int, profileID string, filter catalog.AccessFilter, excludeIDs map[string]struct{}, limit int) ([]mergedItem, bool) {
 	cwItems, nextUpItems, err := h.fetchLiveCWAndNextUp(r, userID, profileID, filter, limit+len(excludeIDs))
 	if err != nil {
-		slog.Warn("WatchTonightCards: CW/NextUp fetch failed", "user_id", userID, "error", err)
+		slog.WarnContext(r.Context(), "WatchTonightCards: CW/NextUp fetch failed", "component", "api", "user_id", userID, "error", err)
 		return nil, false
 	}
 
@@ -277,7 +277,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(r *http.Request, userID int,
 	poolSize := discoverCandidatePoolSize(limit, len(genres))
 	embedding, err := h.recsRepo.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {
-		slog.Warn("WatchTonightCards: taste profile fetch failed", "user_id", userID, "profile_id", profileID, "error", err)
+		slog.WarnContext(r.Context(), "WatchTonightCards: taste profile fetch failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 	}
 
 	candidates := []recommendations.ScoredItem{}
@@ -294,7 +294,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(r *http.Request, userID int,
 			filter,
 		)
 		if err != nil {
-			slog.Warn("WatchTonightCards: taste candidate query failed", "user_id", userID, "profile_id", profileID, "error", err)
+			slog.WarnContext(r.Context(), "WatchTonightCards: taste candidate query failed", "component", "api", "user_id", userID, "profile_id", profileID, "error", err)
 		} else {
 			candidates = candidateItems
 			genreMap = candidateGenres
@@ -344,7 +344,7 @@ func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Co
 		"",
 	)
 	if err != nil {
-		slog.Warn("WatchTonightCards: popular cache unavailable", "error", err)
+		slog.WarnContext(ctx, "WatchTonightCards: popular cache unavailable", "component", "api", "error", err)
 	}
 	for _, item := range popular {
 		byID[item.MediaItemID] = item
@@ -358,7 +358,7 @@ func (h *RecommendationsHandler) buildColdStartDiscoverCandidates(ctx context.Co
 		"",
 	)
 	if err != nil {
-		slog.Warn("WatchTonightCards: recently added cache unavailable", "error", err)
+		slog.WarnContext(ctx, "WatchTonightCards: recently added cache unavailable", "component", "api", "error", err)
 	}
 	for _, item := range recentlyAdded {
 		if existing, exists := byID[item.MediaItemID]; !exists || item.Score > existing.Score {
@@ -387,7 +387,7 @@ func (h *RecommendationsHandler) fetchCastByIDs(ctx context.Context, lookupIDs [
 	}
 	castMap, err := h.CastFetcher.ListForItems(ctx, lookupIDs)
 	if err != nil {
-		slog.Error("WatchTonightCards: cast fetch failed", "error", err)
+		slog.ErrorContext(ctx, "WatchTonightCards: cast fetch failed", "component", "api", "error", err)
 		return nil
 	}
 	return castMap

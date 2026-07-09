@@ -31,7 +31,7 @@ func NewScopeAccessFilter(resolver ScopeResolver) AccessFilterResolver {
 			SkipPINVerification: true,
 		})
 		if err != nil {
-			slog.Warn("jellycompat: access scope resolution failed; denying library access",
+			slog.WarnContext(ctx, "jellycompat: access scope resolution failed; denying library access", "component", "jellycompat",
 				"user_id", userID,
 				"profile_id", profileID,
 				"error", err,

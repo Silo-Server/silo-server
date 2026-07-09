@@ -60,6 +60,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logfilter"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/logstream"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/manga"
@@ -93,6 +94,7 @@ import (
 	taskrepository "github.com/Silo-Server/silo-server/internal/taskmanager/repository"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/tasks"
 	"github.com/Silo-Server/silo-server/internal/taskmanager/triggers"
+	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userdb"
@@ -130,12 +132,26 @@ func resolvePluginCacheDir() string {
 	return filepath.Join(os.TempDir(), "silo-plugins")
 }
 
-func buildBaseHandler(format string, level slog.Leveler) slog.Handler {
+func buildBaseHandler(format string, level slog.Leveler, otelHandler slog.Handler) slog.Handler {
 	opts := &slog.HandlerOptions{Level: level}
+	var console slog.Handler
 	if strings.EqualFold(format, "json") {
-		return slog.NewJSONHandler(os.Stderr, opts)
+		console = slog.NewJSONHandler(os.Stderr, opts)
+	} else {
+		console = slog.NewTextHandler(os.Stderr, opts)
 	}
-	return slog.NewTextHandler(os.Stderr, opts)
+	if otelHandler == nil {
+		// Redact secrets before they reach stderr (the opslog DB path redacts
+		// separately when flattening rows).
+		return logredact.New(console)
+	}
+	// Fan out to the console and the OTel bridge. The OTel branch is level-gated
+	// by the shared level var so console and OTLP share one verbosity knob (see
+	// telemetry.LevelGated) — otherwise slog.MultiHandler.Enabled would OR the
+	// branches and export Debug records while stderr stays silent. The whole
+	// fan-out is wrapped in secret redaction so console and OTLP both emit
+	// masked output (the opslog DB path redacts separately).
+	return logredact.New(telemetry.FanOut(console, telemetry.LevelGated(otelHandler, level)))
 }
 
 func parseLogLevel(level string) slog.Level {
@@ -178,7 +194,7 @@ func configureOperationalLogging(
 		// Non-fatal: a partition hiccup must not crash-loop the server (see the
 		// operational_logs partition incident). Writes fall back to the default
 		// partition and the periodic cleanup retries EnsureFuturePartitions.
-		slog.Warn("ensure operational log partitions; continuing in degraded mode", "error", err)
+		slog.WarnContext(ctx, "ensure operational log partitions; continuing in degraded mode", "component", "app", "error", err)
 	}
 
 	var operationalWriter opslog.Writer
@@ -221,7 +237,7 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 
 	opts, err := database.LoadPostgresTuneOptionsFromEnv(appMaxConnections)
 	if err != nil {
-		slog.Warn("postgres auto-tuning disabled", "error", err)
+		slog.WarnContext(ctx, "postgres auto-tuning disabled", "component", "app", "error", err)
 		return
 	}
 	if !opts.Enabled {
@@ -233,14 +249,14 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 
 	result, err := database.ApplyPostgresTuning(tuneCtx, pool, opts)
 	for _, failure := range result.Failures {
-		slog.Warn("postgres auto-tuning setting failed",
+		slog.WarnContext(ctx, "postgres auto-tuning setting failed", "component", "app",
 			"name", failure.Name,
 			"value", failure.Value,
 			"error", failure.Err,
 		)
 	}
 	if err != nil {
-		slog.Warn("postgres auto-tuning failed",
+		slog.WarnContext(ctx, "postgres auto-tuning failed", "component", "app",
 			"error", err,
 			"applied", result.Applied,
 			"failures", len(result.Failures),
@@ -248,7 +264,7 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 		return
 	}
 
-	slog.Info("postgres auto-tuning applied",
+	slog.InfoContext(ctx, "postgres auto-tuning applied", "component", "app",
 		"profile", opts.Profile,
 		"postgres_major", result.PostgresMajorVersion,
 		"settings", result.Applied,
@@ -265,12 +281,12 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 		"database_size_bytes", result.DatabaseSizeBytes,
 	)
 	if len(result.RestartRequired) > 0 {
-		slog.Warn("postgres restart required to finish applying auto-tuned settings",
+		slog.WarnContext(ctx, "postgres restart required to finish applying auto-tuned settings", "component", "app",
 			"settings", strings.Join(result.RestartRequired, ","),
 		)
 	}
 	if len(result.Reset) > 0 {
-		slog.Info("postgres auto-tuning reset stale settings",
+		slog.InfoContext(ctx, "postgres auto-tuning reset stale settings", "component", "app",
 			"settings", strings.Join(result.Reset, ","),
 		)
 	}
@@ -285,25 +301,25 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
-		slog.Error("secret backfill: sensitive settings", "error", err)
+		slog.ErrorContext(ctx, "secret backfill: sensitive settings", "component", "app", "error", err)
 	}
 	columnsN, err := secret.BackfillColumns(ctx, pool, cipher, secret.ColumnBackfillTargets())
 	if err != nil {
-		slog.Error("secret backfill: credential columns", "error", err)
+		slog.ErrorContext(ctx, "secret backfill: credential columns", "component", "app", "error", err)
 	}
 	historyServersN, err := historyimport.NewRepository(pool, cipher).BackfillSessionServerSecrets(ctx)
 	if err != nil {
-		slog.Error("secret backfill: history import session server credentials", "error", err)
+		slog.ErrorContext(ctx, "secret backfill: history import session server credentials", "component", "app", "error", err)
 	}
 	// The arr resolver is the encrypting settings decorator: it decrypts a
 	// sensitive target (e.g. requests.radarr.api_key) or passes through a
 	// plaintext custom key, exactly replicating the deleted resolveAPIKey.
 	arrN, err := secret.BackfillReferencedColumns(ctx, pool, cipher, settings.Get, secret.ArrKeyBackfillTargets())
 	if err != nil {
-		slog.Error("secret backfill: arr api keys", "error", err)
+		slog.ErrorContext(ctx, "secret backfill: arr api keys", "component", "app", "error", err)
 	}
 	if total := settingsN + columnsN + historyServersN + arrN; total > 0 {
-		slog.Info("secret backfill: encrypted plaintext credentials at rest",
+		slog.InfoContext(ctx, "secret backfill: encrypted plaintext credentials at rest", "component", "app",
 			"settings", settingsN, "columns", columnsN, "history_session_servers", historyServersN, "arr_keys", arrN, "total", total)
 	}
 }
@@ -541,7 +557,34 @@ func main() {
 	// the config watcher in integrated mode.
 	logLevelVar := new(slog.LevelVar)
 	logLevelVar.Set(parseLogLevel(cfg.Server.LogLevel))
-	baseHandler := buildBaseHandler(cfg.Server.LogFormat, logLevelVar)
+
+	// Bootstrap OpenTelemetry (logs + traces) before installing the log handler
+	// chain. Setup depends only on OTEL_* / SILO_OTEL_ENABLED env (not the DB),
+	// so it is safe to call here. When disabled, this is fully dormant: no
+	// providers are installed and telemetryShutdown is a no-op.
+	telemetryCfg := telemetry.LoadConfig(nodeID)
+	telemetryProviders, telemetryShutdown, err := telemetry.Setup(ctx, telemetryCfg)
+	if err != nil {
+		// Telemetry is best-effort: a malformed OTEL_* environment must not
+		// crash-loop the server. Setup installed no globals and returned no-op
+		// providers, so continue with telemetry disabled.
+		slog.ErrorContext(ctx, "telemetry setup failed; continuing with telemetry disabled", "component", "app", "error", err)
+		telemetryCfg.Enabled = false
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetryShutdown(shutdownCtx); err != nil {
+			slog.WarnContext(shutdownCtx, "telemetry shutdown error", "component", "app", "error", err)
+		}
+	}()
+
+	var otelLogHandler slog.Handler
+	if telemetryCfg.Enabled {
+		otelLogHandler = telemetry.NewOTelHandler(telemetryProviders.LoggerProvider)
+	}
+
+	baseHandler := buildBaseHandler(cfg.Server.LogFormat, logLevelVar, otelLogHandler)
 	quietFilter := logfilter.New(baseHandler, cfg.Server.LogQuiet)
 	slog.SetDefault(slog.New(quietFilter))
 
@@ -576,7 +619,7 @@ func main() {
 	if mode == "proxy" || mode == "transcode" {
 		redisClient, err := cache.NewRedisClient(cfg.Redis)
 		if err != nil || redisClient == nil {
-			slog.Error("redis is required for "+mode+" mode", "error", err)
+			slog.Error("redis is required for this mode", "mode", mode, "error", err)
 			os.Exit(1)
 		}
 
@@ -715,7 +758,7 @@ func main() {
 			// must not be skipped because the admin request was canceled.
 			if key == clientip.SettingTrustedProxies && ipResolver != nil {
 				if cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo); loadErr != nil {
-					slog.Warn("clientip config reload failed", "error", loadErr)
+					slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
 				} else {
 					ipResolver.UpdateTrustedCIDRs(cidrs)
 				}
@@ -1007,7 +1050,7 @@ func main() {
 					settingsRepo,
 					markerPluginResolver,
 				); err != nil {
-					slog.Warn("reload marker plugin providers failed", "error", err)
+					slog.WarnContext(ctx, "reload marker plugin providers failed", "component", "app", "error", err)
 				}
 			})
 		}
@@ -1116,7 +1159,7 @@ func main() {
 		if pluginService != nil && pluginInstallationStore != nil {
 			reloadImageResolvers := func(ctx context.Context) {
 				if err := reloadPluginImageResolvers(ctx, pluginInstallationStore, imageResolver, pluginService); err != nil {
-					slog.Warn("failed to reload plugin image resolvers", "error", err)
+					slog.WarnContext(ctx, "failed to reload plugin image resolvers", "component", "app", "error", err)
 				}
 			}
 			pluginService.AddLifecycleHook(reloadImageResolvers)
@@ -1267,9 +1310,9 @@ func main() {
 			matchWorker.SetSeriesRootClaimer(seriesQueueRepo, cfg.Matcher.TVSeriesRootQueueEnabled())
 			backgroundInit = append(backgroundInit, func(ctx context.Context) {
 				if cleaned, err := seriesQueueRepo.CleanupLegacySeriesGroupQueue(ctx); err != nil {
-					slog.Warn("failed to clean legacy series group queue rows", "error", err)
+					slog.WarnContext(ctx, "failed to clean legacy series group queue rows", "component", "app", "error", err)
 				} else if cleaned > 0 {
-					slog.Info("cleaned legacy series group queue rows", "count", cleaned)
+					slog.InfoContext(ctx, "cleaned legacy series group queue rows", "component", "app", "count", cleaned)
 				}
 			})
 		}
@@ -1278,7 +1321,7 @@ func main() {
 				start := time.Now()
 				enabledFolders, err := deps.FolderRepo.GetEnabled(ctx)
 				if err != nil {
-					slog.Warn("failed to seed metadata queues", "error", err)
+					slog.WarnContext(ctx, "failed to seed metadata queues", "component", "app", "error", err)
 					return
 				}
 				seedMovieQueue := func(folderID int) {
@@ -1286,7 +1329,7 @@ func main() {
 						return
 					}
 					if err := movieQueueRepo.SyncForFolder(ctx, folderID); err != nil {
-						slog.Warn("failed to seed movie match queue", "folder_id", folderID, "error", err)
+						slog.WarnContext(ctx, "failed to seed movie match queue", "component", "app", "folder_id", folderID, "error", err)
 					}
 				}
 				seedSeriesQueue := func(folderID int) {
@@ -1294,7 +1337,7 @@ func main() {
 						return
 					}
 					if err := seriesQueueRepo.SyncForFolder(ctx, folderID); err != nil {
-						slog.Warn("failed to seed series root queue", "folder_id", folderID, "error", err)
+						slog.WarnContext(ctx, "failed to seed series root queue", "component", "app", "folder_id", folderID, "error", err)
 					}
 				}
 				for _, folder := range enabledFolders {
@@ -1311,7 +1354,7 @@ func main() {
 						seedMovieQueue(folder.ID)
 					}
 				}
-				slog.Info("deferred init: metadata match queues seeded", "folders", len(enabledFolders), "duration", time.Since(start))
+				slog.InfoContext(ctx, "deferred init: metadata match queues seeded", "component", "app", "folders", len(enabledFolders), "duration", time.Since(start))
 			})
 		}
 
@@ -1539,7 +1582,7 @@ func main() {
 			WithUserStoreProvider(userStoreProvider)
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
 			if err := watchProviderService.SweepOpenScrobbles(ctx); err != nil {
-				slog.Warn("failed to sweep open watch provider scrobbles", "error", err)
+				slog.WarnContext(ctx, "failed to sweep open watch provider scrobbles", "component", "app", "error", err)
 			}
 		})
 	}
@@ -1655,7 +1698,7 @@ func main() {
 		}
 		cidrs, loadErr := clientip.LoadTrustedCIDRs(context.Background(), settingsRepo)
 		if loadErr != nil {
-			slog.Warn("clientip config reload failed", "error", loadErr)
+			slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", loadErr)
 			return
 		}
 		ipResolver.UpdateTrustedCIDRs(cidrs)
@@ -1672,7 +1715,7 @@ func main() {
 		}
 		cidrs, parseErr := clientip.ParseCIDRs(raw)
 		if parseErr != nil {
-			slog.Warn("clientip config reload failed", "error", parseErr)
+			slog.WarnContext(context.Background(), "clientip config reload failed", "component", "app", "error", parseErr)
 			return
 		}
 		ipResolver.UpdateTrustedCIDRs(cidrs)
@@ -2763,7 +2806,7 @@ func reloadPluginImageResolvers(
 			case sdkcapability.ImageResolver:
 				schemes, priority := imageResolverCapabilityConfig(capability)
 				if len(schemes) == 0 {
-					slog.Warn("plugin image resolver capability has no valid schemes",
+					slog.WarnContext(ctx, "plugin image resolver capability has no valid schemes", "component", "app",
 						"installation_id", installation.ID,
 						"capability_id", capability.ID)
 					continue
@@ -2786,7 +2829,7 @@ func reloadPluginImageResolvers(
 			case sdkcapability.MetadataProvider:
 				scheme := strings.TrimSpace(capability.ID)
 				if !metadata.ValidImageResolverScheme(scheme) {
-					slog.Warn("skipping legacy metadata image resolver with invalid scheme",
+					slog.WarnContext(ctx, "skipping legacy metadata image resolver with invalid scheme", "component", "app",
 						"installation_id", installation.ID,
 						"capability_id", capability.ID)
 					continue
@@ -2808,7 +2851,7 @@ func reloadPluginImageResolvers(
 	}
 
 	resolver.ReplaceSources(registrations)
-	slog.Info("reloaded plugin image resolvers", "sources", len(registrations))
+	slog.InfoContext(ctx, "reloaded plugin image resolvers", "component", "app", "sources", len(registrations))
 	return nil
 }
 

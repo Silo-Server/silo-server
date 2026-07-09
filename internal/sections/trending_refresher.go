@@ -155,7 +155,7 @@ func (r *TrendingRefresher) refreshCombo(ctx context.Context, source, window str
 
 	entries, err := r.fetchEntries(ctx, source, window, trendingFetchCap)
 	if err != nil {
-		r.log().Error("trending refresh: fetch failed", "source", source, "window", window, "error", err)
+		r.log().ErrorContext(ctx, "trending refresh: fetch failed", "source", source, "window", window, "error", err)
 		_ = r.Snapshots.RecordAttempt(ctx, source, window, "error", err.Error(), now)
 		return "error"
 	}
@@ -167,7 +167,7 @@ func (r *TrendingRefresher) refreshCombo(ctx context.Context, source, window str
 
 	contentIDs, err := r.resolveIDs(ctx, entries)
 	if err != nil {
-		r.log().Error("trending refresh: resolve failed", "source", source, "window", window, "error", err)
+		r.log().ErrorContext(ctx, "trending refresh: resolve failed", "source", source, "window", window, "error", err)
 		_ = r.Snapshots.RecordAttempt(ctx, source, window, "error", err.Error(), now)
 		return "error"
 	}
@@ -177,7 +177,7 @@ func (r *TrendingRefresher) refreshCombo(ctx context.Context, source, window str
 		status = "empty"
 	}
 	if err := r.Snapshots.SaveSuccess(ctx, source, window, contentIDs, len(entries), status, now); err != nil {
-		r.log().Error("trending refresh: save failed", "source", source, "window", window, "error", err)
+		r.log().ErrorContext(ctx, "trending refresh: save failed", "source", source, "window", window, "error", err)
 		return "error"
 	}
 	return status

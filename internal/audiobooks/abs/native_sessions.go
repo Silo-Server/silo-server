@@ -63,7 +63,7 @@ func (h *Handler) startNativePlaybackSession(
 	}
 
 	if err := h.deps.NativeSessions.SetProgressPersistenceDisabled(session.ID, true); err != nil {
-		slog.Warn("abs play: disable native progress persistence failed",
+		slog.WarnContext(r.Context(), "abs play: disable native progress persistence failed", "component", "audiobooks",
 			"session_id", session.ID, "error", err)
 	} else {
 		session.DisableProgressPersistence = true
@@ -71,7 +71,7 @@ func (h *Handler) startNativePlaybackSession(
 
 	if startPosition > 0 {
 		if err := h.deps.NativeSessions.UpdateProgress(session.ID, startPosition, false); err != nil {
-			slog.Warn("abs play: seed native session progress failed",
+			slog.WarnContext(r.Context(), "abs play: seed native session progress failed", "component", "audiobooks",
 				"session_id", session.ID, "position", startPosition, "error", err)
 		} else {
 			session.Position = startPosition
@@ -92,7 +92,7 @@ func (h *Handler) startNativePlaybackSession(
 		ClientUserAgent:   session.ClientUserAgent,
 		StreamBitrateKbps: streamBitrateKbps,
 	}); err != nil {
-		slog.Warn("abs play: update native session stream state failed",
+		slog.WarnContext(r.Context(), "abs play: update native session stream state failed", "component", "audiobooks",
 			"session_id", session.ID, "error", err)
 	} else {
 		session.PlayMethod = playback.PlayDirect
@@ -111,7 +111,7 @@ func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID st
 	}
 	if err := h.deps.NativeSessions.UpdateProgress(sessionID, position, false); err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.Warn("abs session sync: update native session progress failed",
+			slog.WarnContext(ctx, "abs session sync: update native session progress failed", "component", "audiobooks",
 				"session_id", sessionID, "position", position, "error", err)
 		}
 		return
@@ -125,7 +125,7 @@ func (h *Handler) stopNativePlaybackSession(ctx context.Context, sessionID strin
 	}
 	if err := h.deps.NativeSessions.StopSession(sessionID); err != nil {
 		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.Warn("abs session close: stop native session failed",
+			slog.WarnContext(ctx, "abs session close: stop native session failed", "component", "audiobooks",
 				"session_id", sessionID, "error", err)
 		}
 		return
@@ -162,7 +162,7 @@ func (h *Handler) syncNativeSessionsNow(ctx context.Context, reason string) {
 		return
 	}
 	if err := h.deps.NativeSessionSyncer.SyncNow(ctx); err != nil {
-		slog.Error("abs: failed to sync native playback sessions", "reason", reason, "error", err)
+		slog.ErrorContext(ctx, "abs: failed to sync native playback sessions", "component", "audiobooks", "reason", reason, "error", err)
 	}
 }
 

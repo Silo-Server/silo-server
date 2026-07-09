@@ -185,14 +185,14 @@ func (e *Enricher) Run(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	slog.Info("audiobook enrichment: sweep started",
+	slog.InfoContext(ctx, "audiobook enrichment: sweep started", "component", "audiobooks",
 		"count", len(items),
 		"workers", e.workers,
 	)
 
 	enriched := e.runBatch(ctx, items, e.enrichItem)
 
-	slog.Info("audiobook enrichment: sweep complete",
+	slog.InfoContext(ctx, "audiobook enrichment: sweep complete", "component", "audiobooks",
 		"attempted", len(items),
 		"enriched", enriched,
 	)
@@ -251,7 +251,7 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 					continue // drain
 				}
 				if err := enrichFn(ctx, item); err != nil {
-					slog.Warn("audiobook enrichment: item failed",
+					slog.WarnContext(ctx, "audiobook enrichment: item failed", "component", "audiobooks",
 						"content_id", item.ContentID,
 						"title", item.Title,
 						"error", err,
@@ -354,7 +354,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	defer e.maybeApplyCoverFallback(ctx, item.ContentID)
 
 	if item.FolderID == 0 {
-		slog.Debug("audiobook enrichment: item has no library folder, skipping",
+		slog.DebugContext(ctx, "audiobook enrichment: item has no library folder, skipping", "component", "audiobooks",
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
@@ -367,7 +367,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return fmt.Errorf("resolving audiobook chain for folder %d: %w", item.FolderID, err)
 	}
 	if len(providers) == 0 {
-		slog.Debug("audiobook enrichment: no providers in chain",
+		slog.DebugContext(ctx, "audiobook enrichment: no providers in chain", "component", "audiobooks",
 			"content_id", item.ContentID,
 			"folder_id", item.FolderID,
 		)
@@ -403,7 +403,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		}
 		results, searchErr := sp.Search(ctx, searchQuery)
 		if searchErr != nil {
-			slog.Warn("audiobook enrichment: search error",
+			slog.WarnContext(ctx, "audiobook enrichment: search error", "component", "audiobooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"error", searchErr,
@@ -422,7 +422,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 				}
 			}
 		}
-		slog.Debug("audiobook enrichment: search result",
+		slog.DebugContext(ctx, "audiobook enrichment: search result", "component", "audiobooks",
 			"provider", p.Slug(),
 			"content_id", item.ContentID,
 			"matched_ids", accumulatedIDs,
@@ -445,7 +445,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			Language:    item.Language,
 		})
 		if getErr != nil {
-			slog.Warn("audiobook enrichment: GetMetadata error",
+			slog.WarnContext(ctx, "audiobook enrichment: GetMetadata error", "component", "audiobooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"error", getErr,
@@ -461,7 +461,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		accumulatedIDs = accumulator.ProviderIDs
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
 
-		slog.Debug("audiobook enrichment: metadata received",
+		slog.DebugContext(ctx, "audiobook enrichment: metadata received", "component", "audiobooks",
 			"provider", p.Slug(),
 			"content_id", item.ContentID,
 			"has_poster", result.PosterPath != "",
@@ -483,7 +483,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		}
 		// Providers ran cleanly but nothing matched — stamp last_refreshed so we
 		// skip on the next sweep.
-		slog.Info("audiobook enrichment: no metadata found",
+		slog.InfoContext(ctx, "audiobook enrichment: no metadata found", "component", "audiobooks",
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
@@ -497,7 +497,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
 	e.autoLinkLiteraryWork(ctx, item.ContentID)
 
-	slog.Info("audiobook enrichment: enriched",
+	slog.InfoContext(ctx, "audiobook enrichment: enriched", "component", "audiobooks",
 		"content_id", item.ContentID,
 		"title", item.Title,
 		"poster", accumulator.PosterPath != "",
@@ -514,11 +514,11 @@ func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
 	}
 	workID, linked, err := e.workLinker.AutoLinkContent(ctx, contentID)
 	if err != nil {
-		slog.Warn("audiobook enrichment: literary work auto-link failed", "content_id", contentID, "error", err)
+		slog.WarnContext(ctx, "audiobook enrichment: literary work auto-link failed", "component", "audiobooks", "content_id", contentID, "error", err)
 		return
 	}
 	if linked {
-		slog.Info("audiobook enrichment: literary work auto-linked", "content_id", contentID, "work_id", workID)
+		slog.InfoContext(ctx, "audiobook enrichment: literary work auto-linked", "component", "audiobooks", "content_id", contentID, "work_id", workID)
 	}
 }
 
@@ -531,7 +531,7 @@ func (e *Enricher) maybeApplyCoverFallback(ctx context.Context, contentID string
 		return
 	}
 	if err := e.applyLocalCoverFallback(ctx, contentID); err != nil {
-		slog.Warn("audiobook enrichment: local cover fallback failed",
+		slog.WarnContext(ctx, "audiobook enrichment: local cover fallback failed", "component", "audiobooks",
 			"content_id", contentID,
 			"error", err,
 		)
@@ -562,7 +562,7 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 		ImageType:   metadata.ImagePoster,
 	})
 	if err != nil {
-		slog.Warn("audiobook enrichment: poster cache failed, keeping provider URL",
+		slog.WarnContext(ctx, "audiobook enrichment: poster cache failed, keeping provider URL", "component", "audiobooks",
 			"content_id", contentID,
 			"url", result.PosterPath,
 			"error", err,
@@ -651,7 +651,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
 			// Non-fatal: log and continue.
-			slog.Warn("audiobook enrichment: failed to persist provider IDs",
+			slog.WarnContext(ctx, "audiobook enrichment: failed to persist provider IDs", "component", "audiobooks",
 				"content_id", contentID,
 				"error", err,
 			)
@@ -667,7 +667,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	if len(result.People) > 0 && e.personRepo != nil && e.itemRepo != nil {
 		if err := e.persistPeople(ctx, contentID, result.People); err != nil {
 			// Non-fatal: log and continue so at least scalar metadata is saved.
-			slog.Warn("audiobook enrichment: failed to persist people",
+			slog.WarnContext(ctx, "audiobook enrichment: failed to persist people", "component", "audiobooks",
 				"content_id", contentID,
 				"error", err,
 			)
@@ -706,7 +706,7 @@ func (e *Enricher) enqueueRemoteArtwork(ctx context.Context, contentID string, r
 	enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if _, err := e.imageCacheJobs.EnqueueBatch(enqueueCtx, inputs); err != nil {
-		slog.Warn("audiobook enrichment: failed to enqueue image cache jobs",
+		slog.WarnContext(ctx, "audiobook enrichment: failed to enqueue image cache jobs", "component", "audiobooks",
 			"content_id", contentID,
 			"count", len(inputs),
 			"error", err,

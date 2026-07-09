@@ -600,12 +600,12 @@ func (s *Service) executeRun(run *Run, provider Provider) {
 func (s *Service) failRun(ctx context.Context, runID string, summary ExecutionSummary, err error) {
 	message := userFacingRunError(summary, err)
 	if updateErr := s.repo.FailRun(ctx, runID, summary, message); updateErr != nil {
-		slog.Error("history import: failed to mark run failed", "run_id", runID, "error", updateErr, "root_error", err)
+		slog.ErrorContext(ctx, "history import: failed to mark run failed", "component", "historyimport", "run_id", runID, "error", updateErr, "root_error", err)
 		return
 	}
 	s.notifyRunByID(ctx, runID)
-	slog.Error(
-		"history import: failed",
+	slog.ErrorContext(ctx,
+		"history import: failed", "component", "historyimport",
 		"run_id", runID,
 		"error", message,
 		"root_error", err,
@@ -756,7 +756,7 @@ func toConnectServerResponses(servers []ConnectServer) []ConnectServerResponse {
 
 func (s *Service) persistProgress(ctx context.Context, runID string, summary ExecutionSummary) {
 	if err := s.repo.UpdateRunProgress(ctx, runID, summary); err != nil && !errors.Is(err, ErrRunNotFound) {
-		slog.Warn("history import: failed to persist progress", "run_id", runID, "error", err)
+		slog.WarnContext(ctx, "history import: failed to persist progress", "component", "historyimport", "run_id", runID, "error", err)
 		return
 	}
 	s.notifyRunByID(ctx, runID)
@@ -765,8 +765,8 @@ func (s *Service) persistProgress(ctx context.Context, runID string, summary Exe
 func (s *Service) persistProgressMaybe(ctx context.Context, runID string, summary ExecutionSummary, processed, total int) {
 	if processed == total || processed%25 == 0 {
 		s.persistProgress(ctx, runID, summary)
-		slog.Info(
-			"history import: progress",
+		slog.InfoContext(ctx,
+			"history import: progress", "component", "historyimport",
 			"run_id", runID,
 			"processed", processed,
 			"total", total,

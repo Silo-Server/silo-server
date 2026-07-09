@@ -175,7 +175,7 @@ func (s *Service) AutoEnqueue(ctx context.Context, itemContentID, language strin
 	}
 	missing, err := s.content.CountMissingFields(ctx, itemContentID, target)
 	if err != nil {
-		s.logger.Warn("metadata translation: missing-field count failed",
+		s.logger.WarnContext(ctx, "metadata translation: missing-field count failed",
 			"content_id", itemContentID, "language", target, "error", err)
 		return
 	}
@@ -188,7 +188,7 @@ func (s *Service) AutoEnqueue(ctx context.Context, itemContentID, language strin
 		TargetLanguage:  target,
 		IncludeChildren: true,
 	}); err != nil {
-		s.logger.Warn("metadata translation: auto-enqueue failed",
+		s.logger.WarnContext(ctx, "metadata translation: auto-enqueue failed",
 			"content_id", itemContentID, "language", target, "error", err)
 	}
 }
@@ -304,7 +304,7 @@ func (f field) segmentID() string {
 
 func (s *Service) run(ctx context.Context, job *Job) {
 	if err := s.repo.UpdateProgress(ctx, job.ID, jobrunner.StatusRunning, 0, "Loading content", 0, 0); err != nil {
-		s.logger.Warn("failed to mark metadata translation job running", "job", job.ID, "error", err)
+		s.logger.WarnContext(ctx, "failed to mark metadata translation job running", "job", job.ID, "error", err)
 	}
 
 	fields, meta, err := s.collectFields(ctx, job)
@@ -314,14 +314,14 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	}
 	if len(fields) == 0 {
 		if err := s.repo.CompleteJob(context.WithoutCancel(ctx), job.ID, "Nothing to translate", 0, 0); err != nil {
-			s.logger.Warn("failed to complete metadata translation job", "job", job.ID, "error", err)
+			s.logger.WarnContext(ctx, "failed to complete metadata translation job", "job", job.ID, "error", err)
 		}
 		return
 	}
 
 	total := len(fields)
 	if err := s.repo.UpdateProgress(ctx, job.ID, jobrunner.StatusRunning, 0.05, "Translating", 0, total); err != nil {
-		s.logger.Warn("failed to update metadata translation job", "job", job.ID, "error", err)
+		s.logger.WarnContext(ctx, "failed to update metadata translation job", "job", job.ID, "error", err)
 	}
 
 	segments := make([]aitranslate.Segment, total)
@@ -385,7 +385,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	}
 
 	if err := s.repo.CompleteJob(context.WithoutCancel(ctx), job.ID, "", done, total); err != nil {
-		s.logger.Warn("failed to complete metadata translation job", "job", job.ID, "error", err)
+		s.logger.WarnContext(ctx, "failed to complete metadata translation job", "job", job.ID, "error", err)
 	}
 }
 
@@ -610,9 +610,9 @@ func (s *Service) finishWithError(ctx context.Context, job *Job, err error) {
 		msg = "cancelled"
 	}
 	if dbErr := s.repo.FailJob(context.WithoutCancel(ctx), job.ID, status, msg); dbErr != nil {
-		s.logger.Warn("failed to record metadata translation job failure", "job", job.ID, "error", dbErr)
+		s.logger.WarnContext(ctx, "failed to record metadata translation job failure", "job", job.ID, "error", dbErr)
 	}
 	if status == jobrunner.StatusFailed {
-		s.logger.Warn("metadata translation job failed", "job", job.ID, "content_id", job.ContentID, "error", err)
+		s.logger.WarnContext(ctx, "metadata translation job failed", "job", job.ID, "content_id", job.ContentID, "error", err)
 	}
 }

@@ -239,7 +239,7 @@ func (s *ContributionService) contributeSegment(
 		row.Status = OutcomeStatusError
 		row.Error = &msg
 		if recErr := s.store.Record(ctx, row); recErr != nil {
-			s.logger.Warn("record contribution error failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", recErr)
+			s.logger.WarnContext(ctx, "record contribution error failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", recErr)
 		}
 		if after, ok := RetryAfter(err); ok {
 			return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: OutcomeStatusRateLimited, Reason: msg, RetryAfter: after}, true
@@ -256,7 +256,7 @@ func (s *ContributionService) contributeSegment(
 		row.SubmissionID = &id
 	}
 	if err := s.store.Record(ctx, row); err != nil {
-		s.logger.Warn("record contribution failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", err)
+		s.logger.WarnContext(ctx, "record contribution failed", "file_id", file.ID, "provider", providerID, "segment", seg.name, "error", err)
 	}
 	return ContributionOutcome{Provider: providerID, Segment: seg.kind, Status: row.Status, SubmissionID: result.ID}, true
 }

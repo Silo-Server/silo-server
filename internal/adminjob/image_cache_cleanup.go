@@ -65,7 +65,7 @@ func (e *ImageCacheCleanupExecutor) Execute(
 		}
 		n, err := e.s3.DeletePrefix(ctx, bucket, prefix)
 		if err != nil {
-			slog.Warn("image cache cleanup: s3 delete failed", "prefix", prefix, "error", err)
+			slog.WarnContext(ctx, "image cache cleanup: s3 delete failed", "component", "adminjob", "prefix", prefix, "error", err)
 			continue
 		}
 		deletedPrefixes++

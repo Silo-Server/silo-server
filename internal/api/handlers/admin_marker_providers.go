@@ -162,7 +162,7 @@ func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter
 		existing.ContributeMinConfidence = v
 	}
 	if err := h.Config.Update(r.Context(), existing); err != nil {
-		h.logger.Error("admin markers: update provider config failed", "provider", provider, "error", err)
+		h.logger.ErrorContext(r.Context(), "admin markers: update provider config failed", "provider", provider, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update provider")
 		return
 	}

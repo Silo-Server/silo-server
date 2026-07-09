@@ -311,7 +311,7 @@ func (e *Engine) RefreshTasteProfile(ctx context.Context, userID int, profileID 
 
 	items, err := e.itemRepo.GetByIDs(ctx, allIDs)
 	if err != nil {
-		slog.Error("taste: failed to fetch items for genre enrichment, cluster labels will be degraded",
+		slog.ErrorContext(ctx, "taste: failed to fetch items for genre enrichment, cluster labels will be degraded", "component", "recommendations",
 			"user_id", userID, "profile_id", profileID,
 			"id_count", len(allIDs), "error", err)
 	} else {

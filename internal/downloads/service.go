@@ -209,13 +209,13 @@ func (s *Service) loadConfig(ctx context.Context) config.DownloadConfig {
 
 	allSettings, err := s.settings.GetAll(ctx)
 	if err != nil {
-		slog.Warn("failed to reload download config from DB, using cached", "error", err)
+		slog.WarnContext(ctx, "failed to reload download config from DB, using cached", "component", "downloads", "error", err)
 		return s.cfg
 	}
 
 	newFullCfg, err := config.LoadFromDB(allSettings)
 	if err != nil {
-		slog.Warn("failed to parse download config from DB, using cached", "error", err)
+		slog.WarnContext(ctx, "failed to parse download config from DB, using cached", "component", "downloads", "error", err)
 		return s.cfg
 	}
 
@@ -226,13 +226,13 @@ func (s *Service) loadConfig(ctx context.Context) config.DownloadConfig {
 	// Update bandwidth manager if limits changed.
 	if s.bandwidth != nil && (oldCfg.ServerBandwidthBPS != s.cfg.ServerBandwidthBPS || oldCfg.UserBandwidthBPS != s.cfg.UserBandwidthBPS) {
 		s.bandwidth.Reload(s.cfg.ServerBandwidthBPS, s.cfg.UserBandwidthBPS)
-		slog.Info("download bandwidth config reloaded", "server_bps", s.cfg.ServerBandwidthBPS, "user_bps", s.cfg.UserBandwidthBPS)
+		slog.InfoContext(ctx, "download bandwidth config reloaded", "component", "downloads", "server_bps", s.cfg.ServerBandwidthBPS, "user_bps", s.cfg.UserBandwidthBPS)
 	}
 
 	// Update quantity limiter if limits changed.
 	if s.limiter != nil && (oldCfg.MaxConcurrentPerUser != s.cfg.MaxConcurrentPerUser || oldCfg.MaxPerPeriod != s.cfg.MaxPerPeriod || oldCfg.PeriodDuration != s.cfg.PeriodDuration) {
 		s.limiter.Reload(s.cfg.MaxConcurrentPerUser, s.cfg.MaxPerPeriod, s.cfg.PeriodDuration)
-		slog.Info("download quantity limits reloaded", "max_concurrent", s.cfg.MaxConcurrentPerUser, "max_per_period", s.cfg.MaxPerPeriod, "period", s.cfg.PeriodDuration)
+		slog.InfoContext(ctx, "download quantity limits reloaded", "component", "downloads", "max_concurrent", s.cfg.MaxConcurrentPerUser, "max_per_period", s.cfg.MaxPerPeriod, "period", s.cfg.PeriodDuration)
 	}
 
 	return s.cfg
@@ -905,14 +905,14 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 			if errors.Is(err, ErrStatusConflict) {
 				return fmt.Errorf("download already in progress: %w", ErrDownloadNotActive)
 			}
-			slog.Warn("failed to transition download to downloading", "download_id", dl.ID, "error", err)
+			slog.WarnContext(ctx, "failed to transition download to downloading", "component", "downloads", "download_id", dl.ID, "error", err)
 		}
 	}
 
 	if err := s.serveDownloadBytes(ctx, w, r, dl, userID, filter); err != nil {
 		if dl.Format == FormatOriginal {
 			if updateErr := s.repo.UpdateStatus(ctx, dl.ID, StatusFailed, 0, nil); updateErr != nil {
-				slog.Error("failed to mark download as failed", "download_id", dl.ID, "error", updateErr)
+				slog.ErrorContext(ctx, "failed to mark download as failed", "component", "downloads", "download_id", dl.ID, "error", updateErr)
 			}
 		}
 		return err
@@ -920,7 +920,7 @@ func (s *Service) ServeFile(ctx context.Context, w http.ResponseWriter, r *http.
 
 	now := time.Now()
 	if err := s.repo.UpdateStatus(ctx, dl.ID, StatusCompleted, dl.FileSize, &now); err != nil {
-		slog.Error("failed to mark download as completed", "download_id", dl.ID, "error", err)
+		slog.ErrorContext(ctx, "failed to mark download as completed", "component", "downloads", "download_id", dl.ID, "error", err)
 	}
 	return nil
 }

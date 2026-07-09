@@ -95,7 +95,7 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, limit Rate) Allow
 
 	if err != nil {
 		// Fail-open: allow request if Redis is unreachable
-		slog.Warn("rate limit Redis error, allowing request", "error", err, "key", key)
+		slog.WarnContext(ctx, "rate limit Redis error, allowing request", "component", "ratelimit", "error", err, "key", key)
 		return AllowResult{
 			Allowed:   true,
 			Limit:     effectiveLimit,

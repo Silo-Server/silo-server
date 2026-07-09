@@ -321,7 +321,7 @@ func (m *SessionManager) StartSessionWithFilesContext(
 		if err != nil {
 			// Fail closed, but make an engine outage distinguishable from a
 			// genuine concurrency-limit denial in the logs.
-			slog.Warn("playback admission decider error; denying session",
+			slog.WarnContext(ctx, "playback admission decider error; denying session", "component", "playback",
 				"user_id", userID, "method", method, "error", err)
 			return nil, admissionDenyError("")
 		}

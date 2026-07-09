@@ -205,7 +205,8 @@ func main() {
 		mode = "WRITE"
 	}
 
-	slog.Info(fmt.Sprintf("backfill: complete (%s)", mode),
+	slog.Info("backfill: complete",
+		"mode", mode,
 		"folder_id", folderID,
 		"groups", len(groups),
 		"items_created", createCount,

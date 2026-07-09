@@ -463,7 +463,7 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 		return nil, fmt.Errorf("fetching TMDB preset: %w", err)
 	}
 
-	slog.Info("TMDB preset sync: fetched results",
+	slog.InfoContext(ctx, "TMDB preset sync: fetched results", "component", "catalog",
 		"collection_id", collection.ID,
 		"preset", preset,
 		"media_type", mediaType,
@@ -486,7 +486,7 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 			return nil, err
 		}
 		if item == nil {
-			slog.Debug("TMDB preset sync: no match",
+			slog.DebugContext(ctx, "TMDB preset sync: no match", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
 				"type", entry.MediaType,
@@ -499,7 +499,7 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
-			slog.Debug("TMDB preset sync: duplicate match skipped",
+			slog.DebugContext(ctx, "TMDB preset sync: duplicate match skipped", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
 				"type", entry.MediaType,
@@ -515,7 +515,7 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 		}
 		seenContentIDs[item.ContentID] = i + 1
 
-		slog.Debug("TMDB preset sync: matched",
+		slog.DebugContext(ctx, "TMDB preset sync: matched", "component", "catalog",
 			"rank", i+1,
 			"title", entry.Title,
 			"type", entry.MediaType,
@@ -535,7 +535,7 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 		}
 	}
 
-	slog.Info("TMDB preset sync: complete",
+	slog.InfoContext(ctx, "TMDB preset sync: complete", "component", "catalog",
 		"collection_id", collection.ID,
 		"preset", preset,
 		"matched", len(matchedItems),
@@ -629,7 +629,7 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 		return nil, fmt.Errorf("fetching TMDB collection: %w", err)
 	}
 
-	slog.Info("TMDB franchise sync: fetched results",
+	slog.InfoContext(ctx, "TMDB franchise sync: fetched results", "component", "catalog",
 		"collection_id", collection.ID,
 		"tmdb_collection_id", cfg.CollectionID,
 		"count", len(results),
@@ -650,7 +650,7 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 			return nil, err
 		}
 		if item == nil {
-			slog.Debug("TMDB franchise sync: no match",
+			slog.DebugContext(ctx, "TMDB franchise sync: no match", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
 				"tmdb_id", entry.ID,
@@ -661,7 +661,7 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
-			slog.Debug("TMDB franchise sync: duplicate match skipped",
+			slog.DebugContext(ctx, "TMDB franchise sync: duplicate match skipped", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
 				"content_id", item.ContentID,
@@ -673,7 +673,7 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 		}
 		seenContentIDs[item.ContentID] = i + 1
 
-		slog.Debug("TMDB franchise sync: matched",
+		slog.DebugContext(ctx, "TMDB franchise sync: matched", "component", "catalog",
 			"rank", i+1,
 			"title", entry.Title,
 			"tmdb_id", entry.ID,
@@ -690,7 +690,7 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 		}
 	}
 
-	slog.Info("TMDB franchise sync: complete",
+	slog.InfoContext(ctx, "TMDB franchise sync: complete", "component", "catalog",
 		"collection_id", collection.ID,
 		"tmdb_collection_id", cfg.CollectionID,
 		"matched", len(matchedItems),
@@ -803,7 +803,7 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 		return nil, fmt.Errorf("fetching TMDB discover: %w", err)
 	}
 
-	slog.Info("TMDB discover sync: fetched results",
+	slog.InfoContext(ctx, "TMDB discover sync: fetched results", "component", "catalog",
 		"collection_id", collection.ID,
 		"media_type", mediaType,
 		"sort_by", params.SortBy,
@@ -825,7 +825,7 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 			return nil, err
 		}
 		if item == nil {
-			slog.Debug("TMDB discover sync: no match",
+			slog.DebugContext(ctx, "TMDB discover sync: no match", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
 				"type", entry.MediaType,
@@ -838,7 +838,7 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 			continue
 		}
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
-			slog.Debug("TMDB discover sync: duplicate match skipped",
+			slog.DebugContext(ctx, "TMDB discover sync: duplicate match skipped", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
 				"content_id", item.ContentID,
@@ -861,7 +861,7 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 		}
 	}
 
-	slog.Info("TMDB discover sync: complete",
+	slog.InfoContext(ctx, "TMDB discover sync: complete", "component", "catalog",
 		"collection_id", collection.ID,
 		"media_type", mediaType,
 		"matched", len(matchedItems),
@@ -941,7 +941,7 @@ func (s *LibraryCollectionService) syncTraktPresetCollection(ctx context.Context
 			return s.recordFailedCollectionSync(ctx, collection.ID, startedAt, "Trakt recommendations require a profile")
 		}
 		if s.TraktTokenResolver == nil {
-			slog.Error("Trakt recommendations: token resolver not configured",
+			slog.ErrorContext(ctx, "Trakt recommendations: token resolver not configured", "component", "catalog",
 				"collection_id", collection.ID,
 				"profile_id", profileID,
 			)
@@ -949,7 +949,7 @@ func (s *LibraryCollectionService) syncTraktPresetCollection(ctx context.Context
 		}
 		token, err := s.TraktTokenResolver.ResolveTraktAccessToken(ctx, profileID)
 		if err != nil {
-			slog.Error("Trakt recommendations: failed to resolve access token",
+			slog.ErrorContext(ctx, "Trakt recommendations: failed to resolve access token", "component", "catalog",
 				"collection_id", collection.ID,
 				"profile_id", profileID,
 				"error", err,
@@ -965,7 +965,7 @@ func (s *LibraryCollectionService) syncTraktPresetCollection(ctx context.Context
 		return nil, fmt.Errorf("fetching Trakt preset: %w", err)
 	}
 
-	slog.Info("Trakt preset sync: fetched results",
+	slog.InfoContext(ctx, "Trakt preset sync: fetched results", "component", "catalog",
 		"collection_id", collection.ID,
 		"preset", preset,
 		"media_type", mediaType,
@@ -1003,7 +1003,7 @@ func (s *LibraryCollectionService) syncTraktListCollection(ctx context.Context, 
 		return nil, fmt.Errorf("fetching Trakt list %s/%s: %w", user, list, err)
 	}
 
-	slog.Info("Trakt list sync: fetched results",
+	slog.InfoContext(ctx, "Trakt list sync: fetched results", "component", "catalog",
 		"collection_id", collection.ID,
 		"user", user,
 		"list", list,
@@ -1083,7 +1083,7 @@ func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, c
 		if firstRank, exists := seenContentIDs[item.ContentID]; exists {
 			duplicateCount++
 			warnings = append(warnings, fmt.Sprintf("Duplicate Trakt entry for %s matched existing item %s", entry.Title, item.ContentID))
-			slog.Info("Trakt preset sync: duplicate match skipped",
+			slog.InfoContext(ctx, "Trakt preset sync: duplicate match skipped", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
 				"content_id", item.ContentID,
@@ -1368,7 +1368,7 @@ func (s *LibraryCollectionService) maybeGenerateCollage(ctx context.Context, col
 
 	collection, err := s.collections.GetByID(ctx, collectionID)
 	if err != nil {
-		slog.Warn("collage: failed to load collection", "collection_id", collectionID, "error", err)
+		slog.WarnContext(ctx, "collage: failed to load collection", "component", "catalog", "collection_id", collectionID, "error", err)
 		return
 	}
 
@@ -1379,9 +1379,9 @@ func (s *LibraryCollectionService) maybeGenerateCollage(ctx context.Context, col
 
 	if err := s.CollageGen.GenerateCollectionPoster(ctx, collectionID); err != nil {
 		if errors.Is(err, collage.ErrNotEnoughImages) {
-			slog.Debug("collage: not enough images", "collection_id", collectionID)
+			slog.DebugContext(ctx, "collage: not enough images", "component", "catalog", "collection_id", collectionID)
 		} else {
-			slog.Warn("collage: poster generation failed", "collection_id", collectionID, "error", err)
+			slog.WarnContext(ctx, "collage: poster generation failed", "component", "catalog", "collection_id", collectionID, "error", err)
 		}
 	}
 }

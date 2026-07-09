@@ -530,7 +530,7 @@ func (s *Service) applyResult(
 	updated.ItemCount = len(matched)
 	updated.NextSyncAt = nextSyncAt
 
-	s.logger.Info("user collection synced",
+	s.logger.InfoContext(ctx, "user collection synced",
 		"collection_id", collection.ID,
 		"status", status,
 		"matched", len(matched),

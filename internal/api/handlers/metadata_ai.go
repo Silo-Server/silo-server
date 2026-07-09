@@ -138,7 +138,7 @@ func (h *MetadataAIHandler) HandleTranslateOnView(w http.ResponseWriter, r *http
 		case errors.Is(err, translation.ErrInvalidRequest):
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		default:
-			slog.Error("failed to request on-view translation",
+			slog.ErrorContext(r.Context(), "failed to request on-view translation", "component", "api",
 				"content_id", contentID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start translation")
 		}
@@ -247,7 +247,7 @@ func (h *MetadataAIHandler) HandleTranslate(w http.ResponseWriter, r *http.Reque
 		case errors.Is(err, translation.ErrInvalidRequest):
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		default:
-			slog.Error("failed to enqueue metadata translation",
+			slog.ErrorContext(r.Context(), "failed to enqueue metadata translation", "component", "api",
 				"content_id", contentID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start translation")
 		}

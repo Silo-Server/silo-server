@@ -89,7 +89,7 @@ func (w *Watcher) Start(ctx context.Context) error {
 			}
 		}
 	}); err != nil {
-		slog.Warn("config watcher: subscribe to admin channel failed, using poll-only mode", "error", err)
+		slog.WarnContext(ctx, "config watcher: subscribe to admin channel failed, using poll-only mode", "component", "nodeconfig", "error", err)
 	}
 
 	go w.poll(ctx)
@@ -217,11 +217,11 @@ func (w *Watcher) poll(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := w.reload(ctx); err != nil {
-				slog.Warn("config poll reload failed", "error", err)
+				slog.WarnContext(ctx, "config poll reload failed", "component", "nodeconfig", "error", err)
 			}
 		case <-w.reloadCh:
 			if err := w.reload(ctx); err != nil {
-				slog.Warn("config event reload failed", "error", err)
+				slog.WarnContext(ctx, "config event reload failed", "component", "nodeconfig", "error", err)
 			}
 		}
 	}

@@ -173,7 +173,7 @@ func (h *DownloadHandler) HandleCapability(w http.ResponseWriter, r *http.Reques
 
 	capInfo, err := h.svc.Capability(r.Context(), userID)
 	if err != nil {
-		slog.Error("failed to load download capability", "user_id", userID, "error", err)
+		slog.ErrorContext(r.Context(), "failed to load download capability", "component", "api", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load download capability")
 		return
 	}
@@ -297,7 +297,7 @@ func (h *DownloadHandler) HandleListDownloads(w http.ResponseWriter, r *http.Req
 			writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 			return
 		}
-		slog.Error("failed to list downloads", "user_id", userID, "error", err)
+		slog.ErrorContext(r.Context(), "failed to list downloads", "component", "api", "user_id", userID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list downloads")
 		return
 	}
@@ -336,7 +336,7 @@ func (h *DownloadHandler) HandleDeleteDownload(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 			return
 		}
-		slog.Error("failed to delete download", "download_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "failed to delete download", "component", "api", "download_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete download")
 		return
 	}
@@ -371,7 +371,7 @@ func (h *DownloadHandler) HandlePatchDownload(w http.ResponseWriter, r *http.Req
 		case errors.Is(err, downloads.ErrProfileRequired):
 			writeError(w, http.StatusBadRequest, "profile_required", "A profile is required for managed downloads")
 		default:
-			slog.Error("failed to patch download", "download_id", id, "error", err)
+			slog.ErrorContext(r.Context(), "failed to patch download", "component", "api", "download_id", id, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update download")
 		}
 		return
@@ -415,7 +415,7 @@ func (h *DownloadHandler) HandleDownloadFile(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusForbidden, "forbidden", "You are not allowed to download")
 			return
 		}
-		slog.Error("failed to serve download file", "download_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "failed to serve download file", "component", "api", "download_id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to serve download")
 		return
 	}

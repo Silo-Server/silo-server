@@ -120,7 +120,7 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		// Transient lookup failure: let the claim lease expire and the retry
 		// worker reclaim, instead of permanently failing the delivery.
 		if ctx.Err() == nil {
-			s.logger.Warn("web push delivery lookup failed",
+			s.logger.WarnContext(ctx, "web push delivery lookup failed",
 				"attempt_id", attempt.ID,
 				"delivery_id", attempt.NotificationDeliveryID,
 				"error", err)
@@ -142,7 +142,7 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 
 	publicKey, privateKey, err := s.service.vapidKeys(ctx)
 	if err != nil {
-		s.logger.Error("VAPID keys unavailable", "error", err)
+		s.logger.ErrorContext(ctx, "VAPID keys unavailable", "error", err)
 		_ = s.subscriptions.FinalizeAttempt(ctx, attempt.ID, WebhookOutcomeFailed,
 			attempt.AttemptNumber+1, nil, "VAPID keys unavailable", nil)
 		return
@@ -172,7 +172,7 @@ func (s *webPushSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 	if status == http.StatusNotFound || status == http.StatusGone {
 		// The browser unsubscribed or the registration expired: remove the
 		// subscription entirely (attempts cascade with it).
-		s.logger.Info("web push subscription gone; removing",
+		s.logger.InfoContext(ctx, "web push subscription gone; removing",
 			"subscription_id", sub.ID, "status", status)
 		_ = s.subscriptions.deleteGone(ctx, sub.ID)
 		return

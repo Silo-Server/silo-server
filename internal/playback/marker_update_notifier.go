@@ -28,7 +28,7 @@ func NewMarkerUpdateNotifier(sessions markerUpdateSessionLookup, hub *RealtimeHu
 	}
 }
 
-func (n *MarkerUpdateNotifier) MarkersUpdated(_ context.Context, file *models.MediaFile) {
+func (n *MarkerUpdateNotifier) MarkersUpdated(ctx context.Context, file *models.MediaFile) {
 	if n == nil || file == nil || file.ID <= 0 {
 		return
 	}
@@ -50,8 +50,8 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(_ context.Context, file *models.Me
 		}
 		event, err := NewMarkersUpdatedEvent(session.ID, file.ID, intro, credits, recap, preview)
 		if err != nil {
-			slog.Warn(
-				"failed to encode markers updated realtime event",
+			slog.WarnContext(ctx,
+				"failed to encode markers updated realtime event", "component", "playback",
 				"session_id",
 				session.ID,
 				"file_id",
@@ -62,8 +62,8 @@ func (n *MarkerUpdateNotifier) MarkersUpdated(_ context.Context, file *models.Me
 			continue
 		}
 		if err := n.hub.Send(session.ID, event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
-			slog.Warn(
-				"failed to deliver markers updated realtime event",
+			slog.WarnContext(ctx,
+				"failed to deliver markers updated realtime event", "component", "playback",
 				"session_id",
 				session.ID,
 				"file_id",

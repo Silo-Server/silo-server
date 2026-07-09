@@ -350,7 +350,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	session, err := playback.StartTranscode(context.WithoutCancel(r.Context()), opts)
 	if err != nil {
 		unlock()
-		slog.Error("start transcode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
 		http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		return
 	}
@@ -405,7 +405,7 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	cfg := s.watcher.Config()
 	claims, err := streamtoken.Verify(tokenStr, cfg.Auth.JWTSecret)
 	if err != nil {
-		slog.Warn("transcode node reconstruct: invalid stream token", "error", err,
+		slog.WarnContext(r.Context(), "transcode node reconstruct: invalid stream token", "component", "transcodenode", "error", err,
 			"session", sessionID, "playback_session_id", sessionID)
 		return nil
 	}
@@ -512,7 +512,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 
 	session, err := playback.StartTranscode(context.WithoutCancel(r.Context()), opts)
 	if err != nil {
-		slog.Error("transcode node reconstruct start failed", "error", err,
+		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
 			"session", sessionID, "playback_session_id", sessionID)
 		return nil
 	}
@@ -545,7 +545,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		MediaFileID: card.MediaFileID,
 	})
 
-	slog.Info("transcode node session reconstructed from token",
+	slog.InfoContext(r.Context(), "transcode node session reconstructed from token", "component", "transcodenode",
 		"session", sessionID, "playback_session_id", sessionID,
 		"requested_segment", requestedSegment, "start_segment_number", opts.StartSegmentNumber)
 	return session
@@ -585,7 +585,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	s.activeJobs.Add(-1)
 
 	if err := session.Close(); err != nil {
-		slog.Error("close transcode session", "error", err, "session", sessionID, "playback_session_id", sessionID)
+		slog.ErrorContext(r.Context(), "close transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 	}
 
 	cfg := s.watcher.Config()
@@ -597,7 +597,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	// must still succeed even if the recipe store is briefly unavailable.
 	if s.recipeStore != nil {
 		if err := s.recipeStore.Delete(r.Context(), sessionID); err != nil {
-			slog.Warn("delete transcode recipe on stop", "error", err, "session", sessionID, "playback_session_id", sessionID)
+			slog.WarnContext(r.Context(), "delete transcode recipe on stop", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		}
 	}
 
@@ -626,7 +626,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 
 	manifest, err := session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	if err != nil {
-		slog.Error("get manifest", "error", err, "session", sessionID, "playback_session_id", sessionID)
+		slog.ErrorContext(r.Context(), "get manifest", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		http.Error(w, "manifest not ready", http.StatusServiceUnavailable)
 		return
 	}
@@ -670,7 +670,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 			if !decision.Progress.LastProducedAt.IsZero() {
 				lastProducedAgeMS = now.Sub(decision.Progress.LastProducedAt).Milliseconds()
 			}
-			slog.Info("transcode segment missing",
+			slog.InfoContext(r.Context(), "transcode segment missing", "component", "transcodenode",
 				"segment", name,
 				"requested_segment", segNum,
 				"produced_head", decision.Progress.ProducedHead,
@@ -683,7 +683,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				"playback_session_id", sessionID,
 			)
 			if decision.Wait {
-				slog.Info("transcode segment wait",
+				slog.InfoContext(r.Context(), "transcode segment wait", "component", "transcodenode",
 					"segment", name,
 					"requested_segment", segNum,
 					"produced_head", decision.Progress.ProducedHead,
@@ -697,7 +697,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				)
 				segPath, err = session.WaitForSegment(name, decision.WaitTimeout)
 				if err != nil && err == playback.ErrSegmentNotFound {
-					slog.Info("transcode segment wait timeout",
+					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "transcodenode",
 						"segment", name,
 						"requested_segment", segNum,
 						"produced_head", decision.Progress.ProducedHead,
@@ -715,11 +715,11 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 			if err != nil && err == playback.ErrSegmentNotFound && decision.RestartOnTimeout {
 				seekSeconds, ok, seekErr := session.RestartSeekTarget(segNum)
 				if seekErr != nil && !errors.Is(seekErr, playback.ErrManifestNotReady) {
-					slog.Error("resolve transcode node seek target", "error", seekErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
+					slog.ErrorContext(r.Context(), "resolve transcode node seek target", "component", "transcodenode", "error", seekErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
 				}
 
 				if ok {
-					slog.Info("transcode node seek restart",
+					slog.InfoContext(r.Context(), "transcode node seek restart", "component", "transcodenode",
 						"segment", name,
 						"requested_segment", segNum,
 						"produced_head", decision.Progress.ProducedHead,
@@ -786,14 +786,14 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 	if s.recipeStore != nil {
 		for _, id := range stopped {
 			if err := s.recipeStore.Delete(r.Context(), id); err != nil {
-				slog.Warn("delete transcode recipe on force reload", "error", err, "session", id, "playback_session_id", id)
+				slog.WarnContext(r.Context(), "delete transcode recipe on force reload", "component", "transcodenode", "error", err, "session", id, "playback_session_id", id)
 			}
 		}
 	}
 
 	s.tracker.Cleanup(r.Context())
 
-	slog.Info("transcode force reload completed")
+	slog.InfoContext(r.Context(), "transcode force reload completed", slog.String("component", "transcodenode"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

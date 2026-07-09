@@ -112,7 +112,7 @@ func (p *PlexServerProvider) fetchSeriesMetadata(ctx context.Context, items []Pl
 	for _, key := range seriesKeys {
 		meta, err := p.client.FetchMetadata(ctx, p.baseURL, p.token, key)
 		if err != nil {
-			slog.Warn("plex history import: failed to fetch series metadata", "rating_key", key, "error", err)
+			slog.WarnContext(ctx, "plex history import: failed to fetch series metadata", "component", "historyimport", "rating_key", key, "error", err)
 			*warnings = append(*warnings, fmt.Sprintf("failed to fetch series metadata for %s: %v", key, err))
 			continue
 		}

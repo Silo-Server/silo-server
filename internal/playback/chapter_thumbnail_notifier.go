@@ -67,8 +67,8 @@ func (n *ChapterThumbnailNotifier) ChapterThumbnailReady(
 		n.ttl,
 	)
 	if err != nil {
-		slog.Warn(
-			"failed to presign chapter thumbnail for realtime event",
+		slog.WarnContext(ctx,
+			"failed to presign chapter thumbnail for realtime event", "component", "playback",
 			"file_id",
 			fileID,
 			"chapter_index",
@@ -91,8 +91,8 @@ func (n *ChapterThumbnailNotifier) ChapterThumbnailReady(
 			thumbnailThumbhash,
 		)
 		if err != nil {
-			slog.Warn(
-				"failed to encode chapter thumbnail realtime event",
+			slog.WarnContext(ctx,
+				"failed to encode chapter thumbnail realtime event", "component", "playback",
 				"session_id",
 				session.ID,
 				"file_id",
@@ -105,8 +105,8 @@ func (n *ChapterThumbnailNotifier) ChapterThumbnailReady(
 			continue
 		}
 		if err := n.hub.Send(session.ID, event); err != nil && !errors.Is(err, ErrRealtimeConnectionNotFound) {
-			slog.Warn(
-				"failed to deliver chapter thumbnail realtime event",
+			slog.WarnContext(ctx,
+				"failed to deliver chapter thumbnail realtime event", "component", "playback",
 				"session_id",
 				session.ID,
 				"file_id",

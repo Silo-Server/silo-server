@@ -229,7 +229,7 @@ func (m *ArtifactManager) RunOnce(ctx context.Context) error {
 // repeatedly (each step is idempotent).
 func (m *ArtifactManager) recover(ctx context.Context) {
 	if _, err := m.repo.ReclaimExpiredLeases(ctx); err != nil {
-		slog.Warn("download artifact lease reclaim failed", "error", err)
+		slog.WarnContext(ctx, "download artifact lease reclaim failed", "component", "downloads", "error", err)
 	}
 
 	// Reconcile downloads stranded in 'preparing' against their artifact's
@@ -239,7 +239,7 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 	// failed above) so a download can never sit 'preparing' forever.
 	readyFlipped, failedFlipped, err := m.downloads.ReconcileLinkedDownloads(ctx)
 	if err != nil {
-		slog.Warn("reconciling linked downloads failed", "error", err)
+		slog.WarnContext(ctx, "reconciling linked downloads failed", "component", "downloads", "error", err)
 	} else {
 		for _, d := range readyFlipped {
 			m.publish(ctx, d)
@@ -256,7 +256,7 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 	}
 	ready, err := m.repo.ListReady(ctx)
 	if err != nil {
-		slog.Warn("download artifact ready scan failed", "error", err)
+		slog.WarnContext(ctx, "download artifact ready scan failed", "component", "downloads", "error", err)
 		return
 	}
 	for _, a := range ready {
@@ -264,9 +264,9 @@ func (m *ArtifactManager) recover(ctx context.Context) {
 			continue
 		}
 		if _, statErr := os.Stat(a.OutputPath); statErr != nil {
-			slog.Warn("download artifact output missing, re-queuing", "artifact_id", a.ID, "path", a.OutputPath)
+			slog.WarnContext(ctx, "download artifact output missing, re-queuing", "component", "downloads", "artifact_id", a.ID, "path", a.OutputPath)
 			if err := m.repo.Requeue(ctx, a.ID); err != nil {
-				slog.Warn("re-queue artifact failed", "artifact_id", a.ID, "error", err)
+				slog.WarnContext(ctx, "re-queue artifact failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 				continue
 			}
 			m.triggerDrain()
@@ -340,10 +340,10 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 			return
 		case hbCtx.Err() != nil:
 			// We lost the lease mid-encode; another worker now owns the job.
-			slog.Warn("download artifact encode aborted; lease lost", "artifact_id", a.ID)
+			slog.WarnContext(ctx, "download artifact encode aborted; lease lost", "component", "downloads", "artifact_id", a.ID)
 			return
 		default:
-			slog.Warn("download artifact encode failed", "artifact_id", a.ID, "error", err)
+			slog.WarnContext(ctx, "download artifact encode failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 			m.failJob(ctx, a, err.Error())
 			return
 		}
@@ -358,16 +358,16 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 	// do not flip them here or we would race/duplicate that owner's work.
 	applied, err := m.repo.MarkReady(ctx, a.ID, m.owner, a.OutputPath, size)
 	if err != nil {
-		slog.Error("marking artifact ready failed", "artifact_id", a.ID, "error", err)
+		slog.ErrorContext(ctx, "marking artifact ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return
 	}
 	if !applied {
-		slog.Warn("download artifact ready skipped; lease lost", "artifact_id", a.ID)
+		slog.WarnContext(ctx, "download artifact ready skipped; lease lost", "component", "downloads", "artifact_id", a.ID)
 		return
 	}
 	flipped, err := m.downloads.MarkLinkedDownloadsReady(ctx, a.ID, size)
 	if err != nil {
-		slog.Error("flipping linked downloads ready failed", "artifact_id", a.ID, "error", err)
+		slog.ErrorContext(ctx, "flipping linked downloads ready failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return
 	}
 	for _, d := range flipped {
@@ -378,7 +378,7 @@ func (m *ArtifactManager) encodeOne(ctx context.Context, a *Artifact) {
 func (m *ArtifactManager) failJob(ctx context.Context, a *Artifact, msg string) {
 	terminal, applied, err := m.repo.MarkFailedOrRetry(ctx, a.ID, m.owner, msg, backoffFor(a.Attempts))
 	if err != nil {
-		slog.Error("marking artifact failed/retry errored", "artifact_id", a.ID, "error", err)
+		slog.ErrorContext(ctx, "marking artifact failed/retry errored", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return
 	}
 	if !applied {
@@ -395,7 +395,7 @@ func (m *ArtifactManager) failJob(ctx context.Context, a *Artifact, msg string) 
 func (m *ArtifactManager) failLinkedDownloads(ctx context.Context, artifactID, msg string) {
 	flipped, err := m.downloads.MarkLinkedDownloadsFailed(ctx, artifactID, msg)
 	if err != nil {
-		slog.Error("flipping linked downloads failed errored", "artifact_id", artifactID, "error", err)
+		slog.ErrorContext(ctx, "flipping linked downloads failed errored", "component", "downloads", "artifact_id", artifactID, "error", err)
 		return
 	}
 	for _, d := range flipped {
@@ -426,9 +426,9 @@ func (m *ArtifactManager) heartbeatLoop(ctx context.Context, cancel context.Canc
 			case err != nil && ctx.Err() != nil:
 				return // encode finished or shutting down
 			case err != nil:
-				slog.Warn("download artifact heartbeat errored", "artifact_id", id, "error", err)
+				slog.WarnContext(ctx, "download artifact heartbeat errored", "component", "downloads", "artifact_id", id, "error", err)
 			case !ok:
-				slog.Warn("download artifact lease lost; aborting encode", "artifact_id", id)
+				slog.WarnContext(ctx, "download artifact lease lost; aborting encode", "component", "downloads", "artifact_id", id)
 				cancel()
 				return
 			}
@@ -498,7 +498,7 @@ func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 		}
 		active, err := m.repo.HasActiveLink(ctx, a.ID)
 		if err != nil {
-			slog.Warn("artifact link check failed", "artifact_id", a.ID, "error", err)
+			slog.WarnContext(ctx, "artifact link check failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 			continue
 		}
 		if active {
@@ -506,14 +506,14 @@ func (m *ArtifactManager) Cleanup(ctx context.Context) error {
 		}
 		if a.OutputPath != "" {
 			if err := os.Remove(a.OutputPath); err != nil && !os.IsNotExist(err) {
-				slog.Warn("removing evicted artifact file failed", "artifact_id", a.ID, "error", err)
+				slog.WarnContext(ctx, "removing evicted artifact file failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 			}
 		}
 		if err := m.repo.DeleteArtifact(ctx, a.ID); err != nil {
-			slog.Warn("deleting evicted artifact row failed", "artifact_id", a.ID, "error", err)
+			slog.WarnContext(ctx, "deleting evicted artifact row failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 			continue
 		}
-		slog.Info("evicted download artifact (LRU)", "artifact_id", a.ID, "bytes", a.FileSize)
+		slog.InfoContext(ctx, "evicted download artifact (LRU)", "component", "downloads", "artifact_id", a.ID, "bytes", a.FileSize)
 		total -= a.FileSize
 	}
 	return nil
@@ -529,14 +529,14 @@ func (m *ArtifactManager) sweepStale(ctx context.Context) {
 	}
 	now := time.Now()
 	if failed, err := m.repo.ListFailedBefore(ctx, now.Add(-failedArtifactRetention)); err != nil {
-		slog.Warn("failed-artifact sweep list failed", "error", err)
+		slog.WarnContext(ctx, "failed-artifact sweep list failed", "component", "downloads", "error", err)
 	} else {
 		for _, a := range failed {
 			m.removeArtifact(ctx, a, "failed")
 		}
 	}
 	if orphans, err := m.repo.ListUnlinkedReadyBefore(ctx, now.Add(-unlinkedArtifactRetention)); err != nil {
-		slog.Warn("unlinked-artifact sweep list failed", "error", err)
+		slog.WarnContext(ctx, "unlinked-artifact sweep list failed", "component", "downloads", "error", err)
 	} else {
 		for _, a := range orphans {
 			m.removeArtifact(ctx, a, "unlinked")
@@ -544,9 +544,9 @@ func (m *ArtifactManager) sweepStale(ctx context.Context) {
 	}
 	if m.downloads != nil {
 		if n, err := m.downloads.PruneEphemeralOlderThan(ctx, now.Add(-ephemeralDownloadRetention)); err != nil {
-			slog.Warn("ephemeral download prune failed", "error", err)
+			slog.WarnContext(ctx, "ephemeral download prune failed", "component", "downloads", "error", err)
 		} else if n > 0 {
-			slog.Info("pruned expired ephemeral downloads", "rows", n)
+			slog.InfoContext(ctx, "pruned expired ephemeral downloads", "component", "downloads", "rows", n)
 		}
 	}
 }
@@ -556,17 +556,17 @@ func (m *ArtifactManager) sweepStale(ctx context.Context) {
 func (m *ArtifactManager) removeArtifact(ctx context.Context, a *Artifact, reason string) {
 	if a.OutputPath != "" {
 		if err := os.Remove(a.OutputPath); err != nil && !os.IsNotExist(err) {
-			slog.Warn("removing swept artifact file failed", "artifact_id", a.ID, "error", err)
+			slog.WarnContext(ctx, "removing swept artifact file failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		}
 		if err := os.Remove(a.OutputPath + ".part"); err != nil && !os.IsNotExist(err) {
-			slog.Warn("removing swept artifact partial failed", "artifact_id", a.ID, "error", err)
+			slog.WarnContext(ctx, "removing swept artifact partial failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		}
 	}
 	if err := m.repo.DeleteArtifact(ctx, a.ID); err != nil {
-		slog.Warn("deleting swept artifact row failed", "artifact_id", a.ID, "error", err)
+		slog.WarnContext(ctx, "deleting swept artifact row failed", "component", "downloads", "artifact_id", a.ID, "error", err)
 		return
 	}
-	slog.Info("swept stale download artifact", "artifact_id", a.ID, "reason", reason, "bytes", a.FileSize)
+	slog.InfoContext(ctx, "swept stale download artifact", "component", "downloads", "artifact_id", a.ID, "reason", reason, "bytes", a.FileSize)
 }
 
 // backoffFor returns the retry delay for the next attempt after a failure.

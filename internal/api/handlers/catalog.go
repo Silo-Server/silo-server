@@ -114,7 +114,7 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 				writeError(w, http.StatusNotFound, "not_found", "Catalog source not found")
 				return
 			}
-			slog.Error("catalog: resolve grouped by work failed", "err_msg", err.Error())
+			slog.ErrorContext(r.Context(), "catalog: resolve grouped by work failed", "component", "api", "err_msg", err.Error())
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve catalog")
 			return
 		}
@@ -140,7 +140,7 @@ func (h *CatalogHandler) HandleGetCatalog(w http.ResponseWriter, r *http.Request
 			writeError(w, http.StatusNotFound, "not_found", "Catalog source not found")
 			return
 		}
-		slog.Error("catalog: resolve failed", "err_msg", err.Error())
+		slog.ErrorContext(r.Context(), "catalog: resolve failed", "component", "api", "err_msg", err.Error())
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve catalog")
 		return
 	}
@@ -731,7 +731,7 @@ func (h *CatalogHandler) HandleLegacySearch(w http.ResponseWriter, r *http.Reque
 
 	items, total, err := h.itemsH.itemRepo.Search(r.Context(), query, parseSearchTypes(r.URL.Query()["type"]), limit, offset, h.itemsH.accessFilter(r))
 	if err != nil {
-		slog.Error("search failed", "query", query, "error", err)
+		slog.ErrorContext(r.Context(), "search failed", "component", "api", "query", query, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Search failed")
 		return
 	}

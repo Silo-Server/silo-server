@@ -69,7 +69,7 @@ func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 			if playbackLC.PlaybackSessionID != "" {
 				attrs = append(attrs, "playback_session_id", playbackLC.PlaybackSessionID)
 			}
-			slog.Info("api request", attrs...)
+			slog.InfoContext(r.Context(), "api request", append([]any{"component", "api"}, attrs...)...)
 		})
 	}
 }

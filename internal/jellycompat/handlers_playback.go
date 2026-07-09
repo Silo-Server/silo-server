@@ -483,7 +483,7 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 		}
 	}
 	if recipe == nil {
-		slog.Warn("transcode recipe not persisted: upstream session unavailable",
+		slog.WarnContext(ctx, "transcode recipe not persisted: upstream session unavailable", "component", "jellycompat",
 			"playback_session_id", upstreamSessionID)
 	}
 
@@ -503,7 +503,7 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 		putCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		if err := h.RecipeNodeStore.Put(putCtx, upstreamSessionID, *recipe); err != nil {
-			slog.Warn("persist node transcode recipe failed", "error", err,
+			slog.WarnContext(ctx, "persist node transcode recipe failed", "component", "jellycompat", "error", err,
 				"playback_session_id", upstreamSessionID, "node", recipe.TranscodeNodeURL)
 		}
 	}
@@ -598,7 +598,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				// media default. Resolution falls back to honoring the request.
 				downloaded = nil
 				downloadedKnown = false
-				slog.Warn("jellycompat downloaded subtitle lookup failed",
+				slog.WarnContext(r.Context(), "jellycompat downloaded subtitle lookup failed", "component", "jellycompat",
 					"file_id", source.Version.FileID,
 					"error", listErr,
 				)

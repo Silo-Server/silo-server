@@ -169,7 +169,7 @@ func decodeRawJSON(raw json.RawMessage) *structpb.Struct {
 func (d *EventDispatcher) fanOut(ctx context.Context, env events.Envelope, payload *structpb.Struct) {
 	installations, err := d.installations.ListEnabled(ctx)
 	if err != nil {
-		slog.Warn("plugin event dispatcher: list installations failed", "error", err)
+		slog.WarnContext(ctx, "plugin event dispatcher: list installations failed", "component", "plugins", "error", err)
 		return
 	}
 
@@ -181,7 +181,7 @@ func (d *EventDispatcher) fanOut(ctx context.Context, env events.Envelope, paylo
 
 		capabilities, err := d.installations.ListCapabilities(ctx, installation.ID)
 		if err != nil {
-			slog.Warn("plugin event dispatcher: list capabilities failed", "installation_id", installation.ID, "error", err)
+			slog.WarnContext(ctx, "plugin event dispatcher: list capabilities failed", "component", "plugins", "installation_id", installation.ID, "error", err)
 			continue
 		}
 
@@ -201,7 +201,7 @@ func (d *EventDispatcher) fanOut(ctx context.Context, env events.Envelope, paylo
 
 				client, err := d.resolver.EventConsumerClient(ctx, installationID, capabilityID)
 				if err != nil {
-					slog.Warn("plugin event dispatcher: resolve client failed", "installation_id", installationID, "capability_id", capabilityID, "error", err)
+					slog.WarnContext(ctx, "plugin event dispatcher: resolve client failed", "component", "plugins", "installation_id", installationID, "capability_id", capabilityID, "error", err)
 					return
 				}
 
@@ -209,7 +209,7 @@ func (d *EventDispatcher) fanOut(ctx context.Context, env events.Envelope, paylo
 					EventName: env.Event,
 					Payload:   payload,
 				}); err != nil {
-					slog.Warn("plugin event dispatcher: delivery failed", "installation_id", installationID, "capability_id", capabilityID, "error", err)
+					slog.WarnContext(ctx, "plugin event dispatcher: delivery failed", "component", "plugins", "installation_id", installationID, "capability_id", capabilityID, "error", err)
 				}
 			}(installation.ID, capability.ID)
 			// Deliver to the first matching event_consumer.v1 capability per

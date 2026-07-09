@@ -97,12 +97,12 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 	// websocket reconnect, and the retry workers recover the outbox rows.
 	full, err := s.Deliveries.GetRowByID(ctx, row.ID)
 	if err != nil || full == nil {
-		s.logger.Warn("operational delivery reload failed",
+		s.logger.WarnContext(ctx, "operational delivery reload failed",
 			"delivery_id", row.ID, "error", err)
 		return &row, nil
 	}
 	if err := s.dispatcher.Dispatch(ctx, *full); err != nil {
-		s.logger.Warn("operational delivery dispatch failed",
+		s.logger.WarnContext(ctx, "operational delivery dispatch failed",
 			"delivery_id", row.ID, "error", err)
 	}
 	return &row, nil

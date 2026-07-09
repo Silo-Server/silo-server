@@ -145,7 +145,7 @@ func (h *AutoscanHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 		if terr := h.triggers.UpdateTriggers(autoscanPollTaskKey, []taskmanager.TriggerConfig{
 			{Type: taskmanager.TriggerTypeInterval, IntervalMs: intervalMs},
 		}); terr != nil {
-			slog.WarnContext(r.Context(), "autoscan: reschedule poll task failed", "err", terr)
+			slog.WarnContext(r.Context(), "autoscan: reschedule poll task failed", "component", "api", "err", terr)
 		}
 	}
 	writeJSON(w, http.StatusOK, settingsResponse(updated))
@@ -687,7 +687,7 @@ func (h *AutoscanHandler) HandleTrigger(w http.ResponseWriter, r *http.Request) 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if err := h.svc.PollOnce(ctx); err != nil {
-			slog.WarnContext(ctx, "autoscan: manual poll failed", "err", err)
+			slog.WarnContext(ctx, "autoscan: manual poll failed", "component", "api", "err", err)
 		}
 	}()
 	writeJSON(w, http.StatusAccepted, struct {

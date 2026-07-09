@@ -52,7 +52,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 
 	lazy, err := h.SettingsRepo.Get(ctx, markers.SettingLazyPlayback)
 	if err != nil {
-		slog.Warn("playback lazy markers: load lazy setting failed",
+		slog.WarnContext(ctx, "playback lazy markers: load lazy setting failed", "component", "api",
 			"session_id", session.ID,
 			"file_id", file.ID,
 			"episode_id", file.EpisodeID,
@@ -65,7 +65,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 
 	rawMode, err := h.SettingsRepo.Get(ctx, markers.SettingMode)
 	if err != nil {
-		slog.Warn("playback lazy markers: load marker mode failed",
+		slog.WarnContext(ctx, "playback lazy markers: load marker mode failed", "component", "api",
 			"session_id", session.ID,
 			"file_id", file.ID,
 			"episode_id", file.EpisodeID,
@@ -74,7 +74,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	}
 	mode := markers.NormalizeMode(rawMode)
 	if mode == markers.ModeOff {
-		slog.Debug("playback lazy markers: skipped; marker mode is off",
+		slog.DebugContext(ctx, "playback lazy markers: skipped; marker mode is off", "component", "api",
 			"session_id", session.ID,
 			"file_id", file.ID,
 			"episode_id", file.EpisodeID)
@@ -92,7 +92,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		// Online providers work for any enabled library (movies and series alike).
 		ok, err := h.IntroRepository.IsFileInEnabledLibrary(ctx, file.ID)
 		if err != nil {
-			slog.Warn("playback lazy markers: online eligibility check failed",
+			slog.WarnContext(ctx, "playback lazy markers: online eligibility check failed", "component", "api",
 				"session_id", session.ID,
 				"file_id", file.ID,
 				"error", err)
@@ -108,7 +108,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 		// opted in to expensive fingerprinting and requires an analyzer.
 		ok, err := h.IntroRepository.IntroDetectionEligibleForPlayback(ctx, file.ID)
 		if err != nil {
-			slog.Warn("playback lazy markers: local eligibility check failed",
+			slog.WarnContext(ctx, "playback lazy markers: local eligibility check failed", "component", "api",
 				"session_id", session.ID,
 				"file_id", file.ID,
 				"episode_id", file.EpisodeID,
@@ -122,7 +122,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 	}
 
 	if !shouldRunOnline && !shouldRunLocal {
-		slog.Debug("playback lazy markers: skipped; no eligible detection path",
+		slog.DebugContext(ctx, "playback lazy markers: skipped; no eligible detection path", "component", "api",
 			"session_id", session.ID,
 			"file_id", file.ID,
 			"episode_id", file.EpisodeID,
@@ -136,7 +136,7 @@ func (h *PlaybackHandler) maybeQueueLazyPlaybackMarkers(
 
 	sessionID := session.ID
 	fileSnapshot := *file
-	slog.Info("playback lazy markers: queued",
+	slog.InfoContext(ctx, "playback lazy markers: queued", "component", "api",
 		"session_id", sessionID,
 		"file_id", file.ID,
 		"episode_id", file.EpisodeID,
@@ -248,7 +248,7 @@ func (h *PlaybackHandler) fetchOnlineMarkersForPlayback(ctx context.Context, fil
 		return false, nil
 	}
 	if h.MarkerResolver == nil || h.MarkerUpserter == nil {
-		slog.Debug("playback lazy markers: online fetch skipped; resolver or upserter missing",
+		slog.DebugContext(ctx, "playback lazy markers: online fetch skipped; resolver or upserter missing", "component", "api",
 			"file_id", file.ID)
 		return false, nil
 	}
@@ -258,7 +258,7 @@ func (h *PlaybackHandler) fetchOnlineMarkersForPlayback(ctx context.Context, fil
 		return false, err
 	}
 	if !ids.HasAnyID() {
-		slog.Debug("playback lazy markers: online fetch skipped; no external IDs available",
+		slog.DebugContext(ctx, "playback lazy markers: online fetch skipped; no external IDs available", "component", "api",
 			"file_id", file.ID,
 			"episode_id", file.EpisodeID,
 			"content_id", file.ContentID)
@@ -297,7 +297,7 @@ func (h *PlaybackHandler) reloadPlaybackMarkerFile(ctx context.Context, fileID i
 	}
 	refreshed, err := h.fileResolver.GetByID(ctx, fileID)
 	if err != nil {
-		slog.Warn("playback lazy markers: reload file failed", "file_id", fileID, "error", err)
+		slog.WarnContext(ctx, "playback lazy markers: reload file failed", "component", "api", "file_id", fileID, "error", err)
 		return nil
 	}
 	return refreshed
@@ -313,7 +313,7 @@ func (h *PlaybackHandler) notifyPlaybackMarkers(
 		return
 	}
 	h.MarkerUpdateNotifier.MarkersUpdated(ctx, file)
-	slog.Info("playback lazy markers: emitted marker update",
+	slog.InfoContext(ctx, "playback lazy markers: emitted marker update", "component", "api",
 		"session_id", sessionID,
 		"file_id", file.ID,
 		"episode_id", file.EpisodeID,

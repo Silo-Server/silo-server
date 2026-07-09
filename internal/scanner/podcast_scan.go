@@ -41,7 +41,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		}
 		entries, err := os.ReadDir(root)
 		if err != nil {
-			slog.Warn("podcast scan: read root failed", "root", root, "error", err)
+			slog.WarnContext(ctx, "podcast scan: read root failed", "component", "scanner", "root", root, "error", err)
 			attempted++
 			failures = append(failures, fmt.Errorf("read root %s: %w", root, err))
 			continue
@@ -66,7 +66,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 					return err
 				}
-				slog.Warn("podcast scan: show failed",
+				slog.WarnContext(ctx, "podcast scan: show failed", "component", "scanner",
 					"folder_id", folder.ID,
 					"path", subPath,
 					"error", err,
@@ -85,7 +85,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
 	}
 	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, len(seenPaths) > 0); err != nil {
-		slog.Warn("podcast scan: missing-file reconcile failed", "folder_id", folder.ID, "error", err)
+		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	return nil
 }
@@ -114,7 +114,7 @@ func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.Media
 		return nil, fmt.Errorf("upsert podcast library membership: %w", err)
 	}
 
-	slog.Info("podcast scan: indexed",
+	slog.InfoContext(ctx, "podcast scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
 		"content_id", showContentID,
 		"title", parsed.Title,
@@ -241,7 +241,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 				return err
 			}
 			if !allowed {
-				slog.Warn("podcast scan: walk saw zero files but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed",
+				slog.WarnContext(ctx, "podcast scan: walk saw zero files but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed", "component", "scanner",
 					"folder_id", folder.ID, "existing_files", existingCount)
 				return nil
 			}
@@ -261,7 +261,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 			}
 			if mf.MissingSince == nil {
 				if err := s.fileRepo.MarkMissing(ctx, mf.ID, now); err != nil {
-					slog.Error("podcast scan: failed to mark file missing",
+					slog.ErrorContext(ctx, "podcast scan: failed to mark file missing", "component", "scanner",
 						"folder_id", folder.ID, "path", mf.FilePath, "error", err)
 					continue
 				}
@@ -276,7 +276,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
 		if trashed > 0 {
-			slog.Info("podcast scan: emptied trash", "folder_id", folder.ID, "deleted", trashed)
+			slog.InfoContext(ctx, "podcast scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 		}
 	}
 
@@ -291,7 +291,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 		}
 	}
 	if missing > 0 || removedMemberships > 0 || deletedItems > 0 {
-		slog.Info("podcast scan: reconciled missing files",
+		slog.InfoContext(ctx, "podcast scan: reconciled missing files", "component", "scanner",
 			"folder_id", folder.ID, "missing", missing,
 			"memberships_removed", removedMemberships, "items_deleted", deletedItems)
 	}

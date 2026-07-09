@@ -523,7 +523,7 @@ func (h *ItemsHandler) handlePersonItem(w http.ResponseWriter, r *http.Request, 
 	dto.BackdropImageTags = []string{}
 
 	if counts, err := h.personRepo.CountItemsByType(r.Context(), personID); err != nil {
-		slog.Warn("failed to load filmography counts", "person_id", personID, "error", err)
+		slog.WarnContext(r.Context(), "failed to load filmography counts", "component", "jellycompat", "person_id", personID, "error", err)
 	} else {
 		dto.MovieCount = counts["movie"]
 		dto.SeriesCount = counts["series"]
@@ -757,14 +757,14 @@ func (h *ItemsHandler) HandleMediaSegments(w http.ResponseWriter, r *http.Reques
 		}
 	}
 	if contentID == "" {
-		slog.Debug("jellycompat: media segments lookup with undecodable id", "raw_id", raw)
+		slog.DebugContext(r.Context(), "jellycompat: media segments lookup with undecodable id", "component", "jellycompat", "raw_id", raw)
 		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
 		return
 	}
 
 	detail, err := h.content.GetItemDetail(r.Context(), session, contentID, nil)
 	if err != nil {
-		slog.Warn("jellycompat: media segments item lookup failed",
+		slog.WarnContext(r.Context(), "jellycompat: media segments item lookup failed", "component", "jellycompat",
 			"content_id", contentID,
 			"error", err)
 		writeJSON(w, http.StatusOK, mediaSegmentsResultDTO{Items: []mediaSegmentDTO{}})
@@ -1067,7 +1067,7 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		// path" signal (e.g. a client requesting a type other than the library's
 		// own), not a failure — fall back quietly.
 		if !errors.Is(err, errLatestNotEligible) {
-			slog.Warn("jellycompat: latest via sections failed, falling back to browse", "error", err)
+			slog.WarnContext(r.Context(), "jellycompat: latest via sections failed, falling back to browse", "component", "jellycompat", "error", err)
 		}
 	}
 	result, err := h.content.BrowseItems(r.Context(), session, params)
@@ -1450,7 +1450,7 @@ func (h *ItemsHandler) HandleGenreByName(w http.ResponseWriter, r *http.Request)
 func (h *ItemsHandler) HandleSeasons(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rv := recover(); rv != nil {
-			slog.Error("jellycompat HandleSeasons panic",
+			slog.ErrorContext(r.Context(), "jellycompat HandleSeasons panic", "component", "jellycompat",
 				"error", fmt.Sprint(rv),
 				"path", r.URL.Path,
 				"query", r.URL.RawQuery,
@@ -2536,7 +2536,7 @@ func (h *ItemsHandler) handleResumeResponse(w http.ResponseWriter, r *http.Reque
 			})
 			return
 		}
-		slog.Warn("jellycompat: resume via sections failed, falling back to progress scan", "error", err)
+		slog.WarnContext(r.Context(), "jellycompat: resume via sections failed, falling back to progress scan", "component", "jellycompat", "error", err)
 	}
 
 	items, total, err := h.loadProgressPage(r.Context(), session, "in_progress", query, typeSet, nil)

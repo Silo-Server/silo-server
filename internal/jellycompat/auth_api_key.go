@@ -228,7 +228,7 @@ func (a *AdminAPIKeyAuthenticator) resolveSession(ctx context.Context, token str
 
 	profile, err := a.primaryProfile(ctx, user.ID)
 	if err != nil {
-		slog.Warn("jellycompat api key session synthesis failed", "user_id", user.ID, "error", err)
+		slog.WarnContext(ctx, "jellycompat api key session synthesis failed", "component", "jellycompat", "user_id", user.ID, "error", err)
 		return nil, adminAPIKeyAuthResult{
 			status:  http.StatusUnauthorized,
 			code:    "Unauthorized",

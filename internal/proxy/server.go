@@ -240,7 +240,7 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		if err != nil && r.Context().Err() == nil {
 			// Headers already committed — log and let the client see a
 			// truncated response.
-			slog.Error("stream subtitle (sup)", "error", err, "track", trackIndex,
+			slog.ErrorContext(r.Context(), "stream subtitle (sup)", "component", "proxy", "error", err, "track", trackIndex,
 				"path", claims.MediaPath, "playback_session_id", claims.SessionID)
 		}
 		return
@@ -251,7 +251,7 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 	if requestedFormat == "ass" {
 		data, err := playback.ExtractSubtitleWithFormat(r.Context(), claims.MediaPath, trackIndex, "ass", cfg.Playback.FFmpegPath)
 		if err != nil {
-			slog.Error("extract subtitle (ass)", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
+			slog.ErrorContext(r.Context(), "extract subtitle (ass)", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
 			http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
 			return
 		}
@@ -261,14 +261,14 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 
 	data, format, err := playback.ExtractSubtitle(r.Context(), claims.MediaPath, trackIndex, cfg.Playback.FFmpegPath)
 	if err != nil {
-		slog.Error("extract subtitle", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
+		slog.ErrorContext(r.Context(), "extract subtitle", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
 		http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
 		return
 	}
 
 	vtt, err := playback.ConvertToVTT(data, format)
 	if err != nil {
-		slog.Error("convert to vtt", "error", err, "playback_session_id", claims.SessionID)
+		slog.ErrorContext(r.Context(), "convert to vtt", "component", "proxy", "error", err, "playback_session_id", claims.SessionID)
 		http.Error(w, "subtitle conversion failed", http.StatusInternalServerError)
 		return
 	}
@@ -291,7 +291,7 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 
 	fonts, err := playback.ExtractAttachedSubtitleFonts(r.Context(), claims.MediaPath, cfg.Playback.FFmpegPath)
 	if err != nil {
-		slog.Error("extract subtitle fonts", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
+		slog.ErrorContext(r.Context(), "extract subtitle fonts", "component", "proxy", "error", err, "track", trackIndex, "path", claims.MediaPath, "playback_session_id", claims.SessionID)
 		http.Error(w, "subtitle font extraction failed", http.StatusInternalServerError)
 		return
 	}
@@ -299,7 +299,7 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(playback.EncodeSubtitleFontBundle(fonts)); err != nil {
-		slog.Warn("subtitle font response encode failed", "error", err, "playback_session_id", claims.SessionID)
+		slog.WarnContext(r.Context(), "subtitle font response encode failed", "component", "proxy", "error", err, "playback_session_id", claims.SessionID)
 	}
 }
 
@@ -333,7 +333,7 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		slog.Error("proxy to transcode node", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
+		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}
@@ -354,7 +354,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reload failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	slog.Info("proxy force reload completed")
+	slog.InfoContext(r.Context(), "proxy force reload completed", slog.String("component", "proxy"))
 	w.WriteHeader(http.StatusNoContent)
 }
 

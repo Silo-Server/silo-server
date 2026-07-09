@@ -153,7 +153,7 @@ func (a *Analyzer) Run(ctx context.Context, progress ProgressFunc) (RunSummary, 
 		summary.GroupsSkipped += groupSummary.GroupsSkipped
 		summary.Errors = append(summary.Errors, groupSummary.Errors...)
 		if err != nil {
-			a.logger.Warn("intro marker group analysis failed",
+			a.logger.WarnContext(ctx, "intro marker group analysis failed",
 				"season_id", group.SeasonID,
 				"media_folder_id", group.MediaFolderID,
 				"group_key", group.AnalysisGroupKey,
@@ -261,7 +261,7 @@ func (a *Analyzer) AnalyzeEpisode(ctx context.Context, episodeID string) (RunSum
 		summary.GroupsSkipped += groupSummary.GroupsSkipped
 		summary.Errors = append(summary.Errors, groupSummary.Errors...)
 		if err != nil {
-			a.logger.Warn("intro marker episode group analysis failed",
+			a.logger.WarnContext(ctx, "intro marker episode group analysis failed",
 				"episode_id", episodeID,
 				"season_id", group.SeasonID,
 				"media_folder_id", group.MediaFolderID,
@@ -335,7 +335,7 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 		})
 		if patchErr != nil {
 			summary.Errors = append(summary.Errors, patchErr.Error())
-			a.logger.Warn("intro marker chapter patch failed", "file_id", candidate.FileID, "error", patchErr)
+			a.logger.WarnContext(ctx, "intro marker chapter patch failed", "file_id", candidate.FileID, "error", patchErr)
 			remaining = append(remaining, candidate)
 			continue
 		}
@@ -393,7 +393,7 @@ func (a *Analyzer) processChapterCandidates(ctx context.Context, candidates []Ca
 		if patchErr != nil {
 			msg := fmt.Sprintf("file %d: %v", candidate.FileID, patchErr)
 			summary.Errors = append(summary.Errors, msg)
-			a.logger.Warn("intro marker episode version copy failed", "file_id", candidate.FileID, "source_file_id", source.candidate.FileID, "error", patchErr)
+			a.logger.WarnContext(ctx, "intro marker episode version copy failed", "file_id", candidate.FileID, "source_file_id", source.candidate.FileID, "error", patchErr)
 			unresolved = append(unresolved, candidate)
 			continue
 		}
@@ -413,7 +413,7 @@ func (a *Analyzer) refineChapterSegment(ctx context.Context, candidate Candidate
 	refined, ok, err := a.refiner.RefineChapterEnd(ctx, candidate, segment)
 	if err != nil {
 		summary.SilenceRefinementErrors++
-		a.logger.Warn("intro marker silence refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+		a.logger.WarnContext(ctx, "intro marker silence refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
 		return segment
 	}
 	if ok {
@@ -617,7 +617,7 @@ func (a *Analyzer) analyzeGroup(ctx context.Context, group candidateGroup, opts 
 		if patchErr != nil {
 			msg := fmt.Sprintf("file %d: %v", fileID, patchErr)
 			summary.Errors = append(summary.Errors, msg)
-			a.logger.Warn("intro marker chromaprint patch failed", "file_id", fileID, "path", candidate.FilePath, "error", patchErr)
+			a.logger.WarnContext(ctx, "intro marker chromaprint patch failed", "file_id", fileID, "path", candidate.FilePath, "error", patchErr)
 			continue
 		}
 		if applied {
@@ -643,7 +643,7 @@ func (a *Analyzer) refineChromaprintSegment(ctx context.Context, candidate Candi
 	refined, ok, err := a.chromaprintRefiner.RefineChromaprintStart(ctx, candidate, segment)
 	if err != nil {
 		summary.DialogueRefinementErrors++
-		a.logger.Warn("intro marker dialogue refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+		a.logger.WarnContext(ctx, "intro marker dialogue refinement failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
 		return segment
 	}
 	if ok {
@@ -722,7 +722,7 @@ func (a *Analyzer) ensureFingerprints(ctx context.Context, candidates []Candidat
 			fp, ok, err := a.extractor.Extract(ctx, candidate)
 			<-sem
 			if err != nil {
-				a.logger.Warn("intro marker fingerprint extraction failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
+				a.logger.WarnContext(ctx, "intro marker fingerprint extraction failed", "file_id", candidate.FileID, "path", candidate.FilePath, "error", err)
 				return
 			}
 			if !ok {

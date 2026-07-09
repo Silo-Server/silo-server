@@ -101,7 +101,7 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 			// the client retries it when its notifications subscription is
 			// rejected — whereas a hard 403 would take down every realtime
 			// channel over a notifications-only concern.
-			slog.Warn("events: websocket ticket rejected; connection unbound",
+			slog.WarnContext(r.Context(), "events: websocket ticket rejected; connection unbound", "component", "api",
 				"user_id", claims.UserID)
 		}
 	}
@@ -463,8 +463,8 @@ func (h *EventsHandler) writeSnapshotFrame(
 ) error {
 	data, err := h.snapshotForChannel(r, claims, boundProfileID, channel)
 	if err != nil {
-		slog.Error(
-			"events: failed to build initial snapshot",
+		slog.ErrorContext(r.Context(),
+			"events: failed to build initial snapshot", "component", "api",
 			"channel",
 			channel,
 			"user_id",
@@ -498,7 +498,7 @@ func (h *EventsHandler) writeEventFrame(
 			// writeSnapshotFrame): durable state covers the gap on the next
 			// event or reconnect, while closing the socket tears down every
 			// channel the client subscribed to.
-			slog.Error("events: failed to build event payload", "channel", env.Channel, "event", env.Event, "error", err)
+			slog.ErrorContext(r.Context(), "events: failed to build event payload", "component", "api", "channel", env.Channel, "event", env.Event, "error", err)
 			return nil
 		}
 		data = snapshot

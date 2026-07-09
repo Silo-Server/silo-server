@@ -100,7 +100,7 @@ func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWrite
 	// Load the existing item to infer content type.
 	item, err := h.items.GetByID(r.Context(), contentID)
 	if err != nil {
-		slog.Warn("admin match: item not found", "content_id", contentID, "error", err)
+		slog.WarnContext(r.Context(), "admin match: item not found", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusNotFound, "not_found", "Item not found")
 		return
 	}
@@ -111,7 +111,7 @@ func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWrite
 			writeError(w, http.StatusBadRequest, "bad_request", "library_id is required for items in multiple libraries")
 			return
 		}
-		slog.Warn("admin match: resolve folder failed", "content_id", contentID, "error", err)
+		slog.WarnContext(r.Context(), "admin match: resolve folder failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library_id")
 		return
 	}
@@ -137,7 +137,7 @@ func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWrite
 
 	candidates, err := h.metadata.SearchAndNormalize(r.Context(), query, folderID)
 	if err != nil {
-		slog.Error("admin match: search failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin match: search failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Metadata search failed")
 		return
 	}
@@ -173,7 +173,7 @@ func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.
 	// Verify the item exists.
 	_, err := h.items.GetByID(r.Context(), contentID)
 	if err != nil {
-		slog.Warn("admin match: item not found for apply", "content_id", contentID, "error", err)
+		slog.WarnContext(r.Context(), "admin match: item not found for apply", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusNotFound, "not_found", "Item not found")
 		return
 	}
@@ -184,7 +184,7 @@ func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "bad_request", "library_id is required for items in multiple libraries")
 			return
 		}
-		slog.Warn("admin match: resolve folder failed for apply", "content_id", contentID, "error", err)
+		slog.WarnContext(r.Context(), "admin match: resolve folder failed for apply", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid library_id")
 		return
 	}
@@ -200,7 +200,7 @@ func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.
 		Mode:        metadata.ModeIdentify,
 	})
 	if err != nil {
-		slog.Error("admin match: apply failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin match: apply failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to apply match")
 		return
 	}

@@ -261,7 +261,7 @@ func (r *Runner) queueImageCacheCleanup(ctx context.Context, createdByUserID int
 		Message: "Queued cached image cleanup",
 	})
 	if err != nil {
-		slog.Warn("admin jobs: failed to queue image cache cleanup",
+		slog.WarnContext(ctx, "admin jobs: failed to queue image cache cleanup", "component", "adminjob",
 			"library_id", result.LibraryID,
 			"library_name", result.LibraryName,
 			"error", err,
@@ -782,7 +782,7 @@ func (r *Runner) heartbeatLoop(ctx context.Context, jobID string, stop <-chan st
 			return
 		case <-ticker.C:
 			if err := r.repo.TouchHeartbeat(ctx, jobID); err != nil && !errors.Is(err, ErrJobNotFound) {
-				slog.Warn("admin jobs: failed to touch heartbeat", "job_id", jobID, "error", err)
+				slog.WarnContext(ctx, "admin jobs: failed to touch heartbeat", "component", "adminjob", "job_id", jobID, "error", err)
 			}
 		}
 	}
@@ -823,7 +823,7 @@ func (r *Runner) publishJobByID(ctx context.Context, eventType notifications.Typ
 	job, err := r.repo.GetByID(ctx, id)
 	if err != nil {
 		if !errors.Is(err, ErrJobNotFound) {
-			slog.Warn("admin jobs: failed to load job for realtime event", "job_id", id, "error", err)
+			slog.WarnContext(ctx, "admin jobs: failed to load job for realtime event", "component", "adminjob", "job_id", id, "error", err)
 		}
 		return
 	}
@@ -836,7 +836,7 @@ func (r *Runner) publishJob(ctx context.Context, eventType notifications.Type, j
 		return
 	}
 	if err := r.realtimeHub.PublishJob(ctx, eventType, job); err != nil {
-		slog.Warn("admin jobs: failed to publish realtime job event",
+		slog.WarnContext(ctx, "admin jobs: failed to publish realtime job event", "component", "adminjob",
 			"job_id", job.ID,
 			"type", eventType,
 			"error", err,

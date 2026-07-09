@@ -37,7 +37,7 @@ func (h *Handler) handleListRSSFeeds(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.deps.RSSFeedStore.ListUserFeeds(r.Context(), a.UserID, a.ProfileID)
 	if err != nil {
-		slog.Error("abs feed list failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs feed list failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "feed list failed", http.StatusInternalServerError)
 		return
 	}
@@ -95,7 +95,7 @@ func (h *Handler) handleOpenItemFeed(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "slug taken", http.StatusConflict)
 			return
 		}
-		slog.Error("abs feed create failed", "err", err, "user", a.UserID)
+		slog.ErrorContext(r.Context(), "abs feed create failed", "component", "audiobooks", "err", err, "user", a.UserID)
 		http.Error(w, "feed persist failed", http.StatusInternalServerError)
 		return
 	}
@@ -125,12 +125,12 @@ func (h *Handler) handleCloseFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs feed get-for-close failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs feed get-for-close failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "feed get failed", http.StatusInternalServerError)
 		return
 	}
 	if err := h.deps.RSSFeedStore.CloseFeed(r.Context(), id); err != nil {
-		slog.Error("abs feed close failed", "err", err, "id", id)
+		slog.ErrorContext(r.Context(), "abs feed close failed", "component", "audiobooks", "err", err, "id", id)
 		http.Error(w, "feed close failed", http.StatusInternalServerError)
 		return
 	}
@@ -161,7 +161,7 @@ func (h *Handler) handlePublicFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.Error("abs public feed get failed", "err", err, "slug", slug)
+		slog.ErrorContext(r.Context(), "abs public feed get failed", "component", "audiobooks", "err", err, "slug", slug)
 		http.Error(w, "feed get failed", http.StatusInternalServerError)
 		return
 	}

@@ -40,7 +40,7 @@ func (s *Service) reconcileStaleRuns(ctx context.Context, now time.Time) error {
 	return sweepStaleRunsOnce(ctx, now, historyImportStaleRunThreshold, func(ctx context.Context, staleBefore time.Time, message string) (int64, error) {
 		count, err := s.repo.FailStaleRuns(ctx, staleBefore, message)
 		if err == nil && count > 0 {
-			slog.Warn("history import: reconciled stale running runs", "count", count, "stale_before", staleBefore)
+			slog.WarnContext(ctx, "history import: reconciled stale running runs", "component", "historyimport", "count", count, "stale_before", staleBefore)
 		}
 		return count, err
 	})
@@ -51,7 +51,7 @@ func (s *Service) startRunHeartbeat(ctx context.Context, runID string) context.C
 	go heartbeatLoop(hbCtx, historyImportHeartbeatInterval, func(ctx context.Context) error {
 		err := s.repo.TouchRunHeartbeat(ctx, runID)
 		if err != nil && !errors.Is(err, ErrRunNotFound) {
-			slog.Warn("history import: failed to persist heartbeat", "run_id", runID, "error", err)
+			slog.WarnContext(ctx, "history import: failed to persist heartbeat", "component", "historyimport", "run_id", runID, "error", err)
 		}
 		return nil
 	})

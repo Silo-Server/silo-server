@@ -388,7 +388,7 @@ func (h *AdminHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	lastActive, err := h.loadUserLastActiveAt(r.Context(), userIDs)
 	if err != nil {
-		slog.Warn("failed to load admin user last activity", "error", err)
+		slog.WarnContext(r.Context(), "failed to load admin user last activity", "component", "api", "error", err)
 	}
 	for i := range resp {
 		applyLastActiveAt(&resp[i], lastActive)
@@ -415,7 +415,7 @@ func (h *AdminHandler) HandleGetUser(w http.ResponseWriter, r *http.Request) {
 	resp := toAdminUserResponse(user)
 	lastActive, err := h.loadUserLastActiveAt(r.Context(), []int{user.ID})
 	if err != nil {
-		slog.Warn("failed to load admin user last activity", "user_id", user.ID, "error", err)
+		slog.WarnContext(r.Context(), "failed to load admin user last activity", "component", "api", "user_id", user.ID, "error", err)
 	}
 	applyLastActiveAt(&resp, lastActive)
 
@@ -1018,7 +1018,7 @@ func (h *AdminHandler) publishStatsEvent(ctx context.Context, channel, eventType
 		return
 	}
 	if err := h.EventBus.Publish(ctx, channel, cache.Event{Type: eventType, Payload: payload}); err != nil {
-		slog.Warn("admin: failed to publish stats invalidation event",
+		slog.WarnContext(ctx, "admin: failed to publish stats invalidation event", "component", "api",
 			"channel", channel,
 			"type", eventType,
 			"error", err,
@@ -1074,7 +1074,7 @@ func (h *AdminHandler) HandleRefreshItemMetadata(w http.ResponseWriter, r *http.
 			writeError(w, scopeErr.StatusCode, code, scopeErr.Message)
 			return
 		}
-		slog.Error("admin: resolve item refresh scope failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin: resolve item refresh scope failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve item refresh scope")
 		return
 	}
@@ -1086,7 +1086,7 @@ func (h *AdminHandler) HandleRefreshItemMetadata(w http.ResponseWriter, r *http.
 		Message:         "Queued item metadata refresh",
 	})
 	if err != nil {
-		slog.Error("admin: create item refresh job failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin: create item refresh job failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to queue item metadata refresh")
 		return
 	}
@@ -1171,13 +1171,13 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 	// Try media_items first, then seasons, then episodes.
 	if err := h.DetailSvc.UpdateMediaItemMetadata(r.Context(), contentID, &upd); err != nil {
 		if !errors.Is(err, catalog.ErrItemNotFound) {
-			slog.Error("admin: update item metadata failed", "content_id", contentID, "error", err)
+			slog.ErrorContext(r.Context(), "admin: update item metadata failed", "component", "api", "content_id", contentID, "error", err)
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update metadata")
 			return
 		}
 		if err := h.DetailSvc.UpdateSeasonMetadata(r.Context(), contentID, &upd); err != nil {
 			if !errors.Is(err, catalog.ErrSeasonNotFound) {
-				slog.Error("admin: update season metadata failed", "content_id", contentID, "error", err)
+				slog.ErrorContext(r.Context(), "admin: update season metadata failed", "component", "api", "content_id", contentID, "error", err)
 				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update metadata")
 				return
 			}
@@ -1186,7 +1186,7 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 					writeError(w, http.StatusNotFound, "not_found", "Item not found")
 					return
 				}
-				slog.Error("admin: update episode metadata failed", "content_id", contentID, "error", err)
+				slog.ErrorContext(r.Context(), "admin: update episode metadata failed", "component", "api", "content_id", contentID, "error", err)
 				writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update metadata")
 				return
 			}
@@ -1203,7 +1203,7 @@ func (h *AdminHandler) HandleUpdateItemMetadata(w http.ResponseWriter, r *http.R
 
 	detail, err := h.DetailSvc.GetItemDetail(r.Context(), contentID, catalog.AccessFilter{})
 	if err != nil {
-		slog.Error("admin: fetch updated detail failed", "content_id", contentID, "error", err)
+		slog.ErrorContext(r.Context(), "admin: fetch updated detail failed", "component", "api", "content_id", contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Updated but failed to fetch result")
 		return
 	}
@@ -1725,7 +1725,7 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 			}
 			profileNames, err := listProfileNamesByID(gctx, store)
 			if err != nil {
-				slog.Warn("admin list devices profile lookup failed",
+				slog.WarnContext(r.Context(), "admin list devices profile lookup failed", "component", "api",
 					"user_id", user.ID,
 					"error", err,
 				)
@@ -1743,7 +1743,7 @@ func (h *AdminHandler) HandleListDevices(w http.ResponseWriter, r *http.Request)
 		})
 	}
 	if err := g.Wait(); err != nil {
-		slog.Error("admin list devices failed", "error", err)
+		slog.ErrorContext(r.Context(), "admin list devices failed", "component", "api", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list devices")
 		return
 	}
