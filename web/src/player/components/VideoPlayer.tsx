@@ -357,16 +357,13 @@ export function VideoPlayer({
   const switchQuality = transcodeQuality.switchQuality;
   const isPlayerReady = effectiveStreamUrl !== "";
 
-  // Turning OFF bitmap burn-in (selecting a text track while a PGS/DVD/DVB
-  // track was burned in) restarts the transcode, and the text TextTrack built
-  // in that same moment is orphaned when the <video> element reloads. A text
-  // track built against an already-stable stream survives a reload, so quality
-  // and audio switches (and copy-mode seek restarts) keep their subtitles;
-  // only this specific transition needs a rebuild. The burn-in effect sets the
-  // flag on the off transition; here, once the next settled stream arrives, we
-  // bump a generation so useSubtitleTracks rebuilds its track against it.
+  // Any stream restart (transcode restart on seek, quality/audio switch,
+  // turning off bitmap burn-in) reloads the <video> element, which can orphan
+  // a programmatic TextTrack — cuechange stops firing and the last cue
+  // freezes on screen. Bump a generation on every settled stream change so
+  // useSubtitleTracks rebuilds its track against the new element; the rebuild
+  // carries loaded cues and window coverage over, so it costs no refetch.
   const [subtitleStreamGeneration, setSubtitleStreamGeneration] = useState(0);
-  const rebuildTextTrackOnStreamRef = useRef(false);
   const lastSubtitleStreamUrlRef = useRef<string | null>(null);
   useEffect(() => {
     if (!effectiveStreamUrl) return;
@@ -374,8 +371,7 @@ export function VideoPlayer({
       lastSubtitleStreamUrlRef.current !== null &&
       lastSubtitleStreamUrlRef.current !== effectiveStreamUrl;
     lastSubtitleStreamUrlRef.current = effectiveStreamUrl;
-    if (changed && rebuildTextTrackOnStreamRef.current) {
-      rebuildTextTrackOnStreamRef.current = false;
+    if (changed) {
       setSubtitleStreamGeneration((generation) => generation + 1);
     }
   }, [effectiveStreamUrl]);
@@ -1726,19 +1722,7 @@ export function VideoPlayer({
       ? activeSubtitleTrack.index - externalSubtitleCount
       : null;
   const setSubtitleBurnIn = transcodeQuality.setSubtitleBurnIn;
-  const prevBurnInOrdinalRef = useRef<number | null>(burnInSubtitleOrdinal);
   useEffect(() => {
-    // Going from a burned-in bitmap track to a text track restarts the
-    // transcode (to drop the burn-in). The text track being selected is built
-    // in this same render, so the imminent <video> reload orphans it — flag it
-    // for a rebuild once the new stream settles (see the stream-generation
-    // effect above). Turning burn-in ON, or switching between bitmap tracks,
-    // doesn't render a text track, so it needs no flag.
-    if (prevBurnInOrdinalRef.current != null && burnInSubtitleOrdinal == null) {
-      rebuildTextTrackOnStreamRef.current = true;
-    }
-    prevBurnInOrdinalRef.current = burnInSubtitleOrdinal;
-
     // Until the element has media loaded (an auto-selected bitmap preference
     // at session start, or a stream restart), currentTime still reads 0
     // rather than the resume/seek target — use the intended position instead,

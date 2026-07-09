@@ -215,8 +215,6 @@ describe("useSubtitleTracks", () => {
   });
 
   it("rebuilds the track when the stream restarts (generation bump)", async () => {
-    // Fresh response per call: vttResponse's streamed body is single-use, and
-    // the rebuild issues a second fetch.
     fetchMock.mockImplementation(() =>
       Promise.resolve(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nhi\n\n")),
     );
@@ -244,13 +242,83 @@ describe("useSubtitleTracks", () => {
     await waitFor(() => expect(createdTracks).toHaveLength(1));
     await waitFor(() => expect(createdTracks[0]!.cues).toHaveLength(1));
 
-    // A transcode restart (e.g. selecting a text track that turns off PGS
-    // burn-in) reloads the <video> element and orphans the track built moments
-    // earlier; a generation bump must rebuild it against the new stream so the
-    // text subtitles still render.
+    // A transcode restart (seek, quality/audio switch, burn-in toggle)
+    // reloads the <video> element and can orphan the track; a generation bump
+    // must rebuild it against the new stream so the text subtitles still
+    // render — carrying the loaded cues and coverage over instead of
+    // refetching the window.
     rerender({ generation: 1 });
 
     await waitFor(() => expect(createdTracks).toHaveLength(2));
-    await waitFor(() => expect(createdTracks[1]!.cues).toHaveLength(1));
+    expect(createdTracks[1]!.cues).toHaveLength(1);
+    expect(createdTracks[1]!.cues[0]!.text).toBe("hi");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed window fetch after a backoff instead of marking it covered", async () => {
+    let now = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      fetchMock
+        .mockRejectedValueOnce(new Error("extraction died"))
+        .mockResolvedValueOnce(
+          vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nrecovered\n\n"),
+        );
+
+      const { videoRef } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+      // Inside the backoff window: no retry yet.
+      videoRef.current!.currentTime = 5;
+      videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Past the backoff: the uncovered range is retried and recovers.
+      now += 6_000;
+      videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["recovered"]));
+    } finally {
+      nowSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it("does not treat a failed window as covered when prefetching later", async () => {
+    let now = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      fetchMock
+        .mockResolvedValueOnce(vttResponse("WEBVTT\n\n00:00:10.000 --> 00:00:12.000\nfirst\n\n"))
+        .mockRejectedValueOnce(new Error("prefetch died"))
+        .mockResolvedValueOnce(vttResponse("WEBVTT\n\n10:05.000 --> 10:07.000\nsecond\n\n"));
+
+      const { videoRef } = renderTracks({ origin: 0, durationRef: { current: 7200 } });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(createdTracks[0]?.cues).toHaveLength(1));
+
+      // Enter the prefetch lead of window [0, 600] — this prefetch fails.
+      videoRef.current!.currentTime = 580;
+      videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+      // After the backoff the same still-uncovered range is fetched again;
+      // before the fix the failed window counted as covered and subtitles
+      // silently stopped for its whole span.
+      now += 6_000;
+      videoRef.current!.dispatchEvent(new Event("timeupdate"));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+      expect(String(fetchMock.mock.calls[2]![0])).toContain("position=595");
+      await waitFor(() =>
+        expect(createdTracks[0]!.cues.map((c) => c.text)).toEqual(["first", "second"]),
+      );
+    } finally {
+      nowSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 });

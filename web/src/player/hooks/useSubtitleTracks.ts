@@ -17,6 +17,30 @@ const WINDOW_OVERLAP = 5;
 // Pull back this many seconds from the current position when starting
 // a fresh fetch, so a quick scrub back still lands inside the window.
 const SEEK_BACKOFF = 2;
+// Abort a window fetch when the response goes this long without delivering
+// a chunk. Extraction streams cues progressively, so a healthy-but-slow
+// ffmpeg keeps resetting the clock; only a genuinely hung one trips it.
+// Without this, one hung fetch blocks every future window for the session.
+const FETCH_STALL_TIMEOUT_MS = 30_000;
+// Wait this long after a failed window fetch before retrying, so a
+// persistently failing extraction doesn't turn timeupdate into a fetch storm.
+const FETCH_RETRY_BACKOFF_MS = 5_000;
+
+/**
+ * Cues (in source time) and window coverage snapshotted from a track that is
+ * being torn down, so a rebuild against a reloaded <video> element (stream
+ * restart) can restore them instead of refetching — window extraction costs
+ * a multi-second ffmpeg run per request.
+ */
+interface SubtitleTrackCarryover {
+  url: string | null;
+  cues: ParsedCue[];
+  seen: Set<string>;
+  coverageStart: number;
+  windowEnd: number;
+  atEOF: boolean;
+  hasFetched: boolean;
+}
 
 /** Strip VTT formatting tags, keeping only the text content. */
 function stripVTTTags(text: string): string {
@@ -143,6 +167,10 @@ export function useSubtitleTracks(
   // live-cue effect add only the new tail each batch instead of rescanning the
   // whole (growing) array. Reset on every track rebuild.
   const processedLiveCuesRef = useRef(0);
+  // Snapshot of the previous track's cues and coverage, written by the main
+  // effect's cleanup and consumed by the next build when the subtitle URL is
+  // unchanged (a rebuild forced by a stream reload rather than a track switch).
+  const carryoverRef = useRef<SubtitleTrackCarryover | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -174,14 +202,38 @@ export function useSubtitleTracks(
     // Fresh track has no cues, so it trivially carries the current origin.
     appliedOriginRef.current = streamOriginRef.current;
 
+    // Restore cues and coverage carried over from the previous track when the
+    // URL is unchanged — i.e. this rebuild replaces a track orphaned by a
+    // stream reload, not a track switch. Cue times were snapshotted in source
+    // time and are re-derived against the current origin/delay here, so an
+    // origin change across the reload lands correctly. The carried dedup set
+    // is installed as-is (its keys are source-time based and stay valid).
+    const carried = carryoverRef.current;
+    carryoverRef.current = null;
+    const restored = carried && carried.url === activeUrl && !activeIsLive ? carried : null;
+    if (restored) {
+      const origin = appliedOriginRef.current;
+      const delaySec = appliedDelayMsRef.current / 1000;
+      for (const cue of restored.cues) {
+        const startTime = Math.max(0, cue.start - origin + delaySec);
+        const endTime = cue.end - origin + delaySec;
+        if (endTime <= 0) continue;
+        track.addCue(new VTTCue(startTime, endTime, cue.text));
+      }
+      seenCueKeysRef.current = restored.seen;
+    }
+
     let cancelled = false;
-    let hasFetched = false;
+    let hasFetched = restored?.hasFetched ?? false;
 
     // Sliding-window coverage state. See fetchWindow for semantics.
-    let coverageStart = 0;
-    let windowEnd = 0;
-    let atEOF = false;
+    let coverageStart = restored?.coverageStart ?? 0;
+    let windowEnd = restored?.windowEnd ?? 0;
+    let atEOF = restored?.atEOF ?? false;
     let inflight: AbortController | null = null;
+    // Set on a failed (errored or stalled) window fetch; maybeFetch waits out
+    // a short backoff before retrying the uncovered range.
+    let lastFetchFailureAt = 0;
 
     function handleCueChange() {
       const active = track.activeCues;
@@ -234,14 +286,22 @@ export function useSubtitleTracks(
       if (resetExisting) {
         clearCues();
         coverageStart = seekStart;
-        windowEnd = requestedEnd;
+        windowEnd = seekStart;
         atEOF = false;
-      } else {
-        windowEnd = Math.max(windowEnd, requestedEnd);
       }
 
+      // Abort the fetch if the response stops delivering chunks. Re-armed on
+      // every read so a slow-but-progressing extraction is never cut off.
+      let stallTimer: ReturnType<typeof setTimeout> | null = null;
+      const armStallTimer = () => {
+        if (stallTimer !== null) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => controller.abort(), FETCH_STALL_TIMEOUT_MS);
+      };
+
       const url = appendPosition(activeUrl, seekStart);
+      let succeeded = false;
       try {
+        armStallTimer();
         const resp = await fetch(url, { signal: controller.signal });
         if (!resp.ok || !resp.body) {
           console.error(`[useSubtitleTracks] Failed to fetch ${url}: ${resp.status}`);
@@ -255,6 +315,7 @@ export function useSubtitleTracks(
         // the safe prefix, keep the rest. The WebVTT muxer emits cues
         // terminated by "\n\n".
         while (!cancelled) {
+          armStallTimer();
           const { value, done } = await reader.read();
           if (done) break;
           buf += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
@@ -277,25 +338,37 @@ export function useSubtitleTracks(
           }
         }
 
-        // End-of-input only when the window reaches the known media
-        // duration. Don't infer it from where the window's cues stop:
-        // a window that ends inside a dialogue gap looks identical to
-        // end-of-file by that signal, and a false positive here silently
-        // stops subtitles for the rest of playback.
-        const durationSec = durationRef.current ?? 0;
-        if (durationSec > 0 && requestedEnd >= durationSec) {
-          atEOF = true;
-        }
+        succeeded = true;
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           console.error("[useSubtitleTracks] Stream error:", err);
         }
       } finally {
+        if (stallTimer !== null) clearTimeout(stallTimer);
+        const superseded = inflight !== controller;
         if (inflight === controller) {
           inflight = null;
         }
-        if (!controller.signal.aborted) {
+        if (succeeded && !cancelled) {
           hasFetched = true;
+          // Commit coverage only after the whole window streamed in. A
+          // failed or stalled fetch must leave the range uncovered, or the
+          // gap would read as fetched and never be retried — subtitles
+          // would silently stop for the rest of the window.
+          windowEnd = Math.max(windowEnd, requestedEnd);
+          // End-of-input only when the window reaches the known media
+          // duration. Don't infer it from where the window's cues stop:
+          // a window that ends inside a dialogue gap looks identical to
+          // end-of-file by that signal, and a false positive here silently
+          // stops subtitles for the rest of playback.
+          const durationSec = durationRef.current ?? 0;
+          if (durationSec > 0 && requestedEnd >= durationSec) {
+            atEOF = true;
+          }
+        } else if (!succeeded && !superseded && !cancelled) {
+          // Genuine failure (error, stall, or non-ok response) rather than a
+          // seek superseding this fetch — back off before retrying.
+          lastFetchFailureAt = Date.now();
         }
       }
     }
@@ -311,6 +384,7 @@ export function useSubtitleTracks(
     //     the next window, overlapping slightly with the previous
     function maybeFetch() {
       if (cancelled || inflight) return;
+      if (Date.now() - lastFetchFailureAt < FETCH_RETRY_BACKOFF_MS) return;
       // Until the element has media loaded, currentTime reads 0 rather than
       // the position playback will actually start at (resume target, or a
       // seek that restarted the stream) — use the intended position instead.
@@ -360,6 +434,29 @@ export function useSubtitleTracks(
       videoEl.removeEventListener("seeking", maybeFetch);
       videoEl.removeEventListener("seeked", maybeFetch);
       track.removeEventListener("cuechange", handleCueChange);
+      // Snapshot loaded cues (converted back to source time) and coverage so
+      // a rebuild against a reloaded <video> element can restore them without
+      // refetching. Copy the dedup set: clearCues below empties the shared one.
+      {
+        const origin = appliedOriginRef.current;
+        const delaySec = appliedDelayMsRef.current / 1000;
+        carryoverRef.current = {
+          url: activeUrl,
+          cues: Array.from(track.cues ?? []).map((cue) => {
+            const vc = cue as VTTCue;
+            return {
+              start: vc.startTime + origin - delaySec,
+              end: vc.endTime + origin - delaySec,
+              text: vc.text,
+            };
+          }),
+          seen: new Set(seenCueKeysRef.current),
+          coverageStart,
+          windowEnd,
+          atEOF,
+          hasFetched,
+        };
+      }
       clearCues();
       // Tracks added via addTextTrack can't be removed from the element;
       // setting `disabled` makes it inert so a subsequent language change
