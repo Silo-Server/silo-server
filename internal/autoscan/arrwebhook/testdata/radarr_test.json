@@ -1,0 +1,22 @@
+{
+  "movie": {
+    "id": 1,
+    "title": "Test Title",
+    "year": 1970,
+    "folderPath": "C:\\testpath",
+    "tmdbId": 1234
+  },
+  "remoteMovie": {
+    "tmdbId": 1234,
+    "imdbId": "tt1234",
+    "title": "Test title",
+    "year": 1970
+  },
+  "release": {
+    "quality": "Test Quality",
+    "qualityVersion": 1,
+    "size": 9999999
+  },
+  "eventType": "Test",
+  "instanceName": "Radarr"
+}

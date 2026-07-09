@@ -1,0 +1,20 @@
+{
+  "movie": {
+    "id": 44,
+    "title": "Example Movie",
+    "year": 2024,
+    "folderPath": "/data/movies/Example Movie (2024)",
+    "tmdbId": 654321
+  },
+  "renamedMovieFiles": [
+    {
+      "id": 771,
+      "previousRelativePath": "old-release-name.mkv",
+      "previousPath": "/data/movies/Example Movie (2024)/old-release-name.mkv",
+      "relativePath": "Example Movie (2024) Bluray-1080p.mkv",
+      "path": "/data/movies/Example Movie (2024)/Example Movie (2024) Bluray-1080p.mkv"
+    }
+  ],
+  "eventType": "Rename",
+  "instanceName": "Radarr"
+}

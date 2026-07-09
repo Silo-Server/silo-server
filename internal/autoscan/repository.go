@@ -221,7 +221,7 @@ func (r *Repository) GetConnection(ctx context.Context, id string) (Connection, 
 
 // --- Sources ---
 
-const sourceColumns = `id, plugin_id, capability_id, connection_id, enabled,
+const sourceColumns = `id, plugin_id, capability_id, connection_id, enabled, delivery_mode,
 	poll_interval_seconds, path_rewrites, source_config, label, marker, last_run_at, last_error`
 
 func scanSource(row interface{ Scan(...any) error }) (Source, error) {
@@ -229,7 +229,7 @@ func scanSource(row interface{ Scan(...any) error }) (Source, error) {
 	var pathRewrites []byte
 	var sourceConfig []byte
 	if err := row.Scan(&s.ID, &s.PluginID, &s.CapabilityID, &s.ConnectionID,
-		&s.Enabled, &s.PollIntervalSeconds, &pathRewrites, &sourceConfig, &s.Label, &s.Marker, &s.LastRunAt, &s.LastError); err != nil {
+		&s.Enabled, &s.DeliveryMode, &s.PollIntervalSeconds, &pathRewrites, &sourceConfig, &s.Label, &s.Marker, &s.LastRunAt, &s.LastError); err != nil {
 		return Source{}, err
 	}
 	rewrites, err := unmarshalPathRewrites(pathRewrites)
@@ -313,6 +313,15 @@ func connectionIDArg(id *string) any {
 	return nullable(*id)
 }
 
+// deliveryModeArg normalizes an unset delivery mode to the poll default so
+// pre-webhook callers keep today's behavior.
+func deliveryModeArg(mode string) string {
+	if strings.TrimSpace(mode) == "" {
+		return DeliveryModePoll
+	}
+	return mode
+}
+
 // CreateSource inserts a new autoscan source row. One installed scan_source
 // capability can back many sources (e.g. one Sonarr plugin install fronting 4
 // arr servers, one source per connection), so this is a plain INSERT with a
@@ -329,11 +338,11 @@ func (r *Repository) CreateSource(ctx context.Context, s Source) (Source, error)
 	}
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO autoscan_sources (
-			plugin_id, capability_id, connection_id, enabled, poll_interval_seconds, path_rewrites, source_config, label
+			plugin_id, capability_id, connection_id, enabled, delivery_mode, poll_interval_seconds, path_rewrites, source_config, label
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING `+sourceColumns,
-		s.PluginID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
+		s.PluginID, s.CapabilityID, connectionIDArg(s.ConnectionID), s.Enabled, deliveryModeArg(s.DeliveryMode), s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
 	out, err := scanSource(row)
 	if err != nil {
 		if connID, ok := connectionFKViolation(err, s.ConnectionID); ok {
@@ -361,14 +370,15 @@ func (r *Repository) UpdateSource(ctx context.Context, s Source) (Source, error)
 		UPDATE autoscan_sources
 		SET connection_id = $2,
 		    enabled = $3,
-		    poll_interval_seconds = $4,
-		    path_rewrites = $5,
-		    source_config = $6,
-		    label = $7,
+		    delivery_mode = $4,
+		    poll_interval_seconds = $5,
+		    path_rewrites = $6,
+		    source_config = $7,
+		    label = $8,
 		    updated_at = now()
 		WHERE id = $1
 		RETURNING `+sourceColumns,
-		s.ID, connectionIDArg(s.ConnectionID), s.Enabled, s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
+		s.ID, connectionIDArg(s.ConnectionID), s.Enabled, deliveryModeArg(s.DeliveryMode), s.PollIntervalSeconds, rewrites, sourceConfig, s.Label)
 	out, err := scanSource(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -511,8 +521,8 @@ func (r *Repository) RecordError(ctx context.Context, sourceID, msg string) erro
 }
 
 const eventColumns = `id, source_id, plugin_id, capability_id, started_at, completed_at,
-	duration_ms, status, changes_returned, changes_resolved, targets_claimed, scans_created,
-	scans_reused, scans_suppressed, error_message, marker_before, marker_after`
+	duration_ms, status, delivery_mode, provider_event_type, changes_returned, changes_resolved,
+	targets_claimed, scans_created, scans_reused, scans_suppressed, error_message, marker_before, marker_after`
 
 func scanEvent(row interface{ Scan(...any) error }) (Event, error) {
 	var e Event
@@ -526,6 +536,8 @@ func scanEvent(row interface{ Scan(...any) error }) (Event, error) {
 		&e.CompletedAt,
 		&e.DurationMS,
 		&status,
+		&e.DeliveryMode,
+		&e.ProviderEventType,
 		&e.ChangesReturned,
 		&e.ChangesResolved,
 		&e.TargetsClaimed,
@@ -542,28 +554,43 @@ func scanEvent(row interface{ Scan(...any) error }) (Event, error) {
 	return e, nil
 }
 
+const insertEventSQL = `
+	INSERT INTO autoscan_events (
+		source_id, plugin_id, capability_id, started_at, completed_at,
+		duration_ms, status, delivery_mode, provider_event_type, error_message, marker_before
+	)
+	VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7, $8, $9)
+	RETURNING id`
+
 func (r *Repository) CreateEvent(ctx context.Context, in EventCreate) (int64, error) {
 	started := in.StartedAt
 	if started.IsZero() {
 		started = time.Now()
 	}
 	sourceID := strings.TrimSpace(in.SourceID)
-	if sourceID == "" {
-		row := r.pool.QueryRow(ctx, `
-			INSERT INTO autoscan_events (
-				source_id, plugin_id, capability_id, started_at, completed_at,
-				duration_ms, status, error_message, marker_before
-			)
-		VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7)
-		RETURNING id`,
-			nil,
+	insertArgs := func(sourceID any) []any {
+		return []any{
+			sourceID,
 			in.PluginID,
 			in.CapabilityID,
 			started,
 			string(EventStatusRunning),
+			deliveryModeArg(in.DeliveryMode),
+			in.ProviderEventType,
 			"",
 			nullable(in.MarkerBefore),
-		)
+		}
+	}
+	// Sourceless events (ad hoc triggers) and events that opt out of the
+	// running-event exclusion (webhook deliveries — no marker window to
+	// re-read, so they must never be dropped) insert without the advisory
+	// lock + running check.
+	if sourceID == "" || in.SkipRunningCheck {
+		var sourceArg any
+		if sourceID != "" {
+			sourceArg = sourceID
+		}
+		row := r.pool.QueryRow(ctx, insertEventSQL, insertArgs(sourceArg)...)
 		var id int64
 		if err := row.Scan(&id); err != nil {
 			return 0, fmt.Errorf("create autoscan event: %w", err)
@@ -599,21 +626,7 @@ func (r *Repository) CreateEvent(ctx context.Context, in EventCreate) (int64, er
 		return 0, fmt.Errorf("check running autoscan event: %w", err)
 	}
 
-	row := tx.QueryRow(ctx, `
-		INSERT INTO autoscan_events (
-			source_id, plugin_id, capability_id, started_at, completed_at,
-			duration_ms, status, error_message, marker_before
-		)
-		VALUES ($1, $2, $3, $4, $4, 0, $5, $6, $7)
-		RETURNING id`,
-		sourceID,
-		in.PluginID,
-		in.CapabilityID,
-		started,
-		string(EventStatusRunning),
-		"",
-		nullable(in.MarkerBefore),
-	)
+	row := tx.QueryRow(ctx, insertEventSQL, insertArgs(sourceID)...)
 	var id int64
 	if err := row.Scan(&id); err != nil {
 		return 0, fmt.Errorf("create autoscan event: %w", err)

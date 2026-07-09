@@ -662,6 +662,8 @@ func NewRouter(deps Dependencies) chi.Router {
 			if deps.TaskManager != nil {
 				autoscanHandler.SetTriggerUpdater(deps.TaskManager)
 			}
+			// Fully qualify webhook URLs when the public base URL is known.
+			autoscanHandler.SetPublicURL(deps.PublicURL)
 		}
 
 		if deps.PersonRepo != nil {
@@ -1682,6 +1684,19 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 			})
+		}
+
+		// Autoscan webhook intake: public — Sonarr/Radarr POST here without a
+		// Silo session; the URL's bearer token authenticates the delivery and
+		// maps it to its Autoscan source. Rate limited per-IP (plus the
+		// "autoscan_webhook" per-endpoint limit) since it is unauthenticated.
+		if autoscanHandler != nil {
+			if deps.RateLimitMW != nil {
+				r.With(deps.RateLimitMW.AuthEndpointHandler("autoscan_webhook")).
+					Post("/autoscan/webhooks/{token}", autoscanHandler.HandleWebhookDelivery)
+			} else {
+				r.Post("/autoscan/webhooks/{token}", autoscanHandler.HandleWebhookDelivery)
+			}
 		}
 
 		// Discord account-link OAuth callback: public — Discord redirects the
@@ -2808,6 +2823,9 @@ func NewRouter(deps Dependencies) chi.Router {
 								r.Put("/autoscan/sources/{id}", autoscanHandler.HandleUpdateSource)
 								r.Delete("/autoscan/sources/{id}", autoscanHandler.HandleDeleteSource)
 								r.Get("/autoscan/sources/{id}/rewrite-suggestions", autoscanHandler.HandleRewriteSuggestions)
+								r.Post("/autoscan/sources/{id}/webhook", autoscanHandler.HandleCreateSourceWebhook)
+								r.Post("/autoscan/sources/{id}/webhook/rotate", autoscanHandler.HandleRotateSourceWebhook)
+								r.Delete("/autoscan/sources/{id}/webhook", autoscanHandler.HandleDeleteSourceWebhook)
 								r.Get("/autoscan/scans", autoscanHandler.HandleListScans)
 								r.Get("/autoscan/events", autoscanHandler.HandleListEvents)
 								r.Post("/autoscan/trigger", autoscanHandler.HandleTrigger)

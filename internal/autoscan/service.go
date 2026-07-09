@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
+	"github.com/google/uuid"
 )
 
 const (
@@ -31,6 +32,12 @@ type Store interface {
 	RecordError(ctx context.Context, sourceID, msg string) error
 	CreateEvent(ctx context.Context, event EventCreate) (int64, error)
 	FinishEvent(ctx context.Context, event EventFinish) error
+	CreateWebhookDelivery(ctx context.Context, in ChangeIngest) (WebhookDelivery, error)
+	ClaimWebhookDeliveries(ctx context.Context, workerID string, limit int) ([]WebhookDelivery, error)
+	CompleteWebhookDelivery(ctx context.Context, id int64, lockedBy string) error
+	RetryWebhookDelivery(ctx context.Context, id int64, lockedBy string, delay time.Duration, msg string) error
+	RecordWebhookError(ctx context.Context, sourceID, msg string) error
+	ClearWebhookError(ctx context.Context, sourceID string) error
 }
 
 // Resolver maps a Silo-native path to a concrete scan target (library folder).
@@ -149,6 +156,11 @@ func (s *Service) PollOnce(ctx context.Context) error {
 	now := time.Now()
 
 	for _, src := range sources {
+		// Webhook sources are fed by IngestChanges when the provider POSTs to
+		// their endpoint; there is nothing to poll and no plugin to invoke.
+		if src.DeliveryMode == DeliveryModeWebhook {
+			continue
+		}
 		// Honor the per-source poll interval as a "poll at most every N seconds"
 		// floor: the global task fires at the default cadence, so a source with a
 		// longer interval is skipped until enough time has elapsed.
@@ -205,117 +217,340 @@ func (s *Service) PollOnce(ctx context.Context) error {
 			continue // do NOT advance marker
 		}
 
-		rewritten := rewriteChanges(changes, src.PathRewrites)
-		targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, ttl)
-		if len(targets) > maxAutoscanTargetsPerPoll {
-			collapsed := collapseTargetsToLibraryScans(targets)
-			slog.WarnContext(ctx, "autoscan: collapsed large scan target batch to library scans", "component", "autoscan",
-				"source_id", src.ID,
-				"targets", len(targets),
-				"collapsed_targets", len(collapsed),
-				"limit", maxAutoscanTargetsPerPoll,
-			)
-			targets = collapsed
-		}
-		var enqueue EnqueueResult
-		if len(targets) > 0 {
-			var eerr error
-			enqueue, eerr = s.enqueueScanTargets(ctx, targets, eventID)
-			if eerr != nil {
-				s.releaseClaims(ctx, claimed)
-				slog.WarnContext(ctx, "autoscan: enqueue failed", "component", "autoscan", "source_id", src.ID, "err", eerr)
-				s.finishEvent(ctx, eventID, EventFinish{
-					Status:          EventStatusError,
-					ChangesReturned: len(changes),
-					ChangesResolved: stats.ChangesResolved,
-					TargetsClaimed:  stats.TargetsClaimed,
-					ScansSuppressed: stats.Suppressed,
-					ErrorMessage:    eerr.Error(),
-					MarkerAfter:     marker,
-				})
-				continue // do NOT advance marker
-			}
-		}
-
-		// Advancing the marker is what tells the provider "I've consumed up to
-		// here". Advance it ONLY when the work it represents is genuinely done:
-		//   - provider returned ZERO paths        → nothing to do, advance normally.
-		//   - returned paths AND ≥1 resolved       → enqueued (above), advance.
-		//   - returned paths, resolved but all
-		//     suppressed (recently scanned /
-		//     debounced)                           → work is effectively done; advance.
-		//   - ANY resolve attempt failed INTERNALLY (resolver/database fault —
-		//     possibly transient), whether or not other paths resolved → hold the
-		//     marker and record the error; a later poll re-reads the same window
-		//     once the fault clears. Advancing would silently skip the failed
-		//     paths. Targets that DID resolve were already enqueued above; the
-		//     re-read at worst re-scans them, which is safe.
-		//   - returned paths AND NOTHING resolved  → every path is outside Silo's
-		//     libraries (RequestError) — a benign, expected condition for
-		//     whole-volume filesystem watchers (e.g. CephFS), which observe
-		//     folders that are not registered as Silo libraries. Holding here
-		//     would pin the marker and permanently stall autoscan, so advance;
-		//     finish the event as "unresolved" so the condition stays visible in
-		//     poll history.
-		// (Some-but-not-all resolving still advances when the unresolved
-		// remainder is merely outside Silo's libraries.)
-		//
-		// NOTE: len(targets)==0 alone is NOT misconfiguration — paths can resolve
-		// yet be fully suppressed. Gate on resolvedAny, not targets.
-		if stats.TransientErrors > 0 {
-			msg := fmt.Sprintf("%d resolve attempt(s) failed internally (%d of %d path(s) resolved) — holding marker to retry", stats.TransientErrors, stats.ChangesResolved, len(changes))
-			if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
-				slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
-			}
-			s.finishEvent(ctx, eventID, EventFinish{
-				Status:          EventStatusError,
-				ChangesReturned: len(changes),
-				ChangesResolved: stats.ChangesResolved,
-				TargetsClaimed:  stats.TargetsClaimed,
-				ScansCreated:    enqueue.Created,
-				ScansReused:     enqueue.Reused,
-				ScansSuppressed: stats.Suppressed,
-				ErrorMessage:    msg,
-				MarkerAfter:     marker,
-			})
-			continue // do NOT advance marker
-		}
-		status := EventStatusSuccess
-		var statusMsg string
-		if len(changes) > 0 && !resolvedAny {
-			status = EventStatusUnresolved
-			statusMsg = fmt.Sprintf("returned %d path(s) but none matched a Silo library folder — advanced past them", len(changes))
-			slog.WarnContext(ctx, "autoscan: returned paths matched no library folder — advancing marker",
-				"source_id", src.ID, "changes", len(changes))
-		}
-		if aerr := s.store.AdvanceMarker(ctx, src.ID, next); aerr != nil {
-			slog.WarnContext(ctx, "autoscan: advance marker failed", "component", "autoscan", "source_id", src.ID, "err", aerr)
-			s.finishEvent(ctx, eventID, EventFinish{
-				Status:          EventStatusError,
-				ChangesReturned: len(changes),
-				ChangesResolved: stats.ChangesResolved,
-				TargetsClaimed:  stats.TargetsClaimed,
-				ScansCreated:    enqueue.Created,
-				ScansReused:     enqueue.Reused,
-				ScansSuppressed: stats.Suppressed,
-				ErrorMessage:    aerr.Error(),
-				MarkerAfter:     marker,
-			})
-			continue
-		}
-		s.finishEvent(ctx, eventID, EventFinish{
-			Status:          status,
-			ChangesReturned: len(changes),
-			ChangesResolved: stats.ChangesResolved,
-			TargetsClaimed:  stats.TargetsClaimed,
-			ScansCreated:    enqueue.Created,
-			ScansReused:     enqueue.Reused,
-			ScansSuppressed: stats.Suppressed,
-			ErrorMessage:    statusMsg,
-			MarkerAfter:     next,
+		// consumeSourceChanges finishes the event and does all per-source error
+		// logging/recording; per-source failures never abort the poll loop.
+		_, _ = s.consumeSourceChanges(ctx, src, changes, consumeOptions{
+			EventID:       eventID,
+			TTL:           ttl,
+			Marker:        marker,
+			NextMarker:    next,
+			AdvanceMarker: true,
 		})
 	}
 	return nil
+}
+
+// consumeOptions parameterizes the shared consume path for its two callers.
+// Marker/NextMarker/AdvanceMarker apply to poll-mode consumption only: webhook
+// deliveries carry no marker window, never advance one, and hold nothing on
+// failure (arr retries the delivery instead).
+type consumeOptions struct {
+	EventID       int64
+	TTL           time.Duration
+	Marker        string // poll: the window's opening marker, held on failure
+	NextMarker    string // poll: the provider's next marker
+	AdvanceMarker bool   // poll: true; webhook: false
+}
+
+// consumeResult reports what one consume pass did, for callers that surface
+// the outcome (webhook delivery responses).
+type consumeResult struct {
+	Status      EventStatus
+	Enqueue     EnqueueResult
+	Stats       resolveStats
+	ResolvedAny bool
+}
+
+// consumeSourceChanges is the shared back half of both delivery modes: it
+// rewrites raw provider paths, resolves and claims scan targets, enqueues
+// them, decides the event status, and finishes the event. The returned error
+// reports a genuine failure (enqueue fault or transient resolve fault); the
+// poll loop ignores it (already logged/recorded per source), webhook ingestion
+// propagates it so the delivery can be retried by the sender.
+func (s *Service) consumeSourceChanges(ctx context.Context, src Source, changes []Change, opts consumeOptions) (consumeResult, error) {
+	rewritten := rewriteChanges(changes, src.PathRewrites)
+	targets, claimed, resolvedAny, stats := s.resolveAndClaim(ctx, rewritten, opts.TTL)
+	result := consumeResult{Stats: stats, ResolvedAny: resolvedAny}
+	if len(targets) > maxAutoscanTargetsPerPoll {
+		collapsed := collapseTargetsToLibraryScans(targets)
+		slog.WarnContext(ctx, "autoscan: collapsed large scan target batch to library scans", "component", "autoscan",
+			"source_id", src.ID,
+			"targets", len(targets),
+			"collapsed_targets", len(collapsed),
+			"limit", maxAutoscanTargetsPerPoll,
+		)
+		targets = collapsed
+	}
+	if len(targets) > 0 {
+		enqueue, eerr := s.enqueueScanTargets(ctx, targets, opts.EventID)
+		result.Enqueue = enqueue
+		if eerr != nil {
+			s.releaseClaims(ctx, claimed)
+			slog.WarnContext(ctx, "autoscan: enqueue failed", "component", "autoscan", "source_id", src.ID, "err", eerr)
+			result.Status = EventStatusError
+			s.finishEvent(ctx, opts.EventID, EventFinish{
+				Status:          EventStatusError,
+				ChangesReturned: len(changes),
+				ChangesResolved: stats.ChangesResolved,
+				TargetsClaimed:  stats.TargetsClaimed,
+				ScansSuppressed: stats.Suppressed,
+				ErrorMessage:    eerr.Error(),
+				MarkerAfter:     opts.Marker,
+			})
+			return result, eerr // do NOT advance marker
+		}
+	}
+
+	// Advancing the marker is what tells the provider "I've consumed up to
+	// here". Advance it ONLY when the work it represents is genuinely done:
+	//   - provider returned ZERO paths        → nothing to do, advance normally.
+	//   - returned paths AND ≥1 resolved       → enqueued (above), advance.
+	//   - returned paths, resolved but all
+	//     suppressed (recently scanned /
+	//     debounced)                           → work is effectively done; advance.
+	//   - ANY resolve attempt failed INTERNALLY (resolver/database fault —
+	//     possibly transient), whether or not other paths resolved → hold the
+	//     marker and record the error; a later poll re-reads the same window
+	//     once the fault clears. Advancing would silently skip the failed
+	//     paths. Targets that DID resolve were already enqueued above; the
+	//     re-read at worst re-scans them, which is safe.
+	//   - returned paths AND NOTHING resolved  → every path is outside Silo's
+	//     libraries (RequestError) — a benign, expected condition for
+	//     whole-volume filesystem watchers (e.g. CephFS), which observe
+	//     folders that are not registered as Silo libraries. Holding here
+	//     would pin the marker and permanently stall autoscan, so advance;
+	//     finish the event as "unresolved" so the condition stays visible in
+	//     poll history.
+	// (Some-but-not-all resolving still advances when the unresolved
+	// remainder is merely outside Silo's libraries.)
+	//
+	// Webhook deliveries have no marker: a transient resolve fault still
+	// finishes the event as error (the sender retries the delivery; a
+	// duplicate is at worst suppressed), and the unresolved case is the same
+	// benign "paths outside Silo's libraries" signal.
+	//
+	// NOTE: len(targets)==0 alone is NOT misconfiguration — paths can resolve
+	// yet be fully suppressed. Gate on resolvedAny, not targets.
+	if stats.TransientErrors > 0 {
+		msg := fmt.Sprintf("%d resolve attempt(s) failed internally (%d of %d path(s) resolved)", stats.TransientErrors, stats.ChangesResolved, len(changes))
+		if opts.AdvanceMarker {
+			msg += " — holding marker to retry"
+		}
+		if rerr := s.store.RecordError(ctx, src.ID, msg); rerr != nil {
+			slog.WarnContext(ctx, "autoscan: record error failed", "component", "autoscan", "source_id", src.ID, "err", rerr)
+		}
+		result.Status = EventStatusError
+		s.finishEvent(ctx, opts.EventID, EventFinish{
+			Status:          EventStatusError,
+			ChangesReturned: len(changes),
+			ChangesResolved: stats.ChangesResolved,
+			TargetsClaimed:  stats.TargetsClaimed,
+			ScansCreated:    result.Enqueue.Created,
+			ScansReused:     result.Enqueue.Reused,
+			ScansSuppressed: stats.Suppressed,
+			ErrorMessage:    msg,
+			MarkerAfter:     opts.Marker,
+		})
+		return result, errors.New(msg) // do NOT advance marker
+	}
+	status := EventStatusSuccess
+	var statusMsg string
+	if len(changes) > 0 && !resolvedAny {
+		status = EventStatusUnresolved
+		statusMsg = fmt.Sprintf("returned %d path(s) but none matched a Silo library folder", len(changes))
+		if opts.AdvanceMarker {
+			statusMsg += " — advanced past them"
+			slog.WarnContext(ctx, "autoscan: returned paths matched no library folder — advancing marker",
+				"source_id", src.ID, "changes", len(changes))
+		} else {
+			slog.WarnContext(ctx, "autoscan: webhook paths matched no library folder",
+				"source_id", src.ID, "changes", len(changes))
+		}
+	}
+	if opts.AdvanceMarker {
+		if aerr := s.store.AdvanceMarker(ctx, src.ID, opts.NextMarker); aerr != nil {
+			slog.WarnContext(ctx, "autoscan: advance marker failed", "component", "autoscan", "source_id", src.ID, "err", aerr)
+			result.Status = EventStatusError
+			s.finishEvent(ctx, opts.EventID, EventFinish{
+				Status:          EventStatusError,
+				ChangesReturned: len(changes),
+				ChangesResolved: stats.ChangesResolved,
+				TargetsClaimed:  stats.TargetsClaimed,
+				ScansCreated:    result.Enqueue.Created,
+				ScansReused:     result.Enqueue.Reused,
+				ScansSuppressed: stats.Suppressed,
+				ErrorMessage:    aerr.Error(),
+				MarkerAfter:     opts.Marker,
+			})
+			return result, aerr
+		}
+	}
+	result.Status = status
+	s.finishEvent(ctx, opts.EventID, EventFinish{
+		Status:          status,
+		ChangesReturned: len(changes),
+		ChangesResolved: stats.ChangesResolved,
+		TargetsClaimed:  stats.TargetsClaimed,
+		ScansCreated:    result.Enqueue.Created,
+		ScansReused:     result.Enqueue.Reused,
+		ScansSuppressed: stats.Suppressed,
+		ErrorMessage:    statusMsg,
+		MarkerAfter:     opts.NextMarker,
+	})
+	return result, nil
+}
+
+// ChangeIngest is one webhook delivery's worth of changes for a source.
+type ChangeIngest struct {
+	SourceID          string
+	ProviderEventType string
+	Changes           []Change
+	ReceivedAt        time.Time
+}
+
+// IngestResult summarizes what a webhook delivery produced.
+type IngestResult struct {
+	Enqueued   int
+	Suppressed int
+	Unresolved bool
+	// Pending reports that the delivery was accepted durably but its immediate
+	// ingest failed. The retry task will process it again inside Silo.
+	Pending bool
+}
+
+var errWebhookDeliveryDisabled = errors.New("autoscan: webhook delivery disabled")
+
+const (
+	webhookRetryBaseDelay = 5 * time.Second
+	webhookRetryMaxDelay  = 10 * time.Minute
+)
+
+func webhookRetryDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	delay := webhookRetryBaseDelay
+	for i := 1; i < attempt && delay < webhookRetryMaxDelay; i++ {
+		delay *= 2
+		if delay >= webhookRetryMaxDelay {
+			return webhookRetryMaxDelay
+		}
+	}
+	return delay
+}
+
+// IngestChanges durably records a webhook delivery before attempting the same
+// rewrite/resolve/suppress/enqueue/event pipeline as polling. A transient
+// processing failure leaves the delivery queued for an internal retry and is
+// surfaced as Pending rather than depending on Sonarr/Radarr to replay it.
+func (s *Service) IngestChanges(ctx context.Context, in ChangeIngest) (IngestResult, error) {
+	delivery, err := s.store.CreateWebhookDelivery(ctx, in)
+	if err != nil {
+		return IngestResult{}, err
+	}
+	return s.processWebhookDelivery(ctx, delivery), nil
+}
+
+// RetryPendingWebhookDeliveries claims and consumes a bounded batch of durable
+// deliveries. Repository leases make concurrent nodes safe; individual ingest
+// failures are rescheduled and do not abort the rest of the batch.
+func (s *Service) RetryPendingWebhookDeliveries(ctx context.Context, limit int) (int, error) {
+	deliveries, err := s.store.ClaimWebhookDeliveries(ctx, uuid.NewString(), limit)
+	if err != nil {
+		return 0, err
+	}
+	for _, delivery := range deliveries {
+		s.processWebhookDelivery(ctx, delivery)
+	}
+	return len(deliveries), nil
+}
+
+func (s *Service) processWebhookDelivery(ctx context.Context, delivery WebhookDelivery) IngestResult {
+	result, ingestErr := s.ingestChangesNow(ctx, ChangeIngest{
+		SourceID:          delivery.SourceID,
+		ProviderEventType: delivery.ProviderEventType,
+		Changes:           delivery.Changes,
+		ReceivedAt:        delivery.ReceivedAt,
+	})
+	if ingestErr == nil {
+		if err := s.store.CompleteWebhookDelivery(ctx, delivery.ID, delivery.LockedBy); err != nil {
+			result.Pending = true
+			slog.WarnContext(ctx, "autoscan: complete webhook delivery failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
+		} else {
+			if err := s.store.ClearWebhookError(ctx, delivery.SourceID); err != nil {
+				slog.WarnContext(ctx, "autoscan: clear webhook error failed", "component", "autoscan", "source_id", delivery.SourceID, "err", err)
+			}
+		}
+		return result
+	}
+	if errors.Is(ingestErr, errWebhookDeliveryDisabled) {
+		// A source/global disable is a pause, not a reason to discard work that
+		// was already accepted while enabled. Keep it pending without surfacing a
+		// delivery error and try again after the operator re-enables Autoscan.
+		result.Pending = true
+		if err := s.store.RetryWebhookDelivery(ctx, delivery.ID, delivery.LockedBy, time.Minute, ""); err != nil {
+			slog.WarnContext(ctx, "autoscan: pause webhook retry failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
+		}
+		return result
+	}
+
+	result.Pending = true
+	if err := s.store.RetryWebhookDelivery(
+		ctx,
+		delivery.ID,
+		delivery.LockedBy,
+		webhookRetryDelay(delivery.AttemptCount),
+		ingestErr.Error(),
+	); err != nil {
+		// The durable row remains leased and becomes reclaimable when the lease
+		// expires, so a bookkeeping failure here still cannot lose the delivery.
+		slog.WarnContext(ctx, "autoscan: schedule webhook retry failed", "component", "autoscan", "delivery_id", delivery.ID, "err", err)
+	}
+	if err := s.store.RecordWebhookError(ctx, delivery.SourceID, ingestErr.Error()); err != nil {
+		slog.WarnContext(ctx, "autoscan: record webhook error failed", "component", "autoscan", "source_id", delivery.SourceID, "err", err)
+	}
+	return result
+}
+
+// ingestChangesNow performs one webhook consume attempt. It is deliberately
+// separate from IngestChanges so retries do not create nested delivery rows.
+func (s *Service) ingestChangesNow(ctx context.Context, in ChangeIngest) (IngestResult, error) {
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		return IngestResult{}, err
+	}
+	if !settings.Enabled {
+		return IngestResult{}, errWebhookDeliveryDisabled
+	}
+	src, err := s.store.GetSource(ctx, in.SourceID)
+	if err != nil {
+		return IngestResult{}, err
+	}
+	if src.DeliveryMode != DeliveryModeWebhook {
+		return IngestResult{}, fmt.Errorf("autoscan: source %s is not a webhook source", src.ID)
+	}
+	if !src.Enabled {
+		return IngestResult{}, errWebhookDeliveryDisabled
+	}
+	startedAt := in.ReceivedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	// Event bookkeeping failure does not block the scan work (same resilience
+	// as polling): eventID 0 makes finishEvent a no-op and enqueues without an
+	// event link.
+	eventID, err := s.store.CreateEvent(ctx, EventCreate{
+		SourceID:          src.ID,
+		PluginID:          src.PluginID,
+		CapabilityID:      src.CapabilityID,
+		StartedAt:         startedAt,
+		DeliveryMode:      DeliveryModeWebhook,
+		ProviderEventType: in.ProviderEventType,
+		SkipRunningCheck:  true,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: create webhook event failed", "component", "autoscan", "source_id", src.ID, "err", err)
+		eventID = 0
+	}
+	result, cerr := s.consumeSourceChanges(ctx, src, in.Changes, consumeOptions{
+		EventID: eventID,
+		TTL:     time.Duration(settings.DebounceSeconds) * time.Second,
+	})
+	return IngestResult{
+		Enqueued:   result.Enqueue.Created + result.Enqueue.Reused,
+		Suppressed: result.Stats.Suppressed,
+		Unresolved: result.Status == EventStatusUnresolved,
+	}, cerr
 }
 
 func (s *Service) enqueueScanTargets(ctx context.Context, targets []scantrigger.Target, eventID int64) (EnqueueResult, error) {

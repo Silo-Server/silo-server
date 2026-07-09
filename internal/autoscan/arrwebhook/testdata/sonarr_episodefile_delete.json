@@ -1,0 +1,28 @@
+{
+  "series": {
+    "id": 12,
+    "title": "Example Show",
+    "path": "/data/tv/Example Show",
+    "tvdbId": 123456,
+    "type": "standard"
+  },
+  "episodes": [
+    {
+      "id": 401,
+      "episodeNumber": 1,
+      "seasonNumber": 2,
+      "title": "The One That Got Deleted"
+    }
+  ],
+  "episodeFile": {
+    "id": 991,
+    "relativePath": "Season 02/Example Show - S02E01.mkv",
+    "path": "/data/tv/Example Show/Season 02/Example Show - S02E01.mkv",
+    "quality": "WEBDL-1080p",
+    "qualityVersion": 1,
+    "size": 2147483648
+  },
+  "deleteReason": "upgrade",
+  "eventType": "EpisodeFileDelete",
+  "instanceName": "Sonarr"
+}

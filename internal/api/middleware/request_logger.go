@@ -52,7 +52,7 @@ func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 				"component", "api",
 				"request_id", chimw.GetReqID(r.Context()),
 				"method", r.Method,
-				"path", r.URL.Path,
+				"path", activitylog.RedactSecretPathParams(r, r.URL.Path),
 				"path_pattern", pathPattern,
 				"status", wrapped.status,
 				"duration_ms", time.Since(start).Milliseconds(),

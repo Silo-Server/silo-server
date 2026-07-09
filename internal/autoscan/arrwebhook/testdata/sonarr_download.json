@@ -1,0 +1,32 @@
+{
+  "series": {
+    "id": 12,
+    "title": "Example Show",
+    "path": "/data/tv/Example Show",
+    "tvdbId": 123456,
+    "type": "standard"
+  },
+  "episodes": [
+    {
+      "id": 401,
+      "episodeNumber": 1,
+      "seasonNumber": 2,
+      "title": "The One That Imports"
+    }
+  ],
+  "episodeFile": {
+    "id": 991,
+    "relativePath": "Season 02/Example Show - S02E01 - The One That Imports.mkv",
+    "path": "/data/tv/Example Show/Season 02/Example Show - S02E01 - The One That Imports.mkv",
+    "quality": "WEBDL-1080p",
+    "qualityVersion": 1,
+    "releaseGroup": "GROUP",
+    "sceneName": "Example.Show.S02E01.1080p.WEB-DL",
+    "size": 2147483648
+  },
+  "isUpgrade": false,
+  "downloadClient": "sabnzbd",
+  "downloadId": "abc123",
+  "eventType": "Download",
+  "instanceName": "Sonarr"
+}

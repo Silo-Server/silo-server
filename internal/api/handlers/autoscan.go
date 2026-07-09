@@ -39,6 +39,15 @@ type autoscanStore interface {
 	ListRunningEvents(ctx context.Context) ([]autoscan.Event, error)
 	GetQueueSummary(ctx context.Context) (autoscan.QueueSummary, error)
 	LatestEventAt(ctx context.Context) (*time.Time, error)
+	CreateWebhookEndpoint(ctx context.Context, sourceID string) (autoscan.WebhookEndpoint, string, error)
+	RotateWebhookEndpoint(ctx context.Context, sourceID string) (autoscan.WebhookEndpoint, string, error)
+	DeleteWebhookEndpoint(ctx context.Context, sourceID string) error
+	GetWebhookEndpoint(ctx context.Context, sourceID string) (autoscan.WebhookEndpoint, error)
+	ListWebhookEndpoints(ctx context.Context) ([]autoscan.WebhookEndpoint, error)
+	RevealWebhookToken(ctx context.Context, sourceID string) (string, error)
+	ResolveWebhookToken(ctx context.Context, token string) (autoscan.Source, autoscan.WebhookEndpoint, error)
+	TouchWebhookReceived(ctx context.Context, sourceID string) error
+	RecordWebhookError(ctx context.Context, sourceID, msg string) error
 }
 
 // autoscanTriggerer is the subset of *autoscan.Service the handler needs.
@@ -55,6 +64,9 @@ type autoscanTriggerer interface {
 	// SuggestRewrites proposes path rewrites by matching the source's arr root
 	// folders against Silo's media folders.
 	SuggestRewrites(ctx context.Context, sourceID string) (autoscan.RewriteSuggestions, error)
+	// IngestChanges feeds webhook-delivered changes through the shared
+	// rewrite/resolve/suppress/enqueue pipeline.
+	IngestChanges(ctx context.Context, in autoscan.ChangeIngest) (autoscan.IngestResult, error)
 }
 
 // autoscanTriggerUpdater reconfigures the poll task's schedule when the default
@@ -69,11 +81,14 @@ type autoscanTriggerUpdater interface {
 const autoscanPollTaskKey = "autoscan_poll"
 
 // AutoscanHandler serves the admin-only autoscan settings/connections/sources/
-// trigger API.
+// trigger API plus the public webhook delivery endpoint.
 type AutoscanHandler struct {
 	repo     autoscanStore
 	svc      autoscanTriggerer
 	triggers autoscanTriggerUpdater // optional; nil skips rescheduling
+	// publicURL is the server's externally reachable base URL; when empty,
+	// webhook URLs are returned as absolute paths for the UI to complete.
+	publicURL string
 }
 
 func NewAutoscanHandler(repo autoscanStore, svc autoscanTriggerer) *AutoscanHandler {
@@ -86,6 +101,13 @@ func NewAutoscanHandler(repo autoscanStore, svc autoscanTriggerer) *AutoscanHand
 // manager.
 func (h *AutoscanHandler) SetTriggerUpdater(t autoscanTriggerUpdater) {
 	h.triggers = t
+}
+
+// SetPublicURL wires the server's public base URL so webhook URLs are returned
+// fully qualified. Optional: when unset, responses carry the absolute path and
+// the admin UI prefixes its own origin.
+func (h *AutoscanHandler) SetPublicURL(publicURL string) {
+	h.publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
 }
 
 // --- Settings ---
@@ -307,19 +329,29 @@ func (h *AutoscanHandler) HandleDeleteConnection(w http.ResponseWriter, r *http.
 // --- Sources ---
 
 // autoscanSourceResponse is the client view of a source. It carries no
-// credentials: the connection link is by id only.
+// credentials: the connection link is by id only. The webhook_* fields are
+// admin-only setup surface; webhook_url deliberately stays redisplayable (the
+// token's blast radius is spurious scans of already-registered library paths,
+// and one-time display would force a rotation after any config loss).
 type autoscanSourceResponse struct {
-	ID                  string                 `json:"id"`
-	PluginID            string                 `json:"plugin_id"`
-	CapabilityID        string                 `json:"capability_id"`
-	ConnectionID        *string                `json:"connection_id"`
-	Enabled             bool                   `json:"enabled"`
-	PollIntervalSeconds *int                   `json:"poll_interval_seconds,omitempty"`
-	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
-	SourceConfig        map[string]string      `json:"source_config"`
-	Label               string                 `json:"label"`
-	LastRunAt           *time.Time             `json:"last_run_at,omitempty"`
-	LastError           *string                `json:"last_error,omitempty"`
+	ID                      string                 `json:"id"`
+	PluginID                string                 `json:"plugin_id"`
+	CapabilityID            string                 `json:"capability_id"`
+	ConnectionID            *string                `json:"connection_id"`
+	Enabled                 bool                   `json:"enabled"`
+	DeliveryMode            string                 `json:"delivery_mode"`
+	PollIntervalSeconds     *int                   `json:"poll_interval_seconds,omitempty"`
+	PathRewrites            []autoscan.PathRewrite `json:"path_rewrites"`
+	SourceConfig            map[string]string      `json:"source_config"`
+	Label                   string                 `json:"label"`
+	LastRunAt               *time.Time             `json:"last_run_at,omitempty"`
+	LastError               *string                `json:"last_error,omitempty"`
+	WebhookConfigured       bool                   `json:"webhook_configured"`
+	WebhookURL              string                 `json:"webhook_url,omitempty"`
+	WebhookSecretSuffix     string                 `json:"webhook_secret_suffix,omitempty"`
+	WebhookLastReceivedAt   *time.Time             `json:"webhook_last_received_at,omitempty"`
+	WebhookLastErrorAt      *time.Time             `json:"webhook_last_error_at,omitempty"`
+	WebhookLastErrorMessage string                 `json:"webhook_last_error_message,omitempty"`
 }
 
 func sourceResponse(s autoscan.Source) autoscanSourceResponse {
@@ -330,12 +362,17 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 		rewrites = []autoscan.PathRewrite{}
 	}
 	config := normalizeSourceConfig(s.SourceConfig)
+	deliveryMode := s.DeliveryMode
+	if deliveryMode == "" {
+		deliveryMode = autoscan.DeliveryModePoll
+	}
 	return autoscanSourceResponse{
 		ID:                  s.ID,
 		PluginID:            s.PluginID,
 		CapabilityID:        s.CapabilityID,
 		ConnectionID:        s.ConnectionID,
 		Enabled:             s.Enabled,
+		DeliveryMode:        deliveryMode,
 		PollIntervalSeconds: s.PollIntervalSeconds,
 		PathRewrites:        rewrites,
 		SourceConfig:        config,
@@ -343,6 +380,45 @@ func sourceResponse(s autoscan.Source) autoscanSourceResponse {
 		LastRunAt:           s.LastRunAt,
 		LastError:           s.LastError,
 	}
+}
+
+// webhookURLFor builds the delivery URL for a token: fully qualified when the
+// server knows its public URL, otherwise an absolute path the admin UI
+// completes with its own origin.
+func (h *AutoscanHandler) webhookURLFor(token string) string {
+	return h.publicURL + "/api/v1/autoscan/webhooks/" + token
+}
+
+// attachWebhookState decorates a source response with its endpoint status and
+// redisplayable URL. A reveal failure (e.g. cipher/key drift) degrades to
+// status-without-URL rather than failing the response.
+func (h *AutoscanHandler) attachWebhookState(ctx context.Context, resp *autoscanSourceResponse, endpoint autoscan.WebhookEndpoint) {
+	resp.WebhookConfigured = true
+	resp.WebhookSecretSuffix = endpoint.SecretSuffix
+	resp.WebhookLastReceivedAt = endpoint.LastReceivedAt
+	resp.WebhookLastErrorAt = endpoint.LastErrorAt
+	resp.WebhookLastErrorMessage = endpoint.LastErrorMessage
+	token, err := h.repo.RevealWebhookToken(ctx, endpoint.SourceID)
+	if err != nil {
+		slog.WarnContext(ctx, "autoscan: reveal webhook token failed", "component", "api", "source_id", endpoint.SourceID, "err", err)
+		return
+	}
+	resp.WebhookURL = h.webhookURLFor(token)
+}
+
+// sourceResponseWithWebhook builds a single source response including webhook
+// endpoint state (used by the single-source create/update/webhook handlers).
+func (h *AutoscanHandler) sourceResponseWithWebhook(ctx context.Context, s autoscan.Source) autoscanSourceResponse {
+	resp := sourceResponse(s)
+	endpoint, err := h.repo.GetWebhookEndpoint(ctx, s.ID)
+	if err != nil {
+		if !errors.Is(err, autoscan.ErrNotFound) {
+			slog.WarnContext(ctx, "autoscan: load webhook endpoint failed", "component", "api", "source_id", s.ID, "err", err)
+		}
+		return resp
+	}
+	h.attachWebhookState(ctx, &resp, endpoint)
+	return resp
 }
 
 func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Request) {
@@ -353,9 +429,23 @@ func (h *AutoscanHandler) HandleListSources(w http.ResponseWriter, r *http.Reque
 		writeAutoscanError(w, err)
 		return
 	}
+	// One batched endpoint query for the whole listing (not per source).
+	endpoints, err := h.repo.ListWebhookEndpoints(r.Context())
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	endpointBySource := make(map[string]autoscan.WebhookEndpoint, len(endpoints))
+	for _, e := range endpoints {
+		endpointBySource[e.SourceID] = e
+	}
 	out := make([]autoscanSourceResponse, 0, len(sources))
 	for _, s := range sources {
-		out = append(out, sourceResponse(s))
+		resp := sourceResponse(s)
+		if endpoint, ok := endpointBySource[s.ID]; ok {
+			h.attachWebhookState(r.Context(), &resp, endpoint)
+		}
+		out = append(out, resp)
 	}
 	writeJSON(w, http.StatusOK, struct {
 		Sources []autoscanSourceResponse `json:"sources"`
@@ -402,10 +492,53 @@ type autoscanCreateSourceInput struct {
 	CapabilityID        string                 `json:"capability_id"`
 	ConnectionID        *string                `json:"connection_id"`
 	Enabled             bool                   `json:"enabled"`
+	DeliveryMode        string                 `json:"delivery_mode"`
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
 	SourceConfig        map[string]string      `json:"source_config"`
 	Label               string                 `json:"label"`
+}
+
+// resolveDeliveryMode validates a requested delivery mode against the source
+// identity: webhook mode exists only for the built-in ARR webhook identity
+// (which cannot poll — it has no plugin), and an empty mode defaults to
+// whichever mode the identity supports.
+func resolveDeliveryMode(requested, pluginID, capabilityID string) (string, error) {
+	isBuiltinWebhook := autoscan.IsBuiltinArrWebhookIdentity(pluginID, capabilityID)
+	switch strings.ToLower(strings.TrimSpace(requested)) {
+	case "":
+		if isBuiltinWebhook {
+			return autoscan.DeliveryModeWebhook, nil
+		}
+		return autoscan.DeliveryModePoll, nil
+	case autoscan.DeliveryModePoll:
+		if isBuiltinWebhook {
+			return "", fmt.Errorf("the built-in Sonarr/Radarr webhook source has no plugin to poll; delivery_mode must be webhook")
+		}
+		return autoscan.DeliveryModePoll, nil
+	case autoscan.DeliveryModeWebhook:
+		if !isBuiltinWebhook {
+			return "", fmt.Errorf("delivery_mode webhook is only valid for the built-in Sonarr/Radarr webhook source (%s/%s)",
+				autoscan.BuiltinArrWebhookPluginID, autoscan.BuiltinArrWebhookCapabilityID)
+		}
+		return autoscan.DeliveryModeWebhook, nil
+	default:
+		return "", fmt.Errorf("delivery_mode must be poll or webhook")
+	}
+}
+
+// validateWebhookProvider checks the optional source_config.webhook_provider
+// value used by webhook payload parsing.
+func validateWebhookProvider(config map[string]string) error {
+	provider, ok := config["webhook_provider"]
+	if !ok {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", "auto", "sonarr", "radarr":
+		return nil
+	}
+	return fmt.Errorf("source_config.webhook_provider must be auto, sonarr, or radarr")
 }
 
 // HandleCreateSource creates a new source bound to an installed scan_source
@@ -436,9 +569,25 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	deliveryMode, err := resolveDeliveryMode(in.DeliveryMode, pluginID, capID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	sourceConfig := normalizeSourceConfig(in.SourceConfig)
+	if deliveryMode == autoscan.DeliveryModeWebhook {
+		if err := validateWebhookProvider(sourceConfig); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		if provider, ok := sourceConfig["webhook_provider"]; ok {
+			sourceConfig["webhook_provider"] = strings.ToLower(strings.TrimSpace(provider))
+		}
+	}
 	// Validate the (plugin_id, capability_id) is a currently-installed
 	// scan_source capability — a source may only be created against an installed
-	// plugin capability.
+	// plugin capability. The built-in webhook identity passes because the
+	// composite lister always supplies it.
 	available, err := h.svc.ListAvailableScanSources(r.Context())
 	if err != nil {
 		writeAutoscanError(w, err)
@@ -454,9 +603,10 @@ func (h *AutoscanHandler) HandleCreateSource(w http.ResponseWriter, r *http.Requ
 		CapabilityID:        capID,
 		ConnectionID:        connArg,
 		Enabled:             in.Enabled,
+		DeliveryMode:        deliveryMode,
 		PollIntervalSeconds: in.PollIntervalSeconds,
 		PathRewrites:        normalizePathRewrites(in.PathRewrites),
-		SourceConfig:        normalizeSourceConfig(in.SourceConfig),
+		SourceConfig:        sourceConfig,
 		Label:               autoscan.NormalizeSourceLabel(in.Label),
 	})
 	if err != nil {
@@ -491,6 +641,7 @@ func scanSourceInstalled(available []autoscan.AvailableScanSource, pluginID, cap
 type autoscanSourceInput struct {
 	ConnectionID        *string                `json:"connection_id"`
 	Enabled             bool                   `json:"enabled"`
+	DeliveryMode        string                 `json:"delivery_mode"`
 	PollIntervalSeconds *int                   `json:"poll_interval_seconds"`
 	PathRewrites        []autoscan.PathRewrite `json:"path_rewrites"`
 	SourceConfig        map[string]string      `json:"source_config"`
@@ -549,6 +700,32 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
+	// Delivery mode is validated against the existing row's immutable identity:
+	// an empty input keeps the stored mode.
+	existing, err := h.repo.GetSource(r.Context(), id)
+	if err != nil {
+		writeAutoscanError(w, err)
+		return
+	}
+	requestedMode := in.DeliveryMode
+	if strings.TrimSpace(requestedMode) == "" {
+		requestedMode = existing.DeliveryMode
+	}
+	deliveryMode, err := resolveDeliveryMode(requestedMode, existing.PluginID, existing.CapabilityID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	sourceConfig := normalizeSourceConfig(in.SourceConfig)
+	if deliveryMode == autoscan.DeliveryModeWebhook {
+		if err := validateWebhookProvider(sourceConfig); err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		if provider, ok := sourceConfig["webhook_provider"]; ok {
+			sourceConfig["webhook_provider"] = strings.ToLower(strings.TrimSpace(provider))
+		}
+	}
 	// connection_id is a full-state field: nil means unbind, a UUID string
 	// means bind. A whitespace-only string is normalised to nil (unbound).
 	connArg := normalizeConnectionID(in.ConnectionID)
@@ -558,16 +735,17 @@ func (h *AutoscanHandler) HandleUpdateSource(w http.ResponseWriter, r *http.Requ
 		ID:                  id,
 		ConnectionID:        connArg,
 		Enabled:             in.Enabled,
+		DeliveryMode:        deliveryMode,
 		PollIntervalSeconds: in.PollIntervalSeconds,
 		PathRewrites:        normalizePathRewrites(in.PathRewrites),
-		SourceConfig:        normalizeSourceConfig(in.SourceConfig),
+		SourceConfig:        sourceConfig,
 		Label:               autoscan.NormalizeSourceLabel(in.Label),
 	})
 	if err != nil {
 		writeAutoscanError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, sourceResponse(updated))
+	writeJSON(w, http.StatusOK, h.sourceResponseWithWebhook(r.Context(), updated))
 }
 
 // normalizeConnectionID maps a full-state connection_id input to a stored value:
@@ -719,6 +897,8 @@ type autoscanEventResponse struct {
 	CompletedAt     time.Time                      `json:"completed_at"`
 	DurationMS      int64                          `json:"duration_ms"`
 	Status          string                         `json:"status"`
+	DeliveryMode    string                         `json:"delivery_mode"`
+	ProviderEvent   string                         `json:"provider_event_type,omitempty"`
 	ChangesReturned int                            `json:"changes_returned"`
 	ChangesResolved int                            `json:"changes_resolved"`
 	TargetsClaimed  int                            `json:"targets_claimed"`
@@ -762,6 +942,8 @@ func eventResponse(event autoscan.EventWithRuns) autoscanEventResponse {
 		CompletedAt:     e.CompletedAt,
 		DurationMS:      e.DurationMS,
 		Status:          string(e.Status),
+		DeliveryMode:    e.DeliveryMode,
+		ProviderEvent:   e.ProviderEventType,
 		ChangesReturned: e.ChangesReturned,
 		ChangesResolved: e.ChangesResolved,
 		TargetsClaimed:  e.TargetsClaimed,

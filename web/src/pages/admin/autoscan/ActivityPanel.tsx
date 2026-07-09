@@ -202,6 +202,21 @@ function ScanStatusBadge({ status }: { status: AutoscanScanStatus | ScanRun["sta
   );
 }
 
+/**
+ * Marks webhook-delivered events (with the arr event type when known) so they
+ * read distinctly from poll cycles. Poll events render nothing — poll is the
+ * default and labeling every row would be noise.
+ */
+function DeliveryBadge({ event }: { event: AutoscanEvent }) {
+  if (event.delivery_mode !== "webhook") return null;
+  return (
+    <Badge variant="secondary" className="text-xs">
+      Webhook
+      {event.provider_event_type ? ` · ${event.provider_event_type}` : ""}
+    </Badge>
+  );
+}
+
 // Shared desktop table chrome so the queue, scan history, and poll log read as
 // one family: clipped rounded border, muted sticky-feeling header band.
 function DataTable({ head, children }: { head: ReactNode; children: ReactNode }) {
@@ -606,6 +621,7 @@ function PollEventCard({ event, lookups }: { event: AutoscanEvent; lookups: Sour
           <div className="flex flex-wrap items-center gap-2">
             <PollStatusBadge status={event.status} />
             <span className="font-medium">{pollSourceName(event, lookups)}</span>
+            <DeliveryBadge event={event} />
           </div>
           <PollMetricStrip event={event} />
         </div>
@@ -662,7 +678,12 @@ function PollEventTable({
             <TableCell>
               <PollStatusBadge status={event.status} />
             </TableCell>
-            <TableCell className="font-medium">{pollSourceName(event, lookups)}</TableCell>
+            <TableCell className="font-medium">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {pollSourceName(event, lookups)}
+                <DeliveryBadge event={event} />
+              </div>
+            </TableCell>
             <TableCell>
               <PollMetricStrip event={event} />
               {event.error_message ? (

@@ -2049,23 +2049,35 @@ export interface AutoscanPathRewrite {
   to: string;
 }
 
+export type AutoscanDeliveryMode = "poll" | "webhook";
+
+export type AutoscanWebhookProvider = "auto" | "sonarr" | "radarr";
+
 export interface AutoscanSource {
   id: string;
   plugin_id: string;
   capability_id: string;
   connection_id: string | null;
   enabled: boolean;
+  delivery_mode: AutoscanDeliveryMode;
   poll_interval_seconds: number | null;
   last_run_at: string | null;
   last_error: string | null;
   path_rewrites: AutoscanPathRewrite[];
   source_config: Record<string, string>;
   label: string;
+  webhook_configured: boolean;
+  webhook_url?: string;
+  webhook_secret_suffix?: string;
+  webhook_last_received_at?: string;
+  webhook_last_error_at?: string;
+  webhook_last_error_message?: string;
 }
 
 export interface AutoscanSourceInput {
   connection_id: string | null;
   enabled: boolean;
+  delivery_mode?: AutoscanDeliveryMode;
   poll_interval_seconds: number | null;
   path_rewrites?: AutoscanPathRewrite[];
   source_config?: Record<string, string>;
@@ -2091,6 +2103,7 @@ export interface AutoscanSourceCreateInput {
   capability_id: string;
   connection_id?: string | null;
   enabled: boolean;
+  delivery_mode?: AutoscanDeliveryMode;
   poll_interval_seconds?: number | null;
   path_rewrites: AutoscanPathRewrite[];
   source_config?: Record<string, string>;
@@ -2182,6 +2195,8 @@ export interface AutoscanEvent {
   completed_at: string;
   duration_ms: number;
   status: AutoscanEventStatus;
+  delivery_mode?: AutoscanDeliveryMode;
+  provider_event_type?: string;
   changes_returned: number;
   changes_resolved: number;
   targets_claimed: number;

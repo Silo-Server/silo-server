@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -55,6 +56,25 @@ type RedisLimiter struct {
 	client *redis.Client
 }
 
+// redisWindowLimits maps the shared rate model onto Redis fixed windows. The
+// second window must honor Burst just like the in-memory token bucket; using
+// only int(RequestsPerSecond) previously collapsed a 60/minute, burst-30
+// webhook limit into one request per second and rejected legitimate batches.
+func redisWindowLimits(limit Rate) (secLimit, minLimit, effectiveLimit int) {
+	secLimit = int(math.Ceil(limit.RequestsPerSecond))
+	minLimit = int(math.Ceil(limit.RequestsPerMinute))
+	if limit.Burst > secLimit {
+		secLimit = limit.Burst
+	}
+	if secLimit <= 0 && minLimit > 0 {
+		secLimit = minLimit
+	}
+	if minLimit <= 0 && secLimit > 0 {
+		minLimit = secLimit * 60
+	}
+	return secLimit, minLimit, secLimit
+}
+
 // NewRedisLimiter creates a new Redis-backed rate limiter.
 func NewRedisLimiter(client *redis.Client) *RedisLimiter {
 	return &RedisLimiter{client: client}
@@ -68,25 +88,7 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, limit Rate) Allow
 	secKey := fmt.Sprintf("silo:ratelimit:%s:s:%d", key, secTs)
 	minKey := fmt.Sprintf("silo:ratelimit:%s:m:%d", key, minTs)
 
-	secLimit := int(limit.RequestsPerSecond)
-	minLimit := int(limit.RequestsPerMinute)
-
-	// For sub-1 rps rates (e.g. auth endpoints: 5 req/min = 0.083 rps),
-	// int truncation gives secLimit=0 which makes the Lua script reject
-	// every request. Use the per-minute limit as the effective limit and
-	// skip the per-second constraint by setting it to the per-minute limit
-	// (the per-minute window is the real constraint).
-	subSecondRate := secLimit == 0 && limit.RequestsPerSecond > 0
-	if subSecondRate {
-		secLimit = minLimit
-	}
-
-	// Effective limit for response headers: use per-minute when the rate
-	// is defined in minutes (sub-second), per-second otherwise.
-	effectiveLimit := secLimit
-	if subSecondRate {
-		effectiveLimit = minLimit
-	}
+	secLimit, minLimit, effectiveLimit := redisWindowLimits(limit)
 
 	result, err := rateLimitScript.Run(ctx, rl.client,
 		[]string{secKey, minKey},
@@ -124,7 +126,7 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, limit Rate) Allow
 		}
 	}
 
-	remaining := effectiveLimit - minCount
+	remaining := minLimit - minCount
 	if secRemaining := secLimit - secCount; secRemaining < remaining {
 		remaining = secRemaining
 	}

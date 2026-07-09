@@ -119,6 +119,7 @@ func NewMiddleware(w Writer, nodeID string) func(http.Handler) http.Handler {
 					pathPattern = route
 				}
 			}
+			path = RedactSecretPathParams(r, path)
 
 			// After handler chain completes, auth middleware has populated lc
 			entry := LogEntry{
@@ -141,6 +142,33 @@ func NewMiddleware(w Writer, nodeID string) func(http.Handler) http.Handler {
 			w.Write(entry)
 		})
 	}
+}
+
+// RedactSecretPathParams strips bearer credentials from a request path before
+// it reaches any log sink. Public webhook endpoints authenticate via a secret
+// path segment (chi route params named "token" or "secret" — autoscan webhook
+// intake, webhook-sync); logging the raw path would persist the credential in
+// app logs and the activity table. Must be called after the handler chain ran
+// so the chi route context is populated.
+func RedactSecretPathParams(r *http.Request, path string) string {
+	routeCtx := chi.RouteContext(r.Context())
+	if routeCtx == nil {
+		return path
+	}
+	for i, key := range routeCtx.URLParams.Keys {
+		if key != "token" && key != "secret" {
+			continue
+		}
+		if i >= len(routeCtx.URLParams.Values) {
+			continue
+		}
+		value := routeCtx.URLParams.Values[i]
+		if value == "" {
+			continue
+		}
+		path = strings.Replace(path, "/"+value, "/[redacted]", 1)
+	}
+	return path
 }
 
 // isStreamChunk returns true if the path looks like a stream segment/manifest
