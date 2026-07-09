@@ -156,6 +156,9 @@ func (r *PluginImageResolver) Close() {
 	if r.urlCache != nil {
 		r.urlCache.Close()
 	}
+	if r.variantExistsCache != nil {
+		r.variantExistsCache.Close()
+	}
 }
 
 // ResolveImageURL resolves a single plugin-prefixed image path.
@@ -395,7 +398,7 @@ func (r *PluginImageResolver) existingVariantKey(ctx context.Context, presigner 
 }
 
 // newVariantFallback extracts the variant filename from a cached image key
-// ("…/still/w780.webp" → "w780") and reports its fallback when the variant
+// ("…/still/w780.revision.webp" → "w780") and reports its fallback when the variant
 // is one of the newly-introduced rungs.
 func newVariantFallback(key string) (variant, fallback string, ok bool) {
 	lastSlash := strings.LastIndex(key, "/")

@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -331,6 +332,7 @@ type fakeS3ImagePresigner struct {
 	ttl         time.Duration
 	keys        []string
 	existing    map[string]bool
+	existsErr   error
 	existsCalls int
 }
 
@@ -347,6 +349,9 @@ func (p *fakeS3ImagePresigner) Bucket() string {
 
 func (p *fakeS3ImagePresigner) ObjectExists(_ context.Context, _ string, key string) (bool, error) {
 	p.existsCalls++
+	if p.existsErr != nil {
+		return false, p.existsErr
+	}
 	return p.existing[key], nil
 }
 
@@ -383,16 +388,76 @@ func TestPluginImageResolverS3FallsBackForMissingNewVariant(t *testing.T) {
 	defer resolver.Close()
 	resolver.SetS3Presigner(presigner, 10*time.Minute)
 
-	got := resolver.ResolveImageURL(context.Background(), "tvdb/series/1/seasons/1/episodes/1/still/w780.webp", "featured")
-	want := "s3:tvdb/series/1/seasons/1/episodes/1/still/w500.webp:1"
+	got := resolver.ResolveImageURL(context.Background(), "tvdb/series/1/seasons/1/episodes/1/still/w780.rev123.webp", "featured")
+	want := "s3:tvdb/series/1/seasons/1/episodes/1/still/w500.rev123.webp:1"
 	if got != want {
 		t.Fatalf("resolved URL = %q, want %q", got, want)
 	}
 	if presigner.existsCalls != 1 {
 		t.Fatalf("ObjectExists calls = %d, want 1", presigner.existsCalls)
 	}
-	if len(presigner.keys) != 1 || presigner.keys[0] != "tvdb/series/1/seasons/1/episodes/1/still/w500.webp" {
+	if len(presigner.keys) != 1 || presigner.keys[0] != "tvdb/series/1/seasons/1/episodes/1/still/w500.rev123.webp" {
 		t.Fatalf("presigned keys = %v, want w500 fallback", presigner.keys)
+	}
+}
+
+func TestPluginImageResolverS3PresignsExistingNewVariant(t *testing.T) {
+	const key = "tvdb/series/1/seasons/1/episodes/1/still/w780.webp"
+	presigner := &fakeS3ImagePresigner{existing: map[string]bool{key: true}}
+	resolver := NewPluginImageResolver()
+	defer resolver.Close()
+	resolver.SetS3Presigner(presigner, 10*time.Minute)
+
+	got := resolver.ResolveImageURL(context.Background(), key, "featured")
+	want := "s3:tvdb/series/1/seasons/1/episodes/1/still/w780.webp:1"
+	if got != want {
+		t.Fatalf("resolved URL = %q, want %q", got, want)
+	}
+	if presigner.existsCalls != 1 {
+		t.Fatalf("ObjectExists calls = %d, want 1", presigner.existsCalls)
+	}
+	if len(presigner.keys) != 1 || presigner.keys[0] != key {
+		t.Fatalf("presigned keys = %v, want direct w780 key", presigner.keys)
+	}
+
+	resolver.urlCache.InvalidatePrefix("")
+	got = resolver.ResolveImageURL(context.Background(), key, "featured")
+	want = "s3:tvdb/series/1/seasons/1/episodes/1/still/w780.webp:2"
+	if got != want {
+		t.Fatalf("resolved URL after URL cache clear = %q, want %q", got, want)
+	}
+	if presigner.existsCalls != 1 {
+		t.Fatalf("ObjectExists calls after cached existence = %d, want 1", presigner.existsCalls)
+	}
+}
+
+func TestPluginImageResolverS3PresignsRequestedVariantWhenExistsCheckErrors(t *testing.T) {
+	const key = "tvdb/series/1/seasons/1/episodes/1/still/w780.webp"
+	presigner := &fakeS3ImagePresigner{existsErr: errors.New("s3 unavailable")}
+	resolver := NewPluginImageResolver()
+	defer resolver.Close()
+	resolver.SetS3Presigner(presigner, 10*time.Minute)
+
+	got := resolver.ResolveImageURL(context.Background(), key, "featured")
+	want := "s3:tvdb/series/1/seasons/1/episodes/1/still/w780.webp:1"
+	if got != want {
+		t.Fatalf("resolved URL = %q, want %q", got, want)
+	}
+	if presigner.existsCalls != 1 {
+		t.Fatalf("ObjectExists calls = %d, want 1", presigner.existsCalls)
+	}
+	if len(presigner.keys) != 1 || presigner.keys[0] != key {
+		t.Fatalf("presigned keys = %v, want direct w780 key", presigner.keys)
+	}
+
+	resolver.urlCache.InvalidatePrefix("")
+	got = resolver.ResolveImageURL(context.Background(), key, "featured")
+	want = "s3:tvdb/series/1/seasons/1/episodes/1/still/w780.webp:2"
+	if got != want {
+		t.Fatalf("resolved URL after URL cache clear = %q, want %q", got, want)
+	}
+	if presigner.existsCalls != 2 {
+		t.Fatalf("ObjectExists calls after URL cache clear = %d, want 2 to prove error was not cached", presigner.existsCalls)
 	}
 }
 
@@ -402,8 +467,8 @@ func TestPluginImageResolverS3FallbackURLCacheUsesMissingVariantTTL(t *testing.T
 	defer resolver.Close()
 	resolver.SetS3Presigner(presigner, 4*time.Hour)
 
-	resolved := resolver.ResolveImageURLWithExpiry(context.Background(), "tvdb/series/1/seasons/1/episodes/1/still/w780.webp", "featured")
-	if resolved.URL != "s3:tvdb/series/1/seasons/1/episodes/1/still/w500.webp:1" {
+	resolved := resolver.ResolveImageURLWithExpiry(context.Background(), "tvdb/series/1/seasons/1/episodes/1/still/w780.rev123.webp", "featured")
+	if resolved.URL != "s3:tvdb/series/1/seasons/1/episodes/1/still/w500.rev123.webp:1" {
 		t.Fatalf("resolved URL = %q, want w500 fallback", resolved.URL)
 	}
 	if resolved.ExpiresAt == nil {
@@ -414,7 +479,7 @@ func TestPluginImageResolverS3FallbackURLCacheUsesMissingVariantTTL(t *testing.T
 		t.Fatalf("fallback URL cache TTL = %s, want about %s", cacheTTL, missingVariantCacheTTL)
 	}
 
-	cached := resolver.ResolveImageURLWithExpiry(context.Background(), "tvdb/series/1/seasons/1/episodes/1/still/w780.webp", "featured")
+	cached := resolver.ResolveImageURLWithExpiry(context.Background(), "tvdb/series/1/seasons/1/episodes/1/still/w780.rev123.webp", "featured")
 	if cached.URL != resolved.URL {
 		t.Fatalf("cached fallback URL = %q, want %q", cached.URL, resolved.URL)
 	}

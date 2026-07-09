@@ -84,8 +84,10 @@ func VariantWidths(imageType string) []int {
 	case "backdrop":
 		return []int{1920, 1280, 300}
 	case "logo":
-		return []int{500}
-	default: // poster, still, profile
+		return []int{1280, 500}
+	case "still":
+		return []int{780, 500, 300}
+	default: // poster, profile
 		return []int{500, 300}
 	}
 }
