@@ -5,18 +5,22 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Copy,
   Library as LibraryIcon,
   Plus,
   RefreshCw,
   Trash2,
+  Webhook,
   X,
 } from "lucide-react";
 import { Link } from "react-router";
+import { toast } from "sonner";
 import type {
   AutoscanPathRewrite,
   AutoscanRewriteSuggestions,
   AutoscanSource,
   AutoscanSourceInput,
+  AutoscanWebhookProvider,
   Library,
 } from "@/api/types";
 import {
@@ -64,7 +68,9 @@ import {
   useAutoscanSources,
   useAvailableScanSources,
   useCreateAutoscanSource,
+  useCreateAutoscanWebhook,
   useDeleteAutoscanSource,
+  useRotateAutoscanWebhook,
   useUpdateAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
@@ -133,6 +139,22 @@ function sourceToRowEdit(source: AutoscanSource): RowEdit {
     sourceConfig: sourceConfigForEdit(source),
     label: source.label ?? "",
   };
+}
+
+const ARR_WEBHOOK_PLUGIN_ID = "silo.autoscan.arr-webhook";
+const WEBHOOK_PROVIDER_KEY = "webhook_provider";
+
+function isWebhookSource(source: AutoscanSource): boolean {
+  return source.delivery_mode === "webhook";
+}
+
+function isArrWebhookPlugin(plugin: { plugin_id: string } | undefined): boolean {
+  return plugin?.plugin_id === ARR_WEBHOOK_PLUGIN_ID;
+}
+
+/** Resolve a possibly relative webhook_url against the admin UI's own origin. */
+function absoluteWebhookURL(url: string): string {
+  return url.startsWith("/") ? `${window.location.origin}${url}` : url;
 }
 
 const CEPHFS_PLUGIN_ID = "silo.autoscan.cephfs";
@@ -688,6 +710,147 @@ function CephFSConfigEditor({
 }
 
 // ---------------------------------------------------------------------------
+// WebhookEndpointSection — webhook-mode replacement for the poll interval
+// ---------------------------------------------------------------------------
+
+function WebhookEndpointSection({
+  source,
+  provider,
+  onProviderChange,
+  isSaving,
+}: {
+  source: AutoscanSource;
+  provider: AutoscanWebhookProvider;
+  onProviderChange: (next: AutoscanWebhookProvider) => void;
+  isSaving: boolean;
+}) {
+  const createWebhook = useCreateAutoscanWebhook();
+  const rotateWebhook = useRotateAutoscanWebhook();
+  const [rotateOpen, setRotateOpen] = useState(false);
+
+  const url = source.webhook_url ? absoluteWebhookURL(source.webhook_url) : "";
+
+  async function copyURL() {
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Webhook URL copied");
+    } catch {
+      toast.error("Could not copy — select the URL manually");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-xs">Webhook URL</Label>
+        {source.webhook_configured ? (
+          <>
+            <div className="flex items-center gap-1.5">
+              <Input
+                readOnly
+                value={url || `…${source.webhook_secret_suffix ?? ""} (URL unavailable)`}
+                className="h-8 font-mono text-xs"
+                aria-label="Webhook delivery URL"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={copyURL}
+                disabled={!url}
+                aria-label="Copy webhook URL"
+              >
+                <Copy className="size-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={() => setRotateOpen(true)}
+                disabled={rotateWebhook.isPending}
+                aria-label="Rotate webhook URL"
+                title="Replace the URL — the old one stops working immediately"
+              >
+                <RefreshCw
+                  className={`size-3.5 ${rotateWebhook.isPending ? "animate-spin" : ""}`}
+                />
+              </Button>
+            </div>
+            <p className="text-muted-foreground text-xs">
+              Paste into Sonarr/Radarr → Settings → Connect → Webhook (On Import, On Rename, On File
+              Delete).
+            </p>
+          </>
+        ) : (
+          <div className="space-y-1.5">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={createWebhook.isPending}
+              onClick={() => createWebhook.mutate(source.id)}
+            >
+              <Webhook className="size-3.5" />
+              {createWebhook.isPending ? "Generating…" : "Generate webhook URL"}
+            </Button>
+            <p className="text-muted-foreground text-xs">
+              Creates the URL Sonarr/Radarr will POST import, rename, and delete events to.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-xs">Provider</Label>
+        <Select
+          value={provider}
+          onValueChange={(v) => onProviderChange(v as AutoscanWebhookProvider)}
+          disabled={isSaving}
+        >
+          <SelectTrigger className="w-[140px]" aria-label="Webhook payload provider">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto</SelectItem>
+            <SelectItem value="sonarr">Sonarr</SelectItem>
+            <SelectItem value="radarr">Radarr</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-muted-foreground text-xs">
+          Auto infers Sonarr vs Radarr from each payload.
+        </p>
+      </div>
+
+      {/* Rotate confirmation */}
+      <AlertDialog open={rotateOpen} onOpenChange={setRotateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rotate webhook URL?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The current URL stops working immediately. Sonarr/Radarr keep sending to the old URL
+              until you paste the new one into their webhook settings.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                rotateWebhook.mutate(source.id);
+                setRotateOpen(false);
+              }}
+            >
+              Rotate
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // SourceRow helpers
 // ---------------------------------------------------------------------------
 
@@ -814,13 +977,40 @@ function SourceRow({
     });
   }
 
+  function handleProviderChange(next: AutoscanWebhookProvider) {
+    const sourceConfig = { ...edit.sourceConfig, [WEBHOOK_PROVIDER_KEY]: next };
+    setEdit((ed) => ({ ...ed, sourceConfig }));
+    update.mutate({
+      id: source.id,
+      body: fullBody({ source_config: normalizeSourceConfig(sourceConfig) }),
+    });
+  }
+
   // Whether this source has a bound connection (server-side or pending edit).
   // Used to gate the Sync-from-server button, which needs a server to query.
   const hasEffectiveConnection = Boolean(source.connection_id) || Boolean(edit.connectionId);
 
-  // Status column
-  const hasError = Boolean(source.last_error);
-  const hasRun = Boolean(source.last_run_at);
+  const isWebhook = isWebhookSource(source);
+
+  // Status column. Poll sources report last_run_at/last_error; webhook sources
+  // report their endpoint's delivery bookkeeping instead (deliveries do not
+  // stamp last_run_at).
+  const webhookReceivedMs = source.webhook_last_received_at
+    ? new Date(source.webhook_last_received_at).getTime()
+    : 0;
+  const webhookErrorMs = source.webhook_last_error_at
+    ? new Date(source.webhook_last_error_at).getTime()
+    : 0;
+  const hasError = isWebhook
+    ? webhookErrorMs > 0 && webhookErrorMs >= webhookReceivedMs
+    : Boolean(source.last_error);
+  const hasRun = isWebhook ? webhookReceivedMs > 0 : Boolean(source.last_run_at);
+  const statusErrorMessage = isWebhook
+    ? source.webhook_last_error_message || source.last_error || "Delivery failed"
+    : (source.last_error ?? "");
+  const statusTimestamp = isWebhook
+    ? (source.webhook_last_received_at ?? null)
+    : source.last_run_at;
   const connectionSelectClass = layout === "card" ? "!w-full min-w-0 max-w-full" : "w-[200px]";
   const statusMessageClass =
     layout === "card"
@@ -845,7 +1035,15 @@ function SourceRow({
   const sourceIdentity = (
     <div className="min-w-0 space-y-1">
       <div className="min-w-0 space-y-0.5">
-        <p className="truncate leading-none font-medium">{resolvedLabel.name}</p>
+        <p className="flex items-center gap-1.5 truncate leading-none font-medium">
+          {resolvedLabel.name}
+          {isWebhook && (
+            <Badge variant="secondary" className="shrink-0 text-xs">
+              <Webhook className="size-3" />
+              Webhook
+            </Badge>
+          )}
+        </p>
         <p className="text-muted-foreground text-xs">{resolvedLabel.detail}</p>
       </div>
       <Input
@@ -864,8 +1062,8 @@ function SourceRow({
       <AlertTriangle className="text-destructive size-4 shrink-0" />
       <div className="min-w-0 space-y-0.5">
         <p className="text-destructive leading-none font-medium">Error</p>
-        <p className={statusMessageClass} title={source.last_error ?? ""}>
-          {source.last_error}
+        <p className={statusMessageClass} title={statusErrorMessage}>
+          {statusErrorMessage}
         </p>
       </div>
     </div>
@@ -876,39 +1074,23 @@ function SourceRow({
         <p className="leading-none font-medium">OK</p>
         <p className="text-muted-foreground flex items-center gap-1 text-xs">
           <Clock className="size-3" />
-          {formatRelativeTime(source.last_run_at)}
+          {formatRelativeTime(statusTimestamp)}
         </p>
       </div>
     </div>
   ) : (
-    <span className="text-muted-foreground text-sm">Not run yet</span>
+    <span className="text-muted-foreground text-sm">
+      {isWebhook ? "No deliveries yet" : "Not run yet"}
+    </span>
   );
 
-  const connectionControl =
-    source.connection_id === null && !edit.connectionId ? (
-      <div className="flex max-w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-        <Select value="__none__" onValueChange={handleConnectionChange}>
-          <SelectTrigger
-            className={connectionSelectClass}
-            aria-label={`Connection for ${resolvedLabel.name}`}
-          >
-            <SelectValue placeholder="No connection" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">— No connection —</SelectItem>
-            {connectionOptions.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Badge variant="outline" className="text-muted-foreground w-fit shrink-0">
-          No connection
-        </Badge>
-      </div>
-    ) : (
-      <Select value={edit.connectionId || "__none__"} onValueChange={handleConnectionChange}>
+  const connectionControl = isWebhook ? (
+    <span className="text-muted-foreground text-xs">
+      Not needed — Sonarr/Radarr deliver directly
+    </span>
+  ) : source.connection_id === null && !edit.connectionId ? (
+    <div className="flex max-w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+      <Select value="__none__" onValueChange={handleConnectionChange}>
         <SelectTrigger
           className={connectionSelectClass}
           aria-label={`Connection for ${resolvedLabel.name}`}
@@ -924,9 +1106,56 @@ function SourceRow({
           ))}
         </SelectContent>
       </Select>
-    );
+      <Badge variant="outline" className="text-muted-foreground w-fit shrink-0">
+        No connection
+      </Badge>
+    </div>
+  ) : (
+    <Select value={edit.connectionId || "__none__"} onValueChange={handleConnectionChange}>
+      <SelectTrigger
+        className={connectionSelectClass}
+        aria-label={`Connection for ${resolvedLabel.name}`}
+      >
+        <SelectValue placeholder="No connection" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__none__">— No connection —</SelectItem>
+        {connectionOptions.map((c) => (
+          <SelectItem key={c.id} value={c.id}>
+            {c.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 
-  const intervalSettings = (
+  // Webhook payload paths are arr-side paths and still need host-side
+  // rewrites in Docker/mount-mismatch setups, so the rewrite editor stays
+  // visible in both modes.
+  const rewriteEditor = (
+    <RewriteEditor
+      sourceId={source.id}
+      hasConnection={hasEffectiveConnection}
+      rewrites={edit.rewrites}
+      onChange={(next) => setEdit((ed) => ({ ...ed, rewrites: next }))}
+      onSave={handleRewriteSave}
+      isSaving={update.isPending}
+    />
+  );
+
+  const intervalSettings = isWebhook ? (
+    <>
+      <WebhookEndpointSection
+        source={source}
+        provider={
+          (edit.sourceConfig[WEBHOOK_PROVIDER_KEY] as AutoscanWebhookProvider | undefined) ?? "auto"
+        }
+        onProviderChange={handleProviderChange}
+        isSaving={update.isPending}
+      />
+      {rewriteEditor}
+    </>
+  ) : (
     <>
       <div className="flex items-center gap-2">
         <Input
@@ -947,14 +1176,7 @@ function SourceRow({
         <p className="text-destructive mt-1 text-xs">Must be a positive integer.</p>
       )}
       <p className="text-muted-foreground mt-1 text-xs">{intervalHelp}</p>
-      <RewriteEditor
-        sourceId={source.id}
-        hasConnection={hasEffectiveConnection}
-        rewrites={edit.rewrites}
-        onChange={(next) => setEdit((ed) => ({ ...ed, rewrites: next }))}
-        onSave={handleRewriteSave}
-        isSaving={update.isPending}
-      />
+      {rewriteEditor}
       {isCephFSSource(source) && (
         <CephFSConfigEditor
           config={edit.sourceConfig}
@@ -983,16 +1205,18 @@ function SourceRow({
         </div>
 
         <div className="mt-4 grid min-w-0 gap-4">
-          <div className="grid min-w-0 gap-1.5">
-            <Label className="text-muted-foreground text-xs">Connection</Label>
-            {connectionControl}
-          </div>
+          {!isWebhook && (
+            <div className="grid min-w-0 gap-1.5">
+              <Label className="text-muted-foreground text-xs">Connection</Label>
+              {connectionControl}
+            </div>
+          )}
 
           <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md border px-3 py-2">
             <div className="min-w-0">
               <p className="text-sm font-medium">Enabled</p>
               <p className="text-muted-foreground text-xs break-words">
-                Poll this source for changes
+                {isWebhook ? "Accept webhook deliveries" : "Poll this source for changes"}
               </p>
             </div>
             <Switch
@@ -1004,12 +1228,16 @@ function SourceRow({
           </div>
 
           <div className="grid min-w-0 gap-1.5">
-            <Label className="text-muted-foreground text-xs">Last run</Label>
+            <Label className="text-muted-foreground text-xs">
+              {isWebhook ? "Last delivery" : "Last run"}
+            </Label>
             <div className="min-w-0 overflow-hidden rounded-md border px-3 py-2">{statusNode}</div>
           </div>
 
           <div className="grid min-w-0 gap-1.5">
-            <Label className="text-muted-foreground text-xs">Interval &amp; settings</Label>
+            <Label className="text-muted-foreground text-xs">
+              {isWebhook ? "Webhook & settings" : "Interval & settings"}
+            </Label>
             {intervalSettings}
           </div>
         </div>
@@ -1097,6 +1325,7 @@ function AddSourceDialog({
     (p) => pluginKey(p.plugin_id, p.capability_id) === form.pluginKey,
   );
   const selectedIsCephFS = isCephFSPlugin(selectedPlugin);
+  const selectedIsWebhook = isArrWebhookPlugin(selectedPlugin);
 
   function close() {
     setForm(BLANK_ADD_SOURCE);
@@ -1105,6 +1334,20 @@ function AddSourceDialog({
 
   function handleSubmit() {
     if (!selectedPlugin) return;
+    if (selectedIsWebhook) {
+      createSource.mutate(
+        {
+          plugin_id: selectedPlugin.plugin_id,
+          capability_id: selectedPlugin.capability_id,
+          enabled: false,
+          delivery_mode: "webhook",
+          path_rewrites: [],
+          source_config: { [WEBHOOK_PROVIDER_KEY]: "auto" },
+        },
+        { onSuccess: close },
+      );
+      return;
+    }
     const connectionId =
       form.connectionId && form.connectionId !== "__none__" ? form.connectionId : null;
     const raw = form.intervalStr.trim();
@@ -1124,6 +1367,7 @@ function AddSourceDialog({
   }
 
   const intervalInvalid =
+    !selectedIsWebhook &&
     form.intervalStr.trim() !== "" &&
     (!Number.isInteger(Number(form.intervalStr)) || Number(form.intervalStr) < 1);
   const canSubmit = Boolean(selectedPlugin) && !intervalInvalid && !createSource.isPending;
@@ -1184,50 +1428,67 @@ function AddSourceDialog({
               </Select>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Connection</Label>
-              <Select
-                value={form.connectionId || "__none__"}
-                onValueChange={(v) => setForm((f) => ({ ...f, connectionId: v }))}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="No connection" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— No connection —</SelectItem>
-                  {connectionOptions.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-muted-foreground text-xs">
-                Optional — bind one if the source needs to reach a server (e.g. Sonarr/Radarr).
-                Sources that read locally need no connection.
-              </p>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="add-source-interval">Poll interval (seconds)</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="add-source-interval"
-                  className="w-32"
-                  placeholder="Default"
-                  value={form.intervalStr}
-                  aria-invalid={intervalInvalid}
-                  onChange={(e) => setForm((f) => ({ ...f, intervalStr: e.target.value }))}
-                />
-                <span className="text-muted-foreground text-sm">sec</span>
+            {selectedIsWebhook && (
+              <div className="border-border rounded-md border p-3">
+                <p className="flex items-center gap-1.5 text-sm font-medium">
+                  <Webhook className="size-3.5" />
+                  Direct webhook delivery
+                </p>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  No arr API key or connection needed. After creating the source, generate its
+                  webhook URL and paste it into Sonarr/Radarr → Settings → Connect → Webhook.
+                </p>
               </div>
-              {intervalInvalid && (
-                <p className="text-destructive text-xs">Must be a positive integer.</p>
-              )}
-              <p className="text-muted-foreground text-xs">
-                Optional — leave blank to use the global default poll interval.
-              </p>
-            </div>
+            )}
+
+            {!selectedIsWebhook && (
+              <div className="space-y-1.5">
+                <Label>Connection</Label>
+                <Select
+                  value={form.connectionId || "__none__"}
+                  onValueChange={(v) => setForm((f) => ({ ...f, connectionId: v }))}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="No connection" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— No connection —</SelectItem>
+                    {connectionOptions.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-muted-foreground text-xs">
+                  Optional — bind one if the source needs to reach a server (e.g. Sonarr/Radarr).
+                  Sources that read locally need no connection.
+                </p>
+              </div>
+            )}
+
+            {!selectedIsWebhook && (
+              <div className="space-y-1.5">
+                <Label htmlFor="add-source-interval">Poll interval (seconds)</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="add-source-interval"
+                    className="w-32"
+                    placeholder="Default"
+                    value={form.intervalStr}
+                    aria-invalid={intervalInvalid}
+                    onChange={(e) => setForm((f) => ({ ...f, intervalStr: e.target.value }))}
+                  />
+                  <span className="text-muted-foreground text-sm">sec</span>
+                </div>
+                {intervalInvalid && (
+                  <p className="text-destructive text-xs">Must be a positive integer.</p>
+                )}
+                <p className="text-muted-foreground text-xs">
+                  Optional — leave blank to use the global default poll interval.
+                </p>
+              </div>
+            )}
 
             {selectedIsCephFS && (
               <CephFSConfigEditor

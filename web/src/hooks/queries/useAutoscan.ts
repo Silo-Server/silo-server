@@ -198,6 +198,59 @@ export function useDeleteAutoscanSource() {
   });
 }
 
+// --- Webhook endpoints ---
+
+export function useCreateAutoscanWebhook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<AutoscanSource>(`/admin/autoscan/sources/${encodeURIComponent(id)}/webhook`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      toast.success("Webhook URL created");
+      queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to create webhook URL");
+    },
+  });
+}
+
+export function useRotateAutoscanWebhook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<AutoscanSource>(`/admin/autoscan/sources/${encodeURIComponent(id)}/webhook/rotate`, {
+        method: "POST",
+      }),
+    onSuccess: () => {
+      toast.success("Webhook URL rotated — update Sonarr/Radarr with the new URL");
+      queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to rotate webhook URL");
+    },
+  });
+}
+
+export function useDeleteAutoscanWebhook() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<void>(`/admin/autoscan/sources/${encodeURIComponent(id)}/webhook`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      toast.success("Webhook URL deleted");
+      queryClient.invalidateQueries({ queryKey: adminKeys.autoscanSources() });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to delete webhook URL");
+    },
+  });
+}
+
 /**
  * Test an arr connection. Accepts either an existing connection id, or raw
  * credentials (base_url + api_key_ref) / a request integration id for an

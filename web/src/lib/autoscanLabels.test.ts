@@ -51,12 +51,14 @@ describe("resolveEventSourceName", () => {
     capability_id: "arr",
     connection_id: "conn-1",
     enabled: true,
+    delivery_mode: "poll",
     poll_interval_seconds: null,
     last_run_at: null,
     last_error: null,
     path_rewrites: [],
     source_config: {},
     label: "",
+    webhook_configured: false,
   };
   const lookups: SourceLabelLookups = {
     sourceByID: new Map([["src-1", source]]),
