@@ -1875,6 +1875,17 @@ func main() {
 		}
 	}
 
+	// White-label branding: one service shared by the API (public read + admin
+	// upload), the frontend handler (index.html title, favicon, manifest), and
+	// the artwork reconcile task. S3 is optional — pass a nil AssetStore (not
+	// the typed-nil *s3client.Client) when it isn't configured so text branding
+	// still works without it.
+	var brandingStore branding.AssetStore
+	if deps.S3Public != nil {
+		brandingStore = deps.S3Public
+	}
+	brandingSvc := branding.NewService(settingsRepo, brandingStore)
+
 	// Wire up task manager for admin task API.
 	if needsWorkers && deps.DB != nil {
 		triggerRepo := taskrepository.NewPgTriggerRepository(deps.DB)
@@ -1953,6 +1964,26 @@ func main() {
 		}
 		if metadataImageCacheProcessor != nil {
 			taskMgr.Register(tasks.NewCacheMetadataImagesTask(metadataImageCacheProcessor))
+		}
+		if deps.S3Public != nil {
+			identity := tasks.ArtworkStorageIdentity(cfg.S3.Public.Endpoint, cfg.S3.Public.Bucket, cfg.S3.Public.KeyPrefix)
+			// Seed the fingerprint on first boot so an unchanged storage
+			// identity never triggers a sweep. On the boot after a provider
+			// change the stored (old) identity survives this call and the
+			// startup trigger runs the reconcile.
+			if _, err := settingsRepo.SetIfAbsent(appCtx, tasks.ArtworkStorageIdentityKey, identity); err != nil {
+				slog.Warn("artwork reconcile: seeding storage identity failed", "error", err)
+			}
+			var brandingReconciler tasks.BrandingAssetReconciler
+			if brandingSvc != nil && brandingSvc.HasStorage() {
+				brandingReconciler = brandingSvc
+			}
+			taskMgr.Register(tasks.NewReconcileArtworkCacheTask(
+				metadata.NewArtworkCacheReconciler(deps.DB, deps.S3Public),
+				settingsRepo,
+				brandingReconciler,
+				identity,
+			))
 		}
 		if pluginAutoUpdater != nil {
 			taskMgr.Register(tasks.NewCheckPluginUpdatesTask(pluginAutoUpdater))
@@ -2232,19 +2263,10 @@ func main() {
 	deps.FrontendFS = distFS
 	server.WebDistFS = distFS
 
-	// White-label branding: one service shared by the API (public read + admin
-	// upload) and the frontend handler (index.html title, favicon, manifest).
-	// S3 is optional — pass a nil AssetStore (not the typed-nil *s3client.Client)
-	// when it isn't configured so text branding still works without it.
-	if settingsRepo != nil {
-		var brandingStore branding.AssetStore
-		if deps.S3Public != nil {
-			brandingStore = deps.S3Public
-		}
-		brandingSvc := branding.NewService(settingsRepo, brandingStore)
-		deps.BrandingService = brandingSvc
-		server.Branding = brandingSvc
-	}
+	// Expose the branding service (constructed before the task manager) to the
+	// API and the frontend handler.
+	deps.BrandingService = brandingSvc
+	server.Branding = brandingSvc
 
 	router := api.NewRouter(deps)
 

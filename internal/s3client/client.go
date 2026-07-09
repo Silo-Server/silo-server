@@ -104,7 +104,7 @@ func NewClient(cfg BucketConfig) *Client {
 	if tokenTTL <= 0 {
 		tokenTTL = 10800 // 3 hours
 	}
-	keyPrefix := normalizeKeyPrefix(cfg.KeyPrefix)
+	keyPrefix := NormalizeKeyPrefix(cfg.KeyPrefix)
 
 	return &Client{
 		s3Client:       s3Client,
@@ -542,7 +542,11 @@ func newBytesReadSeeker(data []byte) *bytesReadSeeker {
 	return &bytesReadSeeker{data: data}
 }
 
-func normalizeKeyPrefix(prefix string) string {
+// NormalizeKeyPrefix returns the canonical form of a bucket key prefix as the
+// client applies it to object keys: whitespace- and slash-trimmed, case
+// preserved (S3 keys are case-sensitive). Exported so storage-identity
+// comparisons elsewhere normalize prefixes exactly the way this client does.
+func NormalizeKeyPrefix(prefix string) string {
 	return strings.Trim(strings.TrimSpace(prefix), "/")
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"path"
 
 	"github.com/Silo-Server/silo-server/internal/s3client"
@@ -136,6 +137,38 @@ func (s *Service) GetAsset(ctx context.Context, kind AssetKind) (data []byte, co
 		return nil, "", "", err
 	}
 	return data, contentTypeForExt(path.Ext(ref)), ref, nil
+}
+
+// ReconcileMissingAssets clears the ref of every configured branding asset
+// whose stored object no longer exists (e.g. after the public S3 provider
+// changed without migrating data), so the UI falls back to the built-in
+// defaults instead of serving broken images. Returns how many configured
+// assets were checked and how many of those were cleared.
+func (s *Service) ReconcileMissingAssets(ctx context.Context) (checked, cleared int, err error) {
+	if s == nil || !s.HasStorage() {
+		return 0, 0, nil
+	}
+	for kind, spec := range assetSpecs {
+		ref, _ := s.settings.Get(ctx, spec.settingKey)
+		if ref == "" {
+			continue
+		}
+		checked++
+		key := spec.s3Prefix + "/" + ref
+		_, getErr := s.store.GetObject(ctx, s.store.Bucket(), key)
+		switch {
+		case getErr == nil:
+		case errors.Is(getErr, s3client.ErrNotFound):
+			if setErr := s.settings.Set(ctx, spec.settingKey, ""); setErr != nil {
+				return checked, cleared, setErr
+			}
+			cleared++
+			slog.Warn("branding: cleared asset whose stored object is missing", "kind", kind, "key", key)
+		default:
+			return checked, cleared, getErr
+		}
+	}
+	return checked, cleared, nil
 }
 
 func firstNonEmpty(values ...string) string {

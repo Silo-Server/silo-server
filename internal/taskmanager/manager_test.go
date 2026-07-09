@@ -2,6 +2,8 @@ package taskmanager_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"log/slog"
 	"reflect"
 	"sync"
@@ -146,6 +148,7 @@ func (t stubTask) DefaultTriggers() []taskmanager.TriggerConfig {
 type conditionalStubTask struct {
 	stubTask
 	shouldRunCalled chan struct{}
+	shouldRunErr    error
 	mu              sync.Mutex
 	executeCalls    int
 }
@@ -155,7 +158,7 @@ func (t *conditionalStubTask) ShouldRun(context.Context) (bool, error) {
 	case t.shouldRunCalled <- struct{}{}:
 	default:
 	}
-	return false, nil
+	return false, t.shouldRunErr
 }
 
 func (t *conditionalStubTask) Execute(context.Context, taskmanager.ProgressReporter) error {
@@ -384,5 +387,67 @@ func TestTaskManagerTriggerSkipsConditionalTaskWithoutHistory(t *testing.T) {
 		t.Fatalf("next run = %s, want rearmed after skip time %s",
 			triggers[0].next.Format(time.RFC3339Nano),
 			beforeTrigger.Format(time.RFC3339Nano))
+	}
+}
+
+// A preflight that cannot answer must fail closed: skipping the run is
+// recoverable at the next trigger, while running an expensive conditional
+// task on a transient error is exactly what the gate exists to prevent.
+func TestTaskManagerTriggerSkipsConditionalTaskOnPreflightError(t *testing.T) {
+	triggerRepo := &fakeTriggerRepository{
+		triggers: map[string][]taskmanager.TriggerConfig{
+			"conditional": {
+				{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)},
+			},
+		},
+	}
+	historyRepo := &recordingExecutionRepository{}
+	var triggers []*fakeTrigger
+	factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+		tr := &fakeTrigger{
+			cfg:    cfg,
+			ch:     make(chan struct{}, 1),
+			stopCh: make(chan struct{}),
+		}
+		triggers = append(triggers, tr)
+		return tr
+	}
+	manager := taskmanager.New(
+		triggerRepo,
+		historyRepo,
+		factory,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	task := &conditionalStubTask{
+		stubTask:        stubTask{key: "conditional"},
+		shouldRunCalled: make(chan struct{}, 1),
+		shouldRunErr:    errors.New("settings unavailable"),
+	}
+	manager.Register(task)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer manager.Stop()
+	defer cancel()
+	manager.Start(ctx)
+
+	if len(triggers) != 1 {
+		t.Fatalf("triggers = %d, want 1", len(triggers))
+	}
+	beforeTrigger := time.Now()
+	triggers[0].ch <- struct{}{}
+
+	select {
+	case <-task.shouldRunCalled:
+	case <-time.After(time.Second):
+		t.Fatal("scheduled preflight was not called")
+	}
+
+	time.Sleep(25 * time.Millisecond)
+	if got := task.executeCount(); got != 0 {
+		t.Fatalf("Execute calls = %d, want 0 (preflight errors must fail closed)", got)
+	}
+	if !triggers[0].next.After(beforeTrigger) {
+		t.Fatalf("next run = %s, want rearmed after skipped preflight error",
+			triggers[0].next.Format(time.RFC3339Nano))
 	}
 }

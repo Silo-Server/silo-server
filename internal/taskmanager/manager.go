@@ -148,10 +148,17 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 
 		shouldRun, shouldRunErr := m.shouldRunScheduledTask(ctx, w)
 		if shouldRunErr != nil {
-			m.logger.WarnContext(ctx, "scheduled task preflight failed; running task",
+			// Fail closed: a preflight that cannot answer must not launch the
+			// task — for expensive conditional tasks a transient error would
+			// otherwise trigger the exact work the gate exists to suppress.
+			// Interval/daily triggers retry at their next firing; manual
+			// RunTask always bypasses the gate.
+			m.logger.WarnContext(ctx, "scheduled task preflight failed; skipping run",
 				"task", w.task.Key(), "error", shouldRunErr)
+			m.rearmTriggersFromNow(w)
+			continue
 		}
-		if shouldRunErr == nil && !shouldRun {
+		if !shouldRun {
 			m.rearmTriggersFromNow(w)
 			continue
 		}

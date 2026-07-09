@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import type { ConnectionCheckResponse } from "@/api/types";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
@@ -23,6 +24,14 @@ const PUBLIC_S3_KEYS = [
   "s3.public_token_secret",
   "s3.public_token_param",
   "s3.public_token_ttl",
+] as const;
+
+// Changing any of these moves where cached artwork objects live; the server
+// reconciles the artwork cache after a restart (see reconcile_artwork_cache).
+const PUBLIC_S3_IDENTITY_KEYS = [
+  "s3.public_endpoint",
+  "s3.public_bucket",
+  "s3.public_key_prefix",
 ] as const;
 
 const PRIVATE_S3_KEYS = [
@@ -190,6 +199,20 @@ export default function StorageSettings() {
               value={form.getValue("s3.public_key_prefix")}
               onChange={(v) => form.setValue("s3.public_key_prefix", v)}
             />
+            {PUBLIC_S3_IDENTITY_KEYS.some((key) => form.isDirty(key)) && (
+              <div className="my-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                <div className="text-[13px] leading-relaxed">
+                  <p className="font-medium text-amber-500">Storage location change</p>
+                  <p className="text-muted-foreground mt-1">
+                    Artwork is cached in this bucket. After the server restarts, Silo verifies the
+                    cache against the new storage and automatically re-caches anything missing.
+                    Uploaded images (custom posters, collection artwork, branding) cannot be
+                    re-downloaded — migrate your bucket contents if you want to keep them.
+                  </p>
+                </div>
+              </div>
+            )}
             <SettingField
               label="Access Key"
               type="password"
