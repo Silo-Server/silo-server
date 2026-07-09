@@ -1,0 +1,8 @@
+{
+  "level": "warning",
+  "message": "Indexers unavailable due to failures",
+  "type": "IndexerStatusCheck",
+  "wikiUrl": "https://wiki.servarr.com/sonarr/system#indexers-are-unavailable-due-to-failures",
+  "eventType": "Health",
+  "instanceName": "Sonarr"
+}

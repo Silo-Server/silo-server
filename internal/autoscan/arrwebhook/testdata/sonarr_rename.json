@@ -1,0 +1,27 @@
+{
+  "series": {
+    "id": 12,
+    "title": "Example Show",
+    "path": "/data/tv/Example Show",
+    "tvdbId": 123456,
+    "type": "standard"
+  },
+  "renamedEpisodeFiles": [
+    {
+      "id": 991,
+      "previousRelativePath": "Season 02/old-name-e01.mkv",
+      "previousPath": "/data/tv/Example Show/Season 02/old-name-e01.mkv",
+      "relativePath": "Season 02/Example Show - S02E01.mkv",
+      "path": "/data/tv/Example Show/Season 02/Example Show - S02E01.mkv"
+    },
+    {
+      "id": 992,
+      "previousRelativePath": "Season 02/old-name-e02.mkv",
+      "previousPath": "/data/tv/Example Show/Season 02/old-name-e02.mkv",
+      "relativePath": "Season 02/Example Show - S02E02.mkv",
+      "path": "/data/tv/Example Show/Season 02/Example Show - S02E02.mkv"
+    }
+  ],
+  "eventType": "Rename",
+  "instanceName": "Sonarr"
+}

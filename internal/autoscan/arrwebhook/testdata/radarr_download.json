@@ -1,0 +1,30 @@
+{
+  "movie": {
+    "id": 44,
+    "title": "Example Movie",
+    "year": 2024,
+    "folderPath": "/data/movies/Example Movie (2024)",
+    "tmdbId": 654321
+  },
+  "remoteMovie": {
+    "tmdbId": 654321,
+    "imdbId": "tt7654321",
+    "title": "Example Movie",
+    "year": 2024
+  },
+  "movieFile": {
+    "id": 771,
+    "relativePath": "Example Movie (2024) Bluray-1080p.mkv",
+    "path": "/data/movies/Example Movie (2024)/Example Movie (2024) Bluray-1080p.mkv",
+    "quality": "Bluray-1080p",
+    "qualityVersion": 1,
+    "releaseGroup": "GROUP",
+    "sceneName": "Example.Movie.2024.1080p.BluRay",
+    "size": 4294967296
+  },
+  "isUpgrade": false,
+  "downloadClient": "qbittorrent",
+  "downloadId": "def456",
+  "eventType": "Download",
+  "instanceName": "Radarr"
+}

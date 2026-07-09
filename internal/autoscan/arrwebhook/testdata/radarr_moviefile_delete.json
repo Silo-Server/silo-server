@@ -1,0 +1,20 @@
+{
+  "movie": {
+    "id": 44,
+    "title": "Example Movie",
+    "year": 2024,
+    "folderPath": "/data/movies/Example Movie (2024)",
+    "tmdbId": 654321
+  },
+  "movieFile": {
+    "id": 771,
+    "relativePath": "Example Movie (2024) Bluray-1080p.mkv",
+    "path": "/data/movies/Example Movie (2024)/Example Movie (2024) Bluray-1080p.mkv",
+    "quality": "Bluray-1080p",
+    "qualityVersion": 1,
+    "size": 4294967296
+  },
+  "deleteReason": "deleted",
+  "eventType": "MovieFileDelete",
+  "instanceName": "Radarr"
+}
