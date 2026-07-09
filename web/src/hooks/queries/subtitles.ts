@@ -11,7 +11,7 @@ import type {
   SubtitleUploadRequest,
 } from "@/api/types";
 
-import { subtitleKeys } from "./keys";
+import { itemKeys, subtitleKeys } from "./keys";
 
 interface DownloadSubtitleResponse {
   subtitle: DownloadedSubtitle;
@@ -106,6 +106,30 @@ export function useDownloadedSubtitles(mediaFileId: number | undefined) {
     queryKey: mediaFileId != null ? subtitleKeys.downloaded(mediaFileId) : subtitleKeys.all,
     queryFn: () => fetchDownloadedSubtitles(mediaFileId!),
     enabled: mediaFileId != null,
+  });
+}
+
+/**
+ * Clears the persisted subtitle override (saved when a track is manually
+ * selected during playback) so profile-level auto selection applies again.
+ * Keyed by the movie's content ID or the episode's series ID. Item details
+ * are invalidated broadly because a series-keyed preference feeds the
+ * effective defaults of every episode's detail.
+ */
+export function useDeleteSubtitlePreference() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (prefId: string) => api<void>(`/subtitle-prefs/${prefId}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: itemKeys.details() }),
+        queryClient.invalidateQueries({ queryKey: ["catalog", "items"] }),
+      ]);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to reset subtitle preference");
+    },
   });
 }
 

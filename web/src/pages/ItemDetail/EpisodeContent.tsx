@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
+import { useDeleteSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -69,6 +70,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const [mediaInfoFileId, setMediaInfoFileId] = useState<number | null>(null);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const redetectIntroMutation = useRedetectEpisodeIntro();
+  const deleteSubtitlePreference = useDeleteSubtitlePreference();
 
   // Version selection state — drives the Play button and inline stream popovers.
   const sortedVersions = useMemo(() => sortByResolution(item.versions ?? []), [item.versions]);
@@ -151,6 +153,12 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const handleResetSubtitleSelection = () => {
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
+    // "Auto" also clears the persisted override saved by a manual in-player
+    // selection. Subtitle preferences are series-scoped, so this restores
+    // profile-level auto selection for the whole series.
+    if (item.series_id) {
+      deleteSubtitlePreference.mutate(item.series_id);
+    }
   };
 
   const handleSelectSubtitleOff = () => {
