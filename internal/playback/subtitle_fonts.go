@@ -127,7 +127,7 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 	runErr := cmd.Wait()
 	stopWatch()
 	if overLimit.Load() {
-		return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxSubtitleFontBytes)
+		return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxBytes)
 	}
 	if runErr != nil {
 		if ctx.Err() != nil {
@@ -154,7 +154,7 @@ func dumpFontAttachments(ctx context.Context, inputPath string, ffmpegPath strin
 		}
 		total += info.Size()
 		if total > maxBytes {
-			return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxSubtitleFontBytes)
+			return nil, fmt.Errorf("subtitle fonts: attached font data exceeds %d bytes", maxBytes)
 		}
 		data, err := os.ReadFile(paths[i])
 		if err != nil {

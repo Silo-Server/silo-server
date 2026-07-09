@@ -188,8 +188,10 @@ deployment's ops notes.
   that violate the documented write-path invariant.
 - No `updated_at`/`synced_seq` changes in the repair — client sync state is
   untouched.
-- `/api/v1/stream/{session_id}/subtitles/{track}` (subtitle extraction) is out of
-  scope per the task.
+- `/api/v1/stream/{session_id}/subtitles/{track}` (subtitle *track* conversion)
+  is out of scope per the task. The related font-attachment endpoint
+  `/subtitles/{track}/fonts` *was* folded in as a follow-up — see deliverable 5 —
+  because its per-attachment ffmpeg spawns shared the same slow-endpoint profile.
 
 ## Deliverables
 
@@ -200,6 +202,10 @@ deployment's ops notes.
 3. `perf(catalog):` bounded next-up anchor scan.
 4. `perf(jellycompat,userstore):` SQL series watch-state rollup with chunked
    fallback.
+5. `perf(playback):` single-pass ffmpeg font extraction for
+   `/subtitles/{track}/fonts` (one media-file open instead of one per
+   attachment), with the 32-attachment / 32 MiB caps preserved via a dump-dir
+   watchdog.
 
 ## Verification
 
