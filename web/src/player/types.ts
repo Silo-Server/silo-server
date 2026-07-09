@@ -155,6 +155,8 @@ export interface PrePlaySubtitleSelection {
   hearing_impaired?: boolean;
   external_subtitle_path?: string;
   downloaded_subtitle_id?: number;
+  /** Backend track index, carried so the selection can persist as a preference. */
+  track_index?: number;
 }
 
 /** A time range (intro start/end or credits start/end). */

@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import type { FileVersion, ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
-import { useDeleteSubtitlePreference } from "@/hooks/queries/subtitles";
+import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -71,6 +71,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const refreshMetadataMutation = useRefreshItemMetadata();
   const redetectIntroMutation = useRedetectEpisodeIntro();
   const deleteSubtitlePreference = useDeleteSubtitlePreference();
+  const setSubtitlePreference = useSetSubtitlePreference();
 
   // Version selection state — drives the Play button and inline stream popovers.
   const sortedVersions = useMemo(() => sortByResolution(item.versions ?? []), [item.versions]);
@@ -148,6 +149,12 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
     setSubtitleSelectionMode("explicit");
     setExplicitSubtitleSelection(selection);
+    // Persist as the series' override so the choice sticks across visits,
+    // exactly like a manual in-player selection (preferences are
+    // series-scoped).
+    if (item.series_id) {
+      setSubtitlePreference.mutate({ prefId: item.series_id, selection });
+    }
   };
 
   const handleResetSubtitleSelection = () => {
@@ -164,6 +171,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const handleSelectSubtitleOff = () => {
     setSubtitleSelectionMode("off");
     setExplicitSubtitleSelection(null);
+    if (item.series_id) {
+      setSubtitlePreference.mutate({ prefId: item.series_id, selection: null });
+    }
   };
   const preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null =
     item.effective_subtitle_track_signature

@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { api } from "@/api/client";
+import type { PrePlaySubtitleSelection } from "@/player/types";
+import { derivePersistedSubtitleMode } from "@/player/utils/subtitleMode";
 import type {
   DownloadedSubtitle,
   SubtitleDownloadRequest,
@@ -109,26 +111,72 @@ export function useDownloadedSubtitles(mediaFileId: number | undefined) {
   });
 }
 
+// Subtitle preferences feed the effective defaults on item details; a
+// series-keyed preference feeds every episode's detail, so invalidate broadly.
+function invalidateItemDetails(queryClient: ReturnType<typeof useQueryClient>): Promise<unknown> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: itemKeys.details() }),
+    queryClient.invalidateQueries({ queryKey: ["catalog", "items"] }),
+  ]);
+}
+
 /**
  * Clears the persisted subtitle override (saved when a track is manually
  * selected during playback) so profile-level auto selection applies again.
- * Keyed by the movie's content ID or the episode's series ID. Item details
- * are invalidated broadly because a series-keyed preference feeds the
- * effective defaults of every episode's detail.
+ * Keyed by the movie's content ID or the episode's series ID.
  */
 export function useDeleteSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (prefId: string) => api<void>(`/subtitle-prefs/${prefId}`, { method: "DELETE" }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: itemKeys.details() }),
-        queryClient.invalidateQueries({ queryKey: ["catalog", "items"] }),
-      ]);
-    },
+    onSuccess: () => invalidateItemDetails(queryClient),
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to reset subtitle preference");
+    },
+  });
+}
+
+interface SetSubtitlePreferenceInput {
+  /** Movie content ID or episode series ID (preferences are series-scoped). */
+  prefId: string;
+  /** The chosen track, or null to persist "subtitles off". */
+  selection: PrePlaySubtitleSelection | null;
+}
+
+/**
+ * Persists a pre-play subtitle choice as the item's override — the same
+ * "always play this track" (or "off") preference a manual in-player
+ * selection saves — so the choice sticks across visits and sessions.
+ */
+export function useSetSubtitlePreference() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ prefId, selection }: SetSubtitlePreferenceInput) =>
+      api<void>(`/subtitle-prefs/${prefId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          subtitle_language: selection?.language ?? "",
+          subtitle_track_index: selection?.track_index ?? -1,
+          subtitle_mode: derivePersistedSubtitleMode(
+            selection ? (selection.track_index ?? -1) : null,
+          ),
+          track_signature: selection
+            ? {
+                source: selection.source,
+                language: selection.language,
+                codec: selection.codec,
+                label: selection.label,
+                forced: selection.forced,
+                hearing_impaired: selection.hearing_impaired,
+              }
+            : null,
+        }),
+      }),
+    onSuccess: () => invalidateItemDetails(queryClient),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to save subtitle preference");
     },
   });
 }

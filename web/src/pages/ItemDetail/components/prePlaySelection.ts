@@ -186,6 +186,7 @@ export function buildPrePlaySubtitleCandidates(
           label,
           forced: row.forced,
           hearing_impaired: row.hearingImpaired,
+          track_index: row.index,
         },
         summary: formatSubtitleCandidateSummary(row),
       };
