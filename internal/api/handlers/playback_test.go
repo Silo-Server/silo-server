@@ -1595,8 +1595,7 @@ func TestHandleStartTranscode_BitmapBurnInForcesEncodeAndResolvesCodec(t *testin
 	}
 }
 
-func TestHandleStartTranscode_BitmapRestartUsesOriginalSubtitleInventory(t *testing.T) {
-	sessionMgr := playback.NewSessionManager(0, 0)
+func TestHandleStartTranscode_BitmapRestartUsesDeclaredSubtitleInventory(t *testing.T) {
 	requested := &models.MediaFile{
 		ID:         42,
 		ContentID:  "movie-1",
@@ -1631,49 +1630,90 @@ func TestHandleStartTranscode_BitmapRestartUsesOriginalSubtitleInventory(t *test
 			{Index: 1, Language: "ja", Codec: "hdmv_pgs_subtitle", Title: "Japanese"},
 		},
 	}
-	session, err := sessionMgr.StartSessionWithFiles(
-		1,
-		"profile-1",
-		effective.ID,
-		requested.ID,
-		playback.PlayRemux,
-		true,
-	)
-	if err != nil {
-		t.Fatalf("StartSessionWithFiles: %v", err)
+	tests := []struct {
+		name                string
+		subtitleTrackIndex  int
+		subtitleMediaFileID int
+	}{
+		{
+			name:               "legacy request uses original inventory",
+			subtitleTrackIndex: 1,
+		},
+		{
+			name:                "declared original inventory remaps to effective file",
+			subtitleTrackIndex:  1,
+			subtitleMediaFileID: requested.ID,
+		},
+		{
+			name:                "declared effective inventory keeps effective ordinal",
+			subtitleTrackIndex:  0,
+			subtitleMediaFileID: effective.ID,
+		},
 	}
 
-	handler := NewPlaybackHandler(sessionMgr, mapPlaybackFileResolver{files: map[int]*models.MediaFile{
-		requested.ID: requested,
-		effective.ID: effective,
-	}})
-	handler.ItemAccess = allowAllPlaybackItemAccess{}
-	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionMgr := playback.NewSessionManager(0, 0)
+			session, err := sessionMgr.StartSessionWithFiles(
+				1,
+				"profile-1",
+				effective.ID,
+				requested.ID,
+				playback.PlayRemux,
+				true,
+			)
+			if err != nil {
+				t.Fatalf("StartSessionWithFiles: %v", err)
+			}
 
-	// The web player still holds the original file's subtitle list, where
-	// English is ordinal 1. The session already streams the alternate file,
-	// where English moved to ordinal 0.
-	transcodeReq := httptest.NewRequest(
-		http.MethodPost,
-		"/api/v1/playback/transcode/start",
-		strings.NewReader(`{"session_id":"`+session.ID+`","seek_seconds":120,"target_resolution":"720p","target_codec_video":"h264","target_codec_audio":"aac","target_bitrate_kbps":2000,"segment_duration":2,"subtitle_track_index":1,"subtitle_burn_in":true}`),
-	)
-	transcodeReq = transcodeReq.WithContext(newAuthorizedPlaybackContext())
+			handler := NewPlaybackHandler(sessionMgr, mapPlaybackFileResolver{files: map[int]*models.MediaFile{
+				requested.ID: requested,
+				effective.ID: effective,
+			}})
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
 
-	transcodeRR := httptest.NewRecorder()
-	handler.HandleStartTranscode(transcodeRR, transcodeReq)
-	if transcodeRR.Code != http.StatusAccepted {
-		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
-	}
+			body := map[string]any{
+				"session_id":           session.ID,
+				"seek_seconds":         120,
+				"target_resolution":    "720p",
+				"target_codec_video":   "h264",
+				"target_codec_audio":   "aac",
+				"target_bitrate_kbps":  2000,
+				"segment_duration":     2,
+				"subtitle_track_index": tt.subtitleTrackIndex,
+				"subtitle_burn_in":     true,
+			}
+			if tt.subtitleMediaFileID > 0 {
+				body["subtitle_media_file_id"] = tt.subtitleMediaFileID
+			}
+			encodedBody, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("marshal transcode request: %v", err)
+			}
+			transcodeReq := httptest.NewRequest(
+				http.MethodPost,
+				"/api/v1/playback/transcode/start",
+				strings.NewReader(string(encodedBody)),
+			)
+			transcodeReq = transcodeReq.WithContext(newAuthorizedPlaybackContext())
 
-	transcodeSession := handler.tm.GetTranscodeSession(session.ID)
-	if transcodeSession == nil {
-		t.Fatal("expected local transcode session")
-	}
-	t.Cleanup(func() { _ = transcodeSession.Close() })
-	opts := transcodeSession.Opts()
-	if opts.SubtitleTrackIndex != 0 || opts.SubtitleCodec != "hdmv_pgs_subtitle" {
-		t.Fatalf("burn-in resolved to index=%d codec=%q, want English index 0 PGS", opts.SubtitleTrackIndex, opts.SubtitleCodec)
+			transcodeRR := httptest.NewRecorder()
+			handler.HandleStartTranscode(transcodeRR, transcodeReq)
+			if transcodeRR.Code != http.StatusAccepted {
+				t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
+			}
+
+			transcodeSession := handler.tm.GetTranscodeSession(session.ID)
+			if transcodeSession == nil {
+				t.Fatal("expected local transcode session")
+			}
+			t.Cleanup(func() { _ = transcodeSession.Close() })
+			opts := transcodeSession.Opts()
+			if opts.SubtitleTrackIndex != 0 || opts.SubtitleCodec != "hdmv_pgs_subtitle" {
+				t.Fatalf("burn-in resolved to index=%d codec=%q, want English index 0 PGS", opts.SubtitleTrackIndex, opts.SubtitleCodec)
+			}
+		})
 	}
 }
 

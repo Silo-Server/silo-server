@@ -110,6 +110,8 @@ export interface PlaybackSessionPlaybackInfo {
 /** Subtitle track information. */
 export interface PlayerSubtitleInfo {
   index: number;
+  /** Media file whose subtitle inventory assigned this track index. */
+  media_file_id?: number;
   /**
    * Downloaded-subtitle row id, when this track is a stored downloaded subtitle.
    * Lets the player match a translation-completed / `subtitle_ready` event
@@ -325,6 +327,7 @@ export interface TranscodeStartRequest {
   target_bitrate_kbps: number;
   segment_duration: number;
   subtitle_track_index: number;
+  subtitle_media_file_id?: number;
   subtitle_burn_in: boolean;
 }
 

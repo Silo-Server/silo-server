@@ -1732,6 +1732,8 @@ export function VideoPlayer({
     isBitmapCodec(activeSubtitleTrack.codec)
       ? activeSubtitleTrack.index - externalSubtitleCount
       : null;
+  const burnInSubtitleMediaFileId =
+    burnInSubtitleOrdinal != null ? activeSubtitleTrack?.media_file_id : undefined;
   const setSubtitleBurnIn = transcodeQuality.setSubtitleBurnIn;
   useEffect(() => {
     // Until the element has media loaded (an auto-selected bitmap preference
@@ -1743,8 +1745,8 @@ export function VideoPlayer({
       video && video.readyState > 0
         ? currentTimeRef.current
         : (subtitleFetchAnchorRef.current ?? 0);
-    setSubtitleBurnIn(burnInSubtitleOrdinal, position);
-  }, [burnInSubtitleOrdinal, setSubtitleBurnIn]);
+    setSubtitleBurnIn(burnInSubtitleOrdinal, position, burnInSubtitleMediaFileId);
+  }, [burnInSubtitleMediaFileId, burnInSubtitleOrdinal, setSubtitleBurnIn]);
 
   // A failed burn-in restart rolls the transcode hook back to no bitmap
   // subtitle. Mirror that rollback in the visible selection so the UI never

@@ -46,12 +46,12 @@ func TestBuildSubtitleURLs_IncludesAllBitmapTracksForBurnInClients(t *testing.T)
 	}
 
 	srt := urls[0]
-	if srt.Codec != "subrip" || srt.URL != "/stream/sess-1/subtitles/0.vtt?file_id=42" {
+	if srt.MediaFileID != file.ID || srt.Codec != "subrip" || srt.URL != "/stream/sess-1/subtitles/0.vtt?file_id=42" {
 		t.Errorf("unexpected text track entry: %+v", srt)
 	}
 
 	pgs := urls[1]
-	if pgs.Codec != "hdmv_pgs_subtitle" {
+	if pgs.MediaFileID != file.ID || pgs.Codec != "hdmv_pgs_subtitle" {
 		t.Errorf("expected PGS track to be included, got %+v", pgs)
 	}
 	if pgs.URL != "/stream/sess-1/subtitles/1.sup?file_id=42" {

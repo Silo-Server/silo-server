@@ -493,6 +493,7 @@ export function usePlaybackSession(
           const token = config.getAccessToken();
           const newTracks: PlayerSubtitleInfo[] = downloaded.map((dl, i) => ({
             index: baseIndex + i,
+            media_file_id: mediaFile,
             id: dl.id,
             language: dl.language,
             codec: dl.format,

@@ -373,6 +373,7 @@ type playbackInfoResult struct {
 // subtitleURL represents a subtitle track URL in a playback response.
 type subtitleURL struct {
 	Index           int    `json:"index"`
+	MediaFileID     int    `json:"media_file_id,omitempty"`
 	Language        string `json:"language"`
 	Codec           string `json:"codec,omitempty"`
 	Label           string `json:"label"`
@@ -399,15 +400,16 @@ type changeAudioResponse struct {
 }
 
 type transcodeStartRequest struct {
-	SessionID          string  `json:"session_id"`
-	SeekSeconds        float64 `json:"seek_seconds"`
-	TargetResolution   string  `json:"target_resolution"`
-	TargetCodecVideo   string  `json:"target_codec_video"`
-	TargetCodecAudio   string  `json:"target_codec_audio"`
-	TargetBitrateKbps  int     `json:"target_bitrate_kbps"`
-	SegmentDuration    int     `json:"segment_duration"`
-	SubtitleTrackIndex int     `json:"subtitle_track_index"`
-	SubtitleBurnIn     bool    `json:"subtitle_burn_in"`
+	SessionID           string  `json:"session_id"`
+	SeekSeconds         float64 `json:"seek_seconds"`
+	TargetResolution    string  `json:"target_resolution"`
+	TargetCodecVideo    string  `json:"target_codec_video"`
+	TargetCodecAudio    string  `json:"target_codec_audio"`
+	TargetBitrateKbps   int     `json:"target_bitrate_kbps"`
+	SegmentDuration     int     `json:"segment_duration"`
+	SubtitleTrackIndex  int     `json:"subtitle_track_index"`
+	SubtitleMediaFileID int     `json:"subtitle_media_file_id,omitempty"`
+	SubtitleBurnIn      bool    `json:"subtitle_burn_in"`
 }
 
 type transcodeStartResponse struct {
@@ -1713,6 +1715,7 @@ func buildSubtitleURLs(
 	for i, sub := range file.ExternalSubtitles {
 		urls = append(urls, subtitleURL{
 			Index:           i,
+			MediaFileID:     file.ID,
 			Language:        sub.Language,
 			Codec:           sub.Format,
 			Label:           firstNonEmptyString(sub.Title, sub.EmbeddedTitle, filepath.Base(sub.Path), sub.Language),
@@ -1735,6 +1738,7 @@ func buildSubtitleURLs(
 		}
 		urls = append(urls, subtitleURL{
 			Index:           embeddedOffset + i,
+			MediaFileID:     file.ID,
 			Language:        track.Language,
 			Codec:           track.Codec,
 			Label:           firstNonEmptyString(track.Title, track.EmbeddedTitle, track.Language),
@@ -1750,6 +1754,7 @@ func buildSubtitleURLs(
 	for i, dl := range downloaded {
 		urls = append(urls, subtitleURL{
 			Index:           downloadedOffset + i,
+			MediaFileID:     file.ID,
 			Language:        dl.Language,
 			Codec:           string(dl.Format),
 			Label:           dl.ReleaseName + " (" + dl.Provider + ")",
@@ -2507,13 +2512,33 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	if originalFileID := requestedMediaFileID(session); originalFileID > 0 && originalFileID != file.ID {
 		originalFile, loadErr := h.loadFileByPreferredID(r.Context(), originalFileID, 0)
 		if loadErr != nil || originalFile == nil {
-			if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
-				writeError(w, http.StatusUnprocessableEntity, "subtitle_source_unavailable",
-					"Original media file for the selected subtitle is unavailable")
-				return
-			}
+			requestedFile = nil
 		} else {
 			requestedFile = h.ensurePlaybackProbe(r.Context(), originalFile)
+		}
+	}
+
+	// Subtitle ordinals are meaningful only within the file inventory that
+	// produced them. New clients echo the media_file_id advertised beside the
+	// selected subtitle URL. Clients that omit it retain the legacy behavior of
+	// selecting against RequestedMediaFileID so existing restart flows continue
+	// to remap original-file ordinals after the 4K guard switches versions.
+	subtitleSourceFile := requestedFile
+	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
+		switch {
+		case req.SubtitleMediaFileID <= 0:
+			// Legacy request: requestedFile is the historical source inventory.
+		case file != nil && req.SubtitleMediaFileID == file.ID:
+			subtitleSourceFile = file
+		case requestedFile != nil && req.SubtitleMediaFileID == requestedFile.ID:
+			subtitleSourceFile = requestedFile
+		default:
+			subtitleSourceFile = nil
+		}
+		if subtitleSourceFile == nil {
+			writeError(w, http.StatusUnprocessableEntity, "subtitle_source_unavailable",
+				"Media file inventory for the selected subtitle is unavailable")
+			return
 		}
 	}
 
@@ -2591,7 +2616,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// from the effective file rather than trusted from the client.
 	subtitleCodec := ""
 	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
-		resolvedIndex, resolvedCodec, ok := resolveBurnInSubtitle(requestedFile, file, req.SubtitleTrackIndex)
+		resolvedIndex, resolvedCodec, ok := resolveBurnInSubtitle(subtitleSourceFile, file, req.SubtitleTrackIndex)
 		if !ok {
 			writeError(w, http.StatusUnprocessableEntity, "subtitle_unavailable_in_version",
 				"Selected subtitle track is unavailable in the effective file version")
@@ -2600,7 +2625,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		if resolvedIndex != req.SubtitleTrackIndex {
 			slog.Info("remapped subtitle burn-in track for alternate file",
 				"playback_session_id", req.SessionID,
-				"requested_file_id", requestedFile.ID,
+				"subtitle_source_file_id", subtitleSourceFile.ID,
 				"effective_file_id", file.ID,
 				"requested_subtitle_track_index", req.SubtitleTrackIndex,
 				"effective_subtitle_track_index", resolvedIndex,

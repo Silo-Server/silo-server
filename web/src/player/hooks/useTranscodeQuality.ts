@@ -62,7 +62,11 @@ interface UseTranscodeQualityResult {
    * at the current position via the same machinery as a quality/audio switch,
    * so the server's segment-boundary timeline alignment applies unchanged.
    */
-  setSubtitleBurnIn: (ffmpegSubtitleIndex: number | null, currentPosition: number) => void;
+  setSubtitleBurnIn: (
+    ffmpegSubtitleIndex: number | null,
+    currentPosition: number,
+    subtitleMediaFileId?: number,
+  ) => void;
   /** Currently burned-in embedded subtitle ordinal, or null. */
   burnInSubtitleIndex: number | null;
   transcodeStreamUrl: string | null;
@@ -205,6 +209,7 @@ export function useTranscodeQuality({
   // value without stale-closure races.
   const [burnInSubtitleIndex, setBurnInSubtitleIndex] = useState<number | null>(null);
   const burnInRef = useRef<number | null>(null);
+  const burnInMediaFileIdRef = useRef<number | null>(null);
 
   const effectiveVersion = useMemo(() => {
     if (switchedFileId != null) {
@@ -238,6 +243,7 @@ export function useTranscodeQuality({
     setError(null);
     setSwitchedFileId(null);
     burnInRef.current = null;
+    burnInMediaFileIdRef.current = null;
     setBurnInSubtitleIndex(null);
   }, [sessionId, selectedVersion?.file_id, playMethod]);
 
@@ -340,9 +346,15 @@ export function useTranscodeQuality({
 
       const dispatch = async () => {
         const requestedBurnInIndex = burnInRef.current;
+        const requestedBurnInMediaFileId = burnInMediaFileIdRef.current;
         const rollbackFailedBurnIn = () => {
-          if (requestedBurnInIndex != null && burnInRef.current === requestedBurnInIndex) {
+          if (
+            requestedBurnInIndex != null &&
+            burnInRef.current === requestedBurnInIndex &&
+            burnInMediaFileIdRef.current === requestedBurnInMediaFileId
+          ) {
             burnInRef.current = null;
+            burnInMediaFileIdRef.current = null;
             setBurnInSubtitleIndex(null);
           }
         };
@@ -375,6 +387,8 @@ export function useTranscodeQuality({
             // window can delay first frame for several seconds.
             segment_duration: 2,
             subtitle_track_index: burnInIndex ?? -1,
+            subtitle_media_file_id:
+              burnInIndex != null ? (requestedBurnInMediaFileId ?? undefined) : undefined,
             subtitle_burn_in: burnInIndex != null,
           };
 
@@ -487,9 +501,16 @@ export function useTranscodeQuality({
   // restarts without burn-in — or drops back to the raw file on a direct-play
   // "original" session.
   const setSubtitleBurnIn = useCallback(
-    (ffmpegSubtitleIndex: number | null, currentPosition: number) => {
-      if (burnInRef.current === ffmpegSubtitleIndex) return;
+    (ffmpegSubtitleIndex: number | null, currentPosition: number, subtitleMediaFileId?: number) => {
+      const normalizedMediaFileId = subtitleMediaFileId ?? null;
+      if (
+        burnInRef.current === ffmpegSubtitleIndex &&
+        burnInMediaFileIdRef.current === normalizedMediaFileId
+      ) {
+        return;
+      }
       burnInRef.current = ffmpegSubtitleIndex;
+      burnInMediaFileIdRef.current = ffmpegSubtitleIndex == null ? null : normalizedMediaFileId;
       setBurnInSubtitleIndex(ffmpegSubtitleIndex);
       switchQuality(requestedQualityIdRef.current, currentPosition, true);
     },

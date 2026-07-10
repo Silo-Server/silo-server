@@ -84,7 +84,7 @@ describe("useTranscodeQuality", () => {
     // server call carrying the burn-in, instead of spawning an ffmpeg that
     // is killed milliseconds later by the second start.
     act(() => {
-      result.current.setSubtitleBurnIn(3, 0);
+      result.current.setSubtitleBurnIn(3, 0, 42);
     });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -95,6 +95,7 @@ describe("useTranscodeQuality", () => {
     const body = sentBodies()[0]!;
     expect(body.subtitle_burn_in).toBe(true);
     expect(body.subtitle_track_index).toBe(3);
+    expect(body.subtitle_media_file_id).toBe(42);
     // Burn-in composites into the frames, so codec copy must be off.
     expect(body.target_codec_video).toBe("h264");
   });
@@ -104,7 +105,7 @@ describe("useTranscodeQuality", () => {
 
     act(() => {
       result.current.switchQuality("720p", 30);
-      result.current.setSubtitleBurnIn(3, 30);
+      result.current.setSubtitleBurnIn(3, 30, 42);
     });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -115,6 +116,7 @@ describe("useTranscodeQuality", () => {
     expect(body.target_resolution).toBe("720p");
     expect(body.subtitle_burn_in).toBe(true);
     expect(body.subtitle_track_index).toBe(3);
+    expect(body.subtitle_media_file_id).toBe(42);
   });
 
   it("still dispatches later restarts separately", async () => {
@@ -122,16 +124,18 @@ describe("useTranscodeQuality", () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(sentBodies()[0]!.subtitle_burn_in).toBe(false);
+    expect(sentBodies()[0]!.subtitle_media_file_id).toBeUndefined();
 
     // A user toggle in a later tick is a genuine restart, not coalesced away.
     act(() => {
-      result.current.setSubtitleBurnIn(3, 120);
+      result.current.setSubtitleBurnIn(3, 120, 42);
     });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     const second = sentBodies()[1]!;
     expect(second.subtitle_burn_in).toBe(true);
     expect(second.subtitle_track_index).toBe(3);
+    expect(second.subtitle_media_file_id).toBe(42);
     expect(second.seek_seconds).toBe(120);
   });
 
@@ -153,7 +157,7 @@ describe("useTranscodeQuality", () => {
     fetchMock.mockRejectedValueOnce(new Error("transcode failed"));
 
     act(() => {
-      result.current.setSubtitleBurnIn(3, 120);
+      result.current.setSubtitleBurnIn(3, 120, 42);
     });
 
     await waitFor(() => expect(result.current.error).toMatch(/^Couldn't switch to Original/));
@@ -161,7 +165,7 @@ describe("useTranscodeQuality", () => {
 
     fetchMock.mockResolvedValueOnce(transcodeStartResponse());
     act(() => {
-      result.current.setSubtitleBurnIn(3, 120);
+      result.current.setSubtitleBurnIn(3, 120, 42);
     });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
