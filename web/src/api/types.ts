@@ -3443,6 +3443,12 @@ export interface PluginSettingsSummary {
   user_config_schema: PluginConfigSchema[];
   routes: PluginRoute[];
   assets: PluginAsset[];
+  /**
+   * Optional slash-delimited grouping path from the plugin manifest
+   * (e.g. "Books/Audiobooks") that groups the plugin's entries in the
+   * Apps sidebar section. Absent when the manifest declares no category.
+   */
+  category?: string;
 }
 
 export interface PluginSettingsListResponse {

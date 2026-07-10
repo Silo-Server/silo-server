@@ -5,8 +5,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { PluginSettingsSummary } from "@/api/types";
+
 import AppSidebar from "./AppSidebar";
-import { getProfileMenuSide, isSidebarExpanded } from "./AppSidebar.logic";
+import {
+  getProfileMenuSide,
+  groupAppNavLinks,
+  isSidebarExpanded,
+  type AppNavLink,
+} from "./AppSidebar.logic";
 
 const mockLogout = vi.fn();
 const mockClearProfile = vi.fn();
@@ -44,11 +51,41 @@ vi.mock("@/hooks/queries/sidebarPins", () => ({
   }),
 }));
 
+let mockPluginInstallations: PluginSettingsSummary[] = [];
+
 vi.mock("@/hooks/queries/pluginSettings", () => ({
   usePluginSettingsList: () => ({
-    data: { installations: [] },
+    data: { installations: mockPluginInstallations },
   }),
 }));
+
+function pluginInstallation(
+  id: number,
+  pluginId: string,
+  label: string,
+  category?: string,
+): PluginSettingsSummary {
+  return {
+    id,
+    plugin_id: pluginId,
+    version: "1.0.0",
+    user_config_schema: [],
+    routes: [
+      {
+        id: "home",
+        method: "GET",
+        path: "/",
+        access: "user",
+        navigable: true,
+        navigation_label: label,
+        navigation_kind: "user",
+        static_asset: false,
+      },
+    ],
+    assets: [],
+    category,
+  };
+}
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestFeatureStatus: () => ({
@@ -116,6 +153,7 @@ describe("AppSidebar", () => {
     mockLogout.mockReset();
     mockClearProfile.mockReset();
     mockTogglePin.mockReset();
+    mockPluginInstallations = [];
   });
 
   it("uses the cinema highlight text color for active catalog source links", () => {
@@ -180,5 +218,105 @@ describe("AppSidebar", () => {
     const markup = renderSidebar("/item/42", { collapsed: true });
 
     expect(markup).toContain("mx-auto h-10 w-10 justify-center px-0");
+  });
+
+  it("keeps a flat Apps list when fewer than 2 distinct categories exist", () => {
+    mockPluginInstallations = [
+      pluginInstallation(1, "audiobook-shelf", "Audiobooks", "Books/Audiobooks"),
+      pluginInstallation(2, "comic-reader", "Comics", "Books"),
+    ];
+
+    const markup = renderSidebar("/");
+
+    expect(markup).toContain(">Apps<");
+    expect(markup).toContain(">Audiobooks<");
+    expect(markup).toContain(">Comics<");
+    // Both plugins share the first category segment "Books", so no
+    // per-category sub-headers should render.
+    expect(markup).not.toContain(">Books<");
+    expect(markup).not.toContain(">Other<");
+  });
+
+  it("groups Apps entries by first category segment with Other last when 2+ categories exist", () => {
+    mockPluginInstallations = [
+      pluginInstallation(1, "audiobook-shelf", "Audiobooks", "Books/Audiobooks"),
+      pluginInstallation(2, "arcade", "Arcade", "Games"),
+      pluginInstallation(3, "misc-tool", "Misc Tool"),
+    ];
+
+    const markup = renderSidebar("/");
+
+    expect(markup).toContain(">Apps<");
+    expect(markup).toContain(">Books<");
+    expect(markup).toContain(">Games<");
+    expect(markup).toContain(">Other<");
+    // Alphabetical category order with the uncategorized bucket last.
+    const booksIndex = markup.indexOf(">Books<");
+    const gamesIndex = markup.indexOf(">Games<");
+    const otherIndex = markup.indexOf(">Other<");
+    expect(booksIndex).toBeGreaterThan(-1);
+    expect(gamesIndex).toBeGreaterThan(booksIndex);
+    expect(otherIndex).toBeGreaterThan(gamesIndex);
+  });
+
+  it("hides Apps group headers the same way as other section headers when collapsed", () => {
+    mockPluginInstallations = [
+      pluginInstallation(1, "audiobook-shelf", "Audiobooks", "Books"),
+      pluginInstallation(2, "arcade", "Arcade", "Games"),
+    ];
+
+    const markup = renderSidebar("/", { collapsed: true });
+
+    // Group headers reuse SidebarSectionHeader, so the label slot stays in
+    // the layout (preventing shifts) but is visually hidden when collapsed.
+    expect(markup).toContain(">Books<");
+    expect(markup).toContain(">Games<");
+    const hiddenHeaderCount = (markup.match(/aria-hidden="true" class="[^"]*opacity-0/g) ?? [])
+      .length;
+    expect(hiddenHeaderCount).toBeGreaterThan(0);
+  });
+});
+
+describe("groupAppNavLinks", () => {
+  const link = (id: string, category?: string): AppNavLink => ({
+    id,
+    basePath: `/api/v1/plugins/${id}`,
+    label: id,
+    pluginId: id,
+    category,
+  });
+
+  it("returns null for an empty list", () => {
+    expect(groupAppNavLinks([])).toBeNull();
+  });
+
+  it("returns null when all links are uncategorized", () => {
+    expect(groupAppNavLinks([link("a"), link("b")])).toBeNull();
+  });
+
+  it("returns null when all links share the same first category segment", () => {
+    expect(groupAppNavLinks([link("a", "Books/Audiobooks"), link("b", "Books/Comics")])).toBeNull();
+  });
+
+  it("groups by first segment, sorts alphabetically, and puts Other last", () => {
+    const groups = groupAppNavLinks([
+      link("z", "Games"),
+      link("a", "Books/Audiobooks"),
+      link("m"),
+      link("b", "Books"),
+    ]);
+
+    expect(groups).not.toBeNull();
+    expect(groups?.map((g) => g.category)).toEqual(["Books", "Games", "Other"]);
+    // Input order preserved within a group.
+    expect(groups?.[0]?.links.map((l) => l.id)).toEqual(["a", "b"]);
+    expect(groups?.[2]?.links.map((l) => l.id)).toEqual(["m"]);
+  });
+
+  it("treats blank or slash-only categories as uncategorized", () => {
+    const groups = groupAppNavLinks([link("a", "  "), link("b", "/Books"), link("c", "Games")]);
+
+    expect(groups?.map((g) => g.category)).toEqual(["Games", "Other"]);
+    expect(groups?.[1]?.links.map((l) => l.id)).toEqual(["a", "b"]);
   });
 });
