@@ -76,7 +76,7 @@ func TestAutoUpdateServiceCheckMatchesRenamedRepositoryByStablePluginIdentity(t 
 		entries: []CatalogEntry{
 			{
 				RepositoryID: 7,
-				RepoURL:      "https://github.com/Silo-Server/silo-plugins-metadata-tmdb",
+				RepoURL:      "https://github.com/Silo-Server/silo-plugin-metadata-tmdb",
 				Manifest: &pluginv1.PluginManifest{
 					PluginId: "silo.tmdb",
 					Version:  "1.1.0",
@@ -85,7 +85,7 @@ func TestAutoUpdateServiceCheckMatchesRenamedRepositoryByStablePluginIdentity(t 
 		},
 		resolved: &ResolvedCatalogInstall{
 			RepositoryID: 7,
-			ArchiveURL:   "https://github.com/Silo-Server/silo-plugins-metadata-tmdb/releases/download/v1.1.0/plugin-linux-amd64",
+			ArchiveURL:   "https://github.com/Silo-Server/silo-plugin-metadata-tmdb/releases/download/v1.1.0/plugin-linux-amd64",
 			Checksum:     "deadbeef",
 		},
 	}
