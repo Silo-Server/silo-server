@@ -19,13 +19,13 @@ func TestToUserPluginSettingsSummaryIncludesManifestCategory(t *testing.T) {
 		Version:  "1.2.3",
 	}
 	manifest := &pluginv1.PluginManifest{
-		Category: "Books/Audiobooks",
+		Category: "Tools/Utilities",
 	}
 
 	got := toUserPluginSettingsSummary(installation, manifest)
 
-	if got.Category != "Books/Audiobooks" {
-		t.Fatalf("Category = %q, want %q", got.Category, "Books/Audiobooks")
+	if got.Category != "Tools/Utilities" {
+		t.Fatalf("Category = %q, want %q", got.Category, "Tools/Utilities")
 	}
 	if got.ID != 42 || got.PluginID != "example-audiobooks" || got.Version != "1.2.3" {
 		t.Fatalf("identity fields = %#v", got)

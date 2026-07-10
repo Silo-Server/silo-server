@@ -3445,7 +3445,7 @@ export interface PluginSettingsSummary {
   assets: PluginAsset[];
   /**
    * Optional slash-delimited grouping path from the plugin manifest
-   * (e.g. "Books/Audiobooks") that groups the plugin's entries in the
+   * (e.g. "Tools/Utilities") that groups the plugin's entries in the
    * Apps sidebar section. Absent when the manifest declares no category.
    */
   category?: string;

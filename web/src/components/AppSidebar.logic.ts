@@ -30,13 +30,13 @@ export const UNCATEGORIZED_APP_GROUP = "Other";
  *
  * SDK contract (silo-plugin-sdk proto/silo/plugin/v1/common.proto,
  * PluginManifest.category): a slash-delimited path that groups plugins in
- * the user-facing Apps section — e.g. "Books/Audiobooks" lands in
- * Apps → Books → Audiobooks. Plugins without a category render under
+ * the user-facing Apps section — e.g. "Tools/Utilities" lands in
+ * Apps → Tools → Utilities. Plugins without a category render under
  * "Other". The host does not validate the value; the sidebar tolerates
  * unknown segments.
  *
  * We currently render only ONE level of grouping, so deeper segments
- * ("Audiobooks" in the example above) are intentionally ignored for now.
+ * ("Utilities" in the example above) are intentionally ignored for now.
  *
  * Returns null when fewer than 2 distinct categories exist among the
  * links; the caller should then keep the flat list under the single

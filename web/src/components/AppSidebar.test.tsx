@@ -222,55 +222,55 @@ describe("AppSidebar", () => {
 
   it("keeps a flat Apps list when fewer than 2 distinct categories exist", () => {
     mockPluginInstallations = [
-      pluginInstallation(1, "audiobook-shelf", "Audiobooks", "Books/Audiobooks"),
-      pluginInstallation(2, "comic-reader", "Comics", "Books"),
+      pluginInstallation(1, "alpha-app", "Alpha", "Tools/Utilities"),
+      pluginInstallation(2, "beta-app", "Beta", "Tools"),
     ];
 
     const markup = renderSidebar("/");
 
     expect(markup).toContain(">Apps<");
-    expect(markup).toContain(">Audiobooks<");
-    expect(markup).toContain(">Comics<");
-    // Both plugins share the first category segment "Books", so no
+    expect(markup).toContain(">Alpha<");
+    expect(markup).toContain(">Beta<");
+    // Both plugins share the first category segment "Tools", so no
     // per-category sub-headers should render.
-    expect(markup).not.toContain(">Books<");
+    expect(markup).not.toContain(">Tools<");
     expect(markup).not.toContain(">Other<");
   });
 
   it("groups Apps entries by first category segment with Other last when 2+ categories exist", () => {
     mockPluginInstallations = [
-      pluginInstallation(1, "audiobook-shelf", "Audiobooks", "Books/Audiobooks"),
-      pluginInstallation(2, "arcade", "Arcade", "Games"),
-      pluginInstallation(3, "misc-tool", "Misc Tool"),
+      pluginInstallation(1, "alpha-app", "Alpha", "Tools/Utilities"),
+      pluginInstallation(2, "beta-app", "Beta", "Extras"),
+      pluginInstallation(3, "gamma-app", "Gamma"),
     ];
 
     const markup = renderSidebar("/");
 
     expect(markup).toContain(">Apps<");
-    expect(markup).toContain(">Books<");
-    expect(markup).toContain(">Games<");
+    expect(markup).toContain(">Extras<");
+    expect(markup).toContain(">Tools<");
     expect(markup).toContain(">Other<");
     // Alphabetical category order with the uncategorized bucket last.
-    const booksIndex = markup.indexOf(">Books<");
-    const gamesIndex = markup.indexOf(">Games<");
+    const extrasIndex = markup.indexOf(">Extras<");
+    const toolsIndex = markup.indexOf(">Tools<");
     const otherIndex = markup.indexOf(">Other<");
-    expect(booksIndex).toBeGreaterThan(-1);
-    expect(gamesIndex).toBeGreaterThan(booksIndex);
-    expect(otherIndex).toBeGreaterThan(gamesIndex);
+    expect(extrasIndex).toBeGreaterThan(-1);
+    expect(toolsIndex).toBeGreaterThan(extrasIndex);
+    expect(otherIndex).toBeGreaterThan(toolsIndex);
   });
 
   it("hides Apps group headers the same way as other section headers when collapsed", () => {
     mockPluginInstallations = [
-      pluginInstallation(1, "audiobook-shelf", "Audiobooks", "Books"),
-      pluginInstallation(2, "arcade", "Arcade", "Games"),
+      pluginInstallation(1, "alpha-app", "Alpha", "Tools"),
+      pluginInstallation(2, "beta-app", "Beta", "Extras"),
     ];
 
     const markup = renderSidebar("/", { collapsed: true });
 
     // Group headers reuse SidebarSectionHeader, so the label slot stays in
     // the layout (preventing shifts) but is visually hidden when collapsed.
-    expect(markup).toContain(">Books<");
-    expect(markup).toContain(">Games<");
+    expect(markup).toContain(">Tools<");
+    expect(markup).toContain(">Extras<");
     const hiddenHeaderCount = (markup.match(/aria-hidden="true" class="[^"]*opacity-0/g) ?? [])
       .length;
     expect(hiddenHeaderCount).toBeGreaterThan(0);
@@ -295,28 +295,28 @@ describe("groupAppNavLinks", () => {
   });
 
   it("returns null when all links share the same first category segment", () => {
-    expect(groupAppNavLinks([link("a", "Books/Audiobooks"), link("b", "Books/Comics")])).toBeNull();
+    expect(groupAppNavLinks([link("a", "Tools/Utilities"), link("b", "Tools/Extras")])).toBeNull();
   });
 
   it("groups by first segment, sorts alphabetically, and puts Other last", () => {
     const groups = groupAppNavLinks([
-      link("z", "Games"),
-      link("a", "Books/Audiobooks"),
+      link("z", "Extras"),
+      link("a", "Tools/Utilities"),
       link("m"),
-      link("b", "Books"),
+      link("b", "Tools"),
     ]);
 
     expect(groups).not.toBeNull();
-    expect(groups?.map((g) => g.category)).toEqual(["Books", "Games", "Other"]);
+    expect(groups?.map((g) => g.category)).toEqual(["Extras", "Tools", "Other"]);
     // Input order preserved within a group.
-    expect(groups?.[0]?.links.map((l) => l.id)).toEqual(["a", "b"]);
+    expect(groups?.[1]?.links.map((l) => l.id)).toEqual(["a", "b"]);
     expect(groups?.[2]?.links.map((l) => l.id)).toEqual(["m"]);
   });
 
   it("treats blank or slash-only categories as uncategorized", () => {
-    const groups = groupAppNavLinks([link("a", "  "), link("b", "/Books"), link("c", "Games")]);
+    const groups = groupAppNavLinks([link("a", "  "), link("b", "/Tools"), link("c", "Extras")]);
 
-    expect(groups?.map((g) => g.category)).toEqual(["Games", "Other"]);
+    expect(groups?.map((g) => g.category)).toEqual(["Extras", "Other"]);
     expect(groups?.[1]?.links.map((l) => l.id)).toEqual(["a", "b"]);
   });
 });
