@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 // MimeFromExtension returns a MIME type based on the file extension.
@@ -50,6 +52,9 @@ func MimeFromExtension(name string) string {
 // Range requests, conditional requests (If-Modified-Since, If-None-Match),
 // and Content-Type detection.
 func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) error {
+	// Media bodies routinely take longer than the server's absolute
+	// WriteTimeout; roll the write deadline with progress instead.
+	w = httpstream.NewRollingDeadlineWriter(w)
 	f, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {

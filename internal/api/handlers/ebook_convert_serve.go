@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/ebookconvert"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -156,7 +157,7 @@ func serveConvertedEpub(w http.ResponseWriter, r *http.Request, file *models.Med
 
 	name := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath)) + ".epub"
 	setConvertedEpubHeaders(w, file, key)
-	http.ServeContent(w, r, name, stat.ModTime(), f)
+	http.ServeContent(httpstream.NewRollingDeadlineWriter(w), r, name, stat.ModTime(), f)
 	return nil
 }
 

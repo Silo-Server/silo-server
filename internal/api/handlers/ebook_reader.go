@@ -20,6 +20,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -622,7 +623,7 @@ func serveEbookInline(w http.ResponseWriter, r *http.Request, file *models.Media
 	// Ebook files are served inline on the API origin (and reachable via the
 	// ?token= query fallback), so browsers must never content-sniff them.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+	http.ServeContent(httpstream.NewRollingDeadlineWriter(w), r, stat.Name(), stat.ModTime(), f)
 	return nil
 }
 
