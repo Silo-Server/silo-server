@@ -15,7 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 var (
@@ -24,6 +26,10 @@ var (
 	ErrDeviceLoginDenied     = errors.New("device login request denied")
 	ErrDeviceLoginConsumed   = errors.New("device login request already consumed")
 	ErrDeviceLoginUnapproved = errors.New("device login request not approved")
+	ErrDeviceLoginBadPurpose = errors.New("invalid device login purpose")
+	ErrDeviceLoginPurpose    = errors.New("device login purpose mismatch")
+	ErrDeviceLoginConflict   = errors.New("device login already approved by another identity")
+	ErrDeviceLoginNoProfile  = errors.New("device login profile not found")
 )
 
 const (
@@ -31,15 +37,18 @@ const (
 	DeviceLoginStatusApproved = "approved"
 	DeviceLoginStatusDenied   = "denied"
 	DeviceLoginStatusConsumed = "consumed"
+	DeviceLoginPurposeLogin   = "device_login"
+	DeviceLoginPurposeRemote  = "remote_playback"
 
-	deviceLoginTTL          = 10 * time.Minute
-	deviceLoginPollInterval = 3 * time.Second
-	deviceCodeBytes         = 32
-	browserCodeBytes        = 32
-	userCodeLength          = 8
-	maxDeviceNameLen        = 120
-	maxDevicePlatformLen    = 80
-	maxUserAgentLen         = 256
+	deviceLoginTTL           = 10 * time.Minute
+	deviceLoginPollInterval  = 3 * time.Second
+	remotePlaybackSessionTTL = 24 * time.Hour
+	deviceCodeBytes          = 32
+	browserCodeBytes         = 32
+	userCodeLength           = 8
+	maxDeviceNameLen         = 120
+	maxDevicePlatformLen     = 80
+	maxUserAgentLen          = 256
 )
 
 var deviceCodeAlphabet = []byte("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
@@ -50,6 +59,8 @@ type DeviceLoginStartInput struct {
 	IPAddress      string
 	UserAgent      string
 	BaseURL        string
+	ClientPurpose  string
+	Temporary      bool
 }
 
 type DeviceLoginStartResult struct {
@@ -63,6 +74,8 @@ type DeviceLoginStartResult struct {
 	Interval                int
 	DeviceName              string
 	DevicePlatform          string
+	ClientPurpose           string
+	Temporary               bool
 }
 
 type DeviceLoginLookupInput struct {
@@ -78,13 +91,19 @@ type DeviceLoginInfo struct {
 	DevicePlatform string
 	IPAddressHint  string
 	ExpiresAt      time.Time
+	ClientPurpose  string
+	Temporary      bool
 }
 
 type DeviceLoginPollResult struct {
-	Status    string
-	PollAfter int
-	TokenPair *TokenPair
-	User      *models.User
+	Status           string
+	PollAfter        int
+	TokenPair        *TokenPair
+	User             *models.User
+	ProfileID        string
+	ProfileToken     string
+	Temporary        bool
+	SessionExpiresAt time.Time
 }
 
 type deviceLoginRecord struct {
@@ -99,7 +118,10 @@ type deviceLoginRecord struct {
 	RequestedUserAgent string
 	Status             string
 	ApprovedByUserID   *int
+	ApprovedProfileID  *string
 	AuthSessionID      *string
+	ClientPurpose      string
+	Temporary          bool
 	ExpiresAt          time.Time
 	ApprovedAt         *time.Time
 	DeniedAt           *time.Time
@@ -113,12 +135,15 @@ type DeviceLoginService struct {
 	users    *UserRepository
 	jwt      *JWTService
 	sessions *SessionRepository
+	stores   userstore.UserStoreProvider
+	profiles *access.ProfileTokenService
 }
 
 const deviceLoginSelectColumns = `
 	SELECT id, device_code_hash, browser_code_hash, user_code_hash, match_code,
 		device_name, device_platform, host(ip_address) AS ip_address, requested_user_agent,
-		status, approved_by_user_id, auth_session_id, expires_at, approved_at,
+		status, approved_by_user_id, approved_profile_id, auth_session_id,
+		client_purpose, temporary, expires_at, approved_at,
 		denied_at, consumed_at, created_at, updated_at
 	FROM device_login_requests
 `
@@ -128,6 +153,8 @@ func NewDeviceLoginService(
 	users *UserRepository,
 	jwt *JWTService,
 	sessions *SessionRepository,
+	stores userstore.UserStoreProvider,
+	profiles *access.ProfileTokenService,
 ) *DeviceLoginService {
 	if pool == nil || users == nil || jwt == nil || sessions == nil {
 		return nil
@@ -137,10 +164,16 @@ func NewDeviceLoginService(
 		users:    users,
 		jwt:      jwt,
 		sessions: sessions,
+		stores:   stores,
+		profiles: profiles,
 	}
 }
 
 func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartInput) (*DeviceLoginStartResult, error) {
+	purpose, temporary, err := normalizeDeviceLoginPurpose(input.ClientPurpose, input.Temporary)
+	if err != nil {
+		return nil, err
+	}
 	deviceCode, err := randomToken(deviceCodeBytes)
 	if err != nil {
 		return nil, fmt.Errorf("generate device code: %w", err)
@@ -170,6 +203,8 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 		IPAddress:          trimDeviceField(input.IPAddress, 64),
 		RequestedUserAgent: trimDeviceField(input.UserAgent, maxUserAgentLen),
 		Status:             DeviceLoginStatusPending,
+		ClientPurpose:      purpose,
+		Temporary:          temporary,
 		ExpiresAt:          now.Add(deviceLoginTTL),
 		CreatedAt:          now,
 		UpdatedAt:          now,
@@ -192,6 +227,8 @@ func (s *DeviceLoginService) Start(ctx context.Context, input DeviceLoginStartIn
 		Interval:                int(deviceLoginPollInterval.Seconds()),
 		DeviceName:              record.DeviceName,
 		DevicePlatform:          record.DevicePlatform,
+		ClientPurpose:           record.ClientPurpose,
+		Temporary:               record.Temporary,
 	}, nil
 }
 
@@ -210,6 +247,8 @@ func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookup
 			DevicePlatform: record.DevicePlatform,
 			IPAddressHint:  maskDeviceIPAddress(record.IPAddress),
 			ExpiresAt:      record.ExpiresAt,
+			ClientPurpose:  record.ClientPurpose,
+			Temporary:      record.Temporary,
 		}, nil
 	}
 
@@ -221,6 +260,8 @@ func (s *DeviceLoginService) Lookup(ctx context.Context, input DeviceLoginLookup
 		DevicePlatform: record.DevicePlatform,
 		IPAddressHint:  maskDeviceIPAddress(record.IPAddress),
 		ExpiresAt:      record.ExpiresAt,
+		ClientPurpose:  record.ClientPurpose,
+		Temporary:      record.Temporary,
 	}, nil
 }
 
@@ -229,27 +270,22 @@ func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLooku
 	if err != nil {
 		return err
 	}
-
-	if isDeviceLoginExpired(record) {
-		return ErrDeviceLoginExpired
+	if record.ClientPurpose != DeviceLoginPurposeLogin || record.Temporary {
+		return ErrDeviceLoginPurpose
 	}
-	if record.Status == DeviceLoginStatusConsumed {
-		return ErrDeviceLoginConsumed
-	}
-	if record.Status == DeviceLoginStatusDenied {
-		return ErrDeviceLoginDenied
+	if err := validateDeviceLoginDecision(record); err != nil {
+		return err
 	}
 
-	user, err := s.users.GetByID(ctx, approverUserID)
-	if err != nil {
-		return fmt.Errorf("load approving user: %w", err)
-	}
-	if !user.Enabled {
-		return ErrUserDisabled
+	if err := s.validateApprovingUser(ctx, approverUserID); err != nil {
+		return err
 	}
 
 	if record.Status == DeviceLoginStatusApproved && record.ApprovedByUserID != nil && *record.ApprovedByUserID == approverUserID {
 		return nil
+	}
+	if record.Status == DeviceLoginStatusApproved {
+		return ErrDeviceLoginConflict
 	}
 
 	now := time.Now().UTC()
@@ -261,7 +297,9 @@ func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLooku
 			denied_at = NULL,
 			updated_at = $4
 		WHERE id = $1
-			AND status IN ($5, $6)
+			AND status = $5
+			AND client_purpose = $6
+			AND temporary = FALSE
 			AND expires_at > NOW()
 	`,
 		record.ID,
@@ -269,13 +307,79 @@ func (s *DeviceLoginService) Approve(ctx context.Context, input DeviceLoginLooku
 		approverUserID,
 		now,
 		DeviceLoginStatusPending,
-		DeviceLoginStatusApproved,
+		DeviceLoginPurposeLogin,
 	)
 	if err != nil {
 		return fmt.Errorf("approve device login: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return s.reloadDecisionState(ctx, record.ID, approverUserID, true)
+		return s.reloadApprovalState(ctx, record.ID, approverUserID, "")
+	}
+	return nil
+}
+
+// ApproveRemotePlayback approves a temporary device-login request for the
+// caller's already-resolved viewer profile. The handler must obtain profileID
+// from RequireViewerAccess rather than accepting an untrusted body field.
+func (s *DeviceLoginService) ApproveRemotePlayback(
+	ctx context.Context,
+	input DeviceLoginLookupInput,
+	approverUserID int,
+	profileID string,
+) error {
+	profileID = strings.TrimSpace(profileID)
+	if profileID == "" {
+		return ErrDeviceLoginNoProfile
+	}
+	record, _, err := s.findByLookup(ctx, input)
+	if err != nil {
+		return err
+	}
+	if record.ClientPurpose != DeviceLoginPurposeRemote || !record.Temporary {
+		return ErrDeviceLoginPurpose
+	}
+	if err := validateDeviceLoginDecision(record); err != nil {
+		return err
+	}
+	if err := s.validateApprovingProfile(ctx, approverUserID, profileID); err != nil {
+		return err
+	}
+
+	if record.Status == DeviceLoginStatusApproved {
+		if sameApprovedIdentity(record, approverUserID, profileID) {
+			return nil
+		}
+		return ErrDeviceLoginConflict
+	}
+
+	now := time.Now().UTC()
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE device_login_requests
+		SET status = $2,
+			approved_by_user_id = $3,
+			approved_profile_id = $4,
+			approved_at = $5,
+			denied_at = NULL,
+			updated_at = $5
+		WHERE id = $1
+			AND status = $6
+			AND client_purpose = $7
+			AND temporary = TRUE
+			AND expires_at > NOW()
+	`,
+		record.ID,
+		DeviceLoginStatusApproved,
+		approverUserID,
+		profileID,
+		now,
+		DeviceLoginStatusPending,
+		DeviceLoginPurposeRemote,
+	)
+	if err != nil {
+		return fmt.Errorf("approve remote playback login: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return s.reloadApprovalState(ctx, record.ID, approverUserID, profileID)
 	}
 	return nil
 }
@@ -300,6 +404,7 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 		UPDATE device_login_requests
 		SET status = $2,
 			approved_by_user_id = NULL,
+			approved_profile_id = NULL,
 			approved_at = NULL,
 			denied_at = $3,
 			updated_at = $3
@@ -317,7 +422,7 @@ func (s *DeviceLoginService) Deny(ctx context.Context, input DeviceLoginLookupIn
 		return fmt.Errorf("deny device login: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return s.reloadDecisionState(ctx, record.ID, 0, false)
+		return s.reloadDenyState(ctx, record.ID)
 	}
 	return nil
 }
@@ -374,14 +479,32 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 		return nil, ErrUserDisabled
 	}
 
+	profileID := ""
+	if record.ClientPurpose == DeviceLoginPurposeRemote {
+		if !record.Temporary || record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == "" {
+			return nil, ErrDeviceLoginNoProfile
+		}
+		profileID = strings.TrimSpace(*record.ApprovedProfileID)
+		if err := s.validateProfileOwnership(ctx, user.ID, profileID); err != nil {
+			return nil, err
+		}
+	}
+
 	now := time.Now().UTC()
 	sessionID := uuid.New().String()
+	sessionExpiresAt := now.Add(s.jwt.RefreshExpiry())
+	if record.Temporary {
+		remoteExpiry := now.Add(remotePlaybackSessionTTL)
+		if remoteExpiry.Before(sessionExpiresAt) {
+			sessionExpiresAt = remoteExpiry
+		}
+	}
 	session := models.AuthSession{
 		ID:         sessionID,
 		UserID:     user.ID,
 		DeviceName: record.DeviceName,
 		IPAddress:  record.IPAddress,
-		ExpiresAt:  now.Add(s.jwt.RefreshExpiry()),
+		ExpiresAt:  sessionExpiresAt,
 	}
 	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 		return nil, err
@@ -394,6 +517,22 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	profileToken := ""
+	if record.ClientPurpose == DeviceLoginPurposeRemote {
+		if s.profiles == nil {
+			return nil, errors.New("profile token service is not configured")
+		}
+		profileToken, _, err = s.profiles.Mint(access.ProfileTokenClaims{
+			UserID:         user.ID,
+			SessionID:      sessionID,
+			ProfileID:      profileID,
+			PolicyRevision: user.AccessPolicyRevision,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("mint remote playback profile token: %w", err)
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -417,10 +556,14 @@ func (s *DeviceLoginService) Poll(ctx context.Context, deviceCode string) (*Devi
 	}
 
 	return &DeviceLoginPollResult{
-		Status:    "approved",
-		PollAfter: int(deviceLoginPollInterval.Seconds()),
-		TokenPair: pair,
-		User:      user,
+		Status:           "approved",
+		PollAfter:        int(deviceLoginPollInterval.Seconds()),
+		TokenPair:        pair,
+		User:             user,
+		ProfileID:        profileID,
+		ProfileToken:     profileToken,
+		Temporary:        record.Temporary,
+		SessionExpiresAt: sessionExpiresAt,
 	}, nil
 }
 
@@ -445,9 +588,9 @@ func (s *DeviceLoginService) create(ctx context.Context, record deviceLoginRecor
 		INSERT INTO device_login_requests (
 			id, device_code_hash, browser_code_hash, user_code_hash, match_code,
 			device_name, device_platform, ip_address, requested_user_agent,
-			status, expires_at, created_at, updated_at
+			status, client_purpose, temporary, expires_at, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::inet, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::inet, $9, $10, $11, $12, $13, $14, $15)
 	`,
 		record.ID,
 		record.DeviceCodeHash,
@@ -459,6 +602,8 @@ func (s *DeviceLoginService) create(ctx context.Context, record deviceLoginRecor
 		record.IPAddress,
 		record.RequestedUserAgent,
 		record.Status,
+		record.ClientPurpose,
+		record.Temporary,
 		record.ExpiresAt,
 		record.CreatedAt,
 		record.UpdatedAt,
@@ -522,11 +667,11 @@ func (s *DeviceLoginService) getByDeviceCodeTx(ctx context.Context, tx pgx.Tx, d
 	return scanDeviceLogin(row)
 }
 
-func (s *DeviceLoginService) reloadDecisionState(
+func (s *DeviceLoginService) reloadApprovalState(
 	ctx context.Context,
 	recordID string,
 	approverUserID int,
-	approving bool,
+	profileID string,
 ) error {
 	record, err := s.getByID(ctx, recordID)
 	if err != nil {
@@ -541,12 +686,113 @@ func (s *DeviceLoginService) reloadDecisionState(
 	case DeviceLoginStatusDenied:
 		return ErrDeviceLoginDenied
 	case DeviceLoginStatusApproved:
-		if approving && record.ApprovedByUserID != nil && *record.ApprovedByUserID == approverUserID {
+		if sameApprovedIdentity(record, approverUserID, profileID) {
 			return nil
 		}
+		return ErrDeviceLoginConflict
+	default:
+		return ErrDeviceLoginConflict
+	}
+}
+
+func (s *DeviceLoginService) reloadDenyState(ctx context.Context, recordID string) error {
+	record, err := s.getByID(ctx, recordID)
+	if err != nil {
+		return err
+	}
+	if isDeviceLoginExpired(record) {
+		return ErrDeviceLoginExpired
+	}
+	switch record.Status {
+	case DeviceLoginStatusConsumed:
+		return ErrDeviceLoginConsumed
+	case DeviceLoginStatusDenied:
 		return nil
 	default:
+		return ErrDeviceLoginConflict
+	}
+}
+
+func (s *DeviceLoginService) validateApprovingUser(ctx context.Context, userID int) error {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("load approving user: %w", err)
+	}
+	if !user.Enabled {
+		return ErrUserDisabled
+	}
+	return nil
+}
+
+func (s *DeviceLoginService) validateApprovingProfile(ctx context.Context, userID int, profileID string) error {
+	if err := s.validateApprovingUser(ctx, userID); err != nil {
+		return err
+	}
+	return s.validateProfileOwnership(ctx, userID, profileID)
+}
+
+func (s *DeviceLoginService) validateProfileOwnership(ctx context.Context, userID int, profileID string) error {
+	if s.stores == nil {
+		return errors.New("user store provider is not configured")
+	}
+	store, err := s.stores.ForUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("load approving user store: %w", err)
+	}
+	profile, err := store.GetProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("load approving profile: %w", err)
+	}
+	if profile == nil {
+		return ErrDeviceLoginNoProfile
+	}
+	return nil
+}
+
+func validateDeviceLoginDecision(record *deviceLoginRecord) error {
+	if isDeviceLoginExpired(record) {
+		return ErrDeviceLoginExpired
+	}
+	switch record.Status {
+	case DeviceLoginStatusConsumed:
+		return ErrDeviceLoginConsumed
+	case DeviceLoginStatusDenied:
+		return ErrDeviceLoginDenied
+	case DeviceLoginStatusPending, DeviceLoginStatusApproved:
 		return nil
+	default:
+		return ErrDeviceLoginConflict
+	}
+}
+
+func sameApprovedIdentity(record *deviceLoginRecord, userID int, profileID string) bool {
+	if record.ApprovedByUserID == nil || *record.ApprovedByUserID != userID {
+		return false
+	}
+	if profileID == "" {
+		return record.ApprovedProfileID == nil || strings.TrimSpace(*record.ApprovedProfileID) == ""
+	}
+	return record.ApprovedProfileID != nil && strings.TrimSpace(*record.ApprovedProfileID) == profileID
+}
+
+func normalizeDeviceLoginPurpose(value string, temporary bool) (string, bool, error) {
+	purpose := strings.TrimSpace(value)
+	if purpose == "" {
+		purpose = DeviceLoginPurposeLogin
+	}
+	switch purpose {
+	case DeviceLoginPurposeLogin:
+		if temporary {
+			return "", false, ErrDeviceLoginBadPurpose
+		}
+		return purpose, false, nil
+	case DeviceLoginPurposeRemote:
+		if !temporary {
+			return "", false, ErrDeviceLoginBadPurpose
+		}
+		return purpose, true, nil
+	default:
+		return "", false, ErrDeviceLoginBadPurpose
 	}
 }
 
@@ -564,7 +810,10 @@ func scanDeviceLogin(row pgx.Row) (*deviceLoginRecord, error) {
 		&record.RequestedUserAgent,
 		&record.Status,
 		&record.ApprovedByUserID,
+		&record.ApprovedProfileID,
 		&record.AuthSessionID,
+		&record.ClientPurpose,
+		&record.Temporary,
 		&record.ExpiresAt,
 		&record.ApprovedAt,
 		&record.DeniedAt,

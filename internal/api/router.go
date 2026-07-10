@@ -352,10 +352,17 @@ func NewRouter(deps Dependencies) chi.Router {
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
 		}
-		deviceLoginService = auth.NewDeviceLoginService(deps.DB, userRepo, jwtService, sessionRepo)
+		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
+		deviceLoginService = auth.NewDeviceLoginService(
+			deps.DB,
+			userRepo,
+			jwtService,
+			sessionRepo,
+			deps.UserStoreProvider,
+			profileTokenService,
+		)
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
-		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
 				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore)
@@ -1637,6 +1644,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
 
 			r.Route("/auth", func(r chi.Router) {
+				r.Get("/device/capability", authHandler.HandleDeviceCapability)
 				if deps.RateLimitMW != nil {
 					r.With(deps.RateLimitMW.AuthEndpointHandler("login")).Post("/login", authHandler.HandleLogin)
 					r.With(deps.RateLimitMW.AuthEndpointHandler("setup")).Post("/setup", authHandler.HandleSetup)
@@ -1682,6 +1690,12 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Post("/device/approve", authHandler.HandleDeviceApprove)
 						r.Post("/device/deny", authHandler.HandleDeviceDeny)
 					})
+					if viewerAccessMiddleware != nil {
+						r.With(
+							authMiddleware.RequireAuth,
+							viewerAccessMiddleware.RequireViewerAccess,
+						).Post("/device/approve-handoff", authHandler.HandleDeviceApproveHandoff)
+					}
 				}
 			})
 		}
