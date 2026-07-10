@@ -34,6 +34,15 @@ import {
 } from "@/hooks/queries/admin/libraries";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
+
+const DEAD_ROOT_WARNING_TEXT =
+  "One or more library roots are unreachable. Their files are hidden, but nothing will be deleted until the root is back.";
+const DEAD_ROOT_WARNING_HINT =
+  "Run another scan after storage returns, or use Check Mount to verify connectivity.";
+const EMPTY_ROOT_WARNING_TEXT =
+  "Scan found 0 media files for this library. Cleanup was paused to avoid accidental deletion.";
+const EMPTY_ROOT_WARNING_HINT =
+  "Run another scan after storage returns, or confirm deletion before the next empty-root scan.";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
 import { Button } from "@/components/ui/button";
@@ -627,12 +636,14 @@ export default function AdminLibraries() {
                           <div className="flex flex-col gap-2 py-1">
                             <div className="text-destructive font-medium">
                               {lib.scan_warning_code === "dead_root"
-                                ? "One or more library roots are unreachable. Their files are hidden, but nothing will be deleted until the root is back."
-                                : "Scan found 0 media files for this library. Cleanup was paused to avoid accidental deletion."}
+                                ? DEAD_ROOT_WARNING_TEXT
+                                : EMPTY_ROOT_WARNING_TEXT}
                             </div>
                             <div className="text-muted-foreground">
                               {lib.scan_warning_message ??
-                                "Run another scan after storage returns, or confirm deletion before the next empty-root scan."}
+                                (lib.scan_warning_code === "dead_root"
+                                  ? DEAD_ROOT_WARNING_HINT
+                                  : EMPTY_ROOT_WARNING_HINT)}
                             </div>
                             <div>
                               <Button

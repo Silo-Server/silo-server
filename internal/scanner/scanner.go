@@ -894,7 +894,7 @@ func (s *Scanner) scanPaths(
 	// healthy subtree must not hard-delete rows an unreachable sibling root
 	// left marked missing: probe the configured library roots and exempt any
 	// that are currently unreachable.
-	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))
+	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, cleanScanRoots(folder.Paths))
 	if s.emptyTrashAfterScan {
 		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, unreachableRoots)
 		if err != nil {
@@ -1004,17 +1004,20 @@ func (s *Scanner) scanFolderByRoots(
 	reconcileRoots []string,
 ) (*ScanResult, error) {
 	result := &ScanResult{}
-	roots := compactScanRoots(reconcileRoots)
-	if len(roots) == 0 {
-		roots = compactScanRoots(walkRoots)
+	configuredRoots := cleanScanRoots(reconcileRoots)
+	if len(configuredRoots) == 0 {
+		configuredRoots = cleanScanRoots(walkRoots)
 	}
+	roots := compactScanRoots(configuredRoots)
 
 	// An unreachable root (dead drive, lost mount) is temporarily offline, not
 	// removed from the library: its files are still marked missing below so
 	// clients stop seeing them, but nothing under it may be hard-deleted while
 	// it stays unreachable — trash emptying and item purging are guarded
-	// against these roots further down.
-	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, roots)
+	// against these roots further down. Probe every CONFIGURED path, not the
+	// compacted traversal roots: a nested child mount is dropped by compaction
+	// but can die independently of its reachable parent.
+	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, configuredRoots)
 	result.UnreachableRoots = unreachableRoots
 	unreachableSet := make(map[string]bool, len(unreachableRoots))
 	for _, root := range unreachableRoots {
@@ -1080,7 +1083,14 @@ func (s *Scanner) scanFolderByRoots(
 		pendingEmptyScopes = append(pendingEmptyScopes, scope)
 	}
 
-	if !seenAnyFiles && totalExisting > 0 {
+	// When EVERY configured root is unreachable this is an outage, not an
+	// intentionally emptied library: skip the empty-root confirm flow (and do
+	// not consume the operator's one-time cleanup allowance), fall through so
+	// pending scopes mark files missing (hiding them), and let the dead_root
+	// warning below explain the state. All deletion paths are protected by
+	// the unreachable-roots exclusions, so nothing is purged.
+	allRootsUnreachable := len(unreachableRoots) > 0 && len(unreachableRoots) == len(configuredRoots)
+	if !seenAnyFiles && totalExisting > 0 && !allRootsUnreachable {
 		var err error
 		allowEmptyCleanup, err = s.folderRepo.ConsumeEmptyCleanupAllowance(ctx, folder.ID)
 		if err != nil {
@@ -1191,7 +1201,7 @@ func (s *Scanner) scanFolderByRoots(
 		// clears it (both clear "dead_root" the same way as "empty_root").
 		if err := s.folderRepo.SetScanWarning(ctx, folder.ID,
 			"dead_root",
-			deadRootWarningMessage(len(roots), unreachableRoots),
+			deadRootWarningMessage(len(configuredRoots), unreachableRoots),
 			time.Now().UTC(),
 		); err != nil {
 			return nil, fmt.Errorf("recording dead-root warning for folder %d: %w", folder.ID, err)
@@ -1498,6 +1508,28 @@ func mergeCleanupResult(dst *ScanResult, src *ScanResult, priorErrors int) {
 	}
 }
 
+// cleanScanRoots normalizes and dedupes configured root paths WITHOUT
+// removing nested roots. Reachability must be probed against every
+// configured path: a child mount (/media/drive under /media) is dropped by
+// compactScanRoots for traversal, but can die independently and its files
+// must still be protected from deletion.
+func cleanScanRoots(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	seen := make(map[string]bool, len(paths))
+	for _, rawPath := range paths {
+		if strings.TrimSpace(rawPath) == "" {
+			continue
+		}
+		path := filepath.Clean(rawPath)
+		if path == "" || path == "." || seen[path] {
+			continue
+		}
+		seen[path] = true
+		out = append(out, path)
+	}
+	return out
+}
+
 func compactScanRoots(paths []string) []string {
 	out := make([]string, 0, len(paths))
 	for _, rawPath := range paths {
@@ -1740,7 +1772,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			return fmt.Errorf("syncing present library state for extra file: %w", err)
 		}
 		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID,
-			probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))); err != nil {
+			probeUnreachableRoots(ctx, folder.ID, cleanScanRoots(folder.Paths))); err != nil {
 			return fmt.Errorf("reconciling library membership after extra file scan: %w", err)
 		}
 		return nil
@@ -1757,7 +1789,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		}
 		if cleared > 0 {
 			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID,
-				probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))); reconcileErr != nil {
+				probeUnreachableRoots(ctx, folder.ID, cleanScanRoots(folder.Paths))); reconcileErr != nil {
 				return fmt.Errorf("reconciling folder membership after clearing legacy links: %w", reconcileErr)
 			}
 		}

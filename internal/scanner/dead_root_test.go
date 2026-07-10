@@ -345,3 +345,173 @@ func TestScanFolderDeadRootProtection(t *testing.T) {
 		t.Fatalf("after scan 4: scan_warning_code = %q, want none", *code)
 	}
 }
+
+// TestScanFolderNestedDeadChildRootProtection covers a child mount configured
+// INSIDE a reachable parent root (/parent plus /parent/child). Traversal
+// compaction drops the child, but it can die independently: its files must be
+// protected from the sweep and the folder must warn, even though the parent
+// scan is otherwise healthy.
+func TestScanFolderNestedDeadChildRootProtection(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Nested Dead Root Scan Test")
+
+	base := t.TempDir()
+	parent := filepath.Join(base, "media")
+	child := filepath.Join(parent, "drive")
+	fileParent := filepath.Join(parent, "Alpha (2020)", "Alpha (2020).mkv")
+	fileChild := filepath.Join(child, "Beta (2021)", "Beta (2021).mkv")
+	writeMovie := func(path string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	writeMovie(fileParent)
+	writeMovie(fileChild)
+
+	folder := &models.MediaFolder{
+		ID:      folderID,
+		Paths:   []string{parent, child},
+		Type:    "movies",
+		Name:    "Nested Dead Root Scan Test",
+		Enabled: true,
+	}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan 1: %v", err)
+	}
+	var childID int
+	var childMissing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT id, missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, fileChild,
+	).Scan(&childID, &childMissing); err != nil {
+		t.Fatalf("child row after scan 1: %v", err)
+	}
+	if childMissing != nil {
+		t.Fatalf("child missing after scan 1: %v, want nil", childMissing)
+	}
+
+	// The child mount dies while the parent stays reachable. Compaction hides
+	// the child from traversal, so only the uncompacted probe can protect it.
+	if err := os.RemoveAll(child); err != nil {
+		t.Fatalf("remove child root: %v", err)
+	}
+	result, err := scanner.ScanFolder(ctx, folder)
+	if err != nil {
+		t.Fatalf("scan 2: %v", err)
+	}
+	if len(result.UnreachableRoots) != 1 || result.UnreachableRoots[0] != child {
+		t.Fatalf("scan 2 UnreachableRoots = %v, want [%s]", result.UnreachableRoots, child)
+	}
+	var gotID int
+	if err := pool.QueryRow(ctx,
+		`SELECT id, missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, fileChild,
+	).Scan(&gotID, &childMissing); err != nil {
+		t.Fatalf("child row after scan 2 (was it hard-deleted?): %v", err)
+	}
+	if childMissing == nil {
+		t.Fatal("child file not marked missing after its root died")
+	}
+	if gotID != childID {
+		t.Fatalf("child row id changed %d -> %d", childID, gotID)
+	}
+	var code, message *string
+	if err := pool.QueryRow(ctx,
+		`SELECT scan_warning_code, scan_warning_message FROM media_folders WHERE id = $1`,
+		folderID,
+	).Scan(&code, &message); err != nil {
+		t.Fatalf("query warning: %v", err)
+	}
+	if code == nil || *code != "dead_root" {
+		t.Fatalf("scan_warning_code = %v, want dead_root", code)
+	}
+	if message == nil || !strings.Contains(*message, child) {
+		t.Fatalf("scan_warning_message = %v, want to contain %q", message, child)
+	}
+}
+
+// TestScanFolderAllRootsDeadOutage covers the single-drive-library outage:
+// when EVERY configured root is unreachable, the scan must bypass the
+// empty-root confirm flow (without consuming the operator's one-time cleanup
+// allowance), mark all files missing so they hide, keep every row, and raise
+// dead_root — not empty_root.
+func TestScanFolderAllRootsDeadOutage(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "All Roots Dead Scan Test")
+
+	base := t.TempDir()
+	root := filepath.Join(base, "movies")
+	file := filepath.Join(root, "Alpha (2020)", "Alpha (2020).mkv")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(file, []byte("fake movie payload"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	folder := &models.MediaFolder{
+		ID:      folderID,
+		Paths:   []string{root},
+		Type:    "movies",
+		Name:    "All Roots Dead Scan Test",
+		Enabled: true,
+	}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan 1: %v", err)
+	}
+
+	// Arm the one-time cleanup allowance so we can prove the outage path does
+	// NOT consume it (it must stay reserved for a deliberate empty-root scan).
+	if _, err := pool.Exec(ctx,
+		`UPDATE media_folders SET allow_empty_cleanup_once = true WHERE id = $1`, folderID,
+	); err != nil {
+		t.Fatalf("arm cleanup allowance: %v", err)
+	}
+
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatalf("remove root: %v", err)
+	}
+	result, err := scanner.ScanFolder(ctx, folder)
+	if err != nil {
+		t.Fatalf("scan 2: %v", err)
+	}
+	if result.EmptyRootGuarded {
+		t.Fatal("scan 2 reported EmptyRootGuarded; all-dead outage should take the dead_root path")
+	}
+
+	var missing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, file,
+	).Scan(&missing); err != nil {
+		t.Fatalf("file row after scan 2 (was it hard-deleted?): %v", err)
+	}
+	if missing == nil {
+		t.Fatal("file not marked missing during all-roots-dead outage")
+	}
+
+	var code *string
+	var allowance bool
+	if err := pool.QueryRow(ctx,
+		`SELECT scan_warning_code, allow_empty_cleanup_once FROM media_folders WHERE id = $1`,
+		folderID,
+	).Scan(&code, &allowance); err != nil {
+		t.Fatalf("query folder state: %v", err)
+	}
+	if code == nil || *code != "dead_root" {
+		t.Fatalf("scan_warning_code = %v, want dead_root (not empty_root)", code)
+	}
+	if !allowance {
+		t.Fatal("outage scan consumed the empty-cleanup allowance; it must be preserved")
+	}
+}
