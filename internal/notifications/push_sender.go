@@ -57,7 +57,7 @@ func terminalAPNsDeviceRejection(status int, code, message string) bool {
 	const prefix = "APNs rejected the notification:"
 	reason := strings.TrimSpace(strings.TrimPrefix(message, prefix))
 	switch reason {
-	case "BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered":
+	case "BadDeviceToken", "InvalidToken", "DeviceTokenNotForTopic", "Unregistered":
 		return true
 	default:
 		return false

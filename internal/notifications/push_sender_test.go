@@ -153,6 +153,30 @@ func TestPushSenderSendMapsRelayTerminalAPNsRejection(t *testing.T) {
 	}
 }
 
+func TestTerminalAPNsDeviceRejectionReasons(t *testing.T) {
+	for _, reason := range []string{
+		"BadDeviceToken",
+		"InvalidToken",
+		"DeviceTokenNotForTopic",
+		"Unregistered",
+	} {
+		t.Run(reason, func(t *testing.T) {
+			message := "APNs rejected the notification: " + reason
+			if !terminalAPNsDeviceRejection(http.StatusUnprocessableEntity, "apns_rejected", message) {
+				t.Fatalf("reason %q was not terminal for the device", reason)
+			}
+		})
+	}
+
+	if terminalAPNsDeviceRejection(
+		http.StatusUnprocessableEntity,
+		"apns_rejected",
+		"APNs rejected the notification: PayloadTooLarge",
+	) {
+		t.Fatal("request-level APNs rejection was terminal for the device")
+	}
+}
+
 func TestPushSenderDoesNotDisableDeviceForRequestLevelAPNsRejection(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
