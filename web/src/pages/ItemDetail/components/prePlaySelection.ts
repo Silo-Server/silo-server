@@ -147,15 +147,10 @@ export function formatAudioTrackSummary(track: VersionAudioTrack | undefined): s
     return "Unknown";
   }
 
-  const title = track.title?.trim() || track.embedded_title?.trim();
-  if (title) {
-    return title;
-  }
-
   const language = getLanguageName(track.language ?? "") || "Unknown";
   const codec = track.codec ? mapAudioLabel(track.codec) : "";
   const channels = formatChannels(track.channels);
-  return [language, codec, channels].filter(Boolean).join(" ");
+  return [language, codec, channels].filter(Boolean).join(" · ");
 }
 
 export function toSubtitleTrackSignature(

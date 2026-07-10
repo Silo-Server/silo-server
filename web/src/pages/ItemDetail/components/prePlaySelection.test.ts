@@ -1,10 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatAudioTrackSummary,
   formatSubtitleCandidateSummary,
   formatSubtitlePillSummary,
   inferSubtitleFlagsFromTitle,
 } from "./prePlaySelection";
+
+describe("formatAudioTrackSummary", () => {
+  it("uses language and compact format metadata instead of a container title", () => {
+    expect(
+      formatAudioTrackSummary({
+        language: "en",
+        codec: "eac3",
+        channels: 6,
+        title: "ATSC A/52B (AC-3, E-AC-3)",
+      }),
+    ).toBe("English · EAC3 · 5.1");
+  });
+});
 
 describe("formatSubtitleCandidateSummary", () => {
   it("leaves forced and accessibility state to the row badges", () => {
