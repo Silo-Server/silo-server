@@ -1686,8 +1686,8 @@ func playbackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
 
 // subtitleURLExt returns the URL file extension for a subtitle codec.
 // ASS/SSA tracks get ".ass" so the frontend can request raw ASS data for
-// client-side rendering (JASSUB); PGS tracks get ".sup" for client-side
-// bitmap rendering (libpgs); all other text formats get ".vtt".
+// client-side rendering (JASSUB); PGS tracks get ".sup" for native clients
+// capable of rendering bitmap sidecars; all other text formats get ".vtt".
 func subtitleURLExt(codec string) string {
 	switch {
 	case playback.IsASS(codec):
