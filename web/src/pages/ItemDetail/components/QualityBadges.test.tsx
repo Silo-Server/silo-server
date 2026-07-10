@@ -80,6 +80,17 @@ describe("QualityBadges", () => {
     expect(markup).not.toContain(">Atmos<");
   });
 
+  it("uses codec-specific Atmos labels when track metadata is unavailable", () => {
+    const version = makeVersion({ codec_audio: "eac3 atmos", audio_tracks: undefined });
+
+    const markup = renderToStaticMarkup(
+      <QualityBadges summary={resolveSelectedMediaSummary(version, undefined, 0)} />,
+    );
+
+    expect(markup).toContain(">DD+ Atmos<");
+    expect(markup).not.toContain(">Atmos<");
+  });
+
   it("preserves ordinary HDR and EAC3 labels", () => {
     const version = makeVersion({
       resolution: "1080p",
