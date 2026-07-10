@@ -1,19 +1,26 @@
 import { useEffect, useMemo, useState, type CSSProperties, type RefObject } from "react";
-import { computeSubtitlePositionStyle } from "@/lib/subtitleAppearance";
+import { computeSubtitleFontScale, computeSubtitlePositionStyle } from "@/lib/subtitleAppearance";
 import type { SubtitleAppearance } from "@/lib/subtitleAppearance";
+
+export interface SubtitleLayout {
+  positionStyle: CSSProperties;
+  /** Multiplier for cue font size so text scales with the rendered video. */
+  fontScale: number;
+}
 
 /**
  * Tracks the player container size and the video's intrinsic aspect ratio,
- * then produces a position CSS style that anchors subtitles to a 16:9
- * reference frame centered on the actually-rendered video area (object-fit:
- * contain) rather than the player window. Falls back to container-relative
- * percentages until measurements are available.
+ * then produces a position CSS style and a font scale. The Bottom position is
+ * anchored to the player window, while Lower Third and Top are anchored to a
+ * 16:9 reference frame centered on the actually-rendered video area
+ * (object-fit: contain). Falls back to container-relative percentages and
+ * scale 1 until measurements are available.
  */
-export function useSubtitlePositionStyle(
+export function useSubtitleLayout(
   containerRef: RefObject<HTMLElement | null>,
   videoRef: RefObject<HTMLVideoElement | null>,
   position: SubtitleAppearance["position"],
-): CSSProperties {
+): SubtitleLayout {
   const [playerSize, setPlayerSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [videoAspect, setVideoAspect] = useState(0);
 
@@ -45,7 +52,15 @@ export function useSubtitlePositionStyle(
   }, [videoRef]);
 
   return useMemo(
-    () => computeSubtitlePositionStyle(position, playerSize.w, playerSize.h, videoAspect),
+    () => ({
+      positionStyle: computeSubtitlePositionStyle(
+        position,
+        playerSize.w,
+        playerSize.h,
+        videoAspect,
+      ),
+      fontScale: computeSubtitleFontScale(playerSize.w, playerSize.h, videoAspect),
+    }),
     [position, playerSize.w, playerSize.h, videoAspect],
   );
 }

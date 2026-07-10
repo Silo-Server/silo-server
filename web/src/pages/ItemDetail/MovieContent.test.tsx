@@ -62,6 +62,11 @@ vi.mock("@/hooks/queries/recommendations", () => ({
   useSimilarItems: mocks.useSimilarItems,
 }));
 
+vi.mock("@/hooks/queries/subtitles", () => ({
+  useDeleteSubtitlePreference: () => ({ mutate: vi.fn() }),
+  useSetSubtitlePreference: () => ({ mutate: vi.fn() }),
+}));
+
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: mocks.useAuth,
   useOptionalAuth: mocks.useAuth,

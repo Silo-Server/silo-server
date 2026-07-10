@@ -7,6 +7,7 @@ import { useToggleWatchlist } from "@/hooks/queries/watchlist";
 import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries/items";
 import { useSetRating, useDeleteRating } from "@/hooks/queries/ratings";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
+import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -67,6 +68,8 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   const watchedMutation = useWatchedStateMutation(item);
   const setRatingMutation = useSetRating(item.content_id);
   const deleteRatingMutation = useDeleteRating(item.content_id);
+  const deleteSubtitlePreference = useDeleteSubtitlePreference();
+  const setSubtitlePreference = useSetSubtitlePreference();
   const [editOpen, setEditOpen] = useState(false);
   const [matchOpen, setMatchOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
@@ -150,16 +153,31 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
   const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
     setSubtitleSelectionMode("explicit");
     setExplicitSubtitleSelection(selection);
+    // Persist as this movie's override so the choice sticks across visits,
+    // exactly like a manual in-player selection.
+    setSubtitlePreference.mutate({
+      prefId: item.content_id,
+      selection,
+      showForcedSubtitles: item.effective_show_forced_subtitles,
+    });
   };
 
   const handleSelectSubtitleOff = () => {
     setSubtitleSelectionMode("off");
     setExplicitSubtitleSelection(null);
+    setSubtitlePreference.mutate({
+      prefId: item.content_id,
+      selection: null,
+      showForcedSubtitles: item.effective_show_forced_subtitles,
+    });
   };
 
   const handleResetSubtitleSelection = () => {
     setSubtitleSelectionMode("auto");
     setExplicitSubtitleSelection(null);
+    // "Auto" also clears the persisted override saved by a manual in-player
+    // selection, so profile-level auto selection applies to this movie again.
+    deleteSubtitlePreference.mutate(item.content_id);
   };
 
   const primaryAction = resolveLeafPrimaryAction(item, "Play");

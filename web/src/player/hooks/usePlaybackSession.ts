@@ -68,6 +68,7 @@ export interface StartPlaybackRequestPayload {
   containers: string[];
   max_resolution: string;
   hdr: boolean;
+  supports_bitmap_subtitle_burn_in: boolean;
 }
 
 export function buildStartPlaybackRequestPayload({
@@ -101,6 +102,7 @@ export function buildStartPlaybackRequestPayload({
     containers,
     max_resolution: maxResolution,
     hdr,
+    supports_bitmap_subtitle_burn_in: true,
   };
 
   if (forceInitialPosition || position > 0) {
@@ -491,6 +493,7 @@ export function usePlaybackSession(
           const token = config.getAccessToken();
           const newTracks: PlayerSubtitleInfo[] = downloaded.map((dl, i) => ({
             index: baseIndex + i,
+            media_file_id: mediaFile,
             id: dl.id,
             language: dl.language,
             codec: dl.format,

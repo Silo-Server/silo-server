@@ -102,6 +102,18 @@ func (w *requestStatusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
 }
 
+// Flush implements http.Flusher so progressive responses (streamed subtitle
+// extracts, remux output) keep flushing through the logging wrapper instead of
+// silently buffering until the handler returns.
+func (w *requestStatusWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // Unwrap lets http.ResponseController reach the underlying connection (e.g.
 // for the per-response write deadlines used by streaming handlers).
 func (w *requestStatusWriter) Unwrap() http.ResponseWriter {

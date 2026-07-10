@@ -23,6 +23,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		HWDevice:           "/dev/dri/renderD128",
 		SubtitleTrackIndex: 3,
 		SubtitleBurnIn:     true,
+		SubtitleCodec:      "hdmv_pgs_subtitle",
 		AudioTrackIndex:    1,
 		TargetBitrateKbps:  8000,
 		TotalDuration:      7200,
@@ -44,6 +45,9 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	}
 	if !got.SubtitleBurnIn {
 		t.Errorf("SubtitleBurnIn lost in round trip")
+	}
+	if got.SubtitleCodec != "hdmv_pgs_subtitle" {
+		t.Errorf("SubtitleCodec = %q, want hdmv_pgs_subtitle", got.SubtitleCodec)
 	}
 	if got.AudioTrackIndex != 1 || got.SubtitleTrackIndex != 3 {
 		t.Errorf("track indices wrong: audio=%d sub=%d", got.AudioTrackIndex, got.SubtitleTrackIndex)
@@ -104,6 +108,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		StartSegmentNumber: 450,
 		SubtitleTrackIndex: 3,
 		SubtitleBurnIn:     true,
+		SubtitleCodec:      "hdmv_pgs_subtitle",
 		AudioTrackIndex:    1,
 		TargetBitrateKbps:  8000,
 		TotalDuration:      7200,
@@ -125,6 +130,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		got.TargetCodecVideo != card.TargetCodecVideo || got.TargetCodecAudio != card.TargetCodecAudio ||
 		got.SegmentDuration != card.SegmentDuration || got.StartSegmentNumber != card.StartSegmentNumber ||
 		got.SubtitleTrackIndex != card.SubtitleTrackIndex || got.SubtitleBurnIn != card.SubtitleBurnIn ||
+		got.SubtitleCodec != card.SubtitleCodec ||
 		got.AudioTrackIndex != card.AudioTrackIndex || got.TargetBitrateKbps != card.TargetBitrateKbps ||
 		got.TotalDuration != card.TotalDuration || got.FastStart != card.FastStart {
 		t.Fatalf("encode parameters lost in round trip:\n have %+v\n want %+v", got, card)

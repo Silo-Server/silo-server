@@ -44,6 +44,7 @@ type RecipeCard struct {
 	HWDevice           string  `json:"hw_device,omitempty"`
 	SubtitleTrackIndex int     `json:"subtitle_track_index"`
 	SubtitleBurnIn     bool    `json:"subtitle_burn_in,omitempty"`
+	SubtitleCodec      string  `json:"subtitle_codec,omitempty"`
 	AudioTrackIndex    int     `json:"audio_track_index"`
 	TargetBitrateKbps  int     `json:"target_bitrate_kbps,omitempty"`
 	TotalDuration      float64 `json:"total_duration"`
@@ -75,6 +76,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		HWDevice:           opts.HWDevice,
 		SubtitleTrackIndex: opts.SubtitleTrackIndex,
 		SubtitleBurnIn:     opts.SubtitleBurnIn,
+		SubtitleCodec:      opts.SubtitleCodec,
 		AudioTrackIndex:    opts.AudioTrackIndex,
 		TargetBitrateKbps:  opts.TargetBitrateKbps,
 		TotalDuration:      opts.TotalDuration,
@@ -131,6 +133,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		HWDevice:           c.HWDevice,
 		SubtitleTrackIndex: c.SubtitleTrackIndex,
 		SubtitleBurnIn:     c.SubtitleBurnIn,
+		SubtitleCodec:      c.SubtitleCodec,
 		AudioTrackIndex:    c.AudioTrackIndex,
 		TargetBitrateKbps:  c.TargetBitrateKbps,
 		TotalDuration:      c.TotalDuration,
@@ -173,6 +176,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		StartSegmentNumber: c.StartSegmentNumber,
 		SubtitleTrackIndex: c.SubtitleTrackIndex,
 		SubtitleBurnIn:     c.SubtitleBurnIn,
+		SubtitleCodec:      c.SubtitleCodec,
 		TargetBitrateKbps:  c.TargetBitrateKbps,
 		TotalDuration:      c.TotalDuration,
 		FastStart:          c.FastStart,
@@ -210,6 +214,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		StartSegmentNumber: c.StartSegmentNumber,
 		SubtitleTrackIndex: c.SubtitleTrackIndex,
 		SubtitleBurnIn:     c.SubtitleBurnIn,
+		SubtitleCodec:      c.SubtitleCodec,
 		AudioTrackIndex:    c.AudioTrackIndex,
 		TargetBitrateKbps:  c.TargetBitrateKbps,
 		TotalDuration:      c.TotalDuration,

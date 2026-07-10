@@ -917,6 +917,9 @@ func NewRouter(deps Dependencies) chi.Router {
 		streamHandler.PlaybackConfig = func() config.PlaybackConfig {
 			return deps.CurrentConfig().Playback
 		}
+		streamHandler.SubtitleCache = playback.NewSubtitleCache(func() string {
+			return deps.CurrentConfig().Playback.TranscodeDir
+		})
 	}
 
 	restartStatus := deps.ServerRestartStatus

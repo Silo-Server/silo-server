@@ -34,7 +34,7 @@ function AudioOptionRow({
   const content = (
     <>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-sm font-medium">{title}</span>
           {badges}
         </div>
@@ -97,7 +97,7 @@ export default function AudioTracksPopover({
         >
           <Volume2 className="size-3.5" />
           Audio
-          <span className="text-muted-foreground max-w-24 truncate text-[11px] font-normal sm:max-w-28">
+          <span className="text-muted-foreground max-w-44 truncate text-[11px] font-normal sm:max-w-64">
             {isInteractive
               ? selectionMode === "auto"
                 ? `Auto: ${autoSummary}`
@@ -120,9 +120,14 @@ export default function AudioTracksPopover({
           {tracks.map((track, index) => {
             const codec = track.codec ? mapAudioLabel(track.codec) : "";
             const channels = formatChannels(track.channels);
-            const title = audioTitle(track);
             const language = getLanguageName(track.language ?? "");
-            const meta = [language && language !== title ? language : "", compactAudioMeta(track)]
+            const fallbackTitle = audioTitle(track);
+            const title = language || fallbackTitle;
+            const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
+            const meta = [
+              embeddedTitle && embeddedTitle !== title ? embeddedTitle : "",
+              compactAudioMeta(track),
+            ]
               .filter(Boolean)
               .join(" \u00B7 ");
 

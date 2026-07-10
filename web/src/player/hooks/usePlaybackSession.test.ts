@@ -23,6 +23,7 @@ describe("buildStartPlaybackRequestPayload", () => {
       file_id: 42,
       profile_id: "profile-1",
       start_position: 0,
+      supports_bitmap_subtitle_burn_in: true,
     });
   });
 

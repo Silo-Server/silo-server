@@ -180,3 +180,33 @@ func TestSelectAudioTrack_PrefersExactTrackSignatureOverIndexFallback(t *testing
 		t.Fatalf("SelectAudioTrack() = %d, want 1", got)
 	}
 }
+
+func TestMatchAudioTrackAcrossVersionsRemapsReorderedLanguage(t *testing.T) {
+	requested := []models.AudioTrack{
+		{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
+		{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
+	}
+	effective := []models.AudioTrack{
+		{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
+		{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
+	}
+
+	if got := playback.MatchAudioTrackAcrossVersions(requested, effective, 1); got != 0 {
+		t.Fatalf("MatchAudioTrackAcrossVersions() = %d, want English track 0", got)
+	}
+}
+
+func TestMatchAudioTrackAcrossVersionsFallsBackToLanguageAcrossCodecs(t *testing.T) {
+	requested := []models.AudioTrack{
+		{Language: "ja", Codec: "aac", Channels: 2},
+		{Language: "en", Codec: "truehd", Channels: 8},
+	}
+	effective := []models.AudioTrack{
+		{Language: "en", Codec: "eac3", Channels: 6},
+		{Language: "es", Codec: "aac", Channels: 2, Default: true},
+	}
+
+	if got := playback.MatchAudioTrackAcrossVersions(requested, effective, 1); got != 0 {
+		t.Fatalf("MatchAudioTrackAcrossVersions() = %d, want English track 0", got)
+	}
+}

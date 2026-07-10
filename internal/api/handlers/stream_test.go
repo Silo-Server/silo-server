@@ -173,6 +173,47 @@ func TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500(t *testing.T) {
 	}
 }
 
+func TestHandleSubtitle_NilMediaFileReturns404(t *testing.T) {
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	handler := NewStreamHandler(baseMgr, errStreamFileResolver{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", session.ID)
+	routeCtx.URLParams.Add("track", "0.vtt")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rr := httptest.NewRecorder()
+	handler.HandleSubtitle(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s; want 404", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSubtitleSourceFileIDPinsURLAcrossEffectiveFileSwitch(t *testing.T) {
+	session := &playback.Session{MediaFileID: 200, RequestedMediaFileID: 100}
+
+	request := httptest.NewRequest(http.MethodGet, "/subtitles/4.vtt?file_id=100", nil)
+	fileID, err := subtitleSourceFileID(request, session)
+	if err != nil {
+		t.Fatalf("subtitleSourceFileID: %v", err)
+	}
+	if fileID != 100 {
+		t.Fatalf("fileID = %d, want original subtitle source 100", fileID)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/subtitles/4.vtt?file_id=300", nil)
+	if _, err := subtitleSourceFileID(request, session); err == nil {
+		t.Fatal("expected unrelated subtitle source file to be rejected")
+	}
+}
+
 func TestHandleTransportStartFailure_KeepsSessionForNonMissingError(t *testing.T) {
 	filePath := writePlaybackTestMediaFile(t, "movie.mkv")
 	file := &models.MediaFile{

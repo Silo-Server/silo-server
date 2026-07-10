@@ -214,3 +214,12 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (w *statusWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
+
+// Flush implements http.Flusher directly as well: callers (and middlewares
+// like chi's Compress) discover flushing via a plain type assertion, which
+// Unwrap alone does not satisfy.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}

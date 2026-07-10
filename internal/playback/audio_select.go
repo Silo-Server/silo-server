@@ -85,6 +85,34 @@ func SelectAudioTrack(tracks []models.AudioTrack, preferredLang string, seriesPr
 	return 0
 }
 
+// MatchAudioTrackAcrossVersions maps a selection made against one file's
+// audio inventory onto another version of the same content. Track ordering is
+// not stable across encodes, so carrying the raw ordinal can select a different
+// language. Prefer the stable signature, then the selected language, and
+// finally the effective file's default track.
+func MatchAudioTrackAcrossVersions(
+	requestedTracks []models.AudioTrack,
+	effectiveTracks []models.AudioTrack,
+	requestedIndex int,
+) int {
+	if len(effectiveTracks) == 0 {
+		return 0
+	}
+	if len(requestedTracks) == 0 {
+		return SelectAudioTrack(effectiveTracks, "", nil)
+	}
+	if requestedIndex < 0 || requestedIndex >= len(requestedTracks) {
+		requestedIndex = SelectAudioTrack(requestedTracks, "", nil)
+	}
+
+	selected := requestedTracks[requestedIndex]
+	return SelectAudioTrack(effectiveTracks, "", &AudioTrackPreference{
+		AudioTrackIndex: requestedIndex,
+		AudioLanguage:   selected.Language,
+		TrackSignature:  AudioTrackSignatureFromTrack(selected),
+	})
+}
+
 // BrowserSupportsAudioCodec returns true if the given audio codec can be
 // played natively by web browsers without transcoding.
 func BrowserSupportsAudioCodec(codec string) bool {

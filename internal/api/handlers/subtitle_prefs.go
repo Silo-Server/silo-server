@@ -111,6 +111,19 @@ func (h *SubtitlePrefHandler) HandleSetSubtitlePref(w http.ResponseWriter, r *ht
 	if req.ShowForcedSubtitles != nil {
 		pref.ShowForcedSubtitles = *req.ShowForcedSubtitles
 		pref.HasShowForcedSubtitles = true
+	} else {
+		// This endpoint replaces the combined subtitle-preference row. Preserve
+		// an existing forced-subtitle override when clients update only the track
+		// selection; otherwise an omitted optional field silently resets it.
+		existing, getErr := store.GetSubtitlePreference(r.Context(), profileID, seriesID)
+		if getErr != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to preserve subtitle preference")
+			return
+		}
+		if existing != nil && existing.HasShowForcedSubtitles {
+			pref.ShowForcedSubtitles = existing.ShowForcedSubtitles
+			pref.HasShowForcedSubtitles = true
+		}
 	}
 
 	if err := store.SetSubtitlePreference(r.Context(), pref); err != nil {

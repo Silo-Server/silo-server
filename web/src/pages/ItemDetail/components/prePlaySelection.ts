@@ -14,6 +14,7 @@ import { resolveVersionAudioLanguage } from "@/player/utils/effectiveAudioLangua
 import { getLanguageName } from "@/player/utils/languageNames";
 import { normalizeSubtitleMode } from "@/player/utils/subtitleMode";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
+import { getSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
 import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
 import {
   buildVersionSubtitleInventory,
@@ -51,19 +52,45 @@ function normalizeDownloadedLabel(subtitle: DownloadedSubtitle): string {
   return releaseName || provider || getLanguageName(subtitle.language?.trim() || "unknown");
 }
 
-function subtitleSummaryParts(
-  row: Pick<VersionSubtitleInventoryRow, "languageLabel" | "forced" | "hearingImpaired">,
-): string[] {
-  const parts = [row.languageLabel];
-  if (row.hearingImpaired) parts.push("HI");
-  if (row.forced) parts.push("Forced");
-  return parts.filter(Boolean);
-}
-
 export function formatSubtitleCandidateSummary(
   row: Pick<VersionSubtitleInventoryRow, "languageLabel" | "forced" | "hearingImpaired">,
 ): string {
-  return subtitleSummaryParts(row).join(" ");
+  return row.languageLabel;
+}
+
+export function inferSubtitleFlagsFromTitle(title: string | undefined): {
+  forced: boolean;
+  hearingImpaired: boolean;
+  flagOnly: boolean;
+} {
+  const normalized = title?.trim().toLowerCase() ?? "";
+  const forced = normalized === "forced";
+  const hearingImpaired = ["sdh", "cc", "hi", "hearing impaired"].includes(normalized);
+  return { forced, hearingImpaired, flagOnly: forced || hearingImpaired };
+}
+
+export interface SubtitlePillSummarySource {
+  label?: string;
+  languageLabel?: string;
+  codec?: string;
+  forced?: boolean;
+  hearingImpaired?: boolean;
+}
+
+/**
+ * Single-line summary for the closed selector pill: language, optional
+ * (SDH)/(Forced) markers, and a human-readable subtitle format. Track titles
+ * stay in the open selector, where meaningful details have room to display.
+ */
+export function formatSubtitlePillSummary(source: SubtitlePillSummarySource): string {
+  const name = source.languageLabel?.trim() || source.label?.trim() || "Unknown";
+  const parts = [name];
+  if (source.hearingImpaired && !/\b(?:sdh|cc|hi)\b/i.test(name)) parts.push("(SDH)");
+  if (source.forced && !/forced/i.test(name)) parts.push("(Forced)");
+  const text = parts.join(" ");
+  const codec = source.codec?.trim();
+  const format = getSubtitleFormatLabel(codec) || codec?.toUpperCase();
+  return format ? `${text} · ${format}` : text;
 }
 
 export function getAutoAudioTrackIndex(version: FileVersion | null | undefined): number {
@@ -120,15 +147,10 @@ export function formatAudioTrackSummary(track: VersionAudioTrack | undefined): s
     return "Unknown";
   }
 
-  const title = track.title?.trim() || track.embedded_title?.trim();
-  if (title) {
-    return title;
-  }
-
   const language = getLanguageName(track.language ?? "") || "Unknown";
   const codec = track.codec ? mapAudioLabel(track.codec) : "";
   const channels = formatChannels(track.channels);
-  return [language, codec, channels].filter(Boolean).join(" ");
+  return [language, codec, channels].filter(Boolean).join(" · ");
 }
 
 export function toSubtitleTrackSignature(
@@ -186,6 +208,7 @@ export function buildPrePlaySubtitleCandidates(
           label,
           forced: row.forced,
           hearing_impaired: row.hearingImpaired,
+          track_index: row.index,
         },
         summary: formatSubtitleCandidateSummary(row),
       };

@@ -100,6 +100,32 @@ func TestCompatImageProxyTagVariantMiddlewareLeavesOtherClientsUnchanged(t *test
 	}
 }
 
+func TestCompatImageProxyTagVariantMiddlewareForwardsPreBodyFlushForStreamingResponse(t *testing.T) {
+	codec := NewResourceIDCodec()
+	handler := compatImageProxyTagVariantMiddleware(codec)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("wrapped response writer does not implement http.Flusher")
+		}
+		flusher.Flush()
+		_, _ = w.Write([]byte("data: ready\n\n"))
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/Events", nil)
+	req.Header.Set("User-Agent", "Infuse-Direct/8.4.6")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if !rec.Flushed {
+		t.Fatal("pre-body flush did not reach the underlying response writer")
+	}
+	if rec.Code != http.StatusOK || rec.Body.String() != "data: ready\n\n" {
+		t.Fatalf("status = %d, body = %q; want streamed 200 response", rec.Code, rec.Body.String())
+	}
+}
+
 func TestCompatImageProxyRouteIDCanonicalizesNumericRouteWithoutRegistration(t *testing.T) {
 	routeID := EncodeNumericID(EncodedIDItem, 12345).String()
 	proxyRouteID := compatImageProxyRouteID(NewResourceIDCodec(), routeID)

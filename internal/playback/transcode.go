@@ -43,13 +43,18 @@ type TranscodeOpts struct {
 	HWDevice           string // e.g., /dev/dri/renderD128 (default if empty)
 	SubtitleTrackIndex int    // -1 = no subtitles
 	SubtitleBurnIn     bool
-	AudioTrackIndex    int     // -1 = default (first track), >= 0 = specific track
-	TargetBitrateKbps  int     // max video bitrate in kbps; 0 = CRF-only (no cap)
-	TotalDuration      float64 // total media duration in seconds (for VOD manifest)
-	FastStart          bool    // use superfast preset for faster first-segment production
-	NodeType           string
-	ExecutionMode      string
-	FFmpegLogSink      FFmpegLogSink
+	// SubtitleCodec is the probed codec of the burn-in track (e.g. "subrip",
+	// "hdmv_pgs_subtitle"). Bitmap codecs (PGS/DVD/DVB) select the overlay
+	// filter_complex pipeline; text codecs use the libass subtitles filter.
+	// Empty preserves the legacy text path for callers minted before the field.
+	SubtitleCodec     string
+	AudioTrackIndex   int     // -1 = default (first track), >= 0 = specific track
+	TargetBitrateKbps int     // max video bitrate in kbps; 0 = CRF-only (no cap)
+	TotalDuration     float64 // total media duration in seconds (for VOD manifest)
+	FastStart         bool    // use superfast preset for faster first-segment production
+	NodeType          string
+	ExecutionMode     string
+	FFmpegLogSink     FFmpegLogSink
 }
 
 // TranscodeSession manages a running ffmpeg HLS transcode process.
@@ -279,7 +284,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	args = append(args, "-i", opts.InputPath)
 	args = append(args, "-map_metadata", "-1")
 	args = append(args, "-map_chapters", "-1")
-	args = appendStreamSelectionArgs(args, opts.AudioTrackIndex)
+	args = appendStreamSelectionArgs(args, opts)
 	args = appendTimestampNormalizationArgs(args, opts)
 
 	// Video codec and encoding settings.
@@ -366,9 +371,29 @@ func resolveEffectiveTranscodeHWAccel(opts TranscodeOpts) string {
 	return hwAccel
 }
 
+// bitmapBurnInActive reports whether this transcode composites a bitmap
+// subtitle track (PGS/VOBSUB/DVB) into the video via the overlay
+// filter_complex pipeline. Bitmap burn-in requires a video encode: copy-video
+// sessions never activate it (the API layer forces an encoding recipe before
+// starting a burn-in transcode, this is a defensive backstop).
+func bitmapBurnInActive(opts TranscodeOpts) bool {
+	return opts.SubtitleBurnIn &&
+		opts.SubtitleTrackIndex >= 0 &&
+		NeedsBurnIn(opts.SubtitleCodec) &&
+		!strings.EqualFold(opts.TargetCodecVideo, "copy")
+}
+
 // appendStreamSelectionArgs limits output to primary video/audio streams.
-func appendStreamSelectionArgs(args []string, audioTrackIndex int) []string {
-	args = append(args, "-map", "0:v:0")
+// When bitmap burn-in is active the video output comes from the overlay
+// filter_complex graph's labeled pad instead of the raw input stream —
+// mapping both would emit two video streams into the HLS mux.
+func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
+	audioTrackIndex := opts.AudioTrackIndex
+	if bitmapBurnInActive(opts) {
+		args = append(args, "-map", "[vout]")
+	} else {
+		args = append(args, "-map", "0:v:0")
+	}
 	if audioTrackIndex >= 0 {
 		args = append(args, "-map", fmt.Sprintf("0:a:%d?", audioTrackIndex))
 	} else {
@@ -589,6 +614,8 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 // in only one of them silently ships wrong cached artifacts).
 func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 	switch {
+	case bitmapBurnInActive(opts):
+		return appendBitmapSubtitleBurnInArgs(args, opts)
 	case opts.SubtitleBurnIn && opts.SubtitleTrackIndex >= 0:
 		return appendSubtitleBurnInArgs(args, opts)
 	case opts.HWAccel == "qsv":
@@ -635,7 +662,53 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 	return args
 }
 
-// appendSubtitleBurnInArgs adds subtitle burn-in filter arguments.
+// appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle
+// codecs (PGS/VOBSUB/DVB). libass's subtitles= filter cannot render bitmap
+// tracks, so the decoded subtitle stream is composited onto the video with
+// overlay in a -filter_complex graph (the "Plex route"). The graph's output
+// pad [vout] replaces the raw video stream in stream mapping (see
+// appendStreamSelectionArgs), so -vf must never be emitted alongside this.
+//
+// Overlay runs at the source's native resolution FIRST and any target scaling
+// happens after, so bitmap subtitle geometry is never distorted by a
+// pre-scaling mismatch between the video and subtitle planes.
+// eof_action=pass keeps the video flowing untouched once the subtitle stream
+// ends instead of freezing the last overlay frame on screen.
+//
+// Hardware pipelines mirror appendSubtitleBurnInArgs: frames are downloaded
+// to CPU memory for the overlay, then re-uploaded for the hardware encoder.
+func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
+	// [0:s:N] indexes subtitle streams only, matching the si=N semantics of
+	// the text path — SubtitleTrackIndex is the embedded subtitle ordinal.
+	cpuFilters := fmt.Sprintf("[0:s:%d]overlay=eof_action=pass", opts.SubtitleTrackIndex)
+	if scale := resolutionToScale(opts.TargetResolution); scale != "" {
+		cpuFilters += "," + scale
+	}
+
+	var graph string
+	switch opts.HWAccel {
+	case "qsv":
+		// VAAPI→QSV pipeline: download decoded frames to CPU, overlay, convert
+		// to nv12, upload back to VAAPI, then map to QSV for the encoder.
+		graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
+			",format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"
+	case "vaapi":
+		graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
+			",format=nv12,hwupload[vout]"
+	case "nvenc":
+		graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
+			",format=nv12,hwupload_cuda[vout]"
+	default:
+		// CPU encoding: overlay directly on decoded frames.
+		graph = "[0:v:0]" + cpuFilters + "[vout]"
+	}
+
+	return append(args, "-filter_complex", graph)
+}
+
+// appendSubtitleBurnInArgs adds subtitle burn-in filter arguments for TEXT
+// subtitle codecs (SRT/ASS/…) via the libass-based subtitles= filter; bitmap
+// codecs take the overlay path in appendBitmapSubtitleBurnInArgs.
 // For CPU encoding, the filter chain is: [scale,]subtitles.
 // For QSV/VAAPI, frames must be downloaded from hardware, processed on CPU,
 // then re-uploaded: hwdownload → format=yuv420p → [scale,] subtitles → hwupload → hwmap.

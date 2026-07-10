@@ -56,6 +56,19 @@ interface UseTranscodeQualityResult {
   qualityOptions: QualityOption[];
   activeQualityId: string;
   switchQuality: (qualityId: string, currentPosition: number, forceRestart?: boolean) => void;
+  /**
+   * Burn the given embedded bitmap subtitle track (ffmpeg subtitle-stream
+   * ordinal) into the video, or stop burning when null. Restarts the transcode
+   * at the current position via the same machinery as a quality/audio switch,
+   * so the server's segment-boundary timeline alignment applies unchanged.
+   */
+  setSubtitleBurnIn: (
+    ffmpegSubtitleIndex: number | null,
+    currentPosition: number,
+    subtitleMediaFileId?: number,
+  ) => void;
+  /** Currently burned-in embedded subtitle ordinal, or null. */
+  burnInSubtitleIndex: number | null;
   transcodeStreamUrl: string | null;
   playerStartSeconds: number;
   streamOriginSeconds: number;
@@ -177,8 +190,26 @@ export function useTranscodeQuality({
   const [error, setError] = useState<string | null>(null);
   const [switchedFileId, setSwitchedFileId] = useState<number | null>(null);
   const switchAbortRef = useRef<AbortController | null>(null);
+  // Pending (macrotask-deferred) transcode start dispatch. Restart triggers can
+  // stack up in one tick — e.g. on mount the auto-start effect fires, then
+  // subtitle auto-selection restores a burned-in bitmap track and fires again —
+  // and each server call kills and respawns ffmpeg. Deferring the network
+  // dispatch by one macrotask lets the last call in a tick win, so the server
+  // sees a single start with the final parameters.
+  const dispatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manifestVersionRef = useRef(0);
   const autoStartKeyRef = useRef<string | null>(null);
+  // Latest requested quality, updated synchronously before React commits the
+  // corresponding state. Bitmap subtitle restoration can request another
+  // restart in the same tick and must preserve this pending quality.
+  const requestedQualityIdRef = useRef("original");
+  // Embedded subtitle ordinal being burned into the video, or null. Kept in a
+  // ref (mirrored to state for consumers) so every restart path — quality
+  // switch, out-of-window seek, compatibility fallback — reads the current
+  // value without stale-closure races.
+  const [burnInSubtitleIndex, setBurnInSubtitleIndex] = useState<number | null>(null);
+  const burnInRef = useRef<number | null>(null);
+  const burnInMediaFileIdRef = useRef<number | null>(null);
 
   const effectiveVersion = useMemo(() => {
     if (switchedFileId != null) {
@@ -196,7 +227,12 @@ export function useTranscodeQuality({
   useEffect(() => {
     switchAbortRef.current?.abort();
     switchAbortRef.current = null;
+    if (dispatchTimerRef.current != null) {
+      clearTimeout(dispatchTimerRef.current);
+      dispatchTimerRef.current = null;
+    }
     autoStartKeyRef.current = null;
+    requestedQualityIdRef.current = "original";
     setActiveQualityId("original");
     setTranscodeStreamUrl(null);
     setPlayerStartSeconds(0);
@@ -206,16 +242,37 @@ export function useTranscodeQuality({
     setIsTranscoding(false);
     setError(null);
     setSwitchedFileId(null);
+    burnInRef.current = null;
+    burnInMediaFileIdRef.current = null;
+    setBurnInSubtitleIndex(null);
   }, [sessionId, selectedVersion?.file_id, playMethod]);
+
+  // On unmount, cancel any in-flight or still-deferred start so a stray
+  // transcode/start can't land after the session's exit DELETE.
+  useEffect(
+    () => () => {
+      switchAbortRef.current?.abort();
+      if (dispatchTimerRef.current != null) {
+        clearTimeout(dispatchTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const startTranscode = useCallback(
     (qualityId: string, currentPosition: number, forceRestart = false) => {
       if (!sessionId) return;
+      requestedQualityIdRef.current = qualityId;
       if (!forceRestart && qualityId === activeQualityId) return;
 
-      // Abort any in-progress switch (POST + polling).
+      // Abort any in-progress switch (POST + polling) and supersede any
+      // dispatch still waiting on its macrotask.
       switchAbortRef.current?.abort();
       switchAbortRef.current = null;
+      if (dispatchTimerRef.current != null) {
+        clearTimeout(dispatchTimerRef.current);
+        dispatchTimerRef.current = null;
+      }
 
       // Clear the guard's file switch when reverting to original quality.
       // The backend will set a new switched_file_id in the response if needed.
@@ -230,7 +287,14 @@ export function useTranscodeQuality({
       // For remux and transcode, "original" still needs HLS. Remux can keep
       // video copy; transcode must still encode video because the source codec
       // was already classified as browser-incompatible.
-      if (qualityId === "original" && playMethod !== "transcode" && playMethod !== "remux") {
+      // A burned-in bitmap subtitle always needs an encoding HLS transcode,
+      // even on a direct-play base — never fall back to the raw file then.
+      if (
+        qualityId === "original" &&
+        playMethod !== "transcode" &&
+        playMethod !== "remux" &&
+        burnInRef.current == null
+      ) {
         setActiveQualityId("original");
         setTranscodeStreamUrl(null);
         setPlayerStartSeconds(0);
@@ -280,7 +344,20 @@ export function useTranscodeQuality({
       // from the deleted output directory and throws bufferAppendErrors.
       setTranscodeStreamUrl(null);
 
-      (async () => {
+      const dispatch = async () => {
+        const requestedBurnInIndex = burnInRef.current;
+        const requestedBurnInMediaFileId = burnInMediaFileIdRef.current;
+        const rollbackFailedBurnIn = () => {
+          if (
+            requestedBurnInIndex != null &&
+            burnInRef.current === requestedBurnInIndex &&
+            burnInMediaFileIdRef.current === requestedBurnInMediaFileId
+          ) {
+            burnInRef.current = null;
+            burnInMediaFileIdRef.current = null;
+            setBurnInSubtitleIndex(null);
+          }
+        };
         try {
           // When "Original" is selected on a remux base, use codec copy (no
           // video re-encoding). Transcode bases still encode video because the
@@ -289,8 +366,15 @@ export function useTranscodeQuality({
           // browser can't decode (EAC3, DTS, TrueHD, etc.) and audio transcoding
           // adds negligible overhead compared to video.
           const isCompatibilityFallback = option.id === COMPATIBILITY_QUALITY_ID;
+          // Burn-in composites the subtitle into the video frames, which
+          // requires an encode — codec copy is never allowed while a bitmap
+          // subtitle is burned in (the server enforces this too).
+          const burnInIndex = requestedBurnInIndex;
           const isCopyOriginal =
-            option.isOriginal && !isCompatibilityFallback && playMethod === "remux";
+            option.isOriginal &&
+            !isCompatibilityFallback &&
+            playMethod === "remux" &&
+            burnInIndex == null;
           const body: TranscodeStartRequest = {
             session_id: sessionId,
             seek_seconds: currentPosition,
@@ -302,14 +386,16 @@ export function useTranscodeQuality({
             // especially for remux/copy sessions where a long startup
             // window can delay first frame for several seconds.
             segment_duration: 2,
-            subtitle_track_index: -1,
-            subtitle_burn_in: false,
+            subtitle_track_index: burnInIndex ?? -1,
+            subtitle_media_file_id:
+              burnInIndex != null ? (requestedBurnInMediaFileId ?? undefined) : undefined,
+            subtitle_burn_in: burnInIndex != null,
           };
 
           const resp = await playerFetch<TranscodeStartResponse>(
             config,
             "/playback/transcode/start",
-            { method: "POST", body: JSON.stringify(body) },
+            { method: "POST", body: JSON.stringify(body), signal: abortController.signal },
           );
 
           if (abortController.signal.aborted) return;
@@ -344,6 +430,7 @@ export function useTranscodeQuality({
           setError(null);
         } catch (err: unknown) {
           if (abortController.signal.aborted) return;
+          rollbackFailedBurnIn();
           // 422 = no alternate file version available for 4K transcode protection.
           if (err instanceof PlayerFetchError && err.status === 422) {
             setActiveQualityId("original");
@@ -371,18 +458,24 @@ export function useTranscodeQuality({
             setIsTranscoding(false);
           }
         }
-      })();
+      };
+      dispatchTimerRef.current = setTimeout(() => {
+        dispatchTimerRef.current = null;
+        void dispatch();
+      }, 0);
     },
     [sessionId, activeQualityId, qualityOptions, config, effectiveVersion, playMethod],
   );
 
   const switchQuality = useCallback(
     (qualityId: string, currentPosition: number, forceRestart?: boolean) => {
+      requestedQualityIdRef.current = qualityId;
       // When the user explicitly selects "Original" from the quality menu:
-      // - Direct play base: stop HLS and play the raw file (instant).
+      // - Direct play base: stop HLS and play the raw file (instant), unless a
+      //   bitmap subtitle is burned in (burn-in always needs an encode).
       // - Remux base: use codec copy via HLS.
       // - Transcode base: restart HLS at source resolution while encoding video.
-      if (qualityId === "original" && playMethod === "direct") {
+      if (qualityId === "original" && playMethod === "direct" && burnInRef.current == null) {
         switchAbortRef.current?.abort();
         switchAbortRef.current = null;
         setActiveQualityId("original");
@@ -399,6 +492,29 @@ export function useTranscodeQuality({
       startTranscode(qualityId, currentPosition, forceRestart ?? false);
     },
     [startTranscode, playMethod],
+  );
+
+  // Selecting a bitmap (PGS/DVD/DVB) subtitle track burns it into the video
+  // server-side: the transcode restarts with subtitle_burn_in at the current
+  // position, riding the exact restart machinery a quality switch uses so the
+  // segment-boundary timeline alignment fix is preserved. Deselecting (null)
+  // restarts without burn-in — or drops back to the raw file on a direct-play
+  // "original" session.
+  const setSubtitleBurnIn = useCallback(
+    (ffmpegSubtitleIndex: number | null, currentPosition: number, subtitleMediaFileId?: number) => {
+      const normalizedMediaFileId = subtitleMediaFileId ?? null;
+      if (
+        burnInRef.current === ffmpegSubtitleIndex &&
+        burnInMediaFileIdRef.current === normalizedMediaFileId
+      ) {
+        return;
+      }
+      burnInRef.current = ffmpegSubtitleIndex;
+      burnInMediaFileIdRef.current = ffmpegSubtitleIndex == null ? null : normalizedMediaFileId;
+      setBurnInSubtitleIndex(ffmpegSubtitleIndex);
+      switchQuality(requestedQualityIdRef.current, currentPosition, true);
+    },
+    [switchQuality],
   );
 
   useEffect(() => {
@@ -453,6 +569,8 @@ export function useTranscodeQuality({
     qualityOptions,
     activeQualityId,
     switchQuality,
+    setSubtitleBurnIn,
+    burnInSubtitleIndex,
     transcodeStreamUrl,
     playerStartSeconds,
     streamOriginSeconds,

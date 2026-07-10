@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -44,9 +45,13 @@ type StreamHandler struct {
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
-	SubtitleRepo   subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client       subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket       string               // bucket for subtitle storage
+	// SubtitleCache stores full-track PGS (.sup) extracts under the transcode
+	// dir so repeat selections skip the whole-file ffmpeg demux. May be nil
+	// (tests / minimal setups) — extraction then always streams uncached.
+	SubtitleCache *playback.SubtitleCache
+	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
+	S3Client      subtitles.S3Client   // optional; needed for fetching S3 subtitles
+	S3Bucket      string               // bucket for subtitle storage
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -203,8 +208,13 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := h.fileResolver.GetByID(r.Context(), session.MediaFileID)
+	fileID, err := subtitleSourceFileID(r, session)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	file, err := h.fileResolver.GetByID(r.Context(), fileID)
+	if err != nil || file == nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
 	}
@@ -310,6 +320,29 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
 }
 
+// subtitleSourceFileID pins a subtitle URL to the file whose track list was
+// used to create it. A quality/seek restart may change session.MediaFileID to
+// an alternate version; interpreting the old combined track index against the
+// alternate file can silently serve a different language. Only the session's
+// requested or current effective file may be named by the authenticated URL.
+func subtitleSourceFileID(r *http.Request, session *playback.Session) (int, error) {
+	if session == nil {
+		return 0, errors.New("playback session is required")
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("file_id"))
+	if raw == "" {
+		return session.MediaFileID, nil
+	}
+	fileID, err := strconv.Atoi(raw)
+	if err != nil || fileID <= 0 {
+		return 0, errors.New("invalid subtitle source file")
+	}
+	if fileID != session.MediaFileID && fileID != session.RequestedMediaFileID {
+		return 0, errors.New("subtitle source file does not belong to playback session")
+	}
+	return fileID, nil
+}
+
 // HandleSubtitleFonts extracts embedded container font attachments for ASS/SSA
 // playback. The web player loads these bytes into JASSUB before creating the
 // renderer so libass can resolve script font names deterministically.
@@ -337,7 +370,12 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	file, err := h.fileResolver.GetByID(r.Context(), session.MediaFileID)
+	fileID, err := subtitleSourceFileID(r, session)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	file, err := h.fileResolver.GetByID(r.Context(), fileID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
@@ -460,16 +498,25 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		outFormat = "sup"
 	}
 
-	// ASS and PGS are fetched exactly once and consumed whole by their
-	// client-side renderers (JASSUB / libpgs), so they must never be
-	// windowed. Note subtitleSeekPosition falls back to the session's
-	// last reported position even without a ?position= query — relying
-	// on StreamExtractSubtitle's codec guard alone would still log a
+	// ASS is fetched exactly once and consumed whole by its client-side
+	// renderer (JASSUB), so it must never be windowed. PGS defaults to
+	// the same whole-track behavior, but a client that manages its own
+	// sliding window (the web player's libpgs hook) opts in explicitly
+	// with ?windowed=1 + ?position=/?duration=; there is deliberately no
+	// session-position fallback for sup — an implicit window would
+	// silently drop cues for clients that fetch once. Note
+	// subtitleSeekPosition falls back to the session's last reported
+	// position even without a ?position= query — relying on
+	// StreamExtractSubtitle's codec guard alone would still log a
 	// misleading nonzero seek here.
 	var seek, duration float64
-	if outFormat == "vtt" {
+	var allowWindow bool
+	switch outFormat {
+	case "vtt":
 		seek = subtitleSeekPosition(r, session)
 		duration = subtitleWindowDuration(r)
+	case "sup":
+		allowWindow, seek, duration = playback.PGSWindowRequest(r.URL.Query())
 	}
 	slog.InfoContext(r.Context(), "subtitle stream requested", "component", "api",
 		"file_id", file.ID,
@@ -481,28 +528,41 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		"duration_seconds", duration,
 	)
 
-	switch outFormat {
-	case "ass":
-		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
-	case "sup":
-		w.Header().Set("Content-Type", "application/octet-stream")
-	default:
-		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
-	}
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-
-	err := playback.StreamExtractSubtitle(r.Context(), playback.StreamExtractOpts{
+	opts := playback.StreamExtractOpts{
 		InputPath:       file.FilePath,
 		TrackIndex:      embeddedIndex,
 		SourceCodec:     track.Codec,
 		SeekSeconds:     seek,
 		DurationSeconds: duration,
+		AllowWindow:     allowWindow,
 		FFmpegPath:      h.ffmpegPath(),
-		Writer:          w,
-	})
-	if err != nil {
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Full-track PGS extracts are expensive (whole-file demux) and byte-
+	// identical across requests, so they are served from / teed into the
+	// subtitle cache; windowed PGS requests extract their slice from the
+	// cached full track when present (warming it in the background when
+	// not). All other formats stream uncached: VTT is already windowed
+	// and fast, ASS is small.
+	if outFormat == "sup" {
+		err := h.SubtitleCache.ServeSUPExtract(w, r, opts, playback.StreamExtractSubtitle)
+		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)
+		return
+	}
+
+	switch outFormat {
+	case "ass":
+		w.Header().Set("Content-Type", "text/x-ssa; charset=utf-8")
+	default:
+		w.Header().Set("Content-Type", "text/vtt; charset=utf-8")
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+
+	opts.Writer = w
+	if err := playback.StreamExtractSubtitle(r.Context(), opts); err != nil {
 		// Headers already committed — best we can do is log and let
 		// the client see a truncated response.
 		playback.LogSubtitleStreamError(r.Context(), err, file.ID, embeddedIndex)

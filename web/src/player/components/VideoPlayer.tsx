@@ -14,9 +14,10 @@ import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { useRemuxSeeking } from "../hooks/useRemuxSeeking";
 import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
-import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
+import { isBitmapCodec } from "../utils/subtitleCodecs";
 import { useSubtitleAppearance } from "../hooks/useSubtitleAppearance";
-import { useSubtitlePositionStyle } from "../hooks/useSubtitlePositionStyle";
+import { useSubtitleLayout } from "../hooks/useSubtitleLayout";
+import { computeSubtitleFontSize } from "@/lib/subtitleAppearance";
 import { useNextEpisode } from "../hooks/useNextEpisode";
 import { MARKER_KINDS, useMarkerEditor } from "../hooks/useMarkerEditor";
 import { COMPATIBILITY_QUALITY_ID, useTranscodeQuality } from "../hooks/useTranscodeQuality";
@@ -220,6 +221,7 @@ export function VideoPlayer({
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
   const streamOriginRef = useRef(0);
+  const subtitleFetchAnchorRef = useRef(initialPosition);
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
   const autoSkippedIntroKeyRef = useRef<string | null>(null);
@@ -354,6 +356,26 @@ export function VideoPlayer({
   const activeQualityId = transcodeQuality.activeQualityId;
   const switchQuality = transcodeQuality.switchQuality;
   const isPlayerReady = effectiveStreamUrl !== "";
+
+  // Any stream restart (transcode restart on seek, quality/audio switch,
+  // turning off bitmap burn-in) reloads the <video> element, which can orphan
+  // a programmatic TextTrack — cuechange stops firing and the last cue
+  // freezes on screen. Bump a generation on every settled stream change so
+  // useSubtitleTracks rebuilds its track against the new element; the rebuild
+  // carries loaded cues and window coverage over, so it costs no refetch.
+  const [subtitleStreamGeneration, setSubtitleStreamGeneration] = useState(0);
+  const lastSubtitleStreamUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!effectiveStreamUrl) return;
+    const changed =
+      lastSubtitleStreamUrlRef.current !== null &&
+      lastSubtitleStreamUrlRef.current !== effectiveStreamUrl;
+    lastSubtitleStreamUrlRef.current = effectiveStreamUrl;
+    if (changed) {
+      setSubtitleStreamGeneration((generation) => generation + 1);
+    }
+  }, [effectiveStreamUrl]);
+
   const isFirefoxBrowser =
     typeof navigator !== "undefined" &&
     /firefox/i.test(navigator.userAgent) &&
@@ -429,8 +451,15 @@ export function VideoPlayer({
     displayedPlaybackState.playMethod === "remux";
 
   // Keep the player-local clock mapped onto the canonical media timeline.
-  streamOriginRef.current =
+  const streamOriginSeconds =
     effectivePlayMethod === "transcode" ? transcodeQuality.streamOriginSeconds : 0;
+  streamOriginRef.current = streamOriginSeconds;
+
+  // Media-time position playback is heading to, for consumers that need a
+  // position before the element has media loaded (when currentTime still
+  // reads 0): an in-flight seek target, else the session's start position.
+  subtitleFetchAnchorRef.current =
+    pendingSeekTime ?? toMediaTime(effectiveInitialPosition, streamOriginSeconds);
 
   useEffect(() => {
     if (backendDuration > 0) {
@@ -1524,28 +1553,39 @@ export function VideoPlayer({
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const clearControlsTimer = useCallback(() => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
   const resetControlsTimer = useCallback(() => {
     setControlsVisible(true);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    clearControlsTimer();
     hideTimerRef.current = setTimeout(() => {
       if (videoRef.current && !videoRef.current.paused) {
         setControlsVisible(false);
       }
+      hideTimerRef.current = null;
     }, 3000);
-  }, []);
+  }, [clearControlsTimer]);
+
+  const hideControlsOnMouseLeave = useCallback(() => {
+    clearControlsTimer();
+    setControlsVisible(false);
+  }, [clearControlsTimer]);
 
   // Show controls when paused, start hide timer when playing.
   useEffect(() => {
     if (!playing) {
       setControlsVisible(true);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      clearControlsTimer();
     } else {
       resetControlsTimer();
     }
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, [playing, resetControlsTimer]);
+    return clearControlsTimer;
+  }, [clearControlsTimer, playing, resetControlsTimer]);
 
   // -- Marker editing --
   const currentMarkers = useMemo<MarkerDraft>(
@@ -1587,11 +1627,61 @@ export function VideoPlayer({
 
   // -- Subtitle appearance --
   const { settings: subtitleSettings, containerStyle, cueStyle } = useSubtitleAppearance();
-  const subtitlePositionStyle = useSubtitlePositionStyle(
+  const { positionStyle: subtitlePositionStyle, fontScale: subtitleFontScale } = useSubtitleLayout(
     containerRef,
     videoRef,
     subtitleSettings.position,
   );
+  // Scale cue text with the rendered video so subtitles stay proportionally
+  // the same size as the window grows or shrinks.
+  const scaledCueStyle = useMemo(
+    () => ({
+      ...cueStyle,
+      fontSize: computeSubtitleFontSize(subtitleSettings.fontSize, subtitleFontScale),
+    }),
+    [cueStyle, subtitleSettings.fontSize, subtitleFontScale],
+  );
+
+  // Measure the bottom control bar so bottom-anchored subtitles can lift just
+  // above it while it's visible (YouTube-style) instead of hiding behind it.
+  // The base offset scales with the player, but the bar is a roughly fixed
+  // pixel height, so measure rather than hardcode. The .player-hud element is
+  // laid out even while the controls are faded out, so its height is readable
+  // regardless of visibility.
+  const [controlBarHeight, setControlBarHeight] = useState(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || isDetached) return;
+    const hud = container.querySelector<HTMLElement>(".player-hud");
+    if (!hud) return;
+    const update = () => setControlBarHeight(hud.offsetHeight);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(hud);
+    return () => ro.disconnect();
+  }, [isDetached, isPlayerReady, displayMode]);
+
+  // Bottom-anchored cues rise to clear the control bar (plus a small gap) only
+  // while the bar is up and only in the main foreground player; top-anchored
+  // cues never collide with the bottom HUD, so they don't move.
+  const SUBTITLE_HUD_GAP = 12;
+  const baseSubtitleBottomPx = (() => {
+    const raw = subtitlePositionStyle.bottom;
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+    if (typeof raw === "string" && raw.endsWith("px")) {
+      const parsed = parseFloat(raw);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  })();
+  const subtitlesLifted =
+    displayMode === "foreground" &&
+    controlsVisible &&
+    subtitleSettings.position !== "top" &&
+    controlBarHeight > 0;
+  const subtitleLiftPx = subtitlesLifted
+    ? Math.max(0, controlBarHeight + SUBTITLE_HUD_GAP - baseSubtitleBottomPx)
+    : 0;
 
   // -- Subtitle cue matching --
   // Returns active cue texts for custom rendering instead of native TextTrack
@@ -1600,10 +1690,13 @@ export function VideoPlayer({
     videoRef,
     effectiveSubtitleTracks,
     activeSubtitleIndex,
-    streamOriginRef,
+    streamOriginSeconds,
     subtitleDelayMs,
+    durationRef,
+    subtitleFetchAnchorRef,
     liveCues,
     liveTranslation?.trackKey ?? null,
+    subtitleStreamGeneration,
   );
 
   // -- ASS/SSA subtitle rendering via JASSUB (client-side libass) --
@@ -1612,19 +1705,62 @@ export function VideoPlayer({
     subtitleUrls,
     activeSubtitleIndex,
     isDetached,
-    transcodeQuality.streamOriginSeconds,
+    streamOriginSeconds,
     subtitleDelayMs,
   );
 
-  // -- PGS (Blu-ray bitmap) subtitle rendering via libpgs --
-  const { isActive: isPGSActive } = usePGSSubtitles(
-    videoRef,
-    subtitleUrls,
-    activeSubtitleIndex,
-    isDetached,
-    transcodeQuality.streamOriginSeconds,
-    subtitleDelayMs,
+  // -- Bitmap (PGS/DVD/DVB) subtitle burn-in --
+  // Bitmap tracks are composited into the video server-side (the "Plex
+  // route"): selecting one restarts the transcode with subtitle_burn_in at
+  // the current aligned position, reusing the same restart machinery as a
+  // quality/audio switch (including its loading state). No client-side
+  // renderer runs for these tracks — useSubtitleTracks skips bitmap codecs.
+  const externalSubtitleCount = useMemo(
+    () => subtitleUrls.filter((track) => track.source === "external").length,
+    [subtitleUrls],
   );
+  const activeSubtitleTrack =
+    activeSubtitleIndex !== null
+      ? (effectiveSubtitleTracks.find((track) => track.index === activeSubtitleIndex) ?? null)
+      : null;
+  // ffmpeg's burn-in filters index subtitle streams only, so translate the
+  // session-wide track index (external tracks list first) into the embedded
+  // subtitle ordinal.
+  const burnInSubtitleOrdinal =
+    activeSubtitleTrack &&
+    activeSubtitleTrack.source === "embedded" &&
+    isBitmapCodec(activeSubtitleTrack.codec)
+      ? activeSubtitleTrack.index - externalSubtitleCount
+      : null;
+  const burnInSubtitleMediaFileId =
+    burnInSubtitleOrdinal != null ? activeSubtitleTrack?.media_file_id : undefined;
+  const setSubtitleBurnIn = transcodeQuality.setSubtitleBurnIn;
+  useEffect(() => {
+    // Until the element has media loaded (an auto-selected bitmap preference
+    // at session start, or a stream restart), currentTime still reads 0
+    // rather than the resume/seek target — use the intended position instead,
+    // exactly like the subtitle window fetcher does.
+    const video = videoRef.current;
+    const position =
+      video && video.readyState > 0
+        ? currentTimeRef.current
+        : (subtitleFetchAnchorRef.current ?? 0);
+    setSubtitleBurnIn(burnInSubtitleOrdinal, position, burnInSubtitleMediaFileId);
+  }, [burnInSubtitleMediaFileId, burnInSubtitleOrdinal, setSubtitleBurnIn]);
+
+  // A failed burn-in restart rolls the transcode hook back to no bitmap
+  // subtitle. Mirror that rollback in the visible selection so the UI never
+  // claims an unavailable track is active, and selecting it again performs a
+  // real retry instead of being suppressed as an unchanged selection.
+  useEffect(() => {
+    if (
+      burnInSubtitleOrdinal != null &&
+      transcodeQuality.burnInSubtitleIndex == null &&
+      transcodeQuality.error
+    ) {
+      setActiveSubtitleIndex(null);
+    }
+  }, [burnInSubtitleOrdinal, transcodeQuality.burnInSubtitleIndex, transcodeQuality.error]);
 
   // -- Auto-select subtitle track based on mode --
   useEffect(() => {
@@ -2075,6 +2211,8 @@ export function VideoPlayer({
       }
       style={displayMode === "postroll" ? { width: miniPlayerWidth } : undefined}
       onClick={isPostrollVisible ? handleMiniPlayerClick : undefined}
+      onMouseEnter={isDetached ? undefined : resetControlsTimer}
+      onMouseLeave={isDetached ? undefined : hideControlsOnMouseLeave}
       onMouseMove={isDetached ? undefined : resetControlsTimer}
     >
       {/* Postroll resize handle (bottom-left corner) */}
@@ -2266,17 +2404,28 @@ export function VideoPlayer({
         style={!isPlayerReady ? { visibility: "hidden" } : undefined}
       />
 
-      {/* Subtitle overlay — suppressed when JASSUB (ASS) or libpgs (PGS) is rendering */}
-      {!isDetached && !isASSActive && !isPGSActive && activeCueTexts.length > 0 && (
+      {/* Subtitle overlay — suppressed when JASSUB (ASS) is rendering; bitmap
+          tracks are burned into the video server-side and never reach here.
+          While the control bar is up, bottom-anchored cues rise just above it
+          (subtitleLiftPx) so they never overlap the HUD; they settle back when
+          it hides. z-[5] keeps cues below the controls layer (z-10) as a
+          safety, so any residual overlap tucks behind the bar rather than
+          painting on top of it. */}
+      {!isDetached && !isASSActive && activeCueTexts.length > 0 && (
         <div
-          className="pointer-events-none absolute inset-x-0 z-20 flex flex-col items-center gap-1"
-          style={{ ...containerStyle, ...subtitlePositionStyle }}
+          className="pointer-events-none absolute inset-x-0 z-[5] flex flex-col items-center gap-1"
+          style={{
+            ...containerStyle,
+            ...subtitlePositionStyle,
+            transform: `translateY(-${subtitleLiftPx}px)`,
+            transition: "transform 200ms ease",
+          }}
         >
           {activeCueTexts.map((text, i) => (
             <span
               key={i}
               className="inline-block rounded px-3 py-1 text-center leading-snug"
-              style={{ ...cueStyle, whiteSpace: "pre-line" }}
+              style={{ ...scaledCueStyle, whiteSpace: "pre-line" }}
             >
               {text}
             </span>

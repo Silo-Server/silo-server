@@ -53,6 +53,28 @@ func (w *compatImageProxyTagResponseWriter) Write(p []byte) (int, error) {
 	return w.body.Write(p)
 }
 
+// Flush implements http.Flusher for the passthrough (non-JSON) path only.
+// While buffering a JSON body for tag rewriting there is nothing downstream
+// to flush, and flushing the inner writer would commit headers before
+// finish() has rewritten the response.
+func (w *compatImageProxyTagResponseWriter) Flush() {
+	if !w.passthrough {
+		contentType := w.Header().Get("Content-Type")
+		if contentType == "" || isJSONResponse(contentType) {
+			return
+		}
+		w.passthrough = true
+		status := w.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		w.ResponseWriter.WriteHeader(status)
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func (w *compatImageProxyTagResponseWriter) finish() {
 	if w.passthrough {
 		return

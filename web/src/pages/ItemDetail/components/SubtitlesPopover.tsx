@@ -13,12 +13,15 @@ import type {
   SubtitleMode,
 } from "@/player/types";
 import { getLanguageName } from "@/player/utils/languageNames";
+import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
 import {
   buildPrePlaySubtitleCandidates,
-  formatSubtitleCandidateSummary,
+  formatSubtitlePillSummary,
+  inferSubtitleFlagsFromTitle,
   resolveSelectedAudioLanguage,
   resolveAutoSubtitleSelection,
   subtitleSelectionEquals,
+  type PrePlaySubtitleCandidate,
 } from "./prePlaySelection";
 
 interface SubtitlesPopoverProps {
@@ -82,7 +85,7 @@ function SelectionRow({
   const content = (
     <>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-sm font-medium">{title}</span>
           {badges}
         </div>
@@ -128,29 +131,37 @@ function SubtitleSection({
     <div>
       <div className="text-muted-foreground/60 mb-1 px-3 text-[11px] font-medium">{title}</div>
       <div className="space-y-0.5">
-        {rows.map((row) => (
-          <SelectionRow
-            key={row.key}
-            active={subtitleSelectionEquals(activeSelection, row.selection)}
-            title={row.summary}
-            description={row.title || row.releaseName}
-            onSelect={onSelectSubtitle ? () => onSelectSubtitle(row.selection) : undefined}
-            badges={
-              <>
-                {row.codec && (
-                  <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
-                    {row.codec}
-                  </Badge>
-                )}
-                <SubtitleFlagBadges
-                  forced={row.forced}
-                  hearingImpaired={row.hearingImpaired}
-                  isDefault={row.default}
-                />
-              </>
-            }
-          />
-        ))}
+        {rows.map((row) => {
+          const titleFlags = inferSubtitleFlagsFromTitle(row.title);
+          const description =
+            row.title && !titleFlags.flagOnly && !isSubtitleFormatLabel(row.title, row.codec)
+              ? row.title
+              : row.releaseName;
+
+          return (
+            <SelectionRow
+              key={row.key}
+              active={subtitleSelectionEquals(activeSelection, row.selection)}
+              title={row.summary}
+              description={description}
+              onSelect={onSelectSubtitle ? () => onSelectSubtitle(row.selection) : undefined}
+              badges={
+                <>
+                  {row.codec && (
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
+                      {getSubtitleFormatLabel(row.codec) || row.codec.toUpperCase()}
+                    </Badge>
+                  )}
+                  <SubtitleFlagBadges
+                    forced={row.forced || titleFlags.forced}
+                    hearingImpaired={row.hearingImpaired || titleFlags.hearingImpaired}
+                    isDefault={row.default}
+                  />
+                </>
+              }
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -160,10 +171,22 @@ function formatExplicitSelectionSummary(
   selection: PrePlaySubtitleSelection | null | undefined,
 ): string {
   if (!selection) return "Off";
-  return formatSubtitleCandidateSummary({
+  return formatSubtitlePillSummary({
+    label: selection.label,
     languageLabel: getLanguageName(selection.language ?? "") || selection.language || "Unknown",
+    codec: selection.codec,
     forced: selection.forced,
     hearingImpaired: selection.hearing_impaired,
+  });
+}
+
+function formatCandidatePillSummary(candidate: PrePlaySubtitleCandidate): string {
+  return formatSubtitlePillSummary({
+    label: candidate.selection.label,
+    languageLabel: candidate.languageLabel,
+    codec: candidate.codec,
+    forced: candidate.forced,
+    hearingImpaired: candidate.hearingImpaired,
   });
 }
 
@@ -182,7 +205,11 @@ export default function SubtitlesPopover({
   onResetSelection,
 }: SubtitlesPopoverProps) {
   const [open, setOpen] = useState(false);
-  const downloadedQuery = useDownloadedSubtitles(open ? version?.file_id : undefined);
+  // Downloaded subtitles normally load lazily on open, but when the saved
+  // preference points at one, the closed trigger's Auto summary needs them
+  // to reflect the override.
+  const needsDownloaded = open || preferredSubtitleTrackSignature?.source === "downloaded";
+  const downloadedQuery = useDownloadedSubtitles(needsDownloaded ? version?.file_id : undefined);
   const isInteractive = Boolean(onSelectSubtitle || onSelectSubtitleOff || onResetSelection);
 
   const candidates = useMemo(
@@ -217,12 +244,26 @@ export default function SubtitlesPopover({
 
   if (!version) return null;
 
+  // A stored track signature means a manual override is saved for this item;
+  // present the resolved track as the selection rather than an "Auto" guess.
+  const overrideCandidate =
+    selectionMode === "auto" && preferredSubtitleTrackSignature ? autoCandidate : null;
+
   const activeSummary =
     selectionMode === "auto"
-      ? `Auto: ${autoCandidate?.summary ?? "Off"}`
+      ? overrideCandidate
+        ? formatCandidatePillSummary(overrideCandidate)
+        : `Auto: ${autoCandidate ? formatCandidatePillSummary(autoCandidate) : "Off"}`
       : selectionMode === "off"
         ? "Off"
         : formatExplicitSelectionSummary(explicitSelection);
+
+  const activeListSelection =
+    !isInteractive || selectionMode === "off"
+      ? null
+      : selectionMode === "explicit"
+        ? explicitSelection
+        : (overrideCandidate?.selection ?? null);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -233,7 +274,7 @@ export default function SubtitlesPopover({
         >
           <Captions className="size-3.5" />
           Subs
-          <span className="text-muted-foreground max-w-20 truncate text-[11px] font-normal sm:max-w-24">
+          <span className="text-muted-foreground max-w-44 truncate text-[11px] font-normal sm:max-w-64">
             {isInteractive ? activeSummary : candidates.all.length}
           </span>
           <ChevronDown className="text-muted-foreground size-3" />
@@ -244,9 +285,13 @@ export default function SubtitlesPopover({
           {isInteractive && (
             <>
               <SelectionRow
-                active={selectionMode === "auto"}
+                active={selectionMode === "auto" && !overrideCandidate}
                 title="Auto"
-                description={autoCandidate?.summary ?? "Off"}
+                description={
+                  overrideCandidate
+                    ? "Reset to profile defaults"
+                    : (autoCandidate?.summary ?? "Off")
+                }
                 onSelect={onResetSelection}
               />
               <SelectionRow
@@ -259,17 +304,13 @@ export default function SubtitlesPopover({
           <SubtitleSection
             title="Embedded"
             rows={candidates.embedded}
-            activeSelection={
-              isInteractive && selectionMode === "explicit" ? explicitSelection : null
-            }
+            activeSelection={activeListSelection}
             onSelectSubtitle={onSelectSubtitle}
           />
           <SubtitleSection
             title="External"
             rows={candidates.external}
-            activeSelection={
-              isInteractive && selectionMode === "explicit" ? explicitSelection : null
-            }
+            activeSelection={activeListSelection}
             onSelectSubtitle={onSelectSubtitle}
           />
           {downloadedQuery.isLoading ? (
@@ -281,9 +322,7 @@ export default function SubtitlesPopover({
             <SubtitleSection
               title="Downloaded"
               rows={candidates.downloaded}
-              activeSelection={
-                isInteractive && selectionMode === "explicit" ? explicitSelection : null
-              }
+              activeSelection={activeListSelection}
               onSelectSubtitle={onSelectSubtitle}
             />
           )}

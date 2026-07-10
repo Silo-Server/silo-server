@@ -41,6 +41,7 @@ type TranscodeStartRequest struct {
 	AudioTrackIndex    int     `json:"audio_track_index"`
 	SubtitleTrackIndex int     `json:"subtitle_track_index"`
 	SubtitleBurnIn     bool    `json:"subtitle_burn_in"`
+	SubtitleCodec      string  `json:"subtitle_codec,omitempty"`
 	TotalDuration      float64 `json:"total_duration"`
 }
 
@@ -309,6 +310,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		AudioTrackIndex:    req.AudioTrackIndex,
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
+		SubtitleCodec:      req.SubtitleCodec,
 		TotalDuration:      req.TotalDuration,
 		FastStart:          true,
 		NodeType:           "transcode",

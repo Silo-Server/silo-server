@@ -338,6 +338,7 @@ type startPlaybackRequest struct {
 	HDR                          bool                          `json:"hdr"`
 	HdrDetails                   *hdrDetails                   `json:"hdr_details,omitempty"`
 	AudioPassthrough             *audioPassthroughCapabilities `json:"audio_passthrough,omitempty"`
+	SupportsBitmapSubtitleBurnIn bool                          `json:"supports_bitmap_subtitle_burn_in,omitempty"`
 }
 
 // progressRequest represents the JSON body for POST /playback/{session_id}/progress.
@@ -372,6 +373,7 @@ type playbackInfoResult struct {
 // subtitleURL represents a subtitle track URL in a playback response.
 type subtitleURL struct {
 	Index           int    `json:"index"`
+	MediaFileID     int    `json:"media_file_id,omitempty"`
 	Language        string `json:"language"`
 	Codec           string `json:"codec,omitempty"`
 	Label           string `json:"label"`
@@ -398,15 +400,16 @@ type changeAudioResponse struct {
 }
 
 type transcodeStartRequest struct {
-	SessionID          string  `json:"session_id"`
-	SeekSeconds        float64 `json:"seek_seconds"`
-	TargetResolution   string  `json:"target_resolution"`
-	TargetCodecVideo   string  `json:"target_codec_video"`
-	TargetCodecAudio   string  `json:"target_codec_audio"`
-	TargetBitrateKbps  int     `json:"target_bitrate_kbps"`
-	SegmentDuration    int     `json:"segment_duration"`
-	SubtitleTrackIndex int     `json:"subtitle_track_index"`
-	SubtitleBurnIn     bool    `json:"subtitle_burn_in"`
+	SessionID           string  `json:"session_id"`
+	SeekSeconds         float64 `json:"seek_seconds"`
+	TargetResolution    string  `json:"target_resolution"`
+	TargetCodecVideo    string  `json:"target_codec_video"`
+	TargetCodecAudio    string  `json:"target_codec_audio"`
+	TargetBitrateKbps   int     `json:"target_bitrate_kbps"`
+	SegmentDuration     int     `json:"segment_duration"`
+	SubtitleTrackIndex  int     `json:"subtitle_track_index"`
+	SubtitleMediaFileID int     `json:"subtitle_media_file_id,omitempty"`
+	SubtitleBurnIn      bool    `json:"subtitle_burn_in"`
 }
 
 type transcodeStartResponse struct {
@@ -866,7 +869,20 @@ func (h *PlaybackHandler) resolveCapabilityPlaybackSelection(
 		alt, err := h.findAlternateFile(ctx, requestedFile)
 		if err == nil && alt != nil {
 			effectiveFile := h.ensurePlaybackProbe(ctx, alt)
-			audioTrackIndex = normalizeAudioTrackIndex(effectiveFile, audioTrackIndex)
+			effectiveAudioTrackIndex := playback.MatchAudioTrackAcrossVersions(
+				requestedFile.AudioTracks,
+				effectiveFile.AudioTracks,
+				audioTrackIndex,
+			)
+			if effectiveAudioTrackIndex != audioTrackIndex {
+				slog.InfoContext(ctx, "remapped audio track for alternate file",
+					"requested_file_id", requestedFile.ID,
+					"effective_file_id", effectiveFile.ID,
+					"requested_audio_track_index", audioTrackIndex,
+					"effective_audio_track_index", effectiveAudioTrackIndex,
+				)
+			}
+			audioTrackIndex = effectiveAudioTrackIndex
 			method, transcodeAudio = resolvePlaybackMethodForFile(effectiveFile, req, audioTrackIndex, adminSettings)
 			return effectiveFile, method, transcodeAudio, audioTrackIndex
 		}
@@ -1587,7 +1603,12 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	if h.SubtitleRepo != nil && effectiveFile != nil {
 		downloadedSubs, _ = h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), effectiveFile.ID)
 	}
-	resp.SubtitleURLs = buildSubtitleURLs(session.ID, effectiveFile, downloadedSubs)
+	resp.SubtitleURLs = buildSubtitleURLs(
+		session.ID,
+		effectiveFile,
+		downloadedSubs,
+		req.SupportsBitmapSubtitleBurnIn,
+	)
 
 	// If stream nodes are available, generate proxy-based stream URLs.
 	// Remux and transcode both use HLS via a transcode node, so the planner
@@ -1667,8 +1688,8 @@ func playbackClientInfoFromRequest(r *http.Request) playback.ClientInfo {
 
 // subtitleURLExt returns the URL file extension for a subtitle codec.
 // ASS/SSA tracks get ".ass" so the frontend can request raw ASS data for
-// client-side rendering (JASSUB); PGS tracks get ".sup" for client-side
-// bitmap rendering (libpgs); all other text formats get ".vtt".
+// client-side rendering (JASSUB); PGS tracks get ".sup" for native clients
+// capable of rendering bitmap sidecars; all other text formats get ".vtt".
 func subtitleURLExt(codec string) string {
 	switch {
 	case playback.IsASS(codec):
@@ -1679,7 +1700,12 @@ func subtitleURLExt(codec string) string {
 	return ".vtt"
 }
 
-func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []subtitles.DownloadedSubtitle) []subtitleURL {
+func buildSubtitleURLs(
+	sessionID string,
+	file *models.MediaFile,
+	downloaded []subtitles.DownloadedSubtitle,
+	includeBurnInOnly bool,
+) []subtitleURL {
 	if file == nil {
 		return nil
 	}
@@ -1689,35 +1715,38 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 	for i, sub := range file.ExternalSubtitles {
 		urls = append(urls, subtitleURL{
 			Index:           i,
+			MediaFileID:     file.ID,
 			Language:        sub.Language,
 			Codec:           sub.Format,
 			Label:           firstNonEmptyString(sub.Title, sub.EmbeddedTitle, filepath.Base(sub.Path), sub.Language),
 			Source:          "external",
 			Forced:          sub.Forced,
 			HearingImpaired: sub.HearingImpaired,
-			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, i, subtitleURLExt(sub.Format)),
+			URL:             subtitleStreamURL(sessionID, i, sub.Format, file.ID),
 		})
 	}
 
 	embeddedOffset := len(file.ExternalSubtitles)
 	for i, track := range file.SubtitleTracks {
-		// PGS bitmap tracks are deliverable as .sup streams for
-		// client-side rendering; DVD/DVB bitmap tracks still have no
-		// non-burn-in delivery path, so they stay hidden.
-		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) {
+		// PGS remains universally deliverable as a .sup sidecar. DVD/DVB
+		// bitmap tracks have no usable sidecar representation, so advertise
+		// them only to clients that explicitly declare server-side burn-in
+		// support. Older Apple/Android clients otherwise expose a text URL
+		// that ffmpeg cannot serve.
+		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) && !includeBurnInOnly {
 			continue
 		}
-
 		urls = append(urls, subtitleURL{
 			Index:           embeddedOffset + i,
+			MediaFileID:     file.ID,
 			Language:        track.Language,
 			Codec:           track.Codec,
 			Label:           firstNonEmptyString(track.Title, track.EmbeddedTitle, track.Language),
 			Source:          "embedded",
 			Forced:          track.Forced,
 			HearingImpaired: track.HearingImpaired,
-			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, embeddedOffset+i, subtitleURLExt(track.Codec)),
-			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec),
+			URL:             subtitleStreamURL(sessionID, embeddedOffset+i, track.Codec, file.ID),
+			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec, file.ID),
 		})
 	}
 
@@ -1725,23 +1754,28 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 	for i, dl := range downloaded {
 		urls = append(urls, subtitleURL{
 			Index:           downloadedOffset + i,
+			MediaFileID:     file.ID,
 			Language:        dl.Language,
 			Codec:           string(dl.Format),
 			Label:           dl.ReleaseName + " (" + dl.Provider + ")",
 			Source:          "downloaded",
 			HearingImpaired: dl.HearingImpaired,
-			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, downloadedOffset+i, subtitleURLExt(string(dl.Format))),
+			URL:             subtitleStreamURL(sessionID, downloadedOffset+i, string(dl.Format), file.ID),
 		})
 	}
 
 	return urls
 }
 
-func subtitleFontBundleURL(sessionID string, trackIndex int, codec string) string {
+func subtitleStreamURL(sessionID string, trackIndex int, codec string, fileID int) string {
+	return fmt.Sprintf("/stream/%s/subtitles/%d%s?file_id=%d", sessionID, trackIndex, subtitleURLExt(codec), fileID)
+}
+
+func subtitleFontBundleURL(sessionID string, trackIndex int, codec string, fileID int) string {
 	if !playback.IsASS(codec) {
 		return ""
 	}
-	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts", sessionID, trackIndex)
+	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts?file_id=%d", sessionID, trackIndex, fileID)
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -1986,8 +2020,9 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 	if session.PlayMethod == playback.PlayTranscode {
 		if ts := h.tm.GetTranscodeSession(sessionID); ts != nil {
 			ts.SetAudioTrackIndex(req.AudioTrackIndex)
-			seekSeconds := req.Position
-			startSegment := computeStartSegment(seekSeconds, ts.Opts().SegmentDuration)
+			tsOpts := ts.Opts()
+			startSegment := computeStartSegment(req.Position, tsOpts.SegmentDuration)
+			seekSeconds := alignedSeekSeconds(req.Position, tsOpts.SegmentDuration, tsOpts.TargetCodecVideo)
 			// Throttler + exit monitor re-arm via the session's restart hook.
 			if restartErr := h.tm.RestartSessionLocked(context.WithoutCancel(r.Context()), sessionID, ts, seekSeconds, startSegment); restartErr != nil {
 				slog.ErrorContext(r.Context(), "failed to restart transcode for audio switch", "component", "api", "session", sessionID, "error", restartErr)
@@ -2061,7 +2096,6 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				nodeURL := plan.TranscodeNode.URL
 				_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, nodeURL)
 
-				seekSeconds := req.Position
 				// Restart from the FULL live recipe, not a partial re-derivation.
 				// An audio switch alters only audio selection — subtitle burn-in and
 				// the segment cadence must be preserved, or the node re-encodes a
@@ -2075,8 +2109,13 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				if segmentDuration <= 0 {
 					segmentDuration = playback.DefaultSegmentDuration
 				}
+				seekSeconds := alignedSeekSeconds(req.Position, segmentDuration, updatedSession.TargetVideoCodec)
 				subtitleTrackIndex := session.SubtitleTrackIndex
 				subtitleBurnIn := session.SubtitleBurnIn
+				subtitleCodec := ""
+				if subtitleBurnIn && subtitleTrackIndex >= 0 {
+					subtitleCodec = embeddedSubtitleCodec(file, subtitleTrackIndex)
+				}
 				startSegment := computeStartSegment(seekSeconds, segmentDuration)
 
 				// Derive the encode recipe the same way HandleStartTranscode
@@ -2099,6 +2138,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 					AudioTrackIndex:    req.AudioTrackIndex,
 					SubtitleTrackIndex: subtitleTrackIndex,
 					SubtitleBurnIn:     subtitleBurnIn,
+					SubtitleCodec:      subtitleCodec,
 					TotalDuration:      float64(file.Duration),
 				}
 				if strings.TrimSpace(nodeReq.HWAccel) == "" {
@@ -2154,6 +2194,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 					AudioTrackIndex:    nodeReq.AudioTrackIndex,
 					SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
 					SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
+					SubtitleCodec:      nodeReq.SubtitleCodec,
 					TotalDuration:      nodeReq.TotalDuration,
 				})
 				resp.StreamURL = h.buildProxyManifestURL(card, proxyNode)
@@ -2254,6 +2295,49 @@ func (h *PlaybackHandler) loadAuthorizedFile(r *http.Request, fileID int) (*mode
 	return file, nil
 }
 
+// embeddedSubtitleCodec returns the probed codec of the embedded subtitle
+// track at the given ffmpeg-relative subtitle ordinal (the same index the
+// subtitles=si=N / [0:s:N] filters use), or "" when out of range.
+func embeddedSubtitleCodec(file *models.MediaFile, ffmpegSubtitleIndex int) string {
+	if file == nil || ffmpegSubtitleIndex < 0 || ffmpegSubtitleIndex >= len(file.SubtitleTracks) {
+		return ""
+	}
+	return file.SubtitleTracks[ffmpegSubtitleIndex].Codec
+}
+
+// resolveBurnInSubtitle maps a subtitle selection made against requestedFile
+// onto effectiveFile. The 4K guard may replace the requested file with a
+// lower-resolution version whose subtitle streams have a different order; a
+// raw ordinal carried across that switch can burn the wrong language.
+func resolveBurnInSubtitle(requestedFile, effectiveFile *models.MediaFile, requestedIndex int) (int, string, bool) {
+	if requestedFile == nil || effectiveFile == nil || requestedIndex < 0 || requestedIndex >= len(requestedFile.SubtitleTracks) {
+		return -1, "", false
+	}
+	if requestedFile.ID == effectiveFile.ID {
+		track := effectiveFile.SubtitleTracks[requestedIndex]
+		return requestedIndex, track.Codec, true
+	}
+
+	selected := requestedFile.SubtitleTracks[requestedIndex]
+	for i, candidate := range effectiveFile.SubtitleTracks {
+		if subtitleTracksMatch(selected, candidate) {
+			return i, candidate.Codec, true
+		}
+	}
+	return -1, "", false
+}
+
+func subtitleTracksMatch(a, b models.SubtitleTrack) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Language), strings.TrimSpace(b.Language)) &&
+		strings.EqualFold(strings.TrimSpace(a.Codec), strings.TrimSpace(b.Codec)) &&
+		strings.EqualFold(
+			strings.TrimSpace(firstNonEmptyString(a.Title, a.EmbeddedTitle)),
+			strings.TrimSpace(firstNonEmptyString(b.Title, b.EmbeddedTitle)),
+		) &&
+		a.Forced == b.Forced &&
+		a.HearingImpaired == b.HearingImpaired
+}
+
 // computeStartSegment returns the HLS segment number corresponding to a seek
 // position given the segment duration. Both remote and local transcode paths
 // use this to align ffmpeg output filenames with the VOD manifest.
@@ -2265,6 +2349,25 @@ func computeStartSegment(seekSeconds float64, segmentDuration int) int {
 		return 0
 	}
 	return int(seekSeconds / float64(segmentDuration))
+}
+
+// alignedSeekSeconds snaps an encoded transcode's ffmpeg start position down
+// to the boundary of the segment computeStartSegment assigns it. The synthetic
+// VOD manifest declares segment N to begin at exactly N×segmentDuration;
+// spawning ffmpeg at the raw seek position makes segment N actually begin up
+// to one segment later, and hls.js aligns that content to the declared
+// position — shifting the session's entire timeline (audio, video, and every
+// out-of-band subtitle cue) late by seek mod segmentDuration. Copy-mode
+// sessions serve ffmpeg's real manifest, whose declared timings match the
+// fragments it produces, so they keep the raw seek.
+func alignedSeekSeconds(seekSeconds float64, segmentDuration int, targetVideoCodec string) float64 {
+	if strings.EqualFold(targetVideoCodec, "copy") || seekSeconds <= 0 {
+		return seekSeconds
+	}
+	if segmentDuration <= 0 {
+		segmentDuration = 2
+	}
+	return float64(computeStartSegment(seekSeconds, segmentDuration) * segmentDuration)
 }
 
 // transcodeStartState holds the common parameters needed to finalize a
@@ -2406,6 +2509,38 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	}
 	file = h.ensurePlaybackProbe(r.Context(), file)
 	requestedFile := file
+	if originalFileID := requestedMediaFileID(session); originalFileID > 0 && originalFileID != file.ID {
+		originalFile, loadErr := h.loadFileByPreferredID(r.Context(), originalFileID, 0)
+		if loadErr != nil || originalFile == nil {
+			requestedFile = nil
+		} else {
+			requestedFile = h.ensurePlaybackProbe(r.Context(), originalFile)
+		}
+	}
+
+	// Subtitle ordinals are meaningful only within the file inventory that
+	// produced them. New clients echo the media_file_id advertised beside the
+	// selected subtitle URL. Clients that omit it retain the legacy behavior of
+	// selecting against RequestedMediaFileID so existing restart flows continue
+	// to remap original-file ordinals after the 4K guard switches versions.
+	subtitleSourceFile := requestedFile
+	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
+		switch {
+		case req.SubtitleMediaFileID <= 0:
+			// Legacy request: requestedFile is the historical source inventory.
+		case file != nil && req.SubtitleMediaFileID == file.ID:
+			subtitleSourceFile = file
+		case requestedFile != nil && req.SubtitleMediaFileID == requestedFile.ID:
+			subtitleSourceFile = requestedFile
+		default:
+			subtitleSourceFile = nil
+		}
+		if subtitleSourceFile == nil {
+			writeError(w, http.StatusUnprocessableEntity, "subtitle_source_unavailable",
+				"Media file inventory for the selected subtitle is unavailable")
+			return
+		}
+	}
 
 	// Resume and seek-start requests generally cannot safely stream-copy video
 	// into HLS output. Arbitrary HEVC seek points often land on non-keyframes,
@@ -2417,6 +2552,21 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			"playback_session_id", req.SessionID,
 			"seek_seconds", req.SeekSeconds,
 			"source_video_codec", file.CodecVideo,
+			"requested_target_codec_video", req.TargetCodecVideo,
+			"effective_target_codec_video", "h264",
+		)
+		req.TargetCodecVideo = "h264"
+	}
+
+	// Subtitle burn-in composites subtitles into the video frames, which is
+	// impossible with -c:v copy. If the requested recipe would stream-copy
+	// video (e.g. a remux "original" restart that adds burn-in), force an
+	// encoding transcode so the burned frames are actually produced instead of
+	// the subtitle selection being silently dropped by the filter stage.
+	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 && strings.EqualFold(req.TargetCodecVideo, "copy") {
+		slog.Info("forcing video transcode for subtitle burn-in request",
+			"playback_session_id", req.SessionID,
+			"subtitle_track_index", req.SubtitleTrackIndex,
 			"requested_target_codec_video", req.TargetCodecVideo,
 			"effective_target_codec_video", "h264",
 		)
@@ -2460,6 +2610,31 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Resolve the burn-in track's probed codec so the ffmpeg arg builder can
+	// route bitmap codecs (PGS/DVD/DVB) to the overlay filter_complex pipeline
+	// instead of the text-only libass subtitles filter. Derived server-side
+	// from the effective file rather than trusted from the client.
+	subtitleCodec := ""
+	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
+		resolvedIndex, resolvedCodec, ok := resolveBurnInSubtitle(subtitleSourceFile, file, req.SubtitleTrackIndex)
+		if !ok {
+			writeError(w, http.StatusUnprocessableEntity, "subtitle_unavailable_in_version",
+				"Selected subtitle track is unavailable in the effective file version")
+			return
+		}
+		if resolvedIndex != req.SubtitleTrackIndex {
+			slog.Info("remapped subtitle burn-in track for alternate file",
+				"playback_session_id", req.SessionID,
+				"subtitle_source_file_id", subtitleSourceFile.ID,
+				"effective_file_id", file.ID,
+				"requested_subtitle_track_index", req.SubtitleTrackIndex,
+				"effective_subtitle_track_index", resolvedIndex,
+			)
+		}
+		req.SubtitleTrackIndex = resolvedIndex
+		subtitleCodec = resolvedCodec
+	}
+
 	// Determine whether to run locally or forward to a remote transcode node.
 	var plan nodepool.Plan
 	if h.NodePlanner != nil {
@@ -2481,7 +2656,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			SessionID:          req.SessionID,
 			InputPath:          file.FilePath,
 			SourceVideoCodec:   file.CodecVideo,
-			SeekSeconds:        req.SeekSeconds,
+			SeekSeconds:        alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
 			StartSegmentNumber: computeStartSegment(req.SeekSeconds, req.SegmentDuration),
 			TargetResolution:   req.TargetResolution,
 			TargetCodecVideo:   req.TargetCodecVideo,
@@ -2492,6 +2667,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			AudioTrackIndex:    session.AudioTrackIndex,
 			SubtitleTrackIndex: req.SubtitleTrackIndex,
 			SubtitleBurnIn:     req.SubtitleBurnIn,
+			SubtitleCodec:      subtitleCodec,
 			TotalDuration:      float64(file.Duration),
 		}
 
@@ -2553,6 +2729,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			AudioTrackIndex:    nodeReq.AudioTrackIndex,
 			SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
 			SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
+			SubtitleCodec:      nodeReq.SubtitleCodec,
 			TotalDuration:      nodeReq.TotalDuration,
 		})
 		manifestURL := h.buildProxyManifestURL(card, plan.ProxyNode)
@@ -2595,7 +2772,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		OutputDir:          filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
 		SessionID:          req.SessionID,
 		SourceVideoCodec:   file.CodecVideo,
-		SeekSeconds:        req.SeekSeconds,
+		SeekSeconds:        alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
 		StartSegmentNumber: computeStartSegment(req.SeekSeconds, req.SegmentDuration),
 		TargetResolution:   req.TargetResolution,
 		TargetCodecVideo:   req.TargetCodecVideo,
@@ -2608,6 +2785,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		AudioTrackIndex:    session.AudioTrackIndex,
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
+		SubtitleCodec:      subtitleCodec,
 		TotalDuration:      float64(file.Duration),
 		FastStart:          true,
 		NodeType:           "integrated",

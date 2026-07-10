@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isASSCodec, isBitmapCodec, isPGSCodec } from "./subtitleCodecs";
+import { isASSCodec, isBitmapCodec, isPGSCodec, isSubtitleFormatLabel } from "./subtitleCodecs";
 
 describe("isPGSCodec", () => {
   it("matches PGS codec names case-insensitively", () => {
@@ -37,5 +37,18 @@ describe("isASSCodec", () => {
     expect(isASSCodec("ssa")).toBe(true);
     expect(isASSCodec("pgs")).toBe(false);
     expect(isASSCodec(undefined)).toBe(false);
+  });
+});
+
+describe("isSubtitleFormatLabel", () => {
+  it("recognizes raw codec names and friendly aliases", () => {
+    expect(isSubtitleFormatLabel("SUBRIP", "subrip")).toBe(true);
+    expect(isSubtitleFormatLabel("SRT", "subrip")).toBe(true);
+    expect(isSubtitleFormatLabel("PGS", "hdmv_pgs_subtitle")).toBe(true);
+  });
+
+  it("preserves meaningful track titles", () => {
+    expect(isSubtitleFormatLabel("Forced", "subrip")).toBe(false);
+    expect(isSubtitleFormatLabel("Latin American", "subrip")).toBe(false);
   });
 });
