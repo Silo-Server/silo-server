@@ -75,6 +75,9 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // Flush implements http.Flusher so progressive responses keep flushing
 // through the metrics wrapper instead of silently buffering.
 func (w *statusWriter) Flush() {
+	if !w.written {
+		w.WriteHeader(http.StatusOK)
+	}
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}

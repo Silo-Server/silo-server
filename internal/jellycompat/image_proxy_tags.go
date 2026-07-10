@@ -59,7 +59,16 @@ func (w *compatImageProxyTagResponseWriter) Write(p []byte) (int, error) {
 // finish() has rewritten the response.
 func (w *compatImageProxyTagResponseWriter) Flush() {
 	if !w.passthrough {
-		return
+		contentType := w.Header().Get("Content-Type")
+		if contentType == "" || isJSONResponse(contentType) {
+			return
+		}
+		w.passthrough = true
+		status := w.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		w.ResponseWriter.WriteHeader(status)
 	}
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()

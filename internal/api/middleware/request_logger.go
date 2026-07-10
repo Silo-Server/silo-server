@@ -106,6 +106,9 @@ func (w *requestStatusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // extracts, remux output) keep flushing through the logging wrapper instead of
 // silently buffering until the handler returns.
 func (w *requestStatusWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
