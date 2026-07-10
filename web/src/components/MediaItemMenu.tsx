@@ -262,8 +262,8 @@ export default function MediaItemMenu({
       }
       case "viewDetails": {
         setFilesDialogOpen(true);
-		return;
-	  }
+        return;
+      }
       case "toggleHidden": {
         if (!currentUserState) return;
         await hiddenMutation.mutateAsync(currentUserState.is_hidden);

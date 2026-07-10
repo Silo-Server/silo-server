@@ -1217,6 +1217,7 @@ type userAgnosticSectionFetch func(ctx context.Context, s ResolvedSection, libra
 //
 // Deliberately absent despite having the user-agnostic signature:
 //   - SectionRandom — user-agnostic but must reshuffle per request;
+//   - SectionCriticallyAcclaimed — excludes recommendations hidden by profile;
 //   - SectionEditorialSpotlight — has its own candidate cache + rotation and a
 //     dedicated FetchOne branch;
 //   - SectionGenre / SectionCustomFilter — fetchFiltered shares the signature,
