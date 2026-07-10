@@ -339,13 +339,15 @@ export function formatOriginalAudioCodec(
   version?: PlayerFileVersion,
   track?: PlayerAudioTrack,
 ): string {
+  const trackFormat = formatAudioTrackLabel(track);
+  if (trackFormat.includes("Atmos")) {
+    return trackFormat;
+  }
   const title = track?.title || track?.embedded_title;
   if (title) {
     return title;
   }
-  return (
-    formatAudioTrackLabel(track) || formatAudioTrackLabel({ codec: version?.codec_audio }) || "—"
-  );
+  return trackFormat || formatAudioTrackLabel({ codec: version?.codec_audio }) || "—";
 }
 
 export function formatAudioChannels(version?: PlayerFileVersion, track?: PlayerAudioTrack): string {

@@ -102,9 +102,7 @@ describe("playback info helpers", () => {
       "Dolby Vision Profile 8.1 (HDR10)",
     );
     expect(rowValue(sections, "Current Source File", "Color range")).toBe("Limited (tv)");
-    expect(rowValue(sections, "Current Source File", "Audio codec")).toBe(
-      "EAC3 Dolby Digital Plus + Dolby Atmos",
-    );
+    expect(rowValue(sections, "Current Source File", "Audio codec")).toBe("DD+ Atmos");
     expect(rowValue(sections, "Current Source File", "Audio bitrate")).toBe("640 kbps");
     expect(rowValue(sections, "Current Source File", "Audio channels")).toBe("6");
     expect(rowValue(sections, "Current Source File", "Audio sample rate")).toBe("48,000 Hz");
@@ -185,6 +183,7 @@ describe("playback info helpers", () => {
         ],
         audio_tracks: [
           {
+            title: "E-AC-3",
             codec: "eac3",
             profile: "Dolby Digital Plus + Dolby Atmos",
             channels: 6,
