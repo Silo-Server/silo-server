@@ -155,13 +155,21 @@ export default function MovieContent({ item }: { item: ItemDetail & { type: "mov
     setExplicitSubtitleSelection(selection);
     // Persist as this movie's override so the choice sticks across visits,
     // exactly like a manual in-player selection.
-    setSubtitlePreference.mutate({ prefId: item.content_id, selection });
+    setSubtitlePreference.mutate({
+      prefId: item.content_id,
+      selection,
+      showForcedSubtitles: item.effective_show_forced_subtitles,
+    });
   };
 
   const handleSelectSubtitleOff = () => {
     setSubtitleSelectionMode("off");
     setExplicitSubtitleSelection(null);
-    setSubtitlePreference.mutate({ prefId: item.content_id, selection: null });
+    setSubtitlePreference.mutate({
+      prefId: item.content_id,
+      selection: null,
+      showForcedSubtitles: item.effective_show_forced_subtitles,
+    });
   };
 
   const handleResetSubtitleSelection = () => {

@@ -338,6 +338,7 @@ type startPlaybackRequest struct {
 	HDR                          bool                          `json:"hdr"`
 	HdrDetails                   *hdrDetails                   `json:"hdr_details,omitempty"`
 	AudioPassthrough             *audioPassthroughCapabilities `json:"audio_passthrough,omitempty"`
+	SupportsBitmapSubtitleBurnIn bool                          `json:"supports_bitmap_subtitle_burn_in,omitempty"`
 }
 
 // progressRequest represents the JSON body for POST /playback/{session_id}/progress.
@@ -1587,7 +1588,12 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 	if h.SubtitleRepo != nil && effectiveFile != nil {
 		downloadedSubs, _ = h.SubtitleRepo.ListDownloadedSubtitles(r.Context(), effectiveFile.ID)
 	}
-	resp.SubtitleURLs = buildSubtitleURLs(session.ID, effectiveFile, downloadedSubs)
+	resp.SubtitleURLs = buildSubtitleURLs(
+		session.ID,
+		effectiveFile,
+		downloadedSubs,
+		req.SupportsBitmapSubtitleBurnIn,
+	)
 
 	// If stream nodes are available, generate proxy-based stream URLs.
 	// Remux and transcode both use HLS via a transcode node, so the planner
@@ -1679,7 +1685,12 @@ func subtitleURLExt(codec string) string {
 	return ".vtt"
 }
 
-func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []subtitles.DownloadedSubtitle) []subtitleURL {
+func buildSubtitleURLs(
+	sessionID string,
+	file *models.MediaFile,
+	downloaded []subtitles.DownloadedSubtitle,
+	includeBurnInOnly bool,
+) []subtitleURL {
 	if file == nil {
 		return nil
 	}
@@ -1695,17 +1706,20 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 			Source:          "external",
 			Forced:          sub.Forced,
 			HearingImpaired: sub.HearingImpaired,
-			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, i, subtitleURLExt(sub.Format)),
+			URL:             subtitleStreamURL(sessionID, i, sub.Format, file.ID),
 		})
 	}
 
 	embeddedOffset := len(file.ExternalSubtitles)
 	for i, track := range file.SubtitleTracks {
-		// All embedded tracks are listed, including bitmap codecs: PGS is
-		// deliverable as a .sup stream for client-side rendering (Apple),
-		// and every bitmap codec (PGS/DVD/DVB) is deliverable via server-side
-		// burn-in — the web player restarts the transcode with
-		// subtitle_burn_in when one is selected.
+		// PGS remains universally deliverable as a .sup sidecar. DVD/DVB
+		// bitmap tracks have no usable sidecar representation, so advertise
+		// them only to clients that explicitly declare server-side burn-in
+		// support. Older Apple/Android clients otherwise expose a text URL
+		// that ffmpeg cannot serve.
+		if playback.NeedsBurnIn(track.Codec) && !playback.IsPGS(track.Codec) && !includeBurnInOnly {
+			continue
+		}
 		urls = append(urls, subtitleURL{
 			Index:           embeddedOffset + i,
 			Language:        track.Language,
@@ -1714,8 +1728,8 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 			Source:          "embedded",
 			Forced:          track.Forced,
 			HearingImpaired: track.HearingImpaired,
-			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, embeddedOffset+i, subtitleURLExt(track.Codec)),
-			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec),
+			URL:             subtitleStreamURL(sessionID, embeddedOffset+i, track.Codec, file.ID),
+			FontBundleURL:   subtitleFontBundleURL(sessionID, embeddedOffset+i, track.Codec, file.ID),
 		})
 	}
 
@@ -1728,18 +1742,22 @@ func buildSubtitleURLs(sessionID string, file *models.MediaFile, downloaded []su
 			Label:           dl.ReleaseName + " (" + dl.Provider + ")",
 			Source:          "downloaded",
 			HearingImpaired: dl.HearingImpaired,
-			URL:             fmt.Sprintf("/stream/%s/subtitles/%d%s", sessionID, downloadedOffset+i, subtitleURLExt(string(dl.Format))),
+			URL:             subtitleStreamURL(sessionID, downloadedOffset+i, string(dl.Format), file.ID),
 		})
 	}
 
 	return urls
 }
 
-func subtitleFontBundleURL(sessionID string, trackIndex int, codec string) string {
+func subtitleStreamURL(sessionID string, trackIndex int, codec string, fileID int) string {
+	return fmt.Sprintf("/stream/%s/subtitles/%d%s?file_id=%d", sessionID, trackIndex, subtitleURLExt(codec), fileID)
+}
+
+func subtitleFontBundleURL(sessionID string, trackIndex int, codec string, fileID int) string {
 	if !playback.IsASS(codec) {
 		return ""
 	}
-	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts", sessionID, trackIndex)
+	return fmt.Sprintf("/stream/%s/subtitles/%d/fonts?file_id=%d", sessionID, trackIndex, fileID)
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -2269,6 +2287,39 @@ func embeddedSubtitleCodec(file *models.MediaFile, ffmpegSubtitleIndex int) stri
 	return file.SubtitleTracks[ffmpegSubtitleIndex].Codec
 }
 
+// resolveBurnInSubtitle maps a subtitle selection made against requestedFile
+// onto effectiveFile. The 4K guard may replace the requested file with a
+// lower-resolution version whose subtitle streams have a different order; a
+// raw ordinal carried across that switch can burn the wrong language.
+func resolveBurnInSubtitle(requestedFile, effectiveFile *models.MediaFile, requestedIndex int) (int, string, bool) {
+	if requestedFile == nil || effectiveFile == nil || requestedIndex < 0 || requestedIndex >= len(requestedFile.SubtitleTracks) {
+		return -1, "", false
+	}
+	if requestedFile.ID == effectiveFile.ID {
+		track := effectiveFile.SubtitleTracks[requestedIndex]
+		return requestedIndex, track.Codec, true
+	}
+
+	selected := requestedFile.SubtitleTracks[requestedIndex]
+	for i, candidate := range effectiveFile.SubtitleTracks {
+		if subtitleTracksMatch(selected, candidate) {
+			return i, candidate.Codec, true
+		}
+	}
+	return -1, "", false
+}
+
+func subtitleTracksMatch(a, b models.SubtitleTrack) bool {
+	return strings.EqualFold(strings.TrimSpace(a.Language), strings.TrimSpace(b.Language)) &&
+		strings.EqualFold(strings.TrimSpace(a.Codec), strings.TrimSpace(b.Codec)) &&
+		strings.EqualFold(
+			strings.TrimSpace(firstNonEmptyString(a.Title, a.EmbeddedTitle)),
+			strings.TrimSpace(firstNonEmptyString(b.Title, b.EmbeddedTitle)),
+		) &&
+		a.Forced == b.Forced &&
+		a.HearingImpaired == b.HearingImpaired
+}
+
 // computeStartSegment returns the HLS segment number corresponding to a seek
 // position given the segment duration. Both remote and local transcode paths
 // use this to align ffmpeg output filenames with the VOD manifest.
@@ -2515,7 +2566,23 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// from the effective file rather than trusted from the client.
 	subtitleCodec := ""
 	if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
-		subtitleCodec = embeddedSubtitleCodec(file, req.SubtitleTrackIndex)
+		resolvedIndex, resolvedCodec, ok := resolveBurnInSubtitle(requestedFile, file, req.SubtitleTrackIndex)
+		if !ok {
+			writeError(w, http.StatusUnprocessableEntity, "subtitle_unavailable_in_version",
+				"Selected subtitle track is unavailable in the effective file version")
+			return
+		}
+		if resolvedIndex != req.SubtitleTrackIndex {
+			slog.Info("remapped subtitle burn-in track for alternate file",
+				"playback_session_id", req.SessionID,
+				"requested_file_id", requestedFile.ID,
+				"effective_file_id", file.ID,
+				"requested_subtitle_track_index", req.SubtitleTrackIndex,
+				"effective_subtitle_track_index", resolvedIndex,
+			)
+		}
+		req.SubtitleTrackIndex = resolvedIndex
+		subtitleCodec = resolvedCodec
 	}
 
 	// Determine whether to run locally or forward to a remote transcode node.

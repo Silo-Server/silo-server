@@ -1735,6 +1735,20 @@ export function VideoPlayer({
     setSubtitleBurnIn(burnInSubtitleOrdinal, position);
   }, [burnInSubtitleOrdinal, setSubtitleBurnIn]);
 
+  // A failed burn-in restart rolls the transcode hook back to no bitmap
+  // subtitle. Mirror that rollback in the visible selection so the UI never
+  // claims an unavailable track is active, and selecting it again performs a
+  // real retry instead of being suppressed as an unchanged selection.
+  useEffect(() => {
+    if (
+      burnInSubtitleOrdinal != null &&
+      transcodeQuality.burnInSubtitleIndex == null &&
+      transcodeQuality.error
+    ) {
+      setActiveSubtitleIndex(null);
+    }
+  }, [burnInSubtitleOrdinal, transcodeQuality.burnInSubtitleIndex, transcodeQuality.error]);
+
   // -- Auto-select subtitle track based on mode --
   useEffect(() => {
     if (subtitleSelectionWasManualRef.current) {

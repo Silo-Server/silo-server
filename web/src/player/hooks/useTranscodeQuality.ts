@@ -333,6 +333,13 @@ export function useTranscodeQuality({
       setTranscodeStreamUrl(null);
 
       const dispatch = async () => {
+        const requestedBurnInIndex = burnInRef.current;
+        const rollbackFailedBurnIn = () => {
+          if (requestedBurnInIndex != null && burnInRef.current === requestedBurnInIndex) {
+            burnInRef.current = null;
+            setBurnInSubtitleIndex(null);
+          }
+        };
         try {
           // When "Original" is selected on a remux base, use codec copy (no
           // video re-encoding). Transcode bases still encode video because the
@@ -344,7 +351,7 @@ export function useTranscodeQuality({
           // Burn-in composites the subtitle into the video frames, which
           // requires an encode — codec copy is never allowed while a bitmap
           // subtitle is burned in (the server enforces this too).
-          const burnInIndex = burnInRef.current;
+          const burnInIndex = requestedBurnInIndex;
           const isCopyOriginal =
             option.isOriginal &&
             !isCompatibilityFallback &&
@@ -403,6 +410,7 @@ export function useTranscodeQuality({
           setError(null);
         } catch (err: unknown) {
           if (abortController.signal.aborted) return;
+          rollbackFailedBurnIn();
           // 422 = no alternate file version available for 4K transcode protection.
           if (err instanceof PlayerFetchError && err.status === 422) {
             setActiveQualityId("original");

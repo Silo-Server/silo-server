@@ -153,7 +153,11 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     // exactly like a manual in-player selection (preferences are
     // series-scoped).
     if (item.series_id) {
-      setSubtitlePreference.mutate({ prefId: item.series_id, selection });
+      setSubtitlePreference.mutate({
+        prefId: item.series_id,
+        selection,
+        showForcedSubtitles: item.effective_show_forced_subtitles,
+      });
     }
   };
 
@@ -172,7 +176,11 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
     setSubtitleSelectionMode("off");
     setExplicitSubtitleSelection(null);
     if (item.series_id) {
-      setSubtitlePreference.mutate({ prefId: item.series_id, selection: null });
+      setSubtitlePreference.mutate({
+        prefId: item.series_id,
+        selection: null,
+        showForcedSubtitles: item.effective_show_forced_subtitles,
+      });
     }
   };
   const preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null =

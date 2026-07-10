@@ -127,4 +127,27 @@ describe("useTranscodeQuality", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("rolls back a failed burn-in selection so the same track can be retried", async () => {
+    const { result } = renderQuality();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fetchMock.mockRejectedValueOnce(new Error("transcode failed"));
+
+    act(() => {
+      result.current.setSubtitleBurnIn(3, 120);
+    });
+
+    await waitFor(() => expect(result.current.error).toMatch(/^Couldn't switch to Original/));
+    expect(result.current.burnInSubtitleIndex).toBeNull();
+
+    fetchMock.mockResolvedValueOnce(transcodeStartResponse());
+    act(() => {
+      result.current.setSubtitleBurnIn(3, 120);
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(sentBodies()[2]!.subtitle_track_index).toBe(3);
+    expect(sentBodies()[2]!.subtitle_burn_in).toBe(true);
+  });
 });

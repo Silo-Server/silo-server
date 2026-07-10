@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -207,7 +208,12 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, err := h.fileResolver.GetByID(r.Context(), session.MediaFileID)
+	fileID, err := subtitleSourceFileID(r, session)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	file, err := h.fileResolver.GetByID(r.Context(), fileID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
@@ -314,6 +320,29 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	writeError(w, http.StatusNotFound, "not_found", "Subtitle track not found")
 }
 
+// subtitleSourceFileID pins a subtitle URL to the file whose track list was
+// used to create it. A quality/seek restart may change session.MediaFileID to
+// an alternate version; interpreting the old combined track index against the
+// alternate file can silently serve a different language. Only the session's
+// requested or current effective file may be named by the authenticated URL.
+func subtitleSourceFileID(r *http.Request, session *playback.Session) (int, error) {
+	if session == nil {
+		return 0, errors.New("playback session is required")
+	}
+	raw := strings.TrimSpace(r.URL.Query().Get("file_id"))
+	if raw == "" {
+		return session.MediaFileID, nil
+	}
+	fileID, err := strconv.Atoi(raw)
+	if err != nil || fileID <= 0 {
+		return 0, errors.New("invalid subtitle source file")
+	}
+	if fileID != session.MediaFileID && fileID != session.RequestedMediaFileID {
+		return 0, errors.New("subtitle source file does not belong to playback session")
+	}
+	return fileID, nil
+}
+
 // HandleSubtitleFonts extracts embedded container font attachments for ASS/SSA
 // playback. The web player loads these bytes into JASSUB before creating the
 // renderer so libass can resolve script font names deterministically.
@@ -341,7 +370,12 @@ func (h *StreamHandler) HandleSubtitleFonts(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	file, err := h.fileResolver.GetByID(r.Context(), session.MediaFileID)
+	fileID, err := subtitleSourceFileID(r, session)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	file, err := h.fileResolver.GetByID(r.Context(), fileID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return

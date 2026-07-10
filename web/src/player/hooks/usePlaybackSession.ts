@@ -68,6 +68,7 @@ export interface StartPlaybackRequestPayload {
   containers: string[];
   max_resolution: string;
   hdr: boolean;
+  supports_bitmap_subtitle_burn_in: boolean;
 }
 
 export function buildStartPlaybackRequestPayload({
@@ -101,6 +102,7 @@ export function buildStartPlaybackRequestPayload({
     containers,
     max_resolution: maxResolution,
     hdr,
+    supports_bitmap_subtitle_burn_in: true,
   };
 
   if (forceInitialPosition || position > 0) {

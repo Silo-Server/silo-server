@@ -173,6 +173,24 @@ func TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500(t *testing.T) {
 	}
 }
 
+func TestSubtitleSourceFileIDPinsURLAcrossEffectiveFileSwitch(t *testing.T) {
+	session := &playback.Session{MediaFileID: 200, RequestedMediaFileID: 100}
+
+	request := httptest.NewRequest(http.MethodGet, "/subtitles/4.vtt?file_id=100", nil)
+	fileID, err := subtitleSourceFileID(request, session)
+	if err != nil {
+		t.Fatalf("subtitleSourceFileID: %v", err)
+	}
+	if fileID != 100 {
+		t.Fatalf("fileID = %d, want original subtitle source 100", fileID)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/subtitles/4.vtt?file_id=300", nil)
+	if _, err := subtitleSourceFileID(request, session); err == nil {
+		t.Fatal("expected unrelated subtitle source file to be rejected")
+	}
+}
+
 func TestHandleTransportStartFailure_KeepsSessionForNonMissingError(t *testing.T) {
 	filePath := writePlaybackTestMediaFile(t, "movie.mkv")
 	file := &models.MediaFile{
