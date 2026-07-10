@@ -51,18 +51,40 @@ func BuildSummary(files []*models.MediaFile) *Summary {
 
 func bestFile(files []*models.MediaFile) *models.MediaFile {
 	var best *models.MediaFile
-	bestRank := -1
+	bestRes := -1
+	bestRange := -1
 	for _, file := range files {
 		if file == nil {
 			continue
 		}
-		rank := resolutionRank(file.Resolution)
-		if best == nil || rank > bestRank {
+		res := resolutionRank(file.Resolution)
+		rng := rangeRank(file)
+		if best == nil || res > bestRes || (res == bestRes && rng > bestRange) {
 			best = file
-			bestRank = rank
+			bestRes = res
+			bestRange = rng
 		}
 	}
 	return best
+}
+
+// rangeRank orders files with equal resolution by the richness of their
+// dynamic-range metadata so a Dolby Vision version is not masked by a
+// first-scanned file that only carries the bare HDR boolean (e.g. a stale
+// pre-DV probe row). Ties keep the earliest file in the slice.
+func rangeRank(file *models.MediaFile) int {
+	for _, track := range file.VideoTracks {
+		if track.DolbyVision != "" {
+			return 3
+		}
+	}
+	if hdrTypeFromTracks(file.VideoTracks) != "" {
+		return 2
+	}
+	if file.HDR {
+		return 1
+	}
+	return 0
 }
 
 func normalizeResolution(value string) string {

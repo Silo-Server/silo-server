@@ -6,6 +6,7 @@ import {
   formatMbpsFromKbps,
   formatSampleRate,
 } from "@/lib/mediaFormat";
+import { videoRangeLabel } from "@/lib/videoRange";
 import type {
   PlaybackSessionPlaybackInfo,
   PlayMethod,
@@ -223,7 +224,7 @@ function formatRequestedSourceVersion(version: PlayerFileVersion): string {
   const parts = [
     version.resolution?.trim(),
     formatCodecLabel(version.codec_video),
-    version.hdr ? "HDR" : null,
+    videoRangeLabel(version) || null,
   ].filter(Boolean);
   return parts.join(" ");
 }
@@ -333,11 +334,8 @@ export function formatVideoRangeType(
   if (track?.video_range) {
     return track.video_range;
   }
-  if (version?.hdr) {
-    return "HDR";
-  }
   if (version) {
-    return "SDR";
+    return videoRangeLabel(version) || "SDR";
   }
   return "—";
 }

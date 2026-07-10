@@ -5,6 +5,7 @@ import type { FileVersion, PlaybackVariant } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { videoRangeLabel } from "@/lib/videoRange";
 import { sortPlaybackVariantsByEditionPreference } from "./versionRankingUtils";
 import { buildDetailLine, buildQualitySummary, sortByResolution } from "./VersionFlyout";
 
@@ -128,6 +129,7 @@ export default function VersionDropdown({
                 const isSelected = version.file_id === activeVersion?.file_id;
                 const summary = buildQualitySummary(version);
                 const detail = buildDetailLine(version);
+                const rangeLabel = videoRangeLabel(version);
 
                 return (
                   <button
@@ -146,9 +148,9 @@ export default function VersionDropdown({
                         <span className="truncate text-sm font-medium">
                           {summary || `Version ${version.file_id}`}
                         </span>
-                        {version.hdr ? (
+                        {rangeLabel ? (
                           <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
-                            HDR
+                            {rangeLabel}
                           </Badge>
                         ) : null}
                       </div>

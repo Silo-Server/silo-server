@@ -1,4 +1,5 @@
 import type { FileVersion } from "@/api/types";
+import { bestVideoRangeLabel } from "@/lib/videoRange";
 import { pickBestAttributes } from "./versionRankingUtils";
 
 interface QualityBadgesProps {
@@ -11,7 +12,8 @@ export default function QualityBadges({ versions }: QualityBadgesProps) {
 
   const badges: string[] = [];
   if (best.resolution) badges.push(best.resolution);
-  if (best.hdr) badges.push("HDR");
+  const rangeLabel = bestVideoRangeLabel(versions);
+  if (rangeLabel) badges.push(rangeLabel);
   if (best.audioLabel) badges.push(best.audioLabel);
 
   if (badges.length === 0) return null;
