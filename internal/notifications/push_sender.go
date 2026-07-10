@@ -25,10 +25,12 @@ var pushRetrySchedule = []time.Duration{
 }
 
 const (
-	pushMaxAttempts     = 5
-	pushDispatchQueue   = 512
-	pushRetryClaimLimit = 100
-	relayAppleSendPath  = "/v1/apple/send"
+	pushMaxAttempts         = 5
+	pushDispatchQueue       = 512
+	pushRetryClaimLimit     = 100
+	pushRelayRequestTimeout = 15 * time.Second
+	pushRelayMaxRetryAfter  = 23 * time.Hour
+	relayAppleSendPath      = "/v1/apple/send"
 )
 
 func pushRetryDelay(completedAttempt int) (time.Duration, bool) {
@@ -36,6 +38,30 @@ func pushRetryDelay(completedAttempt int) (time.Duration, bool) {
 		return 0, false
 	}
 	return pushRetrySchedule[completedAttempt] - pushRetrySchedule[completedAttempt-1], true
+}
+
+func pushRetryDelayWithHint(completedAttempt int, retryAfter time.Duration) (time.Duration, bool) {
+	delay, more := pushRetryDelay(completedAttempt)
+	if retryAfter > 0 {
+		// The relay retains idempotency state for 24 hours. Stay safely inside
+		// that window even if APNs returns an unusually large Retry-After value.
+		delay = min(retryAfter, pushRelayMaxRetryAfter)
+	}
+	return delay, more
+}
+
+func terminalAPNsDeviceRejection(status int, code, message string) bool {
+	if status != http.StatusUnprocessableEntity || code != "apns_rejected" {
+		return false
+	}
+	const prefix = "APNs rejected the notification:"
+	reason := strings.TrimSpace(strings.TrimPrefix(message, prefix))
+	switch reason {
+	case "BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered":
+		return true
+	default:
+		return false
+	}
 }
 
 type pushRelayAppleRequest struct {
@@ -85,12 +111,16 @@ type pushSender struct {
 }
 
 func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository, cipher *secret.Cipher, settings *Settings) *pushSender {
+	// The Worker allows APNs up to 10 seconds. Leave enough room for edge
+	// routing and response processing so Silo receives the relay's classified
+	// outcome instead of manufacturing an ambiguous client-side timeout.
+	client := newNotificationHTTPClient(nil, pushRelayRequestTimeout)
 	return &pushSender{
 		devices:             devices,
 		deliveries:          deliveries,
 		cipher:              cipher,
 		settings:            settings,
-		client:              newWebhookHTTPClient(nil),
+		client:              client,
 		logger:              slog.Default().With("component", "notifications.apple_push"),
 		developmentRelayURL: os.Getenv("SILO_PUSH_RELAY_DEVELOPMENT_URL"),
 		now:                 time.Now,
@@ -156,10 +186,7 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 	}
 	_ = s.devices.RecordPushFailure(ctx, device.ID, code, result.TerminalDevice)
 
-	delay, more := pushRetryDelay(attemptNumber)
-	if result.RetryAfter > 0 {
-		delay = result.RetryAfter
-	}
+	delay, more := pushRetryDelayWithHint(attemptNumber, result.RetryAfter)
 	if more && !result.TerminalDevice && retryableHTTPStatus(result.HTTPStatus) {
 		nextRetry := time.Now().Add(delay)
 		return s.finalize(ctx, attempt, PushOutcomeRetrying, result.UpstreamReason, result.Message, statusPtr, result.RelayRequestID, &nextRetry)
@@ -304,7 +331,7 @@ func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliver
 		RelayRequestID: parsed.Error.RequestID,
 		UpstreamReason: code,
 		Message:        strings.TrimSpace(message),
-		TerminalDevice: resp.StatusCode == http.StatusUnprocessableEntity && code == "apns_rejected",
+		TerminalDevice: terminalAPNsDeviceRejection(resp.StatusCode, code, message),
 	}
 }
 

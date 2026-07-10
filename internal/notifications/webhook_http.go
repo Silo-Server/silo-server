@@ -32,12 +32,19 @@ type webhookSendResult struct {
 	Message string
 }
 
-// newWebhookHTTPClient builds the delivery client: 10s total timeout,
-// non-overridable TLS verification, bounded redirects, and a dialer Control
-// hook that re-validates every resolved address at connect time (DNS
-// rebinding mitigation — the guard runs on the address actually being
-// connected to, each redirect hop included).
+// newWebhookHTTPClient builds the webhook delivery client with its standard
+// request timeout.
 func newWebhookHTTPClient(allowPrivate func() bool) *http.Client {
+	return newNotificationHTTPClient(allowPrivate, webhookRequestTimeout)
+}
+
+// newNotificationHTTPClient builds a delivery client with non-overridable TLS
+// verification, bounded redirects, and a dialer Control hook that re-validates
+// every resolved address at connect time (DNS rebinding mitigation — the guard
+// runs on the address actually being connected to, each redirect hop included).
+// Callers may use a longer total timeout when an upstream service has its own
+// request deadline that must expire before Silo gives up waiting for a response.
+func newNotificationHTTPClient(allowPrivate func() bool, requestTimeout time.Duration) *http.Client {
 	dialer := &net.Dialer{
 		Timeout: 5 * time.Second,
 		Control: func(network, address string, _ syscall.RawConn) error {
@@ -61,10 +68,10 @@ func newWebhookHTTPClient(allowPrivate func() bool) *http.Client {
 		MaxIdleConns:          16,
 		IdleConnTimeout:       60 * time.Second,
 		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: webhookRequestTimeout,
+		ResponseHeaderTimeout: requestTimeout,
 	}
 	return &http.Client{
-		Timeout:   webhookRequestTimeout,
+		Timeout:   requestTimeout,
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= webhookMaxRedirects {

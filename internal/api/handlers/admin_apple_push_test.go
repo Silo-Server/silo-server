@@ -103,6 +103,7 @@ func TestAdminApplePushHandlerRegistersRelayAndStoresKey(t *testing.T) {
 func TestAdminApplePushHandlerMapsRelayRateLimit(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{}}
 	relay := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "60")
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{
 			"error": map[string]string{"code": "rate_limited", "message": "too many deployment registrations from this network"},
 		})
@@ -119,6 +120,9 @@ func TestAdminApplePushHandlerMapsRelayRateLimit(t *testing.T) {
 
 	if rec.Code != http.StatusTooManyRequests {
 		t.Fatalf("status = %d (%s), want 429", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "60" {
+		t.Fatalf("Retry-After = %q, want 60", got)
 	}
 	if settings.values[notifications.SettingPushRelayAPIKey] != "" {
 		t.Fatal("api key was stored after relay rejected registration")

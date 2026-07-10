@@ -3,8 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -146,6 +148,9 @@ func (h *AdminApplePushHandler) HandleRegisterRelay(w http.ResponseWriter, r *ht
 			return
 		}
 		status, code, message := mapRelayRegistrationError(err)
+		if errors.As(err, &relayErr) && relayErr.RetryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(math.Ceil(relayErr.RetryAfter.Seconds())))))
+		}
 		writeError(w, status, code, message)
 		return
 	}

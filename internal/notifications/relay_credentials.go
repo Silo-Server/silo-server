@@ -51,9 +51,10 @@ type relayNestedError struct {
 }
 
 type RelayCredentialError struct {
-	Status  int
-	Code    string
-	Message string
+	Status     int
+	Code       string
+	Message    string
+	RetryAfter time.Duration
 }
 
 func (e RelayCredentialError) Error() string { return e.Code }
@@ -143,7 +144,12 @@ func RequestRelayCredential(ctx context.Context, client RelayHTTPDoer, relayURL,
 		if message == "" {
 			message = http.StatusText(resp.StatusCode)
 		}
-		return RelayCredentialResult{}, RelayCredentialError{Status: resp.StatusCode, Code: code, Message: message}
+		return RelayCredentialResult{}, RelayCredentialError{
+			Status:     resp.StatusCode,
+			Code:       code,
+			Message:    message,
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 	var parsed relayCredentialResponse
 	if err := json.Unmarshal(data, &parsed); err != nil {
