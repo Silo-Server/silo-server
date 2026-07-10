@@ -1258,7 +1258,7 @@ func TestHandleChangeAudioTrack_RemoteTranscodeRestartsNodeAndMintsFullRecipe(t 
 	changeReq := httptest.NewRequest(
 		http.MethodPatch,
 		"/api/v1/playback/"+sessionID+"/audio",
-		strings.NewReader(`{"audio_track_index":1,"position":120}`),
+		strings.NewReader(`{"audio_track_index":1,"position":121.5}`),
 	)
 	changeReq = changeReq.WithContext(newAuthorizedPlaybackContext())
 	changeReq = withPlaybackRouteParam(changeReq, "session_id", sessionID)
@@ -1279,9 +1279,12 @@ func TestHandleChangeAudioTrack_RemoteTranscodeRestartsNodeAndMintsFullRecipe(t 
 	if remoteStartReq.SessionID != sessionID {
 		t.Fatalf("remote SessionID = %q, want %q", remoteStartReq.SessionID, sessionID)
 	}
-	// Seek 120s with the node-default 2s segments => start segment 60.
+	// Seek 121.5s with the node-default 2s segments => align to 120s / segment 60.
 	if remoteStartReq.StartSegmentNumber != 60 {
 		t.Fatalf("remote StartSegmentNumber = %d, want 60", remoteStartReq.StartSegmentNumber)
+	}
+	if remoteStartReq.SeekSeconds != 120 {
+		t.Fatalf("remote SeekSeconds = %v, want aligned 120", remoteStartReq.SeekSeconds)
 	}
 	if remoteStartReq.TargetResolution != "720p" || remoteStartReq.TargetCodecVideo != "h264" {
 		t.Fatalf("remote target recipe = %q/%q, want 720p/h264", remoteStartReq.TargetResolution, remoteStartReq.TargetCodecVideo)
@@ -1320,7 +1323,7 @@ func TestHandleChangeAudioTrack_RemoteTranscodeRestartsNodeAndMintsFullRecipe(t 
 		t.Fatalf("token TargetBitrateKbps = %d, want 2000 (recipe-complete)", claims.TargetBitrateKbps)
 	}
 	if claims.SeekSeconds != 120 {
-		t.Fatalf("token SeekSeconds = %v, want 120", claims.SeekSeconds)
+		t.Fatalf("token SeekSeconds = %v, want aligned 120", claims.SeekSeconds)
 	}
 	if claims.StartSegmentNumber != 60 {
 		t.Fatalf("token StartSegmentNumber = %d, want 60", claims.StartSegmentNumber)
@@ -1589,6 +1592,88 @@ func TestHandleStartTranscode_BitmapBurnInForcesEncodeAndResolvesCodec(t *testin
 	// boundary (timeline alignment contract).
 	if got := opts.SeekSeconds; got != 124.0 {
 		t.Fatalf("burn-in aligned seek = %v, want 124.0 (125.0 snapped to the segment boundary)", got)
+	}
+}
+
+func TestHandleStartTranscode_BitmapRestartUsesOriginalSubtitleInventory(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	requested := &models.MediaFile{
+		ID:         42,
+		ContentID:  "movie-1",
+		FilePath:   writePlaybackTestMediaFile(t, "movie-4k.mkv"),
+		Resolution: "2160p",
+		CodecVideo: "hevc",
+		CodecAudio: "aac",
+		Container:  "mkv",
+		Duration:   3600,
+		AudioTracks: []models.AudioTrack{
+			{Codec: "aac", Default: true},
+		},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Language: "ja", Codec: "hdmv_pgs_subtitle", Title: "Japanese"},
+			{Index: 1, Language: "en", Codec: "hdmv_pgs_subtitle", Title: "English"},
+		},
+	}
+	effective := &models.MediaFile{
+		ID:         99,
+		ContentID:  "movie-1",
+		FilePath:   writePlaybackTestMediaFile(t, "movie-1080p.mkv"),
+		Resolution: "1080p",
+		CodecVideo: "h264",
+		CodecAudio: "aac",
+		Container:  "mkv",
+		Duration:   3600,
+		AudioTracks: []models.AudioTrack{
+			{Codec: "aac", Default: true},
+		},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Language: "en", Codec: "hdmv_pgs_subtitle", Title: "English"},
+			{Index: 1, Language: "ja", Codec: "hdmv_pgs_subtitle", Title: "Japanese"},
+		},
+	}
+	session, err := sessionMgr.StartSessionWithFiles(
+		1,
+		"profile-1",
+		effective.ID,
+		requested.ID,
+		playback.PlayRemux,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("StartSessionWithFiles: %v", err)
+	}
+
+	handler := NewPlaybackHandler(sessionMgr, mapPlaybackFileResolver{files: map[int]*models.MediaFile{
+		requested.ID: requested,
+		effective.ID: effective,
+	}})
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+
+	// The web player still holds the original file's subtitle list, where
+	// English is ordinal 1. The session already streams the alternate file,
+	// where English moved to ordinal 0.
+	transcodeReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/playback/transcode/start",
+		strings.NewReader(`{"session_id":"`+session.ID+`","seek_seconds":120,"target_resolution":"720p","target_codec_video":"h264","target_codec_audio":"aac","target_bitrate_kbps":2000,"segment_duration":2,"subtitle_track_index":1,"subtitle_burn_in":true}`),
+	)
+	transcodeReq = transcodeReq.WithContext(newAuthorizedPlaybackContext())
+
+	transcodeRR := httptest.NewRecorder()
+	handler.HandleStartTranscode(transcodeRR, transcodeReq)
+	if transcodeRR.Code != http.StatusAccepted {
+		t.Fatalf("transcode status = %d, body = %s", transcodeRR.Code, transcodeRR.Body.String())
+	}
+
+	transcodeSession := handler.tm.GetTranscodeSession(session.ID)
+	if transcodeSession == nil {
+		t.Fatal("expected local transcode session")
+	}
+	t.Cleanup(func() { _ = transcodeSession.Close() })
+	opts := transcodeSession.Opts()
+	if opts.SubtitleTrackIndex != 0 || opts.SubtitleCodec != "hdmv_pgs_subtitle" {
+		t.Fatalf("burn-in resolved to index=%d codec=%q, want English index 0 PGS", opts.SubtitleTrackIndex, opts.SubtitleCodec)
 	}
 }
 

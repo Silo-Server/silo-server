@@ -2091,7 +2091,6 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				nodeURL := plan.TranscodeNode.URL
 				_ = h.sessionMgr.SetTranscodeNodeURL(sessionID, nodeURL)
 
-				seekSeconds := req.Position
 				// Restart from the FULL live recipe, not a partial re-derivation.
 				// An audio switch alters only audio selection — subtitle burn-in and
 				// the segment cadence must be preserved, or the node re-encodes a
@@ -2105,6 +2104,7 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				if segmentDuration <= 0 {
 					segmentDuration = playback.DefaultSegmentDuration
 				}
+				seekSeconds := alignedSeekSeconds(req.Position, segmentDuration, updatedSession.TargetVideoCodec)
 				subtitleTrackIndex := session.SubtitleTrackIndex
 				subtitleBurnIn := session.SubtitleBurnIn
 				subtitleCodec := ""
@@ -2504,6 +2504,18 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	}
 	file = h.ensurePlaybackProbe(r.Context(), file)
 	requestedFile := file
+	if originalFileID := requestedMediaFileID(session); originalFileID > 0 && originalFileID != file.ID {
+		originalFile, loadErr := h.loadFileByPreferredID(r.Context(), originalFileID, 0)
+		if loadErr != nil || originalFile == nil {
+			if req.SubtitleBurnIn && req.SubtitleTrackIndex >= 0 {
+				writeError(w, http.StatusUnprocessableEntity, "subtitle_source_unavailable",
+					"Original media file for the selected subtitle is unavailable")
+				return
+			}
+		} else {
+			requestedFile = h.ensurePlaybackProbe(r.Context(), originalFile)
+		}
+	}
 
 	// Resume and seek-start requests generally cannot safely stream-copy video
 	// into HLS output. Arbitrary HEVC seek points often land on non-keyframes,

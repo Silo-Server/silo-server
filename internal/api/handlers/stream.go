@@ -214,7 +214,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file, err := h.fileResolver.GetByID(r.Context(), fileID)
-	if err != nil {
+	if err != nil || file == nil {
 		writeError(w, http.StatusNotFound, "not_found", "Media file not found")
 		return
 	}
