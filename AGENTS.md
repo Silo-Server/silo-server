@@ -40,7 +40,8 @@ Do not assume all plugin-related code lives in this repo.
 
 - `silo-plugin-sdk` owns the public plugin SDK, protobuf contracts, generated plugin API code, manifest helpers, and runtime bootstrap.
 - `silo-plugins` owns the central plugin catalog / repository manifest.
-- First-party plugins such as  `silo-plugin-tmdb`, and `silo-plugin-tvdb` live in their own repositories.
+- First-party plugins such as `silo-plugin-metadata-tmdb` and
+  `silo-plugin-metadata-tvdb` live in their own repositories.
 - `Silo` owns host-side plugin installation, runtime management, API handlers, and integration logic.
 
 When a task mentions plugins, first determine whether the change belongs in this repo, the SDK repo, the catalog repo, or a specific plugin repo. Prefer coordinated multi-repo changes over forcing plugin work into `Silo`.
