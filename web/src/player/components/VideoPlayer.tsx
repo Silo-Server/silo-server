@@ -1553,28 +1553,39 @@ export function VideoPlayer({
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const clearControlsTimer = useCallback(() => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  }, []);
+
   const resetControlsTimer = useCallback(() => {
     setControlsVisible(true);
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    clearControlsTimer();
     hideTimerRef.current = setTimeout(() => {
       if (videoRef.current && !videoRef.current.paused) {
         setControlsVisible(false);
       }
+      hideTimerRef.current = null;
     }, 3000);
-  }, []);
+  }, [clearControlsTimer]);
+
+  const hideControlsOnMouseLeave = useCallback(() => {
+    clearControlsTimer();
+    setControlsVisible(false);
+  }, [clearControlsTimer]);
 
   // Show controls when paused, start hide timer when playing.
   useEffect(() => {
     if (!playing) {
       setControlsVisible(true);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      clearControlsTimer();
     } else {
       resetControlsTimer();
     }
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    };
-  }, [playing, resetControlsTimer]);
+    return clearControlsTimer;
+  }, [clearControlsTimer, playing, resetControlsTimer]);
 
   // -- Marker editing --
   const currentMarkers = useMemo<MarkerDraft>(
@@ -2198,6 +2209,8 @@ export function VideoPlayer({
       }
       style={displayMode === "postroll" ? { width: miniPlayerWidth } : undefined}
       onClick={isPostrollVisible ? handleMiniPlayerClick : undefined}
+      onMouseEnter={isDetached ? undefined : resetControlsTimer}
+      onMouseLeave={isDetached ? undefined : hideControlsOnMouseLeave}
       onMouseMove={isDetached ? undefined : resetControlsTimer}
     >
       {/* Postroll resize handle (bottom-left corner) */}
