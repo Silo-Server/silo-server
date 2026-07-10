@@ -65,6 +65,59 @@ func TestAutoUpdateServiceCheckReplacesInstalledPluginsInPlace(t *testing.T) {
 	}
 }
 
+func TestAutoUpdateServiceCheckMatchesRenamedRepositoryByStablePluginIdentity(t *testing.T) {
+	installations := &fakeAutoUpdateInstallations{
+		list: []*Installation{
+			{ID: 41, RepositoryID: pluginRepositoryID(7), PluginID: "silo.tmdb", Version: "1.0.0", UpdatePolicy: "auto", Enabled: true},
+		},
+	}
+	installer := &fakeAutoUpdateInstaller{}
+	catalog := &fakeAutoUpdateCatalog{
+		entries: []CatalogEntry{
+			{
+				RepositoryID: 7,
+				RepoURL:      "https://github.com/Silo-Server/silo-plugins-metadata-tmdb",
+				Manifest: &pluginv1.PluginManifest{
+					PluginId: "silo.tmdb",
+					Version:  "1.1.0",
+				},
+			},
+		},
+		resolved: &ResolvedCatalogInstall{
+			RepositoryID: 7,
+			ArchiveURL:   "https://github.com/Silo-Server/silo-plugins-metadata-tmdb/releases/download/v1.1.0/plugin-linux-amd64",
+			Checksum:     "deadbeef",
+		},
+	}
+	service := NewAutoUpdateService(
+		&fakeAutoUpdateRepositories{list: []*Repository{{
+			ID:      7,
+			URL:     DefaultRepositoryURL,
+			Enabled: true,
+		}}},
+		installations,
+		catalog,
+		installer,
+		&fakeAutoUpdateHost{},
+		nil,
+		nil,
+	)
+
+	summary, err := service.Check(context.Background(), AutoUpdateOptions{})
+	if err != nil {
+		t.Fatalf("Check() returned error: %v", err)
+	}
+	if summary.UpdatesApplied != 1 {
+		t.Fatalf("UpdatesApplied = %d, want 1", summary.UpdatesApplied)
+	}
+	if len(installer.replaceBinary) != 1 || installer.replaceBinary[0].existingID != 41 {
+		t.Fatalf("replace binary calls = %#v, want one in-place replacement for installation 41", installer.replaceBinary)
+	}
+	if len(installations.deletedIDs) != 0 {
+		t.Fatalf("deleted installation IDs = %#v, want none", installations.deletedIDs)
+	}
+}
+
 func TestAutoUpdateServiceCheckFiresOnChangeAfterMutation(t *testing.T) {
 	newOnChangeService := func(installations *fakeAutoUpdateInstallations, opts AutoUpdateOptions, calls *int) (AutoUpdateSummary, error) {
 		catalog := &fakeAutoUpdateCatalog{
