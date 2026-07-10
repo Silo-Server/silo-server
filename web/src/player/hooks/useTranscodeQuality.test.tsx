@@ -99,6 +99,24 @@ describe("useTranscodeQuality", () => {
     expect(body.target_codec_video).toBe("h264");
   });
 
+  it("preserves a pending quality when burn-in is selected in the same tick", async () => {
+    const { result } = renderQuality();
+
+    act(() => {
+      result.current.switchQuality("720p", 30);
+      result.current.setSubtitleBurnIn(3, 30);
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = sentBodies()[0]!;
+    expect(body.target_resolution).toBe("720p");
+    expect(body.subtitle_burn_in).toBe(true);
+    expect(body.subtitle_track_index).toBe(3);
+  });
+
   it("still dispatches later restarts separately", async () => {
     const { result } = renderQuality();
 

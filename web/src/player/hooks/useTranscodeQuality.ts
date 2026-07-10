@@ -195,6 +195,10 @@ export function useTranscodeQuality({
   const dispatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const manifestVersionRef = useRef(0);
   const autoStartKeyRef = useRef<string | null>(null);
+  // Latest requested quality, updated synchronously before React commits the
+  // corresponding state. Bitmap subtitle restoration can request another
+  // restart in the same tick and must preserve this pending quality.
+  const requestedQualityIdRef = useRef("original");
   // Embedded subtitle ordinal being burned into the video, or null. Kept in a
   // ref (mirrored to state for consumers) so every restart path — quality
   // switch, out-of-window seek, compatibility fallback — reads the current
@@ -223,6 +227,7 @@ export function useTranscodeQuality({
       dispatchTimerRef.current = null;
     }
     autoStartKeyRef.current = null;
+    requestedQualityIdRef.current = "original";
     setActiveQualityId("original");
     setTranscodeStreamUrl(null);
     setPlayerStartSeconds(0);
@@ -251,6 +256,7 @@ export function useTranscodeQuality({
   const startTranscode = useCallback(
     (qualityId: string, currentPosition: number, forceRestart = false) => {
       if (!sessionId) return;
+      requestedQualityIdRef.current = qualityId;
       if (!forceRestart && qualityId === activeQualityId) return;
 
       // Abort any in-progress switch (POST + polling) and supersede any
@@ -449,6 +455,7 @@ export function useTranscodeQuality({
 
   const switchQuality = useCallback(
     (qualityId: string, currentPosition: number, forceRestart?: boolean) => {
+      requestedQualityIdRef.current = qualityId;
       // When the user explicitly selects "Original" from the quality menu:
       // - Direct play base: stop HLS and play the raw file (instant), unless a
       //   bitmap subtitle is burned in (burn-in always needs an encode).
@@ -484,9 +491,9 @@ export function useTranscodeQuality({
       if (burnInRef.current === ffmpegSubtitleIndex) return;
       burnInRef.current = ffmpegSubtitleIndex;
       setBurnInSubtitleIndex(ffmpegSubtitleIndex);
-      switchQuality(activeQualityId, currentPosition, true);
+      switchQuality(requestedQualityIdRef.current, currentPosition, true);
     },
-    [activeQualityId, switchQuality],
+    [switchQuality],
   );
 
   useEffect(() => {

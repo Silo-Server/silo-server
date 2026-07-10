@@ -72,4 +72,15 @@ describe("formatSubtitlePillSummary", () => {
       }),
     ).toBe("English (SDH) · SRT");
   });
+
+  it("keeps forced markers in the compact summary", () => {
+    expect(
+      formatSubtitlePillSummary({
+        label: "Forced",
+        languageLabel: "English",
+        codec: "subrip",
+        forced: true,
+      }),
+    ).toBe("English (Forced) · SRT");
+  });
 });
