@@ -55,3 +55,26 @@ export function getSubtitleFormatLabel(codec: string | undefined): string | null
       return null;
   }
 }
+
+function normalizeFormatName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/** Returns true when a track title merely repeats its codec or display format. */
+export function isSubtitleFormatLabel(
+  label: string | undefined,
+  codec: string | undefined,
+): boolean {
+  if (!label || !codec) return false;
+  const normalizedLabel = normalizeFormatName(label);
+  if (!normalizedLabel) return false;
+
+  const formatLabel = getSubtitleFormatLabel(codec);
+  return (
+    normalizedLabel === normalizeFormatName(codec) ||
+    (formatLabel !== null && normalizedLabel === normalizeFormatName(formatLabel))
+  );
+}

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeSubtitleFontScale,
   computeSubtitleFontSize,
+  computeSubtitlePositionStyle,
   computeSubtitleStyles,
   DEFAULT_SUBTITLE_APPEARANCE,
   SUBTITLE_REFERENCE_HEIGHT,
@@ -36,6 +37,24 @@ describe("computeSubtitleFontScale", () => {
     expect(computeSubtitleFontScale(0, 0, 16 / 9)).toBe(1);
     expect(computeSubtitleFontScale(1920, 1080, 0)).toBe(1);
     expect(computeSubtitleFontScale(1920, 1080, Number.NaN)).toBe(1);
+  });
+});
+
+describe("computeSubtitlePositionStyle", () => {
+  it("anchors Bottom to the player window", () => {
+    // The video occupies only 562.5px in this tall player, but Bottom remains
+    // 7% from the player window edge instead of moving up to the video frame.
+    expect(computeSubtitlePositionStyle("bottom", 1000, 2000, 16 / 9)).toEqual({
+      bottom: "140px",
+    });
+  });
+
+  it("anchors Lower Third to the rendered 16:9 video frame", () => {
+    // The centered 16:9 frame is 562.5px tall, with 718.75px below it. The
+    // lower-third inset adds 12% of that frame height: 718.75 + 67.5 = 786.25.
+    expect(computeSubtitlePositionStyle("lower-third", 1000, 2000, 16 / 9)).toEqual({
+      bottom: "786.25px",
+    });
   });
 });
 

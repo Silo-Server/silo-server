@@ -234,10 +234,11 @@ export function computeSubtitleStyles(settings: SubtitleAppearance, fontScale = 
 
 // ─── Position (aspect-aware) ────────────────────────────────────────────────
 
-// Offsets as a fraction of the 16:9 reference frame height.
+// Position offsets as a fraction of their anchor height. "Bottom" uses the
+// player window; "Lower Third" and "Top" use the 16:9 video reference frame.
 const POSITION_OFFSETS: Record<SubtitleAppearance["position"], number> = {
   bottom: 0.07,
-  "lower-third": 0.18,
+  "lower-third": 0.12,
   top: 0.07,
 };
 
@@ -247,7 +248,7 @@ const POSITION_OFFSETS: Record<SubtitleAppearance["position"], number> = {
  */
 function computePositionStyle(position: SubtitleAppearance["position"]): CSSProperties {
   if (position === "top") return { top: "8%", bottom: "auto" };
-  if (position === "lower-third") return { bottom: "18%" };
+  if (position === "lower-third") return { bottom: "12%" };
   return { bottom: "7%" };
 }
 
@@ -289,11 +290,11 @@ export function computeSubtitleFontScale(
 }
 
 /**
- * Aspect-aware positioning. Anchors subtitles relative to a 16:9 reference
- * frame centered on the actually-rendered video area (object-fit: contain).
- * This keeps "Lower Third" and "Bottom" visually consistent regardless of
- * whether content is 16:9, 4:3, or 2.35:1 — wider content's subs may land
- * in the letterbox, which is the intended behavior.
+ * Aspect-aware positioning. "Bottom" is anchored to the player window so it
+ * can use the available letterbox space. "Lower Third" and "Top" are anchored
+ * to a 16:9 reference frame centered on the actually-rendered video area
+ * (object-fit: contain), keeping those positions attached to the video frame
+ * regardless of whether content is 16:9, 4:3, or 2.35:1.
  */
 export function computeSubtitlePositionStyle(
   position: SubtitleAppearance["position"],
@@ -301,6 +302,11 @@ export function computeSubtitlePositionStyle(
   playerHeight: number,
   videoAspect: number,
 ): CSSProperties {
+  if (position === "bottom") {
+    if (playerHeight <= 0) return computePositionStyle(position);
+    return { bottom: `${POSITION_OFFSETS.bottom * playerHeight}px` };
+  }
+
   const refHeight = resolveSubtitleReferenceHeight(playerWidth, playerHeight, videoAspect);
   if (refHeight === null) {
     return computePositionStyle(position);

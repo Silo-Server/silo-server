@@ -10,11 +10,11 @@ export interface SubtitleLayout {
 
 /**
  * Tracks the player container size and the video's intrinsic aspect ratio,
- * then produces a position CSS style and a font scale that anchor subtitles
- * to a 16:9 reference frame centered on the actually-rendered video area
- * (object-fit: contain) rather than the player window. Falls back to
- * container-relative percentages and scale 1 until measurements are
- * available.
+ * then produces a position CSS style and a font scale. The Bottom position is
+ * anchored to the player window, while Lower Third and Top are anchored to a
+ * 16:9 reference frame centered on the actually-rendered video area
+ * (object-fit: contain). Falls back to container-relative percentages and
+ * scale 1 until measurements are available.
  */
 export function useSubtitleLayout(
   containerRef: RefObject<HTMLElement | null>,

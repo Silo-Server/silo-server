@@ -13,6 +13,7 @@ import type {
   SubtitleMode,
 } from "@/player/types";
 import { getLanguageName } from "@/player/utils/languageNames";
+import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
 import {
   buildPrePlaySubtitleCandidates,
   formatSubtitlePillSummary,
@@ -134,13 +135,17 @@ function SubtitleSection({
             key={row.key}
             active={subtitleSelectionEquals(activeSelection, row.selection)}
             title={row.summary}
-            description={row.title || row.releaseName}
+            description={
+              row.title && !isSubtitleFormatLabel(row.title, row.codec)
+                ? row.title
+                : row.releaseName
+            }
             onSelect={onSelectSubtitle ? () => onSelectSubtitle(row.selection) : undefined}
             badges={
               <>
                 {row.codec && (
                   <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
-                    {row.codec}
+                    {getSubtitleFormatLabel(row.codec) || row.codec.toUpperCase()}
                   </Badge>
                 )}
                 <SubtitleFlagBadges

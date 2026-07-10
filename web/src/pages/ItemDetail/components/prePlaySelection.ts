@@ -14,6 +14,7 @@ import { resolveVersionAudioLanguage } from "@/player/utils/effectiveAudioLangua
 import { getLanguageName } from "@/player/utils/languageNames";
 import { normalizeSubtitleMode } from "@/player/utils/subtitleMode";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
+import { getSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
 import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
 import {
   buildVersionSubtitleInventory,
@@ -75,18 +76,19 @@ export interface SubtitlePillSummarySource {
 }
 
 /**
- * Rich single-line summary for the closed selector pill: the track's name
- * with (SDH)/(Forced) markers (skipped when the name already carries them,
- * e.g. embedded "English (CC)" titles) and the subtitle format.
+ * Single-line summary for the closed selector pill: language, optional
+ * (SDH)/(Forced) markers, and a human-readable subtitle format. Track titles
+ * stay in the open selector, where meaningful details have room to display.
  */
 export function formatSubtitlePillSummary(source: SubtitlePillSummarySource): string {
-  const name = source.label?.trim() || source.languageLabel?.trim() || "Unknown";
+  const name = source.languageLabel?.trim() || source.label?.trim() || "Unknown";
   const parts = [name];
   if (source.hearingImpaired && !/\b(?:sdh|cc|hi)\b/i.test(name)) parts.push("(SDH)");
   if (source.forced && !/forced/i.test(name)) parts.push("(Forced)");
   const text = parts.join(" ");
   const codec = source.codec?.trim();
-  return codec ? `${text} · ${codec.toUpperCase()}` : text;
+  const format = getSubtitleFormatLabel(codec) || codec?.toUpperCase();
+  return format ? `${text} · ${format}` : text;
 }
 
 export function getAutoAudioTrackIndex(version: FileVersion | null | undefined): number {

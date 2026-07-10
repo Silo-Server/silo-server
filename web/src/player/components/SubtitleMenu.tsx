@@ -9,7 +9,7 @@ import { SubtitleAppearancePanel } from "./SubtitleAppearancePanel";
 import { playerFetch } from "../player-fetch";
 import { getLanguageName } from "../utils/languageNames";
 import { sortSubtitlesBySource } from "../utils/subtitleSort";
-import { getSubtitleFormatLabel } from "../utils/subtitleCodecs";
+import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import { isTranslatableSource } from "./subtitleTranslateRequest";
 
 interface SubtitleMenuProps {
@@ -212,7 +212,10 @@ export function SubtitleMenu({
               const sourceLabel = SOURCE_LABELS[track.source ?? "embedded"] ?? "Embedded";
               const formatLabel = getSubtitleFormatLabel(track.codec);
               const hasDetail =
-                track.label && track.label !== track.language && track.label !== languageName;
+                track.label &&
+                track.label !== track.language &&
+                track.label !== languageName &&
+                !isSubtitleFormatLabel(track.label, track.codec);
               const itemIdx = ++menuItemIndex;
 
               return (
