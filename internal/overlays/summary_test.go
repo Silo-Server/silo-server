@@ -35,6 +35,16 @@ func TestNormalizeHDRUsesAllDolbyVisionEvidence(t *testing.T) {
 			want: "HDR10",
 		},
 		{
+			name: "HDR10+ range type",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10Plus"}}},
+			want: "HDR10+",
+		},
+		{
+			name: "HLG range type",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{VideoRangeType: "HLG"}}},
+			want: "HLG",
+		},
+		{
 			name: "file fallback",
 			file: &models.MediaFile{HDR: true},
 			want: "HDR",
