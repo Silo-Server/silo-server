@@ -453,6 +453,9 @@ export default function AdminLibraries() {
                             {lib.scan_warning_code === "empty_root" ? (
                               <Badge variant="destructive">Empty root guarded</Badge>
                             ) : null}
+                            {lib.scan_warning_code === "dead_root" ? (
+                              <Badge variant="destructive">Root unreachable</Badge>
+                            ) : null}
                           </div>
                         </TableCell>
                         <TableCell className="text-muted-foreground text-xs">
@@ -609,7 +612,11 @@ export default function AdminLibraries() {
                   );
                 })}
                 {orderedLibraries
-                  .filter((lib) => lib.scan_warning_code === "empty_root")
+                  .filter(
+                    (lib) =>
+                      lib.scan_warning_code === "empty_root" ||
+                      lib.scan_warning_code === "dead_root",
+                  )
                   .map((lib) => {
                     const mountCheck = lastMountCheckByLibraryId[lib.id];
                     const isCheckingMount =
@@ -619,8 +626,9 @@ export default function AdminLibraries() {
                         <TableCell colSpan={7} className="bg-destructive/5 text-sm">
                           <div className="flex flex-col gap-2 py-1">
                             <div className="text-destructive font-medium">
-                              Scan found 0 media files for this library. Cleanup was paused to avoid
-                              accidental deletion.
+                              {lib.scan_warning_code === "dead_root"
+                                ? "One or more library roots are unreachable. Their files are hidden, but nothing will be deleted until the root is back."
+                                : "Scan found 0 media files for this library. Cleanup was paused to avoid accidental deletion."}
                             </div>
                             <div className="text-muted-foreground">
                               {lib.scan_warning_message ??

@@ -375,8 +375,12 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		}
 	}
 
+	// The folder-wide sweep and orphan purge must not destroy rows/items whose
+	// files sit under a currently unreachable library root (see the video
+	// scanner's dead-root protection): unreachable is not removed.
+	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, unreachableRoots)
 		if err != nil {
 			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -385,7 +389,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		}
 	}
 
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID)
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, unreachableRoots)
 	if err != nil {
 		return fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}

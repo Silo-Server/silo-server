@@ -2616,13 +2616,22 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // hidden from clients; the grace only delays deleting the row so a file that
 // reappears within the window restores without re-probing or re-matching.
 // A zero grace deletes all missing-marked rows immediately.
+//
+// Rows whose file_path lies at or under one of protectedRoots are never
+// deleted, no matter how long they have been missing: an unreachable library
+// root (dead drive, lost mount) is temporarily offline, not removed, so its
+// catalog state must survive until the root is reachable again. Passing no
+// protected roots preserves the historical folder-wide sweep exactly.
 // Returns the number of rows deleted.
-func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration) (int, error) {
+func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
-	tag, err := r.pool.Exec(ctx,
-		"DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2",
-		folderID, cutoff,
-	)
+	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2"
+	args := []any{folderID, cutoff}
+	if clauses, clauseArgs := rootCoverageClauses(protectedRoots, len(args)+1); len(clauses) > 0 {
+		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
+		args = append(args, clauseArgs...)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("deleting missing files for folder %d: %w", folderID, err)
 	}
@@ -2671,13 +2680,8 @@ func (r *FileRepository) ListIDsOutsideRoots(ctx context.Context, folderID int, 
 
 	args := make([]any, 0, 1+len(roots)*2)
 	args = append(args, folderID)
-	coveredClauses := make([]string, 0, len(roots))
-	for i, root := range roots {
-		pathArg := 2 + (i * 2)
-		likeArg := pathArg + 1
-		coveredClauses = append(coveredClauses, fmt.Sprintf("(file_path = $%d OR file_path LIKE $%d ESCAPE '\\')", pathArg, likeArg))
-		args = append(args, root, pathPrefixLike(root))
-	}
+	coveredClauses, coveredArgs := rootCoverageClauses(roots, 2)
+	args = append(args, coveredArgs...)
 
 	query := `SELECT id FROM media_files WHERE media_folder_id = $1 AND NOT (` + strings.Join(coveredClauses, " OR ") + `)`
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -3448,4 +3452,21 @@ func nilIfZero(n int) *int {
 
 func pathPrefixLike(pathPrefix string) string {
 	return pathscope.PrefixLike(pathPrefix)
+}
+
+// rootCoverageClauses builds one SQL predicate per root matching file_path
+// rows that live at or under that root, using the exact-match + escaped
+// prefix-LIKE shape shared with ListIDsOutsideRoots (a root never matches a
+// sibling that merely shares a string prefix, e.g. /mnt/movies2 under
+// /mnt/movies). Placeholder numbering starts at firstArg; the returned args
+// bind pairwise (root, prefix pattern) in clause order.
+func rootCoverageClauses(roots []string, firstArg int) ([]string, []any) {
+	clauses := make([]string, 0, len(roots))
+	args := make([]any, 0, len(roots)*2)
+	for i, root := range roots {
+		pathArg := firstArg + i*2
+		clauses = append(clauses, fmt.Sprintf("(file_path = $%d OR file_path LIKE $%d ESCAPE '\\')", pathArg, pathArg+1))
+		args = append(args, root, pathPrefixLike(root))
+	}
+	return clauses, args
 }

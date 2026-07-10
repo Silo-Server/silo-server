@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -889,9 +890,13 @@ func (s *Scanner) scanPaths(
 	// Empty trash: delete files marked as missing for longer than the removal
 	// grace for this folder. Safe because the empty-root guard (above) returns
 	// early when 0 files are found on disk, so we only reach here when the
-	// root is populated.
+	// root is populated. The sweep is folder-wide, so a scoped scan of a
+	// healthy subtree must not hard-delete rows an unreachable sibling root
+	// left marked missing: probe the configured library roots and exempt any
+	// that are currently unreachable.
+	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, unreachableRoots)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -914,7 +919,7 @@ func (s *Scanner) scanPaths(
 	}
 	result.FilesDeleted += deletedFiles
 
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID)
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, unreachableRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -1004,6 +1009,18 @@ func (s *Scanner) scanFolderByRoots(
 		roots = compactScanRoots(walkRoots)
 	}
 
+	// An unreachable root (dead drive, lost mount) is temporarily offline, not
+	// removed from the library: its files are still marked missing below so
+	// clients stop seeing them, but nothing under it may be hard-deleted while
+	// it stays unreachable — trash emptying and item purging are guarded
+	// against these roots further down.
+	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, roots)
+	result.UnreachableRoots = unreachableRoots
+	unreachableSet := make(map[string]bool, len(unreachableRoots))
+	for _, root := range unreachableRoots {
+		unreachableSet[root] = true
+	}
+
 	pendingEmptyScopes := make([]*scopedScan, 0)
 	totalExisting := 0
 	seenAnyFiles := false
@@ -1015,7 +1032,13 @@ func (s *Scanner) scanFolderByRoots(
 			Message:      "Scanning library root",
 			CurrentScope: root,
 		})
-		scope, err := s.scanScope(ctx, folder, []string{root}, []string{root})
+		scopeWalkRoots := []string{root}
+		if unreachableSet[root] {
+			// Skip walking a dead root — it would yield nothing anyway. Its
+			// scope still reconciles below so existing rows are marked missing.
+			scopeWalkRoots = nil
+		}
+		scope, err := s.scanScope(ctx, folder, scopeWalkRoots, []string{root})
 		if err != nil {
 			return nil, err
 		}
@@ -1098,7 +1121,7 @@ func (s *Scanner) scanFolderByRoots(
 	}
 
 	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
+		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, unreachableRoots)
 		if err != nil {
 			return nil, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
@@ -1118,7 +1141,7 @@ func (s *Scanner) scanFolderByRoots(
 	}
 	result.FilesDeleted += deletedOutsideRoots
 
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID)
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, unreachableRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
@@ -1161,13 +1184,48 @@ func (s *Scanner) scanFolderByRoots(
 		}
 	}
 
-	if seenAnyFiles || allowEmptyCleanup {
+	switch {
+	case len(unreachableRoots) > 0:
+		// Surface the outage so the admin UI explains why part of the library
+		// vanished; the mount-check endpoint or the next fully-healthy scan
+		// clears it (both clear "dead_root" the same way as "empty_root").
+		if err := s.folderRepo.SetScanWarning(ctx, folder.ID,
+			"dead_root",
+			deadRootWarningMessage(len(roots), unreachableRoots),
+			time.Now().UTC(),
+		); err != nil {
+			return nil, fmt.Errorf("recording dead-root warning for folder %d: %w", folder.ID, err)
+		}
+	case seenAnyFiles || allowEmptyCleanup:
 		if err := s.folderRepo.ClearScanWarning(ctx, folder.ID); err != nil {
 			return nil, fmt.Errorf("clearing scan warning for folder %d: %w", folder.ID, err)
 		}
 	}
 
 	return result, nil
+}
+
+// probeUnreachableRoots returns the subset of roots that are currently
+// unreachable (missing, not a directory, or unlistable), in input order.
+func probeUnreachableRoots(ctx context.Context, folderID int, roots []string) []string {
+	var unreachable []string
+	for _, root := range roots {
+		if probe := rootcheck.Probe(root); !probe.Reachable {
+			slog.WarnContext(ctx, "scanner: library root unreachable", "component", "scanner",
+				"folder_id", folderID,
+				"root", root,
+				"error_code", probe.ErrorCode,
+				"error", probe.ErrorMessage,
+			)
+			unreachable = append(unreachable, root)
+		}
+	}
+	return unreachable
+}
+
+func deadRootWarningMessage(totalRoots int, unreachableRoots []string) string {
+	return fmt.Sprintf("%d of %d roots unreachable: %s",
+		len(unreachableRoots), totalRoots, strings.Join(unreachableRoots, ", "))
 }
 
 func (s *Scanner) scanScope(
@@ -1569,13 +1627,18 @@ func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderI
 	return nil
 }
 
-func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int) (int, int, []string, error) {
+// reconcileLibraryMemberships removes memberships for content with no
+// remaining non-missing files in the folder and purges orphaned items.
+// unreachableRoots exempts items whose files sit under a currently
+// unreachable library root from the orphan purge (membership removal still
+// happens so the items stay hidden); pass nil when every root is reachable.
+func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int, unreachableRoots []string) (int, int, []string, error) {
 	if s.episodeLibraryRepo != nil {
 		if _, err := s.episodeLibraryRepo.ReconcileFolderMembership(ctx, folderID); err != nil {
 			return 0, 0, nil, err
 		}
 	}
-	return s.libraryRepo.ReconcileFolderMembership(ctx, folderID)
+	return s.libraryRepo.ReconcileFolderMembership(ctx, folderID, unreachableRoots)
 }
 
 func collectStaleRemovedPathFileIDs(existingFiles []*scanStateFile, seenPaths map[string]bool, roots []string) []int {
@@ -1676,7 +1739,8 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
 			return fmt.Errorf("syncing present library state for extra file: %w", err)
 		}
-		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID); err != nil {
+		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID,
+			probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))); err != nil {
 			return fmt.Errorf("reconciling library membership after extra file scan: %w", err)
 		}
 		return nil
@@ -1692,7 +1756,8 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			return clearErr
 		}
 		if cleared > 0 {
-			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID); reconcileErr != nil {
+			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID,
+				probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))); reconcileErr != nil {
 				return fmt.Errorf("reconciling folder membership after clearing legacy links: %w", reconcileErr)
 			}
 		}

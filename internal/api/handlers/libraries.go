@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -31,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -848,7 +848,8 @@ func (h *LibraryHandler) HandleCheckLibraryMount(w http.ResponseWriter, r *http.
 	}
 
 	resp := checkLibraryMount(folder)
-	if resp.Healthy && folder.ScanWarningCode != nil && *folder.ScanWarningCode == "empty_root" {
+	if resp.Healthy && folder.ScanWarningCode != nil &&
+		(*folder.ScanWarningCode == "empty_root" || *folder.ScanWarningCode == "dead_root") {
 		if err := h.folderRepo.ClearScanWarning(r.Context(), folder.ID); err != nil {
 			if errors.Is(err, catalog.ErrFolderNotFound) {
 				writeError(w, http.StatusNotFound, "not_found", "Library not found")
@@ -1274,29 +1275,14 @@ func checkLibraryMount(folder *models.MediaFolder) libraryMountCheckResponse {
 
 	unreachable := 0
 	for _, path := range folder.Paths {
+		probe := rootcheck.Probe(path)
 		root := libraryMountCheckRootResponse{
 			Path:      path,
-			Reachable: true,
+			Reachable: probe.Reachable,
 		}
-
-		info, err := os.Stat(path)
-		if err != nil {
-			code, message := classifyMountCheckError(err, false)
-			root.Reachable = false
-			root.ErrorCode = stringPtr(code)
-			root.ErrorMessage = stringPtr(message)
-		} else if !info.IsDir() {
-			root.Reachable = false
-			root.ErrorCode = stringPtr("not_directory")
-			root.ErrorMessage = stringPtr("Path is not a directory")
-		} else if _, err := os.ReadDir(path); err != nil {
-			code, message := classifyMountCheckError(err, true)
-			root.Reachable = false
-			root.ErrorCode = stringPtr(code)
-			root.ErrorMessage = stringPtr(message)
-		}
-
-		if !root.Reachable {
+		if !probe.Reachable {
+			root.ErrorCode = stringPtr(probe.ErrorCode)
+			root.ErrorMessage = stringPtr(probe.ErrorMessage)
 			unreachable++
 			resp.Healthy = false
 		}
@@ -1313,19 +1299,6 @@ func checkLibraryMount(folder *models.MediaFolder) libraryMountCheckResponse {
 	}
 
 	return resp
-}
-
-func classifyMountCheckError(err error, isRead bool) (string, string) {
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return "not_found", "Path does not exist"
-	case errors.Is(err, os.ErrPermission):
-		return "permission_denied", "Permission denied"
-	case isRead:
-		return "read_failed", "Failed to read directory"
-	default:
-		return "stat_failed", "Failed to stat path"
-	}
 }
 
 func stringPtr(v string) *string {
