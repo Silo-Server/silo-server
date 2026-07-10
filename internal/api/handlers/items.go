@@ -344,6 +344,7 @@ type episodeResponse struct {
 	StillThumbhash string                  `json:"still_thumbhash,omitempty"`
 	UserData       *catalog.SeasonUserData `json:"user_data,omitempty"`
 	Files          []episodeFileResponse   `json:"files,omitempty"`
+	OverlaySummary *models.OverlaySummary  `json:"overlay_summary,omitempty"`
 }
 
 type episodeImageFallback struct {
@@ -959,8 +960,10 @@ func (h *ItemsHandler) buildEpisodeResponses(r *http.Request, episodes []*models
 	}
 	for i := range resp {
 		resp[i].StillURL = stillURLs[stillPaths[i]].URL
-		resp[i].Files = episodeFileResponses(filesByEpisode[resp[i].ContentID], filter)
+		files := catalog.FilterMediaFilesByAccess(filesByEpisode[resp[i].ContentID], filter)
+		resp[i].Files = episodeFileResponses(files, filter)
 		resp[i].UserData = userData[resp[i].ContentID]
+		resp[i].OverlaySummary = overlays.BuildSummary(files)
 	}
 	return resp
 }

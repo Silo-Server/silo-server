@@ -1268,6 +1268,7 @@ export interface EpisodeListItem {
   still_thumbhash: string;
   user_data?: LeafItemUserData;
   files: EpisodeFile[];
+  overlay_summary?: OverlaySummary | null;
 }
 
 export interface EpisodesResponse {

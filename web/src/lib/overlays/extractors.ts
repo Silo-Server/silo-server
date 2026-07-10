@@ -1,4 +1,4 @@
-import type { BrowseItem, OverlaySummary, SectionItem } from "@/api/types";
+import type { BrowseItem, EpisodeListItem, OverlaySummary, SectionItem } from "@/api/types";
 import type { OverlayData } from "./types";
 
 // BrowseItem and SectionItem share the fields the overlay system consumes;
@@ -66,5 +66,9 @@ export function overlayDataFromBrowseItem(item: BrowseItem): OverlayData {
 }
 
 export function overlayDataFromSectionItem(item: SectionItem): OverlayData {
+  return extract(item);
+}
+
+export function overlayDataFromEpisodeListItem(item: EpisodeListItem): OverlayData {
   return extract(item);
 }
