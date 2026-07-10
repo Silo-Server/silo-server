@@ -867,7 +867,20 @@ func (h *PlaybackHandler) resolveCapabilityPlaybackSelection(
 		alt, err := h.findAlternateFile(ctx, requestedFile)
 		if err == nil && alt != nil {
 			effectiveFile := h.ensurePlaybackProbe(ctx, alt)
-			audioTrackIndex = normalizeAudioTrackIndex(effectiveFile, audioTrackIndex)
+			effectiveAudioTrackIndex := playback.MatchAudioTrackAcrossVersions(
+				requestedFile.AudioTracks,
+				effectiveFile.AudioTracks,
+				audioTrackIndex,
+			)
+			if effectiveAudioTrackIndex != audioTrackIndex {
+				slog.InfoContext(ctx, "remapped audio track for alternate file",
+					"requested_file_id", requestedFile.ID,
+					"effective_file_id", effectiveFile.ID,
+					"requested_audio_track_index", audioTrackIndex,
+					"effective_audio_track_index", effectiveAudioTrackIndex,
+				)
+			}
+			audioTrackIndex = effectiveAudioTrackIndex
 			method, transcodeAudio = resolvePlaybackMethodForFile(effectiveFile, req, audioTrackIndex, adminSettings)
 			return effectiveFile, method, transcodeAudio, audioTrackIndex
 		}
