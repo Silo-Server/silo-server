@@ -8,7 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -71,22 +73,27 @@ type pushSendResult struct {
 }
 
 type pushSender struct {
-	devices    *PushDeviceRepository
-	deliveries *DeliveryRepository
-	cipher     *secret.Cipher
-	settings   *Settings
-	client     *http.Client
-	logger     *slog.Logger
+	devices             *PushDeviceRepository
+	deliveries          *DeliveryRepository
+	cipher              *secret.Cipher
+	settings            *Settings
+	client              *http.Client
+	logger              *slog.Logger
+	renewMu             sync.Mutex
+	developmentRelayURL string
+	now                 func() time.Time
 }
 
 func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository, cipher *secret.Cipher, settings *Settings) *pushSender {
 	return &pushSender{
-		devices:    devices,
-		deliveries: deliveries,
-		cipher:     cipher,
-		settings:   settings,
-		client:     newWebhookHTTPClient(nil),
-		logger:     slog.Default().With("component", "notifications.apple_push"),
+		devices:             devices,
+		deliveries:          deliveries,
+		cipher:              cipher,
+		settings:            settings,
+		client:              newWebhookHTTPClient(nil),
+		logger:              slog.Default().With("component", "notifications.apple_push"),
+		developmentRelayURL: os.Getenv("SILO_PUSH_RELAY_DEVELOPMENT_URL"),
+		now:                 time.Now,
 	}
 }
 
@@ -170,11 +177,62 @@ func (s *pushSender) finalize(ctx context.Context, attempt PushDeliveryAttempt, 
 }
 
 func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token string) pushSendResult {
-	apiKey := s.settings.PushRelayAPIKey(ctx)
-	if apiKey == "" {
-		return pushSendResult{Message: "push relay API key not configured", UpstreamReason: "relay_api_key_missing"}
+	credential, err := s.prepareRelayCredential(ctx)
+	if err != nil {
+		return pushSendResult{HTTPStatus: http.StatusServiceUnavailable, Message: err.Error(), UpstreamReason: "relay_credential_unavailable"}
 	}
-	relayURL := s.settings.PushRelayURL(ctx)
+	result := s.sendWithCapability(ctx, attempt, device, token, credential.RelayURL, credential.APIKey)
+	if result.HTTPStatus != http.StatusUnauthorized || result.UpstreamReason != "token_expired" {
+		if result.HTTPStatus == http.StatusUnauthorized {
+			_ = s.markReregistrationRequired(ctx, credential)
+		}
+		return result
+	}
+
+	renewed, err := s.renewRelayCapability(ctx, credential.APIKey)
+	if err != nil {
+		return pushSendResult{
+			HTTPStatus:     http.StatusServiceUnavailable,
+			UpstreamReason: "relay_renewal_failed",
+			Message:        "push relay capability renewal failed",
+		}
+	}
+	return s.sendWithCapability(ctx, attempt, device, token, renewed.RelayURL, renewed.APIKey)
+}
+
+func (s *pushSender) prepareRelayCredential(ctx context.Context) (PushRelayCredential, error) {
+	s.renewMu.Lock()
+	defer s.renewMu.Unlock()
+	current := LoadPushRelayCredential(ctx, s.settings)
+	relayURL, err := NormalizePushRelayURL(current.RelayURL, s.developmentRelayURL)
+	if err != nil {
+		return PushRelayCredential{}, err
+	}
+	current.RelayURL = relayURL
+	if current.APIKey == "" {
+		return PushRelayCredential{}, fmt.Errorf("push relay API key not configured")
+	}
+	if IsLegacyPushRelayKey(current.APIKey) {
+		result, err := RegisterRelayCredential(ctx, s.settings, s.client, relayURL)
+		return result.Credential, err
+	}
+	if current.ReregistrationRequired {
+		return PushRelayCredential{}, fmt.Errorf("push relay re-registration required")
+	}
+	if RelayCredentialNeedsRenewal(s.now(), current.ExpiresAt, current.DeploymentID) {
+		result, err := RenewRelayCredential(ctx, s.settings, s.client, current)
+		// A proactive refresh must not suppress delivery while the current
+		// capability is still valid. Reactive token_expired handling remains the
+		// final safety net once its actual expiry is reached.
+		if err != nil && s.now().Before(current.ExpiresAt) {
+			return current, nil
+		}
+		return result.Credential, err
+	}
+	return current, nil
+}
+
+func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliveryAttempt, device *PushDevice, token, relayURL, apiKey string) pushSendResult {
 	deliveryID := attempt.ID
 	if attempt.NotificationDeliveryID != nil {
 		deliveryID = *attempt.NotificationDeliveryID
@@ -202,7 +260,10 @@ func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, devi
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Silo-Push/1.0")
-	req.Header.Set("Idempotency-Key", fmt.Sprintf("%s:%d", attempt.ID, attempt.AttemptNumber+1))
+	// One logical delivery attempt keeps the same key across every transport
+	// retry. The relay can then distinguish a safe retry from a new delivery and
+	// refuse to resend an ambiguous APNs outcome.
+	req.Header.Set("Idempotency-Key", attempt.ID)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -245,6 +306,34 @@ func (s *pushSender) send(ctx context.Context, attempt PushDeliveryAttempt, devi
 		Message:        strings.TrimSpace(message),
 		TerminalDevice: resp.StatusCode == http.StatusUnprocessableEntity && code == "apns_rejected",
 	}
+}
+
+func (s *pushSender) renewRelayCapability(ctx context.Context, expiredKey string) (PushRelayCredential, error) {
+	s.renewMu.Lock()
+	defer s.renewMu.Unlock()
+
+	// Another sender may have renewed while this goroutine waited for the lock.
+	current := LoadPushRelayCredential(ctx, s.settings)
+	if current.APIKey != "" && current.APIKey != expiredKey {
+		return current, nil
+	}
+	relayURL, err := NormalizePushRelayURL(current.RelayURL, s.developmentRelayURL)
+	if err != nil {
+		return PushRelayCredential{}, err
+	}
+	current.RelayURL = relayURL
+	result, err := RenewRelayCredential(ctx, s.settings, s.client, current)
+	return result.Credential, err
+}
+
+func (s *pushSender) markReregistrationRequired(ctx context.Context, failed PushRelayCredential) error {
+	s.renewMu.Lock()
+	defer s.renewMu.Unlock()
+	current := LoadPushRelayCredential(ctx, s.settings)
+	if current.APIKey != failed.APIKey {
+		return nil
+	}
+	return MarkRelayReregistrationRequired(ctx, s.settings, current)
 }
 
 // PushDispatcher implements the channel Dispatcher interface for Apple push

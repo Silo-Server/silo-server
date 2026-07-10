@@ -32,6 +32,16 @@ func (f *fakeServerSettingsStore) Set(_ context.Context, key, value string) erro
 	return nil
 }
 
+func (f *fakeServerSettingsStore) SetMany(_ context.Context, values map[string]string) error {
+	if f.values == nil {
+		f.values = map[string]string{}
+	}
+	for key, value := range values {
+		f.values[key] = value
+	}
+	return nil
+}
+
 func (f *fakeServerSettingsStore) GetAll(context.Context) (map[string]string, error) {
 	cloned := make(map[string]string, len(f.values))
 	for key, value := range f.values {

@@ -45,6 +45,30 @@ func (r *ServerSettingsRepo) Set(ctx context.Context, key, value string) error {
 	return nil
 }
 
+// SetMany atomically upserts a related group of settings. Credential bundles
+// use this so readers can never observe a URL, identifier, or secret from
+// different relay generations after a partial write.
+func (r *ServerSettingsRepo) SetMany(ctx context.Context, values map[string]string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("server_settings begin batch: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for key, value := range values {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO server_settings (key, value) VALUES ($1, $2)
+			 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+			key, value,
+		); err != nil {
+			return fmt.Errorf("server_settings batch set %q: %w", key, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("server_settings commit batch: %w", err)
+	}
+	return nil
+}
+
 // SetIfAbsent inserts a setting only when the key has no value yet (absent or
 // empty), reporting whether this call won the write. Generated credentials
 // (e.g. the web push VAPID keypair) must be provisioned single-writer across

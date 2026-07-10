@@ -1,23 +1,20 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"strings"
+	"os"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
 type AdminApplePushHandler struct {
-	system   *notifications.System
-	settings ServerSettingsStore
-	client   httpDoer
+	system              *notifications.System
+	settings            ServerSettingsStore
+	client              httpDoer
+	developmentRelayURL string
 }
 
 type httpDoer interface {
@@ -26,9 +23,10 @@ type httpDoer interface {
 
 func NewAdminApplePushHandler(system *notifications.System, settings ServerSettingsStore) *AdminApplePushHandler {
 	return &AdminApplePushHandler{
-		system:   system,
-		settings: settings,
-		client:   &http.Client{Timeout: 10 * time.Second},
+		system:              system,
+		settings:            settings,
+		client:              &http.Client{Timeout: 10 * time.Second},
+		developmentRelayURL: os.Getenv("SILO_PUSH_RELAY_DEVELOPMENT_URL"),
 	}
 }
 
@@ -52,26 +50,6 @@ type adminPushRelayRegisterRequest struct {
 	RelayURL string `json:"relay_url"`
 }
 
-type pushRelayRegisterRequest struct {
-	DeploymentID string `json:"deployment_id,omitempty"`
-}
-
-type pushRelayRegisterResponse struct {
-	RequestID    string   `json:"request_id"`
-	DeploymentID string   `json:"deployment_id"`
-	APIKey       string   `json:"api_key"`
-	KeyPrefix    string   `json:"key_prefix"`
-	APNsTopics   []string `json:"apns_topics"`
-}
-
-type pushRelayNestedError struct {
-	Error struct {
-		Code      string `json:"code"`
-		Message   string `json:"message"`
-		RequestID string `json:"request_id"`
-	} `json:"error"`
-}
-
 type adminPushRelayRegisterResponse struct {
 	RelayURL         string   `json:"relay_url"`
 	DeploymentID     string   `json:"deployment_id"`
@@ -79,6 +57,7 @@ type adminPushRelayRegisterResponse struct {
 	APIKeyConfigured bool     `json:"api_key_configured"`
 	RelayRequestID   string   `json:"relay_request_id,omitempty"`
 	APNsTopics       []string `json:"apns_topics,omitempty"`
+	ExpiresAt        string   `json:"expires_at"`
 }
 
 // HandleTest handles POST /admin/notifications/push/apple/test.
@@ -131,149 +110,73 @@ func (h *AdminApplePushHandler) HandleRegisterRelay(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	relayURL, err := normalizePushRelayURL(req.RelayURL)
+	relayURL, err := notifications.NormalizePushRelayURL(req.RelayURL, h.developmentRelayURL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
-	existingDeploymentID, err := h.settings.Get(r.Context(), notifications.SettingPushRelayDeploymentID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_error", "Failed to load relay deployment id")
-		return
+	settings := notifications.NewSettings(h.settings)
+	if h.system != nil && h.system.Settings != nil {
+		settings = h.system.Settings
 	}
-	relayResp, err := h.registerWithRelay(r, relayURL, strings.TrimSpace(existingDeploymentID))
+	current := notifications.LoadPushRelayCredential(r.Context(), settings)
+	var relayResp notifications.RelayCredentialResult
+	switch {
+	case current.APIKey == "", notifications.IsLegacyPushRelayKey(current.APIKey), current.ReregistrationRequired:
+		relayResp, err = notifications.RegisterRelayCredential(r.Context(), settings, h.client, relayURL)
+	default:
+		currentURL, urlErr := notifications.NormalizePushRelayURL(current.RelayURL, h.developmentRelayURL)
+		if urlErr != nil || currentURL != relayURL {
+			writeError(w, http.StatusConflict, "relay_origin_change_requires_reregistration", "Clear or re-register the relay credential before changing relay origins")
+			return
+		}
+		current.RelayURL = currentURL
+		relayResp, err = notifications.RotateRelayCredential(r.Context(), settings, h.client, current)
+	}
 	if err != nil {
+		var relayErr notifications.RelayCredentialError
+		if current.APIKey != "" && !notifications.IsLegacyPushRelayKey(current.APIKey) &&
+			errors.As(err, &relayErr) && relayErr.Status == http.StatusUnauthorized {
+			if markErr := notifications.MarkRelayReregistrationRequired(r.Context(), settings, current); markErr != nil {
+				writeError(w, http.StatusInternalServerError, "settings_error", "Failed to save push relay credential status")
+				return
+			}
+			writeError(w, http.StatusConflict, "relay_reregistration_required", "The current relay capability was rejected; explicit re-registration is required")
+			return
+		}
 		status, code, message := mapRelayRegistrationError(err)
 		writeError(w, status, code, message)
 		return
 	}
-	if strings.TrimSpace(relayResp.DeploymentID) == "" || strings.TrimSpace(relayResp.APIKey) == "" {
-		writeError(w, http.StatusBadGateway, "relay_bad_response", "Push relay returned an incomplete registration response")
-		return
-	}
-
-	if err := h.settings.Set(r.Context(), notifications.SettingPushRelayURL, relayURL); err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_error", "Failed to save push relay URL")
-		return
-	}
-	if err := h.settings.Set(r.Context(), notifications.SettingPushRelayDeploymentID, relayResp.DeploymentID); err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_error", "Failed to save push relay deployment id")
-		return
-	}
-	if err := h.settings.Set(r.Context(), notifications.SettingPushRelayAPIKey, relayResp.APIKey); err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_error", "Failed to save push relay API key")
-		return
-	}
-	if h.system != nil && h.system.Settings != nil {
-		h.system.Settings.Invalidate(
-			notifications.SettingPushRelayURL,
-			notifications.SettingPushRelayDeploymentID,
-			notifications.SettingPushRelayAPIKey,
-		)
-	}
+	credential := relayResp.Credential
 	writeJSON(w, http.StatusOK, adminPushRelayRegisterResponse{
-		RelayURL:         relayURL,
-		DeploymentID:     relayResp.DeploymentID,
-		KeyPrefix:        relayResp.KeyPrefix,
+		RelayURL:         credential.RelayURL,
+		DeploymentID:     credential.DeploymentID,
+		KeyPrefix:        credential.KeyPrefix,
 		APIKeyConfigured: true,
 		RelayRequestID:   relayResp.RequestID,
 		APNsTopics:       relayResp.APNsTopics,
+		ExpiresAt:        credential.ExpiresAt.UTC().Format(time.RFC3339),
 	})
-}
-
-func (h *AdminApplePushHandler) registerWithRelay(r *http.Request, relayURL, deploymentID string) (*pushRelayRegisterResponse, error) {
-	body, err := json.Marshal(pushRelayRegisterRequest{
-		DeploymentID: deploymentID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	httpReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, relayURL+"/v1/deployments/register", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "Silo-Server/PushRelayRegistration")
-
-	resp, err := h.client.Do(httpReq)
-	if err != nil {
-		return nil, relayRegistrationError{status: http.StatusBadGateway, code: "relay_unreachable", message: "Push relay could not be reached"}
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<10))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var parsed pushRelayNestedError
-		_ = json.Unmarshal(data, &parsed)
-		code := parsed.Error.Code
-		if code == "" {
-			code = fmt.Sprintf("relay_http_%d", resp.StatusCode)
-		}
-		message := parsed.Error.Message
-		if message == "" {
-			message = http.StatusText(resp.StatusCode)
-		}
-		return nil, relayRegistrationError{status: resp.StatusCode, code: code, message: message}
-	}
-	var parsed pushRelayRegisterResponse
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return nil, relayRegistrationError{status: http.StatusBadGateway, code: "relay_bad_response", message: "Push relay returned invalid JSON"}
-	}
-	return &parsed, nil
-}
-
-type relayRegistrationError struct {
-	status  int
-	code    string
-	message string
-}
-
-func (e relayRegistrationError) Error() string {
-	return e.code
 }
 
 func mapRelayRegistrationError(err error) (int, string, string) {
-	var relayErr relayRegistrationError
+	var relayErr notifications.RelayCredentialError
 	if !errors.As(err, &relayErr) {
 		return http.StatusInternalServerError, "internal_error", "Failed to register push relay"
 	}
-	switch relayErr.status {
+	switch relayErr.Status {
 	case http.StatusForbidden:
 		return http.StatusUnprocessableEntity, "relay_deployment_rejected", "Push relay rejected this deployment"
 	case http.StatusTooManyRequests:
-		return http.StatusTooManyRequests, "relay_rate_limited", relayErr.message
+		return http.StatusTooManyRequests, "relay_rate_limited", relayErr.Message
 	case http.StatusServiceUnavailable:
-		return http.StatusServiceUnavailable, "relay_unavailable", relayErr.message
+		return http.StatusServiceUnavailable, "relay_unavailable", relayErr.Message
 	default:
-		if relayErr.status >= 500 {
-			return http.StatusBadGateway, "relay_error", relayErr.message
+		if relayErr.Status >= 500 {
+			return http.StatusBadGateway, "relay_error", relayErr.Message
 		}
-		return http.StatusBadGateway, relayErr.code, relayErr.message
+		return http.StatusBadGateway, relayErr.Code, relayErr.Message
 	}
-}
-
-// normalizePushRelayURLValue trims a relay URL and enforces https with a
-// host. Empty input stays empty so callers choose their own default.
-func normalizePushRelayURLValue(raw string) (string, error) {
-	value := strings.TrimRight(strings.TrimSpace(raw), "/")
-	if value == "" {
-		return "", nil
-	}
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return "", errors.New("relay_url must be an https URL")
-	}
-	return value, nil
-}
-
-func normalizePushRelayURL(raw string) (string, error) {
-	value, err := normalizePushRelayURLValue(raw)
-	if err != nil {
-		return "", err
-	}
-	if value == "" {
-		return notifications.DefaultPushRelayURL, nil
-	}
-	return value, nil
 }

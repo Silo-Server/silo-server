@@ -40,12 +40,13 @@ func TestAdminApplePushHandlerRegistersRelayAndStoresKey(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&relayReq); err != nil {
 			t.Fatalf("decode relay request: %v", err)
 		}
-		writeJSON(w, http.StatusOK, pushRelayRegisterResponse{
-			RequestID:    "relay-request",
-			DeploymentID: "01RETURNED",
-			APIKey:       "rk_live_raw-key",
-			KeyPrefix:    "rk_live_raw",
-			APNsTopics:   []string{"org.siloserver.silo"},
+		writeJSON(w, http.StatusOK, map[string]any{
+			"request_id":    "relay-request",
+			"deployment_id": "01RETURNED",
+			"api_key":       "modern.capability.value",
+			"key_prefix":    "cap_v1_test",
+			"apns_topics":   []string{"org.siloserver.silo"},
+			"expires_at":    "2026-08-10T00:00:00Z",
 		})
 	}))
 	t.Cleanup(relay.Close)
@@ -65,6 +66,7 @@ func TestAdminApplePushHandlerRegistersRelayAndStoresKey(t *testing.T) {
 	httpsRelay := httptest.NewTLSServer(relay.Config.Handler)
 	t.Cleanup(httpsRelay.Close)
 	h.client = httpsRelay.Client()
+	h.developmentRelayURL = httpsRelay.URL
 	rec = httptest.NewRecorder()
 	h.HandleRegisterRelay(rec, httptest.NewRequest(http.MethodPost, "/admin/notifications/push/relay/register", strings.NewReader(`{
 		"relay_url":"`+httpsRelay.URL+`"
@@ -73,7 +75,7 @@ func TestAdminApplePushHandlerRegistersRelayAndStoresKey(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
 	}
-	if relayReq["deployment_id"] != "01EXISTING" || len(relayReq) != 1 {
+	if len(relayReq) != 0 {
 		t.Fatalf("relay request = %+v", relayReq)
 	}
 	if settings.values[notifications.SettingPushRelayURL] != httpsRelay.URL {
@@ -82,7 +84,7 @@ func TestAdminApplePushHandlerRegistersRelayAndStoresKey(t *testing.T) {
 	if settings.values[notifications.SettingPushRelayDeploymentID] != "01RETURNED" {
 		t.Fatalf("stored deployment id = %q", settings.values[notifications.SettingPushRelayDeploymentID])
 	}
-	if settings.values[notifications.SettingPushRelayAPIKey] != "rk_live_raw-key" {
+	if settings.values[notifications.SettingPushRelayAPIKey] != "modern.capability.value" {
 		t.Fatalf("stored api key = %q", settings.values[notifications.SettingPushRelayAPIKey])
 	}
 
@@ -109,6 +111,7 @@ func TestAdminApplePushHandlerMapsRelayRateLimit(t *testing.T) {
 
 	h := NewAdminApplePushHandler(&notifications.System{}, settings)
 	h.client = relay.Client()
+	h.developmentRelayURL = relay.URL
 	rec := httptest.NewRecorder()
 	h.HandleRegisterRelay(rec, httptest.NewRequest(http.MethodPost, "/admin/notifications/push/relay/register", strings.NewReader(`{
 		"relay_url":"`+relay.URL+`"
@@ -119,5 +122,48 @@ func TestAdminApplePushHandlerMapsRelayRateLimit(t *testing.T) {
 	}
 	if settings.values[notifications.SettingPushRelayAPIKey] != "" {
 		t.Fatal("api key was stored after relay rejected registration")
+	}
+}
+
+func TestAdminApplePushHandlerRotatesExistingCapability(t *testing.T) {
+	settings := &fakeServerSettingsStore{values: map[string]string{
+		notifications.SettingPushRelayDeploymentID: "deployment-existing",
+		notifications.SettingPushRelayAPIKey:       "existing.capability.value",
+		notifications.SettingPushRelayKeyPrefix:    "cap_v1_existing",
+		notifications.SettingPushRelayExpiresAt:    "2026-08-01T00:00:00Z",
+	}}
+	var idempotencyKey string
+	relay := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/deployments/rotate" {
+			t.Fatalf("relay path = %q, want rotate", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer existing.capability.value" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		idempotencyKey = r.Header.Get("Idempotency-Key")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"request_id":    "rotate-request",
+			"deployment_id": "deployment-existing",
+			"api_key":       "rotated.capability.value",
+			"key_prefix":    "cap_v1_rotated",
+			"expires_at":    "2026-09-01T00:00:00Z",
+		})
+	}))
+	t.Cleanup(relay.Close)
+	settings.values[notifications.SettingPushRelayURL] = relay.URL
+	h := NewAdminApplePushHandler(&notifications.System{Settings: notifications.NewSettings(settings)}, settings)
+	h.client = relay.Client()
+	h.developmentRelayURL = relay.URL
+
+	rec := httptest.NewRecorder()
+	h.HandleRegisterRelay(rec, httptest.NewRequest(http.MethodPost, "/admin/notifications/push/relay/register", strings.NewReader(`{"relay_url":"`+relay.URL+`"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s), want 200", rec.Code, rec.Body.String())
+	}
+	if idempotencyKey == "" {
+		t.Fatal("rotation omitted Idempotency-Key")
+	}
+	if got := settings.values[notifications.SettingPushRelayAPIKey]; got != "rotated.capability.value" {
+		t.Fatalf("stored capability = %q", got)
 	}
 }

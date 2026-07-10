@@ -32,6 +32,10 @@ function makeForm() {
           return "https://push.siloserver.org";
         case "notifications.push_relay_deployment_id":
           return "01DEPLOYMENT";
+        case "notifications.push_relay_key_prefix":
+          return "cap_v1_test";
+        case "notifications.push_relay_expires_at":
+          return "2026-08-10T00:00:00Z";
         default:
           return "";
       }
@@ -76,6 +80,9 @@ describe("NotificationsAdminSettings", () => {
       keys: expect.arrayContaining([
         "notifications.apple_push_delivery_enabled",
         "notifications.push_relay_deployment_id",
+        "notifications.push_relay_expires_at",
+        "notifications.push_relay_key_prefix",
+        "notifications.push_relay_reregistration_required",
       ]),
     });
     const firstCall = useSettingsFormMock.mock.calls[0];
@@ -84,9 +91,7 @@ describe("NotificationsAdminSettings", () => {
     }
     const [options] = firstCall as [{ keys: string[] }];
     expect(options.keys).not.toContain("notifications.push_relay_api_key");
-    // The relay URL is persisted only via the registration endpoint, never
-    // through the settings form.
-    expect(options.keys).not.toContain("notifications.push_relay_url");
+    expect(options.keys).toContain("notifications.push_relay_url");
   });
 
   it("shows the Silo Push Relay channel status", async () => {
@@ -106,7 +111,9 @@ describe("NotificationsAdminSettings", () => {
     expect(screen.getByText(/does not receive notification titles/)).toBeInTheDocument();
     expect(screen.getByText(/fetches private content directly/)).toBeInTheDocument();
     expect(screen.getByText("Deployment ID")).toBeInTheDocument();
-    expect(screen.getByText("Rotate relay key")).toBeInTheDocument();
+    expect(screen.getByText("Rotate credential")).toBeInTheDocument();
+    expect(screen.getByText("Credential: cap_v1_test")).toBeInTheDocument();
+    expect(screen.getByText(/Silo renews automatically/)).toBeInTheDocument();
     expect(screen.queryByText("Relay API Key")).not.toBeInTheDocument();
     expect(screen.queryByText("Smoke Test Profile ID")).not.toBeInTheDocument();
     expect(screen.queryByText("Server Device ID")).not.toBeInTheDocument();

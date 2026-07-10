@@ -45,10 +45,13 @@ const KEYS = [
   "notifications.webhooks_enabled",
   "notifications.web_push_enabled",
   "notifications.apple_push_delivery_enabled",
-  // notifications.push_relay_url is intentionally absent: the server rejects
-  // direct writes; the relay URL is persisted by the registration endpoint
-  // together with the deployment id and API key.
+  // Relay lifecycle fields are read for status but are never edited through
+  // the shared settings form; credential endpoints replace them atomically.
+  "notifications.push_relay_url",
   "notifications.push_relay_deployment_id",
+  "notifications.push_relay_expires_at",
+  "notifications.push_relay_key_prefix",
+  "notifications.push_relay_reregistration_required",
   "notifications.fanout.settle_seconds",
   "notifications.fanout.max_series_burst",
   "notifications.fanout.max_event_age_hours",
@@ -87,6 +90,7 @@ interface AppleRelayRegisterResult {
   api_key_configured: boolean;
   relay_request_id?: string;
   apns_topics?: string[];
+  expires_at: string;
 }
 
 const DEFAULT_PUSH_RELAY_URL = "https://push.siloserver.org";
@@ -430,11 +434,17 @@ function TestDiscordRow({ unsaved }: { unsaved: boolean }) {
 function RegisterRelayRow({
   relayURL,
   deploymentID,
+  keyPrefix,
+  expiresAt,
+  reregistrationRequired,
   urlEdited,
   onRegistered,
 }: {
   relayURL: string;
   deploymentID: string;
+  keyPrefix: string;
+  expiresAt: string;
+  reregistrationRequired: boolean;
   urlEdited: boolean;
   onRegistered: () => void;
 }) {
@@ -443,6 +453,20 @@ function RegisterRelayRow({
   const [result, setResult] = useState<AppleRelayRegisterResult | null>(null);
 
   const configured = deploymentID.trim() !== "";
+  const actionLabel = reregistrationRequired
+    ? "Re-register relay"
+    : configured
+      ? "Rotate credential"
+      : "Register relay";
+  const expiration = expiresAt ? new Date(expiresAt) : null;
+  const expirationValid = expiration != null && !Number.isNaN(expiration.getTime());
+  const renewalStatus = expirationValid
+    ? expiration.getTime() <= Date.now()
+      ? "Expired; Silo will renew before the next delivery when the relay grace period permits."
+      : `Expires ${expiration.toLocaleString()}; Silo renews automatically during the final week with per-server jitter.`
+    : configured
+      ? "Expiration is unknown; the credential will be refreshed on its next lifecycle operation."
+      : "No relay credential is registered.";
 
   const registerRelay = async () => {
     if (pending) return;
@@ -491,8 +515,18 @@ function RegisterRelayRow({
           ) : (
             <KeyRound className="mr-1.5 h-3.5 w-3.5" />
           )}
-          {configured ? "Rotate relay key" : "Register relay"}
+          {actionLabel}
         </Button>
+      </div>
+      {reregistrationRequired && (
+        <div className="text-xs text-amber-500">
+          The current capability was rejected or revoked. Automatic registration is disabled;
+          re-register explicitly to create a new relay deployment.
+        </div>
+      )}
+      <div className="text-muted-foreground space-y-1 text-xs">
+        {keyPrefix && <div>Credential: {keyPrefix}</div>}
+        <div>{renewalStatus}</div>
       </div>
       {urlEdited && (
         <div className="text-muted-foreground text-xs">
@@ -501,7 +535,7 @@ function RegisterRelayRow({
       )}
       {result && (
         <div className="text-xs text-emerald-500">
-          Registered {result.deployment_id}
+          Credential ready for {result.deployment_id}
           {result.key_prefix ? ` — key ${result.key_prefix}` : ""}
           {result.relay_request_id ? ` — relay ${result.relay_request_id}` : ""}
         </div>
@@ -586,6 +620,10 @@ export default function NotificationsAdminSettings() {
   const pushRelayURL = pushRelayURLDraft ?? savedPushRelayURL;
   const pushRelayURLEdited = pushRelayURL !== savedPushRelayURL;
   const pushRelayDeploymentID = form.getValue("notifications.push_relay_deployment_id");
+  const pushRelayKeyPrefix = form.getValue("notifications.push_relay_key_prefix");
+  const pushRelayExpiresAt = form.getValue("notifications.push_relay_expires_at");
+  const pushRelayReregistrationRequired =
+    form.getValue("notifications.push_relay_reregistration_required") === "true";
   const pushRelayAPIKeyReady = form.sensitiveConfigured.includes(
     "notifications.push_relay_api_key",
   );
@@ -721,7 +759,9 @@ export default function NotificationsAdminSettings() {
             enabled={applePushOn}
             onEnabledChange={setToggle("notifications.apple_push_delivery_enabled")}
             chips={
-              pushRelayAPIKeyReady ? (
+              pushRelayReregistrationRequired ? (
+                <Chip tone="warning">Re-registration required</Chip>
+              ) : pushRelayAPIKeyReady ? (
                 <Chip tone="positive">Relay configured</Chip>
               ) : (
                 <Chip tone={applePushOn ? "warning" : "neutral"}>Relay registration required</Chip>
@@ -740,6 +780,9 @@ export default function NotificationsAdminSettings() {
               <RegisterRelayRow
                 relayURL={pushRelayURL}
                 deploymentID={pushRelayDeploymentID}
+                keyPrefix={pushRelayKeyPrefix}
+                expiresAt={pushRelayExpiresAt}
+                reregistrationRequired={pushRelayReregistrationRequired}
                 urlEdited={pushRelayURLEdited}
                 onRegistered={() => setPushRelayURLDraft(null)}
               />

@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,10 @@ import (
 // locally to avoid a catalog dependency.
 type SettingReader interface {
 	Get(ctx context.Context, key string) (string, error)
+}
+
+type settingBatchWriter interface {
+	SetMany(ctx context.Context, values map[string]string) error
 }
 
 // Server-setting keys for the notification system. All keys are live (no
@@ -55,6 +60,9 @@ const (
 	SettingPushRelayURL             = "notifications.push_relay_url"
 	SettingPushRelayDeploymentID    = "notifications.push_relay_deployment_id"
 	SettingPushRelayAPIKey          = "notifications.push_relay_api_key"
+	SettingPushRelayExpiresAt       = "notifications.push_relay_expires_at"
+	SettingPushRelayKeyPrefix       = "notifications.push_relay_key_prefix"
+	SettingPushRelayReregister      = "notifications.push_relay_reregistration_required"
 
 	// Discord application credentials live under the discord.* namespace
 	// (admin-configured, alongside email.smtp_*). The secret and bot token
@@ -156,6 +164,51 @@ func (s *Settings) Invalidate(keys ...string) {
 		delete(s.cache, key)
 	}
 	s.mu.Unlock()
+}
+
+// PushRelayCredential is the complete persisted identity of one relay
+// capability generation. It must always be replaced as one atomic unit.
+type PushRelayCredential struct {
+	RelayURL               string
+	DeploymentID           string
+	APIKey                 string
+	ExpiresAt              time.Time
+	KeyPrefix              string
+	ReregistrationRequired bool
+}
+
+// UpdatePushRelayCredential atomically persists all fields that identify a
+// relay credential. Production requires a batch-capable settings repository;
+// refusing a sequential fallback is what preserves the invariant.
+func (s *Settings) UpdatePushRelayCredential(ctx context.Context, credential PushRelayCredential) error {
+	if s == nil || s.reader == nil {
+		return errors.New("push relay settings are unavailable")
+	}
+	writer, ok := s.reader.(settingBatchWriter)
+	if !ok {
+		return errors.New("push relay settings do not support atomic writes")
+	}
+	expiresAt := ""
+	if !credential.ExpiresAt.IsZero() {
+		expiresAt = credential.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	values := map[string]string{
+		SettingPushRelayURL:          strings.TrimRight(strings.TrimSpace(credential.RelayURL), "/"),
+		SettingPushRelayDeploymentID: strings.TrimSpace(credential.DeploymentID),
+		SettingPushRelayAPIKey:       strings.TrimSpace(credential.APIKey),
+		SettingPushRelayExpiresAt:    expiresAt,
+		SettingPushRelayKeyPrefix:    strings.TrimSpace(credential.KeyPrefix),
+		SettingPushRelayReregister:   strconv.FormatBool(credential.ReregistrationRequired),
+	}
+	if err := writer.SetMany(ctx, values); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	s.Invalidate(keys...)
+	return nil
 }
 
 func (s *Settings) boolSetting(ctx context.Context, key string, fallback bool) bool {
@@ -382,6 +435,24 @@ func (s *Settings) PushRelayAPIKey(ctx context.Context) string {
 // subsequent key rotations.
 func (s *Settings) PushRelayDeploymentID(ctx context.Context) string {
 	return strings.TrimSpace(s.raw(ctx, SettingPushRelayDeploymentID))
+}
+
+func (s *Settings) PushRelayExpiresAt(ctx context.Context) time.Time {
+	value := strings.TrimSpace(s.raw(ctx, SettingPushRelayExpiresAt))
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
+}
+
+func (s *Settings) PushRelayKeyPrefix(ctx context.Context) string {
+	return strings.TrimSpace(s.raw(ctx, SettingPushRelayKeyPrefix))
+}
+
+func (s *Settings) PushRelayReregistrationRequired(ctx context.Context) bool {
+	value, _ := strconv.ParseBool(strings.TrimSpace(s.raw(ctx, SettingPushRelayReregister)))
+	return value
 }
 
 // DiscordClientID is the Discord application's OAuth2 client ID.

@@ -153,6 +153,31 @@ type settingsConditionalWriter interface {
 	SetIfAbsent(ctx context.Context, key, value string) (bool, error)
 }
 
+type settingsBatchWriter interface {
+	SetMany(ctx context.Context, values map[string]string) error
+}
+
+// SetMany encrypts every sensitive member before delegating one atomic batch
+// to the raw settings repository.
+func (r *EncryptedSettingsRepo) SetMany(ctx context.Context, values map[string]string) error {
+	inner, ok := r.inner.(settingsBatchWriter)
+	if !ok {
+		return fmt.Errorf("settings store does not support atomic batch writes")
+	}
+	encrypted := make(map[string]string, len(values))
+	for key, value := range values {
+		if SensitiveSettingKeys[key] && value != "" {
+			ct, err := r.cipher.Encrypt(value, secret.SettingsAAD(key))
+			if err != nil {
+				return fmt.Errorf("encrypt setting %q: %w", key, err)
+			}
+			value = ct
+		}
+		encrypted[key] = value
+	}
+	return inner.SetMany(ctx, encrypted)
+}
+
 // SetIfAbsent applies Set's encryption contract to a conditional write: the
 // value lands only when the key currently has no value, so concurrent
 // provisioners of generated secrets cannot overwrite each other.

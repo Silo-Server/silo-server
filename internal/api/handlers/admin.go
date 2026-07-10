@@ -2238,7 +2238,12 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		req.Value = strconv.FormatBool(enabled)
-	case notifications.SettingPushRelayURL, notifications.SettingPushRelayDeploymentID, notifications.SettingPushRelayAPIKey:
+	case notifications.SettingPushRelayURL,
+		notifications.SettingPushRelayDeploymentID,
+		notifications.SettingPushRelayAPIKey,
+		notifications.SettingPushRelayExpiresAt,
+		notifications.SettingPushRelayKeyPrefix,
+		notifications.SettingPushRelayReregister:
 		// The registration flow persists the relay URL, deployment id, and API
 		// key together; a direct write to any of them desyncs the stored URL
 		// from the credentials the relay minted for it (and feeds an arbitrary
