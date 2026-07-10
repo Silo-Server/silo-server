@@ -13,6 +13,7 @@ function makeVersion(overrides: Partial<FileVersion> = {}): FileVersion {
     file_size: overrides.file_size ?? 0,
     duration: overrides.duration ?? 7200,
     bitrate: overrides.bitrate ?? 0,
+    effective_audio_track_index: overrides.effective_audio_track_index,
     audio_tracks: overrides.audio_tracks,
     video_tracks: overrides.video_tracks,
   };
@@ -52,26 +53,34 @@ describe("resolveSelectedMediaSummary", () => {
 
   it("derives the video range label from the selected file's tracks", () => {
     const dolbyVision = makeVersion({
+      resolution: "2160p",
       hdr: true,
       video_tracks: [{ dolby_vision: "Profile 8.1", video_range_type: "DOVIWithHDR10" }],
     });
 
-    expect(resolveSelectedMediaSummary(dolbyVision, undefined, 0).videoRangeLabel).toBe("DV HDR10");
+    const summary = resolveSelectedMediaSummary(dolbyVision, undefined, 0);
+    expect(summary.resolution).toBe("4K");
+    expect(summary.videoRangeLabel).toBe("Dolby Vision");
     expect(
       resolveSelectedMediaSummary(makeVersion({ hdr: true }), undefined, 0).videoRangeLabel,
     ).toBe("HDR");
   });
 
-  it("only considers audio tracks from the selected file", () => {
+  it("uses the effective audio track for a precise Atmos carrier label", () => {
     const version = makeVersion({
       codec_audio: "aac",
+      effective_audio_track_index: 1,
       audio_tracks: [
         { language: "en", codec: "aac" },
-        { language: "en", codec: "truehd" },
+        {
+          language: "en",
+          codec: "truehd",
+          profile: "Dolby TrueHD + Dolby Atmos",
+        },
       ],
     });
 
-    expect(resolveSelectedMediaSummary(version, undefined, 0).audioLabel).toBe("TrueHD");
+    expect(resolveSelectedMediaSummary(version, undefined, 0).audioLabel).toBe("TrueHD Atmos");
   });
 
   it("uses the playback variant total for multipart editions", () => {

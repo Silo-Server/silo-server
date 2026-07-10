@@ -90,8 +90,7 @@ func rangeRank(file *models.MediaFile) int {
 // rows may carry only dv_profile or a DOVI* video_range_type.
 func hasDolbyVision(tracks []models.VideoTrack) bool {
 	for _, track := range tracks {
-		if track.DolbyVision != "" || track.DVProfile > 0 ||
-			strings.HasPrefix(track.VideoRangeType, "DOVI") {
+		if track.IsDolbyVision() {
 			return true
 		}
 	}

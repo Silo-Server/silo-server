@@ -5,8 +5,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import { formatFileSize, mapAudioLabel } from "@/lib/mediaFormat";
-import { videoRangeLabel } from "@/lib/videoRange";
+import { formatFileSize, formatVersionQualitySummary } from "@/lib/mediaFormat";
 import { extractSourceHint } from "./versionFormatUtils";
 import { resolutionScore } from "./versionRankingUtils";
 
@@ -15,18 +14,7 @@ import { resolutionScore } from "./versionRankingUtils";
 // ---------------------------------------------------------------------------
 
 export function buildQualitySummary(version: FileVersion): string {
-  const parts: string[] = [];
-
-  if (version.resolution) parts.push(version.resolution);
-  if (version.codec_video) parts.push(version.codec_video.toUpperCase());
-  const rangeLabel = videoRangeLabel(version);
-  if (rangeLabel) parts.push(rangeLabel);
-  if (version.codec_audio) parts.push(mapAudioLabel(version.codec_audio));
-  if (parts.length === 0 && version.container) {
-    parts.push(version.container.toUpperCase());
-  }
-
-  return parts.join(" · ");
+  return formatVersionQualitySummary(version) || version.container?.toUpperCase() || "";
 }
 
 export function buildDetailLine(version: FileVersion): string {

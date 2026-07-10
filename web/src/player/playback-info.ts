@@ -1,10 +1,12 @@
 import {
   dolbyVisionLabel,
+  formatAudioTrackLabel,
   formatBitrate,
   formatCodecLabel,
   formatFileSize,
   formatMbpsFromKbps,
   formatSampleRate,
+  formatVideoQualitySummary,
 } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
 import type { DeliveryV3, PlanV3 } from "./protocol-v3";
@@ -206,12 +208,7 @@ function formatQualityBitrate(kbps?: number): string {
 }
 
 function formatRequestedSourceVersion(version: PlayerFileVersion): string {
-  const parts = [
-    version.resolution?.trim(),
-    formatCodecLabel(version.codec_video),
-    videoRangeLabel(version) || null,
-  ].filter(Boolean);
-  return parts.join(" ");
+  return formatVideoQualitySummary(version, " ");
 }
 
 /**
@@ -302,10 +299,20 @@ export function formatVideoRangeType(
   version?: PlayerFileVersion,
   track?: PlayerVideoTrack,
 ): string {
-  if (track?.dolby_vision) {
-    const dolbyVision = dolbyVisionLabel(track.dolby_vision);
-    return track.video_range ? `${dolbyVision} (${track.video_range})` : dolbyVision;
+  const trackRange = track ? videoRangeLabel({ video_tracks: [track] }) : "";
+  if (track && trackRange.startsWith("DV")) {
+    const dolbyVision = track.dolby_vision
+      ? dolbyVisionLabel(track.dolby_vision)
+      : track.dv_profile
+        ? `Dolby Vision Profile ${track.dv_profile}`
+        : "Dolby Vision";
+    const videoRange = track.video_range?.trim();
+    const normalizedRange = videoRange?.toLowerCase() ?? "";
+    const hasDistinctRange =
+      videoRange && !normalizedRange.includes("dolbyvision") && !normalizedRange.includes("dovi");
+    return hasDistinctRange ? `${dolbyVision} (${videoRange})` : dolbyVision;
   }
+  if (track?.video_range_type) return track.video_range_type;
   if (track?.video_range) {
     return track.video_range;
   }
@@ -336,7 +343,9 @@ export function formatOriginalAudioCodec(
   if (title) {
     return title;
   }
-  return formatCodecLabel(track?.codec || version?.codec_audio);
+  return (
+    formatAudioTrackLabel(track) || formatAudioTrackLabel({ codec: version?.codec_audio }) || "—"
+  );
 }
 
 export function formatAudioChannels(version?: PlayerFileVersion, track?: PlayerAudioTrack): string {

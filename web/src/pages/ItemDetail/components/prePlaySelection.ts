@@ -15,7 +15,7 @@ import { getLanguageName } from "@/player/utils/languageNames";
 import { normalizeSubtitleMode } from "@/player/utils/subtitleMode";
 import { resolveSubtitleAutoSelect } from "@/player/utils/subtitleSort";
 import { getSubtitleFormatLabel } from "@/player/utils/subtitleCodecs";
-import { formatChannels, mapAudioLabel } from "@/lib/mediaFormat";
+import { formatAudioTrackLabel, formatChannels } from "@/lib/mediaFormat";
 import {
   buildVersionSubtitleInventory,
   type VersionSubtitleInventoryRow,
@@ -148,7 +148,7 @@ export function formatAudioTrackSummary(track: VersionAudioTrack | undefined): s
   }
 
   const language = getLanguageName(track.language ?? "") || "Unknown";
-  const codec = track.codec ? mapAudioLabel(track.codec) : "";
+  const codec = formatAudioTrackLabel(track);
   const channels = formatChannels(track.channels);
   return [language, codec, channels].filter(Boolean).join(" · ");
 }

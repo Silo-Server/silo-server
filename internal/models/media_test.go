@@ -128,3 +128,26 @@ func TestMediaFileIsAudioOnly(t *testing.T) {
 		})
 	}
 }
+
+func TestVideoTrackIsDolbyVision(t *testing.T) {
+	tests := []struct {
+		name  string
+		track VideoTrack
+		want  bool
+	}{
+		{name: "explicit label", track: VideoTrack{DolbyVision: "Profile 5"}, want: true},
+		{name: "profile number", track: VideoTrack{DVProfile: 8}, want: true},
+		{name: "video range", track: VideoTrack{VideoRange: "DolbyVision"}, want: true},
+		{name: "range type", track: VideoTrack{VideoRangeType: "DOVIWithHDR10"}, want: true},
+		{name: "plain HDR", track: VideoTrack{VideoRangeType: "HDR10"}, want: false},
+		{name: "empty", track: VideoTrack{}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.track.IsDolbyVision(); got != tt.want {
+				t.Fatalf("IsDolbyVision() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

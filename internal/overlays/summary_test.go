@@ -6,6 +6,50 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+func TestNormalizeHDRUsesAllDolbyVisionEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		file *models.MediaFile
+		want string
+	}{
+		{
+			name: "explicit label",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{DolbyVision: "Profile 5"}}},
+			want: "DV",
+		},
+		{
+			name: "profile number",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{DVProfile: 8}}},
+			want: "DV",
+		},
+		{
+			name: "derived range type",
+			file: &models.MediaFile{
+				VideoTracks: []models.VideoTrack{{VideoRangeType: "DOVIWithHDR10"}},
+			},
+			want: "DV HDR10",
+		},
+		{
+			name: "plain HDR range type",
+			file: &models.MediaFile{VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10"}}},
+			want: "HDR10",
+		},
+		{
+			name: "file fallback",
+			file: &models.MediaFile{HDR: true},
+			want: "HDR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeHDR(tt.file); got != tt.want {
+				t.Fatalf("normalizeHDR() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeVideoCodec(t *testing.T) {
 	cases := []struct {
 		name string
