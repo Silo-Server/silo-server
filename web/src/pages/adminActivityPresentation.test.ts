@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AdminSession } from "@/api/types";
 import {
+  classifyActivityMethod,
+  compareActivityMethods,
+  isJellyfinSession,
   formatContainerDetail,
   formatDeliveredAudioSummary,
   formatDeliveredContainerSummary,
@@ -31,6 +34,8 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     updated_at: overrides.updated_at ?? new Date().toISOString(),
     position_seconds: overrides.position_seconds ?? 300,
     is_paused: overrides.is_paused ?? false,
+    client_name: overrides.client_name,
+    client_user_agent: overrides.client_user_agent,
     audio_track_index: overrides.audio_track_index ?? 0,
     transcode_audio: overrides.transcode_audio ?? true,
     stream_bitrate_kbps: overrides.stream_bitrate_kbps ?? 8000,
@@ -137,6 +142,108 @@ describe("adminActivityPresentation", () => {
         }),
       ),
     ).toBe("Audio SW");
+  });
+
+  it("buckets activity sessions by the backend's per-stream decisions", () => {
+    // Only the audio stream re-encoded (video copied) → "audio".
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "remux",
+          video_decision: "remux",
+          audio_decision: "transcode",
+          transcode_audio: true,
+        }),
+      ),
+    ).toBe("audio");
+    // Same audio-only shape reported via the HLS path (play_method "transcode",
+    // video copied) still counts as an audio transcode, not video.
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "transcode",
+          video_decision: "remux",
+          audio_decision: "transcode",
+          transcode_audio: true,
+        }),
+      ),
+    ).toBe("audio");
+
+    // Full video transcode (with or without audio) stays in the "transcode" bucket.
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "transcode",
+          video_decision: "transcode",
+          audio_decision: "transcode",
+          transcode_audio: true,
+        }),
+      ),
+    ).toBe("transcode");
+
+    // Video-copy HLS repackage (play_method "transcode" but nothing re-encoded)
+    // must count as remux, NOT a video transcode.
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "transcode",
+          video_decision: "remux",
+          audio_decision: "remux",
+          transcode_audio: false,
+        }),
+      ),
+    ).toBe("remux");
+
+    // Direct play and plain remux keep their expected buckets.
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "direct",
+          video_decision: "direct",
+          audio_decision: "direct",
+          transcode_audio: false,
+        }),
+      ),
+    ).toBe("direct");
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "remux",
+          video_decision: "remux",
+          audio_decision: "remux",
+          transcode_audio: false,
+        }),
+      ),
+    ).toBe("remux");
+  });
+
+  it("orders activity buckets with audio after video transcode", () => {
+    const sorted = ["audio", "transcode", "direct", "remux"].sort(compareActivityMethods);
+    expect(sorted).toEqual(["direct", "remux", "transcode", "audio"]);
+  });
+
+  it("tags Jellyfin-ecosystem clients for the JF pill", () => {
+    // Jellyfin clients report their name via the MediaBrowser auth header.
+    expect(isJellyfinSession(makeSession({ client_name: "Jellyfin Web" }))).toBe(true);
+    expect(isJellyfinSession(makeSession({ client_name: "Findroid" }))).toBe(true);
+    // Name-less Static=true direct play (Infuse) is still identified by user agent.
+    expect(
+      isJellyfinSession(
+        makeSession({ client_name: undefined, client_user_agent: "Infuse-Direct/8.4.6" }),
+      ),
+    ).toBe(true);
+    // Native clients and generic browsers are not Jellyfin.
+    expect(isJellyfinSession(makeSession({ client_name: "Silo Android" }))).toBe(false);
+    expect(
+      isJellyfinSession(
+        makeSession({
+          client_name: undefined,
+          client_user_agent: "Mozilla/5.0 (X11) Chrome/120.0 Safari/537.36",
+        }),
+      ),
+    ).toBe(false);
+    // No client metadata at all → not Jellyfin.
+    expect(isJellyfinSession(makeSession())).toBe(false);
   });
 
   it("labels HLS copy-original sessions as container HLS with copied video", () => {

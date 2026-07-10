@@ -11,6 +11,7 @@ import {
   type RealtimeConnectionState,
 } from "@/components/realtimeEventsContext";
 import type { TaskInfo, ScanRun } from "@/api/types";
+import { classifyActivityMethod, compareActivityMethods } from "@/pages/adminActivityPresentation";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -42,7 +43,7 @@ function useServerActivityData() {
   const streamCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const s of sessions) {
-      const method = s.play_method || "unknown";
+      const method = classifyActivityMethod(s);
       counts[method] = (counts[method] || 0) + 1;
     }
     return counts;
@@ -181,9 +182,11 @@ export default function ServerActivity({ hideWhenEmpty = false }: ServerActivity
                 >
                   {sessions.length > 0 ? (
                     <div className="space-y-1.5">
-                      {Object.entries(streamCounts).map(([method, count]) => (
-                        <StreamCountRow key={method} method={method} count={count} />
-                      ))}
+                      {Object.entries(streamCounts)
+                        .sort(([a], [b]) => compareActivityMethods(a, b))
+                        .map(([method, count]) => (
+                          <StreamCountRow key={method} method={method} count={count} />
+                        ))}
                     </div>
                   ) : (
                     <EmptyRow>No active streams</EmptyRow>
@@ -303,6 +306,7 @@ const METHOD_META: Record<string, { label: string; color: string }> = {
   direct: { label: "Direct Play", color: "bg-success" },
   remux: { label: "Remux", color: "bg-info" },
   transcode: { label: "Transcode", color: "bg-warning" },
+  audio: { label: "Audio Transcode", color: "bg-destructive" },
 };
 
 function formatBadgeCount(count: number, countIsLowerBound = false) {

@@ -12,6 +12,9 @@ import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types
 import { useIPUsers } from "@/hooks/queries/admin/ips";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import {
+  classifyActivityMethod,
+  compareActivityMethods,
+  isJellyfinSession,
   formatAudioDetail,
   formatContainerDetail,
   formatDeliveredAudioSummary,
@@ -118,8 +121,10 @@ export default function AdminActivity() {
   // Aggregate counts
   const methods = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const s of sessions)
-      counts[s.play_method || "unknown"] = (counts[s.play_method || "unknown"] || 0) + 1;
+    for (const s of sessions) {
+      const method = classifyActivityMethod(s);
+      counts[method] = (counts[method] || 0) + 1;
+    }
     return counts;
   }, [sessions]);
 
@@ -146,7 +151,7 @@ export default function AdminActivity() {
           s.client_ip?.toLowerCase().includes(q),
       );
     }
-    if (methodFilter) result = result.filter((s) => s.play_method === methodFilter);
+    if (methodFilter) result = result.filter((s) => classifyActivityMethod(s) === methodFilter);
     if (nodeFilter) result = result.filter((s) => s.reporting_node === nodeFilter);
     if (typeFilter) result = result.filter((s) => s.media_type === typeFilter);
 
@@ -160,7 +165,7 @@ export default function AdminActivity() {
           cmp = getDisplayTitle(a).localeCompare(getDisplayTitle(b));
           break;
         case "method":
-          cmp = (a.play_method || "").localeCompare(b.play_method || "");
+          cmp = classifyActivityMethod(a).localeCompare(classifyActivityMethod(b));
           break;
         case "node":
           cmp = (a.reporting_node || "").localeCompare(b.reporting_node || "");
@@ -328,7 +333,7 @@ export default function AdminActivity() {
             </div>
             <div className="flex h-1.5 overflow-hidden rounded-full">
               {Object.entries(methods)
-                .sort(([a], [b]) => a.localeCompare(b))
+                .sort(([a], [b]) => compareActivityMethods(a, b))
                 .map(([method, count]) => (
                   <div
                     key={method}
@@ -339,7 +344,7 @@ export default function AdminActivity() {
             </div>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
               {Object.entries(methods)
-                .sort(([a], [b]) => a.localeCompare(b))
+                .sort(([a], [b]) => compareActivityMethods(a, b))
                 .map(([method, count]) => (
                   <button
                     key={method}
@@ -771,10 +776,18 @@ function StreamRow({
               ) : null}
             </Link>
             <span
-              className={`inline-flex flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(session.play_method)}`}
+              className={`inline-flex flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold capitalize ${methodBadgeColor(classifyActivityMethod(session))}`}
             >
-              {session.play_method || "?"}
+              {classifyActivityMethod(session)}
             </span>
+            {isJellyfinSession(session) ? (
+              <span
+                className="inline-flex flex-shrink-0 rounded border border-[#AA5CC3]/30 bg-[#AA5CC3]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[#AA5CC3]"
+                title="Jellyfin client"
+              >
+                JF
+              </span>
+            ) : null}
           </div>
           <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[11px]">
             {itemHref ? (
@@ -1308,6 +1321,8 @@ function methodBadgeColor(method: string): string {
       return "bg-info/10 text-info border-info/15";
     case "transcode":
       return "bg-warning/10 text-warning border-warning/15";
+    case "audio":
+      return "bg-destructive/10 text-destructive border-destructive/15";
     default:
       return "bg-surface text-muted-foreground border-border";
   }
@@ -1323,6 +1338,8 @@ function methodBarColor(method: string): string {
       return "bg-info";
     case "transcode":
       return "bg-warning";
+    case "audio":
+      return "bg-destructive";
     default:
       return "bg-muted-foreground";
   }
@@ -1336,6 +1353,8 @@ function methodDotColor(method: string): string {
       return "bg-info";
     case "transcode":
       return "bg-warning";
+    case "audio":
+      return "bg-destructive";
     default:
       return "bg-muted-foreground";
   }

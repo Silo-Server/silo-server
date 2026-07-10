@@ -46,6 +46,92 @@ export function normalizeStreamDecision(decision?: string): string {
   }
 }
 
+/**
+ * Classify a session into a single activity "method" bucket for aggregation and
+ * filtering. Reduces the per-stream decisions the backend already reports
+ * (the same fields that drive the playback badges) so the Play Method summary
+ * and Server Activity popover agree with the per-row breakdown:
+ *   - video is re-encoded            -> "transcode" (video transcode)
+ *   - only audio is re-encoded       -> "audio"     (audio transcode)
+ *   - streams only repackaged/copied -> "remux"     (incl. video-copy HLS)
+ *   - nothing touched                -> "direct"
+ * A play_method of "transcode" whose video stream is actually copied (an HLS
+ * repackage) must NOT count as a video transcode — it falls through to remux.
+ */
+export function classifyActivityMethod(session: AdminSession): string {
+  const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
+  const audioDecision = normalizeStreamDecision(
+    session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
+  );
+  if (videoDecision === "transcode") {
+    return "transcode";
+  }
+  if (audioDecision === "transcode") {
+    return "audio";
+  }
+  if (videoDecision === "direct" && audioDecision === "direct") {
+    return "direct";
+  }
+  if (videoDecision === "copy" || audioDecision === "copy") {
+    return "remux";
+  }
+  return session.play_method || "unknown";
+}
+
+// Display order for the activity method buckets. Escalates by cost and keeps the
+// audio-transcode tag AFTER the video-transcode tag in the Play Method line and
+// the Server Activity popover.
+const ACTIVITY_METHOD_ORDER = ["direct", "remux", "copy", "hls", "transcode", "audio"];
+
+function activityMethodRank(method: string): number {
+  const index = ACTIVITY_METHOD_ORDER.indexOf(method);
+  return index === -1 ? ACTIVITY_METHOD_ORDER.length : index;
+}
+
+/** Sort comparator for activity method keys, audio last. Falls back to
+ * alphabetical for anything outside the known order. */
+export function compareActivityMethods(a: string, b: string): number {
+  const diff = activityMethodRank(a) - activityMethodRank(b);
+  return diff !== 0 ? diff : a.localeCompare(b);
+}
+
+// Jellyfin-ecosystem client names / user-agent tokens. Mirrors the server's
+// client-labeling list (internal/api/handlers/playback_sessions.go). A session
+// from one of these is served through the Jellyfin compatibility route: the
+// backend sets client_name from the Jellyfin MediaBrowser auth header, so this
+// is a positive identification of the client, not a guess about the transport.
+// Generic browser tokens (chrome/safari/…) are deliberately excluded — the
+// native web player shares those user agents.
+const JELLYFIN_CLIENT_TOKENS = [
+  "jellyfin",
+  "findroid",
+  "streamyfin",
+  "swiftfin",
+  "jellycon",
+  "wholphin",
+  "fladder",
+  "vidhub",
+  "senplayer",
+  "infuse",
+];
+
+/**
+ * Report whether a session comes from a Jellyfin-ecosystem client, surfaced as
+ * the orthogonal "JF" pill next to the method tag. Checks the reported client
+ * name first, then the raw user agent, against the known Jellyfin client
+ * tokens. Independent of the transcode-method classification — a session can be
+ * both "transcode" and Jellyfin.
+ */
+export function isJellyfinSession(session: AdminSession): boolean {
+  for (const raw of [session.client_name, session.client_user_agent]) {
+    const value = raw?.toLowerCase();
+    if (value && JELLYFIN_CLIENT_TOKENS.some((token) => value.includes(token))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function formatPlaybackDecisionSummary(session: AdminSession): string {
   const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
   const audioDecision = normalizeStreamDecision(
