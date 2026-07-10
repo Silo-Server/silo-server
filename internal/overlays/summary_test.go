@@ -239,6 +239,17 @@ func TestNormalizeHDR(t *testing.T) {
 				ColorTransfer: "smpte2084",
 			}},
 		}, "DV HDR10"},
+		{"dv via profile number only", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{DVProfile: 5}},
+		}, "DV"},
+		{"dv via DOVI range type only", &models.MediaFile{
+			HDR: true,
+			VideoTracks: []models.VideoTrack{{
+				VideoRangeType: "DOVIWithHDR10",
+				ColorTransfer:  "smpte2084",
+			}},
+		}, "DV HDR10"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,6 +276,11 @@ func TestBestFileRangeTieBreaking(t *testing.T) {
 		}},
 	}
 	sdr := &models.MediaFile{Resolution: "2160p"}
+	dvProfileOnly := &models.MediaFile{
+		Resolution:  "2160p",
+		HDR:         true,
+		VideoTracks: []models.VideoTrack{{DVProfile: 5}},
+	}
 	lowResDV := &models.MediaFile{
 		Resolution:  "1080p",
 		HDR:         true,
@@ -281,6 +297,8 @@ func TestBestFileRangeTieBreaking(t *testing.T) {
 			[]*models.MediaFile{genericHDR, dv}, dv},
 		{"dv beats explicit hdr10 at same resolution",
 			[]*models.MediaFile{explicitHDR10, dv}, dv},
+		{"dv via profile number only still outranks generic hdr",
+			[]*models.MediaFile{genericHDR, dvProfileOnly}, dvProfileOnly},
 		{"explicit hdr10 beats bare boolean at same resolution",
 			[]*models.MediaFile{genericHDR, explicitHDR10}, explicitHDR10},
 		{"bare boolean beats sdr at same resolution",

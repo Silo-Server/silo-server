@@ -73,10 +73,8 @@ func bestFile(files []*models.MediaFile) *models.MediaFile {
 // first-scanned file that only carries the bare HDR boolean (e.g. a stale
 // pre-DV probe row). Ties keep the earliest file in the slice.
 func rangeRank(file *models.MediaFile) int {
-	for _, track := range file.VideoTracks {
-		if track.DolbyVision != "" {
-			return 3
-		}
+	if hasDolbyVision(file.VideoTracks) {
+		return 3
 	}
 	if hdrTypeFromTracks(file.VideoTracks) != "" {
 		return 2
@@ -85,6 +83,19 @@ func rangeRank(file *models.MediaFile) int {
 		return 1
 	}
 	return 0
+}
+
+// hasDolbyVision reports whether any track carries Dolby Vision metadata.
+// Probed rows set DolbyVision and DVProfile together, but seeded/imported
+// rows may carry only dv_profile or a DOVI* video_range_type.
+func hasDolbyVision(tracks []models.VideoTrack) bool {
+	for _, track := range tracks {
+		if track.DolbyVision != "" || track.DVProfile > 0 ||
+			strings.HasPrefix(track.VideoRangeType, "DOVI") {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeResolution(value string) string {
@@ -114,13 +125,7 @@ func resolutionRank(value string) int {
 }
 
 func normalizeHDR(file *models.MediaFile) string {
-	hasDV := false
-	for _, track := range file.VideoTracks {
-		if track.DolbyVision != "" {
-			hasDV = true
-			break
-		}
-	}
+	hasDV := hasDolbyVision(file.VideoTracks)
 	hdrType := hdrTypeFromTracks(file.VideoTracks)
 
 	switch {
