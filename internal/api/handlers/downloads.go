@@ -13,6 +13,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -398,7 +399,10 @@ func (h *DownloadHandler) HandleDownloadFile(w http.ResponseWriter, r *http.Requ
 
 	profileID, deviceID, _, _ := managedIdentity(r)
 	filter := requestAccessFilter(r)
-	if err := h.svc.ServeFile(r.Context(), w, r, userID, profileID, deviceID, id, filter); err != nil {
+	// Full media downloads outlive the server's absolute WriteTimeout; roll
+	// the write deadline with progress instead.
+	sw := httpstream.NewRollingDeadlineWriter(w)
+	if err := h.svc.ServeFile(r.Context(), sw, r, userID, profileID, deviceID, id, filter); err != nil {
 		if errors.Is(err, downloads.ErrNotFound) || errors.Is(err, catalog.ErrItemNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "Download not found")
 			return

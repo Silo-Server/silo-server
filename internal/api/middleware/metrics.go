@@ -72,6 +72,12 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
 }
 
+// Unwrap lets http.ResponseController reach the underlying connection (e.g.
+// for the per-response write deadlines used by streaming handlers).
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 var (
 	uuidRegex    = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
 	numericRegex = regexp.MustCompile(`/\d+(/|$)`)

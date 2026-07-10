@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -2183,7 +2184,8 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 						resp.StreamURL = proxyNode.URL + "/stream/remux/" + token
 					case playback.PlayTranscode:
 						resp.StreamURL = proxyNode.URL + "/stream/transcode/" + token + "/master.m3u8"
-					}				}
+					}
+				}
 			}
 		}
 	}
@@ -2994,8 +2996,11 @@ func (h *PlaybackHandler) proxyToTranscodeNode(w http.ResponseWriter, r *http.Re
 			w.Header().Add(k, v)
 		}
 	}
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	// Proxied transcode output can stream past the server's absolute
+	// WriteTimeout; roll the write deadline with progress instead.
+	sw := httpstream.NewRollingDeadlineWriter(w)
+	sw.WriteHeader(resp.StatusCode)
+	io.Copy(sw, resp.Body)
 }
 
 // maybeStartThrottler reads throttle settings and starts the throttler if enabled.
