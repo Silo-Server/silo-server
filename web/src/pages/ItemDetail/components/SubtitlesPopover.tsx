@@ -17,6 +17,7 @@ import { getSubtitleFormatLabel, isSubtitleFormatLabel } from "@/player/utils/su
 import {
   buildPrePlaySubtitleCandidates,
   formatSubtitlePillSummary,
+  inferSubtitleFlagsFromTitle,
   resolveSelectedAudioLanguage,
   resolveAutoSubtitleSelection,
   subtitleSelectionEquals,
@@ -84,7 +85,7 @@ function SelectionRow({
   const content = (
     <>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-sm font-medium">{title}</span>
           {badges}
         </div>
@@ -130,33 +131,37 @@ function SubtitleSection({
     <div>
       <div className="text-muted-foreground/60 mb-1 px-3 text-[11px] font-medium">{title}</div>
       <div className="space-y-0.5">
-        {rows.map((row) => (
-          <SelectionRow
-            key={row.key}
-            active={subtitleSelectionEquals(activeSelection, row.selection)}
-            title={row.summary}
-            description={
-              row.title && !isSubtitleFormatLabel(row.title, row.codec)
-                ? row.title
-                : row.releaseName
-            }
-            onSelect={onSelectSubtitle ? () => onSelectSubtitle(row.selection) : undefined}
-            badges={
-              <>
-                {row.codec && (
-                  <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
-                    {getSubtitleFormatLabel(row.codec) || row.codec.toUpperCase()}
-                  </Badge>
-                )}
-                <SubtitleFlagBadges
-                  forced={row.forced}
-                  hearingImpaired={row.hearingImpaired}
-                  isDefault={row.default}
-                />
-              </>
-            }
-          />
-        ))}
+        {rows.map((row) => {
+          const titleFlags = inferSubtitleFlagsFromTitle(row.title);
+          const description =
+            row.title && !titleFlags.flagOnly && !isSubtitleFormatLabel(row.title, row.codec)
+              ? row.title
+              : row.releaseName;
+
+          return (
+            <SelectionRow
+              key={row.key}
+              active={subtitleSelectionEquals(activeSelection, row.selection)}
+              title={row.summary}
+              description={description}
+              onSelect={onSelectSubtitle ? () => onSelectSubtitle(row.selection) : undefined}
+              badges={
+                <>
+                  {row.codec && (
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] uppercase">
+                      {getSubtitleFormatLabel(row.codec) || row.codec.toUpperCase()}
+                    </Badge>
+                  )}
+                  <SubtitleFlagBadges
+                    forced={row.forced || titleFlags.forced}
+                    hearingImpaired={row.hearingImpaired || titleFlags.hearingImpaired}
+                    isDefault={row.default}
+                  />
+                </>
+              }
+            />
+          );
+        })}
       </div>
     </div>
   );

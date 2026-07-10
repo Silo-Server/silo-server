@@ -52,19 +52,21 @@ function normalizeDownloadedLabel(subtitle: DownloadedSubtitle): string {
   return releaseName || provider || getLanguageName(subtitle.language?.trim() || "unknown");
 }
 
-function subtitleSummaryParts(
-  row: Pick<VersionSubtitleInventoryRow, "languageLabel" | "forced" | "hearingImpaired">,
-): string[] {
-  const parts = [row.languageLabel];
-  if (row.hearingImpaired) parts.push("HI");
-  if (row.forced) parts.push("Forced");
-  return parts.filter(Boolean);
-}
-
 export function formatSubtitleCandidateSummary(
   row: Pick<VersionSubtitleInventoryRow, "languageLabel" | "forced" | "hearingImpaired">,
 ): string {
-  return subtitleSummaryParts(row).join(" ");
+  return row.languageLabel;
+}
+
+export function inferSubtitleFlagsFromTitle(title: string | undefined): {
+  forced: boolean;
+  hearingImpaired: boolean;
+  flagOnly: boolean;
+} {
+  const normalized = title?.trim().toLowerCase() ?? "";
+  const forced = normalized === "forced";
+  const hearingImpaired = ["sdh", "cc", "hi", "hearing impaired"].includes(normalized);
+  return { forced, hearingImpaired, flagOnly: forced || hearingImpaired };
 }
 
 export interface SubtitlePillSummarySource {
