@@ -42,6 +42,11 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 			continue
 		}
 
+		// The subtitle cache is not session state; it manages its own eviction.
+		if entry.Name() == subtitleCacheDirName {
+			continue
+		}
+
 		dir := filepath.Join(root, entry.Name())
 		if minAge > 0 {
 			info, statErr := entry.Info()
