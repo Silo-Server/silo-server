@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"io/fs"
 	"net/http"
 	"strings"
@@ -94,6 +96,7 @@ func FrontendHandler() http.Handler {
 		if path != "/" && path != "/index.html" && !strings.HasSuffix(path, "/") {
 			if f, err := WebDistFS.Open(strings.TrimPrefix(path, "/")); err == nil {
 				f.Close()
+				w.Header().Set("Cache-Control", staticCacheControl(path))
 				fileServer.ServeHTTP(w, r)
 				return
 			}
@@ -110,9 +113,45 @@ func FrontendHandler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Content-Security-Policy", frontendContentSecurityPolicy)
+		// The HTML shell keeps a stable URL across builds, so it must never be
+		// served stale: every deploy changes which content-hashed /assets/*
+		// bundles it references. no-cache lets browsers and CDNs store it but
+		// forces revalidation on each load; the ETag turns an unchanged shell
+		// into a cheap 304. This is what busts a stale UI on deploy without
+		// disabling caching — the referenced bundles stay immutably cached.
+		etag := weakContentETag(indexBytes)
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "no-cache")
+		if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(indexBytes)
 	})
+}
+
+// staticCacheControl returns the Cache-Control policy for a bundled static file.
+//
+// Vite emits content-hashed build output under /assets/ (the hash is in the
+// filename), so those files are immutable: a new build produces a new URL, which
+// is what lets the browser cache them for a year yet still pick up changes. Every
+// other bundled file (service worker, icons, fonts at a stable path) keeps its
+// URL across builds, so it must be revalidated — otherwise a changed sw.js or
+// icon could stay stuck in a browser or CDN cache.
+func staticCacheControl(path string) string {
+	if strings.HasPrefix(path, "/assets/") {
+		return "public, max-age=31536000, immutable"
+	}
+	return "no-cache"
+}
+
+// weakContentETag derives a stable validator from response bytes so a no-cache
+// resource can answer conditional requests with a 304 instead of re-sending the
+// body. Truncated SHA-256 is ample for cache validation (not a security token).
+func weakContentETag(b []byte) string {
+	sum := sha256.Sum256(b)
+	return `"` + hex.EncodeToString(sum[:16]) + `"`
 }
 
 // serveDynamicManifest writes the branding-aware web app manifest.
