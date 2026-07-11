@@ -422,6 +422,7 @@ export interface HistoryImportRun {
   progress_updated: number;
   history_created: number;
   watchlist_added: number;
+  favorites_imported: number;
   skipped: number;
   warnings: string[];
   unmatched_samples: HistoryImportUnmatchedSample[];

@@ -27,18 +27,34 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	seriesMeta, err := p.fetchSeriesMetadata(ctx, append(playedItems, resumableItems...))
 	if err != nil {
 		return nil, nil, err
 	}
 
-	merged := make(map[string]Record, len(playedItems)+len(resumableItems))
+	merged := make(map[string]Record, len(playedItems)+len(resumableItems)+len(favoriteItems))
 	for _, item := range append(playedItems, resumableItems...) {
 		record := normalizeEmbyItem(item, seriesMeta[item.SeriesID])
 		if record.ExternalID == "" {
 			record.ExternalID = item.ID
 		}
+		existing, ok := merged[record.ExternalID]
+		if !ok {
+			merged[record.ExternalID] = record
+			continue
+		}
+		merged[record.ExternalID] = mergeRecords(existing, record)
+	}
+	for _, item := range favoriteItems {
+		record := normalizeEmbyItem(item, embyItem{})
+		record.Favorite = true
+		record.FavoriteOnly = true
+		record.PreferTMDB = true
 		existing, ok := merged[record.ExternalID]
 		if !ok {
 			merged[record.ExternalID] = record
@@ -126,6 +142,13 @@ func mergeRecords(a, b Record) Record {
 	if b.Played {
 		result.Played = true
 	}
+	if b.Favorite {
+		result.Favorite = true
+	}
+	if b.PreferTMDB {
+		result.PreferTMDB = true
+	}
+	result.FavoriteOnly = result.FavoriteOnly && b.FavoriteOnly
 	if b.PlayCount > result.PlayCount {
 		result.PlayCount = b.PlayCount
 	}

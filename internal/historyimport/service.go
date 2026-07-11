@@ -422,6 +422,27 @@ func (s *Service) addToWatchlist(ctx context.Context, userID int, profileID, med
 	return inserted, nil
 }
 
+func (s *Service) addFavorite(ctx context.Context, userID int, profileID, mediaItemID string) (bool, error) {
+	if s.stores == nil {
+		return false, fmt.Errorf("favorites import: user store provider not configured")
+	}
+	store, err := s.stores.ForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("favorites import: open user store: %w", err)
+	}
+	exists, err := store.IsFavorite(ctx, profileID, mediaItemID)
+	if err != nil {
+		return false, fmt.Errorf("favorites import: check %s: %w", mediaItemID, err)
+	}
+	if exists {
+		return false, nil
+	}
+	if err := store.AddFavorite(ctx, profileID, mediaItemID); err != nil {
+		return false, fmt.Errorf("favorites import: add %s: %w", mediaItemID, err)
+	}
+	return true, nil
+}
+
 func (s *Service) executeRun(run *Run, provider Provider) {
 	ctx, cancel := newRunContext(s.bgContext)
 	s.registerRunCancel(run.ID, cancel)
@@ -505,6 +526,14 @@ func (s *Service) executeRun(run *Run, provider Provider) {
 		}
 		summary.Matched++
 
+		if record.Favorite {
+			inserted, err := s.addFavorite(ctx, run.UserID, run.ProfileID, match.MediaItemID)
+			if err != nil {
+				summary.Warnings = append(summary.Warnings, err.Error())
+			} else if inserted {
+				summary.FavoritesImported++
+			}
+		}
 		// Watchlist entries carry no watch state: the matched item joins the
 		// importing profile's watchlist and the progress pipeline is skipped.
 		if record.Watchlisted {
@@ -514,6 +543,10 @@ func (s *Service) executeRun(run *Run, provider Provider) {
 			} else if inserted {
 				summary.WatchlistAdded++
 			}
+			s.persistProgressMaybe(ctx, run.ID, summary, i+1, len(records))
+			continue
+		}
+		if record.FavoriteOnly {
 			s.persistProgressMaybe(ctx, run.ID, summary, i+1, len(records))
 			continue
 		}
@@ -585,6 +618,7 @@ func (s *Service) executeRun(run *Run, provider Provider) {
 		"unmatched", summary.Unmatched,
 		"progress_updated", summary.ProgressUpdated,
 		"history_created", summary.HistoryCreated,
+		"favorites_imported", summary.FavoritesImported,
 		"skipped", summary.Skipped,
 		"warnings", len(summary.Warnings),
 	)
@@ -622,7 +656,7 @@ func userFacingRunError(summary ExecutionSummary, err error) string {
 	if UpstreamHTTPStatus(err) == http.StatusUnauthorized {
 		return "Couldn't connect to that server. Check the URL, username, and password and try again."
 	}
-	if summary.Fetched > 0 || summary.Matched > 0 || summary.ProgressUpdated > 0 || summary.HistoryCreated > 0 {
+	if summary.Fetched > 0 || summary.Matched > 0 || summary.ProgressUpdated > 0 || summary.HistoryCreated > 0 || summary.FavoritesImported > 0 {
 		return "Import stopped early. Some history may already be imported."
 	}
 	return "Import couldn't be completed. Please try again."

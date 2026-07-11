@@ -344,6 +344,7 @@ func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
 			progress_updated integer NOT NULL DEFAULT 0,
 			history_created integer NOT NULL DEFAULT 0,
 			watchlist_added integer NOT NULL DEFAULT 0,
+			favorites_imported integer NOT NULL DEFAULT 0,
 			skipped integer NOT NULL DEFAULT 0,
 			warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
 			unmatched_samples jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -352,6 +353,13 @@ func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
 			started_at timestamptz,
 			completed_at timestamptz,
 			last_heartbeat_at timestamptz
+		) ON COMMIT PRESERVE ROWS`,
+		`CREATE TEMP TABLE user_favorites (
+			user_id integer NOT NULL,
+			profile_id text NOT NULL,
+			media_item_id text NOT NULL,
+			added_at timestamptz NOT NULL DEFAULT now(),
+			PRIMARY KEY (user_id, profile_id, media_item_id)
 		) ON COMMIT PRESERVE ROWS`,
 	} {
 		if _, err := pool.Exec(ctx, stmt); err != nil {

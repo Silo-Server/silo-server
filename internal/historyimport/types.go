@@ -133,26 +133,27 @@ type PlexServerPublic struct {
 
 // Run represents one history import execution.
 type Run struct {
-	ID               string            `json:"id"`
-	UserID           int               `json:"user_id"`
-	ProfileID        string            `json:"profile_id"`
-	SourceType       string            `json:"source_type"`
-	ConnectionMode   string            `json:"connection_mode"`
-	Status           string            `json:"status"`
-	MappingID        *int              `json:"mapping_id,omitempty"`
-	Fetched          int               `json:"fetched"`
-	Matched          int               `json:"matched"`
-	Unmatched        int               `json:"unmatched"`
-	ProgressUpdated  int               `json:"progress_updated"`
-	HistoryCreated   int               `json:"history_created"`
-	WatchlistAdded   int               `json:"watchlist_added"`
-	Skipped          int               `json:"skipped"`
-	Warnings         []string          `json:"warnings"`
-	UnmatchedSamples []UnmatchedSample `json:"unmatched_samples"`
-	ErrorMessage     string            `json:"error_message,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
-	StartedAt        *time.Time        `json:"started_at,omitempty"`
-	CompletedAt      *time.Time        `json:"completed_at,omitempty"`
+	ID                string            `json:"id"`
+	UserID            int               `json:"user_id"`
+	ProfileID         string            `json:"profile_id"`
+	SourceType        string            `json:"source_type"`
+	ConnectionMode    string            `json:"connection_mode"`
+	Status            string            `json:"status"`
+	MappingID         *int              `json:"mapping_id,omitempty"`
+	Fetched           int               `json:"fetched"`
+	Matched           int               `json:"matched"`
+	Unmatched         int               `json:"unmatched"`
+	ProgressUpdated   int               `json:"progress_updated"`
+	HistoryCreated    int               `json:"history_created"`
+	WatchlistAdded    int               `json:"watchlist_added"`
+	FavoritesImported int               `json:"favorites_imported"`
+	Skipped           int               `json:"skipped"`
+	Warnings          []string          `json:"warnings"`
+	UnmatchedSamples  []UnmatchedSample `json:"unmatched_samples"`
+	ErrorMessage      string            `json:"error_message,omitempty"`
+	CreatedAt         time.Time         `json:"created_at"`
+	StartedAt         *time.Time        `json:"started_at,omitempty"`
+	CompletedAt       *time.Time        `json:"completed_at,omitempty"`
 }
 
 type UnmatchedSample struct {
@@ -186,7 +187,13 @@ type Record struct {
 	// matched item is added to the importing profile's watchlist instead of
 	// receiving watch state.
 	Watchlisted bool
-	UpdatedAt   time.Time
+	// FavoriteOnly prevents a favorite with no played/resumable counterpart
+	// from creating an empty progress row. PreferTMDB avoids stale secondary
+	// TVDB IDs winning over Emby's primary TMDB identity for favorite series.
+	Favorite     bool
+	FavoriteOnly bool
+	PreferTMDB   bool
+	UpdatedAt    time.Time
 }
 
 type Match struct {
@@ -250,6 +257,7 @@ type ExecutionSummary struct {
 	ProgressUpdated       int
 	HistoryCreated        int
 	WatchlistAdded        int
+	FavoritesImported     int
 	Skipped               int
 	Warnings              []string
 	UnmatchedSamples      []UnmatchedSample

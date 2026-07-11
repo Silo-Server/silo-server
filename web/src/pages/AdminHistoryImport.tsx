@@ -1240,6 +1240,10 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                           <p>{run.history_created}</p>
                         </div>
                         <div>
+                          <p className="font-medium">Favorites</p>
+                          <p>{run.favorites_imported}</p>
+                        </div>
+                        <div>
                           <p className="font-medium">Watchlist</p>
                           <p>{run.watchlist_added}</p>
                         </div>
