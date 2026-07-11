@@ -3,6 +3,7 @@ package userdb
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -114,13 +115,55 @@ func ListCollections(db *sql.DB, profileID string) ([]Collection, error) {
 		if err := rows.Scan(&c.ID, &c.ProfileID, &c.CreatorProfileID, &c.Name, &c.CollectionType, &c.IsShared, &c.QueryDefinition, &c.SortConfig, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
-		c.AllowedProfileIDs, err = listCollectionProfiles(db, c.ID)
-		if err != nil {
-			return nil, err
-		}
 		collections = append(collections, c)
 	}
-	return collections, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := attachCollectionProfiles(db, collections); err != nil {
+		return nil, err
+	}
+	return collections, nil
+}
+
+// attachCollectionProfiles fills AllowedProfileIDs for every collection with a
+// single batched query, avoiding the N+1 round trip a per-collection lookup
+// would create.
+func attachCollectionProfiles(db *sql.DB, collections []Collection) error {
+	if len(collections) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(collections))
+	args := make([]any, len(collections))
+	for i := range collections {
+		placeholders[i] = "?"
+		args[i] = collections[i].ID
+	}
+	rows, err := db.Query(
+		`SELECT collection_id, profile_id FROM personal_collection_profiles
+		 WHERE collection_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY profile_id ASC`,
+		args...,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	byCollection := make(map[string][]string, len(collections))
+	for rows.Next() {
+		var collectionID, profileID string
+		if err := rows.Scan(&collectionID, &profileID); err != nil {
+			return err
+		}
+		byCollection[collectionID] = append(byCollection[collectionID], profileID)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for i := range collections {
+		collections[i].AllowedProfileIDs = byCollection[collections[i].ID]
+	}
+	return nil
 }
 
 // UpdateCollection renames a collection and updates its updated_at timestamp.

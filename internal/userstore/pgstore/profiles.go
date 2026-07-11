@@ -126,14 +126,13 @@ func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profi
 		if err != nil {
 			return nil, fmt.Errorf("scanning profile row: %w", err)
 		}
-		p.AllowedLibraryIDs, err = listProfileAllowedLibraries(ctx, s.pool, s.userID, p.ID)
-		if err != nil {
-			return nil, err
-		}
 		profiles = append(profiles, *p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating profile rows: %w", err)
+	}
+	if err := s.attachAllowedLibraries(ctx, profiles); err != nil {
+		return nil, err
 	}
 	return profiles, nil
 }

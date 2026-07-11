@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type profileLibraryQuerier interface {
@@ -39,6 +41,48 @@ func listProfileAllowedLibraries(ctx context.Context, q profileLibraryQuerier, u
 		return nil, fmt.Errorf("iterating allowed libraries for profile %s: %w", profileID, err)
 	}
 	return libraryIDs, nil
+}
+
+// attachAllowedLibraries fills AllowedLibraryIDs for every profile with a
+// single batched query, avoiding the N+1 round trip a per-profile lookup
+// would create.
+func (s *PostgresUserStore) attachAllowedLibraries(ctx context.Context, profiles []userstore.Profile) error {
+	if len(profiles) == 0 {
+		return nil
+	}
+	ids := make([]string, len(profiles))
+	for i := range profiles {
+		ids[i] = profiles[i].ID
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT profile_id, library_id
+		FROM user_profile_allowed_libraries
+		WHERE user_id = $1 AND profile_id = ANY($2)
+		ORDER BY library_id ASC`,
+		s.userID,
+		ids,
+	)
+	if err != nil {
+		return fmt.Errorf("listing allowed libraries for user %d: %w", s.userID, err)
+	}
+	defer rows.Close()
+
+	byProfile := make(map[string][]int, len(profiles))
+	for rows.Next() {
+		var profileID string
+		var libraryID int
+		if err := rows.Scan(&profileID, &libraryID); err != nil {
+			return fmt.Errorf("scanning allowed library for user %d: %w", s.userID, err)
+		}
+		byProfile[profileID] = append(byProfile[profileID], libraryID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterating allowed libraries for user %d: %w", s.userID, err)
+	}
+	for i := range profiles {
+		profiles[i].AllowedLibraryIDs = byProfile[profiles[i].ID]
+	}
+	return nil
 }
 
 func replaceProfileAllowedLibraries(ctx context.Context, q profileLibraryQuerier, userID int, profileID string, libraryIDs []int) error {

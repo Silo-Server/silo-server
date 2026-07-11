@@ -128,14 +128,13 @@ func ListProfiles(db *sql.DB) ([]Profile, error) {
 		); err != nil {
 			return nil, fmt.Errorf("scanning profile row: %w", err)
 		}
-		p.AllowedLibraryIDs, err = listProfileAllowedLibraries(db, p.ID)
-		if err != nil {
-			return nil, err
-		}
 		profiles = append(profiles, p)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating profile rows: %w", err)
+	}
+	if err := attachAllowedLibraries(db, profiles); err != nil {
+		return nil, err
 	}
 	return profiles, nil
 }
