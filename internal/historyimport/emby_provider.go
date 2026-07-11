@@ -28,8 +28,10 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 		return nil, nil, err
 	}
 	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
+	var warnings []string
 	if err != nil {
-		return nil, nil, err
+		warnings = append(warnings, "fetching Emby favorites: "+err.Error())
+		favoriteItems = nil
 	}
 
 	seriesMeta, err := p.fetchSeriesMetadata(ctx, append(playedItems, resumableItems...))
@@ -67,7 +69,7 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 	for _, record := range merged {
 		records = append(records, record)
 	}
-	return records, nil, nil
+	return records, warnings, nil
 }
 
 func (p *EmbyProvider) fetchSeriesMetadata(ctx context.Context, items []embyItem) (map[string]embyItem, error) {
