@@ -209,6 +209,9 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID stri
 }
 
 func (s *Postgres) RecordRouteEvent(ctx context.Context, record playback.RouteEventRecordV3) error {
+	if record.Diagnostics == nil {
+		record.Diagnostics = map[string]string{}
+	}
 	diagnostics, err := json.Marshal(record.Diagnostics)
 	if err != nil {
 		return err
