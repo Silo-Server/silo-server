@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -893,6 +894,52 @@ func (s *MetadataService) localProviderContextForContent(ctx context.Context, co
 	}
 }
 
+// seriesChildLocalContext carries the local-sidecar context for season- and
+// episode-level provider fetches: the series root sidecar directories plus
+// the per-season directories and per-episode media file paths derived from
+// filename parsing (naming owns structure; NFOs never create it).
+type seriesChildLocalContext struct {
+	seriesRootPaths      []string
+	seasonDirectoryPaths map[int][]string
+	episodeFilePaths     map[int]map[int][]string // season -> episode -> media files
+}
+
+// buildSeriesChildLocalContext derives the season/episode sidecar context
+// from the series' media file paths. Files without a filename-parseable
+// episode number contribute nothing — exactly the set fallback synthesis
+// also skips.
+func buildSeriesChildLocalContext(seriesRootPaths []string, filePaths []string) seriesChildLocalContext {
+	childCtx := seriesChildLocalContext{
+		seriesRootPaths:      compactUniqueFilePaths(seriesRootPaths),
+		seasonDirectoryPaths: make(map[int][]string),
+		episodeFilePaths:     make(map[int]map[int][]string),
+	}
+	for _, path := range compactUniqueFilePaths(filePaths) {
+		hints := naming.ParseFilename(path, "series")
+		if hints == nil || hints.EpisodeNum == 0 {
+			continue
+		}
+		seasonNum, episodeNum := hints.SeasonNum, hints.EpisodeNum
+		dir := filepath.Dir(path)
+		if !slices.Contains(childCtx.seasonDirectoryPaths[seasonNum], dir) {
+			childCtx.seasonDirectoryPaths[seasonNum] = append(childCtx.seasonDirectoryPaths[seasonNum], dir)
+		}
+		if childCtx.episodeFilePaths[seasonNum] == nil {
+			childCtx.episodeFilePaths[seasonNum] = make(map[int][]string)
+		}
+		childCtx.episodeFilePaths[seasonNum][episodeNum] = append(childCtx.episodeFilePaths[seasonNum][episodeNum], path)
+	}
+	return childCtx
+}
+
+// seriesChildLocalContextForContent builds the season/episode sidecar context
+// from a series' persisted media files (refresh paths, where no scan hints
+// are available).
+func (s *MetadataService) seriesChildLocalContextForContent(ctx context.Context, contentID string, folderID int) seriesChildLocalContext {
+	localCtx := s.localProviderContextForContent(ctx, contentID, folderID)
+	return buildSeriesChildLocalContext(localCtx.primarySidecarSearchPaths, localCtx.allGroupFilePaths)
+}
+
 func (s *MetadataService) directorySidecarSearchPathsForFiles(ctx context.Context, files []*models.MediaFile) []string {
 	if len(files) == 0 {
 		return nil
@@ -1411,10 +1458,19 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if !ok {
 			continue
 		}
+		// A manual Identify skips the local hint provider (NFO) across every
+		// phase: its sidecar art is resolved by file path, not by the chosen id,
+		// so a stale poster/fanart must not be re-applied over the user's choice.
+		if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+			continue
+		}
 		images, err := ip.GetImages(ctx, ImageRequest{
-			ProviderIDs: accumulatedIDs,
-			ContentType: contentType,
-			Language:    req.Language,
+			ProviderIDs:               accumulatedIDs,
+			ContentType:               contentType,
+			Language:                  req.Language,
+			RepresentativeFilePath:    representativeFilePath,
+			AllGroupFilePaths:         allGroupFilePaths,
+			PrimarySidecarSearchPaths: primarySidecarSearchPaths,
 		})
 		if err != nil {
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
@@ -1433,6 +1489,10 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	var allSeasons []SeasonResult
 	var allEpisodes []EpisodeResult
 	if contentType == "series" {
+		childCtx := buildSeriesChildLocalContext(
+			primarySidecarSearchPaths,
+			append(append([]string(nil), representativeFilePath), allGroupFilePaths...),
+		)
 		seasonChain, err := resolveChain("season")
 		if err != nil {
 			return nil, err
@@ -1443,10 +1503,17 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if !ok {
 				continue
 			}
+			// Identify skips the local hint provider (NFO): a stale season.nfo
+			// must not overlay season names on the user's chosen identity.
+			if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+				continue
+			}
 			seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
-				ProviderIDs: accumulatedIDs,
-				ContentType: contentType,
-				Language:    req.Language,
+				ProviderIDs:          accumulatedIDs,
+				ContentType:          contentType,
+				Language:             req.Language,
+				SeriesRootPaths:      childCtx.seriesRootPaths,
+				SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
 			})
 			if err != nil {
 				// Pass nil for provider404s so this refresh can drop the
@@ -1466,33 +1533,54 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		allSeasons = flattenSeasonResults(seasonResults)
 
-		// Phase 4b: Episodes — resolve with "episode" content level.
-		if len(allSeasons) > 0 {
+		// Phase 4b: Episodes — resolve with "episode" content level. The
+		// season set is the provider-returned seasons plus any filename-
+		// derived on-disk seasons, so local episode NFOs are read even when
+		// no provider returned their season (persist then creates the
+		// implicit "Season N" rows).
+		episodeSeasonNumbers := make([]int, 0, len(allSeasons)+len(childCtx.episodeFilePaths))
+		for _, season := range allSeasons {
+			episodeSeasonNumbers = append(episodeSeasonNumbers, season.SeasonNumber)
+		}
+		for seasonNumber := range childCtx.episodeFilePaths {
+			if !slices.Contains(episodeSeasonNumbers, seasonNumber) {
+				episodeSeasonNumbers = append(episodeSeasonNumbers, seasonNumber)
+			}
+		}
+		sort.Ints(episodeSeasonNumbers)
+		if len(episodeSeasonNumbers) > 0 {
 			episodeChain, err := resolveChain("episode")
 			if err != nil {
 				return nil, err
 			}
 			episodeResults := make(map[episodeResultKey]*EpisodeResult)
-			for _, season := range allSeasons {
+			for _, seasonNumber := range episodeSeasonNumbers {
 				for _, p := range episodeChain {
 					ep, ok := p.(EpisodeProvider)
 					if !ok {
 						continue
 					}
+					// Identify skips the local hint provider (NFO): stale episode
+					// NFOs/thumbs must not overlay the user's chosen identity.
+					if _, isIdentityHinter := p.(IdentityHintProvider); isIdentityHinter && req.Mode == ModeIdentify {
+						continue
+					}
 					episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{
-						ProviderIDs:  accumulatedIDs,
-						SeasonNumber: season.SeasonNumber,
-						Language:     req.Language,
+						ProviderIDs:      accumulatedIDs,
+						SeasonNumber:     seasonNumber,
+						Language:         req.Language,
+						SeriesRootPaths:  childCtx.seriesRootPaths,
+						EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
 					})
 					if err != nil {
 						if handleChildProvider404(p.Slug(), accumulatedIDs, err,
 							"content_id", req.ContentID,
-							"season", season.SeasonNumber,
+							"season", seasonNumber,
 						) {
 							continue
 						}
 						slog.WarnContext(ctx, "metadata: episode provider error", "component", "metadata",
-							"provider", p.Slug(), "season", season.SeasonNumber, "error", err)
+							"provider", p.Slug(), "season", seasonNumber, "error", err)
 						continue
 					}
 					accumulateEpisodeResults(episodeResults, episodes)
@@ -1894,11 +1982,16 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
-	// Persist seasons and episodes for series.
+	// Persist seasons and episodes for series. Episode-only results (e.g.
+	// local episode NFOs without a season.nfo) persist too — the persist
+	// path creates their implicit "Season N" rows. Fallback synthesis then
+	// covers any files the providers left unlinked (episodes with no NFO
+	// and no remote row); it is a no-op when every file is linked.
 	if contentType == "series" {
-		if len(seasons) > 0 {
+		if len(seasons) > 0 || len(episodes) > 0 {
 			s.persistSeasonsAndEpisodes(ctx, item, accumulator.ProviderIDs, canonicalLanguage, req.Language, seasons, episodes, mergeMode)
-		} else if err := s.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
+		}
+		if err := s.SynthesizeFallbackEpisodes(ctx, contentID); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to synthesize fallback series structure", "component", "metadata",
 				"content_id", contentID, "error", err)
 		}
@@ -2603,6 +2696,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	}
 
 	updated := false
+	childCtx := s.seriesChildLocalContextForContent(ctx, seriesID, folderID)
 	for _, language := range languages {
 		canonicalLanguage := strings.TrimSpace(series.DefaultMetadataLanguage)
 		if canonicalLanguage == "" {
@@ -2616,11 +2710,11 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if err != nil {
 			return err
 		}
-		seasons, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber)
+		seasons, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx)
 		if err != nil {
 			return err
 		}
-		episodes, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber)
+		episodes, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx)
 		if err != nil {
 			return err
 		}
@@ -2717,7 +2811,7 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 	return accumulatedIDs, nil
 }
 
-func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int) ([]SeasonResult, error) {
+func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext) ([]SeasonResult, error) {
 	seasonChain, err := s.resolveChainCached(ctx, folderID, "season")
 	if err != nil {
 		return nil, fmt.Errorf("resolve season provider chain: %w", err)
@@ -2729,9 +2823,11 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			continue
 		}
 		seasons, err := ep.GetSeasons(ctx, SeasonsRequest{
-			ProviderIDs: providerIDs,
-			ContentType: "series",
-			Language:    language,
+			ProviderIDs:          providerIDs,
+			ContentType:          "series",
+			Language:             language,
+			SeriesRootPaths:      childCtx.seriesRootPaths,
+			SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
 		})
 		if err != nil {
 			if handleProvider404(nil, providerIDs, p.Slug(), err, "season", seasonNumber) {
@@ -2751,7 +2847,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 	return flattenSeasonResults(seasonResults), nil
 }
 
-func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int) ([]EpisodeResult, error) {
+func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext) ([]EpisodeResult, error) {
 	episodeChain, err := s.resolveChainCached(ctx, folderID, "episode")
 	if err != nil {
 		return nil, fmt.Errorf("resolve episode provider chain: %w", err)
@@ -2763,9 +2859,11 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			continue
 		}
 		episodes, err := ep.GetEpisodes(ctx, EpisodesRequest{
-			ProviderIDs:  providerIDs,
-			SeasonNumber: seasonNumber,
-			Language:     language,
+			ProviderIDs:      providerIDs,
+			SeasonNumber:     seasonNumber,
+			Language:         language,
+			SeriesRootPaths:  childCtx.seriesRootPaths,
+			EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
 		})
 		if err != nil {
 			if handleChildProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
@@ -2838,7 +2936,8 @@ func isCachedImagePath(path string) bool {
 		path != "-" &&
 		!strings.HasPrefix(path, "http://") &&
 		!strings.HasPrefix(path, "https://") &&
-		!isProviderImagePath(path)
+		!isProviderImagePath(path) &&
+		!isLocalImageSourcePath(path)
 }
 
 func isRemoteImageSourcePath(path string) bool {
@@ -2848,6 +2947,20 @@ func isRemoteImageSourcePath(path string) bool {
 		path != "-" &&
 		strings.Contains(path, "://") &&
 		!isNonProviderImageScheme(lower)
+}
+
+// isLocalImageSourcePath reports whether path is a local sidecar artwork
+// source (file:// scheme, produced by the NFO provider). Local sources route
+// into *_source_path like remote sources and are copied into the S3 image
+// cache by the processor; they are never served directly.
+func isLocalImageSourcePath(path string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(path)), "file://")
+}
+
+// isCacheableImageSourcePath gates the image-cache enqueue paths: remote
+// provider URLs and local file:// sidecars both queue cache jobs.
+func isCacheableImageSourcePath(path string) bool {
+	return isRemoteImageSourcePath(path) || isLocalImageSourcePath(path)
 }
 
 func isNonProviderImageScheme(lowerPath string) bool {
@@ -2866,7 +2979,29 @@ func providerImageSourcePath(path string) string {
 	return ""
 }
 
+// splitProviderImagePath separates a provider-returned image path into the
+// served path and the cacheable source path. A local file:// sidecar must
+// never land in the served column: it routes into *_source_path only (the
+// cache job fills the served path later). Remote sources keep the existing
+// contract: the URL occupies both columns until the cache job lands.
+func splitProviderImagePath(path string) (servedPath, sourcePath string) {
+	if isLocalImageSourcePath(path) {
+		return "", strings.TrimSpace(path)
+	}
+	return path, providerImageSourcePath(path)
+}
+
 func preserveCachedArtwork(providerPath, providerThumbhash, existingCachedPath, existingSourcePath, existingThumbhash string) (string, string, string) {
+	// A local file:// source must never land in the served *_path column: it
+	// routes into *_source_path and, during the pre-cache window, the path
+	// keeps the prior cached key (or stays empty) until the job completes.
+	if isLocalImageSourcePath(providerPath) {
+		providerPath = strings.TrimSpace(providerPath)
+		if isCachedImagePath(existingCachedPath) {
+			return existingCachedPath, existingThumbhash, providerPath
+		}
+		return "", "", providerPath
+	}
 	if !isRemoteImageSourcePath(providerPath) {
 		if strings.TrimSpace(providerPath) == "" && isCachedImagePath(existingCachedPath) {
 			return existingCachedPath, existingThumbhash, existingSourcePath
@@ -3028,7 +3163,21 @@ func buildItemLocalizationRecord(
 		LogoPath:           loc.LogoPath,
 		LogoSourcePath:     loc.LogoSourcePath,
 	}
-	applyBestImages(locItem, images, mergeMode, preferredLanguage)
+	// Local sidecar art is language-neutral: it must not duplicate into every
+	// localization row, so local candidates only compete at the item level.
+	remoteImages := images
+	for _, img := range images {
+		if isLocalImageSourcePath(img.URL) {
+			remoteImages = make([]RemoteImage, 0, len(images))
+			for _, candidate := range images {
+				if !isLocalImageSourcePath(candidate.URL) {
+					remoteImages = append(remoteImages, candidate)
+				}
+			}
+			break
+		}
+	}
+	applyBestImages(locItem, remoteImages, mergeMode, preferredLanguage)
 	prepareItemImagesForQueue(locItem, existingLocItem)
 
 	loc.PosterPath = locItem.PosterPath
@@ -3275,6 +3424,11 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 	imageJobs := make([]EnqueueImageCacheJobInput, 0, len(seasons)+len(episodes))
 	fallbackProvider := primaryProviderID(providerIDs)
 	keyAttribution := func(sourcePath string) (string, string) {
+		// Local sidecar sources attribute to the synthetic "local" provider,
+		// keyed by the series' own content ID (mirrors item attribution).
+		if isLocalImageSourcePath(sourcePath) {
+			return imageCacheLocalProviderID, seriesID
+		}
 		providerID := providerIDFromPluginURL(sourcePath)
 		if providerID == "" {
 			providerID = fallbackProvider
@@ -3282,7 +3436,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		return providerID, findContentID(series, providerID)
 	}
 	addSeasonImageJob := func(season *models.Season) {
-		if season == nil || !isRemoteImageSourcePath(season.PosterSourcePath) {
+		if season == nil || !isCacheableImageSourcePath(season.PosterSourcePath) {
 			return
 		}
 		providerID, providerContentID := keyAttribution(season.PosterSourcePath)
@@ -3300,7 +3454,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		})
 	}
 	addEpisodeImageJob := func(episode *models.Episode) {
-		if episode == nil || !isRemoteImageSourcePath(episode.StillSourcePath) {
+		if episode == nil || !isCacheableImageSourcePath(episode.StillSourcePath) {
 			return
 		}
 		providerID, providerContentID := keyAttribution(episode.StillSourcePath)
@@ -3320,7 +3474,7 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 		})
 	}
 	addSeasonLocalizationImageJob := func(season *models.Season, loc *models.SeasonLocalization) {
-		if season == nil || loc == nil || !isRemoteImageSourcePath(loc.PosterSourcePath) {
+		if season == nil || loc == nil || !isCacheableImageSourcePath(loc.PosterSourcePath) {
 			return
 		}
 		providerID, providerContentID := keyAttribution(loc.PosterSourcePath)
@@ -3349,13 +3503,15 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				continue
 			}
 			providerSeason := season
-			providerSeason.PosterSourcePath = providerImageSourcePath(providerSeason.PosterPath)
+			providerSeason.PosterPath, providerSeason.PosterSourcePath = splitProviderImagePath(season.PosterPath)
 			if existingSeason != nil && isCanonicalWrite {
 				mergedSeason := seasonResultFromModel(existingSeason)
 				MergeSeasonResult(&providerSeason, &mergedSeason, mergeMode)
+				// preserveCachedArtwork sees the raw provider path so a local
+				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					providerSeason.PosterPath,
-					providerSeason.PosterThumbhash,
+					season.PosterPath,
+					season.PosterThumbhash,
 					existingSeason.PosterPath,
 					existingSeason.PosterSourcePath,
 					existingSeason.PosterThumbhash,
@@ -3399,6 +3555,13 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				if t, parseErr := time.Parse("2006-01-02", providerSeason.AirDate); parseErr == nil {
 					dbSeason.AirDate = &t
 				}
+			}
+			// An artwork-only season (poster but no season.nfo) would otherwise
+			// persist a blank title and then be skipped by fallback synthesis
+			// (which only fills not-yet-existing rows), so default it to the same
+			// "Season N"/"Specials" label synthesis uses. Graceful degradation.
+			if dbSeason.Title == "" {
+				dbSeason.Title = fallbackSeasonTitle(dbSeason.SeasonNumber)
 			}
 			if err := s.seasonRepo.Upsert(ctx, dbSeason); err != nil {
 				slog.WarnContext(ctx, "metadata: failed to upsert season", "component", "metadata",
@@ -3506,13 +3669,15 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 				continue
 			}
 			providerEpisode := ep
-			providerEpisode.StillSourcePath = providerImageSourcePath(providerEpisode.StillPath)
+			providerEpisode.StillPath, providerEpisode.StillSourcePath = splitProviderImagePath(ep.StillPath)
 			if existingEpisode != nil && isCanonicalWrite {
 				mergedEpisode := episodeResultFromModel(existingEpisode)
 				MergeEpisodeResult(&providerEpisode, &mergedEpisode, mergeMode)
+				// preserveCachedArtwork sees the raw provider path so a local
+				// file:// source still routes into *_source_path here.
 				nextPath, nextThumbhash, nextSourcePath := preserveCachedArtwork(
-					providerEpisode.StillPath,
-					providerEpisode.StillThumbhash,
+					ep.StillPath,
+					ep.StillThumbhash,
 					existingEpisode.StillPath,
 					existingEpisode.StillSourcePath,
 					existingEpisode.StillThumbhash,
@@ -3571,6 +3736,13 @@ func (s *MetadataService) persistSeasonsAndEpisodes(
 			if providerEpisode.Ratings.IMDB > 0 {
 				v := providerEpisode.Ratings.IMDB
 				dbEp.RatingIMDB = &v
+			}
+			// An artwork-only episode (a -thumb.jpg but no episode .nfo) would
+			// otherwise persist a blank title and then be skipped by fallback
+			// synthesis, so default it to the same "Episode N" label synthesis
+			// uses. Graceful degradation for partially curated libraries.
+			if dbEp.Title == "" {
+				dbEp.Title = fallbackEpisodeTitle(dbEp.EpisodeNumber)
 			}
 			if err := s.episodeRepo.Upsert(ctx, dbEp); err != nil {
 				slog.WarnContext(ctx, "metadata: failed to upsert episode", "component", "metadata",
@@ -5660,7 +5832,11 @@ func applyBestImages(item *models.MediaItem, images []RemoteImage, mode MergeMod
 		if b.url == "" {
 			return
 		}
-		if *current == "" || mode == MergeReplaceUnlocked || b.rating > 0 {
+		// Local sidecar candidates always apply: they carry rating 0, so an
+		// already-matched item could otherwise never pick up local art, and a
+		// rated remote image could stickily displace it after a transient
+		// local read failure.
+		if *current == "" || mode == MergeReplaceUnlocked || b.rating > 0 || isLocalImageSourcePath(b.url) {
 			*current = b.url
 		}
 	}
@@ -5725,7 +5901,7 @@ func (s *MetadataService) enqueueItemImages(ctx context.Context, item *models.Me
 	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
 	for _, field := range itemArtworkFields(item) {
 		sourcePath := strings.TrimSpace(*field.source)
-		if !isRemoteImageSourcePath(sourcePath) {
+		if !isCacheableImageSourcePath(sourcePath) {
 			continue
 		}
 		providerID, providerContentID := itemImageCacheAttribution(item, providerIDs, images, sourcePath)
@@ -5757,7 +5933,7 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 	inputs := make([]EnqueueImageCacheJobInput, 0, 3)
 	for _, field := range itemArtworkFields(locItem) {
 		sourcePath := strings.TrimSpace(*field.source)
-		if !isRemoteImageSourcePath(sourcePath) {
+		if !isCacheableImageSourcePath(sourcePath) {
 			continue
 		}
 		providerID, providerContentID := itemImageCacheAttribution(item, providerIDs, images, sourcePath)
@@ -5777,6 +5953,16 @@ func (s *MetadataService) enqueueItemLocalizationImages(ctx context.Context, ite
 }
 
 func itemImageCacheAttribution(item *models.MediaItem, providerIDs map[string]string, images []RemoteImage, sourcePath string) (string, string) {
+	// Local sidecar sources are attributed to the synthetic "local" provider
+	// (the generic scheme parse below would derive "file") and keyed by the
+	// item's own content ID, matching the audiobook/ebook local/ precedent.
+	if isLocalImageSourcePath(sourcePath) {
+		contentID := ""
+		if item != nil {
+			contentID = item.ContentID
+		}
+		return imageCacheLocalProviderID, contentID
+	}
 	providerID := providerIDFromPluginURL(sourcePath)
 	if providerID == "" {
 		providerID = findProviderID(images, sourcePath)

@@ -834,7 +834,7 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 		}
 		for _, p := range []string{p1, p2, p3} {
 			if p != "" && !strings.Contains(p, "://") {
-				if dir := pathDir(p); dir != "" {
+				if dir := imageDeletePrefix(p); dir != "" {
 					imageDirs = append(imageDirs, dir)
 				}
 			}

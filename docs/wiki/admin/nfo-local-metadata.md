@@ -35,10 +35,25 @@ For each movie or series, Silo checks (in order):
 1. `movie.nfo` / `tvshow.nfo` in the item's folder
 2. `<media basename>.nfo` next to the media file (e.g. `My Movie (2021).nfo`)
 
+For series, Silo additionally reads:
+
+- `season.nfo` inside each season directory (`<season>` root: title, plot)
+- `<episode basename>.nfo` next to each episode file (`<episodedetails>` root: title,
+  plot, air date, runtime, ratings)
+- Season posters: `poster.jpg` (or `folder`/`cover`) inside the season directory, or
+  `seasonNN-poster.jpg` in the series root
+- Episode thumbnails: `<episode basename>-thumb.jpg`
+
 A sidecar only applies when its root element matches the item type: a stray `movie.nfo` in
 a series folder is skipped in favor of `tvshow.nfo`, and a `tvshow.nfo` next to a movie
 file is ignored. Files that fail to parse are skipped silently and the next candidate is
 tried — a broken NFO never blocks matching.
+
+Season and episode numbers declared inside an NFO (`<seasonnumber>`, `<season>`,
+`<episode>`) are advisory: the directory name and the `SxxEyy` filename pattern decide
+where metadata lands, and a mismatch is logged and resolved in the filename's favor.
+Multi-episode NFO documents (several `<episodedetails>` blocks in one file) are not
+supported; the first block is used and a warning is logged.
 
 ## Supported fields
 
@@ -61,11 +76,12 @@ tried — a broken NFO never blocks matching.
 | `<actor>` (`name`/`role`/`order`) | movie, series | Cast (actor `<thumb>` URLs are ignored) |
 | `<director>`, `<credits>` | movie, series | Crew (directors and writers) |
 | `<uniqueid type="tmdb|imdb|tvdb">` | movie, series | Trusted identity anchor for matching |
+| `<title>`, `<plot>` (`season.nfo`) | season | Season name and overview |
+| `<title>`, `<plot>`, `<aired>`, `<runtime>`, `<ratings>` (`<episodedetails>`) | episode | Episode title, overview, air date, runtime, ratings |
 
-Not yet supported: `<set>` (collections), `season.nfo`, and per-episode `.nfo` files —
-these are planned follow-ups. `<userrating>` is read but not stored (Silo has no
-per-user rating field). Unknown elements are ignored, so exports from Kodi, Jellyfin,
-or tinyMediaManager work as-is.
+Not yet supported: `<set>` (collections) — a planned follow-up. `<userrating>` is read
+but not stored (Silo has no per-user rating field). Unknown elements are ignored, so
+exports from Kodi, Jellyfin, or tinyMediaManager work as-is.
 
 ## How NFO data merges with online providers
 
@@ -102,18 +118,58 @@ Fitness/
     tvshow.nfo            # show title/plot (no <uniqueid> needed)
     poster.jpg fanart.jpg
     Season 01/
-      season.nfo          # "Course A: Classic"        (requires Phase D)
-      poster.jpg                                        (requires Phase D)
+      season.nfo          # "Course A: Classic"
+      poster.jpg          # season poster
       P90X S01E01 - Chest and Back.mkv
-      P90X S01E01 - Chest and Back.nfo                  (requires Phase D)
-      P90X S01E01 - Chest and Back-thumb.jpg            (requires Phase D)
+      P90X S01E01 - Chest and Back.nfo        # episode title/plot
+      P90X S01E01 - Chest and Back-thumb.jpg  # episode thumbnail
 ```
 
-The folder and episode naming build the series/season/episode tree; `tvshow.nfo` supplies
-the show's title and description even when no online provider knows the content. The rows
-marked "requires Phase D" (season and episode NFOs plus their artwork) are planned but not
-shipped yet — today those files are ignored. Sidecar artwork such as `poster.jpg` and
-`fanart.jpg` ships with the local-artwork phase of the same feature.
+The folder and episode naming build the series/season/episode tree; the NFO sidecars
+supply every name, description, and image — even when no online provider knows the
+content. Episodes without an `.nfo` still appear with their generic "Episode N" title,
+so partially curated libraries degrade gracefully.
+
+## Mixed libraries (sports example)
+
+A single library of type **Mixed** can hold movie-shaped and show-shaped content side by
+side — the common case is sports, where pay-per-view events are movies and the weekly
+show is a series, and most of it has no TMDB/TVDB presence:
+
+```
+WWE/
+  WrestleMania 41 (2025)/
+    WrestleMania 41 (2025).mkv
+    movie.nfo             # event title/plot (a <uniqueid> is optional)
+    poster.jpg
+  WWE SmackDown/
+    tvshow.nfo
+    Season 27/
+      season.nfo
+      poster.jpg
+      WWE SmackDown S27E15.mkv
+      WWE SmackDown S27E15.nfo
+      WWE SmackDown S27E15-thumb.jpg
+```
+
+How classification works in a mixed library:
+
+- **Naming decides the type, per file, before any metadata provider runs.** An `SxxEyy`
+  pattern or a `Season NN` folder routes a file to the series lane; everything else is a
+  movie. An NFO never flips the type: a `tvshow.nfo` sitting next to a movie-classified
+  file is ignored (the root element must match the item type), not applied.
+- **NFOs supply metadata and identity only.** Once the type is fixed, the NFO provider
+  behaves exactly as in dedicated movie/series libraries — including season and episode
+  depth for the show-shaped content. An event whose `movie.nfo` carries a
+  `<uniqueid type="tmdb">` still gets full online enrichment, while ID-less events next
+  to it fall back to their local NFO and artwork.
+- **Misclassified group?** Override its **Type** on the root in the library admin
+  (Auto → Movie/Series) and rescan — that is the correction path; fixing the NFO alone
+  will not re-route a file.
+
+Tools that generate sports libraries (sportarr-style managers) should therefore write
+standard `SxxEyy` naming for show content and standalone movie naming (`Title (Year)/`)
+for events, and place NFOs/posters exactly as in the dedicated-library layouts above.
 
 ## Source References
 

@@ -232,6 +232,14 @@ type ImageRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// Local sidecar context (additive; empty for purely remote providers).
+	// RepresentativeFilePath is the group's representative media file,
+	// AllGroupFilePaths are every file in the content group, and
+	// PrimarySidecarSearchPaths are directories already validated as safe for
+	// directory-level sidecars (single-content observed roots).
+	RepresentativeFilePath    string
+	AllGroupFilePaths         []string
+	PrimarySidecarSearchPaths []string
 }
 
 // RemoteImage describes an available image from a provider.
@@ -269,6 +277,10 @@ type CacheImageRequest struct {
 	SeasonNumber  *int
 	EpisodeNumber *int
 	Language      string
+	// KeyDiscriminator, when set, is inserted into the S3 key between the
+	// content ID and the image type (e.g. the 8-hex content hash of a local
+	// sidecar file) so re-cached art rotates to a fresh key.
+	KeyDiscriminator string
 }
 
 // CacheImageResult is returned by ImageCacher on success.
@@ -286,6 +298,13 @@ type ImageCacher interface {
 	CacheImage(ctx context.Context, req CacheImageRequest) (*CacheImageResult, error)
 }
 
+// ImageByteCacher caches an image already read into memory (e.g. a local
+// sidecar file) to object storage. Implemented by imagecache.Cacher alongside
+// ImageCacher; the processor type-asserts it for file:// sources.
+type ImageByteCacher interface {
+	CacheImageBytes(ctx context.Context, data []byte, req CacheImageRequest) (*CacheImageResult, error)
+}
+
 type ImageCacheJobEnqueuer interface {
 	Enqueue(ctx context.Context, in EnqueueImageCacheJobInput) error
 	EnqueueBatch(ctx context.Context, inputs []EnqueueImageCacheJobInput) (int, error)
@@ -296,6 +315,13 @@ type SeasonsRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// Local sidecar context (additive, internal — mirrors MetadataRequest).
+	// SeriesRootPaths are directories already validated as safe for
+	// directory-level sidecars (the series root); SeasonDirectoryPaths maps
+	// each directory-derived season number to its candidate directories.
+	// Both are empty for purely remote providers, which key off ProviderIDs.
+	SeriesRootPaths      []string
+	SeasonDirectoryPaths map[int][]string
 }
 
 // EpisodesRequest is passed to EpisodeProvider.GetEpisodes().
@@ -303,6 +329,11 @@ type EpisodesRequest struct {
 	ProviderIDs  map[string]string
 	SeasonNumber int
 	Language     string
+	// Local sidecar context (additive, internal). SeriesRootPaths as on
+	// SeasonsRequest; EpisodeFilePaths maps each filename-derived episode
+	// number within SeasonNumber to that episode's media file paths.
+	SeriesRootPaths  []string
+	EpisodeFilePaths map[int][]string
 }
 
 // SeasonResult carries season data from a provider.

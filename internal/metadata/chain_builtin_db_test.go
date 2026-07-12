@@ -105,8 +105,13 @@ func TestMigrationSeedsReservedBuiltinInstallation(t *testing.T) {
 	if got := extractDefaultPriority(md, "series"); got != 1 {
 		t.Errorf("nfo series default_priority = %d, want 1", got)
 	}
-	if providerSupportsLevel(md, "episode") {
-		t.Error("nfo capability must not claim episode level in Phase A")
+	// Phase D declares season/episode support so the builtin chain sync
+	// appends the NFO provider to those chains.
+	if got := extractDefaultPriority(md, "season"); got != 1 {
+		t.Errorf("nfo season default_priority = %d, want 1 (Phase D migration)", got)
+	}
+	if got := extractDefaultPriority(md, "episode"); got != 1 {
+		t.Errorf("nfo episode default_priority = %d, want 1 (Phase D migration)", got)
 	}
 }
 

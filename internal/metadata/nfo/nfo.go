@@ -11,6 +11,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// Content types emitted in parsedNFO.Type, matching the metadata package's
+// content-type/level vocabulary.
+const (
+	typeMovie   = "movie"
+	typeSeries  = "series"
+	typeSeason  = "season"
+	typeEpisode = "episode"
+)
+
 // nfoUniqueID represents a <uniqueid> element inside an NFO XML file.
 type nfoUniqueID struct {
 	Type    string `xml:"type,attr"`
@@ -80,14 +89,31 @@ type nfoTVShow struct {
 	Aired string `xml:"aired"`
 }
 
-// nfoEpisode represents the <episodedetails> root element.
+// nfoEpisode represents the <episodedetails> root element. Season/Episode are
+// pointers so "declared as 0" (specials) is distinguishable from "absent" —
+// declared numbers are advisory and checked against the filename-derived
+// structure by the provider.
 type nfoEpisode struct {
-	XMLName   xml.Name      `xml:"episodedetails"`
-	Title     string        `xml:"title"`
-	Season    int           `xml:"season"`
-	Episode   int           `xml:"episode"`
-	Plot      string        `xml:"plot"`
-	UniqueIDs []nfoUniqueID `xml:"uniqueid"`
+	XMLName      xml.Name        `xml:"episodedetails"`
+	Title        string          `xml:"title"`
+	Season       *int            `xml:"season"`
+	Episode      *int            `xml:"episode"`
+	Plot         string          `xml:"plot"`
+	Aired        string          `xml:"aired"`
+	Runtime      string          `xml:"runtime"`
+	LegacyRating string          `xml:"rating"`
+	Ratings      nfoRatingsBlock `xml:"ratings"`
+	UniqueIDs    []nfoUniqueID   `xml:"uniqueid"`
+}
+
+// nfoSeason represents the <season> root element (Kodi/Jellyfin season
+// sidecar). SeasonNumber is a pointer for the same absent-vs-zero reason as
+// nfoEpisode.
+type nfoSeason struct {
+	XMLName      xml.Name `xml:"season"`
+	Title        string   `xml:"title"`
+	Plot         string   `xml:"plot"`
+	SeasonNumber *int     `xml:"seasonnumber"`
 }
 
 // parsedNFO holds extracted data from an NFO file. Collections stay nil when
@@ -118,9 +144,18 @@ type parsedNFO struct {
 	TmdbID           string
 	ImdbID           string
 	TvdbID           string
-	Type             string // movie, series, episode
-	Season           int
-	Episode          int
+	Type             string // movie, series, season, episode
+	// Season/Episode carry the NFO's declared numbers when the matching Set
+	// flag is true. They are advisory only: naming owns structure, so the
+	// directory/filename-derived numbers win on conflict.
+	Season     int
+	SeasonSet  bool
+	Episode    int
+	EpisodeSet bool
+	// MultiEpisode marks a document with more than one <episodedetails>
+	// root (multi-episode file). Out of scope in v1: the first block is
+	// parsed and the caller warns.
+	MultiEpisode bool
 }
 
 // parseNFOData parses NFO XML data and returns structured results.
@@ -134,10 +169,12 @@ func parseNFOData(data []byte) (*parsedNFO, error) {
 	}
 
 	switch rootTag {
-	case "movie":
+	case typeMovie:
 		return parseMovieNFO(data)
 	case "tvshow":
 		return parseTVShowNFO(data)
+	case typeSeason:
+		return parseSeasonNFO(data)
 	case "episodedetails":
 		return parseEpisodeNFO(data)
 	default:
@@ -163,7 +200,7 @@ func parseMovieNFO(data []byte) (*parsedNFO, error) {
 	if err := xmlUnmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("nfo: failed to parse movie: %w", err)
 	}
-	p := parsedFromCommon(&m.nfoCommon, "movie")
+	p := parsedFromCommon(&m.nfoCommon, typeMovie)
 	p.ReleaseDate = firstDate(m.Premiered, m.ReleaseDate)
 	deriveYear(p, m.Premiered, m.ReleaseDate)
 	return p, nil
@@ -174,26 +211,71 @@ func parseTVShowNFO(data []byte) (*parsedNFO, error) {
 	if err := xmlUnmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("nfo: failed to parse tvshow: %w", err)
 	}
-	p := parsedFromCommon(&s.nfoCommon, "series")
+	p := parsedFromCommon(&s.nfoCommon, typeSeries)
 	p.FirstAirDate = firstDate(s.Premiered, s.Aired)
 	deriveYear(p, s.Premiered, s.Aired)
 	return p, nil
 }
 
+func parseSeasonNFO(data []byte) (*parsedNFO, error) {
+	var s nfoSeason
+	if err := xmlUnmarshal(data, &s); err != nil {
+		return nil, fmt.Errorf("nfo: failed to parse season: %w", err)
+	}
+	p := &parsedNFO{
+		Title:    strings.TrimSpace(s.Title),
+		Overview: strings.TrimSpace(s.Plot),
+		Type:     typeSeason,
+	}
+	if s.SeasonNumber != nil {
+		p.Season = *s.SeasonNumber
+		p.SeasonSet = true
+	}
+	return p, nil
+}
+
 func parseEpisodeNFO(data []byte) (*parsedNFO, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
 	var e nfoEpisode
-	if err := xmlUnmarshal(data, &e); err != nil {
+	if err := decoder.Decode(&e); err != nil {
 		return nil, fmt.Errorf("nfo: failed to parse episodedetails: %w", err)
 	}
 	p := &parsedNFO{
-		Title:    strings.TrimSpace(e.Title),
-		Overview: strings.TrimSpace(e.Plot),
-		Type:     "episode",
-		Season:   e.Season,
-		Episode:  e.Episode,
+		Title:        strings.TrimSpace(e.Title),
+		Overview:     strings.TrimSpace(e.Plot),
+		FirstAirDate: firstDate(e.Aired),
+		Type:         typeEpisode,
+		MultiEpisode: hasMoreEpisodeDetails(decoder),
 	}
+	if e.Season != nil {
+		p.Season = *e.Season
+		p.SeasonSet = true
+	}
+	if e.Episode != nil {
+		p.Episode = *e.Episode
+		p.EpisodeSet = true
+	}
+	if minutes, err := strconv.Atoi(strings.TrimSpace(e.Runtime)); err == nil && minutes > 0 {
+		p.Runtime = minutes
+	}
+	applyRatingValues(p, e.Ratings, e.LegacyRating)
 	applyUniqueIDs(p, e.UniqueIDs)
 	return p, nil
+}
+
+// hasMoreEpisodeDetails reports whether the decoder (positioned after the
+// first decoded root) still holds another <episodedetails> element. Kodi
+// multi-episode files concatenate several roots into one .nfo.
+func hasMoreEpisodeDetails(decoder *xml.Decoder) bool {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		if se, ok := tok.(xml.StartElement); ok {
+			return se.Name.Local == "episodedetails"
+		}
+	}
 }
 
 // parsedFromCommon maps the shared <movie>/<tvshow> field set.
@@ -259,16 +341,30 @@ func deriveYear(p *parsedNFO, candidates ...string) {
 // bare <rating> as an IMDB-slot fallback (Kodi's legacy field historically
 // held the scraper's IMDB rating).
 func applyRatings(p *parsedNFO, c *nfoCommon) {
-	for _, r := range c.Ratings.Ratings {
+	applyRatingValues(p, c.Ratings, c.LegacyRating)
+}
+
+// applyRatingValues is the shared ratings mapper for <movie>/<tvshow>
+// (via nfoCommon) and <episodedetails> roots.
+func applyRatingValues(p *parsedNFO, block nfoRatingsBlock, legacyRating string) {
+	for _, r := range block.Ratings {
 		value, ok := parseRatingValue(r.Value)
 		if !ok {
 			continue
 		}
+		name := strings.ToLower(strings.TrimSpace(r.Name))
+		// Default the source scale when <rating> omits max: Rotten Tomatoes
+		// sources are 0-100, everything else 0-10. A blanket default of 10 for a
+		// bare RT score (e.g. tomatometer 60) would scale ×10 and clamp to 100.
+		// An explicit max attribute always wins.
 		max := 10.0
+		if name == "tomatometerallcritics" || name == "tomatometerallaudience" || name == "rottentomatoes" {
+			max = 100.0
+		}
 		if parsed, parsedOK := parseRatingValue(r.Max); parsedOK {
 			max = parsed
 		}
-		switch strings.ToLower(strings.TrimSpace(r.Name)) {
+		switch name {
 		case "imdb":
 			p.RatingIMDB = scaleRating(value, max, 10)
 		case "tmdb", "themoviedb":
@@ -280,7 +376,7 @@ func applyRatings(p *parsedNFO, c *nfoCommon) {
 		}
 	}
 	if p.RatingIMDB == 0 {
-		if value, ok := parseRatingValue(c.LegacyRating); ok {
+		if value, ok := parseRatingValue(legacyRating); ok {
 			p.RatingIMDB = scaleRating(value, 10, 10)
 		}
 	}

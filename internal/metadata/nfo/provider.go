@@ -16,7 +16,7 @@ func NewProvider() *Provider { return &Provider{} }
 
 func (p *Provider) Slug() string       { return "nfo" }
 func (p *Provider) Name() string       { return "NFO Files" }
-func (p *Provider) ForTypes() []string { return []string{"movie", "series"} }
+func (p *Provider) ForTypes() []string { return []string{typeMovie, typeSeries} }
 
 // IdentityHints implements metadata.IdentityHintProvider: the external IDs a
 // curated NFO declares (<uniqueid> tmdb/imdb/tvdb) are trusted identity hints
