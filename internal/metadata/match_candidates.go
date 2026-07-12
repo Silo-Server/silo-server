@@ -256,10 +256,17 @@ func NormalizeCandidates(results []SearchResult, contentType string) []MatchCand
 		sort.Strings(sources)
 		b.candidate.Sources = sources
 
-		// Compute agreement hints.
-		if len(sources) > 1 {
+		// Compute agreement hints from corroborating sources only: a local
+		// sidecar (nfo) echoing a remote result is not provider agreement.
+		corroborating := make([]string, 0, len(sources))
+		for _, s := range sources {
+			if !nonCorroboratingSources[strings.ToLower(s)] {
+				corroborating = append(corroborating, s)
+			}
+		}
+		if len(corroborating) > 1 {
 			b.candidate.AgreementHints = append(b.candidate.AgreementHints,
-				"agreed_by_"+strings.Join(sources, "_and_"))
+				"agreed_by_"+strings.Join(corroborating, "_and_"))
 		}
 
 		candidates = append(candidates, b.candidate)
@@ -413,32 +420,85 @@ func topTieGroup(scored []scoredMatchCandidate) []scoredMatchCandidate {
 	return group
 }
 
+// nonCorroboratingSources are provider slugs whose search results must never
+// count as independent corroboration: a local sidecar (NFO) echoing a title
+// is not a second provider agreeing on identity.
+var nonCorroboratingSources = map[string]bool{"nfo": true}
+
 // pickByProviderPriority returns the group candidate whose Sources include the
 // highest-priority provider (providerPriority is ordered highest-first, e.g. the
 // library's chain order). Falls back to the top-scored candidate when there is no
 // priority info or no source matches.
+//
+// The group has already been proven to be one distinct show, so two defenses
+// against ID-less local candidates apply: when any group member carries
+// provider IDs, ID-less members are excluded from the priority pick (a
+// title-only NFO first in the chain must not downgrade a remotely-found movie
+// to an unenriched local item), and the winner adopts the union of the
+// group's provider IDs (sound because candidatesAreSingleDistinctShow already
+// verified they cannot conflict).
 func pickByProviderPriority(group []scoredMatchCandidate, providerPriority []string) *MatchCandidate {
+	eligible := group
+	if anyCandidateHasProviderIDs(group) {
+		eligible = make([]scoredMatchCandidate, 0, len(group))
+		for _, c := range group {
+			if providerIDRichness(c.candidate.ProviderIDs) > 0 {
+				eligible = append(eligible, c)
+			}
+		}
+	}
+
+	winner := &eligible[0].candidate
 	for _, prov := range providerPriority {
-		for i := range group {
-			for _, s := range group[i].candidate.Sources {
+		for i := range eligible {
+			for _, s := range eligible[i].candidate.Sources {
 				if strings.EqualFold(s, prov) {
-					return &group[i].candidate
+					winner = &eligible[i].candidate
+					return adoptGroupProviderIDs(winner, group)
 				}
 			}
 		}
 	}
-	return &group[0].candidate
+	return adoptGroupProviderIDs(winner, group)
+}
+
+func anyCandidateHasProviderIDs(group []scoredMatchCandidate) bool {
+	for _, c := range group {
+		if providerIDRichness(c.candidate.ProviderIDs) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// adoptGroupProviderIDs returns a copy of winner carrying the union of the
+// group's canonical provider IDs.
+func adoptGroupProviderIDs(winner *MatchCandidate, group []scoredMatchCandidate) *MatchCandidate {
+	adopted := *winner
+	adopted.ProviderIDs = make(map[string]string, len(winner.ProviderIDs))
+	for k, v := range winner.ProviderIDs {
+		adopted.ProviderIDs[k] = v
+	}
+	for _, c := range group {
+		for _, key := range canonicalCandidateIDKeys {
+			if v := strings.TrimSpace(c.candidate.ProviderIDs[key]); v != "" && adopted.ProviderIDs[key] == "" {
+				adopted.ProviderIDs[key] = v
+			}
+		}
+	}
+	return &adopted
 }
 
 // distinctSourceCount returns how many distinct providers (case-insensitive
 // Sources values) appear across the candidate group — i.e. how many independent
-// providers returned this show.
+// providers returned this show. Non-corroborating local sources (nfo) never
+// count.
 func distinctSourceCount(group []scoredMatchCandidate) int {
 	seen := make(map[string]struct{})
 	for _, c := range group {
 		for _, s := range c.candidate.Sources {
 			s = strings.ToLower(strings.TrimSpace(s))
-			if s != "" {
+			if s != "" && !nonCorroboratingSources[s] {
 				seen[s] = struct{}{}
 			}
 		}
@@ -625,7 +685,11 @@ func candidatePrimaryProvider(candidate MatchCandidate) string {
 	return ""
 }
 
-func selectRefreshMatchCandidate(existing *models.MediaItem, candidates []MatchCandidate) (*MatchCandidate, bool) {
+// selectRefreshMatchCandidate picks the refresh winner anchored on the
+// existing item's identity. idOverrides carries identity-hint values that won
+// the pre-search conflict policy (e.g. NFO <uniqueid> on a manual refresh)
+// and takes precedence over the stored ids for anchoring.
+func selectRefreshMatchCandidate(existing *models.MediaItem, idOverrides map[string]string, candidates []MatchCandidate) (*MatchCandidate, bool) {
 	if existing == nil || len(candidates) == 0 {
 		return nil, false
 	}
@@ -638,6 +702,7 @@ func selectRefreshMatchCandidate(existing *models.MediaItem, candidates []MatchC
 		TvdbID: existing.TvdbID,
 		ImdbID: existing.ImdbID,
 	}
+	overrideHintIDs(hints, idOverrides)
 	return selectInitialMatchCandidate(hints, candidates, nil)
 }
 

@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import type { PluginInstallation } from "@/api/types";
-
 import type { LevelChainItem } from "./useLibraryForm";
 import {
   contentLevelsForType,
-  hasMetadataProviderCapability,
+  hasChainProviders,
   levelChainsFromResponse,
   mergeChainWithDefaults,
 } from "./useLibraryForm";
@@ -100,48 +98,22 @@ describe("mergeChainWithDefaults", () => {
   });
 });
 
-describe("hasMetadataProviderCapability", () => {
-  const installation = (over: Partial<PluginInstallation>): PluginInstallation =>
-    ({
-      id: 1,
-      plugin_id: "silo.tmdb",
-      version: "1.0.0",
-      install_path: "/x",
-      enabled: true,
-      capabilities: [],
-      global_config_schema: [],
-      user_config_schema: [],
-      routes: [],
-      assets: [],
-      global_configs: [],
-      auth_bindings: [],
-      task_bindings: [],
-      update_policy: "manual",
-      ...over,
-    }) as PluginInstallation;
+describe("hasChainProviders", () => {
+  const item = (slug: string): LevelChainItem => ({
+    plugin_installation_id: 1,
+    capability_id: slug,
+    provider_slug: slug,
+    enabled: false,
+  });
 
-  it("ignores disabled installations and non-metadata capabilities", () => {
-    expect(
-      hasMetadataProviderCapability([
-        installation({
-          id: 1,
-          enabled: false,
-          capabilities: [{ type: "metadata_provider.v1", id: "tvdb", display_name: "TVDB" }],
-        }),
-        installation({
-          id: 2,
-          capabilities: [{ type: "request_router.v1", id: "seerr", display_name: "Seerr" }],
-        }),
-      ]),
-    ).toBe(false);
+  it("is true when the server chain/defaults expose any provider, even disabled builtins", () => {
+    // A plugin-less server still seeds the built-in NFO provider (disabled):
+    // the chain editor must render instead of the "install a plugin" empty state.
+    expect(hasChainProviders({ movie: [item("nfo")] })).toBe(true);
+  });
 
-    expect(
-      hasMetadataProviderCapability([
-        installation({
-          id: 3,
-          capabilities: [{ type: "metadata_provider.v1", id: "tmdb", display_name: "TMDB" }],
-        }),
-      ]),
-    ).toBe(true);
+  it("is false only when the resolved chains are empty", () => {
+    expect(hasChainProviders({})).toBe(false);
+    expect(hasChainProviders({ movie: [], series: [] })).toBe(false);
   });
 });

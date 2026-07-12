@@ -1,11 +1,6 @@
 import { useMemo, useState } from "react";
 
-import type {
-  CreateLibraryRequest,
-  Library,
-  LibraryProviderChainResponse,
-  PluginInstallation,
-} from "@/api/types";
+import type { CreateLibraryRequest, Library, LibraryProviderChainResponse } from "@/api/types";
 import {
   useCreateLibrary,
   useLibraryProviderDefaults,
@@ -13,7 +8,6 @@ import {
   useSetLibraryProviders,
   useUpdateLibrary,
 } from "@/hooks/queries/admin/libraries";
-import { useAdminPlugins } from "@/hooks/queries/admin/plugins";
 import { PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 
 export type LevelChainItem = {
@@ -23,15 +17,14 @@ export type LevelChainItem = {
   enabled: boolean;
 };
 
-// hasMetadataProviderCapability reports whether any enabled plugin installation
-// exposes a metadata provider — used only to decide between the chain editor
-// and the "install a plugin" empty state. The chain contents themselves come
-// from the server.
-export function hasMetadataProviderCapability(installations: PluginInstallation[]): boolean {
-  return installations.some(
-    (inst) =>
-      inst.enabled && (inst.capabilities ?? []).some((cap) => cap.type === "metadata_provider.v1"),
-  );
+// hasChainProviders reports whether the server's resolved provider chains (a
+// library's saved chain merged with the server-computed defaults) expose any
+// provider — used only to decide between the chain editor and the "install a
+// plugin" empty state. Built-in host providers (NFO) appear in the server
+// response without any plugin installation, so this gate must not depend on
+// installed plugins.
+export function hasChainProviders(chains: Record<string, LevelChainItem[]>): boolean {
+  return Object.values(chains).some((items) => items.length > 0);
 }
 
 export interface LibraryFormErrors {
@@ -158,7 +151,6 @@ export function useLibraryForm({
   const createMutation = useCreateLibrary();
   const updateMutation = useUpdateLibrary();
   const setChainMutation = useSetLibraryProviders();
-  const { installations } = useAdminPlugins();
   const { data: currentChain } = useLibraryProviders(library?.id ?? null);
   // The server computes default chains (same logic that seeds them on create),
   // so the form never re-derives defaults from plugin manifests client-side.
@@ -346,7 +338,7 @@ export function useLibraryForm({
     chainLoading,
     reorderLevel,
     toggleLevelProvider,
-    hasMetadataProviders: hasMetadataProviderCapability(installations),
+    hasMetadataProviders: hasChainProviders(activeLevelChains),
     errors,
     isPending,
     submit,

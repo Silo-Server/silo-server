@@ -52,6 +52,26 @@ func (s *MetadataService) canonicalizeLocalContentID(
 	if s == nil || !contentid.IsLocal(from) {
 		return from, nil
 	}
+	return s.reanchorContentID(ctx, from, ids, itemType)
+}
+
+// reanchorContentID moves `from` to the provider-anchored content_id derived
+// from `ids` when the two differ, merging onto an existing target or renaming a
+// free one. It is the shared core behind two callers: the local-skeleton
+// promotion (canonicalizeLocalContentID) and the manual-refresh corrected-
+// identity re-anchor (a fixed <uniqueid> in an NFO whose item was already
+// anchored to the wrong provider id). Both must hold the provider-dedup lock so
+// the target id cannot be claimed underneath us. When ids do not derive a
+// provider-anchored id, or it equals `from`, this is a no-op.
+func (s *MetadataService) reanchorContentID(
+	ctx context.Context,
+	from string,
+	ids contentid.ProviderIDs,
+	itemType string,
+) (string, error) {
+	if s == nil {
+		return from, nil
+	}
 
 	// Derive with no path fallback: we only want a provider-anchored id here, not
 	// another local value.

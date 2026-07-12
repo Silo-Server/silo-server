@@ -751,6 +751,7 @@ func TestSelectRefreshMatchCandidate_AcceptsCandidateWithPartialTrustedIDCoverag
 			TmdbID: "603",
 			ImdbID: "tt0133093",
 		},
+		nil,
 		[]MatchCandidate{
 			{
 				Title:       "The Matrix",
@@ -775,6 +776,7 @@ func TestSelectRefreshMatchCandidate_RejectsCandidateWithoutTrustedIDMatches(t *
 			TmdbID: "603",
 			ImdbID: "tt0133093",
 		},
+		nil,
 		[]MatchCandidate{
 			{
 				Title:       "The Matrix",
@@ -799,6 +801,7 @@ func TestSelectRefreshMatchCandidate_RejectsConflictingTrustedIDCandidate(t *tes
 			TmdbID: "603",
 			ImdbID: "tt0133093",
 		},
+		nil,
 		[]MatchCandidate{
 			{
 				Title:       "The Matrix",

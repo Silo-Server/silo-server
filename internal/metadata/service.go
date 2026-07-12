@@ -1145,6 +1145,20 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			AllGroupFilePaths:         append([]string(nil), req.Hints.AllGroupFilePaths...),
 			PrimarySidecarSearchPaths: append([]string(nil), req.Hints.PrimarySidecarSearchPaths...),
 		}
+		// Seed curated identity hints (NFO <uniqueid>) before Phase-1 search.
+		// At initial match NFO hints beat folder-name-derived hints, but stored
+		// durable IDs (injected into req.ProviderIDs) beat NFO hints.
+		protectedKeys := make(map[string]bool, len(req.ProviderIDs))
+		for key := range req.ProviderIDs {
+			protectedKeys[key] = true
+		}
+		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
+		selectionHints := req.Hints
+		if len(wonHints) > 0 {
+			hintsCopy := *req.Hints
+			overrideHintIDs(&hintsCopy, wonHints)
+			selectionHints = &hintsCopy
+		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
 		allResults := make([]SearchResult, 0)
 		for _, p := range itemChain {
@@ -1196,7 +1210,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		for _, p := range itemChain {
 			providerPriority = append(providerPriority, p.Slug())
 		}
-		if winner, ok := selectInitialMatchCandidate(req.Hints, candidates, providerPriority); ok && winner != nil {
+		if winner, ok := selectInitialMatchCandidate(selectionHints, candidates, providerPriority); ok && winner != nil {
 			for k, v := range winner.ProviderIDs {
 				if v != "" {
 					accumulatedIDs[k] = v
@@ -1262,6 +1276,18 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		searchQuery.ObservedRootPath = localCtx.observedRootPath
 		searchQuery.AllGroupFilePaths = append([]string(nil), localCtx.allGroupFilePaths...)
 		searchQuery.PrimarySidecarSearchPaths = append([]string(nil), localCtx.primarySidecarSearchPaths...)
+		// Seed curated identity hints (NFO <uniqueid>) before the refresh
+		// search. On a scheduled refresh stored durable IDs win over NFO hints
+		// (no background identity flips); on a manual refresh NFO hints win,
+		// which is the recovery path for a corrected NFO.
+		var protectedKeys map[string]bool
+		if req.Mode == ModeScheduledRefresh {
+			protectedKeys = make(map[string]bool, len(accumulatedIDs))
+			for key := range accumulatedIDs {
+				protectedKeys[key] = true
+			}
+		}
+		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
 		allResults := make([]SearchResult, 0)
 		for _, p := range itemChain {
@@ -1288,7 +1314,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 		}
 		candidates := NormalizeCandidates(allResults, contentType)
-		if winner, ok := selectRefreshMatchCandidate(existing, candidates); ok && winner != nil {
+		if winner, ok := selectRefreshMatchCandidate(existing, wonHints, candidates); ok && winner != nil {
 			for k, v := range winner.ProviderIDs {
 				if v != "" {
 					accumulatedIDs[k] = v
@@ -1333,6 +1359,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if !ok {
 			continue
 		}
+		_, isIdentityHinter := p.(IdentityHintProvider)
+		// A manual Identify is the user's explicit identification: the local
+		// hint provider (NFO) is skipped entirely so a stale sidecar cannot
+		// re-apply its title/ids over the user's choice in the same operation.
+		if isIdentityHinter && req.Mode == ModeIdentify {
+			continue
+		}
 		result, err := mp.GetMetadata(ctx, MetadataRequest{
 			ProviderIDs:               accumulatedIDs,
 			ContentType:               contentType,
@@ -1357,6 +1390,13 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 		if result == nil || !result.HasMetadata {
 			continue
+		}
+		// Identity-hint providers contribute IDs exclusively through the
+		// trusted-hint phase: their Phase-2 results merge metadata fields but
+		// never inject provider-id keys that conflict with or extend the
+		// established identity (kills chimeric ID sets).
+		if isIdentityHinter {
+			result.ProviderIDs = nil
 		}
 		// Bootstrap: feed new IDs to subsequent providers.
 		mergeProviderIDs(accumulator, result)
@@ -1636,6 +1676,33 @@ func (s *MetadataService) mergeAndPersist(
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading canonicalized item: %w", err)
+			}
+			locked = intSliceToFields(existingItem.LockedFields)
+			durableIDs, err = s.loadDurableProviderIDs(ctx, contentID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// Re-anchor an already provider-anchored item whose corrected identity now
+	// derives a different anchor — the recovery path when an admin fixes a wrong
+	// <uniqueid> in an NFO. Manual refresh only: the accumulator's IDs are seeded
+	// from the item's stored IDs and only a trusted NFO hint (which wins on
+	// manual refresh) can change them here, so a scheduled/background refresh
+	// never flips a stored identity. Reuses the local-promotion machinery under
+	// the provider-dedup lock; a no-op when the derived anchor is unchanged.
+	if !isNew && req.Mode == ModeManualRefresh && contentid.IsProviderAnchored(contentID) {
+		reanchored, err := s.reanchorContentID(
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
+		if err != nil {
+			return nil, fmt.Errorf("reanchor provider content id: %w", err)
+		}
+		if reanchored != contentID {
+			contentID = reanchored
+			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
+			if err != nil {
+				return nil, fmt.Errorf("loading reanchored item: %w", err)
 			}
 			locked = intSliceToFields(existingItem.LockedFields)
 			durableIDs, err = s.loadDurableProviderIDs(ctx, contentID)
@@ -2637,7 +2704,7 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 		}
 	}
 	candidates := NormalizeCandidates(allResults, series.Type)
-	if winner, ok := selectRefreshMatchCandidate(series, candidates); ok && winner != nil {
+	if winner, ok := selectRefreshMatchCandidate(series, nil, candidates); ok && winner != nil {
 		for k, v := range winner.ProviderIDs {
 			if v != "" {
 				accumulatedIDs[k] = v
@@ -6100,6 +6167,68 @@ func searchResultConflictsWithTrustedIDs(hintedIDs, candidateIDs map[string]stri
 		}
 	}
 	return false
+}
+
+// applyBuiltinIdentityHints consults the chain's IdentityHintProviders (the
+// built-in NFO provider) and folds their curated tmdb/imdb/tvdb ids into
+// accumulatedIDs ahead of Phase-1 search. Keys in protected (stored durable
+// ids) are never overwritten — a conflict is logged and the stored value
+// kept. The returned map holds the hint values that won a slot in
+// accumulatedIDs, so candidate selection can anchor on them through the
+// trusted-hint machinery.
+func applyBuiltinIdentityHints(
+	ctx context.Context,
+	chain []Provider,
+	query SearchQuery,
+	accumulatedIDs map[string]string,
+	protected map[string]bool,
+) map[string]string {
+	var won map[string]string
+	for _, p := range chain {
+		hinter, ok := p.(IdentityHintProvider)
+		if !ok {
+			continue
+		}
+		hints := hinter.IdentityHints(ctx, query)
+		for _, key := range trustedSearchIDKeys {
+			value := strings.TrimSpace(hints[key])
+			if value == "" {
+				continue
+			}
+			current := strings.TrimSpace(accumulatedIDs[key])
+			if current != "" && protected[key] {
+				if current != value {
+					slog.WarnContext(ctx, "metadata: local identity hint conflicts with stored id; keeping stored id", "component", "metadata",
+						"provider", p.Slug(), "key", key, "stored", current, "hint", value)
+				}
+				continue
+			}
+			if current != "" && current != value {
+				slog.WarnContext(ctx, "metadata: local identity hint overrides conflicting hint id", "component", "metadata",
+					"provider", p.Slug(), "key", key, "previous", current, "hint", value)
+			}
+			accumulatedIDs[key] = value
+			if won == nil {
+				won = make(map[string]string, len(trustedSearchIDKeys))
+			}
+			won[key] = value
+		}
+	}
+	return won
+}
+
+// overrideHintIDs applies won identity-hint values onto a MatchHints copy so
+// trustedHintIDsPresent/candidateMatchesTrustedIDs anchor selection on them.
+func overrideHintIDs(hints *MatchHints, won map[string]string) {
+	if v := won["tmdb"]; v != "" {
+		hints.TmdbID = v
+	}
+	if v := won["tvdb"]; v != "" {
+		hints.TvdbID = v
+	}
+	if v := won["imdb"]; v != "" {
+		hints.ImdbID = v
+	}
 }
 
 func suppressTitleYearFallbackForTrustedIDs(query SearchQuery) SearchQuery {

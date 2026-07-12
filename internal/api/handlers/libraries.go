@@ -2191,22 +2191,7 @@ func buildSeededChainEntries(level string, candidates []seedCandidate) []metadat
 }
 
 func metadataContentLevelsForLibraryType(libraryType string) []string {
-	switch libraryType {
-	case "series":
-		return []string{"series", "season", "episode"}
-	case "movies", "movie":
-		return []string{"movie"}
-	case "audiobooks", "audiobook":
-		return []string{"audiobook"}
-	case "ebooks", "ebook":
-		return []string{"ebook"}
-	case "manga":
-		return []string{"manga"}
-	case "mixed":
-		return []string{"movie", "series", "season", "episode", "audiobook", "ebook"}
-	default:
-		return nil
-	}
+	return metadata.ContentLevelsForLibraryType(libraryType)
 }
 
 // HandleListStaleIDs handles GET /libraries/stale-ids.

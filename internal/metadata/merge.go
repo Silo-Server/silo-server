@@ -40,15 +40,17 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 		mergeFloat(&target.Ratings.RTAudience, source.Ratings.RTAudience, mode)
 	}
 
-	// Always fill year (not lockable — identity field)
-	mergeInt(&target.Year, source.Year, mode)
+	// Year and release/air dates lock together under FieldReleaseDates.
+	if !isLocked(FieldReleaseDates) {
+		mergeInt(&target.Year, source.Year, mode)
+		mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
+		mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
+		mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
+	}
 	mergeScalar(&target.OriginalLanguage, source.OriginalLanguage, mode)
-	mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
 
 	// Series fields (not lockable — structural)
 	mergeInt(&target.SeasonCount, source.SeasonCount, mode)
-	mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
-	mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
 	mergeScalar(&target.ShowStatus, source.ShowStatus, mode)
 	if !isLocked(FieldAirSchedule) {
 		mergeScalar(&target.AirTime, source.AirTime, mode)
@@ -117,13 +119,15 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 		mergeFloat(&target.Ratings.RTAudience, source.Ratings.RTAudience, mode)
 	}
 
-	mergeInt(&target.Year, source.Year, mode)
+	if !isLocked(FieldReleaseDates) {
+		mergeInt(&target.Year, source.Year, mode)
+		mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
+		mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
+		mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
+	}
 	mergeScalar(&target.OriginalTitle, source.OriginalTitle, mode)
 	mergeScalar(&target.OriginalLanguage, source.OriginalLanguage, mode)
-	mergeScalar(&target.ReleaseDate, source.ReleaseDate, mode)
 	mergeInt(&target.SeasonCount, source.SeasonCount, mode)
-	mergeScalar(&target.FirstAirDate, source.FirstAirDate, mode)
-	mergeScalar(&target.LastAirDate, source.LastAirDate, mode)
 	mergeScalar(&target.ShowStatus, source.ShowStatus, mode)
 	if !isLocked(FieldAirSchedule) {
 		mergeScalar(&target.AirTime, source.AirTime, mode)

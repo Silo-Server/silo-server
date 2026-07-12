@@ -61,9 +61,20 @@ func capabilityKey(kind, id string) string {
 	return kind + "\x00" + id
 }
 
+// isReservedPluginID reports whether a plugin id is reserved for the host and
+// must never be installable. Only the exact builtin registration id is
+// reserved: first-party plugins legitimately use the "silo." prefix
+// (silo.tmdb, silo.tvdb).
+func isReservedPluginID(pluginID string) bool {
+	return pluginID == "silo.builtin"
+}
+
 func validateManifestShared(manifest *pluginv1.PluginManifest) error {
 	if err := publicmanifest.Validate(manifest); err != nil {
 		return err
+	}
+	if isReservedPluginID(manifest.GetPluginId()) {
+		return fmt.Errorf("plugin id %q is reserved for built-in host providers", manifest.GetPluginId())
 	}
 	if manifest.GetSiloApiVersion() == "" {
 		return fmt.Errorf("plugin manifest silo_api_version is required")
