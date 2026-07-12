@@ -143,6 +143,7 @@ coordinated additive Android contract change:
 | A plan does not expose requested versus effective media file when alternate-version selection occurs. | Add requested/effective media file IDs and a normalized source descriptor to the plan. |
 | Subtitle decision does not expose the effective fidelity policy. | Add `subtitle_fidelity_policy` beside mode/artifact. |
 | Route events cannot explicitly report replan identity, local PCM recovery, retry outcome, decoder timing, or requested/effective quality. | Add optional structured fields or a versioned, bounded diagnostic schema; the server enriches delivery/recipe/source facts from stored plan state rather than trusting duplicates from the client. |
+| Android's profile-quality canonicalizer passes unknown stored labels through and does not produce `original`. | Canonicalize the closed v3 values and aliases client-side; keep server normalization tolerant for rolling upgrades. |
 
 Gate the detailed behavior with additive client feature tokens such as
 `detailed_decode_capabilities`, `layout_aware_passthrough`, and
@@ -165,9 +166,18 @@ The response engine mapping is fixed:
 Android currently accepts header refresh modes `none` and `session`; do not
 emit `refresh_endpoint` until the client implements it.
 
+Never emit legacy/client-owned runtime values in a v3 plan:
+`mpv_direct`, `client_local_loopback`, `external_player`, or
+`client_local_normalization`. They remain decode-only compatibility values on
+Android.
+
 ### 3.4 Keep v3 dark until the complete route is executable
 
 Add a dynamic server setting `playback.protocol_v3_enabled`, default `false`.
+Read it through `PlaybackSettingsReader.Get` on each capability/start request,
+as the existing `allow_4k_transcode` path does. Do not load it only through
+`internal/config/db_loader.go`; that would turn rollback into a restart-required
+change.
 Also add `GET /api/v1/playback/capability` because `/api/v1` features use
 capability detection rather than server-version sniffing.
 
@@ -219,7 +229,6 @@ Reject before allocating a session when any of these fail:
 - protocol is not exactly `3`;
 - `playback_attempt_id` is absent or not a bounded UUID/ULID-like identifier;
 - file/profile authorization fails;
-- quality is outside `auto`, `original`, `2160p`, `1080p`, `720p`, `480p`;
 - track ID and fallback index disagree;
 - output-route generation is negative or disagrees with the nested output
   context;
@@ -229,7 +238,10 @@ Reject before allocating a session when any of these fail:
 - a replan's failed plan is not the session's active plan.
 
 Normalize codecs, containers, layouts, and dynamic-range labels once at the
-boundary. Preserve the original values only in bounded diagnostics.
+boundary. Accept bounded known quality aliases such as `4k`; fold an unknown
+rolling-upgrade quality value to `auto` with a decision warning instead of
+hard-failing playback. Preserve the original values only in bounded
+diagnostics.
 
 ### 4.3 Complete response invariant
 
@@ -260,12 +272,22 @@ Use the current Android-compatible identity initially:
 
 ```text
 file:{media_file_id}:audio:{ffmpeg_audio_ordinal}
-file:{media_file_id}:subtitle:{combined_or_explicit_ordinal}
+file:{media_file_id}:subtitle:{combined_subtitle_ordinal}
 ```
 
-Centralize generation and parsing in `tracks_v3.go`. A plan that switches to an
-alternate file version must return the effective file's identity after matching
-the requested track by signature. Do not echo a requested-file track ID with an
+Freeze the combined subtitle ordering used by `buildSubtitleURLs`:
+
+1. external subtitles in stored order, starting at zero;
+2. embedded subtitles at `len(external) + embedded_ordinal`; skipped legacy
+   bitmap entries retain their ordinal hole; and
+3. downloaded subtitles in repository `created_at` order at
+   `len(external) + len(all_embedded) + downloaded_ordinal`.
+
+The identity is paired with the effective media file ID. Centralize generation,
+parsing, URL mapping, and alternate-version remapping in `tracks_v3.go`, and
+freeze the exact inventory in Phase 0 fixtures. A plan that switches file
+version must return the effective file's identity after matching the requested
+track by signature. Do not echo a requested-file track ID with an
 effective-file index.
 
 Longer term, scanner-persisted immutable stream IDs can replace ordinal IDs in a
@@ -293,28 +315,70 @@ route generation in `plan_id`. The same effective recipe has the same plan ID;
 an output-route change remains distinguishable because Android includes
 `output_route_generation` in its attempt key.
 
-Implement the client's FNV-1a 64-bit `v3:<hex>` attempt-key algorithm in Go.
+Implement the client's FNV-1a 64-bit `v3:<16-lowercase-hex>` attempt-key
+algorithm in Go. The UTF-8 canonical string is exactly:
+
+```text
+plan_id
+|KOTLIN_DELIVERY_ENUM_NAME
+|KOTLIN_STREAM_PROTOCOL_ENUM_NAME
+|lowercase_container_or_empty
+|lowercase_video_codec_or_empty
+|lowercase_audio_codec_or_empty
+|(width_or_0)x(height_or_0)
+|bitrate_kbps_or_0
+|lowercase_dynamic_range_or_empty
+|KOTLIN_SUBTITLE_MODE_ENUM_NAME
+|comma_joined_transformation_names_sorted_by_name
+|output_route_generation
+|comma_joined_local_mutations_sorted_lexically
+```
+
+The newlines above are explanatory only; the hashed value is one string joined
+by literal `|` characters. Enum components are Kotlin constant names such as
+`ORIGINAL_HTTP`, `HTTP_PROGRESSIVE`, `HLS`, and `BURN_IN`, not lowercase wire
+tokens. Hash with offset basis `0xcbf29ce484222325` and prime
+`0x100000001b3`, then zero-pad to 16 lowercase hex digits.
+
 Before committing a candidate, compute its base key for the request's output
-route and reject it when present in `attempted_plan_keys`. Shared golden
-fixtures must prove Go/Kotlin parity, including transformation ordering and a
-local PCM mutation.
+route and reject it when present in `attempted_plan_keys`. Canonical fixtures
+must be generated by the checked-in Kotlin implementation and consumed as
+opaque expected values by Go tests; a Go-generated fixture would make the
+parity test circular. Include transformation-order, empty/default-field,
+output-route, and local PCM-mutation cases.
 
 Server-side ordered candidate IDs are not security tokens.
 
 ### 5.3 Session and replacement semantics
 
-Prefer retaining the same session ID during replan:
+Treat replan as one replacement transaction, serialized with the per-session
+lifecycle lock:
 
-- serialize replans with the existing per-session lifecycle lock;
-- close the previous remux/transcode transport;
-- start and validate the replacement;
-- atomically update effective file, tracks, recipe, plan ID, and timeline;
-- return the same session ID; and
-- leave progress/scrobble/admin history as one logical playback session.
+1. validate policy, source, candidate and tooling without touching the active
+   route;
+2. reserve the active session's existing stream/transcode capacity slot so the
+   replacement is neither double-counted nor denied by its own predecessor;
+3. start the successor in a plan-scoped staging directory/transport generation,
+   or under an explicitly replacement-linked new session ID;
+4. wait until the successor URL is fetchable or its startup state is validated;
+5. atomically commit effective file, tracks, recipe, plan ID, timeline and
+   signed route;
+6. close and reap the predecessor; and
+7. release or transfer the capacity reservation exactly once.
 
-If a replacement must allocate a new session, return it explicitly and stop the
-old session only after the new transport is ready. Android will also issue an
-idempotent stop for the old ID. Never leave two transcodes consuming capacity.
+If any pre-commit step fails, leave the old route and session usable and return
+a typed terminal/retryable result. Never run two FFmpeg writers against the
+same output directory. Progressive request-scoped transports may drain until
+the old client request disconnects; they do not require a destructive
+close-first swap.
+
+Prefer retaining the same logical playback session so progress, scrobble and
+admin history remain continuous. If the transport design requires a new public
+session ID, return it explicitly and keep the old ID alive until the successor
+is ready. Android will stop the old ID afterward and ignore stop failures. Keep
+the legacy stop endpoint's behavior unchanged; internal v3 replacement and
+cleanup paths must treat an already-stopped session as success even though the
+current `SessionManager.StopSession` returns `ErrSessionNotFound`.
 
 ### 5.4 Replan idempotency
 
@@ -330,6 +394,11 @@ Add short-lived persistence for:
 - `(session_id, replan_request_id)` request digest, state, lease and serialized
   response; and
 - route events.
+
+Current native restart reconstruction is carried by signed stream tokens, not
+a durable plan database. This plan store is the first persisted v3 control-
+plane state; it complements rather than replaces recipe tokens and therefore
+needs explicit expiry/cleanup and token-to-plan reconciliation tests.
 
 For a duplicate replan ID:
 
@@ -356,7 +425,8 @@ independently:
 2. `server_remux_progressive` when the container alone is incompatible and
    progressive seek semantics are acceptable;
 3. `server_remux_hls` when HLS packaging is required;
-4. HLS video-copy plus audio adaptation;
+4. `server_remux_hls` with copied video plus audio adaptation, with the audio
+   change named in the effective recipe, transformations, claims and warnings;
 5. `server_transcode_hls`; and
 6. terminal `adaptation_unavailable`.
 
@@ -453,6 +523,16 @@ and convert compatible streams. Probe these capabilities at startup and expose
 only registered, available transformations. Do not silently run the current
 Profile 7 strip path and still claim Dolby Vision preservation.
 
+The current progressive remux path is not v3-safe unchanged: when `dovi_rpu`
+is present it strips Profile 7 metadata automatically, while the no-filter path
+leaves the copied bitstream without that named adaptation. Refactor remux input
+to require an explicit transformation choice. A Profile 7 progressive remux is
+eligible only when it either preserves a fixture-validated native P7 stream or
+runs the registered `dv_metadata_strip_to_hdr10` transformation against a
+validated HDR10-compatible base layer. When the required filter/tool is
+missing, disqualify that remux candidate rather than emitting an ambiguous
+stream.
+
 ### 6.6 Subtitles
 
 Resolve exactly one mode:
@@ -488,6 +568,14 @@ accepts a validated normalized recipe and returns:
 Both the legacy endpoint and v3 service call this operation. The legacy handler
 continues accepting its existing body and maps it to the normalized recipe;
 there is no `/api/v1` breaking change.
+
+Jellyfin compatibility is behaviorally out of scope for protocol v3. Its
+handlers currently start local/remote transcodes through parallel paths and a
+shared `TranscodeManager`, not through `HandleStartTranscode`. Preserve those
+wire and lifecycle paths during this work and keep their regression tests
+green. The extracted lower-level starter may be adopted by jellycompat only in
+a separately reviewed convergence change; do not half-migrate one of its local
+or remote branches.
 
 Apply the same extraction to progressive remux startup where necessary. The v3
 planner chooses a recipe; the transport starter is not allowed to silently
@@ -543,6 +631,9 @@ epic/sub-issue.
 ### Phase 0 — Freeze the contract
 
 - Add Go structs/enums mirroring the Kotlin v3 wire model.
+- Split only the start-envelope dispatch: protocol `3` returns the disabled
+  no-session negotiation response, while absent/non-3 requests replay the
+  buffered body through the unchanged legacy decoder.
 - Resolve the additive capability, effective-file, subtitle-policy and route-
   diagnostic gaps from section 3.3 in a coordinated Android change.
 - Add request/response JSON golden fixtures and canonical attempt-key fixtures.
@@ -552,7 +643,7 @@ epic/sub-issue.
 
 **Exit:** Go and Android decode the same fixtures and produce identical attempt
 keys; Android populates the detailed capability fields; legacy start tests are
-unchanged.
+unchanged; disabled v3 starts allocate no legacy playback session.
 
 ### Phase 1 — Source facts and transformation registry
 
@@ -579,7 +670,8 @@ function.
 
 ### Phase 3 — Start orchestration
 
-- Split `HandleStartPlayback` into protocol dispatcher and legacy/v3 handlers.
+- Wire the Phase 0 dispatcher's protocol-3 branch to the completed v3
+  orchestration service; keep the legacy branch unchanged.
 - Extract reusable transcode/remux transport starters.
 - Start sessions and final transports from the v3 service.
 - Return complete plans with final URLs and timelines.
