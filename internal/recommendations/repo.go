@@ -116,8 +116,13 @@ func (r *Repo) withHNSWCandidateScan(ctx context.Context, candidateLimit int, fn
 	}
 	defer tx.Rollback(ctx)
 
+	// force_custom_plan keeps the planner replanning with the real bind
+	// parameters: the generic plan pgx's prepared statements otherwise flip to
+	// after five executions cannot cost the ORDER BY ... LIMIT against the HNSW
+	// index and falls back to brute-force scans of the whole embeddings table.
 	_, err = tx.Exec(ctx, `
-		SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true),
+		SELECT set_config('plan_cache_mode', 'force_custom_plan', true),
+		       set_config('hnsw.iterative_scan', 'relaxed_order', true),
 		       set_config('hnsw.ef_search', $1, true)
 	`, fmt.Sprintf("%d", hnswEfSearch(candidateLimit)))
 	if err != nil {
