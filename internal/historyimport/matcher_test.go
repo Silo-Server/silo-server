@@ -120,3 +120,29 @@ func TestMatcherMatchEpisode_AllowsSeasonZeroSpecials(t *testing.T) {
 			repo.episodeBySeriesID, repo.episodeBySeriesSeason, repo.episodeBySeriesEpisode)
 	}
 }
+
+func TestMatcherMatchSeries_CleansYearFromTitle(t *testing.T) {
+	t.Parallel()
+
+	repo := &matcherRepoStub{
+		mediaByTitleYear: map[string][]mediaLookupRow{
+			"series:Bluey:2018": {{ContentID: "series-bluey", Title: "Bluey", Year: 2018}},
+		},
+	}
+	matcher := NewMatcher(repo)
+
+	match, reason, err := matcher.Match(context.Background(), Record{
+		Kind:  KindSeries,
+		Title: "Bluey (2018)",
+		Year:  0,
+	})
+	if err != nil {
+		t.Fatalf("Match returned error: %v", err)
+	}
+	if reason != "" {
+		t.Fatalf("reason = %q, want empty string", reason)
+	}
+	if match == nil || match.MediaItemID != "series-bluey" {
+		t.Fatalf("match = %+v, want series-bluey", match)
+	}
+}

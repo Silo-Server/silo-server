@@ -1,6 +1,7 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { useEventChannel } from "@/components/realtimeEventsContext";
+import { createPlexPin, buildPlexAuthURL, checkPlexPin } from "@/lib/plexAuth";
 import {
   AlertTriangle,
   ArrowRight,
@@ -54,7 +55,6 @@ import {
   useCreateAdminHistoryImportSource,
   useDeleteAdminHistoryImportSource,
   useDiscoverExternalUsers,
-  usePlexLogin,
   useSetAdminSourceToken,
   useUpdateAdminHistoryImportSource,
   useAdminHistoryImportSources,
@@ -162,6 +162,121 @@ const SOURCE_HINTS = {
   plex: { name: "My Plex Server", url: "https://plex.example.com:32400" },
 } as const;
 
+interface UsePlexOAuthOptions {
+  onSuccess: (token: string) => void;
+}
+
+function usePlexOAuth({ onSuccess }: UsePlexOAuthOptions) {
+  const [plexAuthPending, setPlexAuthPending] = useState(false);
+  const [plexAuthError, setPlexAuthError] = useState<string | null>(null);
+  const plexOAuthIntervalRef = useRef<NodeJS.Timeout | number | null>(null);
+  const plexPopupRef = useRef<Window | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (plexOAuthIntervalRef.current) {
+        clearInterval(plexOAuthIntervalRef.current);
+      }
+      if (plexPopupRef.current && !plexPopupRef.current.closed) {
+        plexPopupRef.current.close();
+      }
+    };
+  }, []);
+
+  const triggerOAuth = useCallback(async () => {
+    const width = 600;
+    const height = 700;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+    const popup = window.open(
+      "about:blank",
+      "plex-auth",
+      `width=${width},height=${height},top=${top},left=${left}`
+    );
+
+    if (!popup) {
+      setPlexAuthError("Popup blocked. Please allow popups for this site.");
+      return;
+    }
+    plexPopupRef.current = popup;
+    setPlexAuthPending(true);
+    setPlexAuthError(null);
+
+    let pin: any;
+    try {
+      pin = await createPlexPin();
+      const authUrl = buildPlexAuthURL(pin.code, window.location.origin);
+      popup.location.href = authUrl;
+    } catch (err) {
+      popup.close();
+      plexPopupRef.current = null;
+      setPlexAuthPending(false);
+      setPlexAuthError(err instanceof Error ? err.message : "Failed to start Plex sign-in");
+      return;
+    }
+
+    let attempts = 0;
+    const maxAttempts = 300; // 10 minutes max (Plex PIN is valid for 15m)
+
+    const interval = setInterval(async () => {
+      attempts++;
+      if (popup.closed) {
+        clearInterval(interval);
+        plexOAuthIntervalRef.current = null;
+        plexPopupRef.current = null;
+        setPlexAuthPending(false);
+        return;
+      }
+
+      if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        plexOAuthIntervalRef.current = null;
+        popup.close();
+        plexPopupRef.current = null;
+        setPlexAuthPending(false);
+        setPlexAuthError("Sign-in timed out. Please try again.");
+        return;
+      }
+
+      try {
+        const authToken = await checkPlexPin(pin.id, pin.code);
+        if (authToken) {
+          clearInterval(interval);
+          plexOAuthIntervalRef.current = null;
+          popup.close();
+          plexPopupRef.current = null;
+          setPlexAuthPending(false);
+          onSuccess(authToken);
+        }
+      } catch (err) {
+        // Ignore polling errors
+      }
+    }, 2000);
+
+    plexOAuthIntervalRef.current = interval;
+  }, [onSuccess]);
+
+  const cancelOAuth = useCallback(() => {
+    if (plexOAuthIntervalRef.current) {
+      clearInterval(plexOAuthIntervalRef.current);
+      plexOAuthIntervalRef.current = null;
+    }
+    if (plexPopupRef.current && !plexPopupRef.current.closed) {
+      plexPopupRef.current.close();
+    }
+    plexPopupRef.current = null;
+    setPlexAuthPending(false);
+    setPlexAuthError(null);
+  }, []);
+
+  return {
+    isPending: plexAuthPending,
+    error: plexAuthError,
+    triggerOAuth,
+    cancelOAuth,
+  };
+}
+
 function SourceDialog({
   mode,
   open,
@@ -181,19 +296,40 @@ function SourceDialog({
   const [enabled, setEnabled] = useState(existing?.enabled ?? true);
   const [adminToken, setAdminToken] = useState("");
   const [showToken, setShowToken] = useState(false);
-  const [plexUser, setPlexUser] = useState("");
-  const [plexPass, setPlexPass] = useState("");
-  const [tokenMode, setTokenMode] = useState<"login" | "token">(
-    sourceType === "plex" ? "login" : "token",
+  const [tokenMode, setTokenMode] = useState<"oauth" | "token">(
+    sourceType === "plex" ? "oauth" : "token",
   );
   const create = useCreateAdminHistoryImportSource();
   const update = useUpdateAdminHistoryImportSource();
-  const plexLogin = usePlexLogin();
-  const setTokenMut = useSetAdminSourceToken();
-  const isPending = create.isPending || update.isPending || plexLogin.isPending;
+
+  const {
+    isPending: plexAuthPending,
+    error: plexAuthError,
+    triggerOAuth: handlePlexOAuth,
+    cancelOAuth,
+  } = usePlexOAuth({
+    onSuccess: (token) => {
+      setAdminToken(token);
+      setTokenMode("token");
+    },
+  });
+
+  const isPending = create.isPending || update.isPending || plexAuthPending;
 
   const hints = SOURCE_HINTS[sourceType] || SOURCE_HINTS.jellyfin;
   const isPlex = sourceType === "plex";
+
+  useEffect(() => {
+    cancelOAuth();
+    setAdminToken("");
+    setTokenMode(sourceType === "plex" ? "oauth" : "token");
+  }, [sourceType, cancelOAuth]);
+
+  useEffect(() => {
+    if (!open) {
+      cancelOAuth();
+    }
+  }, [open, cancelOAuth]);
 
   function handleSave() {
     if (!name.trim() || !baseURL.trim()) return;
@@ -204,39 +340,6 @@ function SourceDialog({
         enabled,
       };
       update.mutate({ id: existing.id, body }, { onSuccess: onClose });
-    } else if (isPlex && tokenMode === "login" && plexUser.trim() && plexPass) {
-      // Create source first, then authenticate with Plex and set the token.
-      const body: CreateHistoryImportSourceRequest = {
-        name: name.trim(),
-        source_type: sourceType,
-        base_url: baseURL.trim(),
-        enabled,
-        sort_order: 0,
-      };
-      create.mutate(body, {
-        onSuccess: (source) => {
-          if (!source?.id) {
-            onClose();
-            return;
-          }
-          plexLogin.mutate(
-            { username: plexUser.trim(), password: plexPass },
-            {
-              onSuccess: (data) => {
-                if (data?.token) {
-                  setTokenMut.mutate(
-                    { id: source.id, body: { token: data.token } },
-                    { onSuccess: onClose },
-                  );
-                } else {
-                  onClose();
-                }
-              },
-              onError: () => onClose(), // source created but login failed — user can set token later
-            },
-          );
-        },
-      });
     } else {
       const body: CreateHistoryImportSourceRequest = {
         name: name.trim(),
@@ -275,7 +378,7 @@ function SourceDialog({
                   onValueChange={(v) => {
                     const t = v as "emby" | "jellyfin" | "plex";
                     setSourceType(t);
-                    setTokenMode(t === "plex" ? "login" : "token");
+                    setTokenMode(t === "plex" ? "oauth" : "token");
                   }}
                 >
                   <SelectTrigger>
@@ -312,10 +415,10 @@ function SourceDialog({
                 <div className="flex items-center gap-1 rounded-lg border p-0.5">
                   <button
                     type="button"
-                    onClick={() => setTokenMode("login")}
+                    onClick={() => setTokenMode("oauth")}
                     className={cn(
                       "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                      tokenMode === "login"
+                      tokenMode === "oauth"
                         ? "bg-accent text-foreground"
                         : "text-muted-foreground hover:text-foreground",
                     )}
@@ -337,26 +440,27 @@ function SourceDialog({
                 </div>
               )}
 
-              {isPlex && tokenMode === "login" ? (
+              {isPlex && tokenMode === "oauth" ? (
                 <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="plex-user-create">Plex email or username</Label>
-                    <Input
-                      id="plex-user-create"
-                      placeholder="you@example.com"
-                      value={plexUser}
-                      onChange={(e) => setPlexUser(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="plex-pass-create">Plex password</Label>
-                    <Input
-                      id="plex-pass-create"
-                      type="password"
-                      value={plexPass}
-                      onChange={(e) => setPlexPass(e.target.value)}
-                    />
-                  </div>
+                  <p className="text-muted-foreground text-sm">
+                    Authenticate directly with Plex to retrieve your server's admin token automatically.
+                  </p>
+                  <Button
+                    type="button"
+                    onClick={handlePlexOAuth}
+                    disabled={plexAuthPending}
+                    className="w-full flex items-center justify-center gap-2"
+                  >
+                    {plexAuthPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <KeyRound className="h-4 w-4" />
+                    )}
+                    {plexAuthPending ? "Signing in with Plex..." : "Sign in with Plex"}
+                  </Button>
+                  {plexAuthError && (
+                    <p className="text-xs text-destructive font-medium">{plexAuthError}</p>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-1.5">
@@ -414,38 +518,36 @@ function TokenDialog({
   onClose: () => void;
 }) {
   const isPlex = source.source_type === "plex";
-  const [mode, setMode] = useState<"token" | "login">(isPlex ? "login" : "token");
+  const [mode, setMode] = useState<"token" | "oauth">(isPlex ? "oauth" : "token");
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
-  const [plexUser, setPlexUser] = useState("");
-  const [plexPass, setPlexPass] = useState("");
   const setToken_ = useSetAdminSourceToken();
   const clearToken = useClearAdminSourceToken();
-  const plexLogin = usePlexLogin();
+
+  const {
+    isPending: plexAuthPending,
+    error: plexAuthError,
+    triggerOAuth: handlePlexOAuth,
+    cancelOAuth,
+  } = usePlexOAuth({
+    onSuccess: (token) => {
+      setToken(token);
+      setMode("token");
+    },
+  });
+
+  useEffect(() => {
+    if (!open) {
+      cancelOAuth();
+    }
+  }, [open, cancelOAuth]);
 
   function handleSaveToken() {
     if (!token.trim()) return;
     setToken_.mutate({ id: source.id, body: { token: token.trim() } }, { onSuccess: onClose });
   }
 
-  function handlePlexLogin() {
-    if (!plexUser.trim() || !plexPass) return;
-    plexLogin.mutate(
-      { username: plexUser.trim(), password: plexPass },
-      {
-        onSuccess: (data) => {
-          if (data?.token) {
-            setToken_.mutate(
-              { id: source.id, body: { token: data.token } },
-              { onSuccess: onClose },
-            );
-          }
-        },
-      },
-    );
-  }
-
-  const isSaving = setToken_.isPending || plexLogin.isPending;
+  const isSaving = setToken_.isPending || plexAuthPending;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -459,10 +561,10 @@ function TokenDialog({
             <div className="flex items-center gap-1 rounded-lg border p-0.5">
               <button
                 type="button"
-                onClick={() => setMode("login")}
+                onClick={() => setMode("oauth")}
                 className={cn(
                   "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  mode === "login"
+                  mode === "oauth"
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}
@@ -484,29 +586,27 @@ function TokenDialog({
             </div>
           )}
 
-          {mode === "login" && isPlex ? (
+          {mode === "oauth" && isPlex ? (
             <div className="space-y-3">
               <p className="text-muted-foreground text-sm">
-                Sign in with your Plex account to generate an admin token automatically.
+                Authenticate directly with Plex to retrieve your server's admin token automatically.
               </p>
-              <div className="space-y-1.5">
-                <Label htmlFor="plex-user">Email or username</Label>
-                <Input
-                  id="plex-user"
-                  placeholder="you@example.com"
-                  value={plexUser}
-                  onChange={(e) => setPlexUser(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="plex-pass">Password</Label>
-                <Input
-                  id="plex-pass"
-                  type="password"
-                  value={plexPass}
-                  onChange={(e) => setPlexPass(e.target.value)}
-                />
-              </div>
+              <Button
+                type="button"
+                onClick={handlePlexOAuth}
+                disabled={plexAuthPending}
+                className="w-full flex items-center justify-center gap-2"
+              >
+                {plexAuthPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
+                {plexAuthPending ? "Signing in with Plex..." : "Sign in with Plex"}
+              </Button>
+              {plexAuthError && (
+                <p className="text-xs text-destructive font-medium">{plexAuthError}</p>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -557,15 +657,9 @@ function TokenDialog({
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          {mode === "login" && isPlex ? (
-            <Button onClick={handlePlexLogin} disabled={!plexUser.trim() || !plexPass || isSaving}>
-              {isSaving ? "Signing in…" : "Sign in & save"}
-            </Button>
-          ) : (
-            <Button onClick={handleSaveToken} disabled={!token.trim() || isSaving}>
-              {isSaving ? "Saving…" : "Save"}
-            </Button>
-          )}
+          <Button onClick={handleSaveToken} disabled={!token.trim() || isSaving}>
+            {isSaving ? "Saving…" : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
