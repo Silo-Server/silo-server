@@ -1,6 +1,7 @@
 package historyimport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,17 +27,31 @@ const (
 	// rejects the PMS page size with 400 "Invalid value provided for
 	// x-plex-container-size!".
 	plexWatchlistPageSize = 100
+	uuidCacheTTL          = 5 * time.Minute
 )
+
+type cachedUUID struct {
+	uuid      string
+	createdAt time.Time
+}
 
 type PlexClient struct {
 	httpClient *http.Client
 	limiter    *upstreamRateLimiter
 	// discoverBaseURL is overridable for tests; empty means the real host.
 	discoverBaseURL string
+	// tvBaseURL is overridable for tests; empty means the real host.
+	tvBaseURL string
+	// communityBaseURL is overridable for tests; empty means the real host.
+	communityBaseURL string
+
+	uuidCacheMu sync.RWMutex
+	uuidCache   map[string]cachedUUID
 }
 
 type PlexAccount struct {
 	ID    int    `json:"id"`
+	UUID  string `json:"uuid"`
 	Title string `json:"title"`
 }
 
@@ -43,6 +59,7 @@ func NewPlexClient() *PlexClient {
 	return &PlexClient{
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 		limiter:    sharedHistoryImportUpstreamLimiter,
+		uuidCache:  make(map[string]cachedUUID),
 	}
 }
 
@@ -341,6 +358,289 @@ func (c *PlexClient) FetchWatchlist(ctx context.Context, accountToken string) ([
 			"watchlist: could not resolve external ids for %d of %d items; those fall back to exact title/year matching",
 			unresolved, len(allItems)))
 	}
+	return allItems, warnings, nil
+}
+
+func (c *PlexClient) ResolveUserUUID(ctx context.Context, adminToken, targetID string) (string, error) {
+	cacheKey := adminToken + ":" + targetID
+	c.uuidCacheMu.RLock()
+	if c.uuidCache != nil {
+		if cached, ok := c.uuidCache[cacheKey]; ok && time.Since(cached.createdAt) < uuidCacheTTL {
+			c.uuidCacheMu.RUnlock()
+			return cached.uuid, nil
+		}
+	}
+	c.uuidCacheMu.RUnlock()
+
+	numericID, err := strconv.Atoi(targetID)
+	if err != nil {
+		return "", fmt.Errorf("invalid account id: %w", err)
+	}
+
+	tvBase := c.tvBaseURL
+	if tvBase == "" {
+		tvBase = plexTVBaseURL
+	}
+
+	var errs []error
+
+	// 0. Check admin user themselves (local PMS ID for owner/admin is "1")
+	if targetID == "1" {
+		reqAdmin, err := http.NewRequestWithContext(ctx, http.MethodGet, tvBase+"/api/v2/user", nil)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("creating admin user request: %w", err))
+		} else {
+			c.setPlexHeaders(reqAdmin, adminToken)
+			var adminUser struct {
+				ID   int    `json:"id"`
+				UUID string `json:"uuid"`
+			}
+			if err := c.doJSON(reqAdmin, &adminUser); err == nil {
+				c.writeUUIDCache(adminToken, targetID, adminUser.UUID)
+				return adminUser.UUID, nil
+			} else {
+				errs = append(errs, fmt.Errorf("fetching admin user info: %w", err))
+			}
+		}
+	}
+
+	// 1. Check friends
+	reqFriends, err := http.NewRequestWithContext(ctx, http.MethodGet, tvBase+"/api/v2/friends", nil)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("creating friends request: %w", err))
+	} else {
+		c.setPlexHeaders(reqFriends, adminToken)
+		var friends []struct {
+			ID   int    `json:"id"`
+			UUID string `json:"uuid"`
+		}
+		if err := c.doJSON(reqFriends, &friends); err == nil {
+			for _, f := range friends {
+				if f.ID == numericID {
+					c.writeUUIDCache(adminToken, targetID, f.UUID)
+					return f.UUID, nil
+				}
+			}
+		} else {
+			errs = append(errs, fmt.Errorf("fetching friends list: %w", err))
+		}
+	}
+
+	// 2. Check home users
+	reqHome, err := http.NewRequestWithContext(ctx, http.MethodGet, tvBase+"/api/v2/home/users", nil)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("creating home users request: %w", err))
+	} else {
+		c.setPlexHeaders(reqHome, adminToken)
+		var homeUsers []struct {
+			ID   int    `json:"id"`
+			UUID string `json:"uuid"`
+		}
+		if err := c.doJSON(reqHome, &homeUsers); err == nil {
+			for _, u := range homeUsers {
+				if u.ID == numericID {
+					c.writeUUIDCache(adminToken, targetID, u.UUID)
+					return u.UUID, nil
+				}
+			}
+		} else {
+			errs = append(errs, fmt.Errorf("fetching home users: %w", err))
+		}
+	}
+
+	if len(errs) > 0 {
+		var msg []string
+		for _, e := range errs {
+			msg = append(msg, e.Error())
+		}
+		return "", fmt.Errorf("user with account ID %s not found in Plex friends or home users list (errors: %s)", targetID, strings.Join(msg, "; "))
+	}
+	return "", fmt.Errorf("user with account ID %s not found in Plex friends or home users list", targetID)
+}
+
+func (c *PlexClient) writeUUIDCache(adminToken, targetID, uuid string) {
+	c.uuidCacheMu.Lock()
+	defer c.uuidCacheMu.Unlock()
+
+	if c.uuidCache == nil {
+		c.uuidCache = make(map[string]cachedUUID)
+	}
+
+	// Guard against unbounded map growth: flush if we exceed limit
+	if len(c.uuidCache) >= 100 {
+		c.uuidCache = make(map[string]cachedUUID)
+	}
+
+	c.uuidCache[adminToken+":"+targetID] = cachedUUID{
+		uuid:      uuid,
+		createdAt: time.Now(),
+	}
+}
+
+type plexFriendWatchlistVariables struct {
+	User struct {
+		ID string `json:"id"`
+	} `json:"user"`
+	First int     `json:"first"`
+	After *string `json:"after"`
+}
+
+type plexFriendWatchlistRequest struct {
+	Query     string                       `json:"query"`
+	Variables plexFriendWatchlistVariables `json:"variables"`
+}
+
+// FetchFriendWatchlist queries Plex's GraphQL API to retrieve a friend's full watchlist.
+func (c *PlexClient) FetchFriendWatchlist(ctx context.Context, adminToken, friendUUID string) ([]PlexItem, []string, error) {
+	var allItems []PlexItem
+	var warnings []string
+	var afterCursor *string
+
+	base := c.discoverBaseURL
+	if base == "" {
+		base = plexDiscoverBaseURL
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		default:
+		}
+
+		var queryPayload plexFriendWatchlistRequest
+		queryPayload.Query = `query ($user: UserInput!, $first: PaginationInt!, $after: String) {
+				userV2(user: $user) {
+					... on User {
+						watchlist(first: $first, after: $after) {
+							nodes {
+								id
+								title
+								type
+								guid
+							}
+							pageInfo {
+								hasNextPage
+								endCursor
+							}
+						}
+					}
+				}
+			}`
+		queryPayload.Variables.User.ID = friendUUID
+		queryPayload.Variables.First = 100
+		queryPayload.Variables.After = afterCursor
+
+		queryBytes, err := json.Marshal(queryPayload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshaling GraphQL query: %w", err)
+		}
+
+		baseGQL := c.communityBaseURL
+		if baseGQL == "" {
+			baseGQL = "https://community.plex.tv"
+		}
+
+		gqlReq, err := http.NewRequestWithContext(ctx, http.MethodPost, baseGQL+"/api", bytes.NewReader(queryBytes))
+		if err != nil {
+			return nil, nil, fmt.Errorf("creating GraphQL request: %w", err)
+		}
+		gqlReq.Header.Set("Content-Type", "application/json")
+		gqlReq.Header.Set("X-Plex-Token", adminToken)
+
+		resp, err := c.httpClient.Do(gqlReq)
+		if err != nil {
+			return nil, nil, fmt.Errorf("sending GraphQL request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+			return nil, nil, fmt.Errorf("GraphQL query returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+
+		var gqlResp struct {
+			Errors []struct {
+				Message string `json:"message"`
+			} `json:"errors"`
+			Data struct {
+				UserV2 struct {
+					Watchlist struct {
+						Nodes []struct {
+							ID    string `json:"id"`
+							Title string `json:"title"`
+							Type  string `json:"type"`
+							Guid  string `json:"guid"`
+						} `json:"nodes"`
+						PageInfo struct {
+							HasNextPage bool   `json:"hasNextPage"`
+							EndCursor   string `json:"endCursor"`
+						} `json:"pageInfo"`
+					} `json:"watchlist"`
+				} `json:"userV2"`
+			} `json:"data"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&gqlResp); err != nil {
+			return nil, nil, fmt.Errorf("decoding GraphQL response: %w", err)
+		}
+
+		if len(gqlResp.Errors) > 0 {
+			return nil, nil, fmt.Errorf("GraphQL error: %s", gqlResp.Errors[0].Message)
+		}
+
+		for _, node := range gqlResp.Data.UserV2.Watchlist.Nodes {
+			cleanedTitle := node.Title
+			year := 0
+			if matches := yearRegex.FindStringSubmatch(node.Title); len(matches) == 2 {
+				cleanedTitle = strings.TrimSpace(node.Title[:strings.LastIndex(node.Title, matches[0])])
+				if parsedYear, err := strconv.Atoi(matches[1]); err == nil {
+					year = parsedYear
+				}
+			}
+
+			itemType := strings.ToLower(node.Type)
+			if itemType == "show" {
+				itemType = "show"
+			} else if itemType == "movie" {
+				itemType = "movie"
+			}
+
+			allItems = append(allItems, PlexItem{
+				RatingKey: node.ID,
+				Key:       node.ID,
+				Type:      itemType,
+				Title:     cleanedTitle,
+				Year:      year,
+			})
+		}
+
+		if !gqlResp.Data.UserV2.Watchlist.PageInfo.HasNextPage || len(gqlResp.Data.UserV2.Watchlist.Nodes) == 0 {
+			break
+		}
+		cursor := gqlResp.Data.UserV2.Watchlist.PageInfo.EndCursor
+		afterCursor = &cursor
+	}
+
+	// Resolve detailed external ids (IMDB/TMDB/TVDB) for matchers
+	unresolved := 0
+	for i := range allItems {
+		detail, err := c.fetchWatchlistItemMetadata(ctx, base, adminToken, allItems[i].RatingKey)
+		if err != nil || detail == nil {
+			unresolved++
+			continue
+		}
+		allItems[i].Guid = detail.Guid
+		if allItems[i].Year == 0 {
+			allItems[i].Year = detail.Year
+		}
+	}
+	if unresolved > 0 {
+		warnings = append(warnings, fmt.Sprintf(
+			"watchlist: could not resolve external ids for %d of %d items; those fall back to exact title/year matching",
+			unresolved, len(allItems)))
+	}
+
 	return allItems, warnings, nil
 }
 

@@ -59,6 +59,40 @@ func (p *PlexAdminProvider) Fetch(ctx context.Context) ([]Record, []string, erro
 	for _, record := range merged {
 		records = append(records, record)
 	}
+
+	var watchlistItems []PlexItem
+	var watchlistWarnings []string
+	if p.accountID == "1" {
+		// For the admin/owner account (ID "1"), we can fetch their watchlist directly
+		// using the admin token, since they own the admin token.
+		var wlErr error
+		watchlistItems, watchlistWarnings, wlErr = p.client.FetchWatchlist(ctx, p.token)
+		if wlErr != nil {
+			warnings = append(warnings, fmt.Sprintf("watchlist fetch failed: %v", wlErr))
+		}
+	} else {
+		// Try to resolve the friend's numeric accountID to their global Plex UUID first.
+		// Since this is best-effort (privacy settings or not friends can cause failures),
+		// any error should just be logged as a warning so the history import still completes.
+		friendUUID, err := p.client.ResolveUserUUID(ctx, p.token, p.accountID)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("watchlist fetch failed: cannot resolve Plex UUID for account %s: %v", p.accountID, err))
+		} else {
+			var wlErr error
+			watchlistItems, watchlistWarnings, wlErr = p.client.FetchFriendWatchlist(ctx, p.token, friendUUID)
+			if wlErr != nil {
+				warnings = append(warnings, fmt.Sprintf("watchlist fetch failed: %v", wlErr))
+			}
+		}
+	}
+
+	if len(watchlistItems) > 0 {
+		warnings = append(warnings, watchlistWarnings...)
+		for _, item := range watchlistItems {
+			records = append(records, NormalizePlexWatchlistItem(item))
+		}
+	}
+
 	return records, warnings, nil
 }
 

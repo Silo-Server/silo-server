@@ -3,8 +3,12 @@ package historyimport
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 )
+
+var yearRegex = regexp.MustCompile(`\s*\((\d{4})\)\s*$`)
 
 type matcherRepository interface {
 	MatchMediaByExternalID(ctx context.Context, kind, column, value string) ([]mediaLookupRow, error)
@@ -166,7 +170,18 @@ func (m *Matcher) matchMedia(ctx context.Context, kind, tmdbID, imdbID, tvdbID, 
 		return nil, strings.Join(attempts, "; "), nil
 	}
 
-	rows, err := m.repo.MatchMediaByTitleYear(ctx, kind, title, year)
+	cleanedTitle := title
+	cleanedYear := year
+	if matches := yearRegex.FindStringSubmatch(title); len(matches) == 2 {
+		cleanedTitle = strings.TrimSpace(title[:strings.LastIndex(title, matches[0])])
+		if cleanedYear == 0 {
+			if parsedYear, err := strconv.Atoi(matches[1]); err == nil {
+				cleanedYear = parsedYear
+			}
+		}
+	}
+
+	rows, err := m.repo.MatchMediaByTitleYear(ctx, kind, cleanedTitle, cleanedYear)
 	if err != nil {
 		return nil, "", err
 	}
@@ -179,7 +194,7 @@ func (m *Matcher) matchMedia(ctx context.Context, kind, tmdbID, imdbID, tvdbID, 
 		}, "", nil
 	}
 	if len(rows) > 1 {
-		return nil, fmt.Sprintf("ambiguous exact title/year match for %s (%d rows)", describeTitleYear(title, year), len(rows)), nil
+		return nil, fmt.Sprintf("ambiguous exact title/year match for %s (%d rows)", describeTitleYear(cleanedTitle, cleanedYear), len(rows)), nil
 	}
 	attempts = append(attempts, fmt.Sprintf("no exact title/year match for %s", describeTitleYear(title, year)))
 	return nil, strings.Join(attempts, "; "), nil

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -659,15 +660,32 @@ func (s *Service) CreateSource(ctx context.Context, input CreateSourceInput) (*S
 	default:
 		return nil, fmt.Errorf("source_type must be emby, jellyfin, or plex")
 	}
+	input.BaseURL = normalizeBaseURL(input.BaseURL)
 	return s.repo.CreateSource(ctx, input)
 }
 
 func (s *Service) UpdateSource(ctx context.Context, id int, input UpdateSourceInput) (*Source, error) {
+	if input.BaseURL != nil {
+		normalized := normalizeBaseURL(*input.BaseURL)
+		input.BaseURL = &normalized
+	}
 	return s.repo.UpdateSource(ctx, id, input)
 }
 
 func (s *Service) DeleteSource(ctx context.Context, id int) error {
 	return s.repo.DeleteSource(ctx, id)
+}
+
+func normalizeBaseURL(url string) string {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return ""
+	}
+	lower := strings.ToLower(url)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return "http://" + url
+	}
+	return url
 }
 
 func resolveConnectionMode(input CreateRunInput) (string, error) {
