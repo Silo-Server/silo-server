@@ -530,6 +530,36 @@ func TestItemRepo_BuildFuzzySearchSQL_EmptyQueryReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestItemRepo_Search_LibraryScopeUsesIndependentExistsPredicates pins the
+// leak-safe library scoping shared by the FTS search and the fuzzy fallback via
+// appendSearchScopeFilters. The prior JOIN + NOT(mil.media_folder_id = ANY(...))
+// form let an item linked to BOTH a disabled and a non-disabled library survive
+// the deny check on the passing membership row, so a typo (fuzzy) or exact
+// search could surface items from a disabled library. Both builders must instead
+// emit independent EXISTS/NOT EXISTS subqueries and no membership JOIN.
+func TestItemRepo_Search_LibraryScopeUsesIndependentExistsPredicates(t *testing.T) {
+	repo := &ItemRepository{}
+	filter := AccessFilter{DisabledLibraryIDs: []int{9}}
+
+	ftsSQL, _, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, filter)
+	fuzzySQL, _, _ := repo.buildFuzzySearchSQL("avatar", []string{"movie"}, 20, 0, filter, true, nil)
+
+	for name, sql := range map[string]string{"fts": ftsSQL, "fuzzy": fuzzySQL} {
+		if strings.Contains(sql, "JOIN media_item_libraries") {
+			t.Fatalf("%s query must not JOIN media_item_libraries for scoping; got:\n%s", name, sql)
+		}
+		// Disabled-only path requires positive membership (argument-free EXISTS)
+		// so orphan items don't slip through the vacuous NOT EXISTS...
+		if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)") {
+			t.Fatalf("%s query must require library membership via an argument-free EXISTS; got:\n%s", name, sql)
+		}
+		// ...plus the disabled NOT EXISTS.
+		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($") {
+			t.Fatalf("%s query must exclude disabled libraries via NOT EXISTS; got:\n%s", name, sql)
+		}
+	}
+}
+
 // TestItemRepo_Search_UsesTitleNormalizedColumn asserts that buildSearchSQL
 // reads the mi.title_normalized stored generated column for the title rank
 // arms (exact_title_match and contiguous_title_match), so the LIKE

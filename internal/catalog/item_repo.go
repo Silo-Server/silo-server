@@ -904,16 +904,26 @@ func (r *ItemRepository) SearchPage(
 	parsed := parseSearchQuery(query)
 
 	// FTS block (the common path). queryLimit fetches one extra row in cursor
-	// mode so execSearchBlock can derive hasMore without a separate count.
+	// mode so execSearchBlock can derive hasMore without a separate count. In
+	// cursor mode we also floor the probe at fuzzyFallbackThreshold rows: a tiny
+	// caller limit (e.g. an autocomplete asking for 2) with a few incidental
+	// exact hits would otherwise report hasMore and hide the FTS block's true
+	// size, so the sparse test below (and thus the typo fallback) could never
+	// fire. Fetching up to the threshold lets execSearchBlock's pre-trim count
+	// reveal a genuinely sparse block regardless of limit; the returned page is
+	// still trimmed to limit.
 	queryLimit := limit
 	if !includeTotal {
 		queryLimit = limit + 1
+		if queryLimit < fuzzyFallbackThreshold {
+			queryLimit = fuzzyFallbackThreshold
+		}
 	}
 	sql, countSQL, args := r.buildSearchSQLFromParsed(parsed, itemTypes, queryLimit, offset, filter, includeTotal)
 	if sql == "" {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
-	ftsItems, ftsTotal, ftsHasMore, err := r.execSearchBlock(ctx, sql, countSQL, args, limit, offset, includeTotal)
+	ftsItems, ftsTotal, ftsHasMore, ftsFetched, err := r.execSearchBlock(ctx, sql, countSQL, args, limit, offset, includeTotal)
 	if err != nil {
 		return nil, 0, false, includeTotal, err
 	}
@@ -926,24 +936,22 @@ func (r *ItemRepository) SearchPage(
 	// only when the FTS result set is fully known and sparse (a likely
 	// misspelling or word-boundary miss).
 	//
-	// ftsCount is the fully-known size of the FTS block: the window count in
-	// exact mode, or offset+len(page) once the cursor block is exhausted
-	// (!ftsHasMore). A not-fully-known block cannot be judged sparse.
+	// Exact mode judges sparsity by the window count (page-independent), so every
+	// page of a sparse query agrees and the combined result paginates fully.
 	//
-	// In cursor mode ftsCount is only the true block size at offset 0; past it an
-	// empty FTS page inflates ftsCount to offset (we can't tell "sparse, paged
-	// past the block" from "rich, normal page"). So cursor mode only trusts
-	// sparsity on the first page, where searchWithFuzzyFallback serves fuzzy as a
-	// terminal augmentation (no phantom next page a bare offset cursor couldn't
-	// locate). Exact mode paginates the combined result fully.
-	ftsFullyKnown := includeTotal || !ftsHasMore
-	ftsCount := ftsTotal
-	if !includeTotal {
-		ftsCount = offset + len(ftsItems)
-	}
-	sparse := ftsFullyKnown && ftsCount < fuzzyFallbackThreshold
-	if !includeTotal && offset != 0 {
-		sparse = false
+	// Cursor mode has no window count, so it uses ftsFetched — the pre-trim size
+	// of a probe floored at fuzzyFallbackThreshold rows: fewer than the threshold
+	// came back ⇒ the whole FTS block is smaller than the threshold ⇒ sparse,
+	// independent of the caller's page size. It only trusts this on the first
+	// page (offset 0), where searchWithFuzzyFallback serves fuzzy as a terminal
+	// augmentation (no phantom next page a bare offset cursor couldn't locate);
+	// past it an empty FTS page can't be told from a rich one, so sparse stays
+	// false.
+	var sparse bool
+	if includeTotal {
+		sparse = ftsTotal < fuzzyFallbackThreshold
+	} else if offset == 0 {
+		sparse = ftsFetched < fuzzyFallbackThreshold
 	}
 	if !sparse || !eligibleForFuzzy(parsed) {
 		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
@@ -972,7 +980,7 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	// sparse). Fetched at offset 0 so we hold the whole block regardless of the
 	// requested page — its ids drive fuzzy dedup below.
 	ftsSQL, ftsCountSQL, ftsArgs := r.buildSearchSQLFromParsed(parsed, itemTypes, fuzzyFallbackThreshold, 0, filter, true)
-	ftsBlock, _, _, err := r.execSearchBlock(ctx, ftsSQL, ftsCountSQL, ftsArgs, fuzzyFallbackThreshold, 0, true)
+	ftsBlock, _, _, _, err := r.execSearchBlock(ctx, ftsSQL, ftsCountSQL, ftsArgs, fuzzyFallbackThreshold, 0, true)
 	if err != nil {
 		return nil, 0, false, includeTotal, err
 	}
@@ -983,7 +991,7 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 	var fuzzyBlock []*models.MediaItem
 	if fuzzySQL != "" {
 		var fuzzyMatched int
-		fuzzyBlock, fuzzyMatched, _, err = r.execSearchBlock(ctx, fuzzySQL, fuzzyCountSQL, fuzzyArgs, fuzzyMaxResults, 0, true)
+		fuzzyBlock, fuzzyMatched, _, _, err = r.execSearchBlock(ctx, fuzzySQL, fuzzyCountSQL, fuzzyArgs, fuzzyMaxResults, 0, true)
 		if err != nil {
 			return nil, 0, false, includeTotal, err
 		}
@@ -1038,18 +1046,26 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 // offset 0, is the count sibling re-run to recover the real total. Both queries
 // must end with the trailing limit/offset args so the count sibling can drop
 // them.
-func (r *ItemRepository) execSearchBlock(ctx context.Context, dataSQL, countSQL string, args []any, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, error) {
+//
+// The fourth return value is the pre-trim row count the data query actually
+// returned (before the cursor-mode +1 row is trimmed). SearchPage uses it in
+// cursor mode to judge FTS-block sparsity independently of the caller's page
+// size: the block is sparse when the query — probed with LIMIT
+// >= fuzzyFallbackThreshold — yields fewer than that threshold, even for a tiny
+// caller limit. In exact mode it is simply len(items).
+func (r *ItemRepository) execSearchBlock(ctx context.Context, dataSQL, countSQL string, args []any, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, int, error) {
 	rows, err := r.pool.Query(ctx, dataSQL, args...)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("searching media items: %w", err)
+		return nil, 0, false, 0, fmt.Errorf("searching media items: %w", err)
 	}
 	defer rows.Close()
 
 	if !includeTotal {
 		items, err := scanItems(rows)
 		if err != nil {
-			return nil, 0, false, err
+			return nil, 0, false, 0, err
 		}
+		fetched := len(items)
 		hasMore := len(items) > limit
 		if hasMore {
 			items = items[:limit]
@@ -1058,23 +1074,23 @@ func (r *ItemRepository) execSearchBlock(ctx context.Context, dataSQL, countSQL 
 		if hasMore {
 			total++
 		}
-		return items, total, hasMore, nil
+		return items, total, hasMore, fetched, nil
 	}
 
 	items, total, err := scanItemsWithTotal(rows)
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, 0, err
 	}
 	hasMore := total > offset+len(items)
 	if len(items) == 0 && offset > 0 {
 		// Drop the trailing limit/offset args from the data query.
 		countArgs := args[:len(args)-2]
 		if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			return nil, 0, false, fmt.Errorf("count fallback for empty search page: %w", err)
+			return nil, 0, false, 0, fmt.Errorf("count fallback for empty search page: %w", err)
 		}
 		hasMore = total > offset+len(items)
 	}
-	return items, total, hasMore, nil
+	return items, total, hasMore, len(items), nil
 }
 
 // contentIDsOf extracts the content_id of each item, preserving order.
@@ -1228,11 +1244,11 @@ func (r *ItemRepository) buildSearchSQLFromParsed(parsed parsedSearchQuery, item
 		fmt.Sprintf(normalizedTitleExpr, "mi.sort_title"), exactIdx,
 	)
 
-	// Use qualified column names inside the CTE to avoid ambiguity when
-	// the FROM clause includes a JOIN to media_item_libraries. The select
-	// list aliases coalesced columns back to their own names (poster_path
-	// etc.) so the outer query can re-reference them; GROUP BY needs the
-	// raw references because output aliases are invalid there.
+	// Qualified column names inside the CTE, grouped so the MAX(...) ranking
+	// aggregates below are legal. The select list aliases coalesced columns back
+	// to their own names (poster_path etc.) so the outer query can re-reference
+	// them; GROUP BY needs the raw references because output aliases are invalid
+	// there.
 	qualifiedCols := qualifiedItemColumns("mi")
 	groupByCols := qualifiedItemColumnRefs("mi")
 	scoredCTE := fmt.Sprintf(`
@@ -1321,9 +1337,10 @@ func (r *ItemRepository) buildSearchSQLFromParsed(parsed parsedSearchQuery, item
 // (buildSearchSQLWithTotal) and the trigram fuzzy fallback (buildFuzzySearchSQL):
 // item type, allowed/disabled libraries, the access filter, and the
 // manga-chapter exclusion. It mutates conditions/args/argIdx in place and
-// returns the FROM clause, which gains a JOIN to media_item_libraries when
-// library scoping is requested. Both callers append these in the same order so a
-// single helper keeps the two queries' filtering provably identical.
+// returns the FROM clause (always "media_items mi"; library scoping is enforced
+// with independent EXISTS/NOT EXISTS subqueries rather than a JOIN). Both callers
+// append these in the same order so a single helper keeps the two queries'
+// filtering provably identical.
 func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) (fromClause string) {
 	fromClause = "media_items mi"
 
@@ -1342,24 +1359,15 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 		}
 	}
 
-	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
-	if filter.AllowedLibraryIDs != nil {
-		// Caller (Search) is expected to short-circuit when len == 0; we still
-		// guard here so the builders are safe to invoke from tests.
-		if len(filter.AllowedLibraryIDs) > 0 {
-			*conditions = append(*conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", *argIdx))
-			*args = append(*args, filter.AllowedLibraryIDs)
-			*argIdx++
-		}
-	}
-	if len(filter.DisabledLibraryIDs) > 0 {
-		*conditions = append(*conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", *argIdx))
-		*args = append(*args, filter.DisabledLibraryIDs)
-		*argIdx++
-	}
-	if needsLibJoin {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-	}
+	// Library allow/deny via the shared leak-safe helper: an item linked to both a
+	// passing and a disabled library must not slip through. The old JOIN +
+	// NOT(mil.media_folder_id = ANY(...)) form let the passing membership row
+	// satisfy the deny check (audit 2026-05-01 §3.3), so both the FTS search and
+	// the fuzzy fallback that share this helper used it. appendLibraryAccessConditions
+	// emits independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and
+	// needs no JOIN.
+	appendLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
+
 	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
 
 	// Manga chapters (type='ebook' rows linked into a manga series) are internal
@@ -1411,10 +1419,10 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
-	// GROUP BY content_id collapses duplicate rows produced by the optional
-	// library JOIN, mirroring buildSearchSQLWithTotal, so COUNT(*) OVER () counts
-	// distinct content_ids. qualifiedItemColumns aliases the coalesced columns so
-	// the outer SELECT can re-reference them; GROUP BY uses the raw refs.
+	// GROUP BY is required so the MAX(similarity(...)) ranking aggregate is legal,
+	// mirroring buildSearchSQLWithTotal; COUNT(*) OVER () then counts distinct
+	// content_ids. qualifiedItemColumns aliases the coalesced columns so the outer
+	// SELECT can re-reference them; GROUP BY uses the raw refs.
 	qualifiedCols := qualifiedItemColumns("mi")
 	groupByCols := qualifiedItemColumnRefs("mi")
 	scoredCTE := fmt.Sprintf(`
