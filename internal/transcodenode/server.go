@@ -415,7 +415,11 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	// The token's recipe must be a transcode card for the session id in the URL: a
 	// mismatch is a forged or stale request, and direct/remux cards carry no encode
 	// parameters to rebuild. An empty PlayMethod is a transcode card (back-compat).
-	if card.SessionID != sessionID || (card.PlayMethod != "" && card.PlayMethod != playback.PlayTranscode) {
+	expectedTransportID := card.SessionID
+	if card.TranscodeTransportID != "" {
+		expectedTransportID = card.TranscodeTransportID
+	}
+	if expectedTransportID != sessionID || (card.PlayMethod != "" && card.PlayMethod != playback.PlayTranscode) {
 		return nil
 	}
 	// A native token carries the full byte-affecting recipe. The jellycompat node
@@ -486,6 +490,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	cfg := s.watcher.Config()
 	outputDir := filepath.Join(cfg.Playback.TranscodeDir, sessionID)
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
+	opts.SessionID = sessionID
 	// Re-resolve environment-specific encode knobs from this node's live config; the
 	// token deliberately omits HWAccel/HWDevice so an operator change applies on
 	// rebuild. Run as a transcode node, not integrated (card.TranscodeOpts defaults).

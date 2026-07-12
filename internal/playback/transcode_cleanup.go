@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -38,7 +39,7 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 			continue
 		}
 
-		if _, ok := activeSessionIDs[entry.Name()]; ok {
+		if transcodeDirBelongsToActiveSession(entry.Name(), activeSessionIDs) {
 			continue
 		}
 
@@ -62,4 +63,16 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 	}
 
 	return removed, nil
+}
+
+func transcodeDirBelongsToActiveSession(name string, activeSessionIDs map[string]struct{}) bool {
+	if _, ok := activeSessionIDs[name]; ok {
+		return true
+	}
+	for sessionID := range activeSessionIDs {
+		if sessionID != "" && strings.HasPrefix(name, sessionID+"-") {
+			return true
+		}
+	}
+	return false
 }

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "hls_burn_in_sorted_transformations_and_pcm_mutations",
+    "plan_id": "plan:fixture",
+    "delivery": "server_remux_hls",
+    "stream_protocol": "hls",
+    "container": "hls",
+    "video_codec": "hevc",
+    "audio_codec": "aac",
+    "width": 3840,
+    "height": 2160,
+    "bitrate_kbps": 20000,
+    "dynamic_range": "hdr10",
+    "subtitle_mode": "burn_in",
+    "transformations": ["hdr_to_sdr_tonemap", "audio_to_aac"],
+    "output_route_generation": 7,
+    "local_mutations": ["transport_reopen", "pcm:truehd:8"],
+    "expected": "v3:1194a7441ef67486"
+  }
+]

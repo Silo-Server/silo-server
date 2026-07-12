@@ -71,6 +71,17 @@ type RemuxSession struct {
 	outputPipe io.ReadCloser
 }
 
+// RemuxDVMode makes Profile 7 handling an explicit byte-level recipe choice.
+// The empty/legacy mode exists only for pre-v3 callers and old stream tokens.
+type RemuxDVMode string
+
+const (
+	RemuxDVLegacyAutoV3   RemuxDVMode = "legacy_auto"
+	RemuxDVPreserveV3     RemuxDVMode = "preserve"
+	RemuxDVStripToHDR10V3 RemuxDVMode = "strip_to_hdr10"
+	RemuxDVRejectP7V3     RemuxDVMode = "reject_profile_7"
+)
+
 // buildRemuxArgs constructs the ffmpeg argument list for a remux operation.
 // The args perform codec copy (-c copy) into the target container format,
 // using fragmented output for streaming (frag_keyframe+empty_moov+default_base_moof) and
@@ -165,11 +176,42 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 // When transcodeAudio is true video is copied but audio is transcoded to AAC.
 // The caller must call Close() when done to clean up resources.
 func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) (*RemuxSession, error) {
+	return StartRemuxWithDVMode(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxDVLegacyAutoV3)
+}
+
+// StartRemuxWithDVMode starts a remux with explicit Dolby Vision behavior.
+func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode) (*RemuxSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	bin := ffmpegBinary()
-	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex,
-		remuxDVProfile(dvProfile, supportsDoviRPUFilter()))
+	effectiveProfile := dvProfile
+	if dvProfile == 7 || mode == RemuxDVStripToHDR10V3 {
+		switch mode {
+		case "", RemuxDVLegacyAutoV3:
+			effectiveProfile = remuxDVProfile(dvProfile, supportsDoviRPUFilter())
+		case RemuxDVStripToHDR10V3:
+			if dvProfile != 7 && dvProfile != 8 {
+				cancel()
+				return nil, fmt.Errorf("Dolby Vision HDR10 strip requires profile 7 or 8")
+			}
+			if !supportsDoviRPUFilter() {
+				cancel()
+				return nil, fmt.Errorf("Dolby Vision HDR10 remux requires dovi_rpu")
+			}
+			// buildRemuxArgs uses profile 7 as the explicit strip sentinel; the
+			// filter is equally required for a compatible profile 8 base layer.
+			effectiveProfile = 7
+		case RemuxDVPreserveV3:
+			effectiveProfile = 0
+		case RemuxDVRejectP7V3:
+			cancel()
+			return nil, fmt.Errorf("profile 7 remux is not eligible")
+		default:
+			cancel()
+			return nil, fmt.Errorf("unknown remux Dolby Vision mode %q", mode)
+		}
+	}
+	args := buildRemuxArgs(filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, effectiveProfile)
 	cmd := exec.CommandContext(ctx, bin, args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -226,6 +268,11 @@ func containerMIME(format string) string {
 // total size is not known in advance.
 // When transcodeAudio is true, audio is transcoded to AAC while video is copied.
 func ServeRemux(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) error {
+	return ServeRemuxWithDVMode(w, r, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxDVLegacyAutoV3)
+}
+
+// ServeRemuxWithDVMode streams an explicitly declared Dolby Vision recipe.
+func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode) error {
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
 	w = httpstream.NewRollingDeadlineWriter(w)
@@ -241,7 +288,7 @@ func ServeRemux(w http.ResponseWriter, r *http.Request, filePath, outputFormat s
 		return err
 	}
 
-	session, err := StartRemux(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile)
+	session, err := StartRemuxWithDVMode(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err

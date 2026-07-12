@@ -175,29 +175,30 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 		case "video":
 			dvProfile := dolbyVisionProfileNumber(s.SideDataList)
 			track := VideoTrackInfo{
-				Title:           firstNonEmpty(s.Tags["title"], s.CodecLongName, strings.ToUpper(s.CodecName)),
-				Codec:           s.CodecName,
-				DolbyVision:     dolbyVisionProfile(s.SideDataList),
-				DVProfile:       dvProfile,
-				DVBLCompatID:    dolbyVisionBLCompatID(s.SideDataList),
-				DVELPresent:     dolbyVisionELPresent(s.SideDataList),
-				HDR10Plus:       hasHDR10Plus(s.SideDataList),
-				Profile:         s.Profile,
-				Level:           s.Level,
-				Width:           s.Width,
-				Height:          s.Height,
-				AspectRatio:     s.DisplayAspectRatio,
-				Interlaced:      isInterlaced(s.FieldOrder),
-				FrameRate:       normalizeFrameRate(s.AvgFrameRate),
-				Bitrate:         parseNumeric(s.BitRate) / 1000,
-				VideoRange:      videoRangeLabel(s),
-				VideoRangeType:  videoRangeType(s),
-				ColorPrimaries:  s.ColorPrimaries,
-				ColorSpace:      s.ColorSpace,
-				ColorTransfer:   s.ColorTransfer,
-				BitDepth:        parseBitDepth(s),
-				PixelFormat:     s.PixFmt,
-				ReferenceFrames: s.Refs,
+				Title:              firstNonEmpty(s.Tags["title"], s.CodecLongName, strings.ToUpper(s.CodecName)),
+				Codec:              s.CodecName,
+				DolbyVision:        dolbyVisionProfile(s.SideDataList),
+				DVProfile:          dvProfile,
+				DVBLCompatID:       dolbyVisionBLCompatID(s.SideDataList),
+				DVELPresent:        dolbyVisionELPresent(s.SideDataList),
+				DVEnhancementLayer: dolbyVisionEnhancementLayer(dolbyVisionELPresent(s.SideDataList)),
+				HDR10Plus:          hasHDR10Plus(s.SideDataList),
+				Profile:            s.Profile,
+				Level:              s.Level,
+				Width:              s.Width,
+				Height:             s.Height,
+				AspectRatio:        s.DisplayAspectRatio,
+				Interlaced:         isInterlaced(s.FieldOrder),
+				FrameRate:          normalizeFrameRate(s.AvgFrameRate),
+				Bitrate:            parseNumeric(s.BitRate) / 1000,
+				VideoRange:         videoRangeLabel(s),
+				VideoRangeType:     videoRangeType(s),
+				ColorPrimaries:     s.ColorPrimaries,
+				ColorSpace:         s.ColorSpace,
+				ColorTransfer:      s.ColorTransfer,
+				BitDepth:           parseBitDepth(s),
+				PixelFormat:        s.PixFmt,
+				ReferenceFrames:    s.Refs,
 			}
 			pd.VideoTracks = append(pd.VideoTracks, track)
 			if pd.CodecVideo == "" {
@@ -432,6 +433,16 @@ func dolbyVisionELPresent(sideData []ffprobeSideData) bool {
 		}
 	}
 	return false
+}
+
+// dolbyVisionEnhancementLayer remains conservative until a libdovi-backed
+// analyzer has inspected the RPU mapping. ffprobe can prove that an enhancement
+// layer exists, but it cannot distinguish MEL from FEL.
+func dolbyVisionEnhancementLayer(present bool) string {
+	if !present {
+		return "none"
+	}
+	return "unknown"
 }
 
 func hasHDR10Plus(sideData []ffprobeSideData) bool {

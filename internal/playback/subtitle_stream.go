@@ -26,6 +26,9 @@ type StreamExtractOpts struct {
 	// "ass"). Controls whether we copy the stream (for ASS, which carries
 	// styling) or remux to WebVTT (for everything else).
 	SourceCodec string
+	// TargetFormat optionally forces a compatible converted artifact (currently
+	// WebVTT). Empty preserves the legacy source-driven behavior.
+	TargetFormat string
 	// SeekSeconds asks ffmpeg to start demuxing at this position. For
 	// text-event codecs this is the key win — ffmpeg skips the prefix of
 	// the container instead of scanning from byte 0 to produce earlier
@@ -133,7 +136,7 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 // streamExtractArgs builds the ffmpeg argument list for a streaming
 // subtitle extract.
 func streamExtractArgs(opts StreamExtractOpts) []string {
-	outCodec, outFormat := streamExtractOutput(opts.SourceCodec)
+	outCodec, outFormat := streamExtractOutput(opts.SourceCodec, opts.TargetFormat)
 
 	args := []string{
 		"-hide_banner", "-nostats", "-loglevel", "error",
@@ -249,7 +252,10 @@ func copyAndFlush(dst io.Writer, src io.Reader) error {
 // copied into a .sup elementary stream for client-side bitmap rendering
 // (libpgs); everything else is transmuxed to WebVTT for direct `<track>`
 // consumption.
-func streamExtractOutput(codec string) (outCodec, outFormat string) {
+func streamExtractOutput(codec string, targetFormat ...string) (outCodec, outFormat string) {
+	if len(targetFormat) > 0 && strings.EqualFold(targetFormat[0], "vtt") {
+		return "webvtt", "webvtt"
+	}
 	switch {
 	case IsASS(codec):
 		return "copy", "ass"

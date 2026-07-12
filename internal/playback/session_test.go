@@ -713,19 +713,22 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 
 	err = mgr.UpdateStreamState(session.ID, playback.SessionStreamState{
-		PlayMethod:         playback.PlayTranscode,
-		BasePlayMethod:     playback.PlayRemux,
-		AudioTrackIndex:    2,
-		TranscodeAudio:     true,
-		ClientIP:           "10.0.0.10",
-		StreamBitrateKbps:  4200,
-		TargetResolution:   "1080p",
-		TargetVideoCodec:   "h264",
-		TargetAudioCodec:   "aac",
-		TargetBitrateKbps:  4000,
-		SubtitleTrackIndex: 3,
-		SubtitleBurnIn:     true,
-		SegmentDuration:    4,
+		PlayMethod:           playback.PlayTranscode,
+		BasePlayMethod:       playback.PlayRemux,
+		AudioTrackIndex:      2,
+		TranscodeAudio:       true,
+		ClientIP:             "10.0.0.10",
+		StreamBitrateKbps:    4200,
+		TargetResolution:     "1080p",
+		TargetVideoCodec:     "h264",
+		TargetAudioCodec:     "aac",
+		TargetBitrateKbps:    4000,
+		TranscodeNodeURL:     "http://node-1",
+		TranscodeTransportID: "transport-1",
+		TranscodeRouteSet:    true,
+		SubtitleTrackIndex:   3,
+		SubtitleBurnIn:       true,
+		SegmentDuration:      4,
 	})
 	if err != nil {
 		t.Fatalf("UpdateStreamState: %v", err)
@@ -743,6 +746,9 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 	if got.AudioTrackIndex != 2 {
 		t.Errorf("AudioTrackIndex = %d, want 2", got.AudioTrackIndex)
+	}
+	if got.TranscodeNodeURL != "http://node-1" || got.TranscodeTransportID != "transport-1" {
+		t.Fatalf("transcode route = %q/%q", got.TranscodeNodeURL, got.TranscodeTransportID)
 	}
 	if !got.TranscodeAudio {
 		t.Error("TranscodeAudio = false, want true")
@@ -773,6 +779,16 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 	if got.SegmentDuration != 4 {
 		t.Errorf("SegmentDuration = %d, want 4", got.SegmentDuration)
+	}
+	if err := mgr.UpdateStreamState(session.ID, playback.SessionStreamState{TranscodeRouteSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = mgr.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TranscodeNodeURL != "" || got.TranscodeTransportID != "" {
+		t.Fatalf("cleared transcode route = %q/%q", got.TranscodeNodeURL, got.TranscodeTransportID)
 	}
 }
 

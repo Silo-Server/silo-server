@@ -155,29 +155,30 @@ func (f *MediaFile) PrimaryDVProfile() int {
 
 // VideoTrack represents a probed video stream stored as JSONB.
 type VideoTrack struct {
-	Title           string `json:"title,omitempty"`
-	Codec           string `json:"codec,omitempty"`
-	DolbyVision     string `json:"dolby_vision,omitempty"`
-	DVProfile       int    `json:"dv_profile,omitempty"`
-	DVBLCompatID    int    `json:"dv_bl_compat_id,omitempty"`
-	DVELPresent     bool   `json:"dv_el_present,omitempty"`
-	HDR10Plus       bool   `json:"hdr10_plus,omitempty"`
-	Profile         string `json:"profile,omitempty"`
-	Level           int    `json:"level,omitempty"`
-	Width           int    `json:"width,omitempty"`
-	Height          int    `json:"height,omitempty"`
-	AspectRatio     string `json:"aspect_ratio,omitempty"`
-	Interlaced      bool   `json:"interlaced"`
-	FrameRate       string `json:"frame_rate,omitempty"`
-	Bitrate         int    `json:"bitrate,omitempty"`
-	VideoRange      string `json:"video_range,omitempty"`
-	VideoRangeType  string `json:"video_range_type,omitempty"`
-	ColorPrimaries  string `json:"color_primaries,omitempty"`
-	ColorSpace      string `json:"color_space,omitempty"`
-	ColorTransfer   string `json:"color_transfer,omitempty"`
-	BitDepth        int    `json:"bit_depth,omitempty"`
-	PixelFormat     string `json:"pixel_format,omitempty"`
-	ReferenceFrames int    `json:"reference_frames,omitempty"`
+	Title              string `json:"title,omitempty"`
+	Codec              string `json:"codec,omitempty"`
+	DolbyVision        string `json:"dolby_vision,omitempty"`
+	DVProfile          int    `json:"dv_profile,omitempty"`
+	DVBLCompatID       int    `json:"dv_bl_compat_id,omitempty"`
+	DVELPresent        bool   `json:"dv_el_present,omitempty"`
+	DVEnhancementLayer string `json:"dv_enhancement_layer,omitempty"` // none, mel, fel, unknown
+	HDR10Plus          bool   `json:"hdr10_plus,omitempty"`
+	Profile            string `json:"profile,omitempty"`
+	Level              int    `json:"level,omitempty"`
+	Width              int    `json:"width,omitempty"`
+	Height             int    `json:"height,omitempty"`
+	AspectRatio        string `json:"aspect_ratio,omitempty"`
+	Interlaced         bool   `json:"interlaced"`
+	FrameRate          string `json:"frame_rate,omitempty"`
+	Bitrate            int    `json:"bitrate,omitempty"`
+	VideoRange         string `json:"video_range,omitempty"`
+	VideoRangeType     string `json:"video_range_type,omitempty"`
+	ColorPrimaries     string `json:"color_primaries,omitempty"`
+	ColorSpace         string `json:"color_space,omitempty"`
+	ColorTransfer      string `json:"color_transfer,omitempty"`
+	BitDepth           int    `json:"bit_depth,omitempty"`
+	PixelFormat        string `json:"pixel_format,omitempty"`
+	ReferenceFrames    int    `json:"reference_frames,omitempty"`
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.

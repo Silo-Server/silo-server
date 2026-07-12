@@ -21,14 +21,16 @@ type Session struct {
 	RequestedMediaFileID int
 	PlayMethod           PlayMethod
 	BasePlayMethod       PlayMethod
-	TranscodeAudio       bool   // when true, remux should transcode audio to AAC
+	TranscodeAudio       bool // when true, remux should transcode audio to AAC
+	RemuxDVMode          RemuxDVMode
 	ClientIP             string // resolved client IP for the playback session
 	ClientName           string // reported playback client name, when available
 	ClientVersion        string // reported playback client version, when available
 	ClientUserAgent      string // trimmed request user agent for the playback session
 
-	TranscodeNodeURL string // URL of assigned transcode node (empty = local/integrated)
-	AudioTrackIndex  int
+	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)
+	TranscodeTransportID string // remote node process identity; empty means session ID
+	AudioTrackIndex      int
 
 	StreamBitrateKbps int    // currently delivered bitrate, when known
 	TargetResolution  string // requested output resolution for transcodes
@@ -54,26 +56,31 @@ type Session struct {
 	UpdatedAt                  time.Time
 	LastActivityAt             time.Time
 	activeTransportCount       int
+	replacementPlayMethod      PlayMethod
 }
 
 // SessionStreamState stores the mutable stream-specific details that can
 // change after a session is created (audio track, client IP, transcode target,
 // and reported bitrate).
 type SessionStreamState struct {
-	PlayMethod        PlayMethod
-	BasePlayMethod    PlayMethod
-	AudioTrackIndex   int
-	TranscodeAudio    bool
-	ClientIP          string
-	ClientName        string
-	ClientVersion     string
-	ClientUserAgent   string
-	StreamBitrateKbps int
-	TargetResolution  string
-	TargetVideoCodec  string
-	TargetAudioCodec  string
-	TargetBitrateKbps int
-	TranscodeHWAccel  string
+	PlayMethod           PlayMethod
+	BasePlayMethod       PlayMethod
+	AudioTrackIndex      int
+	TranscodeAudio       bool
+	RemuxDVMode          RemuxDVMode
+	ClientIP             string
+	ClientName           string
+	ClientVersion        string
+	ClientUserAgent      string
+	StreamBitrateKbps    int
+	TargetResolution     string
+	TargetVideoCodec     string
+	TargetAudioCodec     string
+	TargetBitrateKbps    int
+	TranscodeHWAccel     string
+	TranscodeNodeURL     string
+	TranscodeTransportID string
+	TranscodeRouteSet    bool
 
 	// Byte-affecting transcode recipe fields preserved so an offloaded restart
 	// (e.g. audio switch) can rebuild the exact same stream. SubtitleTrackIndex
@@ -533,6 +540,88 @@ func (m *SessionManager) CheckTranscodingAllowed(ctx context.Context, userID int
 	return transcodingDisabledError(requiresVideoTranscode, !requiresVideoTranscode, limits)
 }
 
+// CheckReplacementAllowed applies current user limits and admission policy to
+// an in-place protocol-v3 recipe replacement. The existing session is excluded
+// from the counts because the replacement inherits its stream slot; a direct
+// to transcode change still has to acquire an available transcode slot.
+func (m *SessionManager) CheckReplacementAllowed(ctx context.Context, sessionID string, method PlayMethod, transcodeAudio bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	for {
+		m.mu.Lock()
+		current, ok := m.sessions[sessionID]
+		if !ok {
+			m.mu.Unlock()
+			return ErrSessionNotFound
+		}
+		userID := current.UserID
+		currentMethod := current.PlayMethod
+		activeStreams := m.activeCountLocked(userID)
+		activeTranscodes := m.transcodeCountLocked(userID)
+		decider := m.admissionDecider
+		m.mu.Unlock()
+
+		limits, err := m.limitsForUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		if err := transcodingDisabledError(method == PlayTranscode, transcodeAudio, limits); err != nil {
+			return err
+		}
+		otherStreams := activeStreams - 1
+		if otherStreams < 0 {
+			otherStreams = 0
+		}
+		otherTranscodes := activeTranscodes
+		if currentMethod == PlayTranscode && otherTranscodes > 0 {
+			otherTranscodes--
+		}
+		if decider == nil {
+			m.mu.Lock()
+			stillCurrent, stillExists := m.sessions[sessionID]
+			countsStable := stillExists && stillCurrent.PlayMethod == currentMethod && activeStreams == m.activeCountLocked(userID) && activeTranscodes == m.transcodeCountLocked(userID)
+			if !countsStable {
+				m.mu.Unlock()
+				continue
+			}
+			if limits.MaxTranscodes > 0 && method == PlayTranscode && otherTranscodes >= limits.MaxTranscodes {
+				m.mu.Unlock()
+				return ErrTooManyTranscodes
+			}
+			stillCurrent.replacementPlayMethod = method
+			m.mu.Unlock()
+			return nil
+		}
+		decision, err := decider(ctx, AdmissionRequest{UserID: userID, Limits: limits, CurrentActiveStreams: otherStreams, CurrentActiveTranscodes: otherTranscodes, RequestedMethod: method, RequiresVideoTranscode: method == PlayTranscode, RequiresAudioTranscode: transcodeAudio})
+		if err != nil {
+			return ErrPlaybackNotAllowed
+		}
+		if !decision.Allowed {
+			return admissionDenyError(decision.ReasonCode)
+		}
+		m.mu.Lock()
+		stillCurrent, stillExists := m.sessions[sessionID]
+		countsStable := stillExists && stillCurrent.PlayMethod == currentMethod && activeStreams == m.activeCountLocked(userID) && activeTranscodes == m.transcodeCountLocked(userID)
+		if countsStable {
+			stillCurrent.replacementPlayMethod = method
+			m.mu.Unlock()
+			return nil
+		}
+		m.mu.Unlock()
+	}
+}
+
+// CancelReplacementReservation releases a protocol-v3 capacity reservation
+// after a replacement fails before UpdateStreamState commits its new method.
+func (m *SessionManager) CancelReplacementReservation(sessionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if session := m.sessions[sessionID]; session != nil {
+		session.replacementPlayMethod = ""
+	}
+}
+
 func transcodingDisabledError(requiresVideoTranscode, requiresAudioTranscode bool, limits SessionLimits) error {
 	if requiresVideoTranscode && limits.TranscodingDisabled {
 		return ErrTranscodingDisabled
@@ -599,6 +688,9 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	}
 	s.AudioTrackIndex = state.AudioTrackIndex
 	s.TranscodeAudio = state.TranscodeAudio
+	if state.RemuxDVMode != "" {
+		s.RemuxDVMode = state.RemuxDVMode
+	}
 	s.ClientIP = state.ClientIP
 	if value := normalizeClientMetadataValue(state.ClientName, 128); value != "" {
 		s.ClientName = value
@@ -615,9 +707,14 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	s.TargetAudioCodec = state.TargetAudioCodec
 	s.TargetBitrateKbps = state.TargetBitrateKbps
 	s.TranscodeHWAccel = state.TranscodeHWAccel
+	if state.TranscodeRouteSet {
+		s.TranscodeNodeURL = state.TranscodeNodeURL
+		s.TranscodeTransportID = state.TranscodeTransportID
+	}
 	s.SubtitleTrackIndex = state.SubtitleTrackIndex
 	s.SubtitleBurnIn = state.SubtitleBurnIn
 	s.SegmentDuration = state.SegmentDuration
+	s.replacementPlayMethod = ""
 	m.touchSessionLocked(s)
 	return nil
 }
@@ -847,7 +944,7 @@ func (m *SessionManager) transcodeCountLocked(userID int) int {
 	now := time.Now()
 	count := 0
 	for _, s := range m.sessions {
-		if s.UserID == userID && s.PlayMethod == PlayTranscode && m.countsTowardLimitsLocked(s, now) {
+		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now) {
 			count++
 		}
 	}

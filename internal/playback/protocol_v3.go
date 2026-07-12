@@ -1,0 +1,620 @@
+package playback
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+)
+
+const (
+	ProtocolV3               = 3
+	FeaturePlaybackPlanV3    = "playback_plan_v3"
+	FeatureMedia3Only        = "media3_only"
+	FeatureDetailedDecodeV3  = "detailed_decode_capabilities"
+	FeatureLayoutPassthrough = "layout_aware_passthrough"
+	FeatureRouteDiagnostics  = "playback_route_diagnostics"
+	PlanRecipeVersionV3      = "v3.1"
+)
+
+type DecisionOutcomeV3 string
+
+const (
+	OutcomePlayableV3              DecisionOutcomeV3 = "playable"
+	OutcomeAdaptationUnavailableV3 DecisionOutcomeV3 = "adaptation_unavailable"
+)
+
+type DeliveryV3 string
+
+const (
+	DeliveryOriginalHTTPV3     DeliveryV3 = "original_http"
+	DeliveryRemuxHLSV3         DeliveryV3 = "server_remux_hls"
+	DeliveryRemuxProgressiveV3 DeliveryV3 = "server_remux_progressive"
+	DeliveryTranscodeHLSV3     DeliveryV3 = "server_transcode_hls"
+)
+
+func (d DeliveryV3) KotlinName() string {
+	switch d {
+	case DeliveryOriginalHTTPV3:
+		return "ORIGINAL_HTTP"
+	case DeliveryRemuxHLSV3:
+		return "SERVER_REMUX_HLS"
+	case DeliveryRemuxProgressiveV3:
+		return "SERVER_REMUX_PROGRESSIVE"
+	case DeliveryTranscodeHLSV3:
+		return "SERVER_TRANSCODE_HLS"
+	default:
+		return strings.ToUpper(string(d))
+	}
+}
+
+type EngineV3 string
+
+const (
+	EngineMedia3DirectV3           EngineV3 = "media3_direct"
+	EngineMedia3ProgressiveRemuxV3 EngineV3 = "media3_progressive_remux"
+	EngineMedia3HLSV3              EngineV3 = "media3_hls"
+)
+
+type StreamProtocolV3 string
+
+const (
+	StreamHTTPProgressiveV3 StreamProtocolV3 = "http_progressive"
+	StreamHLSV3             StreamProtocolV3 = "hls"
+)
+
+func (p StreamProtocolV3) KotlinName() string {
+	switch p {
+	case StreamHTTPProgressiveV3:
+		return "HTTP_PROGRESSIVE"
+	case StreamHLSV3:
+		return "HLS"
+	default:
+		return strings.ToUpper(string(p))
+	}
+}
+
+type HeaderRefreshModeV3 string
+
+const (
+	HeaderRefreshNoneV3    HeaderRefreshModeV3 = "none"
+	HeaderRefreshSessionV3 HeaderRefreshModeV3 = "session"
+)
+
+type SubtitleModeV3 string
+
+const (
+	SubtitleOffV3     SubtitleModeV3 = "off"
+	SubtitleRenderV3  SubtitleModeV3 = "render"
+	SubtitleConvertV3 SubtitleModeV3 = "convert"
+	SubtitleBurnInV3  SubtitleModeV3 = "burn_in"
+)
+
+func (m SubtitleModeV3) KotlinName() string {
+	switch m {
+	case SubtitleOffV3:
+		return "OFF"
+	case SubtitleRenderV3:
+		return "RENDER"
+	case SubtitleConvertV3:
+		return "CONVERT"
+	case SubtitleBurnInV3:
+		return "BURN_IN"
+	default:
+		return strings.ToUpper(string(m))
+	}
+}
+
+type SubtitleFidelityV3 string
+
+const (
+	SubtitleFidelityPreserveV3   SubtitleFidelityV3 = "preserve"
+	SubtitleFidelityCompatibleV3 SubtitleFidelityV3 = "compatible"
+)
+
+type EnhancementLayerV3 string
+
+const (
+	EnhancementNoneV3    EnhancementLayerV3 = "none"
+	EnhancementMELV3     EnhancementLayerV3 = "mel"
+	EnhancementFELV3     EnhancementLayerV3 = "fel"
+	EnhancementUnknownV3 EnhancementLayerV3 = "unknown"
+)
+
+type HDRCapabilitiesV3 struct {
+	HDR10               bool  `json:"hdr10"`
+	HDR10Plus           bool  `json:"hdr10_plus"`
+	HLG                 bool  `json:"hlg"`
+	DolbyVisionProfiles []int `json:"dolby_vision_profiles"`
+}
+
+type AudioPassthroughV3 struct {
+	PassthroughCodecs  []string                  `json:"passthrough_codecs"`
+	SpatializerEnabled bool                      `json:"spatializer_enabled"`
+	MaxChannels        int                       `json:"max_channels"`
+	Entries            []AudioPassthroughEntryV3 `json:"entries,omitempty"`
+}
+
+type AudioPassthroughEntryV3 struct {
+	Codec         string   `json:"codec"`
+	ChannelCounts []int    `json:"channel_counts,omitempty"`
+	Layouts       []string `json:"layouts,omitempty"`
+}
+
+type VideoDecodeCapabilityV3 struct {
+	Codec          string   `json:"codec"`
+	Profiles       []string `json:"profiles,omitempty"`
+	Levels         []int    `json:"levels,omitempty"`
+	BitDepths      []int    `json:"bit_depths,omitempty"`
+	MaxWidth       int      `json:"max_width,omitempty"`
+	MaxHeight      int      `json:"max_height,omitempty"`
+	MaxFrameRate   float64  `json:"max_frame_rate,omitempty"`
+	MaxBitrateKbps int      `json:"max_bitrate_kbps,omitempty"`
+	Hardware       bool     `json:"hardware"`
+}
+
+type ClientCodecCapabilitiesV3 struct {
+	CodecsVideo         []string                  `json:"codecs_video"`
+	CodecsVideoHardware []string                  `json:"codecs_video_hardware"`
+	CodecsAudio         []string                  `json:"codecs_audio"`
+	Containers          []string                  `json:"containers"`
+	MaxResolution       string                    `json:"max_resolution,omitempty"`
+	HDR                 bool                      `json:"hdr"`
+	HDRDetails          *HDRCapabilitiesV3        `json:"hdr_details,omitempty"`
+	AudioPassthrough    *AudioPassthroughV3       `json:"audio_passthrough,omitempty"`
+	VideoDecode         []VideoDecodeCapabilityV3 `json:"video_decode,omitempty"`
+}
+
+type DeviceContextV3 struct {
+	Manufacturer string   `json:"manufacturer,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	SDKInt       int      `json:"sdk_int,omitempty"`
+	ABIs         []string `json:"abis,omitempty"`
+}
+
+type OutputContextV3 struct {
+	HDRDetails            *HDRCapabilitiesV3  `json:"hdr_details,omitempty"`
+	AudioPassthrough      *AudioPassthroughV3 `json:"audio_passthrough,omitempty"`
+	CurrentSink           string              `json:"current_sink,omitempty"`
+	OutputRouteGeneration int64               `json:"output_route_generation"`
+}
+
+type EngineSubtitleCapabilitiesV3 struct {
+	EmbeddedText    bool `json:"embedded_text"`
+	SidecarText     bool `json:"sidecar_text"`
+	ASSStyling      bool `json:"ass_styling"`
+	EmbeddedBitmap  bool `json:"embedded_bitmap"`
+	SidecarBitmap   bool `json:"sidecar_bitmap"`
+	FontAttachments bool `json:"font_attachments"`
+}
+
+type EngineCapabilityV3 struct {
+	Enabled                bool                         `json:"enabled"`
+	SupportedOnDevice      bool                         `json:"supported_on_device"`
+	FailureReason          string                       `json:"failure_reason,omitempty"`
+	Containers             []string                     `json:"containers"`
+	VideoCodecs            []string                     `json:"video_codecs"`
+	AudioDecodeCodecs      []string                     `json:"audio_decode_codecs"`
+	AudioPassthroughCodecs []string                     `json:"audio_passthrough_codecs"`
+	MaxChannels            *int                         `json:"max_channels,omitempty"`
+	HDRDetails             *HDRCapabilitiesV3           `json:"hdr_details,omitempty"`
+	Subtitles              EngineSubtitleCapabilitiesV3 `json:"subtitles"`
+	Features               []string                     `json:"features"`
+	AuthHeaderRefresh      bool                         `json:"auth_header_refresh"`
+	ValidatedClaims        []string                     `json:"validated_claims"`
+}
+
+type ClientPlaybackContextV3 struct {
+	ProtocolVersion int                           `json:"protocol_version"`
+	Features        []string                      `json:"features"`
+	Platform        string                        `json:"platform"`
+	FormFactor      string                        `json:"form_factor"`
+	AppVersion      string                        `json:"app_version"`
+	Device          DeviceContextV3               `json:"device"`
+	Output          OutputContextV3               `json:"output"`
+	Engines         map[string]EngineCapabilityV3 `json:"engines"`
+}
+
+type StartRequestV3 struct {
+	ProtocolVersion            int                       `json:"protocol_version"`
+	ClientFeatures             []string                  `json:"client_features"`
+	FileID                     int                       `json:"file_id"`
+	ProfileID                  string                    `json:"profile_id"`
+	PlaybackAttemptID          string                    `json:"playback_attempt_id"`
+	QualityPreference          string                    `json:"quality_preference"`
+	SubtitleFidelityPreference SubtitleFidelityV3        `json:"subtitle_fidelity_preference"`
+	StartPosition              *float64                  `json:"start_position,omitempty"`
+	AudioTrackID               string                    `json:"audio_track_id,omitempty"`
+	AudioTrackIndex            *int                      `json:"audio_track_index,omitempty"`
+	SubtitleTrackID            string                    `json:"subtitle_track_id,omitempty"`
+	SubtitleTrackIndex         *int                      `json:"subtitle_track_index,omitempty"`
+	OutputRouteGeneration      int64                     `json:"output_route_generation"`
+	Metered                    bool                      `json:"metered"`
+	BandwidthEstimateKbps      *int                      `json:"bandwidth_estimate_kbps,omitempty"`
+	BandwidthCapKbps           *int                      `json:"bandwidth_cap_kbps,omitempty"`
+	Capabilities               ClientCodecCapabilitiesV3 `json:"client_capabilities"`
+	ClientPlaybackContext      ClientPlaybackContextV3   `json:"client_playback_context"`
+}
+
+type TrackIdentityV3 struct {
+	ID    string `json:"id"`
+	Index *int   `json:"index,omitempty"`
+}
+
+type SelectedTracksV3 struct {
+	Audio    *TrackIdentityV3 `json:"audio,omitempty"`
+	Subtitle *TrackIdentityV3 `json:"subtitle,omitempty"`
+}
+
+type FailureV3 struct {
+	Classification string `json:"classification"`
+	Message        string `json:"message,omitempty"`
+	DecoderName    string `json:"decoder_name,omitempty"`
+}
+
+type ReplanRequestV3 struct {
+	ProtocolVersion       int                       `json:"protocol_version"`
+	PlaybackAttemptID     string                    `json:"playback_attempt_id"`
+	ReplanRequestID       string                    `json:"replan_request_id"`
+	FailedPlanID          string                    `json:"failed_plan_id"`
+	PlanAttemptID         string                    `json:"plan_attempt_id"`
+	PlanAttemptKey        string                    `json:"plan_attempt_key"`
+	AttemptedPlanKeys     []string                  `json:"attempted_plan_keys"`
+	AttemptCount          int                       `json:"attempt_count"`
+	QualityPreference     string                    `json:"quality_preference"`
+	PositionSeconds       float64                   `json:"position_seconds"`
+	OutputRouteGeneration int64                     `json:"output_route_generation"`
+	SelectedTracks        SelectedTracksV3          `json:"selected_tracks"`
+	Failure               FailureV3                 `json:"failure"`
+	Capabilities          ClientCodecCapabilitiesV3 `json:"client_capabilities"`
+	ClientPlaybackContext ClientPlaybackContextV3   `json:"client_playback_context"`
+}
+
+type RouteEventV3 struct {
+	ProtocolVersion       int               `json:"protocol_version"`
+	PlaybackAttemptID     string            `json:"playback_attempt_id"`
+	SessionID             string            `json:"session_id,omitempty"`
+	PlanID                string            `json:"plan_id,omitempty"`
+	PlanAttemptID         string            `json:"plan_attempt_id,omitempty"`
+	PlanAttemptKey        string            `json:"plan_attempt_key,omitempty"`
+	Event                 string            `json:"event"`
+	FailureClassification string            `json:"failure_classification,omitempty"`
+	FallbackReason        string            `json:"fallback_reason,omitempty"`
+	OutputRouteGeneration int64             `json:"output_route_generation"`
+	Diagnostics           map[string]string `json:"diagnostics"`
+}
+
+type StreamV3 struct {
+	URL              string              `json:"url"`
+	Protocol         StreamProtocolV3    `json:"protocol"`
+	Container        string              `json:"container,omitempty"`
+	MIMEType         string              `json:"mime_type,omitempty"`
+	Headers          map[string]string   `json:"headers"`
+	HeaderRefresh    HeaderRefreshModeV3 `json:"header_refresh"`
+	HeaderRefreshURL string              `json:"header_refresh_url,omitempty"`
+}
+
+type TimelineV3 struct {
+	SourceStartSeconds     float64  `json:"source_start_seconds"`
+	StreamOriginSeconds    float64  `json:"stream_origin_seconds"`
+	PlayerStartSeconds     float64  `json:"player_start_seconds"`
+	TimelineOffsetSeconds  float64  `json:"timeline_offset_seconds"`
+	SeekWindowStartSeconds *float64 `json:"seek_window_start_seconds,omitempty"`
+	SeekWindowEndSeconds   *float64 `json:"seek_window_end_seconds,omitempty"`
+	CanSeekAnywhere        bool     `json:"can_seek_anywhere"`
+	SeekRestoration        string   `json:"seek_restoration"`
+}
+
+type EffectiveRecipeV3 struct {
+	VideoCodec    string   `json:"video_codec,omitempty"`
+	AudioCodec    string   `json:"audio_codec,omitempty"`
+	Width         *int     `json:"width,omitempty"`
+	Height        *int     `json:"height,omitempty"`
+	FrameRate     *float64 `json:"frame_rate,omitempty"`
+	BitrateKbps   *int     `json:"bitrate_kbps,omitempty"`
+	DynamicRange  string   `json:"dynamic_range,omitempty"`
+	AudioChannels *int     `json:"audio_channels,omitempty"`
+	AudioLayout   string   `json:"audio_layout,omitempty"`
+}
+
+type SourceDescriptorV3 struct {
+	MediaFileID        int                `json:"media_file_id"`
+	Container          string             `json:"container,omitempty"`
+	VideoCodec         string             `json:"video_codec,omitempty"`
+	VideoProfile       string             `json:"video_profile,omitempty"`
+	VideoLevel         int                `json:"video_level,omitempty"`
+	BitDepth           int                `json:"bit_depth,omitempty"`
+	Width              int                `json:"width,omitempty"`
+	Height             int                `json:"height,omitempty"`
+	FrameRate          float64            `json:"frame_rate,omitempty"`
+	BitrateKbps        int                `json:"bitrate_kbps,omitempty"`
+	DynamicRange       string             `json:"dynamic_range,omitempty"`
+	DVProfile          int                `json:"dolby_vision_profile,omitempty"`
+	DVBLCompatID       int                `json:"dv_bl_compat_id,omitempty"`
+	DVEnhancementLayer EnhancementLayerV3 `json:"dv_enhancement_layer"`
+	AudioCodec         string             `json:"audio_codec,omitempty"`
+	AudioChannels      int                `json:"audio_channels,omitempty"`
+	AudioLayout        string             `json:"audio_layout,omitempty"`
+}
+
+type VideoClaimsV3 struct {
+	HDR10             bool   `json:"hdr10"`
+	HDR10Plus         bool   `json:"hdr10_plus"`
+	HLG               bool   `json:"hlg"`
+	DolbyVision       bool   `json:"dolby_vision"`
+	DolbyVisionReason string `json:"dolby_vision_reason,omitempty"`
+}
+
+type AudioClaimsV3 struct {
+	Codec          string `json:"codec,omitempty"`
+	Passthrough    bool   `json:"passthrough"`
+	AtmosPreserved bool   `json:"atmos_preserved"`
+	DTSVariant     string `json:"dts_variant,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+type SubtitleClaimsV3 struct {
+	ASSStylingPreserved bool   `json:"ass_styling_preserved"`
+	BitmapOverlay       bool   `json:"bitmap_overlay"`
+	BitmapSidecar       bool   `json:"bitmap_sidecar"`
+	Reason              string `json:"reason,omitempty"`
+}
+
+type ValidationClaimsV3 struct {
+	Video     VideoClaimsV3    `json:"video"`
+	Audio     AudioClaimsV3    `json:"audio"`
+	Subtitles SubtitleClaimsV3 `json:"subtitles"`
+}
+
+type SubtitleArtifactV3 struct {
+	URL                 string  `json:"url"`
+	MIMEType            string  `json:"mime_type"`
+	Format              string  `json:"format"`
+	TimingOriginSeconds float64 `json:"timing_origin_seconds"`
+}
+
+type SubtitleDecisionV3 struct {
+	Mode     SubtitleModeV3      `json:"mode"`
+	TrackID  string              `json:"track_id,omitempty"`
+	Artifact *SubtitleArtifactV3 `json:"artifact,omitempty"`
+}
+
+type TransformationV3 struct {
+	Name            string   `json:"name"`
+	ValidatedClaims []string `json:"validated_claims"`
+}
+
+type DegradationWarningV3 struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type PlanV3 struct {
+	ProtocolVersion        int                    `json:"protocol_version"`
+	PlanID                 string                 `json:"plan_id"`
+	SessionID              string                 `json:"session_id,omitempty"`
+	ExpiresAt              string                 `json:"expires_at,omitempty"`
+	Delivery               DeliveryV3             `json:"delivery"`
+	Engine                 EngineV3               `json:"engine"`
+	Stream                 StreamV3               `json:"stream"`
+	Timeline               TimelineV3             `json:"timeline"`
+	SelectedTracks         SelectedTracksV3       `json:"selected_tracks"`
+	EffectiveRecipe        EffectiveRecipeV3      `json:"effective_recipe"`
+	Claims                 ValidationClaimsV3     `json:"claims"`
+	Subtitle               SubtitleDecisionV3     `json:"subtitle"`
+	Transformations        []TransformationV3     `json:"transformations"`
+	DegradationWarnings    []DegradationWarningV3 `json:"degradation_warnings"`
+	DecisionReason         string                 `json:"decision_reason"`
+	RequestedMediaFileID   int                    `json:"requested_media_file_id"`
+	EffectiveMediaFileID   int                    `json:"effective_media_file_id"`
+	Source                 SourceDescriptorV3     `json:"source"`
+	SubtitleFidelityPolicy string                 `json:"subtitle_fidelity_policy"`
+}
+
+type TerminalV3 struct {
+	Reason    string `json:"reason"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable"`
+}
+
+type DecisionResponseV3 struct {
+	ProtocolVersion int               `json:"protocol_version,omitempty"`
+	ServerFeatures  []string          `json:"server_features"`
+	Outcome         DecisionOutcomeV3 `json:"outcome,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	PlaybackPlan    *PlanV3           `json:"playback_plan,omitempty"`
+	Terminal        *TerminalV3       `json:"terminal,omitempty"`
+}
+
+type CapabilityResponseV3 struct {
+	Enabled          bool               `json:"enabled"`
+	ProtocolVersions []int              `json:"protocol_versions"`
+	Features         []string           `json:"features"`
+	Deliveries       []DeliveryV3       `json:"deliveries"`
+	Transformations  []TransformationV3 `json:"transformations"`
+	Reason           string             `json:"reason,omitempty"`
+}
+
+var boundedIdentifierV3 = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$`)
+
+func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) {
+	if r.ProtocolVersion != ProtocolV3 {
+		return nil, fmt.Errorf("protocol_version must be %d", ProtocolV3)
+	}
+	if r.FileID <= 0 || strings.TrimSpace(r.ProfileID) == "" {
+		return nil, errors.New("file_id and profile_id are required")
+	}
+	if !boundedIdentifierV3.MatchString(r.PlaybackAttemptID) {
+		return nil, errors.New("playback_attempt_id is invalid")
+	}
+	if r.OutputRouteGeneration < 0 || r.ClientPlaybackContext.Output.OutputRouteGeneration != r.OutputRouteGeneration {
+		return nil, errors.New("output_route_generation is invalid or inconsistent")
+	}
+	if r.ClientPlaybackContext.ProtocolVersion != ProtocolV3 {
+		return nil, errors.New("client_playback_context.protocol_version must be 3")
+	}
+	if r.StartPosition != nil && (!isFiniteV3(*r.StartPosition) || *r.StartPosition < 0 || *r.StartPosition > 31_536_000) {
+		return nil, errors.New("start_position is outside the supported range")
+	}
+	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
+		return nil, err
+	}
+	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
+		return nil, err
+	}
+	if r.SubtitleFidelityPreference != SubtitleFidelityPreserveV3 && r.SubtitleFidelityPreference != SubtitleFidelityCompatibleV3 {
+		return nil, errors.New("subtitle_fidelity_preference is invalid")
+	}
+	if len(r.ClientFeatures) > 64 {
+		return nil, errors.New("client_features exceeds supported size")
+	}
+	for _, feature := range r.ClientFeatures {
+		if len(feature) > 128 {
+			return nil, errors.New("client feature exceeds supported size")
+		}
+	}
+	if err := validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext); err != nil {
+		return nil, err
+	}
+	if err := validateTrackPairV3(r.FileID, "audio", r.AudioTrackID, r.AudioTrackIndex); err != nil {
+		return nil, err
+	}
+	if err := validateTrackPairV3(r.FileID, "subtitle", r.SubtitleTrackID, r.SubtitleTrackIndex); err != nil {
+		return nil, err
+	}
+	quality, changed := NormalizeQualityV3(r.QualityPreference)
+	r.QualityPreference = quality
+	if changed {
+		return []DegradationWarningV3{{Code: "quality_preference_normalized", Message: "Unknown quality preference was normalized to auto."}}, nil
+	}
+	return nil, nil
+}
+
+func NormalizeQualityV3(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "auto":
+		return "auto", false
+	case "original", "source", "max":
+		return "original", false
+	case "2160p", "4k", "uhd":
+		return "2160p", false
+	case "1080p", "fhd":
+		return "1080p", false
+	case "720p", "hd":
+		return "720p", false
+	case "480p", "sd":
+		return "480p", false
+	default:
+		return "auto", true
+	}
+}
+
+func (r ReplanRequestV3) Validate() error {
+	if r.ProtocolVersion != ProtocolV3 || !boundedIdentifierV3.MatchString(r.PlaybackAttemptID) || !boundedIdentifierV3.MatchString(r.ReplanRequestID) {
+		return errors.New("invalid replan identity")
+	}
+	if len(r.FailedPlanID) < 8 || len(r.FailedPlanID) > 128 || len(r.PlanAttemptID) < 8 || len(r.PlanAttemptID) > 128 || len(r.PlanAttemptKey) < 8 || len(r.PlanAttemptKey) > 128 || !strings.HasPrefix(r.PlanAttemptKey, "v3:") || r.AttemptCount < 1 || r.AttemptCount > 8 {
+		return errors.New("invalid replan attempt")
+	}
+	if r.OutputRouteGeneration < 0 || r.ClientPlaybackContext.Output.OutputRouteGeneration != r.OutputRouteGeneration {
+		return errors.New("invalid output route generation")
+	}
+	if len(r.AttemptedPlanKeys) > 16 || len(r.Failure.Classification) == 0 || len(r.Failure.Classification) > 64 || len(r.Failure.Message) > 512 || len(r.Failure.DecoderName) > 128 || !isFiniteV3(r.PositionSeconds) || r.PositionSeconds < 0 || r.PositionSeconds > 31_536_000 {
+		return errors.New("replan bounds exceeded")
+	}
+	for _, key := range r.AttemptedPlanKeys {
+		if len(key) > 128 || !strings.HasPrefix(key, "v3:") {
+			return errors.New("invalid attempted plan key")
+		}
+	}
+	return validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext)
+}
+
+func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3) error {
+	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Features) > 64 || len(ctx.Engines) > 16 || len(ctx.Device.ABIs) > 16 || len(ctx.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 || len(ctx.Device.Manufacturer) > 128 || len(ctx.Device.Model) > 128 {
+		return errors.New("capability list exceeds supported size")
+	}
+	for _, values := range [][]string{c.CodecsVideo, c.CodecsVideoHardware, c.CodecsAudio, c.Containers, ctx.Features} {
+		for i := range values {
+			values[i] = strings.ToLower(strings.TrimSpace(values[i]))
+			if len(values[i]) > 128 {
+				return errors.New("capability value exceeds supported size")
+			}
+		}
+	}
+	for i := range c.VideoDecode {
+		c.VideoDecode[i].Codec = strings.ToLower(strings.TrimSpace(c.VideoDecode[i].Codec))
+		if c.VideoDecode[i].Codec == "" || c.VideoDecode[i].MaxWidth < 0 || c.VideoDecode[i].MaxHeight < 0 || c.VideoDecode[i].MaxFrameRate < 0 || c.VideoDecode[i].MaxBitrateKbps < 0 {
+			return errors.New("invalid detailed video capability")
+		}
+	}
+	for name, engine := range ctx.Engines {
+		if len(name) > 64 || len(engine.Containers) > 64 || len(engine.VideoCodecs) > 64 || len(engine.AudioDecodeCodecs) > 64 || len(engine.AudioPassthroughCodecs) > 64 || len(engine.Features) > 64 || len(engine.ValidatedClaims) > 64 {
+			return errors.New("engine capability exceeds supported size")
+		}
+	}
+	for _, abi := range ctx.Device.ABIs {
+		if len(abi) > 64 {
+			return errors.New("device ABI exceeds supported size")
+		}
+	}
+	for _, passthrough := range []*AudioPassthroughV3{c.AudioPassthrough, ctx.Output.AudioPassthrough} {
+		if passthrough == nil {
+			continue
+		}
+		if len(passthrough.PassthroughCodecs) > 64 || len(passthrough.Entries) > 64 || passthrough.MaxChannels < 0 || passthrough.MaxChannels > 64 {
+			return errors.New("audio passthrough capability exceeds supported size")
+		}
+		for _, entry := range passthrough.Entries {
+			if len(entry.Codec) > 64 || len(entry.ChannelCounts) > 32 || len(entry.Layouts) > 32 {
+				return errors.New("audio passthrough entry exceeds supported size")
+			}
+		}
+	}
+	return nil
+}
+
+func validateTrackPairV3(fileID int, kind, id string, index *int) error {
+	if index != nil && (*index < 0 || *index > 10_000) {
+		return fmt.Errorf("%s_track_index is invalid", kind)
+	}
+	if id == "" || index == nil {
+		return nil
+	}
+	want := TrackIDV3(fileID, kind, *index)
+	if id != want {
+		return fmt.Errorf("%s track id and index disagree", kind)
+	}
+	return nil
+}
+
+func validateOptionalBoundedIntV3(v *int, min, max int, name string) error {
+	if v != nil && (*v < min || *v > max) {
+		return fmt.Errorf("%s is outside the supported range", name)
+	}
+	return nil
+}
+
+func isFiniteV3(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+func HasFeatureV3(features []string, wanted string) bool {
+	return slices.ContainsFunc(features, func(v string) bool { return strings.EqualFold(strings.TrimSpace(v), wanted) })
+}
+
+func NewTerminalResponseV3(reason, message string, retryable bool) DecisionResponseV3 {
+	return DecisionResponseV3{
+		ProtocolVersion: ProtocolV3,
+		ServerFeatures:  []string{FeaturePlaybackPlanV3, FeatureMedia3Only},
+		Outcome:         OutcomeAdaptationUnavailableV3,
+		Terminal:        &TerminalV3{Reason: reason, Message: message, Retryable: retryable},
+	}
+}
+
+func DisabledResponseV3() DecisionResponseV3 {
+	return DecisionResponseV3{ProtocolVersion: ProtocolV3, ServerFeatures: []string{}}
+}
+
+func NewPlanExpiryV3(now time.Time) string { return now.Add(MaxTokenTTL).UTC().Format(time.RFC3339) }

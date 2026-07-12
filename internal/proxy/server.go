@@ -178,7 +178,7 @@ func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.touchTranscodeSession(r, claims)
-	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/master.m3u8")
+	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/master.m3u8")
 }
 
 func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +188,17 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 	}
 	s.touchTranscodeSession(r, claims)
 	name := chi.URLParam(r, "name")
-	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/segment/"+name)
+	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/segment/"+name)
+}
+
+func transcodeTransportIDFromClaims(claims *streamtoken.Claims) string {
+	if claims != nil && claims.TranscodeTransportID != "" {
+		return claims.TranscodeTransportID
+	}
+	if claims == nil {
+		return ""
+	}
+	return claims.SessionID
 }
 
 // touchTranscodeSession keeps HLS sessions visible in the active stream count.
