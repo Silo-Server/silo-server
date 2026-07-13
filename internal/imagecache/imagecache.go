@@ -167,19 +167,35 @@ func (c *Cacher) CacheEbookCover(ctx context.Context, data []byte, contentID str
 	return res.BasePath, res.Ext, res.Thumbhash, nil
 }
 
+// validateCacheRequest checks the required identity fields and the
+// episode/season invariant shared by Cache and CacheBytes. Keeping it in one
+// place prevents the season/episode guard from drifting between the two paths:
+// buildBasePath only appends the episode segment inside the SeasonNumber branch,
+// so an episode without a season would silently collide distinct episodes' art
+// under the same S3 key.
+func validateCacheRequest(req CacheRequest) error {
+	if strings.TrimSpace(req.ProviderID) == "" {
+		return fmt.Errorf("imagecache: provider ID is required")
+	}
+	if strings.TrimSpace(req.ContentType) == "" {
+		return fmt.Errorf("imagecache: content type is required")
+	}
+	if strings.TrimSpace(req.ContentID) == "" {
+		return fmt.Errorf("imagecache: content ID is required")
+	}
+	if req.EpisodeNumber != nil && req.SeasonNumber == nil {
+		return fmt.Errorf("imagecache: episode number requires a season number")
+	}
+	return nil
+}
+
 // CacheBytes performs the same variant generation, thumbhash, and S3 upload as
 // Cache but starts from raw image bytes already in hand. Used by the
 // audiobook scanner to push embedded M4B cover art into S3 without round-
 // tripping through HTTP.
 func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) (*CacheResult, error) {
-	if strings.TrimSpace(req.ProviderID) == "" {
-		return nil, fmt.Errorf("imagecache: provider ID is required")
-	}
-	if strings.TrimSpace(req.ContentType) == "" {
-		return nil, fmt.Errorf("imagecache: content type is required")
-	}
-	if strings.TrimSpace(req.ContentID) == "" {
-		return nil, fmt.Errorf("imagecache: content ID is required")
+	if err := validateCacheRequest(req); err != nil {
+		return nil, err
 	}
 	if len(data) == 0 {
 		return nil, fmt.Errorf("imagecache: image data is empty")
@@ -212,17 +228,8 @@ func (c *Cacher) CacheBytes(ctx context.Context, data []byte, req CacheRequest) 
 // Cache downloads the image at req.SourceURL, generates variants, computes a
 // thumbhash, uploads all variants to S3, and returns the base path and thumbhash.
 func (c *Cacher) Cache(ctx context.Context, req CacheRequest) (*CacheResult, error) {
-	if strings.TrimSpace(req.ProviderID) == "" {
-		return nil, fmt.Errorf("imagecache: provider ID is required")
-	}
-	if strings.TrimSpace(req.ContentType) == "" {
-		return nil, fmt.Errorf("imagecache: content type is required")
-	}
-	if strings.TrimSpace(req.ContentID) == "" {
-		return nil, fmt.Errorf("imagecache: content ID is required")
-	}
-	if req.EpisodeNumber != nil && req.SeasonNumber == nil {
-		return nil, fmt.Errorf("imagecache: episode number requires a season number")
+	if err := validateCacheRequest(req); err != nil {
+		return nil, err
 	}
 
 	url := req.SourceURL

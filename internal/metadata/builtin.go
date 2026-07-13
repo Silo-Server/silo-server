@@ -38,8 +38,10 @@ var (
 // under its plugin_capabilities capability_id. Later registrations for the
 // same capability id replace earlier ones.
 func RegisterBuiltinProvider(capabilityID string, construct func() Provider) {
+	// Registration only happens from package init(); empty id or nil constructor
+	// is a programmer error that would silently disable a provider, so fail loud.
 	if capabilityID == "" || construct == nil {
-		return
+		panic("metadata: RegisterBuiltinProvider requires a non-empty capabilityID and non-nil constructor")
 	}
 	builtinProvidersMu.Lock()
 	builtinProviders[capabilityID] = construct

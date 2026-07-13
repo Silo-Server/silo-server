@@ -745,6 +745,13 @@ func readLocalImageFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, classify(err)
 	}
+	// Close the symlink-swap window: os.Open follows symlinks, so a leaf swapped
+	// to a symlink between the Lstat above and this Open would be followed to its
+	// target. Reject unless the opened handle is the exact file Lstat inspected,
+	// so an out-of-root target can never be pulled into the public cache.
+	if !os.SameFile(info, stat) {
+		return nil, fmt.Errorf("local image is not a regular file: %s", path)
+	}
 	if !stat.Mode().IsRegular() {
 		return nil, fmt.Errorf("local image is not a regular file: %s", path)
 	}

@@ -1160,8 +1160,11 @@ func main() {
 		// then append registered builtins disabled (idempotent; also the repair
 		// path after a stale chain-editor save drops a builtin row). Runs before
 		// the metadata service exists, so no chain cache to invalidate here.
-		if err := metadata.SyncBuiltinProviderChains(appCtx, chainRepo); err != nil {
-			log.Fatalf("sync builtin provider chains: %v", err)
+		syncCtx, syncCancel := context.WithTimeout(appCtx, 30*time.Second)
+		syncErr := metadata.SyncBuiltinProviderChains(syncCtx, chainRepo)
+		syncCancel()
+		if syncErr != nil {
+			log.Fatalf("sync builtin provider chains: %v", syncErr)
 		}
 		skippedRootRepo = metadata.NewSkippedRootRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB).WithActiveSearchProvider(activeCatalogSearchProvider)

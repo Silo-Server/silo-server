@@ -284,6 +284,17 @@ func (s *InstallationStore) ListByPluginID(ctx context.Context, pluginID string)
 }
 
 func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInstallationInput) error {
+	// Guard at the store, not only the HTTP handler: the reserved builtin row
+	// carries no archive/binary and must never have its version, path, enabled
+	// flag, or capabilities rewritten, or its chain participation breaks.
+	installation, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if installation.IsBuiltin() {
+		return ErrBuiltinInstallationImmutable
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin update installation transaction: %w", err)
@@ -334,10 +345,6 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		}
 		if tag.RowsAffected() == 0 {
 			return ErrInstallationNotFound
-		}
-	} else {
-		if _, err := s.GetByID(ctx, id); err != nil {
-			return err
 		}
 	}
 
