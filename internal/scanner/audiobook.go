@@ -125,25 +125,25 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 	}
 
 	var audioFiles []string
-	fileStats := make(map[string]os.FileInfo)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		if SupportsAudioFile(entry.Name()) {
-			full := filepath.Join(folderPath, entry.Name())
-			audioFiles = append(audioFiles, full)
-			if info, err := entry.Info(); err == nil {
-				fileStats[full] = info
-			}
+			audioFiles = append(audioFiles, filepath.Join(folderPath, entry.Name()))
 		}
 	}
 	if len(audioFiles) == 0 {
 		return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, os.ErrNotExist)
 	}
 	sort.Strings(audioFiles)
+	// os.Stat (not DirEntry.Info, which has lstat semantics) so symlinked
+	// audio files record the target's size/mtime — the same values
+	// audiobookFolderShouldSkip compares against on rescans. A zero value
+	// (stat failure) never matches, keeping the book on the full-reconcile
+	// path.
 	statOf := func(path string) (size int64, modTime time.Time) {
-		if info, ok := fileStats[path]; ok {
+		if info, err := os.Stat(path); err == nil {
 			return info.Size(), info.ModTime()
 		}
 		return 0, time.Time{}
