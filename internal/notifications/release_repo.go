@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
+
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 )
 
 // ReleaseRepository owns episode_availability, notification_library_seed_state,
@@ -79,6 +81,21 @@ func (r *ReleaseRepository) RecordAvailabilityForLibrary(ctx context.Context, li
 	return r.recordAvailability(ctx, libraryID, emitEvents, query, []any{libraryID})
 }
 
+// appendPathScopeConds appends one SQL condition per scope path matching the
+// path itself or any file under it. The prefix arm uses LIKE with
+// pathscope.PrefixLike (instead of starts_with, which no btree can serve) so
+// the (media_folder_id, file_path text_pattern_ops) index turns the scan into
+// an index range probe rather than a walk of the whole folder.
+func appendPathScopeConds(conds []string, args *[]any, scopePaths []string) []string {
+	for _, path := range scopePaths {
+		*args = append(*args, path, pathscope.PrefixLike(path))
+		conds = append(conds, fmt.Sprintf(
+			`(mf.file_path = $%d OR mf.file_path LIKE $%d ESCAPE '\')`,
+			len(*args)-1, len(*args)))
+	}
+	return conds
+}
+
 // RecordAvailabilityForPaths inserts availability rows for episodes whose
 // playable files live under the given scope paths (subtree/file ingest), and
 // optionally creates release events for newly inserted rows.
@@ -87,13 +104,7 @@ func (r *ReleaseRepository) RecordAvailabilityForPaths(ctx context.Context, libr
 		return 0, 0, nil
 	}
 	args := []any{libraryID}
-	scopeConds := make([]string, 0, len(scopePaths))
-	for _, path := range scopePaths {
-		args = append(args, path)
-		idx := len(args)
-		scopeConds = append(scopeConds,
-			fmt.Sprintf("(mf.file_path = $%d OR starts_with(mf.file_path, $%d || '/'))", idx, idx))
-	}
+	scopeConds := appendPathScopeConds(nil, &args, scopePaths)
 	query := `
 		INSERT INTO episode_availability
 			(library_id, episode_id, series_id, season_number, episode_number, episode_key)
@@ -187,13 +198,7 @@ func (r *ReleaseRepository) RecordItemAvailabilityForPaths(ctx context.Context, 
 		args = append(args, k.Kind)
 		insertCols, selectExtra = "(library_id, item_id, kind)", ", $3"
 	}
-	scopeConds := make([]string, 0, len(scopePaths))
-	for _, path := range scopePaths {
-		args = append(args, path)
-		idx := len(args)
-		scopeConds = append(scopeConds,
-			fmt.Sprintf("(mf.file_path = $%d OR starts_with(mf.file_path, $%d || '/'))", idx, idx))
-	}
+	scopeConds := appendPathScopeConds(nil, &args, scopePaths)
 	query := `
 		INSERT INTO ` + k.AvailabilityTable + ` ` + insertCols + `
 		SELECT DISTINCT mf.media_folder_id, mi.content_id` + selectExtra + `
