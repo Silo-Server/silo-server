@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // ffprobeOutput represents the top-level JSON output from ffprobe.
@@ -196,7 +197,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				ColorPrimaries:     s.ColorPrimaries,
 				ColorSpace:         s.ColorSpace,
 				ColorTransfer:      s.ColorTransfer,
-				BitDepth:           parseBitDepth(s),
+				BitDepth:           models.NormalizeVideoBitDepth(parseBitDepth(s), s.PixFmt, s.Profile),
 				PixelFormat:        s.PixFmt,
 				ReferenceFrames:    s.Refs,
 			}

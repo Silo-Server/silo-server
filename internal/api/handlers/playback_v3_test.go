@@ -19,6 +19,17 @@ type mutablePlaybackSettingsV3 struct {
 	values map[string]string
 }
 
+func TestShouldTryAlternateFileV3PinsOriginalQuality(t *testing.T) {
+	if shouldTryAlternateFileV3("original") || shouldTryAlternateFileV3(" ORIGINAL ") {
+		t.Fatal("original quality must pin the requested media file")
+	}
+	for _, quality := range []string{"auto", "2160p", "1080p", "480p"} {
+		if !shouldTryAlternateFileV3(quality) {
+			t.Fatalf("quality %q should permit alternate selection", quality)
+		}
+	}
+}
+
 func (s *mutablePlaybackSettingsV3) Get(_ context.Context, key string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -309,6 +320,21 @@ func TestHandlePlaybackRouteEventV3RejectsWhileDisabled(t *testing.T) {
 	handler.HandlePlaybackRouteEventV3(rr, req)
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSanitizeDiagnosticsV3PreservesPlayerFailureEvidence(t *testing.T) {
+	got := sanitizeDiagnosticsV3(map[string]string{
+		"error_code":      "2004",
+		"error_code_name": "ERROR_CODE_PARSING_CONTAINER_MALFORMED",
+		"error_cause":     "ParserException",
+		"message":         "must not be persisted",
+	})
+	if got["error_code"] != "2004" || got["error_code_name"] == "" || got["error_cause"] != "ParserException" {
+		t.Fatalf("failure diagnostics = %#v", got)
+	}
+	if _, ok := got["message"]; ok {
+		t.Fatalf("unapproved message persisted: %#v", got)
 	}
 }
 

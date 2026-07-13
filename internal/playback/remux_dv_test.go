@@ -54,3 +54,21 @@ func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRemuxArgsTagsPreservedDolbyVisionForMedia3(t *testing.T) {
+	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8)
+	if !argsContainPair(args, "-tag:v", "dvhe") {
+		t.Fatalf("preserved Dolby Vision must retain a DV sample entry, args=%v", strings.Join(args, " "))
+	}
+	stripped := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7)
+	if argsContainPair(stripped, "-tag:v", "dvhe") {
+		t.Fatalf("HDR10 fallback must not retain a DV sample entry, args=%v", strings.Join(stripped, " "))
+	}
+}
+
+func TestBuildRemuxArgsDelaysMoovForCopiedAtmosConfiguration(t *testing.T) {
+	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 8)
+	if !argsContainPair(args, "-movflags", "frag_keyframe+delay_moov+default_base_moof") {
+		t.Fatalf("remux must delay moov until copied audio is parsed, args=%v", strings.Join(args, " "))
+	}
+}

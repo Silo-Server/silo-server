@@ -173,7 +173,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		Registry: h.transformationRegistryV3(r.Context()), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" {
+	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			effectiveFile = h.ensurePlaybackProbe(r.Context(), alternate)
 			audioIndex = remapAudioIndexV3(requestedFile, effectiveFile, audioIndex)
@@ -654,7 +654,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: requestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" {
+	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(start.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
 			remappedAudio := remapAudioIndexV3(effectiveFile, alternate, audioIndex)
@@ -722,6 +722,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	}
 	reservationHandedOff = true
 	return response, updated, &transport, nil
+}
+
+func shouldTryAlternateFileV3(qualityPreference string) bool {
+	return !strings.EqualFold(strings.TrimSpace(qualityPreference), "original")
 }
 
 func (h *PlaybackHandler) lockReplanV3(sessionID string) func() {
@@ -1090,7 +1094,14 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 }
 
 var routeEventsV3 = map[string]struct{}{"plan_selected": {}, "plan_invalidated": {}, "plan_failed": {}, "first_frame": {}, "terminal": {}, "stopped": {}}
-var diagnosticKeysV3 = map[string]struct{}{"decoder_name": {}, "decoder_init_ms": {}, "first_frame_ms": {}, "device_model": {}, "requested_quality": {}, "effective_quality": {}, "pcm_recovery": {}, "retry_outcome": {}, "replan_request_id": {}}
+var diagnosticKeysV3 = map[string]struct{}{
+	"decoder_name": {}, "decoder_init_ms": {}, "first_frame_ms": {},
+	"device_model": {}, "requested_quality": {}, "effective_quality": {},
+	"pcm_recovery": {}, "retry_outcome": {}, "replan_request_id": {},
+	"video_mime": {}, "video_codecs": {}, "video_width": {}, "video_height": {},
+	"color_transfer": {}, "color_range": {},
+	"error_code": {}, "error_code_name": {}, "error_cause": {},
+}
 
 func validRouteEventV3(event playback.RouteEventV3) bool {
 	if event.ProtocolVersion != playback.ProtocolV3 || len(event.PlaybackAttemptID) < 8 || len(event.PlaybackAttemptID) > 128 || event.OutputRouteGeneration < 0 || len(event.SessionID) > 128 || len(event.PlanID) > 128 || len(event.PlanAttemptID) > 128 || len(event.PlanAttemptKey) > 128 || len(event.FailureClassification) > 64 || len(event.FallbackReason) > 64 || len(event.Diagnostics) > 32 {

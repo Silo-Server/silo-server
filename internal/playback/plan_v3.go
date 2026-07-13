@@ -63,7 +63,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	rangeOK, videoClaims := outputRangeEligibleV3(source, input.Request)
 	audioOK, passthrough, audioClaims := audioEligibilityV3(source, input.Request)
 	containerOK := containsFoldV3(input.Request.Capabilities.Containers, source.Container)
-	dvStripEligible := source.DynamicRange == "dolby_vision" && (source.DVProfile == 7 || source.DVProfile == 8) && source.DVBLCompatID == 1 && clientSupportsHDR10V3(input.Request) && input.Registry != nil && input.Registry.Available("dv_metadata_strip_to_hdr10")
+	dvStripEligible := canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry)
 
 	base := PlanV3{
 		ProtocolVersion:        ProtocolV3,
@@ -83,6 +83,9 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	base.Claims.Audio.Passthrough = passthrough
 	if quality.Warning != nil {
 		base.DegradationWarnings = append(base.DegradationWarnings, *quality.Warning)
+	}
+	if !detailedVideoEvidenceCompleteV3(source) {
+		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)
 	}
 
 	if quality.RequiresTranscode || subtitle.RequiresBurn || !videoOK || (!rangeOK && !dvStripEligible) {
@@ -122,7 +125,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 		dvStrip := dvStripEligible && (source.DVProfile == 7 || !rangeOK)
 		if dvStrip {
-			if source.DVBLCompatID != 1 || !clientSupportsHDR10V3(input.Request) || input.Registry == nil || !input.Registry.Available("dv_metadata_strip_to_hdr10") {
+			if !canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry) {
 				return terminalPlannerResultV3("dv_conversion_unsupported", "Dolby Vision Profile 7 cannot be remuxed safely with the installed toolchain.", false)
 			}
 			plan.Transformations = append(plan.Transformations, TransformationV3{Name: "dv_metadata_strip_to_hdr10", ValidatedClaims: []string{"hdr10_base_layer_preserved"}})
@@ -174,7 +177,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		return terminalPlannerResultV3(reason, "The source requires video adaptation, but transcoding is unavailable.", false)
 	}
-	if source.Height >= 2160 && !input.Settings.Allow4KTranscode {
+	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
 		return terminalPlannerResultV3("no_alternate_version", "A lower-resolution source is required because 4K transcoding is disabled.", false)
 	}
 	if source.DynamicRange != "" && source.DynamicRange != "sdr" {
@@ -214,6 +217,23 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
 	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec}
+}
+
+func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartRequestV3, registry *TransformationRegistryV3) bool {
+	if source.DynamicRange != "dolby_vision" || !clientSupportsHDR10V3(request) || registry == nil || !registry.Available("dv_metadata_strip_to_hdr10") {
+		return false
+	}
+	// Profile 7 always carries an HDR10-viewable base layer. Profile 8 is
+	// safe only when the DOVI compatibility id explicitly identifies HDR10.
+	return source.DVProfile == 7 || source.DVProfile == 8 && source.DVBLCompatID == 1
+}
+
+func is4KSourceV3(file *models.MediaFile, source SourceDescriptorV3) bool {
+	resolution := ""
+	if file != nil {
+		resolution = strings.ToLower(strings.TrimSpace(file.Resolution))
+	}
+	return resolution == "2160p" || resolution == "4k" || resolution == "uhd" || source.Width >= 3840 || source.Height >= 2160
 }
 
 type QualityResultV3 struct {

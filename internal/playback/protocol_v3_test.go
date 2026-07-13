@@ -131,6 +131,125 @@ func TestPlanPlaybackV3DirectRequiresDetailedEvidence(t *testing.T) {
 	}
 }
 
+func TestSourceDescriptorV3NormalizesLegacyHEVCMetadata(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].BitDepth = 0
+	file.VideoTracks[0].PixelFormat = "yuv420p10le"
+	file.VideoTracks[0].DVProfile = 7
+	file.VideoTracks[0].DVELPresent = false
+	file.VideoTracks[0].DVEnhancementLayer = ""
+	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+
+	source := SourceDescriptorFromFileV3(file, 0)
+	if source.BitDepth != 10 {
+		t.Fatalf("bit depth = %d, want inferred 10", source.BitDepth)
+	}
+	if source.DVEnhancementLayer != EnhancementUnknownV3 {
+		t.Fatalf("enhancement layer = %q, want unknown", source.DVEnhancementLayer)
+	}
+}
+
+func TestPlanPlaybackV3DirectPlaysLegacyHDR10WithInferredBitDepth(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].BitDepth = 0
+	file.VideoTracks[0].PixelFormat = "yuv420p10le"
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3DirectPlaysLegacyDolbyVisionProfile8(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].BitDepth = 0
+	file.VideoTracks[0].PixelFormat = "yuv420p10le"
+	file.VideoTracks[0].DVProfile = 8
+	file.VideoTracks[0].DVBLCompatID = 1
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithHDR10"
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.DolbyVision {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.RequestedMediaFileID != file.ID || result.Plan.EffectiveMediaFileID != file.ID {
+		t.Fatalf("source ids = requested %d effective %d", result.Plan.RequestedMediaFileID, result.Plan.EffectiveMediaFileID)
+	}
+}
+
+func TestPlanPlaybackV3RejectsTrulyIncompleteVideoMetadata(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].BitDepth = 0
+	file.VideoTracks[0].PixelFormat = ""
+	file.VideoTracks[0].Profile = ""
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "source_metadata_incomplete" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3BlocksUltrawide4KTranscode(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.Resolution = "2160p"
+	file.VideoTracks[0].Width = 3840
+	file.VideoTracks[0].Height = 1626
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].ColorTransfer = "bt709"
+	req := validStartRequestV3()
+	req.QualityPreference = "1080p"
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "no_alternate_version" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3Profile7FallsBackToHDR10WithoutNativeP7(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].DVProfile = 7
+	file.VideoTracks[0].DVBLCompatID = 6
+	file.VideoTracks[0].DVELPresent = false
+	file.VideoTracks[0].DVEnhancementLayer = ""
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "dv_metadata_strip_to_hdr10", Available: true}})
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: registry})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.Plan.Claims.Video.HDR10 || result.Plan.Claims.Video.DolbyVision {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "dv_metadata_strip_to_hdr10" {
+		t.Fatalf("transformations = %#v", result.Plan.Transformations)
+	}
+}
+
 func TestPlanPlaybackV3AudioAdaptationCopiesVideo(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}

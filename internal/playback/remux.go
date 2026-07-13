@@ -84,7 +84,7 @@ const (
 
 // buildRemuxArgs constructs the ffmpeg argument list for a remux operation.
 // The args perform codec copy (-c copy) into the target container format,
-// using fragmented output for streaming (frag_keyframe+empty_moov+default_base_moof) and
+// using fragmented output for streaming (frag_keyframe+delay_moov+default_base_moof) and
 // pipe:1 for stdout output.
 // When transcodeAudio is true, video is copied but audio is transcoded to
 // stereo AAC (handles cases like DTS/TrueHD that browsers cannot decode).
@@ -139,6 +139,12 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 
 	if dvProfile == 7 {
 		args = append(args, "-bsf:v", "dovi_rpu=strip=1")
+	} else if dvProfile == 5 || dvProfile == 8 {
+		// FFmpeg carries the DOVI configuration record into MP4 but otherwise
+		// labels copied HEVC as hev1. Media3 keys decoder selection from the
+		// sample entry, so retain an explicit Dolby Vision tag as well.
+		// dvhe keeps FFmpeg's dvvC box; forcing dvh1 makes FFmpeg 7.1 omit it.
+		args = append(args, "-tag:v", "dvhe")
 	}
 
 	if transcodeAudio {
@@ -161,7 +167,10 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 	args = append(args,
 		"-avoid_negative_ts", "make_zero",
 		"-f", outputFormat,
-		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
+		// delay_moov lets the MP4 muxer inspect the first audio packet before
+		// writing codec configuration. empty_moov fails immediately for copied
+		// E-AC-3/Atmos tracks because their frame size is not known at header time.
+		"-movflags", "frag_keyframe+delay_moov+default_base_moof",
 		"pipe:1",
 	)
 
@@ -171,7 +180,7 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 // StartRemux starts an ffmpeg process that copies codecs to a new container.
 // When transcodeAudio is false the command is:
 //
-//	ffmpeg -i {input} -c copy -f {format} -movflags frag_keyframe+empty_moov+default_base_moof pipe:1
+//	ffmpeg -i {input} -c copy -f {format} -movflags frag_keyframe+delay_moov+default_base_moof pipe:1
 //
 // When transcodeAudio is true video is copied but audio is transcoded to AAC.
 // The caller must call Close() when done to clean up resources.

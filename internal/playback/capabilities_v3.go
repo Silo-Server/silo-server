@@ -25,7 +25,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		source.VideoCodec = firstNonEmptyV3(normalizeCodecV3(track.Codec), source.VideoCodec)
 		source.VideoProfile = strings.ToLower(strings.TrimSpace(track.Profile))
 		source.VideoLevel = track.Level
-		source.BitDepth = track.BitDepth
+		source.BitDepth = models.NormalizeVideoBitDepth(track.BitDepth, track.PixelFormat, track.Profile)
 		source.Width = track.Width
 		source.Height = track.Height
 		source.FrameRate = parseFrameRateV3(track.FrameRate)
@@ -39,7 +39,12 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		case EnhancementNoneV3, EnhancementMELV3, EnhancementFELV3, EnhancementUnknownV3:
 			source.DVEnhancementLayer = EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer))
 		case "":
-			if track.DVELPresent {
+			// Legacy rows predate the explicit enhancement-layer fields. A
+			// Profile 7 DOVIWithEL label proves an EL exists but cannot prove
+			// MEL versus FEL, so keep it unknown rather than misclassifying it
+			// as a safe single-layer stream.
+			legacyProfile7EL := track.DVProfile == 7 && strings.Contains(strings.ToLower(track.VideoRangeType), "withel")
+			if track.DVELPresent || legacyProfile7EL {
 				source.DVEnhancementLayer = EnhancementUnknownV3
 			} else {
 				source.DVEnhancementLayer = EnhancementNoneV3
@@ -71,7 +76,7 @@ func detailedVideoEligibleV3(source SourceDescriptorV3, request StartRequestV3) 
 	if !HasFeatureV3(request.ClientFeatures, FeatureDetailedDecodeV3) && !HasFeatureV3(request.ClientPlaybackContext.Features, FeatureDetailedDecodeV3) {
 		return false
 	}
-	if source.VideoCodec == "" || source.VideoProfile == "" || source.VideoLevel <= 0 || source.BitDepth <= 0 || source.Width <= 0 || source.Height <= 0 || source.FrameRate <= 0 || source.BitrateKbps <= 0 {
+	if !detailedVideoEvidenceCompleteV3(source) {
 		return false
 	}
 	for _, capability := range request.Capabilities.VideoDecode {
@@ -93,6 +98,17 @@ func detailedVideoEligibleV3(source SourceDescriptorV3, request StartRequestV3) 
 		return true
 	}
 	return false
+}
+
+func detailedVideoEvidenceCompleteV3(source SourceDescriptorV3) bool {
+	return source.VideoCodec != "" &&
+		source.VideoProfile != "" &&
+		source.VideoLevel > 0 &&
+		source.BitDepth > 0 &&
+		source.Width > 0 &&
+		source.Height > 0 &&
+		source.FrameRate > 0 &&
+		source.BitrateKbps > 0
 }
 
 func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (bool, VideoClaimsV3) {
