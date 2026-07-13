@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 )
 
@@ -303,7 +304,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		if err := s.ScanAudiobookFolder(watchCtx, folder, true); err != nil {
 			return nil, err
 		}
-		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID, nil); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
@@ -313,7 +314,7 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 		if err := s.ScanPodcastFolder(watchCtx, folder); err != nil {
 			return nil, err
 		}
-		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID, nil); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
@@ -350,7 +351,7 @@ func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, s
 		if err := s.ScanAudiobookFolder(watchCtx, scopedFolderPaths(folder, []string{scanRoot}), false); err != nil {
 			return nil, err
 		}
-		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID); err != nil {
+		if err := s.syncFolderScopedAudioLibraryState(watchCtx, folder.ID, []string{scanRoot}); err != nil {
 			return nil, err
 		}
 		return &ScanResult{}, nil
@@ -858,7 +859,9 @@ func (s *Scanner) scanPaths(
 	result.Unchanged += extraStats.Unchanged
 	result.Errors += extraStats.Errors
 
-	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+	// Only reachable in subtree mode (library mode delegates to
+	// scanFolderByRoots above), so restrict the sync to the scanned roots.
+	if err := s.syncPresentLibraryState(ctx, folder.ID, reconcileRoots); err != nil {
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
 	}
 
@@ -1093,7 +1096,7 @@ func (s *Scanner) scanFolderByRoots(
 		Message:      "Reconciling library state",
 		CurrentScope: "folder",
 	})
-	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+	if err := s.syncPresentLibraryState(ctx, folder.ID, nil); err != nil {
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
 	}
 
@@ -1465,7 +1468,39 @@ func compactScanRoots(paths []string) []string {
 	return out
 }
 
-func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) error {
+// fileScopeFilter returns the argument list for a present-library sync
+// statement and an "AND (...)" clause restricting media_files alias mf to the
+// given scope paths (each path itself or anything under it). Empty scopePaths
+// yields no clause: the statement stays folder-wide. The prefix arm uses LIKE
+// with pathscope.PrefixLike so the (media_folder_id, file_path
+// text_pattern_ops) index serves it.
+func fileScopeFilter(folderID int, scopePaths []string) (string, []any) {
+	args := []any{folderID}
+	if len(scopePaths) == 0 {
+		return "", args
+	}
+	conds := make([]string, 0, len(scopePaths))
+	for _, path := range scopePaths {
+		args = append(args, path, pathscope.PrefixLike(path))
+		conds = append(conds, fmt.Sprintf(
+			`(mf.file_path = $%d OR mf.file_path LIKE $%d ESCAPE '\')`,
+			len(args)-1, len(args)))
+	}
+	return " AND (" + strings.Join(conds, " OR ") + ")", args
+}
+
+// syncPresentLibraryState repairs linkage state derivable from present files:
+// it clears dangling content/episode pointers and restores library-membership
+// rows. When scopePaths is non-empty only files under those paths are
+// considered — a file/subtree scan can only have changed rows under its own
+// scope, so the folder-wide sweep would be pure overhead (on large folders it
+// dominated per-file scan time). Tradeoff: dangling pointers created by
+// non-scan flows (admin deletes, metadata re-identification) are no longer
+// repaired opportunistically by any file scan; the scheduled library scans,
+// which call this folder-wide (empty scopePaths), remain the backstop.
+func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int, scopePaths []string) error {
+	scopeClause, args := fileScopeFilter(folderID, scopePaths)
+
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		UPDATE media_files mf
 		SET content_id = NULL,
@@ -1477,8 +1512,8 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 			SELECT 1
 			FROM media_items mi
 			WHERE mi.content_id = mf.content_id
-		  )
-	`, folderID); err != nil {
+		  )`+scopeClause+`
+	`, args...); err != nil {
 		return fmt.Errorf("clearing dangling content links: %w", err)
 	}
 
@@ -1493,8 +1528,8 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 			SELECT 1
 			FROM episodes e
 			WHERE e.content_id = mf.episode_id
-		  )
-	`, folderID); err != nil {
+		  )`+scopeClause+`
+	`, args...); err != nil {
 		return fmt.Errorf("clearing dangling episode links: %w", err)
 	}
 
@@ -1505,9 +1540,9 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 		JOIN media_items mi ON mi.content_id = mf.content_id
 		WHERE mf.media_folder_id = $1
 		  AND mf.missing_since IS NULL
-		  AND mf.content_id IS NOT NULL
+		  AND mf.content_id IS NOT NULL`+scopeClause+`
 		ON CONFLICT (content_id, media_folder_id) DO NOTHING
-	`, folderID); err != nil {
+	`, args...); err != nil {
 		return fmt.Errorf("restoring folder memberships: %w", err)
 	}
 
@@ -1519,7 +1554,7 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 			JOIN episodes e ON e.content_id = mf.episode_id
 			WHERE mf.media_folder_id = $1
 			  AND mf.missing_since IS NULL
-			  AND mf.episode_id IS NOT NULL
+			  AND mf.episode_id IS NOT NULL`+scopeClause+`
 			GROUP BY mf.episode_id, mf.media_folder_id
 			ON CONFLICT (episode_id, media_folder_id) DO NOTHING
 			RETURNING episode_id, first_seen_at
@@ -1536,18 +1571,19 @@ func (s *Scanner) syncPresentLibraryState(ctx context.Context, folderID int) err
 		) sub
 		WHERE mi.content_id = sub.series_id
 		  AND mi.type = 'series'
-	`, folderID); err != nil {
+	`, args...); err != nil {
 		return fmt.Errorf("restoring episode folder memberships: %w", err)
 	}
 
 	return nil
 }
 
-func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderID int) error {
-	if err := s.syncPresentLibraryState(ctx, folderID); err != nil {
+func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderID int, scopePaths []string) error {
+	if err := s.syncPresentLibraryState(ctx, folderID, scopePaths); err != nil {
 		return err
 	}
 
+	scopeClause, args := fileScopeFilter(folderID, scopePaths)
 	if _, err := s.fileRepo.Pool().Exec(ctx, `
 		INSERT INTO media_item_roots (media_folder_id, canonical_root_path, content_id)
 		SELECT DISTINCT ON (mf.media_folder_id, mf.canonical_root_path)
@@ -1558,11 +1594,11 @@ func (s *Scanner) syncFolderScopedAudioLibraryState(ctx context.Context, folderI
 		  AND mf.missing_since IS NULL
 		  AND mf.content_id IS NOT NULL
 		  AND COALESCE(mf.canonical_root_path, '') <> ''
-		  AND mi.type IN ('audiobook', 'podcast')
+		  AND mi.type IN ('audiobook', 'podcast')`+scopeClause+`
 		ON CONFLICT (media_folder_id, canonical_root_path)
 		DO UPDATE SET content_id = EXCLUDED.content_id,
 			last_seen_at = NOW()
-	`, folderID); err != nil {
+	`, args...); err != nil {
 		return fmt.Errorf("restoring folder-scoped audio roots: %w", err)
 	}
 
@@ -1647,7 +1683,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if err := s.ScanAudiobookFolder(ctx, scopedFolderPaths(folder, []string{scanRoot}), false); err != nil {
 			return err
 		}
-		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID)
+		return s.syncFolderScopedAudioLibraryState(ctx, folder.ID, []string{scanRoot})
 	}
 
 	// Verify the file extension is recognized.
@@ -1673,7 +1709,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		// Converting a previously-primary row into an extra clears its
 		// content linkage; run the same membership cleanup a full scan would
 		// so stale library membership doesn't linger until the next scan.
-		if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+		if err := s.syncPresentLibraryState(ctx, folder.ID, []string{cleanFile}); err != nil {
 			return fmt.Errorf("syncing present library state for extra file: %w", err)
 		}
 		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID); err != nil {
@@ -1731,7 +1767,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	if err := s.reconcileScannedGroups(ctx, folder.ID, false, []string{scopePath}, false, groupInference); err != nil {
 		return fmt.Errorf("reconciling scanned groups for file: %w", err)
 	}
-	if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
+	if err := s.syncPresentLibraryState(ctx, folder.ID, []string{scopePath}); err != nil {
 		return fmt.Errorf("syncing present library state for file: %w", err)
 	}
 	if s.seriesQueueSyncer != nil {
