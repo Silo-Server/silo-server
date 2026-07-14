@@ -147,23 +147,38 @@ func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playbac
 	return h.v3Registry
 }
 
+// remoteTransformationsV3 is the transport-time capability lookup for a
+// selected node. It never trusts memoized failures: those may be planning
+// deadlines far shorter than this path's fetch budget, and rejecting the
+// already-selected node on a stale planning timeout would fail a start the
+// fetch could still validate.
 func (h *PlaybackHandler) remoteTransformationsV3(ctx context.Context, nodeURL string) ([]playback.TransformationV3, error) {
+	return h.lookupRemoteTransformationsV3(ctx, nodeURL, false)
+}
+
+// remoteTransformationsPlanningV3 is the planning-time variant: it honors
+// negatively-cached fetch failures so an unreachable node costs one timeout
+// per error-TTL window instead of one per playback start.
+func (h *PlaybackHandler) remoteTransformationsPlanningV3(ctx context.Context, nodeURL string) ([]playback.TransformationV3, error) {
+	return h.lookupRemoteTransformationsV3(ctx, nodeURL, true)
+}
+
+func (h *PlaybackHandler) lookupRemoteTransformationsV3(ctx context.Context, nodeURL string, honorCachedFailure bool) ([]playback.TransformationV3, error) {
 	now := time.Now()
 	h.v3NodeCapabilitiesMu.Lock()
 	entry, ok := h.v3NodeCapabilities[nodeURL]
 	h.v3NodeCapabilitiesMu.Unlock()
 	if ok && now.Before(entry.expiresAt) {
-		if entry.err != nil {
+		if entry.err == nil {
+			return append([]playback.TransformationV3(nil), entry.transformations...), nil
+		}
+		if honorCachedFailure {
 			return nil, entry.err
 		}
-		return append([]playback.TransformationV3(nil), entry.transformations...), nil
 	}
 
 	info, err := fetchRemoteTranscodeCapabilities(ctx, nodeURL, h.JWTSecret)
 	if err != nil {
-		// Memoize the failure briefly: with capability-union planning every
-		// start consults the pool, and an unreachable node must not add its
-		// fetch timeout to each of them.
 		h.v3NodeCapabilitiesMu.Lock()
 		if h.v3NodeCapabilities == nil {
 			h.v3NodeCapabilities = make(map[string]v3NodeCapabilityCache)
@@ -209,15 +224,32 @@ func (h *PlaybackHandler) hlsPlanningRegistryV3(ctx context.Context) *playback.T
 	if len(nodeURLs) == 0 {
 		return local
 	}
-	return local.WithAdvertised(h.pooledNodeTransformationsV3(ctx, nodeURLs))
+	var merged []playback.TransformationV3
+	for _, transformations := range h.pooledNodeTransformationsV3(ctx, nodeURLs) {
+		merged = append(merged, transformations...)
+	}
+	return local.WithAdvertised(merged)
+}
+
+// lazyHLSPlanningRegistryV3 defers (and memoizes) the widened-registry build
+// so the planner only pays for node capability lookups when a route decision
+// actually depends on them; direct-play and other source-preserving starts
+// never touch the pool.
+func (h *PlaybackHandler) lazyHLSPlanningRegistryV3(ctx context.Context) func() *playback.TransformationRegistryV3 {
+	var once sync.Once
+	var registry *playback.TransformationRegistryV3
+	return func() *playback.TransformationRegistryV3 {
+		once.Do(func() { registry = h.hlsPlanningRegistryV3(ctx) })
+		return registry
+	}
 }
 
 // pooledNodeTransformationsV3 collects the advertised transformations of the
-// given transcode nodes. Stale cache entries are refreshed concurrently under
-// a short planning deadline; nodes that cannot be reached contribute nothing
-// (their failures are negatively cached), so planning degrades toward the
-// local registry instead of blocking the start path.
-func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, nodeURLs []string) []playback.TransformationV3 {
+// given transcode nodes, keyed by node URL. Stale cache entries are refreshed
+// concurrently under a short planning deadline; nodes that cannot be reached
+// contribute nothing (their failures are negatively cached), so planning
+// degrades toward the local registry instead of blocking the start path.
+func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, nodeURLs []string) map[string][]playback.TransformationV3 {
 	fetchCtx, cancel := context.WithTimeout(ctx, v3NodeCapabilityPlanTimeout)
 	defer cancel()
 	results := make([][]playback.TransformationV3, len(nodeURLs))
@@ -226,7 +258,7 @@ func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, nodeU
 		wg.Add(1)
 		go func(i int, nodeURL string) {
 			defer wg.Done()
-			transformations, err := h.remoteTransformationsV3(fetchCtx, nodeURL)
+			transformations, err := h.remoteTransformationsPlanningV3(fetchCtx, nodeURL)
 			if err != nil {
 				slog.DebugContext(ctx, "protocol v3 node capability unavailable for planning", "component", "api", "node", nodeURL, "error", err)
 				return
@@ -235,11 +267,48 @@ func (h *PlaybackHandler) pooledNodeTransformationsV3(ctx context.Context, nodeU
 		}(i, nodeURL)
 	}
 	wg.Wait()
-	var merged []playback.TransformationV3
-	for _, transformations := range results {
-		merged = append(merged, transformations...)
+	byURL := make(map[string][]playback.TransformationV3, len(nodeURLs))
+	for i, transformations := range results {
+		if transformations != nil {
+			byURL[nodeURLs[i]] = transformations
+		}
 	}
-	return merged
+	return byURL
+}
+
+// capabilitySessionPlannerV3 is implemented by *nodepool.Planner; it lets the
+// transport layer restrict node selection to nodes that can execute the
+// plan's server transformations.
+type capabilitySessionPlannerV3 interface {
+	PlanSessionWith(sessionID, currentTranscodeURL string, needsTranscode bool, estBitrateKbps int, eligible func(*nodepool.Node) bool) nodepool.Plan
+}
+
+// planNodeSessionV3 selects transcode/proxy nodes for the session. Plans that
+// carry server transformations restrict selection to nodes whose advertised
+// capabilities validate against the plan, so load balancing in a
+// heterogeneous pool cannot land a recipe on a node that would reject it when
+// a capable sibling exists. Capability-blind selection remains for
+// transformation-free plans and non-enumerating planners.
+func (h *PlaybackHandler) planNodeSessionV3(ctx context.Context, session *playback.Session, result playback.PlannerResultV3) nodepool.Plan {
+	selector, selectable := h.NodePlanner.(capabilitySessionPlannerV3)
+	enumerator, enumerable := h.NodePlanner.(transcodeNodeEnumeratorV3)
+	if !selectable || !enumerable || !planRequiresServerTransformationsV3(result.Plan) {
+		return h.NodePlanner.PlanSession(session.ID, session.TranscodeNodeURL, true, result.TargetBitrateKbps)
+	}
+	capable := make(map[string]struct{})
+	for nodeURL, advertised := range h.pooledNodeTransformationsV3(ctx, enumerator.TranscodeNodeURLs()) {
+		if validateAdvertisedTransformationsV3(result.Plan, advertised) == nil {
+			capable[nodeURL] = struct{}{}
+		}
+	}
+	// The predicate runs under the planner lock: a set lookup only.
+	return selector.PlanSessionWith(session.ID, session.TranscodeNodeURL, true, result.TargetBitrateKbps, func(node *nodepool.Node) bool {
+		if node == nil {
+			return false
+		}
+		_, ok := capable[node.URL]
+		return ok
+	})
 }
 
 // validateAdvertisedTransformationsV3 verifies that every server-executed
@@ -356,7 +425,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
 		AudioTrackIndex: audioIndex, Settings: settings,
-		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.hlsPlanningRegistryV3(r.Context()), Now: time.Now(),
+		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
 	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
@@ -371,7 +440,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 				writePlaybackFilePreflightError(w, err)
 				return
 			}
-			result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.hlsPlanningRegistryV3(r.Context()), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+			result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 		}
 	}
 	if result.Terminal != nil {
@@ -482,7 +551,7 @@ func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.
 		return h.prepareIdentityTransportV3(session, result), nil
 	}
 	if h.NodePlanner != nil {
-		plan := h.NodePlanner.PlanSession(session.ID, session.TranscodeNodeURL, true, result.TargetBitrateKbps)
+		plan := h.planNodeSessionV3(r.Context(), session, result)
 		if plan.TranscodeNode != nil {
 			transformations, err := h.remoteTransformationsV3(r.Context(), plan.TranscodeNode.URL)
 			if err == nil {
@@ -1120,7 +1189,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			attemptedKeys = append(attemptedKeys, currentKey)
 		}
 	}
-	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.hlsPlanningRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
@@ -1130,7 +1199,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				if err := preflightPlaybackFile(r.Context(), alternate, h.MissingMarker, h.EventsHub); err == nil {
 					effectiveFile = alternate
 					audioIndex = remappedAudio
-					result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.hlsPlanningRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+					result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 				}
 			}
 		}

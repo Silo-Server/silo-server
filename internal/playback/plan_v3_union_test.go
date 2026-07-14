@@ -6,6 +6,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+func staticHLSRegistryV3(registry *TransformationRegistryV3) func() *TransformationRegistryV3 {
+	return func() *TransformationRegistryV3 { return registry }
+}
+
 func TestTransformationRegistryWithAdvertised(t *testing.T) {
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: "audio_to_aac", RecipeVersion: "1"},
@@ -69,7 +73,7 @@ func TestPlanPlaybackV3TranscodeOffloadsToNodeToolchain(t *testing.T) {
 		{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
 		{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
 	})
-	withNodes := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: union})
+	withNodes := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: staticHLSRegistryV3(union)})
 	if withNodes.Plan == nil || withNodes.Plan.Delivery != DeliveryTranscodeHLSV3 {
 		t.Fatalf("with nodes = %s", ExplainPlannerResultV3(withNodes))
 	}
@@ -96,7 +100,7 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 	}
 
 	union := local.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"}})
-	offloaded := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: union})
+	offloaded := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: staticHLSRegistryV3(union)})
 	if offloaded.Plan == nil || offloaded.Plan.Delivery != DeliveryRemuxHLSV3 || !offloaded.TranscodeAudio || offloaded.TargetAudioCodec != "aac" {
 		t.Fatalf("with nodes = %s", ExplainPlannerResultV3(offloaded))
 	}
@@ -104,9 +108,60 @@ func TestPlanPlaybackV3AudioAdaptationOffloadsToHLSRemux(t *testing.T) {
 	// With the toolchain available locally the progressive remux keeps
 	// priority — offloadability must never demote a local-capable route.
 	localCapable := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "1", Available: true}})
-	preserved := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: localCapable, HLSRegistry: localCapable})
+	preserved := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: localCapable, HLSRegistry: staticHLSRegistryV3(localCapable)})
 	if preserved.Plan == nil || preserved.Plan.Delivery != DeliveryRemuxProgressiveV3 {
 		t.Fatalf("local capable = %s", ExplainPlannerResultV3(preserved))
+	}
+}
+
+// A source that direct-plays must never trigger the lazy node-capability
+// producer: building the widened registry can touch the network, and dead
+// nodes must not add latency to starts that never use them.
+func TestPlanPlaybackV3DirectPlayNeverConsultsNodeCapabilities(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry: testTransformationRegistryV3(),
+		HLSRegistry: func() *TransformationRegistryV3 {
+			t.Fatal("direct-play planning must not build the node capability registry")
+			return nil
+		},
+	})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+// A progressive-only client (no HLS engine) cannot consume node-offloaded
+// conversions, so node capabilities must not suppress its specific retryable
+// audio terminal in favor of a generic non-retryable adaptation_unavailable.
+func TestPlanPlaybackV3NodeToolchainDoesNotMaskTerminalForProgressiveOnlyClient(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
+	file.CodecAudio = "truehd"
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	delete(req.ClientPlaybackContext.Engines, string(EngineMedia3HLSV3))
+
+	local := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "audio_to_aac", RecipeVersion: "1"}})
+	union := local.WithAdvertised([]TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"}})
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry: local, HLSRegistry: staticHLSRegistryV3(union),
+	})
+	if result.Terminal == nil || result.Terminal.Reason != "audio_conversion_unsupported" || !result.Terminal.Retryable {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
 }
 
@@ -136,7 +191,7 @@ func TestPlanPlaybackV3Profile7StripOffloadsToHLSRemux(t *testing.T) {
 	}
 
 	union := local.WithAdvertised([]TransformationV3{{Name: "server_dv7_to_hdr10", Executor: "server", RecipeVersion: "1"}})
-	offloaded := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: union})
+	offloaded := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: settings, Registry: local, HLSRegistry: staticHLSRegistryV3(union)})
 	if offloaded.Plan == nil || offloaded.Plan.Delivery != DeliveryRemuxHLSV3 || offloaded.TargetVideoCodec != "copy" {
 		t.Fatalf("with nodes = %s", ExplainPlannerResultV3(offloaded))
 	}

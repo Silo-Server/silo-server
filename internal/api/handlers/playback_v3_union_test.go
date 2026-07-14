@@ -71,24 +71,94 @@ func TestHLSPlanningRegistryV3WithoutEnumeratorIsLocal(t *testing.T) {
 	}
 }
 
-func TestRemoteTransformationsV3CachesFetchFailures(t *testing.T) {
+func TestRemoteTransformationsV3FailureCacheSplit(t *testing.T) {
 	hits := 0
+	fail := true
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
-		w.WriteHeader(http.StatusInternalServerError)
+		if fail {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"}}})
 	}))
 	defer remote.Close()
 
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
-	if _, err := handler.remoteTransformationsV3(context.Background(), remote.URL); err == nil {
+	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL); err == nil {
 		t.Fatal("fetch against a failing node must error")
 	}
-	if _, err := handler.remoteTransformationsV3(context.Background(), remote.URL); err == nil {
-		t.Fatal("memoized failure must still surface as an error")
+	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL); err == nil {
+		t.Fatal("planning lookups must surface the memoized failure")
 	}
 	if hits != 1 {
-		t.Fatalf("failing node was fetched %d times; the failure must be memoized", hits)
+		t.Fatalf("failing node was fetched %d times; planning must memoize the failure", hits)
+	}
+
+	// The transport path must fetch through the memoized failure: it may
+	// have been produced by a planning deadline far shorter than this
+	// path's budget, and rejecting the already-selected node on it would
+	// fail a start a fresh fetch could still validate.
+	fail = false
+	transformations, err := handler.remoteTransformationsV3(context.Background(), remote.URL)
+	if err != nil || len(transformations) != 1 {
+		t.Fatalf("transport lookup must refetch through a memoized failure: %v %#v", err, transformations)
+	}
+	if hits != 2 {
+		t.Fatalf("transport lookup fetched %d times, want 2", hits)
+	}
+	// The refetched success replaces the failure for planning too.
+	if _, err := handler.remoteTransformationsPlanningV3(context.Background(), remote.URL); err != nil {
+		t.Fatalf("planning lookup after transport success: %v", err)
+	}
+	if hits != 2 {
+		t.Fatalf("cached success was refetched (%d hits)", hits)
+	}
+}
+
+// In a heterogeneous pool, a plan that needs server transformations must be
+// placed on a node advertising them even when load balancing prefers an
+// incapable node, while transformation-free plans keep load-based selection.
+func TestPlanNodeSessionV3PrefersCapabilityMatchingNode(t *testing.T) {
+	capable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
+		}})
+	}))
+	defer capable.Close()
+	incapable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+	}))
+	defer incapable.Close()
+
+	transcodes := nodepool.NewTranscodePool()
+	transcodes.SetNodes([]*nodepool.Node{
+		{ID: 1, Name: "incapable", Type: nodepool.NodeTypeTranscode, URL: incapable.URL, Enabled: true, Healthy: true, ActiveJobs: 0},
+		{ID: 2, Name: "capable", Type: nodepool.NodeTypeTranscode, URL: capable.URL, Enabled: true, Healthy: true, ActiveJobs: 5},
+	})
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = nodepool.NewPlanner(nodepool.NewProxyPool(), transcodes)
+
+	plan := &playback.PlanV3{
+		PlanID:   "plan:heterogeneous",
+		Delivery: playback.DeliveryTranscodeHLSV3,
+		Transformations: []playback.TransformationV3{
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
+		},
+	}
+	selected := handler.planNodeSessionV3(context.Background(), &playback.Session{ID: "session-hetero"}, playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode})
+	if selected.TranscodeNode == nil || selected.TranscodeNode.URL != capable.URL {
+		t.Fatalf("capability-requiring plan selected %+v, want the capable node", selected.TranscodeNode)
+	}
+
+	free := &playback.PlanV3{PlanID: "plan:copy", Delivery: playback.DeliveryRemuxHLSV3, Transformations: []playback.TransformationV3{}}
+	loadBased := handler.planNodeSessionV3(context.Background(), &playback.Session{ID: "session-copy"}, playback.PlannerResultV3{Plan: free, PlayMethod: playback.PlayRemux})
+	if loadBased.TranscodeNode == nil || loadBased.TranscodeNode.URL != incapable.URL {
+		t.Fatalf("transformation-free plan selected %+v, want load-based selection", loadBased.TranscodeNode)
 	}
 }
 

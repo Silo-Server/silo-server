@@ -26,20 +26,29 @@ type PlannerInputV3 struct {
 	Registry *TransformationRegistryV3
 	// HLSRegistry optionally widens transformation availability for HLS
 	// deliveries, which can execute on pooled transcode nodes as well as
-	// locally. Nil means HLS routes gate on Registry alone. Callers must
-	// build it as a superset of Registry (local ∪ node capabilities); the
-	// transport layer re-validates the executor that is actually selected.
-	HLSRegistry         *TransformationRegistryV3
+	// locally. Nil means HLS routes gate on Registry alone. It is a lazy
+	// producer because building the widened registry can touch the network
+	// (node capability fetches): the planner only invokes it when a route
+	// decision genuinely depends on node capabilities, so direct-play and
+	// other source-preserving starts never pay for it. Producers must
+	// return a superset of Registry (local ∪ node capabilities) and should
+	// memoize; the transport layer re-validates whichever executor is
+	// actually selected.
+	HLSRegistry         func() *TransformationRegistryV3
 	Now                 time.Time
 	AttemptedKeys       []string
 	AdditionalSubtitles []SubtitleInventoryEntryV3
 }
 
-// hlsRegistry returns the registry HLS deliveries gate on: the widened
-// local∪node registry when provided, otherwise the local one.
+// hlsRegistry resolves the registry HLS deliveries gate on: the widened
+// local∪node registry when provided, otherwise the local one. Callers must
+// keep it behind short-circuits so transformation-free routes never force
+// the lazy producer to run.
 func (input PlannerInputV3) hlsRegistry() *TransformationRegistryV3 {
 	if input.HLSRegistry != nil {
-		return input.HLSRegistry
+		if widened := input.HLSRegistry(); widened != nil {
+			return widened
+		}
 	}
 	return input.Registry
 }
@@ -106,11 +115,17 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		audioClaims.Reason = "no_audio_track"
 	}
 	containerOK := containsFoldV3(input.Request.Capabilities.Containers, source.Container)
+	hlsEngineOK := engineAvailableV3(input.Request, EngineMedia3HLSV3)
 	// DV strip eligibility is split by executor pool: a progressive remux
 	// executes on this process's ffmpeg, while an HLS remux may run on a
-	// pooled transcode node advertising the transformation.
+	// pooled transcode node advertising the transformation. Node capability
+	// only counts when the client can actually run an HLS delivery, and the
+	// widened registry is consulted lazily so non-DV sources never touch it.
 	dvStripEligibleLocal := canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry)
-	dvStripEligible := dvStripEligibleLocal || canStripDolbyVisionToHDR10V3(source, input.Request, input.hlsRegistry())
+	dvStripEligible := dvStripEligibleLocal
+	if !dvStripEligible && hlsEngineOK && source.DynamicRange == "dolby_vision" {
+		dvStripEligible = canStripDolbyVisionToHDR10V3(source, input.Request, input.hlsRegistry())
+	}
 	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
 	clientHDR10Eligible := canClientTransformDV7ToHDR10V3(source, input.Request)
 
@@ -245,9 +260,15 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		localAudioConvertOK := input.Registry != nil && input.Registry.Available("audio_to_aac")
 		if transcodeAudio {
 			// The HLS remux branch below can offload the conversion to a
-			// pooled node, so the terminal only fires when no executor at
-			// all carries the toolchain.
-			if !input.hlsRegistry().Available("audio_to_aac") {
+			// pooled node, but only for clients that can run an HLS
+			// delivery: a progressive-only client must keep this terminal
+			// (its retryable semantics included) rather than fall through
+			// to a generic adaptation_unavailable for a route it can never
+			// use. Short-circuit order keeps locally-capable planning from
+			// consulting node capabilities at all.
+			audioConvertOK := localAudioConvertOK ||
+				hlsEngineOK && input.hlsRegistry().Available("audio_to_aac")
+			if !audioConvertOK {
 				return terminalPlannerResultV3("audio_conversion_unsupported", "The required validated AAC conversion toolchain is unavailable.", true)
 			}
 			plan.EffectiveRecipe.AudioCodec = "aac"
