@@ -5,6 +5,7 @@ import (
 	"context"
 	"os/exec"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -70,6 +71,39 @@ func (r *TransformationRegistryV3) Available(name string) bool {
 	}
 	spec, ok := r.entries[name]
 	return ok && spec.Available
+}
+
+// WithAdvertised returns a registry whose known specs are additionally marked
+// available when a pooled transcode node advertises the same server-executed
+// transformation at the same recipe version. Advertisements never introduce
+// new specs: the planner only selects transformations this server defines,
+// and pinning versions to the local spec guarantees a plan built from the
+// widened registry passes the per-node advertisement validation at transport
+// time. Returns the receiver unchanged when nothing new becomes available.
+func (r *TransformationRegistryV3) WithAdvertised(advertised []TransformationV3) *TransformationRegistryV3 {
+	if r == nil || len(advertised) == 0 {
+		return r
+	}
+	specs := make([]TransformationSpecV3, 0, len(r.entries))
+	changed := false
+	for _, spec := range r.entries {
+		if !spec.Available {
+			for _, remote := range advertised {
+				if strings.EqualFold(strings.TrimSpace(remote.Name), spec.Name) &&
+					strings.TrimSpace(remote.RecipeVersion) == spec.RecipeVersion &&
+					strings.EqualFold(strings.TrimSpace(remote.Executor), "server") {
+					spec.Available = true
+					changed = true
+					break
+				}
+			}
+		}
+		specs = append(specs, spec)
+	}
+	if !changed {
+		return r
+	}
+	return NewTransformationRegistryV3(specs)
 }
 
 func (r *TransformationRegistryV3) Advertised() []TransformationV3 {

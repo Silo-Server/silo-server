@@ -43,6 +43,7 @@ func (h *PlaybackHandler) shadowLegacyPlaybackV3(ctx context.Context, req startP
 		AudioTrackIndex: audioIndex,
 		Settings:        h.plannerSettingsV3(ctx),
 		Registry:        h.transformationRegistryV3(ctx),
+		HLSRegistry:     h.lazyHLSPlanningRegistryV3(ctx),
 		Now:             time.Now(),
 	})
 	attrs := []any{
