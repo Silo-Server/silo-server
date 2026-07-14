@@ -84,14 +84,17 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 			}
 		}
 	}
-	if clientBitmap {
-		sidecar := source != "embedded" && engineCaps.Subtitles.SidecarBitmap || source == "embedded" && engineCaps.Subtitles.EmbeddedBitmap
-		if sidecar {
-			return SubtitlePolicyResultV3{
-				Decision:      SubtitleDecisionV3{Mode: SubtitleRenderV3, TrackID: trackID},
-				Claims:        SubtitleClaimsV3{BitmapSidecar: true, Reason: "client_bitmap_render_supported"},
-				SelectedIndex: index, TransportIndex: transportIndex, Codec: codec, Source: source,
-			}
+	// The stream handler raw-serves exactly one bitmap sidecar shape: an
+	// embedded PGS track as .sup. External/downloaded bitmap tracks go through
+	// WebVTT conversion (impossible for bitmaps) and embedded DVD/DVB have no
+	// client-renderable representation at all, so promising a sidecar for
+	// anything broader publishes an artifact URL that always fails at fetch.
+	// Everything else falls through to burn-in or its terminal.
+	if clientBitmap && source == "embedded" && IsPGS(codec) && engineCaps.Subtitles.EmbeddedBitmap {
+		return SubtitlePolicyResultV3{
+			Decision:      SubtitleDecisionV3{Mode: SubtitleRenderV3, TrackID: trackID},
+			Claims:        SubtitleClaimsV3{BitmapSidecar: true, Reason: "client_bitmap_render_supported"},
+			SelectedIndex: index, TransportIndex: transportIndex, Codec: codec, Source: source,
 		}
 	}
 	if transcodeAllowed {

@@ -79,6 +79,15 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	}
 	rangeOK, videoClaims := outputRangeEligibleV3(source, input.Request)
 	audioOK, passthrough, audioClaims := audioEligibilityV3(source, input.Request)
+	if !audioOK && source.AudioCodec == "" && (file == nil || len(file.AudioTracks) == 0) {
+		// Video-only media has no audio stream to adapt: treating the absence
+		// as an unsupported codec would force a pointless AAC conversion — or
+		// a terminal when conversion is unavailable — on a playable file. An
+		// audio track whose codec merely failed to probe keeps the codec
+		// gate: converting unknown audio is safer than copying it.
+		audioOK = true
+		audioClaims.Reason = "no_audio_track"
+	}
 	containerOK := containsFoldV3(input.Request.Capabilities.Containers, source.Container)
 	dvStripEligible := canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry)
 	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
@@ -515,6 +524,12 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		label = resolutionLabelV3(effectiveHeight)
 	}
 	width, bitrate := qualityDimensionsV3(effectiveHeight, source.Width, source.Height)
+	if capKbps > 0 && bitrate > capKbps {
+		// The ladder has no rung below 480p, so a cap under the lowest rung's
+		// bitrate is honored by lowering the encode target directly: the cap
+		// is a hard delivery ceiling, never advisory.
+		bitrate = capKbps
+	}
 	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result

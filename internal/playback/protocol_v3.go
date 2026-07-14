@@ -573,7 +573,7 @@ func (r *StartRequestV3) NormalizeAndValidate() ([]DegradationWarningV3, error) 
 			return nil, errors.New("client feature exceeds supported size")
 		}
 	}
-	if err := validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext); err != nil {
+	if err := validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext, r.ClientFeatures); err != nil {
 		return nil, err
 	}
 	if err := validateTrackPairV3(r.FileID, "audio", r.AudioTrackID, r.AudioTrackIndex); err != nil {
@@ -651,7 +651,7 @@ func (r ReplanRequestV3) Validate() error {
 			return errors.New("invalid attempted plan key")
 		}
 	}
-	return validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext)
+	return validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext, nil)
 }
 
 func validateSelectedTrackIdentityV3(kind string, track *TrackIdentityV3) error {
@@ -667,7 +667,11 @@ func validateSelectedTrackIdentityV3(kind string, track *TrackIdentityV3) error 
 	return nil
 }
 
-func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3) error {
+// validateCapabilitiesV3 validates and normalizes the shared capability
+// payload. topLevelFeatures carries the request's client_features when the
+// request type has one (replans do not); feature checks accept either
+// location, matching the planner's dual-source reads.
+func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3, topLevelFeatures []string) error {
 	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Features) > 64 || len(ctx.Engines) > 16 || len(ctx.Device.ABIs) > 16 || len(ctx.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 {
 		return errors.New("capability list exceeds supported size")
 	}
@@ -735,7 +739,8 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 				return errors.New("invalid engine transformation capability")
 			}
 			if transformation.Executor == "client" {
-				if !engine.Enabled || !engine.SupportedOnDevice || !HasFeatureV3(ctx.Features, FeatureClientVideoTransforms) {
+				if !engine.Enabled || !engine.SupportedOnDevice ||
+					(!HasFeatureV3(ctx.Features, FeatureClientVideoTransforms) && !HasFeatureV3(topLevelFeatures, FeatureClientVideoTransforms)) {
 					return errors.New("client transformation capability is not enabled")
 				}
 			}
