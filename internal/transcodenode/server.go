@@ -60,12 +60,30 @@ type HealthResponse struct {
 	ActiveJobs int32  `json:"active_jobs"`
 }
 
+// sessionIdleTTL is how long a job may go without a manifest or segment
+// request before the idle reaper closes it. Reaping is safe because a client
+// that comes back later re-presents its still-valid stream token and the job
+// reconstructs seeked to the requested segment; without the reaper, a job
+// whose audience vanished (e.g. a v3 replan retired its transport id and a
+// stale in-flight token resurrected the old one) encodes to end-of-file for
+// nobody.
+const sessionIdleTTL = 10 * time.Minute
+
+// sessionReapInterval is how often the idle reaper sweeps for stale jobs.
+const sessionReapInterval = time.Minute
+
 // Server is the HTTP handler for transcode mode.
 type Server struct {
 	watcher    *nodeconfig.Watcher
 	tracker    *nodesessions.Tracker
 	ffmpegSink playback.FFmpegLogSink
 	sessions   map[string]*playback.TranscodeSession
+	// lastAccess records, per registered session id, when a manifest or segment
+	// request last touched the job (registration counts as the first access).
+	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
+	// is older than sessionIdleTTL.
+	lastAccess map[string]time.Time
+	reaperOnce sync.Once
 	mu         sync.RWMutex
 	activeJobs atomic.Int32
 
@@ -151,9 +169,10 @@ func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, ses
 // NewServer creates a new transcode server.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	s := &Server{
-		watcher:  watcher,
-		tracker:  tracker,
-		sessions: make(map[string]*playback.TranscodeSession),
+		watcher:    watcher,
+		tracker:    tracker,
+		sessions:   make(map[string]*playback.TranscodeSession),
+		lastAccess: make(map[string]time.Time),
 	}
 	if cfg := watcher.Config(); cfg != nil {
 		if cleaned, err := playback.CleanupOrphanedTranscodeDirs(cfg.Playback.TranscodeDir, nil, 0); err != nil {
@@ -167,6 +186,88 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 
 func (s *Server) SetFFmpegLogSink(sink playback.FFmpegLogSink) {
 	s.ffmpegSink = sink
+}
+
+// noteSessionAccessLocked records an access for a registered job. Callers must
+// hold s.mu for writing. Lazily allocates so directly-constructed test servers
+// work.
+func (s *Server) noteSessionAccessLocked(sessionID string) {
+	if s.lastAccess == nil {
+		s.lastAccess = make(map[string]time.Time)
+	}
+	s.lastAccess[sessionID] = time.Now()
+}
+
+// touchSession refreshes a registered job's idle clock so the reaper spares
+// it. Unknown ids are ignored — a reconstruct records its own first access
+// when it registers the rebuilt job.
+func (s *Server) touchSession(sessionID string) {
+	s.mu.Lock()
+	if _, ok := s.sessions[sessionID]; ok {
+		s.noteSessionAccessLocked(sessionID)
+	}
+	s.mu.Unlock()
+}
+
+// startIdleReaper launches the background sweep that closes jobs no client has
+// touched for sessionIdleTTL. Called once when the node starts serving;
+// subsequent calls are no-ops. The goroutine runs for the process lifetime,
+// matching the node's own.
+func (s *Server) startIdleReaper() {
+	s.reaperOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(sessionReapInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				s.reapIdleSessions(sessionIdleTTL)
+			}
+		}()
+	})
+}
+
+// reapIdleSessions closes and unregisters every job whose last manifest or
+// segment access is older than ttl. Registration counts as the first access,
+// so a job still waiting on its manifest (the RequireReady flow) is never
+// reaped mid-wait. Victims are collected under the map lock and closed outside
+// it: Close blocks on ffmpeg teardown and must not stall concurrent requests.
+// The session's recipe is deliberately kept — an idle reap is not a client
+// stop, and a still-valid token must be able to reconstruct on the next hit.
+func (s *Server) reapIdleSessions(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	type idleJob struct {
+		id      string
+		session *playback.TranscodeSession
+		idle    time.Duration
+	}
+	var victims []idleJob
+	s.mu.Lock()
+	for id, session := range s.sessions {
+		last, ok := s.lastAccess[id]
+		if !ok {
+			// Untracked registration (shouldn't happen): start its idle clock
+			// now rather than closing a job that may be actively serving.
+			s.noteSessionAccessLocked(id)
+			continue
+		}
+		if last.Before(cutoff) {
+			victims = append(victims, idleJob{id: id, session: session, idle: time.Since(last)})
+			delete(s.sessions, id)
+			delete(s.lastAccess, id)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, v := range victims {
+		s.activeJobs.Add(-1)
+		if err := v.session.Close(); err != nil {
+			slog.Error("close idle transcode session", "component", "transcodenode", "error", err, "session", v.id, "playback_session_id", v.id)
+		}
+		if s.tracker != nil {
+			s.tracker.Remove(context.Background(), v.id)
+		}
+		slog.Info("transcode node reaped idle session", "component", "transcodenode",
+			"session", v.id, "playback_session_id", v.id, "idle_ms", v.idle.Milliseconds())
+	}
 }
 
 // recipeStore reads a remote transcode's reconstruction recipe written by central
@@ -192,6 +293,7 @@ func (s *Server) SetRecipeStore(store recipeStore) {
 
 // Handler returns the chi.Router with all transcode routes.
 func (s *Server) Handler() http.Handler {
+	s.startIdleReaper()
 	r := chi.NewRouter()
 	r.Get("/api/v1/health", s.handleHealth)
 
@@ -336,6 +438,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if old, ok := s.sessions[req.SessionID]; ok {
 		delete(s.sessions, req.SessionID)
+		delete(s.lastAccess, req.SessionID)
 		s.mu.Unlock()
 		s.activeJobs.Add(-1)
 		_ = old.Close()
@@ -372,6 +475,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.sessions[req.SessionID] = session
+	s.noteSessionAccessLocked(req.SessionID)
 	s.mu.Unlock()
 	unlock()
 	s.activeJobs.Add(1)
@@ -546,6 +650,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return existing
 	}
 	s.sessions[sessionID] = session
+	s.noteSessionAccessLocked(sessionID)
 	s.mu.Unlock()
 	s.activeJobs.Add(1)
 
@@ -601,6 +706,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.sessions, sessionID)
+	delete(s.lastAccess, sessionID)
 	s.mu.Unlock()
 	s.activeJobs.Add(-1)
 
@@ -643,6 +749,8 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Every manifest/segment hit counts as liveness for the idle-job reaper.
+	s.touchSession(sessionID)
 
 	manifest, err := session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	if err != nil {
@@ -679,6 +787,8 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Every manifest/segment hit counts as liveness for the idle-job reaper.
+	s.touchSession(sessionID)
 
 	segPath, err := session.GetSegment(name)
 	if err != nil && err == playback.ErrSegmentNotFound {
@@ -795,6 +905,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		session.Close()
 		os.RemoveAll(filepath.Join(cfg.Playback.TranscodeDir, id))
 		delete(s.sessions, id)
+		delete(s.lastAccess, id)
 		stopped = append(stopped, id)
 	}
 	s.activeJobs.Store(0)

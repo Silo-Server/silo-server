@@ -253,7 +253,12 @@ func copyAndFlush(dst io.Writer, src io.Reader) error {
 // (libpgs); everything else is transmuxed to WebVTT for direct `<track>`
 // consumption.
 func streamExtractOutput(codec string, targetFormat ...string) (outCodec, outFormat string) {
-	if len(targetFormat) > 0 && strings.EqualFold(targetFormat[0], "vtt") {
+	// A forced WebVTT target only applies to text sources: bitmap codecs
+	// carry no text for ffmpeg's webvtt encoder, so honoring the override
+	// would build a command that always fails mid-response. Fall through to
+	// the source-driven mapping instead (handlers reject bitmap-to-vtt
+	// requests before headers are written).
+	if len(targetFormat) > 0 && strings.EqualFold(targetFormat[0], "vtt") && !NeedsBurnIn(codec) {
 		return "webvtt", "webvtt"
 	}
 	switch {

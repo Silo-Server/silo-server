@@ -538,6 +538,16 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		FFmpegPath:      h.ffmpegPath(),
 	}
 	if len(requestedFormat) > 0 && requestedFormat[0] == "vtt" {
+		// Only text sources can be converted to WebVTT. A bitmap track (PGS
+		// reaches here because it is deliverable as .sup; DVD/DVB are rejected
+		// upstream) carries no text, so honoring the override would spawn an
+		// ffmpeg that always fails after the 200 and headers are committed.
+		// Reject before any spawn or header write.
+		if playback.NeedsBurnIn(track.Codec) {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+				"Bitmap subtitle tracks cannot be converted to WebVTT")
+			return
+		}
 		opts.TargetFormat = "vtt"
 		outFormat = "vtt"
 	}
