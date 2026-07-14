@@ -131,6 +131,24 @@ func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTransc
 	return plan
 }
 
+// TranscodeNodeURLs lists the URLs of every enabled pooled transcode node,
+// healthy or not: capability planning wants the deployment's toolchain, and
+// an unreachable node excludes itself when its capability fetch fails. An
+// empty slice means no nodes are pooled.
+func (p *Planner) TranscodeNodeURLs() []string {
+	if p == nil || p.transcodes == nil {
+		return nil
+	}
+	nodes := p.transcodes.Nodes()
+	urls := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node != nil && node.URL != "" {
+			urls = append(urls, node.URL)
+		}
+	}
+	return urls
+}
+
 // ReleaseSession removes a provisional node reservation when playback setup
 // fails or falls back locally before a node health report can account for it.
 func (p *Planner) ReleaseSession(sessionID string) {

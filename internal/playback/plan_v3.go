@@ -16,15 +16,32 @@ type PlannerSettingsV3 struct {
 }
 
 type PlannerInputV3 struct {
-	Request             StartRequestV3
-	RequestedFile       *models.MediaFile
-	EffectiveFile       *models.MediaFile
-	AudioTrackIndex     int
-	Settings            PlannerSettingsV3
-	Registry            *TransformationRegistryV3
+	Request         StartRequestV3
+	RequestedFile   *models.MediaFile
+	EffectiveFile   *models.MediaFile
+	AudioTrackIndex int
+	Settings        PlannerSettingsV3
+	// Registry holds the transformations the local binary can execute.
+	// Progressive remux routes always gate on it: they run in this process.
+	Registry *TransformationRegistryV3
+	// HLSRegistry optionally widens transformation availability for HLS
+	// deliveries, which can execute on pooled transcode nodes as well as
+	// locally. Nil means HLS routes gate on Registry alone. Callers must
+	// build it as a superset of Registry (local ∪ node capabilities); the
+	// transport layer re-validates the executor that is actually selected.
+	HLSRegistry         *TransformationRegistryV3
 	Now                 time.Time
 	AttemptedKeys       []string
 	AdditionalSubtitles []SubtitleInventoryEntryV3
+}
+
+// hlsRegistry returns the registry HLS deliveries gate on: the widened
+// local∪node registry when provided, otherwise the local one.
+func (input PlannerInputV3) hlsRegistry() *TransformationRegistryV3 {
+	if input.HLSRegistry != nil {
+		return input.HLSRegistry
+	}
+	return input.Registry
 }
 
 type PlannerResultV3 struct {
@@ -89,7 +106,11 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		audioClaims.Reason = "no_audio_track"
 	}
 	containerOK := containsFoldV3(input.Request.Capabilities.Containers, source.Container)
-	dvStripEligible := canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry)
+	// DV strip eligibility is split by executor pool: a progressive remux
+	// executes on this process's ffmpeg, while an HLS remux may run on a
+	// pooled transcode node advertising the transformation.
+	dvStripEligibleLocal := canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry)
+	dvStripEligible := dvStripEligibleLocal || canStripDolbyVisionToHDR10V3(source, input.Request, input.hlsRegistry())
 	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
 	clientHDR10Eligible := canClientTransformDV7ToHDR10V3(source, input.Request)
 
@@ -221,8 +242,12 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: "mp4", MIMEType: "video/mp4", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 		plan.DecisionReason = "container_normalization"
 		transcodeAudio := !audioOK
+		localAudioConvertOK := input.Registry != nil && input.Registry.Available("audio_to_aac")
 		if transcodeAudio {
-			if input.Registry == nil || !input.Registry.Available("audio_to_aac") {
+			// The HLS remux branch below can offload the conversion to a
+			// pooled node, so the terminal only fires when no executor at
+			// all carries the toolchain.
+			if !input.hlsRegistry().Available("audio_to_aac") {
 				return terminalPlannerResultV3("audio_conversion_unsupported", "The required validated AAC conversion toolchain is unavailable.", true)
 			}
 			plan.EffectiveRecipe.AudioCodec = "aac"
@@ -243,7 +268,12 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		if !dvStrip {
 			applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 		}
-		if remuxSubtitleOK {
+		// The progressive remux executes on this process's ffmpeg, so its
+		// server transformations must be locally available; when only pooled
+		// nodes carry them, the HLS remux below ships the same recipe on a
+		// node-offloadable delivery instead.
+		progressiveExecutable := (!transcodeAudio || localAudioConvertOK) && (!dvStrip || dvStripEligibleLocal)
+		if remuxSubtitleOK && progressiveExecutable {
 			plan.Subtitle = remuxSubtitle.Decision
 			plan.Claims.Subtitles = remuxSubtitle.Claims
 			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
@@ -259,7 +289,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 			hlsTranscodeAudio := transcodeAudio
 			if audioQuirk, ok := hlsEAC3AudioCorrectionV3(source, input.Request); ok && !hlsTranscodeAudio {
-				if input.Registry == nil || !input.Registry.Available("audio_to_aac") {
+				if !input.hlsRegistry().Available("audio_to_aac") {
 					return terminalPlannerResultV3("audio_conversion_unsupported", "The device-specific HLS route requires the validated AAC conversion toolchain.", true)
 				}
 				hlsTranscodeAudio = true
@@ -320,7 +350,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if hdrTranscodeUnavailableV3(source) {
 		return terminalPlannerResultV3("hdr_transcode_unsupported", "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
 	}
-	if input.Registry == nil || !input.Registry.Available("video_to_h264") || !input.Registry.Available("audio_to_aac") {
+	if !input.hlsRegistry().Available("video_to_h264") || !input.hlsRegistry().Available("audio_to_aac") {
 		return terminalPlannerResultV3("conversion_tool_unavailable", "The required validated H.264/AAC conversion toolchain is unavailable.", true)
 	}
 	plan := base
@@ -558,7 +588,7 @@ func videoTranscodeExecutableV3(input PlannerInputV3, source SourceDescriptorV3)
 	if hdrTranscodeUnavailableV3(source) {
 		return false
 	}
-	return input.Registry != nil && input.Registry.Available("video_to_h264") && input.Registry.Available("audio_to_aac")
+	return input.hlsRegistry().Available("video_to_h264") && input.hlsRegistry().Available("audio_to_aac")
 }
 
 func recipeFromSourceV3(source SourceDescriptorV3) EffectiveRecipeV3 {
