@@ -54,10 +54,20 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
-	subtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, input.AdditionalSubtitles)
+	// Subtitle renderability is engine-specific, so every candidate route is
+	// validated against the capabilities of the engine that would execute it.
+	// The direct engine remains the canonical policy for source-preserving
+	// routes and for the up-front terminal decision.
+	subtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, EngineMedia3DirectV3, input.AdditionalSubtitles)
 	if subtitle.Terminal != nil {
 		return PlannerResultV3{Terminal: subtitle.Terminal, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
 	}
+	remuxSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, EngineMedia3ProgressiveRemuxV3, input.AdditionalSubtitles)
+	hlsSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, EngineMedia3HLSV3, input.AdditionalSubtitles)
+	// A remux route cannot burn subtitles, so it is only viable when its own
+	// engine can deliver the selected subtitle without one.
+	remuxSubtitleOK := remuxSubtitle.Terminal == nil && !remuxSubtitle.RequiresBurn
+	hlsRemuxSubtitleOK := hlsSubtitle.Terminal == nil && !hlsSubtitle.RequiresBurn
 	quality := ResolveQualityPolicyV3(input.Request, source)
 	videoOK := detailedVideoEligibleV3(source, input.Request)
 	var high10Quirk *AppliedQuirkV3
@@ -92,16 +102,40 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		Timeline:               TimelineV3{SourceStartSeconds: floatOrZeroV3(input.Request.StartPosition), PlayerStartSeconds: floatOrZeroV3(input.Request.StartPosition), CanSeekAnywhere: true, SeekRestoration: "player_position"},
 	}
 	base.Claims.Audio.Passthrough = passthrough
-	if quality.Warning != nil {
-		base.DegradationWarnings = append(base.DegradationWarnings, *quality.Warning)
+	if source.DynamicRange == "hdr_unknown" && rangeOK {
+		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
+			Code:    "hdr_range_assumed_hdr10",
+			Message: "The source is flagged HDR without precise range metadata and is delivered as HDR10.",
+		})
 	}
 	if !detailedVideoEvidenceCompleteV3(source) {
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)
 	}
 
-	if quality.RequiresTranscode || subtitle.RequiresBurn || !videoOK ||
-		(!rangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) {
-		return planVideoTranscodeV3(input, base, source, quality, subtitle, "")
+	// Automatic quality reductions (device resolution limit, bandwidth
+	// estimate/cap, metered fallback) are best-effort. When the only reason to
+	// transcode is such a reduction, a validated source-preserving route
+	// exists, and the transcode itself cannot execute (HDR sources have no
+	// validated reduced-quality recipe yet, or the client/server lacks the
+	// transcode route entirely), deliver the source at original quality with a
+	// degradation warning instead of refusing playback. Explicit user-selected
+	// rungs keep the existing terminals.
+	if quality.RequiresTranscode && !quality.ExplicitRung && !subtitle.RequiresBurn && videoOK &&
+		(rangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
+		!videoTranscodeExecutableV3(input, source) {
+		warnings := append(quality.Warnings, DegradationWarningV3{
+			Code:    "quality_reduction_unavailable",
+			Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality.",
+		})
+		quality = originalQualityResultV3(source)
+		quality.Warnings = warnings
+	}
+	base.DegradationWarnings = append(base.DegradationWarnings, quality.Warnings...)
+
+	if quality.RequiresTranscode || !videoOK ||
+		(!rangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) ||
+		(subtitle.RequiresBurn && !remuxSubtitleOK && !hlsRemuxSubtitleOK) {
+		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "")
 	}
 
 	// Profile 7 is normalized on the client against the original range-capable
@@ -153,7 +187,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 	}
 
-	if source.DVProfile != 7 && engineAvailableV3(input.Request, EngineMedia3DirectV3) && containerOK && videoOK && rangeOK && audioOK && quality.PreservesSource {
+	if source.DVProfile != 7 && engineAvailableV3(input.Request, EngineMedia3DirectV3) && containerOK && videoOK && rangeOK && audioOK && quality.PreservesSource && !subtitle.RequiresBurn {
 		plan := base
 		plan.Delivery = DeliveryOriginalHTTPV3
 		plan.Engine = EngineMedia3DirectV3
@@ -166,7 +200,12 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 	}
 
-	if videoOK && (rangeOK || dvStripEligible) && !subtitle.RequiresBurn {
+	// A progressive remux maps only the base-layer video stream, so dual-layer
+	// Profile 7 can never ship as native Dolby Vision here regardless of the
+	// client's decoder claims; the validated HDR10 strip is the only eligible
+	// P7 remux recipe.
+	remuxRangeOK := rangeOK && source.DVProfile != 7
+	if videoOK && (remuxRangeOK || dvStripEligible) && (remuxSubtitleOK || hlsRemuxSubtitleOK) {
 		plan := base
 		plan.Delivery = DeliveryRemuxProgressiveV3
 		plan.Engine = EngineMedia3ProgressiveRemuxV3
@@ -187,9 +226,6 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		}
 		dvStrip := dvStripEligible && (source.DVProfile == 7 || !rangeOK)
 		if dvStrip {
-			if !canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry) {
-				return terminalPlannerResultV3("dv_conversion_unsupported", "Dolby Vision Profile 7 cannot be remuxed safely with the installed toolchain.", false)
-			}
 			plan.Transformations = append(plan.Transformations, TransformationV3{Name: "server_dv7_to_hdr10", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"dolby_vision_metadata_removed", "hdr10_base_layer_preserved", "enhancement_layer_discarded"}})
 			plan.EffectiveRecipe.DynamicRange = "hdr10"
 			plan.Claims.Video = VideoClaimsV3{HDR10: true}
@@ -198,11 +234,15 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		if !dvStrip {
 			applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 		}
-		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
-		if engineAvailableV3(input.Request, EngineMedia3ProgressiveRemuxV3) && !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
-			return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
+		if remuxSubtitleOK {
+			plan.Subtitle = remuxSubtitle.Decision
+			plan.Claims.Subtitles = remuxSubtitle.Claims
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
+			if engineAvailableV3(input.Request, EngineMedia3ProgressiveRemuxV3) && !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SubtitleTrackIndex: remuxSubtitle.SelectedIndex, SubtitleTransportTrackIndex: remuxSubtitle.TransportIndex, SubtitleCodec: remuxSubtitle.Codec}
+			}
 		}
-		if engineAvailableV3(input.Request, EngineMedia3HLSV3) {
+		if engineAvailableV3(input.Request, EngineMedia3HLSV3) && hlsRemuxSubtitleOK {
 			plan.AppliedQuirks = []AppliedQuirkV3{}
 			plan.RuntimeCorrections = []string{}
 			plan.Delivery = DeliveryRemuxHLSV3
@@ -230,26 +270,33 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			} else {
 				plan.DecisionReason = "hls_packaging_required"
 			}
+			plan.Subtitle = hlsSubtitle.Decision
+			plan.Claims.Subtitles = hlsSubtitle.Claims
 			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
 			if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
 				targetAudio := "copy"
 				if hlsTranscodeAudio {
 					targetAudio = "aac"
 				}
-				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: "copy", TargetAudioCodec: targetAudio, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
+				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: "copy", TargetAudioCodec: targetAudio, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: hlsSubtitle.SelectedIndex, SubtitleTransportTrackIndex: hlsSubtitle.TransportIndex, SubtitleCodec: hlsSubtitle.Codec}
 			}
 		}
 	}
 	if engineAvailableV3(input.Request, EngineMedia3HLSV3) {
-		return planVideoTranscodeV3(input, base, source, quality, subtitle, "copy_routes_exhausted")
+		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "copy_routes_exhausted")
 	}
 
 	return terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this source and output route.", false)
 }
 
+// planVideoTranscodeV3 always executes on the HLS engine, so the caller must
+// pass the subtitle policy resolved against EngineMedia3HLSV3.
 func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescriptorV3, quality QualityResultV3, subtitle SubtitlePolicyResultV3, reasonOverride string) PlannerResultV3 {
 	if !engineAvailableV3(input.Request, EngineMedia3HLSV3) {
 		return terminalPlannerResultV3("client_hls_unsupported", "The client cannot execute the required HLS adaptation route.", false)
+	}
+	if subtitle.Terminal != nil {
+		return PlannerResultV3{Terminal: subtitle.Terminal, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
 	}
 	if !input.Settings.TranscodeEnabled {
 		reason := "transcoding_disabled"
@@ -261,7 +308,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
 		return terminalPlannerResultV3("no_alternate_version", "A lower-resolution source is required because 4K transcoding is disabled.", false)
 	}
-	if source.DynamicRange != "" && source.DynamicRange != "sdr" {
+	if hdrTranscodeUnavailableV3(source) {
 		return terminalPlannerResultV3("hdr_transcode_unsupported", "This HDR source requires video encoding, but no validated HDR-preserving or tone-map recipe is installed.", false)
 	}
 	if input.Registry == nil || !input.Registry.Available("video_to_h264") || !input.Registry.Available("audio_to_aac") {
@@ -283,6 +330,8 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_audio_decode"}},
 	)
 	plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Passthrough: false, AtmosPreserved: false, Reason: "server_audio_adaptation"}
+	plan.Subtitle = subtitle.Decision
+	plan.Claims.Subtitles = subtitle.Claims
 	plan.DecisionReason = quality.Reason
 	if reasonOverride != "" {
 		plan.DecisionReason = reasonOverride
@@ -360,34 +409,68 @@ type QualityResultV3 struct {
 	BitrateKbps       int
 	PreservesSource   bool
 	RequiresTranscode bool
-	Reason            string
-	Warning           *DegradationWarningV3
+	// ExplicitRung marks a user-selected fixed rung, as opposed to an
+	// automatic reduction from device limits, bandwidth evidence, or caps.
+	ExplicitRung bool
+	Reason       string
+	Warnings     []DegradationWarningV3
 }
 
+// ResolveQualityPolicyV3 selects the delivery quality for a plan.
+//
+// bandwidth_cap_kbps is a hard delivery ceiling and is honored in every
+// quality mode: "original" delivery is degraded when the source bitrate
+// exceeds the cap, fixed rungs are lowered when their ladder bitrate exceeds
+// it, and "auto" folds the cap into bandwidth-based rung selection. A metered
+// connection with neither a cap nor a bandwidth estimate limits auto
+// selection to the conservative 720p rung — the rung auto would pick for a
+// mid-range bandwidth estimate — instead of assuming the link can sustain the
+// original stream.
 func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) QualityResultV3 {
 	quality, changed := NormalizeQualityV3(request.QualityPreference)
-	if quality == "original" {
-		return QualityResultV3{Label: resolutionLabelV3(source.Height), Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+	var warnings []DegradationWarningV3
+	if changed {
+		warnings = append(warnings, DegradationWarningV3{Code: "quality_preference_normalized", Message: "Unknown quality preference was normalized to auto."})
+	}
+	capKbps := optionalValueV3(request.BandwidthCapKbps)
+	capExceededBySource := capKbps > 0 && source.BitrateKbps > capKbps
+	if quality == "original" && !capExceededBySource {
+		result := originalQualityResultV3(source)
+		result.Warnings = warnings
+		return result
 	}
 	targetHeight := source.Height
 	reason := "quality_auto_source"
-	if quality != "auto" {
+	explicitRung := false
+	capApplied := false
+	switch {
+	case quality == "original":
+		// Only reached when the source bitrate exceeds the cap: the cap is a
+		// hard ceiling and outranks the original preference.
+		targetHeight = ladderHeightForBandwidthV3(int(float64(capKbps) * 0.8))
+		capApplied = true
+	case quality != "auto":
 		targetHeight, _ = strconv.Atoi(strings.TrimSuffix(quality, "p"))
 		reason = "quality_fixed_rung"
-	} else {
+		explicitRung = true
+	default:
 		maxHeight := resolutionHeightV3(request.Capabilities.MaxResolution)
 		if maxHeight > 0 && (targetHeight == 0 || maxHeight < targetHeight) {
 			targetHeight = maxHeight
 			reason = "quality_device_limit"
 		}
 		bandwidth := optionalValueV3(request.BandwidthEstimateKbps)
-		cap := optionalValueV3(request.BandwidthCapKbps)
-		if cap > 0 && (bandwidth == 0 || cap < bandwidth) {
-			bandwidth = cap
+		if capKbps > 0 && (bandwidth == 0 || capKbps < bandwidth) {
+			bandwidth = capKbps
 		}
 		if bandwidth > 0 {
 			targetHeight = minPositiveV3(targetHeight, ladderHeightForBandwidthV3(int(float64(bandwidth)*0.8)))
 			reason = "quality_bandwidth_limit"
+		} else if request.Metered {
+			if capped := minPositiveV3(targetHeight, 720); capped != targetHeight {
+				targetHeight = capped
+				reason = "quality_metered_limit"
+			}
 		}
 	}
 	if targetHeight <= 0 {
@@ -396,19 +479,34 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	if source.Height > 0 && targetHeight > source.Height {
 		targetHeight = source.Height
 	}
-	if source.Height > 0 && targetHeight >= source.Height {
-		result := QualityResultV3{
+	// The cap also constrains the rung chosen above: a rung that would
+	// preserve the source is forced down when the source bitrate exceeds the
+	// cap, and a transcode rung whose ladder bitrate exceeds the cap drops to
+	// the cap's rung.
+	if capKbps > 0 && !capApplied {
+		wouldPreserve := source.Height > 0 && targetHeight >= source.Height
+		if (wouldPreserve && capExceededBySource) || (!wouldPreserve && ladderBitrateKbpsV3(targetHeight) > capKbps) {
+			capApplied = true
+			if capHeight := ladderHeightForBandwidthV3(int(float64(capKbps) * 0.8)); capHeight < targetHeight {
+				targetHeight = capHeight
+			}
+		}
+	}
+	if capApplied {
+		reason = "quality_bandwidth_cap"
+		warnings = append(warnings, DegradationWarningV3{Code: "bandwidth_cap_applied", Message: "Delivery quality is limited by the configured bandwidth cap."})
+	}
+	if source.Height > 0 && targetHeight >= source.Height && !capApplied {
+		return QualityResultV3{
 			Label:           strconv.Itoa(source.Height) + "p",
 			Width:           source.Width,
 			Height:          source.Height,
 			BitrateKbps:     source.BitrateKbps,
 			PreservesSource: true,
+			ExplicitRung:    explicitRung,
 			Reason:          reason,
+			Warnings:        warnings,
 		}
-		if changed {
-			result.Warning = &DegradationWarningV3{Code: "quality_preference_normalized", Message: "Unknown quality preference was normalized to auto."}
-		}
-		return result
 	}
 	label := resolutionLabelV3(targetHeight)
 	effectiveHeight := resolutionHeightV3(label)
@@ -417,12 +515,35 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		label = resolutionLabelV3(effectiveHeight)
 	}
 	width, bitrate := qualityDimensionsV3(effectiveHeight, source.Width, source.Height)
-	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: source.Height > 0 && effectiveHeight >= source.Height, Reason: reason}
+	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, BitrateKbps: bitrate, PreservesSource: !capApplied && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
-	if changed {
-		result.Warning = &DegradationWarningV3{Code: "quality_preference_normalized", Message: "Unknown quality preference was normalized to auto."}
-	}
 	return result
+}
+
+func originalQualityResultV3(source SourceDescriptorV3) QualityResultV3 {
+	return QualityResultV3{Label: resolutionLabelV3(source.Height), Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+}
+
+// hdrTranscodeUnavailableV3 mirrors planVideoTranscodeV3's terminal
+// condition: no validated HDR-preserving or tone-map transcode recipe exists.
+func hdrTranscodeUnavailableV3(source SourceDescriptorV3) bool {
+	return source.DynamicRange != "" && source.DynamicRange != "sdr"
+}
+
+// videoTranscodeExecutableV3 mirrors planVideoTranscodeV3's terminal
+// preconditions: it reports whether a validated video transcode of this
+// source could actually run for this client and configuration.
+func videoTranscodeExecutableV3(input PlannerInputV3, source SourceDescriptorV3) bool {
+	if !engineAvailableV3(input.Request, EngineMedia3HLSV3) || !input.Settings.TranscodeEnabled {
+		return false
+	}
+	if is4KSourceV3(input.EffectiveFile, source) && !input.Settings.Allow4KTranscode {
+		return false
+	}
+	if hdrTranscodeUnavailableV3(source) {
+		return false
+	}
+	return input.Registry != nil && input.Registry.Available("video_to_h264") && input.Registry.Available("audio_to_aac")
 }
 
 func recipeFromSourceV3(source SourceDescriptorV3) EffectiveRecipeV3 {
@@ -446,9 +567,16 @@ func finalizePlanIdentityV3(plan *PlanV3, attemptID string) {
 	plan.PlanID = DeterministicPlanIDV3(attemptID, plan.RequestedMediaFileID, plan.EffectiveMediaFileID, *plan)
 }
 
+// planAttemptedV3 compares FNV-hex attempt keys exactly after trimming
+// whitespace; the keys are case-sensitive hashes, not free-form labels.
 func planAttemptedV3(plan PlanV3, generation int64, attempted []string) bool {
 	wanted := PlanAttemptKeyV3(plan, generation, nil)
-	return containsFoldV3(attempted, wanted)
+	for _, key := range attempted {
+		if strings.TrimSpace(key) == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func terminalPlannerResultV3(reason, message string, retryable bool) PlannerResultV3 {
@@ -526,10 +654,16 @@ func minPositiveV3(a, b int) int {
 	}
 	return b
 }
-func qualityDimensionsV3(height, sourceWidth, sourceHeight int) (int, int) {
-	// Match the established web ladder's standard shared rungs; 2160p is the
-	// v3-only extension until the web menu exposes a 4K transcode tier.
+
+// ladderBitrateKbpsV3 matches the established web ladder's standard shared
+// rungs; 2160p is the v3-only extension until the web menu exposes a 4K
+// transcode tier.
+func ladderBitrateKbpsV3(height int) int {
 	bitrates := map[int]int{480: 1_500, 720: 2_000, 1080: 6_000, 2160: 20_000}
+	return bitrates[resolutionHeightV3(resolutionLabelV3(height))]
+}
+
+func qualityDimensionsV3(height, sourceWidth, sourceHeight int) (int, int) {
 	rung := resolutionHeightV3(resolutionLabelV3(height))
 	width := 0
 	if sourceWidth > 0 && sourceHeight > 0 {
@@ -539,7 +673,7 @@ func qualityDimensionsV3(height, sourceWidth, sourceHeight int) (int, int) {
 	if width == 0 {
 		width, _ = dimensionsFromResolutionV3(resolutionLabelV3(rung))
 	}
-	return width, bitrates[rung]
+	return width, ladderBitrateKbpsV3(rung)
 }
 
 func SortedTransformationNamesV3(values []TransformationV3) []string {

@@ -101,6 +101,39 @@ func TestFireTVDV8HDR10PlusCorrectionRequiresAdvertisedRuntime(t *testing.T) {
 	}
 }
 
+func TestDeviceQuirkProtocolAcceptsEitherFeatureLocation(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42, FilePath: "/media/high10.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
+		Resolution: "1080p", Bitrate: 12_000, AudioChannels: 2,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High 10", Level: 52, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 12_000, BitDepth: 10, VideoRange: "SDR", VideoRangeType: "SDR"}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
+	}
+	req := quirkRequestV3()
+	req.Capabilities.Containers = []string{"mkv"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8}, MaxWidth: 1920, MaxHeight: 1080, MaxFrameRate: 60, MaxBitrateKbps: 20_000, Hardware: true}}
+	// Advertise the quirk protocol in the top-level client features only.
+	req.ClientPlaybackContext.Features = []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDetailedDecodeV3}
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: false}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || len(result.Plan.AppliedQuirks) != 1 || result.Plan.AppliedQuirks[0].ID != QuirkFireTVAFTKRTHigh10V3 {
+		t.Fatalf("client-features-only advertisement: %#v", result)
+	}
+
+	// Context-only advertisement is equally sufficient.
+	contextOnly := quirkRequestV3()
+	contextOnly.ClientFeatures = []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDetailedDecodeV3}
+	if !deviceQuirkProtocolAvailableV3(contextOnly) {
+		t.Fatal("context-only quirk feature must enable the quirk protocol")
+	}
+
+	neither := quirkRequestV3()
+	neither.ClientFeatures = []string{FeaturePlaybackPlanV3, FeatureMedia3Only}
+	neither.ClientPlaybackContext.Features = neither.ClientFeatures
+	if deviceQuirkProtocolAvailableV3(neither) {
+		t.Fatal("quirk protocol enabled without any advertisement")
+	}
+}
+
 func TestPlanAttemptKeyV3DeviceQuirkMatchesKotlin(t *testing.T) {
 	width, height, bitrate := 3840, 2160, 60_000
 	plan := PlanV3{

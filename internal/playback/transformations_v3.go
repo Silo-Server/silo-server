@@ -35,10 +35,24 @@ func ProbeTransformationRegistryV3(ctx context.Context, ffmpegPath string) *Tran
 	cancelEncoders()
 	_, ffmpegErr := exec.LookPath(ffmpegPath)
 	return NewTransformationRegistryV3([]TransformationSpecV3{
-		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: bytes.Contains(bsfs, []byte("dovi_split")), RequiredCapability: "ffmpeg_bsf:dovi_split", PromisedDynamicRange: "hdr10", ValidatedClaims: []string{"dolby_vision_metadata_removed", "hdr10_base_layer_preserved", "enhancement_layer_discarded"}, TerminalReason: "dv_conversion_unsupported"},
+		{Name: "server_dv7_to_hdr10", RecipeVersion: "1", Available: bytes.Contains(bsfs, []byte("dovi_rpu")), RequiredCapability: "ffmpeg_bsf:dovi_rpu", PromisedDynamicRange: "hdr10", ValidatedClaims: []string{"dolby_vision_metadata_removed", "hdr10_base_layer_preserved", "enhancement_layer_discarded"}, TerminalReason: "dv_conversion_unsupported"},
 		{Name: "audio_to_aac", RecipeVersion: "1", Available: ffmpegErr == nil && bytes.Contains(encoders, []byte(" aac ")), RequiredCapability: "ffmpeg_encoder:aac", ValidatedClaims: []string{"media3_audio_decode"}, TerminalReason: "audio_conversion_unsupported"},
-		{Name: "video_to_h264", RecipeVersion: "1", Available: ffmpegErr == nil && bytes.Contains(encoders, []byte("libx264")), RequiredCapability: "ffmpeg_encoder:libx264", PromisedDynamicRange: "sdr", ValidatedClaims: []string{"media3_h264_decode"}, TerminalReason: "video_conversion_unsupported"},
+		{Name: "video_to_h264", RecipeVersion: "1", Available: ffmpegErr == nil && h264EncoderAvailableV3(encoders), RequiredCapability: "ffmpeg_encoder:h264", PromisedDynamicRange: "sdr", ValidatedClaims: []string{"media3_h264_decode"}, TerminalReason: "video_conversion_unsupported"},
 	})
+}
+
+// h264EncodersV3 lists every H.264 encoder the transcode pipeline can select
+// (see buildTranscodeArgs' hardware ladder in transcode.go); any one of them
+// satisfies the video_to_h264 transformation.
+var h264EncodersV3 = []string{"libx264", "h264_qsv", "h264_vaapi", "h264_nvenc", "h264_videotoolbox"}
+
+func h264EncoderAvailableV3(encoders []byte) bool {
+	for _, encoder := range h264EncodersV3 {
+		if bytes.Contains(encoders, []byte(encoder)) {
+			return true
+		}
+	}
+	return false
 }
 
 func NewTransformationRegistryV3(specs []TransformationSpecV3) *TransformationRegistryV3 {

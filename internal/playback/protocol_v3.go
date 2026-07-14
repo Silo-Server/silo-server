@@ -694,10 +694,33 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 		if c.VideoDecode[i].Codec == "" || len(c.VideoDecode[i].DecoderName) > 128 || c.VideoDecode[i].MaxWidth < 0 || c.VideoDecode[i].MaxHeight < 0 || c.VideoDecode[i].MaxFrameRate < 0 || c.VideoDecode[i].MaxBitrateKbps < 0 {
 			return errors.New("invalid detailed video capability")
 		}
+		if len(c.VideoDecode[i].Profiles) > 64 || len(c.VideoDecode[i].Levels) > 64 || len(c.VideoDecode[i].BitDepths) > 64 {
+			return errors.New("detailed video capability exceeds supported size")
+		}
+		for _, profile := range c.VideoDecode[i].Profiles {
+			if len(profile) > 64 {
+				return errors.New("detailed video capability value exceeds supported size")
+			}
+		}
+	}
+	for _, hdr := range []*HDRCapabilitiesV3{c.HDRDetails, ctx.Output.HDRDetails} {
+		if hdr != nil && len(hdr.DolbyVisionProfiles) > 16 {
+			return errors.New("dolby vision profile list exceeds supported size")
+		}
 	}
 	for name, engine := range ctx.Engines {
 		if len(name) > 64 || len(engine.Containers) > 64 || len(engine.VideoCodecs) > 64 || len(engine.AudioDecodeCodecs) > 64 || len(engine.AudioPassthroughCodecs) > 64 || len(engine.Features) > 64 || len(engine.ValidatedClaims) > 64 || len(engine.Transformations) > 16 {
 			return errors.New("engine capability exceeds supported size")
+		}
+		if engine.HDRDetails != nil && len(engine.HDRDetails.DolbyVisionProfiles) > 16 {
+			return errors.New("dolby vision profile list exceeds supported size")
+		}
+		for _, values := range [][]string{engine.Containers, engine.VideoCodecs, engine.AudioDecodeCodecs, engine.AudioPassthroughCodecs, engine.Features, engine.ValidatedClaims} {
+			for _, value := range values {
+				if len(value) > 64 {
+					return errors.New("engine capability value exceeds supported size")
+				}
+			}
 		}
 		seenTransformations := make(map[string]struct{}, len(engine.Transformations))
 		for i := range engine.Transformations {
@@ -751,6 +774,9 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 }
 
 func validateTrackPairV3(fileID int, kind, id string, index *int) error {
+	if len(id) > 128 {
+		return fmt.Errorf("%s_track_id exceeds supported size", kind)
+	}
 	if index != nil && (*index < 0 || *index > 10_000) {
 		return fmt.Errorf("%s_track_index is invalid", kind)
 	}

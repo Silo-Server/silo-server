@@ -3,10 +3,20 @@ package playback
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool {
+	for _, warning := range warnings {
+		if warning.Code == code {
+			return true
+		}
+	}
+	return false
+}
 
 func TestStartRequestV3Validation(t *testing.T) {
 	index := 1
@@ -140,6 +150,8 @@ func TestPlanAttemptKeyV3KotlinFixture(t *testing.T) {
 		DynamicRange          string             `json:"dynamic_range"`
 		SubtitleMode          SubtitleModeV3     `json:"subtitle_mode"`
 		Transformations       []TransformationV3 `json:"transformations"`
+		AppliedQuirks         []AppliedQuirkV3   `json:"applied_quirks"`
+		RuntimeCorrections    []string           `json:"runtime_corrections"`
 		OutputRouteGeneration int64              `json:"output_route_generation"`
 		LocalMutations        []string           `json:"local_mutations"`
 		Expected              string             `json:"expected"`
@@ -162,6 +174,11 @@ func TestPlanAttemptKeyV3KotlinFixture(t *testing.T) {
 				Subtitle:        SubtitleDecisionV3{Mode: value.SubtitleMode},
 			}
 			plan.Transformations = append(plan.Transformations, value.Transformations...)
+			// The quirk identity is conditionally omitted from the preimage
+			// when no quirks or runtime corrections apply; fixtures pin both
+			// arities so the Kotlin client reproduces the omission exactly.
+			plan.AppliedQuirks = append(plan.AppliedQuirks, value.AppliedQuirks...)
+			plan.RuntimeCorrections = append(plan.RuntimeCorrections, value.RuntimeCorrections...)
 			if got := PlanAttemptKeyV3(plan, value.OutputRouteGeneration, value.LocalMutations); got != value.Expected {
 				t.Fatalf("key = %q, want %q", got, value.Expected)
 			}
@@ -549,7 +566,7 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	embeddedCombinedIndex := 1
 	req.SubtitleTrackIndex = &embeddedCombinedIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", embeddedCombinedIndex)
-	result := ResolveSubtitlePolicyV3(file, req, true, nil)
+	result := ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
 	if !result.RequiresBurn || result.SelectedIndex != 1 || result.TransportIndex != 0 {
 		t.Fatalf("embedded burn-in result = %#v", result)
 	}
@@ -558,9 +575,270 @@ func TestSubtitleBurnInUsesEmbeddedOrdinalAndRejectsUnsupportedSources(t *testin
 	req.SubtitleTrackIndex = &externalIndex
 	req.SubtitleTrackID = TrackIDV3(file.ID, "subtitle", externalIndex)
 	req.SubtitleFidelityPreference = SubtitleFidelityPreserveV3
-	result = ResolveSubtitlePolicyV3(file, req, true, nil)
+	result = ResolveSubtitlePolicyV3(file, req, true, EngineMedia3DirectV3, nil)
 	if result.Terminal == nil || result.Terminal.Reason != "subtitle_burn_in_source_unsupported" {
 		t.Fatalf("external burn-in result = %#v", result)
+	}
+}
+
+func TestResolveQualityPolicyV3HonorsBandwidthCapInAllModes(t *testing.T) {
+	source := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 20_000}
+	cap := 5_000
+
+	req := validStartRequestV3()
+	req.QualityPreference = "original"
+	req.BandwidthCapKbps = &cap
+	result := ResolveQualityPolicyV3(req, source)
+	if !result.RequiresTranscode || result.Height != 720 || result.Reason != "quality_bandwidth_cap" || result.ExplicitRung {
+		t.Fatalf("original over cap = %#v", result)
+	}
+	if !hasDegradationWarningV3(result.Warnings, "bandwidth_cap_applied") {
+		t.Fatalf("missing cap warning: %#v", result.Warnings)
+	}
+
+	lowBitrateSource := SourceDescriptorV3{Width: 1920, Height: 1080, BitrateKbps: 4_000}
+	result = ResolveQualityPolicyV3(req, lowBitrateSource)
+	if !result.PreservesSource || result.RequiresTranscode || len(result.Warnings) != 0 {
+		t.Fatalf("original under cap = %#v", result)
+	}
+
+	req.QualityPreference = "1080p"
+	result = ResolveQualityPolicyV3(req, source)
+	if result.Height != 720 || result.Reason != "quality_bandwidth_cap" || !result.ExplicitRung || !result.RequiresTranscode {
+		t.Fatalf("fixed rung over cap = %#v", result)
+	}
+	if !hasDegradationWarningV3(result.Warnings, "bandwidth_cap_applied") {
+		t.Fatalf("missing cap warning: %#v", result.Warnings)
+	}
+
+	req.QualityPreference = "480p"
+	result = ResolveQualityPolicyV3(req, source)
+	if result.Height != 480 || result.Reason != "quality_fixed_rung" || hasDegradationWarningV3(result.Warnings, "bandwidth_cap_applied") {
+		t.Fatalf("fixed rung under cap = %#v", result)
+	}
+
+	req.QualityPreference = "auto"
+	result = ResolveQualityPolicyV3(req, source)
+	if !result.RequiresTranscode || result.Height != 720 || result.PreservesSource {
+		t.Fatalf("auto with cap = %#v", result)
+	}
+}
+
+func TestResolveQualityPolicyV3MeteredWithoutEvidencePrefersConservativeRung(t *testing.T) {
+	source := SourceDescriptorV3{Width: 3840, Height: 2160, BitrateKbps: 20_000}
+	req := validStartRequestV3()
+	req.QualityPreference = "auto"
+	req.Metered = true
+	result := ResolveQualityPolicyV3(req, source)
+	if result.Height != 720 || !result.RequiresTranscode || result.Reason != "quality_metered_limit" || result.ExplicitRung {
+		t.Fatalf("metered auto = %#v", result)
+	}
+
+	estimate := 30_000
+	req.BandwidthEstimateKbps = &estimate
+	result = ResolveQualityPolicyV3(req, source)
+	if !result.PreservesSource || result.Reason != "quality_bandwidth_limit" {
+		t.Fatalf("metered with estimate = %#v", result)
+	}
+
+	req.BandwidthEstimateKbps = nil
+	req.Metered = false
+	result = ResolveQualityPolicyV3(req, source)
+	if !result.PreservesSource || result.RequiresTranscode {
+		t.Fatalf("unmetered auto = %#v", result)
+	}
+}
+
+func TestPlanPlaybackV3HDRDeviceCapFallsBackToOriginalQuality(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := validStartRequestV3()
+	req.QualityPreference = "auto"
+	req.Capabilities.MaxResolution = "1080p"
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.EffectiveRecipe.Height == nil || *result.Plan.EffectiveRecipe.Height != 2160 {
+		t.Fatalf("recipe = %#v", result.Plan.EffectiveRecipe)
+	}
+	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "quality_reduction_unavailable") {
+		t.Fatalf("warnings = %#v", result.Plan.DegradationWarnings)
+	}
+}
+
+func TestPlanPlaybackV3HDRBandwidthCapFallsBackToOriginalQuality(t *testing.T) {
+	file := detailedFixtureFileV3()
+	req := validStartRequestV3()
+	req.QualityPreference = "auto"
+	cap := 5_000
+	req.BandwidthCapKbps = &cap
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "quality_reduction_unavailable") {
+		t.Fatalf("warnings = %#v", result.Plan.DegradationWarnings)
+	}
+}
+
+func TestPlanPlaybackV3CapWithoutTranscodeRouteFallsBackToOriginal(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.Resolution = "1080p"
+	file.VideoTracks[0].Width = 1920
+	file.VideoTracks[0].Height = 1080
+	file.VideoTracks[0].Bitrate = 8_000
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].ColorTransfer = "bt709"
+	req := validStartRequestV3()
+	req.QualityPreference = "original"
+	cap := 4_000
+	req.BandwidthCapKbps = &cap
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	// The client has no HLS engine, so the cap-induced transcode cannot run.
+	delete(req.ClientPlaybackContext.Engines, string(EngineMedia3HLSV3))
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "quality_reduction_unavailable") {
+		t.Fatalf("warnings = %#v", result.Plan.DegradationWarnings)
+	}
+}
+
+func TestPlanPlaybackV3LegacyHDRUnknownAssumesHDR10ForCapableClients(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.HDR = true
+	file.VideoTracks[0].VideoRange = ""
+	file.VideoTracks[0].VideoRangeType = ""
+	file.VideoTracks[0].ColorTransfer = ""
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10 {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "hdr_range_assumed_hdr10") {
+		t.Fatalf("warnings = %#v", result.Plan.DegradationWarnings)
+	}
+
+	// Without HDR10 output support the legacy row keeps the previous
+	// (ineligible) behavior instead of guessing at the client's range.
+	req.Capabilities.HDRDetails = nil
+	req.ClientPlaybackContext.Output.HDRDetails = nil
+	result = PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Terminal == nil || result.Terminal.Reason != "hdr_transcode_unsupported" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestSourceDescriptorV3NormalizesLegacyFileBitrateFallback(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].Bitrate = 0
+	file.Bitrate = 60_000_000 // legacy rows stored bps
+
+	source := SourceDescriptorFromFileV3(file, 0)
+	if source.BitrateKbps != 60_000 {
+		t.Fatalf("file-level bitrate = %d, want normalized 60000", source.BitrateKbps)
+	}
+
+	file.VideoTracks[0].Bitrate = 45_000_000
+	source = SourceDescriptorFromFileV3(file, 0)
+	if source.BitrateKbps != 45_000 {
+		t.Fatalf("track-level bitrate = %d, want normalized 45000", source.BitrateKbps)
+	}
+}
+
+func TestPlanAttemptedV3RequiresExactKeyMatch(t *testing.T) {
+	plan := PlanV3{PlanID: "plan:exact", Delivery: DeliveryOriginalHTTPV3, Stream: StreamV3{Protocol: StreamHTTPProgressiveV3, Container: "mkv"}, Subtitle: SubtitleDecisionV3{Mode: SubtitleOffV3}}
+	key := PlanAttemptKeyV3(plan, 1, nil)
+	if !planAttemptedV3(plan, 1, []string{"  " + key + " "}) {
+		t.Fatal("whitespace-trimmed exact key must match")
+	}
+	if planAttemptedV3(plan, 1, []string{strings.ToUpper(key)}) {
+		t.Fatal("case-folded attempt key must not match an exact hash")
+	}
+}
+
+func TestStartRequestV3ValidationBoundsInnerLists(t *testing.T) {
+	longValue := strings.Repeat("x", 65)
+	cases := []struct {
+		name   string
+		mutate func(*StartRequestV3)
+	}{
+		{"video_decode_profile_count", func(r *StartRequestV3) {
+			r.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Hardware: true, Profiles: make([]string, 65)}}
+		}},
+		{"video_decode_profile_length", func(r *StartRequestV3) {
+			r.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Hardware: true, Profiles: []string{longValue}}}
+		}},
+		{"video_decode_level_count", func(r *StartRequestV3) {
+			r.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Hardware: true, Levels: make([]int, 65)}}
+		}},
+		{"video_decode_bit_depth_count", func(r *StartRequestV3) {
+			r.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "h264", Hardware: true, BitDepths: make([]int, 65)}}
+		}},
+		{"capability_dolby_vision_profiles", func(r *StartRequestV3) {
+			r.Capabilities.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfiles: make([]int, 17)}
+		}},
+		{"output_dolby_vision_profiles", func(r *StartRequestV3) {
+			r.ClientPlaybackContext.Output.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfiles: make([]int, 17)}
+		}},
+		{"engine_dolby_vision_profiles", func(r *StartRequestV3) {
+			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+			engine.HDRDetails = &HDRCapabilitiesV3{DolbyVisionProfiles: make([]int, 17)}
+			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		}},
+		{"engine_container_length", func(r *StartRequestV3) {
+			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+			engine.Containers = []string{longValue}
+			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		}},
+		{"engine_validated_claim_length", func(r *StartRequestV3) {
+			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+			engine.ValidatedClaims = []string{longValue}
+			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		}},
+		{"engine_feature_length", func(r *StartRequestV3) {
+			engine := r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+			engine.Features = []string{longValue}
+			r.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = engine
+		}},
+		{"audio_track_id_length", func(r *StartRequestV3) {
+			r.AudioTrackID = strings.Repeat("a", 129)
+		}},
+		{"subtitle_track_id_length", func(r *StartRequestV3) {
+			r.SubtitleTrackID = strings.Repeat("s", 129)
+		}},
+	}
+	for _, value := range cases {
+		t.Run(value.name, func(t *testing.T) {
+			req := validStartRequestV3()
+			value.mutate(&req)
+			if _, err := req.NormalizeAndValidate(); err == nil {
+				t.Fatal("oversized capability accepted")
+			}
+		})
 	}
 }
 

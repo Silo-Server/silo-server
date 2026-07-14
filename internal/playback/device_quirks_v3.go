@@ -84,7 +84,9 @@ func appendAppliedQuirkV3(plan *PlanV3, quirk AppliedQuirkV3, runtimeCorrection 
 }
 
 func deviceQuirkProtocolAvailableV3(request StartRequestV3) bool {
-	return HasFeatureV3(request.ClientFeatures, FeatureDeviceQuirksV3) &&
+	// Like every other dual-location feature check, either advertisement
+	// location proves the client speaks the quirk protocol.
+	return HasFeatureV3(request.ClientFeatures, FeatureDeviceQuirksV3) ||
 		HasFeatureV3(request.ClientPlaybackContext.Features, FeatureDeviceQuirksV3)
 }
 

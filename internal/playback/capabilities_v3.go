@@ -17,7 +17,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		VideoCodec:         normalizeCodecV3(file.CodecVideo),
 		AudioCodec:         normalizeCodecV3(file.CodecAudio),
 		AudioChannels:      file.AudioChannels,
-		BitrateKbps:        file.Bitrate,
+		BitrateKbps:        normalizeBitrateKbpsV3(file.Bitrate),
 		DVEnhancementLayer: EnhancementNoneV3,
 	}
 	if len(file.VideoTracks) > 0 {
@@ -122,6 +122,14 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 	case "", "sdr":
 		return true, claims
 	case "hdr10":
+		claims.HDR10 = hdr != nil && hdr.HDR10
+		return claims.HDR10, claims
+	case "hdr_unknown":
+		// Legacy rows only recorded a file-level HDR flag without per-track
+		// range metadata. HDR10 is by far the most common static-HDR range, so
+		// an HDR10-capable output treats the source as HDR10 instead of
+		// refusing playback outright; the planner attaches a degradation
+		// warning for these assumed-range plans.
 		claims.HDR10 = hdr != nil && hdr.HDR10
 		return claims.HDR10, claims
 	case "hdr10_plus":

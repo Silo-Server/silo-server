@@ -39,5 +39,31 @@
     "output_route_generation": 9,
     "local_mutations": [],
     "expected": "v3:2a88b5e686373440"
+  },
+  {
+    "name": "direct_device_quirk_and_runtime_correction_identity",
+    "plan_id": "plan:quirk",
+    "delivery": "original_http",
+    "stream_protocol": "http_progressive",
+    "container": "mkv",
+    "video_codec": "hevc",
+    "audio_codec": "eac3",
+    "width": 3840,
+    "height": 2160,
+    "bitrate_kbps": 60000,
+    "dynamic_range": "dolby_vision",
+    "subtitle_mode": "off",
+    "transformations": [],
+    "applied_quirks": [
+      {
+        "id": "android.fire_tv.dv8_hdr10plus_sei_v1",
+        "registry_revision": "2026-07-13.1",
+        "action": "client_runtime_correction"
+      }
+    ],
+    "runtime_corrections": ["client_dv8_hdr10plus_sanitizer_v1"],
+    "output_route_generation": 9,
+    "local_mutations": [],
+    "expected": "v3:8d843bfffeb3adc3"
   }
 ]

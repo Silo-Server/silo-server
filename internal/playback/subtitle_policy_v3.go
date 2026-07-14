@@ -23,7 +23,11 @@ type SubtitleInventoryEntryV3 struct {
 	Source        string
 }
 
-func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, transcodeAllowed bool, additional []SubtitleInventoryEntryV3) SubtitlePolicyResultV3 {
+// ResolveSubtitlePolicyV3 decides how the selected subtitle is delivered when
+// the plan executes on the given engine. Renderability is engine-specific, so
+// callers must resolve the policy against the engine that will actually run
+// the plan rather than assuming the direct engine's capabilities.
+func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, transcodeAllowed bool, engine EngineV3, additional []SubtitleInventoryEntryV3) SubtitlePolicyResultV3 {
 	index := -1
 	if request.SubtitleTrackIndex != nil {
 		index = *request.SubtitleTrackIndex
@@ -49,20 +53,26 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 	if source == "embedded" {
 		transportIndex = index - len(file.ExternalSubtitles)
 	}
-	engine := request.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	engineCaps := request.ClientPlaybackContext.Engines[string(engine)]
 	text := isTextSubtitleV3(codec)
 	ass := IsASS(codec)
 	clientBitmap := isClientRenderableBitmapSubtitleV3(codec)
 	burnInBitmap := clientBitmap || normalizeCodecV3(codec) == "dvb_teletext"
+	if !text && !burnInBitmap {
+		// Unknown codecs (arib_caption, ...) have no validated client render
+		// path and no validated burn-in filter; promising a silent burn-in
+		// would produce a plan the transcoder cannot honor.
+		return subtitleTerminalV3("subtitle_codec_unsupported", fmt.Sprintf("Subtitle format %s has no validated rendering or burn-in route.", codec))
+	}
 	if text {
-		renderable := source != "embedded" && engine.Subtitles.SidecarText || source == "embedded" && engine.Subtitles.EmbeddedText
+		renderable := source != "embedded" && engineCaps.Subtitles.SidecarText || source == "embedded" && engineCaps.Subtitles.EmbeddedText
 		if ass && request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3 {
-			renderable = renderable && engine.Subtitles.ASSStyling && engine.Subtitles.FontAttachments
+			renderable = renderable && engineCaps.Subtitles.ASSStyling && engineCaps.Subtitles.FontAttachments
 		}
 		if renderable {
 			return SubtitlePolicyResultV3{
 				Decision:      SubtitleDecisionV3{Mode: SubtitleRenderV3, TrackID: trackID},
-				Claims:        SubtitleClaimsV3{ASSStylingPreserved: !ass || engine.Subtitles.ASSStyling, Reason: "client_render_supported"},
+				Claims:        SubtitleClaimsV3{ASSStylingPreserved: !ass || engineCaps.Subtitles.ASSStyling, Reason: "client_render_supported"},
 				SelectedIndex: index, TransportIndex: transportIndex, Codec: codec, Source: source,
 			}
 		}
@@ -75,7 +85,7 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 		}
 	}
 	if clientBitmap {
-		sidecar := source != "embedded" && engine.Subtitles.SidecarBitmap || source == "embedded" && engine.Subtitles.EmbeddedBitmap
+		sidecar := source != "embedded" && engineCaps.Subtitles.SidecarBitmap || source == "embedded" && engineCaps.Subtitles.EmbeddedBitmap
 		if sidecar {
 			return SubtitlePolicyResultV3{
 				Decision:      SubtitleDecisionV3{Mode: SubtitleRenderV3, TrackID: trackID},
@@ -125,7 +135,9 @@ func isTextSubtitleV3(codec string) bool {
 
 func isClientRenderableBitmapSubtitleV3(codec string) bool {
 	switch normalizeCodecV3(codec) {
-	case "pgs", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "vobsub":
+	// pgssub, dvdsub, and dvbsub are ffmpeg's short aliases for the same
+	// bitstreams; scanners and older rows record either spelling.
+	case "pgs", "pgssub", "hdmv_pgs_subtitle", "dvd_subtitle", "dvdsub", "dvb_subtitle", "dvbsub", "vobsub":
 		return true
 	default:
 		return false
