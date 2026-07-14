@@ -2243,10 +2243,11 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 				"subtitle_ai.transcribe_quota_period must be day, week, or month")
 			return
 		}
-	case notifications.SettingApplePushDeliveryEnabled:
+	case notifications.SettingApplePushDeliveryEnabled,
+		notifications.SettingAndroidPushDeliveryEnabled:
 		enabled, err := strconv.ParseBool(strings.TrimSpace(req.Value))
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "notifications.apple_push_delivery_enabled must be true or false")
+			writeError(w, http.StatusBadRequest, "bad_request", key+" must be true or false")
 			return
 		}
 		req.Value = strconv.FormatBool(enabled)

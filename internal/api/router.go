@@ -1824,6 +1824,10 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/preferences", notificationsHandler.HandleGetPreferences)
 						r.Put("/preferences", notificationsHandler.HandleUpdatePreferences)
 						r.Get("/push/apple/display/{delivery_id}", notificationsHandler.HandleApplePushDisplay)
+						// Platform-generic registration used by the Android
+						// client; Apple keeps its dedicated route above.
+						r.Post("/push/devices", notificationsHandler.HandleRegisterPushDevice)
+						r.Delete("/push/devices/{device_id}", notificationsHandler.HandleUnregisterPushDevice)
 						r.Get("/email-preferences", notificationsHandler.HandleGetEmailPreferences)
 						r.Put("/email-preferences", notificationsHandler.HandleUpdateEmailPreferences)
 						r.Put("/email-preferences/address", notificationsHandler.HandleRequestEmailAddress)
@@ -2547,6 +2551,7 @@ func NewRouter(deps Dependencies) chi.Router {
 								applePushHandler := handlers.NewAdminApplePushHandler(deps.Notifications, settingsRepo)
 								if deps.Notifications != nil {
 									r.Post("/notifications/push/apple/test", applePushHandler.HandleTest)
+									r.Post("/notifications/push/fcm/test", applePushHandler.HandleTestAndroid)
 								}
 								if settingsRepo != nil {
 									r.Post("/notifications/push/relay/register", applePushHandler.HandleRegisterRelay)

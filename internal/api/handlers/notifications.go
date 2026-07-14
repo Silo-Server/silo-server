@@ -388,21 +388,30 @@ func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.R
 		}
 	}
 	applePush := capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}}
+	androidPush := capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}}
 	// Like web push above, availability requires both the wiring (cipher/store)
 	// and the admin delivery toggle: Available must mean "setup will actually
 	// deliver", not "the server could store a token".
-	if h.system.PushDevices != nil && h.system.PushDevices.Available() &&
-		h.system.Settings.ApplePushDeliveryEnabled(r.Context()) {
-		applePush = capabilityPush{
-			Available:      true,
-			Provider:       notifications.PushProviderSiloRelay,
-			SupportedModes: []string{notifications.PushModePrivatePush, notifications.PushModeInAppOnly},
+	if h.system.PushDevices != nil && h.system.PushDevices.Available() {
+		if h.system.Settings.ApplePushDeliveryEnabled(r.Context()) {
+			applePush = capabilityPush{
+				Available:      true,
+				Provider:       notifications.PushProviderSiloRelay,
+				SupportedModes: []string{notifications.PushModePrivatePush, notifications.PushModeInAppOnly},
+			}
+		}
+		if h.system.Settings.AndroidPushDeliveryEnabled(r.Context()) {
+			androidPush = capabilityPush{
+				Available:      true,
+				Provider:       notifications.PushProviderSiloRelay,
+				SupportedModes: []string{notifications.PushModePrivatePush, notifications.PushModeInAppOnly},
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, capabilityResponse{
 		InApp:       capabilityInApp{Enabled: h.system.Settings.UIEnabled(r.Context())},
 		ApplePush:   applePush,
-		AndroidPush: capabilityPush{Available: false, Provider: "off", SupportedModes: []string{"in_app_only"}},
+		AndroidPush: androidPush,
 		WebPush:     webPush,
 		Webhooks:    webhooks,
 		Email:       email,

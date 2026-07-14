@@ -12,10 +12,12 @@ import (
 )
 
 type fakePushDeviceStore struct {
-	got    ApplePushDeviceRegistration
-	calls  int
-	device *PushDevice
-	err    error
+	got     ApplePushDeviceRegistration
+	gotFCM  FCMPushDeviceRegistration
+	calls   int
+	device  *PushDevice
+	err     error
+	deleted []string
 }
 
 func (f *fakePushDeviceStore) UpsertApple(ctx context.Context, registration ApplePushDeviceRegistration, cipher *secret.Cipher) (*PushDevice, error) {
@@ -33,6 +35,29 @@ func (f *fakePushDeviceStore) UpsertApple(ctx context.Context, registration Appl
 		Enabled:        true,
 		PushMode:       registration.PushMode,
 	}, nil
+}
+
+func (f *fakePushDeviceStore) UpsertFCM(ctx context.Context, registration FCMPushDeviceRegistration, cipher *secret.Cipher) (*PushDevice, error) {
+	f.calls++
+	f.gotFCM = registration
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.device != nil {
+		return f.device, nil
+	}
+	return &PushDevice{
+		ID:             "device-row",
+		Platform:       PushPlatformAndroid,
+		ServerDeviceID: "server-device",
+		Enabled:        true,
+		PushMode:       registration.PushMode,
+	}, nil
+}
+
+func (f *fakePushDeviceStore) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
+	f.deleted = append(f.deleted, profileID+"/"+deviceID)
+	return f.err
 }
 
 func testPushCipher(t *testing.T) *secret.Cipher {
@@ -144,6 +169,87 @@ func TestPushDeviceServiceRegisterAppleRejectsInvalidOrUnsupported(t *testing.T)
 				t.Fatalf("store was called for rejected input")
 			}
 		})
+	}
+}
+
+func TestPushDeviceServiceRegisterFCMNormalizesAndStores(t *testing.T) {
+	store := &fakePushDeviceStore{}
+	service := NewPushDeviceService(store, testPushCipher(t))
+
+	token := strings.Repeat("F", 100) + ":APA91b-" + strings.Repeat("x", 40)
+	device, err := service.RegisterFCM(context.Background(), 42, " profile-1 ", FCMPushRegistrationInput{
+		DeviceID: " local-device ",
+		FCMToken: " " + token + " ",
+		PushMode: "",
+	})
+	if err != nil {
+		t.Fatalf("register fcm: %v", err)
+	}
+	if device.ServerDeviceID != "server-device" || !device.Enabled || device.PushMode != PushModePrivatePush {
+		t.Fatalf("unexpected device response: %+v", device)
+	}
+	if store.gotFCM.UserID != 42 || store.gotFCM.ProfileID != "profile-1" || store.gotFCM.DeviceID != "local-device" {
+		t.Fatalf("unexpected owner scope: %+v", store.gotFCM)
+	}
+	if store.gotFCM.FCMToken != token {
+		t.Fatalf("fcm token was not trimmed exactly: %q", store.gotFCM.FCMToken)
+	}
+	if store.gotFCM.PushMode != PushModePrivatePush {
+		t.Fatalf("push mode = %q", store.gotFCM.PushMode)
+	}
+}
+
+func TestPushDeviceServiceRegisterFCMRejectsInvalidOrUnsupported(t *testing.T) {
+	validToken := strings.Repeat("F", 140)
+	tests := []struct {
+		name    string
+		input   FCMPushRegistrationInput
+		wantErr error
+	}{
+		{
+			name:    "missing device id",
+			input:   FCMPushRegistrationInput{DeviceID: " ", FCMToken: validToken},
+			wantErr: ErrPushDeviceInvalid,
+		},
+		{
+			name:    "short token",
+			input:   FCMPushRegistrationInput{DeviceID: "local-device", FCMToken: "abc"},
+			wantErr: ErrPushDeviceInvalid,
+		},
+		{
+			name:    "token with invalid characters",
+			input:   FCMPushRegistrationInput{DeviceID: "local-device", FCMToken: strings.Repeat("!", 140)},
+			wantErr: ErrPushDeviceInvalid,
+		},
+		{
+			name:    "unsupported push mode",
+			input:   FCMPushRegistrationInput{DeviceID: "local-device", FCMToken: validToken, PushMode: "custom_fcm"},
+			wantErr: ErrPushDeviceUnsupported,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakePushDeviceStore{}
+			service := NewPushDeviceService(store, testPushCipher(t))
+			_, err := service.RegisterFCM(context.Background(), 42, "profile-1", tt.input)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if store.calls != 0 {
+				t.Fatalf("store was called for rejected input")
+			}
+		})
+	}
+}
+
+func TestPushDeviceFCMTokenHashIsCaseSensitive(t *testing.T) {
+	token := strings.Repeat("f", 140)
+	if fcmTokenHash(token) == fcmTokenHash(strings.ToUpper(token)) {
+		t.Fatal("fcm token hash must be case-sensitive")
+	}
+	if fcmTokenHash(" "+token+" ") != fcmTokenHash(token) {
+		t.Fatal("fcm token hash must ignore surrounding whitespace")
 	}
 }
 

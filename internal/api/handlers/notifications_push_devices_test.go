@@ -15,10 +15,12 @@ import (
 )
 
 type handlerPushStore struct {
-	got    notifications.ApplePushDeviceRegistration
-	calls  int
-	device *notifications.PushDevice
-	err    error
+	got     notifications.ApplePushDeviceRegistration
+	gotFCM  notifications.FCMPushDeviceRegistration
+	calls   int
+	device  *notifications.PushDevice
+	err     error
+	deleted []string
 }
 
 func (f *handlerPushStore) UpsertApple(ctx context.Context, registration notifications.ApplePushDeviceRegistration, cipher *secret.Cipher) (*notifications.PushDevice, error) {
@@ -36,6 +38,29 @@ func (f *handlerPushStore) UpsertApple(ctx context.Context, registration notific
 		Enabled:        true,
 		PushMode:       registration.PushMode,
 	}, nil
+}
+
+func (f *handlerPushStore) UpsertFCM(ctx context.Context, registration notifications.FCMPushDeviceRegistration, cipher *secret.Cipher) (*notifications.PushDevice, error) {
+	f.calls++
+	f.gotFCM = registration
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.device != nil {
+		return f.device, nil
+	}
+	return &notifications.PushDevice{
+		ID:             "push-row-android",
+		Platform:       notifications.PushPlatformAndroid,
+		ServerDeviceID: "server-device-android",
+		Enabled:        true,
+		PushMode:       registration.PushMode,
+	}, nil
+}
+
+func (f *handlerPushStore) DeleteByProfileDevice(ctx context.Context, profileID, deviceID string) error {
+	f.deleted = append(f.deleted, profileID+"/"+deviceID)
+	return f.err
 }
 
 func handlerPushCipher(t *testing.T) *secret.Cipher {
@@ -85,6 +110,68 @@ func TestHandleRegisterApplePushDevice(t *testing.T) {
 	}
 	if store.got.UserID != 42 || store.got.ProfileID != "profile-1" || store.got.DeviceID != "local-device" {
 		t.Fatalf("unexpected stored registration: %+v", store.got)
+	}
+}
+
+func newPushDevicesRequest(method, target, body string) *http.Request {
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	ctx := apimw.SetClaims(req.Context(), &auth.Claims{UserID: 42, Role: "user", TokenType: auth.TokenTypeAccess})
+	ctx = apimw.SetProfileID(ctx, "profile-1")
+	return req.WithContext(ctx)
+}
+
+func TestHandleRegisterPushDeviceAndroid(t *testing.T) {
+	store := &handlerPushStore{}
+	handler := NewNotificationsHandler(&notifications.System{
+		PushDevices: notifications.NewPushDeviceService(store, handlerPushCipher(t)),
+	}, nil)
+
+	token := strings.Repeat("F", 140)
+	body := `{
+		"platform":"android",
+		"token":"` + token + `",
+		"device_id":"local-device",
+		"push_mode":"private_push"
+	}`
+	rr := httptest.NewRecorder()
+	handler.HandleRegisterPushDevice(rr, newPushDevicesRequest(http.MethodPost, "/api/v1/notifications/push/devices", body))
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var response applePushRegisterResponse
+	if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.ID != "push-row-android" || response.PushMode != notifications.PushModePrivatePush {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if store.gotFCM.UserID != 42 || store.gotFCM.ProfileID != "profile-1" || store.gotFCM.FCMToken != token {
+		t.Fatalf("unexpected stored registration: %+v", store.gotFCM)
+	}
+}
+
+func TestHandleRegisterPushDeviceRejectsUnknownPlatformAndBadToken(t *testing.T) {
+	newHandler := func() *NotificationsHandler {
+		return NewNotificationsHandler(&notifications.System{
+			PushDevices: notifications.NewPushDeviceService(&handlerPushStore{}, handlerPushCipher(t)),
+		}, nil)
+	}
+
+	rr := httptest.NewRecorder()
+	newHandler().HandleRegisterPushDevice(rr, newPushDevicesRequest(http.MethodPost,
+		"/api/v1/notifications/push/devices",
+		`{"platform":"apple","token":"`+strings.Repeat("F", 140)+`","device_id":"local-device"}`))
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("apple platform status = %d, want 422", rr.Code)
+	}
+
+	rr = httptest.NewRecorder()
+	newHandler().HandleRegisterPushDevice(rr, newPushDevicesRequest(http.MethodPost,
+		"/api/v1/notifications/push/devices",
+		`{"platform":"android","token":"short","device_id":"local-device"}`))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("bad token status = %d, want 400", rr.Code)
 	}
 }
 

@@ -56,13 +56,14 @@ const (
 	SettingServerChannelsBatchSeconds     = "notifications.server_channels.batch_seconds"
 	SettingServerChannelMentionRequesters = "notifications.server_channels.mention_requesters"
 
-	SettingApplePushDeliveryEnabled = "notifications.apple_push_delivery_enabled"
-	SettingPushRelayURL             = "notifications.push_relay_url"
-	SettingPushRelayDeploymentID    = "notifications.push_relay_deployment_id"
-	SettingPushRelayAPIKey          = "notifications.push_relay_api_key"
-	SettingPushRelayExpiresAt       = "notifications.push_relay_expires_at"
-	SettingPushRelayKeyPrefix       = "notifications.push_relay_key_prefix"
-	SettingPushRelayReregister      = "notifications.push_relay_reregistration_required"
+	SettingApplePushDeliveryEnabled   = "notifications.apple_push_delivery_enabled"
+	SettingAndroidPushDeliveryEnabled = "notifications.android_push_delivery_enabled"
+	SettingPushRelayURL               = "notifications.push_relay_url"
+	SettingPushRelayDeploymentID      = "notifications.push_relay_deployment_id"
+	SettingPushRelayAPIKey            = "notifications.push_relay_api_key"
+	SettingPushRelayExpiresAt         = "notifications.push_relay_expires_at"
+	SettingPushRelayKeyPrefix         = "notifications.push_relay_key_prefix"
+	SettingPushRelayReregister        = "notifications.push_relay_reregistration_required"
 
 	// Discord application credentials live under the discord.* namespace
 	// (admin-configured, alongside email.smtp_*). The secret and bot token
@@ -414,6 +415,32 @@ func (s *Settings) ServerChannelsBatchWindow(ctx context.Context) time.Duration 
 // already hold tokens keep them fresh across admin toggles.
 func (s *Settings) ApplePushDeliveryEnabled(ctx context.Context) bool {
 	return s.boolSetting(ctx, SettingApplePushDeliveryEnabled, false)
+}
+
+// AndroidPushDeliveryEnabled is the Android counterpart of
+// ApplePushDeliveryEnabled: it gates relay FCM sends and the capability
+// endpoint's android_push availability.
+func (s *Settings) AndroidPushDeliveryEnabled(ctx context.Context) bool {
+	return s.boolSetting(ctx, SettingAndroidPushDeliveryEnabled, false)
+}
+
+// PushDeliveryEnabled reports whether any push platform may deliver; the
+// shared dispatcher uses it as its wake-up gate.
+func (s *Settings) PushDeliveryEnabled(ctx context.Context) bool {
+	return s.ApplePushDeliveryEnabled(ctx) || s.AndroidPushDeliveryEnabled(ctx)
+}
+
+// EnabledPushPlatforms lists the platforms whose admin delivery toggle is on,
+// in the shape ListEnabledPushByProfiles expects.
+func (s *Settings) EnabledPushPlatforms(ctx context.Context) []string {
+	platforms := make([]string, 0, 2)
+	if s.ApplePushDeliveryEnabled(ctx) {
+		platforms = append(platforms, PushPlatformApple)
+	}
+	if s.AndroidPushDeliveryEnabled(ctx) {
+		platforms = append(platforms, PushPlatformAndroid)
+	}
+	return platforms
 }
 
 // PushRelayURL is the public Silo relay origin.

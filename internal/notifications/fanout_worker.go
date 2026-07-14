@@ -354,10 +354,15 @@ type pendingDelivery struct {
 	flags    ReasonFlags
 }
 
-// enqueuePushOutbox inserts pending Apple push attempt rows for each newly
-// inserted delivery and enabled private-push device.
+// enqueuePushOutbox inserts pending push attempt rows for each newly inserted
+// delivery and enabled private-push device on every admin-enabled platform
+// (Apple and Android).
 func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery) error {
-	if w.pushDevices == nil || len(inserted) == 0 || !w.settings.ApplePushDeliveryEnabled(ctx) {
+	if w.pushDevices == nil || len(inserted) == 0 {
+		return nil
+	}
+	platforms := w.settings.EnabledPushPlatforms(ctx)
+	if len(platforms) == 0 {
 		return nil
 	}
 	profileSet := make(map[string]struct{}, len(inserted))
@@ -368,7 +373,7 @@ func (w *FanoutWorker) enqueuePushOutbox(ctx context.Context, tx pgx.Tx, inserte
 			profileIDs = append(profileIDs, row.ProfileID)
 		}
 	}
-	devicesByProfile, err := w.pushDevices.ListEnabledAppleByProfiles(ctx, tx, profileIDs)
+	devicesByProfile, err := w.pushDevices.ListEnabledPushByProfiles(ctx, tx, profileIDs, platforms)
 	if err != nil {
 		return err
 	}
