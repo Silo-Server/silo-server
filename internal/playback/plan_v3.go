@@ -60,10 +60,19 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	}
 	quality := ResolveQualityPolicyV3(input.Request, source)
 	videoOK := detailedVideoEligibleV3(source, input.Request)
+	var high10Quirk *AppliedQuirkV3
+	if !videoOK {
+		if quirk, ok := high10DecodeOverrideV3(source, input.Request); ok {
+			videoOK = true
+			high10Quirk = quirk
+		}
+	}
 	rangeOK, videoClaims := outputRangeEligibleV3(source, input.Request)
 	audioOK, passthrough, audioClaims := audioEligibilityV3(source, input.Request)
 	containerOK := containsFoldV3(input.Request.Capabilities.Containers, source.Container)
 	dvStripEligible := canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry)
+	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
+	clientHDR10Eligible := canClientTransformDV7ToHDR10V3(source, input.Request)
 
 	base := PlanV3{
 		ProtocolVersion:        ProtocolV3,
@@ -73,6 +82,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		Claims:                 ValidationClaimsV3{Video: videoClaims, Audio: audioClaims, Subtitles: subtitle.Claims},
 		Subtitle:               subtitle.Decision,
 		Transformations:        []TransformationV3{},
+		AppliedQuirks:          []AppliedQuirkV3{},
+		RuntimeCorrections:     []string{},
 		DegradationWarnings:    []DegradationWarningV3{},
 		RequestedMediaFileID:   input.RequestedFile.ID,
 		EffectiveMediaFileID:   file.ID,
@@ -88,16 +99,67 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)
 	}
 
-	if quality.RequiresTranscode || subtitle.RequiresBurn || !videoOK || (!rangeOK && !dvStripEligible) {
+	if quality.RequiresTranscode || subtitle.RequiresBurn || !videoOK ||
+		(!rangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) {
 		return planVideoTranscodeV3(input, base, source, quality, subtitle, "")
 	}
 
-	if engineAvailableV3(input.Request, EngineMedia3DirectV3) && containerOK && videoOK && rangeOK && audioOK && quality.PreservesSource {
+	// Profile 7 is normalized on the client against the original range-capable
+	// source. A decoder profile/max-instance claim alone is not proof of native
+	// dual-layer output, so the default Android route mirrors Silo Apple: P8.1
+	// base-layer Dolby Vision first, then same-file HDR10.
+	if source.DVProfile == 7 && quality.PreservesSource && videoOK && containerOK && audioOK && !subtitle.RequiresBurn {
+		if clientDV81Eligible {
+			plan := base
+			plan.Delivery = DeliveryOriginalHTTPV3
+			plan.Engine = EngineMedia3DirectV3
+			plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
+			plan.DecisionReason = "client_dv7_to_dv81"
+			plan.EffectiveRecipe.DynamicRange = "dolby_vision"
+			plan.Claims.Video = VideoClaimsV3{DolbyVision: true, DolbyVisionReason: "client_profile7_to_profile81"}
+			plan.Transformations = append(plan.Transformations, TransformationV3{
+				Name: ClientDV7ToDV81V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3,
+				ValidatedClaims: []string{"profile7_rpu_converted_to_profile81", "hdr10_base_layer_preserved", "enhancement_layer_discarded"},
+			})
+			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{
+				Code:    "dolby_vision_enhancement_layer_discarded",
+				Message: "Dolby Vision Profile 7 is played as Profile 8.1 base-layer Dolby Vision; enhancement-layer pixel data is discarded.",
+			})
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
+			if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+				return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
+			}
+		}
+		if clientHDR10Eligible {
+			plan := base
+			plan.Delivery = DeliveryOriginalHTTPV3
+			plan.Engine = EngineMedia3DirectV3
+			plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
+			plan.DecisionReason = "client_dv7_to_hdr10"
+			plan.EffectiveRecipe.DynamicRange = "hdr10"
+			plan.Claims.Video = VideoClaimsV3{HDR10: true}
+			plan.Transformations = append(plan.Transformations, TransformationV3{
+				Name: ClientDV7ToHDR10V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3,
+				ValidatedClaims: []string{"dolby_vision_metadata_removed", "hdr10_base_layer_preserved", "enhancement_layer_discarded"},
+			})
+			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{
+				Code:    "dolby_vision_removed",
+				Message: "Dolby Vision Profile 7 is played from the same 4K file as its HDR10 base layer.",
+			})
+			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
+			if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
+				return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
+			}
+		}
+	}
+
+	if source.DVProfile != 7 && engineAvailableV3(input.Request, EngineMedia3DirectV3) && containerOK && videoOK && rangeOK && audioOK && quality.PreservesSource {
 		plan := base
 		plan.Delivery = DeliveryOriginalHTTPV3
 		plan.Engine = EngineMedia3DirectV3
 		plan.Stream = StreamV3{Protocol: StreamHTTPProgressiveV3, Container: source.Container, MIMEType: MimeFromExtension(file.FilePath), Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
 		plan.DecisionReason = "validated_original_playback"
+		applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
 		if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
 			return PlannerResultV3{Plan: &plan, PlayMethod: PlayDirect, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
@@ -119,7 +181,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			plan.EffectiveRecipe.AudioChannels = intPointerV3(2)
 			plan.EffectiveRecipe.AudioLayout = "stereo"
 			plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: "server_audio_adaptation"}
-			plan.Transformations = append(plan.Transformations, TransformationV3{Name: "audio_to_aac", ValidatedClaims: []string{"media3_audio_decode"}})
+			plan.Transformations = append(plan.Transformations, TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_audio_decode"}})
 			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "audio_converted", Message: "The selected audio track is converted to AAC stereo."})
 			plan.DecisionReason = "audio_adaptation"
 		}
@@ -128,23 +190,42 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			if !canStripDolbyVisionToHDR10V3(source, input.Request, input.Registry) {
 				return terminalPlannerResultV3("dv_conversion_unsupported", "Dolby Vision Profile 7 cannot be remuxed safely with the installed toolchain.", false)
 			}
-			plan.Transformations = append(plan.Transformations, TransformationV3{Name: "dv_metadata_strip_to_hdr10", ValidatedClaims: []string{"hdr10_base_layer_preserved"}})
+			plan.Transformations = append(plan.Transformations, TransformationV3{Name: "server_dv7_to_hdr10", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"dolby_vision_metadata_removed", "hdr10_base_layer_preserved", "enhancement_layer_discarded"}})
 			plan.EffectiveRecipe.DynamicRange = "hdr10"
 			plan.Claims.Video = VideoClaimsV3{HDR10: true}
 			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_removed", Message: "Dolby Vision metadata is removed and the validated HDR10 base layer is preserved."})
+		}
+		if !dvStrip {
+			applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 		}
 		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
 		if engineAvailableV3(input.Request, EngineMedia3ProgressiveRemuxV3) && !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
 			return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetAudioCodec: plan.EffectiveRecipe.AudioCodec, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
 		}
-		if engineAvailableV3(input.Request, EngineMedia3HLSV3) && !dvStrip {
-			if floatOrZeroV3(input.Request.StartPosition) > 0 && !IsMPEG2VideoCodec(source.VideoCodec) {
-				return planVideoTranscodeV3(input, base, source, quality, subtitle, "seeked_hls_copy_unsafe")
-			}
+		if engineAvailableV3(input.Request, EngineMedia3HLSV3) {
+			plan.AppliedQuirks = []AppliedQuirkV3{}
+			plan.RuntimeCorrections = []string{}
 			plan.Delivery = DeliveryRemuxHLSV3
 			plan.Engine = EngineMedia3HLSV3
 			plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: "hls", MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshSessionV3}
-			if transcodeAudio {
+			hlsTranscodeAudio := transcodeAudio
+			if audioQuirk, ok := hlsEAC3AudioCorrectionV3(source, input.Request); ok && !hlsTranscodeAudio {
+				if input.Registry == nil || !input.Registry.Available("audio_to_aac") {
+					return terminalPlannerResultV3("audio_conversion_unsupported", "The device-specific HLS route requires the validated AAC conversion toolchain.", true)
+				}
+				hlsTranscodeAudio = true
+				plan.EffectiveRecipe.AudioCodec = "aac"
+				plan.EffectiveRecipe.AudioChannels = intPointerV3(2)
+				plan.EffectiveRecipe.AudioLayout = "stereo"
+				plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: "device_hls_audio_adaptation"}
+				plan.Transformations = append(plan.Transformations, TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_audio_decode"}})
+				plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "audio_converted", Message: "The selected audio track is converted to AAC stereo for this device's HLS route."})
+				appendAppliedQuirkV3(&plan, *audioQuirk, "")
+			}
+			if !dvStrip {
+				applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
+			}
+			if hlsTranscodeAudio {
 				plan.DecisionReason = "hls_audio_adaptation"
 			} else {
 				plan.DecisionReason = "hls_packaging_required"
@@ -152,10 +233,10 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 			finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID)
 			if !planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
 				targetAudio := "copy"
-				if transcodeAudio {
+				if hlsTranscodeAudio {
 					targetAudio = "aac"
 				}
-				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: transcodeAudio, TargetVideoCodec: "copy", TargetAudioCodec: targetAudio, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
+				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: "copy", TargetAudioCodec: targetAudio, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleCodec: subtitle.Codec}
 			}
 		}
 	}
@@ -198,8 +279,8 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.AudioChannels = intPointerV3(2)
 	plan.EffectiveRecipe.AudioLayout = "stereo"
 	plan.Transformations = append(plan.Transformations,
-		TransformationV3{Name: "video_to_h264", ValidatedClaims: []string{"media3_h264_decode"}},
-		TransformationV3{Name: "audio_to_aac", ValidatedClaims: []string{"media3_audio_decode"}},
+		TransformationV3{Name: "video_to_h264", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_h264_decode"}},
+		TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_audio_decode"}},
 	)
 	plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Passthrough: false, AtmosPreserved: false, Reason: "server_audio_adaptation"}
 	plan.DecisionReason = quality.Reason
@@ -220,12 +301,48 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 }
 
 func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartRequestV3, registry *TransformationRegistryV3) bool {
-	if source.DynamicRange != "dolby_vision" || !clientSupportsHDR10V3(request) || registry == nil || !registry.Available("dv_metadata_strip_to_hdr10") {
+	if source.DynamicRange != "dolby_vision" || !clientSupportsHDR10V3(request) || registry == nil || !registry.Available("server_dv7_to_hdr10") {
 		return false
 	}
 	// Profile 7 always carries an HDR10-viewable base layer. Profile 8 is
 	// safe only when the DOVI compatibility id explicitly identifies HDR10.
 	return source.DVProfile == 7 || source.DVProfile == 8 && source.DVBLCompatID == 1
+}
+
+func canClientTransformDV7ToDV81V3(source SourceDescriptorV3, request StartRequestV3) bool {
+	return source.DynamicRange == "dolby_vision" && source.DVProfile == 7 &&
+		clientSupportsDVProfileV3(request, 8) &&
+		clientTransformationAvailableV3(request, ClientDV7ToDV81V3, ClientDVTransformVersionV3)
+}
+
+func canClientTransformDV7ToHDR10V3(source SourceDescriptorV3, request StartRequestV3) bool {
+	return source.DynamicRange == "dolby_vision" && source.DVProfile == 7 && clientSupportsHDR10V3(request) &&
+		clientTransformationAvailableV3(request, ClientDV7ToHDR10V3, ClientDVTransformVersionV3)
+}
+
+func clientSupportsDVProfileV3(request StartRequestV3, profile int) bool {
+	hdr := request.ClientPlaybackContext.Output.HDRDetails
+	if hdr == nil {
+		hdr = request.Capabilities.HDRDetails
+	}
+	return hdr != nil && containsIntV3(hdr.DolbyVisionProfiles, profile)
+}
+
+func clientTransformationAvailableV3(request StartRequestV3, name, version string) bool {
+	if !HasFeatureV3(request.ClientFeatures, FeatureClientVideoTransforms) &&
+		!HasFeatureV3(request.ClientPlaybackContext.Features, FeatureClientVideoTransforms) {
+		return false
+	}
+	engine, ok := request.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	if !ok || !engine.Enabled || !engine.SupportedOnDevice {
+		return false
+	}
+	for _, transformation := range engine.Transformations {
+		if transformation.Executor == "client" && transformation.Name == name && transformation.RecipeVersion == version {
+			return true
+		}
+	}
+	return false
 }
 
 func is4KSourceV3(file *models.MediaFile, source SourceDescriptorV3) bool {

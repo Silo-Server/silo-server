@@ -20,8 +20,8 @@ func argsContainPair(args []string, a, b string) bool {
 // the Apple-parity fallback presentation for devices without a P7 decoder.
 func TestBuildRemuxArgsStripsDolbyVisionRPUForProfile7(t *testing.T) {
 	args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, 7)
-	if !argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
-		t.Fatalf("profile 7 remux must strip DV RPUs, args=%v", strings.Join(args, " "))
+	if !argsContainPair(args, "-bsf:v", "dovi_split=mode=bl") {
+		t.Fatalf("profile 7 remux must extract the HDR10 base layer, args=%v", strings.Join(args, " "))
 	}
 }
 
@@ -49,7 +49,7 @@ func TestRemuxDVProfileFallsBackWithoutFilterSupport(t *testing.T) {
 func TestBuildRemuxArgsKeepsRPUForProfile8AndPlainFiles(t *testing.T) {
 	for _, profile := range []int{0, 5, 8} {
 		args := buildRemuxArgs("/x.mkv", "mp4", 0, false, -1, profile)
-		if argsContainPair(args, "-bsf:v", "dovi_rpu=strip=1") {
+		if argsContainPair(args, "-bsf:v", "dovi_split=mode=bl") {
 			t.Fatalf("profile %d remux must not strip DV RPUs, args=%v", profile, strings.Join(args, " "))
 		}
 	}

@@ -33,6 +33,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 			source.BitrateKbps = normalizeBitrateKbpsV3(track.Bitrate)
 		}
 		source.DynamicRange = normalizeDynamicRangeV3(track)
+		source.HDR10Plus = track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+")
 		source.DVProfile = track.DVProfile
 		source.DVBLCompatID = track.DVBLCompatID
 		switch EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer)) {
@@ -156,41 +157,32 @@ func clientSupportsHDR10V3(request StartRequestV3) bool {
 
 func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copyOK, passthrough bool, claim AudioClaimsV3) {
 	claim.Codec = source.AudioCodec
-	if containsFoldV3(request.Capabilities.CodecsAudio, source.AudioCodec) {
-		claim.Reason = "client_decode_supported"
-		return true, false, claim
-	}
 	passthroughCaps := request.ClientPlaybackContext.Output.AudioPassthrough
 	if passthroughCaps == nil {
 		passthroughCaps = request.Capabilities.AudioPassthrough
 	}
-	if passthroughCaps == nil || !containsFoldV3(passthroughCaps.PassthroughCodecs, source.AudioCodec) {
+	if passthroughCaps != nil && containsFoldV3(passthroughCaps.PassthroughCodecs, source.AudioCodec) &&
+		(HasFeatureV3(request.ClientFeatures, FeatureLayoutPassthrough) || HasFeatureV3(request.ClientPlaybackContext.Features, FeatureLayoutPassthrough)) {
+		for _, entry := range passthroughCaps.Entries {
+			if !strings.EqualFold(entry.Codec, source.AudioCodec) || len(entry.ChannelCounts) == 0 || len(entry.Layouts) == 0 ||
+				!containsIntV3(entry.ChannelCounts, source.AudioChannels) || !containsFoldV3(entry.Layouts, source.AudioLayout) {
+				continue
+			}
+			claim.Passthrough = true
+			claim.AtmosPreserved = strings.Contains(strings.ToLower(source.AudioLayout), "joc") || strings.Contains(strings.ToLower(source.AudioLayout), "atmos")
+			claim.Reason = "sink_passthrough_validated"
+			return true, true, claim
+		}
+	}
+	if containsFoldV3(request.Capabilities.CodecsAudio, source.AudioCodec) {
+		claim.Reason = "client_decode_supported"
+		return true, false, claim
+	}
+	if passthroughCaps != nil && containsFoldV3(passthroughCaps.PassthroughCodecs, source.AudioCodec) {
+		claim.Reason = "passthrough_layout_unsupported"
+	} else {
 		claim.Reason = "audio_codec_unsupported"
-		return false, false, claim
 	}
-	if !HasFeatureV3(request.ClientFeatures, FeatureLayoutPassthrough) && !HasFeatureV3(request.ClientPlaybackContext.Features, FeatureLayoutPassthrough) {
-		claim.Reason = "passthrough_layout_unverified"
-		return false, false, claim
-	}
-	for _, entry := range passthroughCaps.Entries {
-		if !strings.EqualFold(entry.Codec, source.AudioCodec) {
-			continue
-		}
-		if len(entry.ChannelCounts) == 0 || len(entry.Layouts) == 0 {
-			continue
-		}
-		if !containsIntV3(entry.ChannelCounts, source.AudioChannels) {
-			continue
-		}
-		if !containsFoldV3(entry.Layouts, source.AudioLayout) {
-			continue
-		}
-		claim.Passthrough = true
-		claim.AtmosPreserved = strings.Contains(strings.ToLower(source.AudioLayout), "joc") || strings.Contains(strings.ToLower(source.AudioLayout), "atmos")
-		claim.Reason = "sink_passthrough_validated"
-		return true, true, claim
-	}
-	claim.Reason = "passthrough_layout_unsupported"
 	return false, false, claim
 }
 

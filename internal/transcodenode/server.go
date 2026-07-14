@@ -27,22 +27,23 @@ import (
 
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
-	SessionID          string  `json:"session_id"`
-	InputPath          string  `json:"input_path"`
-	SourceVideoCodec   string  `json:"source_video_codec"`
-	SeekSeconds        float64 `json:"seek_seconds"`
-	StartSegmentNumber int     `json:"start_segment_number"`
-	TargetResolution   string  `json:"target_resolution"`
-	TargetCodecVideo   string  `json:"target_codec_video"`
-	TargetCodecAudio   string  `json:"target_codec_audio"`
-	TargetBitrateKbps  int     `json:"target_bitrate_kbps"`
-	SegmentDuration    int     `json:"segment_duration"`
-	HWAccel            string  `json:"hw_accel"`
-	AudioTrackIndex    int     `json:"audio_track_index"`
-	SubtitleTrackIndex int     `json:"subtitle_track_index"`
-	SubtitleBurnIn     bool    `json:"subtitle_burn_in"`
-	SubtitleCodec      string  `json:"subtitle_codec,omitempty"`
-	TotalDuration      float64 `json:"total_duration"`
+	SessionID            string  `json:"session_id"`
+	InputPath            string  `json:"input_path"`
+	SourceVideoCodec     string  `json:"source_video_codec"`
+	VideoBitstreamFilter string  `json:"video_bitstream_filter,omitempty"`
+	SeekSeconds          float64 `json:"seek_seconds"`
+	StartSegmentNumber   int     `json:"start_segment_number"`
+	TargetResolution     string  `json:"target_resolution"`
+	TargetCodecVideo     string  `json:"target_codec_video"`
+	TargetCodecAudio     string  `json:"target_codec_audio"`
+	TargetBitrateKbps    int     `json:"target_bitrate_kbps"`
+	SegmentDuration      int     `json:"segment_duration"`
+	HWAccel              string  `json:"hw_accel"`
+	AudioTrackIndex      int     `json:"audio_track_index"`
+	SubtitleTrackIndex   int     `json:"subtitle_track_index"`
+	SubtitleBurnIn       bool    `json:"subtitle_burn_in"`
+	SubtitleCodec        string  `json:"subtitle_codec,omitempty"`
+	TotalDuration        float64 `json:"total_duration"`
 }
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
@@ -293,29 +294,30 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	outputDir := filepath.Join(cfg.Playback.TranscodeDir, req.SessionID)
 
 	opts := playback.TranscodeOpts{
-		InputPath:          req.InputPath,
-		OutputDir:          outputDir,
-		SessionID:          req.SessionID,
-		SourceVideoCodec:   req.SourceVideoCodec,
-		SeekSeconds:        req.SeekSeconds,
-		StartSegmentNumber: req.StartSegmentNumber,
-		TargetResolution:   req.TargetResolution,
-		TargetCodecVideo:   req.TargetCodecVideo,
-		TargetCodecAudio:   req.TargetCodecAudio,
-		TargetBitrateKbps:  req.TargetBitrateKbps,
-		SegmentDuration:    req.SegmentDuration,
-		FFmpegPath:         cfg.Playback.FFmpegPath,
-		HWAccel:            req.HWAccel,
-		HWDevice:           "",
-		AudioTrackIndex:    req.AudioTrackIndex,
-		SubtitleTrackIndex: req.SubtitleTrackIndex,
-		SubtitleBurnIn:     req.SubtitleBurnIn,
-		SubtitleCodec:      req.SubtitleCodec,
-		TotalDuration:      req.TotalDuration,
-		FastStart:          true,
-		NodeType:           "transcode",
-		ExecutionMode:      "transcode_node",
-		FFmpegLogSink:      s.ffmpegSink,
+		InputPath:            req.InputPath,
+		OutputDir:            outputDir,
+		SessionID:            req.SessionID,
+		SourceVideoCodec:     req.SourceVideoCodec,
+		VideoBitstreamFilter: req.VideoBitstreamFilter,
+		SeekSeconds:          req.SeekSeconds,
+		StartSegmentNumber:   req.StartSegmentNumber,
+		TargetResolution:     req.TargetResolution,
+		TargetCodecVideo:     req.TargetCodecVideo,
+		TargetCodecAudio:     req.TargetCodecAudio,
+		TargetBitrateKbps:    req.TargetBitrateKbps,
+		SegmentDuration:      req.SegmentDuration,
+		FFmpegPath:           cfg.Playback.FFmpegPath,
+		HWAccel:              req.HWAccel,
+		HWDevice:             "",
+		AudioTrackIndex:      req.AudioTrackIndex,
+		SubtitleTrackIndex:   req.SubtitleTrackIndex,
+		SubtitleBurnIn:       req.SubtitleBurnIn,
+		SubtitleCodec:        req.SubtitleCodec,
+		TotalDuration:        req.TotalDuration,
+		FastStart:            true,
+		NodeType:             "transcode",
+		ExecutionMode:        "transcode_node",
+		FFmpegLogSink:        s.ffmpegSink,
 	}
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {

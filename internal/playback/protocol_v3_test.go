@@ -39,24 +39,79 @@ func TestStartRequestV3UnknownQualityFallsBackToAuto(t *testing.T) {
 	}
 }
 
+func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
+	start := validStartRequestV3()
+	request := ReplanRequestV3{
+		ProtocolVersion:       ProtocolV3,
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "replan-operation-0001",
+		FailedPlanID:          "plan:operation-0001",
+		PlanAttemptID:         "plan-attempt-operation-0001",
+		PlanAttemptKey:        "v3:0000000000000001",
+		AttemptCount:          1,
+		QualityPreference:     start.QualityPreference,
+		OutputRouteGeneration: start.OutputRouteGeneration,
+		Failure:               FailureV3{Classification: "parser_failure"},
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+	if request.EffectiveOperation() != ReplanOperationFailureRecoveryV3 {
+		t.Fatalf("missing operation = %q", request.EffectiveOperation())
+	}
+	if err := request.Validate(); err != nil {
+		t.Fatalf("backward-compatible default operation: %v", err)
+	}
+
+	request.Operation = ReplanOperationSeekReanchorV3
+	request.Failure.Classification = ""
+	if err := request.Validate(); err != nil {
+		t.Fatalf("seek reanchor operation without fake failure: %v", err)
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire["operation"] != string(ReplanOperationSeekReanchorV3) {
+		t.Fatalf("serialized operation = %#v", wire["operation"])
+	}
+
+	request.Operation = ReplanOperationSeekFailureRecoveryV3
+	if err := request.Validate(); err == nil {
+		t.Fatal("seek failure recovery without a classification was accepted")
+	}
+	request.Failure.Classification = "decoder_failure"
+	if err := request.Validate(); err != nil {
+		t.Fatalf("seek failure recovery operation: %v", err)
+	}
+
+	request.Operation = "future_operation"
+	if err := request.Validate(); err == nil {
+		t.Fatal("unknown replan operation was accepted")
+	}
+}
+
 func TestPlanAttemptKeyV3KotlinFixture(t *testing.T) {
 	type fixture struct {
-		Name                  string           `json:"name"`
-		PlanID                string           `json:"plan_id"`
-		Delivery              DeliveryV3       `json:"delivery"`
-		StreamProtocol        StreamProtocolV3 `json:"stream_protocol"`
-		Container             string           `json:"container"`
-		VideoCodec            string           `json:"video_codec"`
-		AudioCodec            string           `json:"audio_codec"`
-		Width                 int              `json:"width"`
-		Height                int              `json:"height"`
-		BitrateKbps           int              `json:"bitrate_kbps"`
-		DynamicRange          string           `json:"dynamic_range"`
-		SubtitleMode          SubtitleModeV3   `json:"subtitle_mode"`
-		Transformations       []string         `json:"transformations"`
-		OutputRouteGeneration int64            `json:"output_route_generation"`
-		LocalMutations        []string         `json:"local_mutations"`
-		Expected              string           `json:"expected"`
+		Name                  string             `json:"name"`
+		PlanID                string             `json:"plan_id"`
+		Delivery              DeliveryV3         `json:"delivery"`
+		StreamProtocol        StreamProtocolV3   `json:"stream_protocol"`
+		Container             string             `json:"container"`
+		VideoCodec            string             `json:"video_codec"`
+		AudioCodec            string             `json:"audio_codec"`
+		Width                 int                `json:"width"`
+		Height                int                `json:"height"`
+		BitrateKbps           int                `json:"bitrate_kbps"`
+		DynamicRange          string             `json:"dynamic_range"`
+		SubtitleMode          SubtitleModeV3     `json:"subtitle_mode"`
+		Transformations       []TransformationV3 `json:"transformations"`
+		OutputRouteGeneration int64              `json:"output_route_generation"`
+		LocalMutations        []string           `json:"local_mutations"`
+		Expected              string             `json:"expected"`
 	}
 	body, err := os.ReadFile("testdata/protocol_v3/attempt_keys.json")
 	if err != nil {
@@ -75,9 +130,7 @@ func TestPlanAttemptKeyV3KotlinFixture(t *testing.T) {
 				EffectiveRecipe: EffectiveRecipeV3{VideoCodec: value.VideoCodec, AudioCodec: value.AudioCodec, Width: &value.Width, Height: &value.Height, BitrateKbps: &value.BitrateKbps, DynamicRange: value.DynamicRange},
 				Subtitle:        SubtitleDecisionV3{Mode: value.SubtitleMode},
 			}
-			for _, name := range value.Transformations {
-				plan.Transformations = append(plan.Transformations, TransformationV3{Name: name})
-			}
+			plan.Transformations = append(plan.Transformations, value.Transformations...)
 			if got := PlanAttemptKeyV3(plan, value.OutputRouteGeneration, value.LocalMutations); got != value.Expected {
 				t.Fatalf("key = %q, want %q", got, value.Expected)
 			}
@@ -239,14 +292,68 @@ func TestPlanPlaybackV3Profile7FallsBackToHDR10WithoutNativeP7(t *testing.T) {
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
 	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "dv_metadata_strip_to_hdr10", Available: true}})
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
 
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: registry})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.Plan.Claims.Video.HDR10 || result.Plan.Claims.Video.DolbyVision {
 		t.Fatalf("result = %#v", result)
 	}
-	if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "dv_metadata_strip_to_hdr10" {
+	if len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
 		t.Fatalf("transformations = %#v", result.Plan.Transformations)
+	}
+}
+
+func TestPlanPlaybackV3Profile7UsesVersionedClientTransformationsOnSameFile(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].DVProfile = 7
+	file.VideoTracks[0].DVBLCompatID = 1
+	file.VideoTracks[0].DVELPresent = true
+	file.VideoTracks[0].DVEnhancementLayer = "unknown"
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3, FeatureClientVideoTransforms)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3, FeatureClientVideoTransforms)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+	direct := req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	direct.Transformations = []TransformationV3{
+		{Name: ClientDV7ToDV81V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3},
+		{Name: ClientDV7ToHDR10V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3},
+	}
+	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = direct
+
+	first := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3()})
+	if first.Plan == nil || first.Plan.Delivery != DeliveryOriginalHTTPV3 || first.Plan.EffectiveMediaFileID != file.ID || first.Plan.DecisionReason != "client_dv7_to_dv81" {
+		t.Fatalf("first = %#v", first)
+	}
+	if got := first.Plan.Transformations; len(got) != 1 || got[0].Name != ClientDV7ToDV81V3 || got[0].Executor != "client" || got[0].RecipeVersion != "1" {
+		t.Fatalf("first transformations = %#v", got)
+	}
+
+	failedKey := PlanAttemptKeyV3(*first.Plan, req.OutputRouteGeneration, nil)
+	second := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true}, Registry: testTransformationRegistryV3(), AttemptedKeys: []string{failedKey}})
+	if second.Plan == nil || second.Plan.Delivery != DeliveryOriginalHTTPV3 || second.Plan.EffectiveMediaFileID != file.ID || second.Plan.DecisionReason != "client_dv7_to_hdr10" || !second.Plan.Claims.Video.HDR10 {
+		t.Fatalf("second = %#v", second)
+	}
+}
+
+func TestPlanPlaybackV3Profile7DoesNotInferClientTransformFromHDRProfile(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].DVProfile = 7
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{7, 8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: false}})
+	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 {
+		t.Fatalf("Profile 7 must not direct-play from codec claims alone: %#v", result.Plan)
 	}
 }
 
@@ -306,7 +413,7 @@ func TestPlanPlaybackV3NeverClaimsUnimplementedHDRTranscode(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3Profile7StripNeverFallsThroughToHLSCopy(t *testing.T) {
+func TestPlanPlaybackV3Profile7StripFallsBackToValidatedHLSCopy(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].DVProfile = 7
 	file.VideoTracks[0].DVBLCompatID = 1
@@ -320,14 +427,14 @@ func TestPlanPlaybackV3Profile7StripNeverFallsThroughToHLSCopy(t *testing.T) {
 	req.Capabilities.Containers = []string{"mp4"}
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{7}}
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "dv_metadata_strip_to_hdr10", Available: true}})
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
 	first := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry})
 	if first.Plan == nil || first.Plan.Delivery != DeliveryRemuxProgressiveV3 || len(first.Plan.Transformations) != 1 {
 		t.Fatalf("first = %#v", first)
 	}
 	failedKey := PlanAttemptKeyV3(*first.Plan, req.OutputRouteGeneration, nil)
 	second := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry, AttemptedKeys: []string{failedKey}})
-	if second.Plan != nil || second.Terminal == nil {
+	if second.Plan == nil || second.Plan.Delivery != DeliveryRemuxHLSV3 || second.TargetVideoCodec != "copy" || len(second.Plan.Transformations) != 1 || second.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
 		t.Fatalf("second = %#v", second)
 	}
 }
@@ -343,9 +450,9 @@ func TestPlanPlaybackV3Profile8CompatibleBaseLayerStripsToHDR10(t *testing.T) {
 	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
 	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
 	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true}
-	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "dv_metadata_strip_to_hdr10", Available: true}})
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.Plan.EffectiveRecipe.DynamicRange != "hdr10" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "dv_metadata_strip_to_hdr10" {
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || result.Plan.EffectiveRecipe.DynamicRange != "hdr10" || len(result.Plan.Transformations) != 1 || result.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
 		t.Fatalf("result = %#v", result)
 	}
 }
@@ -420,7 +527,7 @@ func TestResolveQualityPolicyV3PreservesNonStandardSourceHeight(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3SeekedHLSCopyUsesVideoEncode(t *testing.T) {
+func TestPlanPlaybackV3SeekedHLSCopyPreservesVideo(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.Resolution = "1080p"
 	file.VideoTracks[0].Width = 1920
@@ -439,8 +546,46 @@ func TestPlanPlaybackV3SeekedHLSCopyUsesVideoEncode(t *testing.T) {
 	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = EngineCapabilityV3{}
 	req.ClientPlaybackContext.Engines[string(EngineMedia3ProgressiveRemuxV3)] = EngineCapabilityV3{}
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
-	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 || result.TargetVideoCodec != "h264" || result.Plan.DecisionReason != "seeked_hls_copy_unsafe" {
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || result.TargetVideoCodec != "copy" || result.Plan.Timeline.SourceStartSeconds != start {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestPlanPlaybackV3TimelineChangePreservesRouteIdentity(t *testing.T) {
+	file := detailedFixtureFileV3()
+	request := validStartRequestV3()
+	request.ClientFeatures = append(request.ClientFeatures, FeatureDetailedDecodeV3)
+	request.ClientPlaybackContext.Features = append(request.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	request.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	hdr := &HDRCapabilitiesV3{HDR10: true}
+	request.Capabilities.HDR = true
+	request.Capabilities.HDRDetails = hdr
+	request.ClientPlaybackContext.Output.HDRDetails = hdr
+	startAtZero := 0.0
+	request.StartPosition = &startAtZero
+	first := PlanPlaybackV3(PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+	})
+	if first.Plan == nil {
+		t.Fatalf("initial plan = %#v", first)
+	}
+
+	startAtSeek := 321.25
+	request.StartPosition = &startAtSeek
+	second := PlanPlaybackV3(PlannerInputV3{
+		Request: request, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+	})
+	if second.Plan == nil {
+		t.Fatalf("seeked plan = %#v", second)
+	}
+	if first.Plan.PlanID != second.Plan.PlanID ||
+		PlanAttemptKeyV3(*first.Plan, request.OutputRouteGeneration, nil) != PlanAttemptKeyV3(*second.Plan, request.OutputRouteGeneration, nil) {
+		t.Fatalf("timeline changed route identity: first=%#v second=%#v", first.Plan, second.Plan)
+	}
+	if first.Plan.Timeline.SourceStartSeconds != 0 || second.Plan.Timeline.SourceStartSeconds != startAtSeek {
+		t.Fatalf("timeline positions: first=%#v second=%#v", first.Plan.Timeline, second.Plan.Timeline)
 	}
 }
 
@@ -471,6 +616,6 @@ func testTransformationRegistryV3() *TransformationRegistryV3 {
 	return NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: "audio_to_aac", Available: true},
 		{Name: "video_to_h264", Available: true},
-		{Name: "dv_metadata_strip_to_hdr10", Available: true},
+		{Name: "server_dv7_to_hdr10", Available: true},
 	})
 }

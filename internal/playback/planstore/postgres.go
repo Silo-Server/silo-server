@@ -66,12 +66,12 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 		INSERT INTO playback_v3_attempts (
 			playback_attempt_id, session_id, user_id, profile_id,
 			requested_media_file_id, effective_media_file_id,
-			current_plan_id, current_plan, normalized_request, expires_at
-		) VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10)
+			current_plan_id, current_replan_request_id, current_plan, normalized_request, expires_at
+		) VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (playback_attempt_id) DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.UserID, record.ProfileID,
 		record.RequestedMediaFileID, record.EffectiveMediaFileID,
-		record.CurrentPlanID, planJSON, requestJSON, record.ExpiresAt)
+		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, requestJSON, record.ExpiresAt)
 	if err != nil {
 		return err
 	}
@@ -95,12 +95,12 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 	err := s.db.QueryRow(ctx, `
 		SELECT playback_attempt_id, session_id::text, user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
-		       current_plan_id, current_plan, normalized_request, expires_at
+		       current_plan_id, current_replan_request_id, current_plan, normalized_request, expires_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
 		&record.RequestedMediaFileID, &record.EffectiveMediaFileID,
-		&record.CurrentPlanID, &planJSON, &requestJSON, &record.ExpiresAt,
+		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &requestJSON, &record.ExpiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -117,24 +117,24 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 	return &record, nil
 }
 
-func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest string, leaseUntil time.Time) (playback.ReplanLeaseV3, error) {
+func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return playback.ReplanLeaseV3{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	var existingDigest, state string
+	var existingDigest, existingBase, state string
 	var existingLease time.Time
 	var response []byte
 	err = tx.QueryRow(ctx, `
-		SELECT request_digest, state, lease_expires_at, response
+		SELECT request_digest, base_replan_request_id, state, lease_expires_at, response
 		FROM playback_v3_replans
 		WHERE session_id = $1::uuid AND replan_request_id = $2
-		FOR UPDATE`, sessionID, requestID).Scan(&existingDigest, &state, &existingLease, &response)
+		FOR UPDATE`, sessionID, requestID).Scan(&existingDigest, &existingBase, &state, &existingLease, &response)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, err = tx.Exec(ctx, `
-			INSERT INTO playback_v3_replans (session_id, replan_request_id, request_digest, lease_expires_at)
-			VALUES ($1::uuid, $2, $3, $4)`, sessionID, requestID, digest, leaseUntil)
+			INSERT INTO playback_v3_replans (session_id, replan_request_id, request_digest, base_replan_request_id, lease_expires_at)
+			VALUES ($1::uuid, $2, $3, $4, $5)`, sessionID, requestID, digest, baseReplanRequestID, leaseUntil)
 		if err != nil {
 			return playback.ReplanLeaseV3{}, err
 		}
@@ -160,6 +160,9 @@ func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest
 			return playback.ReplanLeaseV3{}, err
 		}
 		return playback.ReplanLeaseV3{State: playback.ReplanLeaseInFlightV3}, nil
+	}
+	if existingBase != baseReplanRequestID {
+		return playback.ReplanLeaseV3{}, playback.ErrStaleReplanLeaseV3
 	}
 	_, err = tx.Exec(ctx, `UPDATE playback_v3_replans SET lease_expires_at = $3, updated_at = NOW() WHERE session_id = $1::uuid AND replan_request_id = $2`, sessionID, requestID, leaseUntil)
 	if err != nil {
@@ -188,8 +191,8 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID stri
 	attemptResult, err := tx.Exec(ctx, `
 		UPDATE playback_v3_attempts SET
 			effective_media_file_id = $2, current_plan_id = $3,
-			current_plan = $4, normalized_request = $5, expires_at = $6, updated_at = NOW()
-		WHERE session_id = $1::uuid`, sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, planJSON, requestJSON, record.ExpiresAt)
+			current_replan_request_id = $4, current_plan = $5, normalized_request = $6, expires_at = $7, updated_at = NOW()
+		WHERE session_id = $1::uuid`, sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, requestJSON, record.ExpiresAt)
 	if err != nil {
 		return err
 	}

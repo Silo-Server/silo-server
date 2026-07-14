@@ -12,9 +12,32 @@
     "bitrate_kbps": 20000,
     "dynamic_range": "hdr10",
     "subtitle_mode": "burn_in",
-    "transformations": ["hdr_to_sdr_tonemap", "audio_to_aac"],
+    "transformations": [
+      {"name": "hdr_to_sdr_tonemap", "executor": "server", "recipe_version": "1"},
+      {"name": "audio_to_aac", "executor": "server", "recipe_version": "1"}
+    ],
     "output_route_generation": 7,
     "local_mutations": ["transport_reopen", "pcm:truehd:8"],
-    "expected": "v3:1194a7441ef67486"
+    "expected": "v3:6d4724f01b6ff692"
+  },
+  {
+    "name": "direct_client_dv81_executor_and_version",
+    "plan_id": "plan:dv81-fixture",
+    "delivery": "original_http",
+    "stream_protocol": "http_progressive",
+    "container": "mkv",
+    "video_codec": "hevc",
+    "audio_codec": "truehd",
+    "width": 3840,
+    "height": 2160,
+    "bitrate_kbps": 65000,
+    "dynamic_range": "dolby_vision",
+    "subtitle_mode": "off",
+    "transformations": [
+      {"name": "client_dv7_to_dv81", "executor": "client", "recipe_version": "1"}
+    ],
+    "output_route_generation": 9,
+    "local_mutations": [],
+    "expected": "v3:2a88b5e686373440"
   }
 ]

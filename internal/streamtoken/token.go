@@ -46,18 +46,19 @@ type Claims struct {
 	// Reconstruction recipe — the byte-affecting encode parameters, mirroring the
 	// former playback.RecipeCard. Zero for direct/remux tokens, which reconstruct
 	// from identity alone plus the client-supplied position.
-	SourceVideoCodec   string  `json:"svc,omitempty"`
-	OutputSubdir       string  `json:"osd,omitempty"`
-	SeekSeconds        float64 `json:"seek,omitempty"`
-	SegmentDuration    int     `json:"segd,omitempty"`
-	StartSegmentNumber int     `json:"ssn,omitempty"`
-	SubtitleTrackIndex int     `json:"sti,omitempty"`
-	SubtitleBurnIn     bool    `json:"sbi,omitempty"`
-	SubtitleCodec      string  `json:"sbc,omitempty"`
-	TargetBitrateKbps  int     `json:"tbr,omitempty"`
-	TotalDuration      float64 `json:"dur,omitempty"`
-	FastStart          bool    `json:"fs,omitempty"`
-	TargetCodecAudio   string  `json:"tca,omitempty"`
+	SourceVideoCodec     string  `json:"svc,omitempty"`
+	VideoBitstreamFilter string  `json:"vbsf,omitempty"`
+	OutputSubdir         string  `json:"osd,omitempty"`
+	SeekSeconds          float64 `json:"seek,omitempty"`
+	SegmentDuration      int     `json:"segd,omitempty"`
+	StartSegmentNumber   int     `json:"ssn,omitempty"`
+	SubtitleTrackIndex   int     `json:"sti,omitempty"`
+	SubtitleBurnIn       bool    `json:"sbi,omitempty"`
+	SubtitleCodec        string  `json:"sbc,omitempty"`
+	TargetBitrateKbps    int     `json:"tbr,omitempty"`
+	TotalDuration        float64 `json:"dur,omitempty"`
+	FastStart            bool    `json:"fs,omitempty"`
+	TargetCodecAudio     string  `json:"tca,omitempty"`
 
 	// Recipe staleness hint, bumped on each re-mint after a recipe mutation
 	// (audio/quality/seek switch). An optional client-side hint only.

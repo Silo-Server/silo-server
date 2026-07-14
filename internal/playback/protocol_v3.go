@@ -11,13 +11,23 @@ import (
 )
 
 const (
-	ProtocolV3               = 3
-	FeaturePlaybackPlanV3    = "playback_plan_v3"
-	FeatureMedia3Only        = "media3_only"
-	FeatureDetailedDecodeV3  = "detailed_decode_capabilities"
-	FeatureLayoutPassthrough = "layout_aware_passthrough"
-	FeatureRouteDiagnostics  = "playback_route_diagnostics"
-	PlanRecipeVersionV3      = "v3.1"
+	ProtocolV3                    = 3
+	FeaturePlaybackPlanV3         = "playback_plan_v3"
+	FeatureMedia3Only             = "media3_only"
+	FeatureDetailedDecodeV3       = "detailed_decode_capabilities"
+	FeatureLayoutPassthrough      = "layout_aware_passthrough"
+	FeatureClientVideoTransforms  = "client_video_transformations_v1"
+	FeatureRouteDiagnostics       = "playback_route_diagnostics"
+	FeatureDeviceQuirksV3         = "device_quirks_v1"
+	FeatureSeekReanchorV3         = "seek_reanchor_v1"
+	PlanRecipeVersionV3           = "v3.2"
+	ClientDV7ToDV81V3             = "client_dv7_to_dv81"
+	ClientDV7ToHDR10V3            = "client_dv7_to_hdr10"
+	ClientDVTransformVersionV3    = "1"
+	ClientDV8HDR10PlusSanitizerV3 = "client_dv8_hdr10plus_sanitizer_v1"
+	ClientPostResumeRecoveryV3    = "client_post_resume_video_recovery_v1"
+	ClientSurfaceRecoveryV3       = "client_surface_recovery_v1"
+	DeviceQuirkRegistryRevisionV3 = "2026-07-13.1"
 )
 
 type DecisionOutcomeV3 string
@@ -146,6 +156,7 @@ type AudioPassthroughEntryV3 struct {
 
 type VideoDecodeCapabilityV3 struct {
 	Codec          string   `json:"codec"`
+	DecoderName    string   `json:"decoder_name,omitempty"`
 	Profiles       []string `json:"profiles,omitempty"`
 	Levels         []int    `json:"levels,omitempty"`
 	BitDepths      []int    `json:"bit_depths,omitempty"`
@@ -169,16 +180,25 @@ type ClientCodecCapabilitiesV3 struct {
 }
 
 type DeviceContextV3 struct {
-	Manufacturer string   `json:"manufacturer,omitempty"`
-	Model        string   `json:"model,omitempty"`
-	SDKInt       int      `json:"sdk_int,omitempty"`
-	ABIs         []string `json:"abis,omitempty"`
+	Manufacturer    string   `json:"manufacturer,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Brand           string   `json:"brand,omitempty"`
+	Device          string   `json:"device,omitempty"`
+	Product         string   `json:"product,omitempty"`
+	SoCManufacturer string   `json:"soc_manufacturer,omitempty"`
+	SoCModel        string   `json:"soc_model,omitempty"`
+	BuildID         string   `json:"build_id,omitempty"`
+	BuildDisplay    string   `json:"build_display,omitempty"`
+	SecurityPatch   string   `json:"security_patch,omitempty"`
+	SDKInt          int      `json:"sdk_int,omitempty"`
+	ABIs            []string `json:"abis,omitempty"`
 }
 
 type OutputContextV3 struct {
 	HDRDetails            *HDRCapabilitiesV3  `json:"hdr_details,omitempty"`
 	AudioPassthrough      *AudioPassthroughV3 `json:"audio_passthrough,omitempty"`
 	CurrentSink           string              `json:"current_sink,omitempty"`
+	SinkType              string              `json:"sink_type,omitempty"`
 	OutputRouteGeneration int64               `json:"output_route_generation"`
 }
 
@@ -205,6 +225,7 @@ type EngineCapabilityV3 struct {
 	Features               []string                     `json:"features"`
 	AuthHeaderRefresh      bool                         `json:"auth_header_refresh"`
 	ValidatedClaims        []string                     `json:"validated_claims"`
+	Transformations        []TransformationV3           `json:"transformations"`
 }
 
 type ClientPlaybackContextV3 struct {
@@ -255,8 +276,17 @@ type FailureV3 struct {
 	DecoderName    string `json:"decoder_name,omitempty"`
 }
 
+type ReplanOperationV3 string
+
+const (
+	ReplanOperationFailureRecoveryV3     ReplanOperationV3 = "failure_recovery"
+	ReplanOperationSeekReanchorV3        ReplanOperationV3 = "seek_reanchor"
+	ReplanOperationSeekFailureRecoveryV3 ReplanOperationV3 = "seek_failure_recovery"
+)
+
 type ReplanRequestV3 struct {
 	ProtocolVersion       int                       `json:"protocol_version"`
+	Operation             ReplanOperationV3         `json:"operation,omitempty"`
 	PlaybackAttemptID     string                    `json:"playback_attempt_id"`
 	ReplanRequestID       string                    `json:"replan_request_id"`
 	FailedPlanID          string                    `json:"failed_plan_id"`
@@ -273,6 +303,17 @@ type ReplanRequestV3 struct {
 	ClientPlaybackContext ClientPlaybackContextV3   `json:"client_playback_context"`
 }
 
+// EffectiveOperation keeps clients which predate the explicit operation field
+// on the ordinary failure-recovery path. Seek operations are deliberately
+// opt-in because both pin the current media version and user intent; an exact
+// reanchor also preserves the current route instead of walking the ladder.
+func (r ReplanRequestV3) EffectiveOperation() ReplanOperationV3 {
+	if r.Operation == "" {
+		return ReplanOperationFailureRecoveryV3
+	}
+	return r.Operation
+}
+
 type RouteEventV3 struct {
 	ProtocolVersion       int               `json:"protocol_version"`
 	PlaybackAttemptID     string            `json:"playback_attempt_id"`
@@ -283,6 +324,8 @@ type RouteEventV3 struct {
 	Event                 string            `json:"event"`
 	FailureClassification string            `json:"failure_classification,omitempty"`
 	FallbackReason        string            `json:"fallback_reason,omitempty"`
+	AppliedQuirkIDs       []string          `json:"applied_quirk_ids,omitempty"`
+	QuirkRegistryRevision string            `json:"quirk_registry_revision,omitempty"`
 	OutputRouteGeneration int64             `json:"output_route_generation"`
 	Diagnostics           map[string]string `json:"diagnostics"`
 }
@@ -332,6 +375,7 @@ type SourceDescriptorV3 struct {
 	FrameRate          float64            `json:"frame_rate,omitempty"`
 	BitrateKbps        int                `json:"bitrate_kbps,omitempty"`
 	DynamicRange       string             `json:"dynamic_range,omitempty"`
+	HDR10Plus          bool               `json:"hdr10_plus"`
 	DVProfile          int                `json:"dolby_vision_profile,omitempty"`
 	DVBLCompatID       int                `json:"dv_bl_compat_id,omitempty"`
 	DVEnhancementLayer EnhancementLayerV3 `json:"dv_enhancement_layer"`
@@ -384,7 +428,16 @@ type SubtitleDecisionV3 struct {
 
 type TransformationV3 struct {
 	Name            string   `json:"name"`
+	Executor        string   `json:"executor"`
+	RecipeVersion   string   `json:"recipe_version"`
 	ValidatedClaims []string `json:"validated_claims"`
+}
+
+type AppliedQuirkV3 struct {
+	ID               string `json:"id"`
+	RegistryRevision string `json:"registry_revision"`
+	Action           string `json:"action"`
+	Reason           string `json:"reason,omitempty"`
 }
 
 type DegradationWarningV3 struct {
@@ -406,6 +459,8 @@ type PlanV3 struct {
 	Claims                 ValidationClaimsV3     `json:"claims"`
 	Subtitle               SubtitleDecisionV3     `json:"subtitle"`
 	Transformations        []TransformationV3     `json:"transformations"`
+	AppliedQuirks          []AppliedQuirkV3       `json:"applied_quirks"`
+	RuntimeCorrections     []string               `json:"runtime_corrections"`
 	DegradationWarnings    []DegradationWarningV3 `json:"degradation_warnings"`
 	DecisionReason         string                 `json:"decision_reason"`
 	RequestedMediaFileID   int                    `json:"requested_media_file_id"`
@@ -522,8 +577,20 @@ func (r ReplanRequestV3) Validate() error {
 	if r.OutputRouteGeneration < 0 || r.ClientPlaybackContext.Output.OutputRouteGeneration != r.OutputRouteGeneration {
 		return errors.New("invalid output route generation")
 	}
-	if len(r.AttemptedPlanKeys) > 16 || len(r.Failure.Classification) == 0 || len(r.Failure.Classification) > 64 || len(r.Failure.Message) > 512 || len(r.Failure.DecoderName) > 128 || !isFiniteV3(r.PositionSeconds) || r.PositionSeconds < 0 || r.PositionSeconds > 31_536_000 {
+	if len(r.AttemptedPlanKeys) > 16 || len(r.Failure.Classification) > 64 || len(r.Failure.Message) > 512 || len(r.Failure.DecoderName) > 128 || !isFiniteV3(r.PositionSeconds) || r.PositionSeconds < 0 || r.PositionSeconds > 31_536_000 {
 		return errors.New("replan bounds exceeded")
+	}
+	switch r.EffectiveOperation() {
+	case ReplanOperationFailureRecoveryV3, ReplanOperationSeekFailureRecoveryV3:
+		if r.Failure.Classification == "" {
+			return errors.New("failure recovery requires a failure classification")
+		}
+	case ReplanOperationSeekReanchorV3:
+		// An exact seek reanchor is a timeline operation, not a failed recipe.
+		// Classification remains accepted for older callers but is not required
+		// and never selects seek semantics.
+	default:
+		return errors.New("invalid replan operation")
 	}
 	for _, key := range r.AttemptedPlanKeys {
 		if len(key) > 128 || !strings.HasPrefix(key, "v3:") {
@@ -534,8 +601,18 @@ func (r ReplanRequestV3) Validate() error {
 }
 
 func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3) error {
-	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Features) > 64 || len(ctx.Engines) > 16 || len(ctx.Device.ABIs) > 16 || len(ctx.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 || len(ctx.Device.Manufacturer) > 128 || len(ctx.Device.Model) > 128 {
+	if len(c.CodecsVideo) > 64 || len(c.CodecsVideoHardware) > 64 || len(c.CodecsAudio) > 64 || len(c.Containers) > 64 || len(c.VideoDecode) > 64 || len(ctx.Features) > 64 || len(ctx.Engines) > 16 || len(ctx.Device.ABIs) > 16 || len(ctx.Platform) > 32 || len(ctx.FormFactor) > 32 || len(ctx.AppVersion) > 64 {
 		return errors.New("capability list exceeds supported size")
+	}
+	deviceValues := []string{
+		ctx.Device.Manufacturer, ctx.Device.Model, ctx.Device.Brand, ctx.Device.Device,
+		ctx.Device.Product, ctx.Device.SoCManufacturer, ctx.Device.SoCModel, ctx.Device.BuildID,
+		ctx.Device.BuildDisplay, ctx.Device.SecurityPatch, ctx.Output.CurrentSink, ctx.Output.SinkType,
+	}
+	for _, value := range deviceValues {
+		if len(value) > 128 {
+			return errors.New("device capability value exceeds supported size")
+		}
 	}
 	for _, values := range [][]string{c.CodecsVideo, c.CodecsVideoHardware, c.CodecsAudio, c.Containers, ctx.Features} {
 		for i := range values {
@@ -547,14 +624,43 @@ func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackCon
 	}
 	for i := range c.VideoDecode {
 		c.VideoDecode[i].Codec = strings.ToLower(strings.TrimSpace(c.VideoDecode[i].Codec))
-		if c.VideoDecode[i].Codec == "" || c.VideoDecode[i].MaxWidth < 0 || c.VideoDecode[i].MaxHeight < 0 || c.VideoDecode[i].MaxFrameRate < 0 || c.VideoDecode[i].MaxBitrateKbps < 0 {
+		if c.VideoDecode[i].Codec == "" || len(c.VideoDecode[i].DecoderName) > 128 || c.VideoDecode[i].MaxWidth < 0 || c.VideoDecode[i].MaxHeight < 0 || c.VideoDecode[i].MaxFrameRate < 0 || c.VideoDecode[i].MaxBitrateKbps < 0 {
 			return errors.New("invalid detailed video capability")
 		}
 	}
 	for name, engine := range ctx.Engines {
-		if len(name) > 64 || len(engine.Containers) > 64 || len(engine.VideoCodecs) > 64 || len(engine.AudioDecodeCodecs) > 64 || len(engine.AudioPassthroughCodecs) > 64 || len(engine.Features) > 64 || len(engine.ValidatedClaims) > 64 {
+		if len(name) > 64 || len(engine.Containers) > 64 || len(engine.VideoCodecs) > 64 || len(engine.AudioDecodeCodecs) > 64 || len(engine.AudioPassthroughCodecs) > 64 || len(engine.Features) > 64 || len(engine.ValidatedClaims) > 64 || len(engine.Transformations) > 16 {
 			return errors.New("engine capability exceeds supported size")
 		}
+		seenTransformations := make(map[string]struct{}, len(engine.Transformations))
+		for i := range engine.Transformations {
+			transformation := &engine.Transformations[i]
+			transformation.Name = strings.ToLower(strings.TrimSpace(transformation.Name))
+			transformation.Executor = strings.ToLower(strings.TrimSpace(transformation.Executor))
+			transformation.RecipeVersion = strings.TrimSpace(transformation.RecipeVersion)
+			if transformation.Name == "" || len(transformation.Name) > 64 ||
+				(transformation.Executor != "client" && transformation.Executor != "server") ||
+				transformation.RecipeVersion == "" || len(transformation.RecipeVersion) > 32 ||
+				len(transformation.ValidatedClaims) > 32 {
+				return errors.New("invalid engine transformation capability")
+			}
+			if transformation.Executor == "client" {
+				if !engine.Enabled || !engine.SupportedOnDevice || !HasFeatureV3(ctx.Features, FeatureClientVideoTransforms) {
+					return errors.New("client transformation capability is not enabled")
+				}
+			}
+			key := transformation.Executor + ":" + transformation.Name + ":" + transformation.RecipeVersion
+			if _, exists := seenTransformations[key]; exists {
+				return errors.New("duplicate engine transformation capability")
+			}
+			seenTransformations[key] = struct{}{}
+			for _, claim := range transformation.ValidatedClaims {
+				if len(claim) > 128 {
+					return errors.New("transformation claim exceeds supported size")
+				}
+			}
+		}
+		ctx.Engines[name] = engine
 	}
 	for _, abi := range ctx.Device.ABIs {
 		if len(abi) > 64 {
@@ -607,7 +713,7 @@ func HasFeatureV3(features []string, wanted string) bool {
 func NewTerminalResponseV3(reason, message string, retryable bool) DecisionResponseV3 {
 	return DecisionResponseV3{
 		ProtocolVersion: ProtocolV3,
-		ServerFeatures:  []string{FeaturePlaybackPlanV3, FeatureMedia3Only},
+		ServerFeatures:  []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDeviceQuirksV3, FeatureSeekReanchorV3},
 		Outcome:         OutcomeAdaptationUnavailableV3,
 		Terminal:        &TerminalV3{Reason: reason, Message: message, Retryable: retryable},
 	}

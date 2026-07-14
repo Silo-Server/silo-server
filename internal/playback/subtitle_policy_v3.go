@@ -2,7 +2,6 @@ package playback
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -53,7 +52,8 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 	engine := request.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
 	text := isTextSubtitleV3(codec)
 	ass := IsASS(codec)
-	bitmap := IsPGS(codec) || strings.Contains(strings.ToLower(codec), "dvd") || strings.Contains(strings.ToLower(codec), "dvb")
+	clientBitmap := isClientRenderableBitmapSubtitleV3(codec)
+	burnInBitmap := clientBitmap || normalizeCodecV3(codec) == "dvb_teletext"
 	if text {
 		renderable := source != "embedded" && engine.Subtitles.SidecarText || source == "embedded" && engine.Subtitles.EmbeddedText
 		if ass && request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3 {
@@ -74,7 +74,7 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 			}
 		}
 	}
-	if bitmap {
+	if clientBitmap {
 		sidecar := source != "embedded" && engine.Subtitles.SidecarBitmap || source == "embedded" && engine.Subtitles.EmbeddedBitmap
 		if sidecar {
 			return SubtitlePolicyResultV3{
@@ -90,7 +90,7 @@ func ResolveSubtitlePolicyV3(file *models.MediaFile, request StartRequestV3, tra
 		}
 		return SubtitlePolicyResultV3{
 			Decision:     SubtitleDecisionV3{Mode: SubtitleBurnInV3, TrackID: trackID},
-			Claims:       SubtitleClaimsV3{BitmapOverlay: bitmap, Reason: "server_burn_in_required"},
+			Claims:       SubtitleClaimsV3{BitmapOverlay: burnInBitmap, Reason: "server_burn_in_required"},
 			RequiresBurn: true, SelectedIndex: index, TransportIndex: transportIndex, Codec: codec, Source: source,
 		}
 	}
@@ -115,7 +115,17 @@ func subtitleCodecAtCombinedIndexV3(file *models.MediaFile, index int, additiona
 
 func isTextSubtitleV3(codec string) bool {
 	switch normalizeCodecV3(codec) {
-	case "srt", "subrip", "vtt", "webvtt", "ass", "ssa", "mov_text", "tx3g":
+	case "srt", "subrip", "vtt", "webvtt", "ass", "ssa", "mov_text", "tx3g",
+		"eia_608", "eia608", "cea_608", "cea608":
+		return true
+	default:
+		return false
+	}
+}
+
+func isClientRenderableBitmapSubtitleV3(codec string) bool {
+	switch normalizeCodecV3(codec) {
+	case "pgs", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "vobsub":
 		return true
 	default:
 		return false

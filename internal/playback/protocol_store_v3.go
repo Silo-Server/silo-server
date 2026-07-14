@@ -11,18 +11,20 @@ import (
 
 var ErrIdempotencyKeyReusedV3 = errors.New("idempotency key reused")
 var ErrPlaybackAttemptExistsV3 = errors.New("playback attempt already exists")
+var ErrStaleReplanLeaseV3 = errors.New("stale replan lease")
 
 type AttemptRecordV3 struct {
-	PlaybackAttemptID    string
-	SessionID            string
-	UserID               int
-	ProfileID            string
-	RequestedMediaFileID int
-	EffectiveMediaFileID int
-	CurrentPlanID        string
-	CurrentPlan          PlanV3
-	NormalizedRequest    StartRequestV3
-	ExpiresAt            time.Time
+	PlaybackAttemptID      string
+	SessionID              string
+	UserID                 int
+	ProfileID              string
+	RequestedMediaFileID   int
+	EffectiveMediaFileID   int
+	CurrentPlanID          string
+	CurrentReplanRequestID string
+	CurrentPlan            PlanV3
+	NormalizedRequest      StartRequestV3
+	ExpiresAt              time.Time
 }
 
 type RouteEventRecordV3 struct {
@@ -52,7 +54,7 @@ type PlanStoreV3 interface {
 	SaveAttempt(context.Context, AttemptRecordV3) error
 	GetAttempt(context.Context, string) (*AttemptRecordV3, error)
 	GetAttemptByPlaybackAttemptID(context.Context, string) (*AttemptRecordV3, error)
-	BeginReplan(context.Context, string, string, string, time.Time) (ReplanLeaseV3, error)
+	BeginReplan(context.Context, string, string, string, string, time.Time) (ReplanLeaseV3, error)
 	CompleteReplan(context.Context, string, string, json.RawMessage, AttemptRecordV3) error
 	RecordRouteEvent(context.Context, RouteEventRecordV3) error
 	CleanupExpired(context.Context, time.Time) (int64, error)
@@ -60,6 +62,7 @@ type PlanStoreV3 interface {
 
 type memoryReplanV3 struct {
 	digest    string
+	base      string
 	lease     time.Time
 	completed bool
 	response  json.RawMessage
@@ -115,13 +118,13 @@ func (s *MemoryPlanStoreV3) GetAttempt(_ context.Context, sessionID string) (*At
 	return &copy, nil
 }
 
-func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID, digest string, leaseUntil time.Time) (ReplanLeaseV3, error) {
+func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (ReplanLeaseV3, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := sessionID + ":" + requestID
 	existing, ok := s.replans[key]
 	if !ok {
-		s.replans[key] = memoryReplanV3{digest: digest, lease: leaseUntil}
+		s.replans[key] = memoryReplanV3{digest: digest, base: baseReplanRequestID, lease: leaseUntil}
 		return ReplanLeaseV3{State: ReplanLeaseOwnedV3}, nil
 	}
 	if existing.digest != digest {
@@ -132,6 +135,9 @@ func (s *MemoryPlanStoreV3) BeginReplan(_ context.Context, sessionID, requestID,
 	}
 	if time.Now().Before(existing.lease) {
 		return ReplanLeaseV3{State: ReplanLeaseInFlightV3}, nil
+	}
+	if existing.base != baseReplanRequestID {
+		return ReplanLeaseV3{}, ErrStaleReplanLeaseV3
 	}
 	existing.lease = leaseUntil
 	s.replans[key] = existing

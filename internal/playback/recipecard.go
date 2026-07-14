@@ -34,24 +34,25 @@ type RecipeCard struct {
 
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
 	// Unused (zero) for direct/remux cards, which carry no segment-based encode.
-	InputPath          string  `json:"input_path"`
-	OutputSubdir       string  `json:"output_subdir,omitempty"`
-	SourceVideoCodec   string  `json:"source_video_codec,omitempty"`
-	SeekSeconds        float64 `json:"seek_seconds"`
-	TargetResolution   string  `json:"target_resolution,omitempty"`
-	TargetCodecVideo   string  `json:"target_codec_video,omitempty"`
-	TargetCodecAudio   string  `json:"target_codec_audio,omitempty"`
-	SegmentDuration    int     `json:"segment_duration"`
-	StartSegmentNumber int     `json:"start_segment_number"`
-	HWAccel            string  `json:"hw_accel,omitempty"`
-	HWDevice           string  `json:"hw_device,omitempty"`
-	SubtitleTrackIndex int     `json:"subtitle_track_index"`
-	SubtitleBurnIn     bool    `json:"subtitle_burn_in,omitempty"`
-	SubtitleCodec      string  `json:"subtitle_codec,omitempty"`
-	AudioTrackIndex    int     `json:"audio_track_index"`
-	TargetBitrateKbps  int     `json:"target_bitrate_kbps,omitempty"`
-	TotalDuration      float64 `json:"total_duration"`
-	FastStart          bool    `json:"fast_start,omitempty"`
+	InputPath            string  `json:"input_path"`
+	OutputSubdir         string  `json:"output_subdir,omitempty"`
+	SourceVideoCodec     string  `json:"source_video_codec,omitempty"`
+	VideoBitstreamFilter string  `json:"video_bitstream_filter,omitempty"`
+	SeekSeconds          float64 `json:"seek_seconds"`
+	TargetResolution     string  `json:"target_resolution,omitempty"`
+	TargetCodecVideo     string  `json:"target_codec_video,omitempty"`
+	TargetCodecAudio     string  `json:"target_codec_audio,omitempty"`
+	SegmentDuration      int     `json:"segment_duration"`
+	StartSegmentNumber   int     `json:"start_segment_number"`
+	HWAccel              string  `json:"hw_accel,omitempty"`
+	HWDevice             string  `json:"hw_device,omitempty"`
+	SubtitleTrackIndex   int     `json:"subtitle_track_index"`
+	SubtitleBurnIn       bool    `json:"subtitle_burn_in,omitempty"`
+	SubtitleCodec        string  `json:"subtitle_codec,omitempty"`
+	AudioTrackIndex      int     `json:"audio_track_index"`
+	TargetBitrateKbps    int     `json:"target_bitrate_kbps,omitempty"`
+	TotalDuration        float64 `json:"total_duration"`
+	FastStart            bool    `json:"fast_start,omitempty"`
 }
 
 // NewRecipeCard builds a RecipeCard from the durable identity fields plus the
@@ -71,6 +72,7 @@ func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeU
 		InputPath:            opts.InputPath,
 		OutputSubdir:         opts.OutputSubdir,
 		SourceVideoCodec:     opts.SourceVideoCodec,
+		VideoBitstreamFilter: opts.VideoBitstreamFilter,
 		SeekSeconds:          opts.SeekSeconds,
 		TargetResolution:     opts.TargetResolution,
 		TargetCodecVideo:     opts.TargetCodecVideo,
@@ -134,6 +136,7 @@ func (c RecipeCard) TranscodeOpts(outputDir, ffmpegPath string, logSink FFmpegLo
 		SessionID:            c.SessionID,
 		TranscodeTransportID: c.TranscodeTransportID,
 		SourceVideoCodec:     c.SourceVideoCodec,
+		VideoBitstreamFilter: c.VideoBitstreamFilter,
 		SeekSeconds:          c.SeekSeconds,
 		TargetResolution:     c.TargetResolution,
 		TargetCodecVideo:     c.TargetCodecVideo,
@@ -186,6 +189,7 @@ func (c RecipeCard) ToClaims() streamtoken.Claims {
 		ProfileID:            c.ProfileID,
 		MediaFileID:          c.MediaFileID,
 		SourceVideoCodec:     c.SourceVideoCodec,
+		VideoBitstreamFilter: c.VideoBitstreamFilter,
 		SeekSeconds:          c.SeekSeconds,
 		SegmentDuration:      c.SegmentDuration,
 		StartSegmentNumber:   c.StartSegmentNumber,
@@ -224,6 +228,7 @@ func RecipeCardFromClaims(c *streamtoken.Claims) RecipeCard {
 		InputPath:            c.MediaPath,
 		OutputSubdir:         c.OutputSubdir,
 		SourceVideoCodec:     c.SourceVideoCodec,
+		VideoBitstreamFilter: c.VideoBitstreamFilter,
 		SeekSeconds:          c.SeekSeconds,
 		TargetResolution:     c.TargetRes,
 		TargetCodecVideo:     c.TargetCodec,

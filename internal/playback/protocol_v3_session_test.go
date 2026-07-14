@@ -79,23 +79,64 @@ func TestMemoryPlanStoreV3StartAndReplanIdempotency(t *testing.T) {
 	if err := store.SaveAttempt(context.Background(), duplicate); !errors.Is(err, ErrPlaybackAttemptExistsV3) {
 		t.Fatalf("duplicate start error = %v", err)
 	}
-	lease, err := store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", time.Now().Add(time.Minute))
+	lease, err := store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
 	if err != nil || lease.State != ReplanLeaseOwnedV3 {
 		t.Fatalf("first lease = %#v, err=%v", lease, err)
 	}
-	lease, err = store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", time.Now().Add(time.Minute))
+	lease, err = store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
 	if err != nil || lease.State != ReplanLeaseInFlightV3 {
 		t.Fatalf("in-flight lease = %#v, err=%v", lease, err)
 	}
-	if _, err := store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-b", time.Now().Add(time.Minute)); !errors.Is(err, ErrIdempotencyKeyReusedV3) {
+	if _, err := store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-b", record.CurrentReplanRequestID, time.Now().Add(time.Minute)); !errors.Is(err, ErrIdempotencyKeyReusedV3) {
 		t.Fatalf("digest conflict = %v", err)
 	}
 	response := json.RawMessage(`{"protocol_version":3}`)
 	if err := store.CompleteReplan(context.Background(), record.SessionID, "replan-0001", response, record); err != nil {
 		t.Fatal(err)
 	}
-	lease, err = store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", time.Now().Add(time.Minute))
+	lease, err = store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
 	if err != nil || lease.State != ReplanLeaseCompletedV3 || string(lease.Response) != string(response) {
 		t.Fatalf("completed lease = %#v, err=%v", lease, err)
+	}
+}
+
+func TestMemoryPlanStoreV3RejectsExpiredLeaseAfterNewerCommit(t *testing.T) {
+	store := NewMemoryPlanStoreV3()
+	record := AttemptRecordV3{
+		PlaybackAttemptID:      "attempt-stale-lease",
+		SessionID:              "session-stale-lease",
+		UserID:                 1,
+		ProfileID:              "profile-1",
+		CurrentPlanID:          "plan-same",
+		CurrentReplanRequestID: "replan-base",
+		ExpiresAt:              time.Now().Add(time.Hour),
+	}
+	if err := store.SaveAttempt(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	if lease, err := store.BeginReplan(
+		context.Background(), record.SessionID, "replan-abandoned", "digest-a",
+		record.CurrentReplanRequestID, time.Now().Add(-time.Second),
+	); err != nil || lease.State != ReplanLeaseOwnedV3 {
+		t.Fatalf("abandoned lease = %#v, err=%v", lease, err)
+	}
+	if lease, err := store.BeginReplan(
+		context.Background(), record.SessionID, "replan-newer", "digest-b",
+		record.CurrentReplanRequestID, time.Now().Add(time.Minute),
+	); err != nil || lease.State != ReplanLeaseOwnedV3 {
+		t.Fatalf("newer lease = %#v, err=%v", lease, err)
+	}
+	record.CurrentReplanRequestID = "replan-newer"
+	if err := store.CompleteReplan(
+		context.Background(), record.SessionID, "replan-newer",
+		json.RawMessage(`{"protocol_version":3}`), record,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginReplan(
+		context.Background(), record.SessionID, "replan-abandoned", "digest-a",
+		record.CurrentReplanRequestID, time.Now().Add(time.Minute),
+	); !errors.Is(err, ErrStaleReplanLeaseV3) {
+		t.Fatalf("expired stale lease error = %v", err)
 	}
 }

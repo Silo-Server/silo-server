@@ -36,6 +36,7 @@ type TranscodeOpts struct {
 	TranscodeTransportID string
 	SessionID            string
 	SourceVideoCodec     string
+	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_split=mode=bl
 	SeekSeconds          float64
 	TargetResolution     string // e.g., 1080p, 720p
 	TargetCodecVideo     string // e.g., h264 (or hevc if allowed)
@@ -60,6 +61,8 @@ type TranscodeOpts struct {
 	ExecutionMode     string
 	FFmpegLogSink     FFmpegLogSink
 }
+
+const DV7ToHDR10BitstreamFilter = "dovi_split=mode=bl"
 
 // TranscodeSession manages a running ffmpeg HLS transcode process.
 type TranscodeSession struct {
@@ -146,6 +149,10 @@ const (
 
 // StartTranscode launches an ffmpeg process that produces HLS segments.
 func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+	if opts.VideoBitstreamFilter != "" &&
+		(opts.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter || !strings.EqualFold(opts.TargetCodecVideo, "copy")) {
+		return nil, fmt.Errorf("unsupported video bitstream filter recipe")
+	}
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
 	}
@@ -294,6 +301,9 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// Video codec and encoding settings.
 	if isVideoCopy {
 		args = append(args, "-c:v", "copy")
+		if opts.VideoBitstreamFilter == DV7ToHDR10BitstreamFilter {
+			args = append(args, "-bsf:v", opts.VideoBitstreamFilter)
+		}
 	} else {
 		args = appendVideoArgs(args, opts)
 	}
