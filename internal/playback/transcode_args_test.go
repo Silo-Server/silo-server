@@ -96,7 +96,7 @@ func TestBuildFFmpegArgs_CopyVideoAppliesValidatedBitstreamFilter(t *testing.T) 
 	})
 
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "-c:v copy -bsf:v dovi_split=mode=bl") {
+	if !strings.Contains(joined, "-c:v copy -bsf:v dovi_rpu=strip=1") {
 		t.Fatalf("copy-video args should apply the validated DV bitstream filter: %s", joined)
 	}
 }

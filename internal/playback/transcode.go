@@ -36,7 +36,7 @@ type TranscodeOpts struct {
 	TranscodeTransportID string
 	SessionID            string
 	SourceVideoCodec     string
-	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_split=mode=bl
+	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
 	SeekSeconds          float64
 	TargetResolution     string // e.g., 1080p, 720p
 	TargetCodecVideo     string // e.g., h264 (or hevc if allowed)
@@ -62,7 +62,9 @@ type TranscodeOpts struct {
 	FFmpegLogSink     FFmpegLogSink
 }
 
-const DV7ToHDR10BitstreamFilter = "dovi_split=mode=bl"
+// DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
+// copy-mode HLS remux; the enhancement layer is dropped by stream mapping.
+const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1"
 
 // TranscodeSession manages a running ffmpeg HLS transcode process.
 type TranscodeSession struct {

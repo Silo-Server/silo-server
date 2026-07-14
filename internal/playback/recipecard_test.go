@@ -13,7 +13,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 		OutputDir:            "/tmp/silo-transcode/abc",
 		SessionID:            "abc",
 		SourceVideoCodec:     "hevc",
-		VideoBitstreamFilter: "dovi_split=mode=bl",
+		VideoBitstreamFilter: "dovi_rpu=strip=1",
 		SeekSeconds:          900,
 		TargetResolution:     "1080p",
 		TargetCodecVideo:     "h264",
@@ -56,7 +56,7 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	if got.TargetCodecVideo != "h264" || got.TargetBitrateKbps != 8000 {
 		t.Errorf("encode params wrong: %+v", got)
 	}
-	if got.VideoBitstreamFilter != "dovi_split=mode=bl" {
+	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
 		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
 	}
 	if got.FFmpegPath != "/usr/bin/ffmpeg" {
@@ -104,7 +104,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 		InputPath:            "/media/movie.mkv",
 		SessionID:            "abc",
 		SourceVideoCodec:     "hevc",
-		VideoBitstreamFilter: "dovi_split=mode=bl",
+		VideoBitstreamFilter: "dovi_rpu=strip=1",
 		SeekSeconds:          900,
 		TargetResolution:     "1080p",
 		TargetCodecVideo:     "h264",
