@@ -131,6 +131,17 @@ func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTransc
 	return plan
 }
 
+// ReleaseSession removes a provisional node reservation when playback setup
+// fails or falls back locally before a node health report can account for it.
+func (p *Planner) ReleaseSession(sessionID string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	delete(p.reserved, sessionID)
+	p.mu.Unlock()
+}
+
 // groupHealth reports, for every group label present in either pool, whether
 // all of its enabled members are healthy. Pools only hold enabled nodes, so
 // disabled nodes never count against a group.

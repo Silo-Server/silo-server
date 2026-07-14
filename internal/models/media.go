@@ -153,31 +153,78 @@ func (f *MediaFile) PrimaryDVProfile() int {
 	return f.VideoTracks[0].DVProfile
 }
 
+// NormalizeVideoBitDepth returns an explicit probe value when available and
+// otherwise derives the bit depth from stable ffprobe fields. FFprobe commonly
+// omits bits_per_raw_sample for HEVC even though the pixel format and profile
+// are conclusive (for example yuv420p10le / Main 10).
+func NormalizeVideoBitDepth(explicit int, pixelFormat, profile string) int {
+	if explicit > 0 {
+		return explicit
+	}
+
+	pixelFormat = strings.ToLower(strings.TrimSpace(pixelFormat))
+	for _, candidate := range []struct {
+		markers []string
+		depth   int
+	}{
+		{markers: []string{"p016", "p16", "gray16", "16le", "16be"}, depth: 16},
+		{markers: []string{"p014", "p14", "gray14", "14le", "14be"}, depth: 14},
+		{markers: []string{"p012", "p12", "gray12", "12le", "12be"}, depth: 12},
+		{markers: []string{"p010", "p10", "gray10", "10le", "10be"}, depth: 10},
+		{markers: []string{"p009", "p9", "gray9", "9le", "9be"}, depth: 9},
+	} {
+		for _, marker := range candidate.markers {
+			if strings.Contains(pixelFormat, marker) {
+				return candidate.depth
+			}
+		}
+	}
+
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	for _, marker := range []string{"main 12", "main12", "12-bit", "12 bit"} {
+		if strings.Contains(profile, marker) {
+			return 12
+		}
+	}
+	for _, marker := range []string{"main 10", "main10", "10-bit", "10 bit"} {
+		if strings.Contains(profile, marker) {
+			return 10
+		}
+	}
+
+	switch pixelFormat {
+	case "yuv420p", "yuv422p", "yuv444p", "yuvj420p", "yuvj422p", "yuvj444p", "nv12", "nv21", "rgb24", "bgr24":
+		return 8
+	}
+	return 0
+}
+
 // VideoTrack represents a probed video stream stored as JSONB.
 type VideoTrack struct {
-	Title           string `json:"title,omitempty"`
-	Codec           string `json:"codec,omitempty"`
-	DolbyVision     string `json:"dolby_vision,omitempty"`
-	DVProfile       int    `json:"dv_profile,omitempty"`
-	DVBLCompatID    int    `json:"dv_bl_compat_id,omitempty"`
-	DVELPresent     bool   `json:"dv_el_present,omitempty"`
-	HDR10Plus       bool   `json:"hdr10_plus,omitempty"`
-	Profile         string `json:"profile,omitempty"`
-	Level           int    `json:"level,omitempty"`
-	Width           int    `json:"width,omitempty"`
-	Height          int    `json:"height,omitempty"`
-	AspectRatio     string `json:"aspect_ratio,omitempty"`
-	Interlaced      bool   `json:"interlaced"`
-	FrameRate       string `json:"frame_rate,omitempty"`
-	Bitrate         int    `json:"bitrate,omitempty"`
-	VideoRange      string `json:"video_range,omitempty"`
-	VideoRangeType  string `json:"video_range_type,omitempty"`
-	ColorPrimaries  string `json:"color_primaries,omitempty"`
-	ColorSpace      string `json:"color_space,omitempty"`
-	ColorTransfer   string `json:"color_transfer,omitempty"`
-	BitDepth        int    `json:"bit_depth,omitempty"`
-	PixelFormat     string `json:"pixel_format,omitempty"`
-	ReferenceFrames int    `json:"reference_frames,omitempty"`
+	Title              string `json:"title,omitempty"`
+	Codec              string `json:"codec,omitempty"`
+	DolbyVision        string `json:"dolby_vision,omitempty"`
+	DVProfile          int    `json:"dv_profile,omitempty"`
+	DVBLCompatID       int    `json:"dv_bl_compat_id,omitempty"`
+	DVELPresent        bool   `json:"dv_el_present,omitempty"`
+	DVEnhancementLayer string `json:"dv_enhancement_layer,omitempty"` // none, mel, fel, unknown
+	HDR10Plus          bool   `json:"hdr10_plus,omitempty"`
+	Profile            string `json:"profile,omitempty"`
+	Level              int    `json:"level,omitempty"`
+	Width              int    `json:"width,omitempty"`
+	Height             int    `json:"height,omitempty"`
+	AspectRatio        string `json:"aspect_ratio,omitempty"`
+	Interlaced         bool   `json:"interlaced"`
+	FrameRate          string `json:"frame_rate,omitempty"`
+	Bitrate            int    `json:"bitrate,omitempty"`
+	VideoRange         string `json:"video_range,omitempty"`
+	VideoRangeType     string `json:"video_range_type,omitempty"`
+	ColorPrimaries     string `json:"color_primaries,omitempty"`
+	ColorSpace         string `json:"color_space,omitempty"`
+	ColorTransfer      string `json:"color_transfer,omitempty"`
+	BitDepth           int    `json:"bit_depth,omitempty"`
+	PixelFormat        string `json:"pixel_format,omitempty"`
+	ReferenceFrames    int    `json:"reference_frames,omitempty"`
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.

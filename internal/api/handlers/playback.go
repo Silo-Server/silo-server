@@ -176,6 +176,23 @@ type PlaybackHandler struct {
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.
 	tm *playback.TranscodeManager
+	// PlanStoreV3 owns the short-lived protocol-v3 control-plane state. Router
+	// wiring replaces the in-memory default with PostgreSQL in integrated mode.
+	PlanStoreV3          playback.PlanStoreV3
+	v3RegistryOnce       sync.Once
+	v3Registry           *playback.TransformationRegistryV3
+	v3NodeCapabilitiesMu sync.Mutex
+	v3NodeCapabilities   map[string]v3NodeCapabilityCache
+	v3EventOnce          sync.Once
+	v3EventQueue         chan playback.RouteEventRecordV3
+	v3ReplanMu           sync.Mutex
+	v3ReplanLocks        map[string]*v3ReplanLock
+	v3ReplanSlotsOnce    sync.Once
+	v3ReplanSlots        chan struct{}
+	v3EventRateMu        sync.Mutex
+	v3EventRates         map[string]v3EventRate
+	v3FlagMu             sync.Mutex
+	v3Flags              map[string]v3FlagCacheEntry
 }
 
 type PlaybackWatchScrobbler interface {
@@ -196,6 +213,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		sessionMgr:       sessionMgr,
 		realtimeCommands: make(map[string]playbackCommandRecord),
 		tm:               playback.NewTranscodeManager(),
+		PlanStoreV3:      playback.NewMemoryPlanStoreV3(),
 	}
 	if len(opts) > 0 {
 		h.fileResolver = opts[0]
@@ -649,7 +667,7 @@ func (h *PlaybackHandler) playbackStreamURL(s *playback.Session) string {
 func identityRecipeCard(s *playback.Session) playback.RecipeCard {
 	switch s.PlayMethod {
 	case playback.PlayRemux:
-		return playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex)
+		return playback.NewRemuxRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID, s.TranscodeAudio, s.AudioTrackIndex, s.RemuxDVMode)
 	default:
 		return playback.NewDirectRecipeCard(s.ID, s.UserID, s.ProfileID, s.MediaFileID)
 	}
@@ -711,6 +729,29 @@ func requestedMediaFileID(session *playback.Session) int {
 		return session.RequestedMediaFileID
 	}
 	return session.MediaFileID
+}
+
+func remoteTransportID(session *playback.Session) string {
+	if session != nil && session.TranscodeTransportID != "" {
+		return session.TranscodeTransportID
+	}
+	if session == nil {
+		return ""
+	}
+	return session.ID
+}
+
+func (h *PlaybackHandler) closeTranscodeForSession(session *playback.Session) {
+	if session == nil {
+		return
+	}
+	// Local sessions remain keyed by the public playback session. Remote v3
+	// processes use a plan-scoped transport identity so a prepared successor can
+	// coexist with its predecessor until commit.
+	h.tm.CloseTranscodeSession(session.ID, "")
+	if session.TranscodeNodeURL != "" {
+		h.tm.StopRemoteTranscode(remoteTransportID(session), session.TranscodeNodeURL)
+	}
 }
 
 func (h *PlaybackHandler) loadFileByPreferredID(
@@ -1226,7 +1267,7 @@ func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *play
 		}
 	}
 
-	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL)
+	h.closeTranscodeForSession(session)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1260,7 +1301,7 @@ func (h *PlaybackHandler) finalizeSessionAbort(ctx context.Context, session *pla
 
 	// Abort is a connection drop / non-terminal teardown — keep the recipe card
 	// so the client can reconstruct on reconnect.
-	h.tm.CloseTranscodeSession(session.ID, session.TranscodeNodeURL)
+	h.closeTranscodeForSession(session)
 	if syncNow {
 		h.syncSessionsNow(ctx, syncReason)
 	}
@@ -1358,8 +1399,36 @@ func (h *PlaybackHandler) persistAudioPreference(
 
 // --- Handler methods ---
 
-// HandleStartPlayback handles POST /playback/start.
+// HandleStartPlayback dispatches the shared start endpoint by protocol
+// envelope while preserving the exact legacy request decoder and behavior.
 func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Request) {
+	if apimw.GetUserID(r.Context()) == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxPlaybackV3BodyBytes))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	var envelope struct {
+		ProtocolVersion *int `json:"protocol_version"`
+	}
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&envelope); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+	if envelope.ProtocolVersion != nil && *envelope.ProtocolVersion == playback.ProtocolV3 {
+		h.handleStartPlaybackV3(w, r, body)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	h.handleStartPlaybackLegacy(w, r)
+}
+
+// handleStartPlaybackLegacy is the pre-v3 start implementation. Keep changes
+// to this function independent from protocol-v3 routing.
+func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -1703,6 +1772,11 @@ func (h *PlaybackHandler) HandleStartPlayback(w http.ResponseWriter, r *http.Req
 		}
 	}
 
+	if h.protocolV3ShadowEnabled(r.Context()) {
+		shadowReq := req
+		shadowReq.ProfileID = profileID
+		go h.shadowLegacyPlaybackV3(context.WithoutCancel(r.Context()), shadowReq, requestedFile, effectiveFile, audioTrackIndex, session.PlayMethod, session.TranscodeAudio, session.ID)
+	}
 	h.syncSessionsNow(r.Context(), "start")
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2163,8 +2237,12 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				// changing only the audio track. SourceVideoCodec/TotalDuration
 				// come from the file; the resolution/codec/bitrate targets and
 				// hwaccel come from the session's persisted stream state.
+				// A v3 session's node job runs under its generation-scoped
+				// transport ID; restarting under the bare session ID would
+				// spawn a duplicate job beside it.
+				restartTransportID := remoteTransportID(&updatedSession)
 				nodeReq := transcodenode.TranscodeStartRequest{
-					SessionID:          sessionID,
+					SessionID:          restartTransportID,
 					InputPath:          file.FilePath,
 					SourceVideoCodec:   file.CodecVideo,
 					SeekSeconds:        seekSeconds,
@@ -2183,6 +2261,12 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				}
 				if strings.TrimSpace(nodeReq.HWAccel) == "" {
 					nodeReq.HWAccel = h.playbackConfig().HWAccel
+				}
+				// A v3 DV strip remux carries its bitstream filter in the
+				// durable session route; dropping it here would hand the node
+				// a DV7 copy recipe that leaves dangling RPUs.
+				if updatedSession.RemuxDVMode == playback.RemuxDVStripToHDR10V3 && strings.EqualFold(nodeReq.TargetCodecVideo, "copy") {
+					nodeReq.VideoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
 				}
 
 				body, _ := json.Marshal(nodeReq)
@@ -2220,22 +2304,24 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				}
 
 				card := playback.NewRecipeCard(updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID, nodeURL, playback.TranscodeOpts{
-					InputPath:          nodeReq.InputPath,
-					SessionID:          nodeReq.SessionID,
-					SourceVideoCodec:   nodeReq.SourceVideoCodec,
-					SeekSeconds:        nodeReq.SeekSeconds,
-					StartSegmentNumber: nodeReq.StartSegmentNumber,
-					TargetResolution:   nodeReq.TargetResolution,
-					TargetCodecVideo:   nodeReq.TargetCodecVideo,
-					TargetCodecAudio:   nodeReq.TargetCodecAudio,
-					TargetBitrateKbps:  nodeReq.TargetBitrateKbps,
-					SegmentDuration:    nodeReq.SegmentDuration,
-					HWAccel:            effectiveHWAccel,
-					AudioTrackIndex:    nodeReq.AudioTrackIndex,
-					SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
-					SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
-					SubtitleCodec:      nodeReq.SubtitleCodec,
-					TotalDuration:      nodeReq.TotalDuration,
+					InputPath:            nodeReq.InputPath,
+					SessionID:            sessionID,
+					TranscodeTransportID: restartTransportID,
+					VideoBitstreamFilter: nodeReq.VideoBitstreamFilter,
+					SourceVideoCodec:     nodeReq.SourceVideoCodec,
+					SeekSeconds:          nodeReq.SeekSeconds,
+					StartSegmentNumber:   nodeReq.StartSegmentNumber,
+					TargetResolution:     nodeReq.TargetResolution,
+					TargetCodecVideo:     nodeReq.TargetCodecVideo,
+					TargetCodecAudio:     nodeReq.TargetCodecAudio,
+					TargetBitrateKbps:    nodeReq.TargetBitrateKbps,
+					SegmentDuration:      nodeReq.SegmentDuration,
+					HWAccel:              effectiveHWAccel,
+					AudioTrackIndex:      nodeReq.AudioTrackIndex,
+					SubtitleTrackIndex:   nodeReq.SubtitleTrackIndex,
+					SubtitleBurnIn:       nodeReq.SubtitleBurnIn,
+					SubtitleCodec:        nodeReq.SubtitleCodec,
+					TotalDuration:        nodeReq.TotalDuration,
 				})
 				resp.StreamURL = h.buildProxyManifestURL(card, proxyNode)
 			} else {
@@ -2254,6 +2340,10 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 					UserID:          updatedSession.UserID,
 					ProfileID:       updatedSession.ProfileID,
 					MediaFileID:     updatedSession.MediaFileID,
+					// v3 sessions route by transport ID and pin an explicit DV
+					// mode; a re-minted token must not silently shed either.
+					TranscodeTransportID: updatedSession.TranscodeTransportID,
+					RemuxDVMode:          string(updatedSession.RemuxDVMode),
 				}
 				if plan.TranscodeNode != nil {
 					tokenClaims.TranscodeNode = plan.TranscodeNode.URL
@@ -2522,7 +2612,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	if h.tm.GetTranscodeSession(req.SessionID) != nil || session.TranscodeNodeURL != "" {
 		// Restarting the transcode under the SAME session id (quality/seek
 		// change) — keep the card; it is re-saved with the new opts below.
-		h.tm.CloseTranscodeSession(req.SessionID, session.TranscodeNodeURL)
+		h.closeTranscodeForSession(session)
 	}
 	abortCurrentSession := func(reason string, cause error) {
 		if abortErr := h.abortPlaybackSession(r.Context(), session); abortErr != nil && !errors.Is(abortErr, playback.ErrSessionNotFound) {
@@ -2723,39 +2813,16 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			TotalDuration:      float64(file.Duration),
 		}
 
-		body, _ := json.Marshal(nodeReq)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tcNode.URL+"/transcode/start", bytes.NewReader(body))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to build transcode request")
-			return
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-		httpReq.Header.Set("Authorization", "Bearer "+h.JWTSecret)
-
-		resp, err := http.DefaultClient.Do(httpReq)
+		nodeResp, status, err := h.startRemotePlaybackTransport(context.Background(), tcNode.URL, nodeReq)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "remote transcode start failed", "component", "api", "error", err, "node", tcNode.URL, "session", req.SessionID, "playback_session_id", req.SessionID)
 			writeError(w, http.StatusBadGateway, "transcode_node_unavailable", "Transcode node is unavailable")
 			return
 		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusAccepted {
-			slog.ErrorContext(r.Context(), "remote transcode start rejected", "component", "api", "status", resp.StatusCode, "node", tcNode.URL)
+		if status != http.StatusAccepted {
+			slog.ErrorContext(r.Context(), "remote transcode start rejected", "component", "api", "status", status, "node", tcNode.URL)
 			writeError(w, http.StatusBadGateway, "transcode_start_failed", "Transcode node rejected the request")
 			return
-		}
-		var nodeResp transcodenode.TranscodeStartResponse
-		if err := json.NewDecoder(resp.Body).Decode(&nodeResp); err != nil {
-			slog.WarnContext(r.Context(), "remote transcode start response decode failed", "component", "api",
-				"error", err,
-				"node", tcNode.URL,
-				"session", req.SessionID,
-				"playback_session_id", req.SessionID,
-			)
 		}
 		effectiveHWAccel := strings.TrimSpace(nodeResp.HWAccel)
 		if effectiveHWAccel == "" {
@@ -2819,7 +2886,7 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// fresh ffmpeg is the sole writer.
 	unlock := h.tm.LockSessionLifecycle(req.SessionID)
 	h.tm.CloseTranscodeSession(req.SessionID, "")
-	transcodeSession, err := playback.StartTranscode(context.WithoutCancel(r.Context()), playback.TranscodeOpts{
+	transcodeSession, err := h.startLocalPlaybackTransport(r.Context(), playback.TranscodeOpts{
 		InputPath:          file.FilePath,
 		OutputDir:          filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
 		SessionID:          req.SessionID,
@@ -2914,7 +2981,7 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 		if session.TranscodeNodeURL != "" {
 			h.touchSessionActivity(sessionID)
 			h.proxyToTranscodeNode(w, r, session.TranscodeNodeURL,
-				"/transcode/"+sessionID+"/master.m3u8")
+				"/transcode/"+remoteTransportID(session)+"/master.m3u8")
 			return
 		}
 		// Local transcode whose process state was lost: reconstruct it from the
@@ -2969,7 +3036,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			h.touchSessionActivity(sessionID)
 			segmentName := chi.URLParam(r, "name")
 			h.proxyToTranscodeNode(w, r, session.TranscodeNodeURL,
-				"/transcode/"+sessionID+"/segment/"+segmentName)
+				"/transcode/"+remoteTransportID(session)+"/segment/"+segmentName)
 			return
 		}
 		// Resume near the segment the client is fetching so reconstruct does not

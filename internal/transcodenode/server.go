@@ -27,22 +27,24 @@ import (
 
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
-	SessionID          string  `json:"session_id"`
-	InputPath          string  `json:"input_path"`
-	SourceVideoCodec   string  `json:"source_video_codec"`
-	SeekSeconds        float64 `json:"seek_seconds"`
-	StartSegmentNumber int     `json:"start_segment_number"`
-	TargetResolution   string  `json:"target_resolution"`
-	TargetCodecVideo   string  `json:"target_codec_video"`
-	TargetCodecAudio   string  `json:"target_codec_audio"`
-	TargetBitrateKbps  int     `json:"target_bitrate_kbps"`
-	SegmentDuration    int     `json:"segment_duration"`
-	HWAccel            string  `json:"hw_accel"`
-	AudioTrackIndex    int     `json:"audio_track_index"`
-	SubtitleTrackIndex int     `json:"subtitle_track_index"`
-	SubtitleBurnIn     bool    `json:"subtitle_burn_in"`
-	SubtitleCodec      string  `json:"subtitle_codec,omitempty"`
-	TotalDuration      float64 `json:"total_duration"`
+	SessionID            string  `json:"session_id"`
+	InputPath            string  `json:"input_path"`
+	SourceVideoCodec     string  `json:"source_video_codec"`
+	VideoBitstreamFilter string  `json:"video_bitstream_filter,omitempty"`
+	SeekSeconds          float64 `json:"seek_seconds"`
+	StartSegmentNumber   int     `json:"start_segment_number"`
+	TargetResolution     string  `json:"target_resolution"`
+	TargetCodecVideo     string  `json:"target_codec_video"`
+	TargetCodecAudio     string  `json:"target_codec_audio"`
+	TargetBitrateKbps    int     `json:"target_bitrate_kbps"`
+	SegmentDuration      int     `json:"segment_duration"`
+	HWAccel              string  `json:"hw_accel"`
+	AudioTrackIndex      int     `json:"audio_track_index"`
+	SubtitleTrackIndex   int     `json:"subtitle_track_index"`
+	SubtitleBurnIn       bool    `json:"subtitle_burn_in"`
+	SubtitleCodec        string  `json:"subtitle_codec,omitempty"`
+	TotalDuration        float64 `json:"total_duration"`
+	RequireReady         bool    `json:"require_ready,omitempty"`
 }
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
@@ -58,12 +60,30 @@ type HealthResponse struct {
 	ActiveJobs int32  `json:"active_jobs"`
 }
 
+// sessionIdleTTL is how long a job may go without a manifest or segment
+// request before the idle reaper closes it. Reaping is safe because a client
+// that comes back later re-presents its still-valid stream token and the job
+// reconstructs seeked to the requested segment; without the reaper, a job
+// whose audience vanished (e.g. a v3 replan retired its transport id and a
+// stale in-flight token resurrected the old one) encodes to end-of-file for
+// nobody.
+const sessionIdleTTL = 10 * time.Minute
+
+// sessionReapInterval is how often the idle reaper sweeps for stale jobs.
+const sessionReapInterval = time.Minute
+
 // Server is the HTTP handler for transcode mode.
 type Server struct {
 	watcher    *nodeconfig.Watcher
 	tracker    *nodesessions.Tracker
 	ffmpegSink playback.FFmpegLogSink
 	sessions   map[string]*playback.TranscodeSession
+	// lastAccess records, per registered session id, when a manifest or segment
+	// request last touched the job (registration counts as the first access).
+	// Guarded by mu alongside sessions; the idle reaper closes jobs whose entry
+	// is older than sessionIdleTTL.
+	lastAccess map[string]time.Time
+	reaperOnce sync.Once
 	mu         sync.RWMutex
 	activeJobs atomic.Int32
 
@@ -149,9 +169,10 @@ func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, ses
 // NewServer creates a new transcode server.
 func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Server {
 	s := &Server{
-		watcher:  watcher,
-		tracker:  tracker,
-		sessions: make(map[string]*playback.TranscodeSession),
+		watcher:    watcher,
+		tracker:    tracker,
+		sessions:   make(map[string]*playback.TranscodeSession),
+		lastAccess: make(map[string]time.Time),
 	}
 	if cfg := watcher.Config(); cfg != nil {
 		if cleaned, err := playback.CleanupOrphanedTranscodeDirs(cfg.Playback.TranscodeDir, nil, 0); err != nil {
@@ -165,6 +186,127 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 
 func (s *Server) SetFFmpegLogSink(sink playback.FFmpegLogSink) {
 	s.ffmpegSink = sink
+}
+
+// noteSessionAccessLocked records an access for a registered job. Callers must
+// hold s.mu for writing. Lazily allocates so directly-constructed test servers
+// work.
+func (s *Server) noteSessionAccessLocked(sessionID string) {
+	if s.lastAccess == nil {
+		s.lastAccess = make(map[string]time.Time)
+	}
+	s.lastAccess[sessionID] = time.Now()
+}
+
+// touchSession refreshes a registered job's idle clock so the reaper spares
+// it. Unknown ids are ignored — a reconstruct records its own first access
+// when it registers the rebuilt job.
+func (s *Server) touchSession(sessionID string) {
+	s.mu.Lock()
+	if _, ok := s.sessions[sessionID]; ok {
+		s.noteSessionAccessLocked(sessionID)
+	}
+	s.mu.Unlock()
+}
+
+// acquireSessionTouched returns the registered job for sessionID and, when
+// found, refreshes its idle clock in the same critical section. Doing both
+// under one lock closes the gap where the idle reaper could unregister the
+// job between a read-lock lookup and a separate touch, leaving the request
+// serving a session whose teardown is already removing its output dir.
+func (s *Server) acquireSessionTouched(sessionID string) (*playback.TranscodeSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	if ok {
+		s.noteSessionAccessLocked(sessionID)
+	}
+	return session, ok
+}
+
+// startIdleReaper launches the background sweep that closes jobs no client has
+// touched for sessionIdleTTL. Called once when the node starts serving;
+// subsequent calls are no-ops. The goroutine runs for the process lifetime,
+// matching the node's own.
+func (s *Server) startIdleReaper() {
+	s.reaperOnce.Do(func() {
+		go func() {
+			ticker := time.NewTicker(sessionReapInterval)
+			defer ticker.Stop()
+			for range ticker.C {
+				s.reapIdleSessions(sessionIdleTTL)
+			}
+		}()
+	})
+}
+
+// reapIdleSessions closes and unregisters every job whose last manifest or
+// segment access is older than ttl. Registration counts as the first access,
+// so a job still waiting on its manifest (the RequireReady flow) is never
+// reaped mid-wait. Candidates are collected under the map lock, then each is
+// re-validated and torn down under its per-session lifecycle lock: Close
+// removes the output dir, and without that lock it could race a token
+// reconstruct and wipe the segments a fresh ffmpeg is writing. The session's
+// recipe is deliberately kept — an idle reap is not a client stop, and a
+// still-valid token must be able to reconstruct on the next hit.
+func (s *Server) reapIdleSessions(ttl time.Duration) {
+	cutoff := time.Now().Add(-ttl)
+	type idleJob struct {
+		id      string
+		session *playback.TranscodeSession
+	}
+	var candidates []idleJob
+	s.mu.Lock()
+	for id, session := range s.sessions {
+		last, ok := s.lastAccess[id]
+		if !ok {
+			// Untracked registration (shouldn't happen): start its idle clock
+			// now rather than closing a job that may be actively serving.
+			s.noteSessionAccessLocked(id)
+			continue
+		}
+		if last.Before(cutoff) {
+			candidates = append(candidates, idleJob{id: id, session: session})
+		}
+	}
+	s.mu.Unlock()
+
+	for _, c := range candidates {
+		s.reapSession(c.id, c.session, cutoff)
+	}
+}
+
+// reapSession tears down one idle job under the per-session lifecycle lock so
+// its Close can never overlap a start or reconstruct spawning a new ffmpeg
+// into the same output dir. Ownership and idleness are re-checked under the
+// lock; a job touched or replaced since the sweep scan is spared.
+func (s *Server) reapSession(sessionID string, session *playback.TranscodeSession, cutoff time.Time) {
+	unlock := s.lockSessionLifecycle(sessionID)
+	defer unlock()
+	s.mu.Lock()
+	live, ok := s.sessions[sessionID]
+	if !ok || live != session {
+		s.mu.Unlock()
+		return
+	}
+	last, tracked := s.lastAccess[sessionID]
+	if tracked && !last.Before(cutoff) {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.sessions, sessionID)
+	delete(s.lastAccess, sessionID)
+	s.mu.Unlock()
+
+	s.activeJobs.Add(-1)
+	if err := session.Close(); err != nil {
+		slog.Error("close idle transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
+	}
+	if s.tracker != nil {
+		s.tracker.Remove(context.Background(), sessionID)
+	}
+	slog.Info("transcode node reaped idle session", "component", "transcodenode",
+		"session", sessionID, "playback_session_id", sessionID, "idle_ms", time.Since(last).Milliseconds())
 }
 
 // recipeStore reads a remote transcode's reconstruction recipe written by central
@@ -190,6 +332,7 @@ func (s *Server) SetRecipeStore(store recipeStore) {
 
 // Handler returns the chi.Router with all transcode routes.
 func (s *Server) Handler() http.Handler {
+	s.startIdleReaper()
 	r := chi.NewRouter()
 	r.Get("/api/v1/health", s.handleHealth)
 
@@ -215,12 +358,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleHWCapabilities(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 	ffmpegPath := ""
 	if cfg := s.watcher.Config(); cfg != nil {
 		ffmpegPath = cfg.Playback.FFmpegPath
 	}
 	info := playback.DetectHWAccelWithFFmpeg(ffmpegPath)
+	info.Transformations = playback.ProbeTransformationRegistryV3(r.Context(), ffmpegPath).Advertised()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }
@@ -293,29 +437,30 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	outputDir := filepath.Join(cfg.Playback.TranscodeDir, req.SessionID)
 
 	opts := playback.TranscodeOpts{
-		InputPath:          req.InputPath,
-		OutputDir:          outputDir,
-		SessionID:          req.SessionID,
-		SourceVideoCodec:   req.SourceVideoCodec,
-		SeekSeconds:        req.SeekSeconds,
-		StartSegmentNumber: req.StartSegmentNumber,
-		TargetResolution:   req.TargetResolution,
-		TargetCodecVideo:   req.TargetCodecVideo,
-		TargetCodecAudio:   req.TargetCodecAudio,
-		TargetBitrateKbps:  req.TargetBitrateKbps,
-		SegmentDuration:    req.SegmentDuration,
-		FFmpegPath:         cfg.Playback.FFmpegPath,
-		HWAccel:            req.HWAccel,
-		HWDevice:           "",
-		AudioTrackIndex:    req.AudioTrackIndex,
-		SubtitleTrackIndex: req.SubtitleTrackIndex,
-		SubtitleBurnIn:     req.SubtitleBurnIn,
-		SubtitleCodec:      req.SubtitleCodec,
-		TotalDuration:      req.TotalDuration,
-		FastStart:          true,
-		NodeType:           "transcode",
-		ExecutionMode:      "transcode_node",
-		FFmpegLogSink:      s.ffmpegSink,
+		InputPath:            req.InputPath,
+		OutputDir:            outputDir,
+		SessionID:            req.SessionID,
+		SourceVideoCodec:     req.SourceVideoCodec,
+		VideoBitstreamFilter: req.VideoBitstreamFilter,
+		SeekSeconds:          req.SeekSeconds,
+		StartSegmentNumber:   req.StartSegmentNumber,
+		TargetResolution:     req.TargetResolution,
+		TargetCodecVideo:     req.TargetCodecVideo,
+		TargetCodecAudio:     req.TargetCodecAudio,
+		TargetBitrateKbps:    req.TargetBitrateKbps,
+		SegmentDuration:      req.SegmentDuration,
+		FFmpegPath:           cfg.Playback.FFmpegPath,
+		HWAccel:              req.HWAccel,
+		HWDevice:             "",
+		AudioTrackIndex:      req.AudioTrackIndex,
+		SubtitleTrackIndex:   req.SubtitleTrackIndex,
+		SubtitleBurnIn:       req.SubtitleBurnIn,
+		SubtitleCodec:        req.SubtitleCodec,
+		TotalDuration:        req.TotalDuration,
+		FastStart:            true,
+		NodeType:             "transcode",
+		ExecutionMode:        "transcode_node",
+		FFmpegLogSink:        s.ffmpegSink,
 	}
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
@@ -332,6 +477,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if old, ok := s.sessions[req.SessionID]; ok {
 		delete(s.sessions, req.SessionID)
+		delete(s.lastAccess, req.SessionID)
 		s.mu.Unlock()
 		s.activeJobs.Add(-1)
 		_ = old.Close()
@@ -356,9 +502,19 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		return
 	}
+	if req.RequireReady {
+		if _, err := session.WaitForManifest(8 * time.Second); err != nil {
+			_ = session.Close()
+			unlock()
+			slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+			http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
+			return
+		}
+	}
 
 	s.mu.Lock()
 	s.sessions[req.SessionID] = session
+	s.noteSessionAccessLocked(req.SessionID)
 	s.mu.Unlock()
 	unlock()
 	s.activeJobs.Add(1)
@@ -415,7 +571,11 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 	// The token's recipe must be a transcode card for the session id in the URL: a
 	// mismatch is a forged or stale request, and direct/remux cards carry no encode
 	// parameters to rebuild. An empty PlayMethod is a transcode card (back-compat).
-	if card.SessionID != sessionID || (card.PlayMethod != "" && card.PlayMethod != playback.PlayTranscode) {
+	expectedTransportID := card.SessionID
+	if card.TranscodeTransportID != "" {
+		expectedTransportID = card.TranscodeTransportID
+	}
+	if expectedTransportID != sessionID || (card.PlayMethod != "" && card.PlayMethod != playback.PlayTranscode) {
 		return nil
 	}
 	// A native token carries the full byte-affecting recipe. The jellycompat node
@@ -486,6 +646,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 	cfg := s.watcher.Config()
 	outputDir := filepath.Join(cfg.Playback.TranscodeDir, sessionID)
 	opts := card.TranscodeOpts(outputDir, cfg.Playback.FFmpegPath, s.ffmpegSink)
+	opts.SessionID = sessionID
 	// Re-resolve environment-specific encode knobs from this node's live config; the
 	// token deliberately omits HWAccel/HWDevice so an operator change applies on
 	// rebuild. Run as a transcode node, not integrated (card.TranscodeOpts defaults).
@@ -528,6 +689,7 @@ func (s *Server) spawnReconstruct(r *http.Request, sessionID string, requestedSe
 		return existing
 	}
 	s.sessions[sessionID] = session
+	s.noteSessionAccessLocked(sessionID)
 	s.mu.Unlock()
 	s.activeJobs.Add(1)
 
@@ -575,6 +737,15 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
+	// Serialize against in-flight starts and reconstructs. A RequireReady
+	// start registers its job only after the readiness wait; a stop racing
+	// that wait (the API rolling back a timed-out start) would otherwise miss
+	// the map and 404, orphaning the just-spawned ffmpeg until the idle
+	// reaper finds it. Blocking here until the start registers turns that
+	// miss into a normal teardown.
+	unlock := s.lockSessionLifecycle(sessionID)
+	defer unlock()
+
 	s.mu.Lock()
 	session, ok := s.sessions[sessionID]
 	if !ok {
@@ -583,6 +754,7 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(s.sessions, sessionID)
+	delete(s.lastAccess, sessionID)
 	s.mu.Unlock()
 	s.activeJobs.Add(-1)
 
@@ -611,10 +783,10 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-
+	// Lookup and liveness refresh happen atomically so the idle reaper can
+	// never unregister the job between them and tear down a session this
+	// request is about to serve from.
+	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
 		// stream token the proxy forwarded. The manifest path carries no segment
@@ -624,6 +796,9 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
+		// A reconstruct that yielded to a concurrently registered winner has
+		// not recorded this hit; count it so the reaper sees the liveness.
+		s.touchSession(sessionID)
 	}
 
 	manifest, err := session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
@@ -643,10 +818,10 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 	name := chi.URLParam(r, "name")
 
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-
+	// Lookup and liveness refresh happen atomically so the idle reaper can
+	// never unregister the job between them and tear down a session this
+	// request is about to serve from.
+	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
 		// forwarded stream token, seeked to the segment the client is requesting so
@@ -660,6 +835,9 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
+		// A reconstruct that yielded to a concurrently registered winner has
+		// not recorded this hit; count it so the reaper sees the liveness.
+		s.touchSession(sessionID)
 	}
 
 	segPath, err := session.GetSegment(name)
@@ -777,6 +955,7 @@ func (s *Server) handleForceReload(w http.ResponseWriter, r *http.Request) {
 		session.Close()
 		os.RemoveAll(filepath.Join(cfg.Playback.TranscodeDir, id))
 		delete(s.sessions, id)
+		delete(s.lastAccess, id)
 		stopped = append(stopped, id)
 	}
 	s.activeJobs.Store(0)

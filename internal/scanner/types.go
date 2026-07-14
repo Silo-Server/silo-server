@@ -38,29 +38,30 @@ type ProbeData struct {
 
 // VideoTrackInfo describes a probed video track.
 type VideoTrackInfo struct {
-	Title           string
-	Codec           string
-	DolbyVision     string
-	DVProfile       int
-	DVBLCompatID    int
-	DVELPresent     bool
-	HDR10Plus       bool
-	Profile         string
-	Level           int
-	Width           int
-	Height          int
-	AspectRatio     string
-	Interlaced      bool
-	FrameRate       string
-	Bitrate         int
-	VideoRange      string
-	VideoRangeType  string
-	ColorPrimaries  string
-	ColorSpace      string
-	ColorTransfer   string
-	BitDepth        int
-	PixelFormat     string
-	ReferenceFrames int
+	Title              string
+	Codec              string
+	DolbyVision        string
+	DVProfile          int
+	DVBLCompatID       int
+	DVELPresent        bool
+	DVEnhancementLayer string
+	HDR10Plus          bool
+	Profile            string
+	Level              int
+	Width              int
+	Height             int
+	AspectRatio        string
+	Interlaced         bool
+	FrameRate          string
+	Bitrate            int
+	VideoRange         string
+	VideoRangeType     string
+	ColorPrimaries     string
+	ColorSpace         string
+	ColorTransfer      string
+	BitDepth           int
+	PixelFormat        string
+	ReferenceFrames    int
 }
 
 // AudioTrackInfo describes a probed audio track.

@@ -50,6 +50,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/planstore"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -805,6 +806,12 @@ func NewRouter(deps Dependencies) chi.Router {
 		} else {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
 		}
+		if deps.DB != nil {
+			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
+		}
+		// Maintenance also bounds the in-memory fallback store: without it a
+		// DB-less deployment accumulates attempts and replans forever.
+		playbackHandler.StartV3Maintenance(deps.AppContext)
 
 		// Wire UserStoreProvider for progress/history persistence.
 		if deps.UserStoreProvider != nil {
@@ -2279,6 +2286,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
 
 					r.Route("/playback", func(r chi.Router) {
+						r.Get("/capability", playbackHandler.HandlePlaybackCapabilityV3)
 						// HLS transcode delivery — no profile auth needed;
 						// session ID (UUID) serves as the access token, same
 						// pattern as /stream/{session_id}.
@@ -2292,6 +2300,8 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Group(func(r chi.Router) {
 							r.Use(apimw.RequireProfile)
 							r.Post("/start", playbackHandler.HandleStartPlayback)
+							r.Post("/{session_id}/replan", playbackHandler.HandleReplanPlaybackV3)
+							r.Post("/route-events", playbackHandler.HandlePlaybackRouteEventV3)
 							r.Post("/{session_id}/progress", playbackHandler.HandleUpdateProgress)
 							r.Patch("/{session_id}/audio", playbackHandler.HandleChangeAudioTrack)
 							r.Delete("/{session_id}", playbackHandler.HandleStopPlayback)

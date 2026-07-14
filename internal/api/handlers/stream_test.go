@@ -196,6 +196,51 @@ func TestHandleSubtitle_NilMediaFileReturns404(t *testing.T) {
 	}
 }
 
+// A .vtt request for a bitmap (PGS) embedded track must be rejected up front:
+// PGS passes the burn-in guard because it is deliverable as .sup, but it has
+// no text to convert, so forcing WebVTT would spawn an ffmpeg that always
+// fails after the 200 and headers are committed.
+func TestHandleSubtitle_BitmapTrackVTTRequestReturns415(t *testing.T) {
+	file := &models.MediaFile{
+		ID:        42,
+		ContentID: "movie-1",
+		FilePath:  "/tmp/movie.mkv",
+		Duration:  3600,
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Language: "eng", Codec: "hdmv_pgs_subtitle"},
+		},
+	}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", session.ID)
+	routeCtx.URLParams.Add("track", "0.vtt")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rr := httptest.NewRecorder()
+	handler.HandleSubtitle(rr, req)
+
+	if rr.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, body = %s; want 415", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body: %v (body = %s)", err, rr.Body.String())
+	}
+	if body.Error != "unsupported_media_type" {
+		t.Fatalf("error code = %q, want %q", body.Error, "unsupported_media_type")
+	}
+}
+
 func TestSubtitleSourceFileIDPinsURLAcrossEffectiveFileSwitch(t *testing.T) {
 	session := &playback.Session{MediaFileID: 200, RequestedMediaFileID: 100}
 

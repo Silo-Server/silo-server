@@ -59,6 +59,22 @@ func TestPlanTranscodePairsProxyFromSameGroup(t *testing.T) {
 	}
 }
 
+func TestReleaseSessionDropsProvisionalReservation(t *testing.T) {
+	node := transcodeNode(1, "http://tc-1", nil, 0)
+	node.MaxJobs = intPtr(1)
+	f := newFixture(nil, []*Node{node})
+	if got := f.planner.PlanSession("s1", "", true, 0).TranscodeNode; got == nil {
+		t.Fatal("first session was not reserved")
+	}
+	if got := f.planner.PlanSession("s2", "", true, 0).TranscodeNode; got != nil {
+		t.Fatalf("second session bypassed reservation: %+v", got)
+	}
+	f.planner.ReleaseSession("s1")
+	if got := f.planner.PlanSession("s2", "", true, 0).TranscodeNode; got == nil {
+		t.Fatal("released reservation still blocked the node")
+	}
+}
+
 func TestDegradedGroupExcludesItsTranscodeNodes(t *testing.T) {
 	unhealthyProxy := proxyNode(1, "http://proxy-a", strPtr("rack-a"))
 	unhealthyProxy.Healthy = false

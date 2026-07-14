@@ -28,21 +28,26 @@ func init() {
 
 // TranscodeOpts holds configuration for an HLS transcode session.
 type TranscodeOpts struct {
-	InputPath          string
-	OutputDir          string // e.g., /tmp/silo-transcode/{session_id}/
-	SessionID          string
-	SourceVideoCodec   string
-	SeekSeconds        float64
-	TargetResolution   string // e.g., 1080p, 720p
-	TargetCodecVideo   string // e.g., h264 (or hevc if allowed)
-	TargetCodecAudio   string // e.g., aac
-	SegmentDuration    int    // seconds, default 6
-	StartSegmentNumber int    // -hls_segment_start_number, default 0
-	FFmpegPath         string // optional explicit ffmpeg binary path
-	HWAccel            string // auto, qsv, vaapi, nvenc, none
-	HWDevice           string // e.g., /dev/dri/renderD128 (default if empty)
-	SubtitleTrackIndex int    // -1 = no subtitles
-	SubtitleBurnIn     bool
+	InputPath string
+	OutputDir string // e.g., /tmp/silo-transcode/{session_id}/
+	// OutputSubdir is the signed, root-relative reconstruction directory. Empty
+	// retains the legacy flat {session_id} layout.
+	OutputSubdir         string
+	TranscodeTransportID string
+	SessionID            string
+	SourceVideoCodec     string
+	VideoBitstreamFilter string // validated copy-mode BSF, e.g. dovi_rpu=strip=1
+	SeekSeconds          float64
+	TargetResolution     string // e.g., 1080p, 720p
+	TargetCodecVideo     string // e.g., h264 (or hevc if allowed)
+	TargetCodecAudio     string // e.g., aac
+	SegmentDuration      int    // seconds, default 6
+	StartSegmentNumber   int    // -hls_segment_start_number, default 0
+	FFmpegPath           string // optional explicit ffmpeg binary path
+	HWAccel              string // auto, qsv, vaapi, nvenc, none
+	HWDevice             string // e.g., /dev/dri/renderD128 (default if empty)
+	SubtitleTrackIndex   int    // -1 = no subtitles
+	SubtitleBurnIn       bool
 	// SubtitleCodec is the probed codec of the burn-in track (e.g. "subrip",
 	// "hdmv_pgs_subtitle"). Bitmap codecs (PGS/DVD/DVB) select the overlay
 	// filter_complex pipeline; text codecs use the libass subtitles filter.
@@ -56,6 +61,10 @@ type TranscodeOpts struct {
 	ExecutionMode     string
 	FFmpegLogSink     FFmpegLogSink
 }
+
+// DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
+// copy-mode HLS remux; the enhancement layer is dropped by stream mapping.
+const DV7ToHDR10BitstreamFilter = "dovi_rpu=strip=1"
 
 // TranscodeSession manages a running ffmpeg HLS transcode process.
 type TranscodeSession struct {
@@ -142,6 +151,10 @@ const (
 
 // StartTranscode launches an ffmpeg process that produces HLS segments.
 func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+	if opts.VideoBitstreamFilter != "" &&
+		(opts.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter || !strings.EqualFold(opts.TargetCodecVideo, "copy")) {
+		return nil, fmt.Errorf("unsupported video bitstream filter recipe")
+	}
 	if opts.SegmentDuration <= 0 {
 		opts.SegmentDuration = defaultSegmentDuration
 	}
@@ -290,6 +303,9 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// Video codec and encoding settings.
 	if isVideoCopy {
 		args = append(args, "-c:v", "copy")
+		if opts.VideoBitstreamFilter == DV7ToHDR10BitstreamFilter {
+			args = append(args, "-bsf:v", opts.VideoBitstreamFilter)
+		}
 	} else {
 		args = appendVideoArgs(args, opts)
 	}
