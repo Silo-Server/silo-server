@@ -684,6 +684,92 @@ func TestSetEffectiveMediaFileID(t *testing.T) {
 	}
 }
 
+func TestSessionReplacementAppliesAndRollsBackAtomically(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSessionWithFiles(7, "profile-1", 42, 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateStreamState(session.ID, playback.SessionStreamState{
+		PlayMethod:           playback.PlayDirect,
+		BasePlayMethod:       playback.PlayDirect,
+		AudioTrackIndex:      0,
+		TranscodeRouteSet:    true,
+		SubtitleTrackIndex:   -1,
+		StreamBitrateKbps:    8_000,
+		TranscodeNodeURL:     "http://old-node",
+		TranscodeTransportID: "old-transport",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	position := 321.5
+	rollback, err := manager.ApplyReplacement(session.ID, playback.SessionReplacement{
+		EffectiveMediaFileID: 84,
+		StreamState: playback.SessionStreamState{
+			PlayMethod:           playback.PlayTranscode,
+			BasePlayMethod:       playback.PlayTranscode,
+			AudioTrackIndex:      2,
+			TranscodeAudio:       true,
+			TranscodeRouteSet:    true,
+			SubtitleTrackIndex:   1,
+			StreamBitrateKbps:    3_500,
+			TranscodeNodeURL:     "http://new-node",
+			TranscodeTransportID: "new-transport",
+		},
+		PositionSeconds: &position,
+		IsPaused:        true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := manager.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.MediaFileID != 84 || replaced.PlayMethod != playback.PlayTranscode || replaced.AudioTrackIndex != 2 ||
+		replaced.TranscodeNodeURL != "http://new-node" || replaced.Position != position || !replaced.IsPaused {
+		t.Fatalf("replacement session = %#v", replaced)
+	}
+	if err := manager.RollbackReplacement(session.ID, rollback); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := manager.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.MediaFileID != 42 || restored.PlayMethod != playback.PlayDirect || restored.AudioTrackIndex != 0 ||
+		restored.TranscodeNodeURL != "http://old-node" || restored.TranscodeTransportID != "old-transport" ||
+		restored.Position != 0 || restored.IsPaused {
+		t.Fatalf("restored session = %#v", restored)
+	}
+}
+
+func TestSessionReplacementRollbackRejectsNewerMutation(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(7, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := manager.ApplyReplacement(session.ID, playback.SessionReplacement{
+		EffectiveMediaFileID: 84,
+		StreamState: playback.SessionStreamState{
+			PlayMethod:         playback.PlayRemux,
+			BasePlayMethod:     playback.PlayRemux,
+			TranscodeRouteSet:  true,
+			SubtitleTrackIndex: -1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateProgress(session.ID, 10, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RollbackReplacement(session.ID, rollback); !errors.Is(err, playback.ErrSessionReplacementSuperseded) {
+		t.Fatalf("rollback error = %v, want ErrSessionReplacementSuperseded", err)
+	}
+}
+
 func TestStartSessionWithFiles(t *testing.T) {
 	mgr := playback.NewSessionManager(0, 0)
 	session, err := mgr.StartSessionWithFiles(1, "profile-1", 200, 100, playback.PlayRemux, true)

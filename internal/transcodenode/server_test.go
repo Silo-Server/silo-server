@@ -1,9 +1,13 @@
 package transcodenode
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +36,38 @@ func newTestServer(t *testing.T) *Server {
 	return &Server{
 		watcher:  w,
 		sessions: make(map[string]*playback.TranscodeSession),
+	}
+}
+
+func TestHandleStartRequireReadyRejectsExitedFFmpeg(t *testing.T) {
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	requestBody, err := json.Marshal(TranscodeStartRequest{
+		SessionID:        "ready-failure-1",
+		InputPath:        "/media/movie.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		RequireReady:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	_, registered := server.sessions["ready-failure-1"]
+	server.mu.RUnlock()
+	if registered {
+		t.Fatal("failed readiness session was registered")
 	}
 }
 

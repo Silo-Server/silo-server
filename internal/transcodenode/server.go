@@ -44,6 +44,7 @@ type TranscodeStartRequest struct {
 	SubtitleBurnIn       bool    `json:"subtitle_burn_in"`
 	SubtitleCodec        string  `json:"subtitle_codec,omitempty"`
 	TotalDuration        float64 `json:"total_duration"`
+	RequireReady         bool    `json:"require_ready,omitempty"`
 }
 
 // TranscodeStartResponse is the JSON response for POST /transcode/start.
@@ -216,12 +217,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleHWCapabilities(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleHWCapabilities(w http.ResponseWriter, r *http.Request) {
 	ffmpegPath := ""
 	if cfg := s.watcher.Config(); cfg != nil {
 		ffmpegPath = cfg.Playback.FFmpegPath
 	}
 	info := playback.DetectHWAccelWithFFmpeg(ffmpegPath)
+	info.Transformations = playback.ProbeTransformationRegistryV3(r.Context(), ffmpegPath).Advertised()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
 }
@@ -357,6 +359,15 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "start transcode", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
 		http.Error(w, "failed to start transcode", http.StatusInternalServerError)
 		return
+	}
+	if req.RequireReady {
+		if _, err := session.WaitForManifest(8 * time.Second); err != nil {
+			_ = session.Close()
+			unlock()
+			slog.ErrorContext(r.Context(), "transcode failed readiness check", "component", "transcodenode", "error", err, "session", req.SessionID, "playback_session_id", req.SessionID)
+			http.Error(w, "transcode did not become ready", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	s.mu.Lock()

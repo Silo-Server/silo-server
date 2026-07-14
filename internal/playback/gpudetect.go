@@ -36,11 +36,12 @@ var nvencProbeCache = struct {
 
 // HWAccelInfo describes the detected hardware acceleration capability.
 type HWAccelInfo struct {
-	Resolved      string   `json:"resolved"`
-	RenderDevices []string `json:"render_devices"`
-	IntelDetected bool     `json:"intel_detected"`
-	Source        string   `json:"source"`
-	NodeURL       string   `json:"node_url,omitempty"`
+	Resolved        string             `json:"resolved"`
+	RenderDevices   []string           `json:"render_devices"`
+	IntelDetected   bool               `json:"intel_detected"`
+	Source          string             `json:"source"`
+	NodeURL         string             `json:"node_url,omitempty"`
+	Transformations []TransformationV3 `json:"transformations,omitempty"`
 }
 
 // DetectHWAccel probes this host's GPU hardware and returns structured info.

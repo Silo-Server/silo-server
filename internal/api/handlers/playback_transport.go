@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -29,7 +31,7 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 	if err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	httpRequest, err := http.NewRequestWithContext(requestCtx, http.MethodPost, nodeURL+"/transcode/start", bytes.NewReader(body))
 	if err != nil {
@@ -50,4 +52,29 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		slog.WarnContext(ctx, "remote transcode start response decode failed", "component", "api", "node", nodeURL, "error", err)
 	}
 	return result, response.StatusCode, nil
+}
+
+func fetchRemoteTranscodeCapabilities(ctx context.Context, nodeURL, jwtSecret string) (playback.HWAccelInfo, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, strings.TrimRight(nodeURL, "/")+"/hw-capabilities", nil)
+	if err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+jwtSecret)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return playback.HWAccelInfo{}, fmt.Errorf("node returned %d", response.StatusCode)
+	}
+	var info playback.HWAccelInfo
+	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+		return playback.HWAccelInfo{}, err
+	}
+	info.Source = "transcode_node"
+	info.NodeURL = nodeURL
+	return info, nil
 }

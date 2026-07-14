@@ -63,7 +63,12 @@ CREATE TABLE playback_route_events (
     client_version TEXT,
     client_model TEXT,
     received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CHECK (event IN ('plan_selected', 'plan_invalidated', 'plan_failed', 'first_frame', 'terminal', 'stopped')),
+    CHECK (event IN (
+        'plan_selected', 'plan_invalidated', 'plan_failed', 'first_frame',
+        'terminal', 'stopped', 'runtime_correction_applied',
+        'runtime_correction_succeeded', 'runtime_correction_failed',
+        'seek_reanchor_requested', 'seek_reanchored'
+    )),
     CHECK (jsonb_typeof(diagnostics) = 'object')
 );
 

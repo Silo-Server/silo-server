@@ -34,14 +34,22 @@ const (
 	maxPlaybackV3BodyBytes      = 256 << 10
 	maxPlaybackV3EventBodyBytes = 32 << 10
 	replanLeaseDurationV3       = 15 * time.Second
+	v3NodeCapabilityTTL         = time.Minute
 )
 
+type v3NodeCapabilityCache struct {
+	transformations []playback.TransformationV3
+	expiresAt       time.Time
+}
+
 type preparedTransportV3 struct {
-	url         string
-	nodeURL     string
-	transportID string
-	commit      func()
-	rollback    func()
+	url                string
+	nodeURL            string
+	transportID        string
+	commit             func()
+	rollback           func()
+	applySession       func() (func() error, error)
+	afterDurableCommit func()
 }
 
 type transportErrorV3 struct {
@@ -69,6 +77,15 @@ type replacementReservationCancellerV3 interface {
 	CancelReplacementReservation(string)
 }
 
+type replacementStateManagerV3 interface {
+	ApplyReplacement(string, playback.SessionReplacement) (playback.SessionReplacementRollback, error)
+	RollbackReplacement(string, playback.SessionReplacementRollback) error
+}
+
+type sessionReservationReleaserV3 interface {
+	ReleaseSession(string)
+}
+
 func (e *transportErrorV3) Error() string {
 	if e.cause != nil {
 		return e.reason + ": " + e.cause.Error()
@@ -89,6 +106,52 @@ func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playbac
 		h.v3Registry = playback.ProbeTransformationRegistryV3(context.WithoutCancel(ctx), h.playbackConfig().FFmpegPath)
 	})
 	return h.v3Registry
+}
+
+func (h *PlaybackHandler) remoteTransformationsV3(ctx context.Context, nodeURL string) ([]playback.TransformationV3, error) {
+	now := time.Now()
+	h.v3NodeCapabilitiesMu.Lock()
+	entry, ok := h.v3NodeCapabilities[nodeURL]
+	h.v3NodeCapabilitiesMu.Unlock()
+	if ok && now.Before(entry.expiresAt) {
+		return append([]playback.TransformationV3(nil), entry.transformations...), nil
+	}
+
+	info, err := fetchRemoteTranscodeCapabilities(ctx, nodeURL, h.JWTSecret)
+	if err != nil {
+		return nil, err
+	}
+	entry = v3NodeCapabilityCache{
+		transformations: append([]playback.TransformationV3(nil), info.Transformations...),
+		expiresAt:       now.Add(v3NodeCapabilityTTL),
+	}
+	h.v3NodeCapabilitiesMu.Lock()
+	if h.v3NodeCapabilities == nil {
+		h.v3NodeCapabilities = make(map[string]v3NodeCapabilityCache)
+	}
+	h.v3NodeCapabilities[nodeURL] = entry
+	h.v3NodeCapabilitiesMu.Unlock()
+	return append([]playback.TransformationV3(nil), entry.transformations...), nil
+}
+
+func validateRemoteTransformationsV3(plan *playback.PlanV3, advertised []playback.TransformationV3) error {
+	available := make(map[string]string, len(advertised))
+	for _, transformation := range advertised {
+		available[strings.ToLower(strings.TrimSpace(transformation.Name))] = strings.TrimSpace(transformation.RecipeVersion)
+	}
+	if plan == nil {
+		return errors.New("playback plan is unavailable")
+	}
+	for _, required := range plan.Transformations {
+		if strings.EqualFold(required.Executor, "client") {
+			continue
+		}
+		version, ok := available[strings.ToLower(strings.TrimSpace(required.Name))]
+		if !ok || version != strings.TrimSpace(required.RecipeVersion) {
+			return fmt.Errorf("transcode node lacks transformation %s@%s", required.Name, required.RecipeVersion)
+		}
+	}
+	return nil
 }
 
 // HandlePlaybackCapabilityV3 reports only transformations that the installed
@@ -191,7 +254,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	}
 	if result.Terminal != nil {
 		response := playback.NewTerminalResponseV3(result.Terminal.Reason, result.Terminal.Message, result.Terminal.Retryable)
-		h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, Event: "terminal", FallbackReason: result.Terminal.Reason, OutputRouteGeneration: req.OutputRouteGeneration}, UserID: userID, ProfileID: profileID, ClientName: playbackClientInfoFromRequest(r).Name, ClientVersion: playbackClientInfoFromRequest(r).Version, ClientModel: req.ClientPlaybackContext.Device.Model})
+		h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, Event: playback.RouteEventTerminalV3, FallbackReason: result.Terminal.Reason, OutputRouteGeneration: req.OutputRouteGeneration}, UserID: userID, ProfileID: profileID, ClientName: playbackClientInfoFromRequest(r).Name, ClientVersion: playbackClientInfoFromRequest(r).Version, ClientModel: req.ClientPlaybackContext.Device.Model})
 		writeJSON(w, http.StatusCreated, response)
 		return
 	}
@@ -261,6 +324,11 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	}
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureRouteDiagnostics, playback.FeatureDeviceQuirksV3, playback.FeatureSeekReanchorV3}, Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, NormalizedRequest: req, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
+	if err := h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport); err != nil {
+		transport.rollback()
+		abort()
+		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to commit the live playback session.", cause: err}
+	}
 	if err := h.PlanStoreV3.SaveAttempt(r.Context(), record); err != nil {
 		transport.rollback()
 		abort()
@@ -273,9 +341,8 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to persist the playback plan.", cause: err}
 	}
 	transport.commit()
-	h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport)
 	h.syncSessionsNow(r.Context(), "v3_start")
-	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: "plan_selected", AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputRouteGeneration: req.OutputRouteGeneration}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientModel: req.ClientPlaybackContext.Device.Model})
+	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputRouteGeneration: req.OutputRouteGeneration}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
 }
 
@@ -286,7 +353,26 @@ func (h *PlaybackHandler) prepareTransportV3(r *http.Request, session *playback.
 	if h.NodePlanner != nil {
 		plan := h.NodePlanner.PlanSession(session.ID, session.TranscodeNodeURL, true, result.TargetBitrateKbps)
 		if plan.TranscodeNode != nil {
-			return h.prepareRemoteTransportV3(r, session, file, result, plan)
+			transformations, err := h.remoteTransformationsV3(r.Context(), plan.TranscodeNode.URL)
+			if err == nil {
+				err = validateRemoteTransformationsV3(result.Plan, transformations)
+			}
+			if err == nil {
+				transport, transportErr := h.prepareRemoteTransportV3(r, session, file, result, plan)
+				if transportErr != nil {
+					if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
+						releaser.ReleaseSession(session.ID)
+					}
+				}
+				return transport, transportErr
+			}
+			slog.WarnContext(r.Context(), "protocol v3 transcode node capability mismatch", "node", plan.TranscodeNode.URL, "error", err)
+			if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
+				releaser.ReleaseSession(session.ID)
+			}
+			if !nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo) {
+				return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_capability_unavailable", message: "No transcode node can execute the selected playback recipe.", retryable: true, cause: err}
+			}
 		}
 		if !nodepool.LocalTranscodeFallbackAllowed(r.Context(), h.SettingsRepo) {
 			return preparedTransportV3{}, &transportErrorV3{reason: "capacity_unavailable", message: "No transcode node is available and local fallback is disabled.", retryable: true}
@@ -432,7 +518,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		videoCodec = "copy"
 	}
 	seekSeconds, startSegment := configureHLSTimelineV3(result.Plan, videoCodec, 2, float64(file.Duration))
-	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: file.CodecVideo, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, HWAccel: h.playbackConfig().HWAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: float64(file.Duration)}
+	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: file.CodecVideo, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, HWAccel: h.playbackConfig().HWAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: float64(file.Duration), RequireReady: true}
 	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
 	if err != nil {
 		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_unavailable", message: "The selected transcode node is unavailable.", retryable: true, cause: err}
@@ -467,7 +553,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}}, nil
 }
 
-func (h *PlaybackHandler) updateV3SessionState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3) {
+func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3) playback.SessionStreamState {
 	state := playback.SessionStreamState{PlayMethod: result.PlayMethod, BasePlayMethod: result.PlayMethod, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), TranscodeAudio: result.TranscodeAudio, RemuxDVMode: remuxDVModeForPlanV3(result.Plan), TranscodeNodeURL: transport.nodeURL, TranscodeTransportID: transport.transportID, TranscodeRouteSet: true, ClientIP: clientip.FromContext(ctx), ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientUserAgent: session.ClientUserAgent, StreamBitrateKbps: result.TargetBitrateKbps, TargetVideoCodec: result.TargetVideoCodec, TargetAudioCodec: result.TargetAudioCodec, TargetResolution: result.TargetResolution, SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn}
 	if result.Plan != nil && (result.Plan.Delivery == playback.DeliveryTranscodeHLSV3 || result.Plan.Delivery == playback.DeliveryRemuxHLSV3) {
 		state.SegmentDuration = 2
@@ -475,9 +561,11 @@ func (h *PlaybackHandler) updateV3SessionState(ctx context.Context, session *pla
 	if state.StreamBitrateKbps <= 0 {
 		state.StreamBitrateKbps = fileBitrateKbps(file)
 	}
-	if err := h.sessionMgr.UpdateStreamState(session.ID, state); err != nil {
-		slog.WarnContext(ctx, "protocol v3 session state update failed", "session", session.ID, "error", err)
-	}
+	return state
+}
+
+func (h *PlaybackHandler) updateV3SessionState(ctx context.Context, session *playback.Session, file *models.MediaFile, result playback.PlannerResultV3, transport preparedTransportV3) error {
+	return h.sessionMgr.UpdateStreamState(session.ID, h.v3SessionStreamState(ctx, session, file, result, transport))
 }
 
 func plannedAudioTrackIndexV3(result playback.PlannerResultV3, fallback int) int {
@@ -642,15 +730,38 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	}
 	updated.CurrentReplanRequestID = req.ReplanRequestID
 	encoded, _ := json.Marshal(response)
+	var rollbackSession func() error
+	if transport != nil && transport.applySession != nil {
+		var err error
+		rollbackSession, err = transport.applySession()
+		if err != nil {
+			transport.rollback()
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit the live replacement session")
+			return
+		}
+	}
 	if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, encoded, updated); err != nil {
+		rollbackFailed := false
+		if rollbackSession != nil {
+			if rollbackErr := rollbackSession(); rollbackErr != nil {
+				rollbackFailed = true
+				slog.ErrorContext(r.Context(), "protocol v3 replacement rollback failed", "session", sessionID, "error", rollbackErr)
+			}
+		}
 		if transport != nil {
 			transport.rollback()
+		}
+		if rollbackFailed {
+			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, false)
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit the replacement plan")
 		return
 	}
 	if transport != nil {
 		transport.commit()
+		if transport.afterDurableCommit != nil {
+			transport.afterDurableCommit()
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -719,6 +830,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		start.QualityPreference = req.QualityPreference
 		start.StartPosition = &req.PositionSeconds
 		start.OutputRouteGeneration = req.OutputRouteGeneration
+		start.Metered = req.Metered
+		start.BandwidthEstimateKbps = copyOptionalIntV3(req.BandwidthEstimateKbps)
+		start.BandwidthCapKbps = copyOptionalIntV3(req.BandwidthCapKbps)
 		start.Capabilities = req.Capabilities
 		start.ClientPlaybackContext = req.ClientPlaybackContext
 		applySelectedTracksToStartV3(&start, req.SelectedTracks)
@@ -832,6 +946,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	if err != nil {
 		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "session_expired", message: "The playback session has expired.", retryable: true}
 	}
+	replacementManager, ok := h.sessionMgr.(replacementStateManagerV3)
+	if !ok {
+		return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "internal_error", message: "The live session manager does not support atomic replacement."}
+	}
 	if checker, ok := h.sessionMgr.(replacementAdmissionCheckerV3); ok {
 		if err := checker.CheckReplacementAllowed(r.Context(), session.ID, result.PlayMethod, result.TranscodeAudio); err != nil {
 			mapped := sessionStartErrorV3(err)
@@ -871,28 +989,31 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	updated.NormalizedRequest = start
 	updated.EffectiveMediaFileID = effectiveFile.ID
 	updated.ExpiresAt = time.Now().Add(playback.MaxTokenTTL)
-	originalCommit := transport.commit
 	originalRollback := transport.rollback
-	transport.commit = func() {
-		originalCommit()
-		_ = h.sessionMgr.SetEffectiveMediaFileID(session.ID, effectiveFile.ID)
-		_ = h.sessionMgr.UpdateAudioTrack(session.ID, audioIndex, result.PlayMethod)
-		h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport)
-		if seekScopedRecovery {
-			paused := session.IsPaused
-			if current, err := h.sessionMgr.GetSession(session.ID); err == nil {
-				paused = current.IsPaused
-			}
-			if err := h.sessionMgr.UpdateProgress(session.ID, req.PositionSeconds, paused); err != nil {
-				slog.WarnContext(r.Context(), "protocol v3 seek recovery progress update failed", "session", session.ID, "error", err)
-			}
+	replacement := playback.SessionReplacement{
+		EffectiveMediaFileID: effectiveFile.ID,
+		StreamState:          h.v3SessionStreamState(r.Context(), session, effectiveFile, result, transport),
+	}
+	if seekScopedRecovery {
+		replacement.PositionSeconds = &req.PositionSeconds
+		replacement.PreservePaused = true
+	}
+	transport.applySession = func() (func() error, error) {
+		rollback, err := replacementManager.ApplyReplacement(session.ID, replacement)
+		if err != nil {
+			return nil, err
 		}
+		return func() error {
+			return replacementManager.RollbackReplacement(session.ID, rollback)
+		}, nil
+	}
+	transport.afterDurableCommit = func() {
 		cancelReservation()
 		h.syncSessionsNow(r.Context(), "v3_replan")
-		event := "plan_selected"
+		event := playback.RouteEventPlanSelectedV3
 		clientModel := req.ClientPlaybackContext.Device.Model
 		if seekReanchor {
-			event = "runtime_correction_succeeded"
+			event = playback.RouteEventRuntimeCorrectionSucceededV3
 			clientModel = start.ClientPlaybackContext.Device.Model
 		}
 		h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, PlanAttemptID: req.PlanAttemptID, PlanAttemptKey: playback.PlanAttemptKeyV3(*result.Plan, start.OutputRouteGeneration, nil), Event: event, FallbackReason: req.Failure.Classification, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputRouteGeneration: start.OutputRouteGeneration}, UserID: session.UserID, ProfileID: session.ProfileID, ClientName: session.ClientName, ClientVersion: session.ClientVersion, ClientModel: clientModel})
@@ -1284,6 +1405,9 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 		return nil
 	}
 	index := *request.SubtitleTrackIndex
+	if index < 0 {
+		return errors.New("The selected subtitle track index is invalid.")
+	}
 	targetIndex := -1
 	switch {
 	case index < len(source.ExternalSubtitles):
@@ -1517,11 +1641,6 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 	return seek, startSegment
 }
 
-var routeEventsV3 = map[string]struct{}{
-	"plan_selected": {}, "plan_invalidated": {}, "plan_failed": {}, "first_frame": {},
-	"terminal": {}, "stopped": {}, "runtime_correction_applied": {},
-	"runtime_correction_succeeded": {}, "runtime_correction_failed": {},
-}
 var diagnosticKeysV3 = map[string]struct{}{
 	"decoder_name": {}, "decoder_init_ms": {}, "first_frame_ms": {},
 	"device_model": {}, "requested_quality": {}, "effective_quality": {},
@@ -1535,6 +1654,9 @@ var diagnosticKeysV3 = map[string]struct{}{
 	"transform_buffer_peak_bytes": {}, "requested_media_file_id": {}, "effective_media_file_id": {},
 	"audio_output_mode": {}, "audio_mime": {}, "audio_channels": {}, "audio_decoder_name": {},
 	"correction_id": {}, "correction_stage": {},
+	"network_transport": {}, "network_metered": {}, "network_validated": {},
+	"bandwidth_estimate_kbps": {}, "link_downstream_kbps": {},
+	"target_source_position_seconds": {}, "reason": {},
 }
 
 func validRouteEventV3(event playback.RouteEventV3) bool {
@@ -1546,8 +1668,7 @@ func validRouteEventV3(event playback.RouteEventV3) bool {
 			return false
 		}
 	}
-	_, ok := routeEventsV3[event.Event]
-	return ok
+	return playback.ValidRouteEventNameV3(event.Event)
 }
 func sanitizeDiagnosticsV3(values map[string]string) map[string]string {
 	result := make(map[string]string)

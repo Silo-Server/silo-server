@@ -14,12 +14,30 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 type mutablePlaybackSettingsV3 struct {
 	mu     sync.Mutex
 	values map[string]string
+}
+
+type failingCompletePlanStoreV3 struct {
+	playback.PlanStoreV3
+}
+
+type staticNodePlannerV3 struct {
+	plan nodepool.Plan
+}
+
+func (p staticNodePlannerV3) PlanSession(string, string, bool, int) nodepool.Plan {
+	return p.plan
+}
+
+func (f *failingCompletePlanStoreV3) CompleteReplan(context.Context, string, string, json.RawMessage, playback.AttemptRecordV3) error {
+	return fmt.Errorf("injected complete replan failure")
 }
 
 func TestShouldTryAlternateFileV3PinsOriginalQuality(t *testing.T) {
@@ -219,8 +237,10 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 		t.Fatal("start returned no plan")
 	}
 	audioIndex := 1
+	bandwidthEstimate := 3_500
+	bandwidthCap := 4_000
 	failedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
-	replan := playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "replan-0001", FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "plan-attempt-0001", PlanAttemptKey: failedKey, AttemptedPlanKeys: []string{failedKey}, AttemptCount: 1, QualityPreference: "original", PositionSeconds: 12, OutputRouteGeneration: startRequest.OutputRouteGeneration, SelectedTracks: playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(file.ID, "audio", audioIndex), Index: &audioIndex}}, Failure: playback.FailureV3{Classification: "audio_renderer_error"}, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext}
+	replan := playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: startRequest.PlaybackAttemptID, ReplanRequestID: "replan-0001", FailedPlanID: started.PlaybackPlan.PlanID, PlanAttemptID: "plan-attempt-0001", PlanAttemptKey: failedKey, AttemptedPlanKeys: []string{failedKey}, AttemptCount: 1, QualityPreference: "original", PositionSeconds: 12, OutputRouteGeneration: startRequest.OutputRouteGeneration, Metered: true, BandwidthEstimateKbps: &bandwidthEstimate, BandwidthCapKbps: &bandwidthCap, SelectedTracks: playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{ID: playback.TrackIDV3(file.ID, "audio", audioIndex), Index: &audioIndex}}, Failure: playback.FailureV3{Classification: "audio_renderer_error"}, Capabilities: startRequest.Capabilities, ClientPlaybackContext: startRequest.ClientPlaybackContext}
 	replanBody, err := json.Marshal(replan)
 	if err != nil {
 		t.Fatal(err)
@@ -252,6 +272,14 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	if session.AudioTrackIndex != audioIndex {
 		t.Fatalf("audio index = %d, want %d", session.AudioTrackIndex, audioIndex)
 	}
+	record, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.NormalizedRequest.Metered || record.NormalizedRequest.BandwidthEstimateKbps == nil || *record.NormalizedRequest.BandwidthEstimateKbps != bandwidthEstimate ||
+		record.NormalizedRequest.BandwidthCapKbps == nil || *record.NormalizedRequest.BandwidthCapKbps != bandwidthCap {
+		t.Fatalf("stored replan network evidence = %#v", record.NormalizedRequest)
+	}
 	replan.PositionSeconds++
 	conflictBody, err := json.Marshal(replan)
 	if err != nil {
@@ -263,6 +291,85 @@ func TestHandleReplanPlaybackV3UpdatesSelectedAudioAndReplaysIdempotently(t *tes
 	handler.HandleReplanPlaybackV3(conflictRR, conflictReq)
 	if conflictRR.Code != http.StatusConflict || !strings.Contains(conflictRR.Body.String(), "idempotency_key_reused") {
 		t.Fatalf("conflict status = %d, body = %s", conflictRR.Code, conflictRR.Body.String())
+	}
+}
+
+func TestHandleReplanPlaybackV3RollsBackLiveSessionWhenPersistenceFails(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.AudioTracks = append(file.AudioTracks, models.AudioTrack{Codec: "aac", Channels: 2, Layout: "stereo", Language: "spa"})
+	manager := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.protocol_v3_enabled": "true", "allow_4k_transcode": "true"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	startRequest := v3HandlerStartRequest()
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, startRequest))).WithContext(newAuthorizedPlaybackContext())
+	startRR := httptest.NewRecorder()
+	handler.HandleStartPlayback(startRR, startReq)
+	if startRR.Code != http.StatusCreated {
+		t.Fatalf("start status = %d, body = %s", startRR.Code, startRR.Body.String())
+	}
+	var started playback.DecisionResponseV3
+	if err := json.Unmarshal(startRR.Body.Bytes(), &started); err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start response: err=%v response=%#v", err, started)
+	}
+	beforeSession, err := manager.GetSession(started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRecord, err := handler.PlanStoreV3.GetAttempt(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	underlyingStore := handler.PlanStoreV3
+	handler.PlanStoreV3 = &failingCompletePlanStoreV3{PlanStoreV3: underlyingStore}
+
+	audioIndex := 1
+	failedKey := playback.PlanAttemptKeyV3(*started.PlaybackPlan, startRequest.OutputRouteGeneration, nil)
+	replan := playback.ReplanRequestV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		PlaybackAttemptID:     startRequest.PlaybackAttemptID,
+		ReplanRequestID:       "replan-rollback-0001",
+		FailedPlanID:          started.PlaybackPlan.PlanID,
+		PlanAttemptID:         "plan-attempt-rollback-0001",
+		PlanAttemptKey:        failedKey,
+		AttemptedPlanKeys:     []string{failedKey},
+		AttemptCount:          1,
+		QualityPreference:     "original",
+		PositionSeconds:       12,
+		OutputRouteGeneration: startRequest.OutputRouteGeneration,
+		SelectedTracks: playback.SelectedTracksV3{Audio: &playback.TrackIdentityV3{
+			ID: playback.TrackIDV3(file.ID, "audio", audioIndex), Index: &audioIndex,
+		}},
+		Failure:               playback.FailureV3{Classification: "audio_renderer_error"},
+		Capabilities:          startRequest.Capabilities,
+		ClientPlaybackContext: startRequest.ClientPlaybackContext,
+	}
+	body, err := json.Marshal(replan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext())
+	req = withPlaybackRouteParam(req, "session_id", started.SessionID)
+	rr := httptest.NewRecorder()
+	handler.HandleReplanPlaybackV3(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("replan status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	afterSession, err := manager.GetSession(started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterSession.MediaFileID != beforeSession.MediaFileID || afterSession.AudioTrackIndex != beforeSession.AudioTrackIndex ||
+		afterSession.PlayMethod != beforeSession.PlayMethod || afterSession.TranscodeNodeURL != beforeSession.TranscodeNodeURL {
+		t.Fatalf("live session was not rolled back: before=%#v after=%#v", beforeSession, afterSession)
+	}
+	afterRecord, err := underlyingStore.GetAttempt(context.Background(), started.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRecord.CurrentPlanID != beforeRecord.CurrentPlanID || afterRecord.CurrentReplanRequestID != beforeRecord.CurrentReplanRequestID {
+		t.Fatalf("durable attempt changed after failed commit: before=%#v after=%#v", beforeRecord, afterRecord)
 	}
 }
 
@@ -967,6 +1074,86 @@ func TestPrepareIdentityTransportV3ProgressiveRemuxNeverAdvertisesNativeSeek(t *
 	}
 }
 
+func TestPrepareTransportV3RejectsNodeMissingRequiredTransformation(t *testing.T) {
+	startHits := 0
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{{Name: "video_to_h264", Executor: "server", RecipeVersion: "2"}}})
+		case "/transcode/start":
+			startHits++
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer remote.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"playback.local_transcode_fallback": "false"}}
+	plan := &playback.PlanV3{
+		PlanID:   "plan:remote-capability",
+		Delivery: playback.DeliveryTranscodeHLSV3,
+		Transformations: []playback.TransformationV3{
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
+		},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	_, transportErr := handler.prepareTransportV3(request, &playback.Session{ID: "session-capability"}, v3HandlerFixtureFile(t), playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac"})
+	if transportErr == nil || transportErr.reason != "transcode_node_capability_unavailable" {
+		t.Fatalf("transport error = %#v", transportErr)
+	}
+	if startHits != 0 {
+		t.Fatalf("incompatible node received %d start requests", startHits)
+	}
+}
+
+func TestPrepareTransportV3RequiresRemoteManifestReadiness(t *testing.T) {
+	var startRequest transcodenode.TranscodeStartRequest
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+			writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{
+				{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+				{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
+			}})
+		case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+			if err := json.NewDecoder(r.Body).Decode(&startRequest); err != nil {
+				t.Errorf("decode remote start: %v", err)
+			}
+			writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{SessionID: startRequest.SessionID, Status: "started"})
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer remote.Close()
+
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.JWTSecret = "test-secret"
+	handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
+	plan := &playback.PlanV3{
+		PlanID:   "plan:remote-ready",
+		Delivery: playback.DeliveryTranscodeHLSV3,
+		Transformations: []playback.TransformationV3{
+			{Name: "video_to_h264", Executor: "server", RecipeVersion: "1"},
+			{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1"},
+		},
+	}
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	transport, transportErr := handler.prepareTransportV3(request, &playback.Session{ID: "session-ready", UserID: 7, ProfileID: "profile-1"}, v3HandlerFixtureFile(t), playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayTranscode, TargetVideoCodec: "h264", TargetAudioCodec: "aac"})
+	if transportErr != nil {
+		t.Fatalf("prepare remote transport: %v", transportErr)
+	}
+	defer transport.rollback()
+	if !startRequest.RequireReady {
+		t.Fatal("protocol-v3 remote start did not require manifest readiness")
+	}
+}
+
 func TestHandleStartPlaybackUnknownProtocolUsesLegacyBranch(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	manager := playback.NewSessionManager(0, 0)
@@ -1055,16 +1242,54 @@ func TestHandlePlaybackRouteEventV3RejectsWhileDisabled(t *testing.T) {
 
 func TestSanitizeDiagnosticsV3PreservesPlayerFailureEvidence(t *testing.T) {
 	got := sanitizeDiagnosticsV3(map[string]string{
-		"error_code":      "2004",
-		"error_code_name": "ERROR_CODE_PARSING_CONTAINER_MALFORMED",
-		"error_cause":     "ParserException",
-		"message":         "must not be persisted",
+		"error_code":                     "2004",
+		"error_code_name":                "ERROR_CODE_PARSING_CONTAINER_MALFORMED",
+		"error_cause":                    "ParserException",
+		"network_transport":              "wifi",
+		"network_metered":                "true",
+		"network_validated":              "true",
+		"bandwidth_estimate_kbps":        "3500",
+		"link_downstream_kbps":           "5000",
+		"target_source_position_seconds": "321.5",
+		"reason":                         "seek_reanchor",
+		"message":                        "must not be persisted",
 	})
 	if got["error_code"] != "2004" || got["error_code_name"] == "" || got["error_cause"] != "ParserException" {
 		t.Fatalf("failure diagnostics = %#v", got)
 	}
 	if _, ok := got["message"]; ok {
 		t.Fatalf("unapproved message persisted: %#v", got)
+	}
+	for _, key := range []string{"network_transport", "network_metered", "network_validated", "bandwidth_estimate_kbps", "link_downstream_kbps", "target_source_position_seconds", "reason"} {
+		if got[key] == "" {
+			t.Errorf("client diagnostic %q was stripped: %#v", key, got)
+		}
+	}
+}
+
+func TestRouteEventV3AcceptsAndroidSeekEvents(t *testing.T) {
+	base := playback.RouteEventV3{
+		ProtocolVersion:       playback.ProtocolV3,
+		PlaybackAttemptID:     "attempt-route-0001",
+		OutputRouteGeneration: 1,
+	}
+	for _, event := range []string{playback.RouteEventSeekReanchorRequestedV3, playback.RouteEventSeekReanchoredV3} {
+		candidate := base
+		candidate.Event = event
+		if !validRouteEventV3(candidate) {
+			t.Errorf("Android route event %q was rejected", event)
+		}
+	}
+}
+
+func TestRemapSubtitleSelectionV3RejectsNegativeIndex(t *testing.T) {
+	index := -1
+	request := playback.StartRequestV3{SubtitleTrackIndex: &index}
+	source := &models.MediaFile{ID: 1, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
+	target := &models.MediaFile{ID: 2, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	if err := handler.remapSubtitleSelectionV3(context.Background(), source, target, &request); err == nil {
+		t.Fatal("negative subtitle index was accepted")
 	}
 }
 

@@ -297,10 +297,52 @@ type ReplanRequestV3 struct {
 	QualityPreference     string                    `json:"quality_preference"`
 	PositionSeconds       float64                   `json:"position_seconds"`
 	OutputRouteGeneration int64                     `json:"output_route_generation"`
+	Metered               bool                      `json:"metered"`
+	BandwidthEstimateKbps *int                      `json:"bandwidth_estimate_kbps,omitempty"`
+	BandwidthCapKbps      *int                      `json:"bandwidth_cap_kbps,omitempty"`
 	SelectedTracks        SelectedTracksV3          `json:"selected_tracks"`
 	Failure               FailureV3                 `json:"failure"`
 	Capabilities          ClientCodecCapabilitiesV3 `json:"client_capabilities"`
 	ClientPlaybackContext ClientPlaybackContextV3   `json:"client_playback_context"`
+}
+
+const (
+	RouteEventPlanSelectedV3               = "plan_selected"
+	RouteEventPlanInvalidatedV3            = "plan_invalidated"
+	RouteEventPlanFailedV3                 = "plan_failed"
+	RouteEventFirstFrameV3                 = "first_frame"
+	RouteEventTerminalV3                   = "terminal"
+	RouteEventStoppedV3                    = "stopped"
+	RouteEventRuntimeCorrectionAppliedV3   = "runtime_correction_applied"
+	RouteEventRuntimeCorrectionSucceededV3 = "runtime_correction_succeeded"
+	RouteEventRuntimeCorrectionFailedV3    = "runtime_correction_failed"
+	RouteEventSeekReanchorRequestedV3      = "seek_reanchor_requested"
+	RouteEventSeekReanchoredV3             = "seek_reanchored"
+)
+
+var routeEventNamesV3 = []string{
+	RouteEventPlanSelectedV3,
+	RouteEventPlanInvalidatedV3,
+	RouteEventPlanFailedV3,
+	RouteEventFirstFrameV3,
+	RouteEventTerminalV3,
+	RouteEventStoppedV3,
+	RouteEventRuntimeCorrectionAppliedV3,
+	RouteEventRuntimeCorrectionSucceededV3,
+	RouteEventRuntimeCorrectionFailedV3,
+	RouteEventSeekReanchorRequestedV3,
+	RouteEventSeekReanchoredV3,
+}
+
+// RouteEventNamesV3 returns the complete protocol-v3 telemetry event contract.
+func RouteEventNamesV3() []string {
+	return append([]string(nil), routeEventNamesV3...)
+}
+
+// ValidRouteEventNameV3 reports whether name is part of the protocol-v3
+// telemetry contract shared by handlers, persistence, and clients.
+func ValidRouteEventNameV3(name string) bool {
+	return slices.Contains(routeEventNamesV3, name)
 }
 
 // EffectiveOperation keeps clients which predate the explicit operation field
@@ -580,6 +622,18 @@ func (r ReplanRequestV3) Validate() error {
 	if len(r.AttemptedPlanKeys) > 16 || len(r.Failure.Classification) > 64 || len(r.Failure.Message) > 512 || len(r.Failure.DecoderName) > 128 || !isFiniteV3(r.PositionSeconds) || r.PositionSeconds < 0 || r.PositionSeconds > 31_536_000 {
 		return errors.New("replan bounds exceeded")
 	}
+	if err := validateOptionalBoundedIntV3(r.BandwidthEstimateKbps, 100, 1_000_000, "bandwidth_estimate_kbps"); err != nil {
+		return err
+	}
+	if err := validateOptionalBoundedIntV3(r.BandwidthCapKbps, 100, 1_000_000, "bandwidth_cap_kbps"); err != nil {
+		return err
+	}
+	if err := validateSelectedTrackIdentityV3("audio", r.SelectedTracks.Audio); err != nil {
+		return err
+	}
+	if err := validateSelectedTrackIdentityV3("subtitle", r.SelectedTracks.Subtitle); err != nil {
+		return err
+	}
 	switch r.EffectiveOperation() {
 	case ReplanOperationFailureRecoveryV3, ReplanOperationSeekFailureRecoveryV3:
 		if r.Failure.Classification == "" {
@@ -598,6 +652,19 @@ func (r ReplanRequestV3) Validate() error {
 		}
 	}
 	return validateCapabilitiesV3(&r.Capabilities, &r.ClientPlaybackContext)
+}
+
+func validateSelectedTrackIdentityV3(kind string, track *TrackIdentityV3) error {
+	if track == nil {
+		return nil
+	}
+	if len(track.ID) > 128 {
+		return fmt.Errorf("%s track id exceeds supported size", kind)
+	}
+	if track.Index != nil && (*track.Index < 0 || *track.Index > 10_000) {
+		return fmt.Errorf("%s track index is invalid", kind)
+	}
+	return nil
 }
 
 func validateCapabilitiesV3(c *ClientCodecCapabilitiesV3, ctx *ClientPlaybackContextV3) error {

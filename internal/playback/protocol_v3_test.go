@@ -94,6 +94,37 @@ func TestReplanRequestV3OperationDefaultsAndValidates(t *testing.T) {
 	}
 }
 
+func TestReplanRequestV3RejectsInvalidNetworkAndTrackEvidence(t *testing.T) {
+	start := validStartRequestV3()
+	request := ReplanRequestV3{
+		ProtocolVersion:       ProtocolV3,
+		PlaybackAttemptID:     start.PlaybackAttemptID,
+		ReplanRequestID:       "replan-validation-0001",
+		FailedPlanID:          "plan:validation-0001",
+		PlanAttemptID:         "plan-attempt-validation-0001",
+		PlanAttemptKey:        "v3:0000000000000001",
+		AttemptCount:          1,
+		QualityPreference:     start.QualityPreference,
+		OutputRouteGeneration: start.OutputRouteGeneration,
+		Failure:               FailureV3{Classification: "parser_failure"},
+		Capabilities:          start.Capabilities,
+		ClientPlaybackContext: start.ClientPlaybackContext,
+	}
+
+	negative := -1
+	request.SelectedTracks.Subtitle = &TrackIdentityV3{ID: "file:42:subtitle:-1", Index: &negative}
+	if err := request.Validate(); err == nil {
+		t.Fatal("negative subtitle index was accepted")
+	}
+
+	request.SelectedTracks.Subtitle = nil
+	tooLow := 99
+	request.BandwidthEstimateKbps = &tooLow
+	if err := request.Validate(); err == nil {
+		t.Fatal("out-of-range bandwidth estimate was accepted")
+	}
+}
+
 func TestPlanAttemptKeyV3KotlinFixture(t *testing.T) {
 	type fixture struct {
 		Name                  string             `json:"name"`
@@ -149,6 +180,21 @@ func TestProtocolV3GoldenWireFixtures(t *testing.T) {
 	}
 	if _, err := start.NormalizeAndValidate(); err != nil {
 		t.Fatalf("golden start request: %v", err)
+	}
+	replanBody, err := os.ReadFile("testdata/protocol_v3/replan_request.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replan ReplanRequestV3
+	if err := json.Unmarshal(replanBody, &replan); err != nil {
+		t.Fatal(err)
+	}
+	if err := replan.Validate(); err != nil {
+		t.Fatalf("golden replan request: %v", err)
+	}
+	if replan.BandwidthEstimateKbps == nil || *replan.BandwidthEstimateKbps != 3_500 ||
+		replan.BandwidthCapKbps == nil || *replan.BandwidthCapKbps != 4_000 || !replan.Metered {
+		t.Fatalf("golden replan network evidence = %#v", replan)
 	}
 	responseBody, err := os.ReadFile("testdata/protocol_v3/decision_response.json")
 	if err != nil {

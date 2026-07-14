@@ -57,6 +57,7 @@ type Session struct {
 	LastActivityAt             time.Time
 	activeTransportCount       int
 	replacementPlayMethod      PlayMethod
+	streamRevision             uint64
 }
 
 // SessionStreamState stores the mutable stream-specific details that can
@@ -91,6 +92,37 @@ type SessionStreamState struct {
 	SubtitleBurnIn     bool
 	SegmentDuration    int
 }
+
+// SessionReplacement is the complete mutable session state associated with a
+// protocol-v3 replacement plan. Position is optional because ordinary failure
+// recovery must preserve the player's latest progress while seek recovery
+// intentionally moves the authoritative timeline.
+type SessionReplacement struct {
+	EffectiveMediaFileID int
+	StreamState          SessionStreamState
+	PositionSeconds      *float64
+	IsPaused             bool
+	PreservePaused       bool
+}
+
+// SessionReplacementRollback is an opaque compare-and-swap token returned by
+// ApplyReplacement. It can restore the previous session state only while no
+// newer stream or progress mutation has superseded the replacement.
+type SessionReplacementRollback struct {
+	sessionID                    string
+	appliedRevision              uint64
+	previousEffectiveMediaFileID int
+	previousStreamState          SessionStreamState
+	previousPosition             float64
+	previousPaused               bool
+	restoreProgress              bool
+	previousReplacementMethod    PlayMethod
+}
+
+// ErrSessionReplacementSuperseded means a replacement rollback would overwrite
+// a newer session mutation. Callers should terminate the session rather than
+// expose state that disagrees with the durable playback plan.
+var ErrSessionReplacementSuperseded = errors.New("session replacement was superseded")
 
 type clientInfoContextKey struct{}
 
@@ -644,6 +676,7 @@ func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPa
 
 	s.Position = position
 	s.IsPaused = isPaused
+	s.streamRevision++
 	m.touchSessionLocked(s)
 	return nil
 }
@@ -664,6 +697,7 @@ func (m *SessionManager) UpdateAudioTrack(sessionID string, audioTrackIndex int,
 	if s.PlayMethod != PlayTranscode || method == PlayTranscode {
 		s.PlayMethod = method
 	}
+	s.streamRevision++
 	m.touchSessionLocked(s)
 	return nil
 }
@@ -680,6 +714,13 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 		return ErrSessionNotFound
 	}
 
+	applySessionStreamStateLocked(s, state)
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	return nil
+}
+
+func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	if state.PlayMethod != "" {
 		s.PlayMethod = state.PlayMethod
 	}
@@ -715,6 +756,119 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	s.SubtitleBurnIn = state.SubtitleBurnIn
 	s.SegmentDuration = state.SegmentDuration
 	s.replacementPlayMethod = ""
+}
+
+func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
+	return SessionStreamState{
+		PlayMethod:           s.PlayMethod,
+		BasePlayMethod:       s.BasePlayMethod,
+		AudioTrackIndex:      s.AudioTrackIndex,
+		TranscodeAudio:       s.TranscodeAudio,
+		RemuxDVMode:          s.RemuxDVMode,
+		ClientIP:             s.ClientIP,
+		ClientName:           s.ClientName,
+		ClientVersion:        s.ClientVersion,
+		ClientUserAgent:      s.ClientUserAgent,
+		StreamBitrateKbps:    s.StreamBitrateKbps,
+		TargetResolution:     s.TargetResolution,
+		TargetVideoCodec:     s.TargetVideoCodec,
+		TargetAudioCodec:     s.TargetAudioCodec,
+		TargetBitrateKbps:    s.TargetBitrateKbps,
+		TranscodeHWAccel:     s.TranscodeHWAccel,
+		TranscodeNodeURL:     s.TranscodeNodeURL,
+		TranscodeTransportID: s.TranscodeTransportID,
+		TranscodeRouteSet:    true,
+		SubtitleTrackIndex:   s.SubtitleTrackIndex,
+		SubtitleBurnIn:       s.SubtitleBurnIn,
+		SegmentDuration:      s.SegmentDuration,
+	}
+}
+
+func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
+	s.PlayMethod = state.PlayMethod
+	s.BasePlayMethod = state.BasePlayMethod
+	s.AudioTrackIndex = state.AudioTrackIndex
+	s.TranscodeAudio = state.TranscodeAudio
+	s.RemuxDVMode = state.RemuxDVMode
+	s.ClientIP = state.ClientIP
+	s.ClientName = state.ClientName
+	s.ClientVersion = state.ClientVersion
+	s.ClientUserAgent = state.ClientUserAgent
+	s.StreamBitrateKbps = state.StreamBitrateKbps
+	s.TargetResolution = state.TargetResolution
+	s.TargetVideoCodec = state.TargetVideoCodec
+	s.TargetAudioCodec = state.TargetAudioCodec
+	s.TargetBitrateKbps = state.TargetBitrateKbps
+	s.TranscodeHWAccel = state.TranscodeHWAccel
+	s.TranscodeNodeURL = state.TranscodeNodeURL
+	s.TranscodeTransportID = state.TranscodeTransportID
+	s.SubtitleTrackIndex = state.SubtitleTrackIndex
+	s.SubtitleBurnIn = state.SubtitleBurnIn
+	s.SegmentDuration = state.SegmentDuration
+}
+
+// ApplyReplacement atomically updates every live-session field owned by a
+// protocol-v3 plan and returns a CAS rollback token for a later persistence
+// failure.
+func (m *SessionManager) ApplyReplacement(sessionID string, replacement SessionReplacement) (SessionReplacementRollback, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return SessionReplacementRollback{}, ErrSessionNotFound
+	}
+	if replacement.EffectiveMediaFileID <= 0 {
+		return SessionReplacementRollback{}, errors.New("replacement effective media file id is invalid")
+	}
+
+	rollback := SessionReplacementRollback{
+		sessionID:                    sessionID,
+		previousEffectiveMediaFileID: s.MediaFileID,
+		previousStreamState:          snapshotSessionStreamStateLocked(s),
+		previousReplacementMethod:    s.replacementPlayMethod,
+	}
+	if replacement.PositionSeconds != nil {
+		rollback.previousPosition = s.Position
+		rollback.previousPaused = s.IsPaused
+		rollback.restoreProgress = true
+	}
+
+	s.MediaFileID = replacement.EffectiveMediaFileID
+	applySessionStreamStateLocked(s, replacement.StreamState)
+	if replacement.PositionSeconds != nil {
+		s.Position = *replacement.PositionSeconds
+		if !replacement.PreservePaused {
+			s.IsPaused = replacement.IsPaused
+		}
+	}
+	s.streamRevision++
+	rollback.appliedRevision = s.streamRevision
+	m.touchSessionLocked(s)
+	return rollback, nil
+}
+
+// RollbackReplacement restores the state captured by ApplyReplacement when no
+// newer session mutation has superseded it.
+func (m *SessionManager) RollbackReplacement(sessionID string, rollback SessionReplacementRollback) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if rollback.sessionID != sessionID || rollback.appliedRevision == 0 || s.streamRevision != rollback.appliedRevision {
+		return ErrSessionReplacementSuperseded
+	}
+	s.MediaFileID = rollback.previousEffectiveMediaFileID
+	restoreSessionStreamStateLocked(s, rollback.previousStreamState)
+	if rollback.restoreProgress {
+		s.Position = rollback.previousPosition
+		s.IsPaused = rollback.previousPaused
+	}
+	s.replacementPlayMethod = rollback.previousReplacementMethod
+	s.streamRevision++
 	m.touchSessionLocked(s)
 	return nil
 }
@@ -730,6 +884,7 @@ func (m *SessionManager) SetTranscodeNodeURL(sessionID, url string) error {
 	}
 
 	s.TranscodeNodeURL = url
+	s.streamRevision++
 	m.touchSessionLocked(s)
 	return nil
 }
@@ -748,6 +903,7 @@ func (m *SessionManager) SetEffectiveMediaFileID(sessionID string, fileID int) e
 	if fileID > 0 {
 		s.MediaFileID = fileID
 	}
+	s.streamRevision++
 	m.touchSessionLocked(s)
 	return nil
 }
