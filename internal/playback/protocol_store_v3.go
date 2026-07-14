@@ -101,6 +101,11 @@ func NewMemoryPlanStoreV3() *MemoryPlanStoreV3 {
 	return &MemoryPlanStoreV3{attempts: make(map[string]AttemptRecordV3), replans: make(map[string]memoryReplanV3)}
 }
 
+// AcquireSessionLock is deliberately a no-op. The store lock exists to
+// serialize replans across processes sharing one PostgreSQL database; the
+// memory store only ever backs a single-process, DB-less deployment, where
+// the handler's own per-session replan mutex already provides the same
+// serialization before this lock is taken.
 func (s *MemoryPlanStoreV3) AcquireSessionLock(context.Context, string) (func(), error) {
 	return func() {}, nil
 }

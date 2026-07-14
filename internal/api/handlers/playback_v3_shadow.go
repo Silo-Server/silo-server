@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -21,6 +22,16 @@ func (h *PlaybackHandler) protocolV3ShadowEnabled(ctx context.Context) bool {
 // labelled validation inference; this is never a production compatibility
 // claim and cannot enable v3 playback.
 func (h *PlaybackHandler) shadowLegacyPlaybackV3(ctx context.Context, req startPlaybackRequest, requestedFile, effectiveFile *models.MediaFile, audioIndex int, productionMethod playback.PlayMethod, productionTranscodeAudio bool, sessionID string) {
+	// The shadow planner runs on a bare goroutine off the production start
+	// path; an escaped panic here would take down the whole process for a
+	// telemetry-only comparison, so it must fail closed instead.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			slog.ErrorContext(ctx, "playback v3 shadow planner panicked",
+				"component", "playback", "playback_session_id", sessionID,
+				"panic", recovered, "stack", string(debug.Stack()))
+		}
+	}()
 	if !h.protocolV3ShadowEnabled(ctx) || requestedFile == nil || effectiveFile == nil {
 		return
 	}

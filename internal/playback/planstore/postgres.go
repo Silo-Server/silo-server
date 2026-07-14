@@ -20,6 +20,22 @@ type Postgres struct {
 
 func NewPostgres(db *pgxpool.Pool) *Postgres { return &Postgres{db: db} }
 
+// SessionLockCapacity reports how many AcquireSessionLock holders the
+// underlying pool can sustain concurrently. Each holder pins one pooled
+// connection for its advisory-lock transaction while issuing further store
+// queries from the same pool, so the bound leaves at least half the pool free
+// for those queries and for the rest of the application.
+func (s *Postgres) SessionLockCapacity() int {
+	if s == nil || s.db == nil {
+		return 0
+	}
+	capacity := int(s.db.Config().MaxConns) / 2
+	if capacity < 1 {
+		capacity = 1
+	}
+	return capacity
+}
+
 func (s *Postgres) AcquireSessionLock(ctx context.Context, sessionID string) (func(), error) {
 	conn, err := s.db.Acquire(ctx)
 	if err != nil {

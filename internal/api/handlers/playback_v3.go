@@ -604,6 +604,12 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 		}
 		committed = true
 		h.tm.StopRemoteTranscode(transportID, node.URL)
+		// The accepted node job is gone; drop the planner reservation too so
+		// repeated failed starts cannot pin the node's max-job or bandwidth
+		// budget until the reservation ages out.
+		if releaser, ok := h.NodePlanner.(sessionReservationReleaserV3); ok {
+			releaser.ReleaseSession(session.ID)
+		}
 		unlock()
 	}}, nil
 }
@@ -878,6 +884,13 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		start.StartPosition = &req.PositionSeconds
 		applySelectedTracksToStartV3(&start, record.CurrentPlan.SelectedTracks)
 	} else {
+		// Failure replans may omit unchanged tracks. The durable current plan
+		// holds the authoritative effective-file selections; the normalized
+		// request can still carry requested-edition identities after an
+		// alternate-version fallback, and validating those against the
+		// effective file would reject an otherwise valid replan. Seed from
+		// the plan first, then overlay the request's explicit changes.
+		applySelectedTracksToStartV3(&start, record.CurrentPlan.SelectedTracks)
 		switch req.Failure.Classification {
 		case "quality_changed":
 			nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
@@ -953,10 +966,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// from an eng/ac3 commentary track to the identically-shaped main
 		// track on a quality change.
 		if currentEffectiveFile.ID != effectiveFile.ID {
-			if start.AudioTrackIndex != nil {
-				remappedAudio := remapAudioIndexV3(currentEffectiveFile, effectiveFile, *start.AudioTrackIndex)
-				start.AudioTrackIndex = &remappedAudio
-				start.AudioTrackID = playback.TrackIDV3(effectiveFile.ID, "audio", remappedAudio)
+			if err := remapAudioSelectionV3(currentEffectiveFile, effectiveFile, &start); err != nil {
+				return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
 			}
 			if start.SubtitleTrackIndex != nil || start.SubtitleTrackID != "" {
 				if err := h.remapSubtitleSelectionV3(r.Context(), currentEffectiveFile, effectiveFile, &start); err != nil {
@@ -1316,11 +1327,25 @@ func (h *PlaybackHandler) lockReplanV3(sessionID string) func() {
 // connection into a lock holder and the inner queries deadlock against them.
 const maxConcurrentReplansV3 = 8
 
+// sessionLockCapacityAdvisorV3 lets a plan store cap replan concurrency below
+// the fixed default when its own connection budget is smaller; a pool sized at
+// or below the default would otherwise let lock holders starve the inner
+// store queries that must complete before any lock is released.
+type sessionLockCapacityAdvisorV3 interface {
+	SessionLockCapacity() int
+}
+
 // acquireReplanSlotV3 blocks until a replan slot frees or the request context
 // is cancelled; excess replans queue here holding no DB resources at all.
 func (h *PlaybackHandler) acquireReplanSlotV3(ctx context.Context) (func(), error) {
 	h.v3ReplanSlotsOnce.Do(func() {
-		h.v3ReplanSlots = make(chan struct{}, maxConcurrentReplansV3)
+		capacity := maxConcurrentReplansV3
+		if advisor, ok := h.PlanStoreV3.(sessionLockCapacityAdvisorV3); ok {
+			if advised := advisor.SessionLockCapacity(); advised > 0 && advised < capacity {
+				capacity = advised
+			}
+		}
+		h.v3ReplanSlots = make(chan struct{}, capacity)
 	})
 	select {
 	case h.v3ReplanSlots <- struct{}{}:
@@ -1510,6 +1535,30 @@ func remapAudioIndexV3(source, target *models.MediaFile, index int) int {
 		}
 	}
 	return normalizeAudioTrackIndex(target, index)
+}
+
+// remapAudioSelectionV3 rebinds the request's audio selection when the
+// effective media file changes. ID-only selections are equally file-bound:
+// the stale ID would be rejected against the new file's track list
+// downstream, so derive the source index from it and remap like any other.
+func remapAudioSelectionV3(source, target *models.MediaFile, request *playback.StartRequestV3) error {
+	if request == nil || source == nil || target == nil || source.ID == target.ID {
+		return nil
+	}
+	if request.AudioTrackIndex == nil {
+		if request.AudioTrackID == "" {
+			return nil
+		}
+		fileID, kind, ordinal, ok := playback.ParseTrackIDV3(request.AudioTrackID)
+		if !ok || kind != "audio" || fileID != source.ID {
+			return errors.New("The selected audio track identity is invalid for the source file.")
+		}
+		request.AudioTrackIndex = &ordinal
+	}
+	remapped := remapAudioIndexV3(source, target, *request.AudioTrackIndex)
+	request.AudioTrackIndex = &remapped
+	request.AudioTrackID = playback.TrackIDV3(target.ID, "audio", remapped)
+	return nil
 }
 
 func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, target *models.MediaFile, request *playback.StartRequestV3) error {
