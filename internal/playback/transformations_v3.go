@@ -5,7 +5,6 @@ import (
 	"context"
 	"os/exec"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -24,9 +23,9 @@ type TransformationRegistryV3 struct {
 }
 
 func ProbeTransformationRegistryV3(ctx context.Context, ffmpegPath string) *TransformationRegistryV3 {
-	if strings.TrimSpace(ffmpegPath) == "" {
-		ffmpegPath = "ffmpeg"
-	}
+	// Resolve exactly like the execution paths (remux and transcode) so every
+	// capability advertised here holds for the binary that later runs.
+	ffmpegPath = ResolveFFmpegPath(ffmpegPath)
 	bsfCtx, cancelBSF := context.WithTimeout(ctx, 3*time.Second)
 	bsfs, _ := exec.CommandContext(bsfCtx, ffmpegPath, "-hide_banner", "-bsfs").Output()
 	cancelBSF()

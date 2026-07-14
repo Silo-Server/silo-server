@@ -172,7 +172,7 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 	// Honor the Dolby Vision mode frozen in the token (empty decodes as the
 	// legacy auto behavior for old tokens), mirroring how the integrated
 	// server's stream handler serves the same claims.
-	_ = playback.ServeRemuxWithDVMode(w, r, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxDVMode(claims.RemuxDVMode))
+	_ = playback.ServeRemuxWithDVMode(w, r, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxDVMode(claims.RemuxDVMode), s.watcher.Config().Playback.FFmpegPath)
 }
 
 func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request) {

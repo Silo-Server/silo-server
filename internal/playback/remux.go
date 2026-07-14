@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -19,8 +20,8 @@ var (
 	resolvedFFmpegPath string
 	ffmpegOnce         sync.Once
 
-	doviRPUAvailable bool
-	doviRPUOnce      sync.Once
+	doviRPUMu    sync.Mutex
+	doviRPUCache map[string]bool
 )
 
 // ffmpegBinary returns the path to the ffmpeg binary.
@@ -37,19 +38,38 @@ func ffmpegBinary() string {
 	return resolvedFFmpegPath
 }
 
-// supportsDoviRPUFilter reports whether FFmpeg can strip Dolby Vision RPU
-// metadata via the dovi_rpu bitstream filter (FFmpeg 7.1+). The enhancement
-// layer itself is dropped by stream mapping, so stripping the RPUs yields a
-// clean HDR10 base layer. Probed once per process.
-func supportsDoviRPUFilter() bool {
-	doviRPUOnce.Do(func() {
-		out, err := exec.Command(ffmpegBinary(), "-hide_banner", "-bsfs").Output()
-		doviRPUAvailable = err == nil && bytes.Contains(out, []byte("dovi_rpu"))
-		if !doviRPUAvailable {
-			slog.Warn("ffmpeg lacks the dovi_rpu bitstream filter (needs FFmpeg 7.1+); validated Profile 7 HDR10 remux is disabled")
-		}
-	})
-	return doviRPUAvailable
+// ResolveFFmpegPath returns the ffmpeg binary the playback pipeline executes
+// for the given configured path: the configured path when set, otherwise the
+// process-global discovery (jellyfin-ffmpeg install, then PATH). Capability
+// probes must resolve through this same function so a feature advertised at
+// planning time is guaranteed present in the binary that later runs.
+func ResolveFFmpegPath(configured string) string {
+	if strings.TrimSpace(configured) != "" {
+		return configured
+	}
+	return ffmpegBinary()
+}
+
+// supportsDoviRPUFilter reports whether the given FFmpeg binary can strip
+// Dolby Vision RPU metadata via the dovi_rpu bitstream filter (FFmpeg 7.1+).
+// The enhancement layer itself is dropped by stream mapping, so stripping the
+// RPUs yields a clean HDR10 base layer. Probed once per binary path.
+func supportsDoviRPUFilter(bin string) bool {
+	doviRPUMu.Lock()
+	defer doviRPUMu.Unlock()
+	if available, ok := doviRPUCache[bin]; ok {
+		return available
+	}
+	out, err := exec.Command(bin, "-hide_banner", "-bsfs").Output()
+	available := err == nil && bytes.Contains(out, []byte("dovi_rpu"))
+	if !available {
+		slog.Warn("ffmpeg lacks the dovi_rpu bitstream filter (needs FFmpeg 7.1+); validated Profile 7 HDR10 remux is disabled", "ffmpeg", bin)
+	}
+	if doviRPUCache == nil {
+		doviRPUCache = make(map[string]bool)
+	}
+	doviRPUCache[bin] = available
+	return available
 }
 
 // remuxDVProfile neutralizes a Dolby Vision profile the local ffmpeg cannot
@@ -188,25 +208,28 @@ func buildRemuxArgs(filePath, outputFormat string, seekSeconds float64, transcod
 // When transcodeAudio is true video is copied but audio is transcoded to AAC.
 // The caller must call Close() when done to clean up resources.
 func StartRemux(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) (*RemuxSession, error) {
-	return StartRemuxWithDVMode(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxDVLegacyAutoV3)
+	return StartRemuxWithDVMode(ctx, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxDVLegacyAutoV3, "")
 }
 
 // StartRemuxWithDVMode starts a remux with explicit Dolby Vision behavior.
-func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode) (*RemuxSession, error) {
+// ffmpegPath selects the binary to execute (empty = process-global discovery);
+// v3 callers must pass the configured playback path so the strip capability
+// promised by the planner's probe holds for the binary that actually runs.
+func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) (*RemuxSession, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
-	bin := ffmpegBinary()
+	bin := ResolveFFmpegPath(ffmpegPath)
 	effectiveProfile := dvProfile
 	tagDVSampleEntry := false
 	switch mode {
 	case "", RemuxDVLegacyAutoV3:
-		effectiveProfile = remuxDVProfile(dvProfile, supportsDoviRPUFilter())
+		effectiveProfile = remuxDVProfile(dvProfile, supportsDoviRPUFilter(bin))
 	case RemuxDVStripToHDR10V3:
 		if dvProfile != 7 && dvProfile != 8 {
 			cancel()
 			return nil, fmt.Errorf("Dolby Vision HDR10 strip requires profile 7 or 8")
 		}
-		if !supportsDoviRPUFilter() {
+		if !supportsDoviRPUFilter(bin) {
 			cancel()
 			return nil, fmt.Errorf("Dolby Vision HDR10 remux requires the dovi_rpu bitstream filter")
 		}
@@ -288,11 +311,12 @@ func containerMIME(format string) string {
 // total size is not known in advance.
 // When transcodeAudio is true, audio is transcoded to AAC while video is copied.
 func ServeRemux(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int) error {
-	return ServeRemuxWithDVMode(w, r, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxDVLegacyAutoV3)
+	return ServeRemuxWithDVMode(w, r, filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, RemuxDVLegacyAutoV3, "")
 }
 
 // ServeRemuxWithDVMode streams an explicitly declared Dolby Vision recipe.
-func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode) error {
+// ffmpegPath selects the binary to execute (empty = process-global discovery).
+func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outputFormat string, seekSeconds float64, transcodeAudio bool, audioTrackIndex int, dvProfile int, mode RemuxDVMode, ffmpegPath string) error {
 	// Remux output streams for the length of the title; roll the write
 	// deadline with progress instead of the server's absolute WriteTimeout.
 	w = httpstream.NewRollingDeadlineWriter(w)
@@ -308,7 +332,7 @@ func ServeRemuxWithDVMode(w http.ResponseWriter, r *http.Request, filePath, outp
 		return err
 	}
 
-	session, err := StartRemuxWithDVMode(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode)
+	session, err := StartRemuxWithDVMode(r.Context(), filePath, outputFormat, seekSeconds, transcodeAudio, audioTrackIndex, dvProfile, mode, ffmpegPath)
 	if err != nil {
 		http.Error(w, "failed to start remux", http.StatusInternalServerError)
 		return err

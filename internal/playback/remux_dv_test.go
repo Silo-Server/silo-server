@@ -77,7 +77,7 @@ func TestBuildRemuxArgsTagsPreservedDolbyVisionOnlyWhenRequested(t *testing.T) {
 // explicit preserve recipe must fail fast instead of emitting a stream with
 // dangling RPUs and no enhancement layer.
 func TestStartRemuxRejectsPreservedProfile7(t *testing.T) {
-	if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, 7, RemuxDVPreserveV3); err == nil {
+	if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, 7, RemuxDVPreserveV3, ""); err == nil {
 		t.Fatal("preserve mode accepted a profile 7 source")
 	}
 }
@@ -85,7 +85,7 @@ func TestStartRemuxRejectsPreservedProfile7(t *testing.T) {
 // An unknown mode must fail for every profile, not only Profile 7 sources.
 func TestStartRemuxRejectsUnknownModeForAllProfiles(t *testing.T) {
 	for _, profile := range []int{0, 5, 7, 8} {
-		if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, profile, RemuxDVMode("bogus")); err == nil {
+		if _, err := StartRemuxWithDVMode(t.Context(), "/nonexistent.mkv", "mp4", 0, false, -1, profile, RemuxDVMode("bogus"), ""); err == nil {
 			t.Fatalf("unknown remux DV mode accepted for profile %d", profile)
 		}
 	}
