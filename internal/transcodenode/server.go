@@ -209,6 +209,21 @@ func (s *Server) touchSession(sessionID string) {
 	s.mu.Unlock()
 }
 
+// acquireSessionTouched returns the registered job for sessionID and, when
+// found, refreshes its idle clock in the same critical section. Doing both
+// under one lock closes the gap where the idle reaper could unregister the
+// job between a read-lock lookup and a separate touch, leaving the request
+// serving a session whose teardown is already removing its output dir.
+func (s *Server) acquireSessionTouched(sessionID string) (*playback.TranscodeSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	if ok {
+		s.noteSessionAccessLocked(sessionID)
+	}
+	return session, ok
+}
+
 // startIdleReaper launches the background sweep that closes jobs no client has
 // touched for sessionIdleTTL. Called once when the node starts serving;
 // subsequent calls are no-ops. The goroutine runs for the process lifetime,
@@ -228,18 +243,19 @@ func (s *Server) startIdleReaper() {
 // reapIdleSessions closes and unregisters every job whose last manifest or
 // segment access is older than ttl. Registration counts as the first access,
 // so a job still waiting on its manifest (the RequireReady flow) is never
-// reaped mid-wait. Victims are collected under the map lock and closed outside
-// it: Close blocks on ffmpeg teardown and must not stall concurrent requests.
-// The session's recipe is deliberately kept — an idle reap is not a client
-// stop, and a still-valid token must be able to reconstruct on the next hit.
+// reaped mid-wait. Candidates are collected under the map lock, then each is
+// re-validated and torn down under its per-session lifecycle lock: Close
+// removes the output dir, and without that lock it could race a token
+// reconstruct and wipe the segments a fresh ffmpeg is writing. The session's
+// recipe is deliberately kept — an idle reap is not a client stop, and a
+// still-valid token must be able to reconstruct on the next hit.
 func (s *Server) reapIdleSessions(ttl time.Duration) {
 	cutoff := time.Now().Add(-ttl)
 	type idleJob struct {
 		id      string
 		session *playback.TranscodeSession
-		idle    time.Duration
 	}
-	var victims []idleJob
+	var candidates []idleJob
 	s.mu.Lock()
 	for id, session := range s.sessions {
 		last, ok := s.lastAccess[id]
@@ -250,24 +266,47 @@ func (s *Server) reapIdleSessions(ttl time.Duration) {
 			continue
 		}
 		if last.Before(cutoff) {
-			victims = append(victims, idleJob{id: id, session: session, idle: time.Since(last)})
-			delete(s.sessions, id)
-			delete(s.lastAccess, id)
+			candidates = append(candidates, idleJob{id: id, session: session})
 		}
 	}
 	s.mu.Unlock()
 
-	for _, v := range victims {
-		s.activeJobs.Add(-1)
-		if err := v.session.Close(); err != nil {
-			slog.Error("close idle transcode session", "component", "transcodenode", "error", err, "session", v.id, "playback_session_id", v.id)
-		}
-		if s.tracker != nil {
-			s.tracker.Remove(context.Background(), v.id)
-		}
-		slog.Info("transcode node reaped idle session", "component", "transcodenode",
-			"session", v.id, "playback_session_id", v.id, "idle_ms", v.idle.Milliseconds())
+	for _, c := range candidates {
+		s.reapSession(c.id, c.session, cutoff)
 	}
+}
+
+// reapSession tears down one idle job under the per-session lifecycle lock so
+// its Close can never overlap a start or reconstruct spawning a new ffmpeg
+// into the same output dir. Ownership and idleness are re-checked under the
+// lock; a job touched or replaced since the sweep scan is spared.
+func (s *Server) reapSession(sessionID string, session *playback.TranscodeSession, cutoff time.Time) {
+	unlock := s.lockSessionLifecycle(sessionID)
+	defer unlock()
+	s.mu.Lock()
+	live, ok := s.sessions[sessionID]
+	if !ok || live != session {
+		s.mu.Unlock()
+		return
+	}
+	last, tracked := s.lastAccess[sessionID]
+	if tracked && !last.Before(cutoff) {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.sessions, sessionID)
+	delete(s.lastAccess, sessionID)
+	s.mu.Unlock()
+
+	s.activeJobs.Add(-1)
+	if err := session.Close(); err != nil {
+		slog.Error("close idle transcode session", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
+	}
+	if s.tracker != nil {
+		s.tracker.Remove(context.Background(), sessionID)
+	}
+	slog.Info("transcode node reaped idle session", "component", "transcodenode",
+		"session", sessionID, "playback_session_id", sessionID, "idle_ms", time.Since(last).Milliseconds())
 }
 
 // recipeStore reads a remote transcode's reconstruction recipe written by central
@@ -698,6 +737,15 @@ func (s *Server) acquireReconstructSlot(ctx context.Context) (func(), bool) {
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
+	// Serialize against in-flight starts and reconstructs. A RequireReady
+	// start registers its job only after the readiness wait; a stop racing
+	// that wait (the API rolling back a timed-out start) would otherwise miss
+	// the map and 404, orphaning the just-spawned ffmpeg until the idle
+	// reaper finds it. Blocking here until the start registers turns that
+	// miss into a normal teardown.
+	unlock := s.lockSessionLifecycle(sessionID)
+	defer unlock()
+
 	s.mu.Lock()
 	session, ok := s.sessions[sessionID]
 	if !ok {
@@ -735,10 +783,10 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-
+	// Lookup and liveness refresh happen atomically so the idle reaper can
+	// never unregister the job between them and tear down a session this
+	// request is about to serve from.
+	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
 		// stream token the proxy forwarded. The manifest path carries no segment
@@ -748,9 +796,10 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
+		// A reconstruct that yielded to a concurrently registered winner has
+		// not recorded this hit; count it so the reaper sees the liveness.
+		s.touchSession(sessionID)
 	}
-	// Every manifest/segment hit counts as liveness for the idle-job reaper.
-	s.touchSession(sessionID)
 
 	manifest, err := session.BuildPlaybackManifest("segment/", r.URL.RawQuery)
 	if err != nil {
@@ -769,10 +818,10 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
 	name := chi.URLParam(r, "name")
 
-	s.mu.RLock()
-	session, ok := s.sessions[sessionID]
-	s.mu.RUnlock()
-
+	// Lookup and liveness refresh happen atomically so the idle reaper can
+	// never unregister the job between them and tear down a session this
+	// request is about to serve from.
+	session, ok := s.acquireSessionTouched(sessionID)
 	if !ok {
 		// Lost the in-memory session (this node restarted): rebuild it from the
 		// forwarded stream token, seeked to the segment the client is requesting so
@@ -786,9 +835,10 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
+		// A reconstruct that yielded to a concurrently registered winner has
+		// not recorded this hit; count it so the reaper sees the liveness.
+		s.touchSession(sessionID)
 	}
-	// Every manifest/segment hit counts as liveness for the idle-job reaper.
-	s.touchSession(sessionID)
 
 	segPath, err := session.GetSegment(name)
 	if err != nil && err == playback.ErrSegmentNotFound {
