@@ -54,12 +54,15 @@ func (input PlannerInputV3) hlsRegistry() *TransformationRegistryV3 {
 }
 
 type PlannerResultV3 struct {
-	Plan                        *PlanV3
-	Terminal                    *TerminalV3
-	PlayMethod                  PlayMethod
-	TranscodeAudio              bool
-	TargetVideoCodec            string
-	TargetAudioCodec            string
+	Plan             *PlanV3
+	Terminal         *TerminalV3
+	PlayMethod       PlayMethod
+	TranscodeAudio   bool
+	TargetVideoCodec string
+	TargetAudioCodec string
+	// TargetAudioChannels caps the transcode's re-encoded channel count;
+	// 0 keeps the historical stereo downmix.
+	TargetAudioChannels         int
 	TargetResolution            string
 	TargetBitrateKbps           int
 	SubtitleTrackIndex          int
@@ -322,6 +325,31 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 				plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "audio_converted", Message: "The selected audio track is converted to AAC stereo for this device's HLS route."})
 				appendAppliedQuirkV3(&plan, *audioQuirk, "")
 			}
+			// DTS and TrueHD are not HLS-native audio codecs. A client's
+			// progressive DTS decode claim does not transfer to segmented
+			// fMP4/TS: copied DTS in an HLS route drags Media3's audio clock
+			// (device stall corrections, ~0.3x pacing, frozen position
+			// reports), so the copy is converted to AAC — surround-preserving
+			// when the source is multichannel.
+			hlsAudioChannels := 0
+			if !hlsTranscodeAudio && !hlsNativeAudioCodecV3(source.AudioCodec) {
+				if !input.hlsRegistry().Available("audio_to_aac") {
+					return terminalPlannerResultV3("audio_conversion_unsupported", "The HLS route requires the validated AAC conversion toolchain.", true)
+				}
+				hlsTranscodeAudio = true
+				hlsAudioChannels = 2
+				audioLayout := "stereo"
+				if source.AudioChannels >= 6 {
+					hlsAudioChannels = 6
+					audioLayout = "5.1"
+				}
+				plan.EffectiveRecipe.AudioCodec = "aac"
+				plan.EffectiveRecipe.AudioChannels = intPointerV3(hlsAudioChannels)
+				plan.EffectiveRecipe.AudioLayout = audioLayout
+				plan.Claims.Audio = AudioClaimsV3{Codec: "aac", Reason: "hls_audio_adaptation"}
+				plan.Transformations = append(plan.Transformations, TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_audio_decode"}})
+				plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: "audio_converted", Message: "The selected audio track is converted to AAC for HLS delivery."})
+			}
 			if !dvStrip {
 				applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 			}
@@ -338,7 +366,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 				if hlsTranscodeAudio {
 					targetAudio = "aac"
 				}
-				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: "copy", TargetAudioCodec: targetAudio, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: hlsSubtitle.SelectedIndex, SubtitleTransportTrackIndex: hlsSubtitle.TransportIndex, SubtitleCodec: hlsSubtitle.Codec}
+				return PlannerResultV3{Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: "copy", TargetAudioCodec: targetAudio, TargetAudioChannels: hlsAudioChannels, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: hlsSubtitle.SelectedIndex, SubtitleTransportTrackIndex: hlsSubtitle.TransportIndex, SubtitleCodec: hlsSubtitle.Codec}
 			}
 		}
 	}
@@ -383,8 +411,16 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	plan.EffectiveRecipe.Width = intPointerV3(quality.Width)
 	plan.EffectiveRecipe.Height = intPointerV3(quality.Height)
 	plan.EffectiveRecipe.BitrateKbps = intPointerV3(quality.BitrateKbps)
-	plan.EffectiveRecipe.AudioChannels = intPointerV3(2)
-	plan.EffectiveRecipe.AudioLayout = "stereo"
+	// Surround sources keep 5.1 through the AAC re-encode (universal Media3
+	// decode); only stereo/mono sources — and unknown layouts — downmix to 2.0.
+	targetAudioChannels := 2
+	audioLayout := "stereo"
+	if source.AudioChannels >= 6 {
+		targetAudioChannels = 6
+		audioLayout = "5.1"
+	}
+	plan.EffectiveRecipe.AudioChannels = intPointerV3(targetAudioChannels)
+	plan.EffectiveRecipe.AudioLayout = audioLayout
 	plan.Transformations = append(plan.Transformations,
 		TransformationV3{Name: "video_to_h264", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_h264_decode"}},
 		TransformationV3{Name: "audio_to_aac", Executor: "server", RecipeVersion: "1", ValidatedClaims: []string{"media3_audio_decode"}},
@@ -406,7 +442,7 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 	if planAttemptedV3(plan, input.Request.OutputRouteGeneration, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec}
+	return PlannerResultV3{Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: "h264", TargetAudioCodec: "aac", TargetAudioChannels: targetAudioChannels, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec}
 }
 
 func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartRequestV3, registry *TransformationRegistryV3) bool {
@@ -588,6 +624,18 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 
 func originalQualityResultV3(source SourceDescriptorV3) QualityResultV3 {
 	return QualityResultV3{Label: resolutionLabelV3(source.Height), Width: source.Width, Height: source.Height, BitrateKbps: source.BitrateKbps, PreservesSource: true, Reason: "quality_original"}
+}
+
+// hlsNativeAudioCodecV3 reports whether an audio codec can be stream-copied
+// into an HLS delivery. The allowlist follows the HLS authoring spec (AAC,
+// AC-3, E-AC-3, MP3); everything else — DTS, TrueHD, PCM, Opus — must be
+// converted even when the client can decode it in a progressive container.
+func hlsNativeAudioCodecV3(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "aac", "ac3", "eac3", "mp3":
+		return true
+	}
+	return false
 }
 
 // hdrTranscodeUnavailableV3 mirrors planVideoTranscodeV3's terminal

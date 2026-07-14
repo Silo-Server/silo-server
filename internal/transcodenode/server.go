@@ -36,6 +36,7 @@ type TranscodeStartRequest struct {
 	TargetResolution     string  `json:"target_resolution"`
 	TargetCodecVideo     string  `json:"target_codec_video"`
 	TargetCodecAudio     string  `json:"target_codec_audio"`
+	TargetAudioChannels  int     `json:"target_audio_channels,omitempty"`
 	TargetBitrateKbps    int     `json:"target_bitrate_kbps"`
 	SegmentDuration      int     `json:"segment_duration"`
 	HWAccel              string  `json:"hw_accel"`
@@ -447,6 +448,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		TargetResolution:     req.TargetResolution,
 		TargetCodecVideo:     req.TargetCodecVideo,
 		TargetCodecAudio:     req.TargetCodecAudio,
+		TargetAudioChannels:  req.TargetAudioChannels,
 		TargetBitrateKbps:    req.TargetBitrateKbps,
 		SegmentDuration:      req.SegmentDuration,
 		FFmpegPath:           cfg.Playback.FFmpegPath,

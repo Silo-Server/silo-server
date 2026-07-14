@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math"
@@ -64,8 +65,21 @@ type adminPushRelayRegisterResponse struct {
 
 // HandleTest handles POST /admin/notifications/push/apple/test.
 func (h *AdminApplePushHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
+	h.handleTest(w, r, "Apple", func(ctx context.Context, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error) {
+		return h.system.SendApplePushTest(ctx, profileID, serverDeviceID)
+	})
+}
+
+// HandleTestAndroid handles POST /admin/notifications/push/fcm/test.
+func (h *AdminApplePushHandler) HandleTestAndroid(w http.ResponseWriter, r *http.Request) {
+	h.handleTest(w, r, "Android", func(ctx context.Context, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error) {
+		return h.system.SendAndroidPushTest(ctx, profileID, serverDeviceID)
+	})
+}
+
+func (h *AdminApplePushHandler) handleTest(w http.ResponseWriter, r *http.Request, platformLabel string, send func(context.Context, string, string) (*notifications.ApplePushTestResult, error)) {
 	if h == nil || h.system == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Apple push delivery is not available")
+		writeError(w, http.StatusServiceUnavailable, "unavailable", platformLabel+" push delivery is not available")
 		return
 	}
 	var req adminApplePushTestRequest
@@ -73,17 +87,17 @@ func (h *AdminApplePushHandler) HandleTest(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	result, err := h.system.SendApplePushTest(r.Context(), req.ProfileID, req.ServerDeviceID)
+	result, err := send(r.Context(), req.ProfileID, req.ServerDeviceID)
 	if err != nil {
 		switch {
 		case errors.Is(err, notifications.ErrPushDeliveryInvalid):
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		case errors.Is(err, notifications.ErrPushDeliveryNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "Apple push device not found")
+			writeError(w, http.StatusNotFound, "not_found", platformLabel+" push device not found")
 		case errors.Is(err, notifications.ErrPushDeliveryUnavailable):
-			writeError(w, http.StatusServiceUnavailable, "unavailable", "Apple push delivery is not available")
+			writeError(w, http.StatusServiceUnavailable, "unavailable", platformLabel+" push delivery is not available")
 		default:
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to send Apple push test")
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to send "+platformLabel+" push test")
 		}
 		return
 	}

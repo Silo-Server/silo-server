@@ -2707,6 +2707,21 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		req.TargetCodecVideo = "h264"
 	}
 
+	// A copy-video HLS output of a Dolby Vision Profile 7 source must strip the
+	// RPU metadata (the enhancement layer is dropped by stream mapping): raw P7
+	// NALs presented as plain HEVC stall hardware decoders. The V3 start path
+	// derives this from the plan (videoBitstreamFilterForPlanV3) and the
+	// audio-switch restart derives it from the durable session route, but this
+	// client-driven restart endpoint historically dropped it — the client asking
+	// for "copy" has no way to know the source needs the strip. Derived after
+	// the seek/burn-in guards above so a copy request they rewrite to h264
+	// never carries a copy-only bitstream filter.
+	videoBitstreamFilter := ""
+	if strings.EqualFold(req.TargetCodecVideo, "copy") &&
+		(session.RemuxDVMode == playback.RemuxDVStripToHDR10V3 || file.PrimaryDVProfile() == 7) {
+		videoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
+	}
+
 	// The request-level permission check above intentionally runs before the
 	// existing transcode is closed. Recheck when server-side normalization has
 	// upgraded an allowed copy-video request into actual video encoding.
@@ -2795,22 +2810,23 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		}
 
 		nodeReq := transcodenode.TranscodeStartRequest{
-			SessionID:          req.SessionID,
-			InputPath:          file.FilePath,
-			SourceVideoCodec:   file.CodecVideo,
-			SeekSeconds:        alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
-			StartSegmentNumber: computeStartSegment(req.SeekSeconds, req.SegmentDuration),
-			TargetResolution:   req.TargetResolution,
-			TargetCodecVideo:   req.TargetCodecVideo,
-			TargetCodecAudio:   req.TargetCodecAudio,
-			TargetBitrateKbps:  req.TargetBitrateKbps,
-			SegmentDuration:    req.SegmentDuration,
-			HWAccel:            h.playbackConfig().HWAccel,
-			AudioTrackIndex:    session.AudioTrackIndex,
-			SubtitleTrackIndex: req.SubtitleTrackIndex,
-			SubtitleBurnIn:     req.SubtitleBurnIn,
-			SubtitleCodec:      subtitleCodec,
-			TotalDuration:      float64(file.Duration),
+			SessionID:            req.SessionID,
+			InputPath:            file.FilePath,
+			SourceVideoCodec:     file.CodecVideo,
+			VideoBitstreamFilter: videoBitstreamFilter,
+			SeekSeconds:          alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
+			StartSegmentNumber:   computeStartSegment(req.SeekSeconds, req.SegmentDuration),
+			TargetResolution:     req.TargetResolution,
+			TargetCodecVideo:     req.TargetCodecVideo,
+			TargetCodecAudio:     req.TargetCodecAudio,
+			TargetBitrateKbps:    req.TargetBitrateKbps,
+			SegmentDuration:      req.SegmentDuration,
+			HWAccel:              h.playbackConfig().HWAccel,
+			AudioTrackIndex:      session.AudioTrackIndex,
+			SubtitleTrackIndex:   req.SubtitleTrackIndex,
+			SubtitleBurnIn:       req.SubtitleBurnIn,
+			SubtitleCodec:        subtitleCodec,
+			TotalDuration:        float64(file.Duration),
 		}
 
 		nodeResp, status, err := h.startRemotePlaybackTransport(context.Background(), tcNode.URL, nodeReq)
@@ -2834,22 +2850,23 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 		// (and a node could someday self-reconstruct from it). Node-side segment
 		// reconstruction is a follow-up (see spec multi-node section).
 		card := playback.NewRecipeCard(session.UserID, session.ProfileID, session.MediaFileID, tcNode.URL, playback.TranscodeOpts{
-			InputPath:          nodeReq.InputPath,
-			SessionID:          nodeReq.SessionID,
-			SourceVideoCodec:   nodeReq.SourceVideoCodec,
-			SeekSeconds:        nodeReq.SeekSeconds,
-			StartSegmentNumber: nodeReq.StartSegmentNumber,
-			TargetResolution:   nodeReq.TargetResolution,
-			TargetCodecVideo:   nodeReq.TargetCodecVideo,
-			TargetCodecAudio:   nodeReq.TargetCodecAudio,
-			TargetBitrateKbps:  nodeReq.TargetBitrateKbps,
-			SegmentDuration:    nodeReq.SegmentDuration,
-			HWAccel:            effectiveHWAccel,
-			AudioTrackIndex:    nodeReq.AudioTrackIndex,
-			SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
-			SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
-			SubtitleCodec:      nodeReq.SubtitleCodec,
-			TotalDuration:      nodeReq.TotalDuration,
+			InputPath:            nodeReq.InputPath,
+			SessionID:            nodeReq.SessionID,
+			SourceVideoCodec:     nodeReq.SourceVideoCodec,
+			VideoBitstreamFilter: nodeReq.VideoBitstreamFilter,
+			SeekSeconds:          nodeReq.SeekSeconds,
+			StartSegmentNumber:   nodeReq.StartSegmentNumber,
+			TargetResolution:     nodeReq.TargetResolution,
+			TargetCodecVideo:     nodeReq.TargetCodecVideo,
+			TargetCodecAudio:     nodeReq.TargetCodecAudio,
+			TargetBitrateKbps:    nodeReq.TargetBitrateKbps,
+			SegmentDuration:      nodeReq.SegmentDuration,
+			HWAccel:              effectiveHWAccel,
+			AudioTrackIndex:      nodeReq.AudioTrackIndex,
+			SubtitleTrackIndex:   nodeReq.SubtitleTrackIndex,
+			SubtitleBurnIn:       nodeReq.SubtitleBurnIn,
+			SubtitleCodec:        nodeReq.SubtitleCodec,
+			TotalDuration:        nodeReq.TotalDuration,
 		})
 		manifestURL := h.buildProxyManifestURL(card, plan.ProxyNode)
 		h.finalizeTranscodeStart(r, transcodeStartState{
@@ -2887,29 +2904,30 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	unlock := h.tm.LockSessionLifecycle(req.SessionID)
 	h.tm.CloseTranscodeSession(req.SessionID, "")
 	transcodeSession, err := h.startLocalPlaybackTransport(r.Context(), playback.TranscodeOpts{
-		InputPath:          file.FilePath,
-		OutputDir:          filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
-		SessionID:          req.SessionID,
-		SourceVideoCodec:   file.CodecVideo,
-		SeekSeconds:        alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
-		StartSegmentNumber: computeStartSegment(req.SeekSeconds, req.SegmentDuration),
-		TargetResolution:   req.TargetResolution,
-		TargetCodecVideo:   req.TargetCodecVideo,
-		TargetCodecAudio:   req.TargetCodecAudio,
-		TargetBitrateKbps:  req.TargetBitrateKbps,
-		SegmentDuration:    req.SegmentDuration,
-		FFmpegPath:         playbackCfg.FFmpegPath,
-		HWAccel:            playbackCfg.HWAccel,
-		HWDevice:           playbackCfg.HWDevice,
-		AudioTrackIndex:    session.AudioTrackIndex,
-		SubtitleTrackIndex: req.SubtitleTrackIndex,
-		SubtitleBurnIn:     req.SubtitleBurnIn,
-		SubtitleCodec:      subtitleCodec,
-		TotalDuration:      float64(file.Duration),
-		FastStart:          true,
-		NodeType:           "integrated",
-		ExecutionMode:      "integrated",
-		FFmpegLogSink:      h.FFmpegLogSink,
+		InputPath:            file.FilePath,
+		OutputDir:            filepath.Join(playbackCfg.TranscodeDir, req.SessionID),
+		SessionID:            req.SessionID,
+		SourceVideoCodec:     file.CodecVideo,
+		VideoBitstreamFilter: videoBitstreamFilter,
+		SeekSeconds:          alignedSeekSeconds(req.SeekSeconds, req.SegmentDuration, req.TargetCodecVideo),
+		StartSegmentNumber:   computeStartSegment(req.SeekSeconds, req.SegmentDuration),
+		TargetResolution:     req.TargetResolution,
+		TargetCodecVideo:     req.TargetCodecVideo,
+		TargetCodecAudio:     req.TargetCodecAudio,
+		TargetBitrateKbps:    req.TargetBitrateKbps,
+		SegmentDuration:      req.SegmentDuration,
+		FFmpegPath:           playbackCfg.FFmpegPath,
+		HWAccel:              playbackCfg.HWAccel,
+		HWDevice:             playbackCfg.HWDevice,
+		AudioTrackIndex:      session.AudioTrackIndex,
+		SubtitleTrackIndex:   req.SubtitleTrackIndex,
+		SubtitleBurnIn:       req.SubtitleBurnIn,
+		SubtitleCodec:        subtitleCodec,
+		TotalDuration:        float64(file.Duration),
+		FastStart:            true,
+		NodeType:             "integrated",
+		ExecutionMode:        "integrated",
+		FFmpegLogSink:        h.FFmpegLogSink,
 	})
 	if err != nil {
 		unlock()

@@ -31,6 +31,7 @@ const (
 	pushRelayRequestTimeout = 15 * time.Second
 	pushRelayMaxRetryAfter  = 23 * time.Hour
 	relayAppleSendPath      = "/v1/apple/send"
+	relayFcmSendPath        = "/v1/fcm/send"
 )
 
 func pushRetryDelay(completedAttempt int) (time.Duration, bool) {
@@ -64,6 +65,26 @@ func terminalAPNsDeviceRejection(status int, code, message string) bool {
 	}
 }
 
+// terminalFCMDeviceRejection recognizes the relay's fcm_rejected responses
+// whose FCM error code means the registration token is permanently gone.
+// Request-level rejections (e.g. INVALID_ARGUMENT payload complaints) keep the
+// device enabled, matching the conservative APNs list above.
+func terminalFCMDeviceRejection(status int, code, message string) bool {
+	if status != http.StatusUnprocessableEntity || code != "fcm_rejected" {
+		return false
+	}
+	const prefix = "FCM rejected the notification:"
+	reason := strings.TrimSpace(strings.TrimPrefix(message, prefix))
+	return reason == "UNREGISTERED"
+}
+
+func terminalDeviceRejection(platform string, status int, code, message string) bool {
+	if platform == PushPlatformAndroid {
+		return terminalFCMDeviceRejection(status, code, message)
+	}
+	return terminalAPNsDeviceRejection(status, code, message)
+}
+
 type pushRelayAppleRequest struct {
 	Token          string  `json:"token"`
 	Environment    string  `json:"environment"`
@@ -78,6 +99,16 @@ type pushRelayAppleResponse struct {
 	RequestID string `json:"request_id"`
 	APNsID    string `json:"apns_id"`
 	Status    string `json:"status"`
+}
+
+// pushRelayFcmRequest matches the relay's /v1/fcm/send contract: no
+// environment or topic — the relay's Firebase project is the boundary.
+type pushRelayFcmRequest struct {
+	Token          string  `json:"token"`
+	Mode           string  `json:"mode"`
+	ServerDeviceID string  `json:"server_device_id"`
+	DeliveryID     string  `json:"delivery_id"`
+	CollapseID     *string `json:"collapse_id,omitempty"`
 }
 
 type pushRelayErrorResponse struct {
@@ -138,8 +169,12 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 		}
 		return nil
 	}
-	if !device.Enabled || device.PushMode != PushModePrivatePush || !s.settings.ApplePushDeliveryEnabled(ctx) {
-		return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_disabled", "apple push delivery disabled", nil, "", nil)
+	deliveryEnabled := s.settings.ApplePushDeliveryEnabled(ctx)
+	if device.Platform == PushPlatformAndroid {
+		deliveryEnabled = s.settings.AndroidPushDeliveryEnabled(ctx)
+	}
+	if !device.Enabled || device.PushMode != PushModePrivatePush || !deliveryEnabled {
+		return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_disabled", "push delivery disabled", nil, "", nil)
 	}
 	if attempt.NotificationDeliveryID != nil {
 		row, err := s.deliveries.GetRowByID(ctx, *attempt.NotificationDeliveryID)
@@ -160,9 +195,13 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 		}
 	}
 
-	token, err := s.cipher.Decrypt(device.APNsTokenCiphertext, pushDeviceAPNsTokenAAD(device.ID))
+	ciphertext, aad := device.APNsTokenCiphertext, pushDeviceAPNsTokenAAD(device.ID)
+	if device.Platform == PushPlatformAndroid {
+		ciphertext, aad = device.FCMTokenCiphertext, pushDeviceFCMTokenAAD(device.ID)
+	}
+	token, err := s.cipher.Decrypt(ciphertext, aad)
 	if err != nil {
-		return s.finalize(ctx, attempt, PushOutcomeFailed, "decrypt_failed", "APNs token decrypt failed", nil, "", nil)
+		return s.finalize(ctx, attempt, PushOutcomeFailed, "decrypt_failed", "push token decrypt failed", nil, "", nil)
 	}
 	result := s.send(ctx, attempt, device, token)
 	attemptNumber := attempt.AttemptNumber + 1
@@ -265,7 +304,8 @@ func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliver
 		deliveryID = *attempt.NotificationDeliveryID
 	}
 	collapseID := deliveryID
-	body, err := json.Marshal(pushRelayAppleRequest{
+	sendPath := relayAppleSendPath
+	var payload any = pushRelayAppleRequest{
 		Token:          token,
 		Environment:    device.APNsEnvironment,
 		Topic:          device.APNsTopic,
@@ -273,11 +313,22 @@ func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliver
 		ServerDeviceID: device.ServerDeviceID,
 		DeliveryID:     deliveryID,
 		CollapseID:     &collapseID,
-	})
+	}
+	if device.Platform == PushPlatformAndroid {
+		sendPath = relayFcmSendPath
+		payload = pushRelayFcmRequest{
+			Token:          token,
+			Mode:           "private_alert",
+			ServerDeviceID: device.ServerDeviceID,
+			DeliveryID:     deliveryID,
+			CollapseID:     &collapseID,
+		}
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return pushSendResult{Message: "relay payload build failed", UpstreamReason: "payload_build_failed"}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+relayAppleSendPath, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, relayURL+sendPath, bytes.NewReader(body))
 	if err != nil {
 		return pushSendResult{Message: "invalid push relay URL", UpstreamReason: "invalid_relay_url"}
 	}
@@ -331,7 +382,7 @@ func (s *pushSender) sendWithCapability(ctx context.Context, attempt PushDeliver
 		RelayRequestID: parsed.Error.RequestID,
 		UpstreamReason: code,
 		Message:        strings.TrimSpace(message),
-		TerminalDevice: terminalAPNsDeviceRejection(resp.StatusCode, code, message),
+		TerminalDevice: terminalDeviceRejection(device.Platform, resp.StatusCode, code, message),
 	}
 }
 
@@ -379,7 +430,9 @@ func newPushDispatcher(sender *pushSender) *PushDispatcher {
 		process: func(ctx context.Context, attempt PushDeliveryAttempt) {
 			sender.processAttempt(ctx, attempt)
 		},
-		enabled:    sender.settings.ApplePushDeliveryEnabled,
+		// The dispatcher claims attempts for every platform; processAttempt
+		// applies the per-platform delivery toggle to each device.
+		enabled:    sender.settings.PushDeliveryEnabled,
 		claimDue:   sender.devices.ClaimDuePushAttempts,
 		claimLimit: pushRetryClaimLimit,
 	}}
@@ -412,16 +465,28 @@ type ApplePushTestResult struct {
 }
 
 func (s *System) SendApplePushTest(ctx context.Context, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+	return s.sendPushTest(ctx, PushPlatformApple, profileID, serverDeviceID)
+}
+
+func (s *System) SendAndroidPushTest(ctx context.Context, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+	return s.sendPushTest(ctx, PushPlatformAndroid, profileID, serverDeviceID)
+}
+
+func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
 	if s == nil || s.pushDeviceRepo == nil || s.pushSender == nil {
 		return nil, ErrPushDeliveryUnavailable
 	}
-	if !s.Settings.ApplePushDeliveryEnabled(ctx) {
+	deliveryEnabled := s.Settings.ApplePushDeliveryEnabled(ctx)
+	if platform == PushPlatformAndroid {
+		deliveryEnabled = s.Settings.AndroidPushDeliveryEnabled(ctx)
+	}
+	if !deliveryEnabled {
 		return nil, ErrPushDeliveryUnavailable
 	}
 	if s.Settings.PushRelayAPIKey(ctx) == "" {
 		return nil, ErrPushDeliveryUnavailable
 	}
-	attempt, device, err := s.pushDeviceRepo.EnqueueAppleTestAttempt(ctx, profileID, serverDeviceID)
+	attempt, device, err := s.pushDeviceRepo.EnqueueTestAttempt(ctx, platform, profileID, serverDeviceID)
 	if err != nil {
 		return nil, err
 	}

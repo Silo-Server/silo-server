@@ -58,6 +58,8 @@ func newPushDeliveryAttempts(deliveryID string, devices []PushDevice) []PushDeli
 			NotificationDeliveryID: &deliveryID,
 			PushDeviceID:           device.ID,
 			TriggerType:            PushTriggerDelivery,
+			Provider:               device.Provider,
+			Platform:               device.Platform,
 		})
 	}
 	return attempts
@@ -98,20 +100,21 @@ func scanPushDeliveryAttempts(rows pgx.Rows) ([]PushDeliveryAttempt, error) {
 	return attempts, rows.Err()
 }
 
-// ListEnabledAppleByProfiles loads delivery-eligible APNs devices keyed by profile.
-func (r *PushDeviceRepository) ListEnabledAppleByProfiles(ctx context.Context, tx pgx.Tx, profileIDs []string) (map[string][]PushDevice, error) {
+// ListEnabledPushByProfiles loads delivery-eligible push devices for the
+// admin-enabled platforms, keyed by profile.
+func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx pgx.Tx, profileIDs, platforms []string) (map[string][]PushDevice, error) {
 	out := make(map[string][]PushDevice, len(profileIDs))
-	if len(profileIDs) == 0 {
+	if len(profileIDs) == 0 || len(platforms) == 0 {
 		return out, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT `+pushDeviceColumns+`
 		FROM push_devices
 		WHERE profile_id = ANY($1)
-		  AND platform = $2
+		  AND platform = ANY($2)
 		  AND provider = $3
 		  AND push_mode = $4
 		  AND enabled`,
-		profileIDs, PushPlatformApple, PushProviderSiloRelay, PushModePrivatePush)
+		profileIDs, platforms, PushProviderSiloRelay, PushModePrivatePush)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled push devices: %w", err)
 	}
@@ -149,8 +152,8 @@ func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.T
 			attempt.NotificationDeliveryID,
 			attempt.PushDeviceID,
 			defaultString(attempt.TriggerType, PushTriggerDelivery),
-			PushProviderSiloRelay,
-			PushPlatformApple,
+			defaultString(attempt.Provider, PushProviderSiloRelay),
+			defaultString(attempt.Platform, PushPlatformApple),
 			0,
 			PushOutcomePending,
 		)
@@ -162,8 +165,9 @@ func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.T
 	return nil
 }
 
-// EnqueueAppleTestAttempt creates a pending diagnostic attempt for one enabled device.
-func (r *PushDeviceRepository) EnqueueAppleTestAttempt(ctx context.Context, profileID, serverDeviceID string) (*PushDeliveryAttempt, *PushDevice, error) {
+// EnqueueTestAttempt creates a pending diagnostic attempt for one enabled
+// device on the given platform.
+func (r *PushDeviceRepository) EnqueueTestAttempt(ctx context.Context, platform, profileID, serverDeviceID string) (*PushDeliveryAttempt, *PushDevice, error) {
 	if r == nil || r.pool == nil {
 		return nil, nil, ErrPushDeliveryUnavailable
 	}
@@ -185,7 +189,7 @@ func (r *PushDeviceRepository) EnqueueAppleTestAttempt(ctx context.Context, prof
 		  AND provider = $3
 		  AND push_mode = $4
 		  AND enabled`
-	args := []any{profileID, PushPlatformApple, PushProviderSiloRelay, PushModePrivatePush}
+	args := []any{profileID, platform, PushProviderSiloRelay, PushModePrivatePush}
 	if serverDeviceID != "" {
 		args = append(args, serverDeviceID)
 		query += fmt.Sprintf(" AND server_device_id = $%d", len(args))
@@ -205,7 +209,7 @@ func (r *PushDeviceRepository) EnqueueAppleTestAttempt(ctx context.Context, prof
 		INSERT INTO push_delivery_attempts
 			(id, notification_delivery_id, push_device_id, trigger_type, provider, platform, attempt_number, outcome)
 		VALUES ($1, NULL, $2, $3, $4, $5, 0, $6)`+pushAttemptReturning,
-		attemptID, device.ID, PushTriggerTest, PushProviderSiloRelay, PushPlatformApple, PushOutcomePending)
+		attemptID, device.ID, PushTriggerTest, PushProviderSiloRelay, platform, PushOutcomePending)
 	if err != nil {
 		return nil, nil, fmt.Errorf("insert push test attempt: %w", err)
 	}

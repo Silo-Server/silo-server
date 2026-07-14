@@ -52,14 +52,18 @@ type TranscodeOpts struct {
 	// "hdmv_pgs_subtitle"). Bitmap codecs (PGS/DVD/DVB) select the overlay
 	// filter_complex pipeline; text codecs use the libass subtitles filter.
 	// Empty preserves the legacy text path for callers minted before the field.
-	SubtitleCodec     string
-	AudioTrackIndex   int     // -1 = default (first track), >= 0 = specific track
-	TargetBitrateKbps int     // max video bitrate in kbps; 0 = CRF-only (no cap)
-	TotalDuration     float64 // total media duration in seconds (for VOD manifest)
-	FastStart         bool    // use superfast preset for faster first-segment production
-	NodeType          string
-	ExecutionMode     string
-	FFmpegLogSink     FFmpegLogSink
+	SubtitleCodec   string
+	AudioTrackIndex int // -1 = default (first track), >= 0 = specific track
+	// TargetAudioChannels caps the re-encoded channel count. 0 (or anything
+	// below 3) keeps the historical stereo downmix; 6 preserves 5.1 from a
+	// surround source. Ignored for copy/passthrough audio targets.
+	TargetAudioChannels int
+	TargetBitrateKbps   int     // max video bitrate in kbps; 0 = CRF-only (no cap)
+	TotalDuration       float64 // total media duration in seconds (for VOD manifest)
+	FastStart           bool    // use superfast preset for faster first-segment production
+	NodeType            string
+	ExecutionMode       string
+	FFmpegLogSink       FFmpegLogSink
 }
 
 // DV7ToHDR10BitstreamFilter strips Dolby Vision RPU metadata during a
@@ -672,7 +676,14 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 		// Legacy Dolby Digital; universal AVR support.
 		args = append(args, "-c:a", "ac3", "-b:a", "448k")
 	default:
-		args = append(args, "-c:a", "aac", "-b:a", "192k", "-ac", "2")
+		// Preserve surround from multichannel sources when the planner asked
+		// for it (AAC 5.1 decodes universally in Media3); the historical
+		// default stays a stereo 192k downmix.
+		if opts.TargetAudioChannels >= 6 {
+			args = append(args, "-c:a", "aac", "-b:a", "384k", "-ac", "6")
+		} else {
+			args = append(args, "-c:a", "aac", "-b:a", "192k", "-ac", "2")
+		}
 	}
 
 	return args
