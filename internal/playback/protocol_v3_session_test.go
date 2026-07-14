@@ -91,7 +91,7 @@ func TestMemoryPlanStoreV3StartAndReplanIdempotency(t *testing.T) {
 		t.Fatalf("digest conflict = %v", err)
 	}
 	response := json.RawMessage(`{"protocol_version":3}`)
-	if err := store.CompleteReplan(context.Background(), record.SessionID, "replan-0001", response, record); err != nil {
+	if err := store.CompleteReplan(context.Background(), record.SessionID, "replan-0001", record.CurrentReplanRequestID, response, record); err != nil {
 		t.Fatal(err)
 	}
 	lease, err = store.BeginReplan(context.Background(), record.SessionID, "replan-0001", "digest-a", record.CurrentReplanRequestID, time.Now().Add(time.Minute))
@@ -126,9 +126,10 @@ func TestMemoryPlanStoreV3RejectsExpiredLeaseAfterNewerCommit(t *testing.T) {
 	); err != nil || lease.State != ReplanLeaseOwnedV3 {
 		t.Fatalf("newer lease = %#v, err=%v", lease, err)
 	}
+	base := record.CurrentReplanRequestID
 	record.CurrentReplanRequestID = "replan-newer"
 	if err := store.CompleteReplan(
-		context.Background(), record.SessionID, "replan-newer",
+		context.Background(), record.SessionID, "replan-newer", base,
 		json.RawMessage(`{"protocol_version":3}`), record,
 	); err != nil {
 		t.Fatal(err)

@@ -93,12 +93,43 @@ func (e *transportErrorV3) Error() string {
 	return e.reason
 }
 
-func (h *PlaybackHandler) protocolV3Enabled(ctx context.Context) bool {
+// v3FlagCacheTTL bounds how stale a v3 feature-flag read may be. Flags stay
+// DB-backed so enabling or rolling back needs no process restart, but reading
+// them once per start/replan/event would put an uncached settings SELECT on
+// every latency-sensitive playback request.
+const v3FlagCacheTTL = 5 * time.Second
+
+type v3FlagCacheEntry struct {
+	value     bool
+	expiresAt time.Time
+}
+
+func (h *PlaybackHandler) settingFlagCachedV3(ctx context.Context, key string) bool {
 	if h == nil || h.SettingsRepo == nil {
 		return false
 	}
-	value, err := h.SettingsRepo.Get(ctx, "playback.protocol_v3_enabled")
-	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
+	now := time.Now()
+	h.v3FlagMu.Lock()
+	entry, ok := h.v3Flags[key]
+	h.v3FlagMu.Unlock()
+	if ok && now.Before(entry.expiresAt) {
+		return entry.value
+	}
+	value, err := h.SettingsRepo.Get(ctx, key)
+	enabled := err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
+	if err == nil {
+		h.v3FlagMu.Lock()
+		if h.v3Flags == nil {
+			h.v3Flags = make(map[string]v3FlagCacheEntry)
+		}
+		h.v3Flags[key] = v3FlagCacheEntry{value: enabled, expiresAt: now.Add(v3FlagCacheTTL)}
+		h.v3FlagMu.Unlock()
+	}
+	return enabled
+}
+
+func (h *PlaybackHandler) protocolV3Enabled(ctx context.Context) bool {
+	return h.settingFlagCachedV3(ctx, "playback.protocol_v3_enabled")
 }
 
 func (h *PlaybackHandler) transformationRegistryV3(ctx context.Context) *playback.TransformationRegistryV3 {
@@ -203,9 +234,19 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	userID := apimw.GetUserID(r.Context())
+	digestBytes := sha256.Sum256(body)
+	requestDigest := hex.EncodeToString(digestBytes[:])
 	if existing, lookupErr := h.PlanStoreV3.GetAttemptByPlaybackAttemptID(r.Context(), req.PlaybackAttemptID); lookupErr == nil {
-		if existing.UserID != userID || existing.ProfileID != profileID || existing.RequestedMediaFileID != req.FileID {
+		if existing.UserID != userID || existing.ProfileID != profileID || existing.RequestedMediaFileID != req.FileID ||
+			(existing.RequestDigest != "" && existing.RequestDigest != requestDigest) {
 			writeError(w, http.StatusConflict, "playback_attempt_reused", "The playback attempt ID belongs to a different request")
+			return
+		}
+		// The replayed plan is only usable while its session is alive; a dead
+		// session must surface as a retryable terminal so the client mints a
+		// fresh attempt instead of replaying a plan it can never stream.
+		if _, sessionErr := h.sessionMgr.GetSession(existing.SessionID); sessionErr != nil {
+			writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3("session_expired", "The playback session for this attempt has ended.", true))
 			return
 		}
 		writeJSON(w, http.StatusCreated, decisionResponseFromAttemptV3(existing))
@@ -259,7 +300,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		return
 	}
 	result.Plan.DegradationWarnings = append(result.Plan.DegradationWarnings, warnings...)
-	response, statusErr := h.startPlannedPlaybackV3(r, userID, profileID, req, requestedFile, effectiveFile, audioIndex, result)
+	response, statusErr := h.startPlannedPlaybackV3(r, userID, profileID, req, requestDigest, requestedFile, effectiveFile, audioIndex, result)
 	if statusErr != nil {
 		if statusErr.reason == "internal_error" {
 			slog.ErrorContext(r.Context(), "protocol v3 start failed", "component", "api", "reason", statusErr.reason, "error", statusErr.cause)
@@ -270,7 +311,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusCreated, response)
 }
 
-func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, profileID string, req playback.StartRequestV3, requestedFile, effectiveFile *models.MediaFile, audioIndex int, result playback.PlannerResultV3) (playback.DecisionResponseV3, *transportErrorV3) {
+func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, profileID string, req playback.StartRequestV3, requestDigest string, requestedFile, effectiveFile *models.MediaFile, audioIndex int, result playback.PlannerResultV3) (playback.DecisionResponseV3, *transportErrorV3) {
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
@@ -323,7 +364,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "subtitle_artifact_unavailable", message: "Failed to prepare the selected subtitle artifact.", cause: err}
 	}
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureRouteDiagnostics, playback.FeatureDeviceQuirksV3, playback.FeatureSeekReanchorV3}, Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
-	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, NormalizedRequest: req, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
+	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, NormalizedRequest: req, RequestDigest: requestDigest, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
 	if err := h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport); err != nil {
 		transport.rollback()
 		abort()
@@ -332,9 +373,18 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if err := h.PlanStoreV3.SaveAttempt(r.Context(), record); err != nil {
 		transport.rollback()
 		abort()
+		if errors.Is(err, playback.ErrIdempotencyKeyReusedV3) {
+			return playback.DecisionResponseV3{}, &transportErrorV3{reason: "playback_attempt_reused", message: "The playback attempt ID was reused with different input."}
+		}
 		if errors.Is(err, playback.ErrPlaybackAttemptExistsV3) {
 			existing, lookupErr := h.PlanStoreV3.GetAttemptByPlaybackAttemptID(r.Context(), req.PlaybackAttemptID)
 			if lookupErr == nil && existing.UserID == userID && existing.ProfileID == profileID && existing.RequestedMediaFileID == req.FileID {
+				// Replaying a concurrent duplicate is only valid while its
+				// session is alive; otherwise tell the client to mint a new
+				// attempt rather than hand it a plan it can never stream.
+				if _, sessionErr := h.sessionMgr.GetSession(existing.SessionID); sessionErr != nil {
+					return playback.DecisionResponseV3{}, &transportErrorV3{reason: "session_expired", message: "The playback session for this attempt has ended.", retryable: true}
+				}
 				return decisionResponseFromAttemptV3(existing), nil
 			}
 		}
@@ -521,9 +571,14 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	req := transcodenode.TranscodeStartRequest{SessionID: transportID, InputPath: file.FilePath, SourceVideoCodec: file.CodecVideo, VideoBitstreamFilter: videoBitstreamFilterForPlanV3(result.Plan), SeekSeconds: seekSeconds, StartSegmentNumber: startSegment, TargetResolution: result.TargetResolution, TargetCodecVideo: videoCodec, TargetCodecAudio: result.TargetAudioCodec, TargetBitrateKbps: result.TargetBitrateKbps, SegmentDuration: 2, HWAccel: h.playbackConfig().HWAccel, AudioTrackIndex: plannedAudioTrackIndexV3(result, session.AudioTrackIndex), SubtitleTrackIndex: result.SubtitleTransportTrackIndex, SubtitleBurnIn: result.SubtitleBurnIn, SubtitleCodec: result.SubtitleCodec, TotalDuration: float64(file.Duration), RequireReady: true}
 	nodeResp, status, err := h.startRemotePlaybackTransport(r.Context(), node.URL, req)
 	if err != nil {
+		// A timeout can fire after the node actually started the job; the
+		// stop is a harmless 404 when it never did, and reaps an orphan
+		// full-length transcode when it did.
+		h.tm.StopRemoteTranscode(transportID, node.URL)
 		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_node_unavailable", message: "The selected transcode node is unavailable.", retryable: true, cause: err}
 	}
 	if status != http.StatusAccepted {
+		h.tm.StopRemoteTranscode(transportID, node.URL)
 		return preparedTransportV3{}, &transportErrorV3{reason: "transcode_start_failed", message: "The selected transcode node rejected the playback transport.", retryable: true}
 	}
 	hw := firstNonEmptyHandlerV3(strings.TrimSpace(nodeResp.HWAccel), strings.TrimSpace(req.HWAccel))
@@ -654,6 +709,12 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		return
 	}
 	sessionID := chiURLParamV3(r, "session_id")
+	releaseSlot, err := h.acquireReplanSlotV3(r.Context())
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "replan_capacity_exhausted", "The server is replanning too many sessions; retry shortly")
+		return
+	}
+	defer releaseSlot()
 	unlockReplan := h.lockReplanV3(sessionID)
 	defer unlockReplan()
 	unlockStore, err := h.PlanStoreV3.AcquireSessionLock(r.Context(), sessionID)
@@ -664,6 +725,12 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 	defer unlockStore()
 	record, err := h.PlanStoreV3.GetAttempt(r.Context(), sessionID)
 	if err != nil {
+		// A store outage must read as retryable, not as the session being
+		// gone: clients tear playback down on session_not_found.
+		if !errors.Is(err, playback.ErrSessionNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load the playback attempt")
+			return
+		}
 		writePlaybackSessionNotFound(w)
 		return
 	}
@@ -740,7 +807,7 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 			return
 		}
 	}
-	if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, encoded, updated); err != nil {
+	if err := h.PlanStoreV3.CompleteReplan(r.Context(), sessionID, req.ReplanRequestID, record.CurrentReplanRequestID, encoded, updated); err != nil {
 		rollbackFailed := false
 		if rollbackSession != nil {
 			if rollbackErr := rollbackSession(); rollbackErr != nil {
@@ -753,6 +820,10 @@ func (h *PlaybackHandler) HandleReplanPlaybackV3(w http.ResponseWriter, r *http.
 		}
 		if rollbackFailed {
 			_ = h.stopPlaybackSessionByID(context.WithoutCancel(r.Context()), sessionID, false)
+		}
+		if errors.Is(err, playback.ErrReplanSupersededV3) {
+			writeError(w, http.StatusConflict, "stale_playback_plan", "A newer replacement plan is already active")
+			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to commit the replacement plan")
 		return
@@ -876,14 +947,21 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		if requestedEditionResolved && preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub) == nil {
 			effectiveFile = requestedFile
 		}
-		if start.AudioTrackIndex != nil {
-			remappedAudio := remapAudioIndexV3(currentEffectiveFile, effectiveFile, *start.AudioTrackIndex)
-			start.AudioTrackIndex = &remappedAudio
-			start.AudioTrackID = playback.TrackIDV3(effectiveFile.ID, "audio", remappedAudio)
-		}
-		if start.SubtitleTrackIndex != nil {
-			if err := h.remapSubtitleSelectionV3(r.Context(), currentEffectiveFile, effectiveFile, &start); err != nil {
-				return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
+		// Track identities only need remapping when the effective edition
+		// actually changes. Remapping within the same file would degrade an
+		// exact selection to a best-match lookup — e.g. moving a listener
+		// from an eng/ac3 commentary track to the identically-shaped main
+		// track on a quality change.
+		if currentEffectiveFile.ID != effectiveFile.ID {
+			if start.AudioTrackIndex != nil {
+				remappedAudio := remapAudioIndexV3(currentEffectiveFile, effectiveFile, *start.AudioTrackIndex)
+				start.AudioTrackIndex = &remappedAudio
+				start.AudioTrackID = playback.TrackIDV3(effectiveFile.ID, "audio", remappedAudio)
+			}
+			if start.SubtitleTrackIndex != nil || start.SubtitleTrackID != "" {
+				if err := h.remapSubtitleSelectionV3(r.Context(), currentEffectiveFile, effectiveFile, &start); err != nil {
+					return playback.DecisionResponseV3{}, *record, nil, &transportErrorV3{reason: "track_unavailable", message: err.Error()}
+				}
 			}
 		}
 	}
@@ -911,16 +989,17 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	attemptedKeys := []string(nil)
 	if !intentChange && !seekReanchor {
 		attemptedKeys = append(attemptedKeys, req.AttemptedPlanKeys...)
+		if !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
+			attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
+		}
 	}
-	if !intentChange && !seekReanchor && !containsStringFoldV3(attemptedKeys, req.PlanAttemptKey) {
-		attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
-	}
-	if seekFailureRecovery {
+	if !seekReanchor && (!intentChange || seekFailureRecovery) {
 		// Client attempt keys may include local mutations that the server cannot
 		// reproduce. Always exclude the durable server recipe as well so stale or
-		// malformed client history cannot immediately select the failed route.
+		// malformed client history cannot immediately re-select the route that
+		// just failed and ping-pong the session.
 		currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.OutputRouteGeneration, nil)
-		if !containsStringFoldV3(attemptedKeys, currentKey) {
+		if !containsStringExactV3(attemptedKeys, currentKey) {
 			attemptedKeys = append(attemptedKeys, currentKey)
 		}
 	}
@@ -1230,6 +1309,28 @@ func (h *PlaybackHandler) lockReplanV3(sessionID string) func() {
 	}
 }
 
+// maxConcurrentReplansV3 bounds simultaneous replan executions. Each replan
+// pins one pooled DB connection for its advisory session lock while issuing
+// further store queries from the same pool; without a bound, a recovery storm
+// (a transcode node dying with dozens of active sessions) turns every pool
+// connection into a lock holder and the inner queries deadlock against them.
+const maxConcurrentReplansV3 = 8
+
+// acquireReplanSlotV3 blocks until a replan slot frees or the request context
+// is cancelled; excess replans queue here holding no DB resources at all.
+func (h *PlaybackHandler) acquireReplanSlotV3(ctx context.Context) (func(), error) {
+	h.v3ReplanSlotsOnce.Do(func() {
+		h.v3ReplanSlots = make(chan struct{}, maxConcurrentReplansV3)
+	})
+	select {
+	case h.v3ReplanSlots <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-h.v3ReplanSlots }) }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (h *PlaybackHandler) HandlePlaybackRouteEventV3(w http.ResponseWriter, r *http.Request) {
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
@@ -1251,21 +1352,32 @@ func (h *PlaybackHandler) HandlePlaybackRouteEventV3(w http.ResponseWriter, r *h
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid route event")
 		return
 	}
-	if event.SessionID != "" {
-		record, err := h.PlanStoreV3.GetAttempt(r.Context(), event.SessionID)
-		if err != nil || record.UserID != userID || record.ProfileID != profileID || record.PlaybackAttemptID != event.PlaybackAttemptID {
-			writeError(w, http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
-			return
-		}
-	} else {
-		record, err := h.PlanStoreV3.GetAttemptByPlaybackAttemptID(r.Context(), event.PlaybackAttemptID)
-		if err != nil || record.UserID != userID || record.ProfileID != profileID {
-			writeError(w, http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
-			return
-		}
-	}
+	// The rate limiter runs before the ownership lookup so the per-minute
+	// budget bounds the store reads as well as the writes.
 	if !h.allowRouteEventV3(userID, event.PlaybackAttemptID) {
 		writeError(w, http.StatusTooManyRequests, "event_rate_limited", "Playback route event rate exceeded")
+		return
+	}
+	var identity *playback.AttemptIdentityV3
+	var identityErr error
+	if event.SessionID != "" {
+		identity, identityErr = h.PlanStoreV3.GetAttemptIdentity(r.Context(), event.SessionID)
+	} else {
+		identity, identityErr = h.PlanStoreV3.GetAttemptIdentityByPlaybackAttemptID(r.Context(), event.PlaybackAttemptID)
+	}
+	if identityErr != nil {
+		// A store outage is not an ownership violation; keep 403 for genuine
+		// mismatches so clients stop sending events for foreign sessions.
+		if !errors.Is(identityErr, playback.ErrSessionNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to authorize the route event")
+			return
+		}
+		writeError(w, http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
+		return
+	}
+	if identity.UserID != userID || identity.ProfileID != profileID ||
+		(event.SessionID != "" && identity.PlaybackAttemptID != event.PlaybackAttemptID) {
+		writeError(w, http.StatusForbidden, "forbidden", "Route event does not belong to this profile")
 		return
 	}
 	event.Diagnostics = sanitizeDiagnosticsV3(event.Diagnostics)
@@ -1401,8 +1513,21 @@ func remapAudioIndexV3(source, target *models.MediaFile, index int) int {
 }
 
 func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, target *models.MediaFile, request *playback.StartRequestV3) error {
-	if request == nil || request.SubtitleTrackIndex == nil || source == nil || target == nil || source.ID == target.ID {
+	if request == nil || source == nil || target == nil || source.ID == target.ID {
 		return nil
+	}
+	if request.SubtitleTrackIndex == nil {
+		// ID-only selections are equally file-bound: the stale ID would be
+		// parsed against the alternate file's track list downstream, so
+		// derive the source index from it and remap like any other.
+		if request.SubtitleTrackID == "" {
+			return nil
+		}
+		fileID, kind, ordinal, ok := playback.ParseTrackIDV3(request.SubtitleTrackID)
+		if !ok || kind != "subtitle" || fileID != source.ID {
+			return errors.New("The selected subtitle track identity is invalid for the source file.")
+		}
+		request.SubtitleTrackIndex = &ordinal
 	}
 	index := *request.SubtitleTrackIndex
 	if index < 0 {
@@ -1586,11 +1711,15 @@ func remuxDVModeForPlanV3(plan *playback.PlanV3) playback.RemuxDVMode {
 	if plan.Source.DVProfile == 0 {
 		return ""
 	}
+	if plan.Source.DVProfile == 7 {
+		// Without the strip transformation a P7 remux would drop the
+		// enhancement layer and leave dangling RPUs. A P7 plan claiming Dolby
+		// Vision is a client-side transform of the original bytes, so any
+		// remux attempt against this session must still be rejected.
+		return playback.RemuxDVRejectP7V3
+	}
 	if plan.Claims.Video.DolbyVision {
 		return playback.RemuxDVPreserveV3
-	}
-	if plan.Source.DVProfile == 7 {
-		return playback.RemuxDVRejectP7V3
 	}
 	return ""
 }
@@ -1671,13 +1800,13 @@ func validRouteEventV3(event playback.RouteEventV3) bool {
 	return playback.ValidRouteEventNameV3(event.Event)
 }
 func sanitizeDiagnosticsV3(values map[string]string) map[string]string {
+	// Iterate the approved keys, not the client map: map iteration order is
+	// random, so a count-limited walk over client keys would keep an
+	// arbitrary subset and drop different diagnostics on identical retries.
 	result := make(map[string]string)
-	count := 0
-	for key, value := range values {
-		if count >= 16 {
-			break
-		}
-		if _, ok := diagnosticKeysV3[key]; !ok {
+	for key := range diagnosticKeysV3 {
+		value, ok := values[key]
+		if !ok {
 			continue
 		}
 		value = strings.TrimSpace(value)
@@ -1685,7 +1814,6 @@ func sanitizeDiagnosticsV3(values map[string]string) map[string]string {
 			value = value[:256]
 		}
 		result[key] = value
-		count++
 	}
 	return result
 }
@@ -1693,6 +1821,19 @@ func sanitizeDiagnosticsV3(values map[string]string) map[string]string {
 func containsStringFoldV3(values []string, wanted string) bool {
 	for _, value := range values {
 		if strings.EqualFold(value, wanted) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsStringExactV3 compares attempt keys byte-for-byte: they are
+// case-sensitive FNV hex digests, so case-folding would treat distinct keys
+// as equal.
+func containsStringExactV3(values []string, wanted string) bool {
+	wanted = strings.TrimSpace(wanted)
+	for _, value := range values {
+		if strings.TrimSpace(value) == wanted {
 			return true
 		}
 	}

@@ -580,7 +580,11 @@ func (m *SessionManager) CheckReplacementAllowed(ctx context.Context, sessionID 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	for {
+	// Bounded CAS: persistent count churn means the user is actively starting
+	// and stopping sessions; failing closed after a few rounds beats spinning
+	// with a limit-provider DB call per iteration.
+	const maxAdmissionRetries = 8
+	for attempt := 0; attempt < maxAdmissionRetries; attempt++ {
 		m.mu.Lock()
 		current, ok := m.sessions[sessionID]
 		if !ok {
@@ -589,8 +593,12 @@ func (m *SessionManager) CheckReplacementAllowed(ctx context.Context, sessionID 
 		}
 		userID := current.UserID
 		currentMethod := current.PlayMethod
-		activeStreams := m.activeCountLocked(userID)
-		activeTranscodes := m.transcodeCountLocked(userID)
+		// Exclude the replaced session from both counts instead of decrementing
+		// the totals: a failed session idle past the liveness grace is already
+		// absent from the count, and a blind decrement would free a slot that
+		// belongs to another live session.
+		otherStreams := m.activeCountExcludingLocked(userID, sessionID)
+		otherTranscodes := m.transcodeCountExcludingLocked(userID, sessionID)
 		decider := m.admissionDecider
 		m.mu.Unlock()
 
@@ -601,18 +609,10 @@ func (m *SessionManager) CheckReplacementAllowed(ctx context.Context, sessionID 
 		if err := transcodingDisabledError(method == PlayTranscode, transcodeAudio, limits); err != nil {
 			return err
 		}
-		otherStreams := activeStreams - 1
-		if otherStreams < 0 {
-			otherStreams = 0
-		}
-		otherTranscodes := activeTranscodes
-		if currentMethod == PlayTranscode && otherTranscodes > 0 {
-			otherTranscodes--
-		}
 		if decider == nil {
 			m.mu.Lock()
 			stillCurrent, stillExists := m.sessions[sessionID]
-			countsStable := stillExists && stillCurrent.PlayMethod == currentMethod && activeStreams == m.activeCountLocked(userID) && activeTranscodes == m.transcodeCountLocked(userID)
+			countsStable := stillExists && stillCurrent.PlayMethod == currentMethod && otherStreams == m.activeCountExcludingLocked(userID, sessionID) && otherTranscodes == m.transcodeCountExcludingLocked(userID, sessionID)
 			if !countsStable {
 				m.mu.Unlock()
 				continue
@@ -627,6 +627,10 @@ func (m *SessionManager) CheckReplacementAllowed(ctx context.Context, sessionID 
 		}
 		decision, err := decider(ctx, AdmissionRequest{UserID: userID, Limits: limits, CurrentActiveStreams: otherStreams, CurrentActiveTranscodes: otherTranscodes, RequestedMethod: method, RequiresVideoTranscode: method == PlayTranscode, RequiresAudioTranscode: transcodeAudio})
 		if err != nil {
+			// Fail closed, but make an engine outage distinguishable from a
+			// genuine concurrency-limit denial in the logs.
+			slog.WarnContext(ctx, "playback replacement admission decider error; denying replacement", "component", "playback",
+				"user_id", userID, "session", sessionID, "method", method, "error", err)
 			return ErrPlaybackNotAllowed
 		}
 		if !decision.Allowed {
@@ -634,7 +638,7 @@ func (m *SessionManager) CheckReplacementAllowed(ctx context.Context, sessionID 
 		}
 		m.mu.Lock()
 		stillCurrent, stillExists := m.sessions[sessionID]
-		countsStable := stillExists && stillCurrent.PlayMethod == currentMethod && activeStreams == m.activeCountLocked(userID) && activeTranscodes == m.transcodeCountLocked(userID)
+		countsStable := stillExists && stillCurrent.PlayMethod == currentMethod && otherStreams == m.activeCountExcludingLocked(userID, sessionID) && otherTranscodes == m.transcodeCountExcludingLocked(userID, sessionID)
 		if countsStable {
 			stillCurrent.replacementPlayMethod = method
 			m.mu.Unlock()
@@ -642,6 +646,7 @@ func (m *SessionManager) CheckReplacementAllowed(ctx context.Context, sessionID 
 		}
 		m.mu.Unlock()
 	}
+	return ErrPlaybackNotAllowed
 }
 
 // CancelReplacementReservation releases a protocol-v3 capacity reservation
@@ -729,7 +734,13 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	}
 	s.AudioTrackIndex = state.AudioTrackIndex
 	s.TranscodeAudio = state.TranscodeAudio
-	if state.RemuxDVMode != "" {
+	if state.TranscodeRouteSet {
+		// A full v3 route description owns the DV mode outright: a replan from
+		// a DV strip remux to an SDR source must clear the stale mode or every
+		// later remux request fails the profile check. Legacy partial updates
+		// never carry a mode and must not clobber one.
+		s.RemuxDVMode = state.RemuxDVMode
+	} else if state.RemuxDVMode != "" {
 		s.RemuxDVMode = state.RemuxDVMode
 	}
 	s.ClientIP = state.ClientIP
@@ -755,7 +766,12 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.SubtitleTrackIndex = state.SubtitleTrackIndex
 	s.SubtitleBurnIn = state.SubtitleBurnIn
 	s.SegmentDuration = state.SegmentDuration
-	s.replacementPlayMethod = ""
+	if state.TranscodeRouteSet {
+		// Only the replacement commit consumes the v3 capacity reservation;
+		// unrelated legacy stream updates arriving mid-replan must not release
+		// the slot and let a concurrent admission race past the transcode cap.
+		s.replacementPlayMethod = ""
+	}
 }
 
 func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
@@ -1085,9 +1101,21 @@ func (m *SessionManager) TranscodeCount(userID int) int {
 
 // activeCountLocked counts active sessions for a user. Caller must hold the lock.
 func (m *SessionManager) activeCountLocked(userID int) int {
+	return m.activeCountExcludingLocked(userID, "")
+}
+
+// activeCountExcludingLocked counts a user's limit-relevant sessions while
+// ignoring one session entirely. Replacement admission uses this instead of
+// subtracting one from the total: a failed session awaiting replan is often
+// idle past the liveness grace and already absent from the count, so a blind
+// decrement would free another session's slot.
+func (m *SessionManager) activeCountExcludingLocked(userID int, excludeSessionID string) int {
 	now := time.Now()
 	count := 0
 	for _, s := range m.sessions {
+		if excludeSessionID != "" && s.ID == excludeSessionID {
+			continue
+		}
 		if s.UserID == userID && m.countsTowardLimitsLocked(s, now) {
 			count++
 		}
@@ -1097,9 +1125,16 @@ func (m *SessionManager) activeCountLocked(userID int) int {
 
 // transcodeCountLocked counts transcode sessions for a user. Caller must hold the lock.
 func (m *SessionManager) transcodeCountLocked(userID int) int {
+	return m.transcodeCountExcludingLocked(userID, "")
+}
+
+func (m *SessionManager) transcodeCountExcludingLocked(userID int, excludeSessionID string) int {
 	now := time.Now()
 	count := 0
 	for _, s := range m.sessions {
+		if excludeSessionID != "" && s.ID == excludeSessionID {
+			continue
+		}
 		if s.UserID == userID && (s.PlayMethod == PlayTranscode || s.replacementPlayMethod == PlayTranscode) && m.countsTowardLimitsLocked(s, now) {
 			count++
 		}

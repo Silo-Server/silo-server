@@ -187,8 +187,12 @@ type PlaybackHandler struct {
 	v3EventQueue         chan playback.RouteEventRecordV3
 	v3ReplanMu           sync.Mutex
 	v3ReplanLocks        map[string]*v3ReplanLock
+	v3ReplanSlotsOnce    sync.Once
+	v3ReplanSlots        chan struct{}
 	v3EventRateMu        sync.Mutex
 	v3EventRates         map[string]v3EventRate
+	v3FlagMu             sync.Mutex
+	v3Flags              map[string]v3FlagCacheEntry
 }
 
 type PlaybackWatchScrobbler interface {
@@ -2233,8 +2237,12 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				// changing only the audio track. SourceVideoCodec/TotalDuration
 				// come from the file; the resolution/codec/bitrate targets and
 				// hwaccel come from the session's persisted stream state.
+				// A v3 session's node job runs under its generation-scoped
+				// transport ID; restarting under the bare session ID would
+				// spawn a duplicate job beside it.
+				restartTransportID := remoteTransportID(&updatedSession)
 				nodeReq := transcodenode.TranscodeStartRequest{
-					SessionID:          sessionID,
+					SessionID:          restartTransportID,
 					InputPath:          file.FilePath,
 					SourceVideoCodec:   file.CodecVideo,
 					SeekSeconds:        seekSeconds,
@@ -2253,6 +2261,12 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				}
 				if strings.TrimSpace(nodeReq.HWAccel) == "" {
 					nodeReq.HWAccel = h.playbackConfig().HWAccel
+				}
+				// A v3 DV strip remux carries its bitstream filter in the
+				// durable session route; dropping it here would hand the node
+				// a DV7 copy recipe that leaves dangling RPUs.
+				if updatedSession.RemuxDVMode == playback.RemuxDVStripToHDR10V3 && strings.EqualFold(nodeReq.TargetCodecVideo, "copy") {
+					nodeReq.VideoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
 				}
 
 				body, _ := json.Marshal(nodeReq)
@@ -2290,22 +2304,24 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				}
 
 				card := playback.NewRecipeCard(updatedSession.UserID, updatedSession.ProfileID, updatedSession.MediaFileID, nodeURL, playback.TranscodeOpts{
-					InputPath:          nodeReq.InputPath,
-					SessionID:          nodeReq.SessionID,
-					SourceVideoCodec:   nodeReq.SourceVideoCodec,
-					SeekSeconds:        nodeReq.SeekSeconds,
-					StartSegmentNumber: nodeReq.StartSegmentNumber,
-					TargetResolution:   nodeReq.TargetResolution,
-					TargetCodecVideo:   nodeReq.TargetCodecVideo,
-					TargetCodecAudio:   nodeReq.TargetCodecAudio,
-					TargetBitrateKbps:  nodeReq.TargetBitrateKbps,
-					SegmentDuration:    nodeReq.SegmentDuration,
-					HWAccel:            effectiveHWAccel,
-					AudioTrackIndex:    nodeReq.AudioTrackIndex,
-					SubtitleTrackIndex: nodeReq.SubtitleTrackIndex,
-					SubtitleBurnIn:     nodeReq.SubtitleBurnIn,
-					SubtitleCodec:      nodeReq.SubtitleCodec,
-					TotalDuration:      nodeReq.TotalDuration,
+					InputPath:            nodeReq.InputPath,
+					SessionID:            sessionID,
+					TranscodeTransportID: restartTransportID,
+					VideoBitstreamFilter: nodeReq.VideoBitstreamFilter,
+					SourceVideoCodec:     nodeReq.SourceVideoCodec,
+					SeekSeconds:          nodeReq.SeekSeconds,
+					StartSegmentNumber:   nodeReq.StartSegmentNumber,
+					TargetResolution:     nodeReq.TargetResolution,
+					TargetCodecVideo:     nodeReq.TargetCodecVideo,
+					TargetCodecAudio:     nodeReq.TargetCodecAudio,
+					TargetBitrateKbps:    nodeReq.TargetBitrateKbps,
+					SegmentDuration:      nodeReq.SegmentDuration,
+					HWAccel:              effectiveHWAccel,
+					AudioTrackIndex:      nodeReq.AudioTrackIndex,
+					SubtitleTrackIndex:   nodeReq.SubtitleTrackIndex,
+					SubtitleBurnIn:       nodeReq.SubtitleBurnIn,
+					SubtitleCodec:        nodeReq.SubtitleCodec,
+					TotalDuration:        nodeReq.TotalDuration,
 				})
 				resp.StreamURL = h.buildProxyManifestURL(card, proxyNode)
 			} else {
@@ -2324,6 +2340,10 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 					UserID:          updatedSession.UserID,
 					ProfileID:       updatedSession.ProfileID,
 					MediaFileID:     updatedSession.MediaFileID,
+					// v3 sessions route by transport ID and pin an explicit DV
+					// mode; a re-minted token must not silently shed either.
+					TranscodeTransportID: updatedSession.TranscodeTransportID,
+					RemuxDVMode:          string(updatedSession.RemuxDVMode),
 				}
 				if plan.TranscodeNode != nil {
 					tokenClaims.TranscodeNode = plan.TranscodeNode.URL

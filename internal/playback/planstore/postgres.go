@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -62,23 +63,47 @@ func (s *Postgres) SaveAttempt(ctx context.Context, record playback.AttemptRecor
 	if err != nil {
 		return err
 	}
-	result, err := s.db.Exec(ctx, `
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// Expired rows linger for up to an hour until CleanupExpired runs; they
+	// must not wedge a legitimate attempt-ID or session reuse into a
+	// conflict that the recovery lookup (which filters expired rows) can
+	// never resolve.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM playback_v3_attempts
+		WHERE (playback_attempt_id = $1 OR session_id = $2::uuid) AND expires_at <= NOW()`,
+		record.PlaybackAttemptID, record.SessionID); err != nil {
+		return err
+	}
+	result, err := tx.Exec(ctx, `
 		INSERT INTO playback_v3_attempts (
 			playback_attempt_id, session_id, user_id, profile_id,
 			requested_media_file_id, effective_media_file_id,
-			current_plan_id, current_replan_request_id, current_plan, normalized_request, expires_at
-		) VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (playback_attempt_id) DO NOTHING`,
+			current_plan_id, current_replan_request_id, current_plan, normalized_request, request_digest, expires_at
+		) VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		ON CONFLICT DO NOTHING`,
 		record.PlaybackAttemptID, record.SessionID, record.UserID, record.ProfileID,
 		record.RequestedMediaFileID, record.EffectiveMediaFileID,
-		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, requestJSON, record.ExpiresAt)
+		record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, requestJSON, record.RequestDigest, record.ExpiresAt)
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
+		// An attempt-ID reused with different input is an idempotency
+		// violation, not a replayable duplicate.
+		var digest string
+		err := tx.QueryRow(ctx, `
+			SELECT request_digest FROM playback_v3_attempts
+			WHERE playback_attempt_id = $1 AND expires_at > NOW()`, record.PlaybackAttemptID).Scan(&digest)
+		if err == nil && digest != "" && record.RequestDigest != "" && digest != record.RequestDigest {
+			return playback.ErrIdempotencyKeyReusedV3
+		}
 		return playback.ErrPlaybackAttemptExistsV3
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (s *Postgres) GetAttempt(ctx context.Context, sessionID string) (*playback.AttemptRecordV3, error) {
@@ -89,18 +114,45 @@ func (s *Postgres) GetAttemptByPlaybackAttemptID(ctx context.Context, attemptID 
 	return s.getAttempt(ctx, "playback_attempt_id = $1", attemptID)
 }
 
+func (s *Postgres) GetAttemptIdentity(ctx context.Context, sessionID string) (*playback.AttemptIdentityV3, error) {
+	return s.getAttemptIdentity(ctx, "session_id = $1::uuid", sessionID)
+}
+
+func (s *Postgres) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, attemptID string) (*playback.AttemptIdentityV3, error) {
+	return s.getAttemptIdentity(ctx, "playback_attempt_id = $1", attemptID)
+}
+
+// getAttemptIdentity fetches only the ownership columns; route-event
+// authorization runs per event and must not pay for the plan JSONB decode.
+func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, value any) (*playback.AttemptIdentityV3, error) {
+	var identity playback.AttemptIdentityV3
+	err := s.db.QueryRow(ctx, `
+		SELECT playback_attempt_id, session_id::text, user_id, profile_id
+		FROM playback_v3_attempts
+		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
+		&identity.PlaybackAttemptID, &identity.SessionID, &identity.UserID, &identity.ProfileID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, playback.ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &identity, nil
+}
+
 func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) (*playback.AttemptRecordV3, error) {
 	var record playback.AttemptRecordV3
 	var planJSON, requestJSON []byte
 	err := s.db.QueryRow(ctx, `
 		SELECT playback_attempt_id, session_id::text, user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
-		       current_plan_id, current_replan_request_id, current_plan, normalized_request, expires_at
+		       current_plan_id, current_replan_request_id, current_plan, normalized_request, request_digest, expires_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
 		&record.RequestedMediaFileID, &record.EffectiveMediaFileID,
-		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &requestJSON, &record.ExpiresAt,
+		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &requestJSON, &record.RequestDigest, &record.ExpiresAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -118,9 +170,22 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 }
 
 func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, error) {
+	// One retry: if a concurrent writer wins the insert race (possible only
+	// when a caller skips the advisory session lock), re-read its row and
+	// resolve to a replay/in-flight lease instead of surfacing a raw 23505.
+	for attempt := 0; ; attempt++ {
+		lease, retry, err := s.beginReplanOnce(ctx, sessionID, requestID, digest, baseReplanRequestID, leaseUntil)
+		if retry && attempt == 0 {
+			continue
+		}
+		return lease, err
+	}
+}
+
+func (s *Postgres) beginReplanOnce(ctx context.Context, sessionID, requestID, digest, baseReplanRequestID string, leaseUntil time.Time) (playback.ReplanLeaseV3, bool, error) {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return playback.ReplanLeaseV3{}, err
+		return playback.ReplanLeaseV3{}, false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	var existingDigest, existingBase, state string
@@ -136,45 +201,49 @@ func (s *Postgres) BeginReplan(ctx context.Context, sessionID, requestID, digest
 			INSERT INTO playback_v3_replans (session_id, replan_request_id, request_digest, base_replan_request_id, lease_expires_at)
 			VALUES ($1::uuid, $2, $3, $4, $5)`, sessionID, requestID, digest, baseReplanRequestID, leaseUntil)
 		if err != nil {
-			return playback.ReplanLeaseV3{}, err
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return playback.ReplanLeaseV3{}, true, nil
+			}
+			return playback.ReplanLeaseV3{}, false, err
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return playback.ReplanLeaseV3{}, err
+			return playback.ReplanLeaseV3{}, false, err
 		}
-		return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3}, nil
+		return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3}, false, nil
 	}
 	if err != nil {
-		return playback.ReplanLeaseV3{}, err
+		return playback.ReplanLeaseV3{}, false, err
 	}
 	if existingDigest != digest {
-		return playback.ReplanLeaseV3{}, playback.ErrIdempotencyKeyReusedV3
+		return playback.ReplanLeaseV3{}, false, playback.ErrIdempotencyKeyReusedV3
 	}
 	if state == "completed" {
 		if err := tx.Commit(ctx); err != nil {
-			return playback.ReplanLeaseV3{}, err
+			return playback.ReplanLeaseV3{}, false, err
 		}
-		return playback.ReplanLeaseV3{State: playback.ReplanLeaseCompletedV3, Response: response}, nil
+		return playback.ReplanLeaseV3{State: playback.ReplanLeaseCompletedV3, Response: response}, false, nil
 	}
 	if time.Now().Before(existingLease) {
 		if err := tx.Commit(ctx); err != nil {
-			return playback.ReplanLeaseV3{}, err
+			return playback.ReplanLeaseV3{}, false, err
 		}
-		return playback.ReplanLeaseV3{State: playback.ReplanLeaseInFlightV3}, nil
+		return playback.ReplanLeaseV3{State: playback.ReplanLeaseInFlightV3}, false, nil
 	}
 	if existingBase != baseReplanRequestID {
-		return playback.ReplanLeaseV3{}, playback.ErrStaleReplanLeaseV3
+		return playback.ReplanLeaseV3{}, false, playback.ErrStaleReplanLeaseV3
 	}
 	_, err = tx.Exec(ctx, `UPDATE playback_v3_replans SET lease_expires_at = $3, updated_at = NOW() WHERE session_id = $1::uuid AND replan_request_id = $2`, sessionID, requestID, leaseUntil)
 	if err != nil {
-		return playback.ReplanLeaseV3{}, err
+		return playback.ReplanLeaseV3{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return playback.ReplanLeaseV3{}, err
+		return playback.ReplanLeaseV3{}, false, err
 	}
-	return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3}, nil
+	return playback.ReplanLeaseV3{State: playback.ReplanLeaseOwnedV3}, false, nil
 }
 
-func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
+func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID, baseReplanRequestID string, response json.RawMessage, record playback.AttemptRecordV3) error {
 	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
@@ -188,15 +257,24 @@ func (s *Postgres) CompleteReplan(ctx context.Context, sessionID, requestID stri
 	if err != nil {
 		return err
 	}
+	// The base-revision predicate makes the commit a true compare-and-swap:
+	// under the advisory session lock it never fails, but a skipped or broken
+	// lock must surface as a conflict rather than silently last-writer-win
+	// the durable plan.
 	attemptResult, err := tx.Exec(ctx, `
 		UPDATE playback_v3_attempts SET
 			effective_media_file_id = $2, current_plan_id = $3,
 			current_replan_request_id = $4, current_plan = $5, normalized_request = $6, expires_at = $7, updated_at = NOW()
-		WHERE session_id = $1::uuid`, sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, requestJSON, record.ExpiresAt)
+		WHERE session_id = $1::uuid AND current_replan_request_id = $8`,
+		sessionID, record.EffectiveMediaFileID, record.CurrentPlanID, record.CurrentReplanRequestID, planJSON, requestJSON, record.ExpiresAt, baseReplanRequestID)
 	if err != nil {
 		return err
 	}
 	if attemptResult.RowsAffected() != 1 {
+		var exists bool
+		if scanErr := tx.QueryRow(ctx, `SELECT true FROM playback_v3_attempts WHERE session_id = $1::uuid`, sessionID).Scan(&exists); scanErr == nil {
+			return playback.ErrReplanSupersededV3
+		}
 		return playback.ErrSessionNotFound
 	}
 	replanResult, err := tx.Exec(ctx, `

@@ -40,9 +40,13 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
     IF NEW.state = 'completed' THEN
+        -- New binaries already write the marker in the same transaction; the
+        -- IS DISTINCT FROM guard skips a redundant second row version there
+        -- while still advancing the marker for older binaries.
         UPDATE playback_v3_attempts
         SET current_replan_request_id = NEW.replan_request_id
-        WHERE session_id = NEW.session_id;
+        WHERE session_id = NEW.session_id
+          AND current_replan_request_id IS DISTINCT FROM NEW.replan_request_id;
     END IF;
     RETURN NEW;
 END;

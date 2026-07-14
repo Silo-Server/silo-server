@@ -18,6 +18,7 @@ CREATE TABLE playback_v3_attempts (
     current_plan_id TEXT NOT NULL,
     current_plan JSONB NOT NULL,
     normalized_request JSONB NOT NULL,
+    request_digest TEXT NOT NULL DEFAULT '',
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -76,6 +77,10 @@ CREATE INDEX playback_route_events_attempt_idx
     ON playback_route_events (playback_attempt_id, received_at);
 CREATE INDEX playback_route_events_release_idx
     ON playback_route_events (event, failure_classification, received_at);
+-- The hourly retention delete scans by age alone; without this index it is a
+-- sequential scan over up to 30 days of telemetry.
+CREATE INDEX playback_route_events_received_idx
+    ON playback_route_events (received_at);
 -- +goose StatementEnd
 
 -- +goose Down

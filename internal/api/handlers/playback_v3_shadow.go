@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -13,11 +12,7 @@ import (
 const playbackV3ShadowSetting = "playback.protocol_v3_shadow_enabled"
 
 func (h *PlaybackHandler) protocolV3ShadowEnabled(ctx context.Context) bool {
-	if h == nil || h.SettingsRepo == nil {
-		return false
-	}
-	value, err := h.SettingsRepo.Get(ctx, playbackV3ShadowSetting)
-	return err == nil && strings.EqualFold(strings.TrimSpace(value), "true")
+	return h.settingFlagCachedV3(ctx, playbackV3ShadowSetting)
 }
 
 // shadowLegacyPlaybackV3 compares the production legacy route with a v3 plan

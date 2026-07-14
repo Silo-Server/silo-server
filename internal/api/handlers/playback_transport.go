@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -45,6 +46,9 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusAccepted {
+		// Drain the (small) error body so the transport can reuse the
+		// connection instead of tearing it down on every failed start.
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 		return transcodenode.TranscodeStartResponse{}, response.StatusCode, nil
 	}
 	var result transcodenode.TranscodeStartResponse

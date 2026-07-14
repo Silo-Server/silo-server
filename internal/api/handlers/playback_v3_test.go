@@ -36,7 +36,7 @@ func (p staticNodePlannerV3) PlanSession(string, string, bool, int) nodepool.Pla
 	return p.plan
 }
 
-func (f *failingCompletePlanStoreV3) CompleteReplan(context.Context, string, string, json.RawMessage, playback.AttemptRecordV3) error {
+func (f *failingCompletePlanStoreV3) CompleteReplan(context.Context, string, string, string, json.RawMessage, playback.AttemptRecordV3) error {
 	return fmt.Errorf("injected complete replan failure")
 }
 
@@ -132,6 +132,11 @@ func TestHandlePlaybackCapabilityV3ReadsFlagPerRequest(t *testing.T) {
 		t.Fatalf("disabled response = %#v", response)
 	}
 	settings.set("playback.protocol_v3_enabled", "true")
+	// The flag stays DB-backed (no restart needed for rollback) behind a
+	// short TTL cache; expiring the cache stands in for the TTL elapsing.
+	handler.v3FlagMu.Lock()
+	handler.v3Flags = nil
+	handler.v3FlagMu.Unlock()
 	if response := request(); !response.Enabled || len(response.Deliveries) != 4 || !playback.HasFeatureV3(response.Features, playback.FeatureSeekReanchorV3) {
 		t.Fatalf("enabled response = %#v", response)
 	}
@@ -547,9 +552,7 @@ func TestHandleReplanPlaybackV3SeekReanchorKeepsCurrentRecipeEligible(t *testing
 	// still reject A's cached response after B became active.
 	mixedWriterRecord := *latestRecord
 	mixedWriterRecord.CurrentReplanRequestID = reanchor.ReplanRequestID
-	if err := handler.PlanStoreV3.SaveAttempt(context.Background(), mixedWriterRecord); err != nil {
-		t.Fatal(err)
-	}
+	handler.PlanStoreV3.(*playback.MemoryPlanStoreV3).ReplaceAttempt(context.Background(), mixedWriterRecord)
 	mixedWriterRetryReq := httptest.NewRequest(http.MethodPost, "/api/v1/playback/"+started.SessionID+"/replan", strings.NewReader(string(body))).WithContext(newAuthorizedPlaybackContext())
 	mixedWriterRetryReq = withPlaybackRouteParam(mixedWriterRetryReq, "session_id", started.SessionID)
 	mixedWriterRetryRR := httptest.NewRecorder()
@@ -806,9 +809,7 @@ func TestHandleReplanPlaybackV3SeekUsesEffectiveEditionWhenRequestedEditionIsGon
 		record.CurrentPlan,
 	)
 	record.CurrentPlanID = record.CurrentPlan.PlanID
-	if err := handler.PlanStoreV3.SaveAttempt(context.Background(), *record); err != nil {
-		t.Fatal(err)
-	}
+	handler.PlanStoreV3.(*playback.MemoryPlanStoreV3).ReplaceAttempt(context.Background(), *record)
 
 	currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.OutputRouteGeneration, nil)
 	reanchor := playback.ReplanRequestV3{

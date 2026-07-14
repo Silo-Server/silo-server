@@ -808,8 +808,10 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
-			playbackHandler.StartV3Maintenance(deps.AppContext)
 		}
+		// Maintenance also bounds the in-memory fallback store: without it a
+		// DB-less deployment accumulates attempts and replans forever.
+		playbackHandler.StartV3Maintenance(deps.AppContext)
 
 		// Wire UserStoreProvider for progress/history persistence.
 		if deps.UserStoreProvider != nil {
