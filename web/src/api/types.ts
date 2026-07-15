@@ -4348,6 +4348,7 @@ export interface UnmatchedLibraryItemsResponse {
 export interface FilesystemBrowseEntry {
   name: string;
   path: string;
+  is_dir?: boolean;
 }
 
 export interface FilesystemBrowseResponse {

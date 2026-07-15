@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Check, FolderOpen, RefreshCw } from "lucide-react";
+import { ArrowUp, Check, FolderOpen, RefreshCw, FileArchive } from "lucide-react";
 
 import { fetchFilesystemBrowse, useFilesystemBrowse } from "@/hooks/queries/admin/libraries";
 import { adminKeys } from "@/hooks/queries/keys";
@@ -258,13 +258,24 @@ export default function FolderBrowser({
                           </div>
                         </button>
 
-                        {/* Navigate into folder */}
                         <button
                           type="button"
                           className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-2 text-left text-sm"
-                          onClick={() => navigate(entry.path)}
+                          onClick={() => {
+                            if (entry.is_dir === false) {
+                              if (!isExisting) {
+                                toggleSelected(entry.path);
+                              }
+                            } else {
+                              navigate(entry.path);
+                            }
+                          }}
                         >
-                          <FolderOpen className="text-muted-foreground h-4 w-4 shrink-0" />
+                          {entry.is_dir === false ? (
+                            <FileArchive className="text-muted-foreground h-4 w-4 shrink-0" />
+                          ) : (
+                            <FolderOpen className="text-muted-foreground h-4 w-4 shrink-0" />
+                          )}
                           <span className="truncate">{entry.name}</span>
                         </button>
                       </div>

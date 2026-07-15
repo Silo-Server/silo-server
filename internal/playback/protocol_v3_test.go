@@ -321,6 +321,27 @@ func TestPlanPlaybackV3RejectsTrulyIncompleteVideoMetadata(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3UsesConservativeHLSForDynamicSTRM(t *testing.T) {
+	file := &models.MediaFile{
+		ID: 42, FilePath: "/media/movie.strm", Container: "strm",
+		CodecVideo: "h264", CodecAudio: "aac", Resolution: "1080p", AudioChannels: 2,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
+	}
+	req := validStartRequestV3()
+	req.QualityPreference = "auto"
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+	})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 || result.PlayMethod != PlayTranscode {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+	if result.Plan.DecisionReason != "dynamic_stream_metadata_deferred" || result.TargetResolution != "1080p" || result.TargetBitrateKbps != 6000 {
+		t.Fatalf("dynamic plan = %#v result = %#v", result.Plan, result)
+	}
+}
+
 func TestPlanPlaybackV3BlocksUltrawide4KTranscode(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.Resolution = "2160p"

@@ -984,7 +984,13 @@ func main() {
 				return out, nil
 			},
 		)
+		siloInternalURL := strings.TrimSpace(os.Getenv("SILO_INTERNAL_URL"))
+		if siloInternalURL == "" {
+			siloInternalURL = "http://127.0.0.1:8080"
+		}
 		pluginHost = pluginhost.NewHost(pluginhost.Config{
+			PublicBaseURL:   os.Getenv("SILO_PUBLIC_URL"),
+			InternalBaseURL: siloInternalURL,
 			EventPublisher:  eventsHub,
 			LibraryLister:   pluginhost.NewLibraryLister(libDataSource),
 			CatalogPresence: catalogPresence,

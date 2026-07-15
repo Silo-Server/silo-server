@@ -524,8 +524,8 @@ func TestSegmentRecoveryDecisionUsesLongerWaitForStartupSegment(t *testing.T) {
 	if !decision.Wait {
 		t.Fatalf("Wait = false, want true (reason=%s)", decision.Reason)
 	}
-	if decision.WaitTimeout != 12*time.Second {
-		t.Fatalf("WaitTimeout = %s, want 12s", decision.WaitTimeout)
+	if decision.WaitTimeout != 30*time.Second {
+		t.Fatalf("WaitTimeout = %s, want 30s", decision.WaitTimeout)
 	}
 	if decision.Reason != "startup_manifest_not_ready" {
 		t.Fatalf("Reason = %q, want startup_manifest_not_ready", decision.Reason)

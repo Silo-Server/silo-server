@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +14,13 @@ import (
 func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if file == nil {
 		return true
+	}
+	// Scanner metadata for .strm files is deliberately a filename-derived
+	// placeholder. Protocol v3 handles these dynamic sources with a conservative
+	// HLS route, so blocking catalog or playback requests on remote ffprobe would
+	// only add startup latency and still cannot guarantee complete evidence.
+	if strings.EqualFold(filepath.Ext(file.FilePath), ".strm") {
+		return false
 	}
 	// Ebook/comic files (epub, pdf, cbz, cbr — including manga chapters, which
 	// are BaseType "ebook") are read directly by the reader and never go through

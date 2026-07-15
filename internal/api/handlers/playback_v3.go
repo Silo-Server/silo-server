@@ -1778,7 +1778,12 @@ func (h *PlaybackHandler) remapSubtitleSelectionV3(ctx context.Context, source, 
 	}
 	index := *request.SubtitleTrackIndex
 	if index < 0 {
-		return errors.New("The selected subtitle track index is invalid.")
+		// Protocol v3 uses a negative index as the explicit "subtitles off"
+		// selection. It is not file-bound, so preserve that intent while
+		// clearing any stale identity carried from the source version.
+		request.SubtitleTrackIndex = nil
+		request.SubtitleTrackID = ""
+		return nil
 	}
 	targetIndex := -1
 	switch {

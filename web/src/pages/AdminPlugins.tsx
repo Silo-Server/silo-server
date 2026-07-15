@@ -72,6 +72,7 @@ import {
   useDeletePluginRepository,
   useInstallPlugin,
   usePluginUpload,
+  usePluginInstallLocal,
   useSavePluginAuthBinding,
   useSavePluginConfig,
   useSavePluginTaskBinding,
@@ -83,6 +84,7 @@ import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
 import { pluginRouteHref } from "@/lib/pluginRouteHref";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
+import FolderBrowser from "@/components/FolderBrowser";
 
 const INSTALLED_PAGE_SIZE = 10;
 const CATALOG_PAGE_SIZE = 12;
@@ -926,39 +928,95 @@ function UploadSection() {
   const { upload, progress, isPending } = usePluginUpload();
   const [file, setFile] = useState<File | null>(null);
 
+  const installLocal = usePluginInstallLocal();
+  const [serverPath, setServerPath] = useState("");
+  const [browserOpen, setBrowserOpen] = useState(false);
+
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!file) return;
     upload(file, { onSuccess: () => setFile(null) });
   }
 
+  function handleLocalSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!serverPath) return;
+    installLocal.mutate(serverPath, {
+      onSuccess: () => setServerPath(""),
+    });
+  }
+
   return (
-    <div className="space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold">Manual Install</h3>
-        <p className="text-muted-foreground text-xs">Upload a plugin binary directly.</p>
+    <div className="space-y-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">Manual Install (Upload)</h3>
+            <p className="text-muted-foreground text-xs">Upload a plugin ZIP from your computer.</p>
+          </div>
+          <form
+            onSubmit={handleSubmit}
+            className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl p-5 sm:flex-row"
+          >
+            <label className="border-border hover:border-foreground/20 flex h-10 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed px-4 text-sm transition-colors">
+              <Upload className="text-muted-foreground h-4 w-4 shrink-0" />
+              <span className="text-muted-foreground truncate">
+                {file ? file.name : "Choose plugin file..."}
+              </span>
+              <input
+                type="file"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            <Button type="submit" variant="outline" size="sm" disabled={!file || isPending}>
+              <Upload className="mr-1.5 h-3.5 w-3.5" />
+              {isPending ? "Uploading..." : "Upload"}
+            </Button>
+          </form>
+          {progress !== null && <Progress value={progress} aria-label="Plugin upload progress" />}
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">Manual Install (Server Path)</h3>
+            <p className="text-muted-foreground text-xs">Install a plugin ZIP already on the server.</p>
+          </div>
+          <form
+            onSubmit={handleLocalSubmit}
+            className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl p-5 sm:flex-row"
+          >
+            <div className="flex h-10 flex-1 items-center gap-2">
+              <Input
+                type="text"
+                placeholder="Absolute path on server (e.g. /mnt/plugins/...)"
+                value={serverPath}
+                onChange={(e) => setServerPath(e.target.value)}
+                className="flex-grow text-sm"
+              />
+              <Button type="button" variant="outline" size="sm" onClick={() => setBrowserOpen(true)}>
+                Browse
+              </Button>
+            </div>
+            <Button type="submit" variant="outline" size="sm" disabled={!serverPath || installLocal.isPending}>
+              {installLocal.isPending ? "Installing..." : "Install"}
+            </Button>
+          </form>
+        </div>
       </div>
-      <form
-        onSubmit={handleSubmit}
-        className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl p-5 sm:flex-row"
-      >
-        <label className="border-border hover:border-foreground/20 flex h-10 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed px-4 text-sm transition-colors">
-          <Upload className="text-muted-foreground h-4 w-4 shrink-0" />
-          <span className="text-muted-foreground truncate">
-            {file ? file.name : "Choose plugin file..."}
-          </span>
-          <input
-            type="file"
-            className="hidden"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-        </label>
-        <Button type="submit" variant="outline" size="sm" disabled={!file || isPending}>
-          <Upload className="mr-1.5 h-3.5 w-3.5" />
-          {isPending ? "Uploading..." : "Upload"}
-        </Button>
-      </form>
-      {progress !== null && <Progress value={progress} aria-label="Plugin upload progress" />}
+
+      {browserOpen && (
+        <FolderBrowser
+          open={browserOpen}
+          onOpenChange={setBrowserOpen}
+          onSelect={(pickedPaths) => {
+            if (pickedPaths.length > 0) {
+              setServerPath(pickedPaths[0] ?? "");
+            }
+            setBrowserOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

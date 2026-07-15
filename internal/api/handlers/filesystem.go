@@ -9,8 +9,9 @@ import (
 )
 
 type filesystemBrowseEntry struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"is_dir"`
 }
 
 type filesystemBrowseResponse struct {
@@ -59,24 +60,28 @@ func (h *FilesystemHandler) HandleBrowse(w http.ResponseWriter, r *http.Request)
 		name := entry.Name()
 		full := filepath.Join(cleaned, name)
 
-		// os.ReadDir reports lstat semantics, so a symlink to a directory has
-		// IsDir() == false. Follow symlink entries with os.Stat and keep them only
-		// when the target is a directory; skip links whose target cannot be stat'd
-		// (broken or looping). Non-symlink, non-directory entries (regular files)
-		// are skipped without the extra stat so large media folders stay fast.
-		if !entry.IsDir() {
+		isDir := entry.IsDir()
+		if !isDir {
 			if entry.Type()&os.ModeSymlink == 0 {
-				continue
-			}
-			target, err := os.Stat(full)
-			if err != nil || !target.IsDir() {
-				continue
+				if !strings.HasSuffix(strings.ToLower(name), ".zip") {
+					continue
+				}
+			} else {
+				target, err := os.Stat(full)
+				if err != nil {
+					continue
+				}
+				isDir = target.IsDir()
+				if !isDir && !strings.HasSuffix(strings.ToLower(name), ".zip") {
+					continue
+				}
 			}
 		}
 
 		result = append(result, filesystemBrowseEntry{
-			Name: name,
-			Path: full,
+			Name:  name,
+			Path:  full,
+			IsDir: isDir,
 		})
 	}
 

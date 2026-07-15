@@ -2642,6 +2642,7 @@ func NewRouter(deps Dependencies) chi.Router {
 									r.Get("/installations", pluginHandler.HandleListInstallations)
 									r.Post("/installations", pluginHandler.HandleCreateInstallation)
 									r.Post("/uploads", pluginHandler.HandleUploadInstallation)
+									r.Post("/install-local", pluginHandler.HandleInstallLocal)
 									r.Post("/uploads/chunked", pluginHandler.HandleCreateChunkedUpload)
 									r.Put("/uploads/chunked/{upload_id}/chunks/{chunk_index}", pluginHandler.HandleUploadChunk)
 									r.Post("/uploads/chunked/{upload_id}/complete", pluginHandler.HandleCompleteChunkedUpload)
