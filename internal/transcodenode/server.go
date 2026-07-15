@@ -176,11 +176,17 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		lastAccess: make(map[string]time.Time),
 	}
 	if cfg := watcher.Config(); cfg != nil {
-		if cleaned, err := playback.CleanupOrphanedTranscodeDirs(cfg.Playback.TranscodeDir, nil, 0); err != nil {
-			slog.Warn("transcode node cleanup failed", "dir", cfg.Playback.TranscodeDir, "error", err)
-		} else if cleaned > 0 {
-			slog.Info("transcode node cleanup removed orphaned dirs", "dir", cfg.Playback.TranscodeDir, "count", cleaned)
-		}
+		// Sweep leftover transcode dirs in the background so a slow
+		// network-filesystem delete never blocks the node's listener from
+		// binding. Age-spare at MaxTokenTTL (was a full wipe): a dir younger
+		// than the max token lifetime may be reused by an imminent
+		// token-carried reconstruct writing into TranscodeDir/<sessionID>, so
+		// wiping it concurrently would race that ffmpeg. Dirs older than any
+		// surviving token are never reconstructable and are still reclaimed.
+		transcodeDir := cfg.Playback.TranscodeDir
+		playback.StartBackgroundOrphanCleanup("transcodenode", transcodeDir, func() (int, error) {
+			return playback.CleanupOrphanedTranscodeDirs(transcodeDir, nil, playback.MaxTokenTTL)
+		})
 	}
 	return s
 }
