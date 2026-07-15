@@ -857,11 +857,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {
 				return deps.CurrentConfig().Playback
 			}
-			if cleaned, err := playbackHandler.CleanupOrphanedTranscodes(); err != nil {
-				slog.Warn("playback transcode cleanup failed", "dir", deps.Config.Playback.TranscodeDir, "error", err)
-			} else if cleaned > 0 {
-				slog.Info("playback transcode cleanup removed orphaned dirs", "dir", deps.Config.Playback.TranscodeDir, "count", cleaned)
-			}
+			playback.StartBackgroundOrphanCleanup("api", deps.Config.Playback.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes)
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer

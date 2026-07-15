@@ -2,11 +2,16 @@ package playback
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 )
+
+var orphanCleanupMu sync.Mutex
 
 // CleanupOrphanedTranscodeDirs removes per-session transcode directories that
 // are not associated with any currently active session IDs.
@@ -20,6 +25,11 @@ import (
 // Pass 0 to disable age-sparing (e.g. a dedicated node's boot-time full wipe,
 // where node restart is an accepted session loss).
 func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struct{}, minAge time.Duration) (int, error) {
+	// Serialize concurrent orphan sweeps of the shared transcode root so two
+	// rare startup sweeps cannot race on os.RemoveAll; one global mutex is fine.
+	orphanCleanupMu.Lock()
+	defer orphanCleanupMu.Unlock()
+
 	if root == "" {
 		return 0, nil
 	}
@@ -63,6 +73,26 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 	}
 
 	return removed, nil
+}
+
+// StartBackgroundOrphanCleanup runs an orphaned-transcode sweep in its own
+// goroutine so a slow network-filesystem delete never blocks server startup.
+// The sweep is already safe to run concurrently with request handling: it
+// spares live/in-flight sessions and any dir younger than MaxTokenTTL, and
+// CleanupOrphanedTranscodeDirs serializes concurrent sweeps of the same root.
+func StartBackgroundOrphanCleanup(component, dir string, cleanup func() (int, error)) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("transcode cleanup panicked", "component", component, "dir", dir, "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
+		if cleaned, err := cleanup(); err != nil {
+			slog.Warn("transcode cleanup failed", "component", component, "dir", dir, "error", err)
+		} else if cleaned > 0 {
+			slog.Info("transcode cleanup removed orphaned dirs", "component", component, "dir", dir, "count", cleaned)
+		}
+	}()
 }
 
 func transcodeDirBelongsToActiveSession(name string, activeSessionIDs map[string]struct{}) bool {
