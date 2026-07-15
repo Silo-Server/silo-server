@@ -111,7 +111,11 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Compat transcode reconstruct is driven by the recipe carried in the durable
 	// compat playback store (jellycompat_playback_sessions); no separate native
 	// recipe table is needed.
-	playback.StartBackgroundOrphanCleanup("jellycompat", playbackHandler.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes)
+	//
+	// This shares TranscodeDir with the native api sweep but snapshots only this
+	// manager's live set; see the api NewRouter call site for why cross-manager
+	// reaping of a >24h idle dir is bounded and safe.
+	playback.StartPeriodicOrphanCleanup(deps.AppContext, "jellycompat", playbackHandler.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes, playback.OrphanCleanupInterval)
 	playbackHandler.profileRefreshRequester = deps.RecWorker
 	playbackHandler.SettingsRepo = deps.SettingsRepo
 	playbackHandler.RecipeNodeStore = deps.RecipeNodeStore

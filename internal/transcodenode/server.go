@@ -175,20 +175,50 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		sessions:   make(map[string]*playback.TranscodeSession),
 		lastAccess: make(map[string]time.Time),
 	}
-	if cfg := watcher.Config(); cfg != nil {
-		// Sweep leftover transcode dirs in the background so a slow
-		// network-filesystem delete never blocks the node's listener from
-		// binding. Age-spare at MaxTokenTTL (was a full wipe): a dir younger
-		// than the max token lifetime may be reused by an imminent
-		// token-carried reconstruct writing into TranscodeDir/<sessionID>, so
-		// wiping it concurrently would race that ffmpeg. Dirs older than any
-		// surviving token are never reconstructable and are still reclaimed.
-		transcodeDir := cfg.Playback.TranscodeDir
-		playback.StartBackgroundOrphanCleanup("transcodenode", transcodeDir, func() (int, error) {
-			return playback.CleanupOrphanedTranscodeDirs(transcodeDir, nil, playback.MaxTokenTTL)
-		})
-	}
 	return s
+}
+
+// StartOrphanSweeper runs the age-guarded orphan-transcode sweep immediately and
+// then hourly until ctx is cancelled. It never blocks (a slow network-filesystem
+// delete runs in its own goroutine), so it is safe to call before the node binds
+// its listener. This is the node's only filesystem-level reclaimer of dirs left
+// behind by a session that was dropped without its output dir being removed — the
+// idle reaper only deletes dirs it still tracks in s.sessions, so without this
+// periodic pass such orphans would linger until the next process restart. The
+// MaxTokenTTL age guard keeps a delete from racing a token-carried reconstruct
+// writing into TranscodeDir/<sessionID>: a dir younger than the max token
+// lifetime may still be reused, while older dirs are never reconstructable.
+func (s *Server) StartOrphanSweeper(ctx context.Context) {
+	dir := ""
+	if cfg := s.watcher.Config(); cfg != nil {
+		dir = cfg.Playback.TranscodeDir
+	}
+	playback.StartPeriodicOrphanCleanup(ctx, "transcodenode", dir, func() (int, error) {
+		// Re-read config each run so a hot-reloaded TranscodeDir is honored.
+		cfg := s.watcher.Config()
+		if cfg == nil {
+			return 0, nil
+		}
+		// Spare the live registered jobs by id, not by age alone: now that the
+		// sweep runs during live traffic, a long-lived session that re-serves
+		// already-written segments stops advancing its dir mtime, so the age
+		// guard could misclassify it as orphaned. The live set is authoritative
+		// (in-flight reconstructs are covered by their fresh writes + age guard).
+		return playback.CleanupOrphanedTranscodeDirs(cfg.Playback.TranscodeDir, s.activeSessionIDs(), playback.MaxTokenTTL)
+	}, playback.OrphanCleanupInterval)
+}
+
+// activeSessionIDs snapshots the ids of currently registered jobs so the orphan
+// sweep spares their output dirs regardless of directory mtime, mirroring the
+// central TranscodeManager's live-set snapshot.
+func (s *Server) activeSessionIDs() map[string]struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	active := make(map[string]struct{}, len(s.sessions))
+	for id := range s.sessions {
+		active[id] = struct{}{}
+	}
+	return active
 }
 
 func (s *Server) SetFFmpegLogSink(sink playback.FFmpegLogSink) {

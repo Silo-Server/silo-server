@@ -25,6 +25,10 @@ import (
 // Dependencies holds the pluggable pieces used by the compat server.
 type Dependencies struct {
 	Config *config.Config
+	// AppContext is the process lifecycle context. When set, it bounds the
+	// periodic orphan-transcode sweep so it stops on shutdown; nil (tests) makes
+	// the sweep a single boot-time run instead of a long-lived ticker.
+	AppContext context.Context
 	// LiveConfig returns the current hot-reloaded config. May be nil (tests,
 	// worker modes); read through CurrentConfig(), which falls back to Config.
 	LiveConfig       func() *config.Config

@@ -857,7 +857,13 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler.PlaybackConfig = func() config.PlaybackConfig {
 				return deps.CurrentConfig().Playback
 			}
-			playback.StartBackgroundOrphanCleanup("api", deps.Config.Playback.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes)
+			// In integrated mode this and the jellycompat sweep both scan the same
+			// TranscodeDir but each snapshots only its own manager's live set, so a
+			// >24h idle dir owned by the other manager can be reaped. Bounded and
+			// safe: active dirs stay mtime-fresh (spared) and either side rebuilds
+			// from its token/recipe, so the worst case is a wasted rebuild. A shared
+			// active-set source across both managers would remove even that.
+			playback.StartPeriodicOrphanCleanup(deps.AppContext, "api", deps.Config.Playback.TranscodeDir, playbackHandler.CleanupOrphanedTranscodes, playback.OrphanCleanupInterval)
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer
