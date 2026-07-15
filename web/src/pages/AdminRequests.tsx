@@ -591,7 +591,30 @@ type RequestRouterInstallation = {
   installationID: number;
   pluginID: string;
   capability: PluginCapability;
+  defaults: {
+    name: string;
+    base_url: string;
+    api_key_ref: string;
+    plugin_config: Record<string, unknown>;
+  };
 };
+
+function requestRouterDefaults(installation: PluginInstallation) {
+  const configured = installation.global_configs?.find((entry) =>
+    Object.prototype.hasOwnProperty.call(entry.value ?? {}, "addon_url"),
+  )?.value;
+  const value = configured ?? {};
+  const pluginConfig: Record<string, unknown> = {};
+  for (const key of ["movies_library_path", "shows_library_path"]) {
+    if (typeof value[key] === "string" && value[key].trim()) pluginConfig[key] = value[key];
+  }
+  return {
+    name: installation.presentation?.display_name || installation.plugin_id,
+    base_url: typeof value.addon_url === "string" ? value.addon_url : "",
+    api_key_ref: typeof value.api_key === "string" ? value.api_key : "",
+    plugin_config: pluginConfig,
+  };
+}
 
 // requestRouterInstallations flattens installed plugins to one entry per
 // request_router.v1 capability so the form can offer an installation selector.
@@ -609,6 +632,7 @@ function requestRouterInstallations(
           installationID: installation.id,
           pluginID: installation.plugin_id,
           capability,
+          defaults: requestRouterDefaults(installation),
         });
       }
     }
@@ -939,7 +963,13 @@ function IntegrationEditor({
     onChange({
       installation_id: String(soleInstallation.installationID),
       capability_id: soleInstallation.capability.id,
+      name: form.name || soleInstallation.defaults.name,
+      base_url: form.base_url || soleInstallation.defaults.base_url,
+      api_key_ref: form.api_key_ref || soleInstallation.defaults.api_key_ref,
     });
+    if (Object.keys(pluginConfig).length === 0) {
+      onConfigChange({ ...soleInstallation.defaults.plugin_config });
+    }
     // onChange identity is stable per card; intentionally depend on the data only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.installation_id, soleInstallationID]);
@@ -957,6 +987,27 @@ function IntegrationEditor({
         entry.capability.id === form.capability_id,
     ) ?? installations.find((entry) => entry.installationID === selectedInstallationID);
 
+  // Adopt configured plugin values for an existing/unseeded connection. Only
+  // empty fields are filled, so saved integration-specific overrides win.
+  useEffect(() => {
+    if (!selected) return;
+    const patch: Partial<IntegrationFormState> = {};
+    if (!form.name && selected.defaults.name) patch.name = selected.defaults.name;
+    if (!form.base_url && selected.defaults.base_url) patch.base_url = selected.defaults.base_url;
+    if (!form.api_key_ref && !form.has_api_key && selected.defaults.api_key_ref) {
+      patch.api_key_ref = selected.defaults.api_key_ref;
+    }
+    if (Object.keys(patch).length > 0) onChange(patch);
+    if (
+      Object.keys(pluginConfig).length === 0 &&
+      Object.keys(selected.defaults.plugin_config).length > 0
+    ) {
+      onConfigChange({ ...selected.defaults.plugin_config });
+    }
+    // Defaults change only when the selected installed plugin changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.installationID, selected?.capability.id]);
+
   // Switching the selected plugin must drop the previous plugin's config (so its
   // keys never reach the new plugin's schema in the options probe or save) and
   // clear stale save errors (handled by patchForm -> clearSaveErrors).
@@ -972,8 +1023,12 @@ function IntegrationEditor({
     patchForm({
       installation_id: String(entry.installationID),
       capability_id: entry.capability.id,
+      name: entry.defaults.name,
+      base_url: entry.defaults.base_url,
+      api_key_ref: entry.defaults.api_key_ref,
+      has_api_key: false,
     });
-    onConfigChange({});
+    onConfigChange({ ...entry.defaults.plugin_config });
   }
   const selectedConfigSchema = selected?.capability.config_schema?.[0];
   const descriptor = selectedConfigSchema?.admin_form;
