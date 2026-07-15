@@ -101,6 +101,32 @@ type RuntimeHostServer struct {
 	installedPlugins InstalledPluginLister
 	configSetter     GlobalConfigSetter
 	installationID   int
+	publicBaseURL    string
+	internalBaseURL  string
+}
+
+// GetHostInfo returns host-owned callback URLs scoped to the calling plugin
+// installation. Plugins never need to guess or persist their numeric ID.
+func (s *RuntimeHostServer) GetHostInfo(context.Context, *pluginv1.GetHostInfoRequest) (*pluginv1.GetHostInfoResponse, error) {
+	base := strings.TrimRight(s.internalBaseURL, "/")
+	if base == "" {
+		base = strings.TrimRight(s.publicBaseURL, "/")
+	}
+	proxyBase := ""
+	if base != "" && s.installationID > 0 {
+		proxyBase = fmt.Sprintf("%s/api/v1/plugins/%d", base, s.installationID)
+	}
+	return &pluginv1.GetHostInfoResponse{
+		PublicBaseUrl:      s.publicBaseURL,
+		InternalBaseUrl:    s.internalBaseURL,
+		PluginProxyBaseUrl: proxyBase,
+	}, nil
+}
+
+// SetHostURLs configures the origins returned to the bound plugin.
+func (s *RuntimeHostServer) SetHostURLs(publicBaseURL, internalBaseURL string) {
+	s.publicBaseURL = strings.TrimRight(publicBaseURL, "/")
+	s.internalBaseURL = strings.TrimRight(internalBaseURL, "/")
 }
 
 // NewRuntimeHostServer constructs a RuntimeHostServer bound to the given

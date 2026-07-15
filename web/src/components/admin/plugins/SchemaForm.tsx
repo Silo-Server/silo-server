@@ -23,6 +23,7 @@ import {
   validateSchemaValues,
   type SchemaOption,
 } from "./schemaFormUtils";
+import FolderBrowser from "@/components/FolderBrowser";
 
 type Props = {
   descriptor: PluginAdminForm;
@@ -144,6 +145,8 @@ export function SchemaForm({
   idPrefix = "schema",
   onValidityChange,
 }: Props) {
+  const [browsingFieldKey, setBrowsingFieldKey] = useState<string | null>(null);
+
   const byKey = useMemo(() => {
     const map = new Map<string, PluginAdminFormField>();
     for (const field of descriptor.fields) {
@@ -249,7 +252,9 @@ export function SchemaForm({
       );
     }
 
-    return (
+    const isPathField = field.key.toLowerCase().includes("path") && field.control !== "PASSWORD" && field.control !== "NUMBER";
+
+    const inputControl = (
       <Input
         id={id}
         type={
@@ -264,6 +269,23 @@ export function SchemaForm({
         onChange={(event) => setField(field.key, event.target.value)}
       />
     );
+
+    if (isPathField) {
+      return (
+        <div className="flex gap-2">
+          <div className="flex-grow">{inputControl}</div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setBrowsingFieldKey(field.key)}
+          >
+            Browse
+          </Button>
+        </div>
+      );
+    }
+
+    return inputControl;
   }
 
   // A non-switch field: label + optional description stacked above the control.
@@ -380,6 +402,20 @@ export function SchemaForm({
           renderFields={(keys) => renderFieldList(resolveKeys(keys))}
         />
       ))}
+      {browsingFieldKey && (
+        <FolderBrowser
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setBrowsingFieldKey(null);
+          }}
+          onSelect={(pickedPaths: string[]) => {
+            if (pickedPaths.length > 0) {
+              setField(browsingFieldKey, pickedPaths[0]);
+            }
+            setBrowsingFieldKey(null);
+          }}
+        />
+      )}
     </div>
   );
 }

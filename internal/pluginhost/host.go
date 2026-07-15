@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	sdkruntime "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
@@ -41,6 +43,10 @@ type Config struct {
 	// GlobalConfigSetter persists SetGlobalConfigEntry calls from plugins. When
 	// nil, SetGlobalConfigEntry returns an error.
 	GlobalConfigSetter GlobalConfigSetter
+	// PublicBaseURL is Silo's externally reachable origin. InternalBaseURL is
+	// the origin reachable from plugin consumers such as FFmpeg.
+	PublicBaseURL   string
+	InternalBaseURL string
 }
 
 type StartRequest struct {
@@ -60,6 +66,8 @@ type Host struct {
 	catalogPresence    CatalogPresenceLookup
 	installedPlugins   InstalledPluginLister
 	globalConfigSetter GlobalConfigSetter
+	publicBaseURL      string
+	internalBaseURL    string
 
 	mu        sync.RWMutex
 	instances map[int]*instance
@@ -95,6 +103,8 @@ func NewHost(cfg Config) *Host {
 		catalogPresence:     cfg.CatalogPresence,
 		installedPlugins:    cfg.InstalledPlugins,
 		globalConfigSetter:  cfg.GlobalConfigSetter,
+		publicBaseURL:       strings.TrimRight(cfg.PublicBaseURL, "/"),
+		internalBaseURL:     strings.TrimRight(cfg.InternalBaseURL, "/"),
 		instances:           make(map[int]*instance),
 	}
 }
@@ -180,8 +190,13 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	configureCtx, configureCancel := ensureDeadline(ctx, DefaultControlTimeout)
 	defer configureCancel()
 
+	configureEntries := append([]*pluginv1.ConfigEntry(nil), req.Config...)
+	if proxyURL := h.pluginProxyURL(req.InstallationID); proxyURL != "" {
+		value, _ := structpb.NewStruct(map[string]any{"plugin_proxy_base_url": proxyURL})
+		configureEntries = append(configureEntries, &pluginv1.ConfigEntry{Key: "silo_runtime", Value: value})
+	}
 	_, err = rpcClient.Runtime().Configure(configureCtx, &pluginv1.ConfigureRequest{
-		Config: req.Config,
+		Config: configureEntries,
 	})
 	if err != nil && status.Code(err) != codes.Unimplemented {
 		_ = protocol.Close()
@@ -206,6 +221,17 @@ func (h *Host) Start(ctx context.Context, req StartRequest) (*Client, error) {
 	go h.monitorHealth(healthCtx, req.InstallationID, instance)
 
 	return client, nil
+}
+
+func (h *Host) pluginProxyURL(installationID int) string {
+	base := strings.TrimRight(h.internalBaseURL, "/")
+	if base == "" {
+		base = strings.TrimRight(h.publicBaseURL, "/")
+	}
+	if base == "" || installationID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s/api/v1/plugins/%d", base, installationID)
 }
 
 func (h *Host) Client(installationID int) (*Client, error) {
@@ -344,6 +370,7 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 			pluginID,
 			installationID,
 		)
+		srv.SetHostURLs(h.publicBaseURL, h.internalBaseURL)
 		pluginv1.RegisterRuntimeHostServer(s, srv)
 		return s
 	})

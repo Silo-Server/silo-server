@@ -214,6 +214,21 @@ func TestRuntimeHostServer_SetGlobalConfigEntry_RejectsEmptyKey(t *testing.T) {
 	}
 }
 
+func TestRuntimeHostServer_GetHostInfoScopesProxyToInstallation(t *testing.T) {
+	srv := pluginhost.NewRuntimeHostServerWithServices(
+		&fakeHub{}, &fakeLibLister{}, nil, nil, nil, "aiostreams", 42,
+	)
+	srv.SetHostURLs("https://silo.example", "http://127.0.0.1:8080/")
+
+	resp, err := srv.GetHostInfo(context.Background(), &pluginv1.GetHostInfoRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := resp.GetPluginProxyBaseUrl(), "http://127.0.0.1:8080/api/v1/plugins/42"; got != want {
+		t.Fatalf("plugin proxy URL = %q, want %q", got, want)
+	}
+}
+
 func TestRuntimeHostServer_PublishEvent_RateLimited(t *testing.T) {
 	hub := &fakeHub{}
 	srv := pluginhost.NewRuntimeHostServerWithRate(hub, &fakeLibLister{}, "silo.example", 2)

@@ -249,6 +249,27 @@ export function usePluginUpload() {
   return { upload, progress, isPending: uploadPlugin.isPending };
 }
 
+export function usePluginInstallLocal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string) =>
+      api<PluginInstallation>("/admin/plugins/install-local", {
+        method: "POST",
+        body: JSON.stringify({ path }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }),
+    onSuccess: () => {
+      toast.success("Plugin installed successfully");
+      invalidatePluginQueries(queryClient);
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Failed to install plugin");
+    },
+  });
+}
+
 export function useUpdatePluginInstallation() {
   const queryClient = useQueryClient();
   return useMutation({

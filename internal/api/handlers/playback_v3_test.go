@@ -1283,14 +1283,17 @@ func TestRouteEventV3AcceptsAndroidSeekEvents(t *testing.T) {
 	}
 }
 
-func TestRemapSubtitleSelectionV3RejectsNegativeIndex(t *testing.T) {
+func TestRemapSubtitleSelectionV3PreservesSubtitlesOff(t *testing.T) {
 	index := -1
-	request := playback.StartRequestV3{SubtitleTrackIndex: &index}
+	request := playback.StartRequestV3{SubtitleTrackIndex: &index, SubtitleTrackID: playback.TrackIDV3(1, "subtitle", 0)}
 	source := &models.MediaFile{ID: 1, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
 	target := &models.MediaFile{ID: 2, ExternalSubtitles: []models.ExternalSubtitle{{Language: "eng", Format: "srt"}}}
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
-	if err := handler.remapSubtitleSelectionV3(context.Background(), source, target, &request); err == nil {
-		t.Fatal("negative subtitle index was accepted")
+	if err := handler.remapSubtitleSelectionV3(context.Background(), source, target, &request); err != nil {
+		t.Fatalf("subtitles-off remap: %v", err)
+	}
+	if request.SubtitleTrackIndex != nil || request.SubtitleTrackID != "" {
+		t.Fatalf("subtitles-off selection was not cleared: %#v", request)
 	}
 }
 

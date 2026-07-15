@@ -656,6 +656,37 @@ func (h *PluginHandler) HandleUploadInstallation(w http.ResponseWriter, r *http.
 	h.writeUploadedPluginResponse(w, r, result)
 }
 
+type InstallLocalRequest struct {
+	Path string `json:"path"`
+}
+
+func (h *PluginHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Request) {
+	var req InstallLocalRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
+		return
+	}
+
+	if req.Path == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "path is required")
+		return
+	}
+
+	if _, err := os.Stat(req.Path); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("file not found on server: %s", err.Error()))
+		return
+	}
+
+	result, err := h.installUploadedPlugin(r.Context(), req.Path)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "installing local plugin", "component", "api", "path", req.Path, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", fmt.Sprintf("Failed to install plugin: %s", err.Error()))
+		return
+	}
+
+	h.writeUploadedPluginResponse(w, r, result)
+}
+
 func (h *PluginHandler) HandleCreateChunkedUpload(w http.ResponseWriter, r *http.Request) {
 	var req pluginChunkedUploadCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

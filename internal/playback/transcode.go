@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"math"
 	"mime"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,6 +95,10 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
+	streamResolverURL    string
+	streamCandidate      int
+	streamCandidateCount int
+	streamCacheRefreshed bool
 }
 
 // SetRestartHook registers a callback fired after every successful Restart.
@@ -147,6 +153,7 @@ const maxPersistedFFmpegChars = 2000
 const (
 	maxSequentialMissingSegments = 2
 	activeSegmentWait            = 12 * time.Second
+	startupSegmentWait           = 30 * time.Second
 	segmentWaitGrace             = 1500 * time.Millisecond
 	maxSegmentWait               = 6 * time.Second
 	minSegmentWait               = 3 * time.Second
@@ -155,6 +162,12 @@ const (
 
 // StartTranscode launches an ffmpeg process that produces HLS segments.
 func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
+	inputPath, err := resolveTranscodeInputPath(opts.InputPath)
+	if err != nil {
+		return nil, err
+	}
+	opts.InputPath = inputPath
+
 	if opts.VideoBitstreamFilter != "" &&
 		(opts.VideoBitstreamFilter != DV7ToHDR10BitstreamFilter || !strings.EqualFold(opts.TargetCodecVideo, "copy")) {
 		return nil, fmt.Errorf("unsupported video bitstream filter recipe")
@@ -178,6 +191,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		done:                 make(chan struct{}),
 		stderr:               newBoundedTailBuffer(stderrTailMaxBytes),
 		lastRequestedSegment: opts.StartSegmentNumber,
+	}
+	if isStreamResolverURL(opts.InputPath) {
+		s.streamResolverURL = opts.InputPath
+		s.streamCandidate = resolverCandidate(opts.InputPath)
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -221,6 +238,152 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}()
 
 	return s, nil
+}
+
+func isStreamResolverURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && strings.Contains(u.Path, "/resolve/")
+}
+
+func resolverCandidate(rawURL string) int {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(u.Query().Get("candidate"))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// RetryNextStreamCandidate restarts a failed dynamic stream with the next
+// cached resolver candidate. Once the advertised candidate set is exhausted,
+// it forces one fresh AIOStreams lookup and starts again at candidate zero.
+func (s *TranscodeSession) RetryNextStreamCandidate(ctx context.Context) (bool, error) {
+	s.mu.Lock()
+	base := s.streamResolverURL
+	if base == "" {
+		s.mu.Unlock()
+		return false, nil
+	}
+	candidate := s.streamCandidate + 1
+	refresh := false
+	if s.streamCandidateCount > 0 && candidate >= s.streamCandidateCount {
+		if s.streamCacheRefreshed {
+			s.mu.Unlock()
+			return false, nil
+		}
+		candidate = 0
+		refresh = true
+	}
+	s.mu.Unlock()
+
+	location, count, unavailable, err := resolveStreamCandidate(ctx, base, candidate, refresh)
+	if err != nil {
+		return false, err
+	}
+	if unavailable {
+		s.mu.Lock()
+		alreadyRefreshed := s.streamCacheRefreshed
+		s.mu.Unlock()
+		if alreadyRefreshed || refresh {
+			return false, nil
+		}
+		candidate, refresh = 0, true
+		location, count, unavailable, err = resolveStreamCandidate(ctx, base, candidate, refresh)
+		if err != nil || unavailable {
+			return false, err
+		}
+	}
+
+	s.mu.Lock()
+	s.streamCandidate = candidate
+	if count > 0 {
+		s.streamCandidateCount = count
+	}
+	if refresh {
+		s.streamCacheRefreshed = true
+	}
+	s.opts.InputPath = location
+	seekSeconds, startSegment := s.opts.SeekSeconds, s.opts.StartSegmentNumber
+	s.mu.Unlock()
+
+	if err := s.Restart(ctx, seekSeconds, startSegment); err != nil {
+		return false, err
+	}
+	s.logFFmpegEvent(ctx, "ffmpeg stream candidate retry", "")
+	return true, nil
+}
+
+func resolveStreamCandidate(ctx context.Context, base string, candidate int, refresh bool) (location string, count int, unavailable bool, err error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", 0, false, err
+	}
+	query := u.Query()
+	query.Set("candidate", strconv.Itoa(candidate))
+	if refresh {
+		query.Set("refresh", "true")
+	} else {
+		query.Del("refresh")
+	}
+	u.RawQuery = query.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return "", 0, false, err
+	}
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", 0, true, nil
+	}
+	if resp.StatusCode != http.StatusFound {
+		return "", 0, false, fmt.Errorf("stream resolver returned HTTP %d", resp.StatusCode)
+	}
+	location = strings.TrimSpace(resp.Header.Get("Location"))
+	if location == "" {
+		return "", 0, false, fmt.Errorf("stream resolver returned an empty location")
+	}
+	count, _ = strconv.Atoi(resp.Header.Get("X-Silo-Stream-Candidates"))
+	return location, count, false, nil
+}
+
+// resolveTranscodeInputPath turns a Stremio-style .strm shortcut into the
+// remote media URL FFmpeg must open. Keeping this at the shared launch boundary
+// covers integrated playback, transcode nodes, Jellyfin compatibility, and
+// reconstructed sessions without duplicating resolution logic in each handler.
+func resolveTranscodeInputPath(inputPath string) (string, error) {
+	if !strings.EqualFold(filepath.Ext(inputPath), ".strm") {
+		return inputPath, nil
+	}
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return "", fmt.Errorf("stat stream shortcut: %w", err)
+	}
+	if info.Size() > 64*1024 {
+		return "", fmt.Errorf("stream shortcut exceeds 64 KiB")
+	}
+	content, err := os.ReadFile(inputPath)
+	if err != nil {
+		return "", fmt.Errorf("read stream shortcut: %w", err)
+	}
+	streamURL := strings.TrimSpace(string(content))
+	if streamURL == "" {
+		return "", fmt.Errorf("stream shortcut is empty")
+	}
+	if strings.ContainsAny(streamURL, "\r\n") {
+		return "", fmt.Errorf("stream shortcut must contain exactly one URL")
+	}
+	lowerURL := strings.ToLower(streamURL)
+	if !strings.HasPrefix(lowerURL, "https://") && !strings.HasPrefix(lowerURL, "http://") {
+		return "", fmt.Errorf("stream shortcut URL must use http or https")
+	}
+	return streamURL, nil
 }
 
 // IsMPEG2VideoCodec reports whether a probed video codec name identifies
@@ -1301,7 +1464,7 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	case !progress.HasManifest:
 		if segNum <= progress.StartSegmentNumber+1 {
 			decision.Wait = true
-			decision.WaitTimeout = activeSegmentWait
+			decision.WaitTimeout = startupSegmentWait
 			decision.RestartOnTimeout = false
 			decision.Reason = "startup_manifest_not_ready"
 		} else {

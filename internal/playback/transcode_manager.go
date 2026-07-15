@@ -653,6 +653,12 @@ func (m *TranscodeManager) MonitorLocalTranscodeExit(sessionID string, session *
 		if session.WaitError() == nil {
 			return
 		}
+		if retried, err := session.RetryNextStreamCandidate(context.Background()); err == nil && retried {
+			slog.Info("transcode restarted with next stream candidate", "component", "playback", "session", sessionID, "playback_session_id", sessionID)
+			return
+		} else if err != nil {
+			slog.Warn("stream candidate retry failed", "component", "playback", "session", sessionID, "playback_session_id", sessionID, "error", err)
+		}
 
 		// ffmpeg crash — tear the session down; a client holding a valid token can
 		// reconstruct it on the next request. Pass the dead session so teardown is a

@@ -2,6 +2,7 @@ package playback
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -157,6 +158,22 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		})
 	}
 	if !detailedVideoEvidenceCompleteV3(source) {
+		if isDynamicStreamSourceV3(file) {
+			targetHeight := source.Height
+			if targetHeight <= 0 {
+				targetHeight = 1080
+			}
+			width, bitrate := qualityDimensionsV3(targetHeight, source.Width, source.Height)
+			dynamicQuality := QualityResultV3{
+				Label:             resolutionLabelV3(targetHeight),
+				Width:             width,
+				Height:            targetHeight,
+				BitrateKbps:       bitrate,
+				RequiresTranscode: true,
+				Reason:            "dynamic_stream_metadata_deferred",
+			}
+			return planVideoTranscodeV3(input, base, source, dynamicQuality, hlsSubtitle, "dynamic_stream_metadata_deferred")
+		}
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)
 	}
 
@@ -375,6 +392,10 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	}
 
 	return terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this source and output route.", false)
+}
+
+func isDynamicStreamSourceV3(file *models.MediaFile) bool {
+	return file != nil && (strings.EqualFold(filepath.Ext(file.FilePath), ".strm") || strings.EqualFold(file.Container, "strm"))
 }
 
 // planVideoTranscodeV3 always executes on the HLS engine, so the caller must
