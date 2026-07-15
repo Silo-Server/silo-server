@@ -10,8 +10,6 @@ import (
 	"log/slog"
 	"math"
 	"mime"
-	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,10 +93,6 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
-	streamResolverURL    string
-	streamCandidate      int
-	streamCandidateCount int
-	streamCacheRefreshed bool
 }
 
 // SetRestartHook registers a callback fired after every successful Restart.
@@ -192,11 +186,6 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		stderr:               newBoundedTailBuffer(stderrTailMaxBytes),
 		lastRequestedSegment: opts.StartSegmentNumber,
 	}
-	if isStreamResolverURL(opts.InputPath) {
-		s.streamResolverURL = opts.InputPath
-		s.streamCandidate = resolverCandidate(opts.InputPath)
-	}
-
 	args := buildFFmpegArgs(opts)
 	bin := opts.FFmpegPath
 	if bin == "" {
@@ -238,119 +227,6 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	}()
 
 	return s, nil
-}
-
-func isStreamResolverURL(rawURL string) bool {
-	u, err := url.Parse(rawURL)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && strings.Contains(u.Path, "/resolve/")
-}
-
-func resolverCandidate(rawURL string) int {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return 0
-	}
-	n, err := strconv.Atoi(u.Query().Get("candidate"))
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
-}
-
-// RetryNextStreamCandidate restarts a failed dynamic stream with the next
-// cached resolver candidate. Once the advertised candidate set is exhausted,
-// it forces one fresh AIOStreams lookup and starts again at candidate zero.
-func (s *TranscodeSession) RetryNextStreamCandidate(ctx context.Context) (bool, error) {
-	s.mu.Lock()
-	base := s.streamResolverURL
-	if base == "" {
-		s.mu.Unlock()
-		return false, nil
-	}
-	candidate := s.streamCandidate + 1
-	refresh := false
-	if s.streamCandidateCount > 0 && candidate >= s.streamCandidateCount {
-		if s.streamCacheRefreshed {
-			s.mu.Unlock()
-			return false, nil
-		}
-		candidate = 0
-		refresh = true
-	}
-	s.mu.Unlock()
-
-	location, count, unavailable, err := resolveStreamCandidate(ctx, base, candidate, refresh)
-	if err != nil {
-		return false, err
-	}
-	if unavailable {
-		s.mu.Lock()
-		alreadyRefreshed := s.streamCacheRefreshed
-		s.mu.Unlock()
-		if alreadyRefreshed || refresh {
-			return false, nil
-		}
-		candidate, refresh = 0, true
-		location, count, unavailable, err = resolveStreamCandidate(ctx, base, candidate, refresh)
-		if err != nil || unavailable {
-			return false, err
-		}
-	}
-
-	s.mu.Lock()
-	s.streamCandidate = candidate
-	if count > 0 {
-		s.streamCandidateCount = count
-	}
-	if refresh {
-		s.streamCacheRefreshed = true
-	}
-	s.opts.InputPath = location
-	seekSeconds, startSegment := s.opts.SeekSeconds, s.opts.StartSegmentNumber
-	s.mu.Unlock()
-
-	if err := s.Restart(ctx, seekSeconds, startSegment); err != nil {
-		return false, err
-	}
-	s.logFFmpegEvent(ctx, "ffmpeg stream candidate retry", "")
-	return true, nil
-}
-
-func resolveStreamCandidate(ctx context.Context, base string, candidate int, refresh bool) (location string, count int, unavailable bool, err error) {
-	u, err := url.Parse(base)
-	if err != nil {
-		return "", 0, false, err
-	}
-	query := u.Query()
-	query.Set("candidate", strconv.Itoa(candidate))
-	if refresh {
-		query.Set("refresh", "true")
-	} else {
-		query.Del("refresh")
-	}
-	u.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return "", 0, false, err
-	}
-	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, false, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return "", 0, true, nil
-	}
-	if resp.StatusCode != http.StatusFound {
-		return "", 0, false, fmt.Errorf("stream resolver returned HTTP %d", resp.StatusCode)
-	}
-	location = strings.TrimSpace(resp.Header.Get("Location"))
-	if location == "" {
-		return "", 0, false, fmt.Errorf("stream resolver returned an empty location")
-	}
-	count, _ = strconv.Atoi(resp.Header.Get("X-Silo-Stream-Candidates"))
-	return location, count, false, nil
 }
 
 // resolveTranscodeInputPath turns a Stremio-style .strm shortcut into the
