@@ -87,7 +87,7 @@ function parseJSONSchema(schema: PluginConfigSchema): ParsedObjectSchema {
   }
 }
 
-function defaultValueForField(field: SupportedField): string | boolean {
+function defaultValueForField(field: SupportedField): unknown {
   if (field.default_value !== undefined) {
     if (typeof field.default_value === "boolean") {
       return field.default_value;
@@ -98,6 +98,9 @@ function defaultValueForField(field: SupportedField): string | boolean {
     if (typeof field.default_value === "string") {
       return field.default_value;
     }
+    if (Array.isArray(field.default_value)) {
+      return field.default_value;
+    }
   }
   if (field.control === "SWITCH") {
     return false;
@@ -105,7 +108,7 @@ function defaultValueForField(field: SupportedField): string | boolean {
   return "";
 }
 
-function valueForField(field: SupportedField, configValue?: PluginConfigValue): string | boolean {
+export function valueForField(field: SupportedField, configValue?: PluginConfigValue): unknown {
   const raw = configValue?.[field.key];
   if (typeof raw === "boolean") {
     return raw;
@@ -114,6 +117,9 @@ function valueForField(field: SupportedField, configValue?: PluginConfigValue): 
     return String(raw);
   }
   if (typeof raw === "string") {
+    return raw;
+  }
+  if (Array.isArray(raw)) {
     return raw;
   }
   return defaultValueForField(field);
