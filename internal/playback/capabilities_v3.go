@@ -93,9 +93,14 @@ func detailedVideoEligibleV3(source SourceDescriptorV3, request StartRequestV3) 
 		if len(capability.BitDepths) > 0 && !containsIntV3(capability.BitDepths, source.BitDepth) {
 			continue
 		}
-		if capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate || capability.MaxBitrateKbps > 0 && source.BitrateKbps > capability.MaxBitrateKbps {
+		if capability.MaxWidth > 0 && source.Width > capability.MaxWidth || capability.MaxHeight > 0 && source.Height > capability.MaxHeight || capability.MaxFrameRate > 0 && source.FrameRate > capability.MaxFrameRate {
 			continue
 		}
+		// MediaCodec's bitrateRange is not a reliable hard decode ceiling on
+		// Android TV. Vendors commonly report a conservative value even when
+		// the hardware decoder can accept higher-bitrate HEVC/HDR streams. A
+		// bitrate mismatch should affect buffering/quality policy, not turn a
+		// source-preserving route into a video transcode.
 		return true
 	}
 	return false

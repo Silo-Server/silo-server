@@ -51,6 +51,26 @@ func TestShouldTryAlternateFileV3PinsOriginalQuality(t *testing.T) {
 	}
 }
 
+func TestShouldTryAlternateAfterTerminalV3AvoidsHDRTranscode(t *testing.T) {
+	tests := []struct {
+		reason  string
+		quality string
+		want    bool
+	}{
+		{reason: "hdr_transcode_unsupported", quality: "auto", want: true},
+		{reason: "no_alternate_version", quality: "1080p", want: true},
+		{reason: "hdr_transcode_unsupported", quality: "original", want: false},
+		{reason: "conversion_tool_unavailable", quality: "auto", want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.reason+"/"+test.quality, func(t *testing.T) {
+			if got := shouldTryAlternateAfterTerminalV3(test.reason, test.quality); got != test.want {
+				t.Fatalf("shouldTryAlternateAfterTerminalV3(%q, %q) = %v, want %v", test.reason, test.quality, got, test.want)
+			}
+		})
+	}
+}
+
 func TestReplanAllowsAlternateFileV3PinsSeekOperations(t *testing.T) {
 	tests := []struct {
 		name      string

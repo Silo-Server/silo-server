@@ -428,7 +428,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
+	if result.Terminal != nil && shouldTryAlternateAfterTerminalV3(result.Terminal.Reason, req.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			effectiveFile = h.ensurePlaybackProbe(r.Context(), alternate)
 			audioIndex = remapAudioIndexV3(requestedFile, effectiveFile, audioIndex)
@@ -1213,7 +1213,9 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
+	if result.Terminal != nil &&
+		(result.Terminal.Reason == "no_alternate_version" || result.Terminal.Reason == "hdr_transcode_unsupported") &&
+		replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
 			remappedAudio := remapAudioIndexV3(effectiveFile, alternate, audioIndex)
@@ -1488,6 +1490,17 @@ func copyOptionalIntV3(value *int) *int {
 
 func shouldTryAlternateFileV3(qualityPreference string) bool {
 	return !strings.EqualFold(strings.TrimSpace(qualityPreference), "original")
+}
+
+// shouldTryAlternateAfterTerminalV3 keeps HDR sources from entering an
+// unvalidated video transcode. When the requested HDR version needs video
+// adaptation but no safe HDR recipe is installed, try the same content's SDR
+// or lower-resolution version before returning the terminal response.
+func shouldTryAlternateAfterTerminalV3(reason, qualityPreference string) bool {
+	if !shouldTryAlternateFileV3(qualityPreference) {
+		return false
+	}
+	return reason == "no_alternate_version" || reason == "hdr_transcode_unsupported"
 }
 
 func replanAllowsAlternateFileV3(operation playback.ReplanOperationV3, qualityPreference string) bool {
