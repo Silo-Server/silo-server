@@ -20,8 +20,8 @@ func TestDurationFromProbeMetadataUsesReasonableVideoDuration(t *testing.T) {
 	}
 
 	got, ok := durationFromProbeMetadata(raw)
-	if !ok || got != 4078 {
-		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 4078, true", got, ok)
+	if !ok || got != 4077 {
+		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 4077, true", got, ok)
 	}
 }
 
@@ -148,5 +148,28 @@ esac
 	}
 	if probe.Duration != 10 {
 		t.Fatalf("ProbeFile() duration = %d, want 10", probe.Duration)
+	}
+}
+
+func TestProbeFileReturnsErrorWhenRequiredPacketFallbackFails(t *testing.T) {
+	t.Parallel()
+
+	ffprobePath := filepath.Join(t.TempDir(), "ffprobe")
+	script := `#!/bin/sh
+case " $* " in
+  *" -show_format "*)
+    printf '%s\n' '{"format":{"duration":"4298357.248000","size":"1258000000"},"streams":[{"codec_type":"video","avg_frame_rate":"30/1"}]}'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(ffprobePath, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing fake ffprobe: %v", err)
+	}
+
+	if _, err := ProbeFile(context.Background(), ffprobePath, "broken.mkv"); err == nil {
+		t.Fatal("ProbeFile() error = nil, want packet fallback failure")
 	}
 }

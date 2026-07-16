@@ -140,9 +140,14 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	probe := convertProbeData(&raw)
 	if probe.Duration == 0 {
 		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
-			if duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate); packetErr == nil {
-				probe.Duration = duration
+			duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate)
+			if packetErr != nil {
+				return nil, packetErr
 			}
+			if duration <= 0 {
+				return nil, fmt.Errorf("ffprobe could not derive video duration for %s", filePath)
+			}
+			probe.Duration = duration
 		}
 	}
 
@@ -263,10 +268,10 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 
 	formatDuration := parseFloat(raw.Format.Duration)
 	if !hasVideoStream(raw.Streams) && durationIsPositiveFinite(formatDuration) {
-		return roundedDuration(formatDuration), true
+		return truncatedDuration(formatDuration), true
 	}
 	if durationIsReasonable(formatDuration) && !durationLooksImplausiblyShort(raw, formatDuration) {
-		return roundedDuration(formatDuration), true
+		return truncatedDuration(formatDuration), true
 	}
 
 	for _, stream := range raw.Streams {
@@ -275,15 +280,15 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 		}
 		streamDuration := parseFloat(stream.Duration)
 		if durationIsReasonable(streamDuration) && !durationLooksImplausiblyShort(raw, streamDuration) {
-			return roundedDuration(streamDuration), true
+			return truncatedDuration(streamDuration), true
 		}
 		if duration := durationAfterStart(streamDuration, parseFloat(stream.StartTime)); duration > 0 {
-			return roundedDuration(duration), true
+			return truncatedDuration(duration), true
 		}
 	}
 
 	if duration := durationAfterStart(formatDuration, parseFloat(raw.Format.StartTime)); duration > 0 {
-		return roundedDuration(duration), true
+		return truncatedDuration(duration), true
 	}
 	return 0, false
 }
@@ -329,6 +334,10 @@ func durationIsPositiveFinite(duration float64) bool {
 
 func roundedDuration(duration float64) int {
 	return max(1, int(math.Round(duration)))
+}
+
+func truncatedDuration(duration float64) int {
+	return max(1, int(duration))
 }
 
 func hasVideoStream(streams []ffprobeStream) bool {
