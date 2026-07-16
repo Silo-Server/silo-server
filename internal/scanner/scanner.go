@@ -2402,6 +2402,9 @@ func needsCriticalProbeRepairScanState(file *scanStateFile) bool {
 	if file.Duration <= 0 {
 		return true
 	}
+	if legacyDurationRepairNeeded(file.Duration, file.FileSize, file.HasVideoTracks, file.ProbeUpdatedAt) {
+		return true
+	}
 	if strings.TrimSpace(file.Container) == "" {
 		return true
 	}

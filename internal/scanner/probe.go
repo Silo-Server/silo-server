@@ -111,8 +111,9 @@ type ffprobeSideData struct {
 
 // ffprobeDisp represents the disposition flags on a stream.
 type ffprobeDisp struct {
-	Default int `json:"default"`
-	Forced  int `json:"forced"`
+	Default     int `json:"default"`
+	Forced      int `json:"forced"`
+	AttachedPic int `json:"attached_pic"`
 }
 
 // ProbeFile runs ffprobe on the given file and returns parsed ProbeData.
@@ -140,14 +141,13 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	probe := convertProbeData(&raw)
 	if probe.Duration == 0 {
 		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
-			duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate)
-			if packetErr != nil {
-				return nil, packetErr
+			// A failed or empty packet scan must not discard the codec and
+			// track metadata that already parsed successfully: callers persist
+			// the partial probe, and the repair layer retries rows whose
+			// duration is still unknown.
+			if duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate); packetErr == nil && duration > 0 {
+				probe.Duration = duration
 			}
-			if duration <= 0 {
-				return nil, fmt.Errorf("ffprobe could not derive video duration for %s", filePath)
-			}
-			probe.Duration = duration
 		}
 	}
 
@@ -259,7 +259,29 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	return pd
 }
 
-const maxReasonableMediaDurationSeconds = 100_000
+const (
+	maxReasonableMediaDurationSeconds = 100_000
+	// Audio-only files (audiobooks, podcasts) legitimately exceed the video
+	// ceiling, but still need a cap so malformed containers cannot persist
+	// multi-year durations.
+	maxReasonableAudioDurationSeconds = 1_000_000
+)
+
+// A large video file whose derived duration is only a few seconds is the
+// signature of malformed container timestamps (and of the legacy probe that
+// divided large durations by one million). The shape is shared with the
+// repair triggers in probe_repair.go and scanner.go so the probe parser and
+// the repair layers cannot drift apart.
+const (
+	implausiblyShortVideoMaxSeconds = 10
+	implausiblyShortVideoMinBytes   = 100 * 1024 * 1024
+)
+
+func videoDurationImplausiblyShort(durationSeconds float64, sizeBytes int64, hasVideo bool) bool {
+	return hasVideo &&
+		durationSeconds > 0 && durationSeconds <= implausiblyShortVideoMaxSeconds &&
+		sizeBytes >= implausiblyShortVideoMinBytes
+}
 
 func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if raw == nil {
@@ -267,7 +289,8 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	}
 
 	formatDuration := parseFloat(raw.Format.Duration)
-	if !hasVideoStream(raw.Streams) && durationIsPositiveFinite(formatDuration) {
+	if !hasVideoStream(raw.Streams) &&
+		durationIsPositiveFinite(formatDuration) && formatDuration <= maxReasonableAudioDurationSeconds {
 		return truncatedDuration(formatDuration), true
 	}
 	if durationIsReasonable(formatDuration) && !durationLooksImplausiblyShort(raw, formatDuration) {
@@ -275,42 +298,32 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	}
 
 	for _, stream := range raw.Streams {
-		if stream.CodecType != "video" {
+		if !isMainVideoStream(stream) {
 			continue
 		}
 		streamDuration := parseFloat(stream.Duration)
 		if durationIsReasonable(streamDuration) && !durationLooksImplausiblyShort(raw, streamDuration) {
 			return truncatedDuration(streamDuration), true
 		}
-		if duration := durationAfterStart(streamDuration, parseFloat(stream.StartTime)); duration > 0 {
+		duration := durationAfterStart(streamDuration, parseFloat(stream.StartTime))
+		if duration > 0 && !durationLooksImplausiblyShort(raw, duration) {
 			return truncatedDuration(duration), true
 		}
 	}
 
-	if duration := durationAfterStart(formatDuration, parseFloat(raw.Format.StartTime)); duration > 0 {
+	duration := durationAfterStart(formatDuration, parseFloat(raw.Format.StartTime))
+	if duration > 0 && !durationLooksImplausiblyShort(raw, duration) {
 		return truncatedDuration(duration), true
 	}
 	return 0, false
 }
 
 func durationLooksImplausiblyShort(raw *ffprobeOutput, duration float64) bool {
-	const (
-		maxShortDurationSeconds = 10
-		minLargeVideoBytes      = 100 * 1024 * 1024
-	)
-	if raw == nil || duration <= 0 || duration > maxShortDurationSeconds {
+	if raw == nil {
 		return false
 	}
-	size, err := strconv.ParseInt(raw.Format.Size, 10, 64)
-	if err != nil || size < minLargeVideoBytes {
-		return false
-	}
-	for _, stream := range raw.Streams {
-		if stream.CodecType == "video" {
-			return true
-		}
-	}
-	return false
+	size := int64(parseFloat(raw.Format.Size))
+	return videoDurationImplausiblyShort(duration, size, hasVideoStream(raw.Streams))
 }
 
 func durationAfterStart(end, start float64) float64 {
@@ -340,20 +353,32 @@ func truncatedDuration(duration float64) int {
 	return max(1, int(duration))
 }
 
+// isMainVideoStream reports whether the stream is a real video stream.
+// Embedded cover art (attached_pic) is reported by ffprobe as a video stream
+// but must not drive duration decisions: it would route audiobooks and music
+// through the video duration gauntlet and packet-scan a single still image.
+func isMainVideoStream(stream ffprobeStream) bool {
+	return stream.CodecType == "video" && stream.Disposition.AttachedPic == 0
+}
+
 func hasVideoStream(streams []ffprobeStream) bool {
-	_, ok := primaryVideoFrameRate(streams)
-	return ok
+	return slices.ContainsFunc(streams, isMainVideoStream)
 }
 
 func primaryVideoFrameRate(streams []ffprobeStream) (string, bool) {
 	for _, stream := range streams {
-		if stream.CodecType == "video" {
+		if isMainVideoStream(stream) {
 			return stream.AvgFrameRate, true
 		}
 	}
 	return "", false
 }
 
+// probeVideoPacketDuration derives a duration for files whose duration
+// metadata is unusable by scanning video packet timestamps. It intentionally
+// demuxes the whole file: the timestamps being repaired are the same ones
+// ffprobe would need for reliable interval seeking, so sampling cannot be
+// trusted here. The repair layer keeps this one-shot per file.
 func probeVideoPacketDuration(
 	ctx context.Context,
 	ffprobePath string,
@@ -389,7 +414,7 @@ func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
 	maxTimestamp := math.Inf(-1)
 
 	for scanner.Scan() {
-		value := strings.TrimSpace(strings.SplitN(scanner.Text(), ",", 2)[0])
+		value := strings.TrimSpace(scanner.Text())
 		if value == "" {
 			continue
 		}
@@ -421,7 +446,11 @@ func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
 	return roundedDuration(best)
 }
 
+// parseFrameRate parses ffprobe's rational frame-rate shape ("30000/1001")
+// or a plain float, returning 0 when unparsable. normalizeFrameRate formats
+// the same parse for persistence; keep the parsing logic here only.
 func parseFrameRate(raw string) float64 {
+	raw = strings.TrimSpace(raw)
 	parts := strings.SplitN(raw, "/", 2)
 	if len(parts) != 2 {
 		fps, _ := strconv.ParseFloat(raw, 64)
@@ -561,16 +590,14 @@ func normalizeFrameRate(raw string) string {
 	if raw == "" || raw == "0/0" {
 		return ""
 	}
-	parts := strings.SplitN(raw, "/", 2)
-	if len(parts) != 2 {
+	if !strings.Contains(raw, "/") {
 		return raw
 	}
-	num, err1 := strconv.ParseFloat(parts[0], 64)
-	den, err2 := strconv.ParseFloat(parts[1], 64)
-	if err1 != nil || err2 != nil || den == 0 {
+	fps := parseFrameRate(raw)
+	if fps == 0 {
 		return raw
 	}
-	return strconv.FormatFloat(num/den, 'f', 3, 64)
+	return strconv.FormatFloat(fps, 'f', 3, 64)
 }
 
 func isInterlaced(fieldOrder string) bool {
