@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -55,11 +56,17 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	if strings.EqualFold(filepath.Ext(filePath), ".strm") {
 		streamURL, err := resolveTranscodeInputPath(filePath)
 		if err != nil {
-			status := http.StatusBadRequest
-			if strings.HasPrefix(err.Error(), "stat stream shortcut") || strings.HasPrefix(err.Error(), "read stream shortcut") {
-				status = http.StatusInternalServerError
+			if errors.Is(err, os.ErrNotExist) {
+				http.Error(w, "file not found", http.StatusNotFound)
+				return err
 			}
-			http.Error(w, err.Error(), status)
+			status := http.StatusBadRequest
+			message := err.Error()
+			if strings.HasPrefix(message, "stat stream shortcut") || strings.HasPrefix(message, "read stream shortcut") {
+				status = http.StatusInternalServerError
+				message = "internal server error"
+			}
+			http.Error(w, message, status)
 			return err
 		}
 		http.Redirect(w, r, streamURL, http.StatusTemporaryRedirect)

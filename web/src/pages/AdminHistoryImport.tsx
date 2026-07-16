@@ -169,21 +169,27 @@ interface UsePlexOAuthOptions {
 function usePlexOAuth({ onSuccess }: UsePlexOAuthOptions) {
   const [plexAuthPending, setPlexAuthPending] = useState(false);
   const [plexAuthError, setPlexAuthError] = useState<string | null>(null);
-  const plexOAuthIntervalRef = useRef<NodeJS.Timeout | number | null>(null);
+  const plexOAuthTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const plexPopupRef = useRef<Window | null>(null);
+  const plexOAuthGenerationRef = useRef(0);
 
-  useEffect(() => {
-    return () => {
-      if (plexOAuthIntervalRef.current) {
-        clearInterval(plexOAuthIntervalRef.current);
-      }
-      if (plexPopupRef.current && !plexPopupRef.current.closed) {
-        plexPopupRef.current.close();
-      }
-    };
+  const stopOAuth = useCallback((closePopup: boolean) => {
+    plexOAuthGenerationRef.current++;
+    if (plexOAuthTimerRef.current) {
+      clearTimeout(plexOAuthTimerRef.current);
+      plexOAuthTimerRef.current = null;
+    }
+    if (closePopup && plexPopupRef.current && !plexPopupRef.current.closed) {
+      plexPopupRef.current.close();
+    }
+    plexPopupRef.current = null;
   }, []);
 
+  useEffect(() => () => stopOAuth(true), [stopOAuth]);
+
   const triggerOAuth = useCallback(async () => {
+    stopOAuth(true);
+    const generation = plexOAuthGenerationRef.current;
     const width = 600;
     const height = 700;
     const left = window.screen.width / 2 - width / 2;
@@ -191,7 +197,7 @@ function usePlexOAuth({ onSuccess }: UsePlexOAuthOptions) {
     const popup = window.open(
       "about:blank",
       "plex-auth",
-      `width=${width},height=${height},top=${top},left=${left}`
+      `width=${width},height=${height},top=${top},left=${left}`,
     );
 
     if (!popup) {
@@ -202,37 +208,34 @@ function usePlexOAuth({ onSuccess }: UsePlexOAuthOptions) {
     setPlexAuthPending(true);
     setPlexAuthError(null);
 
-    let pin: any;
+    let pin: Awaited<ReturnType<typeof createPlexPin>>;
     try {
       pin = await createPlexPin();
-      const authUrl = buildPlexAuthURL(pin.code, window.location.origin);
-      popup.location.href = authUrl;
+      if (generation !== plexOAuthGenerationRef.current) {
+        popup.close();
+        return;
+      }
+      popup.location.href = buildPlexAuthURL(pin.code, window.location.origin);
     } catch (err) {
-      popup.close();
-      plexPopupRef.current = null;
+      if (generation !== plexOAuthGenerationRef.current) return;
+      stopOAuth(true);
       setPlexAuthPending(false);
       setPlexAuthError(err instanceof Error ? err.message : "Failed to start Plex sign-in");
       return;
     }
 
     let attempts = 0;
-    const maxAttempts = 300; // 10 minutes max (Plex PIN is valid for 15m)
-
-    const interval = setInterval(async () => {
+    const maxAttempts = 300;
+    const poll = async () => {
+      if (generation !== plexOAuthGenerationRef.current) return;
       attempts++;
       if (popup.closed) {
-        clearInterval(interval);
-        plexOAuthIntervalRef.current = null;
-        plexPopupRef.current = null;
+        stopOAuth(false);
         setPlexAuthPending(false);
         return;
       }
-
       if (attempts >= maxAttempts) {
-        clearInterval(interval);
-        plexOAuthIntervalRef.current = null;
-        popup.close();
-        plexPopupRef.current = null;
+        stopOAuth(true);
         setPlexAuthPending(false);
         setPlexAuthError("Sign-in timed out. Please try again.");
         return;
@@ -240,34 +243,29 @@ function usePlexOAuth({ onSuccess }: UsePlexOAuthOptions) {
 
       try {
         const authToken = await checkPlexPin(pin.id, pin.code);
+        if (generation !== plexOAuthGenerationRef.current) return;
         if (authToken) {
-          clearInterval(interval);
-          plexOAuthIntervalRef.current = null;
-          popup.close();
-          plexPopupRef.current = null;
+          stopOAuth(true);
           setPlexAuthPending(false);
           onSuccess(authToken);
+          return;
         }
       } catch (err) {
-        // Ignore polling errors
+        // Ignore polling errors and retry sequentially.
       }
-    }, 2000);
+      if (generation === plexOAuthGenerationRef.current) {
+        plexOAuthTimerRef.current = setTimeout(poll, 2000);
+      }
+    };
 
-    plexOAuthIntervalRef.current = interval;
-  }, [onSuccess]);
+    plexOAuthTimerRef.current = setTimeout(poll, 2000);
+  }, [onSuccess, stopOAuth]);
 
   const cancelOAuth = useCallback(() => {
-    if (plexOAuthIntervalRef.current) {
-      clearInterval(plexOAuthIntervalRef.current);
-      plexOAuthIntervalRef.current = null;
-    }
-    if (plexPopupRef.current && !plexPopupRef.current.closed) {
-      plexPopupRef.current.close();
-    }
-    plexPopupRef.current = null;
+    stopOAuth(true);
     setPlexAuthPending(false);
     setPlexAuthError(null);
-  }, []);
+  }, [stopOAuth]);
 
   return {
     isPending: plexAuthPending,
@@ -330,6 +328,10 @@ function SourceDialog({
       cancelOAuth();
     }
   }, [open, cancelOAuth]);
+
+  useEffect(() => {
+    if (tokenMode !== "oauth") cancelOAuth();
+  }, [tokenMode, cancelOAuth]);
 
   function handleSave() {
     if (!name.trim() || !baseURL.trim()) return;
@@ -541,6 +543,10 @@ function TokenDialog({
       cancelOAuth();
     }
   }, [open, cancelOAuth]);
+
+  useEffect(() => {
+    if (mode !== "oauth") cancelOAuth();
+  }, [mode, cancelOAuth]);
 
   function handleSaveToken() {
     if (!token.trim()) return;

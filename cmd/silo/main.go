@@ -127,9 +127,10 @@ func resolveNodeIdentity() string {
 }
 
 func internalBaseURLFromListen(listen string) string {
+	const fallbackPort = "8080"
 	listen = strings.TrimSpace(listen)
 	if listen == "" {
-		listen = ":8080"
+		listen = ":" + fallbackPort
 	}
 	port := ""
 	if _, p, err := net.SplitHostPort(listen); err == nil {
@@ -139,8 +140,9 @@ func internalBaseURLFromListen(listen string) string {
 	} else if idx := strings.LastIndex(listen, ":"); idx >= 0 {
 		port = listen[idx+1:]
 	}
-	if port == "" {
-		port = "8080"
+	portNumber, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || portNumber == 0 {
+		port = fallbackPort
 	}
 	return "http://127.0.0.1:" + port
 }

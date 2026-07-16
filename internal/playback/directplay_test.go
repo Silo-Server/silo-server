@@ -48,3 +48,23 @@ func TestServeDirectPlayRejectsEmptySTRM(t *testing.T) {
 		t.Fatalf("body = %q", rec.Body.String())
 	}
 }
+
+func TestServeDirectPlayMissingSTRMDoesNotLeakPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.strm")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/media/missing.strm", nil)
+
+	err := ServeDirectPlay(rec, req, path)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "file not found" {
+		t.Fatalf("body = %q", got)
+	}
+	if strings.Contains(rec.Body.String(), path) {
+		t.Fatalf("response leaked path %q", path)
+	}
+}
