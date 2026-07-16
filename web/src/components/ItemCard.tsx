@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { BrowseItem } from "@/api/types";
@@ -181,7 +181,7 @@ export default function ItemCard({
   selected?: boolean;
   onToggleSelect?: (item: BrowseItem) => void;
 }) {
-  const [loaded, setLoaded] = useState(false);
+  const { loaded, onLoad } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
   const itemHref = `/item/${encodeURIComponent(item.content_id)}${
     libraryId ? `?libraryId=${libraryId}` : ""
@@ -218,7 +218,7 @@ export default function ItemCard({
                 src={item.poster_url}
                 alt={displayTitle}
                 className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
-                onLoad={() => setLoaded(true)}
+                onLoad={onLoad}
               />
             ) : (
               <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">

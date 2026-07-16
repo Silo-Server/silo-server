@@ -1,13 +1,16 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { ItemDetail, Season } from "@/api/types";
+import type { FileVersion, ItemDetail, Season } from "@/api/types";
 import EpisodeContent from "./EpisodeContent";
 
 const mocks = vi.hoisted(() => {
   let capturedActionBarProps: Record<string, unknown> | null = null;
   let capturedDetailHeroProps: Record<string, unknown> | null = null;
+  let capturedMetadataBadgesProps: Record<string, unknown> | null = null;
+  let capturedQualityBadgesProps: Record<string, unknown> | null = null;
 
   return {
     capturedActionBarProps: {
@@ -24,6 +27,22 @@ const mocks = vi.hoisted(() => {
       },
       set value(value: Record<string, unknown> | null) {
         capturedDetailHeroProps = value;
+      },
+    },
+    capturedMetadataBadgesProps: {
+      get value() {
+        return capturedMetadataBadgesProps;
+      },
+      set value(value: Record<string, unknown> | null) {
+        capturedMetadataBadgesProps = value;
+      },
+    },
+    capturedQualityBadgesProps: {
+      get value() {
+        return capturedQualityBadgesProps;
+      },
+      set value(value: Record<string, unknown> | null) {
+        capturedQualityBadgesProps = value;
       },
     },
     useSeasonDetail: vi.fn(),
@@ -97,11 +116,17 @@ vi.mock("@/components/DownloadVersionPicker", () => ({
 }));
 
 vi.mock("./DetailHero", () => ({
-  default: (props: { context?: ReactNode; actions?: ReactNode } & Record<string, unknown>) => {
+  default: (
+    props: { context?: ReactNode; actions?: ReactNode; metadata?: ReactNode } & Record<
+      string,
+      unknown
+    >,
+  ) => {
     mocks.capturedDetailHeroProps.value = props;
     return (
       <div>
         {props.context}
+        {props.metadata}
         {props.actions}
       </div>
     );
@@ -109,11 +134,17 @@ vi.mock("./DetailHero", () => ({
 }));
 
 vi.mock("./components/MetadataBadges", () => ({
-  default: () => <div />,
+  default: (props: Record<string, unknown>) => {
+    mocks.capturedMetadataBadgesProps.value = props;
+    return <div />;
+  },
 }));
 
 vi.mock("./components/QualityBadges", () => ({
-  default: () => <div />,
+  default: (props: Record<string, unknown>) => {
+    mocks.capturedQualityBadgesProps.value = props;
+    return <div />;
+  },
 }));
 
 vi.mock("./components/ScoreRow", () => ({
@@ -157,6 +188,23 @@ vi.mock("./components/EpisodeCarousel", () => ({
   ),
 }));
 
+function makeFileVersion(overrides: Partial<FileVersion> = {}): FileVersion {
+  return {
+    file_id: overrides.file_id ?? 1,
+    resolution: overrides.resolution ?? "1080p",
+    codec_video: overrides.codec_video ?? "h264",
+    codec_audio: overrides.codec_audio ?? "aac",
+    hdr: overrides.hdr ?? false,
+    container: overrides.container ?? "mkv",
+    file_size: overrides.file_size ?? 0,
+    duration: overrides.duration ?? 2520,
+    bitrate: overrides.bitrate ?? 0,
+    edition_raw: overrides.edition_raw,
+    edition_key: overrides.edition_key,
+    audio_tracks: overrides.audio_tracks,
+  };
+}
+
 function makeEpisodeItem(
   overrides: Partial<ItemDetail & { type: "episode" }> = {},
 ): ItemDetail & { type: "episode" } {
@@ -193,7 +241,7 @@ function makeEpisodeItem(
     season_number: 1,
     episode_number: 1,
     air_date: "2024-01-01",
-    versions: [{ file_id: 1 } as ItemDetail["versions"][number]],
+    versions: [makeFileVersion()],
     subtitles: [],
     intro: null,
     credits: null,
@@ -226,6 +274,8 @@ describe("EpisodeContent", () => {
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
     mocks.capturedDetailHeroProps.value = null;
+    mocks.capturedMetadataBadgesProps.value = null;
+    mocks.capturedQualityBadgesProps.value = null;
     mocks.useAuth.mockReturnValue({ user: null });
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
     mocks.useOnViewTranslation.mockReturnValue({ translating: false, onTranslate: undefined });
@@ -248,6 +298,58 @@ describe("EpisodeContent", () => {
       data: makeSeason(),
     });
     mocks.useRating.mockReturnValue({ data: { rating: 3, rated_at: "2026-03-22T00:00:00Z" } });
+  });
+
+  it("updates hero metadata when the selected episode version changes", () => {
+    const hdrVersion = makeFileVersion({
+      file_id: 1,
+      resolution: "2160p",
+      codec_video: "hevc",
+      codec_audio: "eac3",
+      hdr: true,
+      duration: 2520,
+    });
+    const sdrVersion = makeFileVersion({
+      file_id: 2,
+      resolution: "1080p",
+      codec_video: "h264",
+      codec_audio: "aac",
+      hdr: false,
+      duration: 2700,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/item/episode-1"]}>
+        <EpisodeContent item={makeEpisodeItem({ versions: [hdrVersion, sdrVersion] })} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "42m" });
+    expect(mocks.capturedQualityBadgesProps.value).toEqual({
+      summary: {
+        durationMinutes: 42,
+        resolution: "2160p",
+        videoRangeLabel: "HDR",
+        audioLabel: "EAC3",
+      },
+    });
+
+    act(() => {
+      const selectVersion = mocks.capturedActionBarProps.value?.onSelectVersion as
+        | ((version: FileVersion) => void)
+        | undefined;
+      selectVersion?.(sdrVersion);
+    });
+
+    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "45m" });
+    expect(mocks.capturedQualityBadgesProps.value).toEqual({
+      summary: {
+        durationMinutes: 45,
+        resolution: "1080p",
+        videoRangeLabel: "",
+        audioLabel: "AAC",
+      },
+    });
   });
 
   it("links the season breadcrumb segment to the resolved season page", () => {

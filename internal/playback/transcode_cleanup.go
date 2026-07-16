@@ -1,11 +1,18 @@
 package playback
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
+	"sync"
 	"time"
 )
+
+var orphanCleanupMu sync.Mutex
 
 // CleanupOrphanedTranscodeDirs removes per-session transcode directories that
 // are not associated with any currently active session IDs.
@@ -19,6 +26,11 @@ import (
 // Pass 0 to disable age-sparing (e.g. a dedicated node's boot-time full wipe,
 // where node restart is an accepted session loss).
 func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struct{}, minAge time.Duration) (int, error) {
+	// Serialize concurrent orphan sweeps of the shared transcode root so two
+	// rare startup sweeps cannot race on os.RemoveAll; one global mutex is fine.
+	orphanCleanupMu.Lock()
+	defer orphanCleanupMu.Unlock()
+
 	if root == "" {
 		return 0, nil
 	}
@@ -38,7 +50,12 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 			continue
 		}
 
-		if _, ok := activeSessionIDs[entry.Name()]; ok {
+		if transcodeDirBelongsToActiveSession(entry.Name(), activeSessionIDs) {
+			continue
+		}
+
+		// The subtitle cache is not session state; it manages its own eviction.
+		if entry.Name() == subtitleCacheDirName {
 			continue
 		}
 
@@ -62,4 +79,74 @@ func CleanupOrphanedTranscodeDirs(root string, activeSessionIDs map[string]struc
 	}
 
 	return removed, nil
+}
+
+// OrphanCleanupInterval is how often the periodic orphan sweep re-runs. A dir is
+// only reapable once it is older than MaxTokenTTL (24h), so sweeping much more
+// often than hourly buys nothing; hourly bounds how long an untracked orphan (a
+// dir whose owning session vanished without its RemoveAll succeeding) lingers on
+// a process that is never restarted, without adding meaningful load.
+const OrphanCleanupInterval = time.Hour
+
+// runOrphanCleanup executes one sweep, recovering from a panic (a background
+// goroutine's unrecovered panic would crash the process) and logging the result.
+func runOrphanCleanup(component, dir string, cleanup func() (int, error)) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("transcode cleanup panicked", "component", component, "dir", dir, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	if cleaned, err := cleanup(); err != nil {
+		slog.Warn("transcode cleanup failed", "component", component, "dir", dir, "error", err)
+	} else if cleaned > 0 {
+		slog.Info("transcode cleanup removed orphaned dirs", "component", component, "dir", dir, "count", cleaned)
+	}
+}
+
+// StartBackgroundOrphanCleanup runs a single orphaned-transcode sweep in its own
+// goroutine so a slow network-filesystem delete never blocks server startup.
+// The sweep is already safe to run concurrently with request handling: it
+// spares live/in-flight sessions and any dir younger than MaxTokenTTL, and
+// CleanupOrphanedTranscodeDirs serializes concurrent sweeps of the same root.
+func StartBackgroundOrphanCleanup(component, dir string, cleanup func() (int, error)) {
+	go runOrphanCleanup(component, dir, cleanup)
+}
+
+// StartPeriodicOrphanCleanup runs an immediate background sweep and then repeats
+// it every interval until ctx is cancelled. The startup sweep only reclaims dirs
+// orphaned by an ungraceful prior shutdown; the periodic re-run additionally
+// bounds "untracked orphan" accumulation (a dir whose owning session was dropped
+// without its RemoveAll succeeding) on a process that stays up for weeks. When
+// ctx is nil or interval is non-positive it degrades to a single boot-time sweep
+// so no ticker goroutine outlives a caller with no lifecycle handle (e.g. tests).
+func StartPeriodicOrphanCleanup(ctx context.Context, component, dir string, cleanup func() (int, error), interval time.Duration) {
+	if ctx == nil || interval <= 0 {
+		StartBackgroundOrphanCleanup(component, dir, cleanup)
+		return
+	}
+	go func() {
+		runOrphanCleanup(component, dir, cleanup)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runOrphanCleanup(component, dir, cleanup)
+			}
+		}
+	}()
+}
+
+func transcodeDirBelongsToActiveSession(name string, activeSessionIDs map[string]struct{}) bool {
+	if _, ok := activeSessionIDs[name]; ok {
+		return true
+	}
+	for sessionID := range activeSessionIDs {
+		if sessionID != "" && strings.HasPrefix(name, sessionID+"-") {
+			return true
+		}
+	}
+	return false
 }

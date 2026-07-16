@@ -59,6 +59,46 @@ func TestPlanTranscodePairsProxyFromSameGroup(t *testing.T) {
 	}
 }
 
+func TestPlanSessionWithRestrictsEligibleTranscodeNodes(t *testing.T) {
+	f := newFixture(nil, []*Node{
+		transcodeNode(1, "http://tc-a", nil, 0),
+		transcodeNode(2, "http://tc-b", nil, 5),
+	})
+	eligible := func(n *Node) bool { return n != nil && n.URL == "http://tc-b" }
+
+	plan := f.planner.PlanSessionWith("s1", "", true, 0, eligible)
+	if plan.TranscodeNode == nil || plan.TranscodeNode.URL != "http://tc-b" {
+		t.Fatalf("expected the eligible node despite its higher load, got %+v", plan.TranscodeNode)
+	}
+	if none := f.planner.PlanSessionWith("s2", "", true, 0, func(*Node) bool { return false }); none.TranscodeNode != nil {
+		t.Fatalf("no eligible node must select nothing, got %+v", none.TranscodeNode)
+	}
+	// Soft affinity to the session's current node must not survive the
+	// current node becoming ineligible.
+	if sticky := f.planner.PlanSessionWith("s3", "http://tc-a", true, 0, eligible); sticky.TranscodeNode == nil || sticky.TranscodeNode.URL != "http://tc-b" {
+		t.Fatalf("affinity to an ineligible node must yield to an eligible one, got %+v", sticky.TranscodeNode)
+	}
+	if unrestricted := f.planner.PlanSessionWith("s4", "", true, 0, nil); unrestricted.TranscodeNode == nil || unrestricted.TranscodeNode.URL != "http://tc-a" {
+		t.Fatalf("nil predicate must behave like PlanSession, got %+v", unrestricted.TranscodeNode)
+	}
+}
+
+func TestReleaseSessionDropsProvisionalReservation(t *testing.T) {
+	node := transcodeNode(1, "http://tc-1", nil, 0)
+	node.MaxJobs = intPtr(1)
+	f := newFixture(nil, []*Node{node})
+	if got := f.planner.PlanSession("s1", "", true, 0).TranscodeNode; got == nil {
+		t.Fatal("first session was not reserved")
+	}
+	if got := f.planner.PlanSession("s2", "", true, 0).TranscodeNode; got != nil {
+		t.Fatalf("second session bypassed reservation: %+v", got)
+	}
+	f.planner.ReleaseSession("s1")
+	if got := f.planner.PlanSession("s2", "", true, 0).TranscodeNode; got == nil {
+		t.Fatal("released reservation still blocked the node")
+	}
+}
+
 func TestDegradedGroupExcludesItsTranscodeNodes(t *testing.T) {
 	unhealthyProxy := proxyNode(1, "http://proxy-a", strPtr("rack-a"))
 	unhealthyProxy.Healthy = false

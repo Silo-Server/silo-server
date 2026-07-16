@@ -67,11 +67,11 @@ type fakeScannerCoverCacher struct {
 	contentID string
 }
 
-func (f *fakeScannerCoverCacher) CacheAudiobookCover(_ context.Context, data []byte, contentID string) (string, string, string, error) {
+func (f *fakeScannerCoverCacher) CacheAudiobookCover(_ context.Context, data []byte, contentID string) (string, string, error) {
 	f.calls++
 	f.data = append([]byte(nil), data...)
 	f.contentID = contentID
-	return "local/audiobooks/" + contentID + "/poster", ".webp", "thumbhash", nil
+	return "local/audiobooks/" + contentID + "/poster/original.test-revision.webp", "thumbhash", nil
 }
 
 func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
@@ -108,7 +108,7 @@ func TestApplyAudiobookEmbeddedCoverStoresPosterDuringScan(t *testing.T) {
 	if len(exec.args) != 3 {
 		t.Fatalf("Exec args = %#v, want 3 args", exec.args)
 	}
-	if exec.args[0] != "local/audiobooks/content-1/poster/original.webp" {
+	if exec.args[0] != "local/audiobooks/content-1/poster/original.test-revision.webp" {
 		t.Fatalf("poster arg = %#v", exec.args[0])
 	}
 	if exec.args[1] != "thumbhash" || exec.args[2] != "content-1" {

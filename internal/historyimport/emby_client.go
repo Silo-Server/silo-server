@@ -200,11 +200,19 @@ func (c *EmbyClient) AuthenticateServerUser(ctx context.Context, baseURL, userna
 }
 
 func (c *EmbyClient) FetchItems(ctx context.Context, auth embyLocalAuth, filter string) ([]embyItem, error) {
+	return c.fetchItems(ctx, auth, filter, "Movie,Episode")
+}
+
+func (c *EmbyClient) FetchFavoriteItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
+	return c.fetchItems(ctx, auth, "IsFavorite", "Movie,Series")
+}
+
+func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, filter, includeItemTypes string) ([]embyItem, error) {
 	query := url.Values{}
 	query.Set("Recursive", "true")
 	query.Set("EnableUserData", "true")
 	query.Set("Fields", "ProviderIds")
-	query.Set("IncludeItemTypes", "Movie,Episode")
+	query.Set("IncludeItemTypes", includeItemTypes)
 	query.Set("Filters", filter)
 	path := fmt.Sprintf("%s/Users/%s/Items?%s", auth.BaseURL, url.PathEscape(auth.UserID), query.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)

@@ -9,25 +9,26 @@ import (
 
 func TestRecipeCardRoundTripOpts(t *testing.T) {
 	opts := TranscodeOpts{
-		InputPath:          "/media/movie.mkv",
-		OutputDir:          "/tmp/silo-transcode/abc",
-		SessionID:          "abc",
-		SourceVideoCodec:   "hevc",
-		SeekSeconds:        900,
-		TargetResolution:   "1080p",
-		TargetCodecVideo:   "h264",
-		TargetCodecAudio:   "aac",
-		SegmentDuration:    2,
-		StartSegmentNumber: 450,
-		HWAccel:            "qsv",
-		HWDevice:           "/dev/dri/renderD128",
-		SubtitleTrackIndex: 3,
-		SubtitleBurnIn:     true,
-		SubtitleCodec:      "hdmv_pgs_subtitle",
-		AudioTrackIndex:    1,
-		TargetBitrateKbps:  8000,
-		TotalDuration:      7200,
-		FastStart:          true,
+		InputPath:            "/media/movie.mkv",
+		OutputDir:            "/tmp/silo-transcode/abc",
+		SessionID:            "abc",
+		SourceVideoCodec:     "hevc",
+		VideoBitstreamFilter: "dovi_rpu=strip=1",
+		SeekSeconds:          900,
+		TargetResolution:     "1080p",
+		TargetCodecVideo:     "h264",
+		TargetCodecAudio:     "aac",
+		SegmentDuration:      2,
+		StartSegmentNumber:   450,
+		HWAccel:              "qsv",
+		HWDevice:             "/dev/dri/renderD128",
+		SubtitleTrackIndex:   3,
+		SubtitleBurnIn:       true,
+		SubtitleCodec:        "hdmv_pgs_subtitle",
+		AudioTrackIndex:      1,
+		TargetBitrateKbps:    8000,
+		TotalDuration:        7200,
+		FastStart:            true,
 	}
 
 	card := NewRecipeCard(42, "profile-1", 77, "", opts)
@@ -54,6 +55,9 @@ func TestRecipeCardRoundTripOpts(t *testing.T) {
 	}
 	if got.TargetCodecVideo != "h264" || got.TargetBitrateKbps != 8000 {
 		t.Errorf("encode params wrong: %+v", got)
+	}
+	if got.VideoBitstreamFilter != "dovi_rpu=strip=1" {
+		t.Errorf("VideoBitstreamFilter = %q", got.VideoBitstreamFilter)
 	}
 	if got.FFmpegPath != "/usr/bin/ffmpeg" {
 		t.Errorf("FFmpegPath not re-supplied: %q", got.FFmpegPath)
@@ -97,22 +101,23 @@ func TestRecipeCardLegacyDecodeHasEmptyPlayMethod(t *testing.T) {
 // not asserted here.
 func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 	card := NewRecipeCard(42, "profile-1", 77, "http://node:9000", TranscodeOpts{
-		InputPath:          "/media/movie.mkv",
-		SessionID:          "abc",
-		SourceVideoCodec:   "hevc",
-		SeekSeconds:        900,
-		TargetResolution:   "1080p",
-		TargetCodecVideo:   "h264",
-		TargetCodecAudio:   "aac",
-		SegmentDuration:    2,
-		StartSegmentNumber: 450,
-		SubtitleTrackIndex: 3,
-		SubtitleBurnIn:     true,
-		SubtitleCodec:      "hdmv_pgs_subtitle",
-		AudioTrackIndex:    1,
-		TargetBitrateKbps:  8000,
-		TotalDuration:      7200,
-		FastStart:          true,
+		InputPath:            "/media/movie.mkv",
+		SessionID:            "abc",
+		SourceVideoCodec:     "hevc",
+		VideoBitstreamFilter: "dovi_rpu=strip=1",
+		SeekSeconds:          900,
+		TargetResolution:     "1080p",
+		TargetCodecVideo:     "h264",
+		TargetCodecAudio:     "aac",
+		SegmentDuration:      2,
+		StartSegmentNumber:   450,
+		SubtitleTrackIndex:   3,
+		SubtitleBurnIn:       true,
+		SubtitleCodec:        "hdmv_pgs_subtitle",
+		AudioTrackIndex:      1,
+		TargetBitrateKbps:    8000,
+		TotalDuration:        7200,
+		FastStart:            true,
 	})
 
 	claims := card.ToClaims()
@@ -126,6 +131,7 @@ func TestRecipeCardClaimsRoundTrip(t *testing.T) {
 	}
 	// Byte-affecting encode parameters.
 	if got.InputPath != card.InputPath || got.SourceVideoCodec != card.SourceVideoCodec ||
+		got.VideoBitstreamFilter != card.VideoBitstreamFilter ||
 		got.SeekSeconds != card.SeekSeconds || got.TargetResolution != card.TargetResolution ||
 		got.TargetCodecVideo != card.TargetCodecVideo || got.TargetCodecAudio != card.TargetCodecAudio ||
 		got.SegmentDuration != card.SegmentDuration || got.StartSegmentNumber != card.StartSegmentNumber ||

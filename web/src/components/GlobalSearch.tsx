@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
+import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { VisuallyHidden } from "radix-ui";
@@ -52,7 +53,7 @@ function GlobalSearchResultRow({
   isSelected: boolean;
   onPick: (contentId: string) => void;
 }) {
-  const [loaded, setLoaded] = useState(false);
+  const { loaded, onLoad } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
 
   return (
@@ -83,7 +84,7 @@ function GlobalSearchResultRow({
             alt=""
             className={`h-full w-full object-cover ${loaded ? "opacity-100" : "opacity-0"}`}
             loading="lazy"
-            onLoad={() => setLoaded(true)}
+            onLoad={onLoad}
           />
         ) : (
           <div className="text-muted-foreground flex h-full items-center justify-center px-1 text-center text-[10px] leading-tight">

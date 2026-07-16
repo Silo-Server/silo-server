@@ -2,11 +2,8 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -57,28 +54,5 @@ func (h *SystemHandler) HandleBuildInfo(w http.ResponseWriter, _ *http.Request) 
 }
 
 func (h *SystemHandler) fetchRemoteHWAccel(ctx context.Context, node *nodepool.Node) (playback.HWAccelInfo, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, node.URL+"/hw-capabilities", nil)
-	if err != nil {
-		return playback.HWAccelInfo{}, err
-	}
-	req.Header.Set("Authorization", "Bearer "+h.jwtSecret)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return playback.HWAccelInfo{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return playback.HWAccelInfo{}, fmt.Errorf("node returned %d", resp.StatusCode)
-	}
-
-	var info playback.HWAccelInfo
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return playback.HWAccelInfo{}, err
-	}
-	info.Source = "transcode_node"
-	info.NodeURL = node.URL
-	return info, nil
+	return fetchRemoteTranscodeCapabilities(ctx, node.URL, h.jwtSecret)
 }

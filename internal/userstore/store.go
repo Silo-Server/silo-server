@@ -58,7 +58,7 @@ type UserStore interface {
 
 	// Favorites & Watchlist
 	AddFavorite(ctx context.Context, profileID, mediaItemID string) error
-	AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) error
+	AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error)
 	RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error
 	ListFavorites(ctx context.Context, profileID string, limit, offset int) ([]Favorite, error)
 	ListFavoritesByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]bool, error)

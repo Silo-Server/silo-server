@@ -1,9 +1,27 @@
 package playback
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
+
+func TestStartTranscodeRejectsUnvalidatedBitstreamFilter(t *testing.T) {
+	_, err := StartTranscode(context.Background(), TranscodeOpts{
+		VideoBitstreamFilter: "arbitrary_filter=1",
+		TargetCodecVideo:     "copy",
+	})
+	if err == nil {
+		t.Fatal("unvalidated bitstream filter was accepted")
+	}
+	_, err = StartTranscode(context.Background(), TranscodeOpts{
+		VideoBitstreamFilter: DV7ToHDR10BitstreamFilter,
+		TargetCodecVideo:     "h264",
+	})
+	if err == nil {
+		t.Fatal("DV copy filter was accepted for encoded video")
+	}
+}
 
 func TestBuildFFmpegArgs_QSVDropsSuperfastPreset(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
@@ -63,6 +81,23 @@ func TestBuildFFmpegArgs_CopyVideoFromStartUsesZeroBasedTimestamps(t *testing.T)
 	}
 	if !strings.Contains(joined, "-avoid_negative_ts make_zero") {
 		t.Fatalf("copy-video from-start should zero-base timestamps: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_CopyVideoAppliesValidatedBitstreamFilter(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:            "/media/movie.mkv",
+		OutputDir:            "/tmp/out",
+		SessionID:            "session-dv7",
+		TargetCodecVideo:     "copy",
+		TargetCodecAudio:     "copy",
+		VideoBitstreamFilter: DV7ToHDR10BitstreamFilter,
+		SegmentDuration:      2,
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-c:v copy -bsf:v dovi_rpu=strip=1") {
+		t.Fatalf("copy-video args should apply the validated DV bitstream filter: %s", joined)
 	}
 }
 

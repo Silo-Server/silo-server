@@ -359,7 +359,7 @@ func (s *progressCountingStore) DeleteHomeDismissal(context.Context, string, str
 	panic("unused")
 }
 func (s *progressCountingStore) AddFavorite(context.Context, string, string) error { panic("unused") }
-func (s *progressCountingStore) AddFavoriteAt(context.Context, string, string, time.Time) error {
+func (s *progressCountingStore) AddFavoriteAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s *progressCountingStore) RemoveFavorite(context.Context, string, string) error {

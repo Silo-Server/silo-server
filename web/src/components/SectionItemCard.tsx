@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useImageLoaded } from "@/hooks/useImageLoaded";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
@@ -21,7 +21,7 @@ interface SectionItemCardProps {
 }
 
 export default function SectionItemCard({ item, libraryId }: SectionItemCardProps) {
-  const [loaded, setLoaded] = useState(false);
+  const { loaded, onLoad } = useImageLoaded(item.poster_url);
   const thumbhashUrl = item.poster_thumbhash ? decodeThumbhash(item.poster_thumbhash) : "";
   const itemHref = `/item/${encodeURIComponent(item.content_id)}${
     libraryId ? `?libraryId=${libraryId}` : ""
@@ -57,7 +57,7 @@ export default function SectionItemCard({ item, libraryId }: SectionItemCardProp
                 alt={item.title}
                 className={`h-full w-full object-cover transition-opacity duration-300 ${loaded ? "opacity-100" : "opacity-0"}`}
                 loading="lazy"
-                onLoad={() => setLoaded(true)}
+                onLoad={onLoad}
               />
             ) : (
               <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">

@@ -1,0 +1,45 @@
+{
+  "protocol_version": 3,
+  "client_features": ["playback_plan_v3", "media3_only", "detailed_decode_capabilities"],
+  "file_id": 42,
+  "profile_id": "profile-1",
+  "playback_attempt_id": "attempt-golden-0001",
+  "quality_preference": "original",
+  "subtitle_fidelity_preference": "compatible",
+  "start_position": 12.5,
+  "audio_track_id": "file:42:audio:0",
+  "audio_track_index": 0,
+  "output_route_generation": 7,
+  "metered": false,
+  "client_capabilities": {
+    "codecs_video": ["h264"],
+    "codecs_video_hardware": ["h264"],
+    "codecs_audio": ["aac"],
+    "containers": ["mp4"],
+    "max_resolution": "1080p",
+    "hdr": false,
+    "video_decode": [{
+      "codec": "h264",
+      "profiles": ["high"],
+      "levels": [41],
+      "bit_depths": [8],
+      "max_width": 1920,
+      "max_height": 1080,
+      "max_frame_rate": 60,
+      "max_bitrate_kbps": 20000,
+      "hardware": true
+    }]
+  },
+  "client_playback_context": {
+    "protocol_version": 3,
+    "features": ["playback_plan_v3", "media3_only", "detailed_decode_capabilities"],
+    "platform": "android",
+    "form_factor": "tv",
+    "app_version": "3.0-test",
+    "device": {"manufacturer": "NVIDIA", "model": "SHIELD Android TV", "sdk_int": 35, "abis": ["arm64-v8a"]},
+    "output": {"output_route_generation": 7},
+    "engines": {
+      "media3_direct": {"enabled": true, "supported_on_device": true, "containers": ["mp4"], "video_codecs": ["h264"], "audio_decode_codecs": ["aac"], "audio_passthrough_codecs": [], "subtitles": {"embedded_text": true, "sidecar_text": true, "ass_styling": false, "embedded_bitmap": false, "sidecar_bitmap": false, "font_attachments": false}, "features": [], "auth_header_refresh": true, "validated_claims": []}
+    }
+  }
+}

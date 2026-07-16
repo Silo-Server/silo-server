@@ -271,7 +271,7 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 		rows, err = r.pool.Query(ctx, `
 			SELECT r.id, r.user_id, r.profile_id, r.source_type, r.connection_mode, r.status,
 			       r.mapping_id,
-			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.skipped,
+			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
 			       r.warnings, r.unmatched_samples, COALESCE(r.error_message, ''),
 			       r.created_at, r.started_at, r.completed_at
 			FROM history_import_runs r
@@ -283,7 +283,7 @@ func (r *Repository) ListAllRuns(ctx context.Context, sourceID *int, limit int) 
 		rows, err = r.pool.Query(ctx, `
 			SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			       mapping_id,
-			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
+			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 			       warnings, unmatched_samples, COALESCE(error_message, ''),
 			       created_at, started_at, completed_at
 			FROM history_import_runs
@@ -302,7 +302,7 @@ func (r *Repository) GetRunByID(ctx context.Context, runID string) (*Run, error)
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, profile_id, source_type, connection_mode, status,
 		       mapping_id,
-		       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
+		       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 		       warnings, unmatched_samples, COALESCE(error_message, ''),
 		       created_at, started_at, completed_at
 		FROM history_import_runs
@@ -330,7 +330,7 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 		rows, err = r.pool.Query(ctx, `
 			SELECT r.id, r.user_id, r.profile_id, r.source_type, r.connection_mode, r.status,
 			       r.mapping_id,
-			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.skipped,
+			       r.fetched, r.matched, r.unmatched, r.progress_updated, r.history_created, r.watchlist_added, r.favorites_imported, r.skipped,
 			       r.warnings, r.unmatched_samples, COALESCE(r.error_message, ''),
 			       r.created_at, r.started_at, r.completed_at
 			FROM history_import_runs r
@@ -342,7 +342,7 @@ func (r *Repository) ListActiveRuns(ctx context.Context, sourceID *int) ([]Run, 
 		rows, err = r.pool.Query(ctx, `
 			SELECT id, user_id, profile_id, source_type, connection_mode, status,
 			       mapping_id,
-			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, skipped,
+			       fetched, matched, unmatched, progress_updated, history_created, watchlist_added, favorites_imported, skipped,
 			       warnings, unmatched_samples, COALESCE(error_message, ''),
 			       created_at, started_at, completed_at
 			FROM history_import_runs

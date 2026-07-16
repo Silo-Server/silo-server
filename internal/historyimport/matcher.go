@@ -35,7 +35,7 @@ func (m *Matcher) Match(ctx context.Context, record Record) (*Match, string, err
 }
 
 func (m *Matcher) matchMovie(ctx context.Context, record Record) (*Match, string, error) {
-	match, reason, err := m.matchMedia(ctx, KindMovie, record.TMDBID, record.IMDbID, "", record.Title, record.Year)
+	match, reason, err := m.matchMedia(ctx, KindMovie, record.TMDBID, record.IMDbID, "", record.Title, record.Year, false)
 	if err != nil {
 		return nil, "", err
 	}
@@ -43,7 +43,7 @@ func (m *Matcher) matchMovie(ctx context.Context, record Record) (*Match, string
 }
 
 func (m *Matcher) matchSeries(ctx context.Context, record Record) (*Match, string, error) {
-	match, reason, err := m.matchMedia(ctx, KindSeries, record.TMDBID, record.IMDbID, record.TVDBID, record.Title, record.Year)
+	match, reason, err := m.matchMedia(ctx, KindSeries, record.TMDBID, record.IMDbID, record.TVDBID, record.Title, record.Year, record.PreferTMDB)
 	if err != nil {
 		return nil, "", err
 	}
@@ -115,7 +115,7 @@ func (m *Matcher) matchEpisode(ctx context.Context, record Record) (*Match, stri
 	return match, "", nil
 }
 
-func (m *Matcher) matchMedia(ctx context.Context, kind, tmdbID, imdbID, tvdbID, title string, year int) (*Match, string, error) {
+func (m *Matcher) matchMedia(ctx context.Context, kind, tmdbID, imdbID, tvdbID, title string, year int, preferTMDB bool) (*Match, string, error) {
 	attempts := make([]string, 0, 4)
 	candidates := []struct {
 		column string
@@ -134,6 +134,9 @@ func (m *Matcher) matchMedia(ctx context.Context, kind, tmdbID, imdbID, tvdbID, 
 			{column: "tvdb_id", value: tvdbID, label: "tvdb_id"},
 			{column: "tmdb_id", value: tmdbID, label: "tmdb_id"},
 			{column: "imdb_id", value: imdbID, label: "imdb_id"},
+		}
+		if preferTMDB {
+			candidates[0], candidates[1] = candidates[1], candidates[0]
 		}
 	}
 

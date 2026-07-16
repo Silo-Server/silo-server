@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -3620,10 +3621,7 @@ func cachedImageVariantPath(path, imageType, size string) string {
 	if variant == "" {
 		return path
 	}
-	if strings.Contains(path, "/original.") {
-		return strings.Replace(path, "/original.", "/"+variant+".", 1)
-	}
-	return path
+	return artworkkey.Variant(path, variant)
 }
 
 // imageTypeFromCachedPath returns the image type segment ("poster", "backdrop",

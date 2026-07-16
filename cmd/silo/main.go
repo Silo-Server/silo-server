@@ -670,6 +670,9 @@ func main() {
 			// start, so this node can rebuild a Jellyfin transcode after its own
 			// restart (the node hop token is recipe-less). Shares the offload Redis.
 			srv.SetRecipeStore(noderecipe.NewStore(redisClient, 0))
+			// Reclaim orphaned transcode dirs at boot and hourly thereafter, bound
+			// to appCtx so it stops on shutdown.
+			srv.StartOrphanSweeper(appCtx)
 			handler = srv.Handler()
 		}
 
@@ -1273,6 +1276,7 @@ func main() {
 		// admin image applies can succeed even if automatic metadata caching is off.
 		if deps.S3Public != nil {
 			imageCacher := imagecache.New(deps.S3Public)
+			imageCacher.SetArtworkRevisionTracker(catalog.NewArtworkRevisionTracker(deps.DB))
 			metadataService.SetImageCacher(imageCacher)
 			imageCacheJobs := metadata.NewImageCacheJobRepository(deps.DB)
 			metadataService.SetImageCacheJobEnqueuer(imageCacheJobs)
@@ -1905,6 +1909,11 @@ func main() {
 			taskMgr.Register(tasks.NewScanLibrariesTask(deps.FolderRepo, deps.LibraryScanQueue, deps.EventBus))
 		}
 		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
+		if deps.S3Public != nil {
+			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
+				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.S3Public),
+			))
+		}
 		catalogSearchIndexer := catalog.NewCatalogSearchIndexer(deps.DB, settingsRepo)
 		taskMgr.Register(tasks.NewSyncCatalogSearchIndexTask(catalogSearchIndexer))
 		taskMgr.Register(tasks.NewRebuildCatalogSearchIndexTask(catalogSearchIndexer))
@@ -2385,6 +2394,7 @@ func main() {
 	if (mode == "integrated" || mode == "api") && cfg.JellyfinCompat.Enabled && cfg.JellyfinCompat.Listen != "" {
 		compatDeps := jellycompat.Dependencies{
 			Config:           cfg,
+			AppContext:       appCtx,
 			LiveConfig:       configWatcher.Config,
 			DB:               deps.DB,
 			SecretCipher:     dataCipher,

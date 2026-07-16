@@ -416,11 +416,9 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 		return imageCacheProcessResult{outcome: "failed"}
 	}
 
-	// Confirm the target still references this job's source before uploading.
-	// CacheImage writes to a deterministic, source-independent storage key, so a
-	// stale job whose source an admin or newer refresh has already replaced would
-	// otherwise overwrite the live artwork object even though the conditional DB
-	// update later no-ops. Dropping the obsolete job here avoids that.
+	// Confirm the target still references this job's source before doing the
+	// download and immutable upload. The conditional update below remains the
+	// final concurrency guard; this early check avoids work for an obsolete job.
 	current, err := p.jobs.CurrentTargetSourcePath(ctx, job)
 	if err != nil {
 		p.markFailed(ctx, job, err.Error())
@@ -471,7 +469,7 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 		uploadedVariants: result.UploadedVariants,
 		existingVariants: result.ExistingVariants,
 	}
-	cachedPath := cachedOriginalImagePath(result.BasePath, result.Ext)
+	cachedPath := CachedImageOriginalPath(result)
 	if cachedPath == "" {
 		p.markFailed(ctx, job, "image cache returned empty stored path")
 		processResult.outcome = "failed"
@@ -622,7 +620,7 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		uploadedVariants: result.UploadedVariants,
 		existingVariants: result.ExistingVariants,
 	}
-	cachedPath := cachedOriginalImagePath(result.BasePath, result.Ext)
+	cachedPath := CachedImageOriginalPath(result)
 	if cachedPath == "" {
 		p.markFailed(ctx, job, "image cache returned empty stored path")
 		processResult.outcome = "failed"

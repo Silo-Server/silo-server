@@ -32,6 +32,7 @@ import MediaInfoDialog from "./components/MediaInfoDialog";
 import SubtitleSearchDialog from "./components/SubtitleSearchDialog";
 import { sortByResolution } from "./components/VersionFlyout";
 import { selectDefaultPlaybackVariantVersion } from "./components/versionRankingUtils";
+import { resolveSelectedMediaSummary } from "./components/selectedMediaSummary";
 import { EpisodeCarouselSkeleton } from "./components/SectionSkeletons";
 import {
   getSeasonDisplayTitle,
@@ -44,13 +45,7 @@ import {
   canCurateMetadata as canCurateMetadataForUser,
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
-
-function formatDuration(minutes: number): string {
-  if (minutes <= 0) return "";
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
-}
+import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 
 export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
@@ -101,6 +96,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         ? (sortedVersions.find((version) => version.file_id === manualSelectedFileId) ?? null)
         : null) ?? defaultSelectedVersion,
     [defaultSelectedVersion, manualSelectedFileId, sortedVersions],
+  );
+  const selectedMediaSummary = useMemo(
+    () => resolveSelectedMediaSummary(selectedVersion, item.playback_variants, item.runtime ?? 0),
+    [item.playback_variants, item.runtime, selectedVersion],
   );
   const openMediaInfo = useCallback(
     (fileId?: number) => {
@@ -283,7 +282,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
         logoUrl={item.logo_url}
         metadata={
           <div className="flex flex-wrap items-center gap-2">
-            <MetadataBadges duration={formatDuration(item.runtime ?? 0) || undefined} />
+            <MetadataBadges
+              duration={formatRuntimeMinutes(selectedMediaSummary.durationMinutes) || undefined}
+            />
             {item.air_date && (
               <span className="metadata-badge">
                 {(() => {
@@ -298,7 +299,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                 })()}
               </span>
             )}
-            <QualityBadges versions={item.versions ?? []} />
+            <QualityBadges summary={selectedMediaSummary} />
           </div>
         }
         scoreRow={

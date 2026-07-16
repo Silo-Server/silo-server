@@ -108,3 +108,11 @@ export function compactHdrSuffix(value: string | undefined): string | null {
 function isPositive(value?: number): value is number {
   return Number.isFinite(value) && value != null && value > 0;
 }
+
+/** Hero runtime badge label ("2h 43m", "43m"); "" for zero/unknown. */
+export function formatRuntimeMinutes(minutes: number): string {
+  if (minutes <= 0) return "";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}

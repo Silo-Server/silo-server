@@ -2,6 +2,9 @@ import { Link } from "react-router";
 import { Check, Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import CardOverlays from "@/components/overlays/CardOverlays";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { overlayDataFromEpisodeListItem } from "@/lib/overlays";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import type { EpisodeNavigationState } from "../itemDetailLayout";
 
@@ -16,6 +19,8 @@ export default function SeasonEpisodeGrid({
   isLoading,
   episodeLinkState,
 }: SeasonEpisodeGridProps) {
+  const { prefs: overlayPrefs } = useOverlayPrefs();
+
   if (isLoading) {
     return <EpisodeGridSkeleton />;
   }
@@ -56,6 +61,13 @@ export default function SeasonEpisodeGrid({
                     <div className="flex h-full w-full items-center justify-center">
                       <Play size={32} className="text-muted-foreground/30" />
                     </div>
+                  )}
+                  {overlayPrefs && (
+                    <CardOverlays
+                      data={overlayDataFromEpisodeListItem(episode)}
+                      prefs={overlayPrefs}
+                      variant="wide"
+                    />
                   )}
                   {episode.user_data?.played && (
                     <div className="watched-badge">

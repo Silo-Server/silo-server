@@ -101,7 +101,8 @@ func (s *Service) favoritesBinding() listBinding {
 			return res, true, err
 		},
 		localAdd: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string, at time.Time) error {
-			return store.AddFavoriteAt(ctx, profileID, mediaItemID, at)
+			_, err := store.AddFavoriteAt(ctx, profileID, mediaItemID, at)
+			return err
 		},
 		localRemove: func(ctx context.Context, store userstore.UserStore, profileID, mediaItemID string) error {
 			return store.RemoveFavorite(ctx, profileID, mediaItemID)

@@ -169,7 +169,10 @@ func (s *Server) handleRemux(w http.ResponseWriter, r *http.Request) {
 			seekSeconds = v
 		}
 	}
-	_ = playback.ServeRemux(w, r, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile)
+	// Honor the Dolby Vision mode frozen in the token (empty decodes as the
+	// legacy auto behavior for old tokens), mirroring how the integrated
+	// server's stream handler serves the same claims.
+	_ = playback.ServeRemuxWithDVMode(w, r, claims.MediaPath, "mp4", seekSeconds, claims.TranscodeAudio, claims.AudioTrackIndex, claims.DVProfile, playback.RemuxDVMode(claims.RemuxDVMode), s.watcher.Config().Playback.FFmpegPath)
 }
 
 func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request) {
@@ -178,7 +181,7 @@ func (s *Server) handleTranscodeManifest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	s.touchTranscodeSession(r, claims)
-	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/master.m3u8")
+	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/master.m3u8")
 }
 
 func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +191,17 @@ func (s *Server) handleTranscodeSegment(w http.ResponseWriter, r *http.Request) 
 	}
 	s.touchTranscodeSession(r, claims)
 	name := chi.URLParam(r, "name")
-	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+claims.SessionID+"/segment/"+name)
+	s.proxyToTranscodeNode(w, r, claims, "/transcode/"+transcodeTransportIDFromClaims(claims)+"/segment/"+name)
+}
+
+func transcodeTransportIDFromClaims(claims *streamtoken.Claims) string {
+	if claims != nil && claims.TranscodeTransportID != "" {
+		return claims.TranscodeTransportID
+	}
+	if claims == nil {
+		return ""
+	}
+	return claims.SessionID
 }
 
 // touchTranscodeSession keeps HLS sessions visible in the active stream count.

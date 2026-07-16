@@ -262,7 +262,7 @@ func (s *PersonRefreshService) cachePersonPhoto(
 		return "", "", err
 	}
 
-	return cachedOriginalImagePath(result.BasePath, result.Ext), result.Thumbhash, nil
+	return CachedImageOriginalPath(result), result.Thumbhash, nil
 }
 
 func personProviderIDs(person models.Person) map[string]string {
@@ -369,17 +369,4 @@ func personCacheContentID(
 		}
 	}
 	return strconv.FormatInt(person.ID, 10)
-}
-
-func cachedOriginalImagePath(basePath, ext string) string {
-	if basePath == "" {
-		return ""
-	}
-	if strings.Contains(basePath, "/original.") {
-		return basePath
-	}
-	if ext == "" {
-		ext = ".jpg"
-	}
-	return strings.TrimRight(basePath, "/") + "/original" + ext
 }

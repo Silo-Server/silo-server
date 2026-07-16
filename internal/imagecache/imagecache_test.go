@@ -4,19 +4,26 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/h2non/bimg"
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
+)
+
+const (
+	testTMDBProviderID    = "tmdb"
+	testMoviesContentType = "movies"
 )
 
 // makeTestJPEG generates a minimal solid-color JPEG for use in tests.
@@ -69,6 +76,37 @@ type putCall struct {
 	data   []byte
 }
 
+type trackedRevision struct {
+	originalPath string
+	imageType    string
+	objectKeys   []string
+}
+
+type recordingRevisionTracker struct {
+	mu    sync.Mutex
+	calls []trackedRevision
+	err   error
+}
+
+func (t *recordingRevisionTracker) TrackArtworkRevision(_ context.Context, originalPath, imageType string, objectKeys []string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.calls = append(t.calls, trackedRevision{
+		originalPath: originalPath,
+		imageType:    imageType,
+		objectKeys:   append([]string(nil), objectKeys...),
+	})
+	return t.err
+}
+
+func (t *recordingRevisionTracker) recorded() []trackedRevision {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	result := make([]trackedRevision, len(t.calls))
+	copy(result, t.calls)
+	return result
+}
+
 func (m *mockS3) PutObject(_ context.Context, bucket, key string, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -86,7 +124,9 @@ func (m *mockS3) PutObject(_ context.Context, bucket, key string, data []byte) e
 
 func (m *mockS3) Bucket() string { return m.bucket }
 
-func (m *mockS3) ObjectExists(_ context.Context, _ string, key string) (bool, error) {
+// ObjectMatches treats keys registered via setExisting as content matches;
+// real content verification is exercised against the s3client implementation.
+func (m *mockS3) ObjectMatches(_ context.Context, _ string, key string, _ []byte) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.existsCalls = append(m.existsCalls, key)
@@ -123,6 +163,80 @@ func (m *mockS3) checkedKeys() []string {
 	keys := make([]string, len(m.existsCalls))
 	copy(keys, m.existsCalls)
 	return keys
+}
+
+func (m *mockS3) resetCalls() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = nil
+	m.existsCalls = nil
+}
+
+func TestCacheBytesTracksExactRevisionBeforeUpload(t *testing.T) {
+	s3 := &mockS3{bucket: "artwork"}
+	tracker := &recordingRevisionTracker{}
+	cacher := newWithHTTPClient(s3, nil)
+	cacher.SetArtworkRevisionTracker(tracker)
+
+	result, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+		ProviderID:  testTMDBProviderID,
+		ContentType: testMoviesContentType,
+		ContentID:   "335984",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err != nil {
+		t.Fatalf("CacheBytes: %v", err)
+	}
+
+	calls := tracker.recorded()
+	if len(calls) != 1 {
+		t.Fatalf("tracker calls = %d, want 1", len(calls))
+	}
+	if calls[0].originalPath != result.OriginalPath {
+		t.Fatalf("tracked original = %q, want %q", calls[0].originalPath, result.OriginalPath)
+	}
+	if calls[0].imageType != "poster" {
+		t.Fatalf("tracked image type = %q, want poster", calls[0].imageType)
+	}
+	wantKeys := make([]string, 0, len(result.VariantPaths))
+	for _, key := range result.VariantPaths {
+		wantKeys = append(wantKeys, key)
+	}
+	sort.Strings(wantKeys)
+	if !slices.Equal(calls[0].objectKeys, wantKeys) {
+		t.Fatalf("tracked keys = %v, want %v", calls[0].objectKeys, wantKeys)
+	}
+}
+
+func TestCacheBytesDoesNotUploadWhenRevisionTrackingFails(t *testing.T) {
+	s3 := &mockS3{bucket: "artwork"}
+	tracker := &recordingRevisionTracker{err: errors.New("registry unavailable")}
+	cacher := newWithHTTPClient(s3, nil)
+	cacher.SetArtworkRevisionTracker(tracker)
+
+	_, err := cacher.CacheBytes(context.Background(), makeTestJPEG(t), CacheRequest{
+		ProviderID:  testTMDBProviderID,
+		ContentType: testMoviesContentType,
+		ContentID:   "335984",
+		ImageType:   metadata.ImagePoster,
+	})
+	if err == nil || !strings.Contains(err.Error(), "track artwork revision") {
+		t.Fatalf("CacheBytes error = %v, want tracking failure", err)
+	}
+	if got := len(s3.keys()); got != 0 {
+		t.Fatalf("uploaded objects = %d, want 0", got)
+	}
+}
+
+func (m *mockS3) setExisting(keys ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.existing == nil {
+		m.existing = make(map[string]bool)
+	}
+	for _, key := range keys {
+		m.existing[key] = true
+	}
 }
 
 func containsKey(keys []string, suffix string) bool {
@@ -195,7 +309,7 @@ func TestCache_Poster(t *testing.T) {
 		t.Errorf("expected 3 uploaded variants, got %d: %v", len(keys), keys)
 	}
 	for _, variant := range []string{"original", "w500", "w300"} {
-		want := wantBase + "/" + variant + ".webp"
+		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
@@ -207,23 +321,23 @@ func TestCacheSkipsUploadingVariantsThatAlreadyExist(t *testing.T) {
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
 	wantBase := "tmdb/movies/550/poster"
-	s3 := &mockS3{
-		bucket: "media",
-		existing: map[string]bool{
-			wantBase + "/original.webp": true,
-			wantBase + "/w500.webp":     true,
-			wantBase + "/w300.webp":     true,
-		},
-	}
+	s3 := &mockS3{bucket: "media"}
 	c := newWithHTTPClient(s3, srv.Client())
 
-	result, err := c.Cache(context.Background(), CacheRequest{
+	req := CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
 		ProviderID:  "tmdb",
 		ContentType: "movies",
 		ContentID:   "550",
 		ImageType:   metadata.ImagePoster,
-	})
+	}
+	first, err := c.Cache(context.Background(), req)
+	if err != nil {
+		t.Fatalf("prime immutable variants: %v", err)
+	}
+	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w500"], first.VariantPaths["w300"])
+	s3.resetCalls()
+	result, err := c.Cache(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Cache poster with existing variants: %v", err)
 	}
@@ -236,10 +350,32 @@ func TestCacheSkipsUploadingVariantsThatAlreadyExist(t *testing.T) {
 	if result.UploadedVariants != 0 || result.ExistingVariants != 3 {
 		t.Fatalf("upload stats = uploaded %d existing %d, want uploaded 0 existing 3", result.UploadedVariants, result.ExistingVariants)
 	}
-	for _, key := range []string{wantBase + "/original.webp", wantBase + "/w500.webp", wantBase + "/w300.webp"} {
+	for _, key := range []string{result.VariantPaths["original"], result.VariantPaths["w500"], result.VariantPaths["w300"]} {
 		if !hasKey(s3.checkedKeys(), key) {
 			t.Fatalf("ObjectExists was not checked for %q; checked %v", key, s3.checkedKeys())
 		}
+	}
+}
+
+func TestCacheDifferentContentCreatesDifferentImmutableRevision(t *testing.T) {
+	jpeg := makeTestJPEG(t)
+	png := makeTestPNG(t, 400, 600)
+	s3 := &mockS3{bucket: "media"}
+	c := newWithHTTPClient(s3, http.DefaultClient)
+	req := CacheRequest{ProviderID: testTMDBProviderID, ContentType: testMoviesContentType, ContentID: "550", ImageType: metadata.ImagePoster}
+	first, err := c.CacheBytes(context.Background(), jpeg, req)
+	if err != nil {
+		t.Fatalf("cache first poster: %v", err)
+	}
+	second, err := c.CacheBytes(context.Background(), png, req)
+	if err != nil {
+		t.Fatalf("cache replacement poster: %v", err)
+	}
+	if first.Revision == second.Revision || first.OriginalPath == second.OriginalPath {
+		t.Fatalf("different content reused revision: first=%q second=%q", first.OriginalPath, second.OriginalPath)
+	}
+	if got := s3.keys(); len(got) != 6 {
+		t.Fatalf("uploaded keys = %v, want both immutable three-variant revisions", got)
 	}
 }
 
@@ -247,27 +383,27 @@ func TestCacheUploadsOnlyMissingVariants(t *testing.T) {
 	jpeg := makeTestJPEG(t)
 	srv := startImageServer(t, jpeg, http.StatusOK)
 
-	wantBase := "tmdb/movies/550/poster"
-	s3 := &mockS3{
-		bucket: "media",
-		existing: map[string]bool{
-			wantBase + "/original.webp": true,
-			wantBase + "/w500.webp":     true,
-		},
-	}
+	s3 := &mockS3{bucket: "media"}
 	c := newWithHTTPClient(s3, srv.Client())
 
-	result, err := c.Cache(context.Background(), CacheRequest{
+	req := CacheRequest{
 		SourceURL:   srv.URL + "/poster.jpg",
 		ProviderID:  "tmdb",
 		ContentType: "movies",
 		ContentID:   "550",
 		ImageType:   metadata.ImagePoster,
-	})
+	}
+	first, err := c.Cache(context.Background(), req)
+	if err != nil {
+		t.Fatalf("prime immutable variants: %v", err)
+	}
+	s3.setExisting(first.VariantPaths["original"], first.VariantPaths["w500"])
+	s3.resetCalls()
+	result, err := c.Cache(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Cache poster with partial existing variants: %v", err)
 	}
-	if got := s3.keys(); len(got) != 1 || got[0] != wantBase+"/w300.webp" {
+	if got := s3.keys(); len(got) != 1 || got[0] != result.VariantPaths["w300"] {
 		t.Fatalf("uploaded keys = %v, want only missing w300 variant", got)
 	}
 	if result.UploadedVariants != 1 || result.ExistingVariants != 2 {
@@ -304,13 +440,13 @@ func TestCache_Backdrop(t *testing.T) {
 		t.Errorf("expected 4 uploaded variants, got %d: %v", len(keys), keys)
 	}
 	for _, variant := range []string{"original", "w1920", "w1280", "w300"} {
-		want := wantBase + "/" + variant + ".webp"
+		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
 	}
 	// Must not have w500
-	if hasKey(keys, wantBase+"/w500.webp") {
+	if _, ok := result.VariantPaths["w500"]; ok {
 		t.Error("backdrop should not have w500 variant")
 	}
 }
@@ -344,13 +480,13 @@ func TestCache_Logo(t *testing.T) {
 		t.Errorf("expected 2 uploaded variants, got %d: %v", len(keys), keys)
 	}
 	for _, variant := range []string{"original", "w500"} {
-		want := wantBase + "/" + variant + ".webp"
+		want := result.VariantPaths[variant]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}
 	}
 	for _, forbidden := range []string{"w300", "w1280"} {
-		if hasKey(keys, wantBase+"/"+forbidden+".webp") {
+		if _, ok := result.VariantPaths[forbidden]; ok {
 			t.Errorf("logo should not have %s variant", forbidden)
 		}
 	}
@@ -380,9 +516,8 @@ func TestCache_ConvertsSVGLogo(t *testing.T) {
 	if result.Thumbhash == "" {
 		t.Fatal("Thumbhash is empty")
 	}
-	wantBase := "tmdb/series/1396/logo"
 	for _, variant := range []string{"original", "w500"} {
-		want := wantBase + "/" + variant + ".webp"
+		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
 			t.Errorf("missing S3 key %q in %v", want, s3.keys())
 		}
@@ -400,7 +535,7 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	s3 := &mockS3{bucket: "media"}
 	c := newWithHTTPClient(s3, srv.Client())
 
-	_, err := c.Cache(context.Background(), CacheRequest{
+	result, err := c.Cache(context.Background(), CacheRequest{
 		SourceURL:   srv.URL + "/logo.png",
 		ProviderID:  "tmdb",
 		ContentType: "series",
@@ -410,7 +545,7 @@ func TestCache_CapsLargeOriginalVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cache large logo: %v", err)
 	}
-	original := s3.objectData("tmdb/series/1396/logo/original.webp")
+	original := s3.objectData(result.OriginalPath)
 	if len(original) == 0 {
 		t.Fatal("missing original.webp upload")
 	}
@@ -449,7 +584,7 @@ func TestCache_LocalizedPosterUsesLanguageScopedPath(t *testing.T) {
 	if result.BasePath != wantBase {
 		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
 	}
-	if !hasKey(s3.keys(), wantBase+"/original.webp") {
+	if !hasKey(s3.keys(), result.OriginalPath) {
 		t.Errorf("missing localized original in %v", s3.keys())
 	}
 }
@@ -477,7 +612,7 @@ func TestCache_ProfileUsesProfileImagePath(t *testing.T) {
 		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
 	}
 	for _, variant := range []string{"original", "w500", "w300"} {
-		want := wantBase + "/" + variant + ".webp"
+		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
 			t.Errorf("missing S3 key %q in %v", want, s3.keys())
 		}
@@ -571,7 +706,7 @@ func TestCache_SeasonPoster_NestsUnderSeries(t *testing.T) {
 		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
 	}
 	for _, variant := range []string{"original", "w500", "w300"} {
-		want := wantBase + "/" + variant + ".webp"
+		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
 			t.Errorf("missing S3 key %q in %v", want, s3.keys())
 		}
@@ -604,7 +739,7 @@ func TestCache_EpisodeStill_NestsUnderSeasonAndEpisode(t *testing.T) {
 		t.Errorf("BasePath = %q, want %q", result.BasePath, wantBase)
 	}
 	for _, variant := range []string{"original", "w500", "w300"} {
-		want := wantBase + "/" + variant + ".webp"
+		want := result.VariantPaths[variant]
 		if !hasKey(s3.keys(), want) {
 			t.Errorf("missing S3 key %q in %v", want, s3.keys())
 		}
@@ -618,9 +753,10 @@ func TestCache_SeasonsDoNotCollide(t *testing.T) {
 	s3 := &mockS3{bucket: "media"}
 	c := newWithHTTPClient(s3, srv.Client())
 
+	originalPaths := make(map[int]string)
 	for _, season := range []int{1, 2, 3} {
 		s := season
-		_, err := c.Cache(context.Background(), CacheRequest{
+		result, err := c.Cache(context.Background(), CacheRequest{
 			SourceURL:    srv.URL + "/season.jpg",
 			ProviderID:   "tmdb",
 			ContentType:  "series",
@@ -631,11 +767,12 @@ func TestCache_SeasonsDoNotCollide(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Cache season %d: %v", season, err)
 		}
+		originalPaths[season] = result.OriginalPath
 	}
 
 	keys := s3.keys()
 	for _, season := range []int{1, 2, 3} {
-		want := fmt.Sprintf("tmdb/series/1396/seasons/%d/poster/original.webp", season)
+		want := originalPaths[season]
 		if !hasKey(keys, want) {
 			t.Errorf("missing S3 key %q in %v", want, keys)
 		}

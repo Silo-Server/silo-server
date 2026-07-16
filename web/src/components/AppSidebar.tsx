@@ -2,7 +2,12 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import { getProfileMenuSide, isSidebarExpanded } from "@/components/AppSidebar.logic";
+import {
+  getProfileMenuSide,
+  groupAppNavLinks,
+  isSidebarExpanded,
+  type AppNavLink,
+} from "@/components/AppSidebar.logic";
 import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -190,7 +195,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   );
   const pluginNavLinks = useMemo(() => {
     const installations = pluginSettings?.installations ?? [];
-    const links: { id: string; basePath: string; label: string; pluginId: string }[] = [];
+    const links: AppNavLink[] = [];
     for (const inst of installations) {
       for (const route of inst.routes) {
         if (!route.navigable || route.navigation_kind !== "user") continue;
@@ -199,11 +204,15 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
           basePath: pluginRouteHref(inst.id, route.path),
           label: route.navigation_label || inst.plugin_id,
           pluginId: inst.plugin_id,
+          category: inst.category,
         });
       }
     }
     return links;
   }, [pluginSettings]);
+  // Grouped view of the Apps entries (null → keep the flat list under the
+  // single "Apps" header). See groupAppNavLinks for the SDK category contract.
+  const pluginNavGroups = useMemo(() => groupAppNavLinks(pluginNavLinks), [pluginNavLinks]);
 
   const catalogState = useMemo(
     () =>
@@ -303,6 +312,28 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
         ? "text-sidebar-accent-foreground bg-sidebar-accent/90 shadow-[0_16px_30px_-24px_rgba(0,0,0,0.7)]"
         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
     }`;
+
+  const renderAppNavList = (links: AppNavLink[]) => (
+    <ul className="list-none space-y-0.5">
+      {links.map((link) => (
+        <li key={link.id}>
+          <a
+            href={link.basePath}
+            onClick={(e) => {
+              e.preventDefault();
+              void navigateToPluginRoute(link.basePath);
+              onNavigate?.();
+            }}
+            className={navLinkClassForState(false)}
+            title={link.pluginId}
+          >
+            <Puzzle className="h-[18px] w-[18px] shrink-0" />
+            <SidebarLabel show={showLabels}>{link.label}</SidebarLabel>
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <aside
@@ -695,29 +726,24 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
           </ul>
         </div>
 
-        {/* Apps (plugin-supplied user navigation) */}
+        {/* Apps (plugin-supplied user navigation), grouped by the first
+            segment of the manifest's slash-delimited category when 2+
+            distinct categories exist; flat list otherwise. */}
         {pluginNavLinks.length > 0 && (
           <div className="sidebar-apps">
             <SidebarSectionHeader show={showLabels}>Apps</SidebarSectionHeader>
-            <ul className="list-none space-y-0.5">
-              {pluginNavLinks.map((link) => (
-                <li key={link.id}>
-                  <a
-                    href={link.basePath}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      void navigateToPluginRoute(link.basePath);
-                      onNavigate?.();
-                    }}
-                    className={navLinkClassForState(false)}
-                    title={link.pluginId}
-                  >
-                    <Puzzle className="h-[18px] w-[18px] shrink-0" />
-                    <SidebarLabel show={showLabels}>{link.label}</SidebarLabel>
-                  </a>
-                </li>
-              ))}
-            </ul>
+            {pluginNavGroups ? (
+              <div className="space-y-3">
+                {pluginNavGroups.map((group) => (
+                  <div key={group.category} className="sidebar-apps-group">
+                    <SidebarSectionHeader show={showLabels}>{group.category}</SidebarSectionHeader>
+                    {renderAppNavList(group.links)}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              renderAppNavList(pluginNavLinks)
+            )}
           </div>
         )}
       </nav>

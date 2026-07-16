@@ -1,6 +1,9 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { Play, Star } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
+import CardOverlays from "@/components/overlays/CardOverlays";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { overlayDataFromEpisodeListItem } from "@/lib/overlays";
 
 interface EpisodeRowProps {
   episode: EpisodeListItem;
@@ -10,6 +13,7 @@ interface EpisodeRowProps {
 }
 
 export default function EpisodeRow({ episode, rating, watched, progress }: EpisodeRowProps) {
+  const { prefs: overlayPrefs } = useOverlayPrefs();
   const watchedState = watched ?? episode.user_data?.played ?? false;
   const derivedProgress =
     progress ??
@@ -51,6 +55,13 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
           <div className="text-muted-foreground/50 flex h-full w-full items-center justify-center">
             <Play className="size-6" />
           </div>
+        )}
+        {overlayPrefs && (
+          <CardOverlays
+            data={overlayDataFromEpisodeListItem(episode)}
+            prefs={overlayPrefs}
+            variant="wide"
+          />
         )}
         {hasProgress && (
           <div className="bg-background/40 absolute inset-x-0 bottom-0 h-[3px]">

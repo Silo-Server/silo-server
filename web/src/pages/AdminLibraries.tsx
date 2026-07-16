@@ -123,6 +123,15 @@ import { formatDateTime } from "@/lib/datetime";
 // disappears before state is cleared.
 const MOUNT_CHECK_FEEDBACK_MS = 5_000;
 
+const DEAD_ROOT_WARNING_TEXT =
+  "One or more library roots are unreachable or mounted but returned no files. Their files are hidden, but nothing will be deleted until the root is back or cleanup is confirmed.";
+const DEAD_ROOT_WARNING_HINT =
+  "Run another scan after storage returns, or use Check Mount to verify connectivity.";
+const EMPTY_ROOT_WARNING_TEXT =
+  "Scan found 0 media files for this library. Cleanup was paused to avoid accidental deletion.";
+const EMPTY_ROOT_WARNING_HINT =
+  "Run another scan after storage returns, or confirm deletion before the next empty-root scan.";
+
 export default function AdminLibraries() {
   useEventChannel("scans");
   const { data: libraries = [], isLoading } = useAdminLibraries();
@@ -305,7 +314,7 @@ export default function AdminLibraries() {
           if (!open) setConfirmEmptyRootLib(null);
         }}
         title="Confirm empty root cleanup"
-        description={`If the next scan still finds 0 media files for "${confirmEmptyRootLib?.name}", remove the library items?`}
+        description={`On the next scan of "${confirmEmptyRootLib?.name}", remove items from roots that are reachable but still empty? Unreachable roots remain protected.`}
         confirmLabel="Confirm"
         variant="destructive"
         onConfirm={() => {
@@ -453,6 +462,9 @@ export default function AdminLibraries() {
                             {lib.scan_warning_code === "empty_root" ? (
                               <Badge variant="destructive">Empty root guarded</Badge>
                             ) : null}
+                            {lib.scan_warning_code === "dead_root" ? (
+                              <Badge variant="destructive">Root unreachable</Badge>
+                            ) : null}
                           </div>
                         </TableCell>
                         <TableCell className="text-muted-foreground text-xs">
@@ -568,12 +580,13 @@ export default function AdminLibraries() {
                             >
                               <Trash2 className="h-3 w-3" aria-hidden="true" />
                             </Button>
-                            {lib.scan_warning_code === "empty_root" ? (
+                            {lib.scan_warning_code === "empty_root" ||
+                            lib.scan_warning_code === "dead_root" ? (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="text-destructive h-7 w-7"
-                                title="Confirm deletion for the next empty-root scan"
+                                title="Confirm cleanup for missing or empty roots"
                                 disabled={
                                   confirmEmptyRootCleanupMutation.isPending &&
                                   confirmEmptyRootCleanupMutation.variables === lib.id
@@ -609,7 +622,11 @@ export default function AdminLibraries() {
                   );
                 })}
                 {orderedLibraries
-                  .filter((lib) => lib.scan_warning_code === "empty_root")
+                  .filter(
+                    (lib) =>
+                      lib.scan_warning_code === "empty_root" ||
+                      lib.scan_warning_code === "dead_root",
+                  )
                   .map((lib) => {
                     const mountCheck = lastMountCheckByLibraryId[lib.id];
                     const isCheckingMount =
@@ -619,14 +636,17 @@ export default function AdminLibraries() {
                         <TableCell colSpan={7} className="bg-destructive/5 text-sm">
                           <div className="flex flex-col gap-2 py-1">
                             <div className="text-destructive font-medium">
-                              Scan found 0 media files for this library. Cleanup was paused to avoid
-                              accidental deletion.
+                              {lib.scan_warning_code === "dead_root"
+                                ? DEAD_ROOT_WARNING_TEXT
+                                : EMPTY_ROOT_WARNING_TEXT}
                             </div>
                             <div className="text-muted-foreground">
                               {lib.scan_warning_message ??
-                                "Run another scan after storage returns, or confirm deletion before the next empty-root scan."}
+                                (lib.scan_warning_code === "dead_root"
+                                  ? DEAD_ROOT_WARNING_HINT
+                                  : EMPTY_ROOT_WARNING_HINT)}
                             </div>
-                            <div>
+                            <div className="flex gap-2">
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -643,6 +663,21 @@ export default function AdminLibraries() {
                                 />
                                 Check Mount
                               </Button>
+                              {lib.scan_warning_code === "dead_root" ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  title="Confirm cleanup for missing or empty roots"
+                                  disabled={
+                                    confirmEmptyRootCleanupMutation.isPending &&
+                                    confirmEmptyRootCleanupMutation.variables === lib.id
+                                  }
+                                  onClick={() => handleConfirmEmptyRootCleanup(lib)}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Confirm Cleanup
+                                </Button>
+                              ) : null}
                             </div>
                           </div>
                         </TableCell>

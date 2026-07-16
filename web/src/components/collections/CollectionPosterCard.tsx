@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { Pin, PinOff, User } from "lucide-react";
 import type { LibraryTabCollection } from "@/api/types";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
@@ -23,7 +23,7 @@ export function CollectionPosterCard({
   kind: "regular" | "user_collections";
   libraryId: number;
 }) {
-  const [loaded, setLoaded] = useState(false);
+  const { loaded, onLoad } = useImageLoaded(collection.poster_url);
   const navigate = useViewTransitionNavigate();
   const { togglePin, isPinned } = useToggleSidebarPin();
   const pinned = isPinned(libraryId, "collection", collection.id);
@@ -45,7 +45,7 @@ export function CollectionPosterCard({
                 loaded ? "opacity-100" : "opacity-0"
               }`}
               loading="lazy"
-              onLoad={() => setLoaded(true)}
+              onLoad={onLoad}
             />
           ) : (
             <div className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm">

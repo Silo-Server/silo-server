@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { act, render } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ItemDetail } from "@/api/types";
+import type { FileVersion, ItemDetail } from "@/api/types";
 import MovieContent from "./MovieContent";
 
 const mocks = vi.hoisted(() => {
   let capturedActionBarProps: Record<string, unknown> | null = null;
+  let capturedMetadataBadgesProps: Record<string, unknown> | null = null;
+  let capturedQualityBadgesProps: Record<string, unknown> | null = null;
 
   return {
     capturedActionBarProps: {
@@ -15,6 +18,22 @@ const mocks = vi.hoisted(() => {
       },
       set value(value: Record<string, unknown> | null) {
         capturedActionBarProps = value;
+      },
+    },
+    capturedMetadataBadgesProps: {
+      get value() {
+        return capturedMetadataBadgesProps;
+      },
+      set value(value: Record<string, unknown> | null) {
+        capturedMetadataBadgesProps = value;
+      },
+    },
+    capturedQualityBadgesProps: {
+      get value() {
+        return capturedQualityBadgesProps;
+      },
+      set value(value: Record<string, unknown> | null) {
+        capturedQualityBadgesProps = value;
       },
     },
     useIsFavorite: vi.fn(),
@@ -111,15 +130,26 @@ vi.mock("@/components/RecommendationGrid", () => ({
 }));
 
 vi.mock("./DetailHero", () => ({
-  default: ({ actions }: { actions?: ReactNode }) => <div>{actions}</div>,
+  default: ({ actions, metadata }: { actions?: ReactNode; metadata?: ReactNode }) => (
+    <div>
+      {metadata}
+      {actions}
+    </div>
+  ),
 }));
 
 vi.mock("./components/MetadataBadges", () => ({
-  default: () => <div />,
+  default: (props: Record<string, unknown>) => {
+    mocks.capturedMetadataBadgesProps.value = props;
+    return <div />;
+  },
 }));
 
 vi.mock("./components/QualityBadges", () => ({
-  default: () => <div />,
+  default: (props: Record<string, unknown>) => {
+    mocks.capturedQualityBadgesProps.value = props;
+    return <div />;
+  },
 }));
 
 vi.mock("./components/ScoreRow", () => ({
@@ -136,6 +166,23 @@ vi.mock("./components/ActionBar", () => ({
     return <div />;
   },
 }));
+
+function makeFileVersion(overrides: Partial<FileVersion> = {}): FileVersion {
+  return {
+    file_id: overrides.file_id ?? 1,
+    resolution: overrides.resolution ?? "1080p",
+    codec_video: overrides.codec_video ?? "h264",
+    codec_audio: overrides.codec_audio ?? "aac",
+    hdr: overrides.hdr ?? false,
+    container: overrides.container ?? "mkv",
+    file_size: overrides.file_size ?? 0,
+    duration: overrides.duration ?? 7200,
+    bitrate: overrides.bitrate ?? 0,
+    edition_raw: overrides.edition_raw,
+    edition_key: overrides.edition_key,
+    audio_tracks: overrides.audio_tracks,
+  };
+}
 
 function makeMovieItem(overrides: Partial<ItemDetail & { type: "movie" }> = {}): ItemDetail & {
   type: "movie";
@@ -174,7 +221,7 @@ function makeMovieItem(overrides: Partial<ItemDetail & { type: "movie" }> = {}):
     season_number: null,
     episode_number: null,
     air_date: null,
-    versions: [{ file_id: 1 }] as ItemDetail["versions"],
+    versions: [makeFileVersion()],
     subtitles: [],
     intro: null,
     credits: null,
@@ -186,6 +233,8 @@ function makeMovieItem(overrides: Partial<ItemDetail & { type: "movie" }> = {}):
 describe("MovieContent", () => {
   beforeEach(() => {
     mocks.capturedActionBarProps.value = null;
+    mocks.capturedMetadataBadgesProps.value = null;
+    mocks.capturedQualityBadgesProps.value = null;
     mocks.useIsFavorite.mockReturnValue({ data: false });
     mocks.useToggleFavorite.mockReturnValue({ mutate: vi.fn() });
     mocks.useIsInWatchlist.mockReturnValue({ data: false });
@@ -198,6 +247,60 @@ describe("MovieContent", () => {
     mocks.useSimilarItems.mockReturnValue({ data: { items: [] }, isLoading: false });
     mocks.useAuth.mockReturnValue({ user: null });
     mocks.useCurrentProfile.mockReturnValue({ profile: null });
+  });
+
+  it("updates hero metadata when the selected version changes", () => {
+    const standard = makeFileVersion({
+      file_id: 1,
+      resolution: "2160p",
+      codec_video: "hevc",
+      codec_audio: "eac3",
+      hdr: true,
+      duration: 9780,
+    });
+    const directorsCut = makeFileVersion({
+      file_id: 2,
+      resolution: "1080p",
+      codec_video: "h264",
+      codec_audio: "dts",
+      hdr: false,
+      duration: 11760,
+      edition_raw: "Director's Cut",
+      edition_key: "directors_cut",
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/item/movie-1"]}>
+        <MovieContent item={makeMovieItem({ runtime: 163, versions: [standard, directorsCut] })} />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "2h 43m" });
+    expect(mocks.capturedQualityBadgesProps.value).toEqual({
+      summary: {
+        durationMinutes: 163,
+        resolution: "2160p",
+        videoRangeLabel: "HDR",
+        audioLabel: "EAC3",
+      },
+    });
+
+    act(() => {
+      const selectVersion = mocks.capturedActionBarProps.value?.onSelectVersion as
+        | ((version: FileVersion) => void)
+        | undefined;
+      selectVersion?.(directorsCut);
+    });
+
+    expect(mocks.capturedMetadataBadgesProps.value).toMatchObject({ duration: "3h 16m" });
+    expect(mocks.capturedQualityBadgesProps.value).toEqual({
+      summary: {
+        durationMinutes: 196,
+        resolution: "1080p",
+        videoRangeLabel: "",
+        audioLabel: "DTS",
+      },
+    });
   });
 
   it("passes restartHref when the movie is partially watched", () => {

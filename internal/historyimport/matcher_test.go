@@ -120,3 +120,33 @@ func TestMatcherMatchEpisode_AllowsSeasonZeroSpecials(t *testing.T) {
 			repo.episodeBySeriesID, repo.episodeBySeriesSeason, repo.episodeBySeriesEpisode)
 	}
 }
+
+func TestMatcherMatchSeries_PrefersTMDBForEmbyFavorite(t *testing.T) {
+	t.Parallel()
+
+	repo := &matcherRepoStub{
+		mediaByExternal: map[string][]mediaLookupRow{
+			"series:tmdb_id:94997":  {{ContentID: "house-of-the-dragon", Title: "House of the Dragon", Year: 2022}},
+			"series:tvdb_id:425793": {{ContentID: "making-of", Title: "The House That Dragons Built", Year: 2022}},
+		},
+	}
+	matcher := NewMatcher(repo)
+
+	match, reason, err := matcher.Match(context.Background(), Record{
+		Kind:       KindSeries,
+		Title:      "House of the Dragon",
+		Year:       2022,
+		TMDBID:     "94997",
+		TVDBID:     "425793",
+		PreferTMDB: true,
+	})
+	if err != nil {
+		t.Fatalf("Match returned error: %v", err)
+	}
+	if reason != "" {
+		t.Fatalf("reason = %q, want empty string", reason)
+	}
+	if match == nil || match.MediaItemID != "house-of-the-dragon" {
+		t.Fatalf("match = %+v, want TMDB-backed House of the Dragon", match)
+	}
+}

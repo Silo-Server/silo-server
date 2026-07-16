@@ -1,7 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import EpisodeRow from "./EpisodeRow";
+
+vi.mock("@/components/overlays/CardOverlays", () => ({
+  default: () => null,
+}));
+
+vi.mock("@/hooks/useOverlayPrefs", () => ({
+  useOverlayPrefs: () => ({ prefs: null }),
+}));
 
 describe("EpisodeRow", () => {
   it("renders progress from inline episode user_data", () => {

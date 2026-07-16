@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -913,11 +914,7 @@ func imageDeletePrefix(path string) string {
 // pathDir extracts the directory portion of an S3 image path.
 // e.g. "tmdb/movies/550/poster/original.webp" → "tmdb/movies/550/poster/"
 func pathDir(path string) string {
-	idx := strings.LastIndex(path, "/")
-	if idx <= 0 {
-		return ""
-	}
-	return path[:idx+1]
+	return artworkkey.Directory(path)
 }
 
 // rowQuerier is satisfied by both *pgxpool.Pool and pgx.Tx, letting read

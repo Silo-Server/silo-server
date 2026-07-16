@@ -9,6 +9,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -160,6 +161,9 @@ func (c *Client) PutObject(ctx context.Context, bucket, key string, data []byte)
 		Bucket: aws.String(bucket),
 		Key:    aws.String(objectKey),
 		Body:   body,
+		Metadata: map[string]string{
+			"silo-sha256": objectSHA256(data),
+		},
 	}
 	if ct := contentTypeFromKey(key); ct != "" {
 		input.ContentType = aws.String(ct)
@@ -371,6 +375,32 @@ func (c *Client) ObjectExists(ctx context.Context, bucket, key string) (bool, er
 	}
 
 	return true, nil
+}
+
+// ObjectMatches checks that an immutable object exists with the expected
+// length and application-recorded SHA-256. Objects written before checksums
+// were recorded return false and are safely rewritten by the caller.
+func (c *Client) ObjectMatches(ctx context.Context, bucket, key string, data []byte) (bool, error) {
+	objectKey := c.prefixedKey(key)
+	out, err := c.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(objectKey),
+	})
+	if err != nil {
+		if isNotFoundErr(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("s3 HeadObject %s/%s: %w", bucket, key, err)
+	}
+	if out.ContentLength == nil || *out.ContentLength != int64(len(data)) {
+		return false, nil
+	}
+	return strings.EqualFold(out.Metadata["silo-sha256"], objectSHA256(data)), nil
+}
+
+func objectSHA256(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // DeleteObject deletes the object at the given key.

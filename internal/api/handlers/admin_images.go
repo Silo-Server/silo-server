@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -52,6 +54,7 @@ type AdminImageHandler struct {
 	imageSvc      ImageService
 	imageResolver ImageURLResolver
 	detailSvc     *catalog.DetailService
+	EventsHub     *evt.Hub
 }
 
 // NewAdminImageHandler creates a handler for admin image selection endpoints.
@@ -110,6 +113,8 @@ type applyItemImageResponse struct {
 	ContentID  string `json:"content_id"`
 	StoredPath string `json:"stored_path"`
 	Thumbhash  string `json:"thumbhash"`
+	ImageURL   string `json:"image_url,omitempty"`
+	Revision   string `json:"revision,omitempty"`
 }
 
 // resolvedItem holds the result of looking up a content ID across all three tables.
@@ -304,6 +309,18 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 	}
 
 	imageType := metadata.ImageTypeFromString(req.Type)
+	// Episodes only have stills. Clients historically sent "poster" here (the
+	// old flow silently dropped it), so coerce rather than reject.
+	if resolved.contentType == "episode" {
+		imageType = metadata.ImageStill
+	}
+	// Reject unsupported target/image combinations before spending a download
+	// and an S3 upload on an image that can never be published.
+	if err := catalog.ValidateArtworkSelectionTarget(resolved.contentType, metadata.ImageTypeToString(imageType)); err != nil {
+		writeError(w, http.StatusBadRequest, "unsupported_image_type",
+			fmt.Sprintf("%s items do not accept %s images", resolved.contentType, metadata.ImageTypeToString(imageType)))
+		return
+	}
 	providerID := req.ProviderID
 	if providerID == "" {
 		providerID = primaryProvider(resolved.parentItem)
@@ -344,50 +361,52 @@ func (h *AdminImageHandler) HandleApplyItemImage(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Build the MetadataUpdate targeting only the relevant image field.
-	upd := buildImageUpdate(imageType, result.StoredPath, result.Thumbhash)
-
-	// Lock FieldImages on the parent media_items row to prevent
-	// automatic refreshes from overwriting the manual selection.
-	if resolved.contentType == "movie" || resolved.contentType == "series" {
-		locked := mergeLockedField(resolved.parentItem.LockedFields, int(metadata.FieldImages))
-		upd.LockedFields = &locked
-	}
-
-	// Persist to the correct table.
-	if err := h.persistImageUpdate(r.Context(), contentID, resolved, &upd); err != nil {
+	err = h.detailSvc.PublishArtworkSelection(r.Context(), catalog.ArtworkSelection{
+		TargetType:      resolved.contentType,
+		TargetContentID: contentID,
+		ParentContentID: resolved.parentItem.ContentID,
+		ImageType:       metadata.ImageTypeToString(imageType),
+		StoredPath:      result.StoredPath,
+		SourcePath:      req.OriginalURL,
+		Thumbhash:       result.Thumbhash,
+		LockField:       int(metadata.FieldImages),
+	})
+	if err != nil {
 		slog.ErrorContext(r.Context(), "admin images: persist failed", "component", "api", "content_id", contentID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Image cached but failed to update item")
+		if cleanupErr := h.detailSvc.QueueArtworkRevisionGC(
+			r.Context(), result.StoredPath, metadata.ImageTypeToString(imageType), time.Now().Add(time.Hour),
+		); cleanupErr != nil {
+			slog.ErrorContext(r.Context(), "admin images: failed to queue unpublished artwork cleanup", "component", "api",
+				"content_id", contentID, "stored_path", result.StoredPath, "error", cleanupErr)
+		}
+		switch {
+		case errors.Is(err, catalog.ErrItemNotFound),
+			errors.Is(err, catalog.ErrSeasonNotFound),
+			errors.Is(err, catalog.ErrEpisodeNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "Item not found")
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "Image cached but failed to update item")
+		}
 		return
 	}
 
-	// Also lock FieldImages on the parent series for seasons/episodes.
-	if resolved.contentType == "season" || resolved.contentType == "episode" {
-		parentLocked := mergeLockedField(resolved.parentItem.LockedFields, int(metadata.FieldImages))
-		parentUpd := catalog.MetadataUpdate{LockedFields: &parentLocked}
-		if lockErr := h.detailSvc.UpdateMediaItemMetadata(r.Context(), resolved.parentItem.ContentID, &parentUpd); lockErr != nil {
-			slog.ErrorContext(r.Context(), "admin images: failed to lock FieldImages on parent series", "component", "api",
-				"content_id", contentID, "parent_id", resolved.parentItem.ContentID, "error", lockErr)
-		}
+	publishEventMetadataUpdate(r.Context(), h.EventsHub, 0, contentID)
+	if resolved.parentItem.ContentID != contentID {
+		publishEventMetadataUpdate(r.Context(), h.EventsHub, 0, resolved.parentItem.ContentID)
+	}
+
+	imageURL := ""
+	if h.imageResolver != nil {
+		imageURL = h.imageResolver.ResolveImageURL(r.Context(), result.StoredPath, "original")
 	}
 
 	writeJSON(w, http.StatusOK, applyItemImageResponse{
 		ContentID:  contentID,
 		StoredPath: result.StoredPath,
 		Thumbhash:  result.Thumbhash,
+		ImageURL:   imageURL,
+		Revision:   result.Revision,
 	})
-}
-
-// persistImageUpdate writes the image path update to the correct table.
-func (h *AdminImageHandler) persistImageUpdate(ctx context.Context, contentID string, resolved *resolvedItem, upd *catalog.MetadataUpdate) error {
-	switch resolved.contentType {
-	case "season":
-		return h.detailSvc.UpdateSeasonMetadata(ctx, contentID, upd)
-	case "episode":
-		return h.detailSvc.UpdateEpisodeMetadata(ctx, contentID, upd)
-	default:
-		return h.detailSvc.UpdateMediaItemMetadata(ctx, contentID, upd)
-	}
 }
 
 // resolveImageFolderID finds the primary library folder for a content ID.
@@ -415,38 +434,6 @@ func buildProviderIDs(item *models.MediaItem) map[string]string {
 		ids["imdb"] = item.ImdbID
 	}
 	return ids
-}
-
-// buildImageUpdate constructs a MetadataUpdate targeting a single image field.
-func buildImageUpdate(imageType metadata.ImageType, storedPath, thumbhash string) catalog.MetadataUpdate {
-	var upd catalog.MetadataUpdate
-	switch imageType {
-	case metadata.ImageBackdrop:
-		upd.BackdropPath = &storedPath
-		upd.BackdropThumbhash = &thumbhash
-	case metadata.ImageLogo:
-		upd.LogoPath = &storedPath
-	case metadata.ImageStill:
-		upd.StillPath = &storedPath
-		upd.StillThumbhash = &thumbhash
-	default: // poster
-		upd.PosterPath = &storedPath
-		upd.PosterThumbhash = &thumbhash
-	}
-	return upd
-}
-
-// mergeLockedField adds a field value to the locked fields slice if not already present.
-func mergeLockedField(existing []int, field int) []int {
-	for _, f := range existing {
-		if f == field {
-			return existing
-		}
-	}
-	result := make([]int, len(existing)+1)
-	copy(result, existing)
-	result[len(existing)] = field
-	return result
 }
 
 // primaryProvider returns the primary provider slug for a media item.

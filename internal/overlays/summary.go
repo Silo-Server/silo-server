@@ -51,18 +51,51 @@ func BuildSummary(files []*models.MediaFile) *Summary {
 
 func bestFile(files []*models.MediaFile) *models.MediaFile {
 	var best *models.MediaFile
-	bestRank := -1
+	bestRes := -1
+	bestRange := -1
 	for _, file := range files {
 		if file == nil {
 			continue
 		}
-		rank := resolutionRank(file.Resolution)
-		if best == nil || rank > bestRank {
+		res := resolutionRank(file.Resolution)
+		rng := rangeRank(file)
+		if best == nil || res > bestRes || (res == bestRes && rng > bestRange) {
 			best = file
-			bestRank = rank
+			bestRes = res
+			bestRange = rng
 		}
 	}
 	return best
+}
+
+// rangeRank orders files with equal resolution by the richness of their
+// dynamic-range metadata so a Dolby Vision version is not masked by a
+// first-scanned file that only carries the bare HDR boolean (e.g. a stale
+// pre-DV probe row). Ties keep the earliest file in the slice.
+func rangeRank(file *models.MediaFile) int {
+	if hasDolbyVision(file.VideoTracks) {
+		return 3
+	}
+	if hdrTypeFromTracks(file.VideoTracks) != "" {
+		return 2
+	}
+	if file.HDR {
+		return 1
+	}
+	return 0
+}
+
+// hasDolbyVision reports whether any track carries Dolby Vision metadata.
+// Probed rows set DolbyVision and DVProfile together, but seeded/imported
+// rows may carry only dv_profile or a DOVI* video_range_type.
+func hasDolbyVision(tracks []models.VideoTrack) bool {
+	for _, track := range tracks {
+		if track.DolbyVision != "" || track.DVProfile > 0 ||
+			strings.HasPrefix(track.VideoRangeType, "DOVI") {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeResolution(value string) string {
@@ -92,13 +125,7 @@ func resolutionRank(value string) int {
 }
 
 func normalizeHDR(file *models.MediaFile) string {
-	hasDV := false
-	for _, track := range file.VideoTracks {
-		if track.DolbyVision != "" {
-			hasDV = true
-			break
-		}
-	}
+	hasDV := hasDolbyVision(file.VideoTracks)
 	hdrType := hdrTypeFromTracks(file.VideoTracks)
 
 	switch {
@@ -115,9 +142,22 @@ func normalizeHDR(file *models.MediaFile) string {
 	}
 }
 
-// hdrTypeFromTracks inspects video track color transfer to distinguish HDR variants.
+// hdrTypeFromTracks distinguishes HDR variants from the scanner-derived
+// video_range_type enum (HDR10, HDR10Plus, HLG, DOVIWith*) with color
+// transfer as a fallback, so rows without probed color metadata (e.g.
+// catalog-seeded imports) still resolve. Keep in sync with trackHdrType in
+// web/src/lib/videoRange.ts.
 func hdrTypeFromTracks(tracks []models.VideoTrack) string {
 	for _, track := range tracks {
+		rangeType := strings.TrimSpace(track.VideoRangeType)
+		switch {
+		case track.HDR10Plus || strings.Contains(rangeType, "HDR10Plus"):
+			return "HDR10+"
+		case rangeType == "HDR10" || strings.HasSuffix(rangeType, "WithHDR10"):
+			return "HDR10"
+		case rangeType == "HLG" || strings.HasSuffix(rangeType, "WithHLG"):
+			return "HLG"
+		}
 		ct := strings.ToLower(track.ColorTransfer)
 		switch {
 		case strings.Contains(ct, "smpte2084"):

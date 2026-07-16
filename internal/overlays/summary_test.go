@@ -212,6 +212,165 @@ func TestNormalizeReleaseType(t *testing.T) {
 	}
 }
 
+func TestNormalizeHDR(t *testing.T) {
+	cases := []struct {
+		name string
+		file *models.MediaFile
+		want string
+	}{
+		{"sdr", &models.MediaFile{}, ""},
+		{"bare boolean", &models.MediaFile{HDR: true}, "HDR"},
+		{"hdr10 via color transfer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{ColorTransfer: "smpte2084"}},
+		}, "HDR10"},
+		{"hlg via color transfer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{ColorTransfer: "arib-std-b67"}},
+		}, "HLG"},
+		{"dv only", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{DolbyVision: "Profile 5"}},
+		}, "DV"},
+		{"dv with hdr10 base layer", &models.MediaFile{
+			HDR: true,
+			VideoTracks: []models.VideoTrack{{
+				DolbyVision:   "Profile 8",
+				ColorTransfer: "smpte2084",
+			}},
+		}, "DV HDR10"},
+		{"dv via profile number only", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{DVProfile: 5}},
+		}, "DV"},
+		{"dv via DOVI range type only", &models.MediaFile{
+			HDR: true,
+			VideoTracks: []models.VideoTrack{{
+				VideoRangeType: "DOVIWithHDR10",
+				ColorTransfer:  "smpte2084",
+			}},
+		}, "DV HDR10"},
+		{"hdr10 via range type without color transfer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10"}},
+		}, "HDR10"},
+		{"hlg via range type without color transfer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "HLG"}},
+		}, "HLG"},
+		{"hdr10+ via flag", &models.MediaFile{
+			HDR: true,
+			VideoTracks: []models.VideoTrack{{
+				HDR10Plus:     true,
+				ColorTransfer: "smpte2084",
+			}},
+		}, "HDR10+"},
+		{"hdr10+ via range type", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10Plus"}},
+		}, "HDR10+"},
+		{"dv with hdr10+ base layer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "DOVIWithELHDR10Plus"}},
+		}, "DV HDR10+"},
+		{"sdr range type stays sdr", &models.MediaFile{
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}},
+		}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeHDR(tc.file); got != tc.want {
+				t.Errorf("normalizeHDR = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBestFileRangeTieBreaking(t *testing.T) {
+	genericHDR := &models.MediaFile{Resolution: "2160p", HDR: true}
+	explicitHDR10 := &models.MediaFile{
+		Resolution:  "2160p",
+		HDR:         true,
+		VideoTracks: []models.VideoTrack{{ColorTransfer: "smpte2084"}},
+	}
+	dv := &models.MediaFile{
+		Resolution: "2160p",
+		HDR:        true,
+		VideoTracks: []models.VideoTrack{{
+			DolbyVision:   "Profile 8",
+			ColorTransfer: "smpte2084",
+		}},
+	}
+	sdr := &models.MediaFile{Resolution: "2160p"}
+	dvProfileOnly := &models.MediaFile{
+		Resolution:  "2160p",
+		HDR:         true,
+		VideoTracks: []models.VideoTrack{{DVProfile: 5}},
+	}
+	lowResDV := &models.MediaFile{
+		Resolution:  "1080p",
+		HDR:         true,
+		VideoTracks: []models.VideoTrack{{DolbyVision: "Profile 5"}},
+	}
+	rangeTypeHDR10 := &models.MediaFile{
+		Resolution:  "2160p",
+		HDR:         true,
+		VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10"}},
+	}
+
+	cases := []struct {
+		name  string
+		files []*models.MediaFile
+		want  *models.MediaFile
+	}{
+		{"nil files ignored", []*models.MediaFile{nil, genericHDR}, genericHDR},
+		{"dv beats first-scanned generic hdr at same resolution",
+			[]*models.MediaFile{genericHDR, dv}, dv},
+		{"dv beats explicit hdr10 at same resolution",
+			[]*models.MediaFile{explicitHDR10, dv}, dv},
+		{"dv via profile number only still outranks generic hdr",
+			[]*models.MediaFile{genericHDR, dvProfileOnly}, dvProfileOnly},
+		{"range-type-only hdr10 outranks bare boolean",
+			[]*models.MediaFile{genericHDR, rangeTypeHDR10}, rangeTypeHDR10},
+		{"explicit hdr10 beats bare boolean at same resolution",
+			[]*models.MediaFile{genericHDR, explicitHDR10}, explicitHDR10},
+		{"bare boolean beats sdr at same resolution",
+			[]*models.MediaFile{sdr, genericHDR}, genericHDR},
+		{"higher resolution still wins over lower-res dv",
+			[]*models.MediaFile{lowResDV, genericHDR}, genericHDR},
+		{"full tie keeps earliest file",
+			[]*models.MediaFile{genericHDR, {Resolution: "2160p", HDR: true}}, genericHDR},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := bestFile(tc.files); got != tc.want {
+				t.Errorf("bestFile picked %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestBuildSummaryPrefersDolbyVisionSibling(t *testing.T) {
+	genericHDR := &models.MediaFile{Resolution: "2160p", HDR: true, CodecVideo: "hevc"}
+	dv := &models.MediaFile{
+		Resolution: "2160p",
+		HDR:        true,
+		CodecVideo: "hevc",
+		VideoTracks: []models.VideoTrack{{
+			Codec:         "hevc",
+			DolbyVision:   "Profile 8",
+			ColorTransfer: "smpte2084",
+		}},
+	}
+	got := BuildSummary([]*models.MediaFile{genericHDR, dv})
+	if got == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if got.HDR != "DV HDR10" {
+		t.Errorf("HDR = %q, want %q", got.HDR, "DV HDR10")
+	}
+}
+
 func TestBuildSummaryAggregatesNewFields(t *testing.T) {
 	file := &models.MediaFile{
 		Resolution: "1080p",

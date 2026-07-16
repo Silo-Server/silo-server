@@ -1,9 +1,13 @@
 package transcodenode
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +36,38 @@ func newTestServer(t *testing.T) *Server {
 	return &Server{
 		watcher:  w,
 		sessions: make(map[string]*playback.TranscodeSession),
+	}
+}
+
+func TestHandleStartRequireReadyRejectsExitedFFmpeg(t *testing.T) {
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "failing-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server.watcher.Config().Playback.FFmpegPath = ffmpegPath
+	requestBody, err := json.Marshal(TranscodeStartRequest{
+		SessionID:        "ready-failure-1",
+		InputPath:        "/media/movie.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		RequireReady:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	server.mu.RLock()
+	_, registered := server.sessions["ready-failure-1"]
+	server.mu.RUnlock()
+	if registered {
+		t.Fatal("failed readiness session was registered")
 	}
 }
 
@@ -209,6 +245,89 @@ func TestHandleStop_DeletesRecipe(t *testing.T) {
 	}
 	if _, ok := s.sessions[sid]; ok {
 		t.Fatalf("session %q still registered after stop", sid)
+	}
+}
+
+// The idle reaper must close only jobs whose last access predates the TTL;
+// registration counts as an access, so a just-started job (including one still
+// waiting on its manifest in the RequireReady flow) is spared. Zero-value
+// TranscodeSessions Close without ffmpeg, so this runs without a real spawn.
+func TestReapIdleSessions_ClosesOnlyIdleJobs(t *testing.T) {
+	s := newTestServer(t)
+	s.tracker = nodesessions.NewTracker(nil, "node-url", "node-name", "transcode")
+
+	s.sessions["fresh-1"] = &playback.TranscodeSession{}
+	s.sessions["stale-1"] = &playback.TranscodeSession{}
+	s.lastAccess = map[string]time.Time{
+		"fresh-1": time.Now(),
+		"stale-1": time.Now().Add(-sessionIdleTTL - time.Minute),
+	}
+	s.activeJobs.Store(2)
+
+	s.reapIdleSessions(sessionIdleTTL)
+
+	s.mu.RLock()
+	_, freshAlive := s.sessions["fresh-1"]
+	_, staleAlive := s.sessions["stale-1"]
+	_, staleTracked := s.lastAccess["stale-1"]
+	s.mu.RUnlock()
+	if !freshAlive {
+		t.Fatal("recently accessed session was reaped")
+	}
+	if staleAlive {
+		t.Fatal("idle session survived the reaper")
+	}
+	if staleTracked {
+		t.Fatal("reaped session's idle clock was not dropped")
+	}
+	if got := s.activeJobs.Load(); got != 1 {
+		t.Fatalf("activeJobs = %d, want 1", got)
+	}
+}
+
+// A registered job with no recorded access (untracked registration) must not
+// be closed; the sweep starts its idle clock instead of reaping a job that may
+// be actively serving.
+func TestReapIdleSessions_StartsClockForUntrackedJob(t *testing.T) {
+	s := newTestServer(t)
+	s.sessions["untracked-1"] = &playback.TranscodeSession{}
+	s.activeJobs.Store(1)
+
+	s.reapIdleSessions(sessionIdleTTL)
+
+	s.mu.RLock()
+	_, alive := s.sessions["untracked-1"]
+	last, tracked := s.lastAccess["untracked-1"]
+	s.mu.RUnlock()
+	if !alive {
+		t.Fatal("untracked session was reaped")
+	}
+	if !tracked || last.IsZero() {
+		t.Fatal("sweep did not start the untracked session's idle clock")
+	}
+	if got := s.activeJobs.Load(); got != 1 {
+		t.Fatalf("activeJobs = %d, want 1", got)
+	}
+}
+
+// touchSession must refresh a registered job's idle clock and ignore ids with
+// no live session (a reconstruct records its own first access on register).
+func TestTouchSession_RefreshesIdleClock(t *testing.T) {
+	s := newTestServer(t)
+	s.sessions["live-1"] = &playback.TranscodeSession{}
+	stale := time.Now().Add(-sessionIdleTTL - time.Minute)
+	s.lastAccess = map[string]time.Time{"live-1": stale}
+
+	s.touchSession("live-1")
+	s.touchSession("ghost-1")
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.lastAccess["live-1"].After(stale) {
+		t.Fatal("touch did not refresh the live session's idle clock")
+	}
+	if _, ok := s.lastAccess["ghost-1"]; ok {
+		t.Fatal("touch recorded access for an unregistered session")
 	}
 }
 

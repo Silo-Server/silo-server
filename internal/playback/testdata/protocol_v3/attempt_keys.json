@@ -1,0 +1,69 @@
+[
+  {
+    "name": "hls_burn_in_sorted_transformations_and_pcm_mutations",
+    "plan_id": "plan:fixture",
+    "delivery": "server_remux_hls",
+    "stream_protocol": "hls",
+    "container": "hls",
+    "video_codec": "hevc",
+    "audio_codec": "aac",
+    "width": 3840,
+    "height": 2160,
+    "bitrate_kbps": 20000,
+    "dynamic_range": "hdr10",
+    "subtitle_mode": "burn_in",
+    "transformations": [
+      {"name": "hdr_to_sdr_tonemap", "executor": "server", "recipe_version": "1"},
+      {"name": "audio_to_aac", "executor": "server", "recipe_version": "1"}
+    ],
+    "output_route_generation": 7,
+    "local_mutations": ["transport_reopen", "pcm:truehd:8"],
+    "expected": "v3:6d4724f01b6ff692"
+  },
+  {
+    "name": "direct_client_dv81_executor_and_version",
+    "plan_id": "plan:dv81-fixture",
+    "delivery": "original_http",
+    "stream_protocol": "http_progressive",
+    "container": "mkv",
+    "video_codec": "hevc",
+    "audio_codec": "truehd",
+    "width": 3840,
+    "height": 2160,
+    "bitrate_kbps": 65000,
+    "dynamic_range": "dolby_vision",
+    "subtitle_mode": "off",
+    "transformations": [
+      {"name": "client_dv7_to_dv81", "executor": "client", "recipe_version": "1"}
+    ],
+    "output_route_generation": 9,
+    "local_mutations": [],
+    "expected": "v3:2a88b5e686373440"
+  },
+  {
+    "name": "direct_device_quirk_and_runtime_correction_identity",
+    "plan_id": "plan:quirk",
+    "delivery": "original_http",
+    "stream_protocol": "http_progressive",
+    "container": "mkv",
+    "video_codec": "hevc",
+    "audio_codec": "eac3",
+    "width": 3840,
+    "height": 2160,
+    "bitrate_kbps": 60000,
+    "dynamic_range": "dolby_vision",
+    "subtitle_mode": "off",
+    "transformations": [],
+    "applied_quirks": [
+      {
+        "id": "android.fire_tv.dv8_hdr10plus_sei_v1",
+        "registry_revision": "2026-07-13.1",
+        "action": "client_runtime_correction"
+      }
+    ],
+    "runtime_corrections": ["client_dv8_hdr10plus_sanitizer_v1"],
+    "output_route_generation": 9,
+    "local_mutations": [],
+    "expected": "v3:8d843bfffeb3adc3"
+  }
+]

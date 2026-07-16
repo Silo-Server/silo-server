@@ -79,14 +79,16 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			return nil, err
 		}
 	}
-	if s.pushDeviceRepo != nil && s.Settings.ApplePushDeliveryEnabled(ctx) {
-		devicesByProfile, err := s.pushDeviceRepo.ListEnabledAppleByProfiles(ctx, tx, []string{delivery.ProfileID})
-		if err != nil {
-			return nil, err
-		}
-		attempts := newPushDeliveryAttempts(row.ID, devicesByProfile[delivery.ProfileID])
-		if err := s.pushDeviceRepo.EnqueuePushAttempts(ctx, tx, attempts); err != nil {
-			return nil, err
+	if s.pushDeviceRepo != nil {
+		if platforms := s.Settings.EnabledPushPlatforms(ctx); len(platforms) > 0 {
+			devicesByProfile, err := s.pushDeviceRepo.ListEnabledPushByProfiles(ctx, tx, []string{delivery.ProfileID}, platforms)
+			if err != nil {
+				return nil, err
+			}
+			attempts := newPushDeliveryAttempts(row.ID, devicesByProfile[delivery.ProfileID])
+			if err := s.pushDeviceRepo.EnqueuePushAttempts(ctx, tx, attempts); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -48,7 +48,10 @@ const SECTIONS: { key: Section; label: string; types: ItemDetail["type"][] }[] =
   { key: "dates", label: "Dates & Ratings", types: ["movie", "series", "season", "episode"] },
   { key: "tags", label: "Tags & Genres", types: ["movie", "series"] },
   { key: "ids", label: "External IDs", types: ["movie", "series", "season", "episode"] },
-  { key: "images", label: "Images", types: ["movie", "series", "season", "episode"] },
+  // Episodes are excluded: the image search endpoint only returns series-level
+  // posters/backdrops/logos, and episodes store stills — there is nothing an
+  // episode apply could legitimately show or persist from this dialog.
+  { key: "images", label: "Images", types: ["movie", "series", "season"] },
 ];
 
 // Maps form field names to their MetadataField lock value.

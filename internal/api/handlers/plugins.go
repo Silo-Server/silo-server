@@ -321,6 +321,11 @@ type pluginUserSettingsSummary struct {
 	UserConfigSchema []pluginConfigSchemaJSON `json:"user_config_schema"`
 	Routes           []pluginRouteJSON        `json:"routes"`
 	Assets           []pluginAssetJSON        `json:"assets"`
+	// Category is the manifest's optional slash-delimited grouping path
+	// (e.g. "Tools/Utilities") used to group plugin entries in the
+	// user-facing Apps navigation. Empty (omitted) when the manifest
+	// declares no category. Additive-only per v1 API rules.
+	Category string `json:"category,omitempty"`
 }
 
 type pluginUserSettingsListResponse struct {
@@ -1518,6 +1523,7 @@ func toUserPluginSettingsSummary(
 		UserConfigSchema: configSchemasToJSON(manifest.GetUserConfigSchema()),
 		Routes:           routesToJSON(manifest.GetHttpRoutes()),
 		Assets:           assetsToJSON(manifest.GetAssets()),
+		Category:         manifest.GetCategory(),
 	}
 }
 

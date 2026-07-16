@@ -137,10 +137,15 @@ func intInSlice(value int, values []int) bool {
 	return false
 }
 
-// FilterMediaFilesByAccess drops file versions that exceed the viewer's
-// effective quality ceiling.
+// FilterMediaFilesByAccess drops file versions the viewer cannot access:
+// files in libraries outside their allowed set, in libraries they disabled,
+// or above their effective quality ceiling — the same predicate as
+// FileAllowedByAccess.
 func FilterMediaFilesByAccess(files []*models.MediaFile, filter AccessFilter) []*models.MediaFile {
-	if len(files) == 0 || strings.TrimSpace(filter.MaxPlaybackQuality) == "" {
+	unrestricted := filter.AllowedLibraryIDs == nil &&
+		len(filter.DisabledLibraryIDs) == 0 &&
+		strings.TrimSpace(filter.MaxPlaybackQuality) == ""
+	if len(files) == 0 || unrestricted {
 		return files
 	}
 

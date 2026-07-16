@@ -37,7 +37,7 @@ import (
 // method set by structural typing. Anything implementing CacheAudiobookCover can
 // be passed to scanner.ExtractAndUploadAudiobookCover via this interface.
 type audiobookCoverCacher interface {
-	CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
+	CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (storedPath string, thumbhash string, err error)
 }
 
 const (
@@ -570,25 +570,12 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 		return
 	}
 
-	if storedPath := cachedOriginalImagePath(cached.BasePath, cached.Ext); storedPath != "" {
+	if storedPath := metadata.CachedImageOriginalPath(cached); storedPath != "" {
 		result.PosterPath = storedPath
 	}
 	if cached.Thumbhash != "" {
 		result.PosterThumbhash = cached.Thumbhash
 	}
-}
-
-func cachedOriginalImagePath(basePath, ext string) string {
-	if basePath == "" {
-		return ""
-	}
-	if strings.Contains(basePath, "/original.") {
-		return basePath
-	}
-	if ext == "" {
-		ext = ".jpg"
-	}
-	return strings.TrimRight(basePath, "/") + "/original" + ext
 }
 
 // persist writes the enriched metadata back to the database.
