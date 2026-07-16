@@ -15,17 +15,21 @@ import (
 // --- Favorites ---
 
 func (s *PostgresUserStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) error {
-	return s.AddFavoriteAt(ctx, profileID, mediaItemID, time.Now().UTC())
+	_, err := s.AddFavoriteAt(ctx, profileID, mediaItemID, time.Now().UTC())
+	return err
 }
 
-func (s *PostgresUserStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) error {
-	_, err := s.pool.Exec(ctx,
+func (s *PostgresUserStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	tag, err := s.pool.Exec(ctx,
 		`INSERT INTO user_favorites (user_id, profile_id, media_item_id, added_at)
 		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT DO NOTHING`,
 		s.userID, profileID, mediaItemID, addedAt.UTC(),
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func (s *PostgresUserStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error {

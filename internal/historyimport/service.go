@@ -430,17 +430,11 @@ func (s *Service) addFavorite(ctx context.Context, userID int, profileID, mediaI
 	if err != nil {
 		return false, fmt.Errorf("favorites import: open user store: %w", err)
 	}
-	exists, err := store.IsFavorite(ctx, profileID, mediaItemID)
+	inserted, err := store.AddFavoriteAt(ctx, profileID, mediaItemID, time.Now().UTC())
 	if err != nil {
-		return false, fmt.Errorf("favorites import: check %s: %w", mediaItemID, err)
-	}
-	if exists {
-		return false, nil
-	}
-	if err := store.AddFavorite(ctx, profileID, mediaItemID); err != nil {
 		return false, fmt.Errorf("favorites import: add %s: %w", mediaItemID, err)
 	}
-	return true, nil
+	return inserted, nil
 }
 
 func (s *Service) executeRun(run *Run, provider Provider) {

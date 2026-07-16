@@ -20,19 +20,23 @@ type WatchlistEntry = userstore.WatchlistEntry
 // AddFavorite adds a media item to a profile's favorites.
 // If the item is already a favorite, the operation is a no-op.
 func AddFavorite(db *sql.DB, profileID, mediaItemID string) error {
-	_, err := db.Exec(
-		`INSERT OR IGNORE INTO favorites (profile_id, media_item_id, added_at) VALUES (?, ?, ?)`,
-		profileID, mediaItemID, nowUTC(),
-	)
+	_, err := AddFavoriteAt(db, profileID, mediaItemID, time.Now().UTC())
 	return err
 }
 
-func AddFavoriteAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Time) error {
-	_, err := db.Exec(
+func AddFavoriteAt(db *sql.DB, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	result, err := db.Exec(
 		`INSERT OR IGNORE INTO favorites (profile_id, media_item_id, added_at) VALUES (?, ?, ?)`,
 		profileID, mediaItemID, addedAt.UTC().Format(time.RFC3339),
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 // RemoveFavorite removes a media item from a profile's favorites.

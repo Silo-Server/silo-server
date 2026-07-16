@@ -124,7 +124,7 @@ func (s stubStore) DeleteHomeDismissal(context.Context, string, string, string) 
 	panic("unused")
 }
 func (s stubStore) AddFavorite(context.Context, string, string) error { panic("unused") }
-func (s stubStore) AddFavoriteAt(context.Context, string, string, time.Time) error {
+func (s stubStore) AddFavoriteAt(context.Context, string, string, time.Time) (bool, error) {
 	panic("unused")
 }
 func (s stubStore) RemoveFavorite(context.Context, string, string) error {
