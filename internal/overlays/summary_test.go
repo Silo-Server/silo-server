@@ -250,6 +250,32 @@ func TestNormalizeHDR(t *testing.T) {
 				ColorTransfer:  "smpte2084",
 			}},
 		}, "DV HDR10"},
+		{"hdr10 via range type without color transfer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10"}},
+		}, "HDR10"},
+		{"hlg via range type without color transfer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "HLG"}},
+		}, "HLG"},
+		{"hdr10+ via flag", &models.MediaFile{
+			HDR: true,
+			VideoTracks: []models.VideoTrack{{
+				HDR10Plus:     true,
+				ColorTransfer: "smpte2084",
+			}},
+		}, "HDR10+"},
+		{"hdr10+ via range type", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10Plus"}},
+		}, "HDR10+"},
+		{"dv with hdr10+ base layer", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "DOVIWithELHDR10Plus"}},
+		}, "DV HDR10+"},
+		{"sdr range type stays sdr", &models.MediaFile{
+			VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}},
+		}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -286,6 +312,11 @@ func TestBestFileRangeTieBreaking(t *testing.T) {
 		HDR:         true,
 		VideoTracks: []models.VideoTrack{{DolbyVision: "Profile 5"}},
 	}
+	rangeTypeHDR10 := &models.MediaFile{
+		Resolution:  "2160p",
+		HDR:         true,
+		VideoTracks: []models.VideoTrack{{VideoRangeType: "HDR10"}},
+	}
 
 	cases := []struct {
 		name  string
@@ -299,6 +330,8 @@ func TestBestFileRangeTieBreaking(t *testing.T) {
 			[]*models.MediaFile{explicitHDR10, dv}, dv},
 		{"dv via profile number only still outranks generic hdr",
 			[]*models.MediaFile{genericHDR, dvProfileOnly}, dvProfileOnly},
+		{"range-type-only hdr10 outranks bare boolean",
+			[]*models.MediaFile{genericHDR, rangeTypeHDR10}, rangeTypeHDR10},
 		{"explicit hdr10 beats bare boolean at same resolution",
 			[]*models.MediaFile{genericHDR, explicitHDR10}, explicitHDR10},
 		{"bare boolean beats sdr at same resolution",

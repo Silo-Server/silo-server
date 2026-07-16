@@ -142,9 +142,22 @@ func normalizeHDR(file *models.MediaFile) string {
 	}
 }
 
-// hdrTypeFromTracks inspects video track color transfer to distinguish HDR variants.
+// hdrTypeFromTracks distinguishes HDR variants from the scanner-derived
+// video_range_type enum (HDR10, HDR10Plus, HLG, DOVIWith*) with color
+// transfer as a fallback, so rows without probed color metadata (e.g.
+// catalog-seeded imports) still resolve. Keep in sync with trackHdrType in
+// web/src/lib/videoRange.ts.
 func hdrTypeFromTracks(tracks []models.VideoTrack) string {
 	for _, track := range tracks {
+		rangeType := strings.TrimSpace(track.VideoRangeType)
+		switch {
+		case track.HDR10Plus || strings.Contains(rangeType, "HDR10Plus"):
+			return "HDR10+"
+		case rangeType == "HDR10" || strings.HasSuffix(rangeType, "WithHDR10"):
+			return "HDR10"
+		case rangeType == "HLG" || strings.HasSuffix(rangeType, "WithHLG"):
+			return "HLG"
+		}
 		ct := strings.ToLower(track.ColorTransfer)
 		switch {
 		case strings.Contains(ct, "smpte2084"):

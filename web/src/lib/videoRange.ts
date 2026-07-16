@@ -10,7 +10,6 @@ export interface VideoRangeTrack {
   dolby_vision?: string;
   dv_profile?: number;
   hdr10_plus?: boolean;
-  video_range?: string;
   video_range_type?: string;
   color_transfer?: string;
 }
