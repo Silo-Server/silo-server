@@ -28,6 +28,12 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if file.Duration <= 0 {
 		return true
 	}
+	// Legacy probes could turn malformed multi-day container timestamps into a
+	// few seconds by treating ffprobe's seconds as microseconds. Reprobe the
+	// narrow, physically implausible shape produced by that conversion.
+	if needsLegacyDurationRepair(file) {
+		return true
+	}
 	if strings.TrimSpace(file.Container) == "" {
 		return true
 	}
@@ -83,6 +89,9 @@ func (e *PlaybackProbeEnsurer) Ensure(ctx context.Context, file *models.MediaFil
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
+	if needsLegacyDurationRepair(file) && timeout < time.Minute {
+		timeout = time.Minute
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -94,4 +103,11 @@ func (e *PlaybackProbeEnsurer) Ensure(ctx context.Context, file *models.MediaFil
 	updated := *file
 	applyProbeData(&updated, probe, "local")
 	return e.fileRepo.Upsert(ctx, updated)
+}
+
+func needsLegacyDurationRepair(file *models.MediaFile) bool {
+	return file != nil &&
+		file.Duration > 0 && file.Duration <= 10 &&
+		file.FileSize >= 500*1024*1024 &&
+		len(file.VideoTracks) > 0
 }

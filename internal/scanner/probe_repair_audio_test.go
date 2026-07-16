@@ -52,3 +52,24 @@ func TestNeedsCriticalProbeRepair_UnprobedFileRepairs(t *testing.T) {
 		t.Fatal("an unprobed file must need probe repair")
 	}
 }
+
+func TestNeedsCriticalProbeRepair_ImplausiblyShortLargeVideoRepairs(t *testing.T) {
+	now := time.Now()
+	f := &models.MediaFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		FileSize:       1_200_000_000,
+		Duration:       4,
+		Container:      "mkv",
+		CodecAudio:     "aac",
+		AudioTracks:    []models.AudioTrack{{Language: "eng"}},
+		CodecVideo:     "h264",
+		Resolution:     "720p",
+		VideoTracks:    []models.VideoTrack{{Codec: "h264"}},
+		Chapters:       []models.MediaChapter{},
+	}
+
+	if !NeedsCriticalProbeRepair(f) {
+		t.Fatal("a large video claiming to be four seconds should need probe repair")
+	}
+}

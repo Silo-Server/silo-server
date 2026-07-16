@@ -1,9 +1,12 @@
 package scanner
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -50,6 +53,7 @@ type ffprobeFormat struct {
 	Filename       string            `json:"filename"`
 	FormatName     string            `json:"format_name"`
 	FormatLongName string            `json:"format_long_name"`
+	StartTime      string            `json:"start_time"`
 	Duration       string            `json:"duration"`
 	Size           string            `json:"size"`
 	BitRate        string            `json:"bit_rate"`
@@ -69,6 +73,8 @@ type ffprobeStream struct {
 	DisplayAspectRatio string              `json:"display_aspect_ratio"`
 	FieldOrder         string              `json:"field_order"`
 	AvgFrameRate       string              `json:"avg_frame_rate"`
+	StartTime          string              `json:"start_time"`
+	Duration           string              `json:"duration"`
 	BitRate            string              `json:"bit_rate"`
 	ColorTransfer      string              `json:"color_transfer"`
 	ColorPrimaries     string              `json:"color_primaries"`
@@ -131,7 +137,16 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
 	}
 
-	return convertProbeData(&raw), nil
+	probe := convertProbeData(&raw)
+	if probe.Duration == 0 {
+		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
+			if duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate); packetErr == nil {
+				probe.Duration = duration
+			}
+		}
+	}
+
+	return probe, nil
 }
 
 // FFprobePathFromFFmpeg derives the sibling ffprobe binary path from a configured ffmpeg path.
@@ -151,17 +166,8 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 		Container: detectContainer(raw.Format.FormatName),
 	}
 
-	// Parse duration from format (ffprobe reports seconds).
-	// Some containers (notably MKV) may produce duration in microseconds;
-	// detect and normalise to seconds when the value is unreasonably large.
-	if raw.Format.Duration != "" {
-		if dur, err := strconv.ParseFloat(raw.Format.Duration, 64); err == nil {
-			const maxReasonableSec = 100_000 // ~27.8 hours
-			if dur > maxReasonableSec {
-				dur = dur / 1_000_000 // microseconds → seconds
-			}
-			pd.Duration = int(dur)
-		}
+	if duration, ok := durationFromProbeMetadata(raw); ok {
+		pd.Duration = duration
 	}
 
 	// Parse bitrate from format (bps to kbps).
@@ -246,6 +252,181 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 	pd.FormatTags = normalizeFormatTags(raw.Format.Tags)
 
 	return pd
+}
+
+const maxReasonableMediaDurationSeconds = 100_000
+
+func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
+	if raw == nil {
+		return 0, false
+	}
+
+	formatDuration := parseFloat(raw.Format.Duration)
+	if !hasVideoStream(raw.Streams) && durationIsPositiveFinite(formatDuration) {
+		return roundedDuration(formatDuration), true
+	}
+	if durationIsReasonable(formatDuration) && !durationLooksImplausiblyShort(raw, formatDuration) {
+		return roundedDuration(formatDuration), true
+	}
+
+	for _, stream := range raw.Streams {
+		if stream.CodecType != "video" {
+			continue
+		}
+		streamDuration := parseFloat(stream.Duration)
+		if durationIsReasonable(streamDuration) && !durationLooksImplausiblyShort(raw, streamDuration) {
+			return roundedDuration(streamDuration), true
+		}
+		if duration := durationAfterStart(streamDuration, parseFloat(stream.StartTime)); duration > 0 {
+			return roundedDuration(duration), true
+		}
+	}
+
+	if duration := durationAfterStart(formatDuration, parseFloat(raw.Format.StartTime)); duration > 0 {
+		return roundedDuration(duration), true
+	}
+	return 0, false
+}
+
+func durationLooksImplausiblyShort(raw *ffprobeOutput, duration float64) bool {
+	const (
+		maxShortDurationSeconds = 10
+		minLargeVideoBytes      = 100 * 1024 * 1024
+	)
+	if raw == nil || duration <= 0 || duration > maxShortDurationSeconds {
+		return false
+	}
+	size, err := strconv.ParseInt(raw.Format.Size, 10, 64)
+	if err != nil || size < minLargeVideoBytes {
+		return false
+	}
+	for _, stream := range raw.Streams {
+		if stream.CodecType == "video" {
+			return true
+		}
+	}
+	return false
+}
+
+func durationAfterStart(end, start float64) float64 {
+	if start <= 0 || end <= start {
+		return 0
+	}
+	duration := end - start
+	if !durationIsReasonable(duration) {
+		return 0
+	}
+	return duration
+}
+
+func durationIsReasonable(duration float64) bool {
+	return durationIsPositiveFinite(duration) && duration <= maxReasonableMediaDurationSeconds
+}
+
+func durationIsPositiveFinite(duration float64) bool {
+	return duration > 0 && !math.IsNaN(duration) && !math.IsInf(duration, 0)
+}
+
+func roundedDuration(duration float64) int {
+	return max(1, int(math.Round(duration)))
+}
+
+func hasVideoStream(streams []ffprobeStream) bool {
+	_, ok := primaryVideoFrameRate(streams)
+	return ok
+}
+
+func primaryVideoFrameRate(streams []ffprobeStream) (string, bool) {
+	for _, stream := range streams {
+		if stream.CodecType == "video" {
+			return stream.AvgFrameRate, true
+		}
+	}
+	return "", false
+}
+
+func probeVideoPacketDuration(
+	ctx context.Context,
+	ffprobePath string,
+	filePath string,
+	frameRate string,
+) (int, error) {
+	cmd := exec.CommandContext(ctx, ffprobePath,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "packet=pts_time",
+		"-of", "csv=p=0",
+		filePath,
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return 0, fmt.Errorf("opening ffprobe packet output: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("starting ffprobe packet scan: %w", err)
+	}
+
+	duration := estimateVideoPacketDuration(stdout, frameRate)
+	if err := cmd.Wait(); err != nil {
+		return 0, fmt.Errorf("ffprobe packet scan failed for %s: %w", filePath, err)
+	}
+	return duration, nil
+}
+
+func estimateVideoPacketDuration(reader io.Reader, frameRate string) int {
+	scanner := bufio.NewScanner(reader)
+	packetCount := 0
+	minTimestamp := math.Inf(1)
+	maxTimestamp := math.Inf(-1)
+
+	for scanner.Scan() {
+		value := strings.TrimSpace(strings.SplitN(scanner.Text(), ",", 2)[0])
+		if value == "" {
+			continue
+		}
+		packetCount++
+		timestamp, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			continue
+		}
+		minTimestamp = min(minTimestamp, timestamp)
+		maxTimestamp = max(maxTimestamp, timestamp)
+	}
+
+	best := 0.0
+	if !math.IsInf(minTimestamp, 1) && !math.IsInf(maxTimestamp, -1) {
+		span := maxTimestamp - minTimestamp
+		if durationIsReasonable(span) {
+			best = span
+		}
+	}
+	if fps := parseFrameRate(frameRate); fps > 0 && packetCount > 0 {
+		frameDuration := float64(packetCount) / fps
+		if durationIsReasonable(frameDuration) && frameDuration > best {
+			best = frameDuration
+		}
+	}
+	if best <= 0 {
+		return 0
+	}
+	return roundedDuration(best)
+}
+
+func parseFrameRate(raw string) float64 {
+	parts := strings.SplitN(raw, "/", 2)
+	if len(parts) != 2 {
+		fps, _ := strconv.ParseFloat(raw, 64)
+		return fps
+	}
+	numerator, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0
+	}
+	denominator, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil || denominator == 0 {
+		return 0
+	}
+	return numerator / denominator
 }
 
 func parseNumeric(raw string) int {
