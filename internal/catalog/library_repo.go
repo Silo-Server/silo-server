@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 )
 
 // LibraryItemRepository provides CRUD operations for the media_item_libraries
@@ -544,12 +545,8 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 // scanner's root matching, so a sibling root that merely shares a string
 // prefix (/mnt/movies2 vs /mnt/movies) is never protected by accident.
 func excludeOrphansUnderProtectedPrefixes(ctx context.Context, tx pgx.Tx, orphanIDs []string, folderID int, prefixes []string) ([]string, error) {
-	conds := make([]string, 0, len(prefixes))
-	args := []any{orphanIDs, folderID}
-	for _, prefix := range prefixes {
-		args = append(args, prefix, pathPrefixLike(prefix))
-		conds = append(conds, fmt.Sprintf("(mf.file_path = $%d OR mf.file_path LIKE $%d ESCAPE '\\')", len(args)-1, len(args)))
-	}
+	conds, condArgs := pathscope.CoverageClauses("mf.file_path", prefixes, 3)
+	args := append([]any{orphanIDs, folderID}, condArgs...)
 
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT cid FROM unnest($1::text[]) AS cid

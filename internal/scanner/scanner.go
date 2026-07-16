@@ -894,7 +894,7 @@ func (s *Scanner) scanPaths(
 	// healthy subtree must not hard-delete rows an unreachable sibling root
 	// left marked missing: probe the configured library roots and exempt any
 	// that are currently unreachable.
-	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, cleanScanRoots(folder.Paths))
+	unreachableRoots := unreachableConfiguredRoots(ctx, folder)
 	if s.emptyTrashAfterScan {
 		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, unreachableRoots)
 		if err != nil {
@@ -1231,6 +1231,13 @@ func probeUnreachableRoots(ctx context.Context, folderID int, roots []string) []
 		}
 	}
 	return unreachable
+}
+
+// unreachableConfiguredRoots probes the folder's configured root paths
+// (uncompacted, so a nested child mount is probed independently of its
+// reachable parent) and returns those currently unreachable.
+func unreachableConfiguredRoots(ctx context.Context, folder *models.MediaFolder) []string {
+	return probeUnreachableRoots(ctx, folder.ID, cleanScanRoots(folder.Paths))
 }
 
 func deadRootWarningMessage(totalRoots int, unreachableRoots []string) string {
@@ -1673,6 +1680,37 @@ func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int,
 	return s.libraryRepo.ReconcileFolderMembership(ctx, folderID, unreachableRoots)
 }
 
+// sweepMissingAndReconcile finishes an audio/ebook/podcast missing-file pass:
+// it empties trash (when enabled), reconciles library memberships, and
+// best-effort deletes orphaned S3 image dirs. The folder-wide sweep and
+// orphan purge must not destroy rows/items whose files sit under a currently
+// unreachable library root (see the video scanner's dead-root protection):
+// unreachable is not removed. Counts are returned for the caller's
+// flavor-specific logging; trashed is meaningful even when err is non-nil
+// (the sweep may succeed before reconciliation fails).
+func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.MediaFolder) (trashed, removedMemberships, deletedItems int, err error) {
+	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))
+	if s.emptyTrashAfterScan {
+		trashed, err = s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, unreachableRoots)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
+		}
+	}
+
+	var orphanedImageDirs []string
+	removedMemberships, deletedItems, orphanedImageDirs, err = s.reconcileLibraryMemberships(ctx, folder.ID, unreachableRoots)
+	if err != nil {
+		return trashed, 0, 0, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
+	}
+	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
+		bucket := s.s3Client.Bucket()
+		for _, dir := range orphanedImageDirs {
+			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
+		}
+	}
+	return trashed, removedMemberships, deletedItems, nil
+}
+
 func collectStaleRemovedPathFileIDs(existingFiles []*scanStateFile, seenPaths map[string]bool, roots []string) []int {
 	ids := make([]int, 0)
 	for _, existing := range existingFiles {
@@ -1771,8 +1809,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		if err := s.syncPresentLibraryState(ctx, folder.ID); err != nil {
 			return fmt.Errorf("syncing present library state for extra file: %w", err)
 		}
-		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID,
-			probeUnreachableRoots(ctx, folder.ID, cleanScanRoots(folder.Paths))); err != nil {
+		if _, _, _, err := s.reconcileLibraryMemberships(ctx, folder.ID, unreachableConfiguredRoots(ctx, folder)); err != nil {
 			return fmt.Errorf("reconciling library membership after extra file scan: %w", err)
 		}
 		return nil
@@ -1788,8 +1825,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 			return clearErr
 		}
 		if cleared > 0 {
-			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID,
-				probeUnreachableRoots(ctx, folder.ID, cleanScanRoots(folder.Paths))); reconcileErr != nil {
+			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID, unreachableConfiguredRoots(ctx, folder)); reconcileErr != nil {
 				return fmt.Errorf("reconciling folder membership after clearing legacy links: %w", reconcileErr)
 			}
 		}

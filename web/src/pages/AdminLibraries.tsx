@@ -34,15 +34,6 @@ import {
 } from "@/hooks/queries/admin/libraries";
 import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
-
-const DEAD_ROOT_WARNING_TEXT =
-  "One or more library roots are unreachable. Their files are hidden, but nothing will be deleted until the root is back.";
-const DEAD_ROOT_WARNING_HINT =
-  "Run another scan after storage returns, or use Check Mount to verify connectivity.";
-const EMPTY_ROOT_WARNING_TEXT =
-  "Scan found 0 media files for this library. Cleanup was paused to avoid accidental deletion.";
-const EMPTY_ROOT_WARNING_HINT =
-  "Run another scan after storage returns, or confirm deletion before the next empty-root scan.";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
 import { Button } from "@/components/ui/button";
@@ -131,6 +122,15 @@ import { formatDateTime } from "@/lib/datetime";
 // Keep toast lifetime and delayed state cleanup coordinated so visible feedback
 // disappears before state is cleared.
 const MOUNT_CHECK_FEEDBACK_MS = 5_000;
+
+const DEAD_ROOT_WARNING_TEXT =
+  "One or more library roots are unreachable. Their files are hidden, but nothing will be deleted until the root is back.";
+const DEAD_ROOT_WARNING_HINT =
+  "Run another scan after storage returns, or use Check Mount to verify connectivity.";
+const EMPTY_ROOT_WARNING_TEXT =
+  "Scan found 0 media files for this library. Cleanup was paused to avoid accidental deletion.";
+const EMPTY_ROOT_WARNING_HINT =
+  "Run another scan after storage returns, or confirm deletion before the next empty-root scan.";
 
 export default function AdminLibraries() {
   useEventChannel("scans");

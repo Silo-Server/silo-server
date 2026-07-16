@@ -3455,18 +3455,7 @@ func pathPrefixLike(pathPrefix string) string {
 }
 
 // rootCoverageClauses builds one SQL predicate per root matching file_path
-// rows that live at or under that root, using the exact-match + escaped
-// prefix-LIKE shape shared with ListIDsOutsideRoots (a root never matches a
-// sibling that merely shares a string prefix, e.g. /mnt/movies2 under
-// /mnt/movies). Placeholder numbering starts at firstArg; the returned args
-// bind pairwise (root, prefix pattern) in clause order.
+// rows that live at or under that root; see pathscope.CoverageClauses.
 func rootCoverageClauses(roots []string, firstArg int) ([]string, []any) {
-	clauses := make([]string, 0, len(roots))
-	args := make([]any, 0, len(roots)*2)
-	for i, root := range roots {
-		pathArg := firstArg + i*2
-		clauses = append(clauses, fmt.Sprintf("(file_path = $%d OR file_path LIKE $%d ESCAPE '\\')", pathArg, pathArg+1))
-		args = append(args, root, pathPrefixLike(root))
-	}
-	return clauses, args
+	return pathscope.CoverageClauses("file_path", roots, firstArg)
 }

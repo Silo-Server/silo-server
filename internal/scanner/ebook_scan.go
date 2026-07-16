@@ -375,40 +375,17 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		}
 	}
 
-	// The folder-wide sweep and orphan purge must not destroy rows/items whose
-	// files sit under a currently unreachable library root (see the video
-	// scanner's dead-root protection): unreachable is not removed.
-	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, compactScanRoots(folder.Paths))
-	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, unreachableRoots)
-		if err != nil {
-			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
-		}
-		if trashed > 0 {
-			slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
-		}
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder)
+	if trashed > 0 {
+		slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
-
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, unreachableRoots)
 	if err != nil {
-		return fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
+		return err
 	}
-
-	// Best-effort S3 image cleanup for orphaned items.
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
-		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
-		}
-	}
-
 	if missing > 0 || removedMemberships > 0 || deletedItems > 0 {
 		slog.InfoContext(ctx, "ebook scan: reconciled missing files", "component", "scanner",
-			"folder_id", folder.ID,
-			"missing", missing,
-			"memberships_removed", removedMemberships,
-			"items_deleted", deletedItems,
-		)
+			"folder_id", folder.ID, "missing", missing,
+			"memberships_removed", removedMemberships, "items_deleted", deletedItems)
 	}
 	return nil
 }

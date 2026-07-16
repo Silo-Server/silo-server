@@ -21,7 +21,6 @@ const (
 
 // Result describes the outcome of probing a single root path.
 type Result struct {
-	Path         string
 	Reachable    bool
 	ErrorCode    string // empty when Reachable
 	ErrorMessage string // empty when Reachable
@@ -29,7 +28,7 @@ type Result struct {
 
 // Probe checks that path exists, is a directory, and can be listed.
 func Probe(path string) Result {
-	res := Result{Path: path, Reachable: true}
+	res := Result{Reachable: true}
 	info, err := os.Stat(path)
 	switch {
 	case err != nil:
