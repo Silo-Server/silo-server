@@ -193,6 +193,29 @@ describe("AdminLibraries", () => {
     );
   });
 
+  it("offers confirmed cleanup for a suspect-empty dead-root warning", () => {
+    mocks.useAdminLibraries.mockReturnValue({
+      data: [
+        {
+          id: 2,
+          name: "Audiobooks",
+          paths: ["/media/audiobooks"],
+          type: "audiobooks",
+          enabled: true,
+          last_scanned_at: null,
+          scan_warning_code: "dead_root",
+          scan_warning_at: null,
+          scan_warning_message: "Root is reachable but empty",
+        },
+      ],
+      isLoading: false,
+    });
+
+    const markup = renderPage();
+
+    expect(markup).toContain('title="Confirm cleanup for missing or empty roots"');
+  });
+
   it("renders the collapsed Ambiguous Roots section with a populated count", () => {
     mocks.useLibraryRoots.mockReturnValue({
       data: [

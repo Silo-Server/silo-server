@@ -898,6 +898,12 @@ func (s *Scanner) scanPaths(
 	if err != nil {
 		return nil, err
 	}
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	if err != nil {
+		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
+	}
+	result.MembershipsRemoved = removedMemberships
+	result.ItemsDeleted = deletedItems
 	if s.emptyTrashAfterScan {
 		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, protectedRoots)
 		if err != nil {
@@ -921,13 +927,6 @@ func (s *Scanner) scanPaths(
 		return nil, fmt.Errorf("deleting stale files for folder %d: %w", folder.ID, err)
 	}
 	result.FilesDeleted += deletedFiles
-
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
-	if err != nil {
-		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
-	}
-	result.MembershipsRemoved = removedMemberships
-	result.ItemsDeleted = deletedItems
 
 	if s.seriesQueueSyncer != nil {
 		if allowEmptyRootGuard {
@@ -1020,7 +1019,27 @@ func (s *Scanner) scanFolderByRoots(
 	// against these roots further down. Probe every CONFIGURED path, not the
 	// compacted traversal roots: a nested child mount is dropped by compaction
 	// but can die independently of its reachable parent.
-	unreachableRoots := probeUnreachableRoots(ctx, folder.ID, configuredRoots)
+	configuredProbes := rootcheck.ProbeManyWithTimeout(ctx, configuredRoots, rootcheck.DefaultProbeTimeout)
+	unreachableRoots := make([]string, 0)
+	suspectRoots := make([]string, 0)
+	for i, root := range configuredRoots {
+		probe := configuredProbes[i]
+		if !probe.Reachable {
+			logUnreachableRoot(ctx, folder.ID, root, probe)
+			unreachableRoots = append(unreachableRoots, root)
+			continue
+		}
+		if !probe.Empty {
+			continue
+		}
+		existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
+		if err != nil {
+			return nil, fmt.Errorf("listing files under empty root %q: %w", root, err)
+		}
+		if len(existing) > 0 {
+			suspectRoots = append(suspectRoots, root)
+		}
+	}
 	result.UnreachableRoots = unreachableRoots
 	unreachableSet := make(map[string]bool, len(unreachableRoots))
 	for _, root := range unreachableRoots {
@@ -1071,6 +1090,26 @@ func (s *Scanner) scanFolderByRoots(
 		pendingEmptyScopes = append(pendingEmptyScopes, scope)
 	}
 
+	// Re-probe empty scopes after walking. A root can disconnect after the
+	// initial check; promote that transition into the protected set before any
+	// empty-root guard or reconciliation decision is made.
+	for _, pending := range pendingEmptyScopes {
+		root := firstScope(pending.reconcileRoots)
+		if root == "" || unreachableSet[root] || len(pending.existingFiles) == 0 {
+			continue
+		}
+		probe := rootcheck.ProbeWithTimeout(ctx, root, rootcheck.DefaultProbeTimeout)
+		if !probe.Reachable {
+			logUnreachableRoot(ctx, folder.ID, root, probe)
+			unreachableSet[root] = true
+			unreachableRoots = appendUniquePath(unreachableRoots, root)
+			result.UnreachableRoots = unreachableRoots
+			suspectRoots = removePath(suspectRoots, root)
+		} else if probe.Empty {
+			suspectRoots = appendUniquePath(suspectRoots, root)
+		}
+	}
+
 	// When EVERY configured root is unreachable this is an outage, not an
 	// intentionally emptied library: skip the empty-root confirm flow (and do
 	// not consume the operator's one-time cleanup allowance), fall through so
@@ -1109,16 +1148,6 @@ func (s *Scanner) scanFolderByRoots(
 	// allowance was already consumed above; the mixed case (other roots
 	// healthy) consumes it here so a confirmed single-root cleanout still
 	// completes.
-	suspectRoots := make([]string, 0, len(pendingEmptyScopes))
-	for _, pending := range pendingEmptyScopes {
-		root := firstScope(pending.reconcileRoots)
-		if unreachableSet[root] || len(pending.existingFiles) == 0 {
-			continue
-		}
-		if probe := rootcheck.ProbeWithTimeout(ctx, root, rootcheck.DefaultProbeTimeout); probe.Reachable && probe.Empty {
-			suspectRoots = append(suspectRoots, root)
-		}
-	}
 	if seenAnyFiles && len(suspectRoots) > 0 {
 		var err error
 		allowEmptyCleanup, err = s.folderRepo.ConsumeEmptyCleanupAllowance(ctx, folder.ID)
@@ -1131,12 +1160,13 @@ func (s *Scanner) scanFolderByRoots(
 	}
 	result.SuspectEmptyRoots = suspectRoots
 
+	protectedScanRoots := append(append([]string(nil), unreachableRoots...), suspectRoots...)
 	for _, pending := range pendingEmptyScopes {
 		beforeErrors := pending.result.Errors
 		// forceDeleteAll only ever fires for confirmed cleanup, and even then
 		// rows under a probe-dead root must survive: an outage is not a
 		// confirmation to erase that root's catalog.
-		if err := s.applyScopedScan(ctx, folder, pending, allowEmptyCleanup, unreachableRoots); err != nil {
+		if err := s.applyScopedScan(ctx, folder, pending, allowEmptyCleanup, protectedScanRoots); err != nil {
 			return nil, err
 		}
 		mergeCleanupResult(result, pending.result, beforeErrors)
@@ -1160,6 +1190,12 @@ func (s *Scanner) scanFolderByRoots(
 		protectedRoots = make([]string, 0, len(unreachableRoots)+len(suspectRoots))
 		protectedRoots = append(append(protectedRoots, unreachableRoots...), suspectRoots...)
 	}
+	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	if err != nil {
+		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
+	}
+	result.MembershipsRemoved = removedMemberships
+	result.ItemsDeleted = deletedItems
 	if s.emptyTrashAfterScan {
 		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, protectedRoots)
 		if err != nil {
@@ -1180,13 +1216,6 @@ func (s *Scanner) scanFolderByRoots(
 		return nil, fmt.Errorf("deleting stale files outside configured roots for folder %d: %w", folder.ID, err)
 	}
 	result.FilesDeleted += deletedOutsideRoots
-
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
-	if err != nil {
-		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
-	}
-	result.MembershipsRemoved = removedMemberships
-	result.ItemsDeleted = deletedItems
 
 	if s.seriesQueueSyncer != nil {
 		reportProgress(ctx, ProgressUpdate{
@@ -1252,18 +1281,41 @@ func (s *Scanner) scanFolderByRoots(
 // into the protected "unreachable" path instead of stalling the scanner.
 func probeUnreachableRoots(ctx context.Context, folderID int, roots []string) []string {
 	var unreachable []string
-	for _, root := range roots {
-		if probe := rootcheck.ProbeWithTimeout(ctx, root, rootcheck.DefaultProbeTimeout); !probe.Reachable {
-			slog.WarnContext(ctx, "scanner: library root unreachable", "component", "scanner",
-				"folder_id", folderID,
-				"root", root,
-				"error_code", probe.ErrorCode,
-				"error", probe.ErrorMessage,
-			)
+	probes := rootcheck.ProbeManyWithTimeout(ctx, roots, rootcheck.DefaultProbeTimeout)
+	for i, root := range roots {
+		if probe := probes[i]; !probe.Reachable {
+			logUnreachableRoot(ctx, folderID, root, probe)
 			unreachable = append(unreachable, root)
 		}
 	}
 	return unreachable
+}
+
+func logUnreachableRoot(ctx context.Context, folderID int, root string, probe rootcheck.Result) {
+	slog.WarnContext(ctx, "scanner: library root unreachable", "component", "scanner",
+		"folder_id", folderID,
+		"root", root,
+		"error_code", probe.ErrorCode,
+		"error", probe.ErrorMessage,
+	)
+}
+
+func appendUniquePath(paths []string, path string) []string {
+	for _, existing := range paths {
+		if existing == path {
+			return paths
+		}
+	}
+	return append(paths, path)
+}
+
+func removePath(paths []string, path string) []string {
+	for i, existing := range paths {
+		if existing == path {
+			return append(paths[:i], paths[i+1:]...)
+		}
+	}
+	return paths
 }
 
 // suspectEmptyRoots returns configured roots that probe as reachable but
@@ -1280,11 +1332,12 @@ func (s *Scanner) suspectEmptyRoots(ctx context.Context, folderID int, configure
 		unreachableSet[root] = true
 	}
 	emptyRoots := make([]string, 0, len(configuredRoots))
-	for _, root := range configuredRoots {
+	probes := rootcheck.ProbeManyWithTimeout(ctx, configuredRoots, rootcheck.DefaultProbeTimeout)
+	for i, root := range configuredRoots {
 		if unreachableSet[root] {
 			continue
 		}
-		if probe := rootcheck.ProbeWithTimeout(ctx, root, rootcheck.DefaultProbeTimeout); probe.Reachable && probe.Empty {
+		if probe := probes[i]; probe.Reachable && probe.Empty {
 			emptyRoots = append(emptyRoots, root)
 		}
 	}
@@ -1798,7 +1851,7 @@ func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int,
 }
 
 // sweepMissingAndReconcile finishes an audio/ebook/podcast missing-file pass:
-// it empties trash (when enabled), reconciles library memberships, and
+// it reconciles library memberships, empties trash (when enabled), and
 // best-effort deletes orphaned S3 image dirs. The folder-wide sweep and
 // orphan purge must not destroy rows/items whose files sit under a currently
 // unreachable or suspect-empty library root (see the video scanner's
@@ -1807,9 +1860,7 @@ func (s *Scanner) reconcileLibraryMemberships(ctx context.Context, folderID int,
 // reloaded and probed uncompacted — a nested child mount can die
 // independently of its reachable parent. confirmedCleanup skips the
 // suspect-empty exemption for a scan the operator explicitly confirmed.
-// Counts are returned for the caller's flavor-specific logging; trashed is
-// meaningful even when err is non-nil (the sweep may succeed before
-// reconciliation fails).
+// Counts are returned for the caller's flavor-specific logging.
 func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.MediaFolder, confirmedCleanup bool) (trashed, removedMemberships, deletedItems int, err error) {
 	configuredPaths, err := s.configuredFolderPaths(ctx, folder)
 	if err != nil {
@@ -1824,17 +1875,16 @@ func (s *Scanner) sweepMissingAndReconcile(ctx context.Context, folder *models.M
 		}
 		protectedRoots = append(protectedRoots, suspectRoots...)
 	}
+	var orphanedImageDirs []string
+	removedMemberships, deletedItems, orphanedImageDirs, err = s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
+	}
 	if s.emptyTrashAfterScan {
 		trashed, err = s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace, protectedRoots)
 		if err != nil {
 			return 0, 0, 0, fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
 		}
-	}
-
-	var orphanedImageDirs []string
-	removedMemberships, deletedItems, orphanedImageDirs, err = s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
-	if err != nil {
-		return trashed, 0, 0, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
 	}
 	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
 		bucket := s.s3Client.Bucket()

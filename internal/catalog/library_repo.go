@@ -483,12 +483,20 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 
 	deletedItems := 0
 	var orphanedImageDirs []string
-	if len(removedContentIDs) > 0 {
-		// Find items that will become orphaned (no remaining library memberships).
-		orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
-		if err != nil {
-			return 0, 0, nil, err
-		}
+	// Find both newly orphaned items and items preserved by an earlier
+	// protected-root pass. The latter no longer have a membership to return from
+	// the DELETE above, but their surviving media_files row still ties them to
+	// this folder so they can be reconsidered after the root recovers.
+	orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
+	if len(orphanIDs) > 0 {
 
 		// Exempt orphans whose files sit under an unreachable root: the files
 		// still exist, the root is just offline. See the doc comment above.
@@ -537,6 +545,43 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	}
 
 	return len(removedContentIDs), deletedItems, orphanedImageDirs, nil
+}
+
+func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT mf.content_id
+		FROM media_files mf
+		WHERE mf.media_folder_id = $1
+		  AND mf.content_id IS NOT NULL
+		  AND mf.content_id <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mf.content_id
+		  )
+	`, folderID)
+	if err != nil {
+		return nil, fmt.Errorf("finding previously protected folder orphans: %w", err)
+	}
+	defer rows.Close()
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting previously protected folder orphans: %w", err)
+	}
+	return ids, nil
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]struct{}, len(values)+len(additions))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, value := range additions {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
 }
 
 // excludeOrphansUnderProtectedPrefixes returns the subset of orphanIDs that

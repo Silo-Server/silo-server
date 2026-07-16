@@ -2882,8 +2882,10 @@ export interface LibraryMountCheckRoot {
     | "not_directory"
     | "stat_failed"
     | "read_failed"
+    | "probe_timeout"
     | null;
   error_message: string | null;
+  suspect_empty: boolean;
 }
 
 export interface LibraryMountCheckResponse {

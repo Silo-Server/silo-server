@@ -112,4 +112,22 @@ func TestReconcileFolderMembershipProtectsUnreachableRoots(t *testing.T) {
 	if exists {
 		t.Fatal("memberships remain; items with only missing files must be hidden")
 	}
+
+	// Once the root is reachable again, reconciliation must revisit the item
+	// even though its membership was removed during the protected pass.
+	removed, deletedItems, _, err = repo.ReconcileFolderMembership(ctx, folderID, nil)
+	if err != nil {
+		t.Fatalf("ReconcileFolderMembership after recovery: %v", err)
+	}
+	if removed != 0 || deletedItems != 1 {
+		t.Fatalf("recovery reconciliation removed/deleted = %d/%d, want 0/1", removed, deletedItems)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM media_items WHERE content_id = $1)`, protectedItem,
+	).Scan(&exists); err != nil {
+		t.Fatalf("check recovered orphan: %v", err)
+	}
+	if exists {
+		t.Fatal("previously protected orphan survived after its root recovered")
+	}
 }

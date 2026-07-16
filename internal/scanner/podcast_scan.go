@@ -84,7 +84,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 	if attempted > 0 && succeeded == 0 && len(failures) > 0 {
 		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
 	}
-	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths, len(seenPaths) > 0); err != nil {
+	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths); err != nil {
 		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
 	}
 	return nil
@@ -217,37 +217,19 @@ func applyPodcastShowMetadata(item *models.MediaItem, show *parsedPodcastShow) b
 	return changed
 }
 
-func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, sawFiles bool) error {
+func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
 
-	confirmedCleanup := false
-	if !sawFiles {
-		existingCount := 0
-		for _, root := range roots {
-			existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
-			if err != nil {
-				return fmt.Errorf("listing existing podcast files for %q: %w", root, err)
-			}
-			existingCount += len(existing)
-		}
-		if existingCount > 0 {
-			var guard ebookCleanupGuardRepo
-			if s.folderRepo != nil {
-				guard = s.folderRepo
-			}
-			allowed, err := ebookEmptyCleanupAllowed(ctx, guard, folder.ID, true)
-			if err != nil {
-				return err
-			}
-			if !allowed {
-				slog.WarnContext(ctx, "podcast scan: walk saw zero files but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed", "component", "scanner",
-					"folder_id", folder.ID, "existing_files", existingCount)
-				return nil
-			}
-			confirmedCleanup = true
-		}
+	confirmedCleanup, blockAll, err := s.emptyCleanupDecision(
+		ctx, folder, roots, seenPaths, true, "podcast",
+	)
+	if err != nil {
+		return err
+	}
+	if blockAll {
+		return nil
 	}
 
 	now := time.Now().UTC()

@@ -1280,8 +1280,9 @@ func (h *LibraryHandler) checkLibraryMount(ctx context.Context, folder *models.M
 
 	unreachable := 0
 	emptyPaths := make([]string, 0, len(folder.Paths))
-	for _, path := range folder.Paths {
-		probe := rootcheck.ProbeWithTimeout(ctx, path, rootcheck.DefaultProbeTimeout)
+	probes := rootcheck.ProbeManyWithTimeout(ctx, folder.Paths, rootcheck.DefaultProbeTimeout)
+	for i, path := range folder.Paths {
+		probe := probes[i]
 		root := libraryMountCheckRootResponse{
 			Path:      path,
 			Reachable: probe.Reachable,

@@ -449,6 +449,68 @@ func TestScanFolderNestedDeadChildRootProtection(t *testing.T) {
 	}
 }
 
+func TestScanFolderNestedSuspectEmptyChildRootProtection(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Nested Suspect Root Scan Test")
+
+	base := t.TempDir()
+	parent := filepath.Join(base, "media")
+	child := filepath.Join(parent, "drive")
+	parentFile := filepath.Join(parent, "Alpha (2020)", "Alpha (2020).mkv")
+	childFile := filepath.Join(child, "Beta (2021)", "Beta (2021).mkv")
+	for _, path := range []string{parentFile, childFile} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	folder := &models.MediaFolder{
+		ID: folderID, Paths: []string{parent, child}, Type: "movies",
+		Name: "Nested Suspect Root Scan Test", Enabled: true,
+	}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan 1: %v", err)
+	}
+
+	var childID int
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, childFile,
+	).Scan(&childID); err != nil {
+		t.Fatalf("child row after scan 1: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Dir(childFile)); err != nil {
+		t.Fatalf("empty child mountpoint: %v", err)
+	}
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("restore empty child mountpoint: %v", err)
+	}
+
+	result, err := scanner.ScanFolder(ctx, folder)
+	if err != nil {
+		t.Fatalf("scan 2: %v", err)
+	}
+	if len(result.SuspectEmptyRoots) != 1 || result.SuspectEmptyRoots[0] != child {
+		t.Fatalf("SuspectEmptyRoots = %v, want [%s]", result.SuspectEmptyRoots, child)
+	}
+	var gotID int
+	var missing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT id, missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, childFile,
+	).Scan(&gotID, &missing); err != nil {
+		t.Fatalf("child row after scan 2 (was it deleted?): %v", err)
+	}
+	if gotID != childID || missing == nil {
+		t.Fatalf("child row id/missing = %d/%v, want %d/non-nil", gotID, missing, childID)
+	}
+}
+
 // TestScanFolderAllRootsDeadOutage covers the single-drive-library outage:
 // when EVERY configured root is unreachable, the scan must bypass the
 // empty-root confirm flow (without consuming the operator's one-time cleanup

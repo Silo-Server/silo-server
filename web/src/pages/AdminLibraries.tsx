@@ -314,7 +314,7 @@ export default function AdminLibraries() {
           if (!open) setConfirmEmptyRootLib(null);
         }}
         title="Confirm empty root cleanup"
-        description={`If the next scan still finds 0 media files for "${confirmEmptyRootLib?.name}", remove the library items?`}
+        description={`On the next scan of "${confirmEmptyRootLib?.name}", remove items from roots that are reachable but still empty? Unreachable roots remain protected.`}
         confirmLabel="Confirm"
         variant="destructive"
         onConfirm={() => {
@@ -580,12 +580,13 @@ export default function AdminLibraries() {
                             >
                               <Trash2 className="h-3 w-3" aria-hidden="true" />
                             </Button>
-                            {lib.scan_warning_code === "empty_root" ? (
+                            {lib.scan_warning_code === "empty_root" ||
+                            lib.scan_warning_code === "dead_root" ? (
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 className="text-destructive h-7 w-7"
-                                title="Confirm deletion for the next empty-root scan"
+                                title="Confirm cleanup for missing or empty roots"
                                 disabled={
                                   confirmEmptyRootCleanupMutation.isPending &&
                                   confirmEmptyRootCleanupMutation.variables === lib.id
@@ -645,7 +646,7 @@ export default function AdminLibraries() {
                                   ? DEAD_ROOT_WARNING_HINT
                                   : EMPTY_ROOT_WARNING_HINT)}
                             </div>
-                            <div>
+                            <div className="flex gap-2">
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -662,6 +663,21 @@ export default function AdminLibraries() {
                                 />
                                 Check Mount
                               </Button>
+                              {lib.scan_warning_code === "dead_root" ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  title="Confirm cleanup for missing or empty roots"
+                                  disabled={
+                                    confirmEmptyRootCleanupMutation.isPending &&
+                                    confirmEmptyRootCleanupMutation.variables === lib.id
+                                  }
+                                  onClick={() => handleConfirmEmptyRootCleanup(lib)}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Confirm Cleanup
+                                </Button>
+                              ) : null}
                             </div>
                           </div>
                         </TableCell>
