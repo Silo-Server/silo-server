@@ -652,6 +652,7 @@ func (s *Service) ListAdminSources(ctx context.Context) ([]Source, error) {
 }
 
 func (s *Service) CreateSource(ctx context.Context, input CreateSourceInput) (*Source, error) {
+	input.BaseURL = normalizeBaseURL(input.BaseURL)
 	if input.Name == "" || input.BaseURL == "" {
 		return nil, fmt.Errorf("name and base_url are required")
 	}
@@ -660,7 +661,6 @@ func (s *Service) CreateSource(ctx context.Context, input CreateSourceInput) (*S
 	default:
 		return nil, fmt.Errorf("source_type must be emby, jellyfin, or plex")
 	}
-	input.BaseURL = normalizeBaseURL(input.BaseURL)
 	return s.repo.CreateSource(ctx, input)
 }
 

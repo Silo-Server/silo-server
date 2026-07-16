@@ -70,6 +70,19 @@ func TestPlexAdminProviderFetch(t *testing.T) {
 
 		case "/api":
 			w.Header().Set("Content-Type", "application/json")
+			var payload struct {
+				Variables struct {
+					User struct {
+						ID string `json:"id"`
+					} `json:"user"`
+				} `json:"variables"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode graphql body: %v", err)
+			}
+			if payload.Variables.User.ID != "resolved-friend-uuid" {
+				t.Fatalf("expected resolved friend UUID, got %q", payload.Variables.User.ID)
+			}
 			resp := map[string]any{
 				"data": map[string]any{
 					"userV2": map[string]any{

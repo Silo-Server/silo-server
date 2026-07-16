@@ -548,17 +548,6 @@ func (c *PlexClient) FetchFriendWatchlist(ctx context.Context, adminToken, frien
 		gqlReq.Header.Set("Content-Type", "application/json")
 		gqlReq.Header.Set("X-Plex-Token", adminToken)
 
-		resp, err := c.httpClient.Do(gqlReq)
-		if err != nil {
-			return nil, nil, fmt.Errorf("sending GraphQL request: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
-			return nil, nil, fmt.Errorf("GraphQL query returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-		}
-
 		var gqlResp struct {
 			Errors []struct {
 				Message string `json:"message"`
@@ -581,8 +570,8 @@ func (c *PlexClient) FetchFriendWatchlist(ctx context.Context, adminToken, frien
 			} `json:"data"`
 		}
 
-		if err := json.NewDecoder(resp.Body).Decode(&gqlResp); err != nil {
-			return nil, nil, fmt.Errorf("decoding GraphQL response: %w", err)
+		if err := c.doJSON(gqlReq, &gqlResp); err != nil {
+			return nil, nil, fmt.Errorf("sending GraphQL request: %w", err)
 		}
 
 		if len(gqlResp.Errors) > 0 {
@@ -615,10 +604,14 @@ func (c *PlexClient) FetchFriendWatchlist(ctx context.Context, adminToken, frien
 			})
 		}
 
-		if !gqlResp.Data.UserV2.Watchlist.PageInfo.HasNextPage || len(gqlResp.Data.UserV2.Watchlist.Nodes) == 0 {
+		pageInfo := gqlResp.Data.UserV2.Watchlist.PageInfo
+		if !pageInfo.HasNextPage || len(gqlResp.Data.UserV2.Watchlist.Nodes) == 0 {
 			break
 		}
-		cursor := gqlResp.Data.UserV2.Watchlist.PageInfo.EndCursor
+		cursor := strings.TrimSpace(pageInfo.EndCursor)
+		if cursor == "" || (afterCursor != nil && cursor == *afterCursor) {
+			break
+		}
 		afterCursor = &cursor
 	}
 

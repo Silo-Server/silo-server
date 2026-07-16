@@ -672,8 +672,13 @@ func (h *PluginHandler) HandleInstallLocal(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if _, err := os.Stat(req.Path); err != nil {
+	info, err := os.Stat(req.Path)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("file not found on server: %s", err.Error()))
+		return
+	}
+	if info.IsDir() {
+		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("path is a directory on server: %s", req.Path))
 		return
 	}
 

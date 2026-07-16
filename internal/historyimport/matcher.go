@@ -196,7 +196,7 @@ func (m *Matcher) matchMedia(ctx context.Context, kind, tmdbID, imdbID, tvdbID, 
 	if len(rows) > 1 {
 		return nil, fmt.Sprintf("ambiguous exact title/year match for %s (%d rows)", describeTitleYear(cleanedTitle, cleanedYear), len(rows)), nil
 	}
-	attempts = append(attempts, fmt.Sprintf("no exact title/year match for %s", describeTitleYear(title, year)))
+	attempts = append(attempts, fmt.Sprintf("no exact title/year match for %s", describeTitleYear(cleanedTitle, cleanedYear)))
 	return nil, strings.Join(attempts, "; "), nil
 }
 

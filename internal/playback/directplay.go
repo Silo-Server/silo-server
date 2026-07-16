@@ -52,16 +52,15 @@ func MimeFromExtension(name string) string {
 // Range requests, conditional requests (If-Modified-Since, If-None-Match),
 // and Content-Type detection.
 func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) error {
-	if strings.ToLower(filepath.Ext(filePath)) == ".strm" {
-		content, err := os.ReadFile(filePath)
+	if strings.EqualFold(filepath.Ext(filePath), ".strm") {
+		streamURL, err := resolveTranscodeInputPath(filePath)
 		if err != nil {
-			http.Error(w, "failed to read stream shortcut", http.StatusInternalServerError)
+			status := http.StatusBadRequest
+			if strings.HasPrefix(err.Error(), "stat stream shortcut") || strings.HasPrefix(err.Error(), "read stream shortcut") {
+				status = http.StatusInternalServerError
+			}
+			http.Error(w, err.Error(), status)
 			return err
-		}
-		streamURL := strings.TrimSpace(string(content))
-		if streamURL == "" {
-			http.Error(w, "stream shortcut is empty", http.StatusBadRequest)
-			return nil
 		}
 		http.Redirect(w, r, streamURL, http.StatusTemporaryRedirect)
 		return nil

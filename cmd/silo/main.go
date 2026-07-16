@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -123,6 +124,25 @@ func resolveNodeIdentity() string {
 	}
 	h, _ := os.Hostname()
 	return h
+}
+
+func internalBaseURLFromListen(listen string) string {
+	listen = strings.TrimSpace(listen)
+	if listen == "" {
+		listen = ":8080"
+	}
+	port := ""
+	if _, p, err := net.SplitHostPort(listen); err == nil {
+		port = p
+	} else if strings.HasPrefix(listen, ":") {
+		port = strings.TrimPrefix(listen, ":")
+	} else if idx := strings.LastIndex(listen, ":"); idx >= 0 {
+		port = listen[idx+1:]
+	}
+	if port == "" {
+		port = "8080"
+	}
+	return "http://127.0.0.1:" + port
 }
 
 func resolvePluginCacheDir() string {
@@ -986,7 +1006,7 @@ func main() {
 		)
 		siloInternalURL := strings.TrimSpace(os.Getenv("SILO_INTERNAL_URL"))
 		if siloInternalURL == "" {
-			siloInternalURL = "http://127.0.0.1:8080"
+			siloInternalURL = internalBaseURLFromListen(cfg.Server.Listen)
 		}
 		pluginHost = pluginhost.NewHost(pluginhost.Config{
 			PublicBaseURL:   os.Getenv("SILO_PUBLIC_URL"),

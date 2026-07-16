@@ -24,12 +24,12 @@ import (
 
 // videoExtensions is the set of file extensions recognized as media files.
 var videoExtensions = map[string]bool{
-	".mkv": true,
-	".mp4": true,
-	".avi": true,
-	".m4v": true,
-	".ts":  true,
-	".wmv": true,
+	".mkv":  true,
+	".mp4":  true,
+	".avi":  true,
+	".m4v":  true,
+	".ts":   true,
+	".wmv":  true,
 	".strm": true,
 }
 
@@ -2939,7 +2939,7 @@ func (s *Scanner) gatherHints(filePath string) FileHints {
 
 // probeFile attempts to get probe data by running local ffprobe.
 func (s *Scanner) probeFile(ctx context.Context, filePath string) (*ProbeData, string) {
-	if strings.ToLower(filepath.Ext(filePath)) == ".strm" {
+	if strings.EqualFold(filepath.Ext(filePath), ".strm") {
 		lowerPath := strings.ToLower(filePath)
 		width, height, res := 1920, 1080, "1080p"
 		if strings.Contains(lowerPath, "2160p") || strings.Contains(lowerPath, "4k") {
