@@ -34,6 +34,7 @@ import type {
 } from "../realtime-protocol";
 import { resolvePendingSeekTime } from "../utils/pendingSeek";
 import { resolveVersionAudioLanguage } from "../utils/effectiveAudioLanguage";
+import { HlsStartupGuard } from "../utils/hlsStartupGuard";
 import { normalizeSubtitleMode } from "../utils/subtitleMode";
 import type {
   PlaybackExitState,
@@ -1241,6 +1242,7 @@ export function VideoPlayer({
     if (!video || !isPlayerReady) return;
 
     let hls: HlsType | null = null;
+    let startupGuard: HlsStartupGuard | null = null;
     let destroyed = false;
     let autoplayStarted = false;
 
@@ -1259,6 +1261,7 @@ export function VideoPlayer({
       // the current frame. Starting earlier can produce a visible first-frame
       // freeze where audio advances before video begins moving.
       if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
+      startupGuard?.markPlayable();
       autoplayStarted = true;
       cleanupStartupListeners();
       video.play().catch(() => setPlaying(false));
@@ -1301,6 +1304,15 @@ export function VideoPlayer({
               },
             });
 
+            startupGuard = new HlsStartupGuard(() => {
+              if (destroyed) return;
+
+              console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
+              setError("Playback failed. The media could not be loaded.");
+              hls?.destroy();
+              hlsRef.current = null;
+            });
+
             hls.on(Hls.Events.ERROR, (_event, data) => {
               if (!data.fatal || destroyed) return;
 
@@ -1317,8 +1329,12 @@ export function VideoPlayer({
               lastRecoveryRef.current = now;
 
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                console.warn("[hls.js] Fatal network error, attempting recovery...");
-                hls?.startLoad();
+                if (startupGuard?.handleFatalNetworkError() ?? true) {
+                  console.warn("[hls.js] Fatal network error, attempting recovery...");
+                  hls?.startLoad();
+                } else {
+                  console.error("[hls.js] Fatal startup network error, giving up");
+                }
               } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 if (mediaRecoveryAttemptsRef.current === 0) {
                   console.warn("[hls.js] Fatal media error, attempting recovery...");
@@ -1376,6 +1392,7 @@ export function VideoPlayer({
 
     return () => {
       destroyed = true;
+      startupGuard?.dispose();
       cleanupStartupListeners();
       if (hls) {
         hls.destroy();
