@@ -124,7 +124,7 @@ import { formatDateTime } from "@/lib/datetime";
 const MOUNT_CHECK_FEEDBACK_MS = 5_000;
 
 const DEAD_ROOT_WARNING_TEXT =
-  "One or more library roots are unreachable. Their files are hidden, but nothing will be deleted until the root is back.";
+  "One or more library roots are unreachable or mounted but returned no files. Their files are hidden, but nothing will be deleted until the root is back or cleanup is confirmed.";
 const DEAD_ROOT_WARNING_HINT =
   "Run another scan after storage returns, or use Check Mount to verify connectivity.";
 const EMPTY_ROOT_WARNING_TEXT =

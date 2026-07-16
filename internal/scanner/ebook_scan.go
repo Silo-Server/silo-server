@@ -298,6 +298,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 		return nil
 	}
 
+	confirmedCleanup := false
 	if !sawFiles {
 		existingCount := 0
 		for _, root := range reconcileRoots {
@@ -324,10 +325,11 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 				)
 				return nil
 			}
+			confirmedCleanup = true
 		}
 	}
 
-	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths); err != nil {
+	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths, confirmedCleanup); err != nil {
 		return err
 	}
 	if fullScan && s.folderRepo != nil {
@@ -345,7 +347,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 // folder trash is optionally emptied, and library memberships are reconciled
 // so items with no remaining files are removed (renames therefore converge on
 // the newly indexed path instead of leaving a stale duplicate item).
-func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool) error {
+func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, confirmedCleanup bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -375,7 +377,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		}
 	}
 
-	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder)
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)
 	if trashed > 0 {
 		slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}

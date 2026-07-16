@@ -449,6 +449,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 		return nil
 	}
 
+	confirmedCleanup := false
 	if !sawFiles {
 		existingCount := 0
 		for _, root := range roots {
@@ -475,6 +476,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 					"folder_id", folder.ID, "existing_files", existingCount)
 				return nil
 			}
+			confirmedCleanup = true
 		}
 	}
 
@@ -500,7 +502,7 @@ func (s *Scanner) reconcileAudiobookMissingFiles(ctx context.Context, folder *mo
 		}
 	}
 
-	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder)
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)
 	if trashed > 0 {
 		slog.InfoContext(ctx, "audiobook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}

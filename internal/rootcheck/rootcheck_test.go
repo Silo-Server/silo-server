@@ -1,9 +1,11 @@
 package rootcheck
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestProbeReachableDirectory(t *testing.T) {
@@ -65,5 +67,76 @@ func TestProbeUnreadableDirectory(t *testing.T) {
 	}
 	if res.ErrorCode != ErrCodePermissionDenied {
 		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrCodePermissionDenied)
+	}
+}
+
+func TestProbeWithTimeoutReachableDirectory(t *testing.T) {
+	t.Parallel()
+
+	res := ProbeWithTimeout(context.Background(), t.TempDir(), DefaultProbeTimeout)
+	if !res.Reachable {
+		t.Fatalf("ProbeWithTimeout(temp dir) = %+v, want reachable", res)
+	}
+}
+
+func TestProbeBoundedTimesOutOnHungProbe(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	res := probeBounded(context.Background(), 10*time.Millisecond, func() Result {
+		<-release // simulate a stat/readdir blocked on a hung mount
+		return Result{Reachable: true}
+	})
+	if res.Reachable {
+		t.Fatal("hung probe reported reachable")
+	}
+	if res.ErrorCode != ErrCodeTimeout {
+		t.Fatalf("ErrorCode = %q, want %q", res.ErrorCode, ErrCodeTimeout)
+	}
+}
+
+func TestProbeBoundedHonorsContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	res := probeBounded(ctx, time.Minute, func() Result {
+		<-release
+		return Result{Reachable: true}
+	})
+	if res.Reachable || res.ErrorCode != ErrCodeTimeout {
+		t.Fatalf("canceled probe = %+v, want unreachable/%s", res, ErrCodeTimeout)
+	}
+}
+
+func TestProbeBoundedReturnsFastResult(t *testing.T) {
+	t.Parallel()
+
+	res := probeBounded(context.Background(), time.Minute, func() Result {
+		return Result{Reachable: false, ErrorCode: ErrCodeNotFound, ErrorMessage: "Path does not exist"}
+	})
+	if res.Reachable || res.ErrorCode != ErrCodeNotFound {
+		t.Fatalf("probeBounded passthrough = %+v, want the probe's own result", res)
+	}
+}
+
+func TestProbeReportsEmptyDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	res := Probe(dir)
+	if !res.Reachable || !res.Empty {
+		t.Fatalf("Probe(empty dir) = %+v, want reachable and empty", res)
+	}
+
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	res = Probe(dir)
+	if !res.Reachable || res.Empty {
+		t.Fatalf("Probe(non-empty dir) = %+v, want reachable and not empty", res)
 	}
 }

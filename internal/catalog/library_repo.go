@@ -544,6 +544,16 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 // Matching uses the exact-path + escaped prefix-LIKE shape shared with the
 // scanner's root matching, so a sibling root that merely shares a string
 // prefix (/mnt/movies2 vs /mnt/movies) is never protected by accident.
+//
+// Known limitation: the check is scoped to the reconciled folder's own files
+// (mf.media_folder_id = folderID). An item shared across two libraries whose
+// only surviving files sit under ANOTHER folder's currently-unreachable root
+// is not exempted here — if its membership in this folder is genuinely
+// removed while the other folder's root is offline, the item is purged even
+// though its files under the dead root would have resurrected. Closing this
+// would require probing every enabled folder's roots (or persisting per-
+// folder unreachable state) on each reconcile; accepted for now given how
+// narrow the window is.
 func excludeOrphansUnderProtectedPrefixes(ctx context.Context, tx pgx.Tx, orphanIDs []string, folderID int, prefixes []string) ([]string, error) {
 	conds, condArgs := pathscope.CoverageClauses("mf.file_path", prefixes, 3)
 	args := append([]any{orphanIDs, folderID}, condArgs...)

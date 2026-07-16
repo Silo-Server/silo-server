@@ -222,6 +222,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 		return nil
 	}
 
+	confirmedCleanup := false
 	if !sawFiles {
 		existingCount := 0
 		for _, root := range roots {
@@ -245,6 +246,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 					"folder_id", folder.ID, "existing_files", existingCount)
 				return nil
 			}
+			confirmedCleanup = true
 		}
 	}
 
@@ -270,7 +272,7 @@ func (s *Scanner) reconcilePodcastMissingFiles(ctx context.Context, folder *mode
 		}
 	}
 
-	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder)
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)
 	if trashed > 0 {
 		slog.InfoContext(ctx, "podcast scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}

@@ -2638,6 +2638,55 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 	return int(tag.RowsAffected()), nil
 }
 
+// ListRootsWithOnlyMissingFiles returns the subset of roots (in input order)
+// that still have media_files rows at or under them in the folder but none
+// that are present (missing_since IS NULL). A reachable root in this state is
+// "suspect empty": it is the on-disk signature of a mount that dropped out
+// while leaving an empty, stat-able mountpoint directory, which a
+// reachability probe cannot distinguish from an intentionally emptied root.
+func (r *FileRepository) ListRootsWithOnlyMissingFiles(ctx context.Context, folderID int, roots []string) ([]string, error) {
+	if len(roots) == 0 {
+		return nil, nil
+	}
+	patterns := make([]string, len(roots))
+	for i, root := range roots {
+		patterns[i] = pathscope.PrefixLike(root)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT r.root
+		FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS r(root, pattern, ord)
+		WHERE EXISTS (
+			SELECT 1 FROM media_files mf
+			WHERE mf.media_folder_id = $1
+			  AND (mf.file_path = r.root OR mf.file_path LIKE r.pattern ESCAPE '\')
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM media_files mf
+			WHERE mf.media_folder_id = $1
+			  AND (mf.file_path = r.root OR mf.file_path LIKE r.pattern ESCAPE '\')
+			  AND mf.missing_since IS NULL
+		)
+		ORDER BY r.ord
+	`, folderID, roots, patterns)
+	if err != nil {
+		return nil, fmt.Errorf("querying roots with only missing files: %w", err)
+	}
+	defer rows.Close()
+
+	suspect := make([]string, 0)
+	for rows.Next() {
+		var root string
+		if err := rows.Scan(&root); err != nil {
+			return nil, fmt.Errorf("scanning suspect-empty root: %w", err)
+		}
+		suspect = append(suspect, root)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating suspect-empty roots: %w", err)
+	}
+	return suspect, nil
+}
+
 // DeleteByIDs removes specific media file rows by primary key.
 func (r *FileRepository) DeleteByIDs(ctx context.Context, ids []int) (int, error) {
 	if len(ids) == 0 {
