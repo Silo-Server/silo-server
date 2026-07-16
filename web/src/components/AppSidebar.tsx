@@ -313,22 +313,26 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
         : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
     }`;
 
-  const renderAppNavLink = (link: AppNavLink) => (
-    <li key={link.id}>
-      <a
-        href={link.basePath}
-        onClick={(e) => {
-          e.preventDefault();
-          void navigateToPluginRoute(link.basePath);
-          onNavigate?.();
-        }}
-        className={navLinkClassForState(false)}
-        title={link.pluginId}
-      >
-        <Puzzle className="h-[18px] w-[18px] shrink-0" />
-        <SidebarLabel show={showLabels}>{link.label}</SidebarLabel>
-      </a>
-    </li>
+  const renderAppNavList = (links: AppNavLink[]) => (
+    <ul className="list-none space-y-0.5">
+      {links.map((link) => (
+        <li key={link.id}>
+          <a
+            href={link.basePath}
+            onClick={(e) => {
+              e.preventDefault();
+              void navigateToPluginRoute(link.basePath);
+              onNavigate?.();
+            }}
+            className={navLinkClassForState(false)}
+            title={link.pluginId}
+          >
+            <Puzzle className="h-[18px] w-[18px] shrink-0" />
+            <SidebarLabel show={showLabels}>{link.label}</SidebarLabel>
+          </a>
+        </li>
+      ))}
+    </ul>
   );
 
   return (
@@ -733,16 +737,12 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 {pluginNavGroups.map((group) => (
                   <div key={group.category} className="sidebar-apps-group">
                     <SidebarSectionHeader show={showLabels}>{group.category}</SidebarSectionHeader>
-                    <ul className="list-none space-y-0.5">
-                      {group.links.map((link) => renderAppNavLink(link))}
-                    </ul>
+                    {renderAppNavList(group.links)}
                   </div>
                 ))}
               </div>
             ) : (
-              <ul className="list-none space-y-0.5">
-                {pluginNavLinks.map((link) => renderAppNavLink(link))}
-              </ul>
+              renderAppNavList(pluginNavLinks)
             )}
           </div>
         )}
