@@ -504,3 +504,28 @@ func TestBuildFFmpegArgs_EncodedTranscodePreservesExistingTimestampPolicy(t *tes
 		t.Fatalf("encoded args should keep avoid_negative_ts disabled: %s", joined)
 	}
 }
+
+// TranscodesAudio must agree with appendAudioArgs: only an explicit "copy"
+// passes audio through; an empty codec runs ffmpeg's AAC default.
+func TestTranscodesAudioMatchesFFmpegDefault(t *testing.T) {
+	cases := []struct {
+		codec string
+		want  bool
+	}{
+		{"copy", false},
+		{"COPY", false},
+		{"", true},
+		{"aac", true},
+		{"opus", true},
+	}
+	for _, tc := range cases {
+		if got := TranscodesAudio(tc.codec); got != tc.want {
+			t.Errorf("TranscodesAudio(%q) = %v, want %v", tc.codec, got, tc.want)
+		}
+		args := appendAudioArgs(nil, TranscodeOpts{TargetCodecAudio: tc.codec})
+		copied := strings.Contains(strings.Join(args, " "), "-c:a copy")
+		if copied != !tc.want {
+			t.Errorf("appendAudioArgs(%q) copy=%v disagrees with TranscodesAudio=%v", tc.codec, copied, tc.want)
+		}
+	}
+}

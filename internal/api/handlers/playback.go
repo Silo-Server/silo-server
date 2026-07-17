@@ -2434,7 +2434,7 @@ func (h *PlaybackHandler) finalizeTranscodeStart(r *http.Request, st transcodeSt
 	if streamBitrateKbps <= 0 {
 		streamBitrateKbps = st.file.Bitrate
 	}
-	transcodeAudio := st.req.TargetCodecAudio != "" && !strings.EqualFold(st.req.TargetCodecAudio, "copy")
+	transcodeAudio := playback.TranscodesAudio(st.req.TargetCodecAudio)
 	baseMethod := semanticPlayMethod(st.session)
 
 	slog.InfoContext(r.Context(), "transcode start preserved base playback state", "component", "api",

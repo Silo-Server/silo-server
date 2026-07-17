@@ -1,7 +1,6 @@
 package playback
 
 import (
-	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -69,17 +68,13 @@ type RecipeCard struct {
 // operator's config change applies to reconstructed sessions too.
 func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeURL string, opts TranscodeOpts) RecipeCard {
 	return RecipeCard{
-		SessionID:        opts.SessionID,
-		UserID:           userID,
-		ProfileID:        profileID,
-		MediaFileID:      mediaFileID,
-		TranscodeNodeURL: transcodeNodeURL,
-		PlayMethod:       PlayTranscode,
-		// The transcode re-encodes audio unless the opts explicitly copy it
-		// (an empty codec runs ffmpeg's aac default). Recording this keeps
-		// the reconstructed session's audio decision — and therefore the
-		// admin activity bucket — matching what ffmpeg actually does.
-		TranscodeAudio:     !strings.EqualFold(opts.TargetCodecAudio, "copy"),
+		SessionID:          opts.SessionID,
+		UserID:             userID,
+		ProfileID:          profileID,
+		MediaFileID:        mediaFileID,
+		TranscodeNodeURL:   transcodeNodeURL,
+		PlayMethod:         PlayTranscode,
+		TranscodeAudio:     TranscodesAudio(opts.TargetCodecAudio),
 		InputPath:          opts.InputPath,
 		SourceVideoCodec:   opts.SourceVideoCodec,
 		SeekSeconds:        opts.SeekSeconds,

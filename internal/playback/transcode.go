@@ -632,13 +632,25 @@ func appendVideoFilterArgs(args []string, opts TranscodeOpts) []string {
 	return args
 }
 
+// TranscodesAudio reports whether a transcode with the given target audio
+// codec re-encodes the audio stream. Only an explicit "copy" passes audio
+// through; an empty codec runs ffmpeg's AAC default (see appendAudioArgs), so
+// every consumer of the session's audio decision — live stream state, recipe
+// cards, and the compat mirror — must share this predicate or the activity
+// bucket flips between remux and audio across restarts.
+func TranscodesAudio(targetCodecAudio string) bool {
+	return !strings.EqualFold(targetCodecAudio, "copy")
+}
+
 // appendAudioArgs adds audio codec arguments. Supports "copy" for passthrough,
 // plus opus / aac / eac3 / ac3 as re-encode targets. EAC3 and AC3 are useful
 // when we must transcode video but want to preserve surround channels for an
 // HDMI receiver — both are legal in HLS fMP4 (not MPEG-TS; ensure the HLS
 // packager is fMP4 when emitting these).
 func appendAudioArgs(args []string, opts TranscodeOpts) []string {
-	codec := opts.TargetCodecAudio
+	// Case-insensitive so the switch agrees with TranscodesAudio for any
+	// client-supplied spelling.
+	codec := strings.ToLower(opts.TargetCodecAudio)
 	if codec == "" {
 		codec = "aac"
 	}
