@@ -464,24 +464,31 @@ func TestItemRepo_Search_FTSQueryHasNoFuzzyArm(t *testing.T) {
 
 // TestItemRepo_BuildFuzzySearchSQL asserts that the fuzzy fallback query scores
 // only on the indexed title_normalized column (no title tsvector rebuild),
-// ranks by descending similarity, excludes already-seen content_ids, and
-// applies the same scope filters (type, manga exclusion) as the FTS query.
+// matches via strict word similarity so long titles stay reachable, ranks by
+// descending word similarity with whole-title closeness as tie-break, excludes
+// already-seen content_ids, and applies the same scope filters (type, manga
+// exclusion) as the FTS query.
 func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
 	repo := &ItemRepository{}
 	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, []string{"abc", "def"}, 0)
 
-	if !strings.Contains(dataSQL, "public.normalize_search_text($1) % mi.title_normalized") {
-		t.Fatalf("expected trigram %% arm against title_normalized; got:\n%s", dataSQL)
+	// <<%, not %: full-string similarity is diluted by long titles ("avegners"
+	// must reach "Avengers: Endgame"); the same gin_trgm_ops index serves both.
+	if !strings.Contains(dataSQL, "public.normalize_search_text($1) <<% mi.title_normalized") {
+		t.Fatalf("expected strict-word-similarity arm against title_normalized; got:\n%s", dataSQL)
 	}
-	if !strings.Contains(dataSQL, "MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank") {
-		t.Fatalf("expected similarity ranking on title_normalized; got:\n%s", dataSQL)
+	if !strings.Contains(dataSQL, "MAX(strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank") {
+		t.Fatalf("expected strict word similarity ranking on title_normalized; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_full_rank") {
+		t.Fatalf("expected whole-title similarity tie-break rank; got:\n%s", dataSQL)
 	}
 	// The whole point of the separate query: it must never rebuild the title
 	// tsvectors that made the fused query slow.
 	if strings.Contains(dataSQL, "to_tsvector") || strings.Contains(dataSQL, "ts_rank_cd") {
 		t.Fatalf("fuzzy query must not rebuild title tsvectors; got:\n%s", dataSQL)
 	}
-	if !strings.Contains(dataSQL, "ORDER BY fuzzy_rank DESC, LOWER(title) ASC, content_id ASC") {
+	if !strings.Contains(dataSQL, "ORDER BY fuzzy_rank DESC, fuzzy_full_rank DESC, LOWER(title) ASC, content_id ASC") {
 		t.Fatalf("expected similarity-ordered results; got:\n%s", dataSQL)
 	}
 	if !strings.Contains(dataSQL, "NOT (mi.content_id = ANY($") {
@@ -529,8 +536,11 @@ func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
 	repo := &ItemRepository{}
 
 	floorSQL, _, floorArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, fuzzyAugmentSimilarityFloor)
+	// Whole-title similarity, not word similarity: the augment floor must not
+	// admit embedded prefix words ("coral" scores 0.5 word-similarity to
+	// "coraline").
 	if !strings.Contains(floorSQL, "AND similarity(public.normalize_search_text($1), mi.title_normalized) >= $2") {
-		t.Fatalf("expected explicit similarity floor predicate as $2; got:\n%s", floorSQL)
+		t.Fatalf("expected explicit whole-title similarity floor predicate as $2; got:\n%s", floorSQL)
 	}
 	if len(floorArgs) < 2 || floorArgs[1] != fuzzyAugmentSimilarityFloor {
 		t.Fatalf("expected $2 = fuzzyAugmentSimilarityFloor; got args %#v", floorArgs)

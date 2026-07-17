@@ -147,18 +147,23 @@ const fuzzyFallbackThreshold = 5
 // exceeds this, the overflow is logged and the total is reported as inexact.
 const fuzzyMaxResults = 50
 
-// trgmSimilarityThreshold pins pg_trgm.similarity_threshold for the fuzzy
-// query via SET LOCAL. The % operator's selectivity is otherwise governed by a
-// cluster-wide GUC a DBA (or another application) can change, silently altering
-// both match quality and scan cost per deployment; pinning it keeps the fuzzy
-// arm's behavior deterministic and greppable.
-const trgmSimilarityThreshold = 0.30
+// trgmWordSimilarityThreshold pins pg_trgm.strict_word_similarity_threshold
+// for the fuzzy query via SET LOCAL. The <<% operator's selectivity is
+// otherwise governed by a cluster-wide GUC a DBA (or another application) can
+// change, silently altering both match quality and scan cost per deployment —
+// and its server default (0.6) would reject ordinary one-edit typos
+// ("avegners" vs "avengers" scores ~0.38), so pinning is load-bearing, not
+// just hygiene.
+const trgmWordSimilarityThreshold = 0.30
 
-// fuzzyAugmentSimilarityFloor is the minimum similarity demanded of fuzzy rows
-// when the sparse FTS block is non-empty. A correctly spelled query with a few
-// genuine hits ("coraline") should only gain near-identical titles, not every
-// title clearing the permissive base threshold; a zero-hit query (a likely
-// misspelling) keeps the base threshold so typo recall stays high.
+// fuzzyAugmentSimilarityFloor is the minimum WHOLE-TITLE similarity demanded of
+// fuzzy rows when the sparse FTS block is non-empty. A correctly spelled query
+// with a few genuine hits ("coraline") should only gain near-identical titles,
+// not every title clearing the permissive base threshold — word similarity is
+// deliberately not used here, since it scores embedded prefix words far too
+// high ("coral" is 0.5 to "coraline"). A zero-hit query (a likely misspelling)
+// skips the floor entirely so typo recall, including word-extent matches into
+// long titles, stays high.
 const fuzzyAugmentSimilarityFloor = 0.45
 
 // itemColumnNames lists, in scan order, every column selected by media_items
@@ -1087,8 +1092,9 @@ func (r *ItemRepository) searchWithFuzzyFallback(
 }
 
 // execFuzzyBlock runs the fuzzy data query inside a transaction that pins
-// pg_trgm.similarity_threshold, so the % operator's selectivity cannot drift
-// with cluster configuration. The query was built with LIMIT fuzzyLimit+1; the
+// pg_trgm.strict_word_similarity_threshold, so the <<% operator's selectivity
+// cannot drift with cluster configuration (its 0.6 server default would reject
+// ordinary typos outright). The query was built with LIMIT fuzzyLimit+1; the
 // extra row only signals truncation and is trimmed from the returned block.
 func (r *ItemRepository) execFuzzyBlock(ctx context.Context, dataSQL string, args []any, fuzzyLimit int) ([]*models.MediaItem, bool, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -1097,8 +1103,8 @@ func (r *ItemRepository) execFuzzyBlock(ctx context.Context, dataSQL string, arg
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.similarity_threshold = %g", trgmSimilarityThreshold)); err != nil {
-		return nil, false, fmt.Errorf("pinning trigram similarity threshold: %w", err)
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
+		return nil, false, fmt.Errorf("pinning trigram word-similarity threshold: %w", err)
 	}
 	block, _, truncated, _, err := r.execSearchBlock(ctx, tx, dataSQL, "", args, fuzzyLimit, 0, false)
 	if err != nil {
@@ -1451,15 +1457,16 @@ func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, condition
 
 // buildFuzzySearchSQL assembles the trigram fuzzy-fallback query invoked by
 // SearchPage only when the FTS query is sparse. Unlike buildSearchSQLWithTotal,
-// the sole match predicate is the pg_trgm % operator against the indexed
-// title_normalized generated column (migration 105's gin_trgm_ops index), and
-// the only ranking signal is similarity() on that same column. Crucially it
-// never references the title tsvectors, so the thousands of low-similarity rows
-// the % operator can surface never pay a per-row tsvector rebuild — that rebuild
+// the sole match predicate is the pg_trgm strict-word-similarity operator
+// (<<%) against the indexed title_normalized generated column (migration 105's
+// gin_trgm_ops index serves it), and the ranking signals are
+// strict_word_similarity()/similarity() on that same column. Crucially it
+// never references the title tsvectors, so the low-similarity rows the
+// operator can surface never pay a per-row tsvector rebuild — that rebuild
 // over the fuzzy candidate set was the entire cause of the multi-second search
-// regression. The % operator's base selectivity is pinned by the caller
-// (execFuzzyBlock sets pg_trgm.similarity_threshold via SET LOCAL) so it cannot
-// drift with cluster configuration.
+// regression. The operator's base selectivity is pinned by the caller
+// (execFuzzyBlock sets pg_trgm.strict_word_similarity_threshold via SET LOCAL)
+// so it cannot drift with cluster configuration.
 //
 // Scope note: only title_normalized — a generated column over `title` — is
 // fuzzy-matched, because it is the only column with a gin_trgm_ops index
@@ -1489,8 +1496,19 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 
 	args = []any{searchText}
 	argIdx := 2
-	conditions := []string{"public.normalize_search_text($1) % mi.title_normalized"}
+	// Strict word similarity (<<%) rather than full-string similarity (%): a
+	// typo of one word must still reach long titles ("avegners" → "Avengers:
+	// Endgame"), where full-string similarity is diluted by every extra trigram
+	// the rest of the title contributes. <<% scores the query against the best
+	// word-boundary extent of the title instead, and at equal thresholds it is
+	// a strict superset of % (the whole string is itself a valid extent). The
+	// same gin_trgm_ops index serves both operators.
+	conditions := []string{"public.normalize_search_text($1) <<% mi.title_normalized"}
 	if minSimilarity > 0 {
+		// The floor is whole-title similarity, NOT word similarity: augmenting
+		// a query that already has hits must only admit near-identical titles,
+		// and word similarity rates embedded prefix words far too high (see
+		// fuzzyAugmentSimilarityFloor).
 		conditions = append(conditions, fmt.Sprintf("similarity(public.normalize_search_text($1), mi.title_normalized) >= $%d", argIdx))
 		args = append(args, minSimilarity)
 		argIdx++
@@ -1512,11 +1530,16 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 	// SELECT can re-reference them; GROUP BY uses the raw refs.
 	qualifiedCols := qualifiedItemColumns("mi")
 	groupByCols := qualifiedItemColumnRefs("mi")
+	// fuzzy_rank orders by how well the query matches SOME word extent of the
+	// title; fuzzy_full_rank tie-breaks by whole-title closeness so "The
+	// Avengers" sorts above "Avengers: Endgame" for the typo "avegners". Both
+	// are computed only over the matched candidate set.
 	scoredCTE := fmt.Sprintf(`
 		WITH scored AS (
 			SELECT
 				%s,
-				MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank
+				MAX(strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank,
+				MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_full_rank
 			FROM %s
 			%s
 			GROUP BY %s
@@ -1530,7 +1553,7 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 	dataSQL = scoredCTE + fmt.Sprintf(`
 		SELECT %s%s
 		FROM scored
-		ORDER BY fuzzy_rank DESC, LOWER(title) ASC, content_id ASC
+		ORDER BY fuzzy_rank DESC, fuzzy_full_rank DESC, LOWER(title) ASC, content_id ASC
 		LIMIT $%d OFFSET $%d`, itemColumns, totalColumn, argIdx, argIdx+1)
 	countSQL = scoredCTE + `SELECT COUNT(*) FROM scored`
 	args = append(args, limit, offset)
