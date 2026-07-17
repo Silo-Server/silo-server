@@ -54,7 +54,11 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { compareActiveScans, formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
-import { getSessionClientLabel } from "@/pages/adminActivityPresentation";
+import {
+  activityMethodMeta,
+  classifyActivityMethod,
+  getSessionClientLabel,
+} from "@/pages/adminActivityPresentation";
 
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const DASHBOARD_AUTO_REFRESH_MS = 60_000;
@@ -492,12 +496,8 @@ function StreamCard({ session }: { session: AdminSession }) {
   const username = session.username || `User #${session.user_id}`;
   const elapsed = getTimeAgo(session.started_at);
   const clientLabel = getSessionClientLabel(session);
-  const methodColor =
-    session.play_method === "direct"
-      ? "bg-success/10 text-success border-success/15"
-      : session.play_method === "remux"
-        ? "bg-info/10 text-info border-info/15"
-        : "bg-warning/10 text-warning border-warning/15";
+  const method = classifyActivityMethod(session);
+  const methodColor = activityMethodMeta(method).badgeClass;
 
   return (
     <div className="surface-panel flex gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
@@ -569,7 +569,7 @@ function StreamCard({ session }: { session: AdminSession }) {
           <span
             className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodColor}`}
           >
-            {session.play_method || "unknown"}
+            {method}
           </span>
           {clientLabel ? (
             <span

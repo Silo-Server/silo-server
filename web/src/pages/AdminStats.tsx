@@ -12,7 +12,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Film, FileVideo, Users, Play } from "lucide-react";
 import type { AdminSession, AdminStats } from "@/api/types";
-import { getSessionClientLabel } from "@/pages/adminActivityPresentation";
+import { classifyActivityMethod, getSessionClientLabel } from "@/pages/adminActivityPresentation";
 import { formatDateTime } from "@/lib/datetime";
 
 export default function AdminStats() {
@@ -124,7 +124,7 @@ function SessionsSection({
                   <TableCell className="font-mono text-xs">{s.session_id.slice(0, 8)}...</TableCell>
                   <TableCell>{s.user_id}</TableCell>
                   <TableCell>{s.media_file_id}</TableCell>
-                  <TableCell>{s.play_method}</TableCell>
+                  <TableCell className="capitalize">{classifyActivityMethod(s)}</TableCell>
                   <TableCell>{getSessionClientLabel(s) || "—"}</TableCell>
                   <TableCell className="text-xs">{formatDateTime(s.started_at)}</TableCell>
                 </TableRow>

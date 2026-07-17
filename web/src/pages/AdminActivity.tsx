@@ -12,8 +12,10 @@ import type { AdminSession, OperationalLogEntry, IPUserEntry } from "@/api/types
 import { useIPUsers } from "@/hooks/queries/admin/ips";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import {
+  activityMethodMeta,
   classifyActivityMethod,
   compareActivityMethods,
+  decisionBadgeClass,
   isJellyfinSession,
   formatAudioDetail,
   formatContainerDetail,
@@ -165,7 +167,7 @@ export default function AdminActivity() {
           cmp = getDisplayTitle(a).localeCompare(getDisplayTitle(b));
           break;
         case "method":
-          cmp = classifyActivityMethod(a).localeCompare(classifyActivityMethod(b));
+          cmp = compareActivityMethods(classifyActivityMethod(a), classifyActivityMethod(b));
           break;
         case "node":
           cmp = (a.reporting_node || "").localeCompare(b.reporting_node || "");
@@ -337,7 +339,7 @@ export default function AdminActivity() {
                 .map(([method, count]) => (
                   <div
                     key={method}
-                    className={`transition-all duration-500 ${methodBarColor(method)}`}
+                    className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
                     style={{ width: `${(count / sessions.length) * 100}%` }}
                   />
                 ))}
@@ -354,7 +356,7 @@ export default function AdminActivity() {
                     }`}
                   >
                     <span
-                      className={`inline-block h-2 w-2 rounded-full ${methodDotColor(method)}`}
+                      className={`inline-block h-2 w-2 rounded-full ${activityMethodMeta(method).swatchClass}`}
                     />
                     <span className="font-medium capitalize">{method}</span>
                     <span className="text-muted-foreground tabular-nums">{count}</span>
@@ -527,6 +529,7 @@ function StreamRow({
   const clientLabel = getSessionClientLabel(session);
   const playbackPosition = formatPlaybackPosition(session);
   const transcodeMode = formatTranscodeModeSummary(session);
+  const activityMethod = classifyActivityMethod(session);
   const containerDecision = normalizeContainerDecision(session.play_method);
   const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
   const audioDecision = normalizeStreamDecision(
@@ -776,9 +779,9 @@ function StreamRow({
               ) : null}
             </Link>
             <span
-              className={`inline-flex flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold capitalize ${methodBadgeColor(classifyActivityMethod(session))}`}
+              className={`inline-flex flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold capitalize ${activityMethodMeta(activityMethod).badgeClass}`}
             >
-              {classifyActivityMethod(session)}
+              {activityMethod}
             </span>
             {isJellyfinSession(session) ? (
               <span
@@ -956,7 +959,7 @@ function PlaybackSummaryLine({
         {label}
       </span>
       <span
-        className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[8px] leading-none font-semibold ${methodBadgeColor(decision)}`}
+        className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[8px] leading-none font-semibold ${decisionBadgeClass(decision)}`}
       >
         {formatDecisionLabel(decision)}
       </span>
@@ -1140,7 +1143,7 @@ function PlaybackDetailCard({
           {label}
         </span>
         <span
-          className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodBadgeColor(decision)}`}
+          className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${decisionBadgeClass(decision)}`}
         >
           {formatDecisionLabel(decision)}
         </span>
@@ -1309,53 +1312,4 @@ function stringAttr(entry: OperationalLogEntry, key: string) {
   if (typeof value === "string" && value.length > 0) return value;
   if (typeof value === "number") return String(value);
   return "-";
-}
-
-function methodBadgeColor(method: string): string {
-  switch (method) {
-    case "direct":
-      return "bg-success/10 text-success border-success/15";
-    case "copy":
-    case "remux":
-    case "hls":
-      return "bg-info/10 text-info border-info/15";
-    case "transcode":
-      return "bg-warning/10 text-warning border-warning/15";
-    case "audio":
-      return "bg-destructive/10 text-destructive border-destructive/15";
-    default:
-      return "bg-surface text-muted-foreground border-border";
-  }
-}
-
-function methodBarColor(method: string): string {
-  switch (method) {
-    case "direct":
-      return "bg-success";
-    case "copy":
-    case "remux":
-    case "hls":
-      return "bg-info";
-    case "transcode":
-      return "bg-warning";
-    case "audio":
-      return "bg-destructive";
-    default:
-      return "bg-muted-foreground";
-  }
-}
-
-function methodDotColor(method: string): string {
-  switch (method) {
-    case "direct":
-      return "bg-success";
-    case "remux":
-      return "bg-info";
-    case "transcode":
-      return "bg-warning";
-    case "audio":
-      return "bg-destructive";
-    default:
-      return "bg-muted-foreground";
-  }
 }

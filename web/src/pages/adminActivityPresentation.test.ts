@@ -36,6 +36,8 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     is_paused: overrides.is_paused ?? false,
     client_name: overrides.client_name,
     client_user_agent: overrides.client_user_agent,
+    effective_play_method: overrides.effective_play_method,
+    is_jellyfin_client: overrides.is_jellyfin_client,
     audio_track_index: overrides.audio_track_index ?? 0,
     transcode_audio: overrides.transcode_audio ?? true,
     stream_bitrate_kbps: overrides.stream_bitrate_kbps ?? 8000,
@@ -217,32 +219,61 @@ describe("adminActivityPresentation", () => {
     ).toBe("remux");
   });
 
+  it("prefers the server-computed effective_play_method when present", () => {
+    // The server already reduced the decisions; the local fallback must not
+    // second-guess it even when the raw fields disagree.
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          effective_play_method: "remux",
+          play_method: "transcode",
+          video_decision: "transcode",
+          audio_decision: "transcode",
+        }),
+      ),
+    ).toBe("remux");
+  });
+
+  it("buckets rows with unknown stream state as unknown, not audio", () => {
+    // A legacy/stale row (unrecognized play_method, no decisions) with the
+    // transcode_audio flag set is not a known audio transcode.
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "",
+          video_decision: undefined,
+          audio_decision: undefined,
+          transcode_audio: true,
+        }),
+      ),
+    ).toBe("unknown");
+    expect(
+      classifyActivityMethod(
+        makeSession({
+          play_method: "hls",
+          video_decision: undefined,
+          audio_decision: undefined,
+          transcode_audio: true,
+        }),
+      ),
+    ).toBe("unknown");
+  });
+
   it("orders activity buckets with audio after video transcode", () => {
-    const sorted = ["audio", "transcode", "direct", "remux"].sort(compareActivityMethods);
-    expect(sorted).toEqual(["direct", "remux", "transcode", "audio"]);
+    const sorted = ["audio", "unknown", "transcode", "direct", "remux"].sort(
+      compareActivityMethods,
+    );
+    expect(sorted).toEqual(["direct", "remux", "transcode", "audio", "unknown"]);
   });
 
   it("tags Jellyfin-ecosystem clients for the JF pill", () => {
-    // Jellyfin clients report their name via the MediaBrowser auth header.
-    expect(isJellyfinSession(makeSession({ client_name: "Jellyfin Web" }))).toBe(true);
-    expect(isJellyfinSession(makeSession({ client_name: "Findroid" }))).toBe(true);
-    // Name-less Static=true direct play (Infuse) is still identified by user agent.
-    expect(
-      isJellyfinSession(
-        makeSession({ client_name: undefined, client_user_agent: "Infuse-Direct/8.4.6" }),
-      ),
-    ).toBe(true);
-    // Native clients and generic browsers are not Jellyfin.
-    expect(isJellyfinSession(makeSession({ client_name: "Silo Android" }))).toBe(false);
-    expect(
-      isJellyfinSession(
-        makeSession({
-          client_name: undefined,
-          client_user_agent: "Mozilla/5.0 (X11) Chrome/120.0 Safari/537.36",
-        }),
-      ),
-    ).toBe(false);
-    // No client metadata at all → not Jellyfin.
+    // The server identifies Jellyfin-ecosystem clients (it owns the token
+    // list) and emits is_jellyfin_client; the UI trusts only that field.
+    expect(isJellyfinSession(makeSession({ is_jellyfin_client: true }))).toBe(true);
+    expect(isJellyfinSession(makeSession({ is_jellyfin_client: false }))).toBe(false);
+    // Servers without the field (or no client metadata at all) → no pill,
+    // even when the client name looks like a Jellyfin client.
+    expect(isJellyfinSession(makeSession({ client_name: "Jellyfin Web" }))).toBe(false);
     expect(isJellyfinSession(makeSession())).toBe(false);
   });
 

@@ -11,7 +11,11 @@ import {
   type RealtimeConnectionState,
 } from "@/components/realtimeEventsContext";
 import type { TaskInfo, ScanRun } from "@/api/types";
-import { classifyActivityMethod, compareActivityMethods } from "@/pages/adminActivityPresentation";
+import {
+  activityMethodMeta,
+  classifyActivityMethod,
+  compareActivityMethods,
+} from "@/pages/adminActivityPresentation";
 
 const CONNECTION_PROBLEM_INDICATOR_DELAY_MS = 4_000;
 const MAX_ACTIVITY_SCAN_ROWS = 25;
@@ -302,13 +306,6 @@ function ActivitySection({
   );
 }
 
-const METHOD_META: Record<string, { label: string; color: string }> = {
-  direct: { label: "Direct Play", color: "bg-success" },
-  remux: { label: "Remux", color: "bg-info" },
-  transcode: { label: "Transcode", color: "bg-warning" },
-  audio: { label: "Audio Transcode", color: "bg-destructive" },
-};
-
 function formatBadgeCount(count: number, countIsLowerBound = false) {
   if (countIsLowerBound) {
     return count > MAX_BADGE_COUNT ? `${MAX_BADGE_COUNT}+` : `${count}+`;
@@ -317,12 +314,12 @@ function formatBadgeCount(count: number, countIsLowerBound = false) {
 }
 
 function StreamCountRow({ method, count }: { method: string; count: number }) {
-  const { label = method, color = "bg-muted-foreground" } = METHOD_META[method] ?? {};
+  const meta = activityMethodMeta(method);
   return (
     <div className="flex items-center gap-2.5">
-      <span className={`h-2 w-2 rounded-full ${color}`} />
+      <span className={`h-2 w-2 rounded-full ${meta.swatchClass}`} />
       <span className="text-[12px] font-medium">
-        {count} {label}
+        {count} {meta.label}
       </span>
     </div>
   );

@@ -48,17 +48,20 @@ export function normalizeStreamDecision(decision?: string): string {
 
 /**
  * Classify a session into a single activity "method" bucket for aggregation and
- * filtering. Reduces the per-stream decisions the backend already reports
- * (the same fields that drive the playback badges) so the Play Method summary
- * and Server Activity popover agree with the per-row breakdown:
+ * filtering:
  *   - video is re-encoded            -> "transcode" (video transcode)
  *   - only audio is re-encoded       -> "audio"     (audio transcode)
  *   - streams only repackaged/copied -> "remux"     (incl. video-copy HLS)
  *   - nothing touched                -> "direct"
- * A play_method of "transcode" whose video stream is actually copied (an HLS
- * repackage) must NOT count as a video transcode — it falls through to remux.
+ *   - nothing known                  -> "unknown"
+ * The server computes this reduction as effective_play_method (the
+ * authoritative value, shared with the other admin clients); the local
+ * fallback below covers servers that don't emit the field yet.
  */
 export function classifyActivityMethod(session: AdminSession): string {
+  if (session.effective_play_method) {
+    return session.effective_play_method;
+  }
   const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
   const audioDecision = normalizeStreamDecision(
     session.audio_decision || (session.transcode_audio ? "transcode" : session.play_method),
@@ -66,7 +69,10 @@ export function classifyActivityMethod(session: AdminSession): string {
   if (videoDecision === "transcode") {
     return "transcode";
   }
-  if (audioDecision === "transcode") {
+  // An empty video decision means the stream state is unknown (empty or
+  // unrecognized play_method on a legacy row); don't invent an audio
+  // transcode from the bare transcode_audio flag.
+  if (audioDecision === "transcode" && videoDecision !== "") {
     return "audio";
   }
   if (videoDecision === "direct" && audioDecision === "direct") {
@@ -75,13 +81,13 @@ export function classifyActivityMethod(session: AdminSession): string {
   if (videoDecision === "copy" || audioDecision === "copy") {
     return "remux";
   }
-  return session.play_method || "unknown";
+  return "unknown";
 }
 
 // Display order for the activity method buckets. Escalates by cost and keeps the
 // audio-transcode tag AFTER the video-transcode tag in the Play Method line and
-// the Server Activity popover.
-const ACTIVITY_METHOD_ORDER = ["direct", "remux", "copy", "hls", "transcode", "audio"];
+// the Server Activity popover; unknown sorts last.
+const ACTIVITY_METHOD_ORDER = ["direct", "remux", "transcode", "audio", "unknown"];
 
 function activityMethodRank(method: string): number {
   const index = ACTIVITY_METHOD_ORDER.indexOf(method);
@@ -95,41 +101,76 @@ export function compareActivityMethods(a: string, b: string): number {
   return diff !== 0 ? diff : a.localeCompare(b);
 }
 
-// Jellyfin-ecosystem client names / user-agent tokens. Mirrors the server's
-// client-labeling list (internal/api/handlers/playback_sessions.go). A session
-// from one of these is served through the Jellyfin compatibility route: the
-// backend sets client_name from the Jellyfin MediaBrowser auth header, so this
-// is a positive identification of the client, not a guess about the transport.
-// Generic browser tokens (chrome/safari/…) are deliberately excluded — the
-// native web player shares those user agents.
-const JELLYFIN_CLIENT_TOKENS = [
-  "jellyfin",
-  "findroid",
-  "streamyfin",
-  "swiftfin",
-  "jellycon",
-  "wholphin",
-  "fladder",
-  "vidhub",
-  "senplayer",
-  "infuse",
-];
+export interface ActivityMethodMeta {
+  /** Human label ("Direct Play"); the bucket key itself is the short tag. */
+  label: string;
+  /** Solid swatch class for distribution bars and legend dots. */
+  swatchClass: string;
+  /** Tinted badge classes for the per-row method tag. */
+  badgeClass: string;
+}
+
+// Single source for the bucket -> label/color mapping. Every surface that
+// renders method tags, distribution bars, or legend dots derives from this so
+// the Admin Activity page, the dashboard stream cards, and the Server Activity
+// popover cannot drift apart.
+const ACTIVITY_METHOD_META: Record<string, ActivityMethodMeta> = {
+  direct: {
+    label: "Direct Play",
+    swatchClass: "bg-success",
+    badgeClass: "bg-success/10 text-success border-success/15",
+  },
+  remux: {
+    label: "Remux",
+    swatchClass: "bg-info",
+    badgeClass: "bg-info/10 text-info border-info/15",
+  },
+  transcode: {
+    label: "Transcode",
+    swatchClass: "bg-warning",
+    badgeClass: "bg-warning/10 text-warning border-warning/15",
+  },
+  audio: {
+    label: "Audio Transcode",
+    swatchClass: "bg-destructive",
+    badgeClass: "bg-destructive/10 text-destructive border-destructive/15",
+  },
+};
+
+const UNKNOWN_ACTIVITY_METHOD_META: ActivityMethodMeta = {
+  label: "Unknown",
+  swatchClass: "bg-muted-foreground",
+  badgeClass: "bg-surface text-muted-foreground border-border",
+};
+
+/** Presentation (label + colors) for an activity method bucket. */
+export function activityMethodMeta(method: string): ActivityMethodMeta {
+  return ACTIVITY_METHOD_META[method] ?? UNKNOWN_ACTIVITY_METHOD_META;
+}
+
+/**
+ * Badge classes for a per-stream decision value (direct/copy/remux/hls/
+ * transcode). Copy and HLS are repackaging, so they share the remux tint.
+ */
+export function decisionBadgeClass(decision: string): string {
+  switch (decision) {
+    case "copy":
+    case "hls":
+      return activityMethodMeta("remux").badgeClass;
+    default:
+      return activityMethodMeta(decision).badgeClass;
+  }
+}
 
 /**
  * Report whether a session comes from a Jellyfin-ecosystem client, surfaced as
- * the orthogonal "JF" pill next to the method tag. Checks the reported client
- * name first, then the raw user agent, against the known Jellyfin client
- * tokens. Independent of the transcode-method classification — a session can be
- * both "transcode" and Jellyfin.
+ * the orthogonal "JF" pill next to the method tag. The server owns the client
+ * identification (its token list lives beside its client-labeling rules) and
+ * emits is_jellyfin_client; sessions from servers without the field simply get
+ * no pill.
  */
 export function isJellyfinSession(session: AdminSession): boolean {
-  for (const raw of [session.client_name, session.client_user_agent]) {
-    const value = raw?.toLowerCase();
-    if (value && JELLYFIN_CLIENT_TOKENS.some((token) => value.includes(token))) {
-      return true;
-    }
-  }
-  return false;
+  return session.is_jellyfin_client === true;
 }
 
 export function formatPlaybackDecisionSummary(session: AdminSession): string {
