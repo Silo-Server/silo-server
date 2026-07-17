@@ -527,7 +527,7 @@ func (e *Enricher) cacheRemotePoster(ctx context.Context, contentID string, resu
 		return
 	}
 
-	if storedPath := cachedOriginalImagePath(cached.BasePath, cached.Ext); storedPath != "" {
+	if storedPath := metadata.CachedImageOriginalPath(cached); storedPath != "" {
 		result.PosterPath = storedPath
 	}
 	if cached.Thumbhash != "" {
@@ -587,19 +587,6 @@ func isNilImageCacher(cacher metadata.ImageCacher) bool {
 	default:
 		return false
 	}
-}
-
-func cachedOriginalImagePath(basePath, ext string) string {
-	if basePath == "" {
-		return ""
-	}
-	if strings.Contains(basePath, "/original.") {
-		return basePath
-	}
-	if ext == "" {
-		ext = ".jpg"
-	}
-	return strings.TrimRight(basePath, "/") + "/original" + ext
 }
 
 func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs map[string]string, result *metadata.MetadataResult) error {

@@ -6,6 +6,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { formatFileSize, mapAudioLabel } from "@/lib/mediaFormat";
+import { videoRangeLabel } from "@/lib/videoRange";
 import { extractSourceHint } from "./versionFormatUtils";
 import { resolutionScore } from "./versionRankingUtils";
 
@@ -18,7 +19,8 @@ export function buildQualitySummary(version: FileVersion): string {
 
   if (version.resolution) parts.push(version.resolution);
   if (version.codec_video) parts.push(version.codec_video.toUpperCase());
-  if (version.hdr) parts.push("HDR");
+  const rangeLabel = videoRangeLabel(version);
+  if (rangeLabel) parts.push(rangeLabel);
   if (version.codec_audio) parts.push(mapAudioLabel(version.codec_audio));
   if (parts.length === 0 && version.container) {
     parts.push(version.container.toUpperCase());

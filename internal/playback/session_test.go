@@ -684,6 +684,92 @@ func TestSetEffectiveMediaFileID(t *testing.T) {
 	}
 }
 
+func TestSessionReplacementAppliesAndRollsBackAtomically(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSessionWithFiles(7, "profile-1", 42, 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateStreamState(session.ID, playback.SessionStreamState{
+		PlayMethod:           playback.PlayDirect,
+		BasePlayMethod:       playback.PlayDirect,
+		AudioTrackIndex:      0,
+		TranscodeRouteSet:    true,
+		SubtitleTrackIndex:   -1,
+		StreamBitrateKbps:    8_000,
+		TranscodeNodeURL:     "http://old-node",
+		TranscodeTransportID: "old-transport",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	position := 321.5
+	rollback, err := manager.ApplyReplacement(session.ID, playback.SessionReplacement{
+		EffectiveMediaFileID: 84,
+		StreamState: playback.SessionStreamState{
+			PlayMethod:           playback.PlayTranscode,
+			BasePlayMethod:       playback.PlayTranscode,
+			AudioTrackIndex:      2,
+			TranscodeAudio:       true,
+			TranscodeRouteSet:    true,
+			SubtitleTrackIndex:   1,
+			StreamBitrateKbps:    3_500,
+			TranscodeNodeURL:     "http://new-node",
+			TranscodeTransportID: "new-transport",
+		},
+		PositionSeconds: &position,
+		IsPaused:        true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaced, err := manager.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replaced.MediaFileID != 84 || replaced.PlayMethod != playback.PlayTranscode || replaced.AudioTrackIndex != 2 ||
+		replaced.TranscodeNodeURL != "http://new-node" || replaced.Position != position || !replaced.IsPaused {
+		t.Fatalf("replacement session = %#v", replaced)
+	}
+	if err := manager.RollbackReplacement(session.ID, rollback); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := manager.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.MediaFileID != 42 || restored.PlayMethod != playback.PlayDirect || restored.AudioTrackIndex != 0 ||
+		restored.TranscodeNodeURL != "http://old-node" || restored.TranscodeTransportID != "old-transport" ||
+		restored.Position != 0 || restored.IsPaused {
+		t.Fatalf("restored session = %#v", restored)
+	}
+}
+
+func TestSessionReplacementRollbackRejectsNewerMutation(t *testing.T) {
+	manager := playback.NewSessionManager(0, 0)
+	session, err := manager.StartSession(7, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := manager.ApplyReplacement(session.ID, playback.SessionReplacement{
+		EffectiveMediaFileID: 84,
+		StreamState: playback.SessionStreamState{
+			PlayMethod:         playback.PlayRemux,
+			BasePlayMethod:     playback.PlayRemux,
+			TranscodeRouteSet:  true,
+			SubtitleTrackIndex: -1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.UpdateProgress(session.ID, 10, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.RollbackReplacement(session.ID, rollback); !errors.Is(err, playback.ErrSessionReplacementSuperseded) {
+		t.Fatalf("rollback error = %v, want ErrSessionReplacementSuperseded", err)
+	}
+}
+
 func TestStartSessionWithFiles(t *testing.T) {
 	mgr := playback.NewSessionManager(0, 0)
 	session, err := mgr.StartSessionWithFiles(1, "profile-1", 200, 100, playback.PlayRemux, true)
@@ -713,19 +799,22 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 
 	err = mgr.UpdateStreamState(session.ID, playback.SessionStreamState{
-		PlayMethod:         playback.PlayTranscode,
-		BasePlayMethod:     playback.PlayRemux,
-		AudioTrackIndex:    2,
-		TranscodeAudio:     true,
-		ClientIP:           "10.0.0.10",
-		StreamBitrateKbps:  4200,
-		TargetResolution:   "1080p",
-		TargetVideoCodec:   "h264",
-		TargetAudioCodec:   "aac",
-		TargetBitrateKbps:  4000,
-		SubtitleTrackIndex: 3,
-		SubtitleBurnIn:     true,
-		SegmentDuration:    4,
+		PlayMethod:           playback.PlayTranscode,
+		BasePlayMethod:       playback.PlayRemux,
+		AudioTrackIndex:      2,
+		TranscodeAudio:       true,
+		ClientIP:             "10.0.0.10",
+		StreamBitrateKbps:    4200,
+		TargetResolution:     "1080p",
+		TargetVideoCodec:     "h264",
+		TargetAudioCodec:     "aac",
+		TargetBitrateKbps:    4000,
+		TranscodeNodeURL:     "http://node-1",
+		TranscodeTransportID: "transport-1",
+		TranscodeRouteSet:    true,
+		SubtitleTrackIndex:   3,
+		SubtitleBurnIn:       true,
+		SegmentDuration:      4,
 	})
 	if err != nil {
 		t.Fatalf("UpdateStreamState: %v", err)
@@ -743,6 +832,9 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 	if got.AudioTrackIndex != 2 {
 		t.Errorf("AudioTrackIndex = %d, want 2", got.AudioTrackIndex)
+	}
+	if got.TranscodeNodeURL != "http://node-1" || got.TranscodeTransportID != "transport-1" {
+		t.Fatalf("transcode route = %q/%q", got.TranscodeNodeURL, got.TranscodeTransportID)
 	}
 	if !got.TranscodeAudio {
 		t.Error("TranscodeAudio = false, want true")
@@ -773,6 +865,16 @@ func TestUpdateStreamState(t *testing.T) {
 	}
 	if got.SegmentDuration != 4 {
 		t.Errorf("SegmentDuration = %d, want 4", got.SegmentDuration)
+	}
+	if err := mgr.UpdateStreamState(session.ID, playback.SessionStreamState{TranscodeRouteSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = mgr.GetSession(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TranscodeNodeURL != "" || got.TranscodeTransportID != "" {
+		t.Fatalf("cleared transcode route = %q/%q", got.TranscodeNodeURL, got.TranscodeTransportID)
 	}
 }
 
@@ -1152,5 +1254,104 @@ func TestSessionManager_CleanExpired_PausedGracePeriod(t *testing.T) {
 	// Paused session should still exist.
 	if _, err := sm.GetSession(paused.ID); err != nil {
 		t.Errorf("paused session should survive with 3x grace period, got: %v", err)
+	}
+}
+
+// A failed transcode session idle past the active grace is already absent from
+// the live counts; replacement admission must exclude that session explicitly
+// rather than decrement the totals, or the decrement frees a slot that belongs
+// to another live transcode.
+func TestCheckReplacementAllowedExcludesOnlyTheReplacedSession(t *testing.T) {
+	sm := playback.NewSessionManager(10, 2)
+	sm.SetLivenessGracePeriods(25*time.Millisecond, time.Hour)
+
+	failed, err := sm.StartSession(1, "profile-1", 100, playback.PlayTranscode, false)
+	if err != nil {
+		t.Fatalf("StartSession(failed): %v", err)
+	}
+	// Age the failed session past the active grace so it no longer counts.
+	time.Sleep(60 * time.Millisecond)
+
+	for i := 0; i < 2; i++ {
+		if _, err := sm.StartSession(1, "profile-1", 200+i, playback.PlayTranscode, false); err != nil {
+			t.Fatalf("StartSession(live %d): %v", i, err)
+		}
+	}
+
+	err = sm.CheckReplacementAllowed(context.Background(), failed.ID, playback.PlayTranscode, false)
+	if !errors.Is(err, playback.ErrTooManyTranscodes) {
+		t.Fatalf("CheckReplacementAllowed = %v, want ErrTooManyTranscodes (both slots are held by live sessions)", err)
+	}
+}
+
+// Legacy stream updates (audio switches, progress-driven state) arriving while
+// a v3 replacement is in flight must not release the capacity reservation;
+// only the replacement's own route-set commit consumes it.
+func TestLegacyStreamUpdateKeepsReplacementReservation(t *testing.T) {
+	sm := playback.NewSessionManager(10, 1)
+
+	session, err := sm.StartSession(1, "profile-1", 100, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := sm.CheckReplacementAllowed(context.Background(), session.ID, playback.PlayTranscode, false); err != nil {
+		t.Fatalf("CheckReplacementAllowed: %v", err)
+	}
+
+	// A legacy partial update does not carry TranscodeRouteSet.
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{AudioTrackIndex: 1}); err != nil {
+		t.Fatalf("UpdateStreamState: %v", err)
+	}
+
+	if _, err := sm.StartSession(1, "profile-1", 200, playback.PlayTranscode, false); !errors.Is(err, playback.ErrTooManyTranscodes) {
+		t.Fatalf("StartSession(transcode) = %v, want ErrTooManyTranscodes (reservation must survive the legacy update)", err)
+	}
+
+	// The route-set commit consumes the reservation and the slot converts to a
+	// real transcode, so the cap stays enforced.
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{PlayMethod: playback.PlayTranscode, TranscodeRouteSet: true}); err != nil {
+		t.Fatalf("UpdateStreamState(commit): %v", err)
+	}
+	if _, err := sm.StartSession(1, "profile-1", 201, playback.PlayTranscode, false); !errors.Is(err, playback.ErrTooManyTranscodes) {
+		t.Fatalf("StartSession(transcode) after commit = %v, want ErrTooManyTranscodes", err)
+	}
+}
+
+// A full v3 route description owns RemuxDVMode: a replan that lands on a
+// non-DV source must clear a stale strip mode, while legacy partial updates
+// must not clobber one.
+func TestUpdateStreamStateClearsRemuxDVModeOnRouteSet(t *testing.T) {
+	sm := playback.NewSessionManager(5, 2)
+
+	session, err := sm.StartSession(1, "profile-1", 100, playback.PlayRemux, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{RemuxDVMode: playback.RemuxDVStripToHDR10V3, TranscodeRouteSet: true}); err != nil {
+		t.Fatalf("UpdateStreamState(set): %v", err)
+	}
+
+	// Legacy partial update: mode survives.
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{AudioTrackIndex: 1}); err != nil {
+		t.Fatalf("UpdateStreamState(legacy): %v", err)
+	}
+	got, err := sm.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.RemuxDVMode != playback.RemuxDVStripToHDR10V3 {
+		t.Fatalf("RemuxDVMode after legacy update = %q, want strip_to_hdr10", got.RemuxDVMode)
+	}
+
+	// v3 route-set update for a non-DV source: mode clears.
+	if err := sm.UpdateStreamState(session.ID, playback.SessionStreamState{TranscodeRouteSet: true}); err != nil {
+		t.Fatalf("UpdateStreamState(clear): %v", err)
+	}
+	got, err = sm.GetSession(session.ID)
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if got.RemuxDVMode != "" {
+		t.Fatalf("RemuxDVMode after route-set update = %q, want cleared", got.RemuxDVMode)
 	}
 }

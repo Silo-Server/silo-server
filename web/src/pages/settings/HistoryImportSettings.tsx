@@ -842,13 +842,14 @@ function RunSummary({ run }: { run: HistoryImportRun | null }) {
       )}
 
       {/* Metrics */}
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+      <div className="grid grid-cols-3 gap-2 sm:grid-cols-7">
         <MetricCard label="Fetched" value={run.fetched} />
         <MetricCard label="Matched" value={run.matched} accent="positive" />
         <MetricCard label="Unmatched" value={run.unmatched} accent="warning" />
         <MetricCard label="Progress" value={run.progress_updated} accent="positive" />
         <MetricCard label="History" value={run.history_created} accent="positive" />
         <MetricCard label="Watchlist" value={run.watchlist_added} accent="positive" />
+        <MetricCard label="Favorites" value={run.favorites_imported} accent="positive" />
         <MetricCard label="Skipped" value={run.skipped} />
       </div>
 

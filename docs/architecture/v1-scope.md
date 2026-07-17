@@ -17,3 +17,8 @@ When the scope locks, this file becomes the source of truth and will contain:
 
 Until lock: treat any capability not tracked as `Proposed`/`Locked` on the project as out of scope
 for feature PRs (see the scope gate in `CLAUDE.md`).
+
+Feature-detection precedent: clients discover which metadata providers (including the
+built-in NFO provider, #216) apply to a library type via
+`GET /api/v1/libraries/provider-defaults` rather than version sniffing. New capabilities
+should follow the same capability-endpoint pattern.

@@ -108,6 +108,21 @@ func (h *EventsHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) 
 
 	conn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
+		// The Android/KMP client has a long history of silent handshake
+		// failures here (gorilla writes the 4xx itself); log the exact
+		// upgrade-relevant request shape so a failing client is diagnosable
+		// from the server alone.
+		slog.WarnContext(r.Context(), "events websocket upgrade failed", "component", "api",
+			"error", err,
+			"user_id", claims.UserID,
+			"proto", r.Proto,
+			"method", r.Method,
+			"connection_header", r.Header.Get("Connection"),
+			"upgrade_header", r.Header.Get("Upgrade"),
+			"ws_version", r.Header.Get("Sec-Websocket-Version"),
+			"ws_key_present", r.Header.Get("Sec-Websocket-Key") != "",
+			"user_agent", r.UserAgent(),
+		)
 		return
 	}
 	defer conn.Close()

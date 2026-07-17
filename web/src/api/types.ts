@@ -422,6 +422,7 @@ export interface HistoryImportRun {
   progress_updated: number;
   history_created: number;
   watchlist_added: number;
+  favorites_imported: number;
   skipped: number;
   warnings: string[];
   unmatched_samples: HistoryImportUnmatchedSample[];
@@ -1268,6 +1269,7 @@ export interface EpisodeListItem {
   still_thumbhash: string;
   user_data?: LeafItemUserData;
   files: EpisodeFile[];
+  overlay_summary?: OverlaySummary | null;
 }
 
 export interface EpisodesResponse {
@@ -2893,8 +2895,10 @@ export interface LibraryMountCheckRoot {
     | "not_directory"
     | "stat_failed"
     | "read_failed"
+    | "probe_timeout"
     | null;
   error_message: string | null;
+  suspect_empty: boolean;
 }
 
 export interface LibraryMountCheckResponse {
@@ -3454,6 +3458,12 @@ export interface PluginSettingsSummary {
   user_config_schema: PluginConfigSchema[];
   routes: PluginRoute[];
   assets: PluginAsset[];
+  /**
+   * Optional slash-delimited grouping path from the plugin manifest
+   * (e.g. "Tools/Utilities") that groups the plugin's entries in the
+   * Apps sidebar section. Absent when the manifest declares no category.
+   */
+  category?: string;
 }
 
 export interface PluginSettingsListResponse {
@@ -4333,6 +4343,8 @@ export interface ApplyItemImageResponse {
   content_id: string;
   stored_path: string;
   thumbhash: string;
+  image_url?: string;
+  revision?: string;
 }
 
 export interface UnmatchedLibraryItem {

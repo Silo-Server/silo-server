@@ -153,6 +153,143 @@ func TestPushSenderSendMapsRelayTerminalAPNsRejection(t *testing.T) {
 	}
 }
 
+func TestPushSenderSendBuildsFcmRelayRequest(t *testing.T) {
+	token := strings.Repeat("F", 140)
+	var got struct {
+		auth           string
+		idempotencyKey string
+		body           pushRelayFcmRequest
+	}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.auth = r.Header.Get("Authorization")
+		got.idempotencyKey = r.Header.Get("Idempotency-Key")
+		if r.URL.Path != relayFcmSendPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, relayFcmSendPath)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got.body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"request_id":     "relay-request-fcm-1",
+			"fcm_message_id": "fcm-1",
+			"status":         "accepted",
+		})
+	}))
+	defer server.Close()
+
+	settings := NewSettings(mapSettingReader{
+		SettingPushRelayURL:    server.URL,
+		SettingPushRelayAPIKey: "relay-key",
+	})
+	sender := newPushSender(nil, nil, nil, settings)
+	sender.client = server.Client()
+	sender.developmentRelayURL = server.URL
+
+	deliveryID := "delivery-fcm-1"
+	result := sender.send(context.Background(), PushDeliveryAttempt{
+		ID:                     "attempt-fcm-1",
+		NotificationDeliveryID: &deliveryID,
+	}, &PushDevice{
+		Platform:       PushPlatformAndroid,
+		ServerDeviceID: "server-device-fcm",
+	}, token)
+
+	if !result.OK || result.RelayRequestID != "relay-request-fcm-1" {
+		t.Fatalf("result = %+v", result)
+	}
+	if got.auth != "Bearer relay-key" || got.idempotencyKey != "attempt-fcm-1" {
+		t.Fatalf("headers = %+v", got)
+	}
+	if got.body.Token != token || got.body.Mode != "private_alert" || got.body.DeliveryID != deliveryID {
+		t.Fatalf("relay body = %+v", got.body)
+	}
+	if got.body.CollapseID == nil || *got.body.CollapseID != deliveryID {
+		t.Fatalf("collapse_id = %+v, want delivery id", got.body.CollapseID)
+	}
+}
+
+func TestPushSenderSendMapsRelayTerminalFCMRejection(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(pushRelayErrorResponse{
+			Error: struct {
+				Code      string `json:"code"`
+				Message   string `json:"message"`
+				RequestID string `json:"request_id"`
+			}{
+				Code:      "fcm_rejected",
+				Message:   "FCM rejected the notification: UNREGISTERED",
+				RequestID: "relay-request-fcm-2",
+			},
+		})
+	}))
+	defer server.Close()
+
+	sender := newPushSender(nil, nil, nil, NewSettings(mapSettingReader{
+		SettingPushRelayURL:    server.URL,
+		SettingPushRelayAPIKey: "relay-key",
+	}))
+	sender.client = server.Client()
+	sender.developmentRelayURL = server.URL
+
+	result := sender.send(context.Background(), PushDeliveryAttempt{ID: "attempt-fcm-2"}, &PushDevice{
+		Platform:       PushPlatformAndroid,
+		ServerDeviceID: "server-device-fcm",
+	}, strings.Repeat("F", 140))
+
+	if result.OK || !result.TerminalDevice || result.HTTPStatus != http.StatusUnprocessableEntity {
+		t.Fatalf("terminal result = %+v", result)
+	}
+	if result.UpstreamReason != "fcm_rejected" || result.RelayRequestID != "relay-request-fcm-2" {
+		t.Fatalf("terminal diagnostic = %+v", result)
+	}
+}
+
+func TestTerminalFCMDeviceRejectionReasons(t *testing.T) {
+	if !terminalFCMDeviceRejection(http.StatusUnprocessableEntity, "fcm_rejected",
+		"FCM rejected the notification: UNREGISTERED") {
+		t.Fatal("UNREGISTERED was not terminal for the device")
+	}
+	if terminalFCMDeviceRejection(http.StatusUnprocessableEntity, "fcm_rejected",
+		"FCM rejected the notification: INVALID_ARGUMENT") {
+		t.Fatal("request-level FCM rejection was terminal for the device")
+	}
+	if terminalFCMDeviceRejection(http.StatusUnprocessableEntity, "apns_rejected",
+		"APNs rejected the notification: Unregistered") {
+		t.Fatal("APNs rejection satisfied the FCM matcher")
+	}
+	if terminalDeviceRejection(PushPlatformAndroid, http.StatusUnprocessableEntity, "fcm_rejected",
+		"FCM rejected the notification: UNREGISTERED") !=
+		terminalFCMDeviceRejection(http.StatusUnprocessableEntity, "fcm_rejected",
+			"FCM rejected the notification: UNREGISTERED") {
+		t.Fatal("platform dispatch mismatch")
+	}
+}
+
+func TestAndroidPushDeliverySettings(t *testing.T) {
+	ctx := context.Background()
+	settings := NewSettings(nil)
+	if settings.AndroidPushDeliveryEnabled(ctx) {
+		t.Fatal("AndroidPushDeliveryEnabled must default to false")
+	}
+	if settings.PushDeliveryEnabled(ctx) {
+		t.Fatal("PushDeliveryEnabled must default to false")
+	}
+	if got := settings.EnabledPushPlatforms(ctx); len(got) != 0 {
+		t.Fatalf("EnabledPushPlatforms = %v, want empty", got)
+	}
+
+	settings = NewSettings(mapSettingReader{
+		SettingAndroidPushDeliveryEnabled: "true",
+	})
+	if !settings.AndroidPushDeliveryEnabled(ctx) || !settings.PushDeliveryEnabled(ctx) {
+		t.Fatal("android delivery setting did not enable push delivery")
+	}
+	if got := settings.EnabledPushPlatforms(ctx); len(got) != 1 || got[0] != PushPlatformAndroid {
+		t.Fatalf("EnabledPushPlatforms = %v, want [android]", got)
+	}
+}
+
 func TestTerminalAPNsDeviceRejectionReasons(t *testing.T) {
 	for _, reason := range []string{
 		"BadDeviceToken",

@@ -35,6 +35,8 @@ rewriting.
   reference for the folder layouts and filenames Silo can scan and match today.
 - [Collection Templates](admin/collection-templates.md) - Curated, one-click starting points for
   synced library collections sourced from TMDB, Trakt, and MDBList.
+- [Local NFO Metadata](admin/nfo-local-metadata.md) - Supported NFO sidecar fields, how they merge
+  with online providers, and the naming-supplies-structure contract.
 
 ## Deployment
 

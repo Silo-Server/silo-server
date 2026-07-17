@@ -69,6 +69,11 @@ func (r *TaskRegistry) Tasks(ctx context.Context) ([]taskmanager.Task, error) {
 
 	var tasks []taskmanager.Task
 	for _, installation := range installations {
+		// Builtin installations expose no scheduled tasks and cannot be
+		// launched; defense-in-depth alongside the capability-type filter.
+		if installation.IsBuiltin() {
+			continue
+		}
 		capabilities, err := r.installations.ListCapabilities(ctx, installation.ID)
 		if err != nil {
 			return nil, fmt.Errorf("list plugin capabilities for installation %d: %w", installation.ID, err)

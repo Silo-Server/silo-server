@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/titleutil"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -282,10 +283,89 @@ func ebookEmptyCleanupAllowed(ctx context.Context, repo ebookCleanupGuardRepo, f
 	return allowed, nil
 }
 
+// emptyCleanupDecision determines whether an audio/ebook scan may clean roots
+// that contain catalog rows but produced no files. A completely empty scan is
+// blocked until confirmation; in a mixed multi-root scan only literally empty
+// roots need confirmation, while healthy roots continue reconciling normally.
+func (s *Scanner) emptyCleanupDecision(
+	ctx context.Context,
+	folder *models.MediaFolder,
+	roots []string,
+	seenPaths map[string]bool,
+	fullScan bool,
+	mediaKind string,
+) (confirmed, blockAll bool, err error) {
+	if s.fileRepo == nil || len(roots) == 0 {
+		return false, false, nil
+	}
+	wholeScanEmpty := len(seenPaths) == 0
+	probes := rootcheck.ProbeManyWithTimeout(ctx, roots, rootcheck.DefaultProbeTimeout)
+	needsConfirmation := false
+	for i, root := range roots {
+		if !wholeScanEmpty {
+			seenUnderRoot := false
+			for path := range seenPaths {
+				if pathWithinAnyRoot(path, []string{root}) {
+					seenUnderRoot = true
+					break
+				}
+			}
+			if seenUnderRoot || !probes[i].Reachable || !probes[i].Empty {
+				continue
+			}
+		} else if !probes[i].Reachable {
+			continue
+		}
+		existing, listErr := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
+		if listErr != nil {
+			return false, false, fmt.Errorf("listing existing %s files for %q: %w", mediaKind, root, listErr)
+		}
+		if len(existing) > 0 {
+			needsConfirmation = true
+			break
+		}
+	}
+	if !needsConfirmation {
+		return false, false, nil
+	}
+	var guard ebookCleanupGuardRepo
+	if s.folderRepo != nil {
+		guard = s.folderRepo
+	}
+	allowed := false
+	if wholeScanEmpty {
+		var allowErr error
+		allowed, allowErr = ebookEmptyCleanupAllowed(ctx, guard, folder.ID, fullScan)
+		if allowErr != nil {
+			return false, false, allowErr
+		}
+	} else if fullScan && guard != nil {
+		var allowErr error
+		allowed, allowErr = guard.ConsumeEmptyCleanupAllowance(ctx, folder.ID)
+		if allowErr != nil {
+			return false, false, fmt.Errorf("checking partial-root cleanup confirmation for folder %d: %w", folder.ID, allowErr)
+		}
+		if !allowed {
+			if warnErr := guard.SetScanWarning(ctx, folder.ID,
+				"dead_root",
+				"One or more roots are reachable but empty while the library still has cataloged files; cleanup was skipped until deletion is confirmed.",
+				time.Now().UTC(),
+			); warnErr != nil {
+				return false, false, fmt.Errorf("recording partial-root warning for folder %d: %w", folder.ID, warnErr)
+			}
+		}
+	}
+	if !allowed {
+		slog.WarnContext(ctx, mediaKind+" scan: empty roots still have cataloged files; cleanup requires confirmation",
+			"component", "scanner", "folder_id", folder.ID, "full_scan", fullScan)
+	}
+	return allowed, wholeScanEmpty && !allowed, nil
+}
+
 // reconcileEbookScan applies the post-walk safety policy and then performs
 // missing-file reconciliation for the roots that walked cleanly.
 func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool) error {
-	reconcileRoots, sawFiles := splitEbookReconcileRoots(scans)
+	reconcileRoots, _ := splitEbookReconcileRoots(scans)
 	if len(reconcileRoots) == 0 {
 		if len(scans) > 0 {
 			slog.WarnContext(ctx, "ebook scan: every root walk failed; skipping missing-file reconciliation", "component", "scanner",
@@ -298,36 +378,17 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 		return nil
 	}
 
-	if !sawFiles {
-		existingCount := 0
-		for _, root := range reconcileRoots {
-			existing, err := s.fileRepo.GetByFolderAndPathPrefix(ctx, folder.ID, root)
-			if err != nil {
-				return fmt.Errorf("listing existing ebook files for %q: %w", root, err)
-			}
-			existingCount += len(existing)
-		}
-		if existingCount > 0 {
-			var guard ebookCleanupGuardRepo
-			if s.folderRepo != nil {
-				guard = s.folderRepo
-			}
-			allowed, err := ebookEmptyCleanupAllowed(ctx, guard, folder.ID, fullScan)
-			if err != nil {
-				return err
-			}
-			if !allowed {
-				slog.WarnContext(ctx, "ebook scan: walk saw zero ebooks but the database has files under the scanned roots; skipping reconciliation until cleanup is confirmed", "component", "scanner",
-					"folder_id", folder.ID,
-					"existing_files", existingCount,
-					"full_scan", fullScan,
-				)
-				return nil
-			}
-		}
+	confirmedCleanup, blockAll, err := s.emptyCleanupDecision(
+		ctx, folder, reconcileRoots, seenPaths, fullScan, "ebook",
+	)
+	if err != nil {
+		return err
+	}
+	if blockAll {
+		return nil
 	}
 
-	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths); err != nil {
+	if err := s.reconcileMissingEbookFiles(ctx, folder, reconcileRoots, seenPaths, confirmedCleanup); err != nil {
 		return err
 	}
 	if fullScan && s.folderRepo != nil {
@@ -345,7 +406,7 @@ func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFo
 // folder trash is optionally emptied, and library memberships are reconciled
 // so items with no remaining files are removed (renames therefore converge on
 // the newly indexed path instead of leaving a stale duplicate item).
-func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool) error {
+func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models.MediaFolder, roots []string, seenPaths map[string]bool, confirmedCleanup bool) error {
 	if s.fileRepo == nil || s.libraryRepo == nil || len(roots) == 0 {
 		return nil
 	}
@@ -375,36 +436,17 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		}
 	}
 
-	if s.emptyTrashAfterScan {
-		trashed, err := s.fileRepo.DeleteMissingByFolder(ctx, folder.ID, s.fileRemovalGrace)
-		if err != nil {
-			return fmt.Errorf("emptying trash for folder %d: %w", folder.ID, err)
-		}
-		if trashed > 0 {
-			slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
-		}
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup)
+	if trashed > 0 {
+		slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
-
-	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID)
 	if err != nil {
-		return fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
+		return err
 	}
-
-	// Best-effort S3 image cleanup for orphaned items.
-	if s.s3Client != nil && len(orphanedImageDirs) > 0 {
-		bucket := s.s3Client.Bucket()
-		for _, dir := range orphanedImageDirs {
-			_, _ = s.s3Client.DeletePrefix(ctx, bucket, dir)
-		}
-	}
-
 	if missing > 0 || removedMemberships > 0 || deletedItems > 0 {
 		slog.InfoContext(ctx, "ebook scan: reconciled missing files", "component", "scanner",
-			"folder_id", folder.ID,
-			"missing", missing,
-			"memberships_removed", removedMemberships,
-			"items_deleted", deletedItems,
-		)
+			"folder_id", folder.ID, "missing", missing,
+			"memberships_removed", removedMemberships, "items_deleted", deletedItems)
 	}
 	return nil
 }
@@ -1077,11 +1119,10 @@ func cacheEbookCoverBytes(ctx context.Context, store ebookCoverMetadataStore, ca
 			return nil
 		}
 	}
-	basePath, ext, thumbhash, err := cacher.CacheEbookCover(ctx, data, contentID)
+	posterPath, thumbhash, err := cacher.CacheEbookCover(ctx, data, contentID)
 	if err != nil {
 		return err
 	}
-	posterPath := strings.TrimRight(basePath, "/") + "/original" + ext
 	if _, err := store.SetLocalPoster(ctx, contentID, posterPath, thumbhash, localEbookPosterPrefix); err != nil {
 		return fmt.Errorf("set ebook local poster: %w", err)
 	}

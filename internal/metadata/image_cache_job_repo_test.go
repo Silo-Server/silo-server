@@ -57,7 +57,6 @@ func TestNormalizeImageCacheJobInputSkipsNonProviderArtwork(t *testing.T) {
 		"",
 		"tmdb/series/1396/poster/original.webp",
 		"s3://media/tmdb/series/1396/poster/original.webp",
-		"file:///media/poster.jpg",
 		"local://poster.jpg",
 		"generated://collections/1/poster.jpg",
 	} {

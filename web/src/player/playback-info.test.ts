@@ -170,7 +170,9 @@ describe("playback info helpers", () => {
       runtimeStats: {},
     });
 
-    expect(rowValue(sections, "Player", "Auto-switched from")).toBe("2160p HEVC HDR");
+    // The default fixture is a Dolby Vision (Profile 8.1) file, so the range
+    // badge reads "DV" instead of the old generic boolean-derived "HDR".
+    expect(rowValue(sections, "Player", "Auto-switched from")).toBe("2160p HEVC DV");
     expect(rowValue(sections, "Current Source File", "Video codec")).toBe("H.264 High");
   });
 

@@ -28,6 +28,12 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 	if file.Duration <= 0 {
 		return true
 	}
+	// Legacy probes could turn malformed multi-day container timestamps into a
+	// few seconds by treating ffprobe's seconds as microseconds. Reprobe the
+	// narrow, physically implausible shape produced by that conversion.
+	if needsLegacyDurationRepair(file) {
+		return true
+	}
 	if strings.TrimSpace(file.Container) == "" {
 		return true
 	}
@@ -83,6 +89,9 @@ func (e *PlaybackProbeEnsurer) Ensure(ctx context.Context, file *models.MediaFil
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
+	if reprobeMayScanPackets(file) && timeout < time.Minute {
+		timeout = time.Minute
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -94,4 +103,37 @@ func (e *PlaybackProbeEnsurer) Ensure(ctx context.Context, file *models.MediaFil
 	updated := *file
 	applyProbeData(&updated, probe, "local")
 	return e.fileRepo.Upsert(ctx, updated)
+}
+
+// reprobeMayScanPackets reports whether reprobing this file is likely to hit
+// ProbeFile's packet-scan fallback, which demuxes the entire file and cannot
+// finish inside the default metadata-probe timeout.
+func reprobeMayScanPackets(file *models.MediaFile) bool {
+	if file == nil || len(file.VideoTracks) == 0 {
+		return false
+	}
+	return file.Duration <= 0 ||
+		videoDurationImplausiblyShort(float64(file.Duration), file.FileSize, true)
+}
+
+// legacyProbeDurationFixTime is when the probe duration parser stopped
+// treating large ffprobe durations as microseconds. Rows probed before this
+// may carry the collapsed durations that conversion produced. Rows probed
+// after it are authoritative: a still-short duration was re-derived from
+// packet timestamps, and re-flagging it would reprobe genuinely short clips
+// on every playback decision forever. Adjust if this fix ships later.
+var legacyProbeDurationFixTime = time.Date(2026, time.July, 18, 0, 0, 0, 0, time.UTC)
+
+func needsLegacyDurationRepair(file *models.MediaFile) bool {
+	if file == nil {
+		return false
+	}
+	return legacyDurationRepairNeeded(file.Duration, file.FileSize, len(file.VideoTracks) > 0, file.ProbeUpdatedAt)
+}
+
+func legacyDurationRepairNeeded(duration int, sizeBytes int64, hasVideo bool, probeUpdatedAt *time.Time) bool {
+	if !videoDurationImplausiblyShort(float64(duration), sizeBytes, hasVideo) {
+		return false
+	}
+	return probeUpdatedAt == nil || probeUpdatedAt.Before(legacyProbeDurationFixTime)
 }

@@ -175,6 +175,11 @@ func (d *EventDispatcher) fanOut(ctx context.Context, env events.Envelope, paylo
 
 	var wg sync.WaitGroup
 	for _, installation := range installations {
+		// Builtin installations are metadata-only and never launchable;
+		// defense-in-depth alongside the capability-type filter below.
+		if installation.IsBuiltin() {
+			continue
+		}
 		if env.TargetPluginID != "" && installation.PluginID != env.TargetPluginID {
 			continue
 		}

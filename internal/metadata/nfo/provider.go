@@ -16,24 +16,38 @@ func NewProvider() *Provider { return &Provider{} }
 
 func (p *Provider) Slug() string       { return "nfo" }
 func (p *Provider) Name() string       { return "NFO Files" }
-func (p *Provider) ForTypes() []string { return []string{"movie", "series"} }
+func (p *Provider) ForTypes() []string { return []string{typeMovie, typeSeries} }
+
+// IdentityHints implements metadata.IdentityHintProvider: the external IDs a
+// curated NFO declares (<uniqueid> tmdb/imdb/tvdb) are trusted identity hints
+// that anchor Phase-1 candidate selection. A title-only NFO contributes no
+// hints; its title participates only as a defanged search candidate.
+func (p *Provider) IdentityHints(_ context.Context, query metadata.SearchQuery) map[string]string {
+	parsed := findNFOForQuery(query)
+	if parsed == nil {
+		return nil
+	}
+	hints := make(map[string]string)
+	if parsed.TmdbID != "" {
+		hints["tmdb"] = parsed.TmdbID
+	}
+	if parsed.ImdbID != "" {
+		hints["imdb"] = parsed.ImdbID
+	}
+	if parsed.TvdbID != "" {
+		hints["tvdb"] = parsed.TvdbID
+	}
+	if len(hints) == 0 {
+		return nil
+	}
+	return hints
+}
 
 // Search extracts external IDs from NFO for matching.
 func (p *Provider) Search(ctx context.Context, query metadata.SearchQuery) ([]metadata.SearchResult, error) {
-	nfoPath := findNFOForQuery(query)
-	if nfoPath == "" {
-		return nil, nil
-	}
-	data, err := os.ReadFile(nfoPath)
-	if err != nil {
-		return nil, nil // NFO read errors are not fatal
-	}
-	parsed, err := parseNFOData(data)
-	if err != nil {
-		return nil, nil // NFO parse errors are not fatal
-	}
-	if query.ContentType != "" && parsed.Type != "" && parsed.Type != query.ContentType {
-		return nil, nil
+	parsed := findNFOForQuery(query)
+	if parsed == nil {
+		return nil, nil // missing/unreadable/mismatched NFOs are not fatal
 	}
 	ids := make(map[string]string)
 	if parsed.TmdbID != "" {
@@ -56,25 +70,36 @@ func (p *Provider) Search(ctx context.Context, query metadata.SearchQuery) ([]me
 	}}, nil
 }
 
-// GetMetadata parses full metadata from NFO file.
+// GetMetadata parses full metadata from an NFO file. Like Search, it carries
+// the ContentType guard (enforced inside findNFO): a tvshow.nfo next to a
+// movie file must not inject series data into a movie item at top priority.
 func (p *Provider) GetMetadata(ctx context.Context, req metadata.MetadataRequest) (*metadata.MetadataResult, error) {
-	nfoPath := findNFOForRequest(req)
-	if nfoPath == "" {
-		return &metadata.MetadataResult{}, nil
-	}
-	data, err := os.ReadFile(nfoPath)
-	if err != nil {
-		return &metadata.MetadataResult{}, nil
-	}
-	parsed, err := parseNFOData(data)
-	if err != nil {
+	parsed := findNFOForRequest(req)
+	if parsed == nil {
 		return &metadata.MetadataResult{}, nil
 	}
 	result := &metadata.MetadataResult{
-		HasMetadata: true,
-		Title:       parsed.Title,
-		Year:        parsed.Year,
-		Overview:    parsed.Overview,
+		HasMetadata:   true,
+		Title:         parsed.Title,
+		OriginalTitle: parsed.OriginalTitle,
+		Tagline:       parsed.Tagline,
+		Year:          parsed.Year,
+		Overview:      parsed.Overview,
+		Runtime:       parsed.Runtime,
+		ReleaseDate:   parsed.ReleaseDate,
+		FirstAirDate:  parsed.FirstAirDate,
+		ContentRating: parsed.ContentRating,
+		Genres:        parsed.Genres,
+		Studios:       parsed.Studios,
+		Countries:     parsed.Countries,
+		Keywords:      parsed.Keywords,
+		Ratings: metadata.Ratings{
+			IMDB:       parsed.RatingIMDB,
+			TMDB:       parsed.RatingTMDB,
+			RTCritic:   parsed.RatingRTCritic,
+			RTAudience: parsed.RatingRTAudience,
+		},
+		People:      parsed.People,
 		ProviderIDs: make(map[string]string),
 	}
 	if parsed.TmdbID != "" {
@@ -89,7 +114,7 @@ func (p *Provider) GetMetadata(ctx context.Context, req metadata.MetadataRequest
 	return result, nil
 }
 
-func findNFOForQuery(query metadata.SearchQuery) string {
+func findNFOForQuery(query metadata.SearchQuery) *parsedNFO {
 	candidatePaths := candidateSidecarPaths(
 		query.FilePath,
 		query.RepresentativeFilePath,
@@ -97,17 +122,19 @@ func findNFOForQuery(query metadata.SearchQuery) string {
 		query.PrimarySidecarSearchPaths,
 		query.ProviderIDs["_filepath"],
 	)
-	return findNFO(candidatePaths)
+	_, parsed := findNFO(candidatePaths, query.ContentType)
+	return parsed
 }
 
-func findNFOForRequest(req metadata.MetadataRequest) string {
+func findNFOForRequest(req metadata.MetadataRequest) *parsedNFO {
 	candidatePaths := candidateSidecarPaths(
 		req.FilePath,
 		req.RepresentativeFilePath,
 		req.AllGroupFilePaths,
 		req.PrimarySidecarSearchPaths,
 	)
-	return findNFO(candidatePaths)
+	_, parsed := findNFO(candidatePaths, req.ContentType)
+	return parsed
 }
 
 func candidateSidecarPaths(primary string, representative string, groupFiles []string, searchPaths []string, extras ...string) []string {
@@ -142,19 +169,32 @@ func compactNFOPaths(paths []string) []string {
 
 // findNFO locates the best candidate NFO file across media-file and directory
 // search paths. File paths check legacy directory-level sidecars first, then a
-// basename-matched sidecar in the same directory.
-func findNFO(paths []string) string {
+// basename-matched sidecar in the same directory. A candidate that exists but
+// fails to parse, or whose root type mismatches contentType, falls through to
+// the next candidate — a stray movie.nfo in a series root must not shadow
+// tvshow.nfo, and a tvshow.nfo beside a movie file must not inject series
+// data. Returns the winning path and its parsed contents, or ("", nil).
+func findNFO(paths []string, contentType string) (string, *parsedNFO) {
 	candidates := make([]string, 0, len(paths)*3)
 	for _, path := range paths {
 		candidates = append(candidates, nfoCandidatesForPath(path)...)
 	}
 	candidates = compactNFOPaths(candidates)
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
+		data, err := os.ReadFile(c)
+		if err != nil {
+			continue
 		}
+		parsed, err := parseNFOData(data)
+		if err != nil {
+			continue
+		}
+		if contentType != "" && parsed.Type != "" && parsed.Type != contentType {
+			continue
+		}
+		return c, parsed
 	}
-	return ""
+	return "", nil
 }
 
 func nfoCandidatesForPath(path string) []string {

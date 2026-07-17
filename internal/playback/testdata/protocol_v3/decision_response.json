@@ -1,0 +1,27 @@
+{
+  "protocol_version": 3,
+  "server_features": ["playback_plan_v3", "media3_only", "playback_route_diagnostics"],
+  "outcome": "playable",
+  "session_id": "11111111-1111-4111-8111-111111111111",
+  "playback_plan": {
+    "protocol_version": 3,
+    "plan_id": "plan:golden0001",
+    "session_id": "11111111-1111-4111-8111-111111111111",
+    "expires_at": "2030-01-01T00:00:00Z",
+    "delivery": "original_http",
+    "engine": "media3_direct",
+    "stream": {"url": "/stream/11111111-1111-4111-8111-111111111111", "protocol": "http_progressive", "container": "mp4", "mime_type": "video/mp4", "headers": {}, "header_refresh": "session"},
+    "timeline": {"source_start_seconds": 12.5, "stream_origin_seconds": 0, "player_start_seconds": 12.5, "timeline_offset_seconds": 0, "can_seek_anywhere": true, "seek_restoration": "player_position"},
+    "selected_tracks": {"audio": {"id": "file:42:audio:0", "index": 0}},
+    "effective_recipe": {"video_codec": "h264", "audio_codec": "aac", "width": 1920, "height": 1080, "frame_rate": 23.976, "bitrate_kbps": 8000, "dynamic_range": "sdr", "audio_channels": 2, "audio_layout": "stereo"},
+    "claims": {"video": {"hdr10": false, "hdr10_plus": false, "hlg": false, "dolby_vision": false}, "audio": {"codec": "aac", "passthrough": false, "atmos_preserved": false, "reason": "client_decode_supported"}, "subtitles": {"ass_styling_preserved": false, "bitmap_overlay": false, "bitmap_sidecar": false}},
+    "subtitle": {"mode": "off"},
+    "transformations": [],
+    "degradation_warnings": [],
+    "decision_reason": "validated_original_playback",
+    "requested_media_file_id": 42,
+    "effective_media_file_id": 42,
+    "source": {"media_file_id": 42, "container": "mp4", "video_codec": "h264", "video_profile": "high", "video_level": 41, "bit_depth": 8, "width": 1920, "height": 1080, "frame_rate": 23.976, "bitrate_kbps": 8000, "dynamic_range": "sdr", "dv_enhancement_layer": "none", "audio_codec": "aac", "audio_channels": 2, "audio_layout": "stereo"},
+    "subtitle_fidelity_policy": "allow_simplified_rendering"
+  }
+}

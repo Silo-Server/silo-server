@@ -345,7 +345,19 @@ func resolveEnabledProviders(
 	if err != nil {
 		return nil, err
 	}
-	return buildProviders(ctx, caps, resolver, pool, checker), nil
+	// Exclude capabilities that opt out of default-enable (e.g. the seeded-
+	// disabled built-in NFO provider). Like the chain-less fallback, an
+	// installed-but-off provider must not activate itself through this
+	// content-level-agnostic path (person refresh); only an admin enabling its
+	// chain row does. Absent/unparseable metadata stays eligible (legacy).
+	eligible := make([]CapabilityInfo, 0, len(caps))
+	for _, c := range caps {
+		if !extractDefaultEnabled(lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)) {
+			continue
+		}
+		eligible = append(eligible, c)
+	}
+	return buildProviders(ctx, eligible, resolver, pool, checker), nil
 }
 
 // resolveEnabledProvidersByPriority returns all enabled providers sorted by
@@ -375,8 +387,8 @@ func resolveEnabledProvidersByPriority(
 	items := make([]ranked, 0, len(caps))
 	for _, c := range caps {
 		metadataJSON := lookupCapabilityMetadata(ctx, pool, c.PluginInstallationID, c.CapabilityID)
-		if !providerSupportsLevel(metadataJSON, contentLevel) {
-			slog.DebugContext(ctx, "skipping metadata provider: does not declare support for content level", "component", "metadata",
+		if !providerEligibleForFallback(metadataJSON, contentLevel) {
+			slog.DebugContext(ctx, "skipping metadata provider: not eligible for chain-less fallback", "component", "metadata",
 				"installation_id", c.PluginInstallationID,
 				"capability_id", c.CapabilityID,
 				"content_level", contentLevel)
@@ -419,6 +431,17 @@ func providerSupportsLevel(metadataJSON []byte, contentLevel string) bool {
 		return true
 	}
 	return levels[contentLevel] > 0
+}
+
+// providerEligibleForFallback reports whether a capability may participate in
+// the chain-less fallback for contentLevel. The fallback runs not only for
+// chain-less libraries but whenever a level's enabled-filter yields zero
+// entries, so a capability that opts out of being enabled by default
+// (default_enabled=false — e.g. the seeded-disabled built-in NFO provider or a
+// specialist plugin) must not activate itself through it. Absent or
+// unparseable metadata defaults to eligible, preserving legacy behavior.
+func providerEligibleForFallback(metadataJSON []byte, contentLevel string) bool {
+	return providerSupportsLevel(metadataJSON, contentLevel) && extractDefaultEnabled(metadataJSON)
 }
 
 // lookupCapabilityMetadata returns the raw plugin_capabilities.metadata JSON for
@@ -599,9 +622,27 @@ func buildProviders(
 	providers := make([]Provider, 0, len(caps))
 	for _, c := range caps {
 		enabled, err := installationEnabled(ctx, checker, pool, c.PluginInstallationID)
-		if err != nil || !enabled {
+		if err != nil {
+			slog.WarnContext(ctx, "skipping metadata provider: installation enabled-check failed", "component", "metadata",
+				"installation_id", c.PluginInstallationID, "capability_id", c.CapabilityID, "error", err)
+			continue
+		}
+		if !enabled {
 			slog.DebugContext(ctx, "skipping metadata provider: plugin installation disabled", "component", "metadata",
 				"installation_id", c.PluginInstallationID, "capability_id", c.CapabilityID)
+			continue
+		}
+
+		// A builtin installation's capabilities resolve to in-process providers
+		// from the builtin registry; everything else is a gRPC plugin provider.
+		if installationIsBuiltin(ctx, checker, pool, c.PluginInstallationID) {
+			provider, ok := builtinProvider(c.CapabilityID)
+			if !ok {
+				slog.WarnContext(ctx, "skipping builtin metadata provider: no registered constructor", "component", "metadata",
+					"installation_id", c.PluginInstallationID, "capability_id", c.CapabilityID)
+				continue
+			}
+			providers = append(providers, provider)
 			continue
 		}
 
@@ -617,6 +658,42 @@ func buildProviders(
 		providers = append(providers, provider)
 	}
 	return providers
+}
+
+// installationKindChecker is an optional extension of InstallationEnabledChecker
+// that serves the installation kind from the plugins service's in-memory cache,
+// letting chain resolution identify builtin rows without a per-capability DB
+// query on the hot path. *plugins.Service implements it; when the checker does
+// not (nil or a test fake), installationIsBuiltin falls back to a pool query.
+type installationKindChecker interface {
+	InstallationKind(ctx context.Context, installationID int) (string, error)
+}
+
+// installationIsBuiltin reports whether a plugin installation row is the
+// reserved builtin-host installation (kind='builtin'). It prefers the cached
+// checker (no DB read) and falls back to a direct query. Errors (including a
+// pre-migration schema without the kind column) fail closed to "plugin" so
+// resolution behavior is unchanged.
+func installationIsBuiltin(ctx context.Context, checker InstallationEnabledChecker, pool *pgxpool.Pool, installationID int) bool {
+	if kc, ok := checker.(installationKindChecker); ok {
+		kind, err := kc.InstallationKind(ctx, installationID)
+		if err != nil {
+			return false
+		}
+		return kind == "builtin"
+	}
+	if pool == nil {
+		return false
+	}
+	var kind string
+	err := pool.QueryRow(ctx,
+		"SELECT kind FROM plugin_installations WHERE id = $1",
+		installationID,
+	).Scan(&kind)
+	if err != nil {
+		return false
+	}
+	return kind == "builtin"
 }
 
 // lookupCapabilityDisplayName retrieves the display name from plugin capability metadata.

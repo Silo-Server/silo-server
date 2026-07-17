@@ -1,5 +1,6 @@
 import type { LibraryPlaybackPreference } from "@/api/types";
 import type { UpdateLibraryPlaybackPreferenceRequest } from "@/hooks/queries/libraryPlaybackPreferences";
+import { getLanguageName, LANGUAGES } from "@/player/utils/languageNames";
 
 export const INHERIT_VALUE = "inherit";
 export const NONE_VALUE = "none";
@@ -8,20 +9,11 @@ export const ORIGINAL_LANGUAGE_LABEL = "Original Language";
 export const DEFAULT_SUBTITLE_MODE = "auto";
 export const DEFAULT_SHOW_FORCED_SUBTITLES = true;
 
-export const LANGUAGE_OPTIONS = [
-  { code: "en", label: "English" },
-  { code: "es", label: "Spanish" },
-  { code: "fr", label: "French" },
-  { code: "de", label: "German" },
-  { code: "it", label: "Italian" },
-  { code: "pt", label: "Portuguese" },
-  { code: "ja", label: "Japanese" },
-  { code: "ko", label: "Korean" },
-  { code: "zh", label: "Chinese" },
-  { code: "ru", label: "Russian" },
-  { code: "ar", label: "Arabic" },
-  { code: "hi", label: "Hindi" },
-] as const;
+/**
+ * Language choices for per-library playback overrides, re-exported from the
+ * canonical language list so every supported language stays selectable.
+ */
+export const LANGUAGE_OPTIONS = LANGUAGES;
 
 export const SUBTITLE_MODE_OPTIONS = [
   { value: "auto", label: "Auto" },
@@ -40,8 +32,11 @@ export function getLanguageLabel(code: string) {
   if (code === ORIGINAL_LANGUAGE_VALUE) {
     return ORIGINAL_LANGUAGE_LABEL;
   }
+  if (!code) {
+    return code;
+  }
 
-  return LANGUAGE_OPTIONS.find((language) => language.code === code)?.label ?? code;
+  return getLanguageName(code);
 }
 
 export function getSubtitleModeLabel(mode: string) {

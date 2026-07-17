@@ -12,6 +12,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 )
 
 // LibraryItemRepository provides CRUD operations for the media_item_libraries
@@ -421,7 +422,19 @@ func (r *LibraryItemRepository) Delete(ctx context.Context, contentID string, fo
 // longer has any non-missing files in the given folder. It also deletes orphaned
 // media items once they no longer belong to any library. Returns removed
 // membership count, deleted item count, orphaned S3 image dirs, and any error.
-func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, folderID int) (int, int, []string, error) {
+//
+// protectedPathPrefixes lists library roots that are currently unreachable
+// (dead drive, lost mount). Membership removal proceeds regardless — browse
+// and home queries hide items via media_item_libraries, so removal is what
+// keeps a title with no playable files out of the catalog — but items whose
+// files in this folder sit under a protected prefix are exempt from the
+// orphan delete. Deleting them is not losslessly recoverable (user
+// collections cascade via library_collection_items, manual metadata edits and
+// cached artwork are lost), whereas a hidden membership-less item restores
+// automatically: when the root returns, the scanner clears missing_since on
+// its surviving media_files rows and syncPresentLibraryState re-inserts the
+// membership from those rows.
+func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, folderID int, protectedPathPrefixes []string) (int, int, []string, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("beginning membership reconciliation transaction: %w", err)
@@ -470,11 +483,28 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 
 	deletedItems := 0
 	var orphanedImageDirs []string
-	if len(removedContentIDs) > 0 {
-		// Find items that will become orphaned (no remaining library memberships).
-		orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
-		if err != nil {
-			return 0, 0, nil, err
+	// Find both newly orphaned items and items preserved by an earlier
+	// protected-root pass. The latter no longer have a membership to return from
+	// the DELETE above, but their surviving media_files row still ties them to
+	// this folder so they can be reconsidered after the root recovers.
+	orphanIDs, err := collectOrphanIDs(ctx, tx, removedContentIDs)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	previouslyProtected, err := collectFolderFileOrphanIDs(ctx, tx, folderID)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	orphanIDs = appendUniqueStrings(orphanIDs, previouslyProtected...)
+	if len(orphanIDs) > 0 {
+
+		// Exempt orphans whose files sit under an unreachable root: the files
+		// still exist, the root is just offline. See the doc comment above.
+		if len(orphanIDs) > 0 && len(protectedPathPrefixes) > 0 {
+			orphanIDs, err = excludeOrphansUnderProtectedPrefixes(ctx, tx, orphanIDs, folderID, protectedPathPrefixes)
+			if err != nil {
+				return 0, 0, nil, err
+			}
 		}
 
 		// Collect image paths before deletion.
@@ -515,4 +545,86 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 	}
 
 	return len(removedContentIDs), deletedItems, orphanedImageDirs, nil
+}
+
+func collectFolderFileOrphanIDs(ctx context.Context, tx pgx.Tx, folderID int) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT DISTINCT mf.content_id
+		FROM media_files mf
+		WHERE mf.media_folder_id = $1
+		  AND mf.content_id IS NOT NULL
+		  AND mf.content_id <> ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mf.content_id
+		  )
+	`, folderID)
+	if err != nil {
+		return nil, fmt.Errorf("finding previously protected folder orphans: %w", err)
+	}
+	defer rows.Close()
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("collecting previously protected folder orphans: %w", err)
+	}
+	return ids, nil
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]struct{}, len(values)+len(additions))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, value := range additions {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
+// excludeOrphansUnderProtectedPrefixes returns the subset of orphanIDs that
+// have no media_files row in the folder at or under any protected prefix.
+// Matching uses the exact-path + escaped prefix-LIKE shape shared with the
+// scanner's root matching, so a sibling root that merely shares a string
+// prefix (/mnt/movies2 vs /mnt/movies) is never protected by accident.
+//
+// Known limitation: the check is scoped to the reconciled folder's own files
+// (mf.media_folder_id = folderID). An item shared across two libraries whose
+// only surviving files sit under ANOTHER folder's currently-unreachable root
+// is not exempted here — if its membership in this folder is genuinely
+// removed while the other folder's root is offline, the item is purged even
+// though its files under the dead root would have resurrected. Closing this
+// would require probing every enabled folder's roots (or persisting per-
+// folder unreachable state) on each reconcile; accepted for now given how
+// narrow the window is.
+func excludeOrphansUnderProtectedPrefixes(ctx context.Context, tx pgx.Tx, orphanIDs []string, folderID int, prefixes []string) ([]string, error) {
+	conds, condArgs := pathscope.CoverageClauses("mf.file_path", prefixes, 3)
+	args := append([]any{orphanIDs, folderID}, condArgs...)
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT cid FROM unnest($1::text[]) AS cid
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM media_files mf
+			WHERE mf.media_folder_id = $2
+			  AND mf.content_id = cid
+			  AND (%s)
+		)
+	`, strings.Join(conds, " OR ")), args...)
+	if err != nil {
+		return nil, fmt.Errorf("filtering orphans under protected prefixes: %w", err)
+	}
+	defer rows.Close()
+
+	ids := make([]string, 0, len(orphanIDs))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning unprotected orphan id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

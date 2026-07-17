@@ -382,6 +382,223 @@ func TestItemRepo_Search_EmptyQueryReturnsEmpty(t *testing.T) {
 	}
 }
 
+// TestEligibleForFuzzy pins the min-token gate that guards the fuzzy title
+// fallback: the longest normalized token must clear fuzzyMinTokenLen, so short,
+// non-selective queries stay on the exact FTS/prefix path.
+func TestEligibleForFuzzy(t *testing.T) {
+	cases := []struct {
+		query string
+		want  bool
+	}{
+		{"avegners", true},   // 8-char typo
+		{"sponge bob", true}, // longest token "sponge" (6)
+		{"a vengers", true},  // judged on "vengers" (7), not "a"
+		{"dune", true},       // exactly at the floor
+		{"the", false},       // 3 chars
+		{"a b c", false},     // all short
+		{"and the", false},   // "and" normalized away, "the" is 3
+		{"   ", false},       // empty
+	}
+	for _, tc := range cases {
+		if got := eligibleForFuzzy(parseSearchQuery(tc.query)); got != tc.want {
+			t.Errorf("eligibleForFuzzy(%q) = %v, want %v", tc.query, got, tc.want)
+		}
+	}
+}
+
+// TestSearchTextFromParsed pins the shared searchText derivation used by both
+// the FTS and fuzzy builders: parsed Text when present, else a quote-stripped
+// fallback off the raw query. Both builders must agree so they search the same
+// text.
+func TestSearchTextFromParsed(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{"interstellar", "interstellar"},
+		{`"the matrix"`, "the matrix"},
+		{"  spaced   out  ", "spaced out"},
+		{`"`, ""},
+		{"   ", ""},
+	}
+	for _, tc := range cases {
+		if got := searchTextFromParsed(parseSearchQuery(tc.raw)); got != tc.want {
+			t.Errorf("searchTextFromParsed(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+// TestParseSearchQuery_NormalizedText asserts parseSearchQuery precomputes the
+// full normalized text that eligibleForFuzzy's token gate reads (so the gate
+// does not re-normalize on every sparse search).
+func TestParseSearchQuery_NormalizedText(t *testing.T) {
+	if got := parseSearchQuery("The Avengers").NormalizedText; got != "the avengers" {
+		t.Fatalf("NormalizedText = %q, want %q", got, "the avengers")
+	}
+	// "and" is dropped and folded, matching normalizeTitleForComparison.
+	if got := parseSearchQuery("law and order").NormalizedText; got != "law order" {
+		t.Fatalf("NormalizedText = %q, want %q", got, "law order")
+	}
+}
+
+// TestItemRepo_Search_FTSQueryHasNoFuzzyArm asserts that the FTS query never
+// carries the trigram % arm or its similarity ranking. Fusing them forced a
+// lossy bitmap recheck that rebuilt the title tsvectors for thousands of
+// near-miss rows on every search; the fuzzy path is now a separate query
+// (buildFuzzySearchSQL) invoked only as a fallback by SearchPage.
+func TestItemRepo_Search_FTSQueryHasNoFuzzyArm(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, _ := repo.buildSearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{})
+	for _, sql := range []string{dataSQL, countSQL} {
+		if strings.Contains(sql, "% mi.title_normalized") {
+			t.Fatalf("FTS query must not include the trigram %% arm; got:\n%s", sql)
+		}
+		if strings.Contains(sql, "fuzzy_rank") {
+			t.Fatalf("FTS query must not include fuzzy_rank; got:\n%s", sql)
+		}
+		if strings.Contains(sql, "similarity(") {
+			t.Fatalf("FTS query must not compute similarity(); got:\n%s", sql)
+		}
+	}
+}
+
+// TestItemRepo_BuildFuzzySearchSQL asserts that the fuzzy fallback query scores
+// only on the indexed title_normalized column (no title tsvector rebuild),
+// matches via strict word similarity so long titles stay reachable, ranks by
+// descending word similarity with whole-title closeness as tie-break, excludes
+// already-seen content_ids, and applies the same scope filters (type, manga
+// exclusion) as the FTS query.
+func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, []string{"abc", "def"}, 0)
+
+	// <<%, not %: full-string similarity is diluted by long titles ("avegners"
+	// must reach "Avengers: Endgame"); the same gin_trgm_ops index serves both.
+	if !strings.Contains(dataSQL, "public.normalize_search_text($1) <<% mi.title_normalized") {
+		t.Fatalf("expected strict-word-similarity arm against title_normalized; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "MAX(strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank") {
+		t.Fatalf("expected strict word similarity ranking on title_normalized; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_full_rank") {
+		t.Fatalf("expected whole-title similarity tie-break rank; got:\n%s", dataSQL)
+	}
+	// The whole point of the separate query: it must never rebuild the title
+	// tsvectors that made the fused query slow.
+	if strings.Contains(dataSQL, "to_tsvector") || strings.Contains(dataSQL, "ts_rank_cd") {
+		t.Fatalf("fuzzy query must not rebuild title tsvectors; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "ORDER BY fuzzy_rank DESC, fuzzy_full_rank DESC, LOWER(title) ASC, content_id ASC") {
+		t.Fatalf("expected similarity-ordered results; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "NOT (mi.content_id = ANY($") {
+		t.Fatalf("expected exclusion of already-seen content_ids; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "mi.type IN ($") {
+		t.Fatalf("expected shared type scope filter; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(countSQL, "SELECT COUNT(*) FROM scored") {
+		t.Fatalf("expected count sibling over the scored CTE; got:\n%s", countSQL)
+	}
+	// Arg order: $1 searchText, $2 type, $3 exclusion array, $4 limit, $5 offset.
+	if len(args) != 5 {
+		t.Fatalf("expected 5 args, got %d: %#v", len(args), args)
+	}
+	if args[0] != "avegners" {
+		t.Fatalf("expected $1=searchText; got %#v", args[0])
+	}
+	if args[len(args)-2] != 20 || args[len(args)-1] != 0 {
+		t.Fatalf("expected trailing limit/offset args; got %#v", args[len(args)-2:])
+	}
+}
+
+// TestItemRepo_BuildFuzzySearchSQL_CursorModeOmitsWindowCount asserts that the
+// fuzzy fallback honors cursor mode: with includeTotal=false it must not carry
+// COUNT(*) OVER (), matching buildSearchSQLWithTotal's skip-total contract so
+// SearchPage's cursor path stays a pure keyset page.
+func TestItemRepo_BuildFuzzySearchSQL_CursorModeOmitsWindowCount(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, _, _ := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 21, 0, AccessFilter{}, false, nil, 0)
+	if strings.Contains(dataSQL, "COUNT(*) OVER") {
+		t.Fatalf("cursor-mode fuzzy query must omit window count; got:\n%s", dataSQL)
+	}
+	if strings.Contains(dataSQL, "total_count") {
+		t.Fatalf("cursor-mode fuzzy query must not select total_count; got:\n%s", dataSQL)
+	}
+}
+
+// TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor asserts the augment floor
+// contract: minSimilarity > 0 adds an explicit similarity() >= $n predicate
+// (used when the FTS block had real hits, so augmentation only admits
+// near-certain corrections), and minSimilarity == 0 omits it so zero-hit typo
+// queries keep the base pinned threshold's recall.
+func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
+	repo := &ItemRepository{}
+
+	floorSQL, _, floorArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, fuzzyAugmentSimilarityFloor)
+	// Whole-title similarity, not word similarity: the augment floor must not
+	// admit embedded prefix words ("coral" scores 0.5 word-similarity to
+	// "coraline").
+	if !strings.Contains(floorSQL, "AND similarity(public.normalize_search_text($1), mi.title_normalized) >= $2") {
+		t.Fatalf("expected explicit whole-title similarity floor predicate as $2; got:\n%s", floorSQL)
+	}
+	if len(floorArgs) < 2 || floorArgs[1] != fuzzyAugmentSimilarityFloor {
+		t.Fatalf("expected $2 = fuzzyAugmentSimilarityFloor; got args %#v", floorArgs)
+	}
+	// Trailing limit/offset must still close the arg list for the count sibling.
+	if floorArgs[len(floorArgs)-2] != 20 || floorArgs[len(floorArgs)-1] != 0 {
+		t.Fatalf("expected trailing limit/offset args; got %#v", floorArgs[len(floorArgs)-2:])
+	}
+
+	baseSQL, _, baseArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, 0)
+	if strings.Contains(baseSQL, "AND similarity(public.normalize_search_text($1), mi.title_normalized) >= $2") {
+		t.Fatalf("zero floor must not add a similarity predicate; got:\n%s", baseSQL)
+	}
+	if len(baseArgs) != len(floorArgs)-1 {
+		t.Fatalf("zero floor should bind one fewer arg: base %d vs floor %d", len(baseArgs), len(floorArgs))
+	}
+}
+
+// TestItemRepo_BuildFuzzySearchSQL_EmptyQueryReturnsEmpty guards the same
+// empty-input contract as buildSearchSQL.
+func TestItemRepo_BuildFuzzySearchSQL_EmptyQueryReturnsEmpty(t *testing.T) {
+	repo := &ItemRepository{}
+	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("   ", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, 0)
+	if dataSQL != "" || countSQL != "" || args != nil {
+		t.Fatalf("expected empty result for blank query; got dataSQL=%q countSQL=%q args=%#v", dataSQL, countSQL, args)
+	}
+}
+
+// TestItemRepo_Search_LibraryScopeUsesIndependentExistsPredicates pins the
+// leak-safe library scoping shared by the FTS search and the fuzzy fallback via
+// appendSearchScopeFilters. The prior JOIN + NOT(mil.media_folder_id = ANY(...))
+// form let an item linked to BOTH a disabled and a non-disabled library survive
+// the deny check on the passing membership row, so a typo (fuzzy) or exact
+// search could surface items from a disabled library. Both builders must instead
+// emit independent EXISTS/NOT EXISTS subqueries and no membership JOIN.
+func TestItemRepo_Search_LibraryScopeUsesIndependentExistsPredicates(t *testing.T) {
+	repo := &ItemRepository{}
+	filter := AccessFilter{DisabledLibraryIDs: []int{9}}
+
+	ftsSQL, _, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, filter)
+	fuzzySQL, _, _ := repo.buildFuzzySearchSQL("avatar", []string{"movie"}, 20, 0, filter, true, nil, 0)
+
+	for name, sql := range map[string]string{"fts": ftsSQL, "fuzzy": fuzzySQL} {
+		if strings.Contains(sql, "JOIN media_item_libraries") {
+			t.Fatalf("%s query must not JOIN media_item_libraries for scoping; got:\n%s", name, sql)
+		}
+		// Disabled-only path requires positive membership (argument-free EXISTS)
+		// so orphan items don't slip through the vacuous NOT EXISTS...
+		if !strings.Contains(sql, "EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id)") {
+			t.Fatalf("%s query must require library membership via an argument-free EXISTS; got:\n%s", name, sql)
+		}
+		// ...plus the disabled NOT EXISTS.
+		if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($") {
+			t.Fatalf("%s query must exclude disabled libraries via NOT EXISTS; got:\n%s", name, sql)
+		}
+	}
+}
+
 // TestItemRepo_Search_UsesTitleNormalizedColumn asserts that buildSearchSQL
 // reads the mi.title_normalized stored generated column for the title rank
 // arms (exact_title_match and contiguous_title_match), so the LIKE

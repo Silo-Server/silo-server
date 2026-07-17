@@ -199,6 +199,14 @@ Silo often sees sidecar files that mirror the media basename:
 These are common and expected. Episode naming guidance in this page refers to the media files
 themselves, but sidecars may legitimately reuse the same stem.
 
+Some NFO sidecars are actively read: `movie.nfo`, `tvshow.nfo`, `<media basename>.nfo`,
+`season.nfo`, `<episode basename>.nfo`, and sidecar artwork (season posters, episode
+thumbnails) feed the built-in NFO metadata provider — including `<uniqueid>` provider IDs,
+which act as trusted matching anchors just like `{tmdb-...}` folder tags. NFO files never
+change how files are grouped; naming and layout still decide series/season/episode
+structure. See [Local NFO Metadata](nfo-local-metadata.md) for the supported fields and
+merge behavior.
+
 Supplemental directories next to a movie (and directly under a series root)
 are scanned as **extras** attached to that item, following the Jellyfin/Plex
 folder convention:

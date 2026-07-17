@@ -462,6 +462,12 @@ func (s *Service) PreloadEnabled(ctx context.Context) error {
 		if installation == nil {
 			continue
 		}
+		// Builtin installations have no archive or binary; skip them explicitly
+		// instead of leaning on the tolerated ErrArchiveNotFound branch below
+		// (any other load error here is fatal to startup).
+		if installation.IsBuiltin() {
+			continue
+		}
 		if _, err := s.ensureLoadedInstallation(ctx, installation); err != nil {
 			if errors.Is(err, ErrArchiveNotFound) {
 				slog.WarnContext(ctx,
@@ -806,6 +812,15 @@ func (s *Service) loadInstallation(ctx context.Context, installationID int, requ
 	if requireEnabled && !installation.Enabled {
 		return nil, ErrInstallationDisabled
 	}
+	// requireEnabled marks paths that intend to launch or serve the plugin
+	// (start, manifest routes/assets, gRPC clients, HTTP proxy). The reserved
+	// builtin row has no binary behind it and must never reach those paths;
+	// not-found gives the proxy and API a clean 4xx. Reads with
+	// requireEnabled=false (IsInstallationEnabled for the metadata chain,
+	// generic listings) still see the row.
+	if requireEnabled && installation.IsBuiltin() {
+		return nil, ErrInstallationNotFound
+	}
 	return installation, nil
 }
 
@@ -867,6 +882,17 @@ func (s *Service) IsInstallationEnabled(ctx context.Context, installationID int)
 		return false, err
 	}
 	return installation.Enabled, nil
+}
+
+// InstallationKind returns the installation's kind ("plugin" or "builtin") from
+// the same in-memory cache IsInstallationEnabled reads, so metadata chain
+// resolution can identify builtin rows without a per-capability DB query.
+func (s *Service) InstallationKind(ctx context.Context, installationID int) (string, error) {
+	installation, err := s.loadInstallation(ctx, installationID, false)
+	if err != nil {
+		return "", err
+	}
+	return installation.Kind, nil
 }
 
 func (s *Service) ensureLoadedInstallation(

@@ -21,11 +21,11 @@ const maxAudiobookSidecarCoverSize = 8 * 1024 * 1024
 // request struct) to avoid an import cycle: imagecache imports metadata
 // which imports scanner.
 type audiobookCoverCacher interface {
-	CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
+	CacheAudiobookCover(ctx context.Context, data []byte, contentID string) (storedPath string, thumbhash string, err error)
 }
 
 type ebookCoverCacher interface {
-	CacheEbookCover(ctx context.Context, data []byte, contentID string) (basePath string, ext string, thumbhash string, err error)
+	CacheEbookCover(ctx context.Context, data []byte, contentID string) (storedPath string, thumbhash string, err error)
 }
 
 type audiobookCoverMetadataStore interface {
@@ -84,13 +84,13 @@ func ExtractAndUploadAudiobookCover(
 	if len(data) == 0 {
 		return "", ""
 	}
-	basePath, ext, thumbhash, err := cacher.CacheAudiobookCover(ctx, data, contentID)
+	storedPath, thumbhash, err := cacher.CacheAudiobookCover(ctx, data, contentID)
 	if err != nil {
 		slog.WarnContext(ctx, "audiobook cover: imagecache upload failed", "component", "scanner",
 			"path", audioFilePath, "error", err)
 		return "", ""
 	}
-	return fmt.Sprintf("%s/original%s", basePath, ext), thumbhash
+	return storedPath, thumbhash
 }
 
 func applyAudiobookSidecarCover(ctx context.Context, store audiobookCoverMetadataStore, cacher audiobookCoverCacher, contentID string, folderPath string) error {
@@ -108,11 +108,10 @@ func applyAudiobookSidecarCover(ctx context.Context, store audiobookCoverMetadat
 	if strings.TrimSpace(existingPosterPath) != "" {
 		return nil
 	}
-	basePath, ext, thumbhash, err := cacher.CacheAudiobookCover(ctx, cover, contentID)
+	posterPath, thumbhash, err := cacher.CacheAudiobookCover(ctx, cover, contentID)
 	if err != nil {
 		return err
 	}
-	posterPath := strings.TrimRight(basePath, "/") + "/original" + ext
 	update := &catalog.MetadataUpdate{PosterPath: &posterPath}
 	if thumbhash != "" {
 		update.PosterThumbhash = &thumbhash

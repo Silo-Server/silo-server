@@ -188,6 +188,14 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		if existing == nil || existing.RepositoryID == nil {
 			continue
 		}
+		// The reserved builtin row must never be matched against catalog
+		// entries: a catalog plugin named after it could otherwise rewrite its
+		// version/install_path and convert it into a launchable plugin.
+		// update_policy='manual' on the row and the reserved-plugin-id install
+		// rejection are the other layers.
+		if existing.IsBuiltin() {
+			continue
+		}
 		entry, ok := latestByRepositoryPlugin[repositoryPluginKey{
 			RepositoryID: *existing.RepositoryID,
 			PluginID:     existing.PluginID,

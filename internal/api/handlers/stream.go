@@ -159,7 +159,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				seekSeconds = s
 			}
 		}
-		if err := playback.ServeRemux(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile()); err != nil {
+		if err := playback.ServeRemuxWithDVMode(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath()); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 
@@ -191,7 +191,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 	setPlaybackSessionLogContext(r, sessionID)
 
 	trackParam := chi.URLParam(r, "track")
-	trackIndex, _, err := playback.ParseSubtitleTrackParam(trackParam)
+	trackIndex, requestedFormat, err := playback.ParseSubtitleTrackParam(trackParam)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid subtitle track index")
 		return
@@ -224,7 +224,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		sub := file.ExternalSubtitles[trackIndex]
 
 		// Serve ASS/SSA external subtitles as raw data for client-side rendering.
-		if playback.IsASS(sub.Format) {
+		if playback.IsASS(sub.Format) && requestedFormat != "vtt" {
 			data, err := playback.LoadExternalSubtitleRaw(sub.Path)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal_error",
@@ -264,7 +264,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 		// demuxed, so the first byte lands within ~1s even on network
 		// storage. Works identically for direct-play, remux, and
 		// transcode because it doesn't depend on any other ffmpeg.
-		h.streamEmbeddedSubtitle(w, r, file, embeddedIndex, session)
+		h.streamEmbeddedSubtitle(w, r, file, embeddedIndex, session, requestedFormat)
 		return
 	}
 
@@ -295,7 +295,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Serve ASS/SSA downloaded subtitles as raw data.
-			if playback.IsASS(string(dl.Format)) {
+			if playback.IsASS(string(dl.Format)) && requestedFormat != "vtt" {
 				playback.ServeSubtitle(w, data, "ass")
 				return
 			}
@@ -307,7 +307,7 @@ func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Convert to VTT using the playback conversion pipeline.
-			vttData, err := playback.ConvertToVTT(data, string(dl.Format))
+			vttData, err := playback.ConvertToVTTWithFFmpeg(r.Context(), data, string(dl.Format), h.ffmpegPath())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "convert_error", "Failed to convert subtitle")
 				return
@@ -488,7 +488,7 @@ func (h *StreamHandler) handleTransportStartFailure(ctx context.Context, session
 // track, seeked to the best-known playback position, and pipes its
 // stdout directly to w. Because this ffmpeg is independent of the video
 // pipeline, it works the same for direct play, remux, and transcode.
-func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, session *playback.Session) {
+func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Request, file *models.MediaFile, embeddedIndex int, session *playback.Session, requestedFormat ...string) {
 	track := file.SubtitleTracks[embeddedIndex]
 	outFormat := "vtt"
 	switch {
@@ -536,6 +536,20 @@ func (h *StreamHandler) streamEmbeddedSubtitle(w http.ResponseWriter, r *http.Re
 		DurationSeconds: duration,
 		AllowWindow:     allowWindow,
 		FFmpegPath:      h.ffmpegPath(),
+	}
+	if len(requestedFormat) > 0 && requestedFormat[0] == "vtt" {
+		// Only text sources can be converted to WebVTT. A bitmap track (PGS
+		// reaches here because it is deliverable as .sup; DVD/DVB are rejected
+		// upstream) carries no text, so honoring the override would spawn an
+		// ffmpeg that always fails after the 200 and headers are committed.
+		// Reject before any spawn or header write.
+		if playback.NeedsBurnIn(track.Codec) {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type",
+				"Bitmap subtitle tracks cannot be converted to WebVTT")
+			return
+		}
+		opts.TargetFormat = "vtt"
+		outFormat = "vtt"
 	}
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")

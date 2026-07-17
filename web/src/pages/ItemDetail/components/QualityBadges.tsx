@@ -1,18 +1,14 @@
-import type { FileVersion } from "@/api/types";
-import { pickBestAttributes } from "./versionRankingUtils";
+import type { SelectedMediaSummary } from "./selectedMediaSummary";
 
 interface QualityBadgesProps {
-  versions: FileVersion[];
+  summary: SelectedMediaSummary;
 }
 
-export default function QualityBadges({ versions }: QualityBadgesProps) {
-  const best = pickBestAttributes(versions);
-  if (!best) return null;
-
+export default function QualityBadges({ summary }: QualityBadgesProps) {
   const badges: string[] = [];
-  if (best.resolution) badges.push(best.resolution);
-  if (best.hdr) badges.push("HDR");
-  if (best.audioLabel) badges.push(best.audioLabel);
+  if (summary.resolution) badges.push(summary.resolution);
+  if (summary.videoRangeLabel) badges.push(summary.videoRangeLabel);
+  if (summary.audioLabel) badges.push(summary.audioLabel);
 
   if (badges.length === 0) return null;
 

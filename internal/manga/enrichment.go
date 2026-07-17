@@ -625,7 +625,7 @@ func (e *Enricher) cacheRemoteImage(ctx context.Context, contentID, url string, 
 		return url, ""
 	}
 
-	storedPath := cachedOriginalImagePath(cached.BasePath, cached.Ext)
+	storedPath := metadata.CachedImageOriginalPath(cached)
 	if storedPath == "" {
 		return url, ""
 	}
@@ -643,19 +643,6 @@ func isNilImageCacher(cacher metadata.ImageCacher) bool {
 	default:
 		return false
 	}
-}
-
-func cachedOriginalImagePath(basePath, ext string) string {
-	if basePath == "" {
-		return ""
-	}
-	if strings.Contains(basePath, "/original.") {
-		return basePath
-	}
-	if ext == "" {
-		ext = ".jpg"
-	}
-	return strings.TrimRight(basePath, "/") + "/original" + ext
 }
 
 func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs map[string]string, result *metadata.MetadataResult) error {

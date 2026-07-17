@@ -15,12 +15,16 @@ const IMAGE_TABS: { key: ImageTab; label: string; aspect: string }[] = [
   { key: "logo", label: "Logos", aspect: "aspect-video" },
 ];
 
+// Seasons only store a poster; the server rejects other image types for them.
+const SEASON_TABS = IMAGE_TABS.filter((tab) => tab.key === "poster");
+
 interface ImageSelectorTabProps {
   item: ItemDetail;
   enabled: boolean;
 }
 
 export default function ImageSelectorTab({ item, enabled }: ImageSelectorTabProps) {
+  const availableTabs = item.type === "season" ? SEASON_TABS : IMAGE_TABS;
   const [activeTab, setActiveTab] = useState<ImageTab>("poster");
   const [textlessOnly, setTextlessOnly] = useState(false);
   const [selectedImage, setSelectedImage] = useState<RemoteImage | null>(null);
@@ -92,7 +96,7 @@ export default function ImageSelectorTab({ item, enabled }: ImageSelectorTabProp
 
       {/* Image type tabs */}
       <div className="flex shrink-0 items-center gap-1">
-        {IMAGE_TABS.map((tab) => (
+        {availableTabs.map((tab) => (
           <button
             key={tab.key}
             type="button"

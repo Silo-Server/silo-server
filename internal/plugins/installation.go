@@ -19,6 +19,20 @@ var ErrInstallationNotFound = errors.New("plugin installation not found")
 var ErrArchiveNotFound = errors.New("plugin archive not found")
 var ErrInstallationDisabled = errors.New("plugin installation is disabled")
 
+// ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
+// the reserved builtin-host installation row (delete, update, config, ...).
+var ErrBuiltinInstallationImmutable = errors.New("builtin installation cannot be modified")
+
+// Installation kinds. A 'builtin' installation is the reserved row that
+// anchors built-in host provider capabilities (silo.builtin); it has no
+// archive, manifest, or binary and must never be launched, updated, or
+// deleted. Generic reads must NOT filter builtins — the metadata chain's
+// enabled-check depends on reading them.
+const (
+	KindPlugin  = "plugin"
+	KindBuiltin = "builtin"
+)
+
 type Installation struct {
 	ID               int
 	RepositoryID     *int
@@ -26,10 +40,16 @@ type Installation struct {
 	Version          string
 	InstallPath      string
 	Enabled          bool
+	Kind             string  `json:"kind"`
 	UpdatePolicy     string  `json:"update_policy"`
 	AvailableVersion *string `json:"available_version,omitempty"`
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// IsBuiltin reports whether this is the reserved builtin-host installation.
+func (i *Installation) IsBuiltin() bool {
+	return i != nil && i.Kind == KindBuiltin
 }
 
 type Capability struct {
@@ -77,7 +97,7 @@ func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
 	return &InstallationStore{pool: pool}
 }
 
-const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, update_policy, available_version, created_at, updated_at`
+const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at`
 const capabilityColumns = `plugin_installation_id, capability_type, capability_id, metadata, created_at, updated_at`
 const archiveColumns = `plugin_installation_id, manifest_json, checksum, archive_bytes, created_at, updated_at`
 
@@ -91,6 +111,7 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		&installation.Version,
 		&installation.InstallPath,
 		&installation.Enabled,
+		&installation.Kind,
 		&installation.UpdatePolicy,
 		&installation.AvailableVersion,
 		&installation.CreatedAt,
@@ -263,6 +284,17 @@ func (s *InstallationStore) ListByPluginID(ctx context.Context, pluginID string)
 }
 
 func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInstallationInput) error {
+	// Guard at the store, not only the HTTP handler: the reserved builtin row
+	// carries no archive/binary and must never have its version, path, enabled
+	// flag, or capabilities rewritten, or its chain participation breaks.
+	installation, err := s.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if installation.IsBuiltin() {
+		return ErrBuiltinInstallationImmutable
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin update installation transaction: %w", err)
@@ -313,10 +345,6 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		}
 		if tag.RowsAffected() == 0 {
 			return ErrInstallationNotFound
-		}
-	} else {
-		if _, err := s.GetByID(ctx, id); err != nil {
-			return err
 		}
 	}
 
@@ -390,6 +418,12 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 	installation, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	// Guard at the store, not only the HTTP handler: deleting the reserved
+	// builtin row would cascade through every builtin chain row and RemoveAll
+	// the (sentinel) install dir.
+	if installation.IsBuiltin() {
+		return ErrBuiltinInstallationImmutable
 	}
 
 	tag, err := s.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id)

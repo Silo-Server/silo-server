@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -894,14 +895,26 @@ func dirSetToSlice(set map[string]struct{}) []string {
 	return dirs
 }
 
+// imageDeletePrefix returns the S3 prefix to sweep when deleting the content
+// that owns the cached image at path. Local artwork keys carry a content-hash
+// segment (local/{contentType}/{contentID}/{hash8}/{imageType}/...), so local
+// paths trim to local/{contentType}/{contentID}/ — deleting every stale hash
+// prefix, not just the live one. Other keys keep the per-image-type dir.
+func imageDeletePrefix(path string) string {
+	if !strings.HasPrefix(path, "local/") {
+		return pathDir(path)
+	}
+	segments := strings.SplitN(path, "/", 4)
+	if len(segments) < 4 {
+		return pathDir(path)
+	}
+	return segments[0] + "/" + segments[1] + "/" + segments[2] + "/"
+}
+
 // pathDir extracts the directory portion of an S3 image path.
 // e.g. "tmdb/movies/550/poster/original.webp" → "tmdb/movies/550/poster/"
 func pathDir(path string) string {
-	idx := strings.LastIndex(path, "/")
-	if idx <= 0 {
-		return ""
-	}
-	return path[:idx+1]
+	return artworkkey.Directory(path)
 }
 
 // rowQuerier is satisfied by both *pgxpool.Pool and pgx.Tx, letting read
@@ -967,7 +980,7 @@ func collectRawImageDirs(ctx context.Context, q rowQuerier, contentIDs []string)
 		}
 		for _, p := range []string{p1, p2, p3} {
 			if p != "" && !strings.Contains(p, "://") {
-				if dir := pathDir(p); dir != "" {
+				if dir := imageDeletePrefix(p); dir != "" {
 					dirSet[dir] = struct{}{}
 				}
 			}
@@ -1035,6 +1048,32 @@ func filterUnreferencedImageDirs(ctx context.Context, q rowQuerier, dirs, deleti
 }
 
 // UpdateLastScanned sets the last_scanned_at timestamp for the given folder.
+// LibraryRootsForContent returns the media folder root paths the given
+// content belongs to, resolved through media_item_libraries. The metadata
+// image-cache processor uses this to confine local file:// artwork sources
+// (metadata.LibraryRootResolver).
+func (r *FolderRepository) LibraryRootsForContent(ctx context.Context, contentID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT mfp.path
+		FROM media_folder_paths mfp
+		JOIN media_item_libraries mil ON mil.media_folder_id = mfp.media_folder_id
+		WHERE mil.content_id = $1
+	`, contentID)
+	if err != nil {
+		return nil, fmt.Errorf("querying library roots for content %q: %w", contentID, err)
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			return nil, fmt.Errorf("scanning library root path: %w", err)
+		}
+		paths = append(paths, path)
+	}
+	return paths, rows.Err()
+}
+
 func (r *FolderRepository) UpdateLastScanned(ctx context.Context, id int, scannedAt time.Time) error {
 	tag, err := r.pool.Exec(ctx,
 		"UPDATE media_folders SET last_scanned_at = $1 WHERE id = $2",

@@ -1,3 +1,5 @@
+import { LANGUAGES } from "@/player/utils/languageNames";
+
 export type SettingScope = "user" | "device";
 export type SettingControl = "switch" | "select" | "slider" | "json";
 
@@ -21,20 +23,13 @@ export interface SettingDefinition {
   summary?: (value: string | null | undefined) => string;
 }
 
+/**
+ * Language choices for settings dropdowns, derived from the canonical
+ * language list so every supported language stays selectable.
+ */
 export const LANGUAGE_OPTIONS: SettingOption[] = [
   { value: "", label: "No preference" },
-  { value: "en", label: "English" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" },
-  { value: "it", label: "Italian" },
-  { value: "pt", label: "Portuguese" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "zh", label: "Chinese" },
-  { value: "ru", label: "Russian" },
-  { value: "ar", label: "Arabic" },
-  { value: "hi", label: "Hindi" },
+  ...LANGUAGES.map(({ code, label }) => ({ value: code, label })),
 ];
 
 const definitions: SettingDefinition[] = [

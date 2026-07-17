@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -31,6 +30,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/Silo-Server/silo-server/internal/scantrigger"
 	"github.com/Silo-Server/silo-server/internal/sections"
@@ -251,6 +251,11 @@ type libraryMountCheckRootResponse struct {
 	Reachable    bool    `json:"reachable"`
 	ErrorCode    *string `json:"error_code"`
 	ErrorMessage *string `json:"error_message"`
+	// SuspectEmpty is set when the root is reachable but the library holds
+	// only missing-marked files under it — the signature of a lost mount
+	// exposing an empty mountpoint directory, which a reachability probe
+	// alone cannot detect. Additive field; absent/false for healthy roots.
+	SuspectEmpty bool `json:"suspect_empty"`
 }
 
 type libraryMountCheckResponse struct {
@@ -847,8 +852,9 @@ func (h *LibraryHandler) HandleCheckLibraryMount(w http.ResponseWriter, r *http.
 		return
 	}
 
-	resp := checkLibraryMount(folder)
-	if resp.Healthy && folder.ScanWarningCode != nil && *folder.ScanWarningCode == "empty_root" {
+	resp := h.checkLibraryMount(r.Context(), folder)
+	if resp.Healthy && folder.ScanWarningCode != nil &&
+		(*folder.ScanWarningCode == "empty_root" || *folder.ScanWarningCode == "dead_root") {
 		if err := h.folderRepo.ClearScanWarning(r.Context(), folder.ID); err != nil {
 			if errors.Is(err, catalog.ErrFolderNotFound) {
 				writeError(w, http.StatusNotFound, "not_found", "Library not found")
@@ -1256,7 +1262,7 @@ func scanBoolMetric(result *libraryingest.Result, pick func(*scanner.ScanResult)
 	return pick(result.ScanResult)
 }
 
-func checkLibraryMount(folder *models.MediaFolder) libraryMountCheckResponse {
+func (h *LibraryHandler) checkLibraryMount(ctx context.Context, folder *models.MediaFolder) libraryMountCheckResponse {
 	resp := libraryMountCheckResponse{
 		Status:      "ok",
 		LibraryID:   folder.ID,
@@ -1273,59 +1279,64 @@ func checkLibraryMount(folder *models.MediaFolder) libraryMountCheckResponse {
 	}
 
 	unreachable := 0
-	for _, path := range folder.Paths {
+	emptyPaths := make([]string, 0, len(folder.Paths))
+	probes := rootcheck.ProbeManyWithTimeout(ctx, folder.Paths, rootcheck.DefaultProbeTimeout)
+	for i, path := range folder.Paths {
+		probe := probes[i]
 		root := libraryMountCheckRootResponse{
 			Path:      path,
-			Reachable: true,
+			Reachable: probe.Reachable,
 		}
-
-		info, err := os.Stat(path)
-		if err != nil {
-			code, message := classifyMountCheckError(err, false)
-			root.Reachable = false
-			root.ErrorCode = stringPtr(code)
-			root.ErrorMessage = stringPtr(message)
-		} else if !info.IsDir() {
-			root.Reachable = false
-			root.ErrorCode = stringPtr("not_directory")
-			root.ErrorMessage = stringPtr("Path is not a directory")
-		} else if _, err := os.ReadDir(path); err != nil {
-			code, message := classifyMountCheckError(err, true)
-			root.Reachable = false
-			root.ErrorCode = stringPtr(code)
-			root.ErrorMessage = stringPtr(message)
-		}
-
-		if !root.Reachable {
+		if !probe.Reachable {
+			root.ErrorCode = stringPtr(probe.ErrorCode)
+			root.ErrorMessage = stringPtr(probe.ErrorMessage)
 			unreachable++
 			resp.Healthy = false
+		} else if probe.Empty {
+			emptyPaths = append(emptyPaths, path)
 		}
 		resp.Roots = append(resp.Roots, root)
 	}
 
-	switch unreachable {
-	case 0:
+	// A reachable but literally empty root can be a lost mount that left its
+	// bare mountpoint behind. Cross-check against the catalog: an empty root
+	// holding only missing-marked files is suspect, and reporting it healthy
+	// would both mislead the operator and wrongly clear the dead_root
+	// warning. Best-effort — probe results stand on a query error.
+	suspect := 0
+	if h.pool != nil && len(emptyPaths) > 0 {
+		suspectRoots, err := scanner.NewFileRepository(h.pool).ListRootsWithOnlyMissingFiles(ctx, folder.ID, emptyPaths)
+		if err != nil {
+			slog.WarnContext(ctx, "mount check: suspect-empty root query failed", "component", "api", "library_id", folder.ID, "error", err)
+		} else if len(suspectRoots) > 0 {
+			suspectSet := make(map[string]bool, len(suspectRoots))
+			for _, root := range suspectRoots {
+				suspectSet[root] = true
+			}
+			for i := range resp.Roots {
+				if resp.Roots[i].Reachable && suspectSet[resp.Roots[i].Path] {
+					resp.Roots[i].SuspectEmpty = true
+					suspect++
+					resp.Healthy = false
+				}
+			}
+		}
+	}
+
+	switch {
+	case unreachable == 0 && suspect == 0:
 		resp.Summary = "All configured roots are reachable"
-	case 1:
+	case unreachable == 0:
+		resp.Summary = fmt.Sprintf("%d of %d roots reachable but empty while the library still has cataloged files (lost mount?)", suspect, len(folder.Paths))
+	case suspect > 0:
+		resp.Summary = fmt.Sprintf("%d of %d roots unreachable; %d more reachable but empty while the library still has cataloged files", unreachable, len(folder.Paths), suspect)
+	case unreachable == 1:
 		resp.Summary = fmt.Sprintf("1 of %d roots unreachable", len(folder.Paths))
 	default:
 		resp.Summary = fmt.Sprintf("%d of %d roots unreachable", unreachable, len(folder.Paths))
 	}
 
 	return resp
-}
-
-func classifyMountCheckError(err error, isRead bool) (string, string) {
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return "not_found", "Path does not exist"
-	case errors.Is(err, os.ErrPermission):
-		return "permission_denied", "Permission denied"
-	case isRead:
-		return "read_failed", "Failed to read directory"
-	default:
-		return "stat_failed", "Failed to stat path"
-	}
 }
 
 func stringPtr(v string) *string {
@@ -2191,22 +2202,7 @@ func buildSeededChainEntries(level string, candidates []seedCandidate) []metadat
 }
 
 func metadataContentLevelsForLibraryType(libraryType string) []string {
-	switch libraryType {
-	case "series":
-		return []string{"series", "season", "episode"}
-	case "movies", "movie":
-		return []string{"movie"}
-	case "audiobooks", "audiobook":
-		return []string{"audiobook"}
-	case "ebooks", "ebook":
-		return []string{"ebook"}
-	case "manga":
-		return []string{"manga"}
-	case "mixed":
-		return []string{"movie", "series", "season", "episode", "audiobook", "ebook"}
-	default:
-		return nil
-	}
+	return metadata.ContentLevelsForLibraryType(libraryType)
 }
 
 // HandleListStaleIDs handles GET /libraries/stale-ids.

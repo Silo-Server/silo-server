@@ -88,6 +88,17 @@ func NewPlanner(proxies *ProxyPool, transcodes *TranscodePool) *Planner {
 // bandwidth-cap admission. Re-planning the same session replaces its previous
 // reservation, so quality switches don't double-count.
 func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTranscode bool, estBitrateKbps int) Plan {
+	return p.PlanSessionWith(sessionID, currentTranscodeURL, needsTranscode, estBitrateKbps, nil)
+}
+
+// PlanSessionWith behaves like PlanSession but restricts transcode-node
+// selection to nodes accepted by eligible (nil accepts every node). Capability
+// -aware playback planning uses it so a recipe that only some pooled nodes
+// can execute is never load-balanced onto a node that cannot. The predicate
+// runs under the planner lock and must be cheap and non-blocking (a set
+// lookup, never a network call). Group health is still computed over the
+// full pool: eligibility narrows selection, not co-location semantics.
+func (p *Planner) PlanSessionWith(sessionID, currentTranscodeURL string, needsTranscode bool, estBitrateKbps int, eligible func(*Node) bool) Plan {
 	if p == nil {
 		return Plan{}
 	}
@@ -106,6 +117,15 @@ func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTransc
 	proxies := p.proxies.Nodes()
 	transcodes := p.transcodes.Nodes()
 	groupHealthy := groupHealth(proxies, transcodes)
+	if eligible != nil {
+		filtered := make([]*Node, 0, len(transcodes))
+		for _, node := range transcodes {
+			if eligible(node) {
+				filtered = append(filtered, node)
+			}
+		}
+		transcodes = filtered
+	}
 
 	var plan Plan
 	if needsTranscode {
@@ -129,6 +149,35 @@ func (p *Planner) PlanSession(sessionID, currentTranscodeURL string, needsTransc
 		p.reserved[sessionID] = res
 	}
 	return plan
+}
+
+// TranscodeNodeURLs lists the URLs of every enabled pooled transcode node,
+// healthy or not: capability planning wants the deployment's toolchain, and
+// an unreachable node excludes itself when its capability fetch fails. An
+// empty slice means no nodes are pooled.
+func (p *Planner) TranscodeNodeURLs() []string {
+	if p == nil || p.transcodes == nil {
+		return nil
+	}
+	nodes := p.transcodes.Nodes()
+	urls := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		if node != nil && node.URL != "" {
+			urls = append(urls, node.URL)
+		}
+	}
+	return urls
+}
+
+// ReleaseSession removes a provisional node reservation when playback setup
+// fails or falls back locally before a node health report can account for it.
+func (p *Planner) ReleaseSession(sessionID string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	delete(p.reserved, sessionID)
+	p.mu.Unlock()
 }
 
 // groupHealth reports, for every group label present in either pool, whether

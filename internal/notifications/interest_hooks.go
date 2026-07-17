@@ -107,12 +107,12 @@ func (s *interestTrackingStore) AddFavorite(ctx context.Context, profileID, medi
 	return err
 }
 
-func (s *interestTrackingStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) error {
-	err := s.UserStore.AddFavoriteAt(ctx, profileID, mediaItemID, addedAt)
-	if err == nil {
+func (s *interestTrackingStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
+	inserted, err := s.UserStore.AddFavoriteAt(ctx, profileID, mediaItemID, addedAt)
+	if err == nil && inserted {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
-	return err
+	return inserted, err
 }
 
 func (s *interestTrackingStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) error {

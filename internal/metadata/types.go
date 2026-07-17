@@ -41,6 +41,9 @@ const (
 	FieldImages
 	FieldAirSchedule
 	FieldVideos
+	// FieldReleaseDates locks Year, ReleaseDate, and First/LastAirDate so a
+	// refresh (or an NFO at priority 1) cannot overwrite manual corrections.
+	FieldReleaseDates
 )
 
 // RefreshPriority controls queue ordering.
@@ -229,6 +232,14 @@ type ImageRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// Local sidecar context (additive; empty for purely remote providers).
+	// RepresentativeFilePath is the group's representative media file,
+	// AllGroupFilePaths are every file in the content group, and
+	// PrimarySidecarSearchPaths are directories already validated as safe for
+	// directory-level sidecars (single-content observed roots).
+	RepresentativeFilePath    string
+	AllGroupFilePaths         []string
+	PrimarySidecarSearchPaths []string
 }
 
 // RemoteImage describes an available image from a provider.
@@ -266,13 +277,19 @@ type CacheImageRequest struct {
 	SeasonNumber  *int
 	EpisodeNumber *int
 	Language      string
+	// KeyDiscriminator, when set, is inserted into the S3 key between the
+	// content ID and the image type (e.g. the 8-hex content hash of a local
+	// sidecar file) so re-cached art rotates to a fresh key.
+	KeyDiscriminator string
 }
 
 // CacheImageResult is returned by ImageCacher on success.
 type CacheImageResult struct {
-	BasePath  string // S3 key prefix
-	Thumbhash string // base64-encoded
-	Ext       string // file extension including dot (e.g. ".jpg", ".png")
+	BasePath     string // image-type prefix retained for legacy callers
+	OriginalPath string // exact immutable original-variant object key
+	Revision     string // content revision shared by all generated variants
+	Thumbhash    string // base64-encoded
+	Ext          string // encoded file extension including dot
 
 	UploadedVariants int
 	ExistingVariants int
@@ -281,6 +298,13 @@ type CacheImageResult struct {
 // ImageCacher caches a remote image to object storage.
 type ImageCacher interface {
 	CacheImage(ctx context.Context, req CacheImageRequest) (*CacheImageResult, error)
+}
+
+// ImageByteCacher caches an image already read into memory (e.g. a local
+// sidecar file) to object storage. Implemented by imagecache.Cacher alongside
+// ImageCacher; the processor type-asserts it for file:// sources.
+type ImageByteCacher interface {
+	CacheImageBytes(ctx context.Context, data []byte, req CacheImageRequest) (*CacheImageResult, error)
 }
 
 type ImageCacheJobEnqueuer interface {
@@ -293,6 +317,13 @@ type SeasonsRequest struct {
 	ProviderIDs map[string]string
 	ContentType string
 	Language    string
+	// Local sidecar context (additive, internal — mirrors MetadataRequest).
+	// SeriesRootPaths are directories already validated as safe for
+	// directory-level sidecars (the series root); SeasonDirectoryPaths maps
+	// each directory-derived season number to its candidate directories.
+	// Both are empty for purely remote providers, which key off ProviderIDs.
+	SeriesRootPaths      []string
+	SeasonDirectoryPaths map[int][]string
 }
 
 // EpisodesRequest is passed to EpisodeProvider.GetEpisodes().
@@ -300,6 +331,11 @@ type EpisodesRequest struct {
 	ProviderIDs  map[string]string
 	SeasonNumber int
 	Language     string
+	// Local sidecar context (additive, internal). SeriesRootPaths as on
+	// SeasonsRequest; EpisodeFilePaths maps each filename-derived episode
+	// number within SeasonNumber to that episode's media file paths.
+	SeriesRootPaths  []string
+	EpisodeFilePaths map[int][]string
 }
 
 // SeasonResult carries season data from a provider.

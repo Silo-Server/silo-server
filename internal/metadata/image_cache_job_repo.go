@@ -81,7 +81,19 @@ func isStableProviderImageFailure(errText string) bool {
 	return strings.Contains(errText, "unexpected status 403") ||
 		strings.Contains(errText, "unexpected status 404") ||
 		strings.Contains(errText, "unexpected status 410") ||
-		strings.Contains(errText, "unexpected status 418")
+		strings.Contains(errText, "unexpected status 418") ||
+		// Local sidecar failures that will not heal on the normal backoff:
+		// deleted files (ENOENT), unreadable files (EPERM), paths outside the
+		// owning library's roots, and files that are structurally unusable
+		// (non-regular or over the size cap) — these do not self-heal without an
+		// on-disk change, so a hot retry loop is pointless; recovery is
+		// refresh-driven. Other local read errors keep the standard retry
+		// schedule. Texts match the processor's local branch.
+		strings.Contains(errText, "local image missing") ||
+		strings.Contains(errText, "local image forbidden") ||
+		strings.Contains(errText, "local image path outside library roots") ||
+		strings.Contains(errText, "local image is not a regular file") ||
+		strings.Contains(errText, "local image exceeds")
 }
 
 func (r *ImageCacheJobRepository) Enqueue(ctx context.Context, in EnqueueImageCacheJobInput) error {
@@ -127,7 +139,7 @@ func (r *ImageCacheJobRepository) enqueueBatch(ctx context.Context, inputs []Enq
 func normalizeImageCacheJobInput(in EnqueueImageCacheJobInput) (EnqueueImageCacheJobInput, bool) {
 	in.SourcePath = strings.TrimSpace(in.SourcePath)
 	in.TargetLanguage = strings.TrimSpace(in.TargetLanguage)
-	if in.SourcePath == "" || !strings.Contains(in.SourcePath, "://") || isNonProviderImageScheme(strings.ToLower(in.SourcePath)) {
+	if !isCacheableImageSourcePath(in.SourcePath) {
 		return EnqueueImageCacheJobInput{}, false
 	}
 	if in.ContentType == "" {
@@ -468,6 +480,31 @@ func (r *ImageCacheJobRepository) CurrentTargetSourcePath(ctx context.Context, j
 	return current, nil
 }
 
+// CurrentTargetCachedPath reports the cached image path currently stored on
+// the job's target row. The processor's local-artwork branch uses it to skip
+// unchanged art and to delete the stale hashed local/ prefix after a
+// successful re-cache. Returns ("", nil) when the row no longer exists or the
+// target type is unknown.
+func (r *ImageCacheJobRepository) CurrentTargetCachedPath(ctx context.Context, job *models.MetadataImageCacheJob) (string, error) {
+	if r == nil || r.pool == nil || job == nil {
+		return "", nil
+	}
+	query, args, ok := currentTargetSourceQuery(job)
+	if !ok {
+		return "", nil
+	}
+	query = strings.Replace(query, "_source_path", "_path", 1)
+	var current string
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading current target cached path: %w", err)
+	}
+	return current, nil
+}
+
 func currentTargetSourceQuery(job *models.MetadataImageCacheJob) (string, []any, bool) {
 	switch job.TargetType {
 	case ImageCacheTargetItem:
@@ -542,7 +579,11 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 		return 0, nil
 	}
 	// Each branch is restricted to provider-origin sources (LIKE '%://%' minus
-	// cached/system schemes) AND to targets whose stored *_path is not already a
+	// cached/system schemes). Local file:// sidecar sources are deliberately
+	// excluded from this sweep: their recovery is refresh-driven (a metadata
+	// refresh re-discovers the sidecar and enqueues a fresh job), so a stable
+	// local failure cannot be resurrected here every cycle.
+	// Each branch is also restricted to targets whose stored *_path is not already a
 	// cached relative path. The destination check makes the cached row itself the
 	// durable dedup marker, so pruning succeeded job rows does not cause the whole
 	// catalog to be re-downloaded once the rows age out.
@@ -798,7 +839,14 @@ func (r *ImageCacheJobRepository) EnqueueExistingProviderArtwork(ctx context.Con
 	return r.enqueueBatch(ctx, inputs, true)
 }
 
+// imageCacheLocalProviderID is the synthetic provider slug for local sidecar
+// artwork; cached keys live under "local/..." like audiobook/ebook covers.
+const imageCacheLocalProviderID = "local"
+
 func imageCacheProviderIDFromSource(sourcePath, fallback string) string {
+	if isLocalImageSourcePath(sourcePath) {
+		return imageCacheLocalProviderID
+	}
 	if provider := providerIDFromPluginURL(sourcePath); provider != "" {
 		return provider
 	}

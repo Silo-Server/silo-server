@@ -23,9 +23,11 @@ const FIELD_OVERVIEW = 1;
 const FIELD_GENRES = 2;
 const FIELD_STUDIOS = 3;
 const FIELD_RATING = 6;
+const FIELD_TAGS = 8;
 const FIELD_RUNTIME = 7;
 const FIELD_CONTENT_RATING = 9;
 const FIELD_AIR_SCHEDULE = 11;
+const FIELD_RELEASE_DATES = 13;
 
 const AIR_TIMEZONES = [
   "America/New_York",
@@ -46,7 +48,10 @@ const SECTIONS: { key: Section; label: string; types: ItemDetail["type"][] }[] =
   { key: "dates", label: "Dates & Ratings", types: ["movie", "series", "season", "episode"] },
   { key: "tags", label: "Tags & Genres", types: ["movie", "series"] },
   { key: "ids", label: "External IDs", types: ["movie", "series", "season", "episode"] },
-  { key: "images", label: "Images", types: ["movie", "series", "season", "episode"] },
+  // Episodes are excluded: the image search endpoint only returns series-level
+  // posters/backdrops/logos, and episodes store stills — there is nothing an
+  // episode apply could legitimately show or persist from this dialog.
+  { key: "images", label: "Images", types: ["movie", "series", "season"] },
 ];
 
 // Maps form field names to their MetadataField lock value.
@@ -59,7 +64,7 @@ const FIELD_LOCK_MAP: Record<string, number> = {
   genres: FIELD_GENRES,
   studios: FIELD_STUDIOS,
   networks: FIELD_STUDIOS,
-  countries: FIELD_STUDIOS,
+  countries: FIELD_TAGS,
   rating_imdb: FIELD_RATING,
   rating_tmdb: FIELD_RATING,
   rating_rt_critic: FIELD_RATING,
@@ -68,6 +73,10 @@ const FIELD_LOCK_MAP: Record<string, number> = {
   content_rating: FIELD_CONTENT_RATING,
   air_time: FIELD_AIR_SCHEDULE,
   air_timezone: FIELD_AIR_SCHEDULE,
+  year: FIELD_RELEASE_DATES,
+  release_date: FIELD_RELEASE_DATES,
+  first_air_date: FIELD_RELEASE_DATES,
+  last_air_date: FIELD_RELEASE_DATES,
 };
 
 interface EditMetadataDialogProps {
@@ -426,7 +435,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                 <div className="space-y-4">
                   {(item.type === "movie" || item.type === "series") && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <FieldRow label="Year">
+                      <FieldRow label="Year" lockIcon={renderLockIcon("year")}>
                         <Input
                           type="number"
                           value={form.year || ""}
@@ -435,7 +444,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                       </FieldRow>
 
                       {item.type === "movie" && (
-                        <FieldRow label="Release Date">
+                        <FieldRow label="Release Date" lockIcon={renderLockIcon("release_date")}>
                           <Input
                             type="date"
                             value={form.release_date}
@@ -445,7 +454,10 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                       )}
 
                       {item.type === "series" && (
-                        <FieldRow label="First Air Date">
+                        <FieldRow
+                          label="First Air Date"
+                          lockIcon={renderLockIcon("first_air_date")}
+                        >
                           <Input
                             type="date"
                             value={form.first_air_date}
@@ -458,7 +470,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
 
                   {item.type === "series" && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                      <FieldRow label="Last Air Date">
+                      <FieldRow label="Last Air Date" lockIcon={renderLockIcon("last_air_date")}>
                         <Input
                           type="date"
                           value={form.last_air_date}

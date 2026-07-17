@@ -172,7 +172,7 @@ func (s *SQLiteUserStore) AddFavorite(_ context.Context, profileID, mediaItemID 
 	return AddFavorite(s.db, profileID, mediaItemID)
 }
 
-func (s *SQLiteUserStore) AddFavoriteAt(_ context.Context, profileID, mediaItemID string, addedAt time.Time) error {
+func (s *SQLiteUserStore) AddFavoriteAt(_ context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
 	return AddFavoriteAt(s.db, profileID, mediaItemID, addedAt)
 }
 

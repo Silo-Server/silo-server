@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -130,6 +131,40 @@ func (r *ItemRepository) GetPosterPath(ctx context.Context, contentID string) (s
 // description-only searches viable while suppressing the long tail of
 // incidental one-mention hits that flooded results before.
 const overviewMatchFloor = 0.15
+
+// fuzzyFallbackThreshold is the FTS result count below which SearchPage reaches
+// for the trigram fuzzy fallback (buildFuzzySearchSQL). At or above it the FTS
+// result set is considered rich enough that a "did you mean" pass would only add
+// noise, so common searches stay on the unchanged FTS path and the fuzzy query
+// fires only in the sparse/misspelling case.
+const fuzzyFallbackThreshold = 5
+
+// fuzzyMaxResults caps how many trigram fuzzy matches the fallback contributes.
+// The combined result the fuzzy path serves is therefore bounded at
+// (fuzzyFallbackThreshold-1) FTS rows + fuzzyMaxResults fuzzy rows, small enough
+// to materialize once and slice per page. A "did you mean" fallback has no need
+// to paginate hundreds of low-similarity typo matches; when the true match count
+// exceeds this, the overflow is logged and the total is reported as inexact.
+const fuzzyMaxResults = 50
+
+// trgmWordSimilarityThreshold pins pg_trgm.strict_word_similarity_threshold
+// for the fuzzy query via SET LOCAL. The <<% operator's selectivity is
+// otherwise governed by a cluster-wide GUC a DBA (or another application) can
+// change, silently altering both match quality and scan cost per deployment —
+// and its server default (0.6) would reject ordinary one-edit typos
+// ("avegners" vs "avengers" scores ~0.38), so pinning is load-bearing, not
+// just hygiene.
+const trgmWordSimilarityThreshold = 0.30
+
+// fuzzyAugmentSimilarityFloor is the minimum WHOLE-TITLE similarity demanded of
+// fuzzy rows when the sparse FTS block is non-empty. A correctly spelled query
+// with a few genuine hits ("coraline") should only gain near-identical titles,
+// not every title clearing the permissive base threshold — word similarity is
+// deliberately not used here, since it scores embedded prefix words far too
+// high ("coral" is 0.5 to "coraline"). A zero-hit query (a likely misspelling)
+// skips the floor entirely so typo recall, including word-extent matches into
+// long titles, stays high.
+const fuzzyAugmentSimilarityFloor = 0.45
 
 // itemColumnNames lists, in scan order, every column selected by media_items
 // item queries. Shared by itemColumns, qualifiedItemColumns,
@@ -834,7 +869,7 @@ func (r *ItemRepository) Delete(ctx context.Context, contentID string) ([]string
 		}
 		for _, p := range []string{p1, p2, p3} {
 			if p != "" && !strings.Contains(p, "://") {
-				if dir := pathDir(p); dir != "" {
+				if dir := imageDeletePrefix(p); dir != "" {
 					imageDirs = append(imageDirs, dir)
 				}
 			}
@@ -884,26 +919,241 @@ func (r *ItemRepository) SearchPage(
 	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
+
+	parsed := parseSearchQuery(query)
+
+	// FTS block (the common path). queryLimit fetches one extra row in cursor
+	// mode so execSearchBlock can derive hasMore without a separate count. When
+	// the fuzzy fallback below could fire (first page of a fuzzy-eligible
+	// query) the probe is additionally floored at fuzzyFallbackThreshold rows:
+	// a tiny caller limit (e.g. an autocomplete asking for 2) with a few
+	// incidental exact hits would otherwise report hasMore and hide the FTS
+	// block's true size, so the sparse test below could never fire. Fetching up
+	// to the threshold reveals a genuinely sparse block regardless of limit;
+	// the returned page is still trimmed to limit. Where the fallback cannot
+	// fire, fetching past limit+1 would be pure waste, so the floor is skipped.
 	queryLimit := limit
 	if !includeTotal {
 		queryLimit = limit + 1
+		if offset == 0 && eligibleForFuzzy(parsed) && queryLimit < fuzzyFallbackThreshold {
+			queryLimit = fuzzyFallbackThreshold
+		}
 	}
-	sql, countSQL, args := r.buildSearchSQLWithTotal(query, itemTypes, queryLimit, offset, filter, includeTotal)
+	sql, countSQL, args := r.buildSearchSQLFromParsed(parsed, itemTypes, queryLimit, offset, filter, includeTotal)
 	if sql == "" {
 		return []*models.MediaItem{}, 0, false, includeTotal, nil
 	}
-
-	rows, err := r.pool.Query(ctx, sql, args...)
+	ftsItems, ftsTotal, ftsHasMore, ftsUntrimmed, err := r.execSearchBlock(ctx, r.pool, sql, countSQL, args, limit, offset, includeTotal)
 	if err != nil {
-		return nil, 0, false, includeTotal, fmt.Errorf("searching media items: %w", err)
+		return nil, 0, false, includeTotal, err
+	}
+
+	// Fuzzy fallback trigger. The trigram (typo-tolerant) arm is deliberately NOT
+	// part of the FTS query: OR-ing the pg_trgm % operator into that WHERE forces
+	// a lossy bitmap heap recheck that rebuilds the three title tsvectors for
+	// every one of the thousands of near-miss rows the % operator surfaces,
+	// making *every* search take seconds. Instead we reach for the trigram index
+	// only when the FTS result set is fully known and sparse (a likely
+	// misspelling or word-boundary miss).
+	//
+	// Exact mode judges sparsity by the window count (page-independent), so every
+	// page of a sparse query agrees and the combined result paginates fully.
+	//
+	// Cursor mode has no window count, so it uses the pre-trim size of a probe
+	// floored at fuzzyFallbackThreshold rows: fewer than the threshold came
+	// back ⇒ the whole FTS block is smaller than the threshold ⇒ sparse,
+	// independent of the caller's page size. It only trusts this on the first
+	// page (offset 0), where searchWithFuzzyFallback serves fuzzy as a terminal
+	// augmentation (no phantom next page a bare offset cursor couldn't locate),
+	// and only when the whole FTS block fits inside the caller's page: a
+	// terminal page must never hide exact matches the plain cursor path would
+	// have surfaced via hasMore. Past offset 0 an empty FTS page can't be told
+	// from a rich one, so sparse stays false.
+	var sparse bool
+	if includeTotal {
+		sparse = ftsTotal < fuzzyFallbackThreshold
+	} else if offset == 0 {
+		sparse = len(ftsUntrimmed) < fuzzyFallbackThreshold && len(ftsUntrimmed) <= limit
+	}
+	if !sparse || !eligibleForFuzzy(parsed) {
+		return ftsItems, ftsTotal, ftsHasMore, includeTotal, nil
+	}
+
+	// Hand the fallback the FTS block when the rows just fetched provably form
+	// the complete block, sparing it an identical second FTS query. Cursor mode
+	// always qualifies here (the floored probe returned fewer rows than it
+	// asked for); exact mode qualifies on the first page when the window count
+	// fit within the page.
+	ftsBlock, haveFTSBlock := []*models.MediaItem(nil), false
+	if !includeTotal {
+		ftsBlock, haveFTSBlock = ftsUntrimmed, true
+	} else if offset == 0 && ftsTotal <= len(ftsItems) {
+		ftsBlock, haveFTSBlock = ftsItems, true
+	}
+	return r.searchWithFuzzyFallback(ctx, parsed, itemTypes, limit, offset, filter, includeTotal, ftsBlock, haveFTSBlock)
+}
+
+// searchWithFuzzyFallback serves the combined [FTS block][fuzzy block] result
+// for a sparse, fuzzy-eligible query. Because fuzzy only fires when the FTS
+// block is sparse (< fuzzyFallbackThreshold rows) and the fuzzy contribution is
+// capped at fuzzyMaxResults, the ENTIRE combined result is small
+// (< fuzzyFallbackThreshold + fuzzyMaxResults rows). We materialize it once and
+// slice the requested page in memory. That keeps two-block pagination correct on
+// every page — stable total, no cross-page duplicates, no offset arithmetic
+// straddling the block boundary — for both exact and cursor callers. The
+// FTS-only path in SearchPage is untouched and still streams strictly per page.
+//
+// When haveFTSBlock is true, ftsBlock is the complete sparse FTS block the
+// caller already fetched and no second FTS query is issued; otherwise (exact
+// mode past the first page, or a first page smaller than the block) the block
+// is re-fetched here at offset 0 — its ids drive fuzzy dedup below.
+func (r *ItemRepository) searchWithFuzzyFallback(
+	ctx context.Context,
+	parsed parsedSearchQuery,
+	itemTypes []string,
+	limit, offset int,
+	filter AccessFilter,
+	includeTotal bool,
+	ftsBlock []*models.MediaItem,
+	haveFTSBlock bool,
+) ([]*models.MediaItem, int, bool, bool, error) {
+	if !haveFTSBlock {
+		ftsSQL, ftsCountSQL, ftsArgs := r.buildSearchSQLFromParsed(parsed, itemTypes, fuzzyFallbackThreshold, 0, filter, true)
+		var err error
+		ftsBlock, _, _, _, err = r.execSearchBlock(ctx, r.pool, ftsSQL, ftsCountSQL, ftsArgs, fuzzyFallbackThreshold, 0, true)
+		if err != nil {
+			return nil, 0, false, includeTotal, err
+		}
+	}
+
+	// Fuzzy block, excluding every FTS-block id so no title appears in both
+	// blocks and the combined total is stable per page. Cursor mode serves the
+	// combined result as a single terminal page, so it never needs more fuzzy
+	// rows than the page has room for; exact mode materializes up to the cap.
+	// Either way one extra row is fetched so truncation is detectable without
+	// paying a COUNT(*) OVER () window count over the whole trigram match set.
+	// When the FTS block found real hits the fuzzy arm demands near-certain
+	// corrections (fuzzyAugmentSimilarityFloor) instead of base-threshold noise.
+	fuzzyLimit := fuzzyMaxResults
+	if !includeTotal && limit-len(ftsBlock) < fuzzyLimit {
+		fuzzyLimit = limit - len(ftsBlock)
+	}
+	minSimilarity := 0.0
+	if len(ftsBlock) > 0 {
+		minSimilarity = fuzzyAugmentSimilarityFloor
+	}
+	var fuzzyBlock []*models.MediaItem
+	fuzzyTruncated := false
+	if fuzzyLimit > 0 {
+		fuzzySQL, _, fuzzyArgs := r.buildFuzzySearchFromParsed(parsed, itemTypes, fuzzyLimit+1, 0, filter, false, contentIDsFromMediaItems(ftsBlock), minSimilarity)
+		if fuzzySQL != "" {
+			var err error
+			fuzzyBlock, fuzzyTruncated, err = r.execFuzzyBlock(ctx, fuzzySQL, fuzzyArgs, fuzzyLimit)
+			if err != nil {
+				return nil, 0, false, includeTotal, err
+			}
+			if fuzzyTruncated {
+				slog.DebugContext(ctx, "fuzzy search fallback truncated to cap",
+					"query", parsed.Text, "cap", fuzzyLimit)
+			}
+		}
+	}
+
+	combined := make([]*models.MediaItem, 0, len(ftsBlock)+len(fuzzyBlock))
+	combined = append(combined, ftsBlock...)
+	combined = append(combined, fuzzyBlock...)
+	total := len(combined)
+
+	// Slice the requested page out of the materialized list, clamped so a
+	// caller passing a negative offset or an overflowing limit (the exported
+	// SearchPage is reachable outside the HTTP parser, which otherwise
+	// guarantees offset>=0 and limit>0) gets a sane page instead of a
+	// reversed-slice panic.
+	lo := min(max(offset, 0), total)
+	hi := lo + max(limit, 0)
+	if hi < lo || hi > total { // hi < lo: lo+limit overflowed; serve the rest
+		hi = total
+	}
+	page := combined[lo:hi]
+
+	if !includeTotal {
+		// Cursor mode reaches here only at offset 0 with the whole FTS block
+		// inside the page (see SearchPage gate), so no exact match is hidden;
+		// only fuzzy augmentation past the page is cut. Serve as a terminal
+		// page: report only what we return and no next page, since a bare
+		// offset cursor can't locate the FTS/fuzzy boundary on a follow-up
+		// request.
+		return page, len(page), false, false, nil
+	}
+	// When the fuzzy arm hit its cap the true match count is larger than the
+	// materialized list, so surface the total as inexact rather than presenting
+	// the cap as an exact count.
+	return page, total, hi < total, !fuzzyTruncated, nil
+}
+
+// execFuzzyBlock runs the fuzzy data query inside a transaction that pins
+// pg_trgm.strict_word_similarity_threshold, so the <<% operator's selectivity
+// cannot drift with cluster configuration (its 0.6 server default would reject
+// ordinary typos outright). The query was built with LIMIT fuzzyLimit+1; the
+// extra row only signals truncation and is trimmed from the returned block.
+func (r *ItemRepository) execFuzzyBlock(ctx context.Context, dataSQL string, args []any, fuzzyLimit int) ([]*models.MediaItem, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("beginning fuzzy search tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, fmt.Sprintf("SET LOCAL pg_trgm.strict_word_similarity_threshold = %g", trgmWordSimilarityThreshold)); err != nil {
+		return nil, false, fmt.Errorf("pinning trigram word-similarity threshold: %w", err)
+	}
+	block, _, truncated, _, err := r.execSearchBlock(ctx, tx, dataSQL, "", args, fuzzyLimit, 0, false)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("committing fuzzy search tx: %w", err)
+	}
+	return block, truncated, nil
+}
+
+// searchQuerier is the subset of pgxpool.Pool / pgx.Tx that execSearchBlock
+// needs, so a block can run either directly on the pool or inside a
+// transaction (the fuzzy block pins a GUC with SET LOCAL).
+type searchQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// execSearchBlock runs one search data query (FTS or fuzzy fallback) and its
+// count-fallback sibling, returning that block's page. It is the shared engine
+// behind SearchPage's two blocks so both derive hasMore/total identically.
+//
+// In cursor mode (includeTotal == false) the caller fetches limit+1 rows so
+// hasMore is len(items) > limit; the extra row is trimmed here. In exact mode
+// the data query carries COUNT(*) OVER () for the total, which emits no rows on
+// an empty page (e.g. OFFSET past the last row); only then, and only past
+// offset 0, is the count sibling re-run to recover the real total. Both queries
+// must end with the trailing limit/offset args so the count sibling can drop
+// them.
+//
+// The fourth return value is the untrimmed row set the data query actually
+// returned (before the cursor-mode +1 row is trimmed; in exact mode it equals
+// the page). SearchPage uses it in cursor mode to judge FTS-block sparsity
+// independently of the caller's page size and to hand the fuzzy fallback the
+// complete block without a second FTS query.
+func (r *ItemRepository) execSearchBlock(ctx context.Context, q searchQuerier, dataSQL, countSQL string, args []any, limit, offset int, includeTotal bool) ([]*models.MediaItem, int, bool, []*models.MediaItem, error) {
+	rows, err := q.Query(ctx, dataSQL, args...)
+	if err != nil {
+		return nil, 0, false, nil, fmt.Errorf("searching media items: %w", err)
 	}
 	defer rows.Close()
 
 	if !includeTotal {
 		items, err := scanItems(rows)
 		if err != nil {
-			return nil, 0, false, false, err
+			return nil, 0, false, nil, err
 		}
+		untrimmed := items
 		hasMore := len(items) > limit
 		if hasMore {
 			items = items[:limit]
@@ -912,28 +1162,23 @@ func (r *ItemRepository) SearchPage(
 		if hasMore {
 			total++
 		}
-		return items, total, hasMore, false, nil
+		return items, total, hasMore, untrimmed, nil
 	}
 
 	items, total, err := scanItemsWithTotal(rows)
 	if err != nil {
-		return nil, 0, false, true, err
+		return nil, 0, false, nil, err
 	}
 	hasMore := total > offset+len(items)
-	// COUNT(*) OVER () emits no rows when the data SELECT is empty, so total
-	// stays 0 even when the broader result set has matching rows (e.g. OFFSET
-	// past the last page). Re-query the count to give callers the real total.
-	// Skip when offset == 0 because in that case an empty page genuinely means
-	// total = 0.
 	if len(items) == 0 && offset > 0 {
 		// Drop the trailing limit/offset args from the data query.
 		countArgs := args[:len(args)-2]
-		if err := r.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
-			return nil, 0, false, true, fmt.Errorf("count fallback for empty search page: %w", err)
+		if err := q.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+			return nil, 0, false, nil, fmt.Errorf("count fallback for empty search page: %w", err)
 		}
 		hasMore = total > offset+len(items)
 	}
-	return items, total, hasMore, true, nil
+	return items, total, hasMore, items, nil
 }
 
 // buildSearchSQL assembles the unified search query, returning the SQL string
@@ -960,16 +1205,32 @@ func (r *ItemRepository) SearchPage(
 //	parsed.Year (or NULL)
 //	parsed.Phrase
 //	limit, offset
+//
+// searchTextFromParsed derives the effective search text shared by the FTS and
+// fuzzy builders: the parsed Text, or (when the query was only quotes/whitespace
+// that parsed to empty Text) a whitespace-collapsed, quote-stripped fallback off
+// the raw query. Centralized so the two builders can never search different text.
+func searchTextFromParsed(parsed parsedSearchQuery) string {
+	if parsed.Text != "" {
+		return parsed.Text
+	}
+	return collapseSearchWhitespace(strings.ReplaceAll(strings.TrimSpace(parsed.Raw), "\"", " "))
+}
+
 func (r *ItemRepository) buildSearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter) (dataSQL, countSQL string, args []any) {
 	return r.buildSearchSQLWithTotal(query, itemTypes, limit, offset, filter, true)
 }
 
 func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool) (dataSQL, countSQL string, args []any) {
-	parsed := parseSearchQuery(query)
-	searchText := parsed.Text
-	if searchText == "" {
-		searchText = collapseSearchWhitespace(strings.ReplaceAll(strings.TrimSpace(query), "\"", " "))
-	}
+	return r.buildSearchSQLFromParsed(parseSearchQuery(query), itemTypes, limit, offset, filter, includeTotal)
+}
+
+// buildSearchSQLFromParsed is the FTS query builder proper; the string-taking
+// wrappers above parse first. SearchPage parses once and calls this directly so
+// the same parsedSearchQuery feeds the FTS builder, the fuzzy builder, and the
+// eligibility gate without re-parsing.
+func (r *ItemRepository) buildSearchSQLFromParsed(parsed parsedSearchQuery, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool) (dataSQL, countSQL string, args []any) {
+	searchText := searchTextFromParsed(parsed)
 	if searchText == "" {
 		return "", "", nil
 	}
@@ -1000,48 +1261,14 @@ func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []strin
 	overviewMatch := fmt.Sprintf("%s @@ websearch_to_tsquery('english', $1)", overviewVector)
 
 	// Keep the base match condition index-friendly; exact-title logic is used as
-	// a ranking boost later, not as an additional scan predicate.
+	// a ranking boost later, not as an additional scan predicate. The trigram
+	// (typo-tolerant) arm intentionally lives in buildFuzzySearchSQL, not here:
+	// OR-ing the % operator into this WHERE forced a lossy bitmap recheck that
+	// rebuilt the title tsvectors for thousands of near-miss rows. SearchPage
+	// invokes the fuzzy path separately only when this FTS query is sparse.
 	conditions = append(conditions, fmt.Sprintf("(%s OR %s OR %s)", titleMatch, titlePrefixMatch, overviewMatch))
 
-	if len(itemTypes) > 0 {
-		placeholders := make([]string, 0, len(itemTypes))
-		for _, itemType := range itemTypes {
-			if strings.TrimSpace(itemType) == "" {
-				continue
-			}
-			placeholders = append(placeholders, fmt.Sprintf("$%d", argIdx))
-			args = append(args, strings.ToLower(strings.TrimSpace(itemType)))
-			argIdx++
-		}
-		if len(placeholders) > 0 {
-			conditions = append(conditions, fmt.Sprintf("mi.type IN (%s)", strings.Join(placeholders, ", ")))
-		}
-	}
-
-	needsLibJoin := filter.AllowedLibraryIDs != nil || len(filter.DisabledLibraryIDs) > 0
-	fromClause := "media_items mi"
-	if filter.AllowedLibraryIDs != nil {
-		// Caller (Search) is expected to short-circuit when len == 0; we still
-		// guard here so the builder is safe to invoke from tests.
-		if len(filter.AllowedLibraryIDs) > 0 {
-			conditions = append(conditions, fmt.Sprintf("mil.media_folder_id = ANY($%d)", argIdx))
-			args = append(args, filter.AllowedLibraryIDs)
-			argIdx++
-		}
-	}
-	if len(filter.DisabledLibraryIDs) > 0 {
-		conditions = append(conditions, fmt.Sprintf("NOT (mil.media_folder_id = ANY($%d))", argIdx))
-		args = append(args, filter.DisabledLibraryIDs)
-		argIdx++
-	}
-	if needsLibJoin {
-		fromClause = "media_items mi JOIN media_item_libraries mil ON mi.content_id = mil.content_id"
-	}
-	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
-
-	// Manga chapters (type='ebook' rows linked into a manga series) are internal
-	// sub-units and must never surface as standalone search results.
-	conditions = append(conditions, MangaChapterExclusionWhere("mi"))
+	fromClause := appendSearchScopeFilters(itemTypes, filter, &conditions, &args, &argIdx)
 
 	whereClause := "WHERE " + strings.Join(conditions, " AND ")
 
@@ -1096,11 +1323,11 @@ func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []strin
 		fmt.Sprintf(normalizedTitleExpr, "mi.sort_title"), exactIdx,
 	)
 
-	// Use qualified column names inside the CTE to avoid ambiguity when
-	// the FROM clause includes a JOIN to media_item_libraries. The select
-	// list aliases coalesced columns back to their own names (poster_path
-	// etc.) so the outer query can re-reference them; GROUP BY needs the
-	// raw references because output aliases are invalid there.
+	// Qualified column names inside the CTE, grouped so the MAX(...) ranking
+	// aggregates below are legal. The select list aliases coalesced columns back
+	// to their own names (poster_path etc.) so the outer query can re-reference
+	// them; GROUP BY needs the raw references because output aliases are invalid
+	// there.
 	qualifiedCols := qualifiedItemColumns("mi")
 	groupByCols := qualifiedItemColumnRefs("mi")
 	scoredCTE := fmt.Sprintf(`
@@ -1181,6 +1408,154 @@ func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []strin
 	countSQL = scoredCTE + statsCTE + fmt.Sprintf(`
 		SELECT COUNT(*)
 		%s`, postFilter)
+	args = append(args, limit, offset)
+	return dataSQL, countSQL, args
+}
+
+// appendSearchScopeFilters appends the scope predicates shared by the FTS search
+// (buildSearchSQLWithTotal) and the trigram fuzzy fallback (buildFuzzySearchSQL):
+// item type, allowed/disabled libraries, the access filter, and the
+// manga-chapter exclusion. It mutates conditions/args/argIdx in place and
+// returns the FROM clause (always "media_items mi"; library scoping is enforced
+// with independent EXISTS/NOT EXISTS subqueries rather than a JOIN). Both callers
+// append these in the same order so a single helper keeps the two queries'
+// filtering provably identical.
+func appendSearchScopeFilters(itemTypes []string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) (fromClause string) {
+	fromClause = "media_items mi"
+
+	if len(itemTypes) > 0 {
+		placeholders := make([]string, 0, len(itemTypes))
+		for _, itemType := range itemTypes {
+			if strings.TrimSpace(itemType) == "" {
+				continue
+			}
+			placeholders = append(placeholders, fmt.Sprintf("$%d", *argIdx))
+			*args = append(*args, strings.ToLower(strings.TrimSpace(itemType)))
+			*argIdx++
+		}
+		if len(placeholders) > 0 {
+			*conditions = append(*conditions, fmt.Sprintf("mi.type IN (%s)", strings.Join(placeholders, ", ")))
+		}
+	}
+
+	// Library allow/deny via the shared leak-safe helper: an item linked to both a
+	// passing and a disabled library must not slip through. The old JOIN +
+	// NOT(mil.media_folder_id = ANY(...)) form let the passing membership row
+	// satisfy the deny check (audit 2026-05-01 §3.3), so both the FTS search and
+	// the fuzzy fallback that share this helper used it. appendLibraryAccessConditions
+	// emits independent EXISTS/NOT EXISTS subqueries keyed on mi.content_id and
+	// needs no JOIN.
+	appendLibraryAccessConditions("mi.content_id", filter, conditions, args, argIdx)
+
+	applyAccessFilter("mi", AccessFilter{MaxContentRating: filter.MaxContentRating, ExcludedMediaTypes: filter.ExcludedMediaTypes}, conditions, args, argIdx)
+
+	// Manga chapters (type='ebook' rows linked into a manga series) are internal
+	// sub-units and must never surface as standalone search results.
+	*conditions = append(*conditions, MangaChapterExclusionWhere("mi"))
+	return fromClause
+}
+
+// buildFuzzySearchSQL assembles the trigram fuzzy-fallback query invoked by
+// SearchPage only when the FTS query is sparse. Unlike buildSearchSQLWithTotal,
+// the sole match predicate is the pg_trgm strict-word-similarity operator
+// (<<%) against the indexed title_normalized generated column (migration 105's
+// gin_trgm_ops index serves it), and the ranking signals are
+// strict_word_similarity()/similarity() on that same column. Crucially it
+// never references the title tsvectors, so the low-similarity rows the
+// operator can surface never pay a per-row tsvector rebuild — that rebuild
+// over the fuzzy candidate set was the entire cause of the multi-second search
+// regression. The operator's base selectivity is pinned by the caller
+// (execFuzzyBlock sets pg_trgm.strict_word_similarity_threshold via SET LOCAL)
+// so it cannot drift with cluster configuration.
+//
+// Scope note: only title_normalized — a generated column over `title` — is
+// fuzzy-matched, because it is the only column with a gin_trgm_ops index
+// (migration 105). Typos of original_title or sort_title, which the FTS arm
+// covers exactly, are deliberately out of the fuzzy arm's scope; extending it
+// would need matching normalized columns + trigram indexes (follow-up).
+//
+// includeTotal toggles the COUNT(*) OVER () window total the same way
+// buildSearchSQLWithTotal does, so the fuzzy block honors the caller's cursor
+// vs. exact-count mode. excludeContentIDs drops rows already returned by the FTS
+// block so a title matching both is not shown twice. minSimilarity > 0 adds an
+// explicit similarity floor above the base threshold — used when the FTS block
+// had real hits so augmentation only admits near-certain corrections. Argument
+// order: $1 searchText, then the similarity floor (if any), then the shared
+// scope placeholders, then the exclusion array, then limit/offset.
+func (r *ItemRepository) buildFuzzySearchSQL(query string, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string, minSimilarity float64) (dataSQL, countSQL string, args []any) {
+	return r.buildFuzzySearchFromParsed(parseSearchQuery(query), itemTypes, limit, offset, filter, includeTotal, excludeContentIDs, minSimilarity)
+}
+
+// buildFuzzySearchFromParsed is the fuzzy query builder proper; the string-taking
+// wrapper above parses first. SearchPage parses once and calls this directly.
+func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool, excludeContentIDs []string, minSimilarity float64) (dataSQL, countSQL string, args []any) {
+	searchText := searchTextFromParsed(parsed)
+	if searchText == "" {
+		return "", "", nil
+	}
+
+	args = []any{searchText}
+	argIdx := 2
+	// Strict word similarity (<<%) rather than full-string similarity (%): a
+	// typo of one word must still reach long titles ("avegners" → "Avengers:
+	// Endgame"), where full-string similarity is diluted by every extra trigram
+	// the rest of the title contributes. <<% scores the query against the best
+	// word-boundary extent of the title instead, and at equal thresholds it is
+	// a strict superset of % (the whole string is itself a valid extent). The
+	// same gin_trgm_ops index serves both operators.
+	conditions := []string{"public.normalize_search_text($1) <<% mi.title_normalized"}
+	if minSimilarity > 0 {
+		// The floor is whole-title similarity, NOT word similarity: augmenting
+		// a query that already has hits must only admit near-identical titles,
+		// and word similarity rates embedded prefix words far too high (see
+		// fuzzyAugmentSimilarityFloor).
+		conditions = append(conditions, fmt.Sprintf("similarity(public.normalize_search_text($1), mi.title_normalized) >= $%d", argIdx))
+		args = append(args, minSimilarity)
+		argIdx++
+	}
+
+	fromClause := appendSearchScopeFilters(itemTypes, filter, &conditions, &args, &argIdx)
+
+	if len(excludeContentIDs) > 0 {
+		conditions = append(conditions, fmt.Sprintf("NOT (mi.content_id = ANY($%d))", argIdx))
+		args = append(args, excludeContentIDs)
+		argIdx++
+	}
+
+	whereClause := "WHERE " + strings.Join(conditions, " AND ")
+
+	// GROUP BY is required so the MAX(similarity(...)) ranking aggregate is legal,
+	// mirroring buildSearchSQLWithTotal; COUNT(*) OVER () then counts distinct
+	// content_ids. qualifiedItemColumns aliases the coalesced columns so the outer
+	// SELECT can re-reference them; GROUP BY uses the raw refs.
+	qualifiedCols := qualifiedItemColumns("mi")
+	groupByCols := qualifiedItemColumnRefs("mi")
+	// fuzzy_rank orders by how well the query matches SOME word extent of the
+	// title; fuzzy_full_rank tie-breaks by whole-title closeness so "The
+	// Avengers" sorts above "Avengers: Endgame" for the typo "avegners". Both
+	// are computed only over the matched candidate set.
+	scoredCTE := fmt.Sprintf(`
+		WITH scored AS (
+			SELECT
+				%s,
+				MAX(strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank,
+				MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_full_rank
+			FROM %s
+			%s
+			GROUP BY %s
+		)
+	`, qualifiedCols, fromClause, whereClause, groupByCols)
+
+	totalColumn := ""
+	if includeTotal {
+		totalColumn = ", COUNT(*) OVER () AS total_count"
+	}
+	dataSQL = scoredCTE + fmt.Sprintf(`
+		SELECT %s%s
+		FROM scored
+		ORDER BY fuzzy_rank DESC, fuzzy_full_rank DESC, LOWER(title) ASC, content_id ASC
+		LIMIT $%d OFFSET $%d`, itemColumns, totalColumn, argIdx, argIdx+1)
+	countSQL = scoredCTE + `SELECT COUNT(*) FROM scored`
 	args = append(args, limit, offset)
 	return dataSQL, countSQL, args
 }
