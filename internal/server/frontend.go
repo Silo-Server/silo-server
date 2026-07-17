@@ -1,11 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/branding"
 )
@@ -70,86 +74,154 @@ func FrontendHandler() http.Handler {
 		})
 	}
 
-	fileServer := http.FileServer(http.FS(WebDistFS))
+	// The embedded build output is immutable for the process lifetime, so the
+	// unbranded shell can be read once here. A read failure falls back to a
+	// per-request error response.
+	rawIndex, _ := fs.ReadFile(WebDistFS, "index.html")
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		path := r.URL.Path
+	return &frontendHandler{
+		fileServer: http.FileServer(http.FS(WebDistFS)),
+		rawIndex:   rawIndex,
+	}
+}
 
-		// Dynamic branding endpoints must be handled before the static file
-		// server, which would otherwise serve the bundled defaults shadowing
-		// them. Both fall through to the static asset when no override applies.
-		if Branding != nil {
-			switch path {
-			case "/site.webmanifest":
-				serveDynamicManifest(w, r)
+// frontendHandler serves the embedded SPA. It is a struct rather than a
+// closure so its caches are scoped to one handler instance and reset when a
+// new handler is constructed over a different WebDistFS (as tests do).
+type frontendHandler struct {
+	fileServer http.Handler
+	rawIndex   []byte // unbranded index.html, read once at construction
+
+	// staticETags caches content ETags for stable-URL bundled files (sw.js,
+	// icons, vendor bundles). The embedded FS never changes, so a path's ETag
+	// is computed at most once.
+	staticETags sync.Map // path string -> etag string
+
+	// shell caches the branded index.html and its ETag for the last-seen
+	// branding snapshot, so steady-state shell requests — especially the 304
+	// revalidations that no-cache makes the common case — skip re-reading,
+	// re-rendering, and re-hashing the document.
+	shell atomic.Pointer[renderedShell]
+}
+
+type renderedShell struct {
+	brandingKey string
+	body        []byte
+	etag        string
+}
+
+func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	path := r.URL.Path
+
+	// Dynamic branding endpoints must be handled before the static file
+	// server, which would otherwise serve the bundled defaults shadowing
+	// them. Both fall through to the static asset when no override applies.
+	if Branding != nil {
+		switch path {
+		case "/site.webmanifest":
+			serveDynamicManifest(w, r)
+			return
+		case "/favicon.ico":
+			if serveCustomFavicon(w, r) {
 				return
-			case "/favicon.ico":
-				if serveCustomFavicon(w, r) {
-					return
+			}
+		}
+	}
+
+	// Try to serve the file directly. index.html is excluded so the SPA
+	// HTML always goes through the fallback below and carries the CSP.
+	if path != "/" && path != "/index.html" && !strings.HasSuffix(path, "/") {
+		if f, err := WebDistFS.Open(strings.TrimPrefix(path, "/")); err == nil {
+			_ = f.Close()
+			if strings.HasPrefix(path, "/assets/") {
+				// Vite content-hashes /assets/ filenames, so those URLs are
+				// immutable: a new build produces new URLs, which is what
+				// lets browsers cache them for a year yet pick up deploys.
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				// Every other bundled file (service worker, icons, vendor
+				// bundles) keeps its URL across builds, so it must be
+				// revalidated. The embedded FS carries no modtimes, meaning
+				// http.FileServer emits no validator of its own — without
+				// this ETag, no-cache would force a full re-download on
+				// every use instead of a 304.
+				w.Header().Set("Cache-Control", "no-cache")
+				if etag := h.staticETag(path); etag != "" {
+					w.Header().Set("ETag", etag)
 				}
 			}
-		}
-
-		// Try to serve the file directly. index.html is excluded so the SPA
-		// HTML always goes through the fallback below and carries the CSP.
-		if path != "/" && path != "/index.html" && !strings.HasSuffix(path, "/") {
-			if f, err := WebDistFS.Open(strings.TrimPrefix(path, "/")); err == nil {
-				f.Close()
-				w.Header().Set("Cache-Control", staticCacheControl(path))
-				fileServer.ServeHTTP(w, r)
-				return
-			}
-		}
-
-		// SPA fallback: serve index.html
-		indexBytes, err := fs.ReadFile(WebDistFS, "index.html")
-		if err != nil {
-			http.Error(w, "index.html not found", http.StatusInternalServerError)
+			h.fileServer.ServeHTTP(w, r)
 			return
 		}
-		if Branding != nil {
-			indexBytes = branding.RenderIndexHTML(indexBytes, Branding.Load(r.Context()))
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Header().Set("Content-Security-Policy", frontendContentSecurityPolicy)
-		// The HTML shell keeps a stable URL across builds, so it must never be
-		// served stale: every deploy changes which content-hashed /assets/*
-		// bundles it references. no-cache lets browsers and CDNs store it but
-		// forces revalidation on each load; the ETag turns an unchanged shell
-		// into a cheap 304. This is what busts a stale UI on deploy without
-		// disabling caching — the referenced bundles stay immutably cached.
-		etag := weakContentETag(indexBytes)
-		w.Header().Set("ETag", etag)
-		w.Header().Set("Cache-Control", "no-cache")
-		if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(indexBytes)
-	})
-}
-
-// staticCacheControl returns the Cache-Control policy for a bundled static file.
-//
-// Vite emits content-hashed build output under /assets/ (the hash is in the
-// filename), so those files are immutable: a new build produces a new URL, which
-// is what lets the browser cache them for a year yet still pick up changes. Every
-// other bundled file (service worker, icons, fonts at a stable path) keeps its
-// URL across builds, so it must be revalidated — otherwise a changed sw.js or
-// icon could stay stuck in a browser or CDN cache.
-func staticCacheControl(path string) string {
-	if strings.HasPrefix(path, "/assets/") {
-		return "public, max-age=31536000, immutable"
 	}
-	return "no-cache"
+
+	// SPA fallback: serve the (branded) index.html shell.
+	shell, ok := h.brandedShell(r)
+	if !ok {
+		http.Error(w, "index.html not found", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", frontendContentSecurityPolicy)
+	// The HTML shell keeps a stable URL across builds, so it must never be
+	// served stale: every deploy changes which content-hashed /assets/*
+	// bundles it references. no-cache lets browsers and CDNs store it but
+	// forces revalidation on each load; the ETag turns an unchanged shell
+	// into a cheap 304. ServeContent implements RFC 9110 conditional
+	// semantics (weak comparison, ETag lists), so revalidation keeps working
+	// behind proxies that compress the body and weaken the ETag to W/"...".
+	w.Header().Set("ETag", shell.etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(shell.body))
 }
 
-// weakContentETag derives a stable validator from response bytes so a no-cache
+// brandedShell returns the branding-rendered index.html and its ETag, reusing
+// the cached rendering while the branding snapshot is unchanged.
+func (h *frontendHandler) brandedShell(r *http.Request) (*renderedShell, bool) {
+	if h.rawIndex == nil {
+		return nil, false
+	}
+	var brandingKey string
+	var snap branding.Snapshot
+	if Branding != nil {
+		snap = Branding.Load(r.Context())
+		brandingKey = snap.RenderKey()
+	}
+	if cached := h.shell.Load(); cached != nil && cached.brandingKey == brandingKey {
+		return cached, true
+	}
+	body := h.rawIndex
+	if Branding != nil {
+		body = branding.RenderIndexHTML(h.rawIndex, snap)
+	}
+	rendered := &renderedShell{brandingKey: brandingKey, body: body, etag: contentETag(body)}
+	h.shell.Store(rendered)
+	return rendered, true
+}
+
+// staticETag returns the content ETag for a bundled static file, computing and
+// caching it on first use. Returns "" for paths that can't be read as files
+// (directories), which are served without a validator.
+func (h *frontendHandler) staticETag(path string) string {
+	if v, ok := h.staticETags.Load(path); ok {
+		if etag, ok := v.(string); ok {
+			return etag
+		}
+	}
+	data, err := fs.ReadFile(WebDistFS, strings.TrimPrefix(path, "/"))
+	if err != nil {
+		return ""
+	}
+	etag := contentETag(data)
+	h.staticETags.Store(path, etag)
+	return etag
+}
+
+// contentETag derives a strong validator from response bytes so a no-cache
 // resource can answer conditional requests with a 304 instead of re-sending the
 // body. Truncated SHA-256 is ample for cache validation (not a security token).
-func weakContentETag(b []byte) string {
+func contentETag(b []byte) string {
 	sum := sha256.Sum256(b)
 	return `"` + hex.EncodeToString(sum[:16]) + `"`
 }
@@ -175,18 +247,14 @@ func serveCustomFavicon(w http.ResponseWriter, r *http.Request) bool {
 	// X-Content-Type-Options is already set on the response by the caller. The
 	// favicon may be an admin-uploaded SVG; harden it against script execution
 	// on direct navigation (stored-XSS defense), matching the API asset route.
-	etag := `"` + ref + `"`
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Security-Policy", branding.AssetContentSecurityPolicy)
-	w.Header().Set("ETag", etag)
+	w.Header().Set("ETag", `"`+ref+`"`)
 	// Stable path (no content hash in the URL), so revalidate rather than cache
 	// long-lived; the ETag lets browsers skip the body when unchanged.
+	// ServeContent handles If-None-Match with RFC 9110 semantics (weak
+	// comparison, ETag lists) rather than a naive string compare.
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return true
-	}
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(data)
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
 	return true
 }

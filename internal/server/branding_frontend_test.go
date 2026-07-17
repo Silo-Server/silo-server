@@ -61,6 +61,39 @@ func TestFrontendInjectsServerNameIntoTitle(t *testing.T) {
 	}
 }
 
+// TestFrontendShellCacheFollowsBrandingChanges guards the rendered-shell
+// cache: one handler instance must re-render (and re-tag) the shell when the
+// branding snapshot changes, not keep serving the first rendering forever.
+func TestFrontendShellCacheFollowsBrandingChanges(t *testing.T) {
+	settings := fakeSettings{branding.KeyServerName: "Acme Media"}
+	withBranding(t, settings)
+	handler := FrontendHandler()
+
+	first := httptest.NewRecorder()
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/", nil))
+	if !strings.Contains(first.Body.String(), "<title>Acme Media</title>") {
+		t.Fatalf("initial title not branded: %q", first.Body.String())
+	}
+
+	// Repeat request with unchanged branding: same ETag (served from cache).
+	repeat := httptest.NewRecorder()
+	handler.ServeHTTP(repeat, httptest.NewRequest(http.MethodGet, "/", nil))
+	if first.Header().Get("ETag") != repeat.Header().Get("ETag") {
+		t.Fatalf("etag changed without a branding change: %q vs %q",
+			first.Header().Get("ETag"), repeat.Header().Get("ETag"))
+	}
+
+	settings[branding.KeyServerName] = "Renamed Media"
+	renamed := httptest.NewRecorder()
+	handler.ServeHTTP(renamed, httptest.NewRequest(http.MethodGet, "/", nil))
+	if !strings.Contains(renamed.Body.String(), "<title>Renamed Media</title>") {
+		t.Fatalf("renamed title not rendered: %q", renamed.Body.String())
+	}
+	if renamed.Header().Get("ETag") == first.Header().Get("ETag") {
+		t.Fatal("etag must change when the rendered shell changes")
+	}
+}
+
 func TestFrontendServesDynamicManifest(t *testing.T) {
 	withBranding(t, fakeSettings{branding.KeyServerName: "Acme Media"})
 	rr := httptest.NewRecorder()

@@ -49,6 +49,23 @@ func (s Snapshot) ThemeColor() string {
 	return DefaultThemeColor
 }
 
+// RenderKey returns a stable identity covering every snapshot field the
+// Render* functions read, so callers can cache rendered output and re-render
+// only when the branding configuration actually changes. Keep in sync with
+// RenderIndexHTML and RenderManifest.
+func (s Snapshot) RenderKey() string {
+	return strings.Join([]string{
+		s.ServerName,
+		s.LoginSubtitle,
+		s.AccentColor,
+		s.DefaultTheme,
+		s.assets[KindWordmark],
+		s.assets[KindMark],
+		s.assets[KindFavicon],
+		s.assets[KindLoginBg],
+	}, "\x00")
+}
+
 // Favicon link literal as it appears in web/index.html. Kept in sync with that
 // file; RenderIndexHTML rewrites it to a custom favicon when one is set.
 const indexFaviconLink = `<link rel="icon" href="/favicon.ico" sizes="any" />`

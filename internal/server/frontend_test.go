@@ -78,3 +78,93 @@ func TestFrontendHandlerServesStaticAssetsWithoutCSP(t *testing.T) {
 		t.Fatalf("x-content-type-options = %q", got)
 	}
 }
+
+func newFrontendTestHandler(t *testing.T) http.Handler {
+	t.Helper()
+	prev := WebDistFS
+	WebDistFS = fstest.MapFS{
+		"index.html":    &fstest.MapFile{Data: []byte("<!doctype html><div id=\"root\"></div>")},
+		"assets/app.js": &fstest.MapFile{Data: []byte("console.log(1)")},
+		"sw.js":         &fstest.MapFile{Data: []byte("self.addEventListener('fetch', () => {})")},
+	}
+	t.Cleanup(func() { WebDistFS = prev })
+	return FrontendHandler()
+}
+
+func TestFrontendShellCacheHeadersAndConditionalGet(t *testing.T) {
+	handler := newFrontendTestHandler(t)
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("shell cache-control = %q, want no-cache", got)
+	}
+	etag := rr.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("shell response missing ETag")
+	}
+
+	// Revalidation with the exact ETag answers 304 with no body.
+	conditional := func(inm string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("If-None-Match", inm)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := conditional(etag); rec.Code != http.StatusNotModified {
+		t.Fatalf("If-None-Match exact: status = %d, want 304", rec.Code)
+	}
+	// A fronting proxy that compresses the shell weakens the ETag to W/"...";
+	// RFC 9110 weak comparison must still produce the 304 (a naive string
+	// compare here silently kills revalidation behind nginx gzip).
+	if rec := conditional("W/" + etag); rec.Code != http.StatusNotModified {
+		t.Fatalf("If-None-Match weakened: status = %d, want 304", rec.Code)
+	}
+	// ETag lists must match too.
+	if rec := conditional(`"stale-etag", ` + etag); rec.Code != http.StatusNotModified {
+		t.Fatalf("If-None-Match list: status = %d, want 304", rec.Code)
+	}
+	// A stale validator gets the full document.
+	if rec := conditional(`"stale-etag"`); rec.Code != http.StatusOK || rec.Body.Len() == 0 {
+		t.Fatalf("If-None-Match stale: status = %d body = %d bytes, want 200 with body", rec.Code, rec.Body.Len())
+	}
+}
+
+func TestFrontendStaticFilesCarryValidators(t *testing.T) {
+	handler := newFrontendTestHandler(t)
+
+	// Content-hashed bundles are immutable; the URL is the validator.
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/assets/app.js", nil))
+	if got := rr.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Fatalf("asset cache-control = %q", got)
+	}
+
+	// Stable-URL files must revalidate — and the embedded FS has no modtimes,
+	// so without an explicit ETag no-cache would force a full re-download on
+	// every use (there would be nothing to revalidate against).
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if got := rr.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("sw.js cache-control = %q, want no-cache", got)
+	}
+	etag := rr.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("stable-path static file missing ETag validator")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/sw.js", nil)
+	req.Header.Set("If-None-Match", etag)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("sw.js If-None-Match: status = %d, want 304", rec.Code)
+	}
+}
