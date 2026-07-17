@@ -2253,6 +2253,16 @@ func filterCatalogSearchItems(items []*models.MediaItem, raw string) []*models.M
 			filtered = append(filtered, item)
 		}
 	}
+	if len(filtered) == 0 && len(items) > 0 && eligibleForFuzzy(parsed) {
+		// The strict per-token substring filter erases the repo layer's
+		// typo-tolerant (trigram) matches: a misspelled token is never a
+		// substring of the titles it fuzzy-matched, so a typo query that
+		// found results via the fuzzy fallback would be filtered to zero here
+		// while the plain search box shows matches. When a fuzzy-eligible
+		// query would be emptied entirely, trust the repo's relevance
+		// ordering instead.
+		return items
+	}
 	return filtered
 }
 

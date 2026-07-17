@@ -468,7 +468,7 @@ func TestItemRepo_Search_FTSQueryHasNoFuzzyArm(t *testing.T) {
 // applies the same scope filters (type, manga exclusion) as the FTS query.
 func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
 	repo := &ItemRepository{}
-	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, []string{"abc", "def"})
+	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, []string{"abc", "def"}, 0)
 
 	if !strings.Contains(dataSQL, "public.normalize_search_text($1) % mi.title_normalized") {
 		t.Fatalf("expected trigram %% arm against title_normalized; got:\n%s", dataSQL)
@@ -511,7 +511,7 @@ func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
 // SearchPage's cursor path stays a pure keyset page.
 func TestItemRepo_BuildFuzzySearchSQL_CursorModeOmitsWindowCount(t *testing.T) {
 	repo := &ItemRepository{}
-	dataSQL, _, _ := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 21, 0, AccessFilter{}, false, nil)
+	dataSQL, _, _ := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 21, 0, AccessFilter{}, false, nil, 0)
 	if strings.Contains(dataSQL, "COUNT(*) OVER") {
 		t.Fatalf("cursor-mode fuzzy query must omit window count; got:\n%s", dataSQL)
 	}
@@ -520,11 +520,40 @@ func TestItemRepo_BuildFuzzySearchSQL_CursorModeOmitsWindowCount(t *testing.T) {
 	}
 }
 
+// TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor asserts the augment floor
+// contract: minSimilarity > 0 adds an explicit similarity() >= $n predicate
+// (used when the FTS block had real hits, so augmentation only admits
+// near-certain corrections), and minSimilarity == 0 omits it so zero-hit typo
+// queries keep the base pinned threshold's recall.
+func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
+	repo := &ItemRepository{}
+
+	floorSQL, _, floorArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, fuzzyAugmentSimilarityFloor)
+	if !strings.Contains(floorSQL, "AND similarity(public.normalize_search_text($1), mi.title_normalized) >= $2") {
+		t.Fatalf("expected explicit similarity floor predicate as $2; got:\n%s", floorSQL)
+	}
+	if len(floorArgs) < 2 || floorArgs[1] != fuzzyAugmentSimilarityFloor {
+		t.Fatalf("expected $2 = fuzzyAugmentSimilarityFloor; got args %#v", floorArgs)
+	}
+	// Trailing limit/offset must still close the arg list for the count sibling.
+	if floorArgs[len(floorArgs)-2] != 20 || floorArgs[len(floorArgs)-1] != 0 {
+		t.Fatalf("expected trailing limit/offset args; got %#v", floorArgs[len(floorArgs)-2:])
+	}
+
+	baseSQL, _, baseArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, 0)
+	if strings.Contains(baseSQL, "AND similarity(public.normalize_search_text($1), mi.title_normalized) >= $2") {
+		t.Fatalf("zero floor must not add a similarity predicate; got:\n%s", baseSQL)
+	}
+	if len(baseArgs) != len(floorArgs)-1 {
+		t.Fatalf("zero floor should bind one fewer arg: base %d vs floor %d", len(baseArgs), len(floorArgs))
+	}
+}
+
 // TestItemRepo_BuildFuzzySearchSQL_EmptyQueryReturnsEmpty guards the same
 // empty-input contract as buildSearchSQL.
 func TestItemRepo_BuildFuzzySearchSQL_EmptyQueryReturnsEmpty(t *testing.T) {
 	repo := &ItemRepository{}
-	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("   ", []string{"movie"}, 20, 0, AccessFilter{}, true, nil)
+	dataSQL, countSQL, args := repo.buildFuzzySearchSQL("   ", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, 0)
 	if dataSQL != "" || countSQL != "" || args != nil {
 		t.Fatalf("expected empty result for blank query; got dataSQL=%q countSQL=%q args=%#v", dataSQL, countSQL, args)
 	}
@@ -542,7 +571,7 @@ func TestItemRepo_Search_LibraryScopeUsesIndependentExistsPredicates(t *testing.
 	filter := AccessFilter{DisabledLibraryIDs: []int{9}}
 
 	ftsSQL, _, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, filter)
-	fuzzySQL, _, _ := repo.buildFuzzySearchSQL("avatar", []string{"movie"}, 20, 0, filter, true, nil)
+	fuzzySQL, _, _ := repo.buildFuzzySearchSQL("avatar", []string{"movie"}, 20, 0, filter, true, nil, 0)
 
 	for name, sql := range map[string]string{"fts": ftsSQL, "fuzzy": fuzzySQL} {
 		if strings.Contains(sql, "JOIN media_item_libraries") {
