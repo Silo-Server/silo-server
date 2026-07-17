@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
@@ -27,8 +28,18 @@ type RecipeCard struct {
 	// back-compat with cards written before direct/remux were reconstructable.
 	PlayMethod PlayMethod `json:"play_method,omitempty"`
 	// TranscodeAudio mirrors Session.TranscodeAudio; used by the remux path to
-	// re-spawn ffmpeg with the same audio handling on reconstruct.
+	// re-spawn ffmpeg with the same audio handling on reconstruct, and by the
+	// admin activity views to classify the reconstructed session (audio
+	// re-encode vs repackage).
 	TranscodeAudio bool `json:"transcode_audio,omitempty"`
+
+	// Client metadata mirrored from the session so admin views (client label,
+	// Jellyfin pill) survive reconstruction. Carried only by stored cards —
+	// deliberately NOT projected into stream-token claims, where a user agent
+	// would bloat every stream URL.
+	ClientName      string `json:"client_name,omitempty"`
+	ClientVersion   string `json:"client_version,omitempty"`
+	ClientUserAgent string `json:"client_user_agent,omitempty"`
 
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
 	// Unused (zero) for direct/remux cards, which carry no segment-based encode.
@@ -58,12 +69,17 @@ type RecipeCard struct {
 // operator's config change applies to reconstructed sessions too.
 func NewRecipeCard(userID int, profileID string, mediaFileID int, transcodeNodeURL string, opts TranscodeOpts) RecipeCard {
 	return RecipeCard{
-		SessionID:          opts.SessionID,
-		UserID:             userID,
-		ProfileID:          profileID,
-		MediaFileID:        mediaFileID,
-		TranscodeNodeURL:   transcodeNodeURL,
-		PlayMethod:         PlayTranscode,
+		SessionID:        opts.SessionID,
+		UserID:           userID,
+		ProfileID:        profileID,
+		MediaFileID:      mediaFileID,
+		TranscodeNodeURL: transcodeNodeURL,
+		PlayMethod:       PlayTranscode,
+		// The transcode re-encodes audio unless the opts explicitly copy it
+		// (an empty codec runs ffmpeg's aac default). Recording this keeps
+		// the reconstructed session's audio decision — and therefore the
+		// admin activity bucket — matching what ffmpeg actually does.
+		TranscodeAudio:     !strings.EqualFold(opts.TargetCodecAudio, "copy"),
 		InputPath:          opts.InputPath,
 		SourceVideoCodec:   opts.SourceVideoCodec,
 		SeekSeconds:        opts.SeekSeconds,

@@ -362,6 +362,11 @@ func (m *TranscodeManager) ReconstructSession(ctx context.Context, sessionID str
 		TargetAudioCodec:  card.TargetCodecAudio,
 		TargetBitrateKbps: card.TargetBitrateKbps,
 		TranscodeHWAccel:  card.HWAccel,
+		// Client metadata survives the restart so the admin views keep the
+		// client label and Jellyfin identification for the session's lifetime.
+		ClientName:      normalizeClientMetadataValue(card.ClientName, 128),
+		ClientVersion:   normalizeClientMetadataValue(card.ClientVersion, 64),
+		ClientUserAgent: normalizeClientMetadataValue(card.ClientUserAgent, 512),
 		// Preserve the byte-affecting recipe so an audio switch after a restart
 		// rebuilds the same stream (subtitles/cadence) instead of dropping them.
 		SubtitleTrackIndex: card.SubtitleTrackIndex,

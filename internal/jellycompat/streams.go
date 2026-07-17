@@ -1041,7 +1041,16 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 				return nil, err
 			}
 			if h.tm != nil {
-				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, h.upstreamRecipeCard(playSession, compatSession, source, method)); reconstructed != nil {
+				card := h.upstreamRecipeCard(playSession, compatSession, source, method)
+				// Cards minted before client metadata was recorded (and the
+				// direct/remux fallback cards built here from scratch) carry
+				// none; the current compat request identifies the client, so
+				// the reconstructed session keeps its label and JF pill.
+				if card.ClientName == "" && card.ClientUserAgent == "" {
+					info := playback.ClientInfoFromContext(ctx)
+					card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
+				}
+				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {
 					_ = h.syncUpstreamAudioSelection(playSession, source)
 					return playSession, nil
 				}
@@ -1265,6 +1274,10 @@ func (h *PlaybackHandler) ensureTranscodeSession(ctx context.Context, playSessio
 	// registered this session.
 	h.tm.RegisterTranscodeSession(upstreamSessionID, transcodeSession)
 	unlock()
+
+	// Mirror the actual encode decisions onto the upstream session before the
+	// recipe is persisted — video-copy HLS must not sync as a video transcode.
+	h.recordTranscodeStreamDetails(ctx, upstreamSessionID, opts)
 
 	// Register the exit monitor and persist the reconstruction recipe (shared with
 	// the remote path). On a failed compat-store write roll back this abandoned

@@ -101,6 +101,33 @@ type sessionStarterContext interface {
 	StartSessionWithContext(ctx context.Context, userID int, profileID string, fileID int, method playback.PlayMethod, transcodeAudio bool) (*playback.Session, error)
 }
 
+// transcodeStreamDetailsSetter is implemented by the native SessionManager.
+// Optional (like sessionStarterContext) so lightweight test fakes don't have
+// to; without it the session keeps transport-level defaults only.
+type transcodeStreamDetailsSetter interface {
+	SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool) error
+}
+
+// recordTranscodeStreamDetails mirrors the encode decisions of a started
+// transcode onto the upstream session. StartSession only records the transport
+// method (play_method "transcode", transcodeAudio false), so without this an
+// audio-only re-encode — video copied — syncs to session sync and the admin
+// activity views as a full video transcode. Shared by the local
+// (ensureTranscodeSession) and remote (startRemoteTranscode) paths.
+func (h *PlaybackHandler) recordTranscodeStreamDetails(ctx context.Context, upstreamSessionID string, opts playback.TranscodeOpts) {
+	setter, ok := h.sessionMgr.(transcodeStreamDetailsSetter)
+	if !ok {
+		return
+	}
+	// Only an explicit "copy" leaves the audio untouched; an empty codec runs
+	// ffmpeg's aac default (see appendAudioArgs).
+	transcodeAudio := !strings.EqualFold(opts.TargetCodecAudio, "copy")
+	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio); err != nil {
+		slog.WarnContext(ctx, "record transcode stream details failed", "component", "jellycompat",
+			"error", err, "playback_session_id", upstreamSessionID)
+	}
+}
+
 // FilePathResolver looks up media files by ID.
 type FilePathResolver interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
@@ -443,6 +470,10 @@ func (h *PlaybackHandler) startRemoteTranscode(
 		opts.TargetCodecVideo = "copy"
 	}
 
+	// Same mirror as the local path: the node runs the encode, but the
+	// upstream session here is what session sync and admin views read.
+	h.recordTranscodeStreamDetails(ctx, upstreamSessionID, opts)
+
 	if err := h.persistTranscodeRecipe(ctx, playSessionID, upstreamSessionID, opts); err != nil {
 		// Roll back the already-started node ffmpeg so it isn't leaked.
 		h.tm.CloseTranscodeSession(upstreamSessionID, transcodeNodeURL)
@@ -479,6 +510,12 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 	if h.sessionMgr != nil {
 		if upstream, err := h.sessionMgr.GetSession(upstreamSessionID); err == nil && upstream != nil {
 			card := playback.NewRecipeCard(upstream.UserID, upstream.ProfileID, upstream.MediaFileID, upstream.TranscodeNodeURL, opts)
+			// Mirror the client metadata into the card so a session rebuilt
+			// after a restart keeps its client label and Jellyfin
+			// identification instead of syncing with empty client fields.
+			card.ClientName = upstream.ClientName
+			card.ClientVersion = upstream.ClientVersion
+			card.ClientUserAgent = upstream.ClientUserAgent
 			recipe = &card
 		}
 	}

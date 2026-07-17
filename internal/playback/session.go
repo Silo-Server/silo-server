@@ -622,6 +622,27 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 	return nil
 }
 
+// SetTranscodeStreamDetails records the actual encode decisions of a running
+// transcode on the session — video copy vs re-encode, and whether audio is
+// re-encoded — so session sync and the admin activity views classify the
+// stream by what ffmpeg is doing rather than by the transport method alone
+// (an HLS session with copied video is a repackage, not a video transcode).
+func (m *SessionManager) SetTranscodeStreamDetails(sessionID, targetVideoCodec, targetAudioCodec string, transcodeAudio bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	s.TargetVideoCodec = targetVideoCodec
+	s.TargetAudioCodec = targetAudioCodec
+	s.TranscodeAudio = transcodeAudio
+	m.touchSessionLocked(s)
+	return nil
+}
+
 // SetTranscodeNodeURL assigns a transcode node URL to an existing session.
 func (m *SessionManager) SetTranscodeNodeURL(sessionID, url string) error {
 	m.mu.Lock()
