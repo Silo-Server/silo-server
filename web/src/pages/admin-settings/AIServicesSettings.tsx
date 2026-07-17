@@ -102,6 +102,13 @@ function isChatOnlyGateway(rawURL: string): boolean {
   }
 }
 
+function parseStrictInteger(rawValue: string): number | null {
+  const trimmed = rawValue.trim();
+  if (!/^-?\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 function SectionHeading({
   icon: Icon,
   title,
@@ -250,32 +257,31 @@ export default function AIServicesSettings() {
   }
 
   async function save() {
-    const batchSize = Number.parseInt(value("subtitle_ai.batch_size", "40"), 10);
-    const contextLines = Number.parseInt(value("subtitle_ai.context_neighbors", "2"), 10);
-    const chunkSeconds = Number.parseInt(value("subtitle_ai.asr_chunk_seconds", "600"), 10);
+    const batchSize = parseStrictInteger(value("subtitle_ai.batch_size", "40"));
+    const contextLines = parseStrictInteger(value("subtitle_ai.context_neighbors", "2"));
+    const chunkSeconds = parseStrictInteger(value("subtitle_ai.asr_chunk_seconds", "600"));
     const quotaJobs = Number.parseInt(value("subtitle_ai.transcribe_quota_jobs", "0"), 10);
-    const maxConcurrent = Number.parseInt(
+    const maxConcurrent = parseStrictInteger(
       effectiveValue("ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs", "2"),
-      10,
     );
 
     if (!textReady) {
       toast.error("Text AI base URL and chat model are required.");
       return;
     }
-    if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
+    if (maxConcurrent === null || maxConcurrent < 1) {
       toast.error("Max concurrent jobs must be a positive whole number.");
       return;
     }
-    if (!Number.isInteger(batchSize) || batchSize < 1) {
+    if (batchSize === null || batchSize < 1) {
       toast.error("Subtitle batch size must be a positive whole number.");
       return;
     }
-    if (!Number.isInteger(contextLines) || contextLines < 0) {
+    if (contextLines === null || contextLines < 0) {
       toast.error("Subtitle context lines must be zero or a positive whole number.");
       return;
     }
-    if (!Number.isInteger(chunkSeconds) || chunkSeconds < 60 || chunkSeconds > 600) {
+    if (chunkSeconds === null || chunkSeconds < 60 || chunkSeconds > 600) {
       toast.error("Transcription chunk length must be between 60 and 600 seconds.");
       return;
     }
@@ -284,6 +290,12 @@ export default function AIServicesSettings() {
       return;
     }
     await form.save();
+  }
+
+  function discard() {
+    form.discard();
+    setTextResult(null);
+    setSpeechResult(null);
   }
 
   return (
@@ -588,7 +600,7 @@ export default function AIServicesSettings() {
       <SaveBar
         dirtyCount={form.dirtyCount}
         onSave={() => void save()}
-        onDiscard={form.discard}
+        onDiscard={discard}
         isSaving={form.isSaving}
         restartRequired={form.restartRequired}
       />
