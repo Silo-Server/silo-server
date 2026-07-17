@@ -76,6 +76,30 @@ type playbackSessionRow struct {
 	IsJellyfinClient         bool      `json:"is_jellyfin_client,omitempty"`
 }
 
+// playbackSessionsCapabilitiesResponse advertises the additive fields of the
+// live admin session payload so independently deployed clients (Android,
+// Apple) can feature-detect them. Both fields are omitempty on the wire, so
+// absence on a row is otherwise indistinguishable from an older server.
+type playbackSessionsCapabilitiesResponse struct {
+	// EffectivePlayMethod reports that rows carry effective_play_method.
+	EffectivePlayMethod bool `json:"effective_play_method"`
+	// EffectivePlayMethodValues is the closed bucket vocabulary a supported
+	// server emits (absent field = unknown).
+	EffectivePlayMethodValues []string `json:"effective_play_method_values"`
+	// IsJellyfinClient reports that rows carry is_jellyfin_client.
+	IsJellyfinClient bool `json:"is_jellyfin_client"`
+}
+
+// HandleGetSessionsCapabilities exposes additive feature support for the live
+// admin session payload (GET /admin/sessions/capabilities).
+func (h *AdminHandler) HandleGetSessionsCapabilities(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, playbackSessionsCapabilitiesResponse{
+		EffectivePlayMethod:       true,
+		EffectivePlayMethodValues: []string{"direct", "remux", "transcode", "audio"},
+		IsJellyfinClient:          true,
+	})
+}
+
 // PlaybackSessionsQuery scopes live session listing.
 type PlaybackSessionsQuery struct {
 	// UserID, when positive, limits results to sessions owned by that account.
