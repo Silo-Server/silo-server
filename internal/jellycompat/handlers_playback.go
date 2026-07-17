@@ -119,13 +119,18 @@ func (h *PlaybackHandler) recordTranscodeStreamDetails(ctx context.Context, upst
 	if !ok {
 		return
 	}
-	// Only an explicit "copy" leaves the audio untouched; an empty codec runs
-	// ffmpeg's aac default (see appendAudioArgs).
-	transcodeAudio := !strings.EqualFold(opts.TargetCodecAudio, "copy")
+	transcodeAudio := playback.TranscodesAudio(opts.TargetCodecAudio)
 	if err := setter.SetTranscodeStreamDetails(upstreamSessionID, opts.TargetCodecVideo, opts.TargetCodecAudio, transcodeAudio); err != nil {
 		slog.WarnContext(ctx, "record transcode stream details failed", "component", "jellycompat",
 			"error", err, "playback_session_id", upstreamSessionID)
+		return
 	}
+	// The "compat_start" sync inside ensureUpstreamPlayback already flushed
+	// this session with transport-level defaults, so flush again now that the
+	// real encode decisions are on it — otherwise the admin view shows a
+	// video-copy stream as a full video transcode until the next reconciler
+	// tick.
+	h.syncSessionsNow(ctx, "compat_transcode_details")
 }
 
 // FilePathResolver looks up media files by ID.
