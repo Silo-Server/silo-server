@@ -94,8 +94,15 @@ func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSett
 		}
 	}
 
+	// A copy-unsafe source (H.264 with conflicting in-band PPS) cannot take a
+	// video stream-copy route: the remux would desync strict decoders. Force it
+	// past the remux cases into a full video transcode. Direct play of the
+	// original file (Case 1) stays available — decoders that reparse in-band
+	// parameter sets handle the original container fine.
+	copyUnsafe := videoCopyUnsafeFile(file)
+
 	// Case 2: Client supports codecs but not container → remux.
-	if videoOK && audioOK && !containerOK {
+	if videoOK && audioOK && !containerOK && !copyUnsafe {
 		return &PlayDecision{
 			Method: PlayRemux,
 			File:   file,
@@ -105,7 +112,7 @@ func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSett
 
 	// Case 3: Video OK but audio codec unsupported → remux with audio transcode.
 	// This is much cheaper than a full video transcode.
-	if videoOK && !audioOK {
+	if videoOK && !audioOK && !copyUnsafe {
 		return &PlayDecision{
 			Method:         PlayRemux,
 			File:           file,
@@ -258,4 +265,15 @@ func is4K(res string) bool {
 // containsStr checks if a slice contains a string.
 func containsStr(slice []string, s string) bool {
 	return slices.Contains(slice, s)
+}
+
+// videoCopyUnsafeFile reports whether the file's video stream cannot be safely
+// stream-copied into an avc1/fMP4 segment. It is set once by the multi-PPS
+// bitstream scan (H.264 sources that redefine a pic_parameter_set_id in-band
+// with conflicting content). nil/false means copy is safe or not yet analyzed.
+func videoCopyUnsafeFile(file *models.MediaFile) bool {
+	if file == nil || len(file.VideoTracks) == 0 {
+		return false
+	}
+	return file.VideoTracks[0].MultiplePPS != nil && *file.VideoTracks[0].MultiplePPS
 }

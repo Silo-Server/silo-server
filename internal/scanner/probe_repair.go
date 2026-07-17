@@ -3,6 +3,7 @@ package scanner
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -66,43 +67,122 @@ func NeedsCriticalProbeRepair(file *models.MediaFile) bool {
 type PlaybackProbeEnsurer struct {
 	fileRepo    *FileRepository
 	ffprobePath string
+	ffmpegPath  string
 	timeout     time.Duration
+	// copySafety memoizes the multi-PPS bitstream scan per file for the life of
+	// the process. It is never persisted: the scan runs on the first playback
+	// after a restart and is recomputed lazily thereafter.
+	copySafety sync.Map // file ID -> copySafetyResult
 }
 
-func NewPlaybackProbeEnsurer(fileRepo *FileRepository, ffprobePath string, timeout time.Duration) *PlaybackProbeEnsurer {
+type copySafetyResult struct {
+	size  int64
+	multi bool
+}
+
+func NewPlaybackProbeEnsurer(fileRepo *FileRepository, ffprobePath, ffmpegPath string, timeout time.Duration) *PlaybackProbeEnsurer {
 	return &PlaybackProbeEnsurer{
 		fileRepo:    fileRepo,
 		ffprobePath: ffprobePath,
+		ffmpegPath:  ffmpegPath,
 		timeout:     timeout,
 	}
 }
 
 func (e *PlaybackProbeEnsurer) Ensure(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error) {
-	if file == nil || !NeedsCriticalProbeRepair(file) {
+	if file == nil || e == nil || e.fileRepo == nil {
 		return file, nil
 	}
-	if e == nil || e.fileRepo == nil || strings.TrimSpace(e.ffprobePath) == "" {
+
+	current := file
+	if NeedsCriticalProbeRepair(file) && strings.TrimSpace(e.ffprobePath) != "" {
+		timeout := e.timeout
+		if timeout <= 0 {
+			timeout = 5 * time.Second
+		}
+		if reprobeMayScanPackets(file) && timeout < time.Minute {
+			timeout = time.Minute
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, timeout)
+		probe, err := ProbeFile(probeCtx, e.ffprobePath, file.FilePath)
+		cancel()
+		if err != nil || probe == nil {
+			return file, err
+		}
+		updated := *file
+		applyProbeData(&updated, probe, "local")
+		repaired, err := e.fileRepo.Upsert(ctx, updated)
+		if err != nil {
+			return file, err
+		}
+		current = repaired
+	}
+
+	// Copy-safety analysis is independent of critical probe repair: an
+	// already-probed file still needs its one-time multi-PPS scan before the
+	// planner can decide whether a video stream-copy is safe.
+	return e.ensureCopySafety(ctx, current)
+}
+
+// ensureCopySafety computes the multi-PPS copy-safety flag for H.264 files at
+// playback start and stamps it on an in-memory copy of the file. The result is
+// memoized per process and never written to the database, so it is recomputed
+// on the first play after a restart.
+func (e *PlaybackProbeEnsurer) ensureCopySafety(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error) {
+	if !needsCopySafetyProbe(file) || strings.TrimSpace(e.ffmpegPath) == "" {
 		return file, nil
+	}
+
+	if cached, ok := e.copySafety.Load(file.ID); ok {
+		if result, ok := cached.(copySafetyResult); ok && result.size == file.FileSize {
+			return fileWithMultiplePPS(file, result.multi), nil
+		}
 	}
 
 	timeout := e.timeout
-	if timeout <= 0 {
-		timeout = 5 * time.Second
+	if timeout < 30*time.Second {
+		timeout = 30 * time.Second
 	}
-	if reprobeMayScanPackets(file) && timeout < time.Minute {
-		timeout = time.Minute
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	probe, err := ProbeFile(probeCtx, e.ffprobePath, file.FilePath)
-	if err != nil || probe == nil {
+	scanCtx, cancel := context.WithTimeout(ctx, timeout)
+	multi, err := DetectMultiplePPSH264(scanCtx, e.ffmpegPath, file.FilePath)
+	cancel()
+	if err != nil {
+		// Leave the flag unset so a transient failure retries on the next play
+		// rather than caching a wrong answer; the copy path stays available.
 		return file, err
 	}
 
+	e.copySafety.Store(file.ID, copySafetyResult{size: file.FileSize, multi: multi})
+	return fileWithMultiplePPS(file, multi), nil
+}
+
+// fileWithMultiplePPS returns a shallow copy of file with the (runtime-only)
+// MultiplePPS flag set on its first video track, without mutating the caller's
+// file or its shared VideoTracks slice.
+func fileWithMultiplePPS(file *models.MediaFile, multi bool) *models.MediaFile {
 	updated := *file
-	applyProbeData(&updated, probe, "local")
-	return e.fileRepo.Upsert(ctx, updated)
+	tracks := make([]models.VideoTrack, len(file.VideoTracks))
+	copy(tracks, file.VideoTracks)
+	value := multi
+	tracks[0].MultiplePPS = &value
+	updated.VideoTracks = tracks
+	return &updated
+}
+
+// needsCopySafetyProbe reports whether the file is an H.264 video whose
+// multi-PPS copy-safety flag has not yet been computed.
+func needsCopySafetyProbe(file *models.MediaFile) bool {
+	if file == nil || len(file.VideoTracks) == 0 {
+		return false
+	}
+	if file.VideoTracks[0].MultiplePPS != nil {
+		return false
+	}
+	codec := strings.ToLower(strings.TrimSpace(file.VideoTracks[0].Codec))
+	if codec == "" {
+		codec = strings.ToLower(strings.TrimSpace(file.CodecVideo))
+	}
+	return codec == "h264" || codec == "avc" || codec == "avc1"
 }
 
 // reprobeMayScanPackets reports whether reprobing this file is likely to hit

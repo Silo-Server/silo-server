@@ -65,6 +65,38 @@ func TestResolver_RemuxWithAudioTranscode(t *testing.T) {
 	}
 }
 
+func TestResolver_CopyUnsafeForcesTranscode(t *testing.T) {
+	unsafe := true
+	// h264+dts in mkv would normally remux with audio transcode (video copied),
+	// but the source carries conflicting in-band PPS, so the video copy is unsafe
+	// and it must fall through to a full transcode.
+	file := &models.MediaFile{
+		CodecVideo: "h264", CodecAudio: "dts", Container: "mkv",
+		Resolution: "1080p", HDR: false,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", MultiplePPS: &unsafe}},
+	}
+	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
+
+	if decision.Method != playback.PlayTranscode {
+		t.Errorf("method = %q, want transcode", decision.Method)
+	}
+}
+
+func TestResolver_CopySafeStillRemuxes(t *testing.T) {
+	safe := false
+	// The same shape with the copy-safety scan resolved to safe keeps remuxing.
+	file := &models.MediaFile{
+		CodecVideo: "h264", CodecAudio: "dts", Container: "mkv",
+		Resolution: "1080p", HDR: false,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", MultiplePPS: &safe}},
+	}
+	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
+
+	if decision.Method != playback.PlayRemux {
+		t.Errorf("method = %q, want remux", decision.Method)
+	}
+}
+
 func TestResolver_AudioPassthroughSkipsAudioTranscode(t *testing.T) {
 	// Source is h264 + eac3 in mp4. Client can decode h264 but not eac3; its
 	// sink advertises eac3 passthrough (e.g. HDMI AVR). Should direct-play
