@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/ai/llm"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
@@ -886,6 +887,239 @@ func (f *fakeEmbeddingsSettingsCheckClient) Embed(
 	return [][]float32{{0.1, 0.2}}, nil
 }
 
+type fakeAISettingsCheckClient struct {
+	chat       func(ctx context.Context, messages []llm.Message, jsonObject bool) (string, error)
+	transcribe func(ctx context.Context, req llm.TranscribeRequest) (*llm.Transcription, error)
+}
+
+func (f *fakeAISettingsCheckClient) Chat(
+	ctx context.Context,
+	messages []llm.Message,
+	jsonObject bool,
+) (string, error) {
+	if f.chat != nil {
+		return f.chat(ctx, messages, jsonObject)
+	}
+	return `{"status":"ok"}`, nil
+}
+
+func (f *fakeAISettingsCheckClient) Transcribe(
+	ctx context.Context,
+	req llm.TranscribeRequest,
+) (*llm.Transcription, error) {
+	if f.transcribe != nil {
+		return f.transcribe(ctx, req)
+	}
+	return &llm.Transcription{}, nil
+}
+
+func TestHandleCheckSettingsConnectionAIChatDoesNotSendStoredKeyToDraftEndpoint(t *testing.T) {
+	originalFactory := newAdminAISettingsCheckClient
+	t.Cleanup(func() {
+		newAdminAISettingsCheckClient = originalFactory
+	})
+
+	var captured llm.Config
+	var chatCalled bool
+	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
+		captured = cfg
+		return &fakeAISettingsCheckClient{
+			chat: func(_ context.Context, _ []llm.Message, jsonObject bool) (string, error) {
+				chatCalled = true
+				if !jsonObject {
+					t.Fatal("chat connection check did not request a JSON response")
+				}
+				return `{"status":"ok"}`, nil
+			},
+		}
+	}
+
+	handler := &AdminHandler{
+		SettingsRepo: &fakeServerSettingsStore{
+			values: map[string]string{
+				"ai.base_url":   "https://persisted.example.test",
+				"ai.chat_model": "persisted-model",
+				"ai.api_key":    "persisted-secret",
+			},
+		},
+	}
+
+	rec := performSettingsCheckRequest(
+		t,
+		handler,
+		"/admin/settings/check/ai_chat",
+		map[string]any{
+			"values": map[string]string{
+				"ai.base_url":   "https://draft.example.test",
+				"ai.chat_model": "draft-model",
+				"ai.api_key":    "",
+			},
+			"dirty_keys": []string{"ai.base_url", "ai.chat_model"},
+		},
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var response connectionCheckResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Decode() returned error: %v", err)
+	}
+	if !response.Success || !chatCalled {
+		t.Fatalf("response = %+v, chatCalled = %v", response, chatCalled)
+	}
+	if captured.BaseURL != "https://draft.example.test" || captured.ChatModel != "draft-model" {
+		t.Fatalf("captured config = %+v, want draft endpoint and model", captured)
+	}
+	if captured.APIKey != "" {
+		t.Fatalf("captured API key = %q, want no stored secret for a changed endpoint", captured.APIKey)
+	}
+}
+
+func TestHandleCheckSettingsConnectionAIChatReusesStoredKeyForSameEndpoint(t *testing.T) {
+	originalFactory := newAdminAISettingsCheckClient
+	t.Cleanup(func() {
+		newAdminAISettingsCheckClient = originalFactory
+	})
+
+	var captured llm.Config
+	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
+		captured = cfg
+		return &fakeAISettingsCheckClient{}
+	}
+
+	handler := &AdminHandler{
+		SettingsRepo: &fakeServerSettingsStore{
+			values: map[string]string{
+				"ai.base_url":   "https://persisted.example.test/v1",
+				"ai.chat_model": "persisted-model",
+				"ai.api_key":    "persisted-secret",
+			},
+		},
+	}
+
+	rec := performSettingsCheckRequest(
+		t,
+		handler,
+		"/admin/settings/check/ai_chat",
+		map[string]any{
+			"values": map[string]string{
+				"ai.base_url":   "https://persisted.example.test/other-path",
+				"ai.chat_model": "draft-model",
+			},
+			"dirty_keys": []string{"ai.base_url", "ai.chat_model"},
+		},
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if captured.APIKey != "persisted-secret" {
+		t.Fatalf("captured API key = %q, want stored secret for unchanged authority", captured.APIKey)
+	}
+}
+
+func TestHandleCheckSettingsConnectionAITranscriptionUsesDedicatedASR(t *testing.T) {
+	originalFactory := newAdminAISettingsCheckClient
+	t.Cleanup(func() {
+		newAdminAISettingsCheckClient = originalFactory
+	})
+
+	var captured llm.Config
+	var request llm.TranscribeRequest
+	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
+		captured = cfg
+		return &fakeAISettingsCheckClient{
+			transcribe: func(_ context.Context, req llm.TranscribeRequest) (*llm.Transcription, error) {
+				request = req
+				return &llm.Transcription{}, nil
+			},
+		}
+	}
+
+	handler := &AdminHandler{
+		SettingsRepo: &fakeServerSettingsStore{
+			values: map[string]string{
+				"ai.base_url":     "https://chat.example.test",
+				"ai.api_key":      "chat-secret",
+				"ai.chat_model":   "chat-model",
+				"ai.asr_base_url": "https://whisper.example.test",
+				"ai.asr_api_key":  "asr-secret",
+				"ai.asr_model":    "whisper-model",
+			},
+		},
+	}
+
+	rec := performSettingsCheckRequest(
+		t,
+		handler,
+		"/admin/settings/check/ai_transcription",
+		map[string]any{"values": map[string]string{}, "dirty_keys": []string{}},
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var response connectionCheckResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("Decode() returned error: %v", err)
+	}
+	if !response.Success {
+		t.Fatalf("response.Success = false, message = %q", response.Message)
+	}
+	if captured.ASRBaseURL != "https://whisper.example.test" ||
+		captured.ASRAPIKey != "asr-secret" ||
+		captured.ASRModel != "whisper-model" {
+		t.Fatalf("captured ASR config = %+v", captured)
+	}
+	if len(request.Audio) == 0 || request.Filename == "" || request.Timeout <= 0 {
+		t.Fatalf("transcription probe request = %+v, want bounded WAV probe", request)
+	}
+}
+
+func TestHandleCheckSettingsConnectionAITranscriptionDoesNotSendStoredKeysToDraftEndpoint(t *testing.T) {
+	originalFactory := newAdminAISettingsCheckClient
+	t.Cleanup(func() {
+		newAdminAISettingsCheckClient = originalFactory
+	})
+
+	var captured llm.Config
+	newAdminAISettingsCheckClient = func(cfg llm.Config) aiSettingsCheckClient {
+		captured = cfg
+		return &fakeAISettingsCheckClient{}
+	}
+
+	handler := &AdminHandler{
+		SettingsRepo: &fakeServerSettingsStore{
+			values: map[string]string{
+				"ai.base_url":     "https://chat.example.test",
+				"ai.api_key":      "chat-secret",
+				"ai.chat_model":   "chat-model",
+				"ai.asr_base_url": "https://stored-whisper.example.test",
+				"ai.asr_api_key":  "asr-secret",
+				"ai.asr_model":    "whisper-model",
+			},
+		},
+	}
+
+	rec := performSettingsCheckRequest(
+		t,
+		handler,
+		"/admin/settings/check/ai_transcription",
+		map[string]any{
+			"values": map[string]string{
+				"ai.asr_base_url": "https://draft-whisper.example.test",
+			},
+			"dirty_keys": []string{"ai.asr_base_url"},
+		},
+	)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if captured.ASRAPIKey != "" || captured.APIKey != "" {
+		t.Fatalf("captured config = %+v, want no stored ASR or inherited chat secret", captured)
+	}
+}
+
 func TestHandleCheckSettingsConnectionS3UsesPersistedSensitiveValues(t *testing.T) {
 	originalFactory := newAdminS3SettingsCheckClient
 	t.Cleanup(func() {
@@ -1233,6 +1467,44 @@ func TestAdminUpdateSettingReportsRestartRequired(t *testing.T) {
 			}
 			if !tc.restartRequired && snapshot.RestartRequiredReason != "" {
 				t.Fatalf("tracker reason = %q, want empty", snapshot.RestartRequiredReason)
+			}
+		})
+	}
+}
+
+func TestAdminUpdateSettingNormalizesAIEndpointAndModelValues(t *testing.T) {
+	for _, tc := range []struct {
+		key   string
+		value string
+		want  string
+	}{
+		{key: "ai.base_url", value: "  https://text.example.test/v1  ", want: "https://text.example.test/v1"},
+		{key: "ai.chat_model", value: "  chat-model  ", want: "chat-model"},
+		{key: "ai.asr_base_url", value: "  https://speech.example.test  ", want: "https://speech.example.test"},
+		{key: "ai.asr_model", value: "  whisper-model  ", want: "whisper-model"},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			settings := &fakeServerSettingsStore{}
+			handler := &AdminHandler{SettingsRepo: settings}
+			body, err := json.Marshal(updateSettingRequest{Value: tc.value})
+			if err != nil {
+				t.Fatalf("Marshal() returned error: %v", err)
+			}
+			req := httptest.NewRequest(
+				http.MethodPut,
+				"/admin/settings/"+tc.key,
+				bytes.NewReader(body),
+			)
+			req = withChiParam(req, "key", tc.key)
+			rec := httptest.NewRecorder()
+
+			handler.HandleUpdateSetting(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			if settings.values[tc.key] != tc.want {
+				t.Fatalf("stored value = %q, want %q", settings.values[tc.key], tc.want)
 			}
 		})
 	}
