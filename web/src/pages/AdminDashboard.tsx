@@ -54,6 +54,7 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { cn } from "@/lib/utils";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { compareActiveScans, formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
+import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import {
   activityMethodMeta,
   classifyActivityMethod,
@@ -571,6 +572,7 @@ function StreamCard({ session }: { session: AdminSession }) {
           >
             {method}
           </span>
+          <JellyfinSessionPill session={session} />
           {clientLabel ? (
             <span
               title={session.client_user_agent || clientLabel}

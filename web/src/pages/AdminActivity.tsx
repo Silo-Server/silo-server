@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
+import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
 import { usePageActivity } from "@/hooks/usePageActivity";
@@ -597,8 +598,9 @@ function StreamRow({
                 </span>
               </div>
             ) : null}
-            {(clientLabel || clientIP) && (
+            {(clientLabel || clientIP || isJellyfinSession(session)) && (
               <div className="text-muted-foreground mt-1 flex min-w-0 items-center gap-1.5 text-[10px]">
+                <JellyfinSessionPill session={session} />
                 {clientLabel ? (
                   <span
                     title={session.client_user_agent || clientLabel}
@@ -783,14 +785,7 @@ function StreamRow({
             >
               {activityMethod}
             </span>
-            {isJellyfinSession(session) ? (
-              <span
-                className="inline-flex flex-shrink-0 rounded border border-[#AA5CC3]/30 bg-[#AA5CC3]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[#AA5CC3]"
-                title="Jellyfin client"
-              >
-                JF
-              </span>
-            ) : null}
+            <JellyfinSessionPill session={session} />
           </div>
           <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[11px]">
             {itemHref ? (

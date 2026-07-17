@@ -3,6 +3,7 @@ import { Loader, Pause, Play, Radio } from "lucide-react";
 
 import type { AdminSession } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
+import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHouseholdSessions } from "@/hooks/queries/profiles";
 import {
@@ -70,6 +71,7 @@ function StreamRow({ session }: { session: AdminSession }) {
             {methodMeta.label}
             {bitrate ? ` · ${bitrate}` : ""}
           </span>
+          <JellyfinSessionPill session={session} />
         </div>
 
         <div className="min-w-0">
