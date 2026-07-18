@@ -3,6 +3,7 @@ package playback
 import (
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -116,4 +117,54 @@ func resolveSessionHWDevice(configured, hwAccel string) (string, func()) {
 		})
 	}
 	return device, release
+}
+
+// RenderDeviceInfo describes one render device for operator-facing surfaces.
+type RenderDeviceInfo struct {
+	Path        string `json:"path"`
+	Description string `json:"description"`
+}
+
+// describeRenderDevice builds a short human label for a render device from
+// its sysfs PCI vendor/device ids; best-effort, never fails.
+func describeRenderDevice(renderDevPath string) string {
+	name := filepath.Base(renderDevPath)
+	vendor := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "vendor"))
+	label := ""
+	switch vendor {
+	case "0x8086":
+		label = "Intel GPU"
+	case "0x10de":
+		label = "NVIDIA GPU"
+	case "0x1002":
+		label = "AMD GPU"
+	case "":
+		return "GPU"
+	default:
+		label = "GPU (vendor " + vendor + ")"
+	}
+	if device := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "device")); device != "" && vendor != "0x1002" {
+		label += " (" + device + ")"
+	}
+	return label
+}
+
+func readSysfsID(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// renderDeviceDetails describes every listed device.
+func renderDeviceDetails(devices []string) []RenderDeviceInfo {
+	details := make([]RenderDeviceInfo, 0, len(devices))
+	for _, device := range devices {
+		details = append(details, RenderDeviceInfo{
+			Path:        device,
+			Description: describeRenderDevice(device),
+		})
+	}
+	return details
 }

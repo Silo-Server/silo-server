@@ -175,3 +175,62 @@ func TestPickRenderDeviceListAware(t *testing.T) {
 		t.Fatalf("PickRenderDevice(single) = %q, want unchanged explicit value", got)
 	}
 }
+
+func TestDetectHWAccelRenderDeviceDetails(t *testing.T) {
+	driDir := t.TempDir()
+	sysDir := t.TempDir()
+	for name, ids := range map[string][2]string{
+		"renderD128": {"0x8086", "0x56a6"},
+		"renderD129": {"0x10de", "0x2489"},
+	} {
+		if err := os.WriteFile(driDir+"/"+name, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		devDir := sysDir + "/" + name + "/device"
+		if err := os.MkdirAll(devDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(devDir+"/vendor", []byte(ids[0]+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(devDir+"/device", []byte(ids[1]+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	origDRI, origSys := defaultDRIDir, sysClassDRMDir
+	defaultDRIDir, sysClassDRMDir = driDir, sysDir
+	t.Cleanup(func() { defaultDRIDir, sysClassDRMDir = origDRI, origSys })
+
+	info := DetectHWAccel()
+	if len(info.RenderDeviceDetails) != 2 {
+		t.Fatalf("RenderDeviceDetails len = %d, want 2: %+v", len(info.RenderDeviceDetails), info.RenderDeviceDetails)
+	}
+	first, second := info.RenderDeviceDetails[0], info.RenderDeviceDetails[1]
+	if first.Path != driDir+"/renderD128" || first.Description != "Intel GPU (0x56a6)" {
+		t.Fatalf("first device = %+v, want Intel description", first)
+	}
+	if second.Path != driDir+"/renderD129" || second.Description != "NVIDIA GPU (0x2489)" {
+		t.Fatalf("second device = %+v, want NVIDIA description", second)
+	}
+}
+
+func TestDescribeRenderDeviceUnknownVendor(t *testing.T) {
+	sysDir := t.TempDir()
+	devDir := sysDir + "/renderD130/device"
+	if err := os.MkdirAll(devDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devDir+"/vendor", []byte("0x1002\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	origSys := sysClassDRMDir
+	sysClassDRMDir = sysDir
+	t.Cleanup(func() { sysClassDRMDir = origSys })
+
+	if got := describeRenderDevice("/dev/dri/renderD130"); got != "AMD GPU" {
+		t.Fatalf("describeRenderDevice() = %q, want AMD GPU without device id", got)
+	}
+	if got := describeRenderDevice("/dev/dri/renderD999"); got != "GPU" {
+		t.Fatalf("describeRenderDevice() = %q, want bare GPU for unreadable sysfs", got)
+	}
+}

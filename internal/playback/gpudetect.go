@@ -36,12 +36,13 @@ var nvencProbeCache = struct {
 
 // HWAccelInfo describes the detected hardware acceleration capability.
 type HWAccelInfo struct {
-	Resolved        string             `json:"resolved"`
-	RenderDevices   []string           `json:"render_devices"`
-	IntelDetected   bool               `json:"intel_detected"`
-	Source          string             `json:"source"`
-	NodeURL         string             `json:"node_url,omitempty"`
-	Transformations []TransformationV3 `json:"transformations,omitempty"`
+	Resolved            string             `json:"resolved"`
+	RenderDevices       []string           `json:"render_devices"`
+	RenderDeviceDetails []RenderDeviceInfo `json:"render_device_details"`
+	IntelDetected       bool               `json:"intel_detected"`
+	Source              string             `json:"source"`
+	NodeURL             string             `json:"node_url,omitempty"`
+	Transformations     []TransformationV3 `json:"transformations,omitempty"`
 }
 
 // DetectHWAccel probes this host's GPU hardware and returns structured info.
@@ -60,10 +61,11 @@ func DetectHWAccelWithFFmpeg(ffmpegPath string) HWAccelInfo {
 		}
 	}
 	return HWAccelInfo{
-		Resolved:      ResolveHWAccelWithFFmpeg("auto", ffmpegPath),
-		RenderDevices: devices,
-		IntelDetected: intel,
-		Source:        "local",
+		Resolved:            ResolveHWAccelWithFFmpeg("auto", ffmpegPath),
+		RenderDevices:       devices,
+		RenderDeviceDetails: renderDeviceDetails(devices),
+		IntelDetected:       intel,
+		Source:              "local",
 	}
 }
 

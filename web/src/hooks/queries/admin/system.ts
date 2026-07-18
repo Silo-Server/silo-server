@@ -10,9 +10,15 @@ export interface BuildInfo {
   available: boolean;
 }
 
+export interface RenderDeviceInfo {
+  path: string;
+  description: string;
+}
+
 export interface HWAccelInfo {
   resolved: string;
   render_devices: string[];
+  render_device_details?: RenderDeviceInfo[];
   intel_detected: boolean;
   source: "local" | "transcode_node";
   node_url?: string;
