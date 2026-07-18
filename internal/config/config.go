@@ -157,9 +157,13 @@ func (c MatcherConfig) TVSeriesRootQueueEnabled() bool {
 
 // PlaybackConfig holds transcoding and playback settings.
 type PlaybackConfig struct {
-	FFmpegPath                   string `yaml:"ffmpeg_path"`
-	TranscodeDir                 string `yaml:"transcode_dir"`
-	HWAccel                      string `yaml:"hw_accel"`
+	FFmpegPath   string `yaml:"ffmpeg_path"`
+	TranscodeDir string `yaml:"transcode_dir"`
+	HWAccel      string `yaml:"hw_accel"`
+	// HWDevice is the GPU render device for hardware transcodes. A single
+	// path pins every session to that device; a comma-separated list (e.g.
+	// "/dev/dri/renderD128,/dev/dri/renderD129") balances sessions
+	// least-loaded across the listed devices. Empty auto-detects.
 	HWDevice                     string `yaml:"hw_device"`
 	ChapterThumbnailWorkers      int    `yaml:"chapter_thumbnail_workers"`
 	ChapterThumbnailExecution    string `yaml:"chapter_thumbnail_execution"`

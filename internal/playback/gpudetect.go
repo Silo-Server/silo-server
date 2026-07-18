@@ -68,10 +68,15 @@ func DetectHWAccelWithFFmpeg(ffmpegPath string) HWAccelInfo {
 }
 
 // PickRenderDevice returns the GPU render device path to use.
-// If explicit is non-empty, it is returned as-is.
+// A single explicit value is returned as-is; a comma-separated list resolves
+// to the present device with the fewest active transcode sessions (without
+// reserving it — session-lifetime reservation happens in StartTranscode).
 // Otherwise, it attempts to discover a render device under /dev/dri/.
 // Returns empty string if no device is found (caller should fall back to CPU).
 func PickRenderDevice(explicit string) string {
+	if devices := ParseHWDevices(explicit); len(devices) > 1 {
+		return selectLeastLoadedHWDevice(devices)
+	}
 	if explicit != "" {
 		return explicit
 	}

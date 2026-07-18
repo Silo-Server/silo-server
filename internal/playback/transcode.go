@@ -101,6 +101,9 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
+	// releaseHWDevice returns the session's multi-GPU device reservation on
+	// shutdown; idempotent, nil for sessions constructed without StartTranscode.
+	releaseHWDevice func()
 }
 
 // SetRestartHook registers a callback fired after every successful Restart.
@@ -171,9 +174,15 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		opts.SegmentDuration = defaultSegmentDuration
 	}
 	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
+	// Resolve a multi-device hw_device list to one concrete GPU for the whole
+	// session lifetime (restarts reuse it); the reservation releases on
+	// shutdown.
+	hwDevice, releaseHWDevice := resolveSessionHWDevice(opts.HWDevice, opts.HWAccel)
+	opts.HWDevice = hwDevice
 
 	// Ensure output directory exists.
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
+		releaseHWDevice()
 		return nil, fmt.Errorf("create output dir: %w", err)
 	}
 
@@ -186,6 +195,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		done:                 make(chan struct{}),
 		stderr:               newBoundedTailBuffer(stderrTailMaxBytes),
 		lastRequestedSegment: opts.StartSegmentNumber,
+		releaseHWDevice:      releaseHWDevice,
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -201,6 +211,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
+		releaseHWDevice()
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 	cmd.Dir = opts.OutputDir
@@ -209,6 +220,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 
 	if err := cmd.Start(); err != nil {
 		cancel()
+		releaseHWDevice()
 		s.logFFmpegEvent(ctx, "ffmpeg process exit error", err.Error())
 		return nil, fmt.Errorf("start ffmpeg: %w", err)
 	}
@@ -1441,6 +1453,9 @@ func (s *TranscodeSession) CloseProcess() error {
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	s.StopThrottler()
+	if s.releaseHWDevice != nil {
+		s.releaseHWDevice()
+	}
 	// Cancel the context to kill the process (no mutex needed for cancel).
 	if s.cancel != nil {
 		s.cancel()
