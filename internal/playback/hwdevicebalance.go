@@ -58,12 +58,11 @@ func hwAccelUsesRenderDevice(hwAccel string) bool {
 	return false
 }
 
-// selectLeastLoadedHWDevice picks the present device with the fewest active
-// sessions from a parsed list, preserving list order on ties. When no listed
-// device exists it falls back to the first entry so the failure mode stays
+// presentHWDevices filters a parsed device list to the entries that exist,
+// falling back to the first entry when none do so the failure mode stays
 // deterministic (ffmpeg reports the missing device, matching the historical
 // wrong-path behavior of an explicit single value).
-func selectLeastLoadedHWDevice(devices []string) string {
+func presentHWDevices(devices []string) []string {
 	present := make([]string, 0, len(devices))
 	for _, device := range devices {
 		if hwDeviceStat(device) == nil {
@@ -71,10 +70,14 @@ func selectLeastLoadedHWDevice(devices []string) string {
 		}
 	}
 	if len(present) == 0 {
-		return devices[0]
+		return devices[:1]
 	}
-	hwDeviceLoad.mu.Lock()
-	defer hwDeviceLoad.mu.Unlock()
+	return present
+}
+
+// leastLoadedHWDeviceLocked picks the device with the fewest active sessions,
+// preserving list order on ties. Callers must hold hwDeviceLoad.mu.
+func leastLoadedHWDeviceLocked(present []string) string {
 	best := present[0]
 	for _, device := range present[1:] {
 		if hwDeviceLoad.counts[device] < hwDeviceLoad.counts[best] {
@@ -82,6 +85,15 @@ func selectLeastLoadedHWDevice(devices []string) string {
 		}
 	}
 	return best
+}
+
+// selectLeastLoadedHWDevice picks the present least-loaded device without
+// reserving it (best-effort spreading for non-session consumers).
+func selectLeastLoadedHWDevice(devices []string) string {
+	present := presentHWDevices(devices)
+	hwDeviceLoad.mu.Lock()
+	defer hwDeviceLoad.mu.Unlock()
+	return leastLoadedHWDeviceLocked(present)
 }
 
 // resolveSessionHWDevice resolves the configured hw_device value for one
@@ -96,11 +108,14 @@ func resolveSessionHWDevice(configured, hwAccel string) (string, func()) {
 	if len(devices) <= 1 {
 		return configured, noop
 	}
-	device := selectLeastLoadedHWDevice(devices)
 	if !hwAccelUsesRenderDevice(hwAccel) {
-		return device, noop
+		return selectLeastLoadedHWDevice(devices), noop
 	}
+	// Select and reserve in one critical section so concurrent session starts
+	// observe each other's reservations instead of piling onto one device.
+	present := presentHWDevices(devices)
 	hwDeviceLoad.mu.Lock()
+	device := leastLoadedHWDeviceLocked(present)
 	hwDeviceLoad.counts[device]++
 	count := hwDeviceLoad.counts[device]
 	hwDeviceLoad.mu.Unlock()

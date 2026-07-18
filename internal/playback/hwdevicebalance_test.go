@@ -2,6 +2,7 @@ package playback
 
 import (
 	"os"
+	"sync"
 	"testing"
 )
 
@@ -232,5 +233,39 @@ func TestDescribeRenderDeviceUnknownVendor(t *testing.T) {
 	}
 	if got := describeRenderDevice("/dev/dri/renderD999"); got != "GPU" {
 		t.Fatalf("describeRenderDevice() = %q, want bare GPU for unreadable sysfs", got)
+	}
+}
+
+func TestResolveSessionHWDeviceConcurrentStartsBalanceExactly(t *testing.T) {
+	resetDeviceLoad(t)
+	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
+	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
+
+	const sessions = 8
+	var wg sync.WaitGroup
+	devices := make([]string, sessions)
+	releases := make([]func(), sessions)
+	for i := range sessions {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			devices[i], releases[i] = resolveSessionHWDevice(configured, "qsv")
+		}()
+	}
+	wg.Wait()
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+
+	counts := map[string]int{}
+	for _, device := range devices {
+		counts[device]++
+	}
+	// Atomic select+reserve guarantees an exact split; the pre-fix two-step
+	// selection could pile concurrent starts onto one device.
+	if counts["/dev/dri/renderD128"] != sessions/2 || counts["/dev/dri/renderD129"] != sessions/2 {
+		t.Fatalf("concurrent session split = %v, want exact %d/%d", counts, sessions/2, sessions/2)
 	}
 }
