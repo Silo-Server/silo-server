@@ -23,6 +23,7 @@ const (
 	DefaultEventTimeout      = 10 * time.Second
 	DefaultAuthTimeout       = 10 * time.Second
 	DefaultRouteTimeout      = 10 * time.Second
+	DefaultWatchSyncTimeout  = 60 * time.Second
 	// DefaultRequestRouterTimeout bounds a single request_router RPC.
 	// Fulfillment hits remote arr instances, so allow generous headroom.
 	DefaultRequestRouterTimeout = 60 * time.Second

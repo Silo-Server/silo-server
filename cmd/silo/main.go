@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -847,8 +848,9 @@ func main() {
 		)
 	}
 	var watchProviderService *watchsync.Service
+	var watchProviderRegistry *watchsync.Registry
 	if deps.DB != nil {
-		watchProviderRegistry := watchsync.NewRegistry()
+		watchProviderRegistry = watchsync.NewRegistry()
 		if err := watchProviderRegistry.Register(trakt.NewProvider(nil, "")); err != nil {
 			log.Fatalf("register watch provider: %v", err)
 		}
@@ -1073,6 +1075,15 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
+		if watchProviderRegistry != nil {
+			reloadWatchProviders := func(ctx context.Context) {
+				if err := reloadWatchSyncPluginProviders(ctx, watchProviderRegistry, installationStore, pluginService); err != nil {
+					slog.WarnContext(ctx, "failed to reload watch sync plugin providers", "component", "app", "error", err)
+				}
+			}
+			pluginService.AddLifecycleHook(reloadWatchProviders)
+			reloadWatchProviders(appCtx)
+		}
 		if deps.MarkerRegistry != nil && deps.MarkerProviderConfig != nil {
 			markerPluginResolver := markers.NewPluginResolverAdapter(pluginService)
 			pluginService.AddLifecycleHook(func(ctx context.Context) {
@@ -3036,9 +3047,92 @@ func metadataInt(value any) int {
 	}
 }
 
+var watchSyncPluginReloadMu sync.Mutex
+
 type markerPluginCapabilityStore interface {
 	ListEnabled(ctx context.Context) ([]*plugins.Installation, error)
 	ListCapabilities(ctx context.Context, installationID int) ([]*plugins.Capability, error)
+}
+
+func reloadWatchSyncPluginProviders(
+	ctx context.Context,
+	registry *watchsync.Registry,
+	store markerPluginCapabilityStore,
+	service *plugins.Service,
+) error {
+	if registry == nil {
+		return nil
+	}
+	watchSyncPluginReloadMu.Lock()
+	defer watchSyncPluginReloadMu.Unlock()
+
+	var providers []watchsync.Provider
+	if store == nil || service == nil {
+		return registry.ReplacePluginProviders(providers)
+	}
+	installations, err := store.ListEnabled(ctx)
+	if err != nil {
+		return fmt.Errorf("list enabled watch sync plugin installations: %w", err)
+	}
+	sort.Slice(installations, func(i, j int) bool {
+		if installations[i] == nil {
+			return false
+		}
+		if installations[j] == nil {
+			return true
+		}
+		return installations[i].ID < installations[j].ID
+	})
+	for _, installation := range installations {
+		if installation == nil || installation.IsBuiltin() {
+			continue
+		}
+		capabilities, err := store.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "skip watch sync plugin with unreadable capabilities",
+				"component", "app",
+				"installation_id", installation.ID,
+				"error", err,
+			)
+			continue
+		}
+		for _, capability := range capabilities {
+			if capability == nil || capability.Type != sdkcapability.WatchSyncProvider {
+				continue
+			}
+			descriptor, err := plugins.DecodeCapability(capability)
+			if err != nil {
+				slog.WarnContext(ctx, "skip invalid watch sync plugin capability",
+					"component", "app",
+					"installation_id", installation.ID,
+					"capability_id", capability.ID,
+					"error", err,
+				)
+				continue
+			}
+			provider, err := watchsync.NewPluginProvider(watchsync.PluginProviderOptions{
+				InstallationID: installation.ID,
+				ProviderKey:    fmt.Sprintf("plugin:%d:%s", installation.ID, capability.ID),
+				CapabilityID:   capability.ID,
+				DisplayName:    descriptor.GetDisplayName(),
+				Descriptor:     descriptor.GetWatchSyncProvider(),
+				ResolveClient: func(callCtx context.Context, installationID int, capabilityID string) (watchsync.WatchSyncPluginClient, error) {
+					return service.WatchSyncProviderClient(callCtx, installationID, capabilityID)
+				},
+			})
+			if err != nil {
+				slog.WarnContext(ctx, "skip unsupported watch sync plugin capability",
+					"component", "app",
+					"installation_id", installation.ID,
+					"capability_id", capability.ID,
+					"error", err,
+				)
+				continue
+			}
+			providers = append(providers, provider)
+		}
+	}
+	return registry.ReplacePluginProviders(providers)
 }
 
 type markerPluginRuntimeConfigStore interface {

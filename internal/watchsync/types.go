@@ -100,6 +100,12 @@ type WatchedExporter interface {
 	ExportHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
 
+// singleBatchWatchedExporter bounds one synchronization run to one provider
+// batch. This is used for plugin RPCs with independent per-call deadlines.
+type singleBatchWatchedExporter interface {
+	ExportBatchSize() int
+}
+
 type UnwatchedExporter interface {
 	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
 }
@@ -278,6 +284,19 @@ func AsRateLimited(err error) (RateLimitedError, bool) {
 	return rle, ok
 }
 
+type retryableProviderError struct {
+	message string
+}
+
+func (e retryableProviderError) Error() string {
+	return e.message
+}
+
+func isRetryableProviderError(err error) bool {
+	var retryable retryableProviderError
+	return errors.As(err, &retryable)
+}
+
 type DeviceAuthSession struct {
 	ID              string     `json:"id"`
 	Provider        string     `json:"provider"`
@@ -448,6 +467,15 @@ type LocalListEvent struct {
 	ProfileID string
 	Items     []LocalFavorite
 }
+
+const (
+	historyExportStatusPending             = "pending"
+	historyExportStatusFailed              = "failed"
+	historyExportStatusSent                = "sent"
+	historyExportStatusNotFound            = "not_found"
+	historyExportStatusRemotePresent       = "remote_present"
+	historyExportStatusSatisfiedByScrobble = "satisfied_by_scrobble"
+)
 
 type HistoryExport struct {
 	ID              string

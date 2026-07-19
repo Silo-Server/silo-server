@@ -16,6 +16,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
+const testProviderAccountID = "account-1"
+
 type serviceFakeRepo struct {
 	connections         map[string]Connection
 	dueConnections      []Connection
@@ -30,6 +32,7 @@ type serviceFakeRepo struct {
 	reopenedScrobbles   []scrobbleUpdate
 	confirmedScrobbles  map[string]bool
 	confirmingScrobbles map[string]time.Time
+	markSatisfiedErr    error
 	scrobbleMu          sync.Mutex
 }
 
@@ -234,6 +237,9 @@ func (r *serviceFakeRepo) ListLocalWatchEventConnections(_ context.Context, user
 		if conn.UserID != userID || conn.ProfileID != profileID {
 			continue
 		}
+		if conn.RateLimitedUntil != nil && conn.RateLimitedUntil.After(time.Now()) {
+			continue
+		}
 		switch kind {
 		case LocalWatchEventMarkedWatched:
 			if conn.ExportWatchedEnabled {
@@ -273,7 +279,12 @@ func (r *serviceFakeRepo) UpsertHistoryExports(_ context.Context, exports []Hist
 		replaced := false
 		for i := range r.historyExports {
 			if r.historyExports[i].HistoryID == export.HistoryID && r.historyExports[i].ConnectionID == export.ConnectionID {
-				export.ID = r.historyExports[i].ID
+				existing := r.historyExports[i]
+				export.ID = existing.ID
+				export.AttemptCount = existing.AttemptCount
+				if existing.Status == historyExportStatusSent || existing.Status == historyExportStatusSatisfiedByScrobble || existing.AttemptCount >= 5 {
+					export.Status = existing.Status
+				}
 				r.historyExports[i] = export
 				replaced = true
 				break
@@ -289,7 +300,8 @@ func (r *serviceFakeRepo) UpsertHistoryExports(_ context.Context, exports []Hist
 func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectionID string, limit int) ([]HistoryExport, error) {
 	var exports []HistoryExport
 	for _, export := range r.historyExports {
-		if export.ConnectionID == connectionID && export.Status == "pending" {
+		if export.ConnectionID == connectionID &&
+			(export.Status == historyExportStatusPending || export.Status == historyExportStatusFailed) && export.AttemptCount < 5 {
 			exports = append(exports, export)
 			if limit > 0 && len(exports) >= limit {
 				break
@@ -302,8 +314,25 @@ func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectio
 func (r *serviceFakeRepo) MarkHistoryExportStatus(_ context.Context, id string, status string, lastError string) error {
 	for i := range r.historyExports {
 		if r.historyExports[i].ID == id {
+			if r.historyExports[i].Status == historyExportStatusSent || r.historyExports[i].Status == historyExportStatusSatisfiedByScrobble {
+				return nil
+			}
 			r.historyExports[i].Status = status
+			r.historyExports[i].AttemptCount++
 			r.historyExports[i].LastError = lastError
+			return nil
+		}
+	}
+	return nil
+}
+
+func (r *serviceFakeRepo) MarkHistoryExportSatisfiedByScrobble(_ context.Context, connectionID string, historyID string) error {
+	if r.markSatisfiedErr != nil {
+		return r.markSatisfiedErr
+	}
+	for i := range r.historyExports {
+		if r.historyExports[i].ConnectionID == connectionID && r.historyExports[i].HistoryID == historyID {
+			r.historyExports[i].Status = historyExportStatusSatisfiedByScrobble
 			return nil
 		}
 	}
@@ -421,6 +450,9 @@ func (r *serviceFakeRepo) MarkListItemError(_ context.Context, connectionID stri
 func (r *serviceFakeRepo) ListScrobbleConnections(_ context.Context, _ int, _ string) ([]Connection, error) {
 	conns := make([]Connection, 0, len(r.scrobbleConnections))
 	for _, conn := range r.scrobbleConnections {
+		if conn.RateLimitedUntil != nil && conn.RateLimitedUntil.After(time.Now()) {
+			continue
+		}
 		conns = append(conns, cloneConnectionForTest(conn))
 	}
 	return conns, nil
@@ -589,6 +621,20 @@ func (p *authProviderStub) LookupAccount(
 	return ProviderAccount{ID: "trakt-user-1", Username: "alex"}, nil
 }
 
+type emptyPluginAPIKeyProvider struct{}
+
+func (emptyPluginAPIKeyProvider) Key() string { return "plugin:1:tracker" }
+
+func (emptyPluginAPIKeyProvider) DisplayName() string { return "Tracker" }
+
+func (emptyPluginAPIKeyProvider) Capabilities() Capabilities { return Capabilities{} }
+
+func (emptyPluginAPIKeyProvider) ProviderSource() string { return providerSourcePlugin }
+
+func (emptyPluginAPIKeyProvider) ConnectWithAPIKey(context.Context, string) (TokenSet, ProviderAccount, error) {
+	return TokenSet{}, ProviderAccount{ID: testProviderAccountID}, nil
+}
+
 type watchedImporterStub struct {
 	key    string
 	source userstore.WatchHistorySource
@@ -648,9 +694,10 @@ func (p progressBatchImporterStub) FetchProgressBatch(context.Context, ServerCon
 }
 
 type watchedExporterStub struct {
-	exportErr error
-	key       string
-	source    userstore.WatchHistorySource
+	exportErr    error
+	exportResult ExportResult
+	key          string
+	source       userstore.WatchHistorySource
 }
 
 func (p watchedExporterStub) Key() string {
@@ -673,10 +720,7 @@ func (p watchedExporterStub) FetchHistory(context.Context, ServerConfig, Connect
 }
 
 func (p watchedExporterStub) ExportHistory(context.Context, ServerConfig, Connection, []LocalPlay) (ExportResult, error) {
-	if p.exportErr != nil {
-		return ExportResult{}, p.exportErr
-	}
-	return ExportResult{}, nil
+	return p.exportResult, p.exportErr
 }
 
 func (p watchedExporterStub) HistorySource() userstore.WatchHistorySource {
@@ -769,6 +813,12 @@ func (p scrobblerStub) DisplayName() string {
 
 func (p scrobblerStub) Capabilities() Capabilities {
 	return Capabilities{ScrobblePlayback: true}
+}
+
+type watchedScrobblerStub struct{ scrobblerStub }
+
+func (watchedScrobblerStub) Capabilities() Capabilities {
+	return Capabilities{ScrobblePlayback: true, ExportWatched: true}
 }
 
 func (p scrobblerStub) Start(context.Context, ServerConfig, Connection, ScrobbleEvent) error {
@@ -1715,7 +1765,7 @@ func TestServiceExportWatchedDrainsPendingBatches(t *testing.T) {
 		t.Fatalf("sent = %d, want 101 (result=%+v)", result.Sent, result)
 	}
 	for _, export := range repo.historyExports {
-		if export.Status != "sent" {
+		if export.Status != historyExportStatusSent {
 			t.Fatalf("history exports = %+v, want all sent", repo.historyExports)
 		}
 	}
@@ -1778,8 +1828,62 @@ func TestServiceSyncConnectionMarksRunFailedWhenExportTransportFails(t *testing.
 	if latest.Error == "" {
 		t.Fatalf("latest run error is empty: %+v", latest)
 	}
-	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != "failed" {
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusFailed {
 		t.Fatalf("history exports = %+v, want one failed export", repo.historyExports)
+	}
+}
+
+func TestServiceCompletedScrobblePersistsAndSatisfiesHistoryExport(t *testing.T) {
+	repo := newServiceFakeRepo()
+	service := NewService(repo, NewRegistry())
+	conn := Connection{ID: "conn-1"}
+	event := ScrobbleEvent{
+		PlaybackSessionID: testPlaybackSessionID,
+		MediaItemID:       testEpisodeMediaID,
+		Kind:              historyimport.KindEpisode,
+		SeriesTVDBID:      "123",
+		SeasonNumber:      1,
+		EpisodeNumber:     2,
+		HistoryID:         testWatchHistoryID,
+		OccurredAt:        time.Now().UTC(),
+		Completed:         true,
+	}
+	if err := service.persistCompletedScrobbleExport(context.Background(), conn, event); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending {
+		t.Fatalf("history exports = %#v", repo.historyExports)
+	}
+	if repo.historyExports[0].ProviderItemKey != "show:tvdb:123:s1:e2" {
+		t.Fatalf("provider item key = %q", repo.historyExports[0].ProviderItemKey)
+	}
+	if err := service.dispatchScrobble(context.Background(), watchedScrobblerStub{}, ServerConfig{}, conn, event, "stop", nil); err != nil {
+		t.Fatal(err)
+	}
+	if repo.historyExports[0].Status != historyExportStatusSatisfiedByScrobble {
+		t.Fatalf("history export status = %q", repo.historyExports[0].Status)
+	}
+}
+
+func TestServiceCompletedScrobbleClosesSessionWhenSatisfiedPersistenceFails(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.markSatisfiedErr = errors.New("database unavailable")
+	service := NewService(repo, NewRegistry())
+	conn := Connection{ID: "conn-1", Provider: "trakt"}
+	event := ScrobbleEvent{
+		PlaybackSessionID: testPlaybackSessionID,
+		HistoryID:         testWatchHistoryID,
+		Completed:         true,
+	}
+	repo.historyExports = []HistoryExport{{ID: "export-1", ConnectionID: conn.ID, HistoryID: event.HistoryID, Status: historyExportStatusPending}}
+	if err := service.dispatchScrobble(context.Background(), watchedScrobblerStub{}, ServerConfig{}, conn, event, "stop", nil); err != nil {
+		t.Fatal(err)
+	}
+	if repo.historyExports[0].Status != historyExportStatusPending {
+		t.Fatalf("history export status = %q", repo.historyExports[0].Status)
+	}
+	if len(repo.scrobbleUpdates) != 1 || repo.scrobbleUpdates[0].stopSentAt == nil {
+		t.Fatalf("scrobble updates = %#v", repo.scrobbleUpdates)
 	}
 }
 
@@ -2618,6 +2722,22 @@ func (p rateLimitedImporterStub) HistorySource() userstore.WatchHistorySource {
 	return userstore.WatchHistorySourceTrakt
 }
 
+func TestServicePluginAPIKeyConnectRejectsEmptyReturnedCredential(t *testing.T) {
+	repo := newServiceFakeRepo()
+	registry := NewRegistry()
+	provider := emptyPluginAPIKeyProvider{}
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, registry)
+	if _, err := service.ConnectAPIKey(context.Background(), 7, "profile-1", provider.Key(), "input-secret"); err == nil {
+		t.Fatal("ConnectAPIKey error = nil")
+	}
+	if len(repo.connections) != 0 {
+		t.Fatalf("connections = %#v", repo.connections)
+	}
+}
+
 func TestServiceSyncConnectionDefersOnRateLimit(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -2679,6 +2799,101 @@ func TestServiceSyncConnectionDefersOnRateLimit(t *testing.T) {
 	}
 }
 
+func TestServiceLocalWatchEventCommitsPartialResultAndDefersRateLimit(t *testing.T) {
+	repo := newServiceFakeRepo()
+	provider := watchedExporterStub{
+		exportErr:    RateLimitedError{Provider: "trakt", RetryAfter: 72 * time.Hour},
+		exportResult: ExportResult{Sent: []string{"history-1"}},
+	}
+	registry := NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	service := NewService(repo, registry)
+	service.now = func() time.Time { return now }
+	conn := Connection{
+		ID:                   "conn-1",
+		Provider:             "trakt",
+		UserID:               7,
+		ProfileID:            "profile-1",
+		ProviderAccountID:    testProviderAccountID,
+		ExportWatchedEnabled: true,
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
+	if err := service.processLocalWatchEvent(context.Background(), LocalWatchEvent{
+		Kind:      LocalWatchEventMarkedWatched,
+		UserID:    conn.UserID,
+		ProfileID: conn.ProfileID,
+		Plays: []LocalPlay{{
+			HistoryID:       "history-1",
+			MediaItemID:     "movie-1",
+			ProviderItemKey: "movie:tmdb:603",
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusSent {
+		t.Fatalf("history exports = %#v", repo.historyExports)
+	}
+	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
+	wantUntil := now.Add(24 * time.Hour)
+	if updated.RateLimitedUntil == nil || !updated.RateLimitedUntil.Equal(wantUntil) {
+		t.Fatalf("RateLimitedUntil = %v, want %v", updated.RateLimitedUntil, wantUntil)
+	}
+}
+
+func TestServicePluginTransportFailureLeavesExportPending(t *testing.T) {
+	repo := newServiceFakeRepo()
+	service := NewService(repo, NewRegistry())
+	conn := Connection{ID: "conn-1"}
+	err := service.exportLocalPlays(context.Background(), conn, ServerConfig{}, watchedExporterStub{
+		exportErr: retryableProviderError{message: "watch sync plugin is unavailable"},
+	}, []LocalPlay{{
+		HistoryID:       "history-1",
+		MediaItemID:     "movie-1",
+		ProviderItemKey: "movie:tmdb:603",
+	}})
+	if !isRetryableProviderError(err) {
+		t.Fatalf("error = %#v", err)
+	}
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending || repo.historyExports[0].AttemptCount != 0 {
+		t.Fatalf("history exports = %#v", repo.historyExports)
+	}
+}
+
+func TestServiceScrobbleRateLimitDefersConnection(t *testing.T) {
+	repo := newServiceFakeRepo()
+	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	service := NewService(repo, NewRegistry())
+	service.now = func() time.Time { return now }
+	conn := Connection{
+		ID:                "conn-1",
+		Provider:          "trakt",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		ProviderAccountID: testProviderAccountID,
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	err := service.dispatchScrobble(
+		context.Background(),
+		scrobblerStub{stopErr: RateLimitedError{Provider: conn.Provider, RetryAfter: 30 * time.Minute}},
+		ServerConfig{}, conn,
+		ScrobbleEvent{PlaybackSessionID: testPlaybackSessionID},
+		scrobbleActionStop,
+		nil,
+	)
+	if _, ok := AsRateLimited(err); !ok {
+		t.Fatalf("error = %#v", err)
+	}
+	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
+	wantUntil := now.Add(30 * time.Minute)
+	if updated.RateLimitedUntil == nil || !updated.RateLimitedUntil.Equal(wantUntil) {
+		t.Fatalf("RateLimitedUntil = %v, want %v", updated.RateLimitedUntil, wantUntil)
+	}
+}
+
 func TestServiceSyncConnectionLeavesExportsPendingOnRateLimit(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -2726,7 +2941,7 @@ func TestServiceSyncConnectionLeavesExportsPendingOnRateLimit(t *testing.T) {
 	if err := service.SyncConnection(context.Background(), conn, "scheduled"); err == nil {
 		t.Fatal("SyncConnection error = nil, want rate limit failure")
 	}
-	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != "pending" {
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending {
 		t.Fatalf("history exports = %+v, want one still-pending export", repo.historyExports)
 	}
 	updated := repo.connections[connectionKey("trakt", 7, "profile-1")]

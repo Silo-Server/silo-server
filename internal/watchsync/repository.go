@@ -35,6 +35,7 @@ type Repository interface {
 	UpsertHistoryExports(ctx context.Context, exports []HistoryExport) error
 	ListPendingHistoryExports(ctx context.Context, connectionID string, limit int) ([]HistoryExport, error)
 	MarkHistoryExportStatus(ctx context.Context, id string, status string, lastError string) error
+	MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error
 	UpsertListItemStates(ctx context.Context, states []ListItemState) error
 	ListListItemStates(ctx context.Context, connectionID string, kind ListKind) ([]ListItemState, error)
 	ListPendingListItemExports(ctx context.Context, connectionID string, kind ListKind, limit int) ([]ListItemState, error)
@@ -688,7 +689,9 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 			ON CONFLICT (connection_id, history_id) DO UPDATE SET
 				provider_item_key = EXCLUDED.provider_item_key,
 				status = CASE
-					WHEN watch_provider_history_exports.status IN ('sent', 'satisfied_by_scrobble') THEN watch_provider_history_exports.status
+					WHEN watch_provider_history_exports.status IN ('sent', 'satisfied_by_scrobble')
+						OR watch_provider_history_exports.attempt_count >= 5
+					THEN watch_provider_history_exports.status
 					ELSE EXCLUDED.status
 				END,
 				updated_at = now()
@@ -755,9 +758,26 @@ func (r *PostgresRepository) MarkHistoryExportStatus(ctx context.Context, id str
 			last_error = $3,
 			updated_at = now()
 		WHERE id = $1::uuid
+		  AND status NOT IN ('sent', 'satisfied_by_scrobble')
 	`, id, status, lastError)
 	if err != nil {
 		return fmt.Errorf("mark history export status: %w", err)
+	}
+	return nil
+}
+
+func (r *PostgresRepository) MarkHistoryExportSatisfiedByScrobble(ctx context.Context, connectionID string, historyID string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_history_exports
+		SET status = 'satisfied_by_scrobble',
+			last_attempt_at = now(),
+			last_error = '',
+			updated_at = now()
+		WHERE connection_id = $1::uuid AND history_id = $2
+		  AND status <> 'sent'
+	`, connectionID, historyID)
+	if err != nil {
+		return fmt.Errorf("mark history export satisfied by scrobble: %w", err)
 	}
 	return nil
 }

@@ -6,6 +6,12 @@ import (
 	"sync"
 )
 
+const providerSourcePlugin = "plugin"
+
+type sourcedProvider interface {
+	ProviderSource() string
+}
+
 type Registry struct {
 	mu        sync.RWMutex
 	providers map[string]Provider
@@ -32,6 +38,36 @@ func (r *Registry) Register(provider Provider) error {
 		return fmt.Errorf("watchsync provider %q already registered", key)
 	}
 	r.providers[key] = provider
+	return nil
+}
+
+// ReplacePluginProviders atomically replaces providers discovered from enabled
+// plugin installations while preserving built-in providers. A plugin may not
+// shadow a built-in key, and duplicate plugin keys reject the entire reload.
+func (r *Registry) ReplacePluginProviders(providers []Provider) error {
+	if r == nil {
+		return fmt.Errorf("watchsync registry is nil")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	next := make(map[string]Provider, len(r.providers)+len(providers))
+	for key, provider := range r.providers {
+		if sourced, ok := provider.(sourcedProvider); ok && sourced.ProviderSource() == providerSourcePlugin {
+			continue
+		}
+		next[key] = provider
+	}
+	for _, provider := range providers {
+		if provider == nil || provider.Key() == "" {
+			return fmt.Errorf("watchsync plugin provider and key are required")
+		}
+		if _, exists := next[provider.Key()]; exists {
+			return fmt.Errorf("watchsync plugin provider key %q conflicts with another provider", provider.Key())
+		}
+		next[provider.Key()] = provider
+	}
+	r.providers = next
 	return nil
 }
 

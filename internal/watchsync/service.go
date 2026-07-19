@@ -374,7 +374,13 @@ func (s *Service) processLocalWatchEvent(ctx context.Context, event LocalWatchEv
 				continue
 			}
 			if err := s.exportLocalPlays(ctx, conn, cfg, exporter, event.Plays); err != nil {
-				s.recordLocalWatchEventError(ctx, conn, err)
+				if limited, ok := AsRateLimited(err); ok {
+					if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
+						s.recordLocalWatchEventError(ctx, conn, errors.Join(err, deferErr))
+					}
+				} else {
+					s.recordLocalWatchEventError(ctx, conn, err)
+				}
 			}
 		case LocalWatchEventMarkedUnwatched:
 			if !provider.Capabilities().ExportUnwatched {
@@ -542,6 +548,9 @@ func (s *Service) ConnectAPIKey(
 		return Connection{}, err
 	}
 	if strings.TrimSpace(tokens.AccessToken) == "" {
+		if sourced, ok := provider.(sourcedProvider); ok && sourced.ProviderSource() == providerSourcePlugin {
+			return Connection{}, errors.New("watch sync plugin returned no access token")
+		}
 		tokens.AccessToken = apiKey
 	}
 	return s.persistConnection(ctx, providerKey, userID, profileID, tokens, account)
@@ -843,9 +852,15 @@ func (s *Service) deferRateLimitedConnection(ctx context.Context, conn Connectio
 		return err
 	}
 	retryAfter := rle.RetryAfter
-	if retryAfter <= 0 {
+	switch {
+	case retryAfter <= 0:
 		retryAfter = time.Hour
+	case retryAfter < time.Second:
+		retryAfter = time.Second
+	case retryAfter > 24*time.Hour:
+		retryAfter = 24 * time.Hour
 	}
+	rle.RetryAfter = retryAfter
 	until := s.now().Add(retryAfter)
 	lastError := fmt.Sprintf("%s; sync deferred until %s", rle.Error(), until.Format(time.RFC3339))
 	deferred := 1
@@ -1309,9 +1324,10 @@ func (s *Service) ExportWatched(
 
 	exports := reconcileHistoryExports(conn.ID, local, remote)
 	for _, export := range exports {
-		if export.Status == "remote_present" {
+		switch export.Status {
+		case historyExportStatusRemotePresent:
 			result.RemotePresent++
-		} else if export.Status == "pending" {
+		case historyExportStatusPending:
 			result.Queued++
 		}
 	}
@@ -1337,7 +1353,7 @@ func (s *Service) ExportWatched(
 		for _, export := range pending {
 			play, ok := localByHistoryID[export.HistoryID]
 			if !ok {
-				if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "not_found", "local history entry not found"); err != nil {
+				if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusNotFound, "local history entry not found"); err != nil {
 					return result, err
 				}
 				progressed = true
@@ -1349,26 +1365,30 @@ func (s *Service) ExportWatched(
 		if len(pendingPlays) == 0 {
 			continue
 		}
+		pendingPlays, singleBatch := limitWatchedExportBatch(exporter, pendingPlays)
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
-		if err != nil {
-			// Rate-limited plays are not failures: leave them pending so the
-			// next run (after the deferral) retries without churning state.
-			if _, limited := AsRateLimited(err); limited {
-				return result, err
+		_, limited := AsRateLimited(err)
+		retryable := isRetryableProviderError(err)
+		if err != nil && !limited && !retryable {
+			for _, play := range pendingPlays {
+				export := exportByHistoryID[play.HistoryID]
+				if export.ID != "" {
+					_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error())
+				}
 			}
-			for _, export := range pending {
-				_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", err.Error())
-			}
-			result.Failed += len(pending)
+			result.Failed += len(pendingPlays)
 			return result, err
 		}
+		// Commit per-event outcomes even when the provider also returned a
+		// connection-wide rate limit so successfully applied events are not
+		// retried after the deferral.
 		for _, historyID := range exportResult.Sent {
 			export := exportByHistoryID[historyID]
 			if export.ID == "" {
 				continue
 			}
-			if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "sent", ""); err != nil {
-				return result, err
+			if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusSent, ""); markErr != nil {
+				return result, markErr
 			}
 			result.Sent++
 			progressed = true
@@ -1378,8 +1398,8 @@ func (s *Service) ExportWatched(
 			if export.ID == "" {
 				continue
 			}
-			if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "not_found", "provider item not found"); err != nil {
-				return result, err
+			if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusNotFound, "provider item not found"); markErr != nil {
+				return result, markErr
 			}
 			progressed = true
 		}
@@ -1388,13 +1408,17 @@ func (s *Service) ExportWatched(
 			if export.ID == "" {
 				continue
 			}
-			if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", message); err != nil {
-				return result, err
+			if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, message); markErr != nil {
+				return result, markErr
 			}
 			result.Failed++
 			progressed = true
 		}
-		if !progressed {
+		if limited || retryable {
+			// Leave unmentioned events pending for a later retry.
+			return result, err
+		}
+		if !progressed || singleBatch {
 			break
 		}
 	}
@@ -1426,7 +1450,7 @@ func (s *Service) exportLocalPlays(
 			MediaItemID:     play.MediaItemID,
 			WatchedAt:       play.WatchedAt,
 			ProviderItemKey: play.ProviderItemKey,
-			Status:          "pending",
+			Status:          historyExportStatusPending,
 		})
 	}
 	if len(exports) == 0 {
@@ -1456,14 +1480,16 @@ func (s *Service) exportLocalPlays(
 	if len(pendingPlays) == 0 {
 		return nil
 	}
+	pendingPlays, _ = limitWatchedExportBatch(exporter, pendingPlays)
 	exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
-	if err != nil {
-		// Leave rate-limited plays pending; the next scheduled sync retries.
-		if _, limited := AsRateLimited(err); limited {
-			return err
-		}
-		for _, export := range exportByHistoryID {
-			_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", err.Error())
+	_, limited := AsRateLimited(err)
+	retryable := isRetryableProviderError(err)
+	if err != nil && !limited && !retryable {
+		for _, play := range pendingPlays {
+			export := exportByHistoryID[play.HistoryID]
+			if export.ID != "" {
+				_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error())
+			}
 		}
 		return err
 	}
@@ -1472,8 +1498,8 @@ func (s *Service) exportLocalPlays(
 		if export.ID == "" {
 			continue
 		}
-		if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "sent", ""); err != nil {
-			return err
+		if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusSent, ""); markErr != nil {
+			return markErr
 		}
 	}
 	for _, historyID := range exportResult.NotFound {
@@ -1481,8 +1507,8 @@ func (s *Service) exportLocalPlays(
 		if export.ID == "" {
 			continue
 		}
-		if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "not_found", "provider item not found"); err != nil {
-			return err
+		if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusNotFound, "provider item not found"); markErr != nil {
+			return markErr
 		}
 	}
 	for historyID, message := range exportResult.Failed {
@@ -1490,9 +1516,12 @@ func (s *Service) exportLocalPlays(
 		if export.ID == "" {
 			continue
 		}
-		if err := s.repo.MarkHistoryExportStatus(ctx, export.ID, "failed", message); err != nil {
-			return err
+		if markErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, message); markErr != nil {
+			return markErr
 		}
+	}
+	if limited || retryable {
+		return err
 	}
 	now := s.now()
 	conn.LastOutboundSyncAt = &now
@@ -1503,6 +1532,21 @@ func (s *Service) exportLocalPlays(
 	return nil
 }
 
+func limitWatchedExportBatch(exporter WatchedExporter, plays []LocalPlay) ([]LocalPlay, bool) {
+	bounded, ok := exporter.(singleBatchWatchedExporter)
+	if !ok {
+		return plays, false
+	}
+	limit := bounded.ExportBatchSize()
+	if limit <= 0 {
+		limit = 1
+	}
+	if len(plays) > limit {
+		plays = plays[:limit]
+	}
+	return plays, true
+}
+
 func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []RemotePlay) []HistoryExport {
 	remoteExact := make(map[string]struct{}, len(remote))
 	for _, play := range remote {
@@ -1510,9 +1554,9 @@ func reconcileHistoryExports(connectionID string, local []LocalPlay, remote []Re
 	}
 	exports := make([]HistoryExport, 0, len(local))
 	for _, play := range local {
-		status := "pending"
+		status := historyExportStatusPending
 		if _, ok := remoteExact[remotePlayKey(play.ProviderItemKey, play.WatchedAt)]; ok {
-			status = "remote_present"
+			status = historyExportStatusRemotePresent
 		}
 		exports = append(exports, HistoryExport{
 			ConnectionID:    connectionID,
@@ -1683,6 +1727,8 @@ func parseInt(value string) int {
 	return parsed
 }
 
+const scrobbleActionStop = "stop"
+
 func (s *Service) ScrobbleStart(ctx context.Context, event ScrobbleEvent) error {
 	return s.scrobble(ctx, event, "start", false)
 }
@@ -1692,7 +1738,7 @@ func (s *Service) ScrobblePause(ctx context.Context, event ScrobbleEvent) error 
 }
 
 func (s *Service) ScrobbleStop(ctx context.Context, event ScrobbleEvent) error {
-	return s.scrobble(ctx, event, "stop", false)
+	return s.scrobble(ctx, event, scrobbleActionStop, false)
 }
 
 // ScrobbleStopConfirmed waits for each provider dispatch and reports provider
@@ -1753,6 +1799,19 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 				return err
 			}
 		}
+		// Persist completed playback before provider I/O. Immediate scrobbling
+		// remains the low-latency path; the normal history-export reconciliation
+		// retries this desired state after crashes, plugin downtime, or uncertain
+		// upstream outcomes.
+		if action == scrobbleActionStop && event.Completed && provider.Capabilities().ExportWatched {
+			if err := s.persistCompletedScrobbleExport(ctx, conn, event); err != nil {
+				if confirm {
+					dispatchErrors = append(dispatchErrors, err)
+					continue
+				}
+				return err
+			}
+		}
 		if confirm {
 			confirmedTargets = append(confirmedTargets, confirmedScrobbleTarget{
 				provider: provider, scrobbler: scrobbler, connection: conn,
@@ -1793,6 +1852,38 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 		}
 	}
 	return errors.Join(dispatchErrors...)
+}
+
+func (s *Service) persistCompletedScrobbleExport(ctx context.Context, conn Connection, event ScrobbleEvent) error {
+	if event.HistoryID == "" {
+		return nil
+	}
+	providerItemKey := event.ProviderItemKey
+	if providerItemKey == "" {
+		providerItemKey = providerItemKeyForLocalPlay(LocalPlay{
+			MediaItemID:   event.MediaItemID,
+			Kind:          event.Kind,
+			IMDbID:        event.IMDbID,
+			TMDBID:        event.TMDBID,
+			TVDBID:        event.TVDBID,
+			SeriesIMDbID:  event.SeriesIMDbID,
+			SeriesTMDBID:  event.SeriesTMDBID,
+			SeriesTVDBID:  event.SeriesTVDBID,
+			SeasonNumber:  event.SeasonNumber,
+			EpisodeNumber: event.EpisodeNumber,
+		})
+	}
+	if providerItemKey == "" {
+		return nil
+	}
+	return s.repo.UpsertHistoryExports(ctx, []HistoryExport{{
+		ConnectionID:    conn.ID,
+		HistoryID:       event.HistoryID,
+		MediaItemID:     event.MediaItemID,
+		WatchedAt:       event.OccurredAt,
+		ProviderItemKey: providerItemKey,
+		Status:          historyExportStatusPending,
+	}})
 }
 
 func (s *Service) dispatchScrobbleAsync(scrobbler Scrobbler, cfg ServerConfig, conn Connection, event ScrobbleEvent, action string) {
@@ -1879,12 +1970,17 @@ func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg
 	switch action {
 	case "pause":
 		err = scrobbler.Pause(ctx, cfg, conn, event)
-	case "stop":
+	case scrobbleActionStop:
 		err = scrobbler.Stop(ctx, cfg, conn, event)
 	default:
 		err = scrobbler.Start(ctx, cfg, conn, event)
 	}
 	if err != nil {
+		if limited, ok := AsRateLimited(err); ok {
+			if deferErr := s.deferRateLimitedConnection(ctx, conn, limited); deferErr != nil {
+				err = errors.Join(err, deferErr)
+			}
+		}
 		if confirmedClaim != nil {
 			_ = s.repo.FailConfirmedScrobbleStop(
 				ctx, event.PlaybackSessionID, conn.ID,
@@ -1895,8 +1991,19 @@ func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg
 		}
 		return err
 	}
-	if action == "stop" {
+	if action == scrobbleActionStop {
 		stopSentAt := s.now()
+		if event.Completed && event.HistoryID != "" {
+			if err := s.repo.MarkHistoryExportSatisfiedByScrobble(ctx, conn.ID, event.HistoryID); err != nil {
+				slog.WarnContext(ctx, "failed to mark history export satisfied by scrobble",
+					"component", "watchsync",
+					"provider", conn.Provider,
+					"connection_id", conn.ID,
+					"history_id", event.HistoryID,
+					"error", err,
+				)
+			}
+		}
 		if confirmedClaim != nil {
 			return s.repo.CompleteConfirmedScrobbleStop(
 				ctx, event.PlaybackSessionID, conn.ID,

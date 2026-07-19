@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,9 +10,12 @@ import (
 	"sync"
 	"testing"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
 func TestConfigureS3Clients_SetsCORSOnPublicAssetsBucket(t *testing.T) {
@@ -180,5 +185,46 @@ func TestBuildLiveSessionSync_UsesTransportPlayMethod(t *testing.T) {
 				t.Fatalf("TranscodeHWAccel = %q, want %q", got.TranscodeHWAccel, tc.session.TranscodeHWAccel)
 			}
 		})
+	}
+}
+
+type failingWatchSyncCapabilityStore struct{}
+
+func (failingWatchSyncCapabilityStore) ListEnabled(context.Context) ([]*plugins.Installation, error) {
+	return []*plugins.Installation{{ID: 2, Enabled: true, Kind: plugins.KindPlugin}}, nil
+}
+
+func (failingWatchSyncCapabilityStore) ListCapabilities(context.Context, int) ([]*plugins.Capability, error) {
+	return nil, errors.New("database unavailable")
+}
+
+func TestReloadWatchSyncPluginProvidersDropsStaleProvidersOnCapabilityReadFailure(t *testing.T) {
+	registry := watchsync.NewRegistry()
+	provider, err := watchsync.NewPluginProvider(watchsync.PluginProviderOptions{
+		InstallationID: 1,
+		ProviderKey:    "plugin:1:tracker",
+		CapabilityID:   "tracker",
+		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+			ExportWatched: true,
+		},
+		ResolveClient: func(context.Context, int, string) (watchsync.WatchSyncPluginClient, error) {
+			return nil, errors.New("not used")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reloadWatchSyncPluginProviders(
+		context.Background(), registry, failingWatchSyncCapabilityStore{}, &plugins.Service{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := registry.Get(provider.Key()); ok {
+		t.Fatalf("stale provider %q remained registered", provider.Key())
 	}
 }
