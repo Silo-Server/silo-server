@@ -154,15 +154,29 @@ function GoalsForm({ goals }: { goals: ReadingMotivationGoals }) {
 
   const { mutateAsync: saveGoals } = useSaveReadingGoals();
 
-  // Tracks the last value actually *persisted*, so a blur that didn't change
-  // anything skips the PUT, and so a PUT for one field can still send the
-  // other field's current value. Only advanced after a successful save —
-  // if the PUT fails, the ref stays put so the next blur (even with the same
-  // unsaved value) retries instead of silently no-opping forever.
+  // Tracks the last value actually *persisted*, used only to (a) short-
+  // circuit a blur that didn't change anything, and (b) retry semantics
+  // after a failed save (see below). Only advanced after a successful save
+  // — if the PUT fails, the ref stays put so the next blur (even with the
+  // same unsaved value) retries instead of silently no-opping forever.
+  //
+  // NEVER read from this ref to build a PUT payload's *contents* — blurring
+  // one field while the other field's save is still in flight would read a
+  // savedRef value that hasn't advanced yet, sending a stale value that can
+  // land after (and silently revert) the other field's in-flight save.
+  // Payloads must always be built from the live controlled input state of
+  // both fields instead.
   const savedRef = useRef({ books: savedBooks, hours: savedHours });
 
   function saveFailureMessage(err: unknown): string {
     return err instanceof ApiClientError ? err.message : "Failed to save reading goals.";
+  }
+
+  // Resolves the *other* field's live value for a PUT payload: the input's
+  // own current text if it currently parses, else its last-saved value.
+  function otherFieldValue(input: string, saved: number | null): number | null {
+    const parsed = parseGoalInput(input);
+    return parsed === "invalid" ? saved : parsed;
   }
 
   async function commitBooks() {
@@ -173,9 +187,10 @@ function GoalsForm({ goals }: { goals: ReadingMotivationGoals }) {
     }
     setBooksError(null);
     if (parsed === savedRef.current.books) return;
+    const hours = otherFieldValue(hoursInput, savedRef.current.hours);
     try {
-      await saveGoals({ books_per_year: parsed, hours_per_year: savedRef.current.hours });
-      savedRef.current.books = parsed;
+      await saveGoals({ books_per_year: parsed, hours_per_year: hours });
+      savedRef.current = { books: parsed, hours };
       setSaveError(null);
     } catch (err) {
       setSaveError(saveFailureMessage(err));
@@ -190,9 +205,10 @@ function GoalsForm({ goals }: { goals: ReadingMotivationGoals }) {
     }
     setHoursError(null);
     if (parsed === savedRef.current.hours) return;
+    const books = otherFieldValue(booksInput, savedRef.current.books);
     try {
-      await saveGoals({ books_per_year: savedRef.current.books, hours_per_year: parsed });
-      savedRef.current.hours = parsed;
+      await saveGoals({ books_per_year: books, hours_per_year: parsed });
+      savedRef.current = { books, hours: parsed };
       setSaveError(null);
     } catch (err) {
       setSaveError(saveFailureMessage(err));

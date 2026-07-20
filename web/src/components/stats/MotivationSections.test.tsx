@@ -208,6 +208,52 @@ describe("GoalsSection", () => {
     });
   });
 
+  it("carries the live value of the other field when two saves race", async () => {
+    const user = userEvent.setup();
+    render(<GoalsSection goals={goalsFixture} />);
+
+    let resolveFirst: (() => void) | undefined;
+    let resolveSecond: (() => void) | undefined;
+    mockSaveGoals.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    mockSaveGoals.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSecond = resolve;
+        }),
+    );
+
+    const booksInput = screen.getByLabelText(/Books per year/);
+    const hoursInput = screen.getByLabelText(/Hours per year/);
+
+    // Blur books=30 while its PUT is still pending (not yet resolved, so
+    // savedRef.current.books has NOT advanced past the old saved value 24).
+    await user.clear(booksInput);
+    await user.type(booksInput, "30");
+    await user.tab();
+
+    // Blur hours=150 before the first PUT resolves. The second PUT's payload
+    // must carry the LIVE books value (30) typed into the input, not the
+    // stale savedRef value (24).
+    await user.clear(hoursInput);
+    await user.type(hoursInput, "150");
+    await user.tab();
+
+    expect(mockSaveGoals).toHaveBeenCalledTimes(2);
+    expect(mockSaveGoals).toHaveBeenNthCalledWith(2, {
+      books_per_year: 30,
+      hours_per_year: 150,
+    });
+
+    resolveFirst?.();
+    resolveSecond?.();
+    await waitFor(() => expect(screen.queryByText(/Failed to save reading goals/)).toBeNull());
+  });
+
   it("clears the inline error once a retry succeeds", async () => {
     mockSaveGoals.mockRejectedValueOnce(new Error("boom"));
     const user = userEvent.setup();
