@@ -338,4 +338,19 @@ describe("ReadingStats page", () => {
       vi.useRealTimers();
     }
   });
+
+  it("places the totals row before the motivation sections", () => {
+    mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
+    mockUseReadingMotivation.mockReturnValue({
+      data: motivationFixture,
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderPage();
+    const totalsIndex = markup.indexOf("All time");
+    const motivationIndex = markup.indexOf('data-kind="streak-challenge-section"');
+    expect(totalsIndex).toBeGreaterThan(-1);
+    expect(motivationIndex).toBeGreaterThan(-1);
+    expect(totalsIndex).toBeLessThan(motivationIndex);
+  });
 });

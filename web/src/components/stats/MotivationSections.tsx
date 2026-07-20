@@ -1,3 +1,4 @@
+import { Flame } from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
 
 import { ApiClientError } from "@/api/client";
@@ -59,7 +60,14 @@ export function StreakChallengeSection({ streak, challenge }: StreakChallengeSec
         <CardContent>
           {streak ? (
             <div className="space-y-1">
-              <div className="text-3xl font-semibold tracking-tight">
+              <div className="flex items-center gap-2 text-3xl font-semibold tracking-tight">
+                <Flame
+                  className={cn(
+                    "h-6 w-6",
+                    streak.today_qualified ? "text-primary" : "text-muted-foreground",
+                  )}
+                  aria-hidden="true"
+                />
                 {streak.current_days} {streak.current_days === 1 ? "day" : "days"}
               </div>
               <p className="text-muted-foreground text-sm">

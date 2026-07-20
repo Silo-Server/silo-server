@@ -100,9 +100,14 @@ const dnaFixture: ReadingMotivationDNA = {
 
 describe("StreakChallengeSection", () => {
   it("shows current/longest streak and the challenge percent bar width", () => {
-    render(<StreakChallengeSection streak={streakFixture} challenge={challengeFixture} />);
+    const { container } = render(
+      <StreakChallengeSection streak={streakFixture} challenge={challengeFixture} />,
+    );
     expect(screen.getByText("5 days")).toBeInTheDocument();
     expect(screen.getByText(/Longest streak: 12 days/)).toBeInTheDocument();
+
+    // The streak count carries a flame icon, per the streaks/goals spec.
+    expect(container.querySelector("svg.lucide-flame")).toBeInTheDocument();
 
     const bar = screen.getByRole("progressbar");
     expect(bar).toHaveAttribute("aria-valuenow", "40");

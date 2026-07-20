@@ -95,52 +95,53 @@ export default function ReadingStats() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Reading stats</h1>
 
+      {isError ? (
+        <p className="text-muted-foreground text-sm">Failed to load reading stats.</p>
+      ) : isLoading || !data ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-[108px] rounded-2xl" />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+          <StatCard
+            title="Today"
+            seconds={data.totals.today_seconds}
+            icon={<Clock className="h-4 w-4" />}
+          />
+          <StatCard
+            title="This week"
+            seconds={data.totals.week_seconds}
+            icon={<CalendarDays className="h-4 w-4" />}
+          />
+          <StatCard
+            title="This month"
+            seconds={data.totals.month_seconds}
+            icon={<CalendarRange className="h-4 w-4" />}
+          />
+          <StatCard
+            title="All time"
+            seconds={data.totals.all_time_seconds}
+            icon={<InfinityIcon className="h-4 w-4" />}
+          />
+        </div>
+      )}
+
       {/* Driven entirely by useReadingMotivation, independent of the reading-
-          history query below — a history failure/loading state must not hide
-          streaks, goals, achievements, or Reading DNA. Each section is
-          null-tolerant and renders its own empty/skeleton state while
+          history query above/below — a history failure/loading state must
+          not hide streaks, goals, achievements, or Reading DNA. Each section
+          is null-tolerant and renders its own empty/skeleton state while
           `motivation` is undefined. */}
       <StreakChallengeSection streak={motivation?.streak} challenge={motivation?.challenge} />
       <GoalsSection goals={motivation?.goals} />
       <AchievementsSection achievements={motivation?.achievements} />
       <ReadingDnaSection dna={motivation?.dna} />
 
-      {isError ? (
-        <p className="text-muted-foreground text-sm">Failed to load reading stats.</p>
-      ) : isLoading || !data ? (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-[108px] rounded-2xl" />
-            ))}
-          </div>
-          <Skeleton className="h-32 w-full rounded-2xl" />
-        </div>
+      {isError ? null : isLoading || !data ? (
+        <Skeleton className="h-32 w-full rounded-2xl" />
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
-            <StatCard
-              title="Today"
-              seconds={data.totals.today_seconds}
-              icon={<Clock className="h-4 w-4" />}
-            />
-            <StatCard
-              title="This week"
-              seconds={data.totals.week_seconds}
-              icon={<CalendarDays className="h-4 w-4" />}
-            />
-            <StatCard
-              title="This month"
-              seconds={data.totals.month_seconds}
-              icon={<CalendarRange className="h-4 w-4" />}
-            />
-            <StatCard
-              title="All time"
-              seconds={data.totals.all_time_seconds}
-              icon={<InfinityIcon className="h-4 w-4" />}
-            />
-          </div>
-
           <Card className="rounded-2xl border-0 shadow-none">
             <CardHeader>
               <CardTitle className="text-base font-semibold">Activity</CardTitle>
