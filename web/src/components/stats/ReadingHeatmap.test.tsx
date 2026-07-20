@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import ReadingHeatmap, { heatmapBuckets, type HeatmapDay } from "./ReadingHeatmap";
+import ReadingHeatmap, { densifyDays, heatmapBuckets, type HeatmapDay } from "./ReadingHeatmap";
 
 function addDays(date: string, count: number): string {
   const d = new Date(`${date}T00:00:00Z`);
@@ -66,6 +66,57 @@ describe("heatmapBuckets", () => {
   });
 });
 
+describe("densifyDays", () => {
+  it("fills gap days with zero seconds across the given range", () => {
+    const days: HeatmapDay[] = [
+      { date: "2026-07-01", seconds: 100 },
+      { date: "2026-07-03", seconds: 200 },
+    ];
+    expect(densifyDays(days, "2026-07-01", "2026-07-05")).toEqual([
+      { date: "2026-07-01", seconds: 100 },
+      { date: "2026-07-02", seconds: 0 },
+      { date: "2026-07-03", seconds: 200 },
+      { date: "2026-07-04", seconds: 0 },
+      { date: "2026-07-05", seconds: 0 },
+    ]);
+  });
+
+  it("returns an empty range unchanged when it collapses to nothing", () => {
+    expect(densifyDays([], "2026-07-05", "2026-07-01")).toEqual([]);
+  });
+
+  it("returns a single-day list when from equals to", () => {
+    expect(densifyDays([{ date: "2026-07-04", seconds: 30 }], "2026-07-04", "2026-07-04")).toEqual([
+      { date: "2026-07-04", seconds: 30 },
+    ]);
+  });
+});
+
+describe("heatmapBuckets + densifyDays (sparse history regression)", () => {
+  it("keeps the day after a gap in its correct weekday cell instead of compressing the grid", () => {
+    // 2026-07-01 is a Wednesday (getUTCDay() === 3); 2026-07-03 is a Friday
+    // (getUTCDay() === 5). A gap on 2026-07-02 (no session that day) must not
+    // shift 2026-07-03 left by one cell, or its weekday row would be wrong.
+    const sparseDays: HeatmapDay[] = [
+      { date: "2026-07-01", seconds: 100 },
+      { date: "2026-07-03", seconds: 200 },
+    ];
+    const densified = densifyDays(sparseDays, "2026-07-01", "2026-07-05");
+    expect(densified).toHaveLength(5);
+
+    const cells = heatmapBuckets(densified, 200);
+    // 3 leading blanks (Wednesday) + 5 densified days.
+    expect(cells).toHaveLength(8);
+    expect(cells[3]).toEqual({ date: "2026-07-01", seconds: 100, bucket: 2 });
+    expect(cells[4]).toEqual({ date: "2026-07-02", seconds: 0, bucket: 0 }); // gap day
+    expect(cells[5]).toEqual({ date: "2026-07-03", seconds: 200, bucket: 4 });
+
+    // Weekday alignment: a cell's index modulo 7 must equal its date's UTC
+    // weekday for the GitHub-style grid to read correctly.
+    expect(5 % 7).toBe(new Date("2026-07-03T00:00:00Z").getUTCDay());
+  });
+});
+
 describe("ReadingHeatmap", () => {
   it("renders one cell per day plus leading blanks, with a date · Xm tooltip", () => {
     const days: HeatmapDay[] = [
@@ -79,5 +130,18 @@ describe("ReadingHeatmap", () => {
   it("renders an empty grid without crashing when there is no data", () => {
     const markup = renderToStaticMarkup(<ReadingHeatmap days={[]} />);
     expect(typeof markup).toBe("string");
+  });
+
+  it("densifies gap days when given a from/to range, rendering a filled-in cell for the gap", () => {
+    const days: HeatmapDay[] = [
+      { date: "2026-07-01", seconds: 100 },
+      { date: "2026-07-03", seconds: 200 },
+    ];
+    const markup = renderToStaticMarkup(
+      <ReadingHeatmap days={days} from="2026-07-01" to="2026-07-05" />,
+    );
+    // The gap day (2026-07-02) must render its own zero-second tooltip cell
+    // rather than being skipped.
+    expect(markup).toContain("2026-07-02 · 0m");
   });
 });

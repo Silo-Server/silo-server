@@ -15,8 +15,16 @@ vi.mock("@/hooks/useDocumentTitle", () => ({
 }));
 
 vi.mock("@/components/stats/ReadingHeatmap", () => ({
-  default: ({ days }: { days: { date: string; seconds: number }[] }) => (
-    <div data-kind="reading-heatmap">
+  default: ({
+    days,
+    from,
+    to,
+  }: {
+    days: { date: string; seconds: number }[];
+    from?: string;
+    to?: string;
+  }) => (
+    <div data-kind="reading-heatmap" data-from={from} data-to={to}>
       {days.map((d) => (
         <span key={d.date} data-kind="heatmap-cell">
           {d.date}
@@ -140,9 +148,37 @@ describe("ReadingStats page", () => {
     expect(matches).toHaveLength(fixture.days.length);
   });
 
-  it("requests the default range (no explicit from/to)", () => {
-    mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
-    renderPage();
-    expect(mockUseReadingHistory).toHaveBeenCalledWith();
+  it("requests the server's default range explicitly (today UTC, minus 365 days)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T12:34:56Z"));
+    try {
+      mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
+      renderPage();
+      // Mirrors the server default in HandleHistory: to = today at UTC
+      // midnight, from = to minus 365 days. Passed explicitly (rather than
+      // omitted) so the same range can be handed to the heatmap for
+      // densifying gap days.
+      expect(mockUseReadingHistory).toHaveBeenCalledWith("2025-07-20", "2026-07-20");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("passes the same range to the heatmap that it requests from the history hook", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T12:34:56Z"));
+    try {
+      mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
+      const markup = renderPage();
+      // Both the hook call and the heatmap's from/to props must agree on the
+      // exact same range, or the client-side densify (which uses the
+      // heatmap's range) would disagree with what the server actually
+      // rolled up into `data.days`.
+      const [hookFrom, hookTo] = mockUseReadingHistory.mock.calls[0] ?? [];
+      expect(markup).toContain(`data-from="${hookFrom}"`);
+      expect(markup).toContain(`data-to="${hookTo}"`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { CalendarDays, CalendarRange, Clock, Infinity as InfinityIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router";
 
 import ReadingHeatmap from "@/components/stats/ReadingHeatmap";
@@ -11,6 +11,30 @@ import { formatDate } from "@/lib/datetime";
 import { formatDuration } from "@/lib/formatDuration";
 
 const REMOVED_BOOK_TITLE = "Removed book";
+
+// Mirrors the server's default history window (HandleHistory in
+// internal/api/handlers/reading_sessions.go): `to` = today at UTC midnight,
+// `from` = to minus 365 days (366 calendar days inclusive). Computed
+// explicitly here, rather than relying on the hook's server-side default,
+// so the exact same range can be handed to the heatmap — it needs `from`/`to`
+// to densify gap days across the range the server actually rolled up, not
+// just whatever the (possibly sparse) returned `days` list happens to span.
+const DEFAULT_HISTORY_RANGE_DAYS = 365;
+
+function isoDateUTC(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function todayUTC(): string {
+  const now = new Date();
+  return isoDateUTC(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())));
+}
+
+function subDaysUTC(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return isoDateUTC(d);
+}
 
 function fractionLabel(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
@@ -32,7 +56,9 @@ function StatCard({ title, seconds, icon }: { title: string; seconds: number; ic
 
 export default function ReadingStats() {
   useDocumentTitle("Reading stats");
-  const { data, isLoading, isError } = useReadingHistory();
+  const to = useMemo(() => todayUTC(), []);
+  const from = useMemo(() => subDaysUTC(to, DEFAULT_HISTORY_RANGE_DAYS), [to]);
+  const { data, isLoading, isError } = useReadingHistory(from, to);
 
   return (
     <div className="space-y-6">
@@ -82,7 +108,7 @@ export default function ReadingStats() {
               {data.days.length === 0 ? (
                 <p className="text-muted-foreground text-sm">No reading activity yet.</p>
               ) : (
-                <ReadingHeatmap days={data.days} />
+                <ReadingHeatmap days={data.days} from={from} to={to} />
               )}
             </CardContent>
           </Card>
