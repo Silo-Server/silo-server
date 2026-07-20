@@ -77,6 +77,12 @@ type ReadingMotivationStore interface {
 	// models.EbookFinishedProgressThreshold with the progress row's
 	// updated_at in [from, to).
 	FinishedBooksInRange(ctx context.Context, userID int, profileID string, from, to time.Time) (int, error)
+	// HasBookReadAbove reports whether any of the profile's ebooks has ever
+	// (all-time, not year-scoped) reached at least threshold progress. This
+	// is the "finisher" badge's real criterion (>=95% per spec), distinct
+	// from and stricter than models.EbookFinishedProgressThreshold, which
+	// only gates whether a book counts as "finished" at all.
+	HasBookReadAbove(ctx context.Context, userID int, profileID string, threshold float64) (bool, error)
 	// GenreSeconds returns all-time per-genre reading-time totals,
 	// highest first.
 	GenreSeconds(ctx context.Context, userID int, profileID string) ([]GenreSeconds, error)
@@ -92,6 +98,18 @@ const streakMinSeconds = 300
 // monthChallengeFloorSeconds is the minimum monthly challenge target, so an
 // empty previous month doesn't trivialize the current one.
 const monthChallengeFloorSeconds = 10800
+
+// farFutureYears bounds the upper end of the "all-time" FinishedBooksInRange
+// call used to feed the lifetime books-count achievement badges: any
+// progress row's updated_at is guaranteed to fall before now plus this many
+// years.
+const farFutureYears = 100
+
+// finisherProgressThreshold is the "finisher" badge's minimum all-time
+// per-book progress (>=95%, per spec). It's intentionally stricter than
+// models.EbookFinishedProgressThreshold, which only gates whether a book
+// counts as "finished" at all for the books-count badges and goals card.
+const finisherProgressThreshold = 0.95
 
 // dayKeyLayout is the "YYYY-MM-DD" layout DaySeconds keys and streakFrom's
 // "today" argument use.
@@ -575,15 +593,33 @@ func (h *ReadingMotivationHandler) HandleGetMotivation(w http.ResponseWriter, r 
 		percent = 100
 	}
 
-	// "Finished book" is scoped to the current local year throughout (both
-	// the goals card's year-to-date count and the achievement badges' book
-	// totals), per spec.
+	// "Finished book" is scoped to the current local year for the goals
+	// card's year-to-date count, but the books-count achievement badges
+	// ("first-book"/"ten-books"/"fifty-books") are lifetime totals per
+	// spec, so they're fed by a separate all-time call rather than
+	// finishedYTD. Each call degrades independently.
 	yearStart := time.Date(nowLocal.Year(), 1, 1, 0, 0, 0, 0, loc)
 	yearEnd := yearStart.AddDate(1, 0, 0)
 	finishedYTD, err := h.Store.FinishedBooksInRange(ctx, userID, profileID, yearStart, yearEnd)
 	if err != nil {
 		logSectionErr("finished_books", err)
 		finishedYTD = 0
+	}
+
+	finishedAllTime, err := h.Store.FinishedBooksInRange(ctx, userID, profileID, time.Time{}, now.AddDate(farFutureYears, 0, 0))
+	if err != nil {
+		logSectionErr("finished_books_all_time", err)
+		finishedAllTime = 0
+	}
+
+	// The "finisher" badge is a real, independent criterion: has any book
+	// ever (all-time) reached finisherProgressThreshold, not just "at least
+	// one book was finished this year" (which duplicates "first-book" and
+	// uses the looser models.EbookFinishedProgressThreshold).
+	highRead, err := h.Store.HasBookReadAbove(ctx, userID, profileID, finisherProgressThreshold)
+	if err != nil {
+		logSectionErr("finisher_high_read", err)
+		highRead = false
 	}
 
 	goalsRow, err := h.Store.GetGoals(ctx, userID, profileID)
@@ -664,13 +700,13 @@ func (h *ReadingMotivationHandler) HandleGetMotivation(w http.ResponseWriter, r 
 		LongestSessionSeconds: longestSessionSeconds,
 		CurrentStreak:         currentStreak,
 		LongestStreak:         longestStreak,
-		BooksFinished:         finishedYTD,
+		BooksFinished:         finishedAllTime,
 		NightSeconds:          nightSeconds,
 		EarlyBirdSeconds:      earlyBirdSeconds,
 		WeekendSeconds:        weekendSeconds,
 		DistinctGenres:        len(genres),
 		MaxBookSeconds:        maxBookSeconds,
-		FinishedWithHighRead:  finishedYTD > 0,
+		FinishedWithHighRead:  highRead,
 	})
 	for _, id := range satisfied {
 		if _, already := achievedAt[id]; already {
@@ -884,6 +920,24 @@ func (s *PGReadingMotivationStore) FinishedBooksInRange(ctx context.Context, use
 		return 0, fmt.Errorf("finished books in range: %w", err)
 	}
 	return count, nil
+}
+
+func (s *PGReadingMotivationStore) HasBookReadAbove(ctx context.Context, userID int, profileID string, threshold float64) (bool, error) {
+	if s == nil || s.pool == nil {
+		return false, fmt.Errorf("reading motivation store is not configured")
+	}
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM ebook_reader_progress
+			WHERE user_id = $1 AND profile_id = $2 AND progress >= $3
+		)`,
+		userID, profileID, threshold,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("has book read above: %w", err)
+	}
+	return exists, nil
 }
 
 func (s *PGReadingMotivationStore) GenreSeconds(ctx context.Context, userID int, profileID string) ([]GenreSeconds, error) {

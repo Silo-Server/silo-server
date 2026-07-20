@@ -25,8 +25,21 @@ type fakeReadingMotivationStore struct {
 	sessions    []ReadingSession
 	sessionsErr error
 
-	finishedBooks    int
+	// finishedBooksYTD/finishedBooksErr back the year-scoped
+	// FinishedBooksInRange(from=yearStart, ...) call (goals.books_finished_ytd).
+	finishedBooksYTD int
 	finishedBooksErr error
+
+	// finishedBooksAllTime/finishedBooksAllTimeErr back the all-time
+	// FinishedBooksInRange(from=zero time, ...) call that feeds the
+	// books-count achievement badges, independent of the YTD call.
+	finishedBooksAllTime    int
+	finishedBooksAllTimeErr error
+
+	// hasBookReadAbove/hasBookReadAboveErr back HasBookReadAbove, the
+	// all-time "finisher" badge criterion.
+	hasBookReadAbove    bool
+	hasBookReadAboveErr error
 
 	genres    []GenreSeconds
 	genresErr error
@@ -94,11 +107,28 @@ func (f *fakeReadingMotivationStore) SessionsSince(_ context.Context, _ int, _ s
 	return f.sessions, nil
 }
 
-func (f *fakeReadingMotivationStore) FinishedBooksInRange(_ context.Context, _ int, _ string, _, _ time.Time) (int, error) {
+// FinishedBooksInRange distinguishes the year-scoped YTD call from the
+// all-time call by whether from is the zero time: the handler always passes
+// a non-zero yearStart for the YTD count and time.Time{} for the all-time
+// count, so each call degrades independently via its own error field.
+func (f *fakeReadingMotivationStore) FinishedBooksInRange(_ context.Context, _ int, _ string, from, _ time.Time) (int, error) {
+	if from.IsZero() {
+		if f.finishedBooksAllTimeErr != nil {
+			return 0, f.finishedBooksAllTimeErr
+		}
+		return f.finishedBooksAllTime, nil
+	}
 	if f.finishedBooksErr != nil {
 		return 0, f.finishedBooksErr
 	}
-	return f.finishedBooks, nil
+	return f.finishedBooksYTD, nil
+}
+
+func (f *fakeReadingMotivationStore) HasBookReadAbove(_ context.Context, _ int, _ string, _ float64) (bool, error) {
+	if f.hasBookReadAboveErr != nil {
+		return false, f.hasBookReadAboveErr
+	}
+	return f.hasBookReadAbove, nil
 }
 
 func (f *fakeReadingMotivationStore) GenreSeconds(_ context.Context, _ int, _ string) ([]GenreSeconds, error) {
@@ -657,11 +687,11 @@ func TestMotivationEndpointShape(t *testing.T) {
 		sessions: []ReadingSession{
 			{ContentID: "book-1", StartedAt: now.Add(-2 * time.Hour), DurationSeconds: 3600},
 		},
-		goals:         map[string]ReadingGoals{},
-		achievements:  map[string]time.Time{"first-hour": now.Add(-24 * time.Hour)},
-		finishedBooks: 3,
-		genres:        []GenreSeconds{{Genre: "Sci-Fi", Seconds: 3600}},
-		authors:       []AuthorSeconds{{Author: "Jane Doe", Seconds: 3600}},
+		goals:            map[string]ReadingGoals{},
+		achievements:     map[string]time.Time{"first-hour": now.Add(-24 * time.Hour)},
+		finishedBooksYTD: 3,
+		genres:           []GenreSeconds{{Genre: "Sci-Fi", Seconds: 3600}},
+		authors:          []AuthorSeconds{{Author: "Jane Doe", Seconds: 3600}},
 	}
 	books, hours := 20, 100
 	store.goals[goalsKey(1, "profile-a")] = ReadingGoals{BooksPerYear: &books, HoursPerYear: &hours}
@@ -773,9 +803,9 @@ func TestMotivationDegradesPerSection(t *testing.T) {
 		sessions: []ReadingSession{
 			{ContentID: "book-1", StartedAt: now.Add(-2 * time.Hour), DurationSeconds: 3600},
 		},
-		authors:       []AuthorSeconds{{Author: "Jane Doe", Seconds: 3600}},
-		finishedBooks: 2,
-		genresErr:     fmt.Errorf("genre join exploded"),
+		authors:          []AuthorSeconds{{Author: "Jane Doe", Seconds: 3600}},
+		finishedBooksYTD: 2,
+		genresErr:        fmt.Errorf("genre join exploded"),
 	}
 
 	h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
@@ -860,4 +890,109 @@ func TestMotivationUsesTimezone(t *testing.T) {
 	if !amsterdam.Streak.TodayQualified {
 		t.Error("Europe/Amsterdam today_qualified = false, want true (900s >= 300s minimum)")
 	}
+}
+
+// achievementByID finds an achievement in resp by id, failing the test if
+// it's missing (every response must carry all 18 fixed definitions).
+func achievementByID(t *testing.T, resp readingMotivationResponse, id string) readingMotivationAchievementResponse {
+	t.Helper()
+	for _, a := range resp.Achievements {
+		if a.ID == id {
+			return a
+		}
+	}
+	t.Fatalf("achievement %q not present in response", id)
+	return readingMotivationAchievementResponse{}
+}
+
+// TestMotivationBooksBadgesUseLifetimeCount pins the books-count badge
+// contract: "first-book"/"ten-books"/"fifty-books" are lifetime totals, not
+// the current-year count that feeds goals.books_finished_ytd. The fake
+// store reports 6 books finished this year but 10 all-time, so "ten-books"
+// must show achieved even though the YTD figure the goals card surfaces is
+// only 6.
+func TestMotivationBooksBadgesUseLifetimeCount(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	store := &fakeReadingMotivationStore{
+		finishedBooksYTD:     6,
+		finishedBooksAllTime: 10,
+	}
+
+	h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+	rr := httptest.NewRecorder()
+	h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp readingMotivationResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+	}
+
+	if resp.Goals.BooksFinishedYTD != 6 {
+		t.Errorf("goals.books_finished_ytd = %d, want 6 (year-scoped, unaffected by the all-time badge count)", resp.Goals.BooksFinishedYTD)
+	}
+	if ach := achievementByID(t, resp, "ten-books"); ach.AchievedAt == nil {
+		t.Error(`achievements["ten-books"].achieved_at = nil, want set (10 all-time books clears the threshold, even though YTD is only 6)`)
+	}
+	if ach := achievementByID(t, resp, "fifty-books"); ach.AchievedAt != nil {
+		t.Error(`achievements["fifty-books"].achieved_at set, want nil (10 all-time books doesn't clear 50)`)
+	}
+}
+
+// TestMotivationFinisherUsesHighReadThreshold pins the "finisher" badge
+// contract: it's driven by HasBookReadAbove(0.95), an all-time, independent
+// signal from the books-finished counts, not "at least one YTD-finished
+// book" (which is boolean-identical to "first-book" and uses the wrong,
+// looser 90% threshold).
+func TestMotivationFinisherUsesHighReadThreshold(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+
+	t.Run("finished counts positive but no book cleared 95%: finisher locked, first-book achieved", func(t *testing.T) {
+		store := &fakeReadingMotivationStore{
+			finishedBooksYTD:     1,
+			finishedBooksAllTime: 1,
+			hasBookReadAbove:     false,
+		}
+		h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+		rr := httptest.NewRecorder()
+		h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var resp readingMotivationResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+		}
+
+		if ach := achievementByID(t, resp, "first-book"); ach.AchievedAt == nil {
+			t.Error(`achievements["first-book"].achieved_at = nil, want set (1 all-time book finished)`)
+		}
+		if ach := achievementByID(t, resp, "finisher"); ach.AchievedAt != nil {
+			t.Error(`achievements["finisher"].achieved_at set, want nil (no book has ever reached the 95% threshold)`)
+		}
+	})
+
+	t.Run("a book cleared 95%: finisher achieved", func(t *testing.T) {
+		store := &fakeReadingMotivationStore{
+			finishedBooksYTD:     1,
+			finishedBooksAllTime: 1,
+			hasBookReadAbove:     true,
+		}
+		h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+		rr := httptest.NewRecorder()
+		h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var resp readingMotivationResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+		}
+
+		if ach := achievementByID(t, resp, "finisher"); ach.AchievedAt == nil {
+			t.Error(`achievements["finisher"].achieved_at = nil, want set (a book cleared the 95% threshold)`)
+		}
+	})
 }
