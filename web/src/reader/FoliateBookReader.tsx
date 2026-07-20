@@ -499,6 +499,9 @@ function flattenSearchResult(result: FoliateSearchResult): ReaderSearchResult[] 
   );
 }
 
+export type ReaderContentPoint = { clientX: number; clientY: number };
+export type ReaderContentVerticalPoint = { clientY: number };
+
 type FoliateBookReaderProps = {
   contentID: string;
   file: FileVersion;
@@ -510,6 +513,14 @@ type FoliateBookReaderProps = {
   onLocationChange?: (info: ReaderLocationInfo) => void;
   onReady?: (state: ReaderReadyState) => void;
   onSelectionChange?: (selection: ReaderSelection | null) => void;
+  // foliate renders prose content inside a same-origin iframe that fills the
+  // reading surface, so a page's own pointerup/mousemove listeners never see
+  // taps or hovers over the book text (iframe events do not bubble to the
+  // parent document). These callbacks bridge that boundary: they fire with
+  // coordinates already translated into the outer viewport's space so
+  // callers can treat them like any other page-level pointer event.
+  onContentPointerUp?: (point: ReaderContentPoint) => void;
+  onContentPointerMove?: (point: ReaderContentVerticalPoint) => void;
 };
 
 const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderProps>(
@@ -525,6 +536,8 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       onLocationChange,
       onReady,
       onSelectionChange,
+      onContentPointerUp,
+      onContentPointerMove,
     },
     ref,
   ) {
@@ -540,6 +553,14 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const annotationsRef = useRef<EbookReaderAnnotation[]>(annotations);
     const drawnCfisRef = useRef<Set<string>>(new Set());
     const selectionCleanupRef = useRef<(() => void)[]>([]);
+    // Held in refs (updated every render, read from listeners) rather than
+    // effect dependencies so the content-doc listeners below never need to be
+    // torn down and re-attached just because a caller passed a new inline
+    // callback identity.
+    const onContentPointerUpRef = useRef(onContentPointerUp);
+    onContentPointerUpRef.current = onContentPointerUp;
+    const onContentPointerMoveRef = useRef(onContentPointerMove);
+    onContentPointerMoveRef.current = onContentPointerMove;
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -626,6 +647,11 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       onSelectionChange?.(createSelectionAnnotation());
     }, [createSelectionAnnotation, onSelectionChange]);
 
+    // Wires listeners directly onto each content doc (one per rendered
+    // section/page, foliate re-creates them on "create-overlay"). This is the
+    // only reliable way to observe interaction with the book text: foliate
+    // renders it inside a same-origin iframe that fills the reading surface,
+    // and iframe-internal events never bubble out to the host page.
     const attachSelectionListeners = useCallback(() => {
       for (const cleanup of selectionCleanupRef.current) cleanup();
       selectionCleanupRef.current = [];
@@ -636,10 +662,31 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         doc.addEventListener("selectionchange", handler);
         doc.addEventListener("pointerup", handler);
         doc.addEventListener("keyup", handler);
+        // Translate the iframe-local coordinates into outer viewport
+        // coordinates by adding the content iframe's own frame offset, the
+        // same technique createSelectionAnnotation uses above for selection
+        // rects.
+        const contentPointerUp = (event: PointerEvent) => {
+          const frameRect = doc.defaultView?.frameElement?.getBoundingClientRect();
+          onContentPointerUpRef.current?.({
+            clientX: event.clientX + (frameRect?.left ?? 0),
+            clientY: event.clientY + (frameRect?.top ?? 0),
+          });
+        };
+        const contentPointerMove = (event: MouseEvent) => {
+          const frameRect = doc.defaultView?.frameElement?.getBoundingClientRect();
+          onContentPointerMoveRef.current?.({
+            clientY: event.clientY + (frameRect?.top ?? 0),
+          });
+        };
+        doc.addEventListener("pointerup", contentPointerUp);
+        doc.addEventListener("mousemove", contentPointerMove);
         selectionCleanupRef.current.push(() => {
           doc.removeEventListener("selectionchange", handler);
           doc.removeEventListener("pointerup", handler);
           doc.removeEventListener("keyup", handler);
+          doc.removeEventListener("pointerup", contentPointerUp);
+          doc.removeEventListener("mousemove", contentPointerMove);
         });
       }
     }, [emitSelectionChange]);

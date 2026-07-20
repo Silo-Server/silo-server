@@ -25,6 +25,10 @@ const mocks = vi.hoisted(() => ({
   lastOnLocationChange: undefined as
     | ((info: { fraction: number; sectionIndex: number | null; tocLabel: string | null }) => void)
     | undefined,
+  lastOnContentPointerUp: undefined as
+    | ((point: { clientX: number; clientY: number }) => void)
+    | undefined,
+  lastOnContentPointerMove: undefined as ((point: { clientY: number }) => void) | undefined,
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -78,6 +82,8 @@ vi.mock("@/reader/FoliateBookReader", async () => {
           sectionIndex: number | null;
           tocLabel: string | null;
         }) => void;
+        onContentPointerUp?: (point: { clientX: number; clientY: number }) => void;
+        onContentPointerMove?: (point: { clientY: number }) => void;
         onReady?: (state: {
           toc: Array<{
             id: number;
@@ -96,6 +102,8 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         onFileLoaded,
         onSelectionChange,
         onLocationChange,
+        onContentPointerUp,
+        onContentPointerMove,
         onReady,
       },
       ref,
@@ -104,6 +112,12 @@ vi.mock("@/reader/FoliateBookReader", async () => {
       useEffect(() => {
         mocks.lastOnLocationChange = onLocationChange;
       }, [onLocationChange]);
+      useEffect(() => {
+        mocks.lastOnContentPointerUp = onContentPointerUp;
+      }, [onContentPointerUp]);
+      useEffect(() => {
+        mocks.lastOnContentPointerMove = onContentPointerMove;
+      }, [onContentPointerMove]);
       useImperativeHandle(ref, () => ({
         prev: mocks.readerPrev,
         next: mocks.readerNext,
@@ -928,6 +942,86 @@ describe("EbookReader", () => {
     expect(container.querySelector("footer")).toBeNull();
     act(() => {
       surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
+    });
+    expect(container.querySelector("header")).not.toBeNull();
+  });
+
+  // FoliateBookReader is mocked in this file, so these tests only exercise
+  // EbookReader's own dispatch logic once it receives already-converted
+  // viewport coordinates from onContentPointerUp/onContentPointerMove. The
+  // real bridging across the content iframe boundary — translating iframe
+  // pointer/mousemove events into those viewport coordinates via the frame
+  // element's getBoundingClientRect() — is covered by the component test in
+  // FoliateBookReader.component.test.tsx ("forwards pointerup and mousemove
+  // from content iframes with viewport-adjusted coordinates").
+  it("pages on edge taps and toggles chrome on middle tap reported through the content pointer bridge", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // The mock reader reports an active selection on mount; clear it via the
+    // highlight action so tap zones are free to page/toggle chrome.
+    const highlight = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Highlight selection"]',
+    );
+    await act(async () => {
+      highlight?.click();
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    expect(mocks.lastOnContentPointerUp).toBeTypeOf("function");
+    expect(mocks.lastOnContentPointerMove).toBeTypeOf("function");
+
+    act(() => {
+      mocks.lastOnContentPointerUp?.({ clientX: 30, clientY: 10 });
+    });
+    expect(mocks.readerPrev).toHaveBeenCalled();
+
+    act(() => {
+      mocks.lastOnContentPointerUp?.({ clientX: 270, clientY: 10 });
+    });
+    expect(mocks.readerNext).toHaveBeenCalled();
+
+    expect(container.querySelector("header")).not.toBeNull();
+    act(() => {
+      mocks.lastOnContentPointerUp?.({ clientX: 150, clientY: 10 });
+    });
+    // Middle tap toggled chrome off.
+    expect(container.querySelector("header")).toBeNull();
+    expect(container.querySelector("footer")).toBeNull();
+
+    // With chrome hidden, a content mousemove near the top viewport edge
+    // (converted to outer coordinates by FoliateBookReader in real usage)
+    // must reveal chrome again, mirroring the window-level mousemove path.
+    act(() => {
+      mocks.lastOnContentPointerMove?.({ clientY: 500 });
+    });
+    expect(container.querySelector("header")).toBeNull();
+
+    act(() => {
+      mocks.lastOnContentPointerMove?.({ clientY: 5 });
     });
     expect(container.querySelector("header")).not.toBeNull();
   });

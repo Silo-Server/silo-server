@@ -195,6 +195,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+// Distance from the top/bottom viewport edge (in px) within which a hovering
+// mouse brings hidden chrome back, mirroring desktop reader/video-player
+// conventions. Shared by the window-level mousemove listener (margin taps)
+// and the content-iframe pointer bridge (taps over the book text itself).
+const CHROME_REVEAL_EDGE_PX = 24;
+
+function isNearViewportEdge(clientY: number): boolean {
+  return clientY < CHROME_REVEAL_EDGE_PX || window.innerHeight - clientY < CHROME_REVEAL_EDGE_PX;
+}
+
 export default function EbookReader() {
   const { contentId = "" } = useParams<{ contentId: string }>();
   const navigate = useNavigate();
@@ -370,13 +380,20 @@ export default function EbookReader() {
     setReaderProgress(next);
     void readerRef.current?.goToFraction(next);
   }, []);
-  const handleSurfacePointerUp = useCallback(
-    (event: PointerEvent<HTMLElement>) => {
+  // Shared by both tap paths below: margin taps land on the outer section via
+  // a normal React pointerup, but taps on the book text itself are reported
+  // by FoliateBookReader through onContentPointerUp (see the comment on that
+  // prop) since foliate renders prose inside a same-origin iframe whose
+  // events never bubble to this page. Both read the surface element's rect
+  // through a ref rather than event.currentTarget so the same geometry
+  // applies regardless of which path fired.
+  const dispatchSurfaceTap = useCallback(
+    (clientX: number) => {
       if (isComicFormat) return;
-      const rect = event.currentTarget.getBoundingClientRect();
-      if (rect.width <= 0) return;
+      const rect = readingSurfaceRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return;
       const action = tapZoneAction({
-        xRatio: (event.clientX - rect.left) / rect.width,
+        xRatio: (clientX - rect.left) / rect.width,
         flow: readerSettings.flow,
         hasSelection: Boolean(selection),
       });
@@ -385,6 +402,25 @@ export default function EbookReader() {
       else if (action === "toggle-chrome") setChromeVisible((visible) => !visible);
     },
     [isComicFormat, readerSettings.flow, selection],
+  );
+  const handleSurfacePointerUp = useCallback(
+    (event: PointerEvent<HTMLElement>) => {
+      dispatchSurfaceTap(event.clientX);
+    },
+    [dispatchSurfaceTap],
+  );
+  const handleContentPointerUp = useCallback(
+    (point: { clientX: number; clientY: number }) => {
+      dispatchSurfaceTap(point.clientX);
+    },
+    [dispatchSurfaceTap],
+  );
+  const handleContentPointerMove = useCallback(
+    (point: { clientY: number }) => {
+      if (chromeVisible) return;
+      if (isNearViewportEdge(point.clientY)) setChromeVisible(true);
+    },
+    [chromeVisible],
   );
   const handleCreateHighlight = useCallback(async () => {
     if (!contentId || !selection) return;
@@ -564,7 +600,7 @@ export default function EbookReader() {
   useEffect(() => {
     if (chromeVisible) return;
     const onMove = (event: MouseEvent) => {
-      if (event.clientY < 24 || window.innerHeight - event.clientY < 24) {
+      if (isNearViewportEdge(event.clientY)) {
         setChromeVisible(true);
       }
     };
@@ -787,6 +823,8 @@ export default function EbookReader() {
               onReady={handleReaderReady}
               onSelectionChange={setSelection}
               onLocationChange={setLocationInfo}
+              onContentPointerUp={handleContentPointerUp}
+              onContentPointerMove={handleContentPointerMove}
             />
             {readerSettings.readingRuler && (
               <div
