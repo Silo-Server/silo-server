@@ -17,10 +17,19 @@ goals, challenges, badges, or taste profile.
 
 ### Streaks
 
-- A UTC day counts toward a streak with **≥ 300 seconds** of reading (sum of
-  session `duration_seconds` attributed to `started_at`'s UTC day).
+- All day/hour interpretation in this layer uses the **requester's
+  timezone**: the client sends `tz=<IANA name>` (from
+  `Intl.DateTimeFormat().resolvedOptions().timeZone`) on the motivation and
+  history endpoints; the server resolves it with `time.LoadLocation`,
+  falling back to UTC when absent/invalid. Sessions remain stored in UTC —
+  only aggregation boundaries shift. The existing history endpoint gains
+  the same optional `tz` param (additive; the totals and daily rollup use
+  it so heatmap days match the reader's local midnight).
+- A local-timezone day counts toward a streak with **≥ 300 seconds** of
+  reading (session `duration_seconds` attributed to `started_at` in the
+  requester's zone).
 - Computed on read from sessions: current streak (ending today or yesterday —
-  a streak is "alive" until a full UTC day is missed) and longest streak.
+  a streak is "alive" until a full local day is missed) and longest streak.
   No storage.
 
 ### Goals (per profile, editable)
@@ -29,7 +38,7 @@ goals, challenges, badges, or taste profile.
   hours_per_year int NULL, updated_at` (PK user+profile). NULL = unset.
 - `PUT /api/v1/ebooks/reading-goals` `{books_per_year?, hours_per_year?}`
   (null clears; positive ints ≤ 100000 validated).
-- Progress computed on read for the current UTC year:
+- Progress computed on read for the current year in the requester's zone:
   - hours: YTD session seconds.
   - books: ebooks whose progress crossed the existing finished threshold
     (`models.EbookFinishedProgressThreshold`) with the progress row's
@@ -40,7 +49,7 @@ goals, challenges, badges, or taste profile.
 
 ### Monthly challenge (auto-generated)
 
-- Target for the current month = `max(last calendar month's total seconds,
+- Target for the current month (requester's timezone) = `max(last calendar month's total seconds,
   10800)` (3-hour floor so an empty month doesn't trivialize it).
 - Response includes target, current month seconds, and percent. No storage;
   no curated content.
@@ -73,8 +82,10 @@ goals, challenges, badges, or taste profile.
   16. `genre-hopper` (exploration) — sessions in ≥ 5 distinct genres
   17. `deep-diver` (exploration) — ≥ 10 hours on a single book
   18. `finisher` (exploration) — finished a book with ≥ 95% read
-  *Habit hours use the session's `started_at` hour; UTC (consistent with all
-  other day math — documented as such in the UI copy).
+  *Habit hours and weekend determination use the session's `started_at`
+  in the requester's timezone (see the tz mechanism above). Achievement
+  unlocks are evaluated with the tz of the evaluating request and never
+  revoke; minor tz-dependence at boundaries is accepted.
 
 ### Reading DNA (computed, no storage)
 
@@ -84,7 +95,8 @@ goals, challenges, badges, or taste profile.
 - Diversity score 0–100: `(1 - Σ share²)` over genre shares (complement of
   the Herfindahl index), scaled ×100, rounded.
 - Average session length, most-read hour-of-day buckets (morning/afternoon/
-  evening/night), and a year-end projection of hours from YTD pace.
+  evening/night, requester's timezone), and a year-end projection of hours
+  from YTD pace.
 
 ### API
 
