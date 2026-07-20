@@ -299,7 +299,9 @@ describe("AdminLibraries", () => {
     const markup = renderPage();
 
     expect(markup).toContain("Processing files · 10 / 20 (50%)");
-    expect(markup).toContain("Full library scan · Entire library");
+    // Mode and target render as separate compact-row elements.
+    expect(markup).toContain("Full library scan");
+    expect(markup).toContain("Entire library");
   });
 
   it("renders the collapsed Ambiguous Roots section when no roots exist", () => {

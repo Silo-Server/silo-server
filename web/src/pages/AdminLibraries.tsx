@@ -805,6 +805,21 @@ function ScanQueuePopover({
   );
 }
 
+// How many scan rows a group shows before the rest collapse behind an expander.
+const COLLAPSED_SCAN_ROW_LIMIT = 4;
+
+function useCollapsedScans(scans: ScanRun[]) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleScans = expanded ? scans : scans.slice(0, COLLAPSED_SCAN_ROW_LIMIT);
+  return {
+    expanded,
+    setExpanded,
+    visibleScans,
+    hiddenCount: scans.length - visibleScans.length,
+    collapsible: scans.length > COLLAPSED_SCAN_ROW_LIMIT,
+  };
+}
+
 function ScanQueueGroup({
   group,
   groupIndex,
@@ -824,9 +839,9 @@ function ScanQueueGroup({
   cancelling: boolean;
   onCancel: (libraryID: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const visibleScans = expanded ? group.scans : group.scans.slice(0, COLLAPSED_SCAN_ROW_LIMIT);
-  const hiddenCount = group.scans.length - visibleScans.length;
+  const { expanded, setExpanded, visibleScans, hiddenCount, collapsible } = useCollapsedScans(
+    group.scans,
+  );
 
   return (
     <div>
@@ -884,16 +899,12 @@ function ScanQueueGroup({
               )}
             </div>
             <div className="text-muted-foreground mt-px flex items-center gap-1 text-[10px] leading-relaxed">
-              {scan.path ? (
-                <code
-                  className="text-muted-foreground/70 max-w-[200px] truncate font-mono"
-                  title={scan.path}
-                >
-                  {formatActiveScanTarget(scan)}
-                </code>
-              ) : (
-                <span>Entire library</span>
-              )}
+              <code
+                className="text-muted-foreground/70 max-w-[200px] truncate font-mono"
+                title={scan.path}
+              >
+                {formatActiveScanTarget(scan)}
+              </code>
               <span className="text-border/50 shrink-0">·</span>
               <span className="shrink-0">
                 {scan.status === "running"
@@ -909,7 +920,7 @@ function ScanQueueGroup({
           </div>
         </div>
       ))}
-      {group.scans.length > COLLAPSED_SCAN_ROW_LIMIT ? (
+      {collapsible ? (
         <button
           type="button"
           className="text-muted-foreground hover:text-foreground flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] transition-colors"
@@ -1023,9 +1034,6 @@ function LibraryActiveWorkRow({
   );
 }
 
-// How many scan rows a library shows before the rest collapse behind "Show all".
-const COLLAPSED_SCAN_ROW_LIMIT = 4;
-
 function LibraryScanTasks({
   scans,
   cancelling,
@@ -1037,11 +1045,9 @@ function LibraryScanTasks({
   libraryID: number;
   onCancelScans: (libraryID: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const { expanded, setExpanded, visibleScans, collapsible } = useCollapsedScans(scans);
   const runningCount = scans.filter((scan) => scan.status === "running").length;
   const queuedCount = scans.length - runningCount;
-  const visibleScans = expanded ? scans : scans.slice(0, COLLAPSED_SCAN_ROW_LIMIT);
-  const hiddenCount = scans.length - visibleScans.length;
 
   return (
     <div className="flex min-w-0 flex-col gap-1">
@@ -1061,7 +1067,7 @@ function LibraryScanTasks({
           {runningCount > 0 && queuedCount > 0 ? " · " : null}
           {queuedCount > 0 ? `${queuedCount} queued` : null}
         </span>
-        {scans.length > COLLAPSED_SCAN_ROW_LIMIT ? (
+        {collapsible ? (
           <button
             type="button"
             className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 rounded px-1 text-[10px] transition-colors"
@@ -1088,15 +1094,6 @@ function LibraryScanTasks({
         {visibleScans.map((scan) => (
           <CompactScanRow key={scan.id} scan={scan} />
         ))}
-        {hiddenCount > 0 ? (
-          <button
-            type="button"
-            className="text-muted-foreground/70 hover:text-foreground w-fit rounded text-left text-[10px] transition-colors"
-            onClick={() => setExpanded(true)}
-          >
-            + {hiddenCount} more{hiddenCount <= queuedCount ? " queued" : ""}
-          </button>
-        ) : null}
       </div>
     </div>
   );
@@ -1120,7 +1117,11 @@ function CompactScanRow({ scan }: { scan: ScanRun }) {
         <code className="text-muted-foreground/80 truncate font-mono text-[10px]">
           {formatActiveScanTarget(scan)}
         </code>
-      ) : null}
+      ) : (
+        <span className="text-muted-foreground/80 truncate text-[10px]">
+          {formatActiveScanTarget(scan)}
+        </span>
+      )}
       {progress ? (
         <span className="text-muted-foreground/60 truncate text-[10px]">· {progress}</span>
       ) : null}
