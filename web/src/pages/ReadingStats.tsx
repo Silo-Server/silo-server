@@ -23,23 +23,42 @@ import { formatDuration } from "@/lib/formatDuration";
 const REMOVED_BOOK_TITLE = "Removed book";
 
 // Mirrors the server's default history window (HandleHistory in
-// internal/api/handlers/reading_sessions.go): `to` = today at UTC midnight,
-// `from` = to minus 365 days (366 calendar days inclusive). Computed
-// explicitly here, rather than relying on the hook's server-side default,
-// so the exact same range can be handed to the heatmap — it needs `from`/`to`
-// to densify gap days across the range the server actually rolled up, not
-// just whatever the (possibly sparse) returned `days` list happens to span.
+// internal/api/handlers/reading_sessions.go): `to` = today in the viewer's
+// local timezone, `from` = to minus 365 days (366 calendar days inclusive).
+// Computed explicitly here, rather than relying on the hook's server-side
+// default, so the exact same range can be handed to the heatmap — it needs
+// `from`/`to` to densify gap days across the range the server actually
+// rolled up, not just whatever the (possibly sparse) returned `days` list
+// happens to span.
 const DEFAULT_HISTORY_RANGE_DAYS = 365;
 
 function isoDateUTC(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-function todayUTC(): string {
-  const now = new Date();
-  return isoDateUTC(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())));
+// Formats `date` as a "YYYY-MM-DD" calendar-day string in `timeZone`. The
+// en-CA locale is a well-known trick for getting Intl to emit ISO-ordered
+// digits directly, without hand-rolling a formatToParts reassembly.
+function isoDateInZone(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
+// Today's date string in the viewer's local timezone, matching the calendar
+// day the server's HandleHistory resolves `to` to for the same `tz` param
+// (see requestLocation in internal/api/handlers/reading_motivation.go).
+function todayInZone(timeZone: string): string {
+  return isoDateInZone(new Date(), timeZone);
+}
+
+// Subtracts `days` from a "YYYY-MM-DD" date string. Pure calendar-day
+// arithmetic on the string itself (via a fixed UTC midnight anchor to dodge
+// DST edge cases) — independent of any timezone, since `dateStr` is already
+// resolved to the viewer's local calendar day by the caller.
 function subDaysUTC(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - days);
@@ -66,9 +85,9 @@ function StatCard({ title, seconds, icon }: { title: string; seconds: number; ic
 
 export default function ReadingStats() {
   useDocumentTitle("Reading stats");
-  const to = useMemo(() => todayUTC(), []);
-  const from = useMemo(() => subDaysUTC(to, DEFAULT_HISTORY_RANGE_DAYS), [to]);
   const tz = useMemo(() => clientTimezone(), []);
+  const to = useMemo(() => todayInZone(tz), [tz]);
+  const from = useMemo(() => subDaysUTC(to, DEFAULT_HISTORY_RANGE_DAYS), [to]);
   const { data, isLoading, isError } = useReadingHistory(from, to, tz);
   const { data: motivation } = useReadingMotivation();
 

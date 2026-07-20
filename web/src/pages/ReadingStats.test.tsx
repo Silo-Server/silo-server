@@ -203,21 +203,47 @@ describe("ReadingStats page", () => {
     expect(matches).toHaveLength(fixture.days.length);
   });
 
-  it("requests the server's default range explicitly (today UTC, minus 365 days)", () => {
+  it("requests the server's default range explicitly (today in the viewer's timezone, minus 365 days)", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-20T12:34:56Z"));
+    const resolvedOptionsSpy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({ timeZone: "UTC" } as Intl.ResolvedDateTimeFormatOptions);
     try {
       mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
       renderPage();
-      // Mirrors the server default in HandleHistory: to = today at UTC
-      // midnight, from = to minus 365 days. Passed explicitly (rather than
-      // omitted) so the same range can be handed to the heatmap for
-      // densifying gap days. The third arg is the viewer's IANA timezone.
+      // Mirrors the server default in HandleHistory: to = today in the
+      // viewer's timezone, from = to minus 365 days. Passed explicitly
+      // (rather than omitted) so the same range can be handed to the
+      // heatmap for densifying gap days. The third arg is the viewer's IANA
+      // timezone.
       const [callFrom, callTo] = mockUseReadingHistory.mock.calls[0] ?? [];
       expect(callFrom).toBe("2025-07-20");
       expect(callTo).toBe("2026-07-20");
     } finally {
       vi.useRealTimers();
+      resolvedOptionsSpy.mockRestore();
+    }
+  });
+
+  it("derives today from the viewer's local timezone, not UTC", () => {
+    // 2026-07-19T23:30:00Z is local 2026-07-20T01:30 in Europe/Amsterdam
+    // (CEST, UTC+2): a UTC-derived "today" would request "2026-07-19" here,
+    // one full local day early.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-19T23:30:00Z"));
+    const resolvedOptionsSpy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({ timeZone: "Europe/Amsterdam" } as Intl.ResolvedDateTimeFormatOptions);
+    try {
+      mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
+      renderPage();
+      const [callFrom, callTo] = mockUseReadingHistory.mock.calls[0] ?? [];
+      expect(callTo).toBe("2026-07-20");
+      expect(callFrom).toBe("2025-07-20");
+    } finally {
+      vi.useRealTimers();
+      resolvedOptionsSpy.mockRestore();
     }
   });
 
