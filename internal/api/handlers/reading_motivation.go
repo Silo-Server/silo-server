@@ -259,6 +259,41 @@ func hourBucket(hour int) string {
 	}
 }
 
+// topGenreCount is how many genres the motivation endpoint surfaces
+// individually before collapsing the remainder into an "other" bucket.
+const topGenreCount = 8
+
+// otherGenreLabel is the display name of the collapsed bucket summing every
+// genre beyond the top topGenreCount by seconds.
+const otherGenreLabel = "other"
+
+// collapseGenresToTopEight collapses genres to the top topGenreCount by
+// seconds plus a trailing "other" entry summing the remainder. It's a
+// display-only transform: diversity score and distinct-genre counts must be
+// computed from the uncollapsed list before calling this, since collapsing
+// would otherwise understate both.
+func collapseGenresToTopEight(genres []GenreSeconds) []GenreSeconds {
+	if len(genres) <= topGenreCount {
+		return genres
+	}
+
+	sorted := make([]GenreSeconds, len(genres))
+	copy(sorted, genres)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Seconds > sorted[j].Seconds })
+
+	out := make([]GenreSeconds, 0, topGenreCount+1)
+	var otherSeconds int
+	for i, g := range sorted {
+		if i < topGenreCount {
+			out = append(out, g)
+			continue
+		}
+		otherSeconds += g.Seconds
+	}
+	out = append(out, GenreSeconds{Genre: otherGenreLabel, Seconds: otherSeconds})
+	return out
+}
+
 // diversityScore is the complement of the Herfindahl index over genre-second
 // shares, scaled to 0-100 and rounded: (1 - Sum(share^2)) * 100.
 func diversityScore(genres []GenreSeconds) int {
@@ -746,8 +781,12 @@ func (h *ReadingMotivationHandler) HandleGetMotivation(w http.ResponseWriter, r 
 		achievementsResp = append(achievementsResp, item)
 	}
 
-	genresResp := make([]readingMotivationGenreResponse, 0, len(dna.Genres))
-	for _, g := range dna.Genres {
+	// dna.Genres is the uncollapsed all-time list (diversityScore and
+	// DistinctGenres above are already computed from it); collapse only for
+	// this display projection.
+	displayGenres := collapseGenresToTopEight(dna.Genres)
+	genresResp := make([]readingMotivationGenreResponse, 0, len(displayGenres))
+	for _, g := range displayGenres {
 		genresResp = append(genresResp, readingMotivationGenreResponse{Name: g.Genre, Seconds: g.Seconds})
 	}
 	authorsResp := make([]readingMotivationAuthorResponse, 0, len(dna.Authors))

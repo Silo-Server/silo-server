@@ -1042,3 +1042,58 @@ func TestNightOwlWindowIsMidnightToFiveAM(t *testing.T) {
 		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
 		}
+		if ach := achievementByID(t, resp, "night-owl"); ach.AchievedAt == nil {
+			t.Error(`achievements["night-owl"].achieved_at = nil, want set (01:00 local is within the 00:00-05:00 window)`)
+		}
+	})
+}
+
+// TestMotivationCollapsesGenresToTopEight pins the DNA genre display
+// contract: given more than topGenreCount genres, the response collapses to
+// the top 8 by seconds plus a trailing "other" entry summing the rest,
+// computed in the handler after diversity/distinct-genre math (which must
+// still see the full, uncollapsed list).
+func TestMotivationCollapsesGenresToTopEight(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	genres := []GenreSeconds{
+		{Genre: "g1", Seconds: 1000},
+		{Genre: "g2", Seconds: 900},
+		{Genre: "g3", Seconds: 800},
+		{Genre: "g4", Seconds: 700},
+		{Genre: "g5", Seconds: 600},
+		{Genre: "g6", Seconds: 500},
+		{Genre: "g7", Seconds: 400},
+		{Genre: "g8", Seconds: 300},
+		{Genre: "g9", Seconds: 200},
+		{Genre: "g10", Seconds: 100},
+	}
+	store := &fakeReadingMotivationStore{genres: genres}
+	h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+	rr := httptest.NewRecorder()
+	h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp readingMotivationResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+	}
+
+	if len(resp.DNA.Genres) != 9 {
+		t.Fatalf("len(dna.genres) = %d, want 9 (top 8 + other)", len(resp.DNA.Genres))
+	}
+	last := resp.DNA.Genres[len(resp.DNA.Genres)-1]
+	if last.Name != otherGenreLabel {
+		t.Fatalf("last genre name = %q, want %q", last.Name, otherGenreLabel)
+	}
+	if last.Seconds != 300 { // g9 (200) + g10 (100)
+		t.Fatalf("other seconds = %d, want 300 (g9+g10)", last.Seconds)
+	}
+
+	// Diversity must be computed over all 10 genres, not the collapsed 9.
+	wantDiversity := diversityScore(genres)
+	if resp.DNA.DiversityScore != wantDiversity {
+		t.Fatalf("diversity_score = %d, want %d (computed over the uncollapsed 10-genre list)", resp.DNA.DiversityScore, wantDiversity)
+	}
+}
