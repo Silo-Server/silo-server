@@ -15,13 +15,13 @@ interface PreloadErrorReloadDeps {
   setItem: (key: string, value: string) => void;
 }
 
-export function installPreloadErrorReload(deps?: Partial<PreloadErrorReloadDeps>): void {
+export function installPreloadErrorReload(deps?: Partial<PreloadErrorReloadDeps>): () => void {
   const reload = deps?.reload ?? (() => window.location.reload());
   const now = deps?.now ?? Date.now;
   const getItem = deps?.getItem ?? ((k: string) => sessionStorage.getItem(k));
   const setItem = deps?.setItem ?? ((k: string, v: string) => sessionStorage.setItem(k, v));
 
-  window.addEventListener("vite:preloadError", (event) => {
+  const handler = (event: Event) => {
     const lastReloadAt = Number(getItem(GUARD_KEY) ?? 0);
     if (now() - lastReloadAt < GUARD_WINDOW_MS) {
       // We already reloaded moments ago and the chunk is still missing;
@@ -31,5 +31,8 @@ export function installPreloadErrorReload(deps?: Partial<PreloadErrorReloadDeps>
     event.preventDefault();
     setItem(GUARD_KEY, String(now()));
     reload();
-  });
+  };
+
+  window.addEventListener("vite:preloadError", handler);
+  return () => window.removeEventListener("vite:preloadError", handler);
 }

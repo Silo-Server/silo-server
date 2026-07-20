@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { installPreloadErrorReload } from "./reloadOnPreloadError";
 
 function harness(now: () => number) {
@@ -16,9 +16,16 @@ function harness(now: () => number) {
 }
 
 describe("installPreloadErrorReload", () => {
+  let cleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    cleanups.forEach((cleanup) => cleanup());
+    cleanups = [];
+  });
+
   it("reloads when a dynamically imported chunk fails to load", () => {
     const { reload, deps } = harness(() => 1_000_000);
-    installPreloadErrorReload(deps);
+    cleanups.push(installPreloadErrorReload(deps));
 
     window.dispatchEvent(new Event("vite:preloadError"));
     expect(reload).toHaveBeenCalledTimes(1);
@@ -28,14 +35,14 @@ describe("installPreloadErrorReload", () => {
     let clock = 1_000_000;
     const { reload, deps } = harness(() => clock);
 
-    installPreloadErrorReload(deps);
+    cleanups.push(installPreloadErrorReload(deps));
     window.dispatchEvent(new Event("vite:preloadError"));
     expect(reload).toHaveBeenCalledTimes(1);
 
     // Post-reload page still hits the error seconds later: give up instead
     // of reload-looping.
     clock += 5_000;
-    installPreloadErrorReload(deps);
+    cleanups.push(installPreloadErrorReload(deps));
     window.dispatchEvent(new Event("vite:preloadError"));
     expect(reload).toHaveBeenCalledTimes(1);
   });
@@ -44,12 +51,12 @@ describe("installPreloadErrorReload", () => {
     let clock = 1_000_000;
     const { reload, deps } = harness(() => clock);
 
-    installPreloadErrorReload(deps);
+    cleanups.push(installPreloadErrorReload(deps));
     window.dispatchEvent(new Event("vite:preloadError"));
     expect(reload).toHaveBeenCalledTimes(1);
 
     clock += 10 * 60_000;
-    installPreloadErrorReload(deps);
+    cleanups.push(installPreloadErrorReload(deps));
     window.dispatchEvent(new Event("vite:preloadError"));
     expect(reload).toHaveBeenCalledTimes(2);
   });
