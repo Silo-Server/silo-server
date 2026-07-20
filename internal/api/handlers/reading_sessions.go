@@ -622,8 +622,14 @@ func (s *PGReadingSessionStore) DailyRollup(ctx context.Context, userID int, pro
 	if s == nil || s.pool == nil {
 		return nil, fmt.Errorf("reading session store is not configured")
 	}
+	// Bucketing is pinned to UTC via "AT TIME ZONE 'UTC'" rather than a bare
+	// date_trunc('day', started_at): date_trunc on a timestamptz truncates in
+	// the DB session's timezone, which this pool never sets, so the bucket
+	// boundary would otherwise depend on server/connection config instead of
+	// being deterministic. Day bucketing is intentionally UTC for now; a
+	// follow-up may add requester-timezone support.
 	rows, err := s.pool.Query(ctx, `
-		SELECT date_trunc('day', started_at)::date AS day, SUM(duration_seconds)
+		SELECT date_trunc('day', started_at AT TIME ZONE 'UTC')::date AS day, SUM(duration_seconds)
 		FROM reading_sessions
 		WHERE user_id = $1 AND profile_id = $2 AND started_at >= $3 AND started_at < $4
 		GROUP BY 1
