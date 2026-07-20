@@ -85,11 +85,45 @@ func readerFontBlobPath(dir string, userID int, profileID string, id int64, form
 	return filepath.Join(dir, strconv.Itoa(userID), profileID, fmt.Sprintf("%d.%s", id, format))
 }
 
+// safeReaderFontPathComponent reports whether s is safe to use as a single
+// path component (user ID, profile ID) when building on-disk font paths.
+// profile_id in particular is populated straight from the client-supplied
+// X-Profile-Id header — RequireProfile only checks that it's non-empty — so
+// every handler MUST validate it with this function before it reaches any
+// filepath.Join, filepath.Glob, or filesystem call. An empty string, ".",
+// "..", any substring of "..", or any character outside [A-Za-z0-9._-] is
+// rejected.
+func safeReaderFontPathComponent(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	if strings.Contains(s, "..") {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case c == '.' || c == '_' || c == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // sanitizeReaderFontFilename strips any directory components from a
-// user-supplied upload filename, keeping only the base name.
+// user-supplied upload filename, keeping only the base name. Names that
+// still fail the strict path-component check after that (e.g. "..", or
+// anything containing characters unsafe for a path component) fall back to
+// an empty string so callers apply their default naming.
 func sanitizeReaderFontFilename(name string) string {
 	name = filepath.Base(strings.TrimSpace(name))
 	if name == "." || name == string(filepath.Separator) {
+		return ""
+	}
+	if !safeReaderFontPathComponent(name) {
 		return ""
 	}
 	return name
@@ -105,6 +139,10 @@ func (h *ReaderFontsHandler) HandleList(w http.ResponseWriter, r *http.Request) 
 	}
 	if h == nil || h.Store == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Reader fonts are not configured")
+		return
+	}
+	if !safeReaderFontPathComponent(profileID) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid profile")
 		return
 	}
 
@@ -133,6 +171,10 @@ func (h *ReaderFontsHandler) HandleUpload(w http.ResponseWriter, r *http.Request
 	}
 	if h == nil || h.Store == nil || h.Dir == "" {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Reader fonts are not configured")
+		return
+	}
+	if !safeReaderFontPathComponent(profileID) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid profile")
 		return
 	}
 
@@ -203,6 +245,7 @@ func (h *ReaderFontsHandler) HandleUpload(w http.ResponseWriter, r *http.Request
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		_, _ = h.Store.Delete(r.Context(), userID, profileID, inserted.ID)
+		_ = os.Remove(path)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store reader font")
 		return
 	}
@@ -222,6 +265,10 @@ func (h *ReaderFontsHandler) HandleDelete(w http.ResponseWriter, r *http.Request
 	}
 	if h == nil || h.Store == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Reader fonts are not configured")
+		return
+	}
+	if !safeReaderFontPathComponent(profileID) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid profile")
 		return
 	}
 
@@ -282,6 +329,10 @@ func (h *ReaderFontsHandler) HandleServeFile(w http.ResponseWriter, r *http.Requ
 	}
 	if h == nil || h.Store == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", "Reader fonts are not configured")
+		return
+	}
+	if !safeReaderFontPathComponent(profileID) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Invalid profile")
 		return
 	}
 

@@ -2227,20 +2227,23 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				if ebookReaderHandler != nil {
+				if ebookReaderHandler != nil || readerFontsHandler != nil {
 					r.Route("/ebooks", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
-						r.Get("/capability", ebookReaderHandler.HandleConversionCapability)
-						r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
-						r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
-						r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
-						r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
-						r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
-						r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
-						r.Get("/{content_id}/annotations", ebookReaderHandler.HandleListAnnotations)
-						r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
-						r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
-						r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
+
+						if ebookReaderHandler != nil {
+							r.Get("/capability", ebookReaderHandler.HandleConversionCapability)
+							r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+							r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+							r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
+							r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
+							r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
+							r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
+							r.Get("/{content_id}/annotations", ebookReaderHandler.HandleListAnnotations)
+							r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
+							r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
+							r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
+						}
 
 						if readerFontsHandler != nil {
 							r.Get("/reader-fonts", readerFontsHandler.HandleList)

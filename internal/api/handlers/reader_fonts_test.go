@@ -20,17 +20,31 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
 
-// fakeReaderFontStore is an in-memory ReaderFontStore keyed by font ID.
+// fakeReaderFontStore is an in-memory ReaderFontStore keyed by font ID. Each
+// method bumps a call counter so tests can assert the store was never
+// touched (e.g. when a handler must reject a request before reaching the
+// store or filesystem).
 type fakeReaderFontStore struct {
 	fonts  map[int64]ReaderFont
 	nextID int64
+
+	listCalls   int
+	countCalls  int
+	insertCalls int
+	getCalls    int
+	deleteCalls int
 }
 
 func newFakeReaderFontStore() *fakeReaderFontStore {
 	return &fakeReaderFontStore{fonts: map[int64]ReaderFont{}}
 }
 
+func (f *fakeReaderFontStore) totalCalls() int {
+	return f.listCalls + f.countCalls + f.insertCalls + f.getCalls + f.deleteCalls
+}
+
 func (f *fakeReaderFontStore) List(_ context.Context, userID int, profileID string) ([]ReaderFont, error) {
+	f.listCalls++
 	var out []ReaderFont
 	for _, font := range f.fonts {
 		if font.UserID == userID && font.ProfileID == profileID {
@@ -42,14 +56,18 @@ func (f *fakeReaderFontStore) List(_ context.Context, userID int, profileID stri
 }
 
 func (f *fakeReaderFontStore) Count(ctx context.Context, userID int, profileID string) (int, error) {
-	fonts, err := f.List(ctx, userID, profileID)
-	if err != nil {
-		return 0, err
+	f.countCalls++
+	var out []ReaderFont
+	for _, font := range f.fonts {
+		if font.UserID == userID && font.ProfileID == profileID {
+			out = append(out, font)
+		}
 	}
-	return len(fonts), nil
+	return len(out), nil
 }
 
 func (f *fakeReaderFontStore) Insert(_ context.Context, font ReaderFont) (ReaderFont, error) {
+	f.insertCalls++
 	f.nextID++
 	font.ID = f.nextID
 	font.CreatedAt = time.Now().UTC()
@@ -58,6 +76,7 @@ func (f *fakeReaderFontStore) Insert(_ context.Context, font ReaderFont) (Reader
 }
 
 func (f *fakeReaderFontStore) Get(_ context.Context, userID int, profileID string, id int64) (*ReaderFont, error) {
+	f.getCalls++
 	font, ok := f.fonts[id]
 	if !ok || font.UserID != userID || font.ProfileID != profileID {
 		return nil, nil
@@ -66,6 +85,7 @@ func (f *fakeReaderFontStore) Get(_ context.Context, userID int, profileID strin
 }
 
 func (f *fakeReaderFontStore) Delete(_ context.Context, userID int, profileID string, id int64) (bool, error) {
+	f.deleteCalls++
 	font, ok := f.fonts[id]
 	if !ok || font.UserID != userID || font.ProfileID != profileID {
 		return false, nil
@@ -362,5 +382,90 @@ func TestReaderFontServeAndDeleteAuthorize(t *testing.T) {
 	blobPath := filepath.Join(dir, "1", "profile-a", strconv.FormatInt(font2.ID, 10)+".woff2")
 	if _, err := os.Stat(blobPath); err != nil {
 		t.Fatalf("expected surviving font file on disk at %s: %v", blobPath, err)
+	}
+}
+
+// TestReaderFontRejectsTraversalProfileID is a regression test for a path
+// traversal vulnerability: profile_id is populated from the client-supplied
+// X-Profile-Id header (RequireProfile only checks it is non-empty) and used
+// to build filesystem paths for upload, serve, and delete. A profile ID
+// containing path separators or ".." components must be rejected with 400
+// before any store or filesystem operation happens, so a request such as
+// `X-Profile-Id: ../../../../tmp/evil` cannot escape the fonts directory.
+func TestReaderFontRejectsTraversalProfileID(t *testing.T) {
+	maliciousProfileIDs := []string{
+		"../../tmp/evil",
+		"a/b",
+		"..",
+	}
+
+	for _, profileID := range maliciousProfileIDs {
+		t.Run(profileID, func(t *testing.T) {
+			dir := t.TempDir()
+			store := newFakeReaderFontStore()
+			h := &ReaderFontsHandler{Store: store, Dir: dir}
+
+			// Upload.
+			body := append([]byte("wOF2"), bytes.Repeat([]byte{0x00}, 32)...)
+			uploadReq := newReaderFontUploadRequest(t, 1, profileID, "evil.woff2", body)
+			uploadRR := httptest.NewRecorder()
+			h.HandleUpload(uploadRR, uploadReq)
+			if uploadRR.Code != http.StatusBadRequest {
+				t.Fatalf("upload status = %d, want 400; body = %s", uploadRR.Code, uploadRR.Body.String())
+			}
+			if errResp := decodeReaderFontError(t, uploadRR); errResp.Error != "bad_request" {
+				t.Fatalf("upload error code = %q, want bad_request", errResp.Error)
+			}
+
+			// Serve.
+			serveReq := httptest.NewRequest(http.MethodGet, "/ebooks/reader-fonts/1/file", nil)
+			serveReq = serveReq.WithContext(readerFontAuthContext(1, profileID))
+			serveReq = withReaderFontIDParam(serveReq, 1)
+			serveRR := httptest.NewRecorder()
+			h.HandleServeFile(serveRR, serveReq)
+			if serveRR.Code != http.StatusBadRequest {
+				t.Fatalf("serve status = %d, want 400; body = %s", serveRR.Code, serveRR.Body.String())
+			}
+			if errResp := decodeReaderFontError(t, serveRR); errResp.Error != "bad_request" {
+				t.Fatalf("serve error code = %q, want bad_request", errResp.Error)
+			}
+
+			// Delete.
+			deleteReq := httptest.NewRequest(http.MethodDelete, "/ebooks/reader-fonts/1", nil)
+			deleteReq = deleteReq.WithContext(readerFontAuthContext(1, profileID))
+			deleteReq = withReaderFontIDParam(deleteReq, 1)
+			deleteRR := httptest.NewRecorder()
+			h.HandleDelete(deleteRR, deleteReq)
+			if deleteRR.Code != http.StatusBadRequest {
+				t.Fatalf("delete status = %d, want 400; body = %s", deleteRR.Code, deleteRR.Body.String())
+			}
+			if errResp := decodeReaderFontError(t, deleteRR); errResp.Error != "bad_request" {
+				t.Fatalf("delete error code = %q, want bad_request", errResp.Error)
+			}
+
+			// The store must never have been reached: rejection happens
+			// before any List/Count/Insert/Get/Delete call.
+			if calls := store.totalCalls(); calls != 0 {
+				t.Fatalf("expected store to be untouched, got %d calls (%+v)", calls, store)
+			}
+
+			// Nothing must have been written to disk under the fonts dir.
+			var found []string
+			walkErr := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if path != dir {
+					found = append(found, path)
+				}
+				return nil
+			})
+			if walkErr != nil {
+				t.Fatalf("walk fonts dir: %v", walkErr)
+			}
+			if len(found) != 0 {
+				t.Fatalf("expected no files written to fonts dir, found %+v", found)
+			}
+		})
 	}
 }
