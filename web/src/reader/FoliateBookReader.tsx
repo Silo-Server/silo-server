@@ -391,11 +391,24 @@ export function normalizeReaderSettings(settings?: ReaderSettingsInput): ReaderS
         ? 1
         : DEFAULT_READER_SETTINGS.columns;
 
+  const fontFamily = normalizeReaderFontFamily(raw.fontFamily);
+  const customFontID =
+    typeof raw.customFontID === "number" &&
+    Number.isInteger(raw.customFontID) &&
+    raw.customFontID > 0
+      ? raw.customFontID
+      : null;
+
   return {
     theme: legacyThemeFor(themeName, themeVariant),
     themeName,
     themeVariant,
-    fontFamily: normalizeReaderFontFamily(raw.fontFamily),
+    // "custom" only means anything paired with a customFontID; without one
+    // (e.g. hand-edited or partially-migrated persisted settings) there's no
+    // font to render, so fall back to the book's own typeface rather than
+    // rendering an unstyled "silo-custom-font" with no @font-face rule.
+    fontFamily:
+      fontFamily === "custom" && customFontID == null ? READER_FONT_STACKS.inherit : fontFamily,
     fontSize: clampNumber(raw.fontSize, DEFAULT_READER_SETTINGS.fontSize, 80, 180),
     fontWeight: clampNumber(raw.fontWeight, DEFAULT_READER_SETTINGS.fontWeight, 300, 800),
     hyphenation:
@@ -406,12 +419,7 @@ export function normalizeReaderSettings(settings?: ReaderSettingsInput): ReaderS
     columns,
     columnGap: clampNumber(raw.columnGap, DEFAULT_READER_SETTINGS.columnGap, 0, 50),
     justify: raw.justify === true,
-    customFontID:
-      typeof raw.customFontID === "number" &&
-      Number.isInteger(raw.customFontID) &&
-      raw.customFontID > 0
-        ? raw.customFontID
-        : null,
+    customFontID,
     flow: isReaderFlow(raw.flow) ? raw.flow : DEFAULT_READER_SETTINGS.flow,
     fontBrightness: clampNumber(
       raw.fontBrightness,

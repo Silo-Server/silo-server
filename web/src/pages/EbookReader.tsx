@@ -312,7 +312,11 @@ export default function EbookReader() {
   // only ever toggles for prose/paginated formats.
   const [chromeVisible, setChromeVisible] = useState(true);
   const [readerFonts, setReaderFonts] = useState<ReaderFontMeta[]>([]);
-  const [readerFontsLoaded, setReaderFontsLoaded] = useState(false);
+  // Tracks a *successful* font-list load, separately from "a fetch attempt
+  // finished" — a transient failure must not be treated as "the list is
+  // empty" by the fallback-reset effect below, or it wipes a legitimately
+  // saved custom font selection.
+  const [readerFontsLoadOk, setReaderFontsLoadOk] = useState(false);
   const readerFontsRequestedRef = useRef(false);
   const [fontUploading, setFontUploading] = useState(false);
   const [fontUploadError, setFontUploadError] = useState<string | null>(null);
@@ -389,23 +393,35 @@ export default function EbookReader() {
   }, [contentId]);
   // Uploaded fonts are fetched once, lazily, the first time the settings
   // panel is opened rather than on mount — most reader sessions never touch
-  // it and this endpoint is per-profile, not per-book.
+  // it and this endpoint is per-profile, not per-book. Comics never show the
+  // font controls, so skip the fetch entirely for them.
   useEffect(() => {
-    if (panel !== "settings" || readerFontsRequestedRef.current) return;
+    if (isComicFormat || panel !== "settings" || readerFontsRequestedRef.current) return;
     readerFontsRequestedRef.current = true;
     void fetchReaderFonts()
-      .then(setReaderFonts)
-      .catch(() => {})
-      .finally(() => setReaderFontsLoaded(true));
-  }, [panel]);
+      .then((fonts) => {
+        setReaderFonts(fonts);
+        setReaderFontsLoadOk(true);
+      })
+      .catch(() => {
+        // A transient failure shouldn't latch permanently — clear the guard
+        // so reopening the settings panel retries the fetch instead of
+        // leaving the font list (and the fallback-reset effect below)
+        // permanently unresolved.
+        readerFontsRequestedRef.current = false;
+      });
+  }, [panel, isComicFormat]);
   // If the font a saved config points at no longer exists (deleted from this
   // session or another one), fall back to the book's own typeface instead of
   // silently rendering with whatever the browser last resolved "custom" to.
+  // Gated on a *successful* load (not just "a fetch attempt finished") so a
+  // transient fetch failure can't be mistaken for "the list is empty" and
+  // wipe a legitimately saved selection.
   useEffect(() => {
-    if (!readerFontsLoaded || readerSettings.customFontID == null) return;
+    if (!readerFontsLoadOk || readerSettings.customFontID == null) return;
     if (readerFonts.some((font) => font.id === readerSettings.customFontID)) return;
     updateReaderSettings({ customFontID: null, fontFamily: READER_FONT_STACKS.inherit });
-  }, [readerFontsLoaded, readerFonts, readerSettings.customFontID, updateReaderSettings]);
+  }, [readerFontsLoadOk, readerFonts, readerSettings.customFontID, updateReaderSettings]);
   const handleFontUpload = useCallback(async (event: ReactChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -422,8 +438,13 @@ export default function EbookReader() {
     }
   }, []);
   const handleDeleteFont = useCallback(async (id: number) => {
-    await deleteReaderFont(id);
-    setReaderFonts((current) => current.filter((font) => font.id !== id));
+    setFontUploadError(null);
+    try {
+      await deleteReaderFont(id);
+      setReaderFonts((current) => current.filter((font) => font.id !== id));
+    } catch (err) {
+      setFontUploadError(err instanceof ApiClientError ? err.message : "Font delete failed.");
+    }
   }, []);
   const handleSearchSubmit = useCallback(async () => {
     const query = searchText.trim();

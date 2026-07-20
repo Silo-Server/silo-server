@@ -924,6 +924,184 @@ describe("EbookReader", () => {
     );
   });
 
+  it("keeps a saved custom font selection through a transient fonts-list fetch failure", async () => {
+    mocks.fetchReaderFonts.mockReset();
+    mocks.fetchReaderFonts.mockRejectedValue(new Error("network error"));
+    mocks.fetchEbookReaderConfig.mockResolvedValue({
+      settings: { customFontID: 3, fontFamily: "custom" },
+    });
+    vi.useFakeTimers();
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    // Let the rejected fetchReaderFonts() promise settle.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(mocks.saveEbookReaderConfig).not.toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        settings: expect.objectContaining({ customFontID: null }),
+      }),
+    );
+
+    vi.useRealTimers();
+  });
+
+  it("retries the fonts fetch after a failure the next time the panel opens", async () => {
+    mocks.fetchReaderFonts.mockReset();
+    mocks.fetchReaderFonts.mockRejectedValueOnce(new Error("network error"));
+    mocks.fetchReaderFonts.mockResolvedValueOnce([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    const tocTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Table of contents"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFonts).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      tocTab?.click();
+    });
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFonts).toHaveBeenCalledTimes(2);
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    const uploadedGroup = font?.querySelector('optgroup[label="Uploaded"]');
+    expect(uploadedGroup).not.toBeNull();
+  });
+
+  it("skips the fonts fetch entirely for comic formats", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [makeVersion({ file_id: 8, file_name: "Comic.cbz", container: "cbz" })],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFonts).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a delete-font failure as an inline error instead of an unhandled rejection", async () => {
+    mocks.fetchReaderFonts.mockResolvedValue([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+    mocks.deleteReaderFont.mockRejectedValue(new Error("boom"));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const deleteButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Delete font Literata"]',
+    );
+    await act(async () => {
+      deleteButton?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mocks.deleteReaderFont).toHaveBeenCalledWith(3);
+    // The font must still be listed — the optimistic removal never happened.
+    const uploadedGroup = container
+      .querySelector<HTMLSelectElement>('select[aria-label="Font family"]')
+      ?.querySelector('optgroup[label="Uploaded"]');
+    expect(uploadedGroup?.querySelector('option[value="custom:3"]')).not.toBeNull();
+    expect(container.textContent).toContain("Font delete failed.");
+  });
+
   it("toggles the persisted reading ruler overlay", async () => {
     await act(async () => {
       root.render(

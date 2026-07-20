@@ -236,6 +236,18 @@ describe("FoliateBookReader helpers", () => {
     ).toBe(READER_FONT_STACKS.serif);
   });
 
+  it("falls back to inherit when fontFamily is custom but customFontID is missing", () => {
+    expect(normalizeReaderSettings({ fontFamily: "custom" }).fontFamily).toBe("inherit");
+    expect(normalizeReaderSettings({ fontFamily: "custom" }).customFontID).toBeNull();
+    expect(normalizeReaderSettings({ fontFamily: "custom", customFontID: -1 }).fontFamily).toBe(
+      "inherit",
+    );
+    // A valid pairing is left untouched.
+    expect(normalizeReaderSettings({ fontFamily: "custom", customFontID: 5 }).fontFamily).toBe(
+      "custom",
+    );
+  });
+
   it("normalizes persisted reading ruler settings", () => {
     expect(
       normalizeReaderSettings({
