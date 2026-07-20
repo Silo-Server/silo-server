@@ -187,6 +187,11 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// ReaderFontsDir is the base directory for custom reader font blobs
+	// (see handlers.ReaderFontsHandler). Empty disables the
+	// /ebooks/reader-fonts routes even when DB is set.
+	ReaderFontsDir string
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -513,10 +518,17 @@ func NewRouter(deps Dependencies) chi.Router {
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
 	var ebookConfigStore *handlers.PGEbookReaderConfigStore
 	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
+	var readerFontsHandler *handlers.ReaderFontsHandler
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
 		ebookAnnotationStore = handlers.NewPGEbookReaderAnnotationStore(deps.DB)
+		if deps.ReaderFontsDir != "" {
+			readerFontsHandler = &handlers.ReaderFontsHandler{
+				Store: handlers.NewPGReaderFontStore(deps.DB),
+				Dir:   deps.ReaderFontsDir,
+			}
+		}
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
 		searchIndexEvents := catalog.NewSearchIndexEventRepository(deps.DB)
@@ -2229,6 +2241,13 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
 						r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
 						r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
+
+						if readerFontsHandler != nil {
+							r.Get("/reader-fonts", readerFontsHandler.HandleList)
+							r.Post("/reader-fonts", readerFontsHandler.HandleUpload)
+							r.Delete("/reader-fonts/{font_id}", readerFontsHandler.HandleDelete)
+							r.Get("/reader-fonts/{font_id}/file", readerFontsHandler.HandleServeFile)
+						}
 					})
 				}
 
