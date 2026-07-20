@@ -68,10 +68,12 @@ column layouts.
 
 ### Columns and justification
 
-- `columns: 1 | 2 | auto` replacing/subsuming the current `spread`
-  control where foliate's paginator supports it (foliate `maxColumnCount`);
-  "auto" keeps today's width-based behavior. (BookOrbit offers up to 4;
-  beyond 2 is poster-size territory — YAGNI, revisit on demand.)
+- `columns: auto | 1 | 2 | 3 | 4` replacing/subsuming the current
+  `spread` control (foliate `maxColumnCount`); "auto" keeps today's
+  width-based behavior. Matches BookOrbit's range; foliate still collapses
+  to fewer columns when the viewport can't fit readable lines.
+- `columnGap: 0–50%` (default matches foliate's current gap), applied with
+  the column count through the content CSS.
 - `justify: boolean` toggle beside the existing hyphenation toggle, applied
   through the same content-CSS path.
 - Both persist in reader settings like every other knob; both inert for
@@ -105,7 +107,7 @@ ruler untouched.
   cap), authorization (cross-user access denied), list/delete; name-table
   parsing fallback.
 - Reader: font-face injection present when an uploaded font is selected;
-  columns/justify reach the content CSS; comics unaffected.
+  columns/columnGap/justify reach the content CSS; comics unaffected.
 
 ## Out of scope
 
