@@ -309,6 +309,33 @@ func TestReaderFontUploadEnforcesCaps(t *testing.T) {
 			t.Fatalf("expected no font persisted, got %+v", store.fonts)
 		}
 	})
+
+	// Regression test: before MaxBytesReader was wired in, a request body far
+	// exceeding readerFontMaxBytes was fully buffered by ParseMultipartForm
+	// before the handler's own size check ever ran. This drives the raw body
+	// past the MaxBytesReader cap so ParseMultipartForm itself fails, and
+	// asserts that failure still maps to 413 (not the generic 400 "Invalid
+	// multipart form").
+	t.Run("raw body exceeds the hard multipart cap", func(t *testing.T) {
+		dir := t.TempDir()
+		store := newFakeReaderFontStore()
+		h := &ReaderFontsHandler{Store: store, Dir: dir}
+
+		hugeBody := append([]byte("wOF2"), bytes.Repeat([]byte{0x00}, readerFontMaxBytes+2<<20)...)
+		req := newReaderFontUploadRequest(t, 1, "profile-a", "huge.woff2", hugeBody)
+		rr := httptest.NewRecorder()
+		h.HandleUpload(rr, req)
+
+		if rr.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("status = %d, want 413; body = %s", rr.Code, rr.Body.String())
+		}
+		if errResp := decodeReaderFontError(t, rr); errResp.Error != "too_large" {
+			t.Fatalf("error code = %q, want too_large", errResp.Error)
+		}
+		if len(store.fonts) != 0 {
+			t.Fatalf("expected no font persisted, got %+v", store.fonts)
+		}
+	})
 }
 
 func TestReaderFontListScopedToProfile(t *testing.T) {

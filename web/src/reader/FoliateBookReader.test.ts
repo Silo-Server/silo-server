@@ -276,6 +276,7 @@ describe("FoliateBookReader helpers", () => {
         hyphenation: false,
         rtl: true,
         writingMode: "vertical-rl",
+        justify: true,
       }),
     );
 
@@ -287,6 +288,7 @@ describe("FoliateBookReader helpers", () => {
     expect(styles).toContain("hyphens: none !important");
     expect(styles).toContain("line-height: 1.8 !important");
     expect(styles).toContain("max-width: 68ch !important");
+    expect(styles).toContain("text-align: justify !important");
     expect(styles).toContain("direction: rtl !important");
     expect(styles).toContain("writing-mode: vertical-rl !important");
   });
@@ -368,6 +370,20 @@ describe("FoliateBookReader helpers", () => {
       margin: "20px",
       maxColumnCount: "1",
       maxInlineSize: "9999px",
+    });
+  });
+
+  it("computes explicit column count and gap from settings", () => {
+    expect(
+      readerRendererAttributes(
+        normalizeReaderSettings({
+          columns: 3,
+          columnGap: 20,
+        }),
+      ),
+    ).toMatchObject({
+      maxColumnCount: "3",
+      gap: "20%",
     });
   });
 });

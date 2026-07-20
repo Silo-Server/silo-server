@@ -201,7 +201,16 @@ func (h *ReaderFontsHandler) HandleUpload(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Caps the raw request body before ParseMultipartForm buffers it, so an
+	// oversized upload is rejected while reading instead of after silently
+	// consuming memory (pattern: HandleUploadInstallation in plugins.go).
+	r.Body = http.MaxBytesReader(w, r.Body, readerFontMaxBytes+(1<<20))
 	if err := r.ParseMultipartForm(readerFontMaxBytes + (1 << 20)); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "too_large", "Font file exceeds the maximum size")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid multipart form")
 		return
 	}
