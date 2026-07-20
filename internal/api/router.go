@@ -519,6 +519,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var ebookConfigStore *handlers.PGEbookReaderConfigStore
 	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
 	var readerFontsHandler *handlers.ReaderFontsHandler
+	var readingSessionsHandler *handlers.ReadingSessionsHandler
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
@@ -528,6 +529,10 @@ func NewRouter(deps Dependencies) chi.Router {
 				Store: handlers.NewPGReaderFontStore(deps.DB),
 				Dir:   deps.ReaderFontsDir,
 			}
+		}
+		readingSessionsHandler = &handlers.ReadingSessionsHandler{
+			Store: handlers.NewPGReadingSessionStore(deps.DB),
+			Now:   func() time.Time { return time.Now().UTC() },
 		}
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -2227,7 +2232,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				if ebookReaderHandler != nil || readerFontsHandler != nil {
+				if ebookReaderHandler != nil || readerFontsHandler != nil || readingSessionsHandler != nil {
 					r.Route("/ebooks", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 
@@ -2250,6 +2255,10 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Post("/reader-fonts", readerFontsHandler.HandleUpload)
 							r.Delete("/reader-fonts/{font_id}", readerFontsHandler.HandleDelete)
 							r.Get("/reader-fonts/{font_id}/file", readerFontsHandler.HandleServeFile)
+						}
+
+						if readingSessionsHandler != nil {
+							r.Post("/{content_id}/reading-heartbeat", readingSessionsHandler.HandleHeartbeat)
 						}
 					})
 				}
