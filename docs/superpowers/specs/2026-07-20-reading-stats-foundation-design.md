@@ -67,9 +67,10 @@ goals/achievements layer.
                      "duration_seconds", "start_fraction",
                      "end_fraction" } … ] }          // most recent 50
   Rollups computed by query (`date_trunc('day', started_at)` grouped) —
-  no aggregate tables. Day boundaries use the server's timezone setting.
-- New per-profile page "Reading stats", reached from the user/profile menu
-  (same placement pattern as other profile-scoped pages): a 12-month
+  no aggregate tables. Day boundaries use UTC (the server has no timezone
+  setting; all handler timestamps are already `time.Now().UTC()`).
+- New per-profile page "Reading stats" at `/reading-stats` (RequireProfile +
+  Layout route like other top-level pages) with a sidebar nav entry: a 12-month
   contribution-style heatmap (calendar grid of `days`), totals row,
   top-books-by-time list, and a recent-sessions timeline. Reuses the
   app's existing card/list components; no new charting dependency — the
