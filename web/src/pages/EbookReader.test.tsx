@@ -10,6 +10,7 @@ import EbookReader from "./EbookReader";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
+  useBookReadingStats: vi.fn(),
   readerPrev: vi.fn(),
   readerNext: vi.fn(),
   readerGoTo: vi.fn(),
@@ -39,6 +40,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
   useCatalogItemDetail: mocks.useCatalogItemDetail,
+}));
+
+vi.mock("@/hooks/queries/readingStats", () => ({
+  useBookReadingStats: mocks.useBookReadingStats,
 }));
 
 vi.mock("@/components/PageBack", () => ({
@@ -293,6 +298,7 @@ describe("EbookReader", () => {
     root = createRoot(container);
     installStorage();
     mocks.useCatalogItemDetail.mockReset();
+    mocks.useBookReadingStats.mockReset();
     mocks.readerPrev.mockReset();
     mocks.readerNext.mockReset();
     mocks.readerGoTo.mockReset();
@@ -338,6 +344,7 @@ describe("EbookReader", () => {
       isLoading: false,
       error: null,
     });
+    mocks.useBookReadingStats.mockReturnValue({ data: undefined });
   });
 
   afterEach(async () => {
@@ -375,6 +382,39 @@ describe("EbookReader", () => {
 
     expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the time remaining in the footer once reading stats resolve", async () => {
+    mocks.useBookReadingStats.mockReturnValue({
+      data: { pace_fraction_per_hour: 0.1, time_left_seconds: 7800, book_seconds: 36000 },
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).toContain("2h 10m left");
+    expect(mocks.useBookReadingStats).toHaveBeenCalledWith("ebook-1");
+  });
+
+  it("omits the time remaining when reading stats haven't resolved", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).not.toContain("left");
   });
 
   it("preserves library context on the back-to-ebook link", async () => {

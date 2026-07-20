@@ -64,4 +64,22 @@ describe("ReaderFooter", () => {
     act(() => btn.click());
     expect(onShowShortcuts).toHaveBeenCalled();
   });
+
+  it("shows the time remaining beside the percentage when provided", () => {
+    render({ timeLeftSeconds: 7800 });
+    expect(container.textContent).toContain("34%");
+    expect(container.textContent).toContain("2h 10m left");
+  });
+
+  it("omits the time remaining when null", () => {
+    render({ timeLeftSeconds: null });
+    expect(container.textContent).toContain("34%");
+    expect(container.textContent).not.toContain("left");
+  });
+
+  it("omits the time remaining when undefined", () => {
+    render();
+    expect(container.textContent).toContain("34%");
+    expect(container.textContent).not.toContain("left");
+  });
 });

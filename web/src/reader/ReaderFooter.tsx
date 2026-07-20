@@ -1,5 +1,6 @@
 import { Keyboard } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { formatDuration } from "@/lib/formatDuration";
 import type { ChapterExtent } from "./readerNavigation";
 
 export type ReaderFooterProps = {
@@ -8,6 +9,7 @@ export type ReaderFooterProps = {
   chapterLabel: string | null;
   onScrub: (fraction: number) => void;
   onShowShortcuts: () => void;
+  timeLeftSeconds?: number | null;
 };
 
 export default function ReaderFooter({
@@ -16,6 +18,7 @@ export default function ReaderFooter({
   chapterLabel,
   onScrub,
   onShowShortcuts,
+  timeLeftSeconds,
 }: ReaderFooterProps) {
   const percent = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
   return (
@@ -46,7 +49,9 @@ export default function ReaderFooter({
         </div>
         <div className="text-muted-foreground flex items-center justify-between text-xs">
           <span className="min-w-0 truncate">{extent ? (chapterLabel ?? "") : ""}</span>
-          <span className="tabular-nums">{percent}%</span>
+          <span className="tabular-nums">
+            {percent}%{timeLeftSeconds != null && ` · ${formatDuration(timeLeftSeconds)} left`}
+          </span>
           <Button
             variant="ghost"
             size="icon-sm"

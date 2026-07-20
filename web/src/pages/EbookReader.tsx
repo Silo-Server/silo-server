@@ -48,6 +48,7 @@ import { useReadingHeartbeat } from "@/hooks/useReadingHeartbeat";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useBookReadingStats } from "@/hooks/queries/readingStats";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
@@ -303,6 +304,9 @@ export default function EbookReader() {
     contentId: isComicFormat ? null : contentId || null,
     getFraction: () => locationInfoRef.current?.fraction ?? readerProgress ?? 0,
   });
+  // Pace/time-left estimates only make sense for prose; comics have no
+  // reading-speed signal to project against.
+  const readingStats = useBookReadingStats(!isComicFormat && contentId ? contentId : undefined);
   const configLoadedRef = useRef(false);
   // Tracks settings the user changed in this session so a slow server config
   // fetch cannot clobber them after the fact.
@@ -1743,6 +1747,7 @@ export default function EbookReader() {
           chapterLabel={locationInfo?.tocLabel ?? null}
           onScrub={handleProgressScrub}
           onShowShortcuts={() => setShortcutsOpen(true)}
+          timeLeftSeconds={readingStats.data?.time_left_seconds ?? null}
         />
       )}
       {shortcutsOpen && <ReaderShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
