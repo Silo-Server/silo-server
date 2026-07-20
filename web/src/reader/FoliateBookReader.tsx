@@ -73,6 +73,14 @@ export type FoliateBookReaderHandle = {
   createSelectionAnnotation: () => ReaderSelection | null;
   getReadableText: () => string;
   getSectionFractions: () => number[];
+  // Synchronous read of whether any content doc currently holds a
+  // non-collapsed selection. Unlike onSelectionChange (which the caller
+  // learns about through a state update that FoliateBookReader itself
+  // defers with setTimeout(0) to let native selection settle), this reads
+  // the live DOM selection directly, so it is safe to consult from a
+  // pointerup handler that must decide same-tick whether a tap ending a
+  // selection should also page-turn.
+  hasLiveSelection: () => boolean;
 };
 
 export type ReaderTheme = "light" | "sepia" | "dark";
@@ -627,6 +635,11 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const annotationsRef = useRef<EbookReaderAnnotation[]>(annotations);
     const drawnCfisRef = useRef<Set<string>>(new Set());
     const selectionCleanupRef = useRef<(() => void)[]>([]);
+    // Synchronous mirror of "is there a live, non-collapsed selection",
+    // updated directly inside the selection listeners below (before their
+    // setTimeout(0) deferral) so hasLiveSelection() never reports stale data
+    // to a same-tick caller. See the FoliateBookReaderHandle doc comment.
+    const hasLiveSelectionRef = useRef(false);
     // Held in refs (updated every render, read from listeners) rather than
     // effect dependencies so the content-doc listeners below never need to be
     // torn down and re-attached just because a caller passed a new inline
@@ -696,6 +709,19 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       }
     }, []);
 
+    // Mirrors the collapsed/empty-text checks createSelectionAnnotation uses
+    // below, but only answers "is there a live selection" — no CFI/rect work
+    // — so it's cheap enough to call from every selection-related listener.
+    const computeHasLiveSelection = useCallback((): boolean => {
+      const contents = viewRef.current?.renderer?.getContents?.() ?? [];
+      for (const content of contents) {
+        const selection = content.doc.getSelection();
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0) continue;
+        if (selection.toString().trim()) return true;
+      }
+      return false;
+    }, []);
+
     const createSelectionAnnotation = useCallback((): ReaderSelection | null => {
       const view = viewRef.current;
       const contents = view?.renderer?.getContents?.() ?? [];
@@ -735,10 +761,19 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const attachSelectionListeners = useCallback(() => {
       for (const cleanup of selectionCleanupRef.current) cleanup();
       selectionCleanupRef.current = [];
+      // Content docs are being (re)attached, so any previously live selection
+      // no longer applies.
+      hasLiveSelectionRef.current = false;
       const contents = viewRef.current?.renderer?.getContents?.() ?? [];
       for (const content of contents) {
         const doc = content.doc;
-        const handler = () => window.setTimeout(emitSelectionChange, 0);
+        const handler = () => {
+          // Synchronous, ahead of the deferred emitSelectionChange below, so
+          // a same-tick pointerup handler (e.g. EbookReader's tap dispatch)
+          // reading hasLiveSelection() never sees a stale value.
+          hasLiveSelectionRef.current = computeHasLiveSelection();
+          window.setTimeout(emitSelectionChange, 0);
+        };
         doc.addEventListener("selectionchange", handler);
         doc.addEventListener("pointerup", handler);
         doc.addEventListener("keyup", handler);
@@ -769,7 +804,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
           doc.removeEventListener("mousemove", contentPointerMove);
         });
       }
-    }, [emitSelectionChange]);
+    }, [computeHasLiveSelection, emitSelectionChange]);
 
     const getReadableText = useCallback(() => {
       const contents = viewRef.current?.renderer?.getContents?.() ?? [];
@@ -804,11 +839,13 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         clearSearch: () => viewRef.current?.clearSearch?.(),
         clearSelection: () => {
           viewRef.current?.deselect?.();
+          hasLiveSelectionRef.current = false;
           onSelectionChange?.(null);
         },
         createSelectionAnnotation,
         getReadableText,
         getSectionFractions: () => viewRef.current?.getSectionFractions?.() ?? [],
+        hasLiveSelection: () => hasLiveSelectionRef.current,
       }),
       [createSelectionAnnotation, getReadableText, onSelectionChange],
     );

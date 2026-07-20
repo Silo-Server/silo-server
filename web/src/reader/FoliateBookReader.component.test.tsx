@@ -570,6 +570,47 @@ describe("FoliateBookReader open flow", () => {
     expect(onContentPointerMove).toHaveBeenCalledWith({ clientY: 25 });
   });
 
+  it("updates hasLiveSelection synchronously, ahead of the deferred selection-change callback", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const handleRef = createRef<FoliateBookReaderHandle>();
+
+    await act(async () => {
+      root.render(ui(fileA, {}, handleRef));
+    });
+    const view = viewAt(0);
+
+    const contentDoc = makeFakeContentDoc({ left: 0, top: 0 });
+    let fakeSelection: { isCollapsed: boolean; rangeCount: number; toString: () => string } = {
+      isCollapsed: true,
+      rangeCount: 0,
+      toString: () => "",
+    };
+    contentDoc.getSelection = () => fakeSelection as unknown as Selection;
+    view.renderer = { getContents: () => [{ doc: contentDoc, index: 0 }] };
+
+    await act(async () => {
+      view.dispatchEvent(new CustomEvent("create-overlay"));
+    });
+    expect(handleRef.current?.hasLiveSelection()).toBe(false);
+
+    fakeSelection = { isCollapsed: false, rangeCount: 1, toString: () => "chosen text" };
+    act(() => {
+      contentDoc.dispatchEvent(new Event("selectionchange"));
+    });
+    // True immediately after the synchronous dispatch — this assertion runs
+    // before the listener's setTimeout(0) deferral could ever have fired, so
+    // it proves the ref updates synchronously rather than relying on that
+    // deferred emitSelectionChange callback.
+    expect(handleRef.current?.hasLiveSelection()).toBe(true);
+
+    fakeSelection = { isCollapsed: true, rangeCount: 0, toString: () => "" };
+    act(() => {
+      contentDoc.dispatchEvent(new Event("selectionchange"));
+    });
+    expect(handleRef.current?.hasLiveSelection()).toBe(false);
+  });
+
   it("does not forward content pointer events when the callbacks are absent", async () => {
     const book = makeBook("A");
     mocks.loaderOpen.mockResolvedValue({ book });

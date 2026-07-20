@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   readerGoTo: vi.fn(),
   readerGoToFraction: vi.fn(),
   readerSearch: vi.fn(),
+  hasLiveSelection: vi.fn(),
   captureReaderSettings: vi.fn(),
   captureCustomFontUrl: vi.fn(),
   fetchEbookReaderConfig: vi.fn(),
@@ -89,6 +90,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         createSelectionAnnotation: () => { cfi: string; selectedText: string } | null;
         getReadableText: () => string;
         getSectionFractions: () => number[];
+        hasLiveSelection: () => boolean;
       },
       {
         file: FileVersion;
@@ -155,6 +157,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         }),
         getReadableText: () => "Readable text for speech",
         getSectionFractions: () => [0, 0.25, 0.6, 1],
+        hasLiveSelection: mocks.hasLiveSelection,
       }));
       useEffect(() => {
         onFileLoaded?.({ objectUrl: "blob:ebook", filename: "Reader.epub" });
@@ -304,6 +307,8 @@ describe("EbookReader", () => {
     mocks.readerGoTo.mockReset();
     mocks.readerGoToFraction.mockReset();
     mocks.readerSearch.mockReset();
+    mocks.hasLiveSelection.mockReset();
+    mocks.hasLiveSelection.mockReturnValue(false);
     mocks.captureReaderSettings.mockReset();
     mocks.captureCustomFontUrl.mockReset();
     mocks.fetchEbookReaderConfig.mockReset();
@@ -1559,6 +1564,57 @@ describe("EbookReader", () => {
       surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
     });
     expect(container.querySelector("header")).not.toBeNull();
+  });
+
+  it("does not page-turn an edge tap that just finished a selection, even though React selection state already reads null", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // Clear the selection the mock reports on mount so React's `selection`
+    // state is null, mirroring the race: the pointerup ending a selection
+    // fires before FoliateBookReader's deferred onSelectionChange lands, so
+    // by the time dispatchSurfaceTap runs, `selection` is stale/null.
+    const highlight = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Highlight selection"]',
+    );
+    await act(async () => {
+      highlight?.click();
+    });
+
+    // The reader's synchronous live-selection signal still reports true —
+    // this is what dispatchSurfaceTap must also consult.
+    mocks.hasLiveSelection.mockReturnValue(true);
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    act(() => {
+      // An edge tap, which would otherwise page forward.
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 270, bubbles: true }));
+    });
+
+    expect(mocks.readerNext).not.toHaveBeenCalled();
   });
 
   // FoliateBookReader is mocked in this file, so these tests only exercise

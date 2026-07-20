@@ -559,10 +559,14 @@ export default function EbookReader() {
       if (isComicFormat) return;
       const rect = readingSurfaceRef.current?.getBoundingClientRect();
       if (!rect || rect.width <= 0) return;
+      // Belt and braces: React's `selection` state lags a same-tick pointerup
+      // that just finished a text selection (FoliateBookReader defers the
+      // state update with setTimeout(0) to let native selection settle), so
+      // also consult the reader's synchronous live-selection signal.
       const action = tapZoneAction({
         xRatio: (clientX - rect.left) / rect.width,
         flow: readerSettings.flow,
-        hasSelection: Boolean(selection),
+        hasSelection: Boolean(selection) || (readerRef.current?.hasLiveSelection?.() ?? false),
       });
       if (action === "prev") readerRef.current?.prev();
       else if (action === "next") readerRef.current?.next();
