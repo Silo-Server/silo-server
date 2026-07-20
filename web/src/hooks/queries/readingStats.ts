@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/api/client";
 import { ebookKeys } from "./keys";
@@ -183,7 +183,7 @@ export async function fetchReadingMotivation(tz: string): Promise<ReadingMotivat
 export function useReadingMotivation() {
   const tz = clientTimezone();
   return useQuery({
-    queryKey: ebookKeys.readingMotivation(),
+    queryKey: ebookKeys.readingMotivation(tz),
     queryFn: () => fetchReadingMotivation(tz),
     staleTime: READING_MOTIVATION_STALE_TIME,
   });
@@ -201,5 +201,20 @@ export async function putReadingGoals(goals: ReadingGoalsInput): Promise<void> {
   await api<void>("/ebooks/reading-goals", {
     method: "PUT",
     body: JSON.stringify(goals),
+  });
+}
+
+// Wraps putReadingGoals in the repo's mutation convention: on a successful
+// save, invalidate reading-motivation so goals/progress refetch with the
+// server's latest values. Callers use mutateAsync so a rejected save
+// propagates back to them (see GoalsForm in MotivationSections.tsx, which
+// relies on that rejection to avoid marking an unsaved value as saved).
+export function useSaveReadingGoals() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (goals: ReadingGoalsInput) => putReadingGoals(goals),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ebookKeys.readingMotivation() });
+    },
   });
 }

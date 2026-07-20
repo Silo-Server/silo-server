@@ -1,12 +1,17 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockPutReadingGoals = vi.fn();
+// Stubs useSaveReadingGoals's mutateAsync directly (rather than routing
+// through a real QueryClientProvider + react-query mutation) so these tests
+// stay focused on GoalsForm's own save/error/retry bookkeeping. The
+// invalidate-on-success behavior of the real useSaveReadingGoals hook is
+// covered at the hook level in readingStats.test.ts.
+const mockSaveGoals = vi.fn();
 
 vi.mock("@/hooks/queries/readingStats", () => ({
-  putReadingGoals: (...args: unknown[]) => mockPutReadingGoals(...args),
+  useSaveReadingGoals: () => ({ mutateAsync: (...args: unknown[]) => mockSaveGoals(...args) }),
 }));
 
 import {
@@ -111,8 +116,8 @@ describe("StreakChallengeSection", () => {
 
 describe("GoalsSection", () => {
   beforeEach(() => {
-    mockPutReadingGoals.mockReset();
-    mockPutReadingGoals.mockResolvedValue(undefined);
+    mockSaveGoals.mockReset();
+    mockSaveGoals.mockResolvedValue(undefined);
   });
 
   it("prefills inputs from the goals payload", () => {
@@ -130,7 +135,7 @@ describe("GoalsSection", () => {
     await user.type(booksInput, "30");
     await user.tab();
 
-    expect(mockPutReadingGoals).toHaveBeenCalledWith({
+    expect(mockSaveGoals).toHaveBeenCalledWith({
       books_per_year: 30,
       hours_per_year: 100,
     });
@@ -144,7 +149,7 @@ describe("GoalsSection", () => {
     await user.click(booksInput);
     await user.tab();
 
-    expect(mockPutReadingGoals).not.toHaveBeenCalled();
+    expect(mockSaveGoals).not.toHaveBeenCalled();
   });
 
   it("shows an inline error and does not call putReadingGoals for an invalid (0) value", async () => {
@@ -157,7 +162,7 @@ describe("GoalsSection", () => {
     await user.tab();
 
     expect(await screen.findByText(/between 1 and 100000/)).toBeInTheDocument();
-    expect(mockPutReadingGoals).not.toHaveBeenCalled();
+    expect(mockSaveGoals).not.toHaveBeenCalled();
   });
 
   it("shows an inline error and does not call putReadingGoals for a negative value", async () => {
@@ -170,12 +175,58 @@ describe("GoalsSection", () => {
     await user.tab();
 
     expect(await screen.findByText(/between 1 and 100000/)).toBeInTheDocument();
-    expect(mockPutReadingGoals).not.toHaveBeenCalled();
+    expect(mockSaveGoals).not.toHaveBeenCalled();
   });
 
   it("renders an empty state when goals is null", () => {
     render(<GoalsSection goals={null} />);
     expect(screen.getByText(/No goals data yet/)).toBeInTheDocument();
+  });
+
+  it("shows an inline error and keeps the value retryable when the save rejects", async () => {
+    mockSaveGoals.mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    render(<GoalsSection goals={goalsFixture} />);
+
+    const booksInput = screen.getByLabelText(/Books per year/);
+    await user.clear(booksInput);
+    await user.type(booksInput, "30");
+    await user.tab();
+
+    expect(await screen.findByText(/Failed to save reading goals/)).toBeInTheDocument();
+    expect(mockSaveGoals).toHaveBeenCalledTimes(1);
+
+    // The ref was NOT advanced on failure, so blurring again with the same
+    // (still-unsaved) value must retry the PUT rather than short-circuiting.
+    await user.click(booksInput);
+    await user.tab();
+
+    expect(mockSaveGoals).toHaveBeenCalledTimes(2);
+    expect(mockSaveGoals).toHaveBeenLastCalledWith({
+      books_per_year: 30,
+      hours_per_year: 100,
+    });
+  });
+
+  it("clears the inline error once a retry succeeds", async () => {
+    mockSaveGoals.mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    render(<GoalsSection goals={goalsFixture} />);
+
+    const booksInput = screen.getByLabelText(/Books per year/);
+    await user.clear(booksInput);
+    await user.type(booksInput, "30");
+    await user.tab();
+    expect(await screen.findByText(/Failed to save reading goals/)).toBeInTheDocument();
+
+    mockSaveGoals.mockResolvedValueOnce(undefined);
+    await user.click(booksInput);
+    await user.tab();
+
+    expect(mockSaveGoals).toHaveBeenCalledTimes(2);
+    await waitFor(() =>
+      expect(screen.queryByText(/Failed to save reading goals/)).not.toBeInTheDocument(),
+    );
   });
 });
 

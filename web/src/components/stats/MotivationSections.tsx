@@ -1,10 +1,11 @@
 import { useRef, useState, type FormEvent } from "react";
 
+import { ApiClientError } from "@/api/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
-  putReadingGoals,
+  useSaveReadingGoals,
   type ReadingMotivationAchievement,
   type ReadingMotivationChallenge,
   type ReadingMotivationDNA,
@@ -147,11 +148,22 @@ function GoalsForm({ goals }: { goals: ReadingMotivationGoals }) {
   const [hoursInput, setHoursInput] = useState(() => goalDisplayValue(savedHours));
   const [booksError, setBooksError] = useState<string | null>(null);
   const [hoursError, setHoursError] = useState<string | null>(null);
+  // Surfaces a failed save (network/server error), distinct from the
+  // client-side range validation above. Cleared on the next successful save.
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Tracks the last value actually persisted, so a blur that didn't change
+  const { mutateAsync: saveGoals } = useSaveReadingGoals();
+
+  // Tracks the last value actually *persisted*, so a blur that didn't change
   // anything skips the PUT, and so a PUT for one field can still send the
-  // other field's current value.
+  // other field's current value. Only advanced after a successful save —
+  // if the PUT fails, the ref stays put so the next blur (even with the same
+  // unsaved value) retries instead of silently no-opping forever.
   const savedRef = useRef({ books: savedBooks, hours: savedHours });
+
+  function saveFailureMessage(err: unknown): string {
+    return err instanceof ApiClientError ? err.message : "Failed to save reading goals.";
+  }
 
   async function commitBooks() {
     const parsed = parseGoalInput(booksInput);
@@ -161,8 +173,13 @@ function GoalsForm({ goals }: { goals: ReadingMotivationGoals }) {
     }
     setBooksError(null);
     if (parsed === savedRef.current.books) return;
-    savedRef.current.books = parsed;
-    await putReadingGoals({ books_per_year: parsed, hours_per_year: savedRef.current.hours });
+    try {
+      await saveGoals({ books_per_year: parsed, hours_per_year: savedRef.current.hours });
+      savedRef.current.books = parsed;
+      setSaveError(null);
+    } catch (err) {
+      setSaveError(saveFailureMessage(err));
+    }
   }
 
   async function commitHours() {
@@ -173,8 +190,13 @@ function GoalsForm({ goals }: { goals: ReadingMotivationGoals }) {
     }
     setHoursError(null);
     if (parsed === savedRef.current.hours) return;
-    savedRef.current.hours = parsed;
-    await putReadingGoals({ books_per_year: savedRef.current.books, hours_per_year: parsed });
+    try {
+      await saveGoals({ books_per_year: savedRef.current.books, hours_per_year: parsed });
+      savedRef.current.hours = parsed;
+      setSaveError(null);
+    } catch (err) {
+      setSaveError(saveFailureMessage(err));
+    }
   }
 
   function preventSubmit(e: FormEvent) {
@@ -225,6 +247,7 @@ function GoalsForm({ goals }: { goals: ReadingMotivationGoals }) {
             </p>
           </div>
         </form>
+        {saveError ? <p className="text-destructive mt-3 text-xs">{saveError}</p> : null}
       </CardContent>
     </Card>
   );

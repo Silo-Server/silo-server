@@ -253,6 +253,38 @@ describe("ReadingStats page", () => {
     expect(markup).toContain('data-kind="reading-dna-section" data-has-dna="true"');
   });
 
+  it("renders the motivation sections even when the history query errors", () => {
+    // The four motivation sections are driven entirely by useReadingMotivation
+    // and must not be gated behind the (independent) reading-history query's
+    // error state.
+    mockUseReadingHistory.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+    mockUseReadingMotivation.mockReturnValue({
+      data: motivationFixture,
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderPage();
+    expect(markup.toLowerCase()).toContain("failed");
+    expect(markup).toContain('data-kind="streak-challenge-section" data-has-streak="true"');
+    expect(markup).toContain('data-kind="goals-section" data-has-goals="true"');
+    expect(markup).toContain('data-kind="achievements-section" data-count="1"');
+    expect(markup).toContain('data-kind="reading-dna-section" data-has-dna="true"');
+  });
+
+  it("renders the motivation sections even while the history query is loading", () => {
+    mockUseReadingHistory.mockReturnValue({ data: undefined, isLoading: true, isError: false });
+    mockUseReadingMotivation.mockReturnValue({
+      data: motivationFixture,
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderPage();
+    expect(markup).toContain('data-kind="streak-challenge-section" data-has-streak="true"');
+    expect(markup).toContain('data-kind="goals-section" data-has-goals="true"');
+    expect(markup).toContain('data-kind="achievements-section" data-count="1"');
+    expect(markup).toContain('data-kind="reading-dna-section" data-has-dna="true"');
+  });
+
   it("passes null-tolerant undefined slices to the motivation sections before motivation data loads", () => {
     mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
     mockUseReadingMotivation.mockReturnValue({ data: undefined, isLoading: true, isError: false });

@@ -76,6 +76,16 @@ export default function ReadingStats() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Reading stats</h1>
 
+      {/* Driven entirely by useReadingMotivation, independent of the reading-
+          history query below — a history failure/loading state must not hide
+          streaks, goals, achievements, or Reading DNA. Each section is
+          null-tolerant and renders its own empty/skeleton state while
+          `motivation` is undefined. */}
+      <StreakChallengeSection streak={motivation?.streak} challenge={motivation?.challenge} />
+      <GoalsSection goals={motivation?.goals} />
+      <AchievementsSection achievements={motivation?.achievements} />
+      <ReadingDnaSection dna={motivation?.dna} />
+
       {isError ? (
         <p className="text-muted-foreground text-sm">Failed to load reading stats.</p>
       ) : isLoading || !data ? (
@@ -111,11 +121,6 @@ export default function ReadingStats() {
               icon={<InfinityIcon className="h-4 w-4" />}
             />
           </div>
-
-          <StreakChallengeSection streak={motivation?.streak} challenge={motivation?.challenge} />
-          <GoalsSection goals={motivation?.goals} />
-          <AchievementsSection achievements={motivation?.achievements} />
-          <ReadingDnaSection dna={motivation?.dna} />
 
           <Card className="rounded-2xl border-0 shadow-none">
             <CardHeader>
