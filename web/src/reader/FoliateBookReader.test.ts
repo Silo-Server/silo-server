@@ -291,24 +291,38 @@ describe("FoliateBookReader helpers", () => {
     expect(styles).toContain("writing-mode: vertical-rl !important");
   });
 
-  it("injects an @font-face rule and uses it when a custom font is selected", () => {
+  it("injects an @font-face rule using the caller-supplied font url, never the raw API path", () => {
     const styles = readerStyles(
       normalizeReaderSettings({
         fontFamily: "custom",
         customFontID: 5,
       }),
+      "blob:http://localhost/font-object-url",
     );
 
     expect(styles).toContain(
-      '@font-face { font-family: "silo-custom-font"; src: url("/api/v1/ebooks/reader-fonts/5/file"); font-display: swap; }',
+      '@font-face { font-family: "silo-custom-font"; src: url("blob:http://localhost/font-object-url"); font-display: swap; }',
     );
     expect(styles).toContain('font-family: "silo-custom-font" !important');
+    // The endpoint requires a Bearer token + X-Profile-Id header a browser-native
+    // CSS fetch can never carry, so the raw API path must never land in the CSS.
+    expect(styles).not.toContain("/api/v1/");
   });
 
   it("omits the @font-face rule when no custom font is selected", () => {
     const styles = readerStyles(normalizeReaderSettings({}));
 
     expect(styles).not.toContain("@font-face");
+  });
+
+  it("omits the @font-face rule when the font url hasn't loaded (e.g. a rejected blob fetch), even though a custom font is selected", () => {
+    const settings = normalizeReaderSettings({ fontFamily: "custom", customFontID: 5 });
+
+    expect(readerStyles(settings, null)).not.toContain("@font-face");
+    expect(readerStyles(settings, undefined)).not.toContain("@font-face");
+    // Without a usable url the font-family also must not reference the custom
+    // family name (there is no matching @font-face to back it).
+    expect(readerStyles(settings, null)).not.toContain('"silo-custom-font"');
   });
 
   it("uses full available width in scrolled flow", () => {

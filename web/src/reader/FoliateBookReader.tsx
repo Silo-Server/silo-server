@@ -5,7 +5,6 @@ import { api, apiBlob, apiKeepalive } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import { ebookKeys } from "@/hooks/queries/keys";
 import type { EbookReaderAnnotation } from "@/reader/ebookReaderApi";
-import { readerFontFileUrl } from "@/reader/readerFontsApi";
 import { DocumentLoader, type BookDoc, type TOCItem } from "@/reader/readest/libs/document";
 import {
   legacyThemeFor,
@@ -475,15 +474,30 @@ export async function saveEbookReaderProgress(
 
 const CUSTOM_FONT_FAMILY = "silo-custom-font";
 
-export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS) {
+/**
+ * Builds the CSS injected into foliate's srcdoc iframes. `customFontUrl` must
+ * be an already-authenticated `blob:` URL (see `fetchReaderFontObjectUrl` in
+ * `readerFontsApi.ts`) rather than the raw `/api/v1/...` font file path: the
+ * iframe's CSS engine fetches `@font-face` src URLs itself and cannot attach
+ * the bearer token or X-Profile-Id header the reader-fonts endpoint requires,
+ * so an API path here would 401 silently and the font would never render.
+ * When the url hasn't loaded yet (or failed to), the @font-face rule and the
+ * "silo-custom-font" family are both omitted so the book falls back to its
+ * own typeface instead of an unstyled custom font.
+ */
+export function readerStyles(
+  settings: ReaderSettings = DEFAULT_READER_SETTINGS,
+  customFontUrl?: string | null,
+) {
   const colors = readerPalette(settings.themeName, settings.themeVariant);
   const contentMaxWidth = settings.flow === "scrolled" ? "none" : `${settings.maxWidth}ch`;
   const fontFamily =
-    settings.fontFamily === "custom" ? `"${CUSTOM_FONT_FAMILY}"` : settings.fontFamily;
-  const fontFace =
-    settings.customFontID != null
-      ? `@font-face { font-family: "${CUSTOM_FONT_FAMILY}"; src: url("${readerFontFileUrl(settings.customFontID)}"); font-display: swap; }`
-      : "";
+    settings.fontFamily === "custom" && customFontUrl
+      ? `"${CUSTOM_FONT_FAMILY}"`
+      : settings.fontFamily;
+  const fontFace = customFontUrl
+    ? `@font-face { font-family: "${CUSTOM_FONT_FAMILY}"; src: url("${customFontUrl}"); font-display: swap; }`
+    : "";
   return `
     ${fontFace}
     :root {
@@ -563,6 +577,10 @@ type FoliateBookReaderProps = {
   title: string;
   annotations?: EbookReaderAnnotation[];
   settings?: Partial<ReaderSettings>;
+  // Authenticated blob: URL for settings.customFontID's file, or null while
+  // it's loading/failed to load. See readerStyles' doc comment for why this
+  // can't just be derived from customFontID inside this component.
+  customFontUrl?: string | null;
   onFileLoaded?: (state: ReaderLoadState | null) => void;
   onProgressChange?: (progress: number | null) => void;
   onLocationChange?: (info: ReaderLocationInfo) => void;
@@ -586,6 +604,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       title,
       annotations = [],
       settings,
+      customFontUrl,
       onFileLoaded,
       onProgressChange,
       onLocationChange,
@@ -616,6 +635,12 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     onContentPointerUpRef.current = onContentPointerUp;
     const onContentPointerMoveRef = useRef(onContentPointerMove);
     onContentPointerMoveRef.current = onContentPointerMove;
+    // Same ref-mirroring pattern: applyReaderSettings reads the latest font
+    // url without needing to be redeclared (and re-diffed against the
+    // renderer) on every render just because a caller passed a new prop
+    // identity.
+    const customFontUrlRef = useRef<string | null | undefined>(customFontUrl);
+    customFontUrlRef.current = customFontUrl;
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -624,7 +649,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       settingsRef.current = normalized;
       const renderer = viewRef.current?.renderer;
       if (!renderer) return;
-      const styles = readerStyles(normalized);
+      const styles = readerStyles(normalized, customFontUrlRef.current);
       const attributes = readerRendererAttributes(normalized);
       // Settings such as the reading ruler never reach the renderer; re-styling and
       // re-rendering the book for those (or for any no-op update) causes visible jank.
@@ -790,7 +815,9 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
 
     useEffect(() => {
       applyReaderSettings(settings);
-    }, [applyReaderSettings, settings]);
+      // customFontUrl is not part of `settings`, but changing it (font
+      // finishes loading, is replaced, or fails) still needs a re-style.
+    }, [applyReaderSettings, settings, customFontUrl]);
 
     useEffect(() => {
       annotationsRef.current = annotations;

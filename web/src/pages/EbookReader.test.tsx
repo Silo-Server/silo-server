@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   readerGoToFraction: vi.fn(),
   readerSearch: vi.fn(),
   captureReaderSettings: vi.fn(),
+  captureCustomFontUrl: vi.fn(),
   fetchEbookReaderConfig: vi.fn(),
   saveEbookReaderConfig: vi.fn(),
   saveEbookReaderConfigKeepalive: vi.fn(),
@@ -23,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   createEbookReaderAnnotation: vi.fn(),
   deleteEbookReaderAnnotation: vi.fn(),
   fetchReaderFonts: vi.fn(),
+  fetchReaderFontObjectUrl: vi.fn(),
   uploadReaderFont: vi.fn(),
   deleteReaderFont: vi.fn(),
   lastOnLocationChange: undefined as
@@ -53,6 +55,7 @@ vi.mock("@/reader/ebookReaderApi", () => ({
 
 vi.mock("@/reader/readerFontsApi", () => ({
   fetchReaderFonts: mocks.fetchReaderFonts,
+  fetchReaderFontObjectUrl: mocks.fetchReaderFontObjectUrl,
   uploadReaderFont: mocks.uploadReaderFont,
   deleteReaderFont: mocks.deleteReaderFont,
   readerFontFileUrl: (id: number) => `/api/v1/ebooks/reader-fonts/${id}/file`,
@@ -83,6 +86,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
       {
         file: FileVersion;
         settings?: unknown;
+        customFontUrl?: string | null;
         annotations?: unknown[];
         onProgressChange?: (progress: number | null) => void;
         onFileLoaded?: (state: { objectUrl: string; filename: string } | null) => void;
@@ -108,6 +112,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
       {
         file,
         settings,
+        customFontUrl,
         onProgressChange,
         onFileLoaded,
         onSelectionChange,
@@ -119,6 +124,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
       ref,
     ) {
       mocks.captureReaderSettings(settings);
+      mocks.captureCustomFontUrl(customFontUrl);
       useEffect(() => {
         mocks.lastOnLocationChange = onLocationChange;
       }, [onLocationChange]);
@@ -291,6 +297,7 @@ describe("EbookReader", () => {
     mocks.readerGoToFraction.mockReset();
     mocks.readerSearch.mockReset();
     mocks.captureReaderSettings.mockReset();
+    mocks.captureCustomFontUrl.mockReset();
     mocks.fetchEbookReaderConfig.mockReset();
     mocks.saveEbookReaderConfig.mockReset();
     mocks.saveEbookReaderConfigKeepalive.mockReset();
@@ -298,9 +305,12 @@ describe("EbookReader", () => {
     mocks.createEbookReaderAnnotation.mockReset();
     mocks.deleteEbookReaderAnnotation.mockReset();
     mocks.fetchReaderFonts.mockReset();
+    mocks.fetchReaderFontObjectUrl.mockReset();
     mocks.uploadReaderFont.mockReset();
     mocks.deleteReaderFont.mockReset();
     mocks.fetchReaderFonts.mockResolvedValue([]);
+    mocks.fetchReaderFontObjectUrl.mockImplementation(async (id: number) => `blob:mock-font-${id}`);
+    URL.revokeObjectURL = vi.fn();
     mocks.readerSearch.mockResolvedValue([
       { cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" },
     ]);
@@ -908,6 +918,15 @@ describe("EbookReader", () => {
       expect.objectContaining({ fontFamily: "custom", customFontID: 3 }),
     );
 
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The reader must receive an authenticated blob: URL for the font, never
+    // the raw API path (a browser-native @font-face fetch can't carry auth).
+    expect(mocks.fetchReaderFontObjectUrl).toHaveBeenCalledWith(3);
+    expect(mocks.captureCustomFontUrl).toHaveBeenLastCalledWith("blob:mock-font-3");
+
     const deleteButton = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Delete font Literata"]',
     );
@@ -922,6 +941,90 @@ describe("EbookReader", () => {
     expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
       expect.objectContaining({ fontFamily: "inherit", customFontID: null }),
     );
+    // Falling back off the deleted font must revoke the blob: URL it created.
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-font-3");
+    expect(mocks.captureCustomFontUrl).toHaveBeenLastCalledWith(null);
+  });
+
+  it("falls back to the book's own typeface when the font blob fetch fails", async () => {
+    mocks.fetchReaderFonts.mockResolvedValue([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+    mocks.fetchReaderFontObjectUrl.mockRejectedValue(new Error("network error"));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    await act(async () => {
+      if (!font) return;
+      font.value = "custom:3";
+      font.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFontObjectUrl).toHaveBeenCalledWith(3);
+    // A rejected fetch must leave the font url null rather than passing a
+    // stale/undefined value through to the reader's CSS.
+    expect(mocks.captureCustomFontUrl).toHaveBeenLastCalledWith(null);
+  });
+
+  it("shows a loading placeholder instead of a blank select while a saved custom font hasn't loaded yet", async () => {
+    mocks.fetchEbookReaderConfig.mockResolvedValue({
+      settings: { customFontID: 3, fontFamily: "custom" },
+    });
+    // Never resolves within this test, simulating the fonts list still loading.
+    mocks.fetchReaderFonts.mockReturnValue(new Promise(() => {}));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    expect(font?.value).toBe("custom:3");
+    const placeholder = font?.querySelector<HTMLOptionElement>('option[value="custom:3"]');
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.disabled).toBe(true);
+    expect(placeholder?.textContent).toBe("Loading uploaded font…");
   });
 
   it("keeps a saved custom font selection through a transient fonts-list fetch failure", async () => {

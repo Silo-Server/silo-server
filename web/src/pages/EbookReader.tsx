@@ -79,6 +79,7 @@ import {
 import { chapterExtent, tapZoneAction } from "@/reader/readerNavigation";
 import {
   deleteReaderFont,
+  fetchReaderFontObjectUrl,
   fetchReaderFonts,
   uploadReaderFont,
   type ReaderFontMeta,
@@ -422,6 +423,56 @@ export default function EbookReader() {
     if (readerFonts.some((font) => font.id === readerSettings.customFontID)) return;
     updateReaderSettings({ customFontID: null, fontFamily: READER_FONT_STACKS.inherit });
   }, [readerFontsLoadOk, readerFonts, readerSettings.customFontID, updateReaderSettings]);
+  // Holds an authenticated blob: URL for the selected custom font, since the
+  // reader's injected CSS can't fetch the protected font file itself (see
+  // readerFontsApi.fetchReaderFontObjectUrl for why). Re-fetched whenever the
+  // selection changes. The currently-live URL is tracked in a ref (rather
+  // than only in state) so it can be revoked exactly once it's superseded by
+  // a freshly fetched one, or on unmount — never while it's still the URL
+  // referenced by readerStyles, which would leave the reader pointed at a
+  // dead blob until the replacement arrives.
+  const [customFontUrl, setCustomFontUrl] = useState<string | null>(null);
+  const customFontUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isComicFormat || readerSettings.customFontID == null) {
+      if (customFontUrlRef.current) {
+        URL.revokeObjectURL(customFontUrlRef.current);
+        customFontUrlRef.current = null;
+      }
+      setCustomFontUrl(null);
+      return;
+    }
+    let cancelled = false;
+    fetchReaderFontObjectUrl(readerSettings.customFontID)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        const previous = customFontUrlRef.current;
+        customFontUrlRef.current = url;
+        setCustomFontUrl(url);
+        if (previous) URL.revokeObjectURL(previous);
+      })
+      .catch(() => {
+        // Leave customFontUrl null; readerStyles falls back to the book's own
+        // typeface when no font url is available.
+        if (!cancelled) setCustomFontUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isComicFormat, readerSettings.customFontID]);
+  // Revokes whatever URL is still live when the reader itself unmounts (a
+  // font-selection change is handled above, inline with the fetch).
+  useEffect(() => {
+    return () => {
+      if (customFontUrlRef.current) {
+        URL.revokeObjectURL(customFontUrlRef.current);
+        customFontUrlRef.current = null;
+      }
+    };
+  }, []);
   const handleFontUpload = useCallback(async (event: ReactChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -995,6 +1046,7 @@ export default function EbookReader() {
               file={selectedFile}
               title={item.title}
               settings={readerSettings}
+              customFontUrl={customFontUrl}
               annotations={annotations}
               onFileLoaded={handleFileLoaded}
               onProgressChange={handleProgressChange}
@@ -1417,6 +1469,16 @@ export default function EbookReader() {
                           readerSettings.fontFamily !== "custom" && (
                             <option value={readerSettings.fontFamily}>Custom</option>
                           )}
+                        {readerSettings.customFontID != null && !readerFontsLoadOk && (
+                          // The uploaded-fonts list (and thus the matching
+                          // <option>) hasn't loaded yet for a saved custom-font
+                          // selection; without this the select's value has no
+                          // matching option and renders blank instead of
+                          // showing what's selected.
+                          <option value={`custom:${readerSettings.customFontID}`} disabled>
+                            Loading uploaded font…
+                          </option>
+                        )}
                         {readerFonts.length > 0 && (
                           <optgroup label="Uploaded">
                             {readerFonts.map((font) => (
