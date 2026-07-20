@@ -11,12 +11,11 @@ export function chapterExtent(sectionFractions: number[], fraction: number): Cha
   if (sectionFractions.length < 2) return null;
   const clamped = Math.min(1, Math.max(0, fraction));
   for (let i = sectionFractions.length - 1; i >= 0; i--) {
-    if (clamped >= sectionFractions[i]) {
-      const start = sectionFractions[i];
-      const end = i + 1 < sectionFractions.length ? sectionFractions[i + 1] : 1;
-      if (start >= end) continue; // zero-width section: attribute to the previous one
-      return { start, end, index: i };
-    }
+    const start = sectionFractions[i];
+    if (start === undefined || clamped < start) continue;
+    const end = i + 1 < sectionFractions.length ? (sectionFractions[i + 1] ?? 1) : 1;
+    if (start >= end) continue; // zero-width section: attribute to the previous one
+    return { start, end, index: i };
   }
   return { start: 0, end: sectionFractions[1] ?? 1, index: 0 };
 }
