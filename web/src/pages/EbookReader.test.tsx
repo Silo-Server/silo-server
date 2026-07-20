@@ -1529,19 +1529,34 @@ describe("EbookReader", () => {
       });
     };
 
+    // Escape precedence: shortcuts overlay, then the side panel, then chrome.
     press("?");
     expect(container.textContent).toContain("Keyboard shortcuts");
     expect(container.textContent).toContain("Previous / next page");
+    expect(container.querySelector("aside")).not.toBeNull(); // panel open by default
 
     press("Escape"); // overlay open — Escape closes it first
     expect(container.textContent).not.toContain("Previous / next page");
     expect(container.querySelector("header")).not.toBeNull();
+    expect(container.querySelector("aside")).not.toBeNull(); // panel untouched
 
-    press("Escape"); // overlay already closed — Escape now toggles chrome
+    press("Escape"); // overlay closed, panel open — Escape closes the panel next
+    expect(container.querySelector("aside")).toBeNull();
+    expect(container.querySelector("header")).not.toBeNull(); // chrome untouched
+
+    press("Escape"); // overlay closed, panel closed — Escape now toggles chrome
     expect(container.querySelector("header")).toBeNull();
 
     press("Escape"); // bring chrome back so the panel toggle button is reachable
     expect(container.querySelector("header")).not.toBeNull();
+
+    const openPanel = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open reader panel"]',
+    );
+    await act(async () => {
+      openPanel?.click();
+    });
+    expect(container.querySelector("aside")).not.toBeNull();
 
     const closePanel = container.querySelector<HTMLButtonElement>(
       'button[aria-label="Close reader panel"]',

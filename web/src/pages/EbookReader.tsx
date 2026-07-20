@@ -618,8 +618,13 @@ export default function EbookReader() {
           setShortcutsOpen(true);
           break;
         case "Escape":
+          // Precedence: shortcuts overlay, then the side panel, then chrome —
+          // each Escape closes the topmost thing the user opened before
+          // falling through to the next layer.
           if (shortcutsOpen) {
             setShortcutsOpen(false);
+          } else if (panelOpen) {
+            setPanelOpen(false);
           } else {
             setChromeVisible((visible) => !visible);
           }
