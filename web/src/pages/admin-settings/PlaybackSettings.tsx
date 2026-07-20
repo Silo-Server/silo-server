@@ -300,6 +300,8 @@ function formatResolved(resolved: string): string {
       return "VA-API";
     case "nvenc":
       return "NVIDIA NVENC";
+    case "videotoolbox":
+      return "VideoToolbox (macOS)";
     case "none":
       return "Software";
     default:
