@@ -38,8 +38,9 @@ type fakeReadingMotivationStore struct {
 
 	// hasBookReadAbove/hasBookReadAboveErr back HasBookReadAbove, the
 	// all-time "finisher" badge criterion.
-	hasBookReadAbove    bool
-	hasBookReadAboveErr error
+	hasBookReadAbove       bool
+	hasBookReadAboveErr    error
+	hasBookReadAboveThresh float64
 
 	genres    []GenreSeconds
 	genresErr error
@@ -124,10 +125,11 @@ func (f *fakeReadingMotivationStore) FinishedBooksInRange(_ context.Context, _ i
 	return f.finishedBooksYTD, nil
 }
 
-func (f *fakeReadingMotivationStore) HasBookReadAbove(_ context.Context, _ int, _ string, _ float64) (bool, error) {
+func (f *fakeReadingMotivationStore) HasBookReadAbove(_ context.Context, _ int, _ string, threshold float64) (bool, error) {
 	if f.hasBookReadAboveErr != nil {
 		return false, f.hasBookReadAboveErr
 	}
+	f.hasBookReadAboveThresh = threshold
 	return f.hasBookReadAbove, nil
 }
 
@@ -993,6 +995,9 @@ func TestMotivationFinisherUsesHighReadThreshold(t *testing.T) {
 
 		if ach := achievementByID(t, resp, "finisher"); ach.AchievedAt == nil {
 			t.Error(`achievements["finisher"].achieved_at = nil, want set (a book cleared the 95% threshold)`)
+		}
+		if store.hasBookReadAboveThresh != 0.95 {
+			t.Errorf("handler passed HasBookReadAbove threshold %v, want 0.95", store.hasBookReadAboveThresh)
 		}
 	})
 }

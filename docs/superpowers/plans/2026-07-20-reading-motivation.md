@@ -32,7 +32,17 @@
 - Produces:
   - `func requestLocation(r *http.Request) *time.Location` — parses `tz` query param, `time.LoadLocation`, fallback `time.UTC` (empty/invalid/`Local`-rejected).
   - `reading_goals` + `reading_achievements` tables per spec.
-  - `type ReadingGoals struct { BooksPerYear *int; HoursPerYear *int }`, store methods on a new `ReadingMotivationStore` interface: `GetGoals(ctx, userID, profileID) (*ReadingGoals, error)`, `PutGoals(ctx, userID, profileID string, g ReadingGoals) error`, `AchievedAt(ctx, userID, profileID) (map[string]time.Time, error)`, `PersistAchievement(ctx, userID, profileID, achievementID string, at time.Time) error`, plus `SessionsSince(ctx, userID, profileID string, since time.Time) ([]ReadingSession, error)` (raw rows for the pure math), `FinishedBooksInRange(ctx, userID, profileID string, from, to time.Time) (int, error)`, `GenreSeconds(ctx, userID, profileID string) ([]GenreSeconds, error)`, `AuthorSeconds(ctx, userID, profileID string) ([]AuthorSeconds, error)` — implemented on `PGReadingMotivationStore` (pool).
+  - `type ReadingGoals struct { BooksPerYear *int; HoursPerYear *int }`, store methods on a new `ReadingMotivationStore` interface:
+    - `GetGoals(ctx context.Context, userID int, profileID string) (*ReadingGoals, error)`
+    - `PutGoals(ctx context.Context, userID int, profileID string, g ReadingGoals) error`
+    - `AchievedAt(ctx context.Context, userID int, profileID string) (map[string]time.Time, error)`
+    - `PersistAchievement(ctx context.Context, userID int, profileID, achievementID string, at time.Time) error`
+    - `SessionsSince(ctx context.Context, userID int, profileID string, since time.Time) ([]ReadingSession, error)` (raw rows for the pure math)
+    - `FinishedBooksInRange(ctx context.Context, userID int, profileID string, from, to time.Time) (int, error)`
+    - `HasBookReadAbove(ctx context.Context, userID int, profileID string, threshold float64) (bool, error)` (Task-3-era addition for finisher badge)
+    - `GenreSeconds(ctx context.Context, userID int, profileID string) ([]GenreSeconds, error)`
+    - `AuthorSeconds(ctx context.Context, userID int, profileID string) ([]AuthorSeconds, error)`
+    — implemented on `PGReadingMotivationStore` (pool).
   - `PUT /ebooks/reading-goals` handler (`HandlePutGoals` on `ReadingMotivationHandler{Store; Now func() time.Time}`).
   - History endpoint behavior change (additive): totals/days computed in `requestLocation(r)`.
 
@@ -106,7 +116,14 @@ func requestLocation(r *http.Request) *time.Location {
 }
 ```
 
-Goals: `PUT` decodes `{BooksPerYear *int \`json:"books_per_year"\`; HoursPerYear *int \`json:"hours_per_year"\`}`, validates each non-nil value 1..100000 (400 `invalid_goal` "books_per_year must be between 1 and 100000" / same for hours), `Store.PutGoals` upsert (`INSERT … ON CONFLICT (user_id, profile_id) DO UPDATE SET books_per_year=$3, hours_per_year=$4, updated_at=now()`), 204.
+Goals: `PUT` decodes the following struct, validates each non-nil value 1..100000 (400 `invalid_goal` "books_per_year must be between 1 and 100000" / same for hours), calls `Store.PutGoals` to upsert, 204:
+
+```go
+type putGoalsRequest struct {
+	BooksPerYear *int `json:"books_per_year"`
+	HoursPerYear *int `json:"hours_per_year"`
+}
+```
 
 History tz: in the existing history handler (`reading_sessions.go`), replace the UTC-fixed day computations (today/week/month boundaries + `DailyRollup` day grouping) to use `loc := requestLocation(r)`. For SQL day grouping pass the zone name: `date_trunc('day', started_at AT TIME ZONE $n)` (pass `loc.String()`; `"UTC"` for UTC) — adjust `DailyRollup`/`TotalsSince` signatures to accept `loc *time.Location` and compute range boundaries in that zone. Keep response field names unchanged.
 
