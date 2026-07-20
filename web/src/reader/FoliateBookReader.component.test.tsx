@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, createRef, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,6 +45,8 @@ vi.mock("foliate-js/view.js", () => ({}));
 
 import FoliateBookReader, {
   ebookReaderProgressQueryKey,
+  type FoliateBookReaderHandle,
+  type ReaderLocationInfo,
   type ReaderReadyState,
 } from "@/reader/FoliateBookReader";
 
@@ -60,6 +62,7 @@ class FakeFoliateView extends HTMLElement {
   close = vi.fn();
   init = vi.fn(async () => {});
   goToFraction = vi.fn(async () => {});
+  getSectionFractions = vi.fn((): number[] => []);
   open = vi.fn((book: unknown) => {
     this.book = book;
     const behavior = viewOpenBehaviors.shift();
@@ -129,10 +132,17 @@ describe("FoliateBookReader open flow", () => {
   const fileA = makeFile(7, "a.epub");
   const fileB = makeFile(8, "b.epub");
 
-  function ui(file: FileVersion, props: { onReady?: (state: ReaderReadyState) => void } = {}) {
+  function ui(
+    file: FileVersion,
+    props: {
+      onReady?: (state: ReaderReadyState) => void;
+      onLocationChange?: (info: ReaderLocationInfo) => void;
+    } = {},
+    ref?: Ref<FoliateBookReaderHandle>,
+  ) {
     return (
       <QueryClientProvider client={queryClient}>
-        <FoliateBookReader contentID="book-1" file={file} title="Book" {...props} />
+        <FoliateBookReader contentID="book-1" file={file} title="Book" {...props} ref={ref} />
       </QueryClientProvider>
     );
   }
@@ -422,5 +432,50 @@ describe("FoliateBookReader open flow", () => {
       location: "epubcfi(/6/8)",
       progress: 0.5,
     });
+  });
+
+  it("reports location info on relocate", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const onLocationChange = vi.fn();
+
+    await act(async () => {
+      root.render(ui(fileA, { onLocationChange }));
+    });
+    const view = viewAt(0);
+
+    await act(async () => {
+      view.dispatchEvent(
+        new CustomEvent("relocate", {
+          detail: {
+            cfi: "epubcfi(/6/8!/4/2)",
+            fraction: 0.3,
+            index: 1,
+            tocItem: { label: "Chapter 2" },
+            location: { current: 29, total: 100 },
+          },
+        }),
+      );
+    });
+
+    expect(onLocationChange).toHaveBeenCalledWith({
+      fraction: 0.3,
+      sectionIndex: 1,
+      tocLabel: "Chapter 2",
+    });
+  });
+
+  it("exposes section fractions through the handle", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const handleRef = createRef<FoliateBookReaderHandle>();
+
+    await act(async () => {
+      root.render(ui(fileA, {}, handleRef));
+    });
+    const view = viewAt(0);
+    view.getSectionFractions = vi.fn(() => [0, 0.25, 1]);
+
+    expect(handleRef.current?.getSectionFractions()).toEqual([0, 0.25, 1]);
   });
 });

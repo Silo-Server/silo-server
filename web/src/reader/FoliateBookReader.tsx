@@ -63,6 +63,7 @@ export type FoliateBookReaderHandle = {
   clearSelection: () => void;
   createSelectionAnnotation: () => ReaderSelection | null;
   getReadableText: () => string;
+  getSectionFractions: () => number[];
 };
 
 export type ReaderTheme = "light" | "sepia" | "dark";
@@ -130,10 +131,19 @@ type FoliateSearchResult = {
 
 type RelocateDetail = {
   cfi?: string;
+  fraction?: number;
+  index?: number;
+  tocItem?: { label?: string };
   location?: {
     current?: number;
     total?: number;
   };
+};
+
+export type ReaderLocationInfo = {
+  fraction: number;
+  sectionIndex: number | null;
+  tocLabel: string | null;
 };
 
 // foliate book documents expose destroy() to release cached resource blob URLs,
@@ -497,6 +507,7 @@ type FoliateBookReaderProps = {
   settings?: Partial<ReaderSettings>;
   onFileLoaded?: (state: ReaderLoadState | null) => void;
   onProgressChange?: (progress: number | null) => void;
+  onLocationChange?: (info: ReaderLocationInfo) => void;
   onReady?: (state: ReaderReadyState) => void;
   onSelectionChange?: (selection: ReaderSelection | null) => void;
 };
@@ -511,6 +522,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       settings,
       onFileLoaded,
       onProgressChange,
+      onLocationChange,
       onReady,
       onSelectionChange,
     },
@@ -669,6 +681,10 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         },
         createSelectionAnnotation,
         getReadableText,
+        getSectionFractions: () =>
+          (
+            viewRef.current as { getSectionFractions?: () => number[] } | null
+          )?.getSectionFractions?.() ?? [],
       }),
       [createSelectionAnnotation, getReadableText, onSelectionChange],
     );
@@ -840,13 +856,18 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
             // Only the run that owns the live view may save progress for its file;
             // a superseded view firing late relocates must not overwrite it.
             if (!initializedRef.current || viewRef.current !== view) return;
-            const progress = progressFromRelocate(
-              (event as CustomEvent<RelocateDetail>).detail,
-              file.file_id,
-            );
+            const detail = (event as CustomEvent<RelocateDetail>).detail;
+            const progress = progressFromRelocate(detail, file.file_id);
             if (progress) {
               onProgressChange?.(progress.progress);
               scheduleProgressSave(progress);
+            }
+            if (typeof detail.fraction === "number") {
+              onLocationChange?.({
+                fraction: Math.min(1, Math.max(0, detail.fraction)),
+                sectionIndex: typeof detail.index === "number" ? detail.index : null,
+                tocLabel: detail.tocItem?.label?.trim() || null,
+              });
             }
           });
           await view.open(book);
@@ -914,6 +935,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       drawAnnotations,
       file,
       onFileLoaded,
+      onLocationChange,
       onProgressChange,
       onReady,
       queryClient,
