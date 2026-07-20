@@ -945,6 +945,36 @@ describe("EbookReader", () => {
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
   });
 
+  it("does not snap the progress bar back after scrubbing", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // A prior relocate reported a stale fraction (30%); the footer prefers
+    // locationInfo.fraction over readerProgress, so scrubbing must update it
+    // too or the bar snaps back to 30% on the next render.
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Chapter 2" });
+    });
+
+    const scrubber = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Reading progress"]',
+    );
+    await act(async () => {
+      if (!scrubber) return;
+      setInputValue(scrubber, "65");
+    });
+
+    expect(scrubber?.value).toBe("65");
+    expect(container.querySelector("footer")?.textContent).toContain("65%");
+  });
+
   it("pages on edge taps and toggles chrome on middle tap", async () => {
     await act(async () => {
       root.render(

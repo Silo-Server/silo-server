@@ -387,6 +387,15 @@ export default function EbookReader() {
     const next = Math.min(1, Math.max(0, fraction));
     if (!Number.isFinite(next)) return;
     setReaderProgress(next);
+    // The footer prefers locationInfo.fraction over readerProgress, and that
+    // only otherwise updates from the next foliate relocate event — which can
+    // lag or never land mid-drag. Patch it optimistically too so the bar
+    // doesn't snap back to the last relocate's fraction after a scrub.
+    setLocationInfo((current) =>
+      current
+        ? { ...current, fraction: next }
+        : { fraction: next, sectionIndex: null, tocLabel: null },
+    );
     void readerRef.current?.goToFraction(next);
   }, []);
   // Shared by both tap paths below: margin taps land on the outer section via
