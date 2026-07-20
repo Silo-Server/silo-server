@@ -46,8 +46,8 @@ column layouts.
   - `GET /api/v1/ebooks/reader-fonts` — list `{ id, name, filename, created_at }`
   - `POST /api/v1/ebooks/reader-fonts` — multipart upload; server validates
     magic bytes (sfnt/woff/woff2 signatures), size, and per-profile count caps;
-    display name derived from the font's name table when parseable, else
-    the filename.
+    display name derived from the sanitized filename (no font name-table
+    parsing).
   - `DELETE /api/v1/ebooks/reader-fonts/{id}`
   - `GET /api/v1/ebooks/reader-fonts/{id}/file` — serves the blob with immutable
     cache headers, per-profile authorization (resolved from the session's
@@ -106,8 +106,7 @@ ruler untouched.
 - Settings migration: legacy `theme` values map correctly; round-trip
   persistence includes the legacy field.
 - Fonts API: Go handler tests for upload validation (magic bytes, size,
-  cap), authorization (cross-user access denied), list/delete; name-table
-  parsing fallback.
+  cap), authorization (cross-profile access denied), list/delete.
 - Reader: font-face injection present when an uploaded font is selected;
   columns/columnGap/justify reach the content CSS; comics unaffected.
 
