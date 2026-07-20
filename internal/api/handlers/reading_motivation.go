@@ -481,6 +481,11 @@ const (
 	earlyBirdEndHour   = 8
 )
 
+// nightOwlEndHour bounds the "night-owl" badge's habit window: local hours
+// [0, nightOwlEndHour), i.e. midnight-5am, per spec. This is distinct from
+// hourBucket's "night" DNA bucket (22-04), which wraps across midnight.
+const nightOwlEndHour = 5
+
 type readingMotivationStreakResponse struct {
 	CurrentDays    int  `json:"current_days"`
 	LongestDays    int  `json:"longest_days"`
@@ -659,7 +664,11 @@ func (h *ReadingMotivationHandler) HandleGetMotivation(w http.ResponseWriter, r 
 			ytdSeconds += s.DurationSeconds
 		}
 		hour := local.Hour()
-		if hourBucket(hour) == "night" {
+		// The "night-owl" badge's window is midnight-5am (per spec),
+		// narrower than and offset from hourBucket's "night" DNA bucket
+		// (22-04), so it's accumulated separately rather than reusing
+		// hourBucket here.
+		if hour < nightOwlEndHour {
 			nightSeconds += s.DurationSeconds
 		}
 		if hour >= earlyBirdStartHour && hour < earlyBirdEndHour {

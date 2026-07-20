@@ -996,3 +996,49 @@ func TestMotivationFinisherUsesHighReadThreshold(t *testing.T) {
 		}
 	})
 }
+
+// TestNightOwlWindowIsMidnightToFiveAM pins the "night-owl" badge's
+// accumulation window to local hours [0, 5) per spec, distinct from
+// hourBucket's "night" DNA bucket (22-04). A 10-hour session starting at
+// local 23:00 clears hourBucket's "night" bucket but must NOT count toward
+// the badge; the same duration starting at local 01:00 must.
+func TestNightOwlWindowIsMidnightToFiveAM(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+
+	t.Run("23:00 local does not count toward night-owl", func(t *testing.T) {
+		store := &fakeReadingMotivationStore{
+			sessions: []ReadingSession{
+				{ContentID: "book-1", StartedAt: time.Date(2026, 7, 19, 23, 0, 0, 0, time.UTC), DurationSeconds: 36000},
+			},
+		}
+		h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+		rr := httptest.NewRecorder()
+		h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var resp readingMotivationResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+		}
+		if ach := achievementByID(t, resp, "night-owl"); ach.AchievedAt != nil {
+			t.Error(`achievements["night-owl"].achieved_at set, want nil (23:00 local is outside the 00:00-05:00 window)`)
+		}
+	})
+
+	t.Run("01:00 local counts toward night-owl", func(t *testing.T) {
+		store := &fakeReadingMotivationStore{
+			sessions: []ReadingSession{
+				{ContentID: "book-1", StartedAt: time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC), DurationSeconds: 36000},
+			},
+		}
+		h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+		rr := httptest.NewRecorder()
+		h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var resp readingMotivationResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+		}
