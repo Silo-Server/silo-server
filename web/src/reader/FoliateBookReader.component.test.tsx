@@ -497,6 +497,33 @@ describe("FoliateBookReader open flow", () => {
     });
   });
 
+  it("ignores a relocate event reporting a non-finite fraction", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const onLocationChange = vi.fn();
+
+    await act(async () => {
+      root.render(ui(fileA, { onLocationChange }));
+    });
+    const view = viewAt(0);
+
+    await act(async () => {
+      view.dispatchEvent(
+        new CustomEvent("relocate", {
+          detail: {
+            cfi: "epubcfi(/6/8!/4/2)",
+            fraction: Number.NaN,
+            index: 1,
+            tocItem: { label: "Chapter 2" },
+            location: { current: 29, total: 100 },
+          },
+        }),
+      );
+    });
+
+    expect(onLocationChange).not.toHaveBeenCalled();
+  });
+
   it("exposes section fractions through the handle", async () => {
     const book = makeBook("A");
     mocks.loaderOpen.mockResolvedValue({ book });

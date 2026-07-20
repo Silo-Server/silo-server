@@ -25,6 +25,7 @@ type FoliateViewElement = HTMLElement & {
     options: ReaderSearchOptions & { query: string },
   ) => AsyncGenerator<FoliateSearchResult>;
   clearSearch?: () => void;
+  getSectionFractions?: () => number[];
   renderer?: HTMLElement & {
     primaryIndex?: number;
     getContents?: () => Array<{ doc: Document; index?: number }>;
@@ -728,10 +729,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         },
         createSelectionAnnotation,
         getReadableText,
-        getSectionFractions: () =>
-          (
-            viewRef.current as { getSectionFractions?: () => number[] } | null
-          )?.getSectionFractions?.() ?? [],
+        getSectionFractions: () => viewRef.current?.getSectionFractions?.() ?? [],
       }),
       [createSelectionAnnotation, getReadableText, onSelectionChange],
     );
@@ -909,9 +907,13 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
               onProgressChange?.(progress.progress);
               scheduleProgressSave(progress);
             }
-            if (typeof detail.fraction === "number") {
+            const fraction = detail.fraction;
+            // typeof narrows fraction to number for the Math calls below;
+            // Number.isFinite on top of that rejects NaN/Infinity, which
+            // `typeof` alone would let through as a "number".
+            if (typeof fraction === "number" && Number.isFinite(fraction)) {
               onLocationChange?.({
-                fraction: Math.min(1, Math.max(0, detail.fraction)),
+                fraction: Math.min(1, Math.max(0, fraction)),
                 sectionIndex: typeof detail.index === "number" ? detail.index : null,
                 tocLabel: detail.tocItem?.label?.trim() || null,
               });
