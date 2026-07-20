@@ -10,6 +10,8 @@ import { useReadingHistory } from "@/hooks/queries/readingStats";
 import { formatDate } from "@/lib/datetime";
 import { formatDuration } from "@/lib/formatDuration";
 
+const REMOVED_BOOK_TITLE = "Removed book";
+
 function fractionLabel(fraction: number): string {
   return `${Math.round(fraction * 100)}%`;
 }
@@ -95,8 +97,8 @@ export default function ReadingStats() {
               ) : (
                 <ul className="divide-border/60 divide-y">
                   {data.books.map((book) => {
-                    const isRemoved = !book.title;
-                    const label = isRemoved ? "Removed book" : book.title;
+                    const isRemoved = book.title === REMOVED_BOOK_TITLE;
+                    const label = book.title;
                     return (
                       <li
                         key={book.content_id}
@@ -135,8 +137,8 @@ export default function ReadingStats() {
               ) : (
                 <ul className="divide-border/60 divide-y">
                   {data.sessions.map((session) => {
-                    const isRemoved = !session.title;
-                    const label = isRemoved ? "Removed book" : session.title;
+                    const isRemoved = session.title === REMOVED_BOOK_TITLE;
+                    const label = session.title;
                     return (
                       <li
                         key={`${session.content_id}-${session.started_at}-${session.start_fraction}`}

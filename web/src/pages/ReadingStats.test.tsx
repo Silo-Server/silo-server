@@ -59,7 +59,7 @@ const fixture: ReadingHistory = {
     },
     {
       content_id: "book-2",
-      title: "",
+      title: "Removed book",
       seconds: 1200,
       last_read_at: "2026-07-15T10:00:00Z",
     },
@@ -75,7 +75,7 @@ const fixture: ReadingHistory = {
     },
     {
       content_id: "book-2",
-      title: "",
+      title: "Removed book",
       started_at: "2026-07-19T09:00:00Z",
       duration_seconds: 600,
       start_fraction: 0.4,
