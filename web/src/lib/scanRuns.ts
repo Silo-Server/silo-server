@@ -26,6 +26,14 @@ export function formatActiveScanMode(scan: Pick<ScanRun, "mode">) {
   }
 }
 
+export function formatActiveScanTarget(scan: Pick<ScanRun, "path">) {
+  if (!scan.path) {
+    return "Entire library";
+  }
+  const segments = scan.path.replace(/\/+$/, "").split("/");
+  return segments[segments.length - 1] || scan.path;
+}
+
 export function formatActiveScanTrigger(trigger: string) {
   switch (trigger) {
     case "autoscan":

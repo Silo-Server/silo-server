@@ -95,6 +95,7 @@ import {
   compareActiveScans,
   formatActiveScanMode,
   formatActiveScanProgress,
+  formatActiveScanTarget,
   formatActiveScanTime,
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
@@ -789,93 +790,147 @@ function ScanQueuePopover({
         {/* Library groups */}
         <div className="max-h-[360px] overflow-y-auto px-3 py-2">
           {groups.map((group, gi) => (
-            <div key={group.libraryID}>
-              {/* Library header row */}
-              <div className="flex items-center gap-2 py-1.5">
-                <span className="text-muted-foreground/60 text-[10px] font-semibold tracking-widest uppercase">
-                  {getLibraryScanGroupName(group.library, group.libraryID)}
-                </span>
-                <div className="bg-border/25 h-px flex-1" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-muted-foreground hover:text-destructive h-6 gap-1 px-2 text-[10px]"
-                  disabled={cancellingLibraryID === group.libraryID}
-                  onClick={() => onCancel(group.libraryID)}
-                >
-                  <Square className="h-2.5 w-2.5" />
-                  Cancel
-                </Button>
-              </div>
-
-              {/* Scan rows */}
-              {group.scans.map((scan, si) => (
-                <div
-                  key={scan.id}
-                  className={cn(
-                    "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
-                    scan.status === "running" ? "bg-primary/[0.04]" : "",
-                  )}
-                  style={{
-                    animation: "fade-in 0.25s ease-out backwards",
-                    animationDelay: `${(gi * 4 + si) * 40}ms`,
-                  }}
-                >
-                  {/* Status dot */}
-                  <div className="relative mt-[5px] flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-                    {scan.status === "running" ? (
-                      <>
-                        <span className="bg-success/20 absolute h-2.5 w-2.5 animate-ping rounded-full" />
-                        <span className="bg-success shadow-success/30 relative h-[7px] w-[7px] rounded-full shadow-[0_0_5px_1px]" />
-                      </>
-                    ) : (
-                      <span className="bg-muted-foreground/20 ring-muted-foreground/15 h-[5px] w-[5px] rounded-full ring-[1.5px]" />
-                    )}
-                  </div>
-
-                  {/* Details */}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-xs leading-snug font-medium">
-                        {formatActiveScanMode(scan)}
-                      </span>
-                      {scan.trigger && (
-                        <span className="bg-muted/50 text-muted-foreground rounded px-1 py-px text-[9px] font-medium">
-                          {formatActiveScanTrigger(scan.trigger)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-muted-foreground mt-px flex items-center gap-1 text-[10px] leading-relaxed">
-                      {scan.path ? (
-                        <code className="text-muted-foreground/70 max-w-[200px] truncate font-mono">
-                          {scan.path}
-                        </code>
-                      ) : (
-                        <span>Entire library</span>
-                      )}
-                      <span className="text-border/50 shrink-0">·</span>
-                      <span className="shrink-0">
-                        {scan.status === "running"
-                          ? formatActiveScanTime(scan.started_at, "Started")
-                          : "Waiting for capacity"}
-                      </span>
-                    </div>
-                    {formatActiveScanProgress(scan) && (
-                      <div className="text-muted-foreground/80 mt-1 truncate text-[10px] leading-relaxed">
-                        {formatActiveScanProgress(scan)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {/* Separator between groups */}
-              {gi < groups.length - 1 && <div className="bg-border/20 my-1 h-px" />}
-            </div>
+            <ScanQueueGroup
+              key={group.libraryID}
+              group={group}
+              groupIndex={gi}
+              isLast={gi === groups.length - 1}
+              cancelling={cancellingLibraryID === group.libraryID}
+              onCancel={onCancel}
+            />
           ))}
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+function ScanQueueGroup({
+  group,
+  groupIndex,
+  isLast,
+  cancelling,
+  onCancel,
+}: {
+  group: {
+    libraryID: number;
+    library: Library | null;
+    scans: ScanRun[];
+    runningCount: number;
+    queuedCount: number;
+  };
+  groupIndex: number;
+  isLast: boolean;
+  cancelling: boolean;
+  onCancel: (libraryID: number) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleScans = expanded ? group.scans : group.scans.slice(0, COLLAPSED_SCAN_ROW_LIMIT);
+  const hiddenCount = group.scans.length - visibleScans.length;
+
+  return (
+    <div>
+      {/* Library header row */}
+      <div className="flex items-center gap-2 py-1.5">
+        <span className="text-muted-foreground/60 text-[10px] font-semibold tracking-widest uppercase">
+          {getLibraryScanGroupName(group.library, group.libraryID)}
+        </span>
+        <div className="bg-border/25 h-px flex-1" />
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-destructive h-6 gap-1 px-2 text-[10px]"
+          disabled={cancelling}
+          onClick={() => onCancel(group.libraryID)}
+        >
+          <Square className="h-2.5 w-2.5" />
+          Cancel
+        </Button>
+      </div>
+
+      {/* Scan rows */}
+      {visibleScans.map((scan, si) => (
+        <div
+          key={scan.id}
+          className={cn(
+            "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors",
+            scan.status === "running" ? "bg-primary/[0.04]" : "",
+          )}
+          style={{
+            animation: "fade-in 0.25s ease-out backwards",
+            animationDelay: `${Math.min(groupIndex * 4 + si, 12) * 40}ms`,
+          }}
+        >
+          {/* Status dot */}
+          <div className="relative mt-[5px] flex h-2.5 w-2.5 shrink-0 items-center justify-center">
+            {scan.status === "running" ? (
+              <>
+                <span className="bg-success/20 absolute h-2.5 w-2.5 animate-ping rounded-full" />
+                <span className="bg-success shadow-success/30 relative h-[7px] w-[7px] rounded-full shadow-[0_0_5px_1px]" />
+              </>
+            ) : (
+              <span className="bg-muted-foreground/20 ring-muted-foreground/15 h-[5px] w-[5px] rounded-full ring-[1.5px]" />
+            )}
+          </div>
+
+          {/* Details */}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xs leading-snug font-medium">{formatActiveScanMode(scan)}</span>
+              {scan.trigger && (
+                <span className="bg-muted/50 text-muted-foreground rounded px-1 py-px text-[9px] font-medium">
+                  {formatActiveScanTrigger(scan.trigger)}
+                </span>
+              )}
+            </div>
+            <div className="text-muted-foreground mt-px flex items-center gap-1 text-[10px] leading-relaxed">
+              {scan.path ? (
+                <code
+                  className="text-muted-foreground/70 max-w-[200px] truncate font-mono"
+                  title={scan.path}
+                >
+                  {formatActiveScanTarget(scan)}
+                </code>
+              ) : (
+                <span>Entire library</span>
+              )}
+              <span className="text-border/50 shrink-0">·</span>
+              <span className="shrink-0">
+                {scan.status === "running"
+                  ? formatActiveScanTime(scan.started_at, "Started")
+                  : "Waiting for capacity"}
+              </span>
+            </div>
+            {formatActiveScanProgress(scan) && (
+              <div className="text-muted-foreground/80 mt-1 truncate text-[10px] leading-relaxed">
+                {formatActiveScanProgress(scan)}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+      {group.scans.length > COLLAPSED_SCAN_ROW_LIMIT ? (
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[10px] transition-colors"
+          onClick={() => setExpanded((current) => !current)}
+        >
+          {expanded ? (
+            <>
+              Show less <ChevronUp className="h-3 w-3" />
+            </>
+          ) : (
+            <>
+              + {hiddenCount} more{hiddenCount <= group.queuedCount ? " queued" : ""}{" "}
+              <ChevronDown className="h-3 w-3" />
+            </>
+          )}
+        </button>
+      ) : null}
+
+      {/* Separator between groups */}
+      {!isLast && <div className="bg-border/20 my-1 h-px" />}
+    </div>
   );
 }
 
@@ -954,57 +1009,121 @@ function LibraryActiveWorkRow({
               </div>
             </div>
           ) : null}
-          {activeLibraryScans.map((scan) => (
-            <LibraryScanTaskRow
-              key={scan.id}
-              scan={scan}
+          {activeLibraryScans.length > 0 ? (
+            <LibraryScanTasks
+              scans={activeLibraryScans}
               cancelling={cancellingLibraryID === libraryID}
               libraryID={libraryID}
               onCancelScans={onCancelScans}
             />
-          ))}
+          ) : null}
         </div>
       </TableCell>
     </TableRow>
   );
 }
 
-function LibraryScanTaskRow({
-  scan,
+// How many scan rows a library shows before the rest collapse behind "Show all".
+const COLLAPSED_SCAN_ROW_LIMIT = 4;
+
+function LibraryScanTasks({
+  scans,
   cancelling,
   libraryID,
   onCancelScans,
 }: {
-  scan: ScanRun;
+  scans: ScanRun[];
   cancelling: boolean;
   libraryID: number;
   onCancelScans: (libraryID: number) => void;
 }) {
-  const progress = formatActiveScanProgress(scan);
+  const [expanded, setExpanded] = useState(false);
+  const runningCount = scans.filter((scan) => scan.status === "running").length;
+  const queuedCount = scans.length - runningCount;
+  const visibleScans = expanded ? scans : scans.slice(0, COLLAPSED_SCAN_ROW_LIMIT);
+  const hiddenCount = scans.length - visibleScans.length;
 
   return (
-    <div className="flex min-w-0 items-start gap-1.5">
-      <StopTaskButton
-        disabled={cancelling}
-        label="Cancel library scans"
-        onClick={() => onCancelScans(libraryID)}
-      />
-      <RefreshCw
-        className={cn("mt-0.5 h-3 w-3 shrink-0", scan.status === "running" && "animate-spin")}
-      />
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="text-foreground/80 font-medium">Scan</span>
-          <span className="shrink-0">{scan.status === "running" ? "Running" : "Queued"}</span>
-        </div>
-        <div className="text-muted-foreground/80 truncate text-[10px]">
-          {formatActiveScanMode(scan)}
-          {scan.path ? ` · ${scan.path}` : " · Entire library"}
-        </div>
-        {progress ? (
-          <div className="text-muted-foreground/80 truncate text-[10px]">{progress}</div>
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <StopTaskButton
+          disabled={cancelling}
+          label="Cancel library scans"
+          onClick={() => onCancelScans(libraryID)}
+        />
+        <RefreshCw
+          className={cn("h-3 w-3 shrink-0", runningCount > 0 && "animate-spin")}
+          style={{ animationDuration: "2s" }}
+        />
+        <span className="text-foreground/80 font-medium">Scan</span>
+        <span className="tabular-nums">
+          {runningCount > 0 ? `${runningCount} running` : null}
+          {runningCount > 0 && queuedCount > 0 ? " · " : null}
+          {queuedCount > 0 ? `${queuedCount} queued` : null}
+        </span>
+        {scans.length > COLLAPSED_SCAN_ROW_LIMIT ? (
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 rounded px-1 text-[10px] transition-colors"
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {expanded ? (
+              <>
+                Show less <ChevronUp className="h-3 w-3" />
+              </>
+            ) : (
+              <>
+                Show all {scans.length} <ChevronDown className="h-3 w-3" />
+              </>
+            )}
+          </button>
         ) : null}
       </div>
+      <div
+        className={cn(
+          "flex min-w-0 flex-col gap-0.5 pl-[3.375rem]",
+          expanded && "max-h-56 overflow-y-auto",
+        )}
+      >
+        {visibleScans.map((scan) => (
+          <CompactScanRow key={scan.id} scan={scan} />
+        ))}
+        {hiddenCount > 0 ? (
+          <button
+            type="button"
+            className="text-muted-foreground/70 hover:text-foreground w-fit rounded text-left text-[10px] transition-colors"
+            onClick={() => setExpanded(true)}
+          >
+            + {hiddenCount} more{hiddenCount <= queuedCount ? " queued" : ""}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CompactScanRow({ scan }: { scan: ScanRun }) {
+  const progress = scan.status === "running" ? formatActiveScanProgress(scan) : "";
+
+  return (
+    <div className="flex min-w-0 items-center gap-1.5" title={scan.path}>
+      <span
+        className={cn(
+          "h-1.5 w-1.5 shrink-0 rounded-full",
+          scan.status === "running" ? "bg-success" : "bg-muted-foreground/30",
+        )}
+      />
+      {scan.mode !== "file" ? (
+        <span className="shrink-0 text-[10px]">{formatActiveScanMode(scan)}</span>
+      ) : null}
+      {scan.path ? (
+        <code className="text-muted-foreground/80 truncate font-mono text-[10px]">
+          {formatActiveScanTarget(scan)}
+        </code>
+      ) : null}
+      {progress ? (
+        <span className="text-muted-foreground/60 truncate text-[10px]">· {progress}</span>
+      ) : null}
     </div>
   );
 }
