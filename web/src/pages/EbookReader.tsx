@@ -260,7 +260,7 @@ export default function EbookReader() {
   const [annotations, setAnnotations] = useState<EbookReaderAnnotation[]>([]);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
   const [locationInfo, setLocationInfo] = useState<ReaderLocationInfo | null>(null);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [_shortcutsOpen, setShortcutsOpen] = useState(false);
   const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsVoiceURI, setTtsVoiceURI] = useState("");
