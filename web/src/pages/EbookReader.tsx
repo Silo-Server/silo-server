@@ -71,6 +71,7 @@ import {
 } from "@/reader/ebookReaderApi";
 import { chapterExtent, tapZoneAction } from "@/reader/readerNavigation";
 import ReaderFooter from "@/reader/ReaderFooter";
+import ReaderShortcutsOverlay from "@/reader/ReaderShortcutsOverlay";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
@@ -270,7 +271,11 @@ export default function EbookReader() {
   const [annotations, setAnnotations] = useState<EbookReaderAnnotation[]>([]);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
   const [locationInfo, setLocationInfo] = useState<ReaderLocationInfo | null>(null);
-  const [_shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Mirrors locationInfo synchronously so the keyboard-shortcut handler can
+  // read the latest fraction without listing locationInfo as a dependency —
+  // that would rebind the window keydown listener on every relocate.
+  const locationInfoRef = useRef<ReaderLocationInfo | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsVoiceURI, setTtsVoiceURI] = useState("");
@@ -302,6 +307,10 @@ export default function EbookReader() {
   }, [locationInfo, isComicFormat]);
   const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
     setLoadedFile(state);
+  }, []);
+  const handleLocationChange = useCallback((info: ReaderLocationInfo) => {
+    locationInfoRef.current = info;
+    setLocationInfo(info);
   }, []);
   const handleProgressChange = useCallback((progress: number | null) => {
     setReaderProgress(progress);
@@ -446,6 +455,27 @@ export default function EbookReader() {
     setAnnotations((current) => [created, ...current]);
     setPanel("notes");
   }, [contentId, item?.title, readerProgress, selection]);
+  // Mirrors handleCreateBookmark so the keyboard-shortcut handler can call the
+  // latest version without listing it as a dependency — it closes over
+  // readerProgress, which changes on every relocate, and would otherwise
+  // force the window keydown listener to rebind constantly.
+  const bookmarkActionRef = useRef(handleCreateBookmark);
+  useEffect(() => {
+    bookmarkActionRef.current = handleCreateBookmark;
+  }, [handleCreateBookmark]);
+  const toggleFullscreen = useCallback(() => {
+    if (typeof document === "undefined") return;
+    try {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.()?.catch(() => {});
+      } else {
+        void document.documentElement.requestFullscreen?.()?.catch(() => {});
+      }
+    } catch {
+      // Fullscreen API unsupported or blocked (e.g. embedded without
+      // allow="fullscreen"); ignore rather than surface a console error.
+    }
+  }, []);
   const handleAnnotationNavigate = useCallback((annotation: EbookReaderAnnotation) => {
     // Toolbar bookmarks store synthetic "fraction:<n>" locations that foliate's
     // goTo cannot resolve; route those through goToFraction instead.
@@ -526,15 +556,64 @@ export default function EbookReader() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditableTarget(event.target)) return;
-      if (event.key === "ArrowLeft") {
-        readerRef.current?.prev();
-      } else if (event.key === "ArrowRight") {
-        readerRef.current?.next();
+      switch (event.key) {
+        case "ArrowLeft":
+          readerRef.current?.prev();
+          break;
+        case "ArrowRight":
+          readerRef.current?.next();
+          break;
+        case "Home":
+        case "End": {
+          if (isComicFormat) return;
+          const fractions = readerRef.current?.getSectionFractions() ?? [];
+          const extent = chapterExtent(fractions, locationInfoRef.current?.fraction ?? 0);
+          if (!extent) return;
+          event.preventDefault();
+          void readerRef.current?.goToFraction(event.key === "Home" ? extent.start : extent.end);
+          break;
+        }
+        case "t":
+          // Mirrors the header's panel-open toggle plus the Contents tab
+          // click: reopen onto Contents, or close if already showing it.
+          if (panelOpen && panel === "toc") {
+            setPanelOpen(false);
+          } else {
+            setPanelOpen(true);
+            setPanel("toc");
+          }
+          break;
+        case "s":
+          if (panelOpen && panel === "search") {
+            setPanelOpen(false);
+          } else {
+            setPanelOpen(true);
+            setPanel("search");
+          }
+          break;
+        case "b":
+          void bookmarkActionRef.current();
+          break;
+        case "f":
+          toggleFullscreen();
+          break;
+        case "?":
+          setShortcutsOpen(true);
+          break;
+        case "Escape":
+          if (shortcutsOpen) {
+            setShortcutsOpen(false);
+          } else {
+            setChromeVisible((visible) => !visible);
+          }
+          break;
+        default:
+          break;
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isComicFormat, shortcutsOpen, panelOpen, panel, toggleFullscreen]);
 
   useEffect(() => {
     if (!contentId) return;
@@ -822,7 +901,7 @@ export default function EbookReader() {
               onProgressChange={handleProgressChange}
               onReady={handleReaderReady}
               onSelectionChange={setSelection}
-              onLocationChange={setLocationInfo}
+              onLocationChange={handleLocationChange}
               onContentPointerUp={handleContentPointerUp}
               onContentPointerMove={handleContentPointerMove}
             />
@@ -1357,6 +1436,7 @@ export default function EbookReader() {
           onShowShortcuts={() => setShortcutsOpen(true)}
         />
       )}
+      {shortcutsOpen && <ReaderShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
       {showEndOfBookNext && nextChapter && nextChapterHref && (
         <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
           <Button

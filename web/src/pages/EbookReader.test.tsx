@@ -1424,6 +1424,114 @@ describe("EbookReader", () => {
     expect(value?.className).toContain("justify-self-end");
   });
 
+  it("binds the reader keyboard map with an input guard", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const press = (key: string) => {
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      });
+    };
+
+    press("?");
+    expect(container.textContent).toContain("Keyboard shortcuts");
+    expect(container.textContent).toContain("Previous / next page");
+
+    press("Escape"); // overlay open — Escape closes it first
+    expect(container.textContent).not.toContain("Previous / next page");
+    expect(container.querySelector("header")).not.toBeNull();
+
+    press("Escape"); // overlay already closed — Escape now toggles chrome
+    expect(container.querySelector("header")).toBeNull();
+
+    press("Escape"); // bring chrome back so the panel toggle button is reachable
+    expect(container.querySelector("header")).not.toBeNull();
+
+    const closePanel = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close reader panel"]',
+    );
+    await act(async () => {
+      closePanel?.click();
+    });
+    expect(container.querySelector("aside")).toBeNull();
+
+    // A keydown originating from an editable target (event.target is the
+    // input, not window) must be ignored by the reader shortcut map.
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true }));
+    });
+    expect(container.querySelector("aside")).toBeNull();
+    document.body.removeChild(input);
+
+    // Outside of an editable target, "t" reopens the contents panel.
+    press("t");
+    expect(container.querySelector("aside")).not.toBeNull();
+  });
+
+  it("jumps to chapter bounds on Home and End using section fractions", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Ch 2" });
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Home" }));
+    });
+    expect(mocks.readerGoToFraction).toHaveBeenCalledWith(0.25);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    });
+    expect(mocks.readerGoToFraction).toHaveBeenCalledWith(0.6);
+  });
+
+  it("keeps Home and End inert for comic formats", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [makeVersion({ file_id: 8, file_name: "Comic.cbz", container: "cbz" })],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Home" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    });
+
+    expect(mocks.readerGoToFraction).not.toHaveBeenCalled();
+  });
+
   it("hides paginated-only controls in scrolled flow", async () => {
     await act(async () => {
       root.render(
