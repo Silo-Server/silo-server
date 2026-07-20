@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"testing"
 	"time"
 )
@@ -288,4 +289,294 @@ func TestHistoryUsesRequestTimezone(t *testing.T) {
 	if daysUTC[0].Date == daysAmsterdam[0].Date {
 		t.Fatal("expected the days rollup date strings to differ between UTC and Europe/Amsterdam")
 	}
+}
+
+func TestSessionDaySecondsUsesLocation(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	// 2026-07-19T23:30:00Z is CEST (UTC+2) in Amsterdam, so local time is
+	// 2026-07-20T01:30 -- the next day.
+	sessions := []ReadingSession{
+		{StartedAt: time.Date(2026, 7, 19, 23, 30, 0, 0, time.UTC), DurationSeconds: 900},
+	}
+
+	utcDays := sessionDaySeconds(sessions, time.UTC)
+	if utcDays["2026-07-19"] != 900 {
+		t.Fatalf("UTC bucketing = %v, want 2026-07-19: 900", utcDays)
+	}
+
+	amsDays := sessionDaySeconds(sessions, loc)
+	if amsDays["2026-07-20"] != 900 {
+		t.Fatalf("Europe/Amsterdam bucketing = %v, want 2026-07-20: 900", amsDays)
+	}
+	if _, ok := amsDays["2026-07-19"]; ok {
+		t.Fatalf("Europe/Amsterdam bucketing = %v, did not expect a 2026-07-19 entry", amsDays)
+	}
+}
+
+func TestStreakMath(t *testing.T) {
+	const today = "2026-07-20"
+	const dMinus1 = "2026-07-19"
+	const dMinus2 = "2026-07-18"
+	const dMinus3 = "2026-07-17"
+
+	cases := []struct {
+		name        string
+		days        DaySeconds
+		today       string
+		wantCurrent int
+		wantLongest int
+	}{
+		{
+			name:        "today unqualified but alive off yesterday",
+			days:        DaySeconds{dMinus2: 400, dMinus1: 400, today: 100},
+			today:       today,
+			wantCurrent: 2,
+			wantLongest: 2,
+		},
+		{
+			name:        "today qualified extends the streak",
+			days:        DaySeconds{dMinus1: 400, today: 400},
+			today:       today,
+			wantCurrent: 2,
+			wantLongest: 2,
+		},
+		{
+			name:        "gap breaks the streak but an earlier run still counts toward longest",
+			days:        DaySeconds{dMinus3: 400, dMinus1: 400, today: 400},
+			today:       today,
+			wantCurrent: 2,
+			wantLongest: 2,
+		},
+		{
+			name:        "sub-300s days never qualify",
+			days:        DaySeconds{today: 299},
+			today:       today,
+			wantCurrent: 0,
+			wantLongest: 0,
+		},
+		{
+			name:        "empty days",
+			days:        DaySeconds{},
+			today:       today,
+			wantCurrent: 0,
+			wantLongest: 0,
+		},
+		{
+			name:        "both today and yesterday missed kills the streak even with older history",
+			days:        DaySeconds{dMinus3: 400, dMinus2: 0},
+			today:       today,
+			wantCurrent: 0,
+			wantLongest: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			current, longest := streakFrom(tc.days, tc.today)
+			if current != tc.wantCurrent {
+				t.Errorf("current = %d, want %d", current, tc.wantCurrent)
+			}
+			if longest != tc.wantLongest {
+				t.Errorf("longest = %d, want %d", longest, tc.wantLongest)
+			}
+		})
+	}
+}
+
+func TestMonthChallenge(t *testing.T) {
+	loc := time.UTC
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, loc)
+
+	t.Run("previous month above the floor sets the target", func(t *testing.T) {
+		days := DaySeconds{"2026-06-15": 20000}
+		target, month := monthChallenge(days, now, loc)
+		if target != 20000 {
+			t.Errorf("target = %d, want 20000", target)
+		}
+		if month != 0 {
+			t.Errorf("month = %d, want 0", month)
+		}
+	})
+
+	t.Run("previous month below the floor is clamped to it", func(t *testing.T) {
+		days := DaySeconds{"2026-06-15": 3600}
+		target, _ := monthChallenge(days, now, loc)
+		if target != monthChallengeFloorSeconds {
+			t.Errorf("target = %d, want %d", target, monthChallengeFloorSeconds)
+		}
+	})
+
+	t.Run("month boundaries are drawn in loc, not UTC", func(t *testing.T) {
+		amsterdam, err := time.LoadLocation("Europe/Amsterdam")
+		if err != nil {
+			t.Fatalf("load location: %v", err)
+		}
+		// 2026-06-30T23:30:00Z is CEST (UTC+2), so locally it's
+		// 2026-07-01T01:30 -- the first day of July, not the last day of
+		// June. It must count toward the current month, not the previous
+		// one used to derive the target.
+		sessions := []ReadingSession{
+			{StartedAt: time.Date(2026, 6, 30, 23, 30, 0, 0, time.UTC), DurationSeconds: 1800},
+		}
+		days := sessionDaySeconds(sessions, amsterdam)
+		nowAmsterdam := now.In(amsterdam)
+
+		target, month := monthChallenge(days, nowAmsterdam, amsterdam)
+		if month != 1800 {
+			t.Errorf("month = %d, want 1800 (the boundary session counted as July)", month)
+		}
+		if target != monthChallengeFloorSeconds {
+			t.Errorf("target = %d, want the floor %d (June had no seconds)", target, monthChallengeFloorSeconds)
+		}
+	})
+}
+
+func TestComputeDNA(t *testing.T) {
+	t.Run("diversity: single genre scores 0", func(t *testing.T) {
+		dna := computeDNA(nil, []GenreSeconds{{Genre: "Sci-Fi", Seconds: 100}}, nil, time.Now(), time.UTC)
+		if dna.DiversityScore != 0 {
+			t.Errorf("diversity = %d, want 0", dna.DiversityScore)
+		}
+	})
+
+	t.Run("diversity: two equal genres scores 50", func(t *testing.T) {
+		genres := []GenreSeconds{{Genre: "Sci-Fi", Seconds: 100}, {Genre: "Fantasy", Seconds: 100}}
+		dna := computeDNA(nil, genres, nil, time.Now(), time.UTC)
+		if dna.DiversityScore != 50 {
+			t.Errorf("diversity = %d, want 50", dna.DiversityScore)
+		}
+	})
+
+	t.Run("hour buckets, average session length, and year-end projection", func(t *testing.T) {
+		loc := time.UTC
+		now := time.Date(2026, 7, 2, 0, 0, 0, 0, loc)
+
+		mk := func(hour int) ReadingSession {
+			return ReadingSession{
+				StartedAt:       time.Date(2026, 6, 1, hour, 0, 0, 0, loc),
+				DurationSeconds: 3600,
+			}
+		}
+		sessions := []ReadingSession{
+			mk(5),  // morning, lower boundary
+			mk(11), // morning, upper boundary
+			mk(12), // afternoon, lower boundary
+			mk(16), // afternoon, upper boundary
+			mk(17), // evening, lower boundary
+			mk(21), // evening, upper boundary
+			mk(22), // night, lower boundary
+			mk(4),  // night, upper boundary (wraps past midnight)
+		}
+
+		dna := computeDNA(sessions, nil, nil, now, loc)
+
+		wantBuckets := map[string]int{"morning": 2, "afternoon": 2, "evening": 2, "night": 2}
+		for bucket, want := range wantBuckets {
+			if dna.HoursByBucket[bucket] != want {
+				t.Errorf("HoursByBucket[%q] = %d, want %d (buckets: %v)", bucket, dna.HoursByBucket[bucket], want, dna.HoursByBucket)
+			}
+		}
+
+		if dna.AvgSessionSeconds != 3600 {
+			t.Errorf("AvgSessionSeconds = %d, want 3600", dna.AvgSessionSeconds)
+		}
+
+		yearStart := time.Date(2026, 1, 1, 0, 0, 0, 0, loc)
+		nextYearStart := time.Date(2027, 1, 1, 0, 0, 0, 0, loc)
+		elapsedFraction := float64(now.Sub(yearStart)) / float64(nextYearStart.Sub(yearStart))
+		ytdHours := 8.0 // 8 one-hour sessions, all in 2026
+		wantProjected := goalProjection(ytdHours, elapsedFraction)
+
+		if diff := dna.ProjectedYearHours - wantProjected; diff > 1e-9 || diff < -1e-9 {
+			t.Errorf("ProjectedYearHours = %v, want %v", dna.ProjectedYearHours, wantProjected)
+		}
+	})
+}
+
+func TestEvaluateAchievements(t *testing.T) {
+	base := func() achievementInput { return achievementInput{} }
+
+	cases := []struct {
+		id    string
+		atMin func() achievementInput
+		below func() achievementInput
+	}{
+		{"first-hour", func() achievementInput { in := base(); in.TotalSeconds = 3600; return in }, func() achievementInput { in := base(); in.TotalSeconds = 3599; return in }},
+		{"ten-hours", func() achievementInput { in := base(); in.TotalSeconds = 36000; return in }, func() achievementInput { in := base(); in.TotalSeconds = 35999; return in }},
+		{"fifty-hours", func() achievementInput { in := base(); in.TotalSeconds = 180000; return in }, func() achievementInput { in := base(); in.TotalSeconds = 179999; return in }},
+		{"hundred-hours", func() achievementInput { in := base(); in.TotalSeconds = 360000; return in }, func() achievementInput { in := base(); in.TotalSeconds = 359999; return in }},
+		{"marathon-session", func() achievementInput { in := base(); in.LongestSessionSeconds = 7200; return in }, func() achievementInput { in := base(); in.LongestSessionSeconds = 7199; return in }},
+		{"streak-3", func() achievementInput { in := base(); in.LongestStreak = 3; return in }, func() achievementInput { in := base(); in.LongestStreak = 2; return in }},
+		{"streak-7", func() achievementInput { in := base(); in.LongestStreak = 7; return in }, func() achievementInput { in := base(); in.LongestStreak = 6; return in }},
+		{"streak-30", func() achievementInput { in := base(); in.LongestStreak = 30; return in }, func() achievementInput { in := base(); in.LongestStreak = 29; return in }},
+		{"streak-100", func() achievementInput { in := base(); in.LongestStreak = 100; return in }, func() achievementInput { in := base(); in.LongestStreak = 99; return in }},
+		{"first-book", func() achievementInput { in := base(); in.BooksFinished = 1; return in }, func() achievementInput { in := base(); in.BooksFinished = 0; return in }},
+		{"ten-books", func() achievementInput { in := base(); in.BooksFinished = 10; return in }, func() achievementInput { in := base(); in.BooksFinished = 9; return in }},
+		{"fifty-books", func() achievementInput { in := base(); in.BooksFinished = 50; return in }, func() achievementInput { in := base(); in.BooksFinished = 49; return in }},
+		{"night-owl", func() achievementInput { in := base(); in.NightSeconds = 36000; return in }, func() achievementInput { in := base(); in.NightSeconds = 35999; return in }},
+		{"early-bird", func() achievementInput { in := base(); in.EarlyBirdSeconds = 36000; return in }, func() achievementInput { in := base(); in.EarlyBirdSeconds = 35999; return in }},
+		{"weekender", func() achievementInput { in := base(); in.WeekendSeconds = 72000; return in }, func() achievementInput { in := base(); in.WeekendSeconds = 71999; return in }},
+		{"genre-hopper", func() achievementInput { in := base(); in.DistinctGenres = 5; return in }, func() achievementInput { in := base(); in.DistinctGenres = 4; return in }},
+		{"deep-diver", func() achievementInput { in := base(); in.MaxBookSeconds = 36000; return in }, func() achievementInput { in := base(); in.MaxBookSeconds = 35999; return in }},
+		{"finisher", func() achievementInput { in := base(); in.FinishedWithHighRead = true; return in }, func() achievementInput { in := base(); in.FinishedWithHighRead = false; return in }},
+	}
+
+	if len(cases) != 18 {
+		t.Fatalf("test table has %d cases, want 18 (one per badge)", len(cases))
+	}
+
+	contains := func(ids []string, id string) bool {
+		for _, got := range ids {
+			if got == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			atMin := evaluateAchievements(tc.atMin())
+			if !contains(atMin, tc.id) {
+				t.Errorf("at threshold: ids = %v, want %q present", atMin, tc.id)
+			}
+
+			below := evaluateAchievements(tc.below())
+			if contains(below, tc.id) {
+				t.Errorf("below threshold: ids = %v, want %q absent", below, tc.id)
+			}
+		})
+	}
+
+	t.Run("18 definitions with the exact spec ids", func(t *testing.T) {
+		wantIDs := make([]string, len(cases))
+		for i, tc := range cases {
+			wantIDs[i] = tc.id
+		}
+		sort.Strings(wantIDs)
+
+		if len(achievementDefinitions) != 18 {
+			t.Fatalf("len(achievementDefinitions) = %d, want 18", len(achievementDefinitions))
+		}
+		gotIDs := make([]string, len(achievementDefinitions))
+		for i, def := range achievementDefinitions {
+			if def.Category == "" || def.Name == "" || def.Description == "" {
+				t.Errorf("achievementDefinitions[%d] (%s) has an empty Category/Name/Description", i, def.ID)
+			}
+			gotIDs[i] = def.ID
+		}
+		sort.Strings(gotIDs)
+
+		if len(gotIDs) != len(wantIDs) {
+			t.Fatalf("id count mismatch: got %v want %v", gotIDs, wantIDs)
+		}
+		for i := range gotIDs {
+			if gotIDs[i] != wantIDs[i] {
+				t.Errorf("achievementDefinitions ids = %v, want (sorted) %v", gotIDs, wantIDs)
+			}
+		}
+	})
 }

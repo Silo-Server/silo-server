@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -80,6 +82,319 @@ type ReadingMotivationStore interface {
 	// AuthorSeconds returns all-time per-author reading-time totals,
 	// highest first.
 	AuthorSeconds(ctx context.Context, userID int, profileID string) ([]AuthorSeconds, error)
+}
+
+// streakMinSeconds is the minimum local-day reading time for that day to
+// count toward a streak, per spec.
+const streakMinSeconds = 300
+
+// monthChallengeFloorSeconds is the minimum monthly challenge target, so an
+// empty previous month doesn't trivialize the current one.
+const monthChallengeFloorSeconds = 10800
+
+// dayKeyLayout is the "YYYY-MM-DD" layout DaySeconds keys and streakFrom's
+// "today" argument use.
+const dayKeyLayout = "2006-01-02"
+
+// DaySeconds maps a "YYYY-MM-DD" local calendar day (already resolved
+// against the caller's *time.Location) to the total reading seconds
+// attributed to it.
+type DaySeconds map[string]int
+
+// sessionDaySeconds buckets sessions by the local calendar day their
+// started_at falls on in loc, summing duration_seconds per day. Sessions
+// store started_at in UTC; only the bucketing is timezone-aware.
+func sessionDaySeconds(sessions []ReadingSession, loc *time.Location) DaySeconds {
+	days := make(DaySeconds)
+	for _, s := range sessions {
+		key := s.StartedAt.In(loc).Format(dayKeyLayout)
+		days[key] += s.DurationSeconds
+	}
+	return days
+}
+
+// streakFrom computes the current and longest streaks over days, a map of
+// local calendar day to reading seconds. A day qualifies with >=
+// streakMinSeconds. The current streak is alive until a full local day is
+// missed: if today doesn't qualify, the streak isn't broken yet (it just
+// hasn't been extended) so current counts back from yesterday; if yesterday
+// also fails to qualify, the streak is dead and current is 0.
+func streakFrom(days DaySeconds, today string) (current, longest int) {
+	qualifies := func(day string) bool {
+		return days[day] >= streakMinSeconds
+	}
+
+	runEndingAt := func(start time.Time) int {
+		n := 0
+		d := start
+		for qualifies(d.Format(dayKeyLayout)) {
+			n++
+			d = d.AddDate(0, 0, -1)
+		}
+		return n
+	}
+
+	todayTime, err := time.Parse(dayKeyLayout, today)
+	if err != nil {
+		return 0, 0
+	}
+
+	if qualifies(today) {
+		current = runEndingAt(todayTime)
+	} else {
+		yesterday := todayTime.AddDate(0, 0, -1)
+		if qualifies(yesterday.Format(dayKeyLayout)) {
+			current = runEndingAt(yesterday)
+		}
+	}
+
+	var qualifyingDays []time.Time
+	for day, secs := range days {
+		if secs < streakMinSeconds {
+			continue
+		}
+		t, err := time.Parse(dayKeyLayout, day)
+		if err != nil {
+			continue
+		}
+		qualifyingDays = append(qualifyingDays, t)
+	}
+	sort.Slice(qualifyingDays, func(i, j int) bool { return qualifyingDays[i].Before(qualifyingDays[j]) })
+
+	run := 0
+	var prev time.Time
+	for i, t := range qualifyingDays {
+		if i > 0 && t.Sub(prev) == 24*time.Hour {
+			run++
+		} else {
+			run = 1
+		}
+		if run > longest {
+			longest = run
+		}
+		prev = t
+	}
+
+	return current, longest
+}
+
+// monthChallenge computes the current month's challenge target (the greater
+// of last calendar month's total seconds and monthChallengeFloorSeconds) and
+// the current month's seconds so far, both with month boundaries drawn in
+// loc against now.
+func monthChallenge(days DaySeconds, now time.Time, loc *time.Location) (targetSec, monthSec int) {
+	nowLocal := now.In(loc)
+	y, m, _ := nowLocal.Date()
+
+	prevY, prevM := y, m-1
+	if prevM < time.January {
+		prevM = time.December
+		prevY--
+	}
+
+	var prevMonthSec int
+	for day, secs := range days {
+		t, err := time.Parse(dayKeyLayout, day)
+		if err != nil {
+			continue
+		}
+		dy, dm, _ := t.Date()
+		switch {
+		case dy == y && dm == m:
+			monthSec += secs
+		case dy == prevY && dm == prevM:
+			prevMonthSec += secs
+		}
+	}
+
+	targetSec = prevMonthSec
+	if targetSec < monthChallengeFloorSeconds {
+		targetSec = monthChallengeFloorSeconds
+	}
+	return targetSec, monthSec
+}
+
+// goalProjection linearly extrapolates a year-end total from year-to-date
+// progress and the fraction of the year elapsed. When elapsedFraction is too
+// small to extrapolate meaningfully (< 0.01, i.e. very early in the year)
+// ytd itself is returned rather than dividing by a near-zero denominator.
+func goalProjection(ytd float64, yearElapsedFraction float64) float64 {
+	if yearElapsedFraction < 0.01 {
+		return ytd
+	}
+	return ytd / yearElapsedFraction
+}
+
+// hourBucket classifies an hour-of-day (0-23, local) into one of the four
+// spec buckets: morning 05-11, afternoon 12-16, evening 17-21, night 22-04.
+func hourBucket(hour int) string {
+	switch {
+	case hour >= 5 && hour <= 11:
+		return "morning"
+	case hour >= 12 && hour <= 16:
+		return "afternoon"
+	case hour >= 17 && hour <= 21:
+		return "evening"
+	default:
+		return "night"
+	}
+}
+
+// diversityScore is the complement of the Herfindahl index over genre-second
+// shares, scaled to 0-100 and rounded: (1 - Sum(share^2)) * 100.
+func diversityScore(genres []GenreSeconds) int {
+	var total int
+	for _, g := range genres {
+		total += g.Seconds
+	}
+	if total <= 0 {
+		return 0
+	}
+	var sumSquares float64
+	for _, g := range genres {
+		share := float64(g.Seconds) / float64(total)
+		sumSquares += share * share
+	}
+	return int(math.Round((1 - sumSquares) * 100))
+}
+
+// dnaAggregates is the computed "Reading DNA" profile: taste breakdown,
+// habits, and a year-end pace projection.
+type dnaAggregates struct {
+	Genres             []GenreSeconds
+	Authors            []AuthorSeconds
+	AvgSessionSeconds  int
+	HoursByBucket      map[string]int
+	ProjectedYearHours float64
+	DiversityScore     int
+}
+
+// computeDNA derives dnaAggregates from raw sessions plus the store's
+// all-time genre/author rollups. Hour-of-day buckets and average session
+// length are computed over every session passed in; the year-end projection
+// uses only sessions whose local start falls in now's local year.
+func computeDNA(sessions []ReadingSession, genres []GenreSeconds, authors []AuthorSeconds, now time.Time, loc *time.Location) dnaAggregates {
+	buckets := map[string]int{"morning": 0, "afternoon": 0, "evening": 0, "night": 0}
+	year := now.In(loc).Year()
+
+	var totalSeconds, ytdSeconds int
+	for _, s := range sessions {
+		totalSeconds += s.DurationSeconds
+		local := s.StartedAt.In(loc)
+		buckets[hourBucket(local.Hour())] += s.DurationSeconds
+		if local.Year() == year {
+			ytdSeconds += s.DurationSeconds
+		}
+	}
+
+	avgSessionSeconds := 0
+	if len(sessions) > 0 {
+		avgSessionSeconds = totalSeconds / len(sessions)
+	}
+
+	hoursByBucket := make(map[string]int, len(buckets))
+	for bucket, secs := range buckets {
+		hoursByBucket[bucket] = int(math.Round(float64(secs) / 3600.0))
+	}
+
+	yearStart := time.Date(year, 1, 1, 0, 0, 0, 0, loc)
+	nextYearStart := time.Date(year+1, 1, 1, 0, 0, 0, 0, loc)
+	elapsedFraction := float64(now.In(loc).Sub(yearStart)) / float64(nextYearStart.Sub(yearStart))
+	projected := goalProjection(float64(ytdSeconds)/3600.0, elapsedFraction)
+
+	return dnaAggregates{
+		Genres:             genres,
+		Authors:            authors,
+		AvgSessionSeconds:  avgSessionSeconds,
+		HoursByBucket:      hoursByBucket,
+		ProjectedYearHours: projected,
+		DiversityScore:     diversityScore(genres),
+	}
+}
+
+// achievementInput is the set of computed aggregates evaluateAchievements
+// checks badge criteria against. All fields are already local-timezone-
+// resolved and lifetime (not reset) totals where applicable.
+type achievementInput struct {
+	TotalSeconds          int
+	LongestSessionSeconds int
+	CurrentStreak         int
+	LongestStreak         int
+	BooksFinished         int
+	NightSeconds          int
+	EarlyBirdSeconds      int
+	WeekendSeconds        int
+	DistinctGenres        int
+	MaxBookSeconds        int
+	FinishedWithHighRead  bool
+}
+
+// AchievementDefinition is a fixed badge definition: id, display grouping,
+// name, and description. Criteria live in evaluateAchievements, not here.
+type AchievementDefinition struct {
+	ID          string
+	Category    string
+	Name        string
+	Description string
+}
+
+// achievementDefinitions is the fixed 18-badge starter set. Ids are load-
+// bearing (persisted in reading_achievements) and must never change once
+// shipped.
+var achievementDefinitions = []AchievementDefinition{
+	{ID: "first-hour", Category: "time", Name: "First Hour", Description: "Read for 1 hour total"},
+	{ID: "ten-hours", Category: "time", Name: "Ten Hours", Description: "Read for 10 hours total"},
+	{ID: "fifty-hours", Category: "time", Name: "Fifty Hours", Description: "Read for 50 hours total"},
+	{ID: "hundred-hours", Category: "time", Name: "Hundred Hours", Description: "Read for 100 hours total"},
+	{ID: "marathon-session", Category: "time", Name: "Marathon Session", Description: "Read for 2 hours in a single session"},
+	{ID: "streak-3", Category: "streak", Name: "3-Day Streak", Description: "Read 3 days in a row"},
+	{ID: "streak-7", Category: "streak", Name: "7-Day Streak", Description: "Read 7 days in a row"},
+	{ID: "streak-30", Category: "streak", Name: "30-Day Streak", Description: "Read 30 days in a row"},
+	{ID: "streak-100", Category: "streak", Name: "100-Day Streak", Description: "Read 100 days in a row"},
+	{ID: "first-book", Category: "books", Name: "First Book", Description: "Finish 1 book"},
+	{ID: "ten-books", Category: "books", Name: "Ten Books", Description: "Finish 10 books"},
+	{ID: "fifty-books", Category: "books", Name: "Fifty Books", Description: "Finish 50 books"},
+	{ID: "night-owl", Category: "habits", Name: "Night Owl", Description: "Read 10 hours between midnight and 5am"},
+	{ID: "early-bird", Category: "habits", Name: "Early Bird", Description: "Read 10 hours between 5am and 8am"},
+	{ID: "weekender", Category: "habits", Name: "Weekender", Description: "Read 20 hours on weekends"},
+	{ID: "genre-hopper", Category: "exploration", Name: "Genre Hopper", Description: "Read across 5 distinct genres"},
+	{ID: "deep-diver", Category: "exploration", Name: "Deep Diver", Description: "Read 10 hours on a single book"},
+	{ID: "finisher", Category: "exploration", Name: "Finisher", Description: "Finish a book with at least 95% read"},
+}
+
+// evaluateAchievements returns the ids of every badge in achievementDefinitions
+// whose criteria in is satisfies. It is pure and idempotent: callers merge
+// the result against previously persisted unlocks (never revoked) and
+// persist only the newly satisfied ones.
+func evaluateAchievements(in achievementInput) []string {
+	satisfied := map[string]bool{
+		"first-hour":       in.TotalSeconds >= 3600,
+		"ten-hours":        in.TotalSeconds >= 36000,
+		"fifty-hours":      in.TotalSeconds >= 180000,
+		"hundred-hours":    in.TotalSeconds >= 360000,
+		"marathon-session": in.LongestSessionSeconds >= 7200,
+		"streak-3":         in.LongestStreak >= 3,
+		"streak-7":         in.LongestStreak >= 7,
+		"streak-30":        in.LongestStreak >= 30,
+		"streak-100":       in.LongestStreak >= 100,
+		"first-book":       in.BooksFinished >= 1,
+		"ten-books":        in.BooksFinished >= 10,
+		"fifty-books":      in.BooksFinished >= 50,
+		"night-owl":        in.NightSeconds >= 36000,
+		"early-bird":       in.EarlyBirdSeconds >= 36000,
+		"weekender":        in.WeekendSeconds >= 72000,
+		"genre-hopper":     in.DistinctGenres >= 5,
+		"deep-diver":       in.MaxBookSeconds >= 36000,
+		"finisher":         in.FinishedWithHighRead,
+	}
+
+	var ids []string
+	for _, def := range achievementDefinitions {
+		if satisfied[def.ID] {
+			ids = append(ids, def.ID)
+		}
+	}
+	return ids
 }
 
 // ReadingMotivationHandler serves the reading-goals PUT endpoint (and, from
