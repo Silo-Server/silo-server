@@ -44,6 +44,7 @@ import { ApiClientError } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
+import { useReadingHeartbeat } from "@/hooks/useReadingHeartbeat";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
@@ -298,6 +299,10 @@ export default function EbookReader() {
   const readingSurfaceRef = useRef<HTMLElement | null>(null);
   const tts = useTTS();
   useScreenWakeLock(wakeLockEnabled);
+  const { noteActivity: noteReadingActivity } = useReadingHeartbeat({
+    contentId: isComicFormat ? null : contentId || null,
+    getFraction: () => locationInfoRef.current?.fraction ?? readerProgress ?? 0,
+  });
   const configLoadedRef = useRef(false);
   // Tracks settings the user changed in this session so a slow server config
   // fetch cannot clobber them after the fact.
@@ -331,10 +336,14 @@ export default function EbookReader() {
   const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
     setLoadedFile(state);
   }, []);
-  const handleLocationChange = useCallback((info: ReaderLocationInfo) => {
-    locationInfoRef.current = info;
-    setLocationInfo(info);
-  }, []);
+  const handleLocationChange = useCallback(
+    (info: ReaderLocationInfo) => {
+      locationInfoRef.current = info;
+      setLocationInfo(info);
+      noteReadingActivity();
+    },
+    [noteReadingActivity],
+  );
   const handleProgressChange = useCallback((progress: number | null) => {
     setReaderProgress(progress);
   }, []);
@@ -546,8 +555,9 @@ export default function EbookReader() {
       if (action === "prev") readerRef.current?.prev();
       else if (action === "next") readerRef.current?.next();
       else if (action === "toggle-chrome") setChromeVisible((visible) => !visible);
+      noteReadingActivity();
     },
-    [isComicFormat, readerSettings.flow, selection],
+    [isComicFormat, readerSettings.flow, selection, noteReadingActivity],
   );
   const handleSurfacePointerUp = useCallback(
     (event: PointerEvent<HTMLElement>) => {
@@ -701,6 +711,7 @@ export default function EbookReader() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditableTarget(event.target)) return;
+      noteReadingActivity();
       switch (event.key) {
         case "ArrowLeft":
           readerRef.current?.prev();
@@ -763,7 +774,7 @@ export default function EbookReader() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isComicFormat, shortcutsOpen, panelOpen, panel, toggleFullscreen]);
+  }, [isComicFormat, shortcutsOpen, panelOpen, panel, toggleFullscreen, noteReadingActivity]);
 
   useEffect(() => {
     if (!contentId) return;

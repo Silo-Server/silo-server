@@ -40,6 +40,17 @@ export function ebookReaderAnnotationPath(contentID: string, annotationID: strin
   return `${ebookReaderAnnotationsPath(contentID)}/${encodeURIComponent(annotationID)}`;
 }
 
+export function readingHeartbeatPath(contentID: string): string {
+  return `/ebooks/${encodeURIComponent(contentID)}/reading-heartbeat`;
+}
+
+export async function sendReadingHeartbeat(contentID: string, fraction: number): Promise<void> {
+  await api<void>(readingHeartbeatPath(contentID), {
+    method: "POST",
+    body: JSON.stringify({ fraction }),
+  });
+}
+
 export async function fetchEbookReaderConfig(contentID: string): Promise<Record<string, unknown>> {
   const envelope = await api<EbookReaderConfigEnvelope>(ebookReaderConfigPath(contentID));
   return envelope.config && typeof envelope.config === "object" && !Array.isArray(envelope.config)

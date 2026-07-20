@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   fetchEbookReaderAnnotations: vi.fn(),
   createEbookReaderAnnotation: vi.fn(),
   deleteEbookReaderAnnotation: vi.fn(),
+  sendReadingHeartbeat: vi.fn(),
   fetchReaderFonts: vi.fn(),
   fetchReaderFontObjectUrl: vi.fn(),
   uploadReaderFont: vi.fn(),
@@ -51,6 +52,7 @@ vi.mock("@/reader/ebookReaderApi", () => ({
   fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
   saveEbookReaderConfig: mocks.saveEbookReaderConfig,
   saveEbookReaderConfigKeepalive: mocks.saveEbookReaderConfigKeepalive,
+  sendReadingHeartbeat: mocks.sendReadingHeartbeat,
 }));
 
 vi.mock("@/reader/readerFontsApi", () => ({
@@ -304,6 +306,7 @@ describe("EbookReader", () => {
     mocks.fetchEbookReaderAnnotations.mockReset();
     mocks.createEbookReaderAnnotation.mockReset();
     mocks.deleteEbookReaderAnnotation.mockReset();
+    mocks.sendReadingHeartbeat.mockReset();
     mocks.fetchReaderFonts.mockReset();
     mocks.fetchReaderFontObjectUrl.mockReset();
     mocks.uploadReaderFont.mockReset();
@@ -328,6 +331,7 @@ describe("EbookReader", () => {
       color: "#facc15",
     });
     mocks.deleteEbookReaderAnnotation.mockResolvedValue(undefined);
+    mocks.sendReadingHeartbeat.mockResolvedValue(undefined);
     localStorage.clear();
     mocks.useCatalogItemDetail.mockReturnValue({
       data: makeEbookItem(),
@@ -1330,6 +1334,35 @@ describe("EbookReader", () => {
     expect(footer.textContent).toContain("Chapter 2");
     expect(footer.textContent).toContain("30%");
     expect(footer.querySelector("[data-chapter-band]")).not.toBeNull();
+  });
+
+  it("sends a reading heartbeat on relocate, then again every 30s", async () => {
+    vi.useFakeTimers();
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // Relocate is one of the activity signals: it should beat immediately
+    // rather than waiting up to 30s for the first tick.
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Chapter 2" });
+    });
+    expect(mocks.sendReadingHeartbeat).toHaveBeenCalledWith("ebook-1", 0.3);
+
+    mocks.sendReadingHeartbeat.mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mocks.sendReadingHeartbeat).toHaveBeenCalledWith("ebook-1", 0.3);
+
+    vi.useRealTimers();
   });
 
   it("scrubs reader progress and supports keyboard page navigation", async () => {
