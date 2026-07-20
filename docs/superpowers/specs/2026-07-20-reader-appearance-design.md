@@ -41,19 +41,21 @@ column layouts.
 
 - Upload .ttf/.otf/.woff/.woff2, max 5 MB per file, max 10 fonts per
   profile.
-- New API under the existing ebook reader route group:
-  - `GET /api/v1/reader/fonts` — list `{ id, name, filename, created_at }`
-  - `POST /api/v1/reader/fonts` — multipart upload; server validates
+- New API inside the existing `/api/v1/ebooks` route group (same
+  `RequireProfile` middleware as all reader endpoints):
+  - `GET /api/v1/ebooks/reader-fonts` — list `{ id, name, filename, created_at }`
+  - `POST /api/v1/ebooks/reader-fonts` — multipart upload; server validates
     magic bytes (sfnt/woff/woff2 signatures), size, and per-profile count caps;
     display name derived from the font's name table when parseable, else
     the filename.
-  - `DELETE /api/v1/reader/fonts/{id}`
-  - `GET /api/v1/reader/fonts/{id}/file` — serves the blob with immutable
+  - `DELETE /api/v1/ebooks/reader-fonts/{id}`
+  - `GET /api/v1/ebooks/reader-fonts/{id}/file` — serves the blob with immutable
     cache headers, per-profile authorization (resolved from the session's
     active profile, like the other reader endpoints), and a font content
     type.
-- Storage: filesystem under the existing app data dir
-  (`fonts/<user_id>/<profile_id>/<id>.<ext>`), metadata in a new
+- Storage: filesystem at `SILO_READER_FONTS_DIR` (default
+  `/var/lib/silo/reader-fonts`, matching the container's `/var/lib/silo/*`
+  bind convention), laid out `<user_id>/<profile_id>/<id>.<ext>`, metadata in a new
   `reader_fonts` table (id, user_id, profile_id, name, filename, format,
   size, created_at). **Per-profile scope**, matching the existing reader
   state tables (`ebook_reader_config`, `ebook_reader_annotations`,
