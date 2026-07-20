@@ -3,7 +3,10 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,10 +21,74 @@ import (
 var errSessionNotFound = errors.New("reading session not found")
 
 // fakeReadingSessionStore is an in-memory ReadingSessionStore backed by a
-// slice, mirroring fakeReaderFontStore's style.
+// slice, mirroring fakeReaderFontStore's style. The read-side rollup methods
+// (PaceWindow, BookSeconds, DailyRollup, BookTotals, RecentSessions,
+// TotalsSince) are backed by settable func fields so tests can supply canned
+// responses without reimplementing the SQL rollup logic in memory; tests
+// that don't touch them (e.g. the heartbeat tests) get harmless zero values.
 type fakeReadingSessionStore struct {
 	sessions []ReadingSession
 	nextID   int64
+
+	paceWindowFn     func(contentID string, since time.Time) (float64, int, error)
+	bookSecondsFn    func(contentID string) (int, error)
+	dailyRollupFn    func(from, to time.Time) ([]DayTotal, error)
+	bookTotalsFn     func() ([]BookTotal, error)
+	recentSessionsFn func(limit int) ([]SessionRow, error)
+	totalsSinceFn    func(since time.Time) (int, error)
+}
+
+func (f *fakeReadingSessionStore) PaceWindow(_ context.Context, _ int, _, contentID string, since time.Time) (float64, int, error) {
+	if f.paceWindowFn == nil {
+		return 0, 0, nil
+	}
+	return f.paceWindowFn(contentID, since)
+}
+
+func (f *fakeReadingSessionStore) BookSeconds(_ context.Context, _ int, _, contentID string) (int, error) {
+	if f.bookSecondsFn == nil {
+		return 0, nil
+	}
+	return f.bookSecondsFn(contentID)
+}
+
+func (f *fakeReadingSessionStore) DailyRollup(_ context.Context, _ int, _ string, from, to time.Time) ([]DayTotal, error) {
+	if f.dailyRollupFn == nil {
+		return nil, nil
+	}
+	return f.dailyRollupFn(from, to)
+}
+
+func (f *fakeReadingSessionStore) BookTotals(_ context.Context, _ int, _ string) ([]BookTotal, error) {
+	if f.bookTotalsFn == nil {
+		return nil, nil
+	}
+	return f.bookTotalsFn()
+}
+
+func (f *fakeReadingSessionStore) RecentSessions(_ context.Context, _ int, _ string, limit int) ([]SessionRow, error) {
+	if f.recentSessionsFn == nil {
+		return nil, nil
+	}
+	return f.recentSessionsFn(limit)
+}
+
+func (f *fakeReadingSessionStore) TotalsSince(_ context.Context, _ int, _ string, since time.Time) (int, error) {
+	if f.totalsSinceFn == nil {
+		return 0, nil
+	}
+	return f.totalsSinceFn(since)
+}
+
+// fakeReadingProgressGetter is a settable fake for readingProgressGetter.
+type fakeReadingProgressGetter struct {
+	progress float64
+	found    bool
+	err      error
+}
+
+func (f *fakeReadingProgressGetter) GetProgress(_ context.Context, _ int, _, _ string) (float64, bool, error) {
+	return f.progress, f.found, f.err
 }
 
 func (f *fakeReadingSessionStore) LatestOpen(_ context.Context, userID int, profileID, contentID string, since time.Time) (*ReadingSession, error) {
@@ -335,4 +402,300 @@ func TestReadingHeartbeatScopedToProfile(t *testing.T) {
 	if sessionB.StartFraction != 0.50 {
 		t.Fatalf("profile B start fraction = %v, want 0.50", sessionB.StartFraction)
 	}
+}
+
+func TestPaceAndTimeLeftThresholds(t *testing.T) {
+	t.Run("book pace wins when this-book data clears the 600s minimum", func(t *testing.T) {
+		pace, timeLeft := paceAndTimeLeft(0.2, 1200, 0, 0, 0.5)
+		if pace == nil {
+			t.Fatal("expected non-nil pace")
+		}
+		if math.Abs(*pace-0.6) > 1e-9 {
+			t.Fatalf("pace = %v, want 0.6", *pace)
+		}
+		if timeLeft == nil {
+			t.Fatal("expected non-nil timeLeft")
+		}
+		if diff := *timeLeft - 3000; diff < -1 || diff > 1 {
+			t.Fatalf("timeLeft = %d, want ~3000 (+/-1)", *timeLeft)
+		}
+	})
+
+	t.Run("falls back to all-books pace when this-book data is under 600s", func(t *testing.T) {
+		// Book has only 300s of data (below the 600s minimum); all-books
+		// has 0.3 fractions over 3600s (clears the 1800s minimum), so the
+		// all-books rate is used instead.
+		pace, timeLeft := paceAndTimeLeft(0.05, 300, 0.3, 3600, 0.5)
+		if pace == nil {
+			t.Fatal("expected non-nil pace from all-books fallback")
+		}
+		if math.Abs(*pace-0.3) > 1e-9 {
+			t.Fatalf("pace = %v, want 0.3 (all-books rate, not this-book rate)", *pace)
+		}
+		if timeLeft == nil {
+			t.Fatal("expected non-nil timeLeft")
+		}
+	})
+
+	t.Run("both under their minimums yields no estimate", func(t *testing.T) {
+		pace, timeLeft := paceAndTimeLeft(0.05, 300, 0.1, 900, 0.5)
+		if pace != nil || timeLeft != nil {
+			t.Fatalf("pace/timeLeft = %v/%v, want nil/nil", pace, timeLeft)
+		}
+	})
+
+	t.Run("zero or negative fraction deltas are guarded to nil", func(t *testing.T) {
+		// This-book clears the 600s minimum but has a zero fraction delta;
+		// all-books clears the 1800s minimum but has a negative delta.
+		// Both are guarded against (no divide-by-zero, no nonsense negative
+		// pace), so the overall result is nil.
+		pace, timeLeft := paceAndTimeLeft(0, 1200, -0.1, 3600, 0.5)
+		if pace != nil || timeLeft != nil {
+			t.Fatalf("pace/timeLeft = %v/%v, want nil/nil", pace, timeLeft)
+		}
+	})
+}
+
+func TestReadingStatsBookHandler(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+
+	t.Run("computes pace, time-left, and book seconds from the store and progress", func(t *testing.T) {
+		store := &fakeReadingSessionStore{
+			paceWindowFn: func(contentID string, since time.Time) (float64, int, error) {
+				if !since.Equal(now.Add(-14 * 24 * time.Hour)) {
+					t.Fatalf("pace window since = %v, want now-14d", since)
+				}
+				if contentID == "book-1" {
+					return 0.2, 1200, nil
+				}
+				return 0.9, 9000, nil // all-books window; unused since book-1 wins
+			},
+			bookSecondsFn: func(contentID string) (int, error) {
+				if contentID != "book-1" {
+					t.Fatalf("book seconds contentID = %q, want book-1", contentID)
+				}
+				return 4000, nil
+			},
+		}
+		progress := &fakeReadingProgressGetter{progress: 0.5, found: true}
+		h := &ReadingSessionsHandler{Store: store, Now: func() time.Time { return now }, Progress: progress}
+
+		req := httptest.NewRequest(http.MethodGet, "/ebooks/book-1/reading-stats", nil)
+		req = req.WithContext(readingSessionAuthContext(1, "profile-a"))
+		req = withReadingSessionContentIDParam(req, "book-1")
+		rr := httptest.NewRecorder()
+		h.HandleBookStats(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+
+		var resp struct {
+			PaceFractionPerHour *float64 `json:"pace_fraction_per_hour"`
+			TimeLeftSeconds     *int64   `json:"time_left_seconds"`
+			BookSeconds         int      `json:"book_seconds"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body = %s", err, rr.Body.String())
+		}
+		if resp.PaceFractionPerHour == nil || math.Abs(*resp.PaceFractionPerHour-0.6) > 1e-9 {
+			t.Fatalf("pace_fraction_per_hour = %v, want 0.6", resp.PaceFractionPerHour)
+		}
+		if resp.TimeLeftSeconds == nil {
+			t.Fatal("expected non-nil time_left_seconds")
+		}
+		if resp.BookSeconds != 4000 {
+			t.Fatalf("book_seconds = %d, want 4000", resp.BookSeconds)
+		}
+	})
+
+	t.Run("no progress row and insufficient pace data yields nulls", func(t *testing.T) {
+		store := &fakeReadingSessionStore{
+			paceWindowFn: func(string, time.Time) (float64, int, error) { return 0, 100, nil },
+			bookSecondsFn: func(string) (int, error) {
+				return 0, nil
+			},
+		}
+		progress := &fakeReadingProgressGetter{found: false}
+		h := &ReadingSessionsHandler{Store: store, Now: func() time.Time { return now }, Progress: progress}
+
+		req := httptest.NewRequest(http.MethodGet, "/ebooks/book-2/reading-stats", nil)
+		req = req.WithContext(readingSessionAuthContext(1, "profile-a"))
+		req = withReadingSessionContentIDParam(req, "book-2")
+		rr := httptest.NewRecorder()
+		h.HandleBookStats(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+
+		var resp struct {
+			PaceFractionPerHour *float64 `json:"pace_fraction_per_hour"`
+			TimeLeftSeconds     *int64   `json:"time_left_seconds"`
+			BookSeconds         int      `json:"book_seconds"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body = %s", err, rr.Body.String())
+		}
+		if resp.PaceFractionPerHour != nil {
+			t.Fatalf("pace_fraction_per_hour = %v, want null", *resp.PaceFractionPerHour)
+		}
+		if resp.TimeLeftSeconds != nil {
+			t.Fatalf("time_left_seconds = %v, want null", *resp.TimeLeftSeconds)
+		}
+		if resp.BookSeconds != 0 {
+			t.Fatalf("book_seconds = %d, want 0", resp.BookSeconds)
+		}
+	})
+}
+
+func TestReadingStatsHistoryHandler(t *testing.T) {
+	now := time.Date(2026, 7, 20, 15, 30, 0, 0, time.UTC)
+	today := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+
+	manySessions := make([]SessionRow, 60)
+	for i := range manySessions {
+		manySessions[i] = SessionRow{
+			ContentID:       fmt.Sprintf("book-%d", i),
+			Title:           fmt.Sprintf("Book %d", i),
+			StartedAt:       today.Add(-time.Duration(i) * time.Hour),
+			DurationSeconds: 60,
+			StartFraction:   0.1,
+			EndFraction:     0.2,
+		}
+	}
+
+	var capturedFrom, capturedTo time.Time
+	var capturedLimit int
+	newStore := func() *fakeReadingSessionStore {
+		return &fakeReadingSessionStore{
+			totalsSinceFn: func(since time.Time) (int, error) {
+				switch {
+				case since.Equal(today):
+					return 100, nil
+				case since.Equal(today.AddDate(0, 0, -6)):
+					return 500, nil
+				case since.Equal(today.AddDate(0, 0, -29)):
+					return 2000, nil
+				case since.IsZero():
+					return 9000, nil
+				default:
+					return 0, fmt.Errorf("unexpected TotalsSince(since=%v)", since)
+				}
+			},
+			dailyRollupFn: func(from, to time.Time) ([]DayTotal, error) {
+				capturedFrom, capturedTo = from, to
+				return []DayTotal{
+					{Date: today.AddDate(0, 0, -1), Seconds: 200},
+					{Date: today, Seconds: 100},
+				}, nil
+			},
+			bookTotalsFn: func() ([]BookTotal, error) {
+				return []BookTotal{
+					{ContentID: "book-1", Title: "The Hobbit", Seconds: 3000, LastReadAt: today},
+					{ContentID: "book-2", Title: "", Seconds: 1000, LastReadAt: today.AddDate(0, 0, -2)},
+				}, nil
+			},
+			recentSessionsFn: func(limit int) ([]SessionRow, error) {
+				capturedLimit = limit
+				if limit < len(manySessions) {
+					return manySessions[:limit], nil
+				}
+				return manySessions, nil
+			},
+		}
+	}
+
+	t.Run("default range, totals, title fallback, and session cap", func(t *testing.T) {
+		store := newStore()
+		h := &ReadingSessionsHandler{Store: store, Now: func() time.Time { return now }}
+
+		req := httptest.NewRequest(http.MethodGet, "/ebooks/reading-stats", nil)
+		req = req.WithContext(readingSessionAuthContext(1, "profile-a"))
+		rr := httptest.NewRecorder()
+		h.HandleHistory(rr, req)
+
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+
+		var resp struct {
+			Totals struct {
+				TodaySeconds   int `json:"today_seconds"`
+				WeekSeconds    int `json:"week_seconds"`
+				MonthSeconds   int `json:"month_seconds"`
+				AllTimeSeconds int `json:"all_time_seconds"`
+			} `json:"totals"`
+			Days []struct {
+				Date    string `json:"date"`
+				Seconds int    `json:"seconds"`
+			} `json:"days"`
+			Books []struct {
+				ContentID  string `json:"content_id"`
+				Title      string `json:"title"`
+				Seconds    int    `json:"seconds"`
+				LastReadAt string `json:"last_read_at"`
+			} `json:"books"`
+			Sessions []struct {
+				ContentID       string  `json:"content_id"`
+				Title           string  `json:"title"`
+				StartedAt       string  `json:"started_at"`
+				DurationSeconds int     `json:"duration_seconds"`
+				StartFraction   float64 `json:"start_fraction"`
+				EndFraction     float64 `json:"end_fraction"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v; body = %s", err, rr.Body.String())
+		}
+
+		if resp.Totals.TodaySeconds != 100 || resp.Totals.WeekSeconds != 500 ||
+			resp.Totals.MonthSeconds != 2000 || resp.Totals.AllTimeSeconds != 9000 {
+			t.Fatalf("totals = %+v, want today=100 week=500 month=2000 all_time=9000", resp.Totals)
+		}
+
+		wantFrom := today.AddDate(0, 0, -365)
+		if !capturedFrom.Equal(wantFrom) {
+			t.Fatalf("DailyRollup from = %v, want %v (default range = last 366 days)", capturedFrom, wantFrom)
+		}
+		if !capturedTo.Equal(today) {
+			t.Fatalf("DailyRollup to = %v, want %v", capturedTo, today)
+		}
+
+		if len(resp.Days) != 2 {
+			t.Fatalf("days = %d, want 2", len(resp.Days))
+		}
+
+		if len(resp.Books) != 2 {
+			t.Fatalf("books = %d, want 2", len(resp.Books))
+		}
+		if resp.Books[0].Title != "The Hobbit" {
+			t.Fatalf("books[0].title = %q, want %q", resp.Books[0].Title, "The Hobbit")
+		}
+		if resp.Books[1].Title != "Removed book" {
+			t.Fatalf("books[1].title = %q, want fallback %q for an empty joined title", resp.Books[1].Title, "Removed book")
+		}
+
+		if capturedLimit != 50 {
+			t.Fatalf("RecentSessions limit = %d, want 50", capturedLimit)
+		}
+		if len(resp.Sessions) != 50 {
+			t.Fatalf("sessions = %d, want capped at 50 (fixture has 60)", len(resp.Sessions))
+		}
+	})
+
+	t.Run("bad from/to query params are rejected", func(t *testing.T) {
+		store := newStore()
+		h := &ReadingSessionsHandler{Store: store, Now: func() time.Time { return now }}
+
+		for _, qs := range []string{"from=not-a-date", "to=also-not-a-date", "from=2026-13-40"} {
+			req := httptest.NewRequest(http.MethodGet, "/ebooks/reading-stats?"+qs, nil)
+			req = req.WithContext(readingSessionAuthContext(1, "profile-a"))
+			rr := httptest.NewRecorder()
+			h.HandleHistory(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("qs=%q: status = %d, want 400; body = %s", qs, rr.Code, rr.Body.String())
+			}
+		}
+	})
 }

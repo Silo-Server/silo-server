@@ -531,8 +531,9 @@ func NewRouter(deps Dependencies) chi.Router {
 			}
 		}
 		readingSessionsHandler = &handlers.ReadingSessionsHandler{
-			Store: handlers.NewPGReadingSessionStore(deps.DB),
-			Now:   func() time.Time { return time.Now().UTC() },
+			Store:    handlers.NewPGReadingSessionStore(deps.DB),
+			Now:      func() time.Time { return time.Now().UTC() },
+			Progress: handlers.EbookProgressAdapter{Store: ebookProgressStore},
 		}
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -2259,6 +2260,8 @@ func NewRouter(deps Dependencies) chi.Router {
 
 						if readingSessionsHandler != nil {
 							r.Post("/{content_id}/reading-heartbeat", readingSessionsHandler.HandleHeartbeat)
+							r.Get("/reading-stats", readingSessionsHandler.HandleHistory)
+							r.Get("/{content_id}/reading-stats", readingSessionsHandler.HandleBookStats)
 						}
 					})
 				}
