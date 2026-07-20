@@ -67,7 +67,7 @@ goals, challenges, badges, or taste profile.
   10. `first-book` (books) — 1 book finished
   11. `ten-books` (books) — 10 books finished
   12. `fifty-books` (books) — 50 books finished
-  13. `night-owl` (habits) — ≥ 10 hours read between 00:00–05:00 UTC-local*
+  13. `night-owl` (habits) — ≥ 10 hours read between 00:00–05:00*
   14. `early-bird` (habits) — ≥ 10 hours read between 05:00–08:00
   15. `weekender` (habits) — ≥ 20 hours on weekends
   16. `genre-hopper` (exploration) — sessions in ≥ 5 distinct genres
