@@ -699,3 +699,44 @@ func TestReadingStatsHistoryHandler(t *testing.T) {
 		}
 	})
 }
+
+// TestHistoryTodayUsesRequestTimezone pins the "today" window boundary to
+// the requester's local calendar day, not a UTC-derived one. now is
+// 2026-07-19T23:30:00Z, which is local 2026-07-20T01:30 in Europe/Amsterdam
+// (CEST, UTC+2): a UTC-derived "today" would incorrectly pin the boundary to
+// 2026-07-19, one full local day early, so a session at local 01:00 on the
+// 20th (23:00Z on the 19th) would be missing from today_seconds.
+func TestHistoryTodayUsesRequestTimezone(t *testing.T) {
+	now := time.Date(2026, 7, 19, 23, 30, 0, 0, time.UTC)
+	loc, err := time.LoadLocation("Europe/Amsterdam")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	wantToday := time.Date(2026, 7, 20, 0, 0, 0, 0, loc)
+
+	var sawTodayBoundary bool
+	store := &fakeReadingSessionStore{
+		totalsSinceFn: func(since time.Time, _ *time.Location) (int, error) {
+			if since.Equal(wantToday) {
+				sawTodayBoundary = true
+			}
+			return 0, nil
+		},
+		dailyRollupFn: func(_, _ time.Time, _ *time.Location) ([]DayTotal, error) {
+			return nil, nil
+		},
+	}
+	h := &ReadingSessionsHandler{Store: store, Now: func() time.Time { return now }}
+
+	req := httptest.NewRequest(http.MethodGet, "/ebooks/reading-stats?tz=Europe/Amsterdam", nil)
+	req = req.WithContext(readingSessionAuthContext(1, "profile-a"))
+	rr := httptest.NewRecorder()
+	h.HandleHistory(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+	if !sawTodayBoundary {
+		t.Fatalf("TotalsSince was never called with the local-midnight boundary %v (today derived from UTC instead of the requester's local now)", wantToday)
+	}
+}

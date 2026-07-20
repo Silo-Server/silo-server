@@ -41,7 +41,9 @@ type ReadingSession struct {
 	EndFraction     float64
 }
 
-// DayTotal is a single day's reading-time rollup (UTC calendar day).
+// DayTotal is a single day's reading-time rollup (calendar day in the
+// requester's timezone, per the "tz" query param resolved by
+// requestLocation; defaults to UTC).
 type DayTotal struct {
 	Date    time.Time
 	Seconds int
@@ -401,7 +403,8 @@ func (h *ReadingSessionsHandler) HandleHistory(w http.ResponseWriter, r *http.Re
 
 	loc := requestLocation(r)
 	now := h.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	nowLocal := now.In(loc)
+	today := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 
 	q := r.URL.Query()
 	to := today
