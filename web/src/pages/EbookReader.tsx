@@ -601,7 +601,7 @@ export default function EbookReader() {
   }
 
   return (
-    <div className="bg-background min-h-screen">
+    <div className="bg-background flex h-screen flex-col">
       <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
           <Button asChild variant="ghost" size="icon" aria-label="Back">
@@ -726,7 +726,7 @@ export default function EbookReader() {
 
       <main
         className={cn(
-          "grid h-[calc(100vh-6rem)] min-h-0 w-full overflow-hidden",
+          "grid min-h-0 w-full flex-1 overflow-hidden",
           panelOpen ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem]" : "grid-cols-1",
         )}
       >
