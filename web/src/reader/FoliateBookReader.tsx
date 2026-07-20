@@ -6,6 +6,14 @@ import type { FileVersion } from "@/api/types";
 import { ebookKeys } from "@/hooks/queries/keys";
 import type { EbookReaderAnnotation } from "@/reader/ebookReaderApi";
 import { DocumentLoader, type BookDoc, type TOCItem } from "@/reader/readest/libs/document";
+import {
+  legacyThemeFor,
+  READER_THEMES,
+  readerPalette,
+  themeFromLegacy,
+  type ReaderThemeName,
+  type ReaderThemeVariant,
+} from "@/reader/readerThemes";
 
 type FoliateViewElement = HTMLElement & {
   open: (book: BookDoc) => Promise<void>;
@@ -69,11 +77,15 @@ export type FoliateBookReaderHandle = {
 
 export type ReaderTheme = "light" | "sepia" | "dark";
 export type ReaderFlow = "paginated" | "scrolled";
-export type ReaderSpread = "auto" | "none";
+export type ReaderColumns = "auto" | 1 | 2 | 3 | 4;
 export type ReaderWritingMode = "auto" | "horizontal-tb" | "vertical-rl";
 
 export type ReaderSettings = {
+  // Legacy tri-state theme, kept in sync with themeName/themeVariant on every
+  // normalize so settings persisted by older clients keep rendering correctly.
   theme: ReaderTheme;
+  themeName: ReaderThemeName;
+  themeVariant: ReaderThemeVariant;
   fontFamily: string;
   fontSize: number;
   fontWeight: number;
@@ -81,13 +93,24 @@ export type ReaderSettings = {
   lineHeight: number;
   margin: number;
   maxWidth: number;
-  spread: ReaderSpread;
+  columns: ReaderColumns;
+  columnGap: number;
+  justify: boolean;
+  customFontID: number | null;
   flow: ReaderFlow;
   fontBrightness: number;
   rtl: boolean;
   writingMode: ReaderWritingMode;
   readingRuler: boolean;
   readingRulerTop: number;
+};
+
+// normalizeReaderSettings sanitizes both freshly typed updates and untyped
+// input (parsed JSON from localStorage/server config, which may still carry
+// fields from older settings shapes, e.g. the removed `spread`). Every known
+// field is accepted as `unknown` so per-field guards below decide validity.
+type ReaderSettingsInput = Partial<Record<keyof ReaderSettings, unknown>> & {
+  spread?: unknown;
 };
 
 export type ReaderReadyState = {
@@ -171,6 +194,8 @@ const LEGACY_READER_FONT_ALIASES: Record<string, string> = {
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   theme: "light",
+  themeName: "default",
+  themeVariant: "light",
   fontFamily: READER_FONT_STACKS.inherit,
   fontSize: 112,
   fontWeight: 400,
@@ -178,7 +203,10 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   lineHeight: 1.65,
   margin: 24,
   maxWidth: 74,
-  spread: "auto",
+  columns: "auto",
+  columnGap: 7,
+  justify: false,
+  customFontID: null,
   flow: "paginated",
   fontBrightness: 100,
   rtl: false,
@@ -322,12 +350,16 @@ function isReaderFlow(value: unknown): value is ReaderFlow {
   return value === "paginated" || value === "scrolled";
 }
 
-function isReaderSpread(value: unknown): value is ReaderSpread {
-  return value === "auto" || value === "none";
-}
-
 function isReaderWritingMode(value: unknown): value is ReaderWritingMode {
   return value === "auto" || value === "horizontal-tb" || value === "vertical-rl";
+}
+
+function isReaderThemeName(value: unknown): value is ReaderThemeName {
+  return typeof value === "string" && value in READER_THEMES;
+}
+
+function isReaderThemeVariant(value: unknown): value is ReaderThemeVariant {
+  return value === "light" || value === "dark";
 }
 
 function normalizeReaderFontFamily(value: unknown): string {
@@ -336,37 +368,66 @@ function normalizeReaderFontFamily(value: unknown): string {
   return LEGACY_READER_FONT_ALIASES[trimmed] ?? trimmed;
 }
 
-export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): ReaderSettings {
+export function normalizeReaderSettings(settings?: ReaderSettingsInput): ReaderSettings {
+  const raw = settings ?? {};
+
+  // The theme-pair fields win when present; otherwise fall back to whatever
+  // the legacy tri-state `theme` value (or its own default) maps to, so
+  // settings saved before the palette-pair model existed still resolve.
+  const explicitName = isReaderThemeName(raw.themeName) ? raw.themeName : null;
+  const explicitVariant = isReaderThemeVariant(raw.themeVariant) ? raw.themeVariant : null;
+  const legacyTheme = isReaderTheme(raw.theme) ? raw.theme : DEFAULT_READER_SETTINGS.theme;
+  const fromLegacy = themeFromLegacy(legacyTheme);
+  const themeName = explicitName ?? fromLegacy.themeName;
+  const themeVariant = explicitVariant ?? fromLegacy.themeVariant;
+
+  // `spread: "none"` was the pre-columns way to request single-page mode;
+  // migrate it to columns only when the caller didn't already send columns.
+  const columns: ReaderColumns =
+    raw.columns === 1 || raw.columns === 2 || raw.columns === 3 || raw.columns === 4
+      ? raw.columns
+      : raw.spread === "none"
+        ? 1
+        : DEFAULT_READER_SETTINGS.columns;
+
   return {
-    theme: isReaderTheme(settings?.theme) ? settings.theme : DEFAULT_READER_SETTINGS.theme,
-    fontFamily: normalizeReaderFontFamily(settings?.fontFamily),
-    fontSize: clampNumber(settings?.fontSize, DEFAULT_READER_SETTINGS.fontSize, 80, 180),
-    fontWeight: clampNumber(settings?.fontWeight, DEFAULT_READER_SETTINGS.fontWeight, 300, 800),
+    theme: legacyThemeFor(themeName, themeVariant),
+    themeName,
+    themeVariant,
+    fontFamily: normalizeReaderFontFamily(raw.fontFamily),
+    fontSize: clampNumber(raw.fontSize, DEFAULT_READER_SETTINGS.fontSize, 80, 180),
+    fontWeight: clampNumber(raw.fontWeight, DEFAULT_READER_SETTINGS.fontWeight, 300, 800),
     hyphenation:
-      typeof settings?.hyphenation === "boolean"
-        ? settings.hyphenation
-        : DEFAULT_READER_SETTINGS.hyphenation,
-    lineHeight: clampNumber(settings?.lineHeight, DEFAULT_READER_SETTINGS.lineHeight, 1.1, 2.4),
-    margin: clampNumber(settings?.margin, DEFAULT_READER_SETTINGS.margin, 0, 64),
-    maxWidth: clampNumber(settings?.maxWidth, DEFAULT_READER_SETTINGS.maxWidth, 42, 96),
-    spread: isReaderSpread(settings?.spread) ? settings.spread : DEFAULT_READER_SETTINGS.spread,
-    flow: isReaderFlow(settings?.flow) ? settings.flow : DEFAULT_READER_SETTINGS.flow,
+      typeof raw.hyphenation === "boolean" ? raw.hyphenation : DEFAULT_READER_SETTINGS.hyphenation,
+    lineHeight: clampNumber(raw.lineHeight, DEFAULT_READER_SETTINGS.lineHeight, 1.1, 2.4),
+    margin: clampNumber(raw.margin, DEFAULT_READER_SETTINGS.margin, 0, 64),
+    maxWidth: clampNumber(raw.maxWidth, DEFAULT_READER_SETTINGS.maxWidth, 42, 96),
+    columns,
+    columnGap: clampNumber(raw.columnGap, DEFAULT_READER_SETTINGS.columnGap, 0, 50),
+    justify: raw.justify === true,
+    customFontID:
+      typeof raw.customFontID === "number" &&
+      Number.isInteger(raw.customFontID) &&
+      raw.customFontID > 0
+        ? raw.customFontID
+        : null,
+    flow: isReaderFlow(raw.flow) ? raw.flow : DEFAULT_READER_SETTINGS.flow,
     fontBrightness: clampNumber(
-      settings?.fontBrightness,
+      raw.fontBrightness,
       DEFAULT_READER_SETTINGS.fontBrightness,
       70,
       125,
     ),
-    rtl: typeof settings?.rtl === "boolean" ? settings.rtl : DEFAULT_READER_SETTINGS.rtl,
-    writingMode: isReaderWritingMode(settings?.writingMode)
-      ? settings.writingMode
+    rtl: typeof raw.rtl === "boolean" ? raw.rtl : DEFAULT_READER_SETTINGS.rtl,
+    writingMode: isReaderWritingMode(raw.writingMode)
+      ? raw.writingMode
       : DEFAULT_READER_SETTINGS.writingMode,
     readingRuler:
-      typeof settings?.readingRuler === "boolean"
-        ? settings.readingRuler
+      typeof raw.readingRuler === "boolean"
+        ? raw.readingRuler
         : DEFAULT_READER_SETTINGS.readingRuler,
     readingRulerTop: clampNumber(
-      settings?.readingRulerTop,
+      raw.readingRulerTop,
       DEFAULT_READER_SETTINGS.readingRulerTop,
       0,
       100,
@@ -403,34 +464,8 @@ export async function saveEbookReaderProgress(
   });
 }
 
-function readerColors(theme: ReaderTheme) {
-  switch (theme) {
-    case "dark":
-      return {
-        background: "#111827",
-        foreground: "#f8fafc",
-        link: "#93c5fd",
-        scheme: "dark",
-      };
-    case "sepia":
-      return {
-        background: "#f4ecd8",
-        foreground: "#2f261b",
-        link: "#8b5a2b",
-        scheme: "light",
-      };
-    default:
-      return {
-        background: "#ffffff",
-        foreground: "#171717",
-        link: "#2563eb",
-        scheme: "light",
-      };
-  }
-}
-
 export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS) {
-  const colors = readerColors(settings.theme);
+  const colors = readerPalette(settings.themeName, settings.themeVariant);
   const contentMaxWidth = settings.flow === "scrolled" ? "none" : `${settings.maxWidth}ch`;
   return `
     :root {
@@ -448,6 +483,7 @@ export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS)
       hyphens: ${settings.hyphenation ? "auto" : "none"} !important;
       line-height: ${settings.lineHeight} !important;
       max-width: ${contentMaxWidth} !important;
+      text-align: ${settings.justify ? "justify" : "initial"} !important;
       direction: ${settings.rtl ? "rtl" : "inherit"} !important;
       writing-mode: ${settings.writingMode === "auto" ? "inherit" : settings.writingMode} !important;
       filter: brightness(${settings.fontBrightness}%) !important;
@@ -467,10 +503,10 @@ export function readerRendererAttributes(settings: ReaderSettings) {
   const maxInlinePx = Math.round(settings.maxWidth * 10);
   return {
     flow: scrolled ? "scrolled" : null,
-    gap: "7%",
+    gap: `${settings.columnGap}%`,
     margin: `${settings.margin}px`,
     maxInlineSize: scrolled ? "9999px" : `${maxInlinePx}px`,
-    maxColumnCount: scrolled ? "1" : settings.spread === "none" ? "1" : "2",
+    maxColumnCount: scrolled ? "1" : settings.columns === "auto" ? "2" : String(settings.columns),
   };
 }
 

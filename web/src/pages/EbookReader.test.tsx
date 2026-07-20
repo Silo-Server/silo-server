@@ -1654,7 +1654,6 @@ describe("EbookReader", () => {
     });
 
     expect(container.querySelector('input[aria-label="Width"]')).not.toBeNull();
-    expect(container.querySelector('select[aria-label="Spread"]')).not.toBeNull();
 
     const flow = container.querySelector<HTMLSelectElement>('select[aria-label="Flow"]');
     await act(async () => {
@@ -1664,6 +1663,5 @@ describe("EbookReader", () => {
     });
 
     expect(container.querySelector('input[aria-label="Width"]')).toBeNull();
-    expect(container.querySelector('select[aria-label="Spread"]')).toBeNull();
   });
 });

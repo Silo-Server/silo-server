@@ -175,7 +175,6 @@ describe("FoliateBookReader helpers", () => {
         maxWidth: 200,
         theme: "sepia",
         flow: "scrolled",
-        spread: "none",
       }),
     ).toMatchObject({
       fontSize: 180,
@@ -184,8 +183,36 @@ describe("FoliateBookReader helpers", () => {
       maxWidth: 96,
       theme: "sepia",
       flow: "scrolled",
-      spread: "none",
     });
+  });
+
+  it("migrates legacy theme and spread values", () => {
+    const settings = normalizeReaderSettings({ theme: "sepia", spread: "none" });
+    expect(settings.themeName).toBe("sepia");
+    expect(settings.themeVariant).toBe("light");
+    expect(settings.theme).toBe("sepia"); // legacy field still written
+    expect(settings.columns).toBe(1);
+  });
+
+  it("prefers explicit themeName/themeVariant over the legacy field", () => {
+    const settings = normalizeReaderSettings({
+      theme: "light",
+      themeName: "ocean",
+      themeVariant: "dark",
+    });
+    expect(settings.themeName).toBe("ocean");
+    expect(settings.themeVariant).toBe("dark");
+    expect(settings.theme).toBe("dark"); // legacy derived from the pair
+  });
+
+  it("clamps columns, columnGap, and defaults justify", () => {
+    expect(normalizeReaderSettings({ columns: 4 }).columns).toBe(4);
+    expect(normalizeReaderSettings({ columns: 7 }).columns).toBe("auto");
+    expect(normalizeReaderSettings({ columnGap: 80 }).columnGap).toBe(50);
+    expect(normalizeReaderSettings({ columnGap: -3 }).columnGap).toBe(0);
+    expect(normalizeReaderSettings({}).justify).toBe(false);
+    expect(normalizeReaderSettings({}).columns).toBe("auto");
+    expect(normalizeReaderSettings({}).customFontID).toBeNull();
   });
 
   it("defaults to the ebook publisher font instead of an unloaded named font", () => {

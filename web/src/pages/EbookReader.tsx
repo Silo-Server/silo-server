@@ -45,6 +45,7 @@ import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
+import { themeFromLegacy } from "@/reader/readerThemes";
 import FoliateBookReader, {
   DEFAULT_READER_SETTINGS,
   READER_FONT_STACKS,
@@ -1259,9 +1260,9 @@ export default function EbookReader() {
                       aria-label="Theme"
                       value={readerSettings.theme}
                       onChange={(event) =>
-                        updateReaderSettings({
-                          theme: event.target.value as ReaderSettings["theme"],
-                        })
+                        updateReaderSettings(
+                          themeFromLegacy(event.target.value as ReaderSettings["theme"]),
+                        )
                       }
                       className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                     >
@@ -1408,24 +1409,6 @@ export default function EbookReader() {
                         <option value="auto">Auto</option>
                         <option value="horizontal-tb">Horizontal</option>
                         <option value="vertical-rl">Vertical</option>
-                      </select>
-                    </label>
-                  )}
-                  {readerSettings.flow !== "scrolled" && (
-                    <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground text-xs font-medium">Spread</span>
-                      <select
-                        aria-label="Spread"
-                        value={readerSettings.spread}
-                        onChange={(event) =>
-                          updateReaderSettings({
-                            spread: event.target.value as ReaderSettings["spread"],
-                          })
-                        }
-                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                      >
-                        <option value="auto">Auto</option>
-                        <option value="none">Single page</option>
                       </select>
                     </label>
                   )}
