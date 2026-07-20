@@ -40,7 +40,7 @@ export const READER_SHORTCUTS = [
   { key: "Home/End", description: "Start / end of chapter" },
   { key: "t", description: "Contents panel" },
   { key: "s", description: "Search panel" },
-  { key: "b", description: "Toggle bookmark" },
+  { key: "b", description: "Add bookmark" },
   { key: "f", description: "Fullscreen" },
   { key: "?", description: "This shortcut list" },
   { key: "Esc", description: "Close overlay, or hide/show controls" },
