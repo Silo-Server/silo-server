@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -36,8 +37,7 @@ type AdminAPIKeyAuthenticator struct {
 	// authorization decision, which is re-checked on every request.
 	profiles *apiKeyProfileCache
 
-	lastUsedMu sync.Mutex
-	lastUsedAt map[int64]time.Time
+	apiKeyLastUsed *auth.APIKeyLastUsedTracker
 }
 
 type adminAPIKeyAuthResult struct {
@@ -61,12 +61,12 @@ func NewAdminAPIKeyAuthenticator(keys apiKeyValidator, users apiKeyUserLoader, p
 		now = time.Now
 	}
 	return &AdminAPIKeyAuthenticator{
-		keys:       keys,
-		users:      users,
-		provider:   provider,
-		now:        now,
-		profiles:   newAPIKeyProfileCache(),
-		lastUsedAt: make(map[int64]time.Time),
+		keys:           keys,
+		users:          users,
+		provider:       provider,
+		now:            now,
+		profiles:       newAPIKeyProfileCache(),
+		apiKeyLastUsed: auth.NewAPIKeyLastUsedTracker(keys, now),
 	}
 }
 
@@ -138,7 +138,7 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 	if !res.ok {
 		return res
 	}
-	a.touchLastUsed(apiKey.ID)
+	a.apiKeyLastUsed.Touch(apiKey.ID)
 	return adminAPIKeyAuthResult{
 		ctx:    context.WithValue(r.Context(), adminAPIKeyKey, true),
 		status: http.StatusOK,
@@ -182,28 +182,6 @@ func (a *AdminAPIKeyAuthenticator) validate(ctx context.Context, token string) (
 	return apiKey, user, adminAPIKeyAuthResult{ok: true}
 }
 
-// touchLastUsed records key usage without blocking the request, throttled to at
-// most once per apiKeyLastUsedInterval per key so per-request validation on the
-// hot path (e.g. HLS segments) does not issue a DB write each time.
-func (a *AdminAPIKeyAuthenticator) touchLastUsed(id int64) {
-	now := a.now()
-	a.lastUsedMu.Lock()
-	if last, ok := a.lastUsedAt[id]; ok && now.Sub(last) < apiKeyLastUsedInterval {
-		a.lastUsedMu.Unlock()
-		return
-	}
-	a.lastUsedAt[id] = now
-	a.lastUsedMu.Unlock()
-
-	go func(id int64) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := a.keys.UpdateLastUsed(ctx, id); err != nil {
-			slog.Debug("jellycompat api key last-used update failed", "id", id, "error", err)
-		}
-	}(id)
-}
-
 // resolveSession authenticates an sa_ API key and returns a compat session
 // synthesized for the key user's primary profile, so ordinary browse/stream
 // handlers (which read SessionFromContext) work unchanged for an API key.
@@ -224,7 +202,7 @@ func (a *AdminAPIKeyAuthenticator) resolveSession(ctx context.Context, token str
 	if !res.ok {
 		return nil, res, true
 	}
-	a.touchLastUsed(apiKey.ID)
+	a.apiKeyLastUsed.Touch(apiKey.ID)
 
 	profile, err := a.primaryProfile(ctx, user.ID)
 	if err != nil {
@@ -298,9 +276,6 @@ const (
 	// reassigned/renamed primary profile is picked up, never authorization
 	// (the key and user are re-validated on every request).
 	apiKeyProfileCacheTTL = 5 * time.Minute
-	// apiKeyLastUsedInterval throttles api_keys.last_used_at writes so that
-	// per-request validation on the hot path does not write each time.
-	apiKeyLastUsedInterval = time.Minute
 )
 
 type apiKeyProfileCacheEntry struct {

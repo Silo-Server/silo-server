@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -42,11 +40,6 @@ type APIKeyUserLoader interface {
 	GetByID(ctx context.Context, id int) (*models.User, error)
 }
 
-// apiKeyLastUsedInterval throttles api_keys.last_used_at writes so that
-// per-request validation on the hot path (e.g. HLS segments) does not issue
-// a DB write each time. Matches the jellycompat authenticator.
-const apiKeyLastUsedInterval = time.Minute
-
 // AuthMiddleware provides HTTP middleware for JWT-based authentication with
 // session validity caching.
 type AuthMiddleware struct {
@@ -55,8 +48,7 @@ type AuthMiddleware struct {
 	apiKeyValidator  APIKeyValidator  // nil if API keys not configured
 	apiKeyUserLoader APIKeyUserLoader // nil if API keys not configured
 
-	lastUsedMu sync.Mutex
-	lastUsedAt map[int64]time.Time
+	apiKeyLastUsed *auth.APIKeyLastUsedTracker
 }
 
 // NewAuthMiddleware creates a new AuthMiddleware with the given token validator
@@ -67,28 +59,8 @@ func NewAuthMiddleware(tv TokenValidator, sv SessionValidator, akv APIKeyValidat
 		sessionValidator: sv,
 		apiKeyValidator:  akv,
 		apiKeyUserLoader: akul,
-		lastUsedAt:       make(map[int64]time.Time),
+		apiKeyLastUsed:   auth.NewAPIKeyLastUsedTracker(akv, nil),
 	}
-}
-
-// touchLastUsed records key usage without blocking the request, throttled to
-// at most once per apiKeyLastUsedInterval per key. The map is bounded by the
-// number of API keys, so it never needs eviction.
-func (am *AuthMiddleware) touchLastUsed(id int64) {
-	now := time.Now()
-	am.lastUsedMu.Lock()
-	if last, ok := am.lastUsedAt[id]; ok && now.Sub(last) < apiKeyLastUsedInterval {
-		am.lastUsedMu.Unlock()
-		return
-	}
-	am.lastUsedAt[id] = now
-	am.lastUsedMu.Unlock()
-
-	go func(id int64) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = am.apiKeyValidator.UpdateLastUsed(ctx, id)
-	}(id)
 }
 
 // RequireAuth is an HTTP middleware that enforces JWT authentication.
@@ -129,7 +101,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 				return
 			}
 
-			am.touchLastUsed(apiKey.ID)
+			am.apiKeyLastUsed.Touch(apiKey.ID)
 
 			claims = &auth.Claims{
 				UserID:    user.ID,
