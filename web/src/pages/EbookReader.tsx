@@ -528,6 +528,11 @@ export default function EbookReader() {
   }, []);
   const handleRulerPointerUp = useCallback(
     (event: PointerEvent<HTMLButtonElement>) => {
+      // The grip lives inside [data-reader-surface], which also listens for
+      // pointerup to turn pages on tap. Without this, releasing a drag (the
+      // grip sits near the surface's right edge) bubbles into that handler
+      // and reads as a next-page tap.
+      event.stopPropagation();
       const drag = rulerDragRef.current;
       if (!drag) return;
       rulerDragRef.current = null;
@@ -537,7 +542,10 @@ export default function EbookReader() {
     },
     [updateReaderSettings],
   );
-  const handleRulerPointerCancel = useCallback(() => {
+  const handleRulerPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    // See handleRulerPointerUp: stop this from bubbling into the surface's
+    // page-turn tap handler too.
+    event.stopPropagation();
     rulerDragRef.current = null;
     setRulerDragTop(null);
   }, []);

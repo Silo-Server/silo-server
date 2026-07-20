@@ -814,6 +814,64 @@ describe("EbookReader", () => {
     expect(handle?.getAttribute("aria-valuenow")).toBe("50");
   });
 
+  it("does not turn the page when releasing the reading-ruler drag", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const ruler = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle reading ruler"]',
+    );
+    await act(async () => {
+      ruler?.click();
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    const grip = container.querySelector<HTMLButtonElement>(
+      '[role="slider"][aria-label="Reading ruler position"]',
+    )!;
+    // jsdom has no pointer-capture implementation; the grip's handlers call
+    // these unconditionally, so stub them the way a real button would provide.
+    grip.setPointerCapture = vi.fn();
+    grip.releasePointerCapture = vi.fn();
+
+    act(() => {
+      grip.dispatchEvent(
+        new PointerEvent("pointerdown", { clientY: 250, pointerId: 1, bubbles: true }),
+      );
+    });
+    act(() => {
+      // The grip sits near the reading surface's right edge; if this pointerup
+      // bubbles up to the surface's tap handler it reads as a next-page tap.
+      grip.dispatchEvent(
+        new PointerEvent("pointerup", { clientY: 250, pointerId: 1, bubbles: true }),
+      );
+    });
+
+    expect(mocks.readerNext).not.toHaveBeenCalled();
+  });
+
   it("constrains the reader grid so the side panel stays inside the viewport", async () => {
     await act(async () => {
       root.render(
