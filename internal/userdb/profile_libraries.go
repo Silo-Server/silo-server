@@ -3,7 +3,8 @@ package userdb
 import (
 	"database/sql"
 	"fmt"
-	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func listProfileAllowedLibraries(db *sql.DB, profileID string) ([]int, error) {
@@ -37,37 +38,28 @@ func attachAllowedLibraries(db *sql.DB, profiles []Profile) error {
 	if len(profiles) == 0 {
 		return nil
 	}
-	placeholders := make([]string, len(profiles))
-	args := make([]any, len(profiles))
-	for i := range profiles {
-		placeholders[i] = "?"
-		args[i] = profiles[i].ID
-	}
 	rows, err := db.Query(
-		`SELECT profile_id, library_id FROM profile_allowed_libraries
-		 WHERE profile_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY library_id ASC`,
-		args...,
+		`SELECT profile_id, library_id
+		 FROM profile_allowed_libraries
+		 ORDER BY library_id ASC`,
 	)
 	if err != nil {
 		return fmt.Errorf("listing allowed libraries: %w", err)
 	}
 	defer rows.Close()
 
-	byProfile := make(map[string][]int, len(profiles))
+	var allowedLibraries []userstore.ProfileAllowedLibrary
 	for rows.Next() {
-		var profileID string
-		var libraryID int
-		if err := rows.Scan(&profileID, &libraryID); err != nil {
+		var allowedLibrary userstore.ProfileAllowedLibrary
+		if err := rows.Scan(&allowedLibrary.ProfileID, &allowedLibrary.LibraryID); err != nil {
 			return fmt.Errorf("scanning allowed library: %w", err)
 		}
-		byProfile[profileID] = append(byProfile[profileID], libraryID)
+		allowedLibraries = append(allowedLibraries, allowedLibrary)
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterating allowed libraries: %w", err)
 	}
-	for i := range profiles {
-		profiles[i].AllowedLibraryIDs = byProfile[profiles[i].ID]
-	}
+	userstore.AttachAllowedLibraries(profiles, allowedLibraries)
 	return nil
 }
 

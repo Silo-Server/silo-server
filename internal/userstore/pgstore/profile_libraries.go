@@ -67,21 +67,18 @@ func (s *PostgresUserStore) attachAllowedLibraries(ctx context.Context, profiles
 	}
 	defer rows.Close()
 
-	byProfile := make(map[string][]int, len(profiles))
+	var allowedLibraries []userstore.ProfileAllowedLibrary
 	for rows.Next() {
-		var profileID string
-		var libraryID int
-		if err := rows.Scan(&profileID, &libraryID); err != nil {
+		var allowedLibrary userstore.ProfileAllowedLibrary
+		if err := rows.Scan(&allowedLibrary.ProfileID, &allowedLibrary.LibraryID); err != nil {
 			return fmt.Errorf("scanning allowed library for user %d: %w", s.userID, err)
 		}
-		byProfile[profileID] = append(byProfile[profileID], libraryID)
+		allowedLibraries = append(allowedLibraries, allowedLibrary)
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterating allowed libraries for user %d: %w", s.userID, err)
 	}
-	for i := range profiles {
-		profiles[i].AllowedLibraryIDs = byProfile[profiles[i].ID]
-	}
+	userstore.AttachAllowedLibraries(profiles, allowedLibraries)
 	return nil
 }
 

@@ -3,7 +3,6 @@ package userdb
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -120,7 +119,7 @@ func ListCollections(db *sql.DB, profileID string) ([]Collection, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := attachCollectionProfiles(db, collections); err != nil {
+	if err := attachCollectionProfiles(db, profileID, collections); err != nil {
 		return nil, err
 	}
 	return collections, nil
@@ -129,20 +128,18 @@ func ListCollections(db *sql.DB, profileID string) ([]Collection, error) {
 // attachCollectionProfiles fills AllowedProfileIDs for every collection with a
 // single batched query, avoiding the N+1 round trip a per-collection lookup
 // would create.
-func attachCollectionProfiles(db *sql.DB, collections []Collection) error {
+func attachCollectionProfiles(db *sql.DB, profileID string, collections []Collection) error {
 	if len(collections) == 0 {
 		return nil
 	}
-	placeholders := make([]string, len(collections))
-	args := make([]any, len(collections))
-	for i := range collections {
-		placeholders[i] = "?"
-		args[i] = collections[i].ID
-	}
 	rows, err := db.Query(
-		`SELECT collection_id, profile_id FROM personal_collection_profiles
-		 WHERE collection_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY profile_id ASC`,
-		args...,
+		`SELECT allowed.collection_id, allowed.profile_id
+		 FROM personal_collection_profiles AS visible
+		 JOIN personal_collection_profiles AS allowed
+		   ON allowed.collection_id = visible.collection_id
+		 WHERE visible.profile_id = ?
+		 ORDER BY allowed.profile_id ASC`,
+		profileID,
 	)
 	if err != nil {
 		return err
