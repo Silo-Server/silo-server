@@ -54,4 +54,8 @@ describe("READER_SHORTCUTS", () => {
       expect(keys).toContain(key);
     }
   });
+
+  it("describes the b shortcut as a toggle, since it now un-bookmarks a matching location", () => {
+    expect(READER_SHORTCUTS.find((s) => s.key === "b")?.description).toBe("Toggle bookmark");
+  });
 });

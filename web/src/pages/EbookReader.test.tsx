@@ -1806,6 +1806,55 @@ describe("EbookReader", () => {
     );
   });
 
+  it("toggles the bookmark at the current location on repeated `b` presses: creates, then deletes", async () => {
+    // The mock reader reports a live selection on mount (cfi
+    // "epubcfi(/6/4,/1:0,/1:12)"), so both presses resolve to the same
+    // location — handleToggleBookmark never clears it the way highlighting
+    // does.
+    mocks.createEbookReaderAnnotation.mockResolvedValueOnce({
+      id: "bm-1",
+      content_id: "ebook-1",
+      kind: "bookmark",
+      location: "epubcfi(/6/4,/1:0,/1:12)",
+      selected_text: "",
+      note: "Reader Book",
+      style: "",
+      color: "",
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b" }));
+    });
+
+    expect(mocks.createEbookReaderAnnotation).toHaveBeenCalledTimes(1);
+    expect(mocks.createEbookReaderAnnotation).toHaveBeenCalledWith("ebook-1", {
+      kind: "bookmark",
+      location: "epubcfi(/6/4,/1:0,/1:12)",
+      note: "Reader Book",
+    });
+    expect(mocks.deleteEbookReaderAnnotation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b" }));
+    });
+
+    // Second press at the same location deletes the bookmark just created,
+    // and must not create a second one.
+    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledWith("ebook-1", "bm-1");
+    expect(mocks.createEbookReaderAnnotation).toHaveBeenCalledTimes(1);
+  });
+
   it("navigates fraction bookmarks through goToFraction and CFI annotations through goTo", async () => {
     mocks.fetchEbookReaderAnnotations.mockResolvedValue([
       {

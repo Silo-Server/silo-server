@@ -607,9 +607,22 @@ export default function EbookReader() {
     readerRef.current?.clearSelection();
     setSelection(null);
   }, [contentId, selection]);
-  const handleCreateBookmark = useCallback(async () => {
+  // Toggle semantics: a bookmark "at" a location is identified by an exact
+  // match on the same location string handleCreateBookmark would compute for
+  // the current spot. If one already exists there, this removes it (same
+  // delete path the Notes panel uses); otherwise it creates one. Shared by
+  // both the `b` shortcut and the header bookmark button.
+  const handleToggleBookmark = useCallback(async () => {
     if (!contentId) return;
     const location = selection?.cfi || `fraction:${(readerProgress ?? 0).toFixed(6)}`;
+    const existing = annotations.find(
+      (annotation) => annotation.kind === "bookmark" && annotation.location === location,
+    );
+    if (existing) {
+      await deleteEbookReaderAnnotation(contentId, existing.id);
+      setAnnotations((current) => current.filter((annotation) => annotation.id !== existing.id));
+      return;
+    }
     const created = await createEbookReaderAnnotation(contentId, {
       kind: "bookmark",
       location,
@@ -617,15 +630,15 @@ export default function EbookReader() {
     });
     setAnnotations((current) => [created, ...current]);
     setPanel("notes");
-  }, [contentId, item?.title, readerProgress, selection]);
-  // Mirrors handleCreateBookmark so the keyboard-shortcut handler can call the
+  }, [annotations, contentId, item?.title, readerProgress, selection]);
+  // Mirrors handleToggleBookmark so the keyboard-shortcut handler can call the
   // latest version without listing it as a dependency — it closes over
-  // readerProgress, which changes on every relocate, and would otherwise
+  // readerProgress and annotations, which change often, and would otherwise
   // force the window keydown listener to rebind constantly.
-  const bookmarkActionRef = useRef(handleCreateBookmark);
+  const bookmarkActionRef = useRef(handleToggleBookmark);
   useEffect(() => {
-    bookmarkActionRef.current = handleCreateBookmark;
-  }, [handleCreateBookmark]);
+    bookmarkActionRef.current = handleToggleBookmark;
+  }, [handleToggleBookmark]);
   const toggleFullscreen = useCallback(() => {
     if (typeof document === "undefined") return;
     try {
@@ -991,9 +1004,9 @@ export default function EbookReader() {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Add bookmark"
-                title="Add bookmark"
-                onClick={() => void handleCreateBookmark()}
+                aria-label="Toggle bookmark"
+                title="Toggle bookmark"
+                onClick={() => void handleToggleBookmark()}
               >
                 <Bookmark className="size-4" />
               </Button>
