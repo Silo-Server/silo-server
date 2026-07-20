@@ -76,6 +76,10 @@ interface UseTranscodeQualityResult {
   canSeekAnywhere: boolean;
   durationSeconds: number | null;
   isTranscoding: boolean;
+  /** Increments when a user-visible HLS startup attempt begins. */
+  startupGeneration: number;
+  /** Cancels a transcode start that has not produced playable media yet. */
+  cancelPendingTranscodeStart: () => void;
   error: string | null;
   switchedFileId: number | null;
   effectiveVersion: PlayerFileVersion | undefined;
@@ -188,6 +192,7 @@ export function useTranscodeQuality({
   const [canSeekAnywhere, setCanSeekAnywhere] = useState(true);
   const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
   const [isTranscoding, setIsTranscoding] = useState(false);
+  const [startupGeneration, setStartupGeneration] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [switchedFileId, setSwitchedFileId] = useState<number | null>(null);
   const switchAbortRef = useRef<AbortController | null>(null);
@@ -336,6 +341,7 @@ export function useTranscodeQuality({
       const abortController = new AbortController();
       switchAbortRef.current = abortController;
 
+      setStartupGeneration((generation) => generation + 1);
       setIsTranscoding(true);
       setActiveQualityId(qualityId);
       setError(null);
@@ -469,6 +475,16 @@ export function useTranscodeQuality({
     [sessionId, activeQualityId, qualityOptions, config, effectiveVersion, playMethod],
   );
 
+  const cancelPendingTranscodeStart = useCallback(() => {
+    if (dispatchTimerRef.current != null) {
+      clearTimeout(dispatchTimerRef.current);
+      dispatchTimerRef.current = null;
+    }
+    switchAbortRef.current?.abort();
+    switchAbortRef.current = null;
+    setIsTranscoding(false);
+  }, []);
+
   const switchQuality = useCallback(
     (qualityId: string, currentPosition: number, forceRestart?: boolean) => {
       requestedQualityIdRef.current = qualityId;
@@ -579,6 +595,8 @@ export function useTranscodeQuality({
     canSeekAnywhere,
     durationSeconds,
     isTranscoding,
+    startupGeneration,
+    cancelPendingTranscodeStart,
     error,
     switchedFileId,
     effectiveVersion,

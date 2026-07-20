@@ -150,6 +150,34 @@ describe("useTranscodeQuality", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("cancels an in-flight startup before a manifest arrives", async () => {
+    let requestSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce((_, init: RequestInit) => {
+      requestSignal = init.signal as AbortSignal;
+      return new Promise((_, reject) => {
+        requestSignal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    });
+
+    const { result } = renderQuality();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(result.current.startupGeneration).toBe(1);
+    expect(result.current.isTranscoding).toBe(true);
+
+    act(() => {
+      result.current.cancelPendingTranscodeStart();
+    });
+
+    expect(requestSignal?.aborted).toBe(true);
+    await waitFor(() => expect(result.current.isTranscoding).toBe(false));
+    expect(result.current.error).toBeNull();
+  });
+
   it("rolls back a failed burn-in selection so the same track can be retried", async () => {
     const { result } = renderQuality();
 

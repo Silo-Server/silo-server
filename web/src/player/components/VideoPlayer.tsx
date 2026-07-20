@@ -219,6 +219,7 @@ export function VideoPlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);
   const hlsRef = useRef<HlsType | null>(null);
+  const hlsStartupGuardRef = useRef<HlsStartupGuard | null>(null);
   const mediaRecoveryAttemptsRef = useRef(0);
   const lastRecoveryRef = useRef(0);
   const streamOriginRef = useRef(0);
@@ -337,6 +338,39 @@ export function VideoPlayer({
     initialPosition,
     qualityPreference,
   });
+  const { cancelPendingTranscodeStart, startupGeneration } = transcodeQuality;
+  const hlsStartupExpected =
+    transcodeQuality.isTranscoding || transcodeQuality.transcodeStreamUrl !== null;
+
+  const failHlsStartup = useCallback(() => {
+    console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
+    cancelPendingTranscodeStart();
+
+    const activeHls = hlsRef.current;
+    hlsRef.current = null;
+    activeHls?.destroy();
+
+    const video = videoRef.current;
+    if (video) {
+      video.removeAttribute("src");
+      video.load();
+    }
+    setError("Playback failed. The media could not be loaded.");
+  }, [cancelPendingTranscodeStart]);
+
+  useEffect(() => {
+    if (!hlsStartupExpected || startupGeneration === 0) return;
+
+    const guard = new HlsStartupGuard(failHlsStartup);
+    hlsStartupGuardRef.current = guard;
+
+    return () => {
+      guard.dispose();
+      if (hlsStartupGuardRef.current === guard) {
+        hlsStartupGuardRef.current = null;
+      }
+    };
+  }, [failHlsStartup, hlsStartupExpected, startupGeneration]);
 
   // Derive effective stream URL and play method.
   // Both transcode and remux go through HLS, so treat them as "transcode" for the player.
@@ -1239,10 +1273,9 @@ export function VideoPlayer({
   // -- hls.js lifecycle --
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !isPlayerReady) return;
+    if (!video || !isPlayerReady || hlsStartupGuardRef.current?.hasFailed()) return;
 
     let hls: HlsType | null = null;
-    let startupGuard: HlsStartupGuard | null = null;
     let destroyed = false;
     let autoplayStarted = false;
 
@@ -1253,15 +1286,15 @@ export function VideoPlayer({
     const cleanupStartupListeners = () => {
       video.removeEventListener("loadeddata", attemptAutoplayWhenReady);
       video.removeEventListener("canplay", attemptAutoplayWhenReady);
+      video.removeEventListener("loadedmetadata", attemptAutoplayWhenReady);
     };
 
     const attemptAutoplayWhenReady = () => {
-      if (destroyed || autoplayStarted) return;
+      if (destroyed || autoplayStarted || hlsStartupGuardRef.current?.hasFailed()) return;
       // HAVE_FUTURE_DATA means the browser has enough media to advance beyond
       // the current frame. Starting earlier can produce a visible first-frame
       // freeze where audio advances before video begins moving.
       if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return;
-      startupGuard?.markPlayable();
       autoplayStarted = true;
       cleanupStartupListeners();
       video.play().catch(() => setPlaying(false));
@@ -1276,7 +1309,7 @@ export function VideoPlayer({
       if (effectivePlayMethod === "transcode") {
         try {
           const Hls = await hlsPromise;
-          if (destroyed) return;
+          if (destroyed || hlsStartupGuardRef.current?.hasFailed()) return;
 
           if (Hls.isSupported()) {
             const maxBufferLength = selectedVersionBitrate >= 25000 ? 60 : 120;
@@ -1304,15 +1337,6 @@ export function VideoPlayer({
               },
             });
 
-            startupGuard = new HlsStartupGuard(() => {
-              if (destroyed) return;
-
-              console.error("[hls.js] Playback startup timed out or exhausted recovery attempts");
-              setError("Playback failed. The media could not be loaded.");
-              hls?.destroy();
-              hlsRef.current = null;
-            });
-
             hls.on(Hls.Events.ERROR, (_event, data) => {
               if (!data.fatal || destroyed) return;
 
@@ -1329,7 +1353,7 @@ export function VideoPlayer({
               lastRecoveryRef.current = now;
 
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                if (startupGuard?.handleFatalNetworkError() ?? true) {
+                if (hlsStartupGuardRef.current?.handleFatalNetworkError() ?? true) {
                   console.warn("[hls.js] Fatal network error, attempting recovery...");
                   hls?.startLoad();
                 } else {
@@ -1392,7 +1416,6 @@ export function VideoPlayer({
 
     return () => {
       destroyed = true;
-      startupGuard?.dispose();
       cleanupStartupListeners();
       if (hls) {
         hls.destroy();
@@ -1428,6 +1451,10 @@ export function VideoPlayer({
       }
       setBuffering(false);
     };
+    const markPlaybackStarted = () => {
+      hlsStartupGuardRef.current?.markPlaybackStarted();
+      setAwaitingFirstFrame(false);
+    };
     const onTimeUpdate = () => {
       const nextTime = toMediaTime(video.currentTime, streamOriginRef.current);
       const resolved = resolvePendingSeekTime(nextTime, pendingSeekTime);
@@ -1438,13 +1465,13 @@ export function VideoPlayer({
       // timeupdate is the most reliable signal that frames are rendering.
       // Also clears any stale buffering state from HLS segment transitions
       // where `waiting` fired but `canplay`/`playing` never followed.
-      setAwaitingFirstFrame(false);
+      markPlaybackStarted();
       clearBuffering();
     };
     const onSeeked = () => {
       setPendingSeekTime(null);
       setCurrentTime(toMediaTime(video.currentTime, streamOriginRef.current));
-      setAwaitingFirstFrame(false);
+      markPlaybackStarted();
       clearBuffering();
       if (roomSyncWaiting && watchTogetherSync.attachedSessionId === sessionId) {
         watchTogetherSync.reportReady();
@@ -1486,7 +1513,7 @@ export function VideoPlayer({
     };
     const onPlaying = () => {
       clearBuffering();
-      setAwaitingFirstFrame(false);
+      markPlaybackStarted();
     };
     const onStalled = () => {
       if (watchTogetherRoomActive && watchTogetherSync.attachedSessionId === sessionId) {

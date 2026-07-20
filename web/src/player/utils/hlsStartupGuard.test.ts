@@ -17,9 +17,11 @@ describe("HlsStartupGuard", () => {
 
     vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS - 1);
     expect(onFailure).not.toHaveBeenCalled();
+    expect(guard.hasFailed()).toBe(false);
 
     vi.advanceTimersByTime(1);
     expect(onFailure).toHaveBeenCalledOnce();
+    expect(guard.hasFailed()).toBe(true);
     guard.dispose();
   });
 
@@ -32,16 +34,18 @@ describe("HlsStartupGuard", () => {
 
     expect(guard.handleFatalNetworkError()).toBe(false);
     expect(onFailure).toHaveBeenCalledOnce();
+    expect(guard.hasFailed()).toBe(true);
   });
 
   it("disarms startup limits after playable media arrives", () => {
     const onFailure = vi.fn();
     const guard = new HlsStartupGuard(onFailure);
 
-    guard.markPlayable();
+    guard.markPlaybackStarted();
     vi.advanceTimersByTime(HLS_STARTUP_TIMEOUT_MS);
 
     expect(onFailure).not.toHaveBeenCalled();
+    expect(guard.hasFailed()).toBe(false);
     expect(guard.handleFatalNetworkError()).toBe(true);
     expect(guard.handleFatalNetworkError()).toBe(true);
   });

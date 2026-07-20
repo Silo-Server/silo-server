@@ -9,11 +9,8 @@ export class HlsStartupGuard {
   private fatalNetworkRecoveries = 0;
   private timeoutId: ReturnType<typeof setTimeout> | null;
 
-  constructor(
-    private readonly onFailure: () => void,
-    timeoutMs = HLS_STARTUP_TIMEOUT_MS,
-  ) {
-    this.timeoutId = setTimeout(() => this.fail(), timeoutMs);
+  constructor(private readonly onFailure: () => void) {
+    this.timeoutId = setTimeout(() => this.fail(), HLS_STARTUP_TIMEOUT_MS);
   }
 
   handleFatalNetworkError(): boolean {
@@ -29,11 +26,15 @@ export class HlsStartupGuard {
     return false;
   }
 
-  markPlayable() {
+  markPlaybackStarted() {
     if (this.state !== "starting") return;
 
     this.state = "playable";
     this.clearTimeout();
+  }
+
+  hasFailed() {
+    return this.state === "failed";
   }
 
   dispose() {
