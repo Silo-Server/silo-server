@@ -40,8 +40,9 @@ function bucketFor(seconds: number, max: number): HeatmapBucket {
  * left-to-right, days run top-to-bottom starting Sunday).
  */
 export function heatmapBuckets(days: HeatmapDay[], max: number): (HeatmapCell | null)[] {
-  if (days.length === 0) return [];
-  const leadingBlanks = new Date(`${days[0].date}T00:00:00Z`).getUTCDay();
+  const firstDay = days[0];
+  if (!firstDay) return [];
+  const leadingBlanks = new Date(`${firstDay.date}T00:00:00Z`).getUTCDay();
   const blanks: null[] = new Array(leadingBlanks).fill(null);
   const cells: HeatmapCell[] = days.map((day) => ({
     date: day.date,
