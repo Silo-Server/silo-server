@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   fetchEbookReaderAnnotations: vi.fn(),
   createEbookReaderAnnotation: vi.fn(),
   deleteEbookReaderAnnotation: vi.fn(),
+  fetchReaderFonts: vi.fn(),
+  uploadReaderFont: vi.fn(),
+  deleteReaderFont: vi.fn(),
   lastOnLocationChange: undefined as
     | ((info: { fraction: number; sectionIndex: number | null; tocLabel: string | null }) => void)
     | undefined,
@@ -46,6 +49,13 @@ vi.mock("@/reader/ebookReaderApi", () => ({
   fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
   saveEbookReaderConfig: mocks.saveEbookReaderConfig,
   saveEbookReaderConfigKeepalive: mocks.saveEbookReaderConfigKeepalive,
+}));
+
+vi.mock("@/reader/readerFontsApi", () => ({
+  fetchReaderFonts: mocks.fetchReaderFonts,
+  uploadReaderFont: mocks.uploadReaderFont,
+  deleteReaderFont: mocks.deleteReaderFont,
+  readerFontFileUrl: (id: number) => `/api/v1/ebooks/reader-fonts/${id}/file`,
 }));
 
 vi.mock("@/reader/FoliateBookReader", async () => {
@@ -253,6 +263,14 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function clickThemeSwatch(container: HTMLDivElement, name: string) {
+  container.querySelector<HTMLButtonElement>(`[data-theme-choice="${name}"]`)?.click();
+}
+
+function clickDarkModeToggle(container: HTMLDivElement) {
+  container.querySelector<HTMLButtonElement>('[aria-label="Reader dark mode"]')?.click();
+}
+
 describe("EbookReader", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -279,6 +297,10 @@ describe("EbookReader", () => {
     mocks.fetchEbookReaderAnnotations.mockReset();
     mocks.createEbookReaderAnnotation.mockReset();
     mocks.deleteEbookReaderAnnotation.mockReset();
+    mocks.fetchReaderFonts.mockReset();
+    mocks.uploadReaderFont.mockReset();
+    mocks.deleteReaderFont.mockReset();
+    mocks.fetchReaderFonts.mockResolvedValue([]);
     mocks.readerSearch.mockResolvedValue([
       { cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" },
     ]);
@@ -575,11 +597,9 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "dark";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "default");
+      clickDarkModeToggle(container);
     });
 
     await act(async () => {
@@ -620,11 +640,9 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "dark";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "default");
+      clickDarkModeToggle(container);
     });
     expect(mocks.saveEbookReaderConfig).not.toHaveBeenCalled();
 
@@ -663,11 +681,8 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "sepia";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "sepia");
     });
 
     await act(async () => {
@@ -786,6 +801,127 @@ describe("EbookReader", () => {
       }),
     );
     expect(comfortable?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("renders the theme grid and switches palette pairs", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const ocean = container.querySelector<HTMLButtonElement>('[data-theme-choice="ocean"]');
+    expect(ocean).not.toBeNull();
+    await act(async () => {
+      ocean?.click();
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ themeName: "ocean", theme: "light" }),
+    );
+
+    await act(async () => {
+      clickDarkModeToggle(container);
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ themeName: "ocean", themeVariant: "dark", theme: "dark" }),
+    );
+  });
+
+  it("disables the variant toggle for AMOLED", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    await act(async () => {
+      clickThemeSwatch(container, "amoled");
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Reader dark mode"]');
+    expect(toggle?.disabled).toBe(true);
+  });
+
+  it("offers uploaded fonts in the font picker and falls back on delete", async () => {
+    mocks.fetchReaderFonts.mockResolvedValue([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+    mocks.deleteReaderFont.mockResolvedValue(undefined);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    const uploadedGroup = font?.querySelector('optgroup[label="Uploaded"]');
+    expect(uploadedGroup).not.toBeNull();
+    const option = uploadedGroup?.querySelector<HTMLOptionElement>('option[value="custom:3"]');
+    expect(option?.textContent).toBe("Literata");
+
+    await act(async () => {
+      if (!font) return;
+      font.value = "custom:3";
+      font.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fontFamily: "custom", customFontID: 3 }),
+    );
+
+    const deleteButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Delete font Literata"]',
+    );
+    await act(async () => {
+      deleteButton?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mocks.deleteReaderFont).toHaveBeenCalledWith(3);
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fontFamily: "inherit", customFontID: null }),
+    );
   });
 
   it("toggles the persisted reading ruler overlay", async () => {
@@ -1308,11 +1444,9 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "dark";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "default");
+      clickDarkModeToggle(container);
     });
 
     await act(async () => {

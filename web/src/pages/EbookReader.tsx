@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent,
 } from "react";
@@ -13,14 +14,17 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Columns,
   Download,
   GripHorizontal,
   Highlighter,
   Library,
   ListTree,
   Loader2,
+  Moon,
   PanelRightClose,
   PanelRightOpen,
+  Palette,
   Pause,
   Play,
   RotateCcw,
@@ -31,10 +35,12 @@ import {
   Square,
   Trash2,
   Type,
+  Upload,
   Volume2,
 } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
+import { ApiClientError } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
@@ -45,7 +51,7 @@ import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
-import { themeFromLegacy } from "@/reader/readerThemes";
+import { READER_THEMES, type ReaderThemeName } from "@/reader/readerThemes";
 import FoliateBookReader, {
   DEFAULT_READER_SETTINGS,
   READER_FONT_STACKS,
@@ -71,6 +77,12 @@ import {
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
 import { chapterExtent, tapZoneAction } from "@/reader/readerNavigation";
+import {
+  deleteReaderFont,
+  fetchReaderFonts,
+  uploadReaderFont,
+  type ReaderFontMeta,
+} from "@/reader/readerFontsApi";
 import ReaderFooter from "@/reader/ReaderFooter";
 import ReaderShortcutsOverlay from "@/reader/ReaderShortcutsOverlay";
 
@@ -299,6 +311,11 @@ export default function EbookReader() {
   // Comics always keep chrome visible (see the render gate below); this state
   // only ever toggles for prose/paginated formats.
   const [chromeVisible, setChromeVisible] = useState(true);
+  const [readerFonts, setReaderFonts] = useState<ReaderFontMeta[]>([]);
+  const [readerFontsLoaded, setReaderFontsLoaded] = useState(false);
+  const readerFontsRequestedRef = useRef(false);
+  const [fontUploading, setFontUploading] = useState(false);
+  const [fontUploadError, setFontUploadError] = useState<string | null>(null);
   const progressLabel = formatReaderProgress(readerProgress);
   const tocEntries = useMemo(() => flattenToc(toc), [toc]);
   const chapterBand = useMemo(() => {
@@ -370,6 +387,44 @@ export default function EbookReader() {
       void saveEbookReaderConfig(contentId, { settings: defaults });
     }
   }, [contentId]);
+  // Uploaded fonts are fetched once, lazily, the first time the settings
+  // panel is opened rather than on mount — most reader sessions never touch
+  // it and this endpoint is per-profile, not per-book.
+  useEffect(() => {
+    if (panel !== "settings" || readerFontsRequestedRef.current) return;
+    readerFontsRequestedRef.current = true;
+    void fetchReaderFonts()
+      .then(setReaderFonts)
+      .catch(() => {})
+      .finally(() => setReaderFontsLoaded(true));
+  }, [panel]);
+  // If the font a saved config points at no longer exists (deleted from this
+  // session or another one), fall back to the book's own typeface instead of
+  // silently rendering with whatever the browser last resolved "custom" to.
+  useEffect(() => {
+    if (!readerFontsLoaded || readerSettings.customFontID == null) return;
+    if (readerFonts.some((font) => font.id === readerSettings.customFontID)) return;
+    updateReaderSettings({ customFontID: null, fontFamily: READER_FONT_STACKS.inherit });
+  }, [readerFontsLoaded, readerFonts, readerSettings.customFontID, updateReaderSettings]);
+  const handleFontUpload = useCallback(async (event: ReactChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setFontUploadError(null);
+    setFontUploading(true);
+    try {
+      const font = await uploadReaderFont(file);
+      setReaderFonts((current) => [...current, font]);
+    } catch (err) {
+      setFontUploadError(err instanceof ApiClientError ? err.message : "Font upload failed.");
+    } finally {
+      setFontUploading(false);
+    }
+  }, []);
+  const handleDeleteFont = useCallback(async (id: number) => {
+    await deleteReaderFont(id);
+    setReaderFonts((current) => current.filter((font) => font.id !== id));
+  }, []);
   const handleSearchSubmit = useCallback(async () => {
     const query = searchText.trim();
     if (!query) {
@@ -1251,35 +1306,83 @@ export default function EbookReader() {
                     </label>
                   </div>
                   <div className="flex items-center gap-2 text-sm font-medium">
+                    <Palette className="size-4" />
+                    Theme
+                  </div>
+                  <div className="space-y-2">
+                    <div role="group" aria-label="Reader theme" className="grid grid-cols-5 gap-2">
+                      {(Object.keys(READER_THEMES) as ReaderThemeName[]).map((name) => {
+                        const definition = READER_THEMES[name];
+                        const swatch = definition[readerSettings.themeVariant] ?? definition.light;
+                        const active = readerSettings.themeName === name;
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            data-theme-choice={name}
+                            title={definition.label}
+                            aria-label={definition.label}
+                            aria-pressed={active}
+                            onClick={() =>
+                              updateReaderSettings({
+                                themeName: name,
+                                themeVariant: readerSettings.themeVariant,
+                              })
+                            }
+                            style={{
+                              background: swatch.background,
+                              borderColor: swatch.foreground,
+                            }}
+                            className={cn(
+                              "focus-visible:ring-ring/50 size-8 rounded-full border-2 outline-none focus-visible:ring-[3px]",
+                              active ? "ring-ring ring-2 ring-offset-2" : "",
+                            )}
+                          />
+                        );
+                      })}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label="Reader dark mode"
+                      aria-pressed={readerSettings.themeVariant === "dark"}
+                      disabled={READER_THEMES[readerSettings.themeName].darkOnly === true}
+                      onClick={() =>
+                        updateReaderSettings({
+                          themeVariant: readerSettings.themeVariant === "dark" ? "light" : "dark",
+                        })
+                      }
+                      className="w-full justify-center gap-2"
+                    >
+                      <Moon className="size-4" />
+                      Dark mode
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm font-medium">
                     <Type className="size-4" />
                     Typography
                   </div>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Theme</span>
-                    <select
-                      aria-label="Theme"
-                      value={readerSettings.theme}
-                      onChange={(event) =>
-                        updateReaderSettings(
-                          themeFromLegacy(event.target.value as ReaderSettings["theme"]),
-                        )
-                      }
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                    >
-                      <option value="light">Light</option>
-                      <option value="sepia">Sepia</option>
-                      <option value="dark">Dark</option>
-                    </select>
-                  </label>
                   {!isComicFormat && (
                     <label className="block space-y-1 text-sm">
                       <span className="text-muted-foreground text-xs font-medium">Font</span>
                       <select
                         aria-label="Font family"
-                        value={readerSettings.fontFamily}
-                        onChange={(event) =>
-                          updateReaderSettings({ fontFamily: event.target.value })
+                        value={
+                          readerSettings.fontFamily === "custom" &&
+                          readerSettings.customFontID != null
+                            ? `custom:${readerSettings.customFontID}`
+                            : readerSettings.fontFamily
                         }
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          if (raw.startsWith("custom:")) {
+                            const id = Number(raw.slice("custom:".length));
+                            updateReaderSettings({ fontFamily: "custom", customFontID: id });
+                          } else {
+                            updateReaderSettings({ fontFamily: raw, customFontID: null });
+                          }
+                        }}
                         className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                       >
                         {READER_FONT_OPTIONS.map((option) => (
@@ -1289,9 +1392,64 @@ export default function EbookReader() {
                         ))}
                         {!READER_FONT_OPTIONS.some(
                           (option) => option.value === readerSettings.fontFamily,
-                        ) && <option value={readerSettings.fontFamily}>Custom</option>}
+                        ) &&
+                          readerSettings.fontFamily !== "custom" && (
+                            <option value={readerSettings.fontFamily}>Custom</option>
+                          )}
+                        {readerFonts.length > 0 && (
+                          <optgroup label="Uploaded">
+                            {readerFonts.map((font) => (
+                              <option key={font.id} value={`custom:${font.id}`}>
+                                {font.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                     </label>
+                  )}
+                  {!isComicFormat && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground text-xs font-medium">
+                          Uploaded fonts
+                        </span>
+                        <label className="text-foreground inline-flex cursor-pointer items-center gap-1 text-xs font-medium">
+                          <Upload className="size-3.5" />
+                          {fontUploading ? "Uploading…" : "Upload"}
+                          <input
+                            type="file"
+                            accept=".ttf,.otf,.woff,.woff2"
+                            aria-label="Upload font"
+                            disabled={fontUploading}
+                            onChange={(event) => void handleFontUpload(event)}
+                            className="sr-only"
+                          />
+                        </label>
+                      </div>
+                      {fontUploadError && <p className="text-xs text-red-600">{fontUploadError}</p>}
+                      {readerFonts.length > 0 && (
+                        <ul className="space-y-1">
+                          {readerFonts.map((font) => (
+                            <li
+                              key={font.id}
+                              className="flex items-center justify-between gap-2 text-sm"
+                            >
+                              <span className="min-w-0 truncate">{font.name}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`Delete font ${font.name}`}
+                                title={`Delete font ${font.name}`}
+                                onClick={() => void handleDeleteFont(font.id)}
+                              >
+                                <Trash2 className="size-3" />
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   )}
                   {!isComicFormat && (
                     <ReaderRange
@@ -1343,6 +1501,45 @@ export default function EbookReader() {
                       onChange={(maxWidth) => updateReaderSettings({ maxWidth })}
                     />
                   )}
+                  {!isComicFormat && (
+                    <>
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Columns className="size-4" />
+                        Layout
+                      </div>
+                      <label className="block space-y-1 text-sm">
+                        <span className="text-muted-foreground text-xs font-medium">Columns</span>
+                        <select
+                          aria-label="Columns"
+                          value={String(readerSettings.columns)}
+                          onChange={(event) =>
+                            updateReaderSettings({
+                              columns:
+                                event.target.value === "auto"
+                                  ? "auto"
+                                  : (Number(event.target.value) as ReaderSettings["columns"]),
+                            })
+                          }
+                          className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                        >
+                          <option value="auto">Auto</option>
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="3">3</option>
+                          <option value="4">4</option>
+                        </select>
+                      </label>
+                      <ReaderRange
+                        label="Column gap"
+                        value={readerSettings.columnGap}
+                        min={0}
+                        max={50}
+                        step={1}
+                        suffix="%"
+                        onChange={(columnGap) => updateReaderSettings({ columnGap })}
+                      />
+                    </>
+                  )}
                   <div className="border-border space-y-2 border-t pt-3">
                     {!isComicFormat && (
                       <label className="flex items-center justify-between gap-3 text-sm">
@@ -1353,6 +1550,19 @@ export default function EbookReader() {
                           checked={readerSettings.hyphenation}
                           onChange={(event) =>
                             updateReaderSettings({ hyphenation: event.target.checked })
+                          }
+                        />
+                      </label>
+                    )}
+                    {!isComicFormat && (
+                      <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Justify text</span>
+                        <input
+                          aria-label="Justify text"
+                          type="checkbox"
+                          checked={readerSettings.justify}
+                          onChange={(event) =>
+                            updateReaderSettings({ justify: event.target.checked })
                           }
                         />
                       </label>

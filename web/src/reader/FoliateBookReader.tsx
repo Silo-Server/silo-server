@@ -5,6 +5,7 @@ import { api, apiBlob, apiKeepalive } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import { ebookKeys } from "@/hooks/queries/keys";
 import type { EbookReaderAnnotation } from "@/reader/ebookReaderApi";
+import { readerFontFileUrl } from "@/reader/readerFontsApi";
 import { DocumentLoader, type BookDoc, type TOCItem } from "@/reader/readest/libs/document";
 import {
   legacyThemeFor,
@@ -464,10 +465,19 @@ export async function saveEbookReaderProgress(
   });
 }
 
+const CUSTOM_FONT_FAMILY = "silo-custom-font";
+
 export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS) {
   const colors = readerPalette(settings.themeName, settings.themeVariant);
   const contentMaxWidth = settings.flow === "scrolled" ? "none" : `${settings.maxWidth}ch`;
+  const fontFamily =
+    settings.fontFamily === "custom" ? `"${CUSTOM_FONT_FAMILY}"` : settings.fontFamily;
+  const fontFace =
+    settings.customFontID != null
+      ? `@font-face { font-family: "${CUSTOM_FONT_FAMILY}"; src: url("${readerFontFileUrl(settings.customFontID)}"); font-display: swap; }`
+      : "";
   return `
+    ${fontFace}
     :root {
       --theme-bg-color: ${colors.background};
       --theme-fg-color: ${colors.foreground};
@@ -477,7 +487,7 @@ export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS)
     html, body {
       background: ${colors.background} !important;
       color: ${colors.foreground} !important;
-      font-family: ${settings.fontFamily} !important;
+      font-family: ${fontFamily} !important;
       font-size: ${settings.fontSize}% !important;
       font-weight: ${settings.fontWeight} !important;
       hyphens: ${settings.hyphenation ? "auto" : "none"} !important;

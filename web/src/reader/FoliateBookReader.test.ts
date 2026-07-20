@@ -279,6 +279,26 @@ describe("FoliateBookReader helpers", () => {
     expect(styles).toContain("writing-mode: vertical-rl !important");
   });
 
+  it("injects an @font-face rule and uses it when a custom font is selected", () => {
+    const styles = readerStyles(
+      normalizeReaderSettings({
+        fontFamily: "custom",
+        customFontID: 5,
+      }),
+    );
+
+    expect(styles).toContain(
+      '@font-face { font-family: "silo-custom-font"; src: url("/api/v1/ebooks/reader-fonts/5/file"); font-display: swap; }',
+    );
+    expect(styles).toContain('font-family: "silo-custom-font" !important');
+  });
+
+  it("omits the @font-face rule when no custom font is selected", () => {
+    const styles = readerStyles(normalizeReaderSettings({}));
+
+    expect(styles).not.toContain("@font-face");
+  });
+
   it("uses full available width in scrolled flow", () => {
     const scrolledStyles = readerStyles(
       normalizeReaderSettings({
