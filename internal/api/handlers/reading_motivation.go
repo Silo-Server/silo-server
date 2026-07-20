@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"sort"
@@ -452,6 +453,286 @@ func (h *ReadingMotivationHandler) HandlePutGoals(w http.ResponseWriter, r *http
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// earlyBirdStartHour/earlyBirdEndHour bound the "early-bird" badge's habit
+// window (5am-8am local), which is narrower than hourBucket's "morning"
+// bucket (5-11) used for the DNA hour-of-day breakdown.
+const (
+	earlyBirdStartHour = 5
+	earlyBirdEndHour   = 8
+)
+
+type readingMotivationStreakResponse struct {
+	CurrentDays    int  `json:"current_days"`
+	LongestDays    int  `json:"longest_days"`
+	TodaySeconds   int  `json:"today_seconds"`
+	TodayQualified bool `json:"today_qualified"`
+}
+
+type readingMotivationGoalsResponse struct {
+	BooksPerYear     *int    `json:"books_per_year"`
+	HoursPerYear     *int    `json:"hours_per_year"`
+	BooksFinishedYTD int     `json:"books_finished_ytd"`
+	HoursYTD         float64 `json:"hours_ytd"`
+	BooksOnTrackFor  int     `json:"books_on_track_for"`
+	HoursOnTrackFor  int     `json:"hours_on_track_for"`
+}
+
+type readingMotivationChallengeResponse struct {
+	TargetSeconds int `json:"target_seconds"`
+	MonthSeconds  int `json:"month_seconds"`
+	Percent       int `json:"percent"`
+}
+
+type readingMotivationAchievementResponse struct {
+	ID          string  `json:"id"`
+	Category    string  `json:"category"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	AchievedAt  *string `json:"achieved_at"`
+}
+
+type readingMotivationGenreResponse struct {
+	Name    string `json:"name"`
+	Seconds int    `json:"seconds"`
+}
+
+type readingMotivationAuthorResponse struct {
+	Name    string `json:"name"`
+	Seconds int    `json:"seconds"`
+}
+
+type readingMotivationDNAResponse struct {
+	Genres             []readingMotivationGenreResponse  `json:"genres"`
+	Authors            []readingMotivationAuthorResponse `json:"authors"`
+	DiversityScore     int                               `json:"diversity_score"`
+	AvgSessionSeconds  int                               `json:"avg_session_seconds"`
+	HoursByBucket      map[string]int                    `json:"hours_by_bucket"`
+	ProjectedYearHours float64                           `json:"projected_year_hours"`
+}
+
+type readingMotivationResponse struct {
+	Streak       readingMotivationStreakResponse        `json:"streak"`
+	Goals        readingMotivationGoalsResponse         `json:"goals"`
+	Challenge    readingMotivationChallengeResponse     `json:"challenge"`
+	Achievements []readingMotivationAchievementResponse `json:"achievements"`
+	DNA          readingMotivationDNAResponse           `json:"dna"`
+}
+
+// HandleGetMotivation assembles the full reading-motivation payload: streak,
+// yearly goals progress, the auto monthly challenge, the 18-badge
+// achievement grid (evaluating and persisting any newly satisfied ones),
+// and the Reading DNA taste/habit breakdown.
+//
+// Each section is computed from its own store call(s): a failing call is
+// logged and that section falls back to its zero value (empty slice/zeroed
+// struct) rather than aborting the whole response. Only the identity check
+// and a nil store/Now are request-level preconditions that can fail the
+// endpoint outright.
+func (h *ReadingMotivationHandler) HandleGetMotivation(w http.ResponseWriter, r *http.Request) {
+	userID := apimw.GetUserID(r.Context())
+	profileID := apimw.GetProfileID(r.Context())
+	if userID == 0 {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
+		return
+	}
+	if h == nil || h.Store == nil || h.Now == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Reading motivation is not configured")
+		return
+	}
+
+	ctx := r.Context()
+	loc := requestLocation(r)
+	now := h.Now()
+	nowLocal := now.In(loc)
+
+	logSectionErr := func(section string, err error) {
+		slog.ErrorContext(ctx, "reading motivation: section failed, degrading to zero value",
+			"component", "api", "section", section, "error", err)
+	}
+
+	// Sessions feed streak/challenge/DNA/achievement math; a failure here
+	// degrades every section that reads from it to its own zero value
+	// rather than a hard 500, same as any other section.
+	sessions, err := h.Store.SessionsSince(ctx, userID, profileID, time.Time{})
+	if err != nil {
+		logSectionErr("sessions", err)
+		sessions = nil
+	}
+
+	days := sessionDaySeconds(sessions, loc)
+	todayKey := nowLocal.Format(dayKeyLayout)
+	currentStreak, longestStreak := streakFrom(days, todayKey)
+	todaySeconds := days[todayKey]
+
+	targetSeconds, monthSeconds := monthChallenge(days, now, loc)
+	percent := 0
+	if targetSeconds > 0 {
+		percent = int(math.Round(float64(monthSeconds) / float64(targetSeconds) * 100))
+	}
+	if percent > 100 {
+		percent = 100
+	}
+
+	// "Finished book" is scoped to the current local year throughout (both
+	// the goals card's year-to-date count and the achievement badges' book
+	// totals), per spec.
+	yearStart := time.Date(nowLocal.Year(), 1, 1, 0, 0, 0, 0, loc)
+	yearEnd := yearStart.AddDate(1, 0, 0)
+	finishedYTD, err := h.Store.FinishedBooksInRange(ctx, userID, profileID, yearStart, yearEnd)
+	if err != nil {
+		logSectionErr("finished_books", err)
+		finishedYTD = 0
+	}
+
+	goalsRow, err := h.Store.GetGoals(ctx, userID, profileID)
+	if err != nil {
+		logSectionErr("goals", err)
+		goalsRow = nil
+	}
+
+	genres, err := h.Store.GenreSeconds(ctx, userID, profileID)
+	if err != nil {
+		logSectionErr("genre_seconds", err)
+		genres = nil
+	}
+
+	authors, err := h.Store.AuthorSeconds(ctx, userID, profileID)
+	if err != nil {
+		logSectionErr("author_seconds", err)
+		authors = nil
+	}
+
+	dna := computeDNA(sessions, genres, authors, now, loc)
+
+	elapsedFraction := float64(nowLocal.Sub(yearStart)) / float64(yearEnd.Sub(yearStart))
+	var ytdSeconds int
+	var totalSeconds, longestSessionSeconds, maxBookSeconds int
+	var nightSeconds, earlyBirdSeconds, weekendSeconds int
+	bookSeconds := make(map[string]int)
+	for _, s := range sessions {
+		totalSeconds += s.DurationSeconds
+		if s.DurationSeconds > longestSessionSeconds {
+			longestSessionSeconds = s.DurationSeconds
+		}
+		bookSeconds[s.ContentID] += s.DurationSeconds
+
+		local := s.StartedAt.In(loc)
+		if local.Year() == nowLocal.Year() {
+			ytdSeconds += s.DurationSeconds
+		}
+		hour := local.Hour()
+		if hourBucket(hour) == "night" {
+			nightSeconds += s.DurationSeconds
+		}
+		if hour >= earlyBirdStartHour && hour < earlyBirdEndHour {
+			earlyBirdSeconds += s.DurationSeconds
+		}
+		if wd := local.Weekday(); wd == time.Saturday || wd == time.Sunday {
+			weekendSeconds += s.DurationSeconds
+		}
+	}
+	for _, secs := range bookSeconds {
+		if secs > maxBookSeconds {
+			maxBookSeconds = secs
+		}
+	}
+
+	goalsResp := readingMotivationGoalsResponse{
+		BooksFinishedYTD: finishedYTD,
+		HoursYTD:         float64(ytdSeconds) / 3600.0,
+		BooksOnTrackFor:  int(math.Round(goalProjection(float64(finishedYTD), elapsedFraction))),
+		HoursOnTrackFor:  int(math.Round(goalProjection(float64(ytdSeconds)/3600.0, elapsedFraction))),
+	}
+	if goalsRow != nil {
+		goalsResp.BooksPerYear = goalsRow.BooksPerYear
+		goalsResp.HoursPerYear = goalsRow.HoursPerYear
+	}
+
+	achievedAt, err := h.Store.AchievedAt(ctx, userID, profileID)
+	if err != nil {
+		logSectionErr("achievements", err)
+		achievedAt = nil
+	}
+	if achievedAt == nil {
+		achievedAt = make(map[string]time.Time)
+	}
+
+	satisfied := evaluateAchievements(achievementInput{
+		TotalSeconds:          totalSeconds,
+		LongestSessionSeconds: longestSessionSeconds,
+		CurrentStreak:         currentStreak,
+		LongestStreak:         longestStreak,
+		BooksFinished:         finishedYTD,
+		NightSeconds:          nightSeconds,
+		EarlyBirdSeconds:      earlyBirdSeconds,
+		WeekendSeconds:        weekendSeconds,
+		DistinctGenres:        len(genres),
+		MaxBookSeconds:        maxBookSeconds,
+		FinishedWithHighRead:  finishedYTD > 0,
+	})
+	for _, id := range satisfied {
+		if _, already := achievedAt[id]; already {
+			continue
+		}
+		if err := h.Store.PersistAchievement(ctx, userID, profileID, id, now); err != nil {
+			// Persistence failure is a silent skip: the badge shows locked
+			// in this response and the next call retries the unlock.
+			slog.ErrorContext(ctx, "reading motivation: persist achievement failed",
+				"component", "api", "achievement_id", id, "error", err)
+			continue
+		}
+		achievedAt[id] = now
+	}
+
+	achievementsResp := make([]readingMotivationAchievementResponse, 0, len(achievementDefinitions))
+	for _, def := range achievementDefinitions {
+		item := readingMotivationAchievementResponse{
+			ID:          def.ID,
+			Category:    def.Category,
+			Name:        def.Name,
+			Description: def.Description,
+		}
+		if at, ok := achievedAt[def.ID]; ok {
+			formatted := at.UTC().Format(time.RFC3339)
+			item.AchievedAt = &formatted
+		}
+		achievementsResp = append(achievementsResp, item)
+	}
+
+	genresResp := make([]readingMotivationGenreResponse, 0, len(dna.Genres))
+	for _, g := range dna.Genres {
+		genresResp = append(genresResp, readingMotivationGenreResponse{Name: g.Genre, Seconds: g.Seconds})
+	}
+	authorsResp := make([]readingMotivationAuthorResponse, 0, len(dna.Authors))
+	for _, a := range dna.Authors {
+		authorsResp = append(authorsResp, readingMotivationAuthorResponse{Name: a.Author, Seconds: a.Seconds})
+	}
+
+	writeJSON(w, http.StatusOK, readingMotivationResponse{
+		Streak: readingMotivationStreakResponse{
+			CurrentDays:    currentStreak,
+			LongestDays:    longestStreak,
+			TodaySeconds:   todaySeconds,
+			TodayQualified: todaySeconds >= streakMinSeconds,
+		},
+		Goals: goalsResp,
+		Challenge: readingMotivationChallengeResponse{
+			TargetSeconds: targetSeconds,
+			MonthSeconds:  monthSeconds,
+			Percent:       percent,
+		},
+		Achievements: achievementsResp,
+		DNA: readingMotivationDNAResponse{
+			Genres:             genresResp,
+			Authors:            authorsResp,
+			DiversityScore:     dna.DiversityScore,
+			AvgSessionSeconds:  dna.AvgSessionSeconds,
+			HoursByBucket:      dna.HoursByBucket,
+			ProjectedYearHours: dna.ProjectedYearHours,
+		},
+	})
 }
 
 // PGReadingMotivationStore is the Postgres-backed ReadingMotivationStore.

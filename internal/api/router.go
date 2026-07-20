@@ -2271,6 +2271,7 @@ func NewRouter(deps Dependencies) chi.Router {
 
 						if readingMotivationHandler != nil {
 							r.Put("/reading-goals", readingMotivationHandler.HandlePutGoals)
+							r.Get("/reading-motivation", readingMotivationHandler.HandleGetMotivation)
 						}
 					})
 				}

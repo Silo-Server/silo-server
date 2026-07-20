@@ -13,16 +13,32 @@ import (
 )
 
 // fakeReadingMotivationStore is an in-memory ReadingMotivationStore backed
-// by maps, mirroring fakeReadingSessionStore's style. Only the goals
-// methods are exercised by this task's tests; the remaining methods are
-// present to satisfy the interface for later tasks.
+// by maps, mirroring fakeReadingSessionStore's style.
 type fakeReadingMotivationStore struct {
 	goals map[string]ReadingGoals
 
 	putGoalsErr error
 
-	achievements map[string]time.Time
-	sessions     []ReadingSession
+	achievements  map[string]time.Time
+	achievedAtErr error
+
+	sessions    []ReadingSession
+	sessionsErr error
+
+	finishedBooks    int
+	finishedBooksErr error
+
+	genres    []GenreSeconds
+	genresErr error
+
+	authors    []AuthorSeconds
+	authorsErr error
+
+	// persistCalls records the achievement ids PersistAchievement was
+	// invoked with, in call order, so tests can assert only newly
+	// satisfied badges trigger a persist.
+	persistCalls []string
+	persistErr   error
 }
 
 func goalsKey(userID int, profileID string) string {
@@ -53,10 +69,17 @@ func (f *fakeReadingMotivationStore) PutGoals(_ context.Context, userID int, pro
 }
 
 func (f *fakeReadingMotivationStore) AchievedAt(_ context.Context, _ int, _ string) (map[string]time.Time, error) {
+	if f.achievedAtErr != nil {
+		return nil, f.achievedAtErr
+	}
 	return f.achievements, nil
 }
 
 func (f *fakeReadingMotivationStore) PersistAchievement(_ context.Context, _ int, _, achievementID string, at time.Time) error {
+	if f.persistErr != nil {
+		return f.persistErr
+	}
+	f.persistCalls = append(f.persistCalls, achievementID)
 	if f.achievements == nil {
 		f.achievements = make(map[string]time.Time)
 	}
@@ -65,19 +88,31 @@ func (f *fakeReadingMotivationStore) PersistAchievement(_ context.Context, _ int
 }
 
 func (f *fakeReadingMotivationStore) SessionsSince(_ context.Context, _ int, _ string, _ time.Time) ([]ReadingSession, error) {
+	if f.sessionsErr != nil {
+		return nil, f.sessionsErr
+	}
 	return f.sessions, nil
 }
 
 func (f *fakeReadingMotivationStore) FinishedBooksInRange(_ context.Context, _ int, _ string, _, _ time.Time) (int, error) {
-	return 0, nil
+	if f.finishedBooksErr != nil {
+		return 0, f.finishedBooksErr
+	}
+	return f.finishedBooks, nil
 }
 
 func (f *fakeReadingMotivationStore) GenreSeconds(_ context.Context, _ int, _ string) ([]GenreSeconds, error) {
-	return nil, nil
+	if f.genresErr != nil {
+		return nil, f.genresErr
+	}
+	return f.genres, nil
 }
 
 func (f *fakeReadingMotivationStore) AuthorSeconds(_ context.Context, _ int, _ string) ([]AuthorSeconds, error) {
-	return nil, nil
+	if f.authorsErr != nil {
+		return nil, f.authorsErr
+	}
+	return f.authors, nil
 }
 
 func TestRequestLocation(t *testing.T) {
@@ -579,4 +614,250 @@ func TestEvaluateAchievements(t *testing.T) {
 			}
 		}
 	})
+}
+
+// motivationRequest builds an authenticated GET request against the
+// reading-motivation endpoint, optionally with a raw query string (e.g.
+// "tz=Europe/Amsterdam").
+func motivationRequest(userID int, profileID, rawQuery string) *http.Request {
+	url := "/ebooks/reading-motivation"
+	if rawQuery != "" {
+		url += "?" + rawQuery
+	}
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	return req.WithContext(readingSessionAuthContext(userID, profileID))
+}
+
+// assertKeys unmarshals raw as a JSON object and fails the test if its key
+// set isn't exactly want (order-independent).
+func assertKeys(t *testing.T, raw json.RawMessage, want []string) {
+	t.Helper()
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal object: %v; raw = %s", err, raw)
+	}
+	for _, k := range want {
+		if _, ok := m[k]; !ok {
+			t.Errorf("missing key %q; raw = %s", k, raw)
+		}
+	}
+	if len(m) != len(want) {
+		got := make([]string, 0, len(m))
+		for k := range m {
+			got = append(got, k)
+		}
+		sort.Strings(got)
+		t.Errorf("keys = %v, want exactly %v", got, want)
+	}
+}
+
+func TestMotivationEndpointShape(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	store := &fakeReadingMotivationStore{
+		sessions: []ReadingSession{
+			{ContentID: "book-1", StartedAt: now.Add(-2 * time.Hour), DurationSeconds: 3600},
+		},
+		goals:         map[string]ReadingGoals{},
+		achievements:  map[string]time.Time{"first-hour": now.Add(-24 * time.Hour)},
+		finishedBooks: 3,
+		genres:        []GenreSeconds{{Genre: "Sci-Fi", Seconds: 3600}},
+		authors:       []AuthorSeconds{{Author: "Jane Doe", Seconds: 3600}},
+	}
+	books, hours := 20, 100
+	store.goals[goalsKey(1, "profile-a")] = ReadingGoals{BooksPerYear: &books, HoursPerYear: &hours}
+
+	h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+	rr := httptest.NewRecorder()
+	h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &top); err != nil {
+		t.Fatalf("unmarshal top level: %v; body = %s", err, rr.Body.String())
+	}
+	wantTop := []string{"streak", "goals", "challenge", "achievements", "dna"}
+	for _, k := range wantTop {
+		if _, ok := top[k]; !ok {
+			t.Errorf("missing top-level key %q; body = %s", k, rr.Body.String())
+		}
+	}
+	if len(top) != len(wantTop) {
+		t.Errorf("top-level keys = %v, want exactly %v", top, wantTop)
+	}
+
+	assertKeys(t, top["streak"], []string{"current_days", "longest_days", "today_seconds", "today_qualified"})
+	assertKeys(t, top["goals"], []string{
+		"books_per_year", "hours_per_year", "books_finished_ytd",
+		"hours_ytd", "books_on_track_for", "hours_on_track_for",
+	})
+	assertKeys(t, top["challenge"], []string{"target_seconds", "month_seconds", "percent"})
+	assertKeys(t, top["dna"], []string{
+		"genres", "authors", "diversity_score", "avg_session_seconds",
+		"hours_by_bucket", "projected_year_hours",
+	})
+
+	var achievements []map[string]json.RawMessage
+	if err := json.Unmarshal(top["achievements"], &achievements); err != nil {
+		t.Fatalf("unmarshal achievements: %v", err)
+	}
+	if len(achievements) != 18 {
+		t.Fatalf("len(achievements) = %d, want 18", len(achievements))
+	}
+	for i, a := range achievements {
+		for _, k := range []string{"id", "category", "name", "description", "achieved_at"} {
+			if _, ok := a[k]; !ok {
+				t.Errorf("achievements[%d] missing key %q: %v", i, k, a)
+			}
+		}
+	}
+}
+
+// TestMotivationPersistsNewUnlocks fixtures three consecutive qualifying
+// days (>=300s each) totaling 3900s, which satisfies both "first-hour"
+// (>=3600s total) and "streak-3" (LongestStreak>=3). The store already has
+// "first-hour" persisted, so only "streak-3" should trigger a new
+// PersistAchievement call; the response must show both as achieved.
+func TestMotivationPersistsNewUnlocks(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	earlierUnlock := now.Add(-48 * time.Hour)
+
+	store := &fakeReadingMotivationStore{
+		sessions: []ReadingSession{
+			{ContentID: "book-1", StartedAt: time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC), DurationSeconds: 1300},
+			{ContentID: "book-1", StartedAt: time.Date(2026, 7, 19, 10, 0, 0, 0, time.UTC), DurationSeconds: 1300},
+			{ContentID: "book-1", StartedAt: time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC), DurationSeconds: 1300},
+		},
+		achievements: map[string]time.Time{"first-hour": earlierUnlock},
+	}
+
+	h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+	rr := httptest.NewRecorder()
+	h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+	}
+
+	if len(store.persistCalls) != 1 || store.persistCalls[0] != "streak-3" {
+		t.Fatalf("persistCalls = %v, want exactly [\"streak-3\"]", store.persistCalls)
+	}
+
+	var resp readingMotivationResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+	}
+	var gotFirstHour, gotStreak3 bool
+	for _, a := range resp.Achievements {
+		switch a.ID {
+		case "first-hour":
+			gotFirstHour = a.AchievedAt != nil
+		case "streak-3":
+			gotStreak3 = a.AchievedAt != nil
+		}
+	}
+	if !gotFirstHour {
+		t.Error("first-hour should show as achieved in the response")
+	}
+	if !gotStreak3 {
+		t.Error("streak-3 should show as newly achieved in the response")
+	}
+}
+
+// TestMotivationDegradesPerSection pins the per-section degradation
+// contract: a failing store call for one section never 500s the whole
+// request, and only that section falls back to its zero value.
+func TestMotivationDegradesPerSection(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	store := &fakeReadingMotivationStore{
+		sessions: []ReadingSession{
+			{ContentID: "book-1", StartedAt: now.Add(-2 * time.Hour), DurationSeconds: 3600},
+		},
+		authors:       []AuthorSeconds{{Author: "Jane Doe", Seconds: 3600}},
+		finishedBooks: 2,
+		genresErr:     fmt.Errorf("genre join exploded"),
+	}
+
+	h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+	rr := httptest.NewRecorder()
+	h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (section failure must degrade, not abort); body = %s", rr.Code, rr.Body.String())
+	}
+
+	var resp readingMotivationResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+	}
+	if len(resp.DNA.Genres) != 0 {
+		t.Errorf("dna.genres = %v, want empty", resp.DNA.Genres)
+	}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &top); err != nil {
+		t.Fatalf("unmarshal top level: %v", err)
+	}
+	var dna map[string]json.RawMessage
+	if err := json.Unmarshal(top["dna"], &dna); err != nil {
+		t.Fatalf("unmarshal dna: %v", err)
+	}
+	if string(dna["genres"]) != "[]" {
+		t.Errorf(`dna.genres raw JSON = %s, want "[]" (not null)`, dna["genres"])
+	}
+
+	// Other sections stay intact: authors survived (unaffected store call),
+	// and streak/goals math over the still-good sessions/finished-books
+	// data is unaffected by the genre failure.
+	if len(resp.DNA.Authors) != 1 {
+		t.Errorf("dna.authors = %v, want the one fixture author to survive", resp.DNA.Authors)
+	}
+	if resp.Goals.BooksFinishedYTD != 2 {
+		t.Errorf("goals.books_finished_ytd = %d, want 2", resp.Goals.BooksFinishedYTD)
+	}
+	if resp.Streak.TodaySeconds != 3600 {
+		t.Errorf("streak.today_seconds = %d, want 3600", resp.Streak.TodaySeconds)
+	}
+}
+
+// TestMotivationUsesTimezone reuses the 23:30Z-session trick from
+// TestHistoryUsesRequestTimezone: a session at 2026-07-19T23:30:00Z lands on
+// local day 2026-07-20 in Europe/Amsterdam (UTC+2 in July) but 2026-07-19 in
+// UTC, shifting which day "today" attribution lands on.
+func TestMotivationUsesTimezone(t *testing.T) {
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	store := &fakeReadingMotivationStore{
+		sessions: []ReadingSession{
+			{ContentID: "book-1", StartedAt: time.Date(2026, 7, 19, 23, 30, 0, 0, time.UTC), DurationSeconds: 900},
+		},
+	}
+
+	run := func(rawQuery string) readingMotivationResponse {
+		h := &ReadingMotivationHandler{Store: store, Now: func() time.Time { return now }}
+		rr := httptest.NewRecorder()
+		h.HandleGetMotivation(rr, motivationRequest(1, "profile-a", rawQuery))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body = %s", rr.Code, rr.Body.String())
+		}
+		var resp readingMotivationResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal response: %v; body = %s", err, rr.Body.String())
+		}
+		return resp
+	}
+
+	utc := run("")
+	amsterdam := run("tz=Europe/Amsterdam")
+
+	if utc.Streak.TodaySeconds != 0 {
+		t.Errorf("UTC today_seconds = %d, want 0 (session falls on yesterday in UTC)", utc.Streak.TodaySeconds)
+	}
+	if utc.Streak.TodayQualified {
+		t.Error("UTC today_qualified = true, want false")
+	}
+	if amsterdam.Streak.TodaySeconds != 900 {
+		t.Errorf("Europe/Amsterdam today_seconds = %d, want 900 (session falls on today in +02:00)", amsterdam.Streak.TodaySeconds)
+	}
+	if !amsterdam.Streak.TodayQualified {
+		t.Error("Europe/Amsterdam today_qualified = false, want true (900s >= 300s minimum)")
+	}
 }
