@@ -268,6 +268,12 @@ export default function EbookReader() {
   // ruler) is meaningless and the side panel steals width the pages need, so
   // it starts closed (the toggle still opens it).
   const isComicFormat = format === "cbz" || format === "cbr";
+  // isComicFormat is derived from the loaded item's file versions, so while
+  // the detail query is still pending it defaults to false — indistinguishable
+  // from a prose book. Trackers below must stay off until the item has
+  // actually loaded, or a keypress during that window can fire a stats GET
+  // and a spurious heartbeat for what turns out to be a comic.
+  const readerKindKnown = Boolean(item);
   const readerRef = useRef<FoliateBookReaderHandle>(null);
   const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
   const [readerProgress, setReaderProgress] = useState<number | null>(null);
@@ -301,12 +307,14 @@ export default function EbookReader() {
   const tts = useTTS();
   useScreenWakeLock(wakeLockEnabled);
   const { noteActivity: noteReadingActivity } = useReadingHeartbeat({
-    contentId: isComicFormat ? null : contentId || null,
+    contentId: readerKindKnown && !isComicFormat ? contentId || null : null,
     getFraction: () => locationInfoRef.current?.fraction ?? readerProgress ?? 0,
   });
   // Pace/time-left estimates only make sense for prose; comics have no
   // reading-speed signal to project against.
-  const readingStats = useBookReadingStats(!isComicFormat && contentId ? contentId : undefined);
+  const readingStats = useBookReadingStats(
+    readerKindKnown && !isComicFormat && contentId ? contentId : undefined,
+  );
   const configLoadedRef = useRef(false);
   // Tracks settings the user changed in this session so a slow server config
   // fetch cannot clobber them after the fact.

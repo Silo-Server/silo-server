@@ -1405,6 +1405,43 @@ describe("EbookReader", () => {
     vi.useRealTimers();
   });
 
+  it("does not send a heartbeat or enable the reading-stats query while the item detail is still loading", async () => {
+    // isComicFormat is derived from the loaded item's file versions, so
+    // while useCatalogItemDetail is still pending it's false — the same as
+    // a prose book. Without gating on the item being loaded, a keypress
+    // during this window would fire a stats GET and a spurious heartbeat
+    // for a book that might turn out to be a comic (which the reader must
+    // never track).
+    vi.useFakeTimers();
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(mocks.sendReadingHeartbeat).not.toHaveBeenCalled();
+    const lastReadingStatsCall =
+      mocks.useBookReadingStats.mock.calls[mocks.useBookReadingStats.mock.calls.length - 1];
+    expect(lastReadingStatsCall?.[0]).toBeUndefined();
+
+    vi.useRealTimers();
+  });
+
   it("scrubs reader progress and supports keyboard page navigation", async () => {
     await act(async () => {
       root.render(
