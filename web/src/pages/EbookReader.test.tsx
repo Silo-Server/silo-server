@@ -873,6 +873,111 @@ describe("EbookReader", () => {
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
   });
 
+  it("pages on edge taps and toggles chrome on middle tap", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // The mock reader reports an active selection on mount; clear it via the
+    // highlight action so tap zones are free to page/toggle chrome.
+    const highlight = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Highlight selection"]',
+    );
+    await act(async () => {
+      highlight?.click();
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 30, bubbles: true }));
+    });
+    expect(mocks.readerPrev).toHaveBeenCalled();
+
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 270, bubbles: true }));
+    });
+    expect(mocks.readerNext).toHaveBeenCalled();
+
+    expect(container.querySelector("header")).not.toBeNull();
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
+    });
+    expect(container.querySelector("header")).toBeNull();
+    expect(container.querySelector("footer")).toBeNull();
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
+    });
+    expect(container.querySelector("header")).not.toBeNull();
+  });
+
+  it("always shows chrome and ignores tap zones for comic formats", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [makeVersion({ file_id: 8, file_name: "Comic.cbz", container: "cbz" })],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    expect(container.querySelector("header")).not.toBeNull();
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
+    });
+    // Comics never hide chrome, and the tap-zone handler is inert for them.
+    expect(container.querySelector("header")).not.toBeNull();
+    expect(mocks.readerPrev).not.toHaveBeenCalled();
+    expect(mocks.readerNext).not.toHaveBeenCalled();
+  });
+
   it("loads annotations, creates highlights, and deletes annotations", async () => {
     mocks.fetchEbookReaderAnnotations.mockResolvedValue([
       {

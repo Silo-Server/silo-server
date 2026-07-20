@@ -69,7 +69,7 @@ import {
   saveEbookReaderConfigKeepalive,
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
-import { chapterExtent } from "@/reader/readerNavigation";
+import { chapterExtent, tapZoneAction } from "@/reader/readerNavigation";
 import ReaderFooter from "@/reader/ReaderFooter";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
@@ -280,6 +280,9 @@ export default function EbookReader() {
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<ReaderSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  // Comics always keep chrome visible (see the render gate below); this state
+  // only ever toggles for prose/paginated formats.
+  const [chromeVisible, setChromeVisible] = useState(true);
   const progressLabel = formatReaderProgress(readerProgress);
   const tocEntries = useMemo(() => flattenToc(toc), [toc]);
   const chapterBand = useMemo(() => {
@@ -367,6 +370,22 @@ export default function EbookReader() {
     setReaderProgress(next);
     void readerRef.current?.goToFraction(next);
   }, []);
+  const handleSurfacePointerUp = useCallback(
+    (event: PointerEvent<HTMLElement>) => {
+      if (isComicFormat) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const action = tapZoneAction({
+        xRatio: (event.clientX - rect.left) / rect.width,
+        flow: readerSettings.flow,
+        hasSelection: Boolean(selection),
+      });
+      if (action === "prev") readerRef.current?.prev();
+      else if (action === "next") readerRef.current?.next();
+      else if (action === "toggle-chrome") setChromeVisible((visible) => !visible);
+    },
+    [isComicFormat, readerSettings.flow, selection],
+  );
   const handleCreateHighlight = useCallback(async () => {
     if (!contentId || !selection) return;
     const created = await createEbookReaderAnnotation(contentId, {
@@ -539,6 +558,19 @@ export default function EbookReader() {
   useEffect(() => {
     void reloadAnnotations();
   }, [reloadAnnotations]);
+
+  // Lets a mouse hovering near the top/bottom edge bring hidden chrome back
+  // without a click, mirroring desktop reader/video-player conventions.
+  useEffect(() => {
+    if (chromeVisible) return;
+    const onMove = (event: MouseEvent) => {
+      if (event.clientY < 24 || window.innerHeight - event.clientY < 24) {
+        setChromeVisible(true);
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    return () => window.removeEventListener("mousemove", onMove);
+  }, [chromeVisible]);
   if (isLoading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
@@ -600,129 +632,135 @@ export default function EbookReader() {
     );
   }
 
+  const showChrome = chromeVisible || isComicFormat;
+
   return (
     <div className="bg-background flex h-screen flex-col">
-      <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
-        <div className="flex h-14 items-center gap-3 px-4">
-          <Button asChild variant="ghost" size="icon" aria-label="Back">
-            <Link to={backHref}>
-              <ArrowLeft className="size-5" />
-            </Link>
-          </Button>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{item.title}</div>
-            <div className="text-muted-foreground truncate text-xs">{format.toUpperCase()}</div>
-          </div>
-          {nextChapterHref && nextChapter && (
-            <Button
-              asChild
-              variant="ghost"
-              size="sm"
-              className="hidden gap-1 sm:inline-flex"
-              title={`Next: ${nextChapter.label}`}
-            >
-              <Link to={nextChapterHref}>
-                <span className="text-muted-foreground max-w-36 truncate text-xs">
-                  {nextChapter.label}
-                </span>
-                <ChevronRight className="size-4" />
+      {showChrome && (
+        <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
+          <div className="flex h-14 items-center gap-3 px-4">
+            <Button asChild variant="ghost" size="icon" aria-label="Back">
+              <Link to={backHref}>
+                <ArrowLeft className="size-5" />
               </Link>
             </Button>
-          )}
-          {progressLabel && (
-            <div className="text-muted-foreground hidden min-w-12 text-center text-xs tabular-nums sm:block">
-              {progressLabel}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">{item.title}</div>
+              <div className="text-muted-foreground truncate text-xs">{format.toUpperCase()}</div>
             </div>
-          )}
-          {isReaderSupportedFile(selectedFile) && readerFiles.length > 1 && (
-            <select
-              aria-label="Reader file"
-              value={selectedFile.file_id}
-              onChange={(event) => handleFileChange(event.target.value)}
-              className="border-border bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
-            >
-              {readerFiles.map((file) => (
-                <option key={file.file_id} value={file.file_id}>
-                  {readerFileLabel(file)}
-                </option>
-              ))}
-            </select>
-          )}
-          <div className="flex shrink-0 items-center gap-1">
-            {selection && (
+            {nextChapterHref && nextChapter && (
               <Button
-                variant="secondary"
+                asChild
+                variant="ghost"
                 size="sm"
-                aria-label="Highlight selection"
-                title="Highlight selection"
-                onClick={() => void handleCreateHighlight()}
+                className="hidden gap-1 sm:inline-flex"
+                title={`Next: ${nextChapter.label}`}
               >
-                <Highlighter className="size-4" />
-                Highlight
+                <Link to={nextChapterHref}>
+                  <span className="text-muted-foreground max-w-36 truncate text-xs">
+                    {nextChapter.label}
+                  </span>
+                  <ChevronRight className="size-4" />
+                </Link>
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Add bookmark"
-              title="Add bookmark"
-              onClick={() => void handleCreateBookmark()}
-            >
-              <Bookmark className="size-4" />
-            </Button>
-            {!isComicFormat && (
-              <Button
-                variant={readerSettings.readingRuler ? "secondary" : "ghost"}
-                size="icon-sm"
-                aria-label="Toggle reading ruler"
-                title="Reading ruler"
-                onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
-              >
-                <Ruler className="size-4" />
-              </Button>
+            {progressLabel && (
+              <div className="text-muted-foreground hidden min-w-12 text-center text-xs tabular-nums sm:block">
+                {progressLabel}
+              </div>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={panelOpen ? "Close reader panel" : "Open reader panel"}
-              title={panelOpen ? "Close reader panel" : "Open reader panel"}
-              onClick={() => setPanelOpen((open) => !open)}
-            >
-              {panelOpen ? (
-                <PanelRightClose className="size-4" />
-              ) : (
-                <PanelRightOpen className="size-4" />
+            {isReaderSupportedFile(selectedFile) && readerFiles.length > 1 && (
+              <select
+                aria-label="Reader file"
+                value={selectedFile.file_id}
+                onChange={(event) => handleFileChange(event.target.value)}
+                className="border-border bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
+              >
+                {readerFiles.map((file) => (
+                  <option key={file.file_id} value={file.file_id}>
+                    {readerFileLabel(file)}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {selection && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label="Highlight selection"
+                  title="Highlight selection"
+                  onClick={() => void handleCreateHighlight()}
+                >
+                  <Highlighter className="size-4" />
+                  Highlight
+                </Button>
               )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Previous page"
-              title="Previous page"
-              onClick={() => readerRef.current?.prev()}
-            >
-              <ChevronLeft className="size-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Next page"
-              title="Next page"
-              onClick={() => readerRef.current?.next()}
-            >
-              <ChevronRight className="size-5" />
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Add bookmark"
+                title="Add bookmark"
+                onClick={() => void handleCreateBookmark()}
+              >
+                <Bookmark className="size-4" />
+              </Button>
+              {!isComicFormat && (
+                <Button
+                  variant={readerSettings.readingRuler ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  aria-label="Toggle reading ruler"
+                  title="Reading ruler"
+                  onClick={() =>
+                    updateReaderSettings({ readingRuler: !readerSettings.readingRuler })
+                  }
+                >
+                  <Ruler className="size-4" />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={panelOpen ? "Close reader panel" : "Open reader panel"}
+                title={panelOpen ? "Close reader panel" : "Open reader panel"}
+                onClick={() => setPanelOpen((open) => !open)}
+              >
+                {panelOpen ? (
+                  <PanelRightClose className="size-4" />
+                ) : (
+                  <PanelRightOpen className="size-4" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Previous page"
+                title="Previous page"
+                onClick={() => readerRef.current?.prev()}
+              >
+                <ChevronLeft className="size-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Next page"
+                title="Next page"
+                onClick={() => readerRef.current?.next()}
+              >
+                <ChevronRight className="size-5" />
+              </Button>
+            </div>
+            {loadedFile && (
+              <Button asChild variant="outline" size="sm">
+                <a href={loadedFile.objectUrl} download={loadedFile.filename}>
+                  <Download className="size-4" />
+                  File
+                </a>
+              </Button>
+            )}
           </div>
-          {loadedFile && (
-            <Button asChild variant="outline" size="sm">
-              <a href={loadedFile.objectUrl} download={loadedFile.filename}>
-                <Download className="size-4" />
-                File
-              </a>
-            </Button>
-          )}
-        </div>
-      </header>
+        </header>
+      )}
 
       <main
         className={cn(
@@ -731,7 +769,12 @@ export default function EbookReader() {
         )}
       >
         {isReaderSupportedFile(selectedFile) ? (
-          <section ref={readingSurfaceRef} className="relative min-h-0 min-w-0 overflow-hidden">
+          <section
+            ref={readingSurfaceRef}
+            data-reader-surface
+            onPointerUp={handleSurfacePointerUp}
+            className="relative min-h-0 min-w-0 overflow-hidden"
+          >
             <FoliateBookReader
               ref={readerRef}
               contentID={contentId}
@@ -1267,7 +1310,7 @@ export default function EbookReader() {
           </aside>
         )}
       </main>
-      {!isComicFormat && (
+      {!isComicFormat && chromeVisible && (
         <ReaderFooter
           fraction={locationInfo?.fraction ?? readerProgress ?? 0}
           extent={chapterBand}
