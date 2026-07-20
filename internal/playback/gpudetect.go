@@ -308,9 +308,12 @@ func ffmpegSupportsVideoToolbox(ffmpegPath string) (bool, string) {
 }
 
 // probeFFmpegVideoToolbox verifies the configured FFmpeg exposes VideoToolbox
-// decode plus both encoders, then smoke-encodes one frame. No filter probes:
-// the videotoolbox pipeline keeps decoded frames in system memory, so the
-// regular software filter graph applies (see appendHWAccelArgs).
+// decode plus both encoders, then smoke-encodes one frame per encoder in the
+// same constant-quality mode the uncapped transcode path emits (-q:v needs an
+// Apple Silicon compression session; Intel Macs must fail here so auto
+// resolves to software instead of approving commands that cannot run). No
+// filter probes: the videotoolbox pipeline keeps decoded frames in system
+// memory, so the regular software filter graph applies (see appendHWAccelArgs).
 func probeFFmpegVideoToolbox(ffmpegPath string) nvencProbeResult {
 	if output, err := runFFmpegProbe(ffmpegPath, "-hide_banner", "-hwaccels"); err != nil {
 		return nvencProbeResult{reason: "hwaccels probe failed: " + probeFailure(err, output)}
@@ -326,18 +329,27 @@ func probeFFmpegVideoToolbox(ffmpegPath string) nvencProbeResult {
 		return nvencProbeResult{reason: "hevc_videotoolbox encoder unavailable"}
 	}
 
-	if output, err := runFFmpegProbe(ffmpegPath,
-		"-hide_banner",
-		"-loglevel", "error",
-		"-f", "lavfi",
-		"-i", "testsrc2=size=640x360:rate=1",
-		"-frames:v", "1",
-		"-an",
-		"-c:v", "h264_videotoolbox",
-		"-f", "null",
-		"-",
-	); err != nil {
-		return nvencProbeResult{reason: "h264_videotoolbox smoke encode failed: " + probeFailure(err, output)}
+	for _, smoke := range []struct {
+		encoder string
+		quality string
+	}{
+		{"h264_videotoolbox", "65"},
+		{"hevc_videotoolbox", "60"},
+	} {
+		if output, err := runFFmpegProbe(ffmpegPath,
+			"-hide_banner",
+			"-loglevel", "error",
+			"-f", "lavfi",
+			"-i", "testsrc2=size=640x360:rate=1",
+			"-frames:v", "1",
+			"-an",
+			"-c:v", smoke.encoder,
+			"-q:v", smoke.quality,
+			"-f", "null",
+			"-",
+		); err != nil {
+			return nvencProbeResult{reason: smoke.encoder + " smoke encode failed: " + probeFailure(err, output)}
+		}
 	}
 
 	return nvencProbeResult{available: true}

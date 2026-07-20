@@ -556,6 +556,38 @@ func TestResolveHWAccelWithFFmpegDarwinRequiresBothVTEncoders(t *testing.T) {
 	}
 }
 
+func TestResolveHWAccelWithFFmpegDarwinFallsBackToNoneWhenSmokeEncodeFails(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{videotoolbox: true, h264VT: true, hevcVT: true})
+
+	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path); got != "none" {
+		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want none when smoke encode fails", got)
+	}
+}
+
+func TestVideoToolboxProbeSmokesBothEncodersInConstantQualityMode(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
+
+	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path); got != "videotoolbox" {
+		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox", got)
+	}
+	log, err := os.ReadFile(ffmpeg.logPath)
+	if err != nil {
+		t.Fatalf("read probe log: %v", err)
+	}
+	// The smoke encodes must exercise the exact uncapped (-q:v) mode the
+	// transcode arg builder emits — Intel Macs fail that mode at session
+	// creation, so probing without it would approve unrunnable commands.
+	for _, want := range []string{"-c:v h264_videotoolbox -q:v 65", "-c:v hevc_videotoolbox -q:v 60"} {
+		if !strings.Contains(string(log), want) {
+			t.Fatalf("probe log missing %q:\n%s", want, log)
+		}
+	}
+}
+
 func TestExplicitVideoToolboxBypassesFFmpegProbe(t *testing.T) {
 	setupHWAccelTest(t)
 
