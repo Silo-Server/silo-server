@@ -39,20 +39,26 @@ column layouts.
 
 ### Custom fonts (per-user, server-stored)
 
-- Upload .ttf/.otf/.woff/.woff2, max 5 MB per file, max 10 fonts per user.
+- Upload .ttf/.otf/.woff/.woff2, max 5 MB per file, max 10 fonts per
+  profile.
 - New API under the existing ebook reader route group:
   - `GET /api/v1/reader/fonts` — list `{ id, name, filename, created_at }`
   - `POST /api/v1/reader/fonts` — multipart upload; server validates
-    magic bytes (sfnt/woff/woff2 signatures), size, and count caps;
+    magic bytes (sfnt/woff/woff2 signatures), size, and per-profile count caps;
     display name derived from the font's name table when parseable, else
     the filename.
   - `DELETE /api/v1/reader/fonts/{id}`
   - `GET /api/v1/reader/fonts/{id}/file` — serves the blob with immutable
-    cache headers, per-user authorization, and a font content type.
+    cache headers, per-profile authorization (resolved from the session's
+    active profile, like the other reader endpoints), and a font content
+    type.
 - Storage: filesystem under the existing app data dir
-  (`fonts/<user_id>/<id>.<ext>`), metadata in a new `reader_fonts` table
-  (id, user_id, name, filename, format, size, created_at). Per-user scope
-  (account-level, not profile-level — fonts are assets, not preferences).
+  (`fonts/<user_id>/<profile_id>/<id>.<ext>`), metadata in a new
+  `reader_fonts` table (id, user_id, profile_id, name, filename, format,
+  size, created_at). **Per-profile scope**, matching the existing reader
+  state tables (`ebook_reader_config`, `ebook_reader_annotations`,
+  `ebook_reader_progress` are all user+profile scoped) — each household
+  profile manages its own font list. Caps apply per profile.
 - Reader font picker gains an "Uploaded" group; selecting one injects a
   `@font-face` into the foliate content styles pointing at the file URL.
   Books with embedded fonts keep the existing "Book default" behavior.
