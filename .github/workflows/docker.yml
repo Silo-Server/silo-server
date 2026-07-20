@@ -19,7 +19,15 @@ env:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -27,6 +35,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Prepare platform slug and lowercase image name
+        run: |
+          echo "PLATFORM_PAIR=${PLATFORM//\//-}" >> "$GITHUB_ENV"
+          echo "IMAGE_LC=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+        env:
+          PLATFORM: ${{ matrix.platform }}
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -76,9 +91,69 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          name: silo-builder
-          keep-state: true
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-contexts: |
+            frontend_dist=./web/dist
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
+            BUILD_DIRTY=false
+          cache-from: type=gha,scope=docker-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=docker-${{ env.PLATFORM_PAIR }},mode=max
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_LC }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${RUNNER_TEMP}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      packages: write
+
+    steps:
+      - name: Prepare lowercase image name
+        run: echo "IMAGE_LC=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -96,16 +171,14 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=,format=short
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-contexts: |
-            frontend_dist=./web/dist
-          build-args: |
-            BUILD_REVISION=${{ github.sha }}
-            BUILD_DIRTY=false
+      - name: Create and push manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          # shellcheck disable=SC2046
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "${REGISTRY}/${IMAGE_LC}@sha256:%s " *)
+
+      - name: Inspect manifest list
+        run: |
+          docker buildx imagetools inspect "${REGISTRY}/${IMAGE_LC}:${GITHUB_SHA::7}"
