@@ -43,8 +43,9 @@ describe("ReaderFooter", () => {
   });
 
   it("hides band and label without an extent", () => {
-    render({ extent: null, chapterLabel: null });
+    render({ extent: null, chapterLabel: "The Duke" });
     expect(container.querySelector("[data-chapter-band]")).toBeNull();
+    expect(container.textContent).not.toContain("The Duke");
   });
 
   it("scrubs the whole book from the slider", () => {

@@ -45,7 +45,7 @@ export default function ReaderFooter({
           />
         </div>
         <div className="text-muted-foreground flex items-center justify-between text-xs">
-          <span className="min-w-0 truncate">{chapterLabel ?? ""}</span>
+          <span className="min-w-0 truncate">{extent ? (chapterLabel ?? "") : ""}</span>
           <span className="tabular-nums">{percent}%</span>
           <Button
             variant="ghost"
