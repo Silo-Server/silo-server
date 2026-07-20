@@ -183,6 +183,49 @@ func TestReaderFontUploadValidatesMagicBytes(t *testing.T) {
 		t.Fatalf("expected font file on disk at %s: %v", blobPath, err)
 	}
 
+	// Test that real filenames with spaces and special characters are preserved
+	t.Run("preserves real filenames", func(t *testing.T) {
+		testCases := []struct {
+			uploadName string
+			expectName string
+			expectFile string
+		}{
+			{"Literata Bold (2).ttf", "Literata Bold (2)", "Literata Bold (2).ttf"},
+			{"Times New Roman.ttf", "Times New Roman", "Times New Roman.ttf"},
+			{"font-name_v1.2.otf", "font-name_v1.2", "font-name_v1.2.otf"},
+			{"Раш́ски́й.ttf", "Раш́ски́й", "Раш́ски́й.ttf"}, // Cyrillic with combining marks
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.uploadName, func(t *testing.T) {
+				dir := t.TempDir()
+				store := newFakeReaderFontStore()
+				h := &ReaderFontsHandler{Store: store, Dir: dir}
+
+				body := append([]byte("wOF2"), bytes.Repeat([]byte{0x00}, 32)...)
+				req := newReaderFontUploadRequest(t, 1, "profile-a", tc.uploadName, body)
+				rr := httptest.NewRecorder()
+				h.HandleUpload(rr, req)
+
+				if rr.Code != http.StatusCreated {
+					t.Fatalf("status = %d, want 201; body = %s", rr.Code, rr.Body.String())
+				}
+
+				var font ReaderFont
+				if err := json.Unmarshal(rr.Body.Bytes(), &font); err != nil {
+					t.Fatalf("decode response: %v", err)
+				}
+
+				if font.Name != tc.expectName {
+					t.Fatalf("name = %q, want %q", font.Name, tc.expectName)
+				}
+				if font.Filename != tc.expectFile {
+					t.Fatalf("filename = %q, want %q", font.Filename, tc.expectFile)
+				}
+			})
+		}
+	})
+
 	// A body that doesn't match any known font magic bytes must be rejected
 	// with 415 and must leave neither a metadata row nor a file behind.
 	rejectStore := newFakeReaderFontStore()
@@ -441,6 +484,18 @@ func TestReaderFontRejectsTraversalProfileID(t *testing.T) {
 			}
 			if errResp := decodeReaderFontError(t, deleteRR); errResp.Error != "bad_request" {
 				t.Fatalf("delete error code = %q, want bad_request", errResp.Error)
+			}
+
+			// List.
+			listReq := httptest.NewRequest(http.MethodGet, "/ebooks/reader-fonts", nil)
+			listReq = listReq.WithContext(readerFontAuthContext(1, profileID))
+			listRR := httptest.NewRecorder()
+			h.HandleList(listRR, listReq)
+			if listRR.Code != http.StatusBadRequest {
+				t.Fatalf("list status = %d, want 400; body = %s", listRR.Code, listRR.Body.String())
+			}
+			if errResp := decodeReaderFontError(t, listRR); errResp.Error != "bad_request" {
+				t.Fatalf("list error code = %q, want bad_request", errResp.Error)
 			}
 
 			// The store must never have been reached: rejection happens

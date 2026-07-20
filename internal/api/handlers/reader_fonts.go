@@ -114,18 +114,41 @@ func safeReaderFontPathComponent(s string) bool {
 }
 
 // sanitizeReaderFontFilename strips any directory components from a
-// user-supplied upload filename, keeping only the base name. Names that
-// still fail the strict path-component check after that (e.g. "..", or
-// anything containing characters unsafe for a path component) fall back to
-// an empty string so callers apply their default naming.
+// user-supplied upload filename, keeping only the base name. It removes
+// NUL and control characters (0x00-0x1F, 0x7F), trims whitespace, and caps
+// at 255 runes. This is a display-only field; the actual blob is stored
+// content-addressed as <id>.<format> (see readerFontBlobPath). Rejects to
+// an empty string only if the result is empty, ".", or ".." so callers
+// apply their default naming.
 func sanitizeReaderFontFilename(name string) string {
 	name = filepath.Base(strings.TrimSpace(name))
 	if name == "." || name == string(filepath.Separator) {
 		return ""
 	}
-	if !safeReaderFontPathComponent(name) {
+
+	// Remove NUL and control characters (0x00-0x1F, 0x7F) to prevent
+	// filesystem or display issues.
+	var filtered strings.Builder
+	for _, r := range name {
+		if (r >= 0x00 && r <= 0x1F) || r == 0x7F {
+			continue
+		}
+		filtered.WriteRune(r)
+	}
+	name = filtered.String()
+	name = strings.TrimSpace(name)
+
+	// Cap at 255 runes (typical filesystem limit).
+	if len([]rune(name)) > 255 {
+		runes := []rune(name)
+		name = string(runes[:255])
+	}
+
+	// Reject if the result is empty, ".", or ".."
+	if name == "" || name == "." || name == ".." {
 		return ""
 	}
+
 	return name
 }
 
