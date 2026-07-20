@@ -2,11 +2,21 @@ import { CalendarDays, CalendarRange, Clock, Infinity as InfinityIcon } from "lu
 import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router";
 
+import {
+  AchievementsSection,
+  GoalsSection,
+  ReadingDnaSection,
+  StreakChallengeSection,
+} from "@/components/stats/MotivationSections";
 import ReadingHeatmap from "@/components/stats/ReadingHeatmap";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useReadingHistory } from "@/hooks/queries/readingStats";
+import {
+  clientTimezone,
+  useReadingHistory,
+  useReadingMotivation,
+} from "@/hooks/queries/readingStats";
 import { formatDate } from "@/lib/datetime";
 import { formatDuration } from "@/lib/formatDuration";
 
@@ -58,7 +68,9 @@ export default function ReadingStats() {
   useDocumentTitle("Reading stats");
   const to = useMemo(() => todayUTC(), []);
   const from = useMemo(() => subDaysUTC(to, DEFAULT_HISTORY_RANGE_DAYS), [to]);
-  const { data, isLoading, isError } = useReadingHistory(from, to);
+  const tz = useMemo(() => clientTimezone(), []);
+  const { data, isLoading, isError } = useReadingHistory(from, to, tz);
+  const { data: motivation } = useReadingMotivation();
 
   return (
     <div className="space-y-6">
@@ -99,6 +111,11 @@ export default function ReadingStats() {
               icon={<InfinityIcon className="h-4 w-4" />}
             />
           </div>
+
+          <StreakChallengeSection streak={motivation?.streak} challenge={motivation?.challenge} />
+          <GoalsSection goals={motivation?.goals} />
+          <AchievementsSection achievements={motivation?.achievements} />
+          <ReadingDnaSection dna={motivation?.dna} />
 
           <Card className="rounded-2xl border-0 shadow-none">
             <CardHeader>

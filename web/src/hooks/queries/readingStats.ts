@@ -3,6 +3,17 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { ebookKeys } from "./keys";
 
+/**
+ * The viewer's IANA timezone (e.g. "Europe/Amsterdam"), as reported by the
+ * browser. Sent as the `tz` query param on reading-history and
+ * reading-motivation fetches so the server can attribute streaks/totals to
+ * the viewer's local calendar days rather than UTC. Falls back to "UTC" when
+ * the runtime can't resolve one (e.g. some test/SSR environments).
+ */
+export function clientTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC";
+}
+
 // Pace/time-left aren't yet meaningful until enough reading heartbeats have
 // landed for the book, so the server returns null rather than a misleading
 // estimate.
@@ -74,22 +85,121 @@ export interface ReadingHistory {
 // heatmap without the caller having to compute dates itself.
 const READING_HISTORY_STALE_TIME = 5 * 60 * 1000;
 
-function readingHistoryPath(from?: string, to?: string): string {
+function readingHistoryPath(from?: string, to?: string, tz?: string): string {
   const params = new URLSearchParams();
   if (from) params.set("from", from);
   if (to) params.set("to", to);
+  if (tz) params.set("tz", tz);
   const query = params.toString();
   return query ? `/ebooks/reading-stats?${query}` : "/ebooks/reading-stats";
 }
 
-export async function fetchReadingHistory(from?: string, to?: string): Promise<ReadingHistory> {
-  return api<ReadingHistory>(readingHistoryPath(from, to));
+export async function fetchReadingHistory(
+  from?: string,
+  to?: string,
+  tz?: string,
+): Promise<ReadingHistory> {
+  return api<ReadingHistory>(readingHistoryPath(from, to, tz));
 }
 
-export function useReadingHistory(from?: string, to?: string) {
+export function useReadingHistory(from?: string, to?: string, tz?: string) {
   return useQuery({
-    queryKey: ebookKeys.readingHistory(from, to),
-    queryFn: () => fetchReadingHistory(from, to),
+    queryKey: ebookKeys.readingHistory(from, to, tz),
+    queryFn: () => fetchReadingHistory(from, to, tz),
     staleTime: READING_HISTORY_STALE_TIME,
+  });
+}
+
+// --- Reading motivation (streaks, goals, achievements, Reading DNA) ---
+
+export interface ReadingMotivationStreak {
+  current_days: number;
+  longest_days: number;
+  today_seconds: number;
+  today_qualified: boolean;
+}
+
+export interface ReadingMotivationGoals {
+  books_per_year: number | null;
+  hours_per_year: number | null;
+  books_finished_ytd: number;
+  hours_ytd: number;
+  books_on_track_for: number;
+  hours_on_track_for: number;
+}
+
+export interface ReadingMotivationChallenge {
+  target_seconds: number;
+  month_seconds: number;
+  percent: number;
+}
+
+export interface ReadingMotivationAchievement {
+  id: string;
+  category: string;
+  name: string;
+  description: string;
+  achieved_at: string | null;
+}
+
+export interface ReadingMotivationGenre {
+  name: string;
+  seconds: number;
+}
+
+export interface ReadingMotivationAuthor {
+  name: string;
+  seconds: number;
+}
+
+export interface ReadingMotivationDNA {
+  genres: ReadingMotivationGenre[];
+  authors: ReadingMotivationAuthor[];
+  diversity_score: number;
+  avg_session_seconds: number;
+  hours_by_bucket: Record<string, number>;
+  projected_year_hours: number;
+}
+
+export interface ReadingMotivation {
+  streak: ReadingMotivationStreak;
+  goals: ReadingMotivationGoals;
+  challenge: ReadingMotivationChallenge;
+  achievements: ReadingMotivationAchievement[];
+  dna: ReadingMotivationDNA;
+}
+
+const READING_MOTIVATION_STALE_TIME = 5 * 60 * 1000;
+
+function readingMotivationPath(tz: string): string {
+  const params = new URLSearchParams({ tz });
+  return `/ebooks/reading-motivation?${params.toString()}`;
+}
+
+export async function fetchReadingMotivation(tz: string): Promise<ReadingMotivation> {
+  return api<ReadingMotivation>(readingMotivationPath(tz));
+}
+
+export function useReadingMotivation() {
+  const tz = clientTimezone();
+  return useQuery({
+    queryKey: ebookKeys.readingMotivation(),
+    queryFn: () => fetchReadingMotivation(tz),
+    staleTime: READING_MOTIVATION_STALE_TIME,
+  });
+}
+
+export interface ReadingGoalsInput {
+  books_per_year: number | null;
+  hours_per_year: number | null;
+}
+
+// PUT semantics: both fields are always sent, even when only one changed —
+// an absent field would clear the corresponding goal server-side (see
+// HandlePutGoals), so callers must always send the current value of both.
+export async function putReadingGoals(goals: ReadingGoalsInput): Promise<void> {
+  await api<void>("/ebooks/reading-goals", {
+    method: "PUT",
+    body: JSON.stringify(goals),
   });
 }

@@ -2,13 +2,21 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ReadingHistory } from "@/hooks/queries/readingStats";
+import type { ReadingHistory, ReadingMotivation } from "@/hooks/queries/readingStats";
 
 const mockUseReadingHistory = vi.fn();
+const mockUseReadingMotivation = vi.fn();
 
-vi.mock("@/hooks/queries/readingStats", () => ({
-  useReadingHistory: (...args: unknown[]) => mockUseReadingHistory(...args),
-}));
+vi.mock("@/hooks/queries/readingStats", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/queries/readingStats")>(
+    "@/hooks/queries/readingStats",
+  );
+  return {
+    ...actual,
+    useReadingHistory: (...args: unknown[]) => mockUseReadingHistory(...args),
+    useReadingMotivation: (...args: unknown[]) => mockUseReadingMotivation(...args),
+  };
+});
 
 vi.mock("@/hooks/useDocumentTitle", () => ({
   useDocumentTitle: () => undefined,
@@ -31,6 +39,21 @@ vi.mock("@/components/stats/ReadingHeatmap", () => ({
         </span>
       ))}
     </div>
+  ),
+}));
+
+vi.mock("@/components/stats/MotivationSections", () => ({
+  StreakChallengeSection: ({ streak }: { streak: unknown }) => (
+    <div data-kind="streak-challenge-section" data-has-streak={String(streak != null)} />
+  ),
+  GoalsSection: ({ goals }: { goals: unknown }) => (
+    <div data-kind="goals-section" data-has-goals={String(goals != null)} />
+  ),
+  AchievementsSection: ({ achievements }: { achievements: unknown[] | null | undefined }) => (
+    <div data-kind="achievements-section" data-count={String(achievements?.length ?? 0)} />
+  ),
+  ReadingDnaSection: ({ dna }: { dna: unknown }) => (
+    <div data-kind="reading-dna-section" data-has-dna={String(dna != null)} />
   ),
 }));
 
@@ -92,9 +115,41 @@ const fixture: ReadingHistory = {
   ],
 };
 
+const motivationFixture: ReadingMotivation = {
+  streak: { current_days: 5, longest_days: 12, today_seconds: 900, today_qualified: true },
+  goals: {
+    books_per_year: 24,
+    hours_per_year: 100,
+    books_finished_ytd: 6,
+    hours_ytd: 42.5,
+    books_on_track_for: 12,
+    hours_on_track_for: 85,
+  },
+  challenge: { target_seconds: 10000, month_seconds: 4000, percent: 40 },
+  achievements: [
+    {
+      id: "first-hour",
+      category: "time",
+      name: "First Hour",
+      description: "Read for 1 hour total",
+      achieved_at: "2026-01-05T00:00:00Z",
+    },
+  ],
+  dna: {
+    genres: [{ name: "Sci-Fi", seconds: 7200 }],
+    authors: [{ name: "Andy Weir", seconds: 5400 }],
+    diversity_score: 62,
+    avg_session_seconds: 1500,
+    hours_by_bucket: { morning: 2, afternoon: 1, evening: 4, night: 0 },
+    projected_year_hours: 87.3,
+  },
+};
+
 describe("ReadingStats page", () => {
   beforeEach(() => {
     mockUseReadingHistory.mockReset();
+    mockUseReadingMotivation.mockReset();
+    mockUseReadingMotivation.mockReturnValue({ data: undefined, isLoading: false, isError: false });
   });
 
   it("shows a loading state while the history query is in flight", () => {
@@ -157,11 +212,55 @@ describe("ReadingStats page", () => {
       // Mirrors the server default in HandleHistory: to = today at UTC
       // midnight, from = to minus 365 days. Passed explicitly (rather than
       // omitted) so the same range can be handed to the heatmap for
-      // densifying gap days.
-      expect(mockUseReadingHistory).toHaveBeenCalledWith("2025-07-20", "2026-07-20");
+      // densifying gap days. The third arg is the viewer's IANA timezone.
+      const [callFrom, callTo] = mockUseReadingHistory.mock.calls[0] ?? [];
+      expect(callFrom).toBe("2025-07-20");
+      expect(callTo).toBe("2026-07-20");
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("appends the viewer's timezone as the tz argument on the history fetch", () => {
+    const mockedZone = "Europe/Amsterdam";
+    const resolvedOptionsSpy = vi
+      .spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions")
+      .mockReturnValue({ timeZone: mockedZone } as Intl.ResolvedDateTimeFormatOptions);
+    try {
+      mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
+      renderPage();
+      expect(mockUseReadingHistory).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(String),
+        mockedZone,
+      );
+    } finally {
+      resolvedOptionsSpy.mockRestore();
+    }
+  });
+
+  it("renders the motivation sections wired from the mocked useReadingMotivation hook", () => {
+    mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
+    mockUseReadingMotivation.mockReturnValue({
+      data: motivationFixture,
+      isLoading: false,
+      isError: false,
+    });
+    const markup = renderPage();
+    expect(markup).toContain('data-kind="streak-challenge-section" data-has-streak="true"');
+    expect(markup).toContain('data-kind="goals-section" data-has-goals="true"');
+    expect(markup).toContain('data-kind="achievements-section" data-count="1"');
+    expect(markup).toContain('data-kind="reading-dna-section" data-has-dna="true"');
+  });
+
+  it("passes null-tolerant undefined slices to the motivation sections before motivation data loads", () => {
+    mockUseReadingHistory.mockReturnValue({ data: fixture, isLoading: false, isError: false });
+    mockUseReadingMotivation.mockReturnValue({ data: undefined, isLoading: true, isError: false });
+    const markup = renderPage();
+    expect(markup).toContain('data-kind="streak-challenge-section" data-has-streak="false"');
+    expect(markup).toContain('data-kind="goals-section" data-has-goals="false"');
+    expect(markup).toContain('data-kind="achievements-section" data-count="0"');
+    expect(markup).toContain('data-kind="reading-dna-section" data-has-dna="false"');
   });
 
   it("passes the same range to the heatmap that it requests from the history hook", () => {

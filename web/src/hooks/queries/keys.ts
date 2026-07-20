@@ -192,8 +192,9 @@ export const episodeKeys = {
 export const ebookKeys = {
   readerProgress: (contentId: string | undefined) => ["ebook-reader-progress", contentId] as const,
   readingStats: (contentId: string | undefined) => ["reading-stats", contentId] as const,
-  readingHistory: (from?: string, to?: string) =>
-    ["reading-history", from ?? "default", to ?? "default"] as const,
+  readingHistory: (from?: string, to?: string, tz?: string) =>
+    ["reading-history", from ?? "default", to ?? "default", tz ?? "default"] as const,
+  readingMotivation: () => ["reading-motivation"] as const,
 };
 
 export const libraryKeys = {
