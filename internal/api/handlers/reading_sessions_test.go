@@ -235,6 +235,8 @@ func TestReadingHeartbeatValidatesFraction(t *testing.T) {
 		{"above one", []byte(`{"fraction":1.5}`)},
 		{"NaN literal is invalid JSON", []byte(`{"fraction":NaN}`)},
 		{"missing body", nil},
+		{"empty object (missing fraction key)", []byte(`{}`)},
+		{"other field only", []byte(`{"other":1}`)},
 	}
 
 	for _, tc := range cases {
@@ -251,6 +253,54 @@ func TestReadingHeartbeatValidatesFraction(t *testing.T) {
 				t.Fatalf("expected store untouched, got %d sessions", len(store.sessions))
 			}
 		})
+	}
+}
+
+func TestReadingHeartbeatAcceptsExplicitZeroFraction(t *testing.T) {
+	store := &fakeReadingSessionStore{}
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	h := &ReadingSessionsHandler{Store: store, Now: func() time.Time { return now }}
+
+	rr := postHeartbeat(t, h, 1, "profile-a", "book-1", []byte(`{"fraction":0}`))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+	if len(store.sessions) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(store.sessions))
+	}
+	s := store.latestOpen(1, "profile-a", "book-1")
+	if s == nil {
+		t.Fatal("expected a session")
+	}
+	if s.StartFraction != 0.0 || s.EndFraction != 0.0 {
+		t.Fatalf("fractions = %v/%v, want 0/0", s.StartFraction, s.EndFraction)
+	}
+}
+
+func TestReadingHeartbeatExtendsAtExactSessionGap(t *testing.T) {
+	store := &fakeReadingSessionStore{}
+	t0 := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	now := t0
+	h := &ReadingSessionsHandler{Store: store, Now: func() time.Time { return now }}
+
+	rr := postHeartbeat(t, h, 1, "profile-a", "book-1", []byte(`{"fraction":0.10}`))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+	firstID := store.latestOpen(1, "profile-a", "book-1").ID
+
+	// Exactly 120s later: should still extend the existing session (>= check).
+	now = t0.Add(120 * time.Second)
+	rr = postHeartbeat(t, h, 1, "profile-a", "book-1", []byte(`{"fraction":0.20}`))
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body = %s", rr.Code, rr.Body.String())
+	}
+	if len(store.sessions) != 1 {
+		t.Fatalf("sessions = %d, want 1 (should extend, not create new)", len(store.sessions))
+	}
+	s := store.latestOpen(1, "profile-a", "book-1")
+	if s.ID != firstID {
+		t.Fatalf("session id = %d, want extended session %d", s.ID, firstID)
 	}
 }
 

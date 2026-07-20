@@ -61,7 +61,7 @@ type ReadingSessionsHandler struct {
 }
 
 type readingHeartbeatRequest struct {
-	Fraction float64 `json:"fraction"`
+	Fraction *float64 `json:"fraction"`
 }
 
 // HandleHeartbeat records a reading heartbeat for the active profile,
@@ -92,7 +92,11 @@ func (h *ReadingSessionsHandler) HandleHeartbeat(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "invalid_fraction", "Invalid heartbeat body")
 		return
 	}
-	if math.IsNaN(req.Fraction) || math.IsInf(req.Fraction, 0) || req.Fraction < 0 || req.Fraction > 1 {
+	if req.Fraction == nil {
+		writeError(w, http.StatusBadRequest, "invalid_fraction", "fraction is required")
+		return
+	}
+	if math.IsNaN(*req.Fraction) || math.IsInf(*req.Fraction, 0) || *req.Fraction < 0 || *req.Fraction > 1 {
 		writeError(w, http.StatusBadRequest, "invalid_fraction", "fraction must be a finite number between 0 and 1")
 		return
 	}
@@ -114,7 +118,7 @@ func (h *ReadingSessionsHandler) HandleHeartbeat(w http.ResponseWriter, r *http.
 		if credit < 0 {
 			credit = 0
 		}
-		if err := h.Store.Extend(ctx, open.ID, now, int(credit.Seconds()), req.Fraction); err != nil {
+		if err := h.Store.Extend(ctx, open.ID, now, int(credit.Seconds()), *req.Fraction); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to update reading session")
 			return
 		}
@@ -126,8 +130,8 @@ func (h *ReadingSessionsHandler) HandleHeartbeat(w http.ResponseWriter, r *http.
 			StartedAt:       now,
 			LastHeartbeatAt: now,
 			DurationSeconds: 0,
-			StartFraction:   req.Fraction,
-			EndFraction:     req.Fraction,
+			StartFraction:   *req.Fraction,
+			EndFraction:     *req.Fraction,
 		}
 		if err := h.Store.Insert(ctx, session); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to start reading session")
