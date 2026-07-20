@@ -80,6 +80,7 @@ export default function PlaybackSettings() {
               { value: "qsv", label: "Intel Quick Sync (QSV)" },
               { value: "vaapi", label: "VA-API" },
               { value: "nvenc", label: "NVIDIA NVENC" },
+              { value: "videotoolbox", label: "VideoToolbox (macOS)" },
               { value: "none", label: "Software" },
             ]}
             value={form.getValue("playback.hw_accel")}

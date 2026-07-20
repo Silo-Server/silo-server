@@ -1298,3 +1298,93 @@ func TestAppendAudioArgsBoostsOnlyEncodedSurroundToStereo(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildFFmpegArgs_VideoToolboxH264UsesSoftwareFilters(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:         "/media/movie.mkv",
+		OutputDir:         "/tmp/out",
+		SessionID:         "session-vt",
+		SourceVideoCodec:  "h264",
+		TargetCodecVideo:  "h264",
+		TargetCodecAudio:  "aac",
+		SegmentDuration:   2,
+		HWAccel:           "videotoolbox",
+		TargetResolution:  "720p",
+		TargetBitrateKbps: 2000,
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-hwaccel videotoolbox") {
+		t.Fatalf("videotoolbox args should enable videotoolbox hwaccel: %s", joined)
+	}
+	if strings.Contains(joined, "-hwaccel_output_format") {
+		t.Fatalf("videotoolbox decode must output software frames: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_videotoolbox") {
+		t.Fatalf("videotoolbox args should use h264_videotoolbox encoder: %s", joined)
+	}
+	if !strings.Contains(joined, "-pix_fmt yuv420p") {
+		t.Fatalf("videotoolbox h264 should force 8-bit output: %s", joined)
+	}
+	if !strings.Contains(joined, "-vf scale=-2:720") {
+		t.Fatalf("videotoolbox args should use the software scale filter: %s", joined)
+	}
+	if !strings.Contains(joined, "-b:v 2000k -maxrate 2000k -bufsize 4000k") {
+		t.Fatalf("videotoolbox args should include bitrate cap controls: %s", joined)
+	}
+	if !strings.Contains(joined, "-g 60 -keyint_min 60") {
+		t.Fatalf("videotoolbox args should force GOP on segment boundaries: %s", joined)
+	}
+	if strings.Contains(joined, "-preset") {
+		t.Fatalf("videotoolbox encoder does not take x264-style presets: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_VideoToolboxHEVCKeepsSourceBitDepth(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:        "/media/movie.mkv",
+		OutputDir:        "/tmp/out",
+		SessionID:        "session-vt-hevc",
+		SourceVideoCodec: "hevc",
+		TargetCodecVideo: "hevc",
+		TargetCodecAudio: "copy",
+		SegmentDuration:  2,
+		HWAccel:          "videotoolbox",
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-c:v hevc_videotoolbox") {
+		t.Fatalf("videotoolbox args should use hevc_videotoolbox encoder: %s", joined)
+	}
+	if strings.Contains(joined, "-pix_fmt") {
+		t.Fatalf("videotoolbox hevc must not force a pixel format (HDR10 passthrough): %s", joined)
+	}
+	if !strings.Contains(joined, "-q:v 60") {
+		t.Fatalf("uncapped videotoolbox hevc should use constant-quality mode: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_VideoToolboxTextBurnInStaysOnCPUFilters(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-vt-sub",
+		SourceVideoCodec:   "h264",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "videotoolbox",
+		TargetResolution:   "720p",
+		SubtitleBurnIn:     true,
+		SubtitleTrackIndex: 0,
+		SubtitleCodec:      "subrip",
+	})
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "subtitles=") {
+		t.Fatalf("text burn-in should use the subtitles filter: %s", joined)
+	}
+	if strings.Contains(joined, "hwdownload") || strings.Contains(joined, "hwupload") {
+		t.Fatalf("videotoolbox burn-in runs on software frames, no hw round-trip: %s", joined)
+	}
+}

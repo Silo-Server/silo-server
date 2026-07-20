@@ -18,14 +18,17 @@ type hwAccelTestEnv struct {
 }
 
 type fakeFFmpegProbe struct {
-	cuda       bool
-	h264NVENC  bool
-	hevcNVENC  bool
-	scaleCUDA  bool
-	uploadCUDA bool
-	smokeOK    bool
-	hang       bool
-	delay      time.Duration
+	cuda         bool
+	h264NVENC    bool
+	hevcNVENC    bool
+	scaleCUDA    bool
+	uploadCUDA   bool
+	videotoolbox bool
+	h264VT       bool
+	hevcVT       bool
+	smokeOK      bool
+	hang         bool
+	delay        time.Duration
 }
 
 type fakeFFmpegBinary struct {
@@ -469,6 +472,9 @@ func writeFakeFFmpeg(t *testing.T, probe fakeFFmpegProbe) fakeFFmpegBinary {
 	if probe.cuda {
 		script += "    echo 'cuda'\n"
 	}
+	if probe.videotoolbox {
+		script += "    echo 'videotoolbox'\n"
+	}
 	script += "    exit 0 ;;\n"
 	script += "  *-encoders*)\n"
 	if probe.h264NVENC {
@@ -476,6 +482,12 @@ func writeFakeFFmpeg(t *testing.T, probe fakeFFmpegProbe) fakeFFmpegBinary {
 	}
 	if probe.hevcNVENC {
 		script += "    echo ' V..... hevc_nvenc NVIDIA NVENC hevc encoder'\n"
+	}
+	if probe.h264VT {
+		script += "    echo ' V..... h264_videotoolbox VideoToolbox H.264 encoder'\n"
+	}
+	if probe.hevcVT {
+		script += "    echo ' V..... hevc_videotoolbox VideoToolbox hevc encoder'\n"
 	}
 	script += "    exit 0 ;;\n"
 	script += "  *-filters*)\n"
@@ -503,6 +515,51 @@ func writeFakeFFmpeg(t *testing.T, probe fakeFFmpegProbe) fakeFFmpegBinary {
 
 func resetNVENCProbeCacheForTest() {
 	nvencProbeCache.Lock()
-	defer nvencProbeCache.Unlock()
 	nvencProbeCache.byPath = make(map[string]nvencProbeCacheEntry)
+	nvencProbeCache.Unlock()
+	videoToolboxProbeCache.Lock()
+	videoToolboxProbeCache.byPath = make(map[string]nvencProbeResult)
+	videoToolboxProbeCache.Unlock()
+}
+
+func successfulVideoToolboxProbe() fakeFFmpegProbe {
+	return fakeFFmpegProbe{videotoolbox: true, h264VT: true, hevcVT: true, smokeOK: true}
+}
+
+func TestResolveHWAccelWithFFmpegDarwinUsesVideoToolbox(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
+
+	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path); got != "videotoolbox" {
+		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox", got)
+	}
+}
+
+func TestResolveHWAccelWithFFmpegDarwinFallsBackToNoneWhenProbeFails(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{})
+
+	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path); got != "none" {
+		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want none", got)
+	}
+}
+
+func TestResolveHWAccelWithFFmpegDarwinRequiresBothVTEncoders(t *testing.T) {
+	setupHWAccelTest(t)
+	currentGOOS = "darwin"
+	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{videotoolbox: true, h264VT: true, smokeOK: true})
+
+	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path); got != "none" {
+		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want none when hevc_videotoolbox is missing", got)
+	}
+}
+
+func TestExplicitVideoToolboxBypassesFFmpegProbe(t *testing.T) {
+	setupHWAccelTest(t)
+
+	if got := ResolveHWAccelWithFFmpeg("videotoolbox", "/does/not/exist/ffmpeg"); got != "videotoolbox" {
+		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox", got)
+	}
 }

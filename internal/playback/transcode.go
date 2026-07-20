@@ -138,11 +138,12 @@ func VideoSampleEntryForDVCopy(dvProfile int) string {
 }
 
 const (
-	transcodeCodecH264 = "h264"
-	HWAccelNone        = "none"
-	transcodeHWQSV     = "qsv"
-	transcodeHWVAAPI   = "vaapi"
-	transcodeHWNVENC   = "nvenc"
+	transcodeCodecH264      = "h264"
+	HWAccelNone             = "none"
+	transcodeHWQSV          = "qsv"
+	transcodeHWVAAPI        = "vaapi"
+	transcodeHWNVENC        = "nvenc"
+	transcodeHWVideoToolbox = "videotoolbox"
 )
 
 // TranscodeSession manages a running ffmpeg HLS transcode process.
@@ -834,12 +835,13 @@ func appendSegmentBoundaryArgs(args []string, opts TranscodeOpts) []string {
 			fmt.Sprintf("expr:gte(t,n_forced*%d)", opts.SegmentDuration))
 	}
 
-	// Hardware encoders (QSV, VAAPI, NVENC) may not reliably honor
-	// force_key_frames expressions. Set explicit GOP size so segment
+	// Hardware encoders (QSV, VAAPI, NVENC, VideoToolbox) may not reliably
+	// honor force_key_frames expressions. Set explicit GOP size so segment
 	// boundaries always start with an intra frame. We assume 30 fps as a
 	// safe ceiling — the GOP will be at most segmentDuration * 30 frames.
 	// Matches Jellyfin's approach for hardware encoders.
-	if opts.HWAccel == transcodeHWQSV || opts.HWAccel == transcodeHWVAAPI || opts.HWAccel == transcodeHWNVENC {
+	if opts.HWAccel == transcodeHWQSV || opts.HWAccel == transcodeHWVAAPI ||
+		opts.HWAccel == transcodeHWNVENC || opts.HWAccel == transcodeHWVideoToolbox {
 		gopSize := fmt.Sprintf("%d", opts.SegmentDuration*30)
 		args = append(args, "-g", gopSize, "-keyint_min", gopSize)
 	}
@@ -899,6 +901,12 @@ func appendHWAccelArgs(args []string, opts TranscodeOpts) []string {
 		if hwDevice := strings.TrimSpace(opts.HWDevice); hwDevice != "" {
 			args = append(args, "-hwaccel_device", hwDevice)
 		}
+	case transcodeHWVideoToolbox:
+		// No -hwaccel_output_format: decoded frames land in system memory,
+		// so the software filter graph (scale, subtitle burn-in, tone paths)
+		// applies unchanged and the *_videotoolbox encoders upload
+		// internally. HW decode + HW encode carries nearly all of the win.
+		args = append(args, "-hwaccel", "videotoolbox")
 	}
 	return args
 }
@@ -987,6 +995,32 @@ func appendVideoArgs(args []string, opts TranscodeOpts) []string {
 				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
 		} else {
 			args = append(args, "-cq:v", "28", "-b:v", "0")
+		}
+	case opts.HWAccel == transcodeHWVideoToolbox && codec == transcodeCodecH264:
+		// 8-bit output for browser MSE compatibility (mirrors the libx264
+		// path); VideoToolbox has no 10-bit H.264 encode.
+		args = append(args, "-c:v", "h264_videotoolbox",
+			"-pix_fmt", "yuv420p", "-profile:v", "high")
+		if hasBitrateCap {
+			args = append(args,
+				"-b:v", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		} else {
+			// Constant-quality mode (1-100 scale, hardware-rate-controlled).
+			args = append(args, "-q:v", "65")
+		}
+	case opts.HWAccel == transcodeHWVideoToolbox && codec == "hevc":
+		// pix_fmt is left to the input: 10-bit sources encode as p010
+		// (HDR10 passthrough), matching the other hardware HEVC paths.
+		args = append(args, "-c:v", "hevc_videotoolbox")
+		if hasBitrateCap {
+			args = append(args,
+				"-b:v", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-maxrate", fmt.Sprintf("%dk", opts.TargetBitrateKbps),
+				"-bufsize", fmt.Sprintf("%dk", opts.TargetBitrateKbps*2))
+		} else {
+			args = append(args, "-q:v", "60")
 		}
 	default:
 		// CPU fallback — match Jellyfin's proven browser-compatible settings.

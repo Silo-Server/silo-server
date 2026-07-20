@@ -342,6 +342,7 @@ export function ServerStorageStep() {
                 <SelectItem value="auto">Auto</SelectItem>
                 <SelectItem value="vaapi">VAAPI</SelectItem>
                 <SelectItem value="nvenc">NVENC</SelectItem>
+                <SelectItem value="videotoolbox">VideoToolbox (macOS)</SelectItem>
                 <SelectItem value="qsv">QSV</SelectItem>
                 <SelectItem value="none">None</SelectItem>
               </SelectContent>
