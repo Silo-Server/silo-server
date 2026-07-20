@@ -156,6 +156,15 @@ func (h *frontendHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A missing /assets/ file is a content-hashed chunk from another build,
+	// not an app route: answering with the shell makes dynamic imports fail
+	// on a text/html module. A 404 surfaces the real condition so the client
+	// preload-error handler can reload onto the current build.
+	if strings.HasPrefix(path, "/assets/") {
+		http.NotFound(w, r)
+		return
+	}
+
 	// SPA fallback: serve the (branded) index.html shell.
 	shell, ok := h.brandedShell(r)
 	if !ok {

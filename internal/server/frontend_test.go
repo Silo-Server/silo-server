@@ -79,6 +79,31 @@ func TestFrontendHandlerServesStaticAssetsWithoutCSP(t *testing.T) {
 	}
 }
 
+func TestFrontendHandlerReturns404ForMissingAssets(t *testing.T) {
+	handler := newFrontendTestHandler(t)
+
+	// A content-hashed chunk from a previous build no longer exists after a
+	// deploy. Serving the SPA shell at a .js URL makes the browser fail with
+	// "Failed to fetch dynamically imported module"; a 404 lets clients (and
+	// the preload-error reload handler) see the real condition.
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/assets/view-OldHash.js", nil))
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("missing asset status = %d, want 404", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); strings.Contains(ct, "text/html") {
+		t.Fatalf("missing asset served as HTML (%q), the SPA fallback must not swallow /assets/", ct)
+	}
+
+	// Non-asset app routes still get the shell.
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/library/ebooks", nil))
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("SPA route = %d %q, want 200 HTML", rr.Code, rr.Header().Get("Content-Type"))
+	}
+}
+
 func newFrontendTestHandler(t *testing.T) http.Handler {
 	t.Helper()
 	prev := WebDistFS
