@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   fetchEbookReaderAnnotations: vi.fn(),
   createEbookReaderAnnotation: vi.fn(),
   deleteEbookReaderAnnotation: vi.fn(),
+  lastOnLocationChange: undefined as
+    | ((info: { fraction: number; sectionIndex: number | null; tocLabel: string | null }) => void)
+    | undefined,
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -61,6 +64,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         clearSelection: () => void;
         createSelectionAnnotation: () => { cfi: string; selectedText: string } | null;
         getReadableText: () => string;
+        getSectionFractions: () => number[];
       },
       {
         file: FileVersion;
@@ -69,6 +73,11 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         onProgressChange?: (progress: number | null) => void;
         onFileLoaded?: (state: { objectUrl: string; filename: string } | null) => void;
         onSelectionChange?: (selection: { cfi: string; selectedText: string } | null) => void;
+        onLocationChange?: (info: {
+          fraction: number;
+          sectionIndex: number | null;
+          tocLabel: string | null;
+        }) => void;
         onReady?: (state: {
           toc: Array<{
             id: number;
@@ -80,10 +89,21 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         }) => void;
       }
     >(function MockFoliateBookReader(
-      { file, settings, onProgressChange, onFileLoaded, onSelectionChange, onReady },
+      {
+        file,
+        settings,
+        onProgressChange,
+        onFileLoaded,
+        onSelectionChange,
+        onLocationChange,
+        onReady,
+      },
       ref,
     ) {
       mocks.captureReaderSettings(settings);
+      useEffect(() => {
+        mocks.lastOnLocationChange = onLocationChange;
+      }, [onLocationChange]);
       useImperativeHandle(ref, () => ({
         prev: mocks.readerPrev,
         next: mocks.readerNext,
@@ -97,6 +117,7 @@ vi.mock("@/reader/FoliateBookReader", async () => {
           selectedText: "sample text",
         }),
         getReadableText: () => "Readable text for speech",
+        getSectionFractions: () => [0, 0.25, 0.6, 1],
       }));
       useEffect(() => {
         onFileLoaded?.({ objectUrl: "blob:ebook", filename: "Reader.epub" });
@@ -797,6 +818,29 @@ describe("EbookReader", () => {
     expect(main?.className).toContain("overflow-hidden");
     expect(readerPane?.className).toContain("min-w-0");
     expect(sidePanel?.className).toContain("min-w-0");
+  });
+
+  it("renders the chapter-aware footer instead of a header slider", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Chapter 2" });
+    });
+
+    const header = container.querySelector("header")!;
+    expect(header.querySelector('input[type="range"]')).toBeNull();
+    const footer = container.querySelector("footer")!;
+    expect(footer.textContent).toContain("Chapter 2");
+    expect(footer.textContent).toContain("30%");
+    expect(footer.querySelector("[data-chapter-band]")).not.toBeNull();
   });
 
   it("scrubs reader progress and supports keyboard page navigation", async () => {

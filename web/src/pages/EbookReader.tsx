@@ -10,7 +10,6 @@ import {
 import {
   ArrowLeft,
   Bookmark,
-  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -56,6 +55,7 @@ import FoliateBookReader, {
   readerFileFormat,
   type FoliateBookReaderHandle,
   type ReaderLoadState,
+  type ReaderLocationInfo,
   type ReaderSearchResult,
   type ReaderSelection,
   type ReaderSettings,
@@ -69,6 +69,8 @@ import {
   saveEbookReaderConfigKeepalive,
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
+import { chapterExtent } from "@/reader/readerNavigation";
+import ReaderFooter from "@/reader/ReaderFooter";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
@@ -257,6 +259,8 @@ export default function EbookReader() {
   );
   const [annotations, setAnnotations] = useState<EbookReaderAnnotation[]>([]);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
+  const [locationInfo, setLocationInfo] = useState<ReaderLocationInfo | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsVoiceURI, setTtsVoiceURI] = useState("");
@@ -278,6 +282,11 @@ export default function EbookReader() {
   const [searching, setSearching] = useState(false);
   const progressLabel = formatReaderProgress(readerProgress);
   const tocEntries = useMemo(() => flattenToc(toc), [toc]);
+  const chapterBand = useMemo(() => {
+    if (!locationInfo || isComicFormat) return null;
+    const fractions = readerRef.current?.getSectionFractions() ?? [];
+    return chapterExtent(fractions, locationInfo.fraction);
+  }, [locationInfo, isComicFormat]);
   const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
     setLoadedFile(state);
   }, []);
@@ -352,8 +361,8 @@ export default function EbookReader() {
       setSearching(false);
     }
   }, [searchText]);
-  const handleProgressScrub = useCallback((value: string) => {
-    const next = Math.min(1, Math.max(0, Number(value) / 100));
+  const handleProgressScrub = useCallback((fraction: number) => {
+    const next = Math.min(1, Math.max(0, fraction));
     if (!Number.isFinite(next)) return;
     setReaderProgress(next);
     void readerRef.current?.goToFraction(next);
@@ -713,22 +722,6 @@ export default function EbookReader() {
             </Button>
           )}
         </div>
-        <div className="border-border/60 flex h-10 items-center gap-3 border-t px-4">
-          <BookOpen className="text-muted-foreground size-4 shrink-0" />
-          <input
-            aria-label="Reading progress"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={Math.round((readerProgress ?? 0) * 100)}
-            onChange={(event) => handleProgressScrub(event.target.value)}
-            className="accent-primary h-2 min-w-0 flex-1"
-          />
-          <div className="text-muted-foreground w-11 text-right text-xs tabular-nums">
-            {progressLabel ?? "0%"}
-          </div>
-        </div>
       </header>
 
       <main
@@ -750,6 +743,7 @@ export default function EbookReader() {
               onProgressChange={handleProgressChange}
               onReady={handleReaderReady}
               onSelectionChange={setSelection}
+              onLocationChange={setLocationInfo}
             />
             {readerSettings.readingRuler && (
               <div
@@ -1273,6 +1267,15 @@ export default function EbookReader() {
           </aside>
         )}
       </main>
+      {!isComicFormat && (
+        <ReaderFooter
+          fraction={locationInfo?.fraction ?? readerProgress ?? 0}
+          extent={chapterBand}
+          chapterLabel={locationInfo?.tocLabel ?? null}
+          onScrub={handleProgressScrub}
+          onShowShortcuts={() => setShortcutsOpen(true)}
+        />
+      )}
       {showEndOfBookNext && nextChapter && nextChapterHref && (
         <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
           <Button
