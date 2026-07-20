@@ -32,10 +32,10 @@ type fakeReadingSessionStore struct {
 
 	paceWindowFn     func(contentID string, since time.Time) (float64, int, error)
 	bookSecondsFn    func(contentID string) (int, error)
-	dailyRollupFn    func(from, to time.Time) ([]DayTotal, error)
+	dailyRollupFn    func(from, to time.Time, loc *time.Location) ([]DayTotal, error)
 	bookTotalsFn     func() ([]BookTotal, error)
 	recentSessionsFn func(limit int) ([]SessionRow, error)
-	totalsSinceFn    func(since time.Time) (int, error)
+	totalsSinceFn    func(since time.Time, loc *time.Location) (int, error)
 }
 
 func (f *fakeReadingSessionStore) PaceWindow(_ context.Context, _ int, _, contentID string, since time.Time) (float64, int, error) {
@@ -52,11 +52,11 @@ func (f *fakeReadingSessionStore) BookSeconds(_ context.Context, _ int, _, conte
 	return f.bookSecondsFn(contentID)
 }
 
-func (f *fakeReadingSessionStore) DailyRollup(_ context.Context, _ int, _ string, from, to time.Time) ([]DayTotal, error) {
+func (f *fakeReadingSessionStore) DailyRollup(_ context.Context, _ int, _ string, from, to time.Time, loc *time.Location) ([]DayTotal, error) {
 	if f.dailyRollupFn == nil {
 		return nil, nil
 	}
-	return f.dailyRollupFn(from, to)
+	return f.dailyRollupFn(from, to, loc)
 }
 
 func (f *fakeReadingSessionStore) BookTotals(_ context.Context, _ int, _ string) ([]BookTotal, error) {
@@ -73,11 +73,11 @@ func (f *fakeReadingSessionStore) RecentSessions(_ context.Context, _ int, _ str
 	return f.recentSessionsFn(limit)
 }
 
-func (f *fakeReadingSessionStore) TotalsSince(_ context.Context, _ int, _ string, since time.Time) (int, error) {
+func (f *fakeReadingSessionStore) TotalsSince(_ context.Context, _ int, _ string, since time.Time, loc *time.Location) (int, error) {
 	if f.totalsSinceFn == nil {
 		return 0, nil
 	}
-	return f.totalsSinceFn(since)
+	return f.totalsSinceFn(since, loc)
 }
 
 // fakeReadingProgressGetter is a settable fake for readingProgressGetter.
@@ -569,7 +569,7 @@ func TestReadingStatsHistoryHandler(t *testing.T) {
 	var capturedLimit int
 	newStore := func() *fakeReadingSessionStore {
 		return &fakeReadingSessionStore{
-			totalsSinceFn: func(since time.Time) (int, error) {
+			totalsSinceFn: func(since time.Time, _ *time.Location) (int, error) {
 				switch {
 				case since.Equal(today):
 					return 100, nil
@@ -583,7 +583,7 @@ func TestReadingStatsHistoryHandler(t *testing.T) {
 					return 0, fmt.Errorf("unexpected TotalsSince(since=%v)", since)
 				}
 			},
-			dailyRollupFn: func(from, to time.Time) ([]DayTotal, error) {
+			dailyRollupFn: func(from, to time.Time, _ *time.Location) ([]DayTotal, error) {
 				capturedFrom, capturedTo = from, to
 				return []DayTotal{
 					{Date: today.AddDate(0, 0, -1), Seconds: 200},

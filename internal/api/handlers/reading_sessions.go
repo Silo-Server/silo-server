@@ -85,17 +85,20 @@ type ReadingSessionStore interface {
 	PaceWindow(ctx context.Context, userID int, profileID, contentID string, since time.Time) (fractions float64, seconds int, err error)
 	// BookSeconds is the all-time total reading duration for one book.
 	BookSeconds(ctx context.Context, userID int, profileID, contentID string) (int, error)
-	// DailyRollup groups duration by UTC calendar day over [from, to]
+	// DailyRollup groups duration by calendar day (in loc) over [from, to]
 	// (inclusive of both endpoint days).
-	DailyRollup(ctx context.Context, userID int, profileID string, from, to time.Time) ([]DayTotal, error)
+	DailyRollup(ctx context.Context, userID int, profileID string, from, to time.Time, loc *time.Location) ([]DayTotal, error)
 	// BookTotals returns all-time per-book totals, newest-read first.
 	BookTotals(ctx context.Context, userID int, profileID string) ([]BookTotal, error)
 	// RecentSessions returns the most recent sessions, newest-first,
 	// capped at limit.
 	RecentSessions(ctx context.Context, userID int, profileID string, limit int) ([]SessionRow, error)
 	// TotalsSince sums duration for sessions started at or after since. A
-	// zero since returns the all-time total.
-	TotalsSince(ctx context.Context, userID int, profileID string, since time.Time) (int, error)
+	// zero since returns the all-time total. loc is accepted for interface
+	// symmetry with DailyRollup; since is already an absolute instant (the
+	// caller computes it from the requester's local day boundary), so it
+	// does not affect the SQL comparison.
+	TotalsSince(ctx context.Context, userID int, profileID string, since time.Time, loc *time.Location) (int, error)
 }
 
 // readingProgressGetter is the minimal progress lookup the per-book
@@ -396,13 +399,14 @@ func (h *ReadingSessionsHandler) HandleHistory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	loc := requestLocation(r)
 	now := h.Now()
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 
 	q := r.URL.Query()
 	to := today
 	if v := q.Get("to"); v != "" {
-		parsed, err := time.Parse("2006-01-02", v)
+		parsed, err := time.ParseInLocation("2006-01-02", v, loc)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "to must be a valid date (YYYY-MM-DD)")
 			return
@@ -411,7 +415,7 @@ func (h *ReadingSessionsHandler) HandleHistory(w http.ResponseWriter, r *http.Re
 	}
 	from := to.AddDate(0, 0, -defaultHistoryRangeDays)
 	if v := q.Get("from"); v != "" {
-		parsed, err := time.Parse("2006-01-02", v)
+		parsed, err := time.ParseInLocation("2006-01-02", v, loc)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "bad_request", "from must be a valid date (YYYY-MM-DD)")
 			return
@@ -424,28 +428,28 @@ func (h *ReadingSessionsHandler) HandleHistory(w http.ResponseWriter, r *http.Re
 
 	ctx := r.Context()
 
-	todaySeconds, err := h.Store.TotalsSince(ctx, userID, profileID, today)
+	todaySeconds, err := h.Store.TotalsSince(ctx, userID, profileID, today, loc)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load reading totals")
 		return
 	}
-	weekSeconds, err := h.Store.TotalsSince(ctx, userID, profileID, today.AddDate(0, 0, -6))
+	weekSeconds, err := h.Store.TotalsSince(ctx, userID, profileID, today.AddDate(0, 0, -6), loc)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load reading totals")
 		return
 	}
-	monthSeconds, err := h.Store.TotalsSince(ctx, userID, profileID, today.AddDate(0, 0, -29))
+	monthSeconds, err := h.Store.TotalsSince(ctx, userID, profileID, today.AddDate(0, 0, -29), loc)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load reading totals")
 		return
 	}
-	allTimeSeconds, err := h.Store.TotalsSince(ctx, userID, profileID, time.Time{})
+	allTimeSeconds, err := h.Store.TotalsSince(ctx, userID, profileID, time.Time{}, loc)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load reading totals")
 		return
 	}
 
-	days, err := h.Store.DailyRollup(ctx, userID, profileID, from, to)
+	days, err := h.Store.DailyRollup(ctx, userID, profileID, from, to, loc)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load daily reading rollup")
 		return
@@ -618,23 +622,23 @@ func (s *PGReadingSessionStore) BookSeconds(ctx context.Context, userID int, pro
 	return seconds, nil
 }
 
-func (s *PGReadingSessionStore) DailyRollup(ctx context.Context, userID int, profileID string, from, to time.Time) ([]DayTotal, error) {
+func (s *PGReadingSessionStore) DailyRollup(ctx context.Context, userID int, profileID string, from, to time.Time, loc *time.Location) ([]DayTotal, error) {
 	if s == nil || s.pool == nil {
 		return nil, fmt.Errorf("reading session store is not configured")
 	}
-	// Bucketing is pinned to UTC via "AT TIME ZONE 'UTC'" rather than a bare
-	// date_trunc('day', started_at): date_trunc on a timestamptz truncates in
-	// the DB session's timezone, which this pool never sets, so the bucket
-	// boundary would otherwise depend on server/connection config instead of
-	// being deterministic. Day bucketing is intentionally UTC for now; a
-	// follow-up may add requester-timezone support.
+	// Bucketing is pinned to an explicit zone via "AT TIME ZONE $5" rather
+	// than a bare date_trunc('day', started_at): date_trunc on a timestamptz
+	// truncates in the DB session's timezone, which this pool never sets, so
+	// the bucket boundary would otherwise depend on server/connection config
+	// instead of being deterministic. The zone name comes from the
+	// requester's tz param (loc), defaulting to "UTC".
 	rows, err := s.pool.Query(ctx, `
-		SELECT date_trunc('day', started_at AT TIME ZONE 'UTC')::date AS day, SUM(duration_seconds)
+		SELECT date_trunc('day', started_at AT TIME ZONE $5)::date AS day, SUM(duration_seconds)
 		FROM reading_sessions
 		WHERE user_id = $1 AND profile_id = $2 AND started_at >= $3 AND started_at < $4
 		GROUP BY 1
 		ORDER BY 1`,
-		userID, profileID, from, to.AddDate(0, 0, 1),
+		userID, profileID, from, to.AddDate(0, 0, 1), loc.String(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("daily rollup: %w", err)
@@ -719,7 +723,7 @@ func (s *PGReadingSessionStore) RecentSessions(ctx context.Context, userID int, 
 	return out, nil
 }
 
-func (s *PGReadingSessionStore) TotalsSince(ctx context.Context, userID int, profileID string, since time.Time) (int, error) {
+func (s *PGReadingSessionStore) TotalsSince(ctx context.Context, userID int, profileID string, since time.Time, _ *time.Location) (int, error) {
 	if s == nil || s.pool == nil {
 		return 0, fmt.Errorf("reading session store is not configured")
 	}

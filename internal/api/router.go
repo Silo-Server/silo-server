@@ -520,6 +520,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
 	var readerFontsHandler *handlers.ReaderFontsHandler
 	var readingSessionsHandler *handlers.ReadingSessionsHandler
+	var readingMotivationHandler *handlers.ReadingMotivationHandler
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
@@ -534,6 +535,10 @@ func NewRouter(deps Dependencies) chi.Router {
 			Store:    handlers.NewPGReadingSessionStore(deps.DB),
 			Now:      func() time.Time { return time.Now().UTC() },
 			Progress: handlers.EbookProgressAdapter{Store: ebookProgressStore},
+		}
+		readingMotivationHandler = &handlers.ReadingMotivationHandler{
+			Store: handlers.NewPGReadingMotivationStore(deps.DB),
+			Now:   func() time.Time { return time.Now().UTC() },
 		}
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
@@ -2233,7 +2238,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				if ebookReaderHandler != nil || readerFontsHandler != nil || readingSessionsHandler != nil {
+				if ebookReaderHandler != nil || readerFontsHandler != nil || readingSessionsHandler != nil || readingMotivationHandler != nil {
 					r.Route("/ebooks", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
 
@@ -2262,6 +2267,10 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Post("/{content_id}/reading-heartbeat", readingSessionsHandler.HandleHeartbeat)
 							r.Get("/reading-stats", readingSessionsHandler.HandleHistory)
 							r.Get("/{content_id}/reading-stats", readingSessionsHandler.HandleBookStats)
+						}
+
+						if readingMotivationHandler != nil {
+							r.Put("/reading-goals", readingMotivationHandler.HandlePutGoals)
 						}
 					})
 				}
