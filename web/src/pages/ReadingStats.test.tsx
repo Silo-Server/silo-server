@@ -127,6 +127,10 @@ describe("ReadingStats page", () => {
     expect(markup).toContain("30m");
     expect(markup).toContain("10%");
     expect(markup).toContain("25%");
+    // session 2 (removed book): shows title but suppresses item link
+    expect(markup).toContain("Removed book");
+    const bookTwoLinks = (markup.match(/\/item\/book-2/g) ?? []).length;
+    expect(bookTwoLinks).toBe(0);
   });
 
   it("renders one heatmap cell per fixture day", () => {
