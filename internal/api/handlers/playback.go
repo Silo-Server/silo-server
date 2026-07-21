@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -674,6 +675,39 @@ func streamCardFromToken(tokenStr, sessionID, secret string) *playback.RecipeCar
 	}
 	card := playback.RecipeCardFromClaims(claims)
 	return &card
+}
+
+// NewStreamTokenAuthenticator builds the ?st= fallback authenticator for the
+// Cast-reachable stream delivery routes, wired into apimw.RequireStreamAuth.
+// It verifies the request's ?st= token against the {session_id} path parameter
+// using the given signing secret and, on success, authenticates the request as
+// the token's user for streaming that one session. It returns ok=false when the
+// token is absent, invalid/expired, or bound to a different session than the
+// path (streamCardFromToken enforces the session-id match) — the middleware
+// then falls through to 401.
+//
+// The synthesized claims carry only the streaming identity: the card's UserID,
+// its SessionID, and TokenTypeAccess. No role is set, so a ?st= token can never
+// confer admin or any privilege beyond streaming the encoded session. The
+// card's ProfileID is returned separately so the middleware can seed profile
+// context for logging/scope.
+func NewStreamTokenAuthenticator(secret string) apimw.StreamTokenAuthenticator {
+	return func(r *http.Request) (*auth.Claims, string, bool) {
+		sessionID := chi.URLParam(r, "session_id")
+		if sessionID == "" {
+			return nil, "", false
+		}
+		card := streamCardFromToken(r.URL.Query().Get(streamTokenParam), sessionID, secret)
+		if card == nil {
+			return nil, "", false
+		}
+		claims := &auth.Claims{
+			UserID:    card.UserID,
+			SessionID: card.SessionID,
+			TokenType: auth.TokenTypeAccess,
+		}
+		return claims, card.ProfileID, true
+	}
 }
 
 // appendStreamToken adds the ?st=<token> parameter to a native serve URL.
@@ -3534,6 +3568,9 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 // HandleStartTranscode.
 func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	// HLS manifests are Cast-reachable: the Default Media Receiver fetches the
+	// adaptive manifest directly and requires CORS to read it cross-origin.
+	setStreamDeliveryCORS(w)
 	session, status, card := h.loadTranscodeServeSession(r, sessionID)
 	switch status {
 	case playback.SessionMissing:
@@ -3589,6 +3626,9 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 // Auth is optional — the session UUID serves as an access token.
 func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	// HLS segments are Cast-reachable: the Default Media Receiver fetches each
+	// segment directly (with Range) and requires CORS to read them cross-origin.
+	setStreamDeliveryCORS(w)
 	session, status, card := h.loadTranscodeServeSession(r, sessionID)
 	switch status {
 	case playback.SessionMissing:

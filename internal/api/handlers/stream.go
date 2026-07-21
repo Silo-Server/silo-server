@@ -25,6 +25,23 @@ type FilePathResolver interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 }
 
+// setStreamDeliveryCORS sets the CORS headers a Cast receiver (the Default
+// Media Receiver) needs to fetch adaptive HLS and progressive streams. The
+// receiver runs on a Google-hosted origin, so it must be allowed to read the
+// manifest/segment/stream bytes cross-origin, to send a Range header, and to
+// read back the Content-Length/Content-Range for adaptive seeking.
+//
+// This does not widen who may fetch a session's bytes: these delivery routes
+// are still gated by session-scoped auth (a bearer/?token= JWT, or a valid
+// per-session ?st= stream token). The wildcard only removes the browser's
+// same-origin *read* restriction on responses that were already authorized.
+func setStreamDeliveryCORS(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Origin", "*")
+	h.Set("Access-Control-Allow-Headers", "Range")
+	h.Set("Access-Control-Expose-Headers", "Content-Length, Content-Range")
+}
+
 // StreamHandler handles HTTP endpoints for streaming media content.
 type StreamHandler struct {
 	sessionMgr    SessionManagerInterface
@@ -92,6 +109,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setPlaybackSessionLogContext(r, sessionID)
+
+	// Progressive direct-play/remux streams are Cast-reachable: the receiver
+	// fetches this URL directly, so it needs the delivery CORS headers.
+	setStreamDeliveryCORS(w)
 
 	// Look up the session, reconstructing it from the recipe card on a not-found
 	// miss (e.g. after a server restart) so a direct/remux stream resumes instead

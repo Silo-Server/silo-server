@@ -1832,6 +1832,92 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Cast-reachable media delivery routes. These are pulled out of the
+		// blanket RequireAuth group below so the HLS manifest/segment,
+		// progressive stream, and stream-subtitle routes can additionally
+		// authenticate via a per-session ?st= stream token: a Chromecast
+		// fetches the stream URL directly and cannot refresh a short-lived
+		// access JWT mid-movie. A bearer/?token= JWT still takes full
+		// precedence (validated exactly as RequireAuth); the ?st= card only
+		// authorizes streaming the one session it encodes. The non-delivery
+		// /playback routes (capability, control socket, mutations) keep the
+		// standard RequireAuth path.
+		if authMiddleware != nil && (playbackHandler != nil || streamHandler != nil) {
+			// applyStreamGuards mirrors the ambient guards the main authed
+			// group applies after auth (demo guard, rate limit, viewer
+			// access). demoGuard is a no-op for the GET/HEAD delivery routes
+			// but is kept for parity with the standard chain.
+			applyStreamGuards := func(r chi.Router) {
+				if demoGuard != nil {
+					r.Use(demoGuard.Guard)
+				}
+				if deps.RateLimitMW != nil {
+					r.Use(deps.RateLimitMW.Handler)
+				}
+				if viewerAccessMiddleware != nil {
+					r.Use(viewerAccessMiddleware.RequireViewerAccess)
+				}
+			}
+
+			r.Group(func(r chi.Router) {
+				if playbackHandler != nil {
+					playbackHandler.ItemAccess = itemRepo
+					playbackHandler.EpisodeLookup = episodeRepo
+					playbackHandler.ExtraLookup = extraRepo
+					playbackHandler.OriginalLangLookup = itemRepo
+					playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
+
+					r.Route("/playback", func(r chi.Router) {
+						// HLS transcode delivery — bearer/?token= JWT OR the
+						// scoped ?st= stream token. The session ID (UUID) plus
+						// the signed ?st= card serve as the access grant.
+						r.Group(func(r chi.Router) {
+							r.Use(authMiddleware.RequireStreamAuth(handlers.NewStreamTokenAuthenticator(playbackHandler.JWTSecret)))
+							applyStreamGuards(r)
+							r.Get("/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest)
+							r.Get("/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment)
+						})
+
+						// Non-delivery playback routes keep blanket auth: a
+						// ?st= card must never reach the control socket or a
+						// mutation route.
+						r.Group(func(r chi.Router) {
+							r.Use(authMiddleware.RequireAuth)
+							applyStreamGuards(r)
+							r.Get("/capability", playbackHandler.HandlePlaybackCapabilityV3)
+							// Playback realtime control socket — needs auth but not profile.
+							r.Get("/sessions/{session_id}/control/ws", playbackHandler.HandleSessionWebSocket)
+
+							// All mutation routes require profile auth.
+							r.Group(func(r chi.Router) {
+								r.Use(apimw.RequireProfile)
+								r.Post("/start", playbackHandler.HandleStartPlayback)
+								r.Post("/{session_id}/replan", playbackHandler.HandleReplanPlaybackV3)
+								r.Post("/route-events", playbackHandler.HandlePlaybackRouteEventV3)
+								r.Post("/{session_id}/progress", playbackHandler.HandleUpdateProgress)
+								r.Patch("/{session_id}/audio", playbackHandler.HandleChangeAudioTrack)
+								r.Delete("/{session_id}", playbackHandler.HandleStopPlayback)
+								r.Post("/transcode/start", playbackHandler.HandleStartTranscode)
+							})
+						})
+					})
+				}
+
+				// Stream delivery routes — bearer/?token= JWT OR the scoped
+				// ?st= stream token (same access model as HLS delivery).
+				if streamHandler != nil {
+					r.Group(func(r chi.Router) {
+						r.Use(authMiddleware.RequireStreamAuth(handlers.NewStreamTokenAuthenticator(streamHandler.JWTSecret)))
+						applyStreamGuards(r)
+						r.Get("/stream/{session_id}", streamHandler.HandleStream)
+						r.Head("/stream/{session_id}", streamHandler.HandleStream)
+						r.Get("/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)
+						r.Get("/stream/{session_id}/subtitles/{track}/fonts", streamHandler.HandleSubtitleFonts)
+					})
+				}
+			})
+		}
+
 		// All remaining routes require auth.
 		if authMiddleware != nil {
 			r.Group(func(r chi.Router) {
@@ -2349,38 +2435,9 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				// Playback routes.
-				if playbackHandler != nil {
-					playbackHandler.ItemAccess = itemRepo
-					playbackHandler.EpisodeLookup = episodeRepo
-					playbackHandler.ExtraLookup = extraRepo
-					playbackHandler.OriginalLangLookup = itemRepo
-					playbackHandler.FFmpegLogSink = deps.FFmpegLogSink
-
-					r.Route("/playback", func(r chi.Router) {
-						r.Get("/capability", playbackHandler.HandlePlaybackCapabilityV3)
-						// HLS transcode delivery — no profile auth needed;
-						// session ID (UUID) serves as the access token, same
-						// pattern as /stream/{session_id}.
-						r.Get("/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest)
-						r.Get("/transcode/{session_id}/segment/{name}", playbackHandler.HandleGetTranscodeSegment)
-
-						// Playback realtime control socket — needs auth but not profile.
-						r.Get("/sessions/{session_id}/control/ws", playbackHandler.HandleSessionWebSocket)
-
-						// All mutation routes require profile auth.
-						r.Group(func(r chi.Router) {
-							r.Use(apimw.RequireProfile)
-							r.Post("/start", playbackHandler.HandleStartPlayback)
-							r.Post("/{session_id}/replan", playbackHandler.HandleReplanPlaybackV3)
-							r.Post("/route-events", playbackHandler.HandlePlaybackRouteEventV3)
-							r.Post("/{session_id}/progress", playbackHandler.HandleUpdateProgress)
-							r.Patch("/{session_id}/audio", playbackHandler.HandleChangeAudioTrack)
-							r.Delete("/{session_id}", playbackHandler.HandleStopPlayback)
-							r.Post("/transcode/start", playbackHandler.HandleStartTranscode)
-						})
-					})
-				}
+				// Playback + stream delivery routes are registered above in the
+				// cast-reachable group (they accept a scoped ?st= token in
+				// addition to a bearer/?token= JWT). See RequireStreamAuth.
 
 				if watchTogetherHandler != nil {
 					r.Route("/watch-together", func(r chi.Router) {
@@ -2403,13 +2460,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				// Stream routes.
-				if streamHandler != nil {
-					r.Get("/stream/{session_id}", streamHandler.HandleStream)
-					r.Head("/stream/{session_id}", streamHandler.HandleStream)
-					r.Get("/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)
-					r.Get("/stream/{session_id}/subtitles/{track}/fonts", streamHandler.HandleSubtitleFonts)
-				}
+				// Stream routes are registered in the cast-reachable group above.
 
 				// Download routes.
 				if policyHandler != nil {
