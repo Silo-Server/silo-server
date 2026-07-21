@@ -98,9 +98,8 @@ type Service struct {
 	ffmpegPath       string
 	hwAccel          string
 	hwDevice         string
-	hwResolveOnce    sync.Once
-	resolvedHWAccel  string
-	resolvedHWDevice string
+	hwResolveOnce   sync.Once
+	resolvedHWAccel string
 
 	notifyNormal        chan struct{}
 	notifyPriority      chan struct{}
@@ -653,12 +652,10 @@ func (s *Service) extractFrameLocal(ctx context.Context, inputPath string, seekS
 func (s *Service) resolveHWConfig() (string, string) {
 	s.hwResolveOnce.Do(func() {
 		s.resolvedHWAccel = playback.ResolveHWAccelWithFFmpeg(s.hwAccel, s.ffmpegPath)
-		s.resolvedHWDevice = s.hwDevice
-		if s.resolvedHWDevice == "" && (s.resolvedHWAccel == "qsv" || s.resolvedHWAccel == "vaapi") {
-			s.resolvedHWDevice = playback.PickRenderDevice("")
-		}
 	})
-	return s.resolvedHWAccel, s.resolvedHWDevice
+	// The configured device value passes through raw: ExtractFrame resolves it
+	// (multi-device balancing, empty-value auto-detection) per extraction.
+	return s.resolvedHWAccel, s.hwDevice
 }
 
 func (s *Service) chapterThumbnailExecutionMode(ctx context.Context) string {

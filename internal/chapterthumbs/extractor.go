@@ -33,7 +33,10 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 	}
 
 	resolvedAccel := playback.ResolveHWAccelWithFFmpeg(opts.HWAccel, ffmpegPath)
-	resolvedDevice := opts.HWDevice
+	// Resolve a multi-device hw_device list to one concrete GPU for this
+	// extraction; the reservation spans only the hardware attempt below.
+	resolvedDevice, releaseHWDevice := playback.AcquireHWDevice(opts.HWDevice, resolvedAccel)
+	defer releaseHWDevice()
 	if resolvedDevice == "" && (resolvedAccel == "qsv" || resolvedAccel == "vaapi") {
 		resolvedDevice = playback.PickRenderDevice("")
 	}
@@ -48,6 +51,7 @@ func ExtractFrame(ctx context.Context, opts FrameExtractOptions) ([]byte, string
 			attemptCtx, cancel := context.WithTimeout(ctx, extractTimeoutForAttempt(true, opts.ToneMap))
 			data, err := runExtract(attemptCtx, ffmpegPath, args)
 			cancel()
+			releaseHWDevice()
 			if err == nil {
 				return data, "", nil
 			}
