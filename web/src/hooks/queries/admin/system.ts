@@ -15,6 +15,15 @@ export interface RenderDeviceInfo {
   description: string;
 }
 
+export interface NodeHWAccel {
+  node_url: string;
+  node_name?: string;
+  resolved?: string;
+  render_devices?: string[];
+  render_device_details?: RenderDeviceInfo[];
+  error?: string;
+}
+
 export interface HWAccelInfo {
   resolved: string;
   render_devices: string[];
@@ -22,6 +31,8 @@ export interface HWAccelInfo {
   intel_detected: boolean;
   source: "local" | "transcode_node";
   node_url?: string;
+  /** Per-node inventories when transcode nodes are registered. */
+  nodes?: NodeHWAccel[];
 }
 
 export function useBuildInfo() {

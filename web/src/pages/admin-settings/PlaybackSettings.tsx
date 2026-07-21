@@ -6,7 +6,12 @@ import { Switch } from "@/components/ui/switch";
 import { SettingField } from "./SettingField";
 import { SaveBar } from "./SaveBar";
 import { FieldGroup } from "./FieldGroup";
-import { parseHWDeviceList, toggleHWDevice } from "./playbackSettings.utils";
+import {
+  buildHWDeviceRows,
+  nodeInventoriesDiverge,
+  parseHWDeviceList,
+  toggleHWDevice,
+} from "./playbackSettings.utils";
 
 const KEYS = [
   "playback.ffmpeg_path",
@@ -30,9 +35,16 @@ export default function PlaybackSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const hwAccel = form.getValue("playback.hw_accel");
   const hwDetection = useHWAccelDetection(hwAccel !== "none");
-  const renderDevices = hwDetection.data?.render_device_details ?? [];
-  const selectedDevices = parseHWDeviceList(form.getValue("playback.hw_device"));
-  const detectedPaths = renderDevices.map((device) => device.path);
+  const hwDevice = form.getValue("playback.hw_device");
+  const selectedDevices = parseHWDeviceList(hwDevice);
+  const deviceRows = buildHWDeviceRows(hwDetection.data, hwDevice);
+  const detectedPaths = deviceRows.filter((row) => row.detected).map((row) => row.path);
+  // Balancing is QSV/VAAPI-only: NVENC addresses GPUs by CUDA index/UUID, so
+  // the multi-select picker is hidden for it (the server uses the first
+  // configured entry).
+  const isNvenc =
+    hwAccel === "nvenc" || (hwAccel === "auto" && hwDetection.data?.resolved === "nvenc");
+  const inventoriesDiverge = nodeInventoriesDiverge(hwDetection.data);
 
   if (form.isLoading) return <div>Loading...</div>;
 
@@ -87,7 +99,13 @@ export default function PlaybackSettings() {
           {form.getValue("playback.hw_accel") === "auto" && hwDetection.isLoading && (
             <p className="text-muted-foreground -mt-1 text-xs">Detecting hardware...</p>
           )}
-          {hwAccel !== "none" && renderDevices.length > 0 && (
+          {hwAccel !== "none" && isNvenc && selectedDevices.length > 1 && (
+            <p className="-mt-1 text-xs text-amber-500">
+              Multi-GPU balancing supports QSV/VA-API only; with NVENC the server uses the first
+              configured device ({selectedDevices[0]}).
+            </p>
+          )}
+          {hwAccel !== "none" && !isNvenc && deviceRows.length > 0 && (
             <div className="flex flex-col gap-2 py-3">
               <div className="space-y-0.5">
                 <Label className="text-sm font-medium">GPU Devices</Label>
@@ -97,46 +115,47 @@ export default function PlaybackSettings() {
                     : selectedDevices.length === 1
                       ? "All transcodes run on the selected device."
                       : "Transcode sessions balance across the selected devices (least loaded first)."}
-                  {hwDetection.data?.source === "transcode_node" && " Devices reported by a transcode node."}
+                  {hwDetection.data?.source === "transcode_node" &&
+                    " Devices reported by a transcode node."}
                 </p>
+                {inventoriesDiverge && (
+                  <p className="text-xs text-amber-500">
+                    This setting applies to every transcode node, but the nodes report different
+                    devices. Only paths present on all nodes are safe to select.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
-                {renderDevices.map((device) => (
-                  <div key={device.path} className="flex items-center justify-between gap-3">
+                {deviceRows.map((row) => (
+                  <div key={row.path} className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm">{device.description}</p>
-                      <p className="text-muted-foreground truncate font-mono text-xs">{device.path}</p>
+                      <p
+                        className={`truncate text-sm ${row.detected ? "" : "text-muted-foreground"}`}
+                      >
+                        {row.description}
+                      </p>
+                      <p className="text-muted-foreground truncate font-mono text-xs">{row.path}</p>
+                      {row.missingOnNodes.length > 0 && (
+                        <p className="truncate text-xs text-amber-500">
+                          Not present on: {row.missingOnNodes.join(", ")}
+                        </p>
+                      )}
                     </div>
                     <Switch
-                      checked={selectedDevices.includes(device.path)}
+                      checked={selectedDevices.includes(row.path)}
                       onCheckedChange={() =>
                         form.setValue(
                           "playback.hw_device",
-                          toggleHWDevice(form.getValue("playback.hw_device"), device.path, detectedPaths),
+                          toggleHWDevice(
+                            form.getValue("playback.hw_device"),
+                            row.path,
+                            detectedPaths,
+                          ),
                         )
                       }
                     />
                   </div>
                 ))}
-                {selectedDevices
-                  .filter((path) => !detectedPaths.includes(path))
-                  .map((path) => (
-                    <div key={path} className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm">Configured device not detected</p>
-                        <p className="text-muted-foreground truncate font-mono text-xs">{path}</p>
-                      </div>
-                      <Switch
-                        checked
-                        onCheckedChange={() =>
-                          form.setValue(
-                            "playback.hw_device",
-                            toggleHWDevice(form.getValue("playback.hw_device"), path, detectedPaths),
-                          )
-                        }
-                      />
-                    </div>
-                  ))}
               </div>
             </div>
           )}
