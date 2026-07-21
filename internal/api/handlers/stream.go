@@ -97,6 +97,12 @@ func NewStreamHandler(sessionMgr SessionManagerInterface, fileResolver FilePathR
 // For remux: starts an ffmpeg remux and streams the output.
 // For transcode: returns 400 (transcode uses manifest/segment endpoints).
 func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
+	// Progressive direct-play/remux streams are Cast-reachable: the receiver
+	// fetches this URL directly, so it needs the delivery CORS headers. Set
+	// before any early return so error responses are readable cross-origin
+	// too (an opaque CORS failure hides the actual status from the receiver).
+	setStreamDeliveryCORS(w)
+
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -109,10 +115,6 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setPlaybackSessionLogContext(r, sessionID)
-
-	// Progressive direct-play/remux streams are Cast-reachable: the receiver
-	// fetches this URL directly, so it needs the delivery CORS headers.
-	setStreamDeliveryCORS(w)
 
 	// Look up the session, reconstructing it from the recipe card on a not-found
 	// miss (e.g. after a server restart) so a direct/remux stream resumes instead

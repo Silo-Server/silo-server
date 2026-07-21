@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // stubTokenValidator returns preconfigured claims/err for any token string.
@@ -183,5 +184,59 @@ func TestRequireAuth_RejectsStreamTokenOnly(t *testing.T) {
 	}
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+// stubUserLoader returns a fixed user (or error) for any id.
+type stubUserLoader struct {
+	user *models.User
+	err  error
+}
+
+func (s stubUserLoader) GetByID(context.Context, int) (*models.User, error) {
+	return s.user, s.err
+}
+
+func TestRequireStreamAuth_DisabledUserStreamTokenReturns401(t *testing.T) {
+	// A signed ?st= URL outlives login state (24h TTL); once the account is
+	// disabled the token must stop streaming even though its signature and
+	// session binding are still valid.
+	am := NewAuthMiddleware(
+		stubTokenValidator{err: errors.New("no bearer")},
+		stubSessionValidator{},
+		nil,
+		stubUserLoader{user: &models.User{ID: 42, Enabled: false}},
+	)
+	probe := &probeHandler{}
+	h := am.RequireStreamAuth(allowStreamToken(42, "profile-7"))(probe)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/sess-1?st=tok", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if probe.ran {
+		t.Fatal("handler ran; disabled user's ?st= must 401")
+	}
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestRequireStreamAuth_EnabledUserStreamTokenStillAuthenticates(t *testing.T) {
+	am := NewAuthMiddleware(
+		stubTokenValidator{err: errors.New("no bearer")},
+		stubSessionValidator{},
+		nil,
+		stubUserLoader{user: &models.User{ID: 42, Enabled: true}},
+	)
+	probe := &probeHandler{}
+	h := am.RequireStreamAuth(allowStreamToken(42, "profile-7"))(probe)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/sess-1?st=tok", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+
+	if !probe.ran || probe.userID != 42 {
+		t.Fatalf("enabled user must pass; ran=%v status=%d", probe.ran, rr.Code)
 	}
 }

@@ -182,6 +182,18 @@ func (am *AuthMiddleware) RequireStreamAuth(streamAuth StreamTokenAuthenticator)
 
 			if streamAuth != nil {
 				if claims, profileID, ok := streamAuth(r); ok && claims != nil {
+					// A signed ?st= URL outlives login state (its TTL is the
+					// only time bound), so disabling an account must also kill
+					// its outstanding stream URLs. Same per-request user check
+					// the API-key path performs; the loader is nil only in
+					// deployments without user storage (then TTL still bounds).
+					if am.apiKeyUserLoader != nil {
+						user, err := am.apiKeyUserLoader.GetByID(r.Context(), claims.UserID)
+						if err != nil || user == nil || !user.Enabled {
+							writeUnauthorized(w, "User account is disabled")
+							return
+						}
+					}
 					if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 						uid := claims.UserID
 						lc.UserID = &uid
