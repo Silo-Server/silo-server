@@ -396,6 +396,12 @@ type startPlaybackRequest struct {
 	HdrDetails                   *hdrDetails                   `json:"hdr_details,omitempty"`
 	AudioPassthrough             *audioPassthroughCapabilities `json:"audio_passthrough,omitempty"`
 	SupportsBitmapSubtitleBurnIn bool                          `json:"supports_bitmap_subtitle_burn_in,omitempty"`
+	// SeekableStreamsOnly is set by clients that hand the stream URL to a
+	// device that can only seek via HTTP Range on a real file or an HLS VOD
+	// manifest (e.g. a Cast receiver). The progressive remux pipe is the one
+	// route seekable by neither, so a resolved remux is upgraded to a
+	// transcode session when transcoding is available.
+	SeekableStreamsOnly bool `json:"seekable_streams_only,omitempty"`
 }
 
 // progressRequest represents the JSON body for POST /playback/{session_id}/progress.
@@ -1841,6 +1847,16 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		audioTrackIndex,
 		preserveDirectAudioSelection,
 	)
+	// The remux pipe streams chunked from a live ffmpeg process — no
+	// Content-Length, no Range — so a seekable-streams-only client gets a
+	// transcode session instead (its HLS manifest seeks anywhere). An explicit
+	// remux request keeps precedence, and disabled transcoding keeps the
+	// best-effort remux rather than refusing playback.
+	if req.SeekableStreamsOnly && method == playback.PlayRemux &&
+		!strings.EqualFold(req.PlayMethod, string(playback.PlayRemux)) &&
+		h.playbackConfig().TranscodeEnabled {
+		method = playback.PlayTranscode
+	}
 	if requestedFile != nil && effectiveFile != nil && requestedFile.ID != effectiveFile.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
 			slog.WarnContext(r.Context(), "requested playback file preflight failed; continuing with alternate file", "component", "api",
