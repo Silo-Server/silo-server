@@ -198,6 +198,12 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 // a playback session and serves it as WebVTT or raw ASS depending on the
 // URL extension (e.g. /subtitles/2.ass or /subtitles/2.vtt).
 func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
+	// Subtitle tracks are Cast-reachable: the Default Media Receiver fetches
+	// declared text tracks cross-origin. Set on every branch up front — the
+	// embedded streaming path sets its own ACAO, but external/downloaded
+	// tracks (ServeSubtitle) and error responses would otherwise omit it and
+	// CC silently fails on the receiver.
+	setStreamDeliveryCORS(w)
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")

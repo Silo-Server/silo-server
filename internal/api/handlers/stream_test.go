@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -170,6 +171,49 @@ func TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500(t *testing.T) {
 	}
 	if body.Error != "internal_error" {
 		t.Fatalf("error code = %q, want %q (body = %s)", body.Error, "internal_error", rr.Body.String())
+	}
+}
+
+// A Cast receiver fetches subtitle tracks cross-origin from the Google-hosted
+// receiver page. The embedded-track streaming path already sends CORS, but
+// external/downloaded tracks go through ServeSubtitle — without the delivery
+// CORS headers the receiver's fetch fails and CC silently never renders.
+func TestHandleSubtitle_ExternalTrackSendsDeliveryCORS(t *testing.T) {
+	subPath := filepath.Join(t.TempDir(), "movie.en.vtt")
+	if err := os.WriteFile(subPath, []byte("WEBVTT\n\n00:00.000 --> 00:02.000\nhi\n"), 0o644); err != nil {
+		t.Fatalf("write subtitle: %v", err)
+	}
+	file := &models.MediaFile{
+		ID:        42,
+		ContentID: "movie-1",
+		FilePath:  "/tmp/movie.mkv",
+		Duration:  3600,
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Path: subPath, Language: "en", Format: "vtt"},
+		},
+	}
+	baseMgr := playback.NewSessionManager(0, 0)
+	session, err := baseMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	handler := NewStreamHandler(baseMgr, testPlaybackFileResolver{file: file})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/"+session.ID+"/subtitles/0.vtt", nil)
+	req = req.WithContext(newAuthorizedPlaybackContext())
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("session_id", session.ID)
+	routeCtx.URLParams.Add("track", "0.vtt")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+
+	rr := httptest.NewRecorder()
+	handler.HandleSubtitle(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, "*")
 	}
 }
 
