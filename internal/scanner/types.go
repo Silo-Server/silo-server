@@ -70,6 +70,7 @@ type VideoTrackInfo struct {
 	ColorPrimaries     string
 	ColorSpace         string
 	ColorTransfer      string
+	ColorRange         string
 	BitDepth           int
 	PixelFormat        string
 	ReferenceFrames    int

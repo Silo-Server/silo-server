@@ -2583,6 +2583,7 @@ func toVideoTrackRecords(tracks []models.VideoTrack) []VideoTrackRecord {
 			ColorPrimaries:  track.ColorPrimaries,
 			ColorSpace:      track.ColorSpace,
 			ColorTransfer:   track.ColorTransfer,
+			ColorRange:      track.ColorRange,
 			BitDepth:        track.BitDepth,
 			PixelFormat:     track.PixelFormat,
 			ReferenceFrames: track.ReferenceFrames,

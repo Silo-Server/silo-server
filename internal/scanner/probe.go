@@ -79,6 +79,7 @@ type ffprobeStream struct {
 	ColorTransfer      string              `json:"color_transfer"`
 	ColorPrimaries     string              `json:"color_primaries"`
 	ColorSpace         string              `json:"color_space"`
+	ColorRange         string              `json:"color_range"`
 	PixFmt             string              `json:"pix_fmt"`
 	Refs               int                 `json:"refs"`
 	BitsPerRawSample   ffprobeScalarString `json:"bits_per_raw_sample"`
@@ -208,6 +209,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				ColorPrimaries:     s.ColorPrimaries,
 				ColorSpace:         s.ColorSpace,
 				ColorTransfer:      s.ColorTransfer,
+				ColorRange:         s.ColorRange,
 				BitDepth:           models.NormalizeVideoBitDepth(parseBitDepth(s), s.PixFmt, s.Profile),
 				PixelFormat:        s.PixFmt,
 				ReferenceFrames:    s.Refs,

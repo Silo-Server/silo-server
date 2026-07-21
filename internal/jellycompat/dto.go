@@ -267,6 +267,7 @@ type mediaStreamDTO struct {
 	ColorPrimaries         string  `json:"ColorPrimaries,omitempty"`
 	ColorSpace             string  `json:"ColorSpace,omitempty"`
 	ColorTransfer          string  `json:"ColorTransfer,omitempty"`
+	ColorRange             string  `json:"ColorRange,omitempty"`
 	PixelFormat            string  `json:"PixelFormat,omitempty"`
 	AudioSpatialFormat     string  `json:"AudioSpatialFormat,omitempty"`
 	AverageFrameRate       float64 `json:"AverageFrameRate,omitempty"`

@@ -893,6 +893,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			ColorPrimaries:         track.ColorPrimaries,
 			ColorSpace:             track.ColorSpace,
 			ColorTransfer:          track.ColorTransfer,
+			ColorRange:             track.ColorRange,
 			PixelFormat:            track.PixelFormat,
 			AudioSpatialFormat:     "None",
 			AverageFrameRate:       parseCompatFrameRate(track.FrameRate),
