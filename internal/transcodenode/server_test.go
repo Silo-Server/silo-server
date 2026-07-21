@@ -402,3 +402,50 @@ func TestCopyModeReconstruct_SkipsFastSeek(t *testing.T) {
 		t.Fatalf("encoded card must apply the seg×dur fast seek")
 	}
 }
+
+// A fresh /transcode/start must resolve this node's configured hw_device list
+// through the shared GPU pool — the same path reconstruction uses — rather
+// than bypassing it with an empty device.
+func TestHandleStartUsesConfiguredHWDeviceList(t *testing.T) {
+	server := newTestServer(t)
+	ffmpegPath := filepath.Join(t.TempDir(), "looping-ffmpeg.sh")
+	if err := os.WriteFile(ffmpegPath, []byte("#!/bin/sh\nwhile :; do sleep 0.1; done\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// This test reaches the spawn/track path, so it needs a (no-op) tracker.
+	server.tracker = nodesessions.NewTracker(nil, "http://node", "node", "transcode")
+	cfg := server.watcher.Config()
+	cfg.Playback.FFmpegPath = ffmpegPath
+	// Neither device exists, so resolution deterministically lands on the
+	// first entry; the point is that the configured list reaches the session.
+	cfg.Playback.HWDevice = "/dev/dri/renderD888,/dev/dri/renderD889"
+
+	requestBody, err := json.Marshal(TranscodeStartRequest{
+		SessionID:        "hwdevice-start-1",
+		InputPath:        "/media/movie.mkv",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		SegmentDuration:  2,
+		HWAccel:          "vaapi",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/transcode/start", bytes.NewReader(requestBody))
+	rr := httptest.NewRecorder()
+	server.handleStart(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+
+	server.mu.RLock()
+	session := server.sessions["hwdevice-start-1"]
+	server.mu.RUnlock()
+	if session == nil {
+		t.Fatal("session was not registered")
+	}
+	defer session.CloseProcess()
+	if got := session.Opts().HWDevice; got != "/dev/dri/renderD888" {
+		t.Fatalf("session HWDevice = %q, want one concrete device from the configured list", got)
+	}
+}

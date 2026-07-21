@@ -493,16 +493,19 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		SegmentDuration:        req.SegmentDuration,
 		FFmpegPath:             cfg.Playback.FFmpegPath,
 		HWAccel:                req.HWAccel,
-		HWDevice:               "",
-		AudioTrackIndex:        req.AudioTrackIndex,
-		SubtitleTrackIndex:     req.SubtitleTrackIndex,
-		SubtitleBurnIn:         req.SubtitleBurnIn,
-		SubtitleCodec:          req.SubtitleCodec,
-		TotalDuration:          req.TotalDuration,
-		FastStart:              true,
-		NodeType:               "transcode",
-		ExecutionMode:          "transcode_node",
-		FFmpegLogSink:          s.ffmpegSink,
+		// This node's configured device (or device list — StartTranscode
+		// resolves it to one GPU), matching what reconstruction uses so fresh
+		// and reconstructed sessions balance identically.
+		HWDevice:           cfg.Playback.HWDevice,
+		AudioTrackIndex:    req.AudioTrackIndex,
+		SubtitleTrackIndex: req.SubtitleTrackIndex,
+		SubtitleBurnIn:     req.SubtitleBurnIn,
+		SubtitleCodec:      req.SubtitleCodec,
+		TotalDuration:      req.TotalDuration,
+		FastStart:          true,
+		NodeType:           "transcode",
+		ExecutionMode:      "transcode_node",
+		FFmpegLogSink:      s.ffmpegSink,
 	}
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
