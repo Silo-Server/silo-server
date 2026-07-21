@@ -3412,8 +3412,13 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			FileName:        sub.FileName,
 		})
 	}
-	for _, sub := range file.ExternalSubtitles {
+	for i, sub := range file.ExternalSubtitles {
 		tracks = append(tracks, VersionSubtitleTrack{
+			// Combined-index identity: externals occupy 0..n-1 in the playback
+			// selection space (session subtitle_urls, ResolveSubtitlePolicyV3).
+			// Without this every external serialized index 0 and clients keying
+			// on index got duplicates.
+			Index:           i,
 			Language:        sub.Language,
 			Codec:           sub.Format,
 			Title:           firstNonEmpty(sub.Title, filepath.Base(sub.Path)),
