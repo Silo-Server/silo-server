@@ -70,15 +70,12 @@ func DetectHWAccelWithFFmpeg(ffmpegPath string) HWAccelInfo {
 }
 
 // PickRenderDevice returns the GPU render device path to use.
-// A single explicit value is returned as-is; a comma-separated list resolves
-// to the present device with the fewest active transcode sessions (without
-// reserving it — session-lifetime reservation happens in StartTranscode).
+// If explicit is non-empty, it is returned as-is — multi-device lists are
+// resolved to one device by AcquireHWDevice before args are built, so this
+// never sees a list on a live path.
 // Otherwise, it attempts to discover a render device under /dev/dri/.
 // Returns empty string if no device is found (caller should fall back to CPU).
 func PickRenderDevice(explicit string) string {
-	if devices := ParseHWDevices(explicit); len(devices) > 1 {
-		return selectLeastLoadedHWDevice(devices)
-	}
 	if explicit != "" {
 		return explicit
 	}
@@ -318,4 +315,54 @@ func detectRenderDevice(driDir string) string {
 		return devices[0]
 	}
 	return ""
+}
+
+// RenderDeviceInfo describes one render device for operator-facing surfaces.
+type RenderDeviceInfo struct {
+	Path        string `json:"path"`
+	Description string `json:"description"`
+}
+
+// describeRenderDevice builds a short human label for a render device from
+// its sysfs PCI vendor/device ids; best-effort, never fails.
+func describeRenderDevice(renderDevPath string) string {
+	name := filepath.Base(renderDevPath)
+	vendor := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "vendor"))
+	label := ""
+	switch vendor {
+	case "0x8086":
+		label = "Intel GPU"
+	case "0x10de":
+		label = "NVIDIA GPU"
+	case "0x1002":
+		label = "AMD GPU"
+	case "":
+		return "GPU"
+	default:
+		label = "GPU (vendor " + vendor + ")"
+	}
+	if device := readSysfsID(filepath.Join(sysClassDRMDir, name, "device", "device")); device != "" && vendor != "0x1002" {
+		label += " (" + device + ")"
+	}
+	return label
+}
+
+func readSysfsID(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// renderDeviceDetails describes every listed device.
+func renderDeviceDetails(devices []string) []RenderDeviceInfo {
+	details := make([]RenderDeviceInfo, 0, len(devices))
+	for _, device := range devices {
+		details = append(details, RenderDeviceInfo{
+			Path:        device,
+			Description: describeRenderDevice(device),
+		})
+	}
+	return details
 }

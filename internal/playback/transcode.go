@@ -176,8 +176,8 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
 	// Resolve a multi-device hw_device list to one concrete GPU for the whole
 	// session lifetime (restarts reuse it); the reservation releases on
-	// shutdown.
-	hwDevice, releaseHWDevice := resolveSessionHWDevice(opts.HWDevice, opts.HWAccel)
+	// shutdown once ffmpeg has exited.
+	hwDevice, releaseHWDevice := AcquireHWDevice(opts.HWDevice, opts.HWAccel)
 	opts.HWDevice = hwDevice
 
 	// Ensure output directory exists.
@@ -1453,9 +1453,6 @@ func (s *TranscodeSession) CloseProcess() error {
 // temporary output directory.
 func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	s.StopThrottler()
-	if s.releaseHWDevice != nil {
-		s.releaseHWDevice()
-	}
 	// Cancel the context to kill the process (no mutex needed for cancel).
 	if s.cancel != nil {
 		s.cancel()
@@ -1467,6 +1464,13 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 	// done is nil when no process was started (e.g. test-only sessions).
 	if s.done != nil {
 		<-s.done
+	}
+
+	// Release the GPU reservation only after ffmpeg has actually exited, so a
+	// concurrent start cannot select this device while the old process is
+	// still using it.
+	if s.releaseHWDevice != nil {
+		s.releaseHWDevice()
 	}
 
 	s.mu.Lock()

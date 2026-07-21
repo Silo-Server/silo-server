@@ -31,7 +31,7 @@ func resetDeviceLoad(t *testing.T) {
 	hwDeviceLoad.mu.Unlock()
 }
 
-func TestParseHWDevices(t *testing.T) {
+func TestParseHWDeviceSet(t *testing.T) {
 	cases := []struct {
 		in   string
 		want []string
@@ -42,50 +42,65 @@ func TestParseHWDevices(t *testing.T) {
 		{" /dev/dri/renderD128 , /dev/dri/renderD129 ,", []string{"/dev/dri/renderD128", "/dev/dri/renderD129"}},
 	}
 	for _, tc := range cases {
-		got := ParseHWDevices(tc.in)
-		if len(got) != len(tc.want) {
-			t.Fatalf("ParseHWDevices(%q) = %v, want %v", tc.in, got, tc.want)
+		got := ParseHWDeviceSet(tc.in)
+		if got.Empty() != (len(tc.want) == 0) || got.Multi() != (len(tc.want) > 1) {
+			t.Fatalf("ParseHWDeviceSet(%q) Empty/Multi mismatch for %v", tc.in, tc.want)
 		}
-		for i := range got {
-			if got[i] != tc.want[i] {
-				t.Fatalf("ParseHWDevices(%q) = %v, want %v", tc.in, got, tc.want)
+		list := got.List()
+		if len(list) != len(tc.want) {
+			t.Fatalf("ParseHWDeviceSet(%q).List() = %v, want %v", tc.in, list, tc.want)
+		}
+		for i := range list {
+			if list[i] != tc.want[i] {
+				t.Fatalf("ParseHWDeviceSet(%q).List() = %v, want %v", tc.in, list, tc.want)
 			}
 		}
 	}
 }
 
-func TestResolveSessionHWDeviceSingleValuePassesThrough(t *testing.T) {
+func TestAcquireHWDeviceEmptyValueStaysEmpty(t *testing.T) {
 	resetDeviceLoad(t)
-	fakeDeviceStat(t) // nothing exists; single value must still pass through
-	device, release := resolveSessionHWDevice("/dev/dri/renderD128", "qsv")
+	device, release := AcquireHWDevice("", "qsv")
 	defer release()
-	if device != "/dev/dri/renderD128" {
-		t.Fatalf("device = %q, want explicit single value unchanged", device)
+	if device != "" {
+		t.Fatalf("device = %q, want empty so auto-detection applies", device)
 	}
 }
 
-func TestResolveSessionHWDeviceBalancesAcrossList(t *testing.T) {
+func TestAcquireHWDeviceSingleValuePassesThrough(t *testing.T) {
+	resetDeviceLoad(t)
+	fakeDeviceStat(t) // nothing exists; single value must still pass through
+	for _, accel := range []string{"qsv", "vaapi", "nvenc", "none"} {
+		device, release := AcquireHWDevice("/dev/dri/renderD128", accel)
+		if device != "/dev/dri/renderD128" {
+			t.Fatalf("accel %s: device = %q, want explicit single value unchanged", accel, device)
+		}
+		release()
+	}
+}
+
+func TestAcquireHWDeviceBalancesAcrossList(t *testing.T) {
 	resetDeviceLoad(t)
 	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
 	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
 
-	dev1, release1 := resolveSessionHWDevice(configured, "qsv")
+	dev1, release1 := AcquireHWDevice(configured, "qsv")
 	if dev1 != "/dev/dri/renderD128" {
-		t.Fatalf("first session device = %q, want first listed on tie", dev1)
+		t.Fatalf("first workload device = %q, want first listed on tie", dev1)
 	}
-	dev2, release2 := resolveSessionHWDevice(configured, "qsv")
+	dev2, release2 := AcquireHWDevice(configured, "vaapi")
 	if dev2 != "/dev/dri/renderD129" {
-		t.Fatalf("second session device = %q, want least-loaded second device", dev2)
+		t.Fatalf("second workload device = %q, want least-loaded second device", dev2)
 	}
-	dev3, release3 := resolveSessionHWDevice(configured, "qsv")
+	dev3, release3 := AcquireHWDevice(configured, "qsv")
 	if dev3 != "/dev/dri/renderD128" {
-		t.Fatalf("third session device = %q, want round-back to first on tie", dev3)
+		t.Fatalf("third workload device = %q, want round-back to first on tie", dev3)
 	}
 
-	// Releasing the first session makes renderD128 least-loaded again.
+	// Releasing the first workload makes renderD128 least-loaded again.
 	release1()
 	release3()
-	dev4, release4 := resolveSessionHWDevice(configured, "qsv")
+	dev4, release4 := AcquireHWDevice(configured, "qsv")
 	if dev4 != "/dev/dri/renderD128" {
 		t.Fatalf("post-release device = %q, want freed first device", dev4)
 	}
@@ -93,53 +108,66 @@ func TestResolveSessionHWDeviceBalancesAcrossList(t *testing.T) {
 	release4()
 }
 
-func TestResolveSessionHWDeviceSkipsMissingDevices(t *testing.T) {
+func TestAcquireHWDeviceSkipsMissingDevices(t *testing.T) {
 	resetDeviceLoad(t)
 	fakeDeviceStat(t, "/dev/dri/renderD129")
-	device, release := resolveSessionHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
+	device, release := AcquireHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
 	defer release()
 	if device != "/dev/dri/renderD129" {
 		t.Fatalf("device = %q, want the only present device", device)
 	}
 }
 
-func TestResolveSessionHWDeviceAllMissingFallsBackToFirst(t *testing.T) {
+func TestAcquireHWDeviceAllMissingFallsBackToFirst(t *testing.T) {
 	resetDeviceLoad(t)
 	fakeDeviceStat(t) // none exist
-	device, release := resolveSessionHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
+	device, release := AcquireHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
 	defer release()
 	if device != "/dev/dri/renderD128" {
 		t.Fatalf("device = %q, want deterministic first entry when none exist", device)
 	}
 }
 
-func TestResolveSessionHWDeviceSoftwareAccelDoesNotAcquire(t *testing.T) {
+func TestAcquireHWDeviceNVENCMultiListUsesFirstWithoutReserving(t *testing.T) {
 	resetDeviceLoad(t)
-	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
-	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
-
-	_, releaseNone := resolveSessionHWDevice(configured, "none")
-	defer releaseNone()
-
-	// A software session must not shift the balance: the next GPU session
-	// still lands on the first device.
-	device, release := resolveSessionHWDevice(configured, "qsv")
+	fakeDeviceStat(t) // NVENC entries are CUDA indexes/UUIDs, never present as paths
+	device, release := AcquireHWDevice("0,1", "nvenc")
 	defer release()
-	if device != "/dev/dri/renderD128" {
-		t.Fatalf("device = %q, want first device unaffected by software session", device)
+	if device != "0" {
+		t.Fatalf("device = %q, want first NVENC entry", device)
+	}
+	if got := hwDeviceActiveCount("0"); got != 0 {
+		t.Fatalf("active count = %d, want no reservation for NVENC", got)
 	}
 }
 
-func TestResolveSessionHWDeviceReleaseIsIdempotent(t *testing.T) {
+func TestAcquireHWDeviceSoftwareAccelDoesNotReserve(t *testing.T) {
 	resetDeviceLoad(t)
 	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
 	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
 
-	_, release1 := resolveSessionHWDevice(configured, "qsv")
+	_, releaseNone := AcquireHWDevice(configured, "none")
+	defer releaseNone()
+
+	// A software workload must not shift the balance: the next GPU workload
+	// still lands on the first device.
+	device, release := AcquireHWDevice(configured, "qsv")
+	defer release()
+	if device != "/dev/dri/renderD128" {
+		t.Fatalf("device = %q, want first device unaffected by software workload", device)
+	}
+}
+
+func TestAcquireHWDeviceReleaseIsIdempotent(t *testing.T) {
+	resetDeviceLoad(t)
+	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
+	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
+
+	_, release1 := AcquireHWDevice(configured, "qsv")
 	release1()
 	release1() // double release must not underflow the count
 
-	dev, release2 := resolveSessionHWDevice(configured, "qsv")
+	dev, release2 := AcquireHWDevice(configured, "qsv")
 	defer release2()
 	if dev != "/dev/dri/renderD128" {
 		t.Fatalf("device = %q, want first device after idempotent release", dev)
@@ -153,25 +181,10 @@ func TestResolveSessionHWDeviceReleaseIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestPickRenderDeviceListAware(t *testing.T) {
-	resetDeviceLoad(t)
-	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
-
-	// A list picks a concrete device without acquiring load.
-	dev := PickRenderDevice("/dev/dri/renderD128,/dev/dri/renderD129")
-	if dev != "/dev/dri/renderD128" {
-		t.Fatalf("PickRenderDevice(list) = %q, want least-loaded first device", dev)
-	}
-
-	// With the first device loaded, the list resolves to the second.
-	_, release := resolveSessionHWDevice("/dev/dri/renderD128,/dev/dri/renderD129", "qsv")
-	defer release()
-	dev = PickRenderDevice("/dev/dri/renderD128,/dev/dri/renderD129")
-	if dev != "/dev/dri/renderD129" {
-		t.Fatalf("PickRenderDevice(list) = %q, want second device while first is loaded", dev)
-	}
-
-	// Single explicit value keeps the historical pass-through contract.
+func TestPickRenderDeviceExplicitValuePassesThrough(t *testing.T) {
+	// PickRenderDevice is auto-detection only; list resolution happens in
+	// AcquireHWDevice before args are built, so an explicit value — even a
+	// stale CSV — passes through untouched.
 	if got := PickRenderDevice("/dev/dri/renderD42"); got != "/dev/dri/renderD42" {
 		t.Fatalf("PickRenderDevice(single) = %q, want unchanged explicit value", got)
 	}
@@ -236,20 +249,20 @@ func TestDescribeRenderDeviceUnknownVendor(t *testing.T) {
 	}
 }
 
-func TestResolveSessionHWDeviceConcurrentStartsBalanceExactly(t *testing.T) {
+func TestAcquireHWDeviceConcurrentStartsBalanceExactly(t *testing.T) {
 	resetDeviceLoad(t)
 	fakeDeviceStat(t, "/dev/dri/renderD128", "/dev/dri/renderD129")
 	configured := "/dev/dri/renderD128,/dev/dri/renderD129"
 
-	const sessions = 8
+	const workloads = 8
 	var wg sync.WaitGroup
-	devices := make([]string, sessions)
-	releases := make([]func(), sessions)
-	for i := range sessions {
+	devices := make([]string, workloads)
+	releases := make([]func(), workloads)
+	for i := range workloads {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			devices[i], releases[i] = resolveSessionHWDevice(configured, "qsv")
+			devices[i], releases[i] = AcquireHWDevice(configured, "qsv")
 		}()
 	}
 	wg.Wait()
@@ -263,9 +276,9 @@ func TestResolveSessionHWDeviceConcurrentStartsBalanceExactly(t *testing.T) {
 	for _, device := range devices {
 		counts[device]++
 	}
-	// Atomic select+reserve guarantees an exact split; the pre-fix two-step
-	// selection could pile concurrent starts onto one device.
-	if counts["/dev/dri/renderD128"] != sessions/2 || counts["/dev/dri/renderD129"] != sessions/2 {
-		t.Fatalf("concurrent session split = %v, want exact %d/%d", counts, sessions/2, sessions/2)
+	// Atomic select+reserve guarantees an exact split; a two-step selection
+	// could pile concurrent starts onto one device.
+	if counts["/dev/dri/renderD128"] != workloads/2 || counts["/dev/dri/renderD129"] != workloads/2 {
+		t.Fatalf("concurrent workload split = %v, want exact %d/%d", counts, workloads/2, workloads/2)
 	}
 }
