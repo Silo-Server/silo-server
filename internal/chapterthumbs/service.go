@@ -89,15 +89,15 @@ type ChapterThumbnailRequest struct {
 }
 
 type Service struct {
-	fileRepo         FileRepository
-	folderRepo       FolderRepository
-	probeEnsurer     ProbeEnsurer
-	settings         SettingsReader
-	store            ObjectStore
-	notifier         ThumbnailNotifier
-	ffmpegPath       string
-	hwAccel          string
-	hwDevice         string
+	fileRepo        FileRepository
+	folderRepo      FolderRepository
+	probeEnsurer    ProbeEnsurer
+	settings        SettingsReader
+	store           ObjectStore
+	notifier        ThumbnailNotifier
+	ffmpegPath      string
+	hwAccel         string
+	hwDevice        string
 	hwResolveOnce   sync.Once
 	resolvedHWAccel string
 
