@@ -3397,7 +3397,8 @@ func (s *DetailService) buildVersionChapters(ctx context.Context, file *models.M
 
 func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 	tracks := make([]VersionSubtitleTrack, 0, len(file.SubtitleTracks)+len(file.ExternalSubtitles))
-	for _, sub := range file.SubtitleTracks {
+	nextExternalIndex := len(file.VideoTracks) + len(file.AudioTracks)
+	for i, sub := range file.SubtitleTracks {
 		tracks = append(tracks, VersionSubtitleTrack{
 			Index:           sub.Index,
 			Language:        sub.Language,
@@ -3411,14 +3412,23 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			External:        sub.External,
 			FileName:        sub.FileName,
 		})
+
+		index := sub.Index
+		if index <= 0 {
+			index = len(file.VideoTracks) + len(file.AudioTracks) + i
+		}
+		if index >= nextExternalIndex {
+			nextExternalIndex = index + 1
+		}
+	}
+	// Zero means "use positional fallback" to downstream consumers and is
+	// omitted from JSON, so external tracks always receive positive indexes.
+	if nextExternalIndex < 1 {
+		nextExternalIndex = 1
 	}
 	for i, sub := range file.ExternalSubtitles {
 		tracks = append(tracks, VersionSubtitleTrack{
-			// Combined-index identity: externals occupy 0..n-1 in the playback
-			// selection space (session subtitle_urls, ResolveSubtitlePolicyV3).
-			// Without this every external serialized index 0 and clients keying
-			// on index got duplicates.
-			Index:           i,
+			Index:           nextExternalIndex + i,
 			Language:        sub.Language,
 			Codec:           sub.Format,
 			Title:           firstNonEmpty(sub.Title, filepath.Base(sub.Path)),
