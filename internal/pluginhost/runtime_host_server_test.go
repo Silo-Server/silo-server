@@ -9,6 +9,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 
 	"github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
@@ -169,9 +170,9 @@ type fakeConfigSetter struct {
 
 type fakeVirtualCatalog struct{ installationID int }
 
-func (f *fakeVirtualCatalog) UpsertVirtualMedia(_ context.Context, installationID int, req *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error) {
+func (f *fakeVirtualCatalog) UpsertVirtualMedia(_ context.Context, installationID int, req catalog.VirtualMedia) (*catalog.VirtualMediaResult, error) {
 	f.installationID = installationID
-	return &pluginv1.UpsertVirtualMediaResponse{MediaId: "movie-tmdb-42", LibraryId: req.GetLibraryId()}, nil
+	return &catalog.VirtualMediaResult{MediaID: "movie-tmdb-42", LibraryID: req.LibraryID}, nil
 }
 
 func TestRuntimeHostServerUpsertVirtualMediaUsesBoundInstallation(t *testing.T) {

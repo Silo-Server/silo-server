@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"golang.org/x/time/rate"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/events"
 )
 
@@ -85,12 +87,12 @@ func (f GlobalConfigSetterFunc) SetGlobalConfigEntry(ctx context.Context, instal
 // VirtualCatalogRegistrar performs host-owned transactional registration of
 // virtual media submitted by an installed plugin.
 type VirtualCatalogRegistrar interface {
-	UpsertVirtualMedia(context.Context, int, *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error)
+	UpsertVirtualMedia(context.Context, int, catalog.VirtualMedia) (*catalog.VirtualMediaResult, error)
 }
 
-type VirtualCatalogRegistrarFunc func(context.Context, int, *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error)
+type VirtualCatalogRegistrarFunc func(context.Context, int, catalog.VirtualMedia) (*catalog.VirtualMediaResult, error)
 
-func (f VirtualCatalogRegistrarFunc) UpsertVirtualMedia(ctx context.Context, installationID int, req *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error) {
+func (f VirtualCatalogRegistrarFunc) UpsertVirtualMedia(ctx context.Context, installationID int, req catalog.VirtualMedia) (*catalog.VirtualMediaResult, error) {
 	return f(ctx, installationID, req)
 }
 
@@ -179,7 +181,61 @@ func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv
 	if s.installationID <= 0 {
 		return nil, fmt.Errorf("server: plugin installation is not bound")
 	}
-	return s.virtualCatalog.UpsertVirtualMedia(ctx, s.installationID, req)
+
+	variants := make([]catalog.VirtualMediaVariant, 0, len(req.GetVariants()))
+	for _, v := range req.GetVariants() {
+		variants = append(variants, catalog.VirtualMediaVariant{
+			VirtualURI:     v.GetVirtualUri(),
+			Label:          v.GetLabel(),
+			Resolution:     v.GetResolution(),
+			CodecVideo:     v.GetCodecVideo(),
+			CodecAudio:     v.GetCodecAudio(),
+			HDR:            v.GetHdr(),
+			Bitrate:        int(v.GetBitrate()),
+			RuntimeMinutes: int(v.GetRuntimeMinutes()),
+		})
+	}
+
+	episodes := make([]catalog.VirtualEpisode, 0, len(req.GetEpisodes()))
+	for _, episode := range req.GetEpisodes() {
+		var airDate time.Time
+		if episode.GetAirDateUnix() > 0 {
+			airDate = time.Unix(episode.GetAirDateUnix(), 0).UTC()
+		}
+		epVariants := make([]catalog.VirtualMediaVariant, 0, len(episode.GetVariants()))
+		for _, v := range episode.GetVariants() {
+			epVariants = append(epVariants, catalog.VirtualMediaVariant{
+				VirtualURI:     v.GetVirtualUri(),
+				Label:          v.GetLabel(),
+				Resolution:     v.GetResolution(),
+				CodecVideo:     v.GetCodecVideo(),
+				CodecAudio:     v.GetCodecAudio(),
+				HDR:            v.GetHdr(),
+				Bitrate:        int(v.GetBitrate()),
+				RuntimeMinutes: int(v.GetRuntimeMinutes()),
+			})
+		}
+		episodes = append(episodes, catalog.VirtualEpisode{
+			SeasonNumber: int(episode.GetSeasonNumber()), EpisodeNumber: int(episode.GetEpisodeNumber()),
+			Title: episode.GetTitle(), Overview: episode.GetOverview(), AirDate: airDate,
+			RuntimeMinutes: int(episode.GetRuntimeMinutes()), StillPath: episode.GetStillPath(), VirtualURI: episode.GetVirtualUri(),
+			Variants: epVariants,
+		})
+	}
+
+	vm := catalog.VirtualMedia{
+		LibraryID: req.GetLibraryId(), MediaType: req.GetMediaType(), Title: req.GetTitle(), Year: int(req.GetYear()),
+		IMDbID: req.GetImdbId(), TMDBID: req.GetTmdbId(), TVDBID: req.GetTvdbId(), Overview: req.GetOverview(),
+		Genres: req.GetGenres(), PosterPath: req.GetPosterPath(), BackdropPath: req.GetBackdropPath(),
+		VirtualURI: req.GetVirtualUri(), RuntimeMinutes: int(req.GetRuntimeMinutes()), Episodes: episodes,
+		Variants: variants,
+	}
+
+	result, err := s.virtualCatalog.UpsertVirtualMedia(ctx, s.installationID, vm)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.UpsertVirtualMediaResponse{MediaId: result.MediaID, LibraryId: result.LibraryID, EpisodesUpserted: int32(result.EpisodesUpserted)}, nil
 }
 
 // PublishEvent auto-prefixes the plugin's event name with "plugin.<plugin_id>."

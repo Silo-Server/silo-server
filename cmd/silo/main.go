@@ -1021,25 +1021,8 @@ func main() {
 			LibraryLister:   pluginhost.NewLibraryLister(libDataSource),
 			CatalogPresence: catalogPresence,
 			VirtualCatalog: pluginhost.VirtualCatalogRegistrarFunc(
-				func(ctx context.Context, _ int, req *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error) {
-					episodes := make([]catalog.VirtualEpisode, 0, len(req.GetEpisodes()))
-					for _, episode := range req.GetEpisodes() {
-						var airDate time.Time
-						if episode.GetAirDateUnix() > 0 {
-							airDate = time.Unix(episode.GetAirDateUnix(), 0).UTC()
-						}
-						episodes = append(episodes, catalog.VirtualEpisode{
-							SeasonNumber: int(episode.GetSeasonNumber()), EpisodeNumber: int(episode.GetEpisodeNumber()),
-							Title: episode.GetTitle(), Overview: episode.GetOverview(), AirDate: airDate,
-							RuntimeMinutes: int(episode.GetRuntimeMinutes()), StillPath: episode.GetStillPath(), VirtualURI: episode.GetVirtualUri(),
-						})
-					}
-					result, err := virtualRegistrar.Upsert(ctx, catalog.VirtualMedia{
-						LibraryID: req.GetLibraryId(), MediaType: req.GetMediaType(), Title: req.GetTitle(), Year: int(req.GetYear()),
-						IMDbID: req.GetImdbId(), TMDBID: req.GetTmdbId(), TVDBID: req.GetTvdbId(), Overview: req.GetOverview(),
-						Genres: req.GetGenres(), PosterPath: req.GetPosterPath(), BackdropPath: req.GetBackdropPath(),
-						VirtualURI: req.GetVirtualUri(), RuntimeMinutes: int(req.GetRuntimeMinutes()), Episodes: episodes,
-					})
+				func(ctx context.Context, _ int, req catalog.VirtualMedia) (*catalog.VirtualMediaResult, error) {
+					result, err := virtualRegistrar.Upsert(ctx, req)
 					if err != nil {
 						return nil, err
 					}
@@ -1049,7 +1032,7 @@ func main() {
 							slog.WarnContext(ctx, "failed to queue virtual media metadata refresh", "component", "plugin-host", "content_id", result.MediaID, "error", err)
 						}
 					}
-					return &pluginv1.UpsertVirtualMediaResponse{MediaId: result.MediaID, LibraryId: result.LibraryID, EpisodesUpserted: int32(result.EpisodesUpserted)}, nil
+					return result, nil
 				},
 			),
 			InstalledPlugins: pluginhost.InstalledPluginListerFunc(

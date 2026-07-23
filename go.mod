@@ -2,7 +2,7 @@ module github.com/Silo-Server/silo-server
 
 // Remove this replacement after the virtual-catalog RuntimeHost contract ships
 // in an upstream SDK release.
-replace github.com/Silo-Server/silo-plugin-sdk => github.com/drondeseries/silo-plugin-sdk v0.10.1-virtual.2
+replace github.com/Silo-Server/silo-plugin-sdk => /opt/altmount/github/silo-plugin-sdk
 
 go 1.26.4
 
