@@ -209,6 +209,17 @@ func resolvedListSet(key string, items []*models.MediaItem, total int, now time.
 	resolvedListCacheMu.Unlock()
 }
 
+// InvalidateResolvedListCache removes cached shared section memberships. Call
+// this after catalog membership changes outside the scanner (for example, when
+// a request-router plugin registers virtual media directly). Per-user overlays
+// are not stored here and need no invalidation.
+func InvalidateResolvedListCache() {
+	resolvedListCacheMu.Lock()
+	resolvedListCache = make(map[string]resolvedListEntry)
+	resolvedListLastPrune = time.Time{}
+	resolvedListCacheMu.Unlock()
+}
+
 // pruneExpiredResolvedListEntriesLocked sweeps expired entries at most once per
 // resolvedListPruneInterval. The caller must hold resolvedListCacheMu. Keys for
 // scopes that are never looked up again would otherwise remain forever, so this

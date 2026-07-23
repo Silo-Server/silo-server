@@ -82,6 +82,18 @@ func (f GlobalConfigSetterFunc) SetGlobalConfigEntry(ctx context.Context, instal
 	return f(ctx, installationID, key, value)
 }
 
+// VirtualCatalogRegistrar performs host-owned transactional registration of
+// virtual media submitted by an installed plugin.
+type VirtualCatalogRegistrar interface {
+	UpsertVirtualMedia(context.Context, int, *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error)
+}
+
+type VirtualCatalogRegistrarFunc func(context.Context, int, *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error)
+
+func (f VirtualCatalogRegistrarFunc) UpsertVirtualMedia(ctx context.Context, installationID int, req *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error) {
+	return f(ctx, installationID, req)
+}
+
 // DefaultPublishEventRatePerSec is the default maximum number of events a
 // plugin may publish per second. It also serves as the burst size so a plugin
 // can fire a short burst at a higher rate before being throttled.
@@ -100,6 +112,7 @@ type RuntimeHostServer struct {
 
 	installedPlugins InstalledPluginLister
 	configSetter     GlobalConfigSetter
+	virtualCatalog   VirtualCatalogRegistrar
 	installationID   int
 }
 
@@ -147,14 +160,26 @@ func NewRuntimeHostServerWithServices(
 	catalog CatalogPresenceLookup,
 	installedPlugins InstalledPluginLister,
 	configSetter GlobalConfigSetter,
+	virtualCatalog VirtualCatalogRegistrar,
 	pluginID string,
 	installationID int,
 ) *RuntimeHostServer {
 	s := NewRuntimeHostServerWithCatalog(publisher, libs, catalog, pluginID)
 	s.installedPlugins = installedPlugins
 	s.configSetter = configSetter
+	s.virtualCatalog = virtualCatalog
 	s.installationID = installationID
 	return s
+}
+
+func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error) {
+	if s.virtualCatalog == nil {
+		return nil, fmt.Errorf("server: virtual catalog is not configured")
+	}
+	if s.installationID <= 0 {
+		return nil, fmt.Errorf("server: plugin installation is not bound")
+	}
+	return s.virtualCatalog.UpsertVirtualMedia(ctx, s.installationID, req)
 }
 
 // PublishEvent auto-prefixes the plugin's event name with "plugin.<plugin_id>."

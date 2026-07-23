@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -75,11 +76,19 @@ func preflightPlaybackFile(
 	marker MissingFileMarker,
 	eventsHub *evt.Hub,
 ) error {
+	if isVirtualPlaybackFile(file) {
+		return nil
+	}
 	if file == nil {
 		return &playbackFilePreflightError{notFound: true}
 	}
 	if file.MissingSince != nil {
 		return &playbackFilePreflightError{notFound: true}
+	}
+
+	lower := strings.ToLower(file.FilePath)
+	if strings.HasPrefix(lower, "aiostreams://") || strings.HasPrefix(lower, "virtual://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return nil
 	}
 
 	if _, err := os.Stat(file.FilePath); err != nil {
@@ -93,12 +102,30 @@ func preflightPlaybackFile(
 	return nil
 }
 
+func resolveVirtualMediaPath(ctx context.Context, resolver VirtualMediaResolver, path string) (string, error) {
+	lower := strings.ToLower(path)
+	if !strings.HasPrefix(lower, "aiostreams://") && !strings.HasPrefix(lower, "virtual://") {
+		return path, nil
+	}
+	if resolver == nil {
+		return "", fmt.Errorf("virtual media resolver is not configured")
+	}
+	resolved, err := resolver.ResolveVirtualMedia(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
 func markPlaybackFileMissing(
 	ctx context.Context,
 	file *models.MediaFile,
 	marker MissingFileMarker,
 	eventsHub *evt.Hub,
 ) {
+	if isVirtualPlaybackFile(file) {
+		return
+	}
 	if file == nil {
 		return
 	}

@@ -48,10 +48,11 @@ type StreamHandler struct {
 	// SubtitleCache stores full-track PGS (.sup) extracts under the transcode
 	// dir so repeat selections skip the whole-file ffmpeg demux. May be nil
 	// (tests / minimal setups) — extraction then always streams uncached.
-	SubtitleCache *playback.SubtitleCache
-	SubtitleRepo  subtitles.Repository // optional; enables S3-sourced subtitles
-	S3Client      subtitles.S3Client   // optional; needed for fetching S3 subtitles
-	S3Bucket      string               // bucket for subtitle storage
+	SubtitleCache        *playback.SubtitleCache
+	SubtitleRepo         subtitles.Repository // optional; enables S3-sourced subtitles
+	S3Client             subtitles.S3Client   // optional; needed for fetching S3 subtitles
+	S3Bucket             string               // bucket for subtitle storage
+	VirtualMediaResolver VirtualMediaResolver
 }
 
 // ffmpegPath returns the currently configured ffmpeg binary path.
@@ -138,16 +139,26 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 
 	switch session.PlayMethod {
 	case playback.PlayDirect:
+		streamPath, err := resolveVirtualMediaPath(r.Context(), h.VirtualMediaResolver, file.FilePath)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to resolve virtual media stream")
+			return
+		}
 		if err := h.sessionMgr.BeginTransport(sessionID); err == nil {
 			defer func() {
 				_ = h.sessionMgr.EndTransport(sessionID)
 			}()
 		}
-		if err := playback.ServeDirectPlay(w, r, file.FilePath); err != nil {
+		if err := playback.ServeDirectPlay(w, r, streamPath); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 
 	case playback.PlayRemux:
+		streamPath, err := resolveVirtualMediaPath(r.Context(), h.VirtualMediaResolver, file.FilePath)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "virtual_media_resolution_failed", "Failed to resolve virtual media stream")
+			return
+		}
 		if err := h.sessionMgr.BeginTransport(sessionID); err == nil {
 			defer func() {
 				_ = h.sessionMgr.EndTransport(sessionID)
@@ -159,7 +170,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				seekSeconds = s
 			}
 		}
-		if err := playback.ServeRemuxWithDVMode(w, r, file.FilePath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath()); err != nil {
+		if err := playback.ServeRemuxWithDVMode(w, r, streamPath, "mp4", seekSeconds, session.TranscodeAudio, session.AudioTrackIndex, file.PrimaryDVProfile(), session.RemuxDVMode, h.ffmpegPath()); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 

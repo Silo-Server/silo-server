@@ -453,7 +453,7 @@ func (r *LibraryItemRepository) ReconcileFolderMembership(ctx context.Context, f
 			FROM media_files mf
 			WHERE mf.media_folder_id = mil.media_folder_id
 			  AND mf.content_id = mil.content_id
-			  AND mf.missing_since IS NULL
+			  AND (mf.missing_since IS NULL OR mf.container = 'virtual' OR mf.file_path LIKE 'aiostreams://%')
 		  )
 		  AND NOT EXISTS (
 			SELECT 1

@@ -119,6 +119,19 @@ func TestResolver_Transcode_UnsupportedVideoCodec(t *testing.T) {
 	}
 }
 
+func TestResolver_VirtualSourceWithoutProbeMetadataTranscodes(t *testing.T) {
+	file := &models.MediaFile{
+		FilePath:  "aiostreams://series/tt2403776/2/1",
+		Container: "virtual",
+	}
+
+	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
+
+	if decision.Method != playback.PlayTranscode {
+		t.Errorf("method = %q, want transcode for an unprobed dynamic source", decision.Method)
+	}
+}
+
 func TestResolver_Transcode_ResolutionExceeds(t *testing.T) {
 	file := &models.MediaFile{
 		CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",

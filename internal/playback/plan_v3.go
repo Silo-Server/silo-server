@@ -202,6 +202,13 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		})
 	}
 	if !detailedVideoEvidenceCompleteV3(source) {
+		// Plugin-backed sources intentionally have no local probe metadata. Do
+		// not reject them as terminal: resolve the URI at transcode start and
+		// use the validated H.264/AAC HLS fallback. Physical files retain the
+		// strict metadata gate above.
+		if isVirtualPlaybackFileV3(file) {
+			return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "virtual_source_metadata_deferred")
+		}
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)
 	}
 
@@ -420,6 +427,15 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	}
 
 	return terminalPlannerResultV3("adaptation_unavailable", "No validated playback route is available for this source and output route.", false)
+}
+
+func isVirtualPlaybackFileV3(file *models.MediaFile) bool {
+	if file == nil {
+		return false
+	}
+	path := strings.ToLower(strings.TrimSpace(file.FilePath))
+	return strings.EqualFold(strings.TrimSpace(file.Container), "virtual") ||
+		strings.HasPrefix(path, "aiostreams://") || strings.HasPrefix(path, "virtual://")
 }
 
 // planVideoTranscodeV3 always executes on the HLS engine, so the caller must

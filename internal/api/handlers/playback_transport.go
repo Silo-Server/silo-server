@@ -20,6 +20,11 @@ import (
 // locking and decide whether registration is immediate or transactionally
 // staged.
 func (h *PlaybackHandler) startLocalPlaybackTransport(ctx context.Context, opts playback.TranscodeOpts) (*playback.TranscodeSession, error) {
+	inputPath, err := resolveVirtualMediaPath(ctx, h.VirtualMediaResolver, opts.InputPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve transcode input: %w", err)
+	}
+	opts.InputPath = inputPath
 	return playback.StartTranscode(context.WithoutCancel(ctx), opts)
 }
 
@@ -28,6 +33,11 @@ func (h *PlaybackHandler) startLocalPlaybackTransport(ctx context.Context, opts 
 // their existing public error envelopes while executing identical transport
 // startup and response parsing.
 func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, nodeURL string, request transcodenode.TranscodeStartRequest) (transcodenode.TranscodeStartResponse, int, error) {
+	inputPath, err := resolveVirtualMediaPath(ctx, h.VirtualMediaResolver, request.InputPath)
+	if err != nil {
+		return transcodenode.TranscodeStartResponse{}, 0, fmt.Errorf("resolve transcode input: %w", err)
+	}
+	request.InputPath = inputPath
 	body, err := json.Marshal(request)
 	if err != nil {
 		return transcodenode.TranscodeStartResponse{}, 0, err

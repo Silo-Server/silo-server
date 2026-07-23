@@ -33,3 +33,12 @@ export function mediaDurationSeconds(
   }
   return undefined;
 }
+
+export function mediaElementDuration(
+  backendDurationSeconds: number,
+  elementDurationSeconds: number,
+): number | null {
+  if (backendDurationSeconds > 0) return null;
+  if (!Number.isFinite(elementDurationSeconds) || elementDurationSeconds <= 0) return null;
+  return elementDurationSeconds;
+}

@@ -614,6 +614,48 @@ func nonNilStringSlice(values []string) []string {
 	return values
 }
 
+// MaterializeVirtualPlaybackItem atomically creates a catalog item, links it to
+// the selected libraries, and adds a zero-storage playback source. Existing
+// local files always suppress creation of the virtual source.
+func (r *ItemRepository) MaterializeVirtualPlaybackItem(ctx context.Context, item *models.MediaItem, libraryIDs []int) error {
+	if item == nil || item.ContentID == "" || strings.TrimSpace(item.ImdbID) == "" {
+		return fmt.Errorf("virtual playback item requires content and IMDb IDs")
+	}
+	if len(libraryIDs) == 0 {
+		return fmt.Errorf("virtual playback item requires at least one library")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin virtual item transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := r.UpsertTx(ctx, tx, item); err != nil {
+		return err
+	}
+	for _, libraryID := range libraryIDs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+			VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`, item.ContentID, libraryID); err != nil {
+			return fmt.Errorf("linking virtual item to library: %w", err)
+		}
+	}
+	virtualPath := "aiostreams://movie/" + strings.TrimSpace(item.ImdbID)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
+		SELECT $1, $2, $3, 0
+		WHERE NOT EXISTS (
+			SELECT 1 FROM media_files
+			WHERE content_id = $1 AND left(file_path, 13) <> $4
+		)
+		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], virtualPath, "aiostreams://"); err != nil {
+		return fmt.Errorf("creating virtual playback file: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit virtual item transaction: %w", err)
+	}
+	return nil
+}
+
 // GetByID retrieves a media item by its content ID.
 func (r *ItemRepository) GetByID(ctx context.Context, contentID string) (*models.MediaItem, error) {
 	query := `SELECT ` + itemColumns + ` FROM media_items WHERE content_id = $1`

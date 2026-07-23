@@ -41,6 +41,8 @@ type Config struct {
 	// GlobalConfigSetter persists SetGlobalConfigEntry calls from plugins. When
 	// nil, SetGlobalConfigEntry returns an error.
 	GlobalConfigSetter GlobalConfigSetter
+	// VirtualCatalog owns virtual media registration requested by plugins.
+	VirtualCatalog VirtualCatalogRegistrar
 }
 
 type StartRequest struct {
@@ -60,6 +62,7 @@ type Host struct {
 	catalogPresence    CatalogPresenceLookup
 	installedPlugins   InstalledPluginLister
 	globalConfigSetter GlobalConfigSetter
+	virtualCatalog     VirtualCatalogRegistrar
 
 	mu        sync.RWMutex
 	instances map[int]*instance
@@ -95,6 +98,7 @@ func NewHost(cfg Config) *Host {
 		catalogPresence:     cfg.CatalogPresence,
 		installedPlugins:    cfg.InstalledPlugins,
 		globalConfigSetter:  cfg.GlobalConfigSetter,
+		virtualCatalog:      cfg.VirtualCatalog,
 		instances:           make(map[int]*instance),
 	}
 }
@@ -321,7 +325,7 @@ func (h *Host) stopInstance(instance *instance) {
 //
 // Skipped when no RuntimeHost services are configured.
 func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int) error {
-	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil {
+	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil && h.virtualCatalog == nil {
 		return nil
 	}
 
@@ -341,6 +345,7 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 			h.catalogPresence,
 			h.installedPlugins,
 			h.globalConfigSetter,
+			h.virtualCatalog,
 			pluginID,
 			installationID,
 		)

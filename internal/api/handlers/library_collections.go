@@ -383,6 +383,7 @@ type importMDBListRequest struct {
 	Description       string `json:"description"`
 	URL               string `json:"url"`
 	Limit             *int   `json:"limit,omitempty"`
+	VirtualPlayback   bool   `json:"virtual_playback,omitempty"`
 	Featured          bool   `json:"featured"`
 	SortOrder         int    `json:"sort_order,omitempty"`
 	PosterURL         string `json:"poster_url"`
@@ -2628,7 +2629,7 @@ func (h *LibraryCollectionHandler) createMDBListCollection(
 	}
 
 	normalizedURL := usercollections.NormalizeMDBListURL(req.URL)
-	sourceConfig, err := buildMDBListSourceConfig(normalizedURL, req.Limit)
+	sourceConfig, err := buildMDBListSourceConfig(normalizedURL, req.Limit, req.VirtualPlayback)
 	if err != nil {
 		return nil, fmt.Errorf("building MDBList source config: %w", err)
 	}
@@ -3379,14 +3380,16 @@ func defaultCollectionSourceConfig(config json.RawMessage) json.RawMessage {
 	return config
 }
 
-func buildMDBListSourceConfig(url string, limit *int) (json.RawMessage, error) {
+func buildMDBListSourceConfig(url string, limit *int, virtualPlayback bool) (json.RawMessage, error) {
 	payload := struct {
-		Mode  string `json:"mode"`
-		URL   string `json:"url"`
-		Limit *int   `json:"limit,omitempty"`
+		Mode            string `json:"mode"`
+		URL             string `json:"url"`
+		Limit           *int   `json:"limit,omitempty"`
+		VirtualPlayback bool   `json:"virtual_playback,omitempty"`
 	}{
-		Mode: "mdblist_json",
-		URL:  url,
+		Mode:            "mdblist_json",
+		URL:             url,
+		VirtualPlayback: virtualPlayback,
 	}
 	if limit != nil && *limit > 0 {
 		payload.Limit = limit

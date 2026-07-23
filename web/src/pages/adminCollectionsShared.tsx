@@ -1201,6 +1201,7 @@ export function MDBListImportForm({
   const [url, setURL] = useState("");
   const [limit, setLimit] = useState("");
   const [featured, setFeatured] = useState(true);
+  const [virtualPlayback, setVirtualPlayback] = useState(false);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [backdropFile, setBackdropFile] = useState<File | null>(null);
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
@@ -1219,6 +1220,7 @@ export function MDBListImportForm({
           description,
           url,
           limit: parsedLimit,
+          virtual_playback: virtualPlayback,
           featured,
           poster_source_url: posterSourceUrl.trim() || undefined,
           backdrop_source_url: backdropSourceUrl.trim() || undefined,
@@ -1326,6 +1328,16 @@ export function MDBListImportForm({
         </div>
 
         <SyncScheduleField value={syncSchedule} onChange={setSyncSchedule} />
+
+        <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
+          <div>
+            <p className="text-sm font-medium">Zero-storage virtual playback</p>
+            <p className="text-muted-foreground text-xs">
+              Create database-only movie entries for unmatched IMDb IDs and resolve them through AIOStreams.
+            </p>
+          </div>
+          <Switch checked={virtualPlayback} onCheckedChange={setVirtualPlayback} />
+        </div>
 
         <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
           <div>

@@ -959,6 +959,7 @@ func main() {
 	var pluginInstallationStore *plugins.InstallationStore
 	var pluginRuntimeConfigStore *plugins.RuntimeConfigStore
 	var pluginHTTPProxy *plugins.HTTPProxy
+	var requestVirtualMetadataRefresh func(context.Context, string) error
 	pluginAutoUpdateDone := make(chan struct{})
 	var pluginAutoUpdater *plugins.AutoUpdateService
 	if deps.DB != nil {
@@ -1014,10 +1015,43 @@ func main() {
 				return out, nil
 			},
 		)
+		virtualRegistrar := catalog.NewVirtualMediaRegistrar(deps.DB)
 		pluginHost = pluginhost.NewHost(pluginhost.Config{
 			EventPublisher:  eventsHub,
 			LibraryLister:   pluginhost.NewLibraryLister(libDataSource),
 			CatalogPresence: catalogPresence,
+			VirtualCatalog: pluginhost.VirtualCatalogRegistrarFunc(
+				func(ctx context.Context, _ int, req *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error) {
+					episodes := make([]catalog.VirtualEpisode, 0, len(req.GetEpisodes()))
+					for _, episode := range req.GetEpisodes() {
+						var airDate time.Time
+						if episode.GetAirDateUnix() > 0 {
+							airDate = time.Unix(episode.GetAirDateUnix(), 0).UTC()
+						}
+						episodes = append(episodes, catalog.VirtualEpisode{
+							SeasonNumber: int(episode.GetSeasonNumber()), EpisodeNumber: int(episode.GetEpisodeNumber()),
+							Title: episode.GetTitle(), Overview: episode.GetOverview(), AirDate: airDate,
+							RuntimeMinutes: int(episode.GetRuntimeMinutes()), StillPath: episode.GetStillPath(), VirtualURI: episode.GetVirtualUri(),
+						})
+					}
+					result, err := virtualRegistrar.Upsert(ctx, catalog.VirtualMedia{
+						LibraryID: req.GetLibraryId(), MediaType: req.GetMediaType(), Title: req.GetTitle(), Year: int(req.GetYear()),
+						IMDbID: req.GetImdbId(), TMDBID: req.GetTmdbId(), TVDBID: req.GetTvdbId(), Overview: req.GetOverview(),
+						Genres: req.GetGenres(), PosterPath: req.GetPosterPath(), BackdropPath: req.GetBackdropPath(),
+						VirtualURI: req.GetVirtualUri(), RuntimeMinutes: int(req.GetRuntimeMinutes()), Episodes: episodes,
+					})
+					if err != nil {
+						return nil, err
+					}
+					sections.InvalidateResolvedListCache()
+					if requestVirtualMetadataRefresh != nil {
+						if err := requestVirtualMetadataRefresh(ctx, result.MediaID); err != nil {
+							slog.WarnContext(ctx, "failed to queue virtual media metadata refresh", "component", "plugin-host", "content_id", result.MediaID, "error", err)
+						}
+					}
+					return &pluginv1.UpsertVirtualMediaResponse{MediaId: result.MediaID, LibraryId: result.LibraryID, EpisodesUpserted: int32(result.EpisodesUpserted)}, nil
+				},
+			),
 			InstalledPlugins: pluginhost.InstalledPluginListerFunc(
 				func(ctx context.Context) ([]pluginhost.InstalledPluginRecord, error) {
 					installations, err := installationStore.List(ctx)
@@ -1275,6 +1309,9 @@ func main() {
 			personRepo,
 			deps.FileRepo, skippedRootRepo, staleIDRepo, rootClaimRepo,
 		)
+		requestVirtualMetadataRefresh = func(ctx context.Context, contentID string) error {
+			return metadataService.RequestStaleMetadataRefresh(ctx, metadata.RefreshTargetItem, contentID)
+		}
 		// Drop the resolved-chain cache whenever a plugin is installed, enabled,
 		// disabled, updated, or uninstalled. The installation-enabled check is
 		// served from the plugins service's in-memory cache (invalidated on the
@@ -2094,6 +2131,7 @@ func main() {
 		)
 		requestReconcileSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		api.AttachRequestRouter(requestReconcileSvc, pluginService)
+		requestReconcileSvc.SetCatalogChangeNotifier(sections.InvalidateResolvedListCache)
 		requestReconcileSvc.SetGroupPolicyProvider(accessGroupStore)
 		if userStoreProvider != nil {
 			userRepo := auth.NewUserRepository(deps.DB)

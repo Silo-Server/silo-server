@@ -410,6 +410,20 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		writeV3FileError(w, err)
 		return
 	}
+	if isVirtualPlaybackFile(requestedFile) {
+		streamURL, resolveErr := h.resolveVirtualPlayback(r, requestedFile, profileID)
+		if resolveErr != nil {
+			writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3("virtual_playback_failed", "Failed to resolve virtual playback.", true))
+			return
+		}
+		response, statusErr := h.startVirtualPlaybackV3(r, req, requestDigest, requestedFile, streamURL)
+		if statusErr != nil {
+			writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3(statusErr.reason, statusErr.message, statusErr.retryable))
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
+		return
+	}
 	requestedFile = h.ensurePlaybackProbe(r.Context(), requestedFile)
 	audioIndex, err := resolveV3AudioIndex(requestedFile, req.AudioTrackID, req.AudioTrackIndex)
 	if err != nil {

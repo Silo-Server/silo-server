@@ -626,7 +626,11 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 	row := exec.QueryRow(ctx, `
 		UPDATE request_integrations SET
 			name=$2, enabled=$3, base_url=$4,
-			api_key_ref = CASE WHEN $5 = '' THEN api_key_ref ELSE $5 END,
+			api_key_ref = CASE
+				WHEN installation_id IS DISTINCT FROM $7 THEN $5
+				WHEN $5 = '' THEN api_key_ref
+				ELSE $5
+			END,
 			capability_id=$6, installation_id=$7,
 			supported_media_types=$8, plugin_config=$9, updated_at=now()
 		WHERE id=$1

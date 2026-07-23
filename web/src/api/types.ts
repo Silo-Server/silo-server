@@ -1635,6 +1635,7 @@ export interface ImportMDBListCollectionRequest {
   description?: string;
   url: string;
   limit?: number;
+  virtual_playback?: boolean;
   featured?: boolean;
   poster_url?: string;
   poster_source_url?: string;

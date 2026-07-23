@@ -142,7 +142,9 @@ func (t *pluginTask) Execute(ctx context.Context, progress taskmanager.ProgressR
 		return fmt.Errorf("load plugin task client: %w", err)
 	}
 
-	response, err := client.Run(ctx, &pluginv1.RunScheduledTaskRequest{TaskKey: t.Key()})
+	// The host key includes installation identity for global uniqueness, but
+	// the plugin contract identifies the task by its manifest capability ID.
+	response, err := client.Run(ctx, &pluginv1.RunScheduledTaskRequest{TaskKey: t.capabilityID})
 	if err != nil {
 		return fmt.Errorf("run plugin task %s: %w", t.Key(), err)
 	}

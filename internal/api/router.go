@@ -702,6 +702,7 @@ func NewRouter(deps Dependencies) chi.Router {
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
 		)
 		AttachRequestRouter(requestSvc, deps.PluginService)
+		requestSvc.SetCatalogChangeNotifier(sections.InvalidateResolvedListCache)
 		requestSvc.SetGroupPolicyProvider(accessGroupStore)
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if viewerResolver != nil {
@@ -904,9 +905,19 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		if deps.FileRepo != nil {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr, deps.FileRepo)
+			if deps.PluginService != nil {
+				playbackHandler.VirtualPlaybackResolver = deps.PluginService
+			}
 			streamHandler = handlers.NewStreamHandler(deps.SessionMgr, deps.FileRepo)
 		} else {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
+			if deps.PluginService != nil {
+				playbackHandler.VirtualPlaybackResolver = deps.PluginService
+			}
+		}
+		playbackHandler.VirtualMediaResolver = deps.PluginHTTPProxy
+		if streamHandler != nil {
+			streamHandler.VirtualMediaResolver = deps.PluginHTTPProxy
 		}
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)

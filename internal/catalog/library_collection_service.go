@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/collage"
 	"github.com/Silo-Server/silo-server/internal/collectionutil"
+	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -158,16 +159,17 @@ type SyncCollectionOptions struct {
 }
 
 type libraryCollectionSourceConfig struct {
-	Mode       string              `json:"mode"`
-	Provider   string              `json:"provider,omitempty"`
-	Preset     string              `json:"preset,omitempty"`
-	URL        string              `json:"url,omitempty"`
-	ListURL    string              `json:"list_url,omitempty"`
-	MediaType  string              `json:"media_type,omitempty"`
-	TimeWindow string              `json:"time_window,omitempty"`
-	ProfileID  string              `json:"profile_id,omitempty"`
-	Limit      *int                `json:"limit,omitempty"`
-	Builders   *CollectionBuilders `json:"builders,omitempty"`
+	Mode            string              `json:"mode"`
+	Provider        string              `json:"provider,omitempty"`
+	Preset          string              `json:"preset,omitempty"`
+	URL             string              `json:"url,omitempty"`
+	ListURL         string              `json:"list_url,omitempty"`
+	MediaType       string              `json:"media_type,omitempty"`
+	TimeWindow      string              `json:"time_window,omitempty"`
+	ProfileID       string              `json:"profile_id,omitempty"`
+	Limit           *int                `json:"limit,omitempty"`
+	VirtualPlayback bool                `json:"virtual_playback,omitempty"`
+	Builders        *CollectionBuilders `json:"builders,omitempty"`
 	// CollectionID is the TMDB collection ID for the `tmdb_collection` mode.
 	// Stored as a plain int (not *int) so zero round-trips as "unset" via the
 	// omitempty tag — the sync path treats 0 as a placeholder sentinel.
@@ -206,6 +208,13 @@ type mdblistEntry struct {
 	MediaType   string `json:"mediatype"`
 	Title       string `json:"title"`
 	ReleaseYear int    `json:"release_year"`
+}
+
+func sourceEnablesVirtualPlayback(raw json.RawMessage) bool {
+	var cfg struct {
+		VirtualPlayback bool `json:"virtual_playback"`
+	}
+	return json.Unmarshal(raw, &cfg) == nil && cfg.VirtualPlayback
 }
 
 func (s *LibraryCollectionService) SyncCollection(ctx context.Context, collectionID string) (*models.LibraryCollectionSyncRun, error) {
@@ -300,6 +309,36 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 	seriesLookup, err := s.items.GetByExternalIDs(ctx, seriesBatch, "series")
 	if err != nil {
 		return nil, err
+	}
+
+	if sourceEnablesVirtualPlayback(collection.SourceConfig) {
+		for _, entry := range entries {
+			if mdbListEntryItemType(entry) != "movie" || strings.TrimSpace(entry.IMDbID) == "" {
+				continue
+			}
+			if len(pickCandidatesByPriority(movieLookup, entry, "movie")) > 0 {
+				continue
+			}
+			contentID, err := idgen.NextID()
+			if err != nil {
+				return nil, fmt.Errorf("generating virtual media id: %w", err)
+			}
+			item := &models.MediaItem{
+				ContentID: contentID, Type: "movie", Title: entry.Title,
+				SortTitle: entry.Title, Year: entry.ReleaseYear, ImdbID: entry.IMDbID,
+				TmdbID: fmt.Sprintf("%d", entry.ID), Status: "matched",
+			}
+			if entry.ID <= 0 {
+				item.TmdbID = ""
+			}
+			if err := s.items.MaterializeVirtualPlaybackItem(ctx, item, collection.LibraryIDs); err != nil {
+				return nil, fmt.Errorf("materializing virtual item %q: %w", entry.Title, err)
+			}
+			movieLookup.ByIMDb[entry.IMDbID] = contentID
+			if item.TmdbID != "" {
+				movieLookup.ByTMDB[item.TmdbID] = contentID
+			}
+		}
 	}
 
 	// First pass: collect ALL candidate content_ids per entry in priority

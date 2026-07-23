@@ -128,6 +128,10 @@ type PlaybackChapterThumbnailQueuer interface {
 	QueuePriorityFileAtPosition(ctx context.Context, fileID int, targetSeconds float64)
 }
 
+type VirtualMediaResolver interface {
+	ResolveVirtualMedia(ctx context.Context, virtualURI string) (string, error)
+}
+
 // PlaybackOriginalLanguageLookup fetches the original language for a content item.
 type PlaybackOriginalLanguageLookup interface {
 	GetOriginalLanguage(ctx context.Context, contentID string) (string, error)
@@ -144,7 +148,8 @@ type copySeekAnchorResolver func(
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
 	sessionMgr              SessionManagerInterface
-	fileResolver            FilePathResolver            // optional; enables stream_url in responses
+	fileResolver            FilePathResolver // optional; enables stream_url in responses
+	VirtualPlaybackResolver VirtualPlaybackResolver
 	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
 	WatchScrobbler          PlaybackWatchScrobbler
 	StableIdentityResolver  *watchstate.StableIdentityResolver
@@ -165,6 +170,7 @@ type PlaybackHandler struct {
 	FileVersionFetcher      PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
 	ProbeEnsurer            PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
 	ChapterThumbnailQueuer  PlaybackChapterThumbnailQueuer
+	VirtualMediaResolver    VirtualMediaResolver
 	IntroAnalyzer           IntroEpisodeAnalyzer
 	IntroRepository         PlaybackIntroEligibilityChecker
 	MarkerRegistry          *markers.Registry
@@ -1691,7 +1697,14 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		}
 		return
 	}
-	file = h.ensurePlaybackProbe(r.Context(), file)
+	virtualStreamURL, err := h.resolveVirtualPlayback(r, file, profileID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "virtual_playback_failed", "Failed to resolve virtual playback")
+		return
+	}
+	if virtualStreamURL == "" {
+		file = h.ensurePlaybackProbe(r.Context(), file)
+	}
 
 	// Determine audio track.
 	audioTrackIndex := 0
@@ -1755,7 +1768,7 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 
 	// If the client sent codec capabilities and no explicit play method,
 	// use the resolver to determine the best play strategy.
-	if method == "" && h.fileResolver != nil && len(req.CodecsVideo) > 0 {
+	if virtualStreamURL == "" && method == "" && h.fileResolver != nil && len(req.CodecsVideo) > 0 {
 		effectiveFile, method, transcodeAudio, audioTrackIndex = h.resolveCapabilityPlaybackSelection(
 			r.Context(),
 			req,
@@ -1941,7 +1954,7 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 	// If stream nodes are available, generate proxy-based stream URLs.
 	// Remux and transcode both use HLS via a transcode node, so the planner
 	// picks the transcode node and its group's proxy together.
-	if h.NodePlanner != nil && h.JWTSecret != "" {
+	if virtualStreamURL == "" && h.NodePlanner != nil && h.JWTSecret != "" {
 		needsTranscode := session.PlayMethod == playback.PlayTranscode || session.PlayMethod == playback.PlayRemux
 		plan := h.NodePlanner.PlanSession(session.ID, "", needsTranscode, fileBitrateKbps(effectiveFile))
 		proxyNode := plan.ProxyNode
@@ -1997,6 +2010,12 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 				}
 			}
 		}
+	}
+
+	if virtualStreamURL != "" {
+		resp.StreamURL = virtualStreamURL
+		resp.SubtitleURLs = nil
+		resp.PlaybackInfo = &playbackInfoResult{StreamType: "external_http"}
 	}
 
 	if h.protocolV3ShadowEnabled(r.Context()) {

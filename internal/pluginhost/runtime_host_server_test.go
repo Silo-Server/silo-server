@@ -142,7 +142,7 @@ func TestRuntimeHostServer_ListInstalledPlugins_ReturnsPlugins(t *testing.T) {
 		},
 	}}
 	srv := pluginhost.NewRuntimeHostServerWithServices(
-		&fakeHub{}, &fakeLibLister{}, nil, lister, nil, "silo.example", 7,
+		&fakeHub{}, &fakeLibLister{}, nil, lister, nil, nil, "silo.example", 7,
 	)
 
 	resp, err := srv.ListInstalledPlugins(context.Background(), &pluginv1.ListInstalledPluginsRequest{})
@@ -167,6 +167,28 @@ type fakeConfigSetter struct {
 	value          map[string]any
 }
 
+type fakeVirtualCatalog struct{ installationID int }
+
+func (f *fakeVirtualCatalog) UpsertVirtualMedia(_ context.Context, installationID int, req *pluginv1.UpsertVirtualMediaRequest) (*pluginv1.UpsertVirtualMediaResponse, error) {
+	f.installationID = installationID
+	return &pluginv1.UpsertVirtualMediaResponse{MediaId: "movie-tmdb-42", LibraryId: req.GetLibraryId()}, nil
+}
+
+func TestRuntimeHostServerUpsertVirtualMediaUsesBoundInstallation(t *testing.T) {
+	registrar := &fakeVirtualCatalog{}
+	srv := pluginhost.NewRuntimeHostServerWithServices(&fakeHub{}, &fakeLibLister{}, nil, nil, nil, registrar, "virtual.plugin", 77)
+	resp, err := srv.UpsertVirtualMedia(context.Background(), &pluginv1.UpsertVirtualMediaRequest{LibraryId: "1", MediaType: "movie", Title: "Example", VirtualUri: "aiostreams://movie/tt1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registrar.installationID != 77 {
+		t.Fatalf("installation=%d", registrar.installationID)
+	}
+	if resp.GetMediaId() != "movie-tmdb-42" {
+		t.Fatalf("media=%q", resp.GetMediaId())
+	}
+}
+
 func (f *fakeConfigSetter) SetGlobalConfigEntry(_ context.Context, installationID int, key string, value map[string]any) error {
 	f.installationID = installationID
 	f.key = key
@@ -177,7 +199,7 @@ func (f *fakeConfigSetter) SetGlobalConfigEntry(_ context.Context, installationI
 func TestRuntimeHostServer_SetGlobalConfigEntry_PassesInstallationKeyAndValue(t *testing.T) {
 	setter := &fakeConfigSetter{}
 	srv := pluginhost.NewRuntimeHostServerWithServices(
-		&fakeHub{}, &fakeLibLister{}, nil, nil, setter, "silo.example", 42,
+		&fakeHub{}, &fakeLibLister{}, nil, nil, setter, nil, "silo.example", 42,
 	)
 	value, _ := structpb.NewStruct(map[string]any{"baseUrl": "https://example.test"})
 
@@ -202,7 +224,7 @@ func TestRuntimeHostServer_SetGlobalConfigEntry_PassesInstallationKeyAndValue(t 
 func TestRuntimeHostServer_SetGlobalConfigEntry_RejectsEmptyKey(t *testing.T) {
 	setter := &fakeConfigSetter{}
 	srv := pluginhost.NewRuntimeHostServerWithServices(
-		&fakeHub{}, &fakeLibLister{}, nil, nil, setter, "silo.example", 42,
+		&fakeHub{}, &fakeLibLister{}, nil, nil, setter, nil, "silo.example", 42,
 	)
 
 	_, err := srv.SetGlobalConfigEntry(context.Background(), &pluginv1.SetGlobalConfigEntryRequest{})

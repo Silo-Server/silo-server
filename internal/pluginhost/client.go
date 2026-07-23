@@ -154,7 +154,7 @@ func (c *Client) ScheduledTask(capabilityID string) (*ScheduledTaskClient, error
 	}
 	return &ScheduledTaskClient{
 		client:  c.rpc.ScheduledTask(),
-		timeout: DefaultControlTimeout,
+		timeout: DefaultScheduledTaskTimeout,
 	}, nil
 }
 

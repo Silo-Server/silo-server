@@ -2669,7 +2669,10 @@ func (r *FileRepository) MarkMissing(ctx context.Context, id int, since time.Tim
 // Returns the number of rows deleted.
 func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int, gracePeriod time.Duration, protectedRoots []string) (int, error) {
 	cutoff := time.Now().UTC().Add(-gracePeriod)
-	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2"
+	// Virtual plugin-backed files are not present on the local filesystem by
+	// design. They must never be treated as missing physical files by scanner
+	// cleanup, otherwise a scan/restart disables playback for every virtual item.
+	query := "DELETE FROM media_files WHERE media_folder_id = $1 AND missing_since IS NOT NULL AND missing_since < $2 AND container <> 'virtual' AND file_path NOT LIKE 'aiostreams://%'"
 	args := []any{folderID, cutoff}
 	if clauses, clauseArgs := rootCoverageClauses(protectedRoots, len(args)+1); len(clauses) > 0 {
 		query += " AND NOT (" + strings.Join(clauses, " OR ") + ")"
@@ -2916,8 +2919,8 @@ func (r *FileRepository) ListByObservedRootPath(ctx context.Context, folderID in
 func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) ([]*models.MediaFile, error) {
 	query := `SELECT ` + fileColumns + ` FROM media_files
 		WHERE content_id = $1 AND missing_since IS NULL
-		ORDER BY id ASC`
-	rows, err := r.pool.Query(ctx, query, contentID)
+		ORDER BY (left(file_path, 13) = $2) ASC, id ASC`
+	rows, err := r.pool.Query(ctx, query, contentID, "aiostreams://")
 	if err != nil {
 		return nil, fmt.Errorf("querying files by content_id: %w", err)
 	}

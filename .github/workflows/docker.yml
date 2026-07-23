@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/virtual-playback-upstream
   workflow_dispatch:
 
 concurrency:
@@ -97,7 +98,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Extract metadata
         id: meta
@@ -160,7 +161,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       - name: Extract metadata
         id: meta
@@ -169,6 +170,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_LC }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
             type=sha,prefix=,format=short
 
       - name: Create and push manifest list

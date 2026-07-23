@@ -8,13 +8,33 @@ import (
 )
 
 type fakePresenceLookup struct {
-	rows []catalog.ExternalIDMatchRow
-	got  []catalog.ExternalIDLookupCandidate
+	rows      []catalog.ExternalIDMatchRow
+	got       []catalog.ExternalIDLookupCandidate
+	mediaType string
 }
 
-func (f *fakePresenceLookup) LookupExternalIDs(_ context.Context, _ string, candidates []catalog.ExternalIDLookupCandidate) ([]catalog.ExternalIDMatchRow, error) {
+func (f *fakePresenceLookup) LookupExternalIDs(_ context.Context, mediaType string, candidates []catalog.ExternalIDLookupCandidate) ([]catalog.ExternalIDMatchRow, error) {
+	f.mediaType = mediaType
 	f.got = append([]catalog.ExternalIDLookupCandidate(nil), candidates...)
 	return f.rows, nil
+}
+
+func TestCatalogPresenceUsesCanonicalSeriesType(t *testing.T) {
+	lookup := &fakePresenceLookup{rows: []catalog.ExternalIDMatchRow{{
+		QueryTMDBID: "85720", MediaID: "show-tmdb-85720", MatchedProvider: "tmdb",
+	}}}
+	presence := &CatalogPresence{items: lookup}
+
+	result, err := presence.Lookup(context.Background(), MediaTypeSeries, []PresenceCandidate{{TMDBID: 85720}})
+	if err != nil {
+		t.Fatalf("Lookup returned error: %v", err)
+	}
+	if lookup.mediaType != "series" {
+		t.Fatalf("catalog media type = %q, want series", lookup.mediaType)
+	}
+	if !result[85720].Available {
+		t.Fatal("series should be available")
+	}
 }
 
 type fakeTMDBBackfiller struct {

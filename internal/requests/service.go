@@ -67,6 +67,7 @@ type Service struct {
 	requesterIdentity RequesterIdentityResolver
 	notifier          FulfillmentNotifier
 	lifecycle         LifecycleNotifier
+	catalogChanged    func()
 	Now               func() time.Time
 }
 
@@ -95,6 +96,10 @@ func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *
 }
 
 func (s *Service) SetRouterProvider(p RequestRouterProvider) { s.router = p }
+
+// SetCatalogChangeNotifier installs the cache/event hook used when a request
+// router may have registered media directly in the catalog during Fulfill.
+func (s *Service) SetCatalogChangeNotifier(notify func()) { s.catalogChanged = notify }
 
 func (s *Service) SetEntitlementResolver(r EntitlementResolver) { s.entitlements = r }
 
@@ -1181,6 +1186,14 @@ func (s *Service) validateViaPlugin(ctx context.Context, in Integration) error {
 			return err
 		}
 		if stored != nil {
+			sameInstallation := stored.InstallationID != nil && in.InstallationID != nil && *stored.InstallationID == *in.InstallationID
+			if !sameInstallation {
+				// Credentials and plugin config belong to the selected plugin. Never
+				// carry them across when an integration is rebound to another install.
+				stored = nil
+			}
+		}
+		if stored != nil {
 			// Don't pair a stored API key with a caller-changed base URL: require the
 			// key to be re-entered when the server URL changes (defense against
 			// exfiltrating a stored, API-unreadable key to an attacker-supplied URL).
@@ -1701,6 +1714,12 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	targets, msg, err := s.router.Fulfill(ctx, installationID, capabilityID, req, want, conns)
 	if err != nil {
 		return nil, err
+	}
+	// Fulfill is allowed to create virtual catalog rows before returning. Flush
+	// shared home-section membership now so Recently Added reflects the change
+	// on the user's next request instead of serving its five-minute warm entry.
+	if s.catalogChanged != nil {
+		s.catalogChanged()
 	}
 	if len(targets) == 0 {
 		if msg == "" {
