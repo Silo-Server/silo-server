@@ -4,6 +4,7 @@ import {
   classifyActivityMethod,
   compareActivityMethods,
   isJellyfinSession,
+  isNativeSiloSession,
   formatContainerDetail,
   formatDeliveredAudioSummary,
   formatDeliveredContainerSummary,
@@ -38,6 +39,7 @@ function makeSession(overrides: Partial<AdminSession> = {}): AdminSession {
     client_user_agent: overrides.client_user_agent,
     effective_play_method: overrides.effective_play_method,
     is_jellyfin_client: overrides.is_jellyfin_client,
+    is_native_silo_client: overrides.is_native_silo_client,
     audio_track_index: overrides.audio_track_index ?? 0,
     transcode_audio: overrides.transcode_audio ?? true,
     stream_bitrate_kbps: overrides.stream_bitrate_kbps ?? 8000,
@@ -275,6 +277,13 @@ describe("adminActivityPresentation", () => {
     // even when the client name looks like a Jellyfin client.
     expect(isJellyfinSession(makeSession({ client_name: "Jellyfin Web" }))).toBe(false);
     expect(isJellyfinSession(makeSession())).toBe(false);
+  });
+
+  it("tags first-party clients for the native Silo pill", () => {
+    expect(isNativeSiloSession(makeSession({ is_native_silo_client: true }))).toBe(true);
+    expect(isNativeSiloSession(makeSession({ is_native_silo_client: false }))).toBe(false);
+    expect(isNativeSiloSession(makeSession({ client_name: "Silo for Windows" }))).toBe(false);
+    expect(isNativeSiloSession(makeSession())).toBe(false);
   });
 
   it("labels HLS copy-original sessions as container HLS with copied video", () => {

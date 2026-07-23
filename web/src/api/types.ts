@@ -2405,6 +2405,7 @@ export interface AdminSession {
   client_version?: string;
   client_label?: string;
   client_user_agent?: string;
+  is_native_silo_client?: boolean;
   audio_track_index: number;
   transcode_audio: boolean;
   stream_bitrate_kbps: number | null;

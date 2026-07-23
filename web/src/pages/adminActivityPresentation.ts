@@ -173,6 +173,11 @@ export function isJellyfinSession(session: AdminSession): boolean {
   return session.is_jellyfin_client === true;
 }
 
+/** Report whether a session is a first-party client using Silo's native API. */
+export function isNativeSiloSession(session: AdminSession): boolean {
+  return session.is_native_silo_client === true;
+}
+
 export function formatPlaybackDecisionSummary(session: AdminSession): string {
   const videoDecision = normalizeStreamDecision(session.video_decision || session.play_method);
   const audioDecision = normalizeStreamDecision(

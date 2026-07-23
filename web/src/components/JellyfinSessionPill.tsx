@@ -1,5 +1,5 @@
 import type { AdminSession } from "@/api/types";
-import { isJellyfinSession } from "@/pages/adminActivityPresentation";
+import { isJellyfinSession, isNativeSiloSession } from "@/pages/adminActivityPresentation";
 
 /**
  * Purple "JF" pill marking a session served through the Jellyfin compatibility
@@ -16,6 +16,21 @@ export function JellyfinSessionPill({ session }: { session: AdminSession }) {
       title="Jellyfin client"
     >
       JF
+    </span>
+  );
+}
+
+/** First-party native Silo client badge. */
+export function NativeSiloSessionPill({ session }: { session: AdminSession }) {
+  if (!isNativeSiloSession(session)) {
+    return null;
+  }
+  return (
+    <span
+      className="border-primary/30 bg-primary/15 text-primary inline-flex flex-shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+      title="Native Silo client"
+    >
+      Silo
     </span>
   );
 }

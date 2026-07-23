@@ -65,8 +65,8 @@ func TestSessionsCapabilitiesAdvertisesActivityFields(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode capabilities: %v", err)
 	}
-	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient {
-		t.Fatalf("capabilities must advertise both fields: %+v", resp)
+	if !resp.EffectivePlayMethod || !resp.IsJellyfinClient || !resp.IsNativeSiloClient {
+		t.Fatalf("capabilities must advertise all fields: %+v", resp)
 	}
 	want := []string{"direct", "remux", "transcode", "audio"}
 	if len(resp.EffectivePlayMethodValues) != len(want) {
@@ -99,6 +99,28 @@ func TestIsJellyfinEcosystemClient(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isJellyfinEcosystemClient(tc.clientName, tc.userAgent); got != tc.want {
 				t.Fatalf("isJellyfinEcosystemClient(%q, %q) = %v, want %v", tc.clientName, tc.userAgent, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestIsNativeSiloClient(t *testing.T) {
+	cases := []struct {
+		name       string
+		clientName string
+		want       bool
+	}{
+		{"windows desktop", "Silo for Windows", true},
+		{"native android", "Silo Android", true},
+		{"case and whitespace", "  SILO FOR WINDOWS  ", true},
+		{"jellyfin client", "VidHub", false},
+		{"browser", "Chrome", false},
+		{"missing", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNativeSiloClient(tc.clientName); got != tc.want {
+				t.Fatalf("isNativeSiloClient(%q) = %v, want %v", tc.clientName, got, tc.want)
 			}
 		})
 	}

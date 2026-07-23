@@ -74,6 +74,7 @@ type playbackSessionRow struct {
 	AudioDecision            string    `json:"audio_decision,omitempty"`
 	EffectivePlayMethod      string    `json:"effective_play_method,omitempty"`
 	IsJellyfinClient         bool      `json:"is_jellyfin_client,omitempty"`
+	IsNativeSiloClient       bool      `json:"is_native_silo_client,omitempty"`
 }
 
 // playbackSessionsCapabilitiesResponse advertises the additive fields of the
@@ -88,6 +89,8 @@ type playbackSessionsCapabilitiesResponse struct {
 	EffectivePlayMethodValues []string `json:"effective_play_method_values"`
 	// IsJellyfinClient reports that rows carry is_jellyfin_client.
 	IsJellyfinClient bool `json:"is_jellyfin_client"`
+	// IsNativeSiloClient reports that rows carry is_native_silo_client.
+	IsNativeSiloClient bool `json:"is_native_silo_client"`
 }
 
 // HandleGetSessionsCapabilities exposes additive feature support for the live
@@ -97,6 +100,7 @@ func (h *AdminHandler) HandleGetSessionsCapabilities(w http.ResponseWriter, _ *h
 		EffectivePlayMethod:       true,
 		EffectivePlayMethodValues: []string{"direct", "remux", "transcode", "audio"},
 		IsJellyfinClient:          true,
+		IsNativeSiloClient:        true,
 	})
 }
 
@@ -276,6 +280,7 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
 	row.IsJellyfinClient = isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
+	row.IsNativeSiloClient = isNativeSiloClient(row.ClientName)
 
 	var audioTracks []models.AudioTrack
 	if len(audioTracksJSON) > 0 {
@@ -434,6 +439,15 @@ func isJellyfinEcosystemClient(clientName, userAgent string) bool {
 		}
 	}
 	return false
+}
+
+// isNativeSiloClient identifies first-party clients that use Silo's native API.
+// The desktop client reports the stable product name without a release number,
+// allowing the UI to show a branded protocol pill without conflating it with
+// the Jellyfin compatibility surface.
+func isNativeSiloClient(clientName string) bool {
+	name := strings.ToLower(strings.TrimSpace(clientName))
+	return name == "silo for windows" || strings.HasPrefix(name, "silo ")
 }
 
 func firstNonEmptyValue(values ...string) string {

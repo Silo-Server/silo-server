@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { AdminSessionActions } from "@/components/AdminSessionActions";
-import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
+import { JellyfinSessionPill, NativeSiloSessionPill } from "@/components/JellyfinSessionPill";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import { useOperationalLogs } from "@/hooks/queries/admin/logs";
 import { usePageActivity } from "@/hooks/usePageActivity";
@@ -18,6 +18,7 @@ import {
   compareActivityMethods,
   decisionBadgeClass,
   isJellyfinSession,
+  isNativeSiloSession,
   formatAudioDetail,
   formatContainerDetail,
   formatDeliveredAudioSummary,
@@ -526,7 +527,7 @@ function StreamRow({
   const sourceContainer = session.source_container?.trim().toUpperCase();
   const streamBitrate = formatSessionBitrate(session.stream_bitrate_kbps);
   const streamMeta = [sourceContainer, streamBitrate].filter(Boolean).join(" · ");
-  const clientIP = session.client_ip?.trim() || "";
+  const clientIP = isNativeSiloSession(session) ? "" : session.client_ip?.trim() || "";
   const clientLabel = getSessionClientLabel(session);
   const playbackPosition = formatPlaybackPosition(session);
   const transcodeMode = formatTranscodeModeSummary(session);
@@ -598,9 +599,13 @@ function StreamRow({
                 </span>
               </div>
             ) : null}
-            {(clientLabel || clientIP || isJellyfinSession(session)) && (
+            {(clientLabel ||
+              clientIP ||
+              isJellyfinSession(session) ||
+              isNativeSiloSession(session)) && (
               <div className="text-muted-foreground mt-1 flex min-w-0 items-center gap-1.5 text-[10px]">
                 <JellyfinSessionPill session={session} />
+                <NativeSiloSessionPill session={session} />
                 {clientLabel ? (
                   <span
                     title={session.client_user_agent || clientLabel}
@@ -786,6 +791,7 @@ function StreamRow({
               {activityMethod}
             </span>
             <JellyfinSessionPill session={session} />
+            <NativeSiloSessionPill session={session} />
           </div>
           <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[11px]">
             {itemHref ? (
