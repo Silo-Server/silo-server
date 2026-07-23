@@ -2,11 +2,14 @@ package httpstream
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -86,9 +89,13 @@ func TestUnwrappedStreamStillKilledAtWriteTimeout(t *testing.T) {
 // connection: a client that stops reading must cause a write error within
 // roughly the stall window, not never.
 func TestStalledClientReaped(t *testing.T) {
-	handlerDone := make(chan error, 1)
+	type result struct {
+		err     error
+		outcome StreamOutcome
+	}
+	handlerDone := make(chan result, 1)
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sw := newRollingDeadlineWriter(w, 1*time.Second, 0)
+		sw := newRollingDeadlineWriter(w, 500*time.Millisecond, 0)
 		sw.WriteHeader(http.StatusOK)
 		buf := make([]byte, 1<<20)
 		var err error
@@ -98,7 +105,7 @@ func TestStalledClientReaped(t *testing.T) {
 			}
 			sw.Flush()
 		}
-		handlerDone <- err
+		handlerDone <- result{err: err, outcome: sw.Outcome(r.Context())}
 	}))
 	srv.Config.WriteTimeout = 0 // isolate: only the rolling deadline may reap
 	srv.Start()
@@ -116,12 +123,151 @@ func TestStalledClientReaped(t *testing.T) {
 	}
 
 	select {
-	case err := <-handlerDone:
-		if err == nil {
+	case got := <-handlerDone:
+		if got.err == nil {
 			t.Fatal("handler finished 256MB into a non-reading client without error")
+		}
+		if got.outcome != OutcomeStalledReap {
+			t.Fatalf("outcome = %q, want %q (error: %v)", got.outcome, OutcomeStalledReap, got.err)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("stalled client was never reaped by the rolling deadline")
+	}
+}
+
+func TestDisconnectedClientClassifiedClientGone(t *testing.T) {
+	type result struct {
+		err     error
+		outcome StreamOutcome
+	}
+	startWriting := make(chan struct{})
+	handlerDone := make(chan result, 1)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sw := newRollingDeadlineWriter(w, 5*time.Second, 0)
+		sw.WriteHeader(http.StatusOK)
+		_, _ = sw.Write([]byte("ready"))
+		sw.Flush()
+		<-startWriting
+
+		buf := make([]byte, 1<<20)
+		var err error
+		for i := 0; i < 256; i++ {
+			if _, err = sw.Write(buf); err != nil {
+				break
+			}
+			sw.Flush()
+		}
+		handlerDone <- result{err: err, outcome: sw.Outcome(r.Context())}
+	}))
+	srv.Config.WriteTimeout = 0
+	srv.Start()
+	defer srv.Close()
+
+	conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if _, err := fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if _, err := bufio.NewReader(conn).ReadString('\n'); err != nil {
+		t.Fatalf("status line: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	close(startWriting)
+
+	select {
+	case got := <-handlerDone:
+		if got.err == nil {
+			t.Fatal("handler completed after the client disconnected")
+		}
+		if got.outcome != OutcomeClientGone {
+			t.Fatalf("outcome = %q, want %q (error: %v)", got.outcome, OutcomeClientGone, got.err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("handler did not observe the client disconnect")
+	}
+}
+
+func TestWriteOutcomeCompletedAndCounted(t *testing.T) {
+	rr := httptest.NewRecorder()
+	sw := newRollingDeadlineWriter(rr, time.Second, 0)
+	sw.WriteHeader(http.StatusCreated)
+	const body = "completed body"
+	n, err := sw.Write([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(body) || sw.BytesWritten() != int64(len(body)) {
+		t.Fatalf("bytes = (%d, %d), want %d", n, sw.BytesWritten(), len(body))
+	}
+	if sw.StatusCode() != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", sw.StatusCode(), http.StatusCreated)
+	}
+	if outcome := sw.Outcome(context.Background()); outcome != OutcomeCompleted {
+		t.Fatalf("outcome = %q, want %q", outcome, OutcomeCompleted)
+	}
+}
+
+func TestServeContentReadFromOutcomeCompletedAndCounted(t *testing.T) {
+	const totalSize = 2 << 20
+	filePath := filepath.Join(t.TempDir(), "source.bin")
+	if err := os.WriteFile(filePath, bytesOf('x', totalSize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	type result struct {
+		status  int
+		bytes   int64
+		outcome StreamOutcome
+	}
+	handlerDone := make(chan result, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, err := os.Open(filePath)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer f.Close()
+		stat, err := f.Stat()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		sw := newRollingDeadlineWriter(w, 5*time.Second, 0)
+		http.ServeContent(sw, r, stat.Name(), stat.ModTime(), f)
+		handlerDone <- result{status: sw.StatusCode(), bytes: sw.BytesWritten(), outcome: sw.Outcome(r.Context())}
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, readErr := io.Copy(io.Discard, resp.Body)
+	closeErr := resp.Body.Close()
+	if readErr != nil || closeErr != nil {
+		t.Fatalf("read = %v, close = %v", readErr, closeErr)
+	}
+	if n != totalSize {
+		t.Fatalf("response bytes = %d, want %d", n, totalSize)
+	}
+
+	select {
+	case got := <-handlerDone:
+		if got.status != http.StatusOK {
+			t.Fatalf("status = %d, want 200", got.status)
+		}
+		if got.bytes != totalSize {
+			t.Fatalf("counted bytes = %d, want %d", got.bytes, totalSize)
+		}
+		if got.outcome != OutcomeCompleted {
+			t.Fatalf("outcome = %q, want %q", got.outcome, OutcomeCompleted)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not complete")
 	}
 }
 
@@ -171,6 +317,14 @@ func (b neverEnding) Read(p []byte) (int, error) {
 type slowReader struct {
 	r     io.Reader
 	delay time.Duration
+}
+
+func bytesOf(value byte, size int) []byte {
+	buf := make([]byte, size)
+	for i := range buf {
+		buf[i] = value
+	}
+	return buf
 }
 
 func (s *slowReader) Read(p []byte) (int, error) {

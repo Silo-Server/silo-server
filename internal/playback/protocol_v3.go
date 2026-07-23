@@ -20,6 +20,7 @@ const (
 	FeatureRouteDiagnostics       = "playback_route_diagnostics"
 	FeatureDeviceQuirksV3         = "device_quirks_v1"
 	FeatureSeekReanchorV3         = "seek_reanchor_v1"
+	FeatureDirectStreamResumeV3   = "direct_stream_resume_v1"
 	PlanRecipeVersionV3           = "v3.2"
 	ClientDV7ToDV81V3             = "client_dv7_to_dv81"
 	ClientDV7ToHDR10V3            = "client_dv7_to_hdr10"
@@ -812,7 +813,7 @@ func HasFeatureV3(features []string, wanted string) bool {
 func NewTerminalResponseV3(reason, message string, retryable bool) DecisionResponseV3 {
 	return DecisionResponseV3{
 		ProtocolVersion: ProtocolV3,
-		ServerFeatures:  []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDeviceQuirksV3, FeatureSeekReanchorV3},
+		ServerFeatures:  []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDeviceQuirksV3, FeatureSeekReanchorV3, FeatureDirectStreamResumeV3},
 		Outcome:         OutcomeAdaptationUnavailableV3,
 		Terminal:        &TerminalV3{Reason: reason, Message: message, Retryable: retryable},
 	}

@@ -1,9 +1,12 @@
 package playback
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/httpstream"
@@ -54,7 +57,8 @@ func MimeFromExtension(name string) string {
 func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) error {
 	// Media bodies routinely take longer than the server's absolute
 	// WriteTimeout; roll the write deadline with progress instead.
-	w = httpstream.NewRollingDeadlineWriter(w)
+	streamWriter := httpstream.NewRollingDeadlineWriter(w)
+	w = streamWriter
 	f, err := os.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -71,10 +75,62 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return err
 	}
+	w = &directPlayResponseWriter{
+		RollingDeadlineWriter: streamWriter,
+		size:                  stat.Size(),
+	}
+
+	if _, exists := w.Header()[http.CanonicalHeaderKey("ETag")]; !exists {
+		w.Header().Set("ETag", fmt.Sprintf("\"%x-%x\"", stat.ModTime().UnixNano(), stat.Size()))
+	}
 
 	// Set Content-Type explicitly so ServeContent does not sniff.
 	w.Header().Set("Content-Type", MimeFromExtension(filePath))
 
+	rangeStart := directStreamRangeStart(r.Header.Get("Range"))
+	hadIfRange := len(r.Header.Values("If-Range")) > 0
+	directStreamActive.Inc()
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+	outcome := streamWriter.Outcome(r.Context())
+	status := streamWriter.StatusCode()
+	bytesSent := streamWriter.BytesWritten()
+	recordDirectStreamEnd(outcome, status, bytesSent, rangeStart)
+	slog.InfoContext(r.Context(), "direct stream ended",
+		"component", "playback",
+		"outcome", outcome,
+		"status", status,
+		"bytes_sent", bytesSent,
+		"range_start", rangeStart,
+		"had_if_range", hadIfRange,
+	)
 	return nil
+}
+
+type directPlayResponseWriter struct {
+	*httpstream.RollingDeadlineWriter
+	size int64
+}
+
+func (w *directPlayResponseWriter) WriteHeader(status int) {
+	if status == http.StatusRequestedRangeNotSatisfiable {
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", w.size))
+	}
+	w.RollingDeadlineWriter.WriteHeader(status)
+}
+
+func directStreamRangeStart(rangeHeader string) int64 {
+	const prefix = "bytes="
+	if !strings.HasPrefix(rangeHeader, prefix) {
+		return -1
+	}
+	firstRange, _, _ := strings.Cut(strings.TrimSpace(strings.TrimPrefix(rangeHeader, prefix)), ",")
+	start, _, ok := strings.Cut(strings.TrimSpace(firstRange), "-")
+	if !ok || start == "" {
+		return -1
+	}
+	value, err := strconv.ParseInt(strings.TrimSpace(start), 10, 64)
+	if err != nil || value < 0 {
+		return -1
+	}
+	return value
 }

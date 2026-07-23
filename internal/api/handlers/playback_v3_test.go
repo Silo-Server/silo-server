@@ -137,7 +137,10 @@ func TestHandlePlaybackCapabilityV3ReadsFlagPerRequest(t *testing.T) {
 	handler.v3FlagMu.Lock()
 	handler.v3Flags = nil
 	handler.v3FlagMu.Unlock()
-	if response := request(); !response.Enabled || len(response.Deliveries) != 4 || !playback.HasFeatureV3(response.Features, playback.FeatureSeekReanchorV3) {
+	if response := request(); !response.Enabled ||
+		len(response.Deliveries) != 4 ||
+		!playback.HasFeatureV3(response.Features, playback.FeatureSeekReanchorV3) ||
+		!playback.HasFeatureV3(response.Features, playback.FeatureDirectStreamResumeV3) {
 		t.Fatalf("enabled response = %#v", response)
 	}
 }
