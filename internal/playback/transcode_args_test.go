@@ -307,7 +307,7 @@ func TestBuildFFmpegArgs_BitmapBurnInNoScaleKeepsNativeResolution(t *testing.T) 
 	}
 }
 
-func TestBuildFFmpegArgs_BitmapBurnInVAAPIRoundTripsThroughCPU(t *testing.T) {
+func TestBuildFFmpegArgs_BitmapBurnInVAAPICompositesOnGPU(t *testing.T) {
 	args := buildFFmpegArgs(TranscodeOpts{
 		InputPath:          "/media/movie.mkv",
 		OutputDir:          "/tmp/out",
@@ -324,9 +324,14 @@ func TestBuildFFmpegArgs_BitmapBurnInVAAPIRoundTripsThroughCPU(t *testing.T) {
 	})
 
 	joined := strings.Join(args, " ")
-	want := "-filter_complex [0:v:0]hwdownload,format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload[vout]"
+	// Only the subtitle bitmap is uploaded; the video stays on the VAAPI surface
+	// and is composited with overlay_vaapi — no full-frame hwdownload roundtrip.
+	want := "-filter_complex [0:s:1]format=bgra,hwupload[sub];[0:v:0][sub]overlay_vaapi=eof_action=pass,scale_vaapi=w=-2:h=720:format=nv12[vout]"
 	if !strings.Contains(joined, want) {
-		t.Fatalf("vaapi bitmap burn-in should hwdownload → overlay → hwupload %q: %s", want, joined)
+		t.Fatalf("vaapi bitmap burn-in should composite on GPU %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "hwdownload") {
+		t.Fatalf("vaapi bitmap burn-in must not roundtrip the video through CPU: %s", joined)
 	}
 	if !strings.Contains(joined, "-map [vout]") {
 		t.Fatalf("vaapi bitmap burn-in should map the filter graph output: %s", joined)
@@ -336,6 +341,68 @@ func TestBuildFFmpegArgs_BitmapBurnInVAAPIRoundTripsThroughCPU(t *testing.T) {
 	}
 	if !strings.Contains(joined, "-c:v h264_vaapi") {
 		t.Fatalf("vaapi bitmap burn-in should keep the hardware encoder: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_BitmapBurnInQSVCompositesOnGPU(t *testing.T) {
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-pgs-qsv",
+		SourceVideoCodec:   "h264",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "qsv",
+		TargetResolution:   "720p",
+		SubtitleTrackIndex: 1,
+		SubtitleBurnIn:     true,
+		SubtitleCodec:      "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	// GPU composite via overlay_vaapi, then map the VAAPI surface to QSV for the
+	// encoder — the video never leaves hardware memory.
+	want := "-filter_complex [0:s:1]format=bgra,hwupload[sub];[0:v:0][sub]overlay_vaapi=eof_action=pass,scale_vaapi=w=-2:h=720:format=nv12,hwmap=derive_device=qsv,format=qsv[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("qsv bitmap burn-in should composite on GPU %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "hwdownload") {
+		t.Fatalf("qsv bitmap burn-in must not roundtrip the video through CPU: %s", joined)
+	}
+	if strings.Contains(joined, "-vf ") {
+		t.Fatalf("qsv bitmap burn-in must not emit -vf: %s", joined)
+	}
+	if !strings.Contains(joined, "-c:v h264_qsv") {
+		t.Fatalf("qsv bitmap burn-in should keep the hardware encoder: %s", joined)
+	}
+}
+
+func TestBuildFFmpegArgs_BitmapBurnInNVENCStaysOnCPUOverlay(t *testing.T) {
+	// overlay_cuda is unverified on the bundled ffmpeg, so NVENC keeps the safe
+	// software roundtrip: download the frame, overlay on CPU, re-upload to CUDA.
+	args := buildFFmpegArgs(TranscodeOpts{
+		InputPath:          "/media/movie.mkv",
+		OutputDir:          "/tmp/out",
+		SessionID:          "session-pgs-nvenc",
+		SourceVideoCodec:   "h264",
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		HWAccel:            "nvenc",
+		TargetResolution:   "720p",
+		SubtitleTrackIndex: 1,
+		SubtitleBurnIn:     true,
+		SubtitleCodec:      "hdmv_pgs_subtitle",
+	})
+
+	joined := strings.Join(args, " ")
+	want := "-filter_complex [0:v:0]hwdownload,format=yuv420p[vmain];[vmain][0:s:1]overlay=eof_action=pass,scale=-2:720,format=nv12,hwupload_cuda[vout]"
+	if !strings.Contains(joined, want) {
+		t.Fatalf("nvenc bitmap burn-in should keep the CPU roundtrip %q: %s", want, joined)
+	}
+	if strings.Contains(joined, "overlay_vaapi") {
+		t.Fatalf("nvenc bitmap burn-in must not use the VAAPI GPU overlay: %s", joined)
 	}
 }
 

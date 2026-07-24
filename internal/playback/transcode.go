@@ -711,7 +711,7 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 
 // appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle
 // codecs (PGS/VOBSUB/DVB). libass's subtitles= filter cannot render bitmap
-// tracks, so the decoded subtitle stream is composited onto the video with
+// tracks, so the decoded subtitle stream is composited onto the video with an
 // overlay in a -filter_complex graph (the "Plex route"). The graph's output
 // pad [vout] replaces the raw video stream in stream mapping (see
 // appendStreamSelectionArgs), so -vf must never be emitted alongside this.
@@ -722,32 +722,49 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 // eof_action=pass keeps the video flowing untouched once the subtitle stream
 // ends instead of freezing the last overlay frame on screen.
 //
-// Hardware pipelines mirror appendSubtitleBurnInArgs: frames are downloaded
-// to CPU memory for the overlay, then re-uploaded for the hardware encoder.
+// QSV/VAAPI composite ON the GPU via overlay_vaapi: the decoded video never
+// leaves its VAAPI surface, and only the small, low-frequency subtitle bitmap is
+// uploaded. This avoids the full-frame GPU→CPU→GPU roundtrip a software overlay
+// forces — that roundtrip runs below realtime on 1080p sources (~0.7x), starving
+// the client, and can crash the QSV buffer path with SIGBUS. See
+// appendSubtitleBurnInArgs for the TEXT path, which must stay on CPU because
+// libass is a software renderer. NVENC and CPU encodes keep the software overlay:
+// overlay_cuda is unverified on this build, so the CUDA path retains the safe
+// (if slower) roundtrip rather than risk a broken graph.
 func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string {
 	// [0:s:N] indexes subtitle streams only, matching the si=N semantics of
 	// the text path — SubtitleTrackIndex is the embedded subtitle ordinal.
-	cpuFilters := fmt.Sprintf("[0:s:%d]overlay=eof_action=pass", opts.SubtitleTrackIndex)
-	if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-		cpuFilters += "," + scale
-	}
+	subInput := fmt.Sprintf("[0:s:%d]", opts.SubtitleTrackIndex)
 
 	var graph string
 	switch opts.HWAccel {
 	case "qsv":
-		// VAAPI→QSV pipeline: download decoded frames to CPU, overlay, convert
-		// to nv12, upload back to VAAPI, then map to QSV for the encoder.
-		graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
-			",format=nv12,hwupload,hwmap=derive_device=qsv,format=qsv[vout]"
+		// GPU composite: upload only the subtitle bitmap, overlay it onto the
+		// VAAPI video surface, scale, then map to QSV for the encoder. The scale
+		// helper already appends the hwmap=derive_device=qsv tail.
+		graph = subInput + "format=bgra,hwupload[sub];" +
+			"[0:v:0][sub]overlay_vaapi=eof_action=pass," + qsvScaleFilter(opts.TargetResolution) + "[vout]"
 	case "vaapi":
-		graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
-			",format=nv12,hwupload[vout]"
-	case "nvenc":
-		graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
-			",format=nv12,hwupload_cuda[vout]"
+		// GPU composite: same as QSV but the frames stay on VAAPI through the
+		// encoder, so no cross-device map is needed.
+		graph = subInput + "format=bgra,hwupload[sub];" +
+			"[0:v:0][sub]overlay_vaapi=eof_action=pass," + vaapiScaleFilter(opts.TargetResolution) + "[vout]"
 	default:
-		// CPU encoding: overlay directly on decoded frames.
-		graph = "[0:v:0]" + cpuFilters + "[vout]"
+		// NVENC and CPU: software overlay on CPU frames. Build the overlay
+		// fragment (subtitle input + optional post-scale) once, then wire it into
+		// the encode-specific pipeline.
+		cpuFilters := subInput + "overlay=eof_action=pass"
+		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
+			cpuFilters += "," + scale
+		}
+		if opts.HWAccel == "nvenc" {
+			// Download to CPU for the overlay, then re-upload to CUDA.
+			graph = "[0:v:0]hwdownload,format=yuv420p[vmain];[vmain]" + cpuFilters +
+				",format=nv12,hwupload_cuda[vout]"
+		} else {
+			// CPU encoding: overlay directly on decoded frames.
+			graph = "[0:v:0]" + cpuFilters + "[vout]"
+		}
 	}
 
 	return append(args, "-filter_complex", graph)
