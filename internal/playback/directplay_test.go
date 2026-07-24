@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+)
+
+const (
+	directPlayDarwinGOOS  = "darwin"
+	directPlayLinuxGOOS   = "linux"
+	directPlayWindowsGOOS = "windows"
 )
 
 func TestServeDirectPlayHTTPContract(t *testing.T) {
@@ -53,7 +60,14 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		t.Fatalf("Accept-Ranges = %q, want bytes", got)
 	}
 	etag := full.Header().Get("ETag")
-	if etag == "" || strings.HasPrefix(etag, "W/") || !strings.HasPrefix(etag, "\"") || !strings.HasSuffix(etag, "\"") {
+	validatorRequired := platformRequiresDirectPlayValidator()
+	if validatorRequired && etag == "" {
+		t.Fatalf("ETag omitted on supported platform %s", runtime.GOOS)
+	}
+	if !validatorRequired && etag != "" {
+		t.Fatalf("ETag = %q on unsupported platform %s, want omitted validator", etag, runtime.GOOS)
+	}
+	if etag != "" && (strings.HasPrefix(etag, "W/") || !strings.HasPrefix(etag, "\"") || !strings.HasSuffix(etag, "\"")) {
 		t.Fatalf("ETag = %q, want a strong quoted validator", etag)
 	}
 
@@ -152,6 +166,9 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	}
 
 	t.Run("matching If-Range", func(t *testing.T) {
+		if !validatorRequired {
+			t.Skip("platform does not expose a durable file revision")
+		}
 		rr := serve(http.MethodGet, "bytes=7-", etag, "")
 		if rr.Code != http.StatusPartialContent {
 			t.Fatalf("status = %d, want 206", rr.Code)
@@ -172,6 +189,9 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	})
 
 	t.Run("If-None-Match", func(t *testing.T) {
+		if !validatorRequired {
+			t.Skip("platform does not expose a durable file revision")
+		}
 		rr := serve(http.MethodGet, "", "", etag)
 		if rr.Code != http.StatusNotModified {
 			t.Fatalf("status = %d, want 304", rr.Code)
@@ -183,6 +203,10 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 }
 
 func TestServeDirectPlayChangedEntityRejectsOldIfRange(t *testing.T) {
+	if !platformRequiresDirectPlayValidator() {
+		t.Skip("platform does not expose a durable file revision")
+	}
+
 	dir := t.TempDir()
 	filePath := filepath.Join(dir, "fixture.mp4")
 	const original = "original bytes"
@@ -199,6 +223,9 @@ func TestServeDirectPlayChangedEntityRejectsOldIfRange(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldETag := first.Header().Get("ETag")
+	if oldETag == "" {
+		t.Fatalf("ETag omitted on supported platform %s", runtime.GOOS)
+	}
 
 	const replacement = "replaced bytes"
 	if len(replacement) != len(original) {
@@ -259,6 +286,15 @@ type fileInfoWithoutSystem struct {
 
 func (fileInfoWithoutSystem) Sys() any {
 	return nil
+}
+
+func platformRequiresDirectPlayValidator() bool {
+	switch runtime.GOOS {
+	case directPlayDarwinGOOS, directPlayLinuxGOOS, directPlayWindowsGOOS:
+		return true
+	default:
+		return false
+	}
 }
 
 func TestServeDirectPlayStalledWriteIncrementsOutcomeMetric(t *testing.T) {

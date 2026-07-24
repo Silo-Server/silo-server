@@ -21,17 +21,31 @@ func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool 
 func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 	first := ServerFeaturesV3()
 	second := ServerFeaturesV3()
-	if len(first) != 8 {
-		t.Fatalf("server features = %v, want 8 entries", first)
+	expected := map[string]struct{}{
+		FeaturePlaybackPlanV3:       {},
+		FeatureMedia3Only:           {},
+		FeatureDetailedDecodeV3:     {},
+		FeatureLayoutPassthrough:    {},
+		FeatureRouteDiagnostics:     {},
+		FeatureDeviceQuirksV3:       {},
+		FeatureSeekReanchorV3:       {},
+		FeatureDirectStreamResumeV3: {},
 	}
-
-	for _, feature := range []string{
-		FeatureDetailedDecodeV3,
-		FeatureLayoutPassthrough,
-		FeatureRouteDiagnostics,
-		FeatureDirectStreamResumeV3,
-	} {
-		if !HasFeatureV3(first, feature) {
+	if len(first) != len(expected) {
+		t.Fatalf("server features = %v, want %d entries", first, len(expected))
+	}
+	seen := make(map[string]struct{}, len(first))
+	for _, feature := range first {
+		if _, ok := expected[feature]; !ok {
+			t.Fatalf("server features contain unexpected %q: %v", feature, first)
+		}
+		if _, duplicate := seen[feature]; duplicate {
+			t.Fatalf("server features contain duplicate %q: %v", feature, first)
+		}
+		seen[feature] = struct{}{}
+	}
+	for feature := range expected {
+		if _, ok := seen[feature]; !ok {
 			t.Fatalf("server features omitted %q: %v", feature, first)
 		}
 	}
