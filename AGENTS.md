@@ -1,123 +1,101 @@
-# Repository Guidelines
+# Silo Server
 
-## Project Structure & Module Organization
-`cmd/silo` contains the main server entrypoint. Backend code lives in `internal/`, organized by domain (`api`, `catalog`, `metadata`, `playback`, `scanner`, `jellycompat`, etc.); keep new code in the package that owns the behavior instead of creating catch-all helpers. Database changes belong in `migrations/sql/` as Goose SQL migrations. Legacy converted migrations intentionally keep their original numeric versions so existing `schema_versions` rows can bootstrap cleanly into Goose. New migrations must use timestamped filenames created with `make migrate-create NAME=add_thing`; do not run `goose fix` or create paired `.up.sql` / `.down.sql` files. The React frontend lives in `web/src/`, with feature code split across `components/`, `pages/`, `hooks/`, `player/`, and `lib/`. Reference material belongs in `docs/architecture/` or `docs/superpowers/{specs,plans}/`; ad hoc SQL helpers live in `scripts/`.
+Go backend for Silo: API contracts, auth/session, catalog/scanner/playback services, database
+migrations, Jellyfin compatibility, and the host-side plugin runtime. `cmd/silo` is the
+entrypoint, backend code is under `internal/` by domain, the React frontend is `web/src/`.
 
-When creating or editing `docs/superpowers/specs/` or `docs/superpowers/plans/`, never include local absolute filesystem paths or transient worktree IDs. Use repository-relative paths and wording like "Commands assume the repository root is the cwd."
+This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term
+maintainability is encouraged.
 
-This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
+## Priorities
 
+Performance and reliability first. Keep behavior predictable under load and during failures —
+session restarts, reconnects, partial streams. When a tradeoff is forced, choose correctness and
+robustness over short-term convenience.
 
-## Core Priorities
+Put new code in the package that owns the behavior rather than in a catch-all helper. Prefer
+extracting shared logic over duplicating it, and prefer changing existing code over bolting a
+local workaround onto it.
 
-1. Performance first.
-2. Reliability first.
-3. Keep behavior predictable under load and during failures (session restarts, reconnects, partial streams).
+## Gotchas
 
-If a tradeoff is required, choose correctness and robustness over short-term convenience.
+**Migrations.** New DB changes are Goose SQL migrations in `migrations/sql/`, created with
+`make migrate-create NAME=add_thing` so they get timestamped filenames. Never run `goose fix`,
+and never create paired `.up.sql` / `.down.sql` files. Legacy converted migrations deliberately
+keep their original numeric versions so existing `schema_versions` rows bootstrap cleanly — do
+not renumber them.
 
-## Maintainability
+**Encrypted settings.** Encrypted `server_settings` rows are GCM-bound to their key name.
+Renaming a row in SQL makes its value undecryptable.
 
-Long term maintainability is a core priority. If you add new functionality, first check if there is shared logic that can be extracted to a separate module. Duplicate logic across multiple files is a code smell and should be avoided. Don't be afraid to change existing code. Don't take shortcuts by just adding local logic to solve a problem.
+**Profiles vs accounts.** Login accounts (`users`) are separate from household profiles; several
+profiles on one account share a `user_id`. A profile's `is_primary` marks the household parent,
+which is *not* the server-wide `admin` role on the account.
 
-This repository is part of a broader multi-repo Silo workspace. The sibling
-repositories are usually checked out side-by-side in the same parent directory.
+**Docs hygiene.** Files under `docs/superpowers/{specs,plans}/` must not contain local absolute
+filesystem paths or transient worktree IDs — use repository-relative paths and wording like
+"Commands assume the repository root is the cwd." `make verify-local-paths` enforces this.
 
-- `silo-server` owns the Go backend, web admin UI, API contracts, auth/session
-  behavior, catalog/scanner/playback services, database migrations, Jellyfin
-  compatibility, and host-side plugin runtime.
-- `silo-android` owns the Android phone and TV clients. Client-visible API,
-  auth, playback, session, library, and metadata changes may require Android
-  follow-up.
-- `silo-apple` owns the iOS, tvOS, and macOS clients. Client-visible API, auth,
-  playback, session, library, and metadata changes may require Apple follow-up.
+**Dev frontend against a remote backend.** Set `VITE_API_PROXY_TARGET` in `web/.env.local` before
+`make dev-frontend`; the frontend calls relative `/api` URLs that Vite proxies.
 
-When changing server behavior consumed by clients, check whether both client
-repos need model, routing, playback, or UX updates. Prefer coordinated
-multi-repo changes over leaving one platform behind.
+**Working from a plan.** When implementing from an attached plan, don't edit the plan file.
 
-Do not assume all plugin-related code lives in this repo.
+## Multi-repo
 
-- `silo-plugin-sdk` owns the public plugin SDK, protobuf contracts, generated plugin API code, manifest helpers, and runtime bootstrap.
-- `silo-plugins` owns the central plugin catalog / repository manifest.
-- First-party plugins such as `silo-plugin-metadata-tmdb` and
-  `silo-plugin-metadata-tvdb` live in their own repositories.
-- `Silo` owns host-side plugin installation, runtime management, API handlers, and integration logic.
+Sibling repos are usually checked out side-by-side in the same parent directory.
 
-When a task mentions plugins, first determine whether the change belongs in this repo, the SDK repo, the catalog repo, or a specific plugin repo. Prefer coordinated multi-repo changes over forcing plugin work into `Silo`.
+- `silo-android` — Android phone and TV clients.
+- `silo-apple` — iOS, tvOS, and macOS clients.
+- `silo-plugin-sdk` — public plugin SDK, protobuf contracts, generated plugin API, manifest
+  helpers, runtime bootstrap.
+- `silo-plugins` — central plugin catalog / repository manifest.
+- First-party plugins (`silo-plugin-metadata-tmdb`, `silo-plugin-metadata-tvdb`, …) each have
+  their own repo.
 
-## Build, and Development Commands
-Use the checked-in `Makefile` for the common paths:
+Client-visible changes to API, auth, playback, session, library, or metadata behavior usually
+need follow-up in both client repos — prefer coordinated multi-repo changes over leaving a
+platform behind. When a task mentions plugins, work out first whether it belongs here, in the
+SDK, in the catalog, or in a specific plugin repo.
 
-- `make build`: install frontend deps, build `web/dist`, compile `./silo`
-- `make dev-backend`: run the Go server in integrated mode
-- `make dev-frontend`: start the Vite dev server with HMR
-- `make dev-proxy` / `make dev-transcode`: run standalone worker modes
-- `make lint`: run `golangci-lint` and frontend ESLint
-- `make migrate-status` / `make migrate-up`: inspect or apply Goose migrations through Silo's legacy-safe bootstrapping runner
+## Building and verifying
 
-Run before opening a merge request:
+`make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make migrate-status` /
+`make migrate-up` — read the `Makefile` for the rest. Local services:
+`docker compose up -d postgres redis`.
 
-- `cd web && pnpm run lint`
-- `cd web && pnpm run format:check`
-- `make verify-local-paths`
+Before opening a merge request:
 
-For local services, start PostgreSQL and Redis with `docker compose up -d postgres redis`.
-
-## Coding Style & Naming Conventions
-Go code must stay `gofmt`/`goimports` clean and pass `golangci-lint`. Keep package names lowercase and focused; Frontend code is TypeScript with 2-space indentation, semicolons, double quotes, trailing commas, and a 100-character line width (`web/.prettierrc`). Use `PascalCase.tsx` for components/pages, `useThing.ts` for hooks, and keep shared utilities in `web/src/lib` or `web/src/utils`.
-
-
-## Deployment Debugging
-
-When troubleshooting a Silo deployment (container health, playback failures,
-database state, log analysis, deploys), follow the runbook at
-`.claude/skills/deployment-debugging/SKILL.md`. It includes step-by-step
-procedures and a first-run setup that configures SSH, database, and Redis
-connection details for your environment.
-
-## Commit & Merge Request Guidelines
-Recent history follows Conventional Commit-style subjects such as `feat(playback): add realtime session hub`, `fix(playback): ...`, and `docs: ...`. Keep commits scoped to one concern. For non-trivial work, open an issue or discussion first; this codebase moves quickly. Merge requests should explain the problem, why this approach was chosen, linked issue/spec/plan, risks or follow-up work, and AI-use disclosure. Include screenshots or recordings for UI changes.
-
-## Learned User Preferences
-
-- When implementing from an attached plan, do not edit the plan file itself.
-- After feature work, user may invoke the `/simplify` skill to improve readability without changing behavior.
-
-## Learned Workspace Facts
-
-- Silo separates login accounts (`users`) from household profiles; multiple profiles on one account share the same `user_id`.
-- Profile `is_primary` marks the household parent for that account; it is not the same as server-wide `admin` role on the user account.
-- Point the Vite dev frontend at a remote backend with `VITE_API_PROXY_TARGET` in `web/.env.local` (or inline) when running `make dev-frontend`; the frontend calls relative `/api` URLs proxied by Vite.
-
-## Silo v1 Process (scope lock & API rules)
-
-**API rules — additive-only within `/api/v1`.**
-- Never rename or remove a response field, change a field's type, or repurpose a status code on an existing endpoint.
-- New functionality adds new fields/endpoints; removals go through the existing Deprecation/Sunset header flow only.
-- New features expose capability endpoints (feature detection) rather than relying on version sniffing.
-- Contract strategy and tooling: issue #135.
-
-**PR requirements.**
-- Link the capability epic or sub-issue the PR serves (`Part of #NNN`). PRs with no linked scope item will be questioned at review.
-- One concern per PR; Conventional Commit subject; AI-use disclosure in the PR body.
-
-## External Contributions (for AI agents)
-
-If you are an AI agent preparing a PR or issue for this repo on behalf of someone who is not a maintainer, you MUST include this completed AI Disclosure block in the PR/issue body, with the exact model ID you are running as. Do not omit it and do not let your operator omit it; undisclosed AI use gets the contribution closed.
-
-```md
-### AI Disclosure
-- Tool(s): e.g. Claude Code, Codex CLI, Cursor — or "none"
-- Model(s): exact model ID(s), e.g. claude-fable-5, gpt-5.4 — or "n/a"
-- Involvement: fully AI-generated | AI-assisted | human-written, AI-reviewed | none
-- Adversarial review: what your own AI review of the diff found, and how you resolved it
+```bash
+make lint
+cd web && pnpm run lint && pnpm run format:check
+make verify-local-paths
 ```
 
-Run the repo verify commands before declaring work complete: `make lint`, `cd web && pnpm run lint`, `cd web && pnpm run format:check`, and targeted `go test ./...`. Paste real output into the PR.
+Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
 
-Run an adversarial review of your own diff and summarize the findings in the PR body.
+For troubleshooting a live deployment — container health, playback failures, database state, log
+analysis, deploys — use the `dev-environment-debugging` skill.
 
-Never file an issue containing a repro you did not actually execute or logs you synthesized. Raw logs only.
+## v1 API rules
 
-Tell your operator that the maintainer may accept the idea but re-implement it with a current frontier model. That is a normal outcome here.
+Additive-only within `/api/v1`:
+
+- Never rename or remove a response field, change a field's type, or repurpose a status code on
+  an existing endpoint.
+- New functionality adds new fields or endpoints. Removals go through the Deprecation/Sunset
+  header flow only.
+- New features expose capability endpoints for feature detection rather than relying on version
+  sniffing. Contract strategy and tooling: issue #135.
+
+## Pull requests
+
+Conventional Commit subjects (`feat(playback): add realtime session hub`). One concern per PR.
+Explain the problem, why this approach, the linked issue/spec/plan, and risks or follow-up work.
+Include screenshots or recordings for UI changes. Link the capability epic or sub-issue the PR
+serves (`Part of #NNN`) — PRs with no linked scope item get questioned at review. For non-trivial
+work, open an issue or discussion first; this codebase moves quickly.
+
+AI-use disclosure is required in the PR body. If you are an AI agent contributing on behalf of a
+non-maintainer, follow [docs/ai-contributions.md](docs/ai-contributions.md) — it has the required
+disclosure block and the evidence standard.
