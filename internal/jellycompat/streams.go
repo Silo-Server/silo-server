@@ -1402,8 +1402,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 				// direct/remux fallback cards built here from scratch) carry
 				// none; the current compat request identifies the client, so
 				// the reconstructed session keeps its label and JF pill.
+				info := playback.ClientInfoFromContext(ctx)
+				card.IsJellyfinCompat = info.IsCompat
 				if card.ClientName == "" && card.ClientUserAgent == "" {
-					info := playback.ClientInfoFromContext(ctx)
 					card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
 				}
 				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {

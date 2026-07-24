@@ -547,6 +547,7 @@ func (h *PlaybackHandler) persistTranscodeRecipe(
 			card.ClientName = upstream.ClientName
 			card.ClientVersion = upstream.ClientVersion
 			card.ClientUserAgent = upstream.ClientUserAgent
+			card.IsJellyfinCompat = upstream.IsJellyfinCompat
 			recipe = &card
 		}
 	}

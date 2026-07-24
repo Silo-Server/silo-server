@@ -140,3 +140,17 @@ func TestPlaybackClientDisplayNameAndroidDevices(t *testing.T) {
 		})
 	}
 }
+
+func TestEnrichPlaybackSessionRowUsesCompatOrigin(t *testing.T) {
+	row := playbackSessionRow{
+		ClientName:      "Unrecognized Client",
+		ClientUserAgent: "Dalvik/2.1.0",
+		CompatOrigin:    true,
+	}
+
+	enrichPlaybackSessionRow(&row, nil)
+
+	if !row.IsJellyfinClient {
+		t.Fatal("compat-origin session must be marked as a Jellyfin client")
+	}
+}

@@ -74,6 +74,7 @@ type playbackSessionRow struct {
 	AudioDecision            string    `json:"audio_decision,omitempty"`
 	EffectivePlayMethod      string    `json:"effective_play_method,omitempty"`
 	IsJellyfinClient         bool      `json:"is_jellyfin_client,omitempty"`
+	CompatOrigin             bool      `json:"-"`
 }
 
 // playbackSessionsCapabilitiesResponse advertises the additive fields of the
@@ -199,7 +200,8 @@ func (l *PlaybackSessionsLoader) Load(
 			mf.audio_channels,
 			COALESCE(mf.audio_tracks::text, '[]'),
 			COALESCE(requested_mf.codec_video, ''),
-			COALESCE(requested_mf.resolution, '')
+			COALESCE(requested_mf.resolution, ''),
+			COALESCE(s.compat_origin, FALSE)
 		 FROM playback_sessions_sync s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
@@ -241,6 +243,7 @@ func (l *PlaybackSessionsLoader) Load(
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec, &targetBitrateKbps,
 			&s.TranscodeHWAccel, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
+			&s.CompatOrigin,
 		); err != nil {
 			return nil, fmt.Errorf("scanning playback session: %w", err)
 		}
@@ -275,7 +278,7 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
-	row.IsJellyfinClient = isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
+	row.IsJellyfinClient = row.CompatOrigin || isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
 
 	var audioTracks []models.AudioTrack
 	if len(audioTracksJSON) > 0 {
@@ -418,9 +421,8 @@ var jellyfinClientTokens = []string{
 }
 
 // isJellyfinEcosystemClient reports whether the session's client metadata
-// matches a known Jellyfin-ecosystem client. This is a heuristic: an
-// unrecognized fork simply gets no JF pill (cosmetic). Stamping a compat-origin
-// flag on the session at creation would be exact and is the eventual fix.
+// matches a known Jellyfin-ecosystem client. This heuristic remains a fallback
+// for rows created before compat-origin identity was persisted.
 func isJellyfinEcosystemClient(clientName, userAgent string) bool {
 	for _, value := range []string{clientName, userAgent} {
 		value = strings.ToLower(strings.TrimSpace(value))
