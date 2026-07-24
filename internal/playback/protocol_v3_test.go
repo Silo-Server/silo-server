@@ -18,6 +18,30 @@ func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool 
 	return false
 }
 
+func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
+	first := ServerFeaturesV3()
+	second := ServerFeaturesV3()
+	if len(first) != 8 {
+		t.Fatalf("server features = %v, want 8 entries", first)
+	}
+
+	for _, feature := range []string{
+		FeatureDetailedDecodeV3,
+		FeatureLayoutPassthrough,
+		FeatureRouteDiagnostics,
+		FeatureDirectStreamResumeV3,
+	} {
+		if !HasFeatureV3(first, feature) {
+			t.Fatalf("server features omitted %q: %v", feature, first)
+		}
+	}
+
+	first[0] = "mutated"
+	if second[0] != FeaturePlaybackPlanV3 {
+		t.Fatalf("feature slices share backing storage: %v", second)
+	}
+}
+
 func TestStartRequestV3Validation(t *testing.T) {
 	index := 1
 	req := validStartRequestV3()

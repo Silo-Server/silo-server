@@ -10,6 +10,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 )
 
 func TestServeDirectPlayHTTPContract(t *testing.T) {
@@ -78,6 +82,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 		wantStatus  int
 		wantRange   string
 		wantBody    string
+		wantStart   int64
 	}{
 		{
 			name:        "bounded range",
@@ -85,6 +90,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 			wantStatus:  http.StatusPartialContent,
 			wantRange:   fmt.Sprintf("bytes 5-9/%d", len(content)),
 			wantBody:    content[5:10],
+			wantStart:   5,
 		},
 		{
 			name:        "suffix range",
@@ -92,6 +98,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 			wantStatus:  http.StatusPartialContent,
 			wantRange:   fmt.Sprintf("bytes %d-%d/%d", len(content)-4, len(content)-1, len(content)),
 			wantBody:    content[len(content)-4:],
+			wantStart:   int64(len(content) - 4),
 		},
 		{
 			name:        "open ended range",
@@ -99,6 +106,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 			wantStatus:  http.StatusPartialContent,
 			wantRange:   fmt.Sprintf("bytes 10-%d/%d", len(content)-1, len(content)),
 			wantBody:    content[10:],
+			wantStart:   10,
 		},
 		{
 			name:        "syntactically invalid range",
@@ -121,6 +129,7 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			resumesBefore := counterValue(t, directStreamRangeResumes)
 			rr := serve(http.MethodGet, tt.rangeHeader, "", "")
 			if rr.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %q", rr.Code, tt.wantStatus, rr.Body.String())
@@ -130,6 +139,14 @@ func TestServeDirectPlayHTTPContract(t *testing.T) {
 			}
 			if tt.wantStatus == http.StatusPartialContent && rr.Body.String() != tt.wantBody {
 				t.Fatalf("body = %q, want %q", rr.Body.String(), tt.wantBody)
+			}
+			if tt.wantStatus == http.StatusPartialContent {
+				if got := directStreamRangeStart(rr.Code, rr.Header().Get("Content-Range")); got != tt.wantStart {
+					t.Fatalf("range start = %d, want %d", got, tt.wantStart)
+				}
+				if got := counterValue(t, directStreamRangeResumes); got != resumesBefore+1 {
+					t.Fatalf("resume counter = %v, want %v", got, resumesBefore+1)
+				}
 			}
 		})
 	}
@@ -183,12 +200,14 @@ func TestServeDirectPlayChangedEntityRejectsOldIfRange(t *testing.T) {
 	}
 	oldETag := first.Header().Get("ETag")
 
-	const replacement = "replacement entity with a different size"
+	const replacement = "replaced bytes"
+	if len(replacement) != len(original) {
+		t.Fatal("test fixture must preserve file size")
+	}
 	if err := os.WriteFile(filePath, []byte(replacement), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	replacementTime := originalTime.Add(5 * time.Second)
-	if err := os.Chtimes(filePath, replacementTime, replacementTime); err != nil {
+	if err := os.Chtimes(filePath, originalTime, originalTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -208,4 +227,97 @@ func TestServeDirectPlayChangedEntityRejectsOldIfRange(t *testing.T) {
 	if newETag := rr.Header().Get("ETag"); newETag == oldETag {
 		t.Fatalf("ETag did not change after replacement: %q", newETag)
 	}
+}
+
+func TestDirectPlayEntityTagOmitsUnsupportedRevision(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "fixture.mp4")
+	if err := os.WriteFile(filePath, []byte("abcdef"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close fixture: %v", err)
+		}
+	})
+
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := directPlayEntityTag(file, fileInfoWithoutSystem{FileInfo: info}); got != "" {
+		t.Fatalf("ETag without durable revision = %q, want omitted validator", got)
+	}
+}
+
+type fileInfoWithoutSystem struct {
+	os.FileInfo
+}
+
+func (fileInfoWithoutSystem) Sys() any {
+	return nil
+}
+
+func TestServeDirectPlayStalledWriteIncrementsOutcomeMetric(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "fixture.mp4")
+	if err := os.WriteFile(filePath, []byte("media bytes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stalledEnds := directStreamEnds.WithLabelValues(string(httpstream.OutcomeStalledReap))
+	endsBefore := counterValue(t, stalledEnds)
+	activeBefore := gaugeValue(t, directStreamActive)
+
+	writer := &deadlineResponseWriter{header: make(http.Header)}
+	if err := ServeDirectPlay(writer, httptest.NewRequest(http.MethodGet, "/stream", nil), filePath); err != nil {
+		t.Fatal(err)
+	}
+
+	if writer.status != http.StatusOK {
+		t.Fatalf("status = %d, want %d", writer.status, http.StatusOK)
+	}
+	if got := counterValue(t, stalledEnds); got != endsBefore+1 {
+		t.Fatalf("stalled end counter = %v, want %v", got, endsBefore+1)
+	}
+	if got := gaugeValue(t, directStreamActive); got != activeBefore {
+		t.Fatalf("active stream gauge = %v, want restored value %v", got, activeBefore)
+	}
+}
+
+func counterValue(t testing.TB, counter prometheus.Counter) float64 {
+	t.Helper()
+	metric := &dto.Metric{}
+	if err := counter.Write(metric); err != nil {
+		t.Fatalf("read counter: %v", err)
+	}
+	return metric.GetCounter().GetValue()
+}
+
+func gaugeValue(t testing.TB, gauge prometheus.Gauge) float64 {
+	t.Helper()
+	metric := &dto.Metric{}
+	if err := gauge.Write(metric); err != nil {
+		t.Fatalf("read gauge: %v", err)
+	}
+	return metric.GetGauge().GetValue()
+}
+
+type deadlineResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *deadlineResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *deadlineResponseWriter) WriteHeader(status int) {
+	w.status = status
+}
+
+func (w *deadlineResponseWriter) Write([]byte) (int, error) {
+	return 0, os.ErrDeadlineExceeded
 }

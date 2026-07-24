@@ -31,6 +31,22 @@ const (
 	DeviceQuirkRegistryRevisionV3 = "2026-07-13.1"
 )
 
+// ServerFeaturesV3 returns the complete feature set advertised by protocol-v3
+// capability and decision responses. A fresh slice prevents callers from
+// mutating the shared contract.
+func ServerFeaturesV3() []string {
+	return []string{
+		FeaturePlaybackPlanV3,
+		FeatureMedia3Only,
+		FeatureDetailedDecodeV3,
+		FeatureLayoutPassthrough,
+		FeatureRouteDiagnostics,
+		FeatureDeviceQuirksV3,
+		FeatureSeekReanchorV3,
+		FeatureDirectStreamResumeV3,
+	}
+}
+
 type DecisionOutcomeV3 string
 
 const (
@@ -813,7 +829,7 @@ func HasFeatureV3(features []string, wanted string) bool {
 func NewTerminalResponseV3(reason, message string, retryable bool) DecisionResponseV3 {
 	return DecisionResponseV3{
 		ProtocolVersion: ProtocolV3,
-		ServerFeatures:  []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDeviceQuirksV3, FeatureSeekReanchorV3, FeatureDirectStreamResumeV3},
+		ServerFeatures:  ServerFeaturesV3(),
 		Outcome:         OutcomeAdaptationUnavailableV3,
 		Terminal:        &TerminalV3{Reason: reason, Message: message, Retryable: retryable},
 	}

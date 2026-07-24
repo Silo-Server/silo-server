@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -33,6 +34,78 @@ func (m *hookedSessionManager) BeginTransport(sessionID string) error {
 		m.beginTransportHook()
 	}
 	return m.SessionManager.BeginTransport(sessionID)
+}
+
+func TestHandleStream_PausedSessionResumesWithDelayedRangeRequest(t *testing.T) {
+	const (
+		contentID       = "movie-1"
+		sessionRouteKey = "session_id"
+	)
+	filePath := writePlaybackTestMediaFile(t, "movie.mp4")
+	file := &models.MediaFile{
+		ID:        42,
+		ContentID: contentID,
+		FilePath:  filePath,
+		Duration:  3600,
+	}
+	sessionMgr := playback.NewSessionManager(0, 0)
+	session, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if err := sessionMgr.UpdateProgress(session.ID, 1, true); err != nil {
+		t.Fatalf("UpdateProgress(paused): %v", err)
+	}
+
+	handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: file})
+	request := func(rangeHeader, ifRange string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := playbackTestRequest(
+			http.MethodGet,
+			"/api/v1/stream/"+session.ID,
+			nil,
+			map[string]string{sessionRouteKey: session.ID},
+		)
+		if rangeHeader != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+		if ifRange != "" {
+			req.Header.Set("If-Range", ifRange)
+		}
+		rr := httptest.NewRecorder()
+		handler.HandleStream(rr, req)
+		return rr
+	}
+
+	initial := request("", "")
+	if initial.Code != http.StatusOK {
+		t.Fatalf("initial status = %d, body = %s", initial.Code, initial.Body.String())
+	}
+	etag := initial.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("initial response omitted ETag")
+	}
+
+	const (
+		activeGrace = 5 * time.Millisecond
+		pausedGrace = 5 * time.Second
+	)
+	time.Sleep(20 * time.Millisecond)
+	sessionMgr.CleanInactive(activeGrace, pausedGrace)
+	if _, err := sessionMgr.GetSession(session.ID); err != nil {
+		t.Fatalf("paused session expired before ranged resume: %v", err)
+	}
+
+	resumed := request("bytes=2-", etag)
+	if resumed.Code != http.StatusPartialContent {
+		t.Fatalf("resume status = %d, body = %s", resumed.Code, resumed.Body.String())
+	}
+	if got := resumed.Body.String(); got != "deo" {
+		t.Fatalf("resume body = %q, want %q", got, "deo")
+	}
+	if live, err := sessionMgr.GetSession(session.ID); err != nil || live.ID != session.ID {
+		t.Fatalf("ranged request did not preserve session %q: session=%#v err=%v", session.ID, live, err)
+	}
 }
 
 func TestHandleStream_AbortsSessionWhenDirectPlayFileDisappearsAfterPreflight(t *testing.T) {

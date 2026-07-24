@@ -80,26 +80,29 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 		size:                  stat.Size(),
 	}
 
-	if _, exists := w.Header()[http.CanonicalHeaderKey("ETag")]; !exists {
-		w.Header().Set("ETag", fmt.Sprintf("\"%x-%x\"", stat.ModTime().UnixNano(), stat.Size()))
+	w.Header().Del("ETag")
+	if etag := directPlayEntityTag(f, stat); etag != "" {
+		w.Header().Set("ETag", etag)
 	}
 
 	// Set Content-Type explicitly so ServeContent does not sniff.
 	w.Header().Set("Content-Type", MimeFromExtension(filePath))
 
-	rangeStart := directStreamRangeStart(r.Header.Get("Range"))
+	hadRange := len(r.Header.Values("Range")) > 0
 	hadIfRange := len(r.Header.Values("If-Range")) > 0
 	directStreamActive.Inc()
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
 	outcome := streamWriter.Outcome(r.Context())
 	status := streamWriter.StatusCode()
 	bytesSent := streamWriter.BytesWritten()
+	rangeStart := directStreamRangeStart(status, w.Header().Get("Content-Range"))
 	recordDirectStreamEnd(outcome, status, bytesSent, rangeStart)
 	slog.InfoContext(r.Context(), "direct stream ended",
 		"component", "playback",
 		"outcome", outcome,
 		"status", status,
 		"bytes_sent", bytesSent,
+		"range_requested", hadRange,
 		"range_start", rangeStart,
 		"had_if_range", hadIfRange,
 	)
@@ -118,19 +121,26 @@ func (w *directPlayResponseWriter) WriteHeader(status int) {
 	w.RollingDeadlineWriter.WriteHeader(status)
 }
 
-func directStreamRangeStart(rangeHeader string) int64 {
-	const prefix = "bytes="
-	if !strings.HasPrefix(rangeHeader, prefix) {
+func directStreamRangeStart(status int, contentRange string) int64 {
+	if status != http.StatusPartialContent {
 		return -1
 	}
-	firstRange, _, _ := strings.Cut(strings.TrimSpace(strings.TrimPrefix(rangeHeader, prefix)), ",")
-	start, _, ok := strings.Cut(strings.TrimSpace(firstRange), "-")
+
+	value, ok := strings.CutPrefix(strings.TrimSpace(contentRange), "bytes ")
+	if !ok {
+		return -1
+	}
+	bounds, _, ok := strings.Cut(value, "/")
+	if !ok {
+		return -1
+	}
+	start, _, ok := strings.Cut(strings.TrimSpace(bounds), "-")
 	if !ok || start == "" {
 		return -1
 	}
-	value, err := strconv.ParseInt(strings.TrimSpace(start), 10, 64)
-	if err != nil || value < 0 {
+	parsedStart, err := strconv.ParseInt(strings.TrimSpace(start), 10, 64)
+	if err != nil || parsedStart < 0 {
 		return -1
 	}
-	return value
+	return parsedStart
 }

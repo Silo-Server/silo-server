@@ -15,14 +15,21 @@ Original-file responses follow the HTTP byte-range contract:
   `416 Requested Range Not Satisfiable` with `Content-Range: bytes */<size>`.
 - `HEAD` returns the same representation headers as `GET` without a body.
 
-Each response carries a strong, opaque `ETag` derived from the served file's
-modification time and size. The validator is stable while the playback plan's
-original-file entity is unchanged. A client resuming a transfer sends both
-`Range` and `If-Range` with that validator. When it still matches, the server
-returns the requested `206` response. When the entity changed, the server
-ignores the range and returns the entire current entity as `200 OK`, preventing
-bytes from different revisions from being combined. `If-None-Match` uses the
-same validator for ordinary conditional requests.
+On Linux, macOS, and Windows, each response carries a strong, opaque `ETag`
+derived from the open file's filesystem identity, change time, modification
+time, and size. The validator is stable while the playback plan's original-file
+entity is unchanged, but changes for same-size replacements even when their
+modification time is preserved. Platforms that cannot expose a durable
+filesystem revision omit the validator instead of hashing an entire media file
+before each request. On those platforms an ETag-based `If-Range` request cannot
+match and safely falls back to a full `200 OK` response.
+
+A client resuming a transfer sends both `Range` and `If-Range` with the
+validator. When it still matches, the server returns the requested `206`
+response. When the entity changed, the server ignores the range and returns the
+entire current entity as `200 OK`, preventing bytes from different revisions
+from being combined. `If-None-Match` uses the same validator for ordinary
+conditional requests.
 
 Playback sessions already treat each transport request independently.
 Sequential ranged requests refresh transport activity, and cleanup never
