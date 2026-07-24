@@ -103,3 +103,40 @@ func TestIsJellyfinEcosystemClient(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaybackClientDisplayNameAndroidDevices(t *testing.T) {
+	cases := []struct {
+		name      string
+		userAgent string
+		want      string
+	}{
+		{
+			name:      "fire tv model",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 11; AFTKRT Build/RS8180.3729N)",
+			want:      "Fire TV Stick 4K Max",
+		},
+		{
+			name:      "unmapped multi-word android model preserved",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 13; Pixel 7 Build/TQ3A)",
+			want:      "Android · Pixel 7",
+		},
+		{
+			name:      "shield model",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 11; SHIELD Android TV Build/RQ1A)",
+			want:      "NVIDIA Shield",
+		},
+		{
+			name:      "chrome remains browser label",
+			userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36",
+			want:      "Chrome 120",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := playbackClientDisplayName("", "", tc.userAgent)
+			if got != tc.want {
+				t.Fatalf("playbackClientDisplayName() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

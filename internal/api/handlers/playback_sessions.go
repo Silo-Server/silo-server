@@ -494,6 +494,10 @@ func playbackClientDisplayName(name, version, userAgent string) string {
 		return rule.label
 	}
 
+	if label := androidDeviceLabel(userAgent); label != "" {
+		return label
+	}
+
 	switch {
 	case strings.Contains(lower, "applecoremedia"):
 		return "Apple player"
@@ -510,6 +514,51 @@ func playbackClientDisplayName(name, version, userAgent string) string {
 	default:
 		return firstUserAgentProduct(userAgent)
 	}
+}
+
+// knownAndroidDeviceLabels maps Android / Fire OS build model codes to friendly
+// product names for the admin session view. Keys are uppercased so the lookup is
+// case-insensitive. This only affects the displayed label — the session still
+// stores the raw model code in its user agent.
+var knownAndroidDeviceLabels = map[string]string{
+	"AFTKRT":            "Fire TV Stick 4K Max",
+	"AFTMM":             "Fire TV Stick 4K",
+	"AFTKM":             "Fire TV Stick 4K Max (1st Gen)",
+	"AFTKA":             "Fire TV Stick 4K Max (2nd Gen)",
+	"AFTSS":             "Fire TV Stick (3rd Gen)",
+	"AFTT":              "Fire TV Stick (2nd Gen)",
+	"AFTB":              "Fire TV (1st Gen)",
+	"AFTS":              "Fire TV (2nd Gen)",
+	"AFTN":              "Fire TV (3rd Gen)",
+	"AFTR":              "Fire TV Cube (2nd Gen)",
+	"AFTA":              "Fire TV Cube (1st Gen)",
+	"SHIELD ANDROID TV": "NVIDIA Shield",
+}
+
+// androidDeviceLabel derives a friendly device label from a bare Android / Fire OS
+// user agent of the form "... (Linux; U; Android <ver>; <MODEL> Build/<build>)".
+// The model is the whole segment between the last ';' and 'Build/', so multi-word
+// models ("Pixel 7", "SHIELD Android TV") survive intact. Known model codes map to
+// a product name; anything else falls back to "Android · <MODEL>" rather than the
+// uninformative "Dalvik". Returns "" when no model can be parsed.
+func androidDeviceLabel(userAgent string) string {
+	buildIndex := strings.Index(userAgent, "Build/")
+	if buildIndex < 0 {
+		return ""
+	}
+
+	model := strings.TrimSpace(userAgent[:buildIndex])
+	if separator := strings.LastIndex(model, ";"); separator >= 0 {
+		model = model[separator+1:]
+	}
+	model = strings.TrimSpace(strings.Trim(strings.TrimSpace(model), "();"))
+	if model == "" {
+		return ""
+	}
+	if label, ok := knownAndroidDeviceLabels[strings.ToUpper(model)]; ok {
+		return label
+	}
+	return "Android · " + model
 }
 
 func containsAny(value string, needles []string) bool {
