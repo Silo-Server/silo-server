@@ -15,7 +15,7 @@ import type {
 } from "@/lib/datetime";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
 import { useOptionalAuth } from "@/hooks/useAuth";
-import { storage } from "@/utils/storage";
+import { dateTimeFormatCache, storage } from "@/utils/storage";
 
 export const DATE_FORMAT_SETTING_KEY = "ui.date_format";
 export const TIME_FORMAT_SETTING_KEY = "ui.time_format";
@@ -38,7 +38,7 @@ interface DateTimeFormatContextValue {
 const DateTimeFormatContext = createContext<DateTimeFormatContextValue | null>(null);
 
 /**
- * Syncs the persisted date/time format settings (profile-scoped, mirrored in
+ * Syncs the persisted date/time format settings (user-scoped, mirrored in
  * localStorage like the theme preferences) into the shared formatter state in
  * lib/datetime, and exposes setters for the settings UI.
  */
@@ -57,8 +57,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
   // fails), the localStorage warm start is only trusted if it was mirrored for
   // this same user; another account's device-local preference must not leak in.
   const apiLoaded = loadApiSettings && apiSettings !== undefined;
-  const localTrusted =
-    authUserId === null || storage.get(storage.KEYS.UI_DATETIME_FORMAT_OWNER) === authUserId;
+  const localTrusted = dateTimeFormatCache.isTrusted(authUserId);
   const dateFormat = apiLoaded
     ? parseDateFormatPreference(apiSettings[DATE_FORMAT_SETTING_KEY])
     : localTrusted
@@ -76,21 +75,15 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
     // this device paints in the right format before the settings request
     // resolves.
     if (apiLoaded) {
-      storage.set(storage.KEYS.UI_DATE_FORMAT, dateFormat);
-      storage.set(storage.KEYS.UI_TIME_FORMAT, timeFormat);
-      if (authUserId !== null) {
-        storage.set(storage.KEYS.UI_DATETIME_FORMAT_OWNER, authUserId);
-      }
+      dateTimeFormatCache.set(storage.KEYS.UI_DATE_FORMAT, dateFormat, authUserId);
+      dateTimeFormatCache.set(storage.KEYS.UI_TIME_FORMAT, timeFormat, authUserId);
     }
   }, [dateFormat, timeFormat, apiLoaded, authUserId]);
 
   const setDateFormat = useCallback(
     (value: DateFormatPreference) => {
       setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), dateFormat: value });
-      storage.set(storage.KEYS.UI_DATE_FORMAT, value);
-      if (authUserId !== null) {
-        storage.set(storage.KEYS.UI_DATETIME_FORMAT_OWNER, authUserId);
-      }
+      dateTimeFormatCache.set(storage.KEYS.UI_DATE_FORMAT, value, authUserId);
       settingMutation.mutate({ key: DATE_FORMAT_SETTING_KEY, value });
     },
     [settingMutation, authUserId],
@@ -99,10 +92,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
   const setTimeFormat = useCallback(
     (value: TimeFormatPreference) => {
       setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), timeFormat: value });
-      storage.set(storage.KEYS.UI_TIME_FORMAT, value);
-      if (authUserId !== null) {
-        storage.set(storage.KEYS.UI_DATETIME_FORMAT_OWNER, authUserId);
-      }
+      dateTimeFormatCache.set(storage.KEYS.UI_TIME_FORMAT, value, authUserId);
       settingMutation.mutate({ key: TIME_FORMAT_SETTING_KEY, value });
     },
     [settingMutation, authUserId],
