@@ -417,8 +417,8 @@
       "key": "ui.theme",
       "introduced_in": 1,
       "persistence": "remote",
-      "allowed_scopes": ["profile"],
-      "resolution_order": ["profile", "default"],
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
       "value_schema": {
         "type": "enum",
         "values": [
@@ -435,7 +435,7 @@
       "label": "Theme",
       "description": "Colour theme for the Silo interface.",
       "recommended_control": "select",
-      "notes": "Renamed from the unregistered legacy key \"ui_theme\", which the extension bag accepted without validation. Moved from account to profile scope: appearance is per household member, and the account row is copied to every profile during migration. Adding a theme is an additive enum widening. The admin-set default theme stays in server_settings and is not a user setting."
+      "notes": "Renamed from the unregistered legacy key \"ui_theme\", which the extension bag accepted without validation. Moved from account to profile scope: appearance is per household member, and the account row is copied to every profile during migration. Carries a device override because the right theme is partly a function of the screen and the room — a light theme on a phone in daylight, a dark one on a TV at night — which is the same reasoning that gives ui.text_scale one. Note that ui.custom_theme_vars and ui.custom_css stay profile-wide, so a profile's custom styling still applies on top of a device's theme override. Adding a theme is an additive enum widening. The admin-set default theme stays in server_settings and is not a user setting."
     },
     {
       "key": "ui.text_scale",
