@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10
 
-**Status:** Draft — coordinated breaking-release design for issue #376
+**Status:** Draft — staged, contract-first design for issue #376
 
 **Scope:** `silo-server`, `silo-apple`, `silo-android`, and the Silo web client
 
@@ -31,6 +31,20 @@ experimental knob without a server PR when all of the following are true:
 This gives clients freedom for genuine local implementation details without allowing the public
 settings model to drift again.
 
+The contract is delivered in three independently shippable stages. Only the vocabulary — keys,
+types, scopes, resolution, defaults, UX semantics — is coupled across repositories. Storage
+consolidation and legacy retirement are deliberately **not** on the same critical path, and no
+stage requires a lockstep four-repository release:
+
+| Stage | Content | Client impact | Breaking |
+|---|---|---|---|
+| A — contract | Manifest, typed endpoints, generated bindings, canonical resolver bound to **existing** storage | Clients adopt at their own cadence | No |
+| B — storage | Consolidate values into typed canonical storage behind the same API | None; internal only | No |
+| C — retirement | Retire the legacy string API and duplicated profile DTO fields | Old clients degrade, then lose the legacy surface | Yes, gated |
+
+Stage A is where the drift stops. It is additive, so it does not need to wait for storage work,
+migration rehearsal, or app-store approval.
+
 ## User-visible behavior
 
 The contract makes persistence visible and predictable:
@@ -50,11 +64,18 @@ incognito window gets a new device identity and resolves those settings from the
 The UI must use these exact scope descriptions:
 
 - **All devices for this profile** — profile value that roams after sign-in.
-- **This device/browser** — override tied to the active profile and device identity.
+- **This device, for this profile** — override tied to the active profile *and* device identity.
 - **Only this app/device** — client-local value that is never uploaded.
+- **Everyone on this account** — account-scope value shared by every profile.
 
 Avoid ambiguous labels such as “global,” “default,” or “remember this” without naming what the
 value follows.
+
+The device label names both halves of the identity deliberately. A bare “This device/browser”
+implies the value applies to whoever is using the device, which is exactly backwards on the shared
+screens where device overrides matter most: a living-room TV used by four household profiles. A
+user who reads “This device” on a family TV will reasonably assume they are changing it for the
+household, and the actual behavior — a private override for their profile alone — is the opposite.
 
 ## Why this is needed
 
@@ -86,7 +107,16 @@ That duplication has produced verified drift:
 - jellycompat's Jellyfin `DisplayPreferences` handler seeds its first-run state from the profile
   subtitle and auto-skip columns and persists its blobs through the legacy string settings store
   under `jellycompat:displayprefs:*` keys, coupling third-party client state to both surfaces this
-  design removes.
+  design retires.
+
+There is also a fourth contract that #376 did not cover, and it is the one most likely to be
+overlooked: **`internal/policy` already resolves restrictions over the same subject matter.**
+`internal/policy/input.go` carries `account_max_playback_quality`, `profile_max_playback_quality`,
+and `profile_preferred_metadata_language`, and `user_profiles` carries `max_playback_quality`,
+`max_content_rating`, and `library_restrictions_enabled` alongside the preference columns
+`quality_preference` and `preferred_metadata_language`. A settings contract that resolves
+preferences without consulting that engine produces a second, disagreeing answer for the same
+user-visible control. See **Preferences versus restrictions**.
 
 The web client also has useful precedent to preserve: owner-tagged cached date/time settings avoid
 showing one account's cached values to another account. Theme and custom-style caches need the same
@@ -114,10 +144,12 @@ as well.
 3. Explicit storage scopes and per-setting resolution order.
 4. Compile-time key/type wrappers for Swift, Kotlin, and TypeScript.
 5. Strict rejection of unknown remote keys and invalid values.
-6. One coordinated server/client cutover with a one-time data migration.
+6. A staged rollout in which no stage brands an already-installed client unusable.
 7. Durable, profile-safe native synchronization.
 8. Clear UX explaining what roams and what remains on a device.
 9. A small, documented escape hatch for client-private knobs.
+10. One explicit seam between user *preference* (this contract) and enforced *restriction*
+    (`internal/policy`), so a client can never present a choice policy will refuse.
 
 ## Non-goals
 
@@ -128,7 +160,10 @@ as well.
 - Making every setting available on every platform.
 - Preserving accidental key names, old string wire formats, or incorrect defaults as canonical
   behavior.
-- Supporting old apps against the new server or new apps against an old server.
+- Maintaining two *authoring* models. The legacy string surface survives retirement only as a
+  read-mostly projection of the canonical resolver, never as a second place to define a setting.
+- Replacing `internal/policy`. Settings express what a user wants; policy expresses what the
+  account, profile, and access groups permit. Policy stays authoritative.
 
 ## Terminology
 
@@ -144,6 +179,11 @@ as well.
   persisted only by the client.
 - **Private local** — a non-production implementation or diagnostics knob outside the shared
   contract.
+- **Restriction** — an enforced ceiling or lock owned by `internal/policy` (parental controls,
+  access groups, account/profile `max_playback_quality`). A restriction is not a setting and is
+  never stored in this contract; it constrains what an effective value is allowed to be.
+- **Permitted value** — the effective value after policy constraint. Clients render and act on the
+  permitted value, never on the raw effective value.
 
 ## Ownership classes
 
@@ -192,18 +232,42 @@ The API version and contract revision are separate:
 }
 ```
 
-- `api_version` identifies the settings protocol expected by this coordinated release.
+- `api_version` identifies the settings protocol. It changes only for a change no revision rule
+  below can express.
 - `revision` is a monotonically increasing integer changed by every manifest PR.
-- Adding a key is additive.
-- Within one `api_version`, revisions are monotone-compatible after the cutover: because published
-  definitions are immutable, a client pinned to an older revision remains valid, and a client
-  pinned to a newer revision than the connected server hides the definitions the server does not
-  know yet.
-- After this cutover, a key's value type, persistence class, meaning, or allowed scope is immutable.
-  A later incompatible change requires another explicit contract-version cutover or a new key.
-- Tightening a numeric range or enum requires a migration for every previously valid stored value.
-- Changing a default requires explicit release notes because it can alter behavior without a stored
-  value changing.
+
+Within one `api_version`, revisions are monotone-compatible in both directions. A client pinned to
+an older revision remains valid; a client pinned to a newer revision hides what the connected
+server does not know. That property depends on classifying every manifest change:
+
+| Change | Allowed within `api_version` | Requires |
+|---|---|---|
+| Add a key | Yes | Revision bump |
+| **Widen** `allowed_scopes` (add a more specific override scope) | Yes | Revision bump; new scope carries `introduced_in` |
+| Add an enum member | Yes | Revision bump; member carries `introduced_in` |
+| Widen a numeric range | Yes | Revision bump; bound carries `introduced_in` |
+| Change a default | Yes | Revision bump plus explicit release notes — behavior changes with no stored value changing |
+| Deprecate a key | Yes | Revision bump; `deprecated: true`, definition stays published |
+| **Narrow** `allowed_scopes`, tighten a range, remove an enum member | No | New key, plus a migration for every previously valid stored value |
+| Change value type, persistence class, or meaning | No | New key |
+
+Widening is safe in a way narrowing is not, and the two must not share one rule. An older client
+that does not know a newly added scope still receives a correctly resolved value and can read
+`source`; it simply cannot author at that scope. An older client that has already stored a value
+at a scope you remove has nowhere to put it.
+
+Because defaults, enum members, ranges, and scopes can therefore all move within one
+`api_version`, revision awareness has to be finer than whole definitions:
+
+- `introduced_in` is a **manifest revision**, not an `api_version`.
+- Every additively introduced sub-element — an enum member, a scope, a widened bound — carries its
+  own `introduced_in`.
+- A client filters options, scopes, and bounds against the server's advertised revision before
+  rendering or sending them. This is what prevents a newer client from offering a choice an older
+  server will reject with `invalid_value` for reasons the user cannot act on.
+
+Published definitions are never unpublished. A deprecated definition stays in the manifest with
+`deprecated: true` so older clients continue to resolve it.
 
 ## Definition model
 
@@ -229,22 +293,63 @@ The public definition is a tagged, typed record:
 }
 ```
 
+A definition that policy can constrain declares that binding explicitly, and additively introduced
+sub-elements carry their own revision:
+
+```json
+{
+  "key": "playback.preferred_quality",
+  "introduced_in": 1,
+  "persistence": "remote",
+  "allowed_scopes": ["profile", "profile_device"],
+  "resolution_order": ["profile_device", "profile", "default"],
+  "value_schema": {
+    "type": "enum",
+    "values": [
+      { "value": "auto" },
+      { "value": "1080p" },
+      { "value": "2160p" },
+      { "value": "1080p-high", "introduced_in": 14 }
+    ],
+    "ordered": true
+  },
+  "default_value": "auto",
+  "constrained_by": {
+    "policy_input": "max_playback_quality",
+    "constraint": "ceiling"
+  },
+  "category": "playback",
+  "label": "Preferred quality",
+  "description": "Pick the quality Silo should prefer.",
+  "deprecated": false
+}
+```
+
 Required fields:
 
 | Field | Rule |
 |---|---|
 | `key` | Lowercase dot-separated identifier. Canonical names do not encode a platform. |
+| `introduced_in` | Manifest revision that first published this definition. |
 | `persistence` | `remote` or `client_local`. |
-| `allowed_scopes` | Non-empty and valid for the persistence class. |
+| `allowed_scopes` | Non-empty and valid for the persistence class. Individual scopes added after `introduced_in` carry their own `introduced_in`. |
 | `resolution_order` | Contains every remote scope at most once and ends in `default`. |
 | `value_schema` | One tagged schema from the type system below. |
 | `default_value` | Valid against `value_schema`; may be JSON `null` only when nullable. |
-| `platforms` | Platforms expected to expose or consume the setting. |
 | `category` | Stable grouping for docs/admin UX; not authorization. |
 | `label`, `description` | Canonical English copy. Clients may localize it. |
 
-Optional fields include `unit`, `recommended_control`, and localized option identifiers. UI
-metadata is advisory; validation, scope, and defaults are normative.
+Optional fields include `unit`, `recommended_control`, `platforms`, `constrained_by`, and localized
+option identifiers.
+
+`platforms` is **advisory UI metadata only**. It tells a client whether a setting is expected to be
+meaningful on that platform so unsupported entries can be hidden rather than shown disabled. The
+server does not enforce it, because enforcement would mean every new platform, form factor, or
+client needs a manifest PR before it can write a setting it already implements correctly. Omitting
+`platforms` means "expected everywhere."
+
+Validation, scope, resolution, defaults, and `constrained_by` are normative. Everything else is
+advisory.
 
 Internal server bindings map a definition to existing profile columns or preference stores. They
 must not expose table or column names in the public manifest.
@@ -259,7 +364,7 @@ The v1 contract supports these tagged schemas:
 | `integer` | `minimum`, `maximum`, optional `step` | `30` |
 | `number` | finite `minimum`, `maximum`, optional `step` | `1.25` |
 | `string` | `min_length`, `max_length`, optional `pattern` | `"fit"` |
-| `enum` | non-empty typed `values` array | `"always"` |
+| `enum` | non-empty `values` array of member objects; optional `ordered` | `"always"` |
 | `language_tag` | well-formed BCP 47 tag; optional null | `"en-US"` |
 | `object` | required `schema_ref` | `{ "fontScale": 1.2 }` |
 
@@ -270,6 +375,12 @@ Rules:
 - `unset` is an operation, not a value. JSON `null` is allowed only when the definition says it is
   meaningful.
 - Enum wire values are stable identifiers, never localized labels.
+- An enum member is an object — `{ "value": "always", "introduced_in": 14 }` — not a bare string,
+  so members added after the definition can carry their own revision. `introduced_in` is omitted
+  when the member shipped with the definition.
+- `ordered: true` declares that members form a meaningful progression (quality ladders, size
+  steps). A `ceiling` or `floor` policy constraint is only valid on an ordered enum or a numeric
+  type, since otherwise "cap this value" has no meaning.
 - Language values are normalized to a canonical BCP 47 representation while preserving valid
   region/script specificity.
 - Arbitrary untyped JSON is not allowed. Existing `subtitle_appearance` becomes an `object` with a
@@ -322,7 +433,7 @@ Examples:
 Clients may cache effective values but must not reimplement a different precedence. Playback and
 catalog code consume the server resolver or a server-produced effective preference snapshot.
 
-The effective response identifies both value and source:
+The effective response identifies value, source, and any policy constraint:
 
 ```json
 {
@@ -335,54 +446,149 @@ The effective response identifies both value and source:
 }
 ```
 
-## Breaking API cutover
+## Preferences versus restrictions
 
-This is a coordinated breaking release, not an additive compatibility rollout. The release replaces
-the current stringly `/api/v1/settings` contract and removes duplicated preference fields/routes in
-the same server version that runs the one-time migration.
+Silo already has a second resolver. `internal/policy` evaluates access groups, parental controls,
+and the account/profile `max_playback_quality` ceiling, and it is authoritative for what a viewer
+is permitted to do. This contract must not become a competing answer to the same question.
 
-This is an explicit exception to the repository's normal additive-only `/api/v1` policy and must be
-recorded in the v1 scope amendment that approves implementation. If that exception is not approved,
-the exact same contract moves to `/api/v2/settings`; maintaining both protocols is not an option in
-this design.
+The seam is:
 
-### Version handshake and upgrade gate
+- **Settings answer "what does this user want?"** They are authored by the user and stored here.
+- **Policy answers "what is this user allowed to have?"** It is authored by an admin or a household
+  parent, evaluated by `internal/policy`, and never stored in `user_setting_values`.
 
-- Protocol version `1` is the only supported protocol after cutover. First-party authenticated
-  middleware returns `426 Upgrade Required` with `required_settings_contract_version` when the
-  `X-Silo-Settings-Contract-Version` header is absent or does not equal `1`.
-- Native and separately deployed web clients also send `X-Silo-Settings-Contract-Revision` with
-  their pinned manifest revision. The revision header is diagnostic and compatibility-informing,
-  not an equality gate: within protocol version `1`, the server accepts any revision.
-- Revision differences are handled by the manifest contract, not by blocking. The bootstrap
-  response and manifest endpoint advertise the server's revision; a client pinned to a newer
-  revision hides definitions the connected server does not know, and a client pinned to an older
-  revision simply does not surface newer definitions. Definition immutability makes both
-  directions safe.
-- The cutover release itself is exact: every artifact in the coordinated version set is built from
-  the same protocol version and the same manifest revision, and the pre-release conformance gate
-  verifies that exact set.
-- The server-bundled web application is always built from the server's own manifest revision.
-- New clients do not support pre-cutover servers. Old clients do not support post-cutover servers.
-  A post-cutover client detects a pre-cutover server by the absence of the settings manifest
-  endpoint and shows a server-upgrade-required screen; a pre-cutover client receives `426` from a
-  post-cutover server and shows an app-update-required screen. Each screen states which side is
-  behind.
+Without an explicit seam the failure is concrete and immediate: a child profile capped by
+`max_playback_quality` at `720p` opens the quality picker, the settings resolver reports an
+effective value of `2160p`, the client renders 4K as selected and selectable, the user picks it,
+and playback silently delivers something else. The same shape applies to
+`catalog.metadata_language` against `profile_preferred_metadata_language` and to any future
+restriction.
 
-The hard gate is deliberately scoped to the protocol version. Partial operation across protocol
-versions would recreate split-brain settings behavior, but additive manifest revisions cannot,
-because published definitions are immutable. This keeps the one-time cutover strict without
-turning every future setting into another four-platform lockstep release — a recurring cost that
-would push development back toward unregistered `local.*` knobs and recreate exactly the drift
-this contract removes. After the cutover, the server manifest PR can ship first and clients adopt
-the new revision on their own release cadence.
+Therefore:
 
-One deployment window must be acknowledged: app stores auto-update clients, while self-hosted
-operators upgrade servers on their own schedule. A store-updated post-cutover client against a
-not-yet-upgraded server shows the deliberate server-upgrade-required screen until the operator
-updates. Client releases for the cutover use phased store rollout, and the version-set release
-notes instruct operators to upgrade the server before or promptly after the client rollout
-begins. There is no mixed-protocol compatibility mode; the explicit screen is the mitigation.
+1. A definition that policy can constrain declares `constrained_by` with the policy input it reads
+   and the constraint kind (`ceiling`, `floor`, `allowlist`, or `locked`).
+2. The effective-values endpoint applies the constraint and reports both values:
+
+```json
+{
+  "key": "playback.preferred_quality",
+  "value": "720p",
+  "requested_value": "2160p",
+  "source": "profile_device",
+  "constrained_by": { "policy_input": "max_playback_quality", "constraint": "ceiling" },
+  "permitted_values": ["auto", "480p", "720p"],
+  "definition_revision": 12,
+  "updated_at": "2026-07-10T15:03:04Z"
+}
+```
+
+3. `value` is the permitted value. Clients act on it. `requested_value` appears only when a
+   constraint changed the outcome, so the UI can explain the difference instead of silently
+   disagreeing with the user's stored choice.
+4. `permitted_values` narrows the manifest's declared options for this viewer. Clients render from
+   `permitted_values` when present, and from the manifest otherwise.
+5. Mutations are **not** rejected for exceeding a restriction. Storing a preference the current
+   policy forbids is legitimate: restrictions change, and a child's stored 4K preference should
+   take effect on the day the cap is lifted rather than being destroyed by it. Validation rejects
+   values invalid against the *definition*; policy constrains at resolution time.
+6. Playback and catalog paths consume the permitted value. They must not re-resolve the raw stored
+   value and re-apply policy independently.
+7. A `locked` constraint means the user cannot author the setting at all under current policy. UI
+   shows the value with a lock affordance and an explanation, not a disabled control with no reason.
+
+Rule 5 is the one that is easy to get backwards. A restriction is a filter on what a preference
+*does*, not a validator on what a preference *is*.
+
+## API delivery and compatibility
+
+The typed contract ships **additively**. The new surfaces are new paths —
+`/api/v1/settings/manifest`, `/values`, `/values/effective`, `/mutations` — which the repository's
+own v1 rules already permit without an exception ("New functionality adds new fields or
+endpoints"). Nothing about introducing the contract is breaking.
+
+Only two things are breaking, and they are deferred to stage C: retiring the legacy string
+`/api/v1/settings...` handlers, and removing preference fields from profile DTOs.
+
+### Why not a hard version cutover
+
+An earlier revision of this design gated the entire first-party authenticated middleware on an
+`X-Silo-Settings-Contract-Version` header and returned `426 Upgrade Required` on mismatch. That is
+withdrawn, for three reasons.
+
+**It brands working installs unusable.** The gate sat on the whole authenticated chain, not on
+`/settings/*`. A client whose settings version did not match could not browse, resume, or play —
+the app was dead, not degraded. Combine that with the deployment reality this design already
+acknowledges (app stores auto-update clients; self-hosters upgrade servers whenever they choose)
+and the predictable outcome is an overnight store update leaving a user's TV app at an
+upgrade-required screen until they can reach their server. For a self-hosted media server that is
+the worst failure mode available, and settings — the least critical subsystem in the product — is
+not a defensible reason to reach it.
+
+**It is version sniffing, which this repository has ruled against.** `docs/architecture/v1-scope.md`
+states the rule as capability endpoints for feature detection rather than version sniffing, and
+cites `GET /api/v1/libraries/provider-defaults` as the precedent. The manifest endpoint *is* the
+capability endpoint here: its presence plus its `api_version` and `revision` fields already tell a
+client everything the header would have. The header added no detection ability. It only added
+blocking.
+
+**It contradicts the closest precedent in the repository.**
+`docs/superpowers/plans/2026-07-12-playback-protocol-v3.md` is a comparably large cross-platform
+protocol change, and it chose coexistence: preserve the legacy branch, keep legacy web and Apple
+playback supported, do not change legacy decisions during the first rollout. Settings has a weaker
+claim to a hard cutover than playback did.
+
+### Detection and degradation
+
+- A client detects contract support by fetching `GET /api/v1/settings/manifest`. Present means the
+  contract is available; `404` means a pre-contract server.
+- Against a pre-contract server, a contract-aware client falls back to the legacy string endpoints
+  for the keys it knows, with reduced fidelity. It does **not** show a blocking screen. Silo
+  remains fully usable; settings are simply older.
+- The manifest response and `GET /api/v1/settings/capability` both advertise `api_version` and
+  `revision`. Clients filter definitions, scopes, enum members, and bounds against the server's
+  advertised revision as described above.
+- Clients may send `X-Silo-Settings-Contract-Revision` for diagnostics and server-side telemetry
+  about deployed revision spread. It is never an equality gate and never blocks a request.
+- The server-bundled web application is always built from the server's own manifest revision, so it
+  is exact by construction.
+- `426` is not used anywhere in this design.
+
+### Legacy projection
+
+Once the canonical resolver exists, the legacy string endpoints are reimplemented on top of it
+rather than kept as a parallel implementation:
+
+- `GET/PUT/DELETE /api/v1/settings/...` serialize the typed value to the legacy string form and
+  write through to the canonical store.
+- Profile DTO preference fields are populated from the canonical resolver at profile scope, and
+  writes to them are translated into canonical mutations.
+- Types that cannot round-trip through a string are exposed at their nearest legacy form; a legacy
+  client sees what it saw before, not more.
+- There is exactly one authoring model underneath. The legacy surface cannot define a key, a
+  default, a range, or a scope.
+
+This is a projection, not a second protocol, and it is the reason no stage needs a lockstep
+release. It costs a few hundred lines and removes the entire bricking risk.
+
+### Retirement
+
+Retirement is a scheduling question, not an architectural one, and the answer depends on when it
+lands relative to v1 scope lock:
+
+- **Before lock.** `docs/architecture/v1-scope.md` currently reads **"Status: NOT LOCKED — proposal
+  window open,"** and the amendment process described there only exists *after* lock. There is no
+  amendment to write yet. Before lock, removing the legacy surface is simply in scope, and the
+  projection can be short-lived. **This is the preferred path, and it is an argument for
+  prioritizing the work now rather than after lock.**
+- **After lock.** Use the Deprecation/Sunset flow the v1 policy already mandates and that the
+  codebase already implements — see `internal/api/handlers/legacy_read_routes.go` for the existing
+  pattern. Legacy settings responses carry `Deprecation` and `Sunset`, the projection stays for the
+  announced window, and removal happens on the sunset date.
+
+Neither path needs `/api/v2/settings`. A `v2` namespace would imply a whole second API surface this
+project does not want to own, for the sake of one subsystem.
 
 ### Manifest
 
@@ -392,6 +598,11 @@ begins. There is no mixed-protocol compatibility mode; the explicit screen is th
 - Returns the public canonical manifest.
 - Supports `If-None-Match` and `304 Not Modified`.
 - Never includes current values, secrets, database bindings, or admin-only server configuration.
+- Doubles as the capability endpoint for this subsystem: its presence means the contract is
+  available, and its `api_version`/`revision` fields are the only version negotiation clients need.
+
+`GET /api/v1/settings/capability` returns `api_version` and `revision` alone, for clients that want
+to check compatibility without transferring the manifest body.
 
 ### Explicit stored values
 
@@ -413,9 +624,28 @@ begins. There is no mixed-protocol compatibility mode; the explicit screen is th
 - Requires the active profile and device identity headers for definitions that can resolve those
   scopes.
 - Rejects unknown keys rather than fabricating defaults.
-- Returns native typed values, resolution source, source context, definition revision, and
-  `updated_at`.
+- Returns native typed values, resolution source, source context, definition revision,
+  `updated_at`, and any policy constraint.
 - A missing explicit value is not an error; resolution continues to the next declared scope.
+- Applies `constrained_by` before responding, per **Preferences versus restrictions**.
+
+`POST /api/v1/settings/values/effective` accepts a batched form for content-scoped resolution:
+
+```json
+{
+  "keys": ["playback.audio_language", "playback.subtitle_mode"],
+  "contexts": [
+    { "context_id": "a", "library_id": "42", "series_id": "s-1001" },
+    { "context_id": "b", "library_id": "42", "series_id": "s-1002" }
+  ]
+}
+```
+
+The batched form is not a convenience. `profile_series` and `profile_library` resolution is
+per-item, so a season view, a continue-watching row, or any list that needs resolved track
+preferences would otherwise issue one request per item. One round trip resolving *n* contexts
+against a single prepared query is the required shape; per-item requests are a rejected design.
+See **Read path** for the corresponding server-side rules.
 
 ### Mutations
 
@@ -462,8 +692,12 @@ Server rules:
    keys.
 8. Emit a settings-changed event carrying only affected keys/scopes and contract revision; clients
    re-fetch effective values rather than trusting event payload values. Events ride the existing
-   realtime event hub (`internal/events`) on its `settings` channel, which this work re-scopes
-   from its current admin-only grant to per-user/per-profile routing.
+   realtime event hub (`internal/events`) on a **new** `user_settings` channel with per-user and
+   per-profile routing, following the personal-delivery pattern `allowsEventForClaims` already
+   applies to notifications. The existing `settings` channel is reserved for admin server
+   configuration: it is declared in `internal/events/types.go` and granted to admins only in
+   `allowedChannelsForRole`, and although it currently has no publishers, overloading one channel
+   name for both admin-wide and per-user payloads is a routing mistake waiting to leak.
 
 HTTP `400` is used for malformed batches. A syntactically valid batch returns `200` with typed
 per-mutation results such as `applied`, `already_applied`, `invalid_value`, `forbidden`, or
@@ -473,9 +707,10 @@ Concurrent writes to the same identity are last-write-wins in server receipt ord
 increments the stored row `revision`. There is no compare-and-set precondition in v1 — settings
 are low-frequency user-intent values where the newest explicit choice should win.
 
-### Removed surfaces
+### Retired surfaces
 
-The cutover removes, rather than adapts, the old preference surfaces:
+These surfaces stop being authoritative in stage A, become projections in stage B, and are removed
+in stage C:
 
 - String-valued `GET`, `PUT`, and `DELETE /api/v1/settings...` handlers.
 - Preference fields on profile create/update/response DTOs, including language, subtitle behavior,
@@ -483,34 +718,73 @@ The cutover removes, rather than adapts, the old preference surfaces:
 - Separate library and series default-language/subtitle mutation routes. Track-selection history may
   remain specialized, but user preference defaults move to this contract.
 - The open-ended unknown user-setting extension bag.
-- The legacy `user_settings` string key/value table itself, after migration. Its only
-  non-settings tenant — jellycompat display-preferences blobs — moves to a dedicated jellycompat
-  store first (see below).
+- The legacy `user_settings` string key/value table itself. Its only non-settings tenant —
+  jellycompat display-preferences blobs — moves to a dedicated jellycompat store first (see below).
 - Client-written raw remote keys and local copies of remote defaults/ranges.
 
-All production reads and writes use the typed manifest, effective-values endpoint, and mutation
-endpoint immediately after the release. Unknown keys are always rejected.
+Two of these tighten earlier than the rest, because they are the actual drift vectors and neither
+breaks a released client:
+
+- **The unknown-key extension bag closes in stage A.** `keyUsesUserScope` in
+  `internal/api/handlers/settings.go` currently returns true for *any* unregistered key, which is
+  what allows a client to invent production settings unilaterally. Writes to unregistered keys are
+  rejected as soon as the manifest exists. Existing unregistered rows keep being readable until
+  migration classifies them.
+- **Client-side authoring stops in phase 0**, by convention rather than by server enforcement.
+
+Everything else waits for stage C. Unknown keys are always rejected on the new endpoints.
 
 ## Jellyfin compatibility surface
 
-`internal/jellycompat` serves third-party Jellyfin clients (Infuse, Findroid, JellyCon) that can
-never send this handshake and can never be version-gated:
+`internal/jellycompat` serves third-party Jellyfin clients (Infuse, Findroid, JellyCon) that Silo
+does not control and cannot ask to adopt anything:
 
-- jellycompat runs on its own router and listener with its own auth middleware. The settings
-  contract handshake applies only to the first-party API chain and must not be added to
-  jellycompat routes.
+- jellycompat runs on its own router and listener with its own auth middleware. No settings
+  contract negotiation, header, or gate is ever added to jellycompat routes. Since this design no
+  longer gates the first-party chain either, this is now a statement of scope rather than an
+  exemption.
 - The hardcoded Jellyfin user `Configuration` DTO and the disposition-based default audio/subtitle
-  stream selection read none of the removed preference columns and are unaffected.
-- `GET`/`POST /DisplayPreferences/{id}` is affected twice: it persists its blobs through the
-  legacy `user_settings` string store under `jellycompat:displayprefs:*` keys, and its first-run
-  seed reads the profile `subtitle_language`, `subtitle_mode`, and `auto_skip_credits` columns
-  this migration removes. The cutover therefore (1) moves existing display-preferences blobs into
-  a dedicated jellycompat storage table during the one-time migration and (2) repoints the seed at
-  the canonical effective-values resolver for the equivalent keys. Display-preferences blobs are
+  stream selection read none of the retired preference columns and are unaffected.
+- `GET`/`POST /DisplayPreferences/{id}` (`internal/jellycompat/handlers_displayprefs.go`) is
+  affected twice: it persists its blobs through the legacy `user_settings` string store under
+  `jellycompat:displayprefs:*` keys, and `seedFromProfile` reads the profile `subtitle_language`,
+  `subtitle_mode`, and `auto_skip_credits` columns this work retires. Stage B therefore (1) moves
+  existing display-preferences blobs into a dedicated jellycompat storage table and (2) repoints
+  the seed at the canonical resolver for the equivalent keys. Display-preferences blobs are
   Jellyfin client state, not production Silo settings; they do not join the manifest.
+- **The seed resolves at profile scope only.** A Jellyfin client has no Silo device identity, so
+  there is no correct `device_id` to resolve against. Resolving with a synthesized or borrowed
+  device ID would silently import an unrelated device's overrides into a third-party client, and
+  registering one would pollute the device registry with rows the user never created. The seed
+  therefore walks the definition's resolution order with `profile_device` skipped.
 - The phase-0 inventory covers jellycompat reads/writes alongside the first-party clients.
 
 ## Canonical storage
+
+**This section describes stage B, and stage B is not on the critical path.**
+
+The definition model already separates the public contract from where a value physically lives:
+internal bindings map a definition onto a profile column, the device settings table, or a
+preference store, and the manifest never exposes table or column names. That indirection is the
+load-bearing idea. Physically consolidating five scopes into one table is a separate decision that
+buys operational tidiness, not correctness — and it is where nearly all of this design's risk sits
+(one atomic migration, two backends, per-user SQLite fan-out, irreversible column drops).
+
+Conflating the two is what forced the original all-at-once release. So:
+
+- **Stage A binds the manifest to existing storage.** `user_profiles` columns, `user_device_settings`,
+  `library_playback_prefs`, `series_playback_prefs`, and `user_settings` stay exactly where they
+  are. The resolver reads through the bindings. Clients get the full typed contract, the drift
+  stops, and no data moves.
+- **Stage B consolidates storage** behind an unchanged API, once the contract has been running in
+  production and the bindings have proven the manifest models reality correctly.
+
+Stage B is invisible to every client, which means it can be scheduled, rehearsed, and rolled back
+on its own terms instead of being coupled to four app releases. If it is ever judged not worth the
+migration risk, the contract still works — the bindings are a legitimate permanent end state, not
+scaffolding.
+
+The rest of this section specifies stage B when it happens.
 
 Remote values move to one typed `user_setting_values` table. The manifest remains the schema; the
 database stores validated JSON and scope identity.
@@ -573,10 +847,49 @@ Mutation idempotency uses a separate `user_setting_mutations` table keyed by
 `(user_id, mutation_id)` with request hash, serialized result, and `expires_at`; rows expire after
 30 days.
 
+`expires_at` is not self-enforcing. A background sweeper deletes expired idempotency rows on the
+same schedule and shape as `internal/policy/decisionlog_cleanup.go`, which already solves exactly
+this problem for decision logs. Without it the table only grows. `user_setting_migration_rejects`
+is bounded by the one-time migration rather than by traffic, so it is retained indefinitely and
+removed by the operator, but it is reported in the completion summary so it cannot be forgotten.
+
 The migration also creates `user_setting_migration_rejects`, an inactive audit table with source
 table/key/identity/value and rejection reason. It has no runtime read/write API and is not an
 extension bag. Its only purpose is to retain unrecognized or invalid historical rows for operator
 inspection instead of silently deleting them.
+
+### Read path
+
+The repository's stated priority is performance and reliability first, and this design replaces
+narrow purpose-built tables with a generic five-scope table. That trade has to be paid for
+explicitly rather than assumed.
+
+Normative rules:
+
+1. **One query per resolution request, not one per scope.** Resolving a key with a four-scope chain
+   issues a single query over the candidate identities, and the resolver ranks the returned rows by
+   the definition's `resolution_order` in Go. Five sequential index lookups per key per item is a
+   rejected implementation.
+2. **Batched context resolution is the primary read shape** for anything content-scoped. See the
+   `POST /values/effective` batch form above. A list view resolves *n* items in one round trip and
+   one query.
+3. **The covering index for the hot path is
+   `(user_id, profile_id, key, scope)`**, in addition to the partial unique indexes, which exist for
+   correctness rather than for reads. `profile_series` and `profile_library` resolution additionally
+   needs `(user_id, profile_id, series_id)` and `(user_id, profile_id, library_id)`.
+4. **Playback and catalog paths take a snapshot, not per-item resolution.** A session resolves its
+   settings once at start and carries an effective-preference snapshot, which is what
+   `internal/catalog/detail.go` and `internal/api/handlers/playback.go` effectively do today with
+   `Profile.Language`. Re-resolving mid-stream is a correctness hazard as well as a cost.
+5. **Stage B ships with a benchmark against the tables it replaces.** `series_playback_prefs` and
+   `library_playback_prefs` reads are the baseline; a consolidated read that regresses a hot catalog
+   or playback path against that baseline blocks stage B. Consolidation is a tidiness win, and a
+   tidiness win does not get to cost latency on a list endpoint.
+6. **Account- and profile-scope values are cacheable per request** and should be resolved once per
+   request rather than per consumer. Device-scope values are cacheable for the life of a session.
+
+If rule 5 fails, the correct outcome is to keep the specialized tables as permanent bindings. That
+is an acceptable end state, not a failure of the contract.
 
 The one-time migration runs transactionally before the server accepts traffic:
 
@@ -592,20 +905,30 @@ The one-time migration runs transactionally before the server accepts traffic:
    duplicate identity, row-count/checksum mismatch, or schema errors. Nothing is silently dropped:
    every quarantined row appears in the preflight and completion report.
 6. Record the completed contract version and manifest revision in the database.
-7. Remove migrated preference columns and obsolete settings tables/routes in the same release.
-8. Retain specialized track-history fields only when they represent a concrete selected track or
+7. Retain specialized track-history fields only when they represent a concrete selected track or
    signature rather than a default user setting.
+
+Migrated preference columns and obsolete tables are **not** dropped in the same release. Stage B
+moves the data and repoints reads; the old columns are left in place, unread, until stage C. This
+is what makes stage B reversible: if consolidation misbehaves in production, reverting the binding
+is a code change, not a database restore.
 
 Migration atomicity is per database. The PostgreSQL store migrates in one transaction before the
 server accepts traffic. Each per-user SQLite database migrates in its own transaction at startup
-and records a per-database completion marker; a user database that fails structurally is
-quarantined with an operator-visible error and that account's settings-dependent operation is
-blocked until it is repaired or restored. One damaged user database must not prevent the server
-from starting for everyone else.
+and records a per-database completion marker. One damaged user database must not prevent the
+server from starting for everyone else.
 
-There is no dual read, dual write, fallback adapter, or rollback to the old settings schema after a
-successful migration. Operators must take the normal pre-upgrade database backup; rollback means
-restoring that backup and the prior server binary together.
+A user database that fails structurally is quarantined, and the account then operates in
+**degraded settings mode**: every definition resolves to its contract default, mutations are
+rejected with a typed `settings_unavailable` result, and both the user and the operator see an
+explicit error naming the condition. The account is **not** blocked. An earlier revision of this
+design blocked "settings-dependent operation," which in practice means playback, browsing, and
+resume — an account-wide outage caused by a corrupt preferences database. Falling back to defaults
+degrades the experience; blocking removes it. Defaults are always a safe answer, which is the whole
+point of having them.
+
+There is no dual read, dual write, or fallback adapter between the old and new *storage* once a
+database has migrated. Operators must take the normal pre-upgrade database backup.
 
 ## Initial canonical scope decisions
 
@@ -618,19 +941,44 @@ client. The following decisions resolve today's duplicate semantics:
 | `playback.subtitle_language` | remote: profile, profile_device, profile_library, profile_series | Migrate existing profile/library/series subtitle fields to this key. |
 | `playback.subtitle_mode` | remote: profile, profile_device, profile_library, profile_series | Existing values are normalized to one enum. |
 | `playback.show_forced_subtitles` | remote: profile, profile_device, profile_library, profile_series | Preserve explicit false separately from unset. |
-| `catalog.metadata_language` | remote: profile | Migrate existing `preferred_metadata_language` values to this key. |
-| `playback.preferred_quality` | remote: profile, profile_device | Profile quality is fallback; device override wins. |
+| `catalog.metadata_language` | remote: profile | Migrate existing `preferred_metadata_language` values to this key. Constrained by `profile_preferred_metadata_language` policy input. |
+| `playback.preferred_quality` | remote: profile, profile_device | Profile quality is fallback; device override wins. Constrained by account/profile `max_playback_quality` as a `ceiling`. |
 | `playback.auto_skip_intro`, `credits`, `recap` | remote: profile, profile_device | Existing profile columns are fallback; explicit device values win. |
 | `playback.auto_play_next`, `auto_play_next_preview`, `next_up_prompt_seconds` | remote: profile, profile_device | Use `playback.*`; Android's `player.next_up_prompt_seconds` is migrated and removed from production writes. |
 | `subtitle_appearance` | remote: profile, profile_device | Profile value roams; device customization wins. Existing account fallback is copied to each profile. |
 | `player.*` technical playback keys | remote: profile_device | HDR, DV, seek cache, speed, sync, gravity, and orientation remain device-specific and server-validated. |
-| Theme, text scale/weight, contrast, custom theme variables/CSS | remote: account | Owner-tag all local caches; never apply a cached value to a different authenticated user. |
-| Date/time format and search media scope | remote: account | Preserve existing account behavior and strict enums. |
+| Theme, text scale/weight, contrast, custom theme variables/CSS | remote: **profile**, profile_device | Existing account rows are copied to every profile on the account; device override for per-screen contrast/scale. Owner-tag all local caches; never apply a cached value to a different authenticated user. |
+| Date/time format | remote: **profile** | Existing account rows are copied to every profile. |
+| Search media scope | remote: profile | Preserve strict enums. |
 | `ui.library_page_state` | remote: profile_device | Keep navigation state tied to one profile/device. |
 | OS caption mirroring, platform decoder diagnostics, temporary sleep timers | client_local or private `local.*` | Production caption-mirroring UI is contract-known local; diagnostics/timers remain private local. |
 
+### Appearance belongs to the profile, not the account
+
+Theme, text scale, contrast, custom CSS, and date/time format are stored today in `user_settings`
+keyed by `user_id`, so they are account-wide. That is an artifact of the storage that predates
+household profiles, and this contract should not canonize it — especially given the immutability
+rules above, which would make it expensive to revisit.
+
+Profiles are household members sharing one login. Appearance is the most personal category in the
+product, and account scope produces two bad outcomes directly:
+
+- Everyone in the household shares one theme, one text size, and one contrast setting. A parent who
+  needs larger text imposes it on everyone, and a child who wants a different theme cannot have one.
+- Combined with the account-scope authorization rule below, *any* non-child profile can restyle
+  every other profile's UI, including the primary's. Nothing about that reads as intentional.
+
+These keys therefore land at `profile` scope, with the existing account row copied to every profile
+during migration — the same deterministic fan-out already specified for subtitle appearance. This
+costs one migration rule now and avoids a new-key migration later.
+
+`account` scope is kept in the model, because genuinely account-wide values exist (billing-style,
+security, and account-identity preferences will want it). It simply should not be the default
+landing place for anything that is merely stored per-user today. **The inventory in phase 0 must
+justify every `account`-scope assignment rather than inheriting it from current storage.**
+
 The manifest inventory PR must also locate and classify currently unregistered web theme/custom
-keys and Android-only keys. An unregistered official key blocks the migration and release.
+keys and Android-only keys. An unregistered official key blocks stage A completion.
 
 ### Subtitle appearance migration
 
@@ -662,11 +1010,10 @@ Client CI must fail when:
 - A local default or range duplicates and disagrees with generated metadata.
 - The vendored manifest is malformed or generated files are stale.
 
-The server manifest PR lands first. Client PRs then update the pinned artifact and generated code.
-Every release in the coordinated cutover version set embeds the same settings protocol version and
-exact manifest revision. After the cutover, clients pin whatever revision they were built from;
-the protocol-version handshake plus revision-aware definition hiding keeps mixed-revision pairs
-safe without lockstep releases.
+The server manifest PR lands first. Client PRs then update the pinned artifact and generated code
+on their own release cadence. Clients pin whatever revision they were built from; capability
+detection plus revision-aware filtering keeps mixed-revision pairs safe. No release in any stage
+requires a matching release in another repository.
 
 ## Native synchronization contract
 
@@ -687,9 +1034,11 @@ Required behavior:
 7. Flush using the stored server/profile/device context, not the currently selected context.
 8. Cancel or quarantine work after logout until the same account/server identity returns.
 9. Process `unset` as a first-class operation.
-10. Treat `426 Upgrade Required` as a hold state, not a failure: keep entries queued, surface the
-    upgrade-required state, and resume flushing after the app is updated. Do not drop entries or
-    retry-spin on it.
+10. Treat a pre-contract server (manifest endpoint absent) as a hold state, not a failure: keep
+    entries queued, fall back to the legacy endpoints for keys that have a legacy equivalent, and
+    resume typed flushing when the server gains the contract. Do not drop entries or retry-spin.
+11. Treat a `settings_unavailable` result as retryable, not terminal. It signals a degraded server
+    store, not a bad mutation.
 
 Web mutations may remain request-immediate, but caches must be keyed by server, user, profile,
 device, and setting scope as applicable. A cached value must never render before ownership matches
@@ -704,7 +1053,12 @@ the authenticated context.
 - Reset actions state their target: **Reset this device**, **Reset this profile**, or **Reset all**.
 - Offline edits show a subtle pending indicator. Terminal sync failures show a retry action and a
   readable validation message.
-- Unsupported platform settings are hidden, not displayed disabled without explanation.
+- Settings hidden by `platforms` are hidden, not displayed disabled without explanation.
+- A setting constrained by policy shows the permitted value with an explanation of the limit, and
+  offers only `permitted_values`. A `locked` constraint shows a lock affordance and states who set
+  it — never a disabled control with no reason.
+- When a stored preference exceeds a current restriction, the screen says so rather than silently
+  rewriting the user's choice. The stored preference is still theirs; it is just capped today.
 - Admin device views render controls from the canonical manifest and may clear remote overrides.
   They do not claim access to client-local values.
 - Apple’s current subtitle copy — explicitly separating profile behavior from per-device appearance
@@ -712,86 +1066,99 @@ the authenticated context.
 
 ## Validation and authorization
 
-- Validation occurs in the server contract layer before any setting value is stored.
-- Profile DTOs no longer contain preference fields, so profile identity/access updates cannot bypass
-  settings validation.
+- Validation occurs in the server contract layer before any setting value is stored. Validation
+  checks a value against its *definition*; it does not apply policy restrictions — see
+  **Preferences versus restrictions**.
+- Once profile DTOs stop carrying preference fields, profile identity/access updates cannot bypass
+  settings validation. Until then, the legacy projection routes those writes through the same
+  validation path, so the bypass closes in stage A rather than stage C.
 - The authenticated user may mutate owned profiles according to existing profile permissions.
-- Account-scope values affect every profile on the account, so account-scope mutations are
-  rejected for child profiles; the primary profile and other non-child profiles may mutate them.
-  UX copy for account-scope settings states that they apply to the whole account.
+- Account-scope values affect every profile on the account, so account-scope mutations require the
+  **primary** profile. Child profiles and ordinary non-primary profiles may read them but not
+  write them. UX copy for account-scope settings states that they apply to the whole account.
+  Restricting the write to the household parent matches what `is_primary` already means; allowing
+  any non-child profile to change a value every other profile sees is an authorization gap, not a
+  convenience.
 - Device mutations require a non-empty bounded device ID and register/update device metadata.
 - Library/series settings require access to the referenced content scope.
 - Admin clear/reset operations are audited.
 - Settings values must never contain secrets. A future secret-like preference requires a dedicated
   encrypted/credential API, not a new settings schema type.
 
-## Coordinated release plan
+## Staged release plan
 
-Implementation may be split across PRs, but none of the new clients or breaking server routes are
-released independently. The deployable unit is one version set containing the server, bundled web,
-Apple clients, and Android clients built against contract version `1`.
+Implementation is split across PRs and across three stages. **No stage requires a coordinated
+four-repository release.** Each repository ships when it is ready; the manifest revision and the
+capability endpoint carry the compatibility information that a lockstep version set used to.
 
-### Build phase 0 — freeze and inventory
+The ordering constraint is only this: the server manifest PR for a given definition lands before
+any client implements it.
 
-- Stop adding ad hoc remote key literals.
+### Phase 0 — freeze and inventory
+
+- Stop adding ad hoc remote key literals in every repository.
 - Inventory server, web, Apple, Android, and jellycompat reads/writes.
 - Classify every production setting and record aliases, current defaults, ranges, and consumers.
-- Define a migration disposition for every discovered stored key and profile preference column.
+- Justify every proposed `account`-scope assignment rather than inheriting it from current storage.
+- Identify every definition that a policy input constrains.
+- Define a disposition for every discovered stored key and profile preference column.
 
-### Build phase 1 — contract and storage
+### Stage A — contract (additive, no breaking change)
+
+Server:
 
 - Add `contracts/settings/v1` and manifest validation tests.
 - Register all official current keys, including web theme/customization keys.
-- Add canonical storage, mutation idempotency storage, and the one-time migration.
-- Generate Go/TypeScript registry code from the manifest.
-- Add typed manifest, effective-values, and mutation routes behind an unreleased build gate.
-
-### Build phase 2 — canonical resolution
-
-- Move profile, account, device, library, and series defaults to canonical values.
+- Implement the canonical resolver over **existing** storage via internal bindings.
+- Apply `constrained_by` in the resolver, wired to `internal/policy`.
+- Add manifest, capability, values, effective-values (single and batched), and mutation routes.
+- Add mutation idempotency storage and its sweeper.
+- Reject writes to unregistered keys; close the unknown-key extension bag.
 - Make playback/catalog paths consume the canonical resolver.
+- Add the `user_settings` event channel with per-user routing.
+- Generate Go/TypeScript bindings from the manifest.
+
+Clients, on their own cadence:
+
+- Generate and adopt Swift/Kotlin/TypeScript bindings.
 - Fix Apple audio language so a stored value affects selection.
-- Remove preference fields and mutation behavior from profile/library/series DTOs.
-- Repoint the jellycompat DisplayPreferences seed at the canonical resolver and move its blobs to
-  dedicated jellycompat storage.
-
-### Build phase 3 — clients
-
-- Generate and adopt Swift/Kotlin bindings.
 - Fix Android aliases/defaults/ranges and remove unregistered production writes.
 - Replace Apple and Android pending-write logic with durable scoped outboxes.
 - Apply owner-tagged cache keys throughout web settings.
-- Add the standardized scope/source UX.
-- Add the protocol-version handshake, server-revision awareness (hide definitions newer than the
-  connected server), and both upgrade-required screens (app-behind and server-behind).
+- Add the standardized scope/source/constraint UX.
+- Add capability detection with legacy fallback — no blocking screens.
 
-### Pre-release gate
+**Stage A is where the drift stops and where every P1 in #376 is fixed.** It ships without moving
+a single row.
 
-- All four repositories pass the shared conformance fixture at the exact commits selected for the
-  release.
-- Migration is rehearsed against anonymized copies representing SQLite and PostgreSQL user stores,
-  including invalid/unknown-value failure cases.
-- Store-distributed Apple/Android builds are approved and publicly available before the breaking
-  server release is published.
-- Release notes state that server and apps must be upgraded together and that rollback requires a
-  pre-upgrade database restore.
-- Server startup reports a migration preflight summary before applying destructive schema cleanup.
+### Stage B — storage consolidation (invisible)
 
-### Cutover
+- Add canonical storage and the one-time migration.
+- Repoint bindings from legacy tables to canonical storage.
+- Move jellycompat DisplayPreferences blobs to dedicated jellycompat storage and repoint its seed
+  at the canonical resolver, profile scope only.
+- Leave legacy columns in place, unread.
 
-1. Operator takes the required database backup.
-2. Operator upgrades the server; startup runs the transaction and contract validation.
-3. Server begins requiring contract version `1` and serves the matching bundled web client.
-4. Users update Apple/Android clients; mismatched clients receive the upgrade-required gate.
-5. No old settings route or schema remains active after the migration commits.
+Gate: migration rehearsed against anonymized SQLite and PostgreSQL copies including
+invalid/unknown-value cases; startup reports a preflight summary; the read-path benchmark in
+**Read path** shows no regression against the specialized tables it replaces.
 
-### Post-cutover cleanup
+### Stage C — retirement (breaking, scheduled)
+
+- Retire the legacy string settings routes and the profile DTO preference fields.
+- Drop migrated columns and obsolete tables.
+- Before v1 scope lock: remove directly. After lock: `Deprecation`/`Sunset` for the announced
+  window first.
+
+Gate: legacy surface traffic has fallen to a level the maintainers accept, measured from the
+revision telemetry header, and the sunset date has passed if one was announced.
+
+### Post-stage cleanup
 
 - Verify migrated counts/checksums and effective-value samples.
-- Add stale empty-device cleanup and Forget device UX if they did not ship in the cutover build.
-- Delete migration-only transform code after the supported upgrade window only if Silo's release
-  policy permits skipping directly to newer versions; otherwise retain the one-time migration as an
-  inert historical migration.
+- Add stale empty-device cleanup and Forget device UX.
+- Retain the one-time migration as an inert historical migration unless Silo's release policy
+  permits skipping directly to newer versions.
 
 ## Testing
 
@@ -802,6 +1169,12 @@ Apple clients, and Android clients built against contract version `1`.
 - Every resolution chain references allowed scopes exactly once and ends with `default`.
 - Generated Go, TypeScript, Swift, and Kotlin outputs are reproducible.
 - Every stored legacy source key/column has exactly one migration disposition.
+- Every additively introduced enum member, scope, and widened bound carries an `introduced_in`
+  revision, and no `introduced_in` exceeds the manifest revision.
+- A manifest change that narrows a scope, tightens a range, removes an enum member, or changes a
+  value type fails the compatibility check without a new key.
+- Every `constrained_by.policy_input` names a field `internal/policy` actually produces, and a
+  `ceiling`/`floor` constraint is declared only on an ordered enum or a numeric type.
 
 ### Server tests
 
@@ -814,17 +1187,29 @@ Apple clients, and Android clients built against contract version `1`.
 - Per-mutation partial retry behavior.
 - One-time migration success, atomic failure, alias normalization, row-count/checksum verification,
   and restart after completed migration.
-- Protocol-version mismatch and missing-header `426` behavior; revision tolerance within protocol
-  `1` (older-revision client accepted, newer-revision client hides unknown definitions).
-- jellycompat DisplayPreferences seeding from the canonical resolver, blob survival across the
-  store move, and the absence of the handshake on jellycompat routes.
+- Revision tolerance in both directions: an older-revision client is accepted, and a newer-revision
+  client's unknown definitions, enum members, and scopes are filtered rather than rejected.
+- No route in the first-party chain returns `426`.
+- Legacy projection round trip: a legacy string write is readable through the typed API and vice
+  versa, and a legacy profile DTO preference write passes the same validation as a canonical
+  mutation.
+- Policy constraint: an effective value is capped to the permitted value, `requested_value` is
+  reported, `permitted_values` narrows correctly, and a mutation exceeding a restriction is
+  **stored** rather than rejected and takes effect when the restriction is lifted.
+- Degraded settings mode returns contract defaults and `settings_unavailable` instead of blocking
+  the account.
+- Batched effective resolution returns the same results as *n* single-context calls, in one query.
+- jellycompat DisplayPreferences seeding from the canonical resolver at profile scope with
+  `profile_device` skipped, and blob survival across the store move.
 - Incognito/new-device fallback without copying another device override.
-- Empty stale-device retention cleanup.
+- Empty stale-device retention cleanup and idempotency-row expiry sweeping.
 
 ### Client tests
 
-- Generated key/type use, the protocol-version gate, and revision-aware definition hiding.
-- New sign-in/incognito receives account/profile values but not another device override.
+- Generated key/type use, capability detection, and revision-aware filtering of definitions, enum
+  members, and scopes.
+- A pre-contract server produces legacy fallback, not a blocking screen.
+- New sign-in/incognito receives profile values but not another device override.
 - Profile switch and server switch cannot redirect queued writes.
 - Process death preserves outbox entries.
 - Failed writes remain queued and visible.
@@ -835,40 +1220,63 @@ Apple clients, and Android clients built against contract version `1`.
 
 The contract directory includes a fixture set of definitions, explicit values, contexts, and
 expected effective results. Server, web, Apple, and Android run the same fixture cases. This is the
-release gate that catches key, default, type, and precedence drift.
+gate that catches key, default, type, and precedence drift.
+
+Because releases are no longer coordinated, the fixture is a **per-repository CI gate** rather than
+a pre-release version-set gate. Each repository runs it against its pinned manifest revision on
+every PR. That is strictly stronger than checking four commits once at release time: drift is
+caught when it is introduced, by the PR that introduces it.
 
 ## Acceptance criteria
 
+Stage A:
+
 - A production user-facing setting cannot land in a client without a canonical manifest entry.
 - A private `local.*` knob cannot be sent to the server.
-- The server rejects unknown keys and invalid typed values on the new API.
+- The server rejects unknown keys and invalid typed values, including on the legacy projection.
 - Swift, Kotlin, TypeScript, and Go use generated key/type bindings.
-- Profile language and subtitle preferences roam into a new incognito session.
+- Profile language, subtitle, and appearance preferences roam into a new incognito session.
 - Device overrides do not roam into a different device identity.
-- Effective responses explain where values came from.
+- Effective responses explain where values came from and whether policy constrained them.
+- A client can never present a choice that policy will refuse, and a stored preference is never
+  destroyed by a restriction.
 - Apple and Android persist failed mutations with full server/profile/device identity.
 - The verified Android key/default/range drift and Apple no-op audio preference are covered by
   conformance tests.
-- The one-time migration either completes and verifies atomically or leaves the old database
-  unchanged.
-- A mismatched settings protocol version is blocked with an explicit upgrade message that names
-  which side is behind; revision differences within protocol `1` degrade safely by hiding
-  definitions unknown to the other side.
-- Child profiles cannot mutate account-scope values.
-- jellycompat routes remain exempt from the handshake, and its DisplayPreferences seed and storage
-  no longer depend on removed profile columns or the legacy string settings store.
-- No old string settings route, open-ended key bag, or duplicated profile preference field remains
-  after cutover.
+- Only the primary profile can mutate account-scope values.
+- **No client, at any version, is made unusable by a version difference.** A contract-aware client
+  against a pre-contract server degrades to legacy settings and remains fully functional.
+- No first-party route returns `426`.
+
+Stage B:
+
+- The one-time migration either completes and verifies atomically or leaves the database unchanged.
+- A quarantined per-user database degrades that account to contract defaults; it does not block the
+  account or the server.
+- No hot catalog or playback read regresses against the specialized tables it replaces.
+- jellycompat's DisplayPreferences seed and storage no longer depend on retired profile columns or
+  the legacy string settings store.
+
+Stage C:
+
+- No legacy string settings route, open-ended key bag, or duplicated profile preference field
+  remains.
+- Removal happened before v1 scope lock, or through an announced Deprecation/Sunset window.
 
 ## Required PR workflow for a new setting
 
 1. Open a `silo-server` PR that adds the manifest definition, default, scopes, resolution order,
-   UX copy, persistence/scopes (or `client_local` declaration), contract-version impact, and
-   contract tests.
+   UX copy, persistence class (or `client_local` declaration), any `constrained_by` binding,
+   `introduced_in` revision, and contract tests.
 2. Merge the contract PR before merging a production client implementation.
 3. Update the client’s pinned manifest and regenerate bindings.
-4. Implement the UI/consumer using generated types and the protocol-version handshake.
-5. Add the cross-platform fixture when the setting has resolution or coercion behavior.
+4. Implement the UI/consumer using generated types, filtering against the server's advertised
+   revision.
+5. Add the cross-platform fixture when the setting has resolution, constraint, or coercion behavior.
+
+Steps 3 and 4 happen on each client's own schedule. A new setting is one server PR plus *n*
+independent client PRs, never a synchronized release. That property is the reason the contract can
+be strict without becoming the thing people route around.
 
 This server-first PR requirement is intentional governance, not a requirement that every value be
 stored by the server. It keeps the vocabulary, types, defaults, and UX semantics consistent while
