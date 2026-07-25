@@ -24,6 +24,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # github.com/h2non/bimg binds libvips through cgo and pkg-config, so
+      # nothing under ./... compiles without the headers. The Dockerfile
+      # installs the same package in its build stage.
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvips-dev
+
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
@@ -68,8 +76,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # The pnpm version comes from web/package.json's packageManager field —
+      # there is no package.json at the repo root, and `defaults.run` does not
+      # apply to an action's own inputs.
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
 
       - name: Set up Node
         uses: actions/setup-node@v5
