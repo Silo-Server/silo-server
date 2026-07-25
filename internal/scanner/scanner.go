@@ -621,27 +621,38 @@ func walkLogicalTree(
 	return nil
 }
 
-func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string) ([]string, error) {
+// collectLogicalFilePaths walks the given roots and returns the media files
+// found, plus how many entries the walk could not read or resolve.
+//
+// walkLogicalTree deliberately swallows per-entry Lstat/ReadDir failures so one
+// bad file cannot abort a scan of a million. That makes the returned list
+// non-authoritative when failures occurred: a mount that dies partway through
+// traversal yields a short list that looks exactly like a large deletion.
+// Callers must treat a non-zero failure count as "this scope's picture is
+// incomplete" and skip missing reconciliation for it, the same way the ebook
+// scanner does with ebookRootScan.failed.
+func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string) ([]string, int, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
 	mode := walkModeFor(libraryType)
+	walkFailures := 0
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 		}
 		cleanRoot := filepath.Clean(rootPath)
 		if cleanRoot == "" || cleanRoot == "." {
 			continue
 		}
-		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths, nil); err != nil {
-			return nil, err
+		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths, &walkFailures); err != nil {
+			return nil, 0, err
 		}
 	}
 
-	return filePaths, nil
+	return filePaths, walkFailures, nil
 }
 
 func (s *Scanner) scanPaths(
@@ -693,7 +704,7 @@ func (s *Scanner) scanPaths(
 		Message:      "Discovering media files",
 		CurrentScope: firstScope(reconcileRoots),
 	})
-	filePaths, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type)
+	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots: %w", walkErr)
 	}
@@ -702,6 +713,9 @@ func (s *Scanner) scanPaths(
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
 	)
+	if walkFailures > 0 {
+		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
+	}
 	reportProgress(ctx, ProgressUpdate{
 		Phase:           "processing",
 		Message:         "Processing discovered files",
@@ -899,31 +913,14 @@ func (s *Scanner) scanPaths(
 	if err != nil {
 		return nil, err
 	}
-
-	// Mark files that were in the DB but not found on disk as missing.
-	now := time.Now().UTC()
-	for _, existing := range existingFiles {
-		if seenPaths[existing.FilePath] {
-			continue
-		}
-		if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
-			result.MissingSkippedProtected++
-			continue
-		}
-		// Only mark as missing if not already marked.
-		if existing.MissingSince == nil {
-			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
-				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
-					"path", existing.FilePath,
-					"error", err,
-				)
-				result.Errors++
-				continue
-			}
-		}
-		result.Missing++
+	// An incomplete walk makes this scope's file list a lower bound rather
+	// than an inventory; reconciling against it would hide whatever the walk
+	// failed to read.
+	if walkFailures > 0 {
+		protectedRoots = append(append([]string(nil), protectedRoots...), reconcileRoots...)
 	}
-	logProtectedMissingSkips(ctx, folder.ID, result.MissingSkippedProtected, protectedRoots)
+
+	s.markMissingExcludingProtected(ctx, folder.ID, existingFiles, seenPaths, protectedRoots, result)
 
 	// Empty trash: delete files marked as missing for longer than the removal
 	// grace for this folder. Safe because the empty-root guard (above) returns
@@ -1028,6 +1025,10 @@ type scopedScan struct {
 	rootInference  rootInferenceResult
 	groupInference groupInferenceResult
 	result         *ScanResult
+	// walkIncomplete is set when the walk could not read part of this scope's
+	// tree. The file list is then a lower bound, not an inventory, so the
+	// scope must be excluded from missing reconciliation.
+	walkIncomplete bool
 }
 
 func (s *Scanner) scanFolderByRoots(
@@ -1044,12 +1045,12 @@ func (s *Scanner) scanFolderByRoots(
 	roots := compactScanRoots(configuredRoots)
 
 	// An unreachable root (dead drive, lost mount) is temporarily offline, not
-	// removed from the library: its files are still marked missing below so
-	// clients stop seeing them, but nothing under it may be hard-deleted while
-	// it stays unreachable — trash emptying and item purging are guarded
-	// against these roots further down. Probe every CONFIGURED path, not the
-	// compacted traversal roots: a nested child mount is dropped by compaction
-	// but can die independently of its reachable parent.
+	// removed from the library: its files are left untouched below — not
+	// marked missing, not trashed, not purged — for as long as it stays
+	// unreachable. Marking would be enough to hide them, since every catalog
+	// read filters on missing_since IS NULL. Probe every CONFIGURED path, not
+	// the compacted traversal roots: a nested child mount is dropped by
+	// compaction but can die independently of its reachable parent.
 	configuredProbes := rootcheck.ProbeManyWithTimeout(ctx, configuredRoots, rootcheck.DefaultProbeTimeout)
 	unreachableRoots := make([]string, 0)
 	suspectRoots := make([]string, 0)
@@ -1091,7 +1092,9 @@ func (s *Scanner) scanFolderByRoots(
 		scopeWalkRoots := []string{root}
 		if unreachableSet[root] {
 			// Skip walking a dead root — it would yield nothing anyway. Its
-			// scope still reconciles below so existing rows are marked missing.
+			// scope still reconciles below (roots, groups, memberships), but
+			// its existing rows are protected from missing-marking rather
+			// than swept up by the empty walk.
 			scopeWalkRoots = nil
 		}
 		scope, err := s.scanScope(ctx, folder, scopeWalkRoots, []string{root})
@@ -1108,11 +1111,19 @@ func (s *Scanner) scanFolderByRoots(
 		if len(scope.filePaths) > 0 {
 			seenAnyFiles = true
 			beforeErrors := scope.result.Errors
-			// Pass the unreachable roots even though this scope walked files:
-			// a nested child mount can be dead under a live parent, and its
-			// rows fall inside this scope's existing files. Without them the
-			// child's catalog gets marked missing on the parent's success.
-			if err := s.applyScopedScan(ctx, folder, scope, false, unreachableRoots); err != nil {
+			// Pass both protected sets even though this scope walked files: a
+			// nested child mount compacted into this root can be dead, or can
+			// be a suspect-empty mountpoint, and either way its rows fall
+			// inside this scope's existing files. Without them the child's
+			// catalog gets marked missing on the parent's success.
+			//
+			// suspectRoots is read before the confirmed-cleanup allowance is
+			// consumed below, so a nested child is protected from marking
+			// here regardless. Deleting such a root's catalog stays an
+			// explicit operator action rather than a side effect of its
+			// parent scanning cleanly.
+			scopeProtected := append(append([]string(nil), unreachableRoots...), suspectRoots...)
+			if err := s.applyScopedScan(ctx, folder, scope, false, scopeProtected); err != nil {
 				return nil, err
 			}
 			mergeCleanupResult(result, scope.result, beforeErrors)
@@ -1379,7 +1390,13 @@ func (s *Scanner) suspectEmptyRoots(ctx context.Context, folderID int, configure
 	if len(emptyRoots) == 0 {
 		return nil, nil
 	}
-	suspect, err := s.fileRepo.ListRootsWithOnlyMissingFiles(ctx, folderID, emptyRoots)
+	// Any cataloged row under an empty-but-reachable root makes it suspect,
+	// not just a root whose rows are already all missing. Requiring the
+	// latter made this protection reactive: on the first scan after a mount
+	// dropped, the rows are still live, the root is not classified suspect,
+	// and the scan marks everything missing — the exact outage this guards
+	// against, recognised only in time to protect the wreckage.
+	suspect, err := s.fileRepo.ListRootsWithCatalogedFiles(ctx, folderID, emptyRoots)
 	if err != nil {
 		return nil, fmt.Errorf("listing suspect-empty roots for folder %d: %w", folderID, err)
 	}
@@ -1462,7 +1479,7 @@ func (s *Scanner) scanScope(
 		return nil, fmt.Errorf("loading item statuses for folder %d path %q: %w", folder.ID, reconcileRoots[0], err)
 	}
 
-	filePaths, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type)
+	filePaths, walkFailures, walkErr := collectLogicalFilePaths(ctx, walkRoots, folder.Type)
 	if walkErr != nil {
 		return nil, fmt.Errorf("walking media roots for %q: %w", reconcileRoots[0], walkErr)
 	}
@@ -1471,6 +1488,9 @@ func (s *Scanner) scanScope(
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
 	)
+	if walkFailures > 0 {
+		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
+	}
 	reportProgress(ctx, ProgressUpdate{
 		Phase:           "processing",
 		Message:         "Processing discovered files",
@@ -1622,6 +1642,7 @@ func (s *Scanner) scanScope(
 		rootInference:  rootInference,
 		groupInference: groupInference,
 		result:         result,
+		walkIncomplete: walkFailures > 0,
 	}, nil
 }
 
@@ -1653,32 +1674,14 @@ func (s *Scanner) applyScopedScan(
 		return fmt.Errorf("reconciling scanned groups for scope %q: %w", scope.reconcileRoots[0], err)
 	}
 
-	now := time.Now().UTC()
-	for _, existing := range scope.existingFiles {
-		if scope.seenPaths[existing.FilePath] {
-			continue
-		}
-		// A file under an offline root was not found because the storage did
-		// not answer. Marking it missing hides it from every catalog read, so
-		// a transient mount fault would take working titles out of the library
-		// until the next successful scan.
-		if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
-			scope.result.MissingSkippedProtected++
-			continue
-		}
-		if existing.MissingSince == nil {
-			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
-				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
-					"path", existing.FilePath,
-					"error", err,
-				)
-				scope.result.Errors++
-				continue
-			}
-		}
-		scope.result.Missing++
+	// A scope whose walk could not read part of its tree saw an incomplete
+	// picture of what is on disk. Treating that as authoritative would mark
+	// everything below the unread portion missing, which is the transient
+	// storage failure this protection exists for — so protect the whole scope.
+	if scope.walkIncomplete {
+		protectedRoots = append(append([]string(nil), protectedRoots...), scope.reconcileRoots...)
 	}
-	logProtectedMissingSkips(ctx, folder.ID, scope.result.MissingSkippedProtected, protectedRoots)
+	s.markMissingExcludingProtected(ctx, folder.ID, scope.existingFiles, scope.seenPaths, protectedRoots, scope.result)
 
 	staleFileIDs := collectStaleRemovedPathFileIDs(scope.existingFiles, scope.seenPaths, scope.reconcileRoots)
 	if forceDeleteAll && len(scope.filePaths) == 0 {
@@ -1710,6 +1713,60 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
 	dst.EmptyRootGuarded = dst.EmptyRootGuarded || src.EmptyRootGuarded
+}
+
+// markMissingExcludingProtected marks every cataloged file the walk did not
+// see as missing, except those under a protected root.
+//
+// Protection is the whole point: catalog reads filter on
+// missing_since IS NULL, so marking a file is user-visible deletion. A root
+// that is unreachable, is a suspect-empty mountpoint, or whose walk came back
+// incomplete tells us nothing about whether its files exist, and hiding them
+// on that basis turns a storage blip into a library outage.
+//
+// Shared by the folder scan and the scoped scan so the two cannot drift.
+func (s *Scanner) markMissingExcludingProtected(
+	ctx context.Context,
+	folderID int,
+	existingFiles []*scanStateFile,
+	seenPaths map[string]bool,
+	protectedRoots []string,
+	result *ScanResult,
+) {
+	now := time.Now().UTC()
+	for _, existing := range existingFiles {
+		if seenPaths[existing.FilePath] {
+			continue
+		}
+		if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
+			result.MissingSkippedProtected++
+			continue
+		}
+		// Only mark as missing if not already marked.
+		if existing.MissingSince == nil {
+			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
+				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
+					"path", existing.FilePath,
+					"error", err,
+				)
+				result.Errors++
+				continue
+			}
+		}
+		result.Missing++
+	}
+	logProtectedMissingSkips(ctx, folderID, result.MissingSkippedProtected, protectedRoots)
+}
+
+// logIncompleteWalk reports that a scope's traversal could not read part of
+// its tree, so its file list is a lower bound rather than an inventory.
+func logIncompleteWalk(ctx context.Context, folderID int, reconcileRoots []string, walkFailures int) {
+	slog.WarnContext(ctx, "scanner: root walk incomplete; scope excluded from missing-file reconciliation",
+		"component", "scanner",
+		"folder_id", folderID,
+		"scope", firstScope(reconcileRoots),
+		"walk_failures", walkFailures,
+	)
 }
 
 // logProtectedMissingSkips reports files a scan declined to mark missing

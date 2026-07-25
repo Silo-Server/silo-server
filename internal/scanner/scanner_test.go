@@ -46,9 +46,12 @@ func TestCollectLogicalFilePaths_PreservesLogicalSymlinkRootPaths(t *testing.T) 
 		t.Skipf("symlinks not supported on this platform: %v", err)
 	}
 
-	files, err := collectLogicalFilePaths(context.Background(), []string{logicalRoot}, "series")
+	files, walkFailures, err := collectLogicalFilePaths(context.Background(), []string{logicalRoot}, "series")
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
+	}
+	if walkFailures != 0 {
+		t.Fatalf("walkFailures = %d, want 0 for a fully readable tree", walkFailures)
 	}
 
 	want := filepath.Join(logicalRoot, "Season 1", "Episode 01.mkv")
@@ -82,9 +85,12 @@ func TestCollectLogicalFilePaths_DedupesSharedPhysicalDirsAndCycles(t *testing.T
 		t.Skipf("symlinks not supported on this platform: %v", err)
 	}
 
-	files, err := collectLogicalFilePaths(context.Background(), []string{physicalRoot, aliasRoot}, "movie")
+	files, walkFailures, err := collectLogicalFilePaths(context.Background(), []string{physicalRoot, aliasRoot}, "movie")
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
+	}
+	if walkFailures != 0 {
+		t.Fatalf("walkFailures = %d, want 0 for a fully readable tree", walkFailures)
 	}
 
 	sort.Strings(files)

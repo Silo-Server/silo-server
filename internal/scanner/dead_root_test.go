@@ -520,8 +520,17 @@ func TestScanFolderNestedSuspectEmptyChildRootProtection(t *testing.T) {
 	).Scan(&gotID, &missing); err != nil {
 		t.Fatalf("child row after scan 2 (was it deleted?): %v", err)
 	}
-	if gotID != childID || missing == nil {
-		t.Fatalf("child row id/missing = %d/%v, want %d/non-nil", gotID, missing, childID)
+	// The child mountpoint survived but its contents vanished with the mount,
+	// which is indistinguishable from an intentional emptying. The safe
+	// reading is to leave the rows visible: hiding them on a guess turns a
+	// dropped mount into a library outage, whereas an intentional emptying is
+	// confirmed explicitly through the cleanup allowance.
+	if gotID != childID {
+		t.Fatalf("child row id = %d, want %d", gotID, childID)
+	}
+	if missing != nil {
+		t.Fatalf("child row marked missing at %v; a suspect-empty child mount must not be "+
+			"hidden just because its parent root scanned cleanly", missing)
 	}
 }
 
@@ -1097,5 +1106,129 @@ func TestScanFolderFlappingRootNeverHidesPresentFiles(t *testing.T) {
 	}
 	if stillThere {
 		t.Fatal("a genuinely deleted file under a reachable root survived; real deletions must still be detected")
+	}
+}
+
+// TestScanFolderFirstScanAfterMountDropsProtectsLiveRows covers Codex review
+// finding #2 on PR #472: suspect-empty detection used to require a root whose
+// rows were ALL already missing, which meant it could only recognise a lost
+// mount one scan too late.
+//
+// Here the mount drops leaving a reachable but empty mountpoint, and the rows
+// are still live because nothing has marked them yet — the state on the very
+// first scan after a real mount failure. The root must be classified suspect
+// and its rows protected on that first scan, not after they have been hidden.
+func TestScanFolderFirstScanAfterMountDropsProtectsLiveRows(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "First Outage Scan Test")
+
+	base := t.TempDir()
+	live := filepath.Join(base, "live")
+	dropped := filepath.Join(base, "dropped")
+	liveFile := filepath.Join(live, "Alpha (2020)", "Alpha (2020).mkv")
+	droppedFile := filepath.Join(dropped, "Beta (2021)", "Beta (2021).mkv")
+
+	write := func(path string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	write(liveFile)
+	write(droppedFile)
+
+	folder := &models.MediaFolder{
+		ID: folderID, Paths: []string{live, dropped}, Type: "movies",
+		Name: "First Outage Scan Test", Enabled: true,
+	}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("baseline scan: %v", err)
+	}
+	var missing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, droppedFile).Scan(&missing); err != nil {
+		t.Fatalf("baseline row: %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("baseline: row already missing at %v", missing)
+	}
+
+	// The mount drops: contents vanish, the mountpoint directory remains and
+	// still probes reachable. The rows under it are all still live.
+	if err := os.RemoveAll(filepath.Join(dropped, "Beta (2021)")); err != nil {
+		t.Fatalf("empty the dropped root: %v", err)
+	}
+
+	result, err := scanner.ScanFolder(ctx, folder)
+	if err != nil {
+		t.Fatalf("first outage scan: %v", err)
+	}
+	if len(result.SuspectEmptyRoots) != 1 || result.SuspectEmptyRoots[0] != dropped {
+		t.Fatalf("SuspectEmptyRoots = %v, want [%s] on the FIRST scan after the drop",
+			result.SuspectEmptyRoots, dropped)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, droppedFile).Scan(&missing); err != nil {
+		t.Fatalf("row after outage scan (hard-deleted?): %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("first scan after the mount dropped hid the row at %v; suspect-empty "+
+			"protection must engage before the rows are marked, not after", missing)
+	}
+}
+
+// TestCollectLogicalFilePathsReportsUnreadableEntries covers Codex review
+// finding #3 on PR #472: the video walk swallowed per-entry read failures and
+// reported no signal, so a mount dying partway through traversal produced a
+// short file list indistinguishable from a large deletion.
+func TestCollectLogicalFilePathsReportsUnreadableEntries(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits do not deny access")
+	}
+
+	root := t.TempDir()
+	readable := filepath.Join(root, "Alpha (2020)")
+	if err := os.MkdirAll(readable, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(readable, "Alpha (2020).mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// A subtree the walk cannot read stands in for the portion of a tree that
+	// becomes unreachable when a mount dies mid-traversal.
+	blocked := filepath.Join(root, "Beta (2021)")
+	if err := os.MkdirAll(blocked, 0o755); err != nil {
+		t.Fatalf("mkdir blocked: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "Beta (2021).mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocked: %v", err)
+	}
+	if err := os.Chmod(blocked, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+
+	files, walkFailures, err := collectLogicalFilePaths(context.Background(), []string{root}, "movies")
+	if err != nil {
+		t.Fatalf("collectLogicalFilePaths: %v", err)
+	}
+	if walkFailures == 0 {
+		t.Fatal("walk reported 0 failures despite an unreadable subtree; a partial listing " +
+			"would then be treated as an authoritative inventory")
+	}
+	// The readable file is still found — one bad subtree must not abort the walk.
+	if len(files) != 1 {
+		t.Fatalf("files = %v, want just the readable one", files)
 	}
 }

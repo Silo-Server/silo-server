@@ -2682,6 +2682,58 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 	return int(tag.RowsAffected()), nil
 }
 
+// ListRootsWithCatalogedFiles returns the subset of roots (in input order)
+// that still have any media_files rows at or under them in the folder,
+// whether those rows are present or already marked missing.
+//
+// This is the proactive counterpart to ListRootsWithOnlyMissingFiles. That
+// query requires a root to have NO live rows left, which means it can only
+// recognise a lost mount after a scan has already marked its files missing —
+// i.e. after the damage is done. For deciding whether to mark in the first
+// place, the question is simply "does the catalog believe anything lives
+// here", because an empty-but-reachable directory that still owns cataloged
+// files is the signature of a dropped mount exposing its bare mountpoint.
+//
+// A genuinely emptied root also matches, which is intended: emptying a root
+// is confirmed through the operator's one-time cleanup allowance rather than
+// inferred from a single scan.
+func (r *FileRepository) ListRootsWithCatalogedFiles(ctx context.Context, folderID int, roots []string) ([]string, error) {
+	if len(roots) == 0 {
+		return nil, nil
+	}
+	patterns := make([]string, len(roots))
+	for i, root := range roots {
+		patterns[i] = pathscope.PrefixLike(root)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT r.root
+		FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS r(root, pattern, ord)
+		WHERE EXISTS (
+			SELECT 1 FROM media_files mf
+			WHERE mf.media_folder_id = $1
+			  AND (mf.file_path = r.root OR mf.file_path LIKE r.pattern ESCAPE '\')
+		)
+		ORDER BY r.ord
+	`, folderID, roots, patterns)
+	if err != nil {
+		return nil, fmt.Errorf("querying roots with cataloged files: %w", err)
+	}
+	defer rows.Close()
+
+	occupied := make([]string, 0)
+	for rows.Next() {
+		var root string
+		if err := rows.Scan(&root); err != nil {
+			return nil, fmt.Errorf("scanning root with cataloged files: %w", err)
+		}
+		occupied = append(occupied, root)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating roots with cataloged files: %w", err)
+	}
+	return occupied, nil
+}
+
 // ListRootsWithOnlyMissingFiles returns the subset of roots (in input order)
 // that still have media_files rows at or under them in the folder but none
 // that are present (missing_since IS NULL). A reachable root in this state is
