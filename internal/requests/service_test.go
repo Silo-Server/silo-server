@@ -868,8 +868,8 @@ func TestReconcileRequestsRetiresStalledQueuedTargetOnPresence(t *testing.T) {
 	if len(targets) != 1 || targets[0].Status != StatusCompleted {
 		t.Fatalf("targets = %+v, want the stalled target completed", targets)
 	}
-	if targets[0].ExternalStatus != "presence_confirmed" {
-		t.Fatalf("external status = %q, want presence_confirmed", targets[0].ExternalStatus)
+	if targets[0].ExternalStatus != ExternalStatusPresenceConfirmed {
+		t.Fatalf("external status = %q, want %s", targets[0].ExternalStatus, ExternalStatusPresenceConfirmed)
 	}
 	if store.requests["req-1"].Status != StatusCompleted {
 		t.Fatalf("request status = %q, want completed", store.requests["req-1"].Status)
@@ -910,6 +910,42 @@ func TestReconcileRequestsNeverRetiresDownloadingTargetOnPresence(t *testing.T) 
 	targets, _ := store.ListTargets(context.Background(), "req-1")
 	if targets[0].Status != StatusDownloading {
 		t.Fatalf("target status = %q, want downloading left alone", targets[0].Status)
+	}
+}
+
+// Partial retirement: the stalled quality is closed out while a sibling target
+// that is genuinely downloading keeps the request open.
+func TestReconcileRequestsRetiresStalledQueuedWhileDownloadingStaysOpen(t *testing.T) {
+	store, service, now := seedStalledPresenceRequest(t, StatusQueued, 48*time.Hour)
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "router-1", IntegrationKind: "radarr",
+		Quality: Quality2160p, Status: StatusDownloading, ExternalID: "456", ExternalStatus: "downloading",
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 0 {
+		t.Fatalf("result = %+v, want nothing completed while a download is in flight", result)
+	}
+
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	byQuality := map[Quality]Target{}
+	for _, t := range targets {
+		byQuality[t.Quality] = t
+	}
+	if got := byQuality[Quality1080p]; got.Status != StatusCompleted || got.ExternalStatus != ExternalStatusPresenceConfirmed {
+		t.Fatalf("1080p target = %+v, want completed via presence", got)
+	}
+	if got := byQuality[Quality2160p]; got.Status != StatusDownloading {
+		t.Fatalf("2160p target = %+v, want left downloading", got)
+	}
+	if store.requests["req-1"].Status != StatusDownloading {
+		t.Fatalf("request status = %q, want downloading (the live target keeps it open)", store.requests["req-1"].Status)
 	}
 }
 

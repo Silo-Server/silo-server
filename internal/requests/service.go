@@ -1684,6 +1684,11 @@ func (s *Service) liveTargets(ctx context.Context, requestID string) ([]Target, 
 // and has not.
 const stalledTargetHorizon = 24 * time.Hour
 
+// ExternalStatusPresenceConfirmed marks a target closed out by the presence
+// backstop rather than by a router-reported completion. Exported so clients can
+// distinguish "the arr said it finished" from "we found the media ourselves".
+const ExternalStatusPresenceConfirmed = "presence_confirmed"
+
 // retireStalledTargets is the backstop for a router that never reports
 // completion. The presence shortcut in reconcileRequest stays disabled for as
 // long as any target looks live, so a router that reports "queued" forever — a
@@ -1704,7 +1709,7 @@ func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []
 		if t.Status != StatusQueued || t.UpdatedAt.After(cutoff) {
 			continue
 		}
-		next, err := s.store.UpdateTargetStatus(ctx, t.ID, StatusCompleted, "", "presence_confirmed", "", Viewer{})
+		next, err := s.store.UpdateTargetStatus(ctx, t.ID, StatusCompleted, "", ExternalStatusPresenceConfirmed, "", Viewer{})
 		if err != nil {
 			return updated, retired, err
 		}
