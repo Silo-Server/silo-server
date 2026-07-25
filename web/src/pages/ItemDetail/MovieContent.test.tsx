@@ -285,7 +285,7 @@ describe("MovieContent", () => {
     expect(mocks.capturedQualityBadgesProps.value).toEqual({
       summary: {
         durationMinutes: 163,
-        resolution: "2160p",
+        resolution: "4K",
         videoRangeLabel: "HDR",
         audioLabel: "EAC3",
       },
