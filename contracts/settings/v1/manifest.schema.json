@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/manifest.schema.json",
+  "title": "Silo cross-platform user settings manifest",
+  "description": "Canonical contract for every production, user-facing setting. See docs/superpowers/specs/2026-07-10-cross-platform-user-settings-contract-design.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "revision", "definitions"],
+  "properties": {
+    "api_version": {
+      "description": "Settings protocol version. Changes only for a change no revision rule can express.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "revision": {
+      "description": "Monotonically increasing integer bumped by every manifest PR.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "definitions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/definition" }
+    }
+  },
+  "$defs": {
+    "settingKey": {
+      "description": "Lowercase dot-separated identifier. Canonical names do not encode a platform.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 128
+    },
+    "revisionRef": {
+      "description": "Manifest revision in which this element was introduced.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "scopeName": {
+      "description": "Storage identity a value attaches to. Whether a given scope is legal for a definition depends on its persistence class, which internal/settingscontract enforces.",
+      "type": "string",
+      "enum": [
+        "account",
+        "profile",
+        "profile_device",
+        "profile_library",
+        "profile_series",
+        "client_local"
+      ]
+    },
+    "scopeEntry": {
+      "description": "A scope, optionally tagged with the revision that added it to this definition.",
+      "oneOf": [
+        { "$ref": "#/$defs/scopeName" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope"],
+          "properties": {
+            "scope": { "$ref": "#/$defs/scopeName" },
+            "introduced_in": { "$ref": "#/$defs/revisionRef" }
+          }
+        }
+      ]
+    },
+    "enumMember": {
+      "description": "Enum members are objects so members added later can carry their own revision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": {
+        "value": { "type": ["string", "integer", "boolean"] },
+        "label": { "type": "string" },
+        "introduced_in": { "$ref": "#/$defs/revisionRef" },
+        "deprecated": { "type": "boolean", "default": false }
+      }
+    },
+    "valueSchema": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "boolean" },
+            "nullable": { "type": "boolean", "default": false }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "minimum", "maximum"],
+          "properties": {
+            "type": { "const": "integer" },
+            "minimum": { "type": "integer" },
+            "maximum": { "type": "integer" },
+            "step": { "type": "integer", "exclusiveMinimum": 0 },
+            "nullable": { "type": "boolean", "default": false },
+            "minimum_introduced_in": { "$ref": "#/$defs/revisionRef" },
+            "maximum_introduced_in": { "$ref": "#/$defs/revisionRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "minimum", "maximum"],
+          "properties": {
+            "type": { "const": "number" },
+            "minimum": { "type": "number" },
+            "maximum": { "type": "number" },
+            "step": { "type": "number", "exclusiveMinimum": 0 },
+            "nullable": { "type": "boolean", "default": false },
+            "minimum_introduced_in": { "$ref": "#/$defs/revisionRef" },
+            "maximum_introduced_in": { "$ref": "#/$defs/revisionRef" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "max_length"],
+          "properties": {
+            "type": { "const": "string" },
+            "min_length": { "type": "integer", "minimum": 0, "default": 0 },
+            "max_length": { "type": "integer", "minimum": 1 },
+            "pattern": { "type": "string", "format": "regex" },
+            "nullable": { "type": "boolean", "default": false }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "values"],
+          "properties": {
+            "type": { "const": "enum" },
+            "values": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/enumMember" }
+            },
+            "ordered": {
+              "description": "Members form a meaningful progression. Required for ceiling/floor constraints.",
+              "type": "boolean",
+              "default": false
+            },
+            "nullable": { "type": "boolean", "default": false }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "const": "language_tag" },
+            "nullable": { "type": "boolean", "default": false }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "schema_ref"],
+          "properties": {
+            "type": { "const": "object" },
+            "schema_ref": {
+              "description": "Filename under contracts/settings/v1/schemas/.",
+              "type": "string",
+              "pattern": "^[a-z0-9-]+\\.json$"
+            },
+            "nullable": { "type": "boolean", "default": false }
+          }
+        }
+      ]
+    },
+    "constraint": {
+      "description": "Binding to a policy input that constrains this setting at resolution time.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_input", "constraint"],
+      "properties": {
+        "policy_input": {
+          "description": "Field name produced by internal/policy.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "constraint": {
+          "type": "string",
+          "enum": ["ceiling", "floor", "allowlist", "locked"]
+        }
+      }
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "introduced_in",
+        "persistence",
+        "allowed_scopes",
+        "resolution_order",
+        "value_schema",
+        "default_value",
+        "category",
+        "label",
+        "description"
+      ],
+      "properties": {
+        "key": { "$ref": "#/$defs/settingKey" },
+        "introduced_in": { "$ref": "#/$defs/revisionRef" },
+        "persistence": {
+          "type": "string",
+          "enum": ["remote", "client_local"]
+        },
+        "allowed_scopes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/scopeEntry" }
+        },
+        "resolution_order": {
+          "description": "Most specific first. Must end with \"default\".",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "account",
+              "profile",
+              "profile_device",
+              "profile_library",
+              "profile_series",
+              "client_local",
+              "default"
+            ]
+          }
+        },
+        "value_schema": { "$ref": "#/$defs/valueSchema" },
+        "default_value": {},
+        "constrained_by": { "$ref": "#/$defs/constraint" },
+        "platforms": {
+          "description": "Advisory UI metadata. Absent means \"expected everywhere\". Never server-enforced.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["web", "ios", "tvos", "macos", "android", "android_tv"]
+          }
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "unit": { "type": "string" },
+        "recommended_control": {
+          "type": "string",
+          "enum": ["switch", "select", "slider", "stepper", "text", "color", "panel"]
+        },
+        "deprecated": { "type": "boolean", "default": false },
+        "notes": {
+          "description": "Maintainer commentary. Not served in the public manifest.",
+          "type": "string"
+        }
+      }
+    }
+  }
+}
