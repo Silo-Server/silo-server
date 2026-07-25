@@ -19,21 +19,22 @@ import (
 const testProviderAccountID = "account-1"
 
 type serviceFakeRepo struct {
-	connections         map[string]Connection
-	dueConnections      []Connection
-	sessions            map[string]DeviceAuthSession
-	settings            map[string]string
-	syncRuns            []SyncRun
-	historyExports      []HistoryExport
-	listItemStates      []ListItemState
-	scrobbleConnections []Connection
-	scrobbleSessions    []ScrobbleSession
-	scrobbleUpdates     []scrobbleUpdate
-	reopenedScrobbles   []scrobbleUpdate
-	confirmedScrobbles  map[string]bool
-	confirmingScrobbles map[string]time.Time
-	markSatisfiedErr    error
-	scrobbleMu          sync.Mutex
+	connections          map[string]Connection
+	dueConnections       []Connection
+	sessions             map[string]DeviceAuthSession
+	settings             map[string]string
+	syncRuns             []SyncRun
+	historyExports       []HistoryExport
+	listItemStates       []ListItemState
+	scrobbleConnections  []Connection
+	scrobbleSessions     []ScrobbleSession
+	scrobbleUpdates      []scrobbleUpdate
+	reopenedScrobbles    []scrobbleUpdate
+	confirmedScrobbles   map[string]bool
+	confirmingScrobbles  map[string]time.Time
+	markSatisfiedErr     error
+	markHistoryStatusErr error
+	scrobbleMu           sync.Mutex
 }
 
 type scrobbleUpdate struct {
@@ -312,6 +313,9 @@ func (r *serviceFakeRepo) ListPendingHistoryExports(_ context.Context, connectio
 }
 
 func (r *serviceFakeRepo) MarkHistoryExportStatus(_ context.Context, id string, status string, lastError string) error {
+	if r.markHistoryStatusErr != nil {
+		return r.markHistoryStatusErr
+	}
 	for i := range r.historyExports {
 		if r.historyExports[i].ID == id {
 			if r.historyExports[i].Status == historyExportStatusSent || r.historyExports[i].Status == historyExportStatusSatisfiedByScrobble {
@@ -332,6 +336,9 @@ func (r *serviceFakeRepo) MarkHistoryExportSatisfiedByScrobble(_ context.Context
 	}
 	for i := range r.historyExports {
 		if r.historyExports[i].ConnectionID == connectionID && r.historyExports[i].HistoryID == historyID {
+			if r.historyExports[i].Status == historyExportStatusSent {
+				return nil
+			}
 			r.historyExports[i].Status = historyExportStatusSatisfiedByScrobble
 			return nil
 		}
@@ -1833,6 +1840,60 @@ func TestServiceSyncConnectionMarksRunFailedWhenExportTransportFails(t *testing.
 	}
 }
 
+func TestServiceExportWatchedReturnsStatusPersistenceFailure(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("close sqlite: %v", closeErr)
+		}
+	}()
+	if err := userdb.InitSchema(db); err != nil {
+		t.Fatalf("InitSchema: %v", err)
+	}
+	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+		ID:              "history-1",
+		ProfileID:       "profile-1",
+		MediaItemID:     "movie-1",
+		WatchedAt:       "2026-05-04T12:00:00Z",
+		DurationSeconds: 7200,
+		Completed:       true,
+		Source:          userstore.WatchHistorySourcePlayback,
+		Identity: userstore.WatchIdentity{
+			StableType:  "movie",
+			ProviderIDs: map[string]string{"tmdb": "603"},
+		},
+	}); err != nil {
+		t.Fatalf("AddHistory: %v", err)
+	}
+
+	repo := newServiceFakeRepo()
+	repo.markHistoryStatusErr = errors.New("persist failed")
+	service := NewService(repo, NewRegistry()).WithUserStoreProvider(staticStoreProvider{
+		store: userdb.NewSQLiteUserStore(db),
+	})
+	result, err := service.ExportWatched(context.Background(), Connection{
+		ID:        "conn-1",
+		Provider:  "trakt",
+		UserID:    7,
+		ProfileID: "profile-1",
+	}, ServerConfig{}, watchedExporterStub{exportErr: errors.New("provider offline")})
+	if err == nil {
+		t.Fatal("ExportWatched error = nil, want combined export and persistence failure")
+	}
+	if !strings.Contains(err.Error(), "provider offline") || !strings.Contains(err.Error(), "persist failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending {
+		t.Fatalf("history exports = %+v", repo.historyExports)
+	}
+}
+
 func TestServiceCompletedScrobblePersistsAndSatisfiesHistoryExport(t *testing.T) {
 	repo := newServiceFakeRepo()
 	service := NewService(repo, NewRegistry())
@@ -2859,6 +2920,45 @@ func TestServicePluginTransportFailureLeavesExportPending(t *testing.T) {
 		t.Fatalf("error = %#v", err)
 	}
 	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending || repo.historyExports[0].AttemptCount != 0 {
+		t.Fatalf("history exports = %#v", repo.historyExports)
+	}
+}
+
+func TestServiceExportLocalPlaysReturnsStatusPersistenceFailure(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.markHistoryStatusErr = errors.New("persist failed")
+	service := NewService(repo, NewRegistry())
+	conn := Connection{ID: "conn-1"}
+	err := service.exportLocalPlays(context.Background(), conn, ServerConfig{}, watchedExporterStub{
+		exportErr: errors.New("provider offline"),
+	}, []LocalPlay{{
+		HistoryID:       "history-1",
+		MediaItemID:     "movie-1",
+		ProviderItemKey: "movie:tmdb:603",
+	}})
+	if err == nil {
+		t.Fatal("exportLocalPlays error = nil, want combined export and persistence failure")
+	}
+	if !strings.Contains(err.Error(), "provider offline") || !strings.Contains(err.Error(), "persist failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending || repo.historyExports[0].AttemptCount != 0 {
+		t.Fatalf("history exports = %#v", repo.historyExports)
+	}
+}
+
+func TestServiceFakeRepoMarkHistoryExportSatisfiedByScrobbleSkipsSent(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.historyExports = []HistoryExport{{
+		ID:           "export-1",
+		ConnectionID: "conn-1",
+		HistoryID:    "history-1",
+		Status:       historyExportStatusSent,
+	}}
+	if err := repo.MarkHistoryExportSatisfiedByScrobble(context.Background(), "conn-1", "history-1"); err != nil {
+		t.Fatal(err)
+	}
+	if repo.historyExports[0].Status != historyExportStatusSent {
 		t.Fatalf("history exports = %#v", repo.historyExports)
 	}
 }

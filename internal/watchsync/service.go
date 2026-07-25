@@ -1370,14 +1370,17 @@ func (s *Service) ExportWatched(
 		_, limited := AsRateLimited(err)
 		retryable := isRetryableProviderError(err)
 		if err != nil && !limited && !retryable {
+			var markErr error
 			for _, play := range pendingPlays {
 				export := exportByHistoryID[play.HistoryID]
 				if export.ID != "" {
-					_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error())
+					if statusErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error()); statusErr != nil {
+						markErr = errors.Join(markErr, statusErr)
+					}
 				}
 			}
 			result.Failed += len(pendingPlays)
-			return result, err
+			return result, errors.Join(err, markErr)
 		}
 		// Commit per-event outcomes even when the provider also returned a
 		// connection-wide rate limit so successfully applied events are not
@@ -1485,13 +1488,16 @@ func (s *Service) exportLocalPlays(
 	_, limited := AsRateLimited(err)
 	retryable := isRetryableProviderError(err)
 	if err != nil && !limited && !retryable {
+		var markErr error
 		for _, play := range pendingPlays {
 			export := exportByHistoryID[play.HistoryID]
 			if export.ID != "" {
-				_ = s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error())
+				if statusErr := s.repo.MarkHistoryExportStatus(ctx, export.ID, historyExportStatusFailed, err.Error()); statusErr != nil {
+					markErr = errors.Join(markErr, statusErr)
+				}
 			}
 		}
-		return err
+		return errors.Join(err, markErr)
 	}
 	for _, historyID := range exportResult.Sent {
 		export := exportByHistoryID[historyID]

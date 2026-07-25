@@ -48,16 +48,21 @@ func (f *fakeWatchSyncPluginClient) ApplyEvents(_ context.Context, req *pluginv1
 
 func testPluginProvider(t *testing.T, client WatchSyncPluginClient) *PluginProvider {
 	t.Helper()
+	return testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
+		AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+		ExportWatched: true,
+		MaxBatchSize:  25,
+	})
+}
+
+func testPluginProviderWithDescriptor(t *testing.T, client WatchSyncPluginClient, descriptor *pluginv1.WatchSyncProviderDescriptor) *PluginProvider {
+	t.Helper()
 	provider, err := NewPluginProvider(PluginProviderOptions{
 		InstallationID: 4,
 		ProviderKey:    testPluginProviderKey,
 		CapabilityID:   testPluginCapabilityID,
 		DisplayName:    "AniList",
-		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
-			AuthMethods:   []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
-			ExportWatched: true,
-			MaxBatchSize:  25,
-		},
+		Descriptor:     descriptor,
 		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
 			return client, nil
 		},
@@ -81,6 +86,21 @@ func TestPluginProviderRejectsUnsupportedInitialDescriptor(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected authorization-code-only descriptor to be rejected")
+	}
+
+	_, err = NewPluginProvider(PluginProviderOptions{
+		InstallationID: 4,
+		ProviderKey:    testPluginProviderKey,
+		CapabilityID:   testPluginCapabilityID,
+		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+			AuthMethods:         []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+			ExportWatched:       true,
+			SupportedMediaTypes: []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_UNSPECIFIED},
+		},
+		ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) { return nil, nil },
+	})
+	if err == nil {
+		t.Fatal("expected unsupported media descriptor to be rejected")
 	}
 }
 
@@ -149,6 +169,31 @@ func TestPluginProviderBatchesEventsInOneRPC(t *testing.T) {
 	}
 	if len(client.applyRequest.GetEvents()) != 2 || len(result.Sent) != 1 || len(result.NotFound) != 1 {
 		t.Fatalf("request=%#v result=%#v", client.applyRequest, result)
+	}
+}
+
+func TestPluginProviderSkipsUnsupportedExportMedia(t *testing.T) {
+	client := &fakeWatchSyncPluginClient{applyResponse: &pluginv1.WatchSyncApplyEventsResponse{Results: []*pluginv1.WatchSyncApplyResult{
+		{EventId: testWatchHistoryID, Status: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED},
+	}}}
+	provider := testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
+		AuthMethods:         []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+		ExportWatched:       true,
+		MaxBatchSize:        25,
+		SupportedMediaTypes: []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE},
+	})
+	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{
+		{HistoryID: testWatchHistoryID, Kind: historyimport.KindMovie},
+		{HistoryID: testSecondHistoryID, Kind: historyimport.KindEpisode},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(client.applyRequest.GetEvents()) != 1 || client.applyRequest.GetEvents()[0].GetEventId() != testWatchHistoryID {
+		t.Fatalf("apply request = %#v", client.applyRequest)
+	}
+	if got := result.Failed[testSecondHistoryID]; got != watchSyncUnsupportedEpisodeMediaMessage {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -227,6 +272,29 @@ func TestPluginProviderMapsRateLimitFault(t *testing.T) {
 	limited, ok := AsRateLimited(err)
 	if !ok || limited.RetryAfter != 30*time.Second {
 		t.Fatalf("error = %#v", err)
+	}
+}
+
+func TestPluginProviderRejectsUnsupportedScrobbleMedia(t *testing.T) {
+	client := &fakeWatchSyncPluginClient{}
+	provider := testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
+		AuthMethods:         []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+		ExportWatched:       true,
+		MaxBatchSize:        25,
+		SupportedMediaTypes: []pluginv1.WatchSyncMediaType{pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE},
+	})
+	err := provider.Stop(context.Background(), ServerConfig{}, Connection{}, ScrobbleEvent{
+		Completed:         true,
+		HistoryID:         testWatchHistoryID,
+		PlaybackSessionID: testPlaybackSessionID,
+		Kind:              historyimport.KindEpisode,
+		OccurredAt:        time.Now().UTC(),
+	})
+	if err == nil || err.Error() != watchSyncUnsupportedEpisodeMediaMessage {
+		t.Fatalf("error = %#v", err)
+	}
+	if client.applyRequest != nil {
+		t.Fatalf("unexpected apply request = %#v", client.applyRequest)
 	}
 }
 

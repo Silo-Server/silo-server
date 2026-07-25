@@ -37,8 +37,15 @@ type PluginProvider struct {
 	capabilityID   string
 	displayName    string
 	descriptor     *pluginv1.WatchSyncProviderDescriptor
+	supportedMedia map[pluginv1.WatchSyncMediaType]struct{}
 	resolveClient  WatchSyncPluginClientResolver
 }
+
+const (
+	watchSyncUnsupportedMovieMediaMessage   = "watch sync plugin does not support movie media"
+	watchSyncUnsupportedEpisodeMediaMessage = "watch sync plugin does not support episode media"
+	watchSyncUnsupportedMediaMessage        = "watch sync plugin does not support this media type"
+)
 
 func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 	if options.InstallationID <= 0 || strings.TrimSpace(options.CapabilityID) == "" {
@@ -59,6 +66,10 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 	if options.Descriptor.GetExportUnwatched() || options.Descriptor.GetImportWatched() || options.Descriptor.GetImportProgress() {
 		return nil, fmt.Errorf("watch sync plugin %q advertises operations unsupported by the initial server adapter", options.ProviderKey)
 	}
+	supportedMedia, err := supportedWatchSyncMediaTypes(options.Descriptor)
+	if err != nil {
+		return nil, fmt.Errorf("watch sync plugin %q %w", options.ProviderKey, err)
+	}
 	if options.ResolveClient == nil {
 		return nil, fmt.Errorf("watch sync plugin client resolver is required")
 	}
@@ -68,6 +79,7 @@ func NewPluginProvider(options PluginProviderOptions) (*PluginProvider, error) {
 		capabilityID:   options.CapabilityID,
 		displayName:    options.DisplayName,
 		descriptor:     options.Descriptor,
+		supportedMedia: supportedMedia,
 		resolveClient:  options.ResolveClient,
 	}, nil
 }
@@ -185,8 +197,18 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 		batchSize = maximum
 	}
 	events := make([]*pluginv1.WatchSyncEvent, 0, batchSize)
+	selectedPlays := make([]LocalPlay, 0, batchSize)
 	for _, play := range plays[:batchSize] {
-		events = append(events, watchEventFromLocalPlay(play, pluginv1.WatchSyncOrigin_WATCH_SYNC_ORIGIN_RECONCILIATION))
+		event := watchEventFromLocalPlay(play, pluginv1.WatchSyncOrigin_WATCH_SYNC_ORIGIN_RECONCILIATION)
+		if !p.supportsMedia(event.GetMedia().GetMediaType()) {
+			result.Failed[play.HistoryID] = unsupportedWatchSyncMediaMessage(event.GetMedia().GetMediaType())
+			continue
+		}
+		events = append(events, event)
+		selectedPlays = append(selectedPlays, play)
+	}
+	if len(events) == 0 {
+		return result, nil
 	}
 	response, err := client.ApplyEvents(ctx, &pluginv1.WatchSyncApplyEventsRequest{
 		Context: p.authenticatedContext(conn),
@@ -218,7 +240,7 @@ func (p *PluginProvider) ExportHistory(ctx context.Context, _ ServerConfig, conn
 		}
 	}
 	for index, event := range events {
-		historyID := plays[index].HistoryID
+		historyID := selectedPlays[index].HistoryID
 		apply := resultForEvent(response.GetResults(), event.GetEventId())
 		switch apply.GetStatus() {
 		case pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED,
@@ -253,11 +275,14 @@ func (p *PluginProvider) Stop(ctx context.Context, _ ServerConfig, conn Connecti
 	if !event.Completed {
 		return nil
 	}
+	watchEvent := watchEventFromScrobble(event)
+	if !p.supportsMedia(watchEvent.GetMedia().GetMediaType()) {
+		return watchSyncProviderFaultError{message: unsupportedWatchSyncMediaMessage(watchEvent.GetMedia().GetMediaType())}
+	}
 	client, err := p.resolveClient(ctx, p.installationID, p.capabilityID)
 	if err != nil {
 		return watchSyncUnavailableError()
 	}
-	watchEvent := watchEventFromScrobble(event)
 	response, err := client.ApplyEvents(ctx, &pluginv1.WatchSyncApplyEventsRequest{
 		Context: p.authenticatedContext(conn),
 		Events:  []*pluginv1.WatchSyncEvent{watchEvent},
@@ -431,6 +456,46 @@ func supportsWatchSyncAPIKey(descriptor *pluginv1.WatchSyncProviderDescriptor) b
 		}
 	}
 	return false
+}
+
+func supportedWatchSyncMediaTypes(descriptor *pluginv1.WatchSyncProviderDescriptor) (map[pluginv1.WatchSyncMediaType]struct{}, error) {
+	media := descriptor.GetSupportedMediaTypes()
+	if len(media) == 0 {
+		return map[pluginv1.WatchSyncMediaType]struct{}{
+			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE:   {},
+			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE: {},
+		}, nil
+	}
+	supported := make(map[pluginv1.WatchSyncMediaType]struct{}, len(media))
+	for _, mediaType := range media {
+		switch mediaType {
+		case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE,
+			pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
+			supported[mediaType] = struct{}{}
+		default:
+			return nil, fmt.Errorf("advertises unsupported media type %q", mediaType.String())
+		}
+	}
+	return supported, nil
+}
+
+func (p *PluginProvider) supportsMedia(mediaType pluginv1.WatchSyncMediaType) bool {
+	if mediaType == pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_UNSPECIFIED {
+		return true
+	}
+	_, ok := p.supportedMedia[mediaType]
+	return ok
+}
+
+func unsupportedWatchSyncMediaMessage(mediaType pluginv1.WatchSyncMediaType) string {
+	switch mediaType {
+	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_MOVIE:
+		return watchSyncUnsupportedMovieMediaMessage
+	case pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_EPISODE:
+		return watchSyncUnsupportedEpisodeMediaMessage
+	default:
+		return watchSyncUnsupportedMediaMessage
+	}
 }
 
 func safeApplyMessage(result *pluginv1.WatchSyncApplyResult, secrets ...string) string {
