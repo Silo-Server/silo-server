@@ -1,17 +1,18 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { ThemeId } from "@/lib/themes";
+import { DEFAULT_THEME } from "@/lib/themes";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useBranding } from "@/hooks/useBranding";
-import { storage } from "@/utils/storage";
+import { appearanceCache, storage } from "@/utils/storage";
 import {
+  appearanceCacheOwner,
   getInitialTheme,
   isValidTheme,
   parseHighContrast,
   parseTextScale,
   parseTextWeight,
-  shouldLoadApiTheme,
 } from "@/hooks/themePreferences";
 import type { TextScale, TextWeight } from "@/hooks/themePreferences";
 
@@ -47,24 +48,45 @@ function applyHighContrastToDOM(value: boolean): void {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themePreference, setThemePreference] = useState<ThemeId>(getInitialTheme);
-  const [previewThemeState, setPreviewThemeState] = useState<ThemeId | null>(null);
-  const [textScalePreference, setTextScalePreference] = useState<TextScale>(() =>
-    parseTextScale(storage.get(storage.KEYS.UI_TEXT_SCALE)),
-  );
-  const [textWeightPreference, setTextWeightPreference] = useState<TextWeight>(() =>
-    parseTextWeight(storage.get(storage.KEYS.UI_TEXT_WEIGHT)),
-  );
-  const [highContrastPreference, setHighContrastPreference] = useState<boolean>(() =>
-    parseHighContrast(storage.get(storage.KEYS.UI_HIGH_CONTRAST)),
-  );
   const auth = useOptionalAuth();
-  const loadApiTheme = shouldLoadApiTheme({
+  // The account that owns the localStorage warm start. Null while auth is
+  // bootstrapping or nobody is signed in, which still trusts the cache so the
+  // app paints in the last look this device used.
+  const cacheOwner = appearanceCacheOwner({
     loading: auth?.loading ?? false,
     user: auth?.user ? { id: auth.user.id } : null,
   });
+  const loadApiTheme = cacheOwner !== null;
+  // Read once per render, before any effect below re-stamps the cache, so every
+  // ThemeProvider in this render pass agrees on whether the cache is ours.
+  const cacheTrusted = appearanceCache.isTrusted(cacheOwner);
 
-  // Load persisted setting from API (profile-scoped)
+  const [themePreference, setThemePreference] = useState<ThemeId>(() =>
+    getInitialTheme(cacheOwner),
+  );
+  const [previewThemeState, setPreviewThemeState] = useState<ThemeId | null>(null);
+  const [textScalePreference, setTextScalePreference] = useState<TextScale>(() =>
+    parseTextScale(appearanceCache.get(storage.KEYS.UI_TEXT_SCALE, cacheOwner)),
+  );
+  const [textWeightPreference, setTextWeightPreference] = useState<TextWeight>(() =>
+    parseTextWeight(appearanceCache.get(storage.KEYS.UI_TEXT_WEIGHT, cacheOwner)),
+  );
+  const [highContrastPreference, setHighContrastPreference] = useState<boolean>(() =>
+    parseHighContrast(appearanceCache.get(storage.KEYS.UI_HIGH_CONTRAST, cacheOwner)),
+  );
+
+  // Another account's appearance is never a valid starting point: drop it (and
+  // take ownership of the now-empty cache) as soon as we know who is signed in.
+  useEffect(() => {
+    if (cacheOwner === null || cacheTrusted) return;
+    appearanceCache.clear(cacheOwner);
+    setThemePreference(DEFAULT_THEME);
+    setTextScalePreference("default");
+    setTextWeightPreference("default");
+    setHighContrastPreference(false);
+  }, [cacheOwner, cacheTrusted]);
+
+  // Load persisted setting from API (user-scoped)
   const { data: apiSettings } = useSettings({ enabled: loadApiTheme });
   const apiTheme = apiSettings?.ui_theme;
   const apiTextScale = apiSettings?.ui_text_scale;
@@ -76,21 +98,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // preference of their own (no stored local choice and no profile ui_theme).
   // A user's explicit choice always wins, preserving the per-user layering.
   const { defaultTheme: adminDefaultTheme } = useBranding();
-  const hasStoredThemeChoice = storage.get(storage.KEYS.THEME) != null;
+  // Values cached by another account must not stand in for the signed-in
+  // account's missing preferences — that would both show them someone else's
+  // appearance and suppress the admin default theme they should be getting.
+  const localTheme = cacheTrusted ? themePreference : DEFAULT_THEME;
+  const localTextScale = cacheTrusted ? textScalePreference : "default";
+  const localTextWeight = cacheTrusted ? textWeightPreference : "default";
+  const localHighContrast = cacheTrusted ? highContrastPreference : false;
+  const hasStoredThemeChoice = appearanceCache.get(storage.KEYS.THEME, cacheOwner) != null;
   const fallbackTheme: ThemeId =
-    !hasStoredThemeChoice && isValidTheme(adminDefaultTheme) ? adminDefaultTheme : themePreference;
+    !hasStoredThemeChoice && isValidTheme(adminDefaultTheme) ? adminDefaultTheme : localTheme;
 
   const theme =
-    loadApiTheme && apiTheme ? getInitialThemeFromApi(apiTheme, fallbackTheme) : fallbackTheme;
-  const textScale = loadApiTheme
-    ? parseTextScale(apiTextScale ?? textScalePreference)
-    : textScalePreference;
+    loadApiTheme && apiTheme
+      ? getInitialThemeFromApi(apiTheme, fallbackTheme, cacheOwner)
+      : fallbackTheme;
+  const textScale = loadApiTheme ? parseTextScale(apiTextScale ?? localTextScale) : localTextScale;
   const textWeight = loadApiTheme
-    ? parseTextWeight(apiTextWeight ?? textWeightPreference)
-    : textWeightPreference;
+    ? parseTextWeight(apiTextWeight ?? localTextWeight)
+    : localTextWeight;
   const highContrast = loadApiTheme
-    ? parseHighContrast(apiHighContrast ?? String(highContrastPreference))
-    : highContrastPreference;
+    ? parseHighContrast(apiHighContrast ?? String(localHighContrast))
+    : localHighContrast;
 
   useEffect(() => {
     applyThemeToDOM(previewThemeState ?? theme);
@@ -113,10 +142,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setPreviewThemeState(null);
       setThemePreference(newTheme);
       applyThemeToDOM(newTheme);
-      storage.set(storage.KEYS.THEME, newTheme);
+      appearanceCache.set(storage.KEYS.THEME, newTheme, cacheOwner);
       settingMutation.mutate({ key: "ui_theme", value: newTheme });
     },
-    [settingMutation],
+    [settingMutation, cacheOwner],
   );
 
   const previewTheme = useCallback((newTheme: ThemeId) => {
@@ -131,30 +160,30 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     (value: TextScale) => {
       setTextScalePreference(value);
       applyTextScaleToDOM(value);
-      storage.set(storage.KEYS.UI_TEXT_SCALE, value);
+      appearanceCache.set(storage.KEYS.UI_TEXT_SCALE, value, cacheOwner);
       settingMutation.mutate({ key: "ui_text_scale", value });
     },
-    [settingMutation],
+    [settingMutation, cacheOwner],
   );
 
   const setTextWeight = useCallback(
     (value: TextWeight) => {
       setTextWeightPreference(value);
       applyTextWeightToDOM(value);
-      storage.set(storage.KEYS.UI_TEXT_WEIGHT, value);
+      appearanceCache.set(storage.KEYS.UI_TEXT_WEIGHT, value, cacheOwner);
       settingMutation.mutate({ key: "ui_text_weight", value });
     },
-    [settingMutation],
+    [settingMutation, cacheOwner],
   );
 
   const setHighContrast = useCallback(
     (value: boolean) => {
       setHighContrastPreference(value);
       applyHighContrastToDOM(value);
-      storage.set(storage.KEYS.UI_HIGH_CONTRAST, String(value));
+      appearanceCache.set(storage.KEYS.UI_HIGH_CONTRAST, String(value), cacheOwner);
       settingMutation.mutate({ key: "ui_high_contrast", value: String(value) });
     },
-    [settingMutation],
+    [settingMutation, cacheOwner],
   );
 
   return (
@@ -183,7 +212,11 @@ export function useTheme(): ThemeContextValue {
   return ctx;
 }
 
-function getInitialThemeFromApi(apiTheme: string | null, fallback: ThemeId): ThemeId {
+function getInitialThemeFromApi(
+  apiTheme: string | null,
+  fallback: ThemeId,
+  cacheOwner: string | null,
+): ThemeId {
   if (!apiTheme || !isValidTheme(apiTheme)) return fallback;
-  return storage.get(storage.KEYS.THEME) !== apiTheme ? apiTheme : fallback;
+  return appearanceCache.get(storage.KEYS.THEME, cacheOwner) !== apiTheme ? apiTheme : fallback;
 }
