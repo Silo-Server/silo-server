@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOPROXY: https://proxy.golang.org,direct
+  GOPRIVATE: github.com/Silo-Server/*
+  GONOSUMDB: github.com/Silo-Server/*
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # cmd/silo embeds the built frontend, so nothing under ./... compiles
+      # without web/dist. The Go jobs never serve it, so a placeholder is
+      # enough; the Docker workflow builds the real bundle.
+      - name: Stub the embedded frontend bundle
+        run: make embed-stub
+
+      - name: Build
+        run: go build ./...
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt is required on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # Runs the settings-contract gate among everything else: the embedded
+      # manifest must parse, satisfy its own schema, hold every structural
+      # invariant, and agree with the live settings registry on keys and
+      # defaults. Without this job those tests exist but never run.
+      - name: Test
+        run: make test-go
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Typecheck and build
+        run: pnpm run build
+
+      # Includes the appearance-cache ownership tests, which are the regression
+      # guard for cross-account leaks in the localStorage warm start.
+      - name: Test
+        working-directory: .
+        run: make test-web
+
+  docs:
+    name: Docs hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify no local paths leaked into committed docs
+        run: make verify-local-paths

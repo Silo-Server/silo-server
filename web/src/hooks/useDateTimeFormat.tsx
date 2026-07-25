@@ -15,7 +15,8 @@ import type {
 } from "@/lib/datetime";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
 import { useOptionalAuth } from "@/hooks/useAuth";
-import { dateTimeFormatCache, storage } from "@/utils/storage";
+import { appearanceCacheOwner } from "@/hooks/themePreferences";
+import { appearanceCache, storage } from "@/utils/storage";
 
 export const DATE_FORMAT_SETTING_KEY = "ui.date_format";
 export const TIME_FORMAT_SETTING_KEY = "ui.time_format";
@@ -23,9 +24,14 @@ export const TIME_FORMAT_SETTING_KEY = "ui.time_format";
 // Seed the shared formatter state from localStorage at module load, before the
 // first render, so an app booting straight into a date-heavy page doesn't
 // paint in the wrong format while the settings request is in flight.
+//
+// Auth has not resolved this early, so this reads through the same namespace
+// resolution as every other access — the account that last wrote here — rather
+// than the bare key. Reading the bare key would seed the formatter with
+// whichever account happened to write before namespacing existed.
 setDateTimeFormatPreferences({
-  dateFormat: parseDateFormatPreference(storage.get(storage.KEYS.UI_DATE_FORMAT)),
-  timeFormat: parseTimeFormatPreference(storage.get(storage.KEYS.UI_TIME_FORMAT)),
+  dateFormat: parseDateFormatPreference(appearanceCache.get(storage.KEYS.UI_DATE_FORMAT, null)),
+  timeFormat: parseTimeFormatPreference(appearanceCache.get(storage.KEYS.UI_TIME_FORMAT, null)),
 });
 
 interface DateTimeFormatContextValue {
@@ -44,8 +50,13 @@ const DateTimeFormatContext = createContext<DateTimeFormatContextValue | null>(n
  */
 export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
   const auth = useOptionalAuth();
-  const authUserId = auth && !auth.loading && auth.user ? String(auth.user.id) : null;
-  const loadApiSettings = authUserId !== null;
+  // Same owner token as the theme caches, from the same function, so widening
+  // ownership can never move one provider and leave this one behind.
+  const cacheOwner = appearanceCacheOwner({
+    loading: auth?.loading ?? false,
+    user: auth?.user ? { id: auth.user.id } : null,
+  });
+  const loadApiSettings = cacheOwner !== null;
   const { data: apiSettings } = useSettings({ enabled: loadApiSettings });
   const settingMutation = useSetSetting();
 
@@ -54,48 +65,48 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
   // missing key means the user has no preference (auto), not "fall back to
   // whatever this device saw last" — and rollback of a failed save flows back
   // through the query cache. Until then (including when the settings request
-  // fails), the localStorage warm start is only trusted if it was mirrored for
-  // this same user; another account's device-local preference must not leak in.
+  // fails), fall back to this account's own mirrored values rather than the
+  // module-level seed, which ran before auth resolved and on a shared browser
+  // may hold the account that used this device last.
   const apiLoaded = loadApiSettings && apiSettings !== undefined;
-  const localTrusted = dateTimeFormatCache.isTrusted(authUserId);
   const dateFormat = apiLoaded
     ? parseDateFormatPreference(apiSettings[DATE_FORMAT_SETTING_KEY])
-    : localTrusted
-      ? local.dateFormat
-      : "auto";
+    : loadApiSettings
+      ? parseDateFormatPreference(appearanceCache.get(storage.KEYS.UI_DATE_FORMAT, cacheOwner))
+      : local.dateFormat;
   const timeFormat = apiLoaded
     ? parseTimeFormatPreference(apiSettings[TIME_FORMAT_SETTING_KEY])
-    : localTrusted
-      ? local.timeFormat
-      : "auto";
+    : loadApiSettings
+      ? parseTimeFormatPreference(appearanceCache.get(storage.KEYS.UI_TIME_FORMAT, cacheOwner))
+      : local.timeFormat;
 
   useEffect(() => {
     setDateTimeFormatPreferences({ dateFormat, timeFormat });
-    // Mirror the resolved values (tagged with their owner) so the next load on
-    // this device paints in the right format before the settings request
+    // Mirror the resolved values into this account's namespace so the next load
+    // on this device paints in the right format before the settings request
     // resolves.
     if (apiLoaded) {
-      dateTimeFormatCache.set(storage.KEYS.UI_DATE_FORMAT, dateFormat, authUserId);
-      dateTimeFormatCache.set(storage.KEYS.UI_TIME_FORMAT, timeFormat, authUserId);
+      appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, dateFormat, cacheOwner);
+      appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, timeFormat, cacheOwner);
     }
-  }, [dateFormat, timeFormat, apiLoaded, authUserId]);
+  }, [dateFormat, timeFormat, apiLoaded, cacheOwner]);
 
   const setDateFormat = useCallback(
     (value: DateFormatPreference) => {
       setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), dateFormat: value });
-      dateTimeFormatCache.set(storage.KEYS.UI_DATE_FORMAT, value, authUserId);
+      appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, value, cacheOwner);
       settingMutation.mutate({ key: DATE_FORMAT_SETTING_KEY, value });
     },
-    [settingMutation, authUserId],
+    [settingMutation, cacheOwner],
   );
 
   const setTimeFormat = useCallback(
     (value: TimeFormatPreference) => {
       setDateTimeFormatPreferences({ ...getDateTimeFormatPreferences(), timeFormat: value });
-      dateTimeFormatCache.set(storage.KEYS.UI_TIME_FORMAT, value, authUserId);
+      appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, value, cacheOwner);
       settingMutation.mutate({ key: TIME_FORMAT_SETTING_KEY, value });
     },
-    [settingMutation, authUserId],
+    [settingMutation, cacheOwner],
   );
 
   return (

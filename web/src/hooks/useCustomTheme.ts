@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { appearanceCacheOwner } from "@/hooks/themePreferences";
-import { customThemeCache, storage } from "@/utils/storage";
+import { appearanceCache, storage } from "@/utils/storage";
 import { parseVarsJson } from "@/lib/themeExport";
 import { sanitizeCss } from "@/lib/cssSanitizer";
 import type { ThemeToken } from "@/lib/themeTokens";
@@ -28,8 +28,6 @@ interface UseCustomThemeResult {
   isDirty: boolean;
 }
 
-const EMPTY_VARS: ThemeVarOverrides = {};
-
 export function useCustomTheme(): UseCustomThemeResult {
   const auth = useOptionalAuth();
   // Owner of the localStorage warm start; null while auth bootstraps or when
@@ -39,9 +37,6 @@ export function useCustomTheme(): UseCustomThemeResult {
     user: auth?.user ? { id: auth.user.id } : null,
   });
   const loadApi = cacheOwner !== null;
-  // Read once per render, before the effects below re-stamp the cache, so every
-  // useCustomTheme instance in this render pass agrees on the answer.
-  const cacheTrusted = customThemeCache.isTrusted(cacheOwner);
 
   // API values
   const { data: apiSettings } = useSettings({ enabled: loadApi });
@@ -51,10 +46,10 @@ export function useCustomTheme(): UseCustomThemeResult {
 
   // Local draft state (for instant updates without waiting for API)
   const [localVars, setLocalVars] = useState<ThemeVarOverrides>(() =>
-    parseVarsJson(customThemeCache.get(storage.KEYS.UI_CUSTOM_THEME_VARS, cacheOwner)),
+    parseVarsJson(appearanceCache.get(storage.KEYS.UI_CUSTOM_THEME_VARS, cacheOwner)),
   );
   const [localCss, setLocalCss] = useState<string>(
-    () => customThemeCache.get(storage.KEYS.UI_CUSTOM_CSS, cacheOwner) ?? "",
+    () => appearanceCache.get(storage.KEYS.UI_CUSTOM_CSS, cacheOwner) ?? "",
   );
   const [isDirty, setIsDirty] = useState(false);
 
@@ -62,37 +57,50 @@ export function useCustomTheme(): UseCustomThemeResult {
   const varsTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const cssTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Another account's custom theme is never a valid starting point: drop it (and
-  // take ownership of the now-empty cache) as soon as we know who is signed in.
-  // Declared before the API sync effects so it can never wipe values they just
-  // wrote for the new owner.
+  // A debounced persist closes over the account it was scheduled for. Drop any
+  // pending write when the account changes or the editor unmounts: otherwise a
+  // timer armed by the previous account fires against the new account's session
+  // and stores their predecessor's CSS under their name.
   useEffect(() => {
-    if (cacheOwner === null || cacheTrusted) return;
-    customThemeCache.clear(cacheOwner);
-    setLocalVars(EMPTY_VARS);
-    setLocalCss("");
-  }, [cacheOwner, cacheTrusted]);
+    return () => {
+      clearTimeout(varsTimerRef.current);
+      clearTimeout(cssTimerRef.current);
+    };
+  }, [cacheOwner]);
+
+  // This state was seeded for whoever was signed in when the hook mounted.
+  // Re-seed from the new owner's namespace when the account changes, so an
+  // account switch without a reload stops rendering the previous account's
+  // tokens even before their own settings arrive. Adjusted during render, so
+  // there is no frame in which the new account sees the old one's theme.
+  const [seededOwner, setSeededOwner] = useState(cacheOwner);
+  if (seededOwner !== cacheOwner) {
+    setSeededOwner(cacheOwner);
+    setLocalVars(parseVarsJson(appearanceCache.get(storage.KEYS.UI_CUSTOM_THEME_VARS, cacheOwner)));
+    setLocalCss(appearanceCache.get(storage.KEYS.UI_CUSTOM_CSS, cacheOwner) ?? "");
+    setIsDirty(false);
+  }
 
   // Sync API values into local state when they arrive
   useEffect(() => {
     if (loadApi && apiVars !== undefined) {
       const parsed = parseVarsJson(apiVars);
       setLocalVars(parsed);
-      customThemeCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, JSON.stringify(parsed), cacheOwner);
+      appearanceCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, JSON.stringify(parsed), cacheOwner);
     }
   }, [loadApi, apiVars, cacheOwner]);
 
   useEffect(() => {
     if (loadApi && apiCss !== undefined && apiCss !== null) {
       setLocalCss(apiCss);
-      customThemeCache.set(storage.KEYS.UI_CUSTOM_CSS, apiCss, cacheOwner);
+      appearanceCache.set(storage.KEYS.UI_CUSTOM_CSS, apiCss, cacheOwner);
     }
   }, [loadApi, apiCss, cacheOwner]);
 
   const persistVars = useCallback(
     (vars: ThemeVarOverrides) => {
       const json = JSON.stringify(vars);
-      customThemeCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, json, cacheOwner);
+      appearanceCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, json, cacheOwner);
       settingMutation.mutate({ key: "ui_custom_theme_vars", value: json });
     },
     [settingMutation, cacheOwner],
@@ -101,7 +109,7 @@ export function useCustomTheme(): UseCustomThemeResult {
   const persistCss = useCallback(
     (css: string) => {
       const safe = sanitizeCss(css);
-      customThemeCache.set(storage.KEYS.UI_CUSTOM_CSS, safe, cacheOwner);
+      appearanceCache.set(storage.KEYS.UI_CUSTOM_CSS, safe, cacheOwner);
       settingMutation.mutate({ key: "ui_custom_css", value: safe });
     },
     [settingMutation, cacheOwner],
@@ -174,10 +182,8 @@ export function useCustomTheme(): UseCustomThemeResult {
   );
 
   return {
-    // Until the cache is proven to be ours, render nothing custom rather than
-    // the previous account's tokens and CSS.
-    vars: cacheTrusted ? localVars : EMPTY_VARS,
-    customCss: cacheTrusted ? localCss : "",
+    vars: localVars,
+    customCss: localCss,
     setVar,
     resetVar,
     setAllVars,

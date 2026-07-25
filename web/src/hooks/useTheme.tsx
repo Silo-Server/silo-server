@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { ThemeId } from "@/lib/themes";
-import { DEFAULT_THEME } from "@/lib/themes";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useBranding } from "@/hooks/useBranding";
@@ -57,9 +56,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     user: auth?.user ? { id: auth.user.id } : null,
   });
   const loadApiTheme = cacheOwner !== null;
-  // Read once per render, before any effect below re-stamps the cache, so every
-  // ThemeProvider in this render pass agrees on whether the cache is ours.
-  const cacheTrusted = appearanceCache.isTrusted(cacheOwner);
 
   const [themePreference, setThemePreference] = useState<ThemeId>(() =>
     getInitialTheme(cacheOwner),
@@ -75,16 +71,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     parseHighContrast(appearanceCache.get(storage.KEYS.UI_HIGH_CONTRAST, cacheOwner)),
   );
 
-  // Another account's appearance is never a valid starting point: drop it (and
-  // take ownership of the now-empty cache) as soon as we know who is signed in.
-  useEffect(() => {
-    if (cacheOwner === null || cacheTrusted) return;
-    appearanceCache.clear(cacheOwner);
-    setThemePreference(DEFAULT_THEME);
-    setTextScalePreference("default");
-    setTextWeightPreference("default");
-    setHighContrastPreference(false);
-  }, [cacheOwner, cacheTrusted]);
+  // This state was seeded for whoever was signed in when the provider mounted.
+  // Re-seed from the new owner's namespace when the account changes, so signing
+  // out and back in as someone else without a reload stops painting the
+  // previous account's look. Values are namespaced, so this reads the new
+  // account's own warm start rather than falling back to defaults.
+  //
+  // Adjusted during render rather than in an effect: React re-runs this pass
+  // before committing, so the new account never gets a frame painted with the
+  // previous one's appearance.
+  const [seededOwner, setSeededOwner] = useState(cacheOwner);
+  if (seededOwner !== cacheOwner) {
+    setSeededOwner(cacheOwner);
+    setThemePreference(getInitialTheme(cacheOwner));
+    setTextScalePreference(
+      parseTextScale(appearanceCache.get(storage.KEYS.UI_TEXT_SCALE, cacheOwner)),
+    );
+    setTextWeightPreference(
+      parseTextWeight(appearanceCache.get(storage.KEYS.UI_TEXT_WEIGHT, cacheOwner)),
+    );
+    setHighContrastPreference(
+      parseHighContrast(appearanceCache.get(storage.KEYS.UI_HIGH_CONTRAST, cacheOwner)),
+    );
+  }
 
   // Load persisted setting from API (user-scoped)
   const { data: apiSettings } = useSettings({ enabled: loadApiTheme });
@@ -98,13 +107,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // preference of their own (no stored local choice and no profile ui_theme).
   // A user's explicit choice always wins, preserving the per-user layering.
   const { defaultTheme: adminDefaultTheme } = useBranding();
-  // Values cached by another account must not stand in for the signed-in
-  // account's missing preferences — that would both show them someone else's
-  // appearance and suppress the admin default theme they should be getting.
-  const localTheme = cacheTrusted ? themePreference : DEFAULT_THEME;
-  const localTextScale = cacheTrusted ? textScalePreference : "default";
-  const localTextWeight = cacheTrusted ? textWeightPreference : "default";
-  const localHighContrast = cacheTrusted ? highContrastPreference : false;
+  const localTheme = themePreference;
+  const localTextScale = textScalePreference;
+  const localTextWeight = textWeightPreference;
+  const localHighContrast = highContrastPreference;
   const hasStoredThemeChoice = appearanceCache.get(storage.KEYS.THEME, cacheOwner) != null;
   const fallbackTheme: ThemeId =
     !hasStoredThemeChoice && isValidTheme(adminDefaultTheme) ? adminDefaultTheme : localTheme;
@@ -120,6 +126,37 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const highContrast = loadApiTheme
     ? parseHighContrast(apiHighContrast ?? String(localHighContrast))
     : localHighContrast;
+
+  // Mirror the server's values into this account's namespace so the next cold
+  // start paints them before the settings request resolves. Without this the
+  // cache would only ever hold choices made on this device, and a user who
+  // picked their theme elsewhere would flash the default on every load.
+  //
+  // Only keys the user actually has a stored preference for are mirrored: the
+  // absence of a cached theme is what lets the admin default apply, so writing
+  // a resolved-but-unchosen value here would silently pin them to whatever the
+  // default happened to be the first time they loaded the app.
+  useEffect(() => {
+    if (!loadApiTheme || apiSettings === undefined) return;
+    if (isValidTheme(apiTheme)) appearanceCache.set(storage.KEYS.THEME, apiTheme, cacheOwner);
+    if (apiTextScale != null) {
+      appearanceCache.set(storage.KEYS.UI_TEXT_SCALE, apiTextScale, cacheOwner);
+    }
+    if (apiTextWeight != null) {
+      appearanceCache.set(storage.KEYS.UI_TEXT_WEIGHT, apiTextWeight, cacheOwner);
+    }
+    if (apiHighContrast != null) {
+      appearanceCache.set(storage.KEYS.UI_HIGH_CONTRAST, apiHighContrast, cacheOwner);
+    }
+  }, [
+    loadApiTheme,
+    apiSettings,
+    apiTheme,
+    apiTextScale,
+    apiTextWeight,
+    apiHighContrast,
+    cacheOwner,
+  ]);
 
   useEffect(() => {
     applyThemeToDOM(previewThemeState ?? theme);

@@ -24,12 +24,23 @@ const (
 )
 
 var (
-	loadOnce   sync.Once
-	loaded     *Manifest
-	loadedErr  error
-	loadedRaw  []byte
-	objSchemas map[string]*jsonschema.Schema
+	loadOnce      sync.Once
+	loaded        *Manifest
+	loadedErr     error
+	loadedRaw     []byte
+	loadedSchemas map[string][]byte
+	objSchemas    map[string]*jsonschema.Schema
 )
+
+// loaded contract, as returned by load(). Keeping this a value rather than
+// having load() assign the package globals means load() stays pure and can be
+// called with a test filesystem without clobbering the process-wide contract.
+type contract struct {
+	manifest  *Manifest
+	raw       []byte
+	schemaRaw map[string][]byte
+	compiled  map[string]*jsonschema.Schema
+}
 
 // Load returns the embedded canonical manifest, parsed and fully validated.
 //
@@ -39,7 +50,15 @@ var (
 // rather than degrading.
 func Load() (*Manifest, error) {
 	loadOnce.Do(func() {
-		loaded, loadedRaw, loadedErr = load(contractFS)
+		result, err := load(contractFS)
+		if err != nil {
+			loadedErr = err
+			return
+		}
+		loaded = result.manifest
+		loadedRaw = result.raw
+		loadedSchemas = result.schemaRaw
+		objSchemas = result.compiled
 	})
 	return loaded, loadedErr
 }
@@ -62,6 +81,20 @@ func RawBytes() ([]byte, error) {
 	return append([]byte(nil), loadedRaw...), nil
 }
 
+// SchemaBytes returns every value schema file exactly as checked in, keyed by
+// file name. These decide which object-typed values the contract accepts, so
+// they are part of its identity — see ETag.
+func SchemaBytes() (map[string][]byte, error) {
+	if _, err := Load(); err != nil {
+		return nil, err
+	}
+	out := make(map[string][]byte, len(loadedSchemas))
+	for name, body := range loadedSchemas {
+		out[name] = append([]byte(nil), body...)
+	}
+	return out, nil
+}
+
 // ObjectSchema returns the compiled JSON Schema for an object-typed value.
 func ObjectSchema(ref string) (*jsonschema.Schema, bool) {
 	if _, err := Load(); err != nil {
@@ -71,38 +104,37 @@ func ObjectSchema(ref string) (*jsonschema.Schema, bool) {
 	return schema, ok
 }
 
-func load(fsys fs.FS) (*Manifest, []byte, error) {
+func load(fsys fs.FS) (contract, error) {
 	raw, err := fs.ReadFile(fsys, manifestPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading manifest: %w", err)
+		return contract{}, fmt.Errorf("reading manifest: %w", err)
 	}
 
 	if err := validateAgainstManifestSchema(fsys, raw); err != nil {
-		return nil, nil, err
+		return contract{}, err
 	}
 
 	var manifest Manifest
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&manifest); err != nil {
-		return nil, nil, fmt.Errorf("parsing manifest: %w", err)
+		return contract{}, fmt.Errorf("parsing manifest: %w", err)
 	}
 
 	if err := manifest.index(); err != nil {
-		return nil, nil, err
+		return contract{}, err
 	}
 
-	schemas, err := compileObjectSchemas(fsys)
+	schemaRaw, compiled, err := compileObjectSchemas(fsys)
 	if err != nil {
-		return nil, nil, err
-	}
-	objSchemas = schemas
-
-	if err := manifest.Validate(schemas); err != nil {
-		return nil, nil, err
+		return contract{}, err
 	}
 
-	return &manifest, raw, nil
+	if err := manifest.Validate(compiled); err != nil {
+		return contract{}, err
+	}
+
+	return contract{manifest: &manifest, raw: raw, schemaRaw: schemaRaw, compiled: compiled}, nil
 }
 
 // validateAgainstManifestSchema checks the manifest file against its own JSON
@@ -142,13 +174,14 @@ func validateAgainstManifestSchema(fsys fs.FS, raw []byte) error {
 // values and their defaults can be validated. Compiling all of them up front
 // also catches a malformed schema file that no definition happens to reference
 // yet.
-func compileObjectSchemas(fsys fs.FS) (map[string]*jsonschema.Schema, error) {
+func compileObjectSchemas(fsys fs.FS) (map[string][]byte, map[string]*jsonschema.Schema, error) {
 	entries, err := fs.ReadDir(fsys, schemasDir)
 	if err != nil {
-		return nil, fmt.Errorf("reading value schema directory: %w", err)
+		return nil, nil, fmt.Errorf("reading value schema directory: %w", err)
 	}
 
 	compiler := jsonschema.NewCompiler()
+	raw := make(map[string][]byte, len(entries))
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -157,15 +190,16 @@ func compileObjectSchemas(fsys fs.FS) (map[string]*jsonschema.Schema, error) {
 		name := entry.Name()
 		body, err := fs.ReadFile(fsys, path.Join(schemasDir, name))
 		if err != nil {
-			return nil, fmt.Errorf("reading value schema %s: %w", name, err)
+			return nil, nil, fmt.Errorf("reading value schema %s: %w", name, err)
 		}
 		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(body))
 		if err != nil {
-			return nil, fmt.Errorf("parsing value schema %s: %w", name, err)
+			return nil, nil, fmt.Errorf("parsing value schema %s: %w", name, err)
 		}
 		if err := compiler.AddResource(name, doc); err != nil {
-			return nil, fmt.Errorf("registering value schema %s: %w", name, err)
+			return nil, nil, fmt.Errorf("registering value schema %s: %w", name, err)
 		}
+		raw[name] = body
 		names = append(names, name)
 	}
 
@@ -173,9 +207,9 @@ func compileObjectSchemas(fsys fs.FS) (map[string]*jsonschema.Schema, error) {
 	for _, name := range names {
 		schema, err := compiler.Compile(name)
 		if err != nil {
-			return nil, fmt.Errorf("compiling value schema %s: %w", name, err)
+			return nil, nil, fmt.Errorf("compiling value schema %s: %w", name, err)
 		}
 		compiled[name] = schema
 	}
-	return compiled, nil
+	return raw, compiled, nil
 }

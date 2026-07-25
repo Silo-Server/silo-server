@@ -71,17 +71,24 @@ SDK, in the catalog, or in a specific plugin repo.
 
 ## Building and verifying
 
-`make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make migrate-status` /
-`make migrate-up` — read the `Makefile` for the rest. Local services:
+`make build`, `make dev-backend`, `make dev-frontend`, `make lint`, `make test`, `make migrate-status`
+/ `make migrate-up` — read the `Makefile` for the rest. Local services:
 `docker compose up -d postgres redis`.
+
+`make test-go` skips the tests named in `GOTEST_KNOWN_FAILURES`, which are failures that predate the
+CI gate and are tracked separately. That list may only shrink: delete an entry together with its
+fix, and never add to it to make a new change pass.
 
 Before opening a merge request:
 
 ```bash
 make lint
+make test
 cd web && pnpm run lint && pnpm run format:check
 make verify-local-paths
 ```
+
+`.github/workflows/ci.yml` runs the same checks on every pull request.
 
 Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
 

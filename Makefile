@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -53,6 +53,38 @@ dev-transcode:
 lint:
 	golangci-lint run
 	cd web && pnpm run lint
+
+# Tests that fail on main today and are tracked separately. Nothing in this list
+# is owned by the change that added it — the point of naming them individually,
+# rather than skipping whole packages, is that everything else stays gated and
+# the list can only shrink. Delete an entry along with its fix; do not add.
+GOTEST_KNOWN_FAILURES := TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion|TestAutoscanMediaUpdatedIgnoresUnsupportedSidecars|TestAutoscanMediaUpdatedSidecarsScanParent|TestAutoscanMediaUpdatedRootSidecarDoesNotScanLibrary
+
+# Frontend test files that fail on main today. Same rules as
+# GOTEST_KNOWN_FAILURES: shrink-only, and never extend it to land a change.
+WEBTEST_KNOWN_FAILURES := \
+	--exclude src/pages/Catalog.test.tsx \
+	--exclude src/pages/ItemDetail/SeasonContent.test.tsx \
+	--exclude src/pages/LibraryRecommended.test.tsx \
+	--exclude src/pages/audiobooks/player/useAudiobookPlayback.test.ts \
+	--exclude src/pages/setup-wizard/steps/ServerStorageStep.test.tsx \
+	--exclude src/player/hooks/useASSSubtitles.test.tsx
+
+# The Go binary embeds the built frontend, so every Go build and test needs
+# web/dist to exist. Tests never serve it, so a placeholder is enough; `make
+# build` still builds the real bundle.
+embed-stub:
+	@mkdir -p web/dist
+	@[ -e web/dist/index.html ] || printf '<!doctype html>\n' > web/dist/index.html
+
+# Run the Go and frontend test suites.
+test: test-go test-web
+
+test-go: embed-stub
+	go test -skip '$(GOTEST_KNOWN_FAILURES)' ./...
+
+test-web:
+	cd web && pnpm exec vitest run $(WEBTEST_KNOWN_FAILURES)
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

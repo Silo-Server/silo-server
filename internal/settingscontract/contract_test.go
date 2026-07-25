@@ -1,7 +1,11 @@
 package settingscontract
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -311,6 +315,224 @@ func TestCanonicalizationSortsKeysAndNormalizesNumbers(t *testing.T) {
 	}
 }
 
+// TestNumbersMatchECMAScript pins the cases where Go's own float formatting
+// disagrees with ECMAScript's Number::toString, which is what RFC 8785
+// requires. Every expectation below is the literal output of String(x) in
+// node; a client running a conforming JCS library must agree byte for byte or
+// its digest of the same manifest will differ from the server's.
+func TestNumbersMatchECMAScript(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// Go's 'g' would switch to exponential at 1e-5; ECMAScript holds off
+		// until the exponent drops below -6.
+		{"0.00001", "0.00001"},
+		{"1e-5", "0.00001"},
+		{"0.000001", "0.000001"},
+		{"1e-6", "0.000001"},
+		// Below the threshold both use exponential, but Go zero-pads.
+		{"1e-7", "1e-7"},
+		{"-1e-7", "-1e-7"},
+		{"5e-324", "5e-324"},
+		// Go prints negative zero as "-0"; JCS has no negative zero.
+		{"-0", "0"},
+		{"0", "0"},
+		// Integers render without a fraction up to 1e21, exponential above.
+		{"1e20", "100000000000000000000"},
+		{"1e21", "1e+21"},
+		{"1e22", "1e+22"},
+		{"1e100", "1e+100"},
+		{"3.0", "3"},
+		{"1e2", "100"},
+		// Shortest round-trip digits, not the exact binary value.
+		{"1234567.5", "1234567.5"},
+		{"0.1", "0.1"},
+		{"2.50", "2.5"},
+		{"-2.5", "-2.5"},
+		{"1.5e300", "1.5e+300"},
+		{"123.456", "123.456"},
+	}
+
+	for _, tc := range cases {
+		got, err := canonicalize([]byte(tc.in))
+		if err != nil {
+			t.Errorf("canonicalize(%s): %v", tc.in, err)
+			continue
+		}
+		if string(got) != tc.want {
+			t.Errorf("canonicalize(%s) = %s, want %s (ECMAScript String())", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestStringsAreNotHTMLEscaped guards the other half of JCS string handling.
+// encoding/json escapes <, > and & by default, which would silently fork the
+// server's digest from every conforming client the first time a label contains
+// an ampersand.
+func TestStringsAreNotHTMLEscaped(t *testing.T) {
+	got, err := canonicalize([]byte(`{"label":"Audio & subtitles","hint":"<auto> or >90%"}`))
+	if err != nil {
+		t.Fatalf("canonicalizing: %v", err)
+	}
+	want := `{"hint":"<auto> or >90%","label":"Audio & subtitles"}`
+	if string(got) != want {
+		t.Fatalf("canonicalize() = %s, want %s", got, want)
+	}
+
+	// The escapes JCS does require are still applied.
+	got, err = canonicalize([]byte(`{"a":"q\"uote\\back\ttab\nline"}`))
+	if err != nil {
+		t.Fatalf("canonicalizing escapes: %v", err)
+	}
+	if want := `{"a":"q\"uote\\back\ttab\nline"}`; string(got) != want {
+		t.Fatalf("canonicalize() = %s, want %s", got, want)
+	}
+
+	// Control characters below 0x20 with no short escape use \u00xx.
+	got, err = canonicalize([]byte(`{"a":"\u0001"}`))
+	if err != nil {
+		t.Fatalf("canonicalizing control character: %v", err)
+	}
+	if want := `{"a":"\u0001"}`; string(got) != want {
+		t.Fatalf("canonicalize() = %s, want %s", got, want)
+	}
+}
+
+// TestETagCoversValueSchemas fails if the entity tag is ever narrowed back to
+// manifest.json alone. The schemas decide which object values the server
+// accepts, so a change to one changes the contract; if it did not move the tag,
+// every client would 304 forever against validation rules that had shifted
+// underneath them.
+func TestETagCoversValueSchemas(t *testing.T) {
+	schemas, err := SchemaBytes()
+	if err != nil {
+		t.Fatalf("reading value schemas: %v", err)
+	}
+	if len(schemas) == 0 {
+		t.Fatal("no value schemas, so this test proves nothing")
+	}
+
+	manifest, err := CanonicalBytes()
+	if err != nil {
+		t.Fatalf("canonicalizing manifest: %v", err)
+	}
+	baseline, err := digestWithSchemas(manifest)
+	if err != nil {
+		t.Fatalf("digesting: %v", err)
+	}
+
+	live, err := ETag()
+	if err != nil {
+		t.Fatalf("computing ETag: %v", err)
+	}
+	if live != baseline {
+		t.Fatalf("ETag() = %s, want the schema-inclusive digest %s", live, baseline)
+	}
+
+	if reference := sha256Of(manifest, schemas); reference != baseline {
+		t.Fatalf("test digest helper disagrees with digestWithSchemas: %s vs %s",
+			reference, baseline)
+	}
+
+	// Tightening a schema — the change that alters what the server accepts
+	// while leaving manifest.json byte-identical — must move the digest.
+	names := make([]string, 0, len(schemas))
+	for name := range schemas {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	tightened := map[string][]byte{}
+	for name, body := range schemas {
+		tightened[name] = body
+	}
+	tightened[names[0]] = []byte(`{"type":"object","additionalProperties":false}`)
+	if sha256Of(manifest, tightened) == baseline {
+		t.Error("changing a value schema's contents did not change the contract digest")
+	}
+
+	// So must renaming one, since the filename is what a definition's
+	// schema_ref binds to.
+	renamed := map[string][]byte{}
+	for name, body := range schemas {
+		renamed[name] = body
+	}
+	renamed["renamed-"+names[0]] = renamed[names[0]]
+	delete(renamed, names[0])
+	if sha256Of(manifest, renamed) == baseline {
+		t.Error("renaming a value schema did not change the contract digest")
+	}
+
+	// Whitespace, on the other hand, must not: the schemas are canonicalized
+	// before hashing, so reformatting a file is not a contract change.
+	reformatted := map[string][]byte{}
+	for name, body := range schemas {
+		reformatted[name] = body
+	}
+	reformatted[names[0]] = append(append([]byte(nil), reformatted[names[0]]...), '\n', ' ')
+	if sha256Of(manifest, reformatted) != baseline {
+		t.Error("reformatting a value schema changed the contract digest")
+	}
+}
+
+func sha256Of(manifest []byte, schemas map[string][]byte) string {
+	names := make([]string, 0, len(schemas))
+	for name := range schemas {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	digest := sha256.New()
+	digest.Write(manifest)
+	for _, name := range names {
+		canonical, err := canonicalize(schemas[name])
+		if err != nil {
+			// A deliberately-perturbed schema may not parse; hash the raw bytes
+			// so the test still observes a change.
+			canonical = schemas[name]
+		}
+		fmt.Fprintf(digest, "\n%d:%s\n%d:", len(name), name, len(canonical))
+		digest.Write(canonical)
+	}
+	return `"` + hex.EncodeToString(digest.Sum(nil)) + `"`
+}
+
+// TestDerivedRepresentationsAreMemoized keeps the manifest endpoint cheap: all
+// four values are pure functions of files fixed at compile time, and a
+// conditional GET must not pay a full parse and re-serialize to answer 304.
+func TestDerivedRepresentationsAreMemoized(t *testing.T) {
+	first, err := CanonicalBytes()
+	if err != nil {
+		t.Fatalf("canonicalizing: %v", err)
+	}
+	second, err := CanonicalBytes()
+	if err != nil {
+		t.Fatalf("canonicalizing again: %v", err)
+	}
+
+	// Callers get their own copy, so mutating one must not corrupt the cache.
+	if len(first) > 0 {
+		first[0] = 'X'
+	}
+	third, err := CanonicalBytes()
+	if err != nil {
+		t.Fatalf("canonicalizing a third time: %v", err)
+	}
+	if string(second) != string(third) {
+		t.Fatal("mutating a returned slice corrupted the memoized canonical bytes")
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		if _, err := ETag(); err != nil {
+			t.Fatalf("computing ETag: %v", err)
+		}
+		if _, err := PublicETag(); err != nil {
+			t.Fatalf("computing PublicETag: %v", err)
+		}
+	})
+	if allocs > 0 {
+		t.Errorf("ETag()+PublicETag() allocate %.0f times per call; both should be memoized", allocs)
+	}
+}
+
 func TestPublicManifestStripsMaintainerNotes(t *testing.T) {
 	public, err := PublicBytes()
 	if err != nil {
@@ -566,5 +788,164 @@ func TestDuplicateKeysAreRejected(t *testing.T) {
 	}
 	if err := manifest.index(); err == nil {
 		t.Fatal("index accepted a duplicate key")
+	}
+}
+
+// TestStrictUnmarshalRejectsTrailingContent covers the bytes a caller slicing a
+// value out of a larger document is most likely to hand over. json.Decoder's
+// More() answers false for a stray closing bracket, so relying on it let
+// `true]` validate as a boolean.
+func TestStrictUnmarshalRejectsTrailingContent(t *testing.T) {
+	rejected := []string{
+		`true]`, `true}`, `30]`, `30}`, `"always"}`, `"a" ]`,
+		`true false`, `30 40`, `{} {}`, `[] []`,
+	}
+	for _, raw := range rejected {
+		var value any
+		if err := strictUnmarshal([]byte(raw), &value); err == nil {
+			t.Errorf("strictUnmarshal(%s) accepted trailing content", raw)
+		}
+	}
+
+	accepted := []string{`true`, `30`, `"always"`, `{"a":1}`, `[1,2]`, `null`, ` 30 `}
+	for _, raw := range accepted {
+		var value any
+		if err := strictUnmarshal([]byte(raw), &value); err != nil {
+			t.Errorf("strictUnmarshal(%s) = %v, want nil", raw, err)
+		}
+	}
+}
+
+// TestEnumMatchingIsTypeSafe guards the value types manifest.schema.json
+// already permits. Comparing formatted tokens made the string "3" satisfy an
+// integer member and "true" satisfy a boolean one.
+func TestEnumMatchingIsTypeSafe(t *testing.T) {
+	schema := &ValueSchema{
+		Type: TypeEnum,
+		Values: []EnumMember{
+			{Value: "auto"},
+			{Value: float64(3)},
+			{Value: true},
+			{Value: float64(1000000)},
+		},
+	}
+
+	accepted := []string{`"auto"`, `3`, `true`, `3.0`, `1000000`, `1e6`}
+	for _, raw := range accepted {
+		if err := schema.ValidateValue(json.RawMessage(raw), nil); err != nil {
+			t.Errorf("ValidateValue(%s) = %v, want nil", raw, err)
+		}
+	}
+
+	rejected := []string{`"3"`, `"true"`, `"1000000"`, `4`, `false`, `"AUTO"`}
+	for _, raw := range rejected {
+		if err := schema.ValidateValue(json.RawMessage(raw), nil); err == nil {
+			t.Errorf("ValidateValue(%s) was accepted; wrong JSON type or value", raw)
+		}
+	}
+
+	// A string member and a numeric member that print alike are distinct, not
+	// a duplicate.
+	mixed := &ValueSchema{
+		Type:   TypeEnum,
+		Values: []EnumMember{{Value: "3"}, {Value: float64(3)}},
+	}
+	if errs := mixed.validate(1, nil); len(errs) != 0 {
+		t.Errorf(`members "3" and 3 reported as duplicates: %v`, errs)
+	}
+}
+
+// TestStepIsEnforced closes the gap between a declared constraint and the
+// single validation path. player.playback_speed advertises a 0.05 step, so a
+// server that stores 1.4372 hands every client a value its stepper cannot
+// represent.
+func TestStepIsEnforced(t *testing.T) {
+	min, max, step := 0.25, 3.0, 0.05
+	schema := &ValueSchema{
+		Type: TypeNumber, Minimum: &min, Maximum: &max, Step: &step,
+	}
+
+	for _, raw := range []string{`0.25`, `0.75`, `1`, `1.25`, `1.4`, `2.5`, `3`} {
+		if err := schema.ValidateValue(json.RawMessage(raw), nil); err != nil {
+			t.Errorf("ValidateValue(%s) = %v, want nil", raw, err)
+		}
+	}
+	for _, raw := range []string{`0.26`, `1.4372`, `1.01`, `2.99`} {
+		if err := schema.ValidateValue(json.RawMessage(raw), nil); err == nil {
+			t.Errorf("ValidateValue(%s) was accepted despite the 0.05 step", raw)
+		}
+	}
+
+	// Range still wins where both apply.
+	if err := schema.ValidateValue(json.RawMessage(`3.05`), nil); err == nil {
+		t.Error("a value above the maximum was accepted")
+	}
+}
+
+// TestLanguageTagsAcceptWhatClientsProduce pins the shapes the narrower
+// original pattern rejected. Every tag here is one a shipped client can emit
+// without the user doing anything unusual.
+func TestLanguageTagsAcceptWhatClientsProduce(t *testing.T) {
+	wellFormed := map[string]string{
+		"en":                 "en",
+		"EN":                 "en",
+		"en-US":              "en-US",
+		"en-us":              "en-US",
+		"EN-us":              "en-US",
+		"en_US":              "en-US", // iOS Locale.identifier, Android Locale.toString()
+		"zh-Hant-TW":         "zh-Hant-TW",
+		"zh-hant-tw":         "zh-Hant-TW",
+		"ca-ES-valencia":     "ca-ES-valencia",
+		"ar-EG-u-nu-latn":    "ar-EG-u-nu-latn",
+		"de-DE-u-co-phonebk": "de-DE-u-co-phonebk",
+		"es-419":             "es-419",
+		"en-US-x-private":    "en-US-x-private",
+	}
+	for input, want := range wellFormed {
+		got, ok := NormalizeLanguageTag(input)
+		if !ok {
+			t.Errorf("NormalizeLanguageTag(%q) rejected a tag a client produces", input)
+			continue
+		}
+		if got != want {
+			t.Errorf("NormalizeLanguageTag(%q) = %q, want %q", input, got, want)
+		}
+	}
+
+	// The empty string is not a language tag: "no preference" is null, which
+	// the nullable flag on each language setting expresses.
+	malformed := []string{"", " ", "e", "toolongprimary", "en-", "-US", "en--US", "123"}
+	for _, input := range malformed {
+		if got, ok := NormalizeLanguageTag(input); ok {
+			t.Errorf("NormalizeLanguageTag(%q) = %q, want rejection", input, got)
+		}
+	}
+}
+
+// TestNormalizeValueCanonicalizesLanguageTags proves normalization is reachable
+// through the shared path, not just available as a helper. Without it en-US,
+// en-us and EN-us are three rows for one preference and track matching misses
+// on two of them.
+func TestNormalizeValueCanonicalizesLanguageTags(t *testing.T) {
+	schema := &ValueSchema{Type: TypeLanguageTag, Nullable: true}
+
+	got, err := schema.NormalizeValue(json.RawMessage(`"en_us"`), nil)
+	if err != nil {
+		t.Fatalf("NormalizeValue: %v", err)
+	}
+	if string(got) != `"en-US"` {
+		t.Fatalf("NormalizeValue = %s, want \"en-US\"", got)
+	}
+
+	got, err = schema.NormalizeValue(json.RawMessage(`null`), nil)
+	if err != nil {
+		t.Fatalf("NormalizeValue(null): %v", err)
+	}
+	if string(got) != jsonNull {
+		t.Fatalf("NormalizeValue(null) = %s, want null", got)
+	}
+
+	if _, err := schema.NormalizeValue(json.RawMessage(`""`), nil); err == nil {
+		t.Error(`NormalizeValue("") was accepted; unset must be null, not the empty string`)
 	}
 }

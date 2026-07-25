@@ -82,12 +82,12 @@
         "default"
       ],
       "value_schema": { "type": "boolean" },
-      "default_value": false,
+      "default_value": true,
       "category": "playback",
       "label": "Show forced subtitles",
       "description": "Show subtitles for foreign-language dialogue even when subtitles are off.",
       "recommended_control": "switch",
-      "notes": "The existing Has* companion booleans on LibraryPlaybackPreference and SubtitlePreference encode set-vs-unset. Migration writes a row only where Has* is true, so explicit false stays distinct from unset."
+      "notes": "Default is true because that is what the server resolves today: user_profiles.show_forced_subtitles is NOT NULL DEFAULT true (migration 029) and profile creation sets it true. A false default here would silently turn forced subtitles off for every profile that never touched the toggle. The Has* companion booleans on LibraryPlaybackPreference and SubtitlePreference encode set-vs-unset at the library and series scopes, so migration writes rows there only where Has* is true. The profile column has no companion and cannot distinguish an explicit true from the column default, so migration writes a profile row only where the value is false — the value that differs from the default."
     },
     {
       "key": "playback.subtitle_appearance",
@@ -111,7 +111,7 @@
       "label": "Subtitle appearance",
       "description": "How subtitles are drawn during playback.",
       "recommended_control": "panel",
-      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged."
+      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. The rename touches three URL paths in internal/api/router.go, the admin device-settings routes, and the key constant in every client, so it cannot land without them. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged, rewriting the key on each row. The default below is the web client's; Apple defaults to a box background and Android to no background with an outline, so migration must first write each platform's own default into a row for users who never opened the panel, or their subtitles silently change appearance at cutover."
     },
     {
       "key": "playback.preferred_quality",
@@ -124,17 +124,10 @@
         "ordered": true,
         "values": [
           { "value": "auto", "label": "Auto" },
-          { "value": "328p" },
-          { "value": "420p" },
-          { "value": "480p" },
-          { "value": "720p" },
-          { "value": "720p-medium" },
-          { "value": "720p-high" },
-          { "value": "1080p-8" },
-          { "value": "1080p" },
-          { "value": "1080p-medium" },
-          { "value": "1080p-high" },
-          { "value": "2160p" },
+          { "value": "480p", "label": "480p" },
+          { "value": "720p", "label": "720p" },
+          { "value": "1080p", "label": "1080p" },
+          { "value": "2160p", "label": "2160p / 4K" },
           { "value": "original", "label": "Original quality" }
         ]
       },
@@ -147,7 +140,7 @@
       "label": "Preferred quality",
       "description": "Pick the quality Silo should prefer.",
       "recommended_control": "select",
-      "notes": "Members are listed ascending so the ceiling constraint has a defined direction; \"auto\" sorts lowest because it never exceeds a cap. Migrates user_profiles.quality_preference as the profile fallback. The account/profile max_playback_quality columns stay in internal/policy and are NOT settings."
+      "notes": "Members are exactly the vocabulary the server already speaks: NormalizeQualityV3 in internal/playback/protocol_v3.go accepts auto, 480p, 720p, 1080p, 2160p and original and normalizes anything else to auto with a degradation warning. Transcode ladder rungs (328p, 720p-high, 1080p-8 and friends) are deliberately absent — they are encoder outputs, not user-facing choices, and registering them would have promised a preference the planner throws away. Members are listed ascending so the ceiling constraint has a defined direction; \"auto\" sorts lowest because it never exceeds a cap, and \"original\" highest because it is the uncapped source. Enforcing the ceiling needs internal/access/quality.go to learn both sentinels: qualityRank ranks neither today, so auto and original both tie at 0 with unset and a cap would let original through. That is Phase 2 work and the ordering it must implement is the one declared here. Migrates user_profiles.quality_preference as the profile fallback; because that column is NOT NULL DEFAULT '1080p', migration writes a profile row only where the value is not the column default, or every profile would be pinned to 1080p having never chosen it. The account/profile max_playback_quality columns stay in internal/policy and are NOT settings."
     },
     {
       "key": "playback.auto_skip_intro",
@@ -237,15 +230,11 @@
       "resolution_order": ["profile", "default"],
       "value_schema": { "type": "language_tag", "nullable": true },
       "default_value": null,
-      "constrained_by": {
-        "policy_input": "profile_preferred_metadata_language",
-        "constraint": "allowlist"
-      },
       "category": "catalog",
       "label": "Metadata language",
       "description": "Language Silo prefers for titles, descriptions, and artwork.",
       "recommended_control": "select",
-      "notes": "Migrates user_profiles.preferred_metadata_language."
+      "notes": "Migrates user_profiles.preferred_metadata_language; that column is NOT NULL DEFAULT '', and the empty string means unset, so migration writes a row only where it is non-empty. Deliberately carries no constrained_by. An earlier draft declared an allowlist on policy input profile_preferred_metadata_language, which is circular: internal/policy/input.go populates that field from this very column and vendor/scope.rego relays it unchanged as a preference. Policy narrows nothing here, and an allowlist bound to a scalar equal to the current value would either be a no-op or reject every change the user makes."
     },
     {
       "key": "player.hdr_enabled",
@@ -313,7 +302,7 @@
       "label": "Match content frame rate",
       "description": "Switch the display refresh rate to match what is playing.",
       "recommended_control": "switch",
-      "notes": "Previously an unregistered Android device-setting write, so every write and reset was rejected by the server. Registered here."
+      "notes": "Android keeps this device-local today: it is absent from PlaybackSettingsKeys.DeviceSettings and documented there as deliberately not synced, so it was never written to the server rather than written and rejected. Registered here because a display-matching preference belongs to the device and should follow a profile across reinstalls."
     },
     {
       "key": "player.playback_speed",
@@ -328,7 +317,7 @@
       "label": "Playback speed",
       "description": "Default playback speed on this device.",
       "recommended_control": "slider",
-      "notes": "Android currently clamps to 4.0. The contract maximum is 3.0, matching the server; the Android clamp and its unit test are corrected to match."
+      "notes": "Range matches the server and the shipped clients: Android already clamps to 0.25..3.0 and no picker offers above 3.0. The 0.05 step is enforced by ValidateValue, not just advertised, so every client's stepper lands on values the server accepts."
     },
     {
       "key": "player.audio_sync_ms",
@@ -404,14 +393,14 @@
       "persistence": "remote",
       "allowed_scopes": ["profile_device"],
       "resolution_order": ["profile_device", "default"],
-      "value_schema": { "type": "integer", "minimum": 0, "maximum": 480 },
+      "value_schema": { "type": "integer", "minimum": 0, "maximum": 240 },
       "default_value": 0,
       "unit": "minutes",
       "category": "player",
       "label": "Default sleep timer",
       "description": "Preset duration for the sleep timer. 0 leaves it off.",
       "recommended_control": "stepper",
-      "notes": "Previously an unregistered Android device-setting write. The design classes transient sleep timers as private local; the persisted default duration is a real preference, so it is registered while the running timer stays client-local."
+      "notes": "Android keeps this device-local today and clamps to 0..240; it was never written to the server rather than written and rejected. The maximum matches that clamp rather than exceeding it, because a manifest bound no shipped client can produce is the drift this contract exists to remove. Raising it later is additive under the widening rule: bump maximum and tag it with maximum_introduced_in. The design classes a running sleep timer as private local; only the persisted default duration is a preference, so only it is registered."
     },
     {
       "key": "ui.theme",
@@ -435,7 +424,7 @@
       "label": "Theme",
       "description": "Colour theme for the Silo interface.",
       "recommended_control": "select",
-      "notes": "Renamed from the unregistered legacy key \"ui_theme\", which the extension bag accepted without validation. Moved from account to profile scope: appearance is per household member, and the account row is copied to every profile during migration. Carries a device override because the right theme is partly a function of the screen and the room — a light theme on a phone in daylight, a dark one on a TV at night — which is the same reasoning that gives ui.text_scale one. Note that ui.custom_theme_vars and ui.custom_css stay profile-wide, so a profile's custom styling still applies on top of a device's theme override. Adding a theme is an additive enum widening. The admin-set default theme stays in server_settings and is not a user setting."
+      "notes": "Renamed from the unregistered legacy key \"ui_theme\", which the extension bag accepted without validation. Moved from account to profile scope: appearance is per household member, and the account row is copied to every profile during migration. Carries a device override because the right theme is partly a function of the screen and the room — a light theme on a phone in daylight, a dark one on a TV at night — which is the same reasoning that gives ui.text_scale one. Note that ui.custom_theme_vars and ui.custom_css stay profile-wide, so a profile's custom styling still applies on top of a device's theme override. Adding a theme is an additive enum widening. The admin-set default theme stays in server_settings and is not a user setting. Migration must also update internal/plugins/user_theme_lookup.go, which reads this value with raw SQL bound to both the old name and the account scope (SELECT value FROM user_settings WHERE user_id = $1 AND key = 'ui_theme') and feeds the X-Silo-Theme header on every plugin request. Left alone, that query matches nothing after the rename and every plugin UI silently falls back to its own theme, with no error to notice."
     },
     {
       "key": "ui.text_scale",
@@ -657,6 +646,32 @@
       "notes": "Contract-known local. Governs on-device storage cleanup prompts."
     },
     {
+      "key": "downloads.default_quality",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": {
+        "type": "enum",
+        "ordered": true,
+        "values": [
+          { "value": "1mbps", "label": "1 Mbps" },
+          { "value": "2mbps", "label": "2 Mbps" },
+          { "value": "5mbps", "label": "5 Mbps" },
+          { "value": "10mbps", "label": "10 Mbps" },
+          { "value": "20mbps", "label": "20 Mbps" },
+          { "value": "original", "label": "Original" }
+        ]
+      },
+      "default_value": "original",
+      "platforms": ["ios", "android"],
+      "category": "downloads",
+      "label": "Download quality",
+      "description": "Quality preset used for new downloads.",
+      "recommended_control": "select",
+      "notes": "Contract-known local: the value is chosen on the device holding the files and is sent on each POST /downloads rather than stored server-side. Members are the DownloadQuality wire presets, ascending. Registered as client_local rather than left unregistered because it is a user-facing preference with shared semantics, and the manifest's invariant is that no production setting exists without an entry."
+    },
+    {
       "key": "subtitle.matches_device",
       "introduced_in": 1,
       "persistence": "client_local",
@@ -669,7 +684,69 @@
       "label": "Match device caption settings",
       "description": "Use the operating system's caption style instead of Silo's.",
       "recommended_control": "switch",
-      "notes": "Contract-known local: reads OS accessibility settings that only exist on the device. When enabled, playback.subtitle_appearance is not applied. Apple's existing copy separating this from profile subtitle behavior is the UX baseline."
+      "notes": "Contract-known local: reads OS accessibility settings that only exist on the device. When enabled, playback.subtitle_appearance is not applied. Apple's existing copy separating this from profile subtitle behavior is the UX baseline. A contract key names a setting; it is not a storage key. Clients keep whatever local key they already use — Android stores this at subtitle.matches_device.local, Apple at player.subtitleMatchesSystemAppearance — so adopting the contract does not reset anyone's local preferences. The same applies to downloads.wifi_only and downloads.keep_watched, which Apple stores as downloads.wifiOnly and downloads.keepWatchedDownloads."
+    },
+    {
+      "key": "player.resume_rewind_seconds",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": { "type": "integer", "minimum": 0, "maximum": 30 },
+      "default_value": 7,
+      "unit": "seconds",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv", "web"],
+      "category": "player",
+      "label": "Rewind on resume",
+      "description": "Skip back this far when resuming a partly watched item, to re-establish context. 0 turns it off.",
+      "recommended_control": "stepper",
+      "notes": "Contract-known local: it tunes playback feel on the device doing the playing. Registered so the name, range and default are shared rather than reinvented per platform."
+    },
+    {
+      "key": "player.passout_threshold",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": { "type": "integer", "minimum": 0, "maximum": 20 },
+      "default_value": 3,
+      "unit": "episodes",
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv", "web"],
+      "category": "player",
+      "label": "Still watching prompt",
+      "description": "How many episodes auto-play before Silo asks whether you are still watching. 0 never asks.",
+      "recommended_control": "stepper",
+      "notes": "Contract-known local: pass-out protection counts consecutive auto-advances in one client session, which no other device can observe."
+    },
+    {
+      "key": "player.picture_in_picture_enabled",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "platforms": ["ios", "macos", "android"],
+      "category": "player",
+      "label": "Picture in picture",
+      "description": "Keep playing in a floating window when you leave the player.",
+      "recommended_control": "switch",
+      "notes": "Contract-known local: picture-in-picture is an OS capability of the device, not a playback preference the server resolves."
+    },
+    {
+      "key": "nav.show_audiobooks",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv"],
+      "category": "nav",
+      "label": "Show audiobooks",
+      "description": "Show the Audiobooks section in navigation.",
+      "recommended_control": "switch",
+      "notes": "Contract-known local: an opt-in navigation surface, hidden by default, with existing Apple (AppNavPreferences.showAudiobooks) and Android parity. Android stores it locally at nav.show_audiobooks.local."
     }
   ]
 }

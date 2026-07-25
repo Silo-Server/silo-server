@@ -12,7 +12,7 @@ func TestNormalize_DefaultsMatchToAll(t *testing.T) {
 
 func TestNormalize_LowercaseAndTrimsFields(t *testing.T) {
 	q := QueryDefinition{
-		Match: "  ALL ",
+		Match:  "  ALL ",
 		Groups: []QueryGroup{{Match: "  Any ", Rules: []QueryRule{{Field: "  Title ", Op: "  IS ", Value: "x"}}}},
 	}
 	n := q.Normalize()

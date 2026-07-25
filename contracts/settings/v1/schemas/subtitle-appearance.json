@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://silo-server.dev/contracts/settings/v1/schemas/subtitle-appearance.json",
   "title": "Subtitle appearance",
-  "description": "Rendering appearance for subtitle tracks. Mirrors web/src/lib/subtitleAppearance.ts.",
+  "description": "Rendering appearance for subtitle tracks. Shared by the web, Apple and Android players; where they disagree the wider vocabulary wins, because a value a shipped client can already produce must stay storable.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -22,8 +22,11 @@
       "enum": ["small", "medium", "large", "xlarge", "xxlarge"]
     },
     "fontFamily": {
+      "description": "A font family name. Not an enum: the Apple clients offer every family CTFontManagerCopyAvailableFontFamilyNames reports and store the chosen name verbatim, so restricting this to the web's three generic families would invalidate the stored appearance of every user who picked a real font. The pattern bounds it to a plain family name — no separators, quotes, parentheses or braces — so a value is safe to interpolate into CSS or a platform font lookup.",
       "type": "string",
-      "enum": ["sans-serif", "serif", "monospace"]
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]*$"
     },
     "fontColor": { "$ref": "#/$defs/hexColor" },
     "backgroundColor": { "$ref": "#/$defs/hexColor" },

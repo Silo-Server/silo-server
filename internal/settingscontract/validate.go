@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -172,13 +175,20 @@ func (v *ValueSchema) validate(manifestRevision int, objectSchemas map[string]*j
 		if v.Step != nil && *v.Step <= 0 {
 			errs = append(errs, fmt.Errorf("step must be positive, got %g", *v.Step))
 		}
-		for label, rev := range map[string]int{
-			"minimum_introduced_in": v.MinimumIntroducedIn,
-			"maximum_introduced_in": v.MaximumIntroducedIn,
+		// A slice, not a map: ranging a map would order these two errors
+		// randomly, so the same broken manifest would report differently from
+		// run to run.
+		for _, tagged := range []struct {
+			label string
+			rev   int
+		}{
+			{"minimum_introduced_in", v.MinimumIntroducedIn},
+			{"maximum_introduced_in", v.MaximumIntroducedIn},
 		} {
-			if rev != 0 && rev > manifestRevision {
+			if tagged.rev != 0 && tagged.rev > manifestRevision {
 				errs = append(errs, fmt.Errorf(
-					"%s is %d, after the manifest revision %d", label, rev, manifestRevision))
+					"%s is %d, after the manifest revision %d",
+					tagged.label, tagged.rev, manifestRevision))
 			}
 		}
 
@@ -193,8 +203,15 @@ func (v *ValueSchema) validate(manifestRevision int, objectSchemas map[string]*j
 				"min_length %d exceeds max_length %d", *v.MinLength, *v.MaxLength))
 		}
 		if v.Pattern != "" {
-			if _, err := regexp.Compile(v.Pattern); err != nil {
+			// Compiled once here and reused by every ValidateValue call.
+			// ValidateValue is documented as the per-request validation path,
+			// so recompiling the pattern on each call would put a regex
+			// compile on every settings write.
+			compiled, err := regexp.Compile(v.Pattern)
+			if err != nil {
 				errs = append(errs, fmt.Errorf("pattern does not compile: %w", err))
+			} else {
+				v.compiledPattern = compiled
 			}
 		}
 
@@ -204,15 +221,17 @@ func (v *ValueSchema) validate(manifestRevision int, objectSchemas map[string]*j
 		}
 		seen := make(map[string]struct{}, len(v.Values))
 		for _, member := range v.Values {
-			token := fmt.Sprintf("%v", member.Value)
+			// Type-tagged, so a string member "3" and an integer member 3 are
+			// two distinct members rather than a reported duplicate.
+			token := enumToken(member.Value)
 			if _, dup := seen[token]; dup {
-				errs = append(errs, fmt.Errorf("enum repeats value %q", token))
+				errs = append(errs, fmt.Errorf("enum repeats value %s", displayEnumValue(member.Value)))
 			}
 			seen[token] = struct{}{}
 			if member.IntroducedIn != 0 && member.IntroducedIn > manifestRevision {
 				errs = append(errs, fmt.Errorf(
-					"enum member %q claims introduced_in %d, after the manifest revision %d",
-					token, member.IntroducedIn, manifestRevision))
+					"enum member %s claims introduced_in %d, after the manifest revision %d",
+					displayEnumValue(member.Value), member.IntroducedIn, manifestRevision))
 			}
 		}
 
@@ -338,20 +357,19 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 		if err := strictUnmarshal(trimmed, &value); err != nil {
 			return fmt.Errorf("expected an enum value: %w", err)
 		}
-		token := fmt.Sprintf("%v", value)
 		for _, member := range v.Values {
-			if fmt.Sprintf("%v", member.Value) == token {
+			if enumMatches(value, member.Value) {
 				return nil
 			}
 		}
-		return fmt.Errorf("%q is not one of %s", token, v.enumTokens())
+		return fmt.Errorf("%s is not one of %s", displayEnumValue(value), v.enumTokens())
 
 	case TypeLanguageTag:
 		var value string
 		if err := strictUnmarshal(trimmed, &value); err != nil {
 			return fmt.Errorf("expected a language tag: %w", err)
 		}
-		if !languageTagPattern.MatchString(value) {
+		if _, ok := NormalizeLanguageTag(value); !ok {
 			return fmt.Errorf("%q is not a well-formed BCP 47 language tag", value)
 		}
 
@@ -375,12 +393,64 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 	return nil
 }
 
+// NormalizeValue validates a value and returns the form that should be stored.
+//
+// Anything that persists a value goes through here rather than ValidateValue,
+// so the row that lands in the database is the one every client compares
+// against. Only language tags differ from their input today; every other type
+// is already canonical once it validates.
+func (v *ValueSchema) NormalizeValue(
+	raw json.RawMessage,
+	objectSchemas map[string]*jsonschema.Schema,
+) (json.RawMessage, error) {
+	if err := v.ValidateValue(raw, objectSchemas); err != nil {
+		return nil, err
+	}
+
+	trimmed := bytes.TrimSpace(raw)
+	if v.Type != TypeLanguageTag || bytes.Equal(trimmed, []byte("null")) {
+		return append(json.RawMessage(nil), trimmed...), nil
+	}
+
+	var tag string
+	if err := strictUnmarshal(trimmed, &tag); err != nil {
+		return nil, fmt.Errorf("expected a language tag: %w", err)
+	}
+	normalized, ok := NormalizeLanguageTag(tag)
+	if !ok {
+		return nil, fmt.Errorf("%q is not a well-formed BCP 47 language tag", tag)
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, fmt.Errorf("encoding normalized language tag: %w", err)
+	}
+	return encoded, nil
+}
+
+// stepTolerance absorbs binary floating-point error when checking a value
+// against a declared step. 0.05 is not exactly representable, so requiring an
+// exact multiple would reject values every client can legitimately produce.
+const stepTolerance = 1e-9
+
 func (v *ValueSchema) checkRange(value float64) error {
 	if v.Minimum != nil && value < *v.Minimum {
 		return fmt.Errorf("%g is below the minimum %g", value, *v.Minimum)
 	}
 	if v.Maximum != nil && value > *v.Maximum {
 		return fmt.Errorf("%g is above the maximum %g", value, *v.Maximum)
+	}
+	if v.Step != nil && *v.Step > 0 {
+		// Steps are counted from the minimum, which is the only origin every
+		// client's stepper agrees on.
+		base := 0.0
+		if v.Minimum != nil {
+			base = *v.Minimum
+		}
+		steps := (value - base) / *v.Step
+		if math.Abs(steps-math.Round(steps))**v.Step > stepTolerance {
+			return fmt.Errorf("%g is not a multiple of the step %g from %g",
+				value, *v.Step, base)
+		}
 	}
 	return nil
 }
@@ -394,9 +464,15 @@ func (v *ValueSchema) checkString(value string) error {
 		return fmt.Errorf("is longer than the maximum %d characters", *v.MaxLength)
 	}
 	if v.Pattern != "" {
-		matcher, err := regexp.Compile(v.Pattern)
-		if err != nil {
-			return fmt.Errorf("pattern does not compile: %w", err)
+		matcher := v.compiledPattern
+		if matcher == nil {
+			// Only reachable for a schema built in a test rather than loaded
+			// from the manifest, where validate() would have compiled it.
+			compiled, err := regexp.Compile(v.Pattern)
+			if err != nil {
+				return fmt.Errorf("pattern does not compile: %w", err)
+			}
+			matcher = compiled
 		}
 		if !matcher.MatchString(value) {
 			return fmt.Errorf("does not match %s", v.Pattern)
@@ -408,9 +484,90 @@ func (v *ValueSchema) checkString(value string) error {
 func (v *ValueSchema) enumTokens() string {
 	tokens := make([]string, 0, len(v.Values))
 	for _, member := range v.Values {
-		tokens = append(tokens, fmt.Sprintf("%v", member.Value))
+		tokens = append(tokens, displayEnumValue(member.Value))
 	}
 	return strings.Join(tokens, ", ")
+}
+
+// enumMatches reports whether a decoded request value is the same JSON value as
+// an enum member.
+//
+// Comparison is by JSON type and value rather than by formatted text.
+// manifest.schema.json permits string, integer and boolean members, and
+// comparing "%v" tokens would let the string "3" satisfy an integer member 3
+// and the string "true" satisfy a boolean member — storing a wire value of a
+// type every generated binding would then fail to decode.
+func enumMatches(value, member any) bool {
+	switch got := value.(type) {
+	case string:
+		want, ok := member.(string)
+		return ok && got == want
+	case bool:
+		want, ok := member.(bool)
+		return ok && got == want
+	case json.Number:
+		return numberEqualsMember(got, member)
+	default:
+		return false
+	}
+}
+
+// numberEqualsMember compares numerically, so a member written 1e6 matches a
+// request sending 1000000 and an integer member 3 matches 3.0. Manifest members
+// decode without UseNumber and arrive as float64; values built in tests may
+// already be json.Number.
+func numberEqualsMember(value json.Number, member any) bool {
+	var want float64
+	switch typed := member.(type) {
+	case float64:
+		want = typed
+	case json.Number:
+		parsed, err := typed.Float64()
+		if err != nil {
+			return false
+		}
+		want = parsed
+	default:
+		return false
+	}
+	got, err := value.Float64()
+	if err != nil {
+		return false
+	}
+	return got == want
+}
+
+// enumToken is a type-tagged identity for duplicate detection, so a string
+// member and a numeric member that print the same are not conflated.
+func enumToken(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return "s:" + typed
+	case bool:
+		return "b:" + strconv.FormatBool(typed)
+	case float64:
+		return "n:" + strconv.FormatFloat(typed, 'g', -1, 64)
+	case json.Number:
+		if parsed, err := typed.Float64(); err == nil {
+			return "n:" + strconv.FormatFloat(parsed, 'g', -1, 64)
+		}
+		return "n:" + typed.String()
+	default:
+		return fmt.Sprintf("?:%v", value)
+	}
+}
+
+// displayEnumValue renders a member for an error message, quoting strings so a
+// reader can tell "3" from 3.
+func displayEnumValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strconv.Quote(typed)
+	case json.Number:
+		return typed.String()
+	default:
+		return fmt.Sprintf("%v", value)
+	}
 }
 
 // strictUnmarshal rejects trailing content and, for numbers, preserves the
@@ -421,15 +578,83 @@ func strictUnmarshal(raw []byte, target any) error {
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
-	if decoder.More() {
+	// Not decoder.More(): that reports whether another element follows in the
+	// *current* array or object, so it answers false for a stray "]" or "}" —
+	// exactly the bytes a caller slicing a value out of a larger document is
+	// most likely to hand over, which would let `true]` validate as a boolean.
+	// Reading the next token tolerates only end-of-input.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return errors.New("unexpected trailing content")
 	}
 	return nil
 }
 
-// languageTagPattern accepts well-formed BCP 47 tags of the shapes Silo
-// actually stores: language, language-region, and language-script-region.
-// Full RFC 5646 grammar is deliberately not implemented; anything this rejects
-// is a value no client currently produces.
+// languageTagPattern accepts the well-formed BCP 47 shapes real clients
+// produce: language, script, region, variants, extension singletons and
+// private use. The narrower language[-script][-region] form this started as
+// rejected tags Android and iOS emit unprompted — `Locale.toLanguageTag()`
+// appends extension subtags for a non-Gregorian calendar or non-Latin numbering
+// system (`ar-EG-u-nu-latn`), and registered variants like `ca-ES-valencia` are
+// ordinary user choices.
 var languageTagPattern = regexp.MustCompile(
-	`^[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-([a-zA-Z]{2}|[0-9]{3}))?$`)
+	`^[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-([a-zA-Z]{2}|[0-9]{3}))?` +
+		`(-([0-9a-zA-Z]{5,8}|[0-9][0-9a-zA-Z]{3}))*` +
+		`(-[0-9a-wy-zA-WY-Z](-[0-9a-zA-Z]{2,8})+)*` +
+		`(-[xX](-[0-9a-zA-Z]{1,8})+)?$`)
+
+// NormalizeLanguageTag returns the canonical BCP 47 form of a tag, or false if
+// it is not well-formed.
+//
+// Normalization is the half that keeps the contract's promise of one stored
+// value per language. Without it `en-US`, `en-us` and `EN-us` are three
+// distinct rows for one preference, and audio-track matching misses on two of
+// them. Underscores are accepted on input because both mobile platforms have a
+// locale accessor that produces them (`Locale.identifier` on iOS,
+// `Locale.toString()` on Android) and sending one is a mistake worth absorbing
+// rather than a value worth rejecting.
+//
+// The empty string is not a language tag. "No preference" is null, which the
+// nullable flag on each language setting already expresses.
+func NormalizeLanguageTag(tag string) (string, bool) {
+	tag = strings.ReplaceAll(strings.TrimSpace(tag), "_", "-")
+	if !languageTagPattern.MatchString(tag) {
+		return "", false
+	}
+
+	parts := strings.Split(tag, "-")
+	// Case is not significant in BCP 47, but the conventional casing is what
+	// every client library produces: lowercase language, Titlecase script,
+	// UPPERCASE region, lowercase everything else.
+	parts[0] = strings.ToLower(parts[0])
+	inExtension := false
+	for i := 1; i < len(parts); i++ {
+		part := parts[i]
+		switch {
+		case len(part) == 1:
+			// A singleton opens an extension ("u", "t") or private use ("x").
+			// Everything after it is extension content, so the two-letter
+			// region rule must stop applying — "nu" in "ar-EG-u-nu-latn" is an
+			// extension key, not a region.
+			inExtension = true
+			parts[i] = strings.ToLower(part)
+		case inExtension:
+			parts[i] = strings.ToLower(part)
+		case i == 1 && len(part) == 4 && isAlpha(part):
+			parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
+		case len(part) == 2 && isAlpha(part):
+			parts[i] = strings.ToUpper(part)
+		default:
+			parts[i] = strings.ToLower(part)
+		}
+	}
+	return strings.Join(parts, "-"), true
+}
+
+func isAlpha(value string) bool {
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return true
+}

@@ -1,26 +1,16 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { appearanceCache, customThemeCache, dateTimeFormatCache, storage } from "./storage";
+import { appearanceCache, storage } from "./storage";
 
 const KEYS = storage.KEYS;
 
-describe("owned caches", () => {
+describe("appearance cache namespacing", () => {
   beforeEach(() => {
-    Object.values(KEYS).forEach((key) => storage.remove(key));
+    localStorage.clear();
   });
 
-  it("trusts the cache while nobody is known to be signed in", () => {
-    storage.set(KEYS.THEME, "cobalt-studio");
-    storage.set(KEYS.UI_APPEARANCE_OWNER, "1");
-
-    expect(appearanceCache.isTrusted(null)).toBe(true);
-    expect(appearanceCache.get(KEYS.THEME, null)).toBe("cobalt-studio");
-  });
-
-  it("trusts the cache for the account that stamped it", () => {
+  it("reads back what the same account wrote", () => {
     appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
 
-    expect(storage.get(KEYS.UI_APPEARANCE_OWNER)).toBe("1");
-    expect(appearanceCache.isTrusted("1")).toBe(true);
     expect(appearanceCache.get(KEYS.THEME, "1")).toBe("cobalt-studio");
   });
 
@@ -28,61 +18,68 @@ describe("owned caches", () => {
     appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
     appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
 
-    expect(appearanceCache.isTrusted("2")).toBe(false);
     expect(appearanceCache.get(KEYS.THEME, "2")).toBeNull();
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "2")).toBeNull();
   });
 
-  it("does not trust an unstamped legacy cache for a known account", () => {
+  it("keeps both accounts' values, so returning to the first still warm starts", () => {
+    appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
+    appearanceCache.set(KEYS.THEME, "oxblood-noir", "2");
+
+    expect(appearanceCache.get(KEYS.THEME, "1")).toBe("cobalt-studio");
+    expect(appearanceCache.get(KEYS.THEME, "2")).toBe("oxblood-noir");
+  });
+
+  it("ignores values written before namespacing existed", () => {
     storage.set(KEYS.THEME, "cobalt-studio");
 
-    expect(appearanceCache.isTrusted("1")).toBe(false);
     expect(appearanceCache.get(KEYS.THEME, "1")).toBeNull();
   });
 
-  it("clear() drops every member value and hands the empty cache to the new owner", () => {
-    appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
-    appearanceCache.set(KEYS.UI_TEXT_SCALE, "large", "1");
-    appearanceCache.set(KEYS.UI_TEXT_WEIGHT, "strong", "1");
-    appearanceCache.set(KEYS.UI_HIGH_CONTRAST, "true", "1");
-
-    appearanceCache.clear("2");
-
-    expect(storage.get(KEYS.THEME)).toBeNull();
-    expect(storage.get(KEYS.UI_TEXT_SCALE)).toBeNull();
-    expect(storage.get(KEYS.UI_TEXT_WEIGHT)).toBeNull();
-    expect(storage.get(KEYS.UI_HIGH_CONTRAST)).toBeNull();
-    expect(appearanceCache.isTrusted("2")).toBe(true);
-    expect(appearanceCache.isTrusted("1")).toBe(false);
-  });
-
-  it("clear() without an owner leaves the cache unstamped", () => {
+  it("falls back to the last account that wrote while nobody is signed in", () => {
     appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
 
-    appearanceCache.clear(null);
-
-    expect(storage.get(KEYS.THEME)).toBeNull();
-    expect(storage.get(KEYS.UI_APPEARANCE_OWNER)).toBeNull();
-    expect(appearanceCache.isTrusted("1")).toBe(false);
+    expect(appearanceCache.get(KEYS.THEME, null)).toBe("cobalt-studio");
   });
 
-  it("keeps each cache group's ownership independent", () => {
+  it("follows the pointer to the most recent account, not the first", () => {
     appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
-    customThemeCache.set(KEYS.UI_CUSTOM_CSS, "body{}", "2");
-    dateTimeFormatCache.set(KEYS.UI_DATE_FORMAT, "iso", "3");
+    appearanceCache.set(KEYS.THEME, "oxblood-noir", "2");
 
-    expect(appearanceCache.isTrusted("1")).toBe(true);
-    expect(appearanceCache.isTrusted("2")).toBe(false);
-    expect(customThemeCache.isTrusted("2")).toBe(true);
-    expect(customThemeCache.isTrusted("1")).toBe(false);
-    expect(dateTimeFormatCache.isTrusted("3")).toBe(true);
-    expect(dateTimeFormatCache.isTrusted("1")).toBe(false);
+    expect(appearanceCache.get(KEYS.THEME, null)).toBe("oxblood-noir");
   });
 
-  it("stamps nothing when there is no owner to stamp", () => {
+  it("keeps a never-signed-in device's values in their own namespace", () => {
     appearanceCache.set(KEYS.THEME, "cobalt-studio", null);
 
-    expect(storage.get(KEYS.THEME)).toBe("cobalt-studio");
-    expect(storage.get(KEYS.UI_APPEARANCE_OWNER)).toBeNull();
+    expect(appearanceCache.get(KEYS.THEME, null)).toBe("cobalt-studio");
+    // Not the bare key, and not visible to a real account.
+    expect(storage.get(KEYS.THEME)).toBeNull();
+    expect(appearanceCache.get(KEYS.THEME, "1")).toBeNull();
+  });
+
+  it("routes a signed-out write into the last account's namespace without moving the pointer", () => {
+    appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
+    appearanceCache.set(KEYS.THEME, "evergreen-studio", null);
+
+    // Reads and writes resolve their namespace the same way, so a theme change
+    // made on the login screen is the one the next read sees. It lands in the
+    // last account's cache, which is only a warm start: their server value
+    // still wins once the settings request resolves.
+    expect(storage.get(KEYS.UI_CACHE_OWNER)).toBe("1");
+    expect(appearanceCache.get(KEYS.THEME, null)).toBe("evergreen-studio");
+    expect(appearanceCache.get(KEYS.THEME, "1")).toBe("evergreen-studio");
+    expect(appearanceCache.get(KEYS.THEME, "2")).toBeNull();
+  });
+
+  it("keeps every key in the group independently namespaced", () => {
+    appearanceCache.set(KEYS.THEME, "cobalt-studio", "1");
+    appearanceCache.set(KEYS.UI_CUSTOM_CSS, "body{}", "1");
+    appearanceCache.set(KEYS.UI_DATE_FORMAT, "iso", "2");
+
+    expect(appearanceCache.get(KEYS.UI_CUSTOM_CSS, "1")).toBe("body{}");
+    expect(appearanceCache.get(KEYS.UI_CUSTOM_CSS, "2")).toBeNull();
+    expect(appearanceCache.get(KEYS.UI_DATE_FORMAT, "2")).toBe("iso");
+    expect(appearanceCache.get(KEYS.UI_DATE_FORMAT, "1")).toBeNull();
   });
 });

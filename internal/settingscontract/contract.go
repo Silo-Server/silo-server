@@ -13,6 +13,7 @@ package settingscontract
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 )
 
 // Scope identifies the storage identity a value is attached to.
@@ -186,6 +187,10 @@ type ValueSchema struct {
 
 	// Object.
 	SchemaRef string `json:"schema_ref,omitempty"`
+
+	// compiledPattern is Pattern, compiled once when the manifest loads.
+	// ValidateValue runs per request, so it must not compile a regex per call.
+	compiledPattern *regexp.Regexp
 }
 
 // EnumMember is one allowed enum value. Members are objects rather than bare

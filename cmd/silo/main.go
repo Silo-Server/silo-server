@@ -95,6 +95,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
 	taskrepository "github.com/Silo-Server/silo-server/internal/taskmanager/repository"
@@ -394,6 +395,21 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+
+	// Step 0: Validate the embedded settings contract before anything can
+	// depend on it. A malformed or self-inconsistent manifest is a build defect,
+	// not a runtime condition, so failing here — loudly, before the first
+	// request — is the whole point: the alternative is shipping an image whose
+	// contract disagrees with the clients that vendored it.
+	contract := settingscontract.MustLoad()
+	contractETag, err := settingscontract.ETag()
+	if err != nil {
+		log.Fatalf("settings contract: %v", err)
+	}
+	slog.Info("settings contract loaded",
+		"revision", contract.Revision,
+		"definitions", len(contract.Definitions),
+		"etag", contractETag)
 
 	// Step 1: Bootstrap from .env
 	bc, err := config.LoadBootstrap(*envFile)
