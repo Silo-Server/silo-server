@@ -1347,35 +1347,41 @@ func TestReprobeNestedRootsCatchesMidScanChildDrop(t *testing.T) {
 	s := &Scanner{fileRepo: NewFileRepository(pool)}
 
 	// Healthy child: nothing to protect.
-	got, err := s.reprobeNestedRoots(context.Background(), 1, configured, parent, false)
+	unreachable, suspect, err := s.reprobeNestedRoots(context.Background(), 1, configured, parent, false)
 	if err != nil {
 		t.Fatalf("reprobeNestedRoots (healthy): %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("protected = %v, want none while the child is reachable", got)
+	if len(unreachable) != 0 || len(suspect) != 0 {
+		t.Fatalf("unreachable=%v suspect=%v, want none while the child is reachable", unreachable, suspect)
 	}
 
 	// The child mount drops mid-scan.
 	if err := os.RemoveAll(child); err != nil {
 		t.Fatalf("drop child: %v", err)
 	}
-	got, err = s.reprobeNestedRoots(context.Background(), 1, configured, parent, false)
+	unreachable, suspect, err = s.reprobeNestedRoots(context.Background(), 1, configured, parent, false)
 	if err != nil {
 		t.Fatalf("reprobeNestedRoots (dropped): %v", err)
 	}
-	if len(got) != 1 || got[0] != child {
-		t.Fatalf("protected = %v, want [%s]: a child that drops after the initial probe "+
-			"must be caught before its parent's scope is reconciled", got, child)
+	// It must land in the UNREACHABLE bucket specifically: reporting a dropped
+	// mount as suspect-empty would hand an operator the wrong diagnosis.
+	if len(unreachable) != 1 || unreachable[0] != child {
+		t.Fatalf("unreachable = %v, want [%s]: a child that drops after the initial probe "+
+			"must be caught before its parent's scope is reconciled", unreachable, child)
+	}
+	if len(suspect) != 0 {
+		t.Fatalf("suspect = %v, want none: an unreachable child is not suspect-empty", suspect)
 	}
 
 	// Only roots nested under this parent are considered — a sibling root has
 	// its own scope and must not be swept in here.
-	got, err = s.reprobeNestedRoots(context.Background(), 1, configured, sibling, false)
+	unreachable, suspect, err = s.reprobeNestedRoots(context.Background(), 1, configured, sibling, false)
 	if err != nil {
 		t.Fatalf("reprobeNestedRoots (sibling): %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("protected = %v, want none: %s has no nested configured roots", got, sibling)
+	if len(unreachable) != 0 || len(suspect) != 0 {
+		t.Fatalf("unreachable=%v suspect=%v, want none: %s has no nested configured roots",
+			unreachable, suspect, sibling)
 	}
 }
 
@@ -1468,5 +1474,95 @@ func TestScanFolderProtectedChildRootSurvivesTrashSweep(t *testing.T) {
 	}
 	if parentMissing != nil {
 		t.Fatalf("healthy parent file marked missing at %v", parentMissing)
+	}
+}
+
+// TestScanFolderUnreadableSubtreeSurvivesTrashSweep covers Codex review
+// finding #8 on PR #472 — the sibling of finding #6, and the second data-loss
+// path in this area.
+//
+// applyScopedScan protected rows under an unreadable directory locally via
+// scope.walkFailures, but the folder-wide protected set was rebuilt without
+// those paths. With trash emptying on, DeleteMissingByFolder could then
+// permanently delete rows past the removal grace beneath a directory this scan
+// could not read — deleting on the strength of an observation never made.
+//
+// Both that fix and #6's now flow through one accumulated protected set, so
+// this test guards the propagation rather than one symptom of losing it.
+func TestScanFolderUnreadableSubtreeSurvivesTrashSweep(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: permission bits do not deny access")
+	}
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Unreadable Subtree Sweep Test")
+
+	root := t.TempDir()
+	keeper := filepath.Join(root, "Keeper (2020)", "Keeper (2020).mkv")
+	hidden := filepath.Join(root, "Locked (2021)", "Locked (2021).mkv")
+	for _, p := range []string{keeper, hidden} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	folder := &models.MediaFolder{
+		ID: folderID, Paths: []string{root}, Type: "movies",
+		Name: "Unreadable Subtree Sweep Test", Enabled: true,
+	}
+	// Trash emptying on, zero grace: anything left unprotected and already
+	// marked missing is deleted on sight.
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("baseline scan: %v", err)
+	}
+	var hiddenID int
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, hidden).Scan(&hiddenID); err != nil {
+		t.Fatalf("hidden row: %v", err)
+	}
+	// Put it in the state the sweep would delete.
+	if _, err := pool.Exec(ctx,
+		`UPDATE media_files SET missing_since = NOW() - INTERVAL '48 hours' WHERE id = $1`,
+		hiddenID); err != nil {
+		t.Fatalf("pre-mark: %v", err)
+	}
+
+	// The subtree becomes unreadable — a permission fault, or storage that
+	// stopped answering for part of the tree.
+	lockedDir := filepath.Dir(hidden)
+	if err := os.Chmod(lockedDir, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan with unreadable subtree: %v", err)
+	}
+
+	var survives bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM media_files WHERE id = $1)`, hiddenID).Scan(&survives); err != nil {
+		t.Fatalf("existence check: %v", err)
+	}
+	if !survives {
+		t.Fatal("row beneath an unreadable directory was hard-deleted by the trash sweep; " +
+			"a scan must not delete on the strength of an observation it could not make")
+	}
+
+	// The readable title is unaffected.
+	var keeperMissing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, keeper).Scan(&keeperMissing); err != nil {
+		t.Fatalf("keeper row: %v", err)
+	}
+	if keeperMissing != nil {
+		t.Fatalf("readable title marked missing at %v", keeperMissing)
 	}
 }

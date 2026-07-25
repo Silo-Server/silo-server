@@ -1111,10 +1111,20 @@ func (s *Scanner) scanFolderByRoots(
 		return nil, err
 	}
 
-	// reprobedRoots accumulates roots found offline by the mid-loop re-probe,
-	// so later folder-wide cleanup honours them alongside the initial probe's
-	// results.
-	reprobedRoots := make([]string, 0)
+	// Protection discovered after the initial probe must reach every later
+	// destructive step, not just the scope that found it. Repeatedly missing
+	// one of these propagation edges is what produced several defects in this
+	// area, so each source accumulates folder-wide here and every consumer
+	// reads the combined set via protectedScanRoots below.
+	//
+	// Unreachable and suspect are tracked apart because they mean different
+	// things to an operator and are reported separately.
+	reprobedUnreachable := make([]string, 0)
+	reprobedSuspect := make([]string, 0)
+	// unreadablePaths are paths some scope's walk could not read. Rows beneath
+	// them were never verified this scan, so they must survive the sweep just
+	// as an offline root's do.
+	unreadablePaths := make([]string, 0)
 
 	pendingEmptyScopes := make([]*scopedScan, 0)
 	totalExisting := 0
@@ -1172,19 +1182,26 @@ func (s *Scanner) scanFolderByRoots(
 			// parent like this one. Re-probe this root's configured children
 			// now so a mid-scan disconnect is caught before its rows are
 			// reconciled.
-			freshProtected, err := s.reprobeNestedRoots(ctx, folder.ID, configuredRoots, root, cleanupArmed)
+			freshUnreachable, freshSuspect, err := s.reprobeNestedRoots(ctx, folder.ID, configuredRoots, root, cleanupArmed)
 			if err != nil {
 				return nil, err
 			}
-			scopeProtected = append(scopeProtected, freshProtected...)
+			scopeProtected = append(scopeProtected, freshUnreachable...)
+			scopeProtected = append(scopeProtected, freshSuspect...)
 			// A root discovered offline here must stay protected for the rest
-			// of the scan, not just for this scope. The folder-wide membership
-			// reconcile and trash sweep below run off reprobedRoots too —
-			// without that, rows under a child that dropped mid-scan and are
-			// already past the removal grace get hard-deleted by the very scan
-			// that noticed the outage.
-			for _, protectedRoot := range freshProtected {
-				reprobedRoots = appendUniquePath(reprobedRoots, protectedRoot)
+			// of the scan, not just for this scope: the folder-wide membership
+			// reconcile and trash sweep below run off these sets too. Without
+			// that, rows under a child that dropped mid-scan and are already
+			// past the removal grace get hard-deleted by the very scan that
+			// noticed the outage.
+			for _, protectedRoot := range freshUnreachable {
+				reprobedUnreachable = appendUniquePath(reprobedUnreachable, protectedRoot)
+			}
+			for _, protectedRoot := range freshSuspect {
+				reprobedSuspect = appendUniquePath(reprobedSuspect, protectedRoot)
+			}
+			for _, unreadable := range scope.walkFailures {
+				unreadablePaths = appendUniquePath(unreadablePaths, unreadable)
 			}
 			if err := s.applyScopedScan(ctx, folder, scope, false, scopeProtected); err != nil {
 				return nil, err
@@ -1196,6 +1213,9 @@ func (s *Scanner) scanFolderByRoots(
 		// Empty scopes stay pending until after the loop: whether they may
 		// force-delete (confirmed cleanup) and whether their roots must be
 		// treated as suspect depends on what the other roots produced.
+		for _, unreadable := range scope.walkFailures {
+			unreadablePaths = appendUniquePath(unreadablePaths, unreadable)
+		}
 		pendingEmptyScopes = append(pendingEmptyScopes, scope)
 	}
 
@@ -1267,18 +1287,29 @@ func (s *Scanner) scanFolderByRoots(
 	if allowEmptyCleanup {
 		suspectRoots = nil
 	}
-	result.SuspectEmptyRoots = suspectRoots
 	// A root that dropped mid-scan is as much an outage as one that failed the
 	// initial probe; report it so the folder warning and scan result do not
-	// present a partial scan as clean.
-	for _, protectedRoot := range reprobedRoots {
+	// present a partial scan as clean. Each keeps its own classification —
+	// reporting a suspect-empty child as unreachable would hand an operator
+	// contradictory failure information.
+	for _, protectedRoot := range reprobedUnreachable {
 		unreachableRoots = appendUniquePath(unreachableRoots, protectedRoot)
 	}
+	if !allowEmptyCleanup {
+		for _, protectedRoot := range reprobedSuspect {
+			suspectRoots = appendUniquePath(suspectRoots, protectedRoot)
+		}
+	}
 	result.UnreachableRoots = unreachableRoots
+	result.SuspectEmptyRoots = suspectRoots
 
+	// The single protected set every later destructive step reads: offline
+	// roots, suspect-empty roots, and paths no walk could read. Anything that
+	// discovers protection must land here, or the trash sweep will delete rows
+	// this scan never verified.
 	protectedScanRoots := append(append([]string(nil), unreachableRoots...), suspectRoots...)
-	for _, protectedRoot := range reprobedRoots {
-		protectedScanRoots = appendUniquePath(protectedScanRoots, protectedRoot)
+	for _, unreadable := range unreadablePaths {
+		protectedScanRoots = appendUniquePath(protectedScanRoots, unreadable)
 	}
 	for _, pending := range pendingEmptyScopes {
 		beforeErrors := pending.result.Errors
@@ -1860,13 +1891,20 @@ func (s *Scanner) markMissingExcludingProtected(
 }
 
 // reprobeNestedRoots re-checks the configured roots nested strictly beneath
-// parent and returns those that must now be protected from reconciliation.
+// parent and returns those that must now be protected, split by why.
 //
 // Root compaction folds a child mount into its parent for traversal, so a
 // child that dies after the initial probe leaves no scope of its own and is
 // never revisited by the post-walk re-probe, which only inspects scopes that
 // walked empty. Without this, a child dropping mid-scan is indistinguishable
 // from its contents having been deleted.
+//
+// Classification comes from ONE probe batch. Probing twice — once for
+// reachability, then again for emptiness — leaves a window where a child that
+// drops between the two samples is seen as reachable by the first and
+// discarded by the second (which only returns reachable-and-empty roots),
+// yielding no protection at all during exactly the disconnect this is meant
+// to catch.
 //
 // cleanupArmed mirrors the caller's rule: an unreachable child is protected
 // regardless, while a suspect-empty one yields to an explicit operator
@@ -1877,7 +1915,7 @@ func (s *Scanner) reprobeNestedRoots(
 	configuredRoots []string,
 	parent string,
 	cleanupArmed bool,
-) ([]string, error) {
+) (unreachable []string, suspect []string, err error) {
 	nested := make([]string, 0)
 	for _, root := range configuredRoots {
 		if root == parent {
@@ -1888,18 +1926,38 @@ func (s *Scanner) reprobeNestedRoots(
 		}
 	}
 	if len(nested) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	protected := probeUnreachableRoots(ctx, folderID, nested)
-	if cleanupArmed {
-		return protected, nil
+	probes := rootcheck.ProbeManyWithTimeout(ctx, nested, rootcheck.DefaultProbeTimeout)
+	unreachable = make([]string, 0)
+	emptyRoots := make([]string, 0)
+	for i, root := range nested {
+		probe := probes[i]
+		switch {
+		case !probe.Reachable:
+			logUnreachableRoot(ctx, folderID, root, probe)
+			unreachable = append(unreachable, root)
+		case probe.Empty:
+			emptyRoots = append(emptyRoots, root)
+		}
 	}
-	suspect, err := s.suspectEmptyRoots(ctx, folderID, nested, protected)
+
+	if cleanupArmed || len(emptyRoots) == 0 || s == nil || s.fileRepo == nil {
+		return unreachable, nil, nil
+	}
+	// An empty child that still owns cataloged rows is a lost mount, not an
+	// emptied library — the same rule suspectEmptyRoots applies, reusing the
+	// probe results already gathered above.
+	suspect, err = s.fileRepo.ListRootsWithCatalogedFiles(ctx, folderID, emptyRoots)
 	if err != nil {
-		return nil, err
+		return nil, nil, fmt.Errorf("listing suspect-empty nested roots for folder %d: %w", folderID, err)
 	}
-	return append(protected, suspect...), nil
+	if len(suspect) > 0 {
+		slog.WarnContext(ctx, "scanner: nested empty roots still hold cataloged files; protecting them from cleanup",
+			"component", "scanner", "folder_id", folderID, "roots", suspect)
+	}
+	return unreachable, suspect, nil
 }
 
 // emptyCleanupArmed reports whether the operator has armed the folder's
