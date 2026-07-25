@@ -193,12 +193,12 @@ func TestDeleteMissingByFolderProtectedRoots(t *testing.T) {
 // TestScanFolderDeadRootProtection walks the real scan pipeline end to end
 // with two on-disk roots and verifies the full dead-root story:
 //
-//  1. a root that disappears has its files marked missing but never
-//     hard-deleted, even with trash emptying enabled and a zero grace
-//     (which would delete them in the very same scan without protection),
-//     and the folder surfaces a dead_root scan warning naming the root;
-//  2. when the root comes back the rows resurrect in place (same ids,
-//     missing_since cleared) and the warning clears;
+//  1. a root that disappears leaves its files completely untouched — neither
+//     marked missing nor hard-deleted, even with trash emptying enabled and a
+//     zero grace (which would delete them in the very same scan without
+//     protection) — and the folder surfaces a dead_root scan warning naming
+//     the root;
+//  2. when the root comes back the rows are still live and the warning clears;
 //  3. deleting a file under a reachable root still purges its row after the
 //     grace elapses (regression: the historical sweep is untouched).
 func TestScanFolderDeadRootProtection(t *testing.T) {
@@ -278,15 +278,24 @@ func TestScanFolderDeadRootProtection(t *testing.T) {
 		t.Fatalf("remove rootB: %v", err)
 	}
 
-	// Scan 2: files under the dead root are marked missing (hidden) but the
-	// row must survive the sweep, and the folder must carry a dead_root
-	// warning naming the root.
+	// Scan 2: files under the dead root are left entirely alone — not marked
+	// missing, not deleted — and the folder carries a dead_root warning naming
+	// the root.
+	//
+	// Not marking them is the point: catalog reads filter on
+	// missing_since IS NULL, so a mark hides the title from browse, search and
+	// playback exactly as if it had been deleted. An unreachable root tells us
+	// nothing about whether its files exist, so hiding them turns a storage
+	// blip into a library outage that persists until the next good scan.
 	result, err := scanner.ScanFolder(ctx, folder)
 	if err != nil {
 		t.Fatalf("scan 2: %v", err)
 	}
 	if len(result.UnreachableRoots) != 1 || result.UnreachableRoots[0] != rootB {
 		t.Fatalf("scan 2 UnreachableRoots = %v, want [%s]", result.UnreachableRoots, rootB)
+	}
+	if result.MissingSkippedProtected != 1 {
+		t.Fatalf("scan 2 MissingSkippedProtected = %d, want 1", result.MissingSkippedProtected)
 	}
 	if _, missingA, foundA = fileRow(fileA); !foundA || missingA != nil {
 		t.Fatalf("after scan 2: fileA found=%v missing=%v, want present and not missing", foundA, missingA)
@@ -295,8 +304,8 @@ func TestScanFolderDeadRootProtection(t *testing.T) {
 	if !foundB {
 		t.Fatal("after scan 2: fileB row was hard-deleted; dead-root protection failed")
 	}
-	if missingB == nil {
-		t.Fatal("after scan 2: fileB not marked missing; it should be hidden")
+	if missingB != nil {
+		t.Fatalf("after scan 2: fileB marked missing at %v; an unreachable root must not hide its files", missingB)
 	}
 	if gotIDB != idB {
 		t.Fatalf("after scan 2: fileB id changed %d -> %d", idB, gotIDB)
@@ -317,8 +326,9 @@ func TestScanFolderDeadRootProtection(t *testing.T) {
 		t.Fatal("after scan 2b: fileB row was hard-deleted on rescan")
 	}
 
-	// Root B returns: the same row resurrects (same id, missing cleared) and
-	// the warning clears.
+	// Root B returns: the row is still the original, still live, and the
+	// warning clears. Because the outage never marked it missing, "recovery"
+	// is a no-op on the row rather than an un-hide.
 	writeMovie(fileB)
 	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
 		t.Fatalf("scan 3: %v", err)
@@ -361,8 +371,8 @@ func TestScanFolderDeadRootProtection(t *testing.T) {
 // TestScanFolderNestedDeadChildRootProtection covers a child mount configured
 // INSIDE a reachable parent root (/parent plus /parent/child). Traversal
 // compaction drops the child, but it can die independently: its files must be
-// protected from the sweep and the folder must warn, even though the parent
-// scan is otherwise healthy.
+// left untouched — neither hidden nor swept — and the folder must warn, even
+// though the parent scan is otherwise healthy.
 func TestScanFolderNestedDeadChildRootProtection(t *testing.T) {
 	pool := newDeadRootTestPool(t)
 	ctx := context.Background()
@@ -428,8 +438,12 @@ func TestScanFolderNestedDeadChildRootProtection(t *testing.T) {
 	).Scan(&gotID, &childMissing); err != nil {
 		t.Fatalf("child row after scan 2 (was it hard-deleted?): %v", err)
 	}
-	if childMissing == nil {
-		t.Fatal("child file not marked missing after its root died")
+	// The parent scan succeeded, but that says nothing about the dead child
+	// mount. Its rows must survive untouched — marking them missing on the
+	// parent's success would hide the child's whole catalog.
+	if childMissing != nil {
+		t.Fatalf("child file marked missing at %v after its root died; a dead child mount "+
+			"must not be hidden just because its parent root scanned cleanly", childMissing)
 	}
 	if gotID != childID {
 		t.Fatalf("child row id changed %d -> %d", childID, gotID)
@@ -570,8 +584,9 @@ func TestScanFolderAllRootsDeadOutage(t *testing.T) {
 	).Scan(&missing); err != nil {
 		t.Fatalf("file row after scan 2 (was it hard-deleted?): %v", err)
 	}
-	if missing == nil {
-		t.Fatal("file not marked missing during all-roots-dead outage")
+	if missing != nil {
+		t.Fatalf("file marked missing at %v during an all-roots-dead outage; "+
+			"a total outage must leave the catalog intact, not empty the library from users' view", missing)
 	}
 
 	var code *string
@@ -719,8 +734,9 @@ func TestScanFolderSuspectEmptyRootProtection(t *testing.T) {
 	if !foundB {
 		t.Fatal("after scan 2: fileB row was hard-deleted; suspect-empty protection failed")
 	}
-	if missingB == nil {
-		t.Fatal("after scan 2: fileB not marked missing; it should be hidden")
+	if missingB != nil {
+		t.Fatalf("after scan 2: fileB marked missing at %v; a suspect-empty root "+
+			"is a lost mount, so its files must stay visible until the root is confirmed empty", missingB)
 	}
 	if gotIDB != idB {
 		t.Fatalf("after scan 2: fileB id changed %d -> %d", idB, gotIDB)
@@ -840,8 +856,9 @@ func TestScanFolderConfirmedCleanupPreservesDeadRoot(t *testing.T) {
 	).Scan(&missingA); err != nil {
 		t.Fatalf("fileA row after scan 2 (was the dead root's catalog erased?): %v", err)
 	}
-	if missingA == nil {
-		t.Fatal("fileA not marked missing during the outage")
+	if missingA != nil {
+		t.Fatalf("fileA marked missing at %v during the outage; confirming cleanup of a "+
+			"reachable empty root must not disturb an unrelated unreachable root's files", missingA)
 	}
 	var countB int
 	if err := pool.QueryRow(ctx,
@@ -961,5 +978,124 @@ func TestSweepMissingAndReconcileProtectsDeadRootsFromScopedScans(t *testing.T) 
 	}
 	if exists {
 		t.Fatal("genuinely deleted row under the reachable parent survived the sweep")
+	}
+}
+
+// TestScanFolderFlappingRootNeverHidesPresentFiles reproduces the production
+// failure this protection exists for: a CephFS-style mount that drops out and
+// comes back while its files sit on disk the whole time.
+//
+// The file is never deleted and never changes. Only the mount flaps. Because
+// every catalog read filters on missing_since IS NULL, a single spurious mark
+// removes the title from browse, search and playback until the next successful
+// scan — users experience it as "this file isn't available anymore" for media
+// that is perfectly intact. The row must therefore come through every scan of
+// the outage untouched.
+func TestScanFolderFlappingRootNeverHidesPresentFiles(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Flapping Root Scan Test")
+
+	base := t.TempDir()
+	live := filepath.Join(base, "live")
+	flappy := filepath.Join(base, "flappy")
+	liveFile := filepath.Join(live, "Alpha (2020)", "Alpha (2020).mkv")
+	flappyFile := filepath.Join(flappy, "Beta (2021)", "Beta (2021).mkv")
+
+	write := func(path string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	write(liveFile)
+	write(flappyFile)
+
+	folder := &models.MediaFolder{
+		ID:      folderID,
+		Paths:   []string{live, flappy},
+		Type:    "movies",
+		Name:    "Flapping Root Scan Test",
+		Enabled: true,
+	}
+	// Trash emptying on with a zero grace: if a scan ever marks the file
+	// missing, the very next scan would also delete the row.
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	missingSince := func(path string) *time.Time {
+		t.Helper()
+		var missing *time.Time
+		if err := pool.QueryRow(ctx,
+			`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+			folderID, path,
+		).Scan(&missing); err != nil {
+			t.Fatalf("row for %s went away entirely: %v", path, err)
+		}
+		return missing
+	}
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("initial scan: %v", err)
+	}
+	if m := missingSince(flappyFile); m != nil {
+		t.Fatalf("baseline: file marked missing at %v", m)
+	}
+
+	// Simulate the mount dropping and returning repeatedly. The payload on
+	// disk is restored byte-for-byte each cycle, exactly as a real mount
+	// returning exposes the same inodes.
+	stashed := filepath.Join(t.TempDir(), "stash")
+	for cycle := range 3 {
+		if err := os.Rename(flappy, stashed); err != nil {
+			t.Fatalf("cycle %d: drop mount: %v", cycle, err)
+		}
+		result, err := scanner.ScanFolder(ctx, folder)
+		if err != nil {
+			t.Fatalf("cycle %d: scan during outage: %v", cycle, err)
+		}
+		if result.MissingSkippedProtected != 1 {
+			t.Fatalf("cycle %d: MissingSkippedProtected = %d, want 1",
+				cycle, result.MissingSkippedProtected)
+		}
+		if m := missingSince(flappyFile); m != nil {
+			t.Fatalf("cycle %d: present file hidden at %v during a mount outage", cycle, m)
+		}
+
+		if err := os.Rename(stashed, flappy); err != nil {
+			t.Fatalf("cycle %d: restore mount: %v", cycle, err)
+		}
+		if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+			t.Fatalf("cycle %d: scan after recovery: %v", cycle, err)
+		}
+		if m := missingSince(flappyFile); m != nil {
+			t.Fatalf("cycle %d: file hidden at %v after the mount returned", cycle, m)
+		}
+	}
+
+	// The healthy sibling root must be unaffected throughout.
+	if m := missingSince(liveFile); m != nil {
+		t.Fatalf("file under the always-healthy root marked missing at %v", m)
+	}
+
+	// And the genuine-deletion path still works: remove the file for real
+	// while its root is reachable, and the row is marked and swept.
+	if err := os.Remove(flappyFile); err != nil {
+		t.Fatalf("remove flappyFile: %v", err)
+	}
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan after real deletion: %v", err)
+	}
+	var stillThere bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM media_files WHERE media_folder_id = $1 AND file_path = $2)`,
+		folderID, flappyFile,
+	).Scan(&stillThere); err != nil {
+		t.Fatalf("existence check: %v", err)
+	}
+	if stillThere {
+		t.Fatal("a genuinely deleted file under a reachable root survived; real deletions must still be detected")
 	}
 }

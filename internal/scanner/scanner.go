@@ -889,10 +889,25 @@ func (s *Scanner) scanPaths(
 		return nil, fmt.Errorf("reconciling scanned groups: %w", err)
 	}
 
+	// Probe the configured library roots before touching missing state. A
+	// scoped scan of a healthy subtree must not act on rows an unreachable or
+	// suspect-empty sibling root owns, and — more importantly — a root that is
+	// merely offline must not have its files marked missing at all: the walk
+	// found nothing there because the storage did not answer, not because the
+	// files are gone.
+	protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
+	if err != nil {
+		return nil, err
+	}
+
 	// Mark files that were in the DB but not found on disk as missing.
 	now := time.Now().UTC()
 	for _, existing := range existingFiles {
 		if seenPaths[existing.FilePath] {
+			continue
+		}
+		if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
+			result.MissingSkippedProtected++
 			continue
 		}
 		// Only mark as missing if not already marked.
@@ -908,18 +923,12 @@ func (s *Scanner) scanPaths(
 		}
 		result.Missing++
 	}
+	logProtectedMissingSkips(ctx, folder.ID, result.MissingSkippedProtected, protectedRoots)
 
 	// Empty trash: delete files marked as missing for longer than the removal
 	// grace for this folder. Safe because the empty-root guard (above) returns
 	// early when 0 files are found on disk, so we only reach here when the
-	// root is populated. The sweep is folder-wide, so a scoped scan of a
-	// healthy subtree must not hard-delete rows an unreachable or
-	// suspect-empty sibling root left marked missing: probe the configured
-	// library roots and exempt any that are currently protected.
-	protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
-	if err != nil {
-		return nil, err
-	}
+	// root is populated.
 	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
@@ -1099,7 +1108,11 @@ func (s *Scanner) scanFolderByRoots(
 		if len(scope.filePaths) > 0 {
 			seenAnyFiles = true
 			beforeErrors := scope.result.Errors
-			if err := s.applyScopedScan(ctx, folder, scope, false, nil); err != nil {
+			// Pass the unreachable roots even though this scope walked files:
+			// a nested child mount can be dead under a live parent, and its
+			// rows fall inside this scope's existing files. Without them the
+			// child's catalog gets marked missing on the parent's success.
+			if err := s.applyScopedScan(ctx, folder, scope, false, unreachableRoots); err != nil {
 				return nil, err
 			}
 			mergeCleanupResult(result, scope.result, beforeErrors)
@@ -1645,6 +1658,14 @@ func (s *Scanner) applyScopedScan(
 		if scope.seenPaths[existing.FilePath] {
 			continue
 		}
+		// A file under an offline root was not found because the storage did
+		// not answer. Marking it missing hides it from every catalog read, so
+		// a transient mount fault would take working titles out of the library
+		// until the next successful scan.
+		if pathWithinAnyRoot(existing.FilePath, protectedRoots) {
+			scope.result.MissingSkippedProtected++
+			continue
+		}
 		if existing.MissingSince == nil {
 			if err := s.fileRepo.MarkMissing(ctx, existing.ID, now); err != nil {
 				slog.ErrorContext(ctx, "scanner: failed to mark file missing", "component", "scanner",
@@ -1657,6 +1678,7 @@ func (s *Scanner) applyScopedScan(
 		}
 		scope.result.Missing++
 	}
+	logProtectedMissingSkips(ctx, folder.ID, scope.result.MissingSkippedProtected, protectedRoots)
 
 	staleFileIDs := collectStaleRemovedPathFileIDs(scope.existingFiles, scope.seenPaths, scope.reconcileRoots)
 	if forceDeleteAll && len(scope.filePaths) == 0 {
@@ -1685,8 +1707,24 @@ func mergeScanResult(dst *ScanResult, src *ScanResult) {
 	dst.Updated += src.Updated
 	dst.Unchanged += src.Unchanged
 	dst.Errors += src.Errors
+	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.RootObservations = append(dst.RootObservations, src.RootObservations...)
 	dst.EmptyRootGuarded = dst.EmptyRootGuarded || src.EmptyRootGuarded
+}
+
+// logProtectedMissingSkips reports files a scan declined to mark missing
+// because their root was offline. This is the signal an operator needs to tell
+// "my library shrank" from "my mount dropped": without it the scan looks
+// clean while silently covering for absent storage.
+func logProtectedMissingSkips(ctx context.Context, folderID, skipped int, protectedRoots []string) {
+	if skipped == 0 {
+		return
+	}
+	slog.WarnContext(ctx, "scanner: left files untouched under offline roots", "component", "scanner",
+		"folder_id", folderID,
+		"files_skipped", skipped,
+		"protected_roots", protectedRoots,
+	)
 }
 
 func firstScope(scopes []string) string {
@@ -1701,6 +1739,7 @@ func mergeCleanupResult(dst *ScanResult, src *ScanResult, priorErrors int) {
 		return
 	}
 	dst.Missing += src.Missing
+	dst.MissingSkippedProtected += src.MissingSkippedProtected
 	dst.FilesDeleted += src.FilesDeleted
 	if src.Errors > priorErrors {
 		dst.Errors += src.Errors - priorErrors
