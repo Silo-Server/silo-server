@@ -1223,12 +1223,95 @@ func TestCollectLogicalFilePathsReportsUnreadableEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collectLogicalFilePaths: %v", err)
 	}
-	if walkFailures == 0 {
-		t.Fatal("walk reported 0 failures despite an unreadable subtree; a partial listing " +
-			"would then be treated as an authoritative inventory")
+	if len(walkFailures) != 1 {
+		t.Fatalf("walkFailures = %v, want exactly the unreadable subtree; a partial listing "+
+			"would otherwise be treated as an authoritative inventory", walkFailures)
+	}
+	// The failure is scoped to the subtree that could not be read, not to the
+	// library root — otherwise one permanently broken entry would suppress
+	// missing-file reconciliation for the whole root on every future scan.
+	if walkFailures[0] != blocked {
+		t.Fatalf("walkFailures[0] = %q, want the blocked subtree %q", walkFailures[0], blocked)
+	}
+	if walkFailures[0] == root {
+		t.Fatal("failure was recorded against the library root; protection must be scoped to the subtree")
 	}
 	// The readable file is still found — one bad subtree must not abort the walk.
 	if len(files) != 1 {
 		t.Fatalf("files = %v, want just the readable one", files)
+	}
+}
+
+// TestScanFolderBrokenSymlinkDoesNotFreezeRootReconciliation covers Codex
+// review finding #3 on the follow-up commit: walk failures were counted, not
+// located, so any failure protected the entire library root.
+//
+// A dangling symlink is both common and permanent, so that would have
+// suppressed missing-file reconciliation for its whole root on every future
+// scan — genuinely deleted titles would stay live forever. The failure must be
+// scoped to the offending path so the rest of the root still reconciles.
+func TestScanFolderBrokenSymlinkDoesNotFreezeRootReconciliation(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Broken Symlink Scan Test")
+
+	root := t.TempDir()
+	keeper := filepath.Join(root, "Keeper (2020)", "Keeper (2020).mkv")
+	doomed := filepath.Join(root, "Doomed (2021)", "Doomed (2021).mkv")
+	for _, p := range []string{keeper, doomed} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	// A permanently dangling symlink, the everyday case.
+	if err := os.Symlink(filepath.Join(root, "nowhere"), filepath.Join(root, "dangling.mkv")); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	folder := &models.MediaFolder{
+		ID: folderID, Paths: []string{root}, Type: "movies",
+		Name: "Broken Symlink Scan Test", Enabled: true,
+	}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("baseline scan: %v", err)
+	}
+
+	// Genuinely delete one title. The dangling symlink is still there.
+	if err := os.RemoveAll(filepath.Dir(doomed)); err != nil {
+		t.Fatalf("remove doomed: %v", err)
+	}
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan after deletion: %v", err)
+	}
+
+	var missing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, doomed).Scan(&missing); err != nil {
+		// The row may already have been swept (zero grace), which also counts
+		// as correctly reconciled.
+		if !strings.Contains(err.Error(), "no rows") {
+			t.Fatalf("doomed row: %v", err)
+		}
+		missing = nil
+	} else if missing == nil {
+		t.Fatal("a genuinely deleted title stayed live because an unrelated dangling symlink " +
+			"marked the whole root unreconcilable")
+	}
+
+	// The surviving title must be untouched throughout.
+	var keeperMissing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, keeper).Scan(&keeperMissing); err != nil {
+		t.Fatalf("keeper row: %v", err)
+	}
+	if keeperMissing != nil {
+		t.Fatalf("surviving title marked missing at %v", keeperMissing)
 	}
 }

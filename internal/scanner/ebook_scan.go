@@ -53,9 +53,9 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 type ebookRootScan struct {
 	root         string
 	files        []string
-	fileOnly     bool  // explicit single-file scan; index it but never reconcile a subtree
-	rootErr      error // root stat failed, or the root is not a directory
-	walkFailures int   // entries within the subtree the walk could not read or resolve
+	fileOnly     bool     // explicit single-file scan; index it but never reconcile a subtree
+	rootErr      error    // root stat failed, or the root is not a directory
+	walkFailures []string // logical paths within the subtree the walk could not read or resolve
 }
 
 // failed reports whether the walk under this root is known to be incomplete.
@@ -64,7 +64,7 @@ type ebookRootScan struct {
 // a mid-walk subtree error) must not cascade into marking — and, with
 // empty_trash_after_scan, deleting — everything under it.
 func (r *ebookRootScan) failed() bool {
-	return r.rootErr != nil || r.walkFailures > 0
+	return r.rootErr != nil || len(r.walkFailures) > 0
 }
 
 // collectEbookRootScans walks every configured root with the shared
@@ -104,7 +104,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots []string) ([
 			slog.WarnContext(ctx, "ebook scan: root walk incomplete; root excluded from missing-file reconciliation", "component", "scanner",
 				"folder_id", folderID,
 				"root", cleanRoot,
-				"walk_failures", scan.walkFailures,
+				"walk_failures", len(scan.walkFailures),
 				"error", scan.rootErr,
 			)
 		}

@@ -50,8 +50,8 @@ func TestCollectLogicalFilePaths_PreservesLogicalSymlinkRootPaths(t *testing.T) 
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
 	}
-	if walkFailures != 0 {
-		t.Fatalf("walkFailures = %d, want 0 for a fully readable tree", walkFailures)
+	if len(walkFailures) != 0 {
+		t.Fatalf("walkFailures = %v, want none for a fully readable tree", walkFailures)
 	}
 
 	want := filepath.Join(logicalRoot, "Season 1", "Episode 01.mkv")
@@ -89,8 +89,8 @@ func TestCollectLogicalFilePaths_DedupesSharedPhysicalDirsAndCycles(t *testing.T
 	if err != nil {
 		t.Fatalf("collect logical paths: %v", err)
 	}
-	if walkFailures != 0 {
-		t.Fatalf("walkFailures = %d, want 0 for a fully readable tree", walkFailures)
+	if len(walkFailures) != 0 {
+		t.Fatalf("walkFailures = %v, want none for a fully readable tree", walkFailures)
 	}
 
 	sort.Strings(files)

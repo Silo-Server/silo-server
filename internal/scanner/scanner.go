@@ -478,9 +478,17 @@ func isIgnoredDirectoryPath(path string) bool {
 // Callers that pass a non-nil counter (the book scanners) use it to exclude
 // incompletely walked roots from missing-file reconciliation; the video walk
 // passes nil and keeps its historical log-and-continue behavior.
-func recordWalkFailure(failures *int) {
+// recordWalkFailure notes the logical path the walk could not read or resolve.
+//
+// The path matters, not just the count: an unreadable directory hides whatever
+// was inside it, but a dangling symlink hides nothing beyond itself. Recording
+// where each failure happened lets callers protect exactly the affected
+// subtree instead of the whole library root — otherwise a single permanently
+// broken symlink would suppress missing-file reconciliation for that root on
+// every future scan, and genuinely deleted titles would never be retired.
+func recordWalkFailure(failures *[]string, path string) {
 	if failures != nil {
-		*failures++
+		*failures = append(*failures, path)
 	}
 }
 
@@ -491,7 +499,7 @@ func walkLogicalTree(
 	mode walkMode,
 	visitedPhysicalDirs map[string]struct{},
 	filePaths *[]string,
-	walkFailures *int,
+	walkFailures *[]string,
 ) error {
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
@@ -502,7 +510,7 @@ func walkLogicalTree(
 	info, err := os.Lstat(physicalPath)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: walk lstat failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
-		recordWalkFailure(walkFailures)
+		recordWalkFailure(walkFailures, logicalPath)
 		return nil
 	}
 
@@ -510,13 +518,13 @@ func walkLogicalTree(
 		resolved, err := filepath.EvalSymlinks(physicalPath)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
-			recordWalkFailure(walkFailures)
+			recordWalkFailure(walkFailures, logicalPath)
 			return nil
 		}
 		targetInfo, err := os.Stat(resolved)
 		if err != nil {
 			slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalPath, "resolved_path", resolved, "error", err)
-			recordWalkFailure(walkFailures)
+			recordWalkFailure(walkFailures, logicalPath)
 			return nil
 		}
 		if targetInfo.IsDir() {
@@ -544,7 +552,7 @@ func walkLogicalTree(
 	canonicalDir, err := canonicalWalkPath(physicalPath)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: canonical path resolution failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
-		recordWalkFailure(walkFailures)
+		recordWalkFailure(walkFailures, logicalPath)
 		return nil
 	}
 	if _, seen := visitedPhysicalDirs[canonicalDir]; seen {
@@ -562,7 +570,7 @@ func walkLogicalTree(
 	entries, err := os.ReadDir(physicalPath)
 	if err != nil {
 		slog.WarnContext(ctx, "scanner: directory read failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
-		recordWalkFailure(walkFailures)
+		recordWalkFailure(walkFailures, logicalPath)
 		return nil
 	}
 	for _, entry := range entries {
@@ -579,13 +587,13 @@ func walkLogicalTree(
 			resolved, err := filepath.EvalSymlinks(physicalChild)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink resolve failed", "component", "scanner", "path", logicalChild, "physical_path", physicalChild, "error", err)
-				recordWalkFailure(walkFailures)
+				recordWalkFailure(walkFailures, logicalChild)
 				continue
 			}
 			targetInfo, err := os.Stat(resolved)
 			if err != nil {
 				slog.WarnContext(ctx, "scanner: symlink stat failed", "component", "scanner", "path", logicalChild, "resolved_path", resolved, "error", err)
-				recordWalkFailure(walkFailures)
+				recordWalkFailure(walkFailures, logicalChild)
 				continue
 			}
 			if targetInfo.IsDir() {
@@ -626,21 +634,26 @@ func walkLogicalTree(
 //
 // walkLogicalTree deliberately swallows per-entry Lstat/ReadDir failures so one
 // bad file cannot abort a scan of a million. That makes the returned list
-// non-authoritative when failures occurred: a mount that dies partway through
-// traversal yields a short list that looks exactly like a large deletion.
-// Callers must treat a non-zero failure count as "this scope's picture is
-// incomplete" and skip missing reconciliation for it, the same way the ebook
-// scanner does with ebookRootScan.failed.
-func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string) ([]string, int, error) {
+// non-authoritative wherever a failure occurred: a mount that dies partway
+// through traversal yields a short list that looks exactly like a large
+// deletion.
+//
+// The second return value is the logical path of every entry the walk could
+// not read or resolve. Callers must treat those paths as unreconcilable —
+// anything cataloged at or under one of them may exist without having been
+// seen. Scoping the protection to those paths rather than to the whole root
+// matters: a dangling symlink is permanent, and protecting its entire library
+// root would suppress missing-file reconciliation there on every future scan.
+func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryType string) ([]string, []string, error) {
 	filePaths := make([]string, 0)
 	visitedPhysicalDirs := make(map[string]struct{})
 	mode := walkModeFor(libraryType)
-	walkFailures := 0
+	walkFailures := make([]string, 0)
 
 	for _, rootPath := range walkRoots {
 		if ctx != nil {
 			if err := ctx.Err(); err != nil {
-				return nil, 0, err
+				return nil, nil, err
 			}
 		}
 		cleanRoot := filepath.Clean(rootPath)
@@ -648,7 +661,7 @@ func collectLogicalFilePaths(ctx context.Context, walkRoots []string, libraryTyp
 			continue
 		}
 		if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, mode, visitedPhysicalDirs, &filePaths, &walkFailures); err != nil {
-			return nil, 0, err
+			return nil, nil, err
 		}
 	}
 
@@ -713,7 +726,7 @@ func (s *Scanner) scanPaths(
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
 	)
-	if walkFailures > 0 {
+	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 	}
 	reportProgress(ctx, ProgressUpdate{
@@ -754,6 +767,7 @@ func (s *Scanner) scanPaths(
 		folder.ID,
 		reconcileRoots,
 		rootInference.Snapshots,
+		len(walkFailures) == 0,
 	); err != nil {
 		return nil, fmt.Errorf("reconciling scanned roots: %w", err)
 	}
@@ -913,11 +927,12 @@ func (s *Scanner) scanPaths(
 	if err != nil {
 		return nil, err
 	}
-	// An incomplete walk makes this scope's file list a lower bound rather
-	// than an inventory; reconciling against it would hide whatever the walk
-	// failed to read.
-	if walkFailures > 0 {
-		protectedRoots = append(append([]string(nil), protectedRoots...), reconcileRoots...)
+	// Wherever the walk could not read, its file list is a lower bound rather
+	// than an inventory, so anything cataloged under those paths must not be
+	// reconciled. Only those paths are protected — a dangling symlink must not
+	// exempt its whole library root forever.
+	if len(walkFailures) > 0 {
+		protectedRoots = append(append([]string(nil), protectedRoots...), walkFailures...)
 	}
 
 	s.markMissingExcludingProtected(ctx, folder.ID, existingFiles, seenPaths, protectedRoots, result)
@@ -1025,10 +1040,12 @@ type scopedScan struct {
 	rootInference  rootInferenceResult
 	groupInference groupInferenceResult
 	result         *ScanResult
-	// walkIncomplete is set when the walk could not read part of this scope's
-	// tree. The file list is then a lower bound, not an inventory, so the
-	// scope must be excluded from missing reconciliation.
-	walkIncomplete bool
+	// walkFailures holds the logical paths this scope's walk could not read or
+	// resolve. Anything cataloged at or under one of them may exist without
+	// having been seen, so those paths are excluded from missing
+	// reconciliation — and their presence also suppresses snapshot/group
+	// pruning, which would otherwise prune against a partial inventory.
+	walkFailures []string
 }
 
 func (s *Scanner) scanFolderByRoots(
@@ -1078,6 +1095,18 @@ func (s *Scanner) scanFolderByRoots(
 		unreachableSet[root] = true
 	}
 
+	// Whether the operator has armed the one-time cleanup allowance decides
+	// how a suspect-empty NESTED child is treated in the walked-parent branch
+	// below. That branch runs before the allowance is consumed, and a scope it
+	// has already reconciled cannot be revisited — so without checking here,
+	// arming the allowance would consume the confirmation while the child's
+	// rows stayed protected indefinitely. Read it without consuming; the
+	// consume still happens in its existing places.
+	cleanupArmed, err := s.emptyCleanupArmed(ctx, folder.ID)
+	if err != nil {
+		return nil, err
+	}
+
 	pendingEmptyScopes := make([]*scopedScan, 0)
 	totalExisting := 0
 	seenAnyFiles := false
@@ -1117,12 +1146,16 @@ func (s *Scanner) scanFolderByRoots(
 			// inside this scope's existing files. Without them the child's
 			// catalog gets marked missing on the parent's success.
 			//
-			// suspectRoots is read before the confirmed-cleanup allowance is
-			// consumed below, so a nested child is protected from marking
-			// here regardless. Deleting such a root's catalog stays an
-			// explicit operator action rather than a side effect of its
-			// parent scanning cleanly.
-			scopeProtected := append(append([]string(nil), unreachableRoots...), suspectRoots...)
+			// Suspect-empty children are protected unless the operator has
+			// explicitly confirmed cleanup — that confirmation is the
+			// deliberate way to retire an emptied root, and honouring it here
+			// is what stops the allowance being consumed to no effect.
+			// Unreachable roots are protected either way: an outage is never
+			// a confirmation to erase a root's catalog.
+			scopeProtected := append([]string(nil), unreachableRoots...)
+			if !cleanupArmed {
+				scopeProtected = append(scopeProtected, suspectRoots...)
+			}
 			if err := s.applyScopedScan(ctx, folder, scope, false, scopeProtected); err != nil {
 				return nil, err
 			}
@@ -1488,7 +1521,7 @@ func (s *Scanner) scanScope(
 		"scope", firstScope(reconcileRoots),
 		"files", len(filePaths),
 	)
-	if walkFailures > 0 {
+	if len(walkFailures) > 0 {
 		logIncompleteWalk(ctx, folder.ID, reconcileRoots, walkFailures)
 	}
 	reportProgress(ctx, ProgressUpdate{
@@ -1642,7 +1675,7 @@ func (s *Scanner) scanScope(
 		rootInference:  rootInference,
 		groupInference: groupInference,
 		result:         result,
-		walkIncomplete: walkFailures > 0,
+		walkFailures:   walkFailures,
 	}, nil
 }
 
@@ -1662,24 +1695,33 @@ func (s *Scanner) applyScopedScan(
 		return nil
 	}
 
+	// Snapshot and group reconciliation prune whatever this walk did not see.
+	// That is only sound against a complete inventory: after a partial walk it
+	// would delete root snapshots, observed locations and group locations for
+	// the portion that could not be read, corrupting later metadata matching
+	// even though the media_files rows themselves stay protected below.
+	// Upserting what we did see is always safe; pruning is what must wait for
+	// a scan that read the whole tree.
+	pruneUnseen := len(scope.walkFailures) == 0
 	if err := s.reconcileScannedRoots(
 		ctx,
 		folder.ID,
 		scope.reconcileRoots,
 		scope.rootInference.Snapshots,
+		pruneUnseen,
 	); err != nil {
 		return fmt.Errorf("reconciling scanned roots for scope %q: %w", scope.reconcileRoots[0], err)
 	}
-	if err := s.reconcileScannedGroups(ctx, folder.ID, false, scope.reconcileRoots, true, scope.groupInference); err != nil {
+	if err := s.reconcileScannedGroups(ctx, folder.ID, false, scope.reconcileRoots, pruneUnseen, scope.groupInference); err != nil {
 		return fmt.Errorf("reconciling scanned groups for scope %q: %w", scope.reconcileRoots[0], err)
 	}
 
-	// A scope whose walk could not read part of its tree saw an incomplete
-	// picture of what is on disk. Treating that as authoritative would mark
-	// everything below the unread portion missing, which is the transient
-	// storage failure this protection exists for — so protect the whole scope.
-	if scope.walkIncomplete {
-		protectedRoots = append(append([]string(nil), protectedRoots...), scope.reconcileRoots...)
+	// Wherever this scope's walk could not read, its picture of the disk is a
+	// lower bound. Protect exactly those paths from missing-marking rather
+	// than the whole scope, so one unreadable entry cannot permanently exempt
+	// a healthy root.
+	if len(scope.walkFailures) > 0 {
+		protectedRoots = append(append([]string(nil), protectedRoots...), scope.walkFailures...)
 	}
 	s.markMissingExcludingProtected(ctx, folder.ID, scope.existingFiles, scope.seenPaths, protectedRoots, scope.result)
 
@@ -1758,15 +1800,45 @@ func (s *Scanner) markMissingExcludingProtected(
 	logProtectedMissingSkips(ctx, folderID, result.MissingSkippedProtected, protectedRoots)
 }
 
+// emptyCleanupArmed reports whether the operator has armed the folder's
+// one-time empty-root cleanup allowance, WITHOUT consuming it.
+//
+// Consumption stays where it was, gated on what the scan actually found. This
+// is only a read, so a scan that never reaches a consume path leaves the
+// allowance armed for the next one.
+func (s *Scanner) emptyCleanupArmed(ctx context.Context, folderID int) (bool, error) {
+	if s == nil || s.folderRepo == nil || folderID <= 0 {
+		return false, nil
+	}
+	folder, err := s.folderRepo.GetByID(ctx, folderID)
+	if err != nil {
+		return false, fmt.Errorf("reading cleanup allowance for folder %d: %w", folderID, err)
+	}
+	if folder == nil {
+		return false, nil
+	}
+	return folder.AllowEmptyCleanupOnce, nil
+}
+
 // logIncompleteWalk reports that a scope's traversal could not read part of
 // its tree, so its file list is a lower bound rather than an inventory.
-func logIncompleteWalk(ctx context.Context, folderID int, reconcileRoots []string, walkFailures int) {
-	slog.WarnContext(ctx, "scanner: root walk incomplete; scope excluded from missing-file reconciliation",
+func logIncompleteWalk(ctx context.Context, folderID int, reconcileRoots []string, walkFailures []string) {
+	slog.WarnContext(ctx, "scanner: walk could not read part of this scope; affected paths excluded from missing-file reconciliation",
 		"component", "scanner",
 		"folder_id", folderID,
 		"scope", firstScope(reconcileRoots),
-		"walk_failures", walkFailures,
+		"walk_failures", len(walkFailures),
+		"unreadable_paths", truncatePaths(walkFailures, 10),
 	)
+}
+
+// truncatePaths bounds a path list for logging; an outage can produce
+// thousands and the first few identify the affected subtree well enough.
+func truncatePaths(paths []string, limit int) []string {
+	if len(paths) <= limit {
+		return paths
+	}
+	return paths[:limit]
 }
 
 // logProtectedMissingSkips reports files a scan declined to mark missing
@@ -2204,6 +2276,7 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 		folder.ID,
 		nil,
 		rootInference.Snapshots,
+		true,
 	); err != nil {
 		return fmt.Errorf("reconciling scanned root for file: %w", err)
 	}
@@ -3089,11 +3162,17 @@ func filterGroupLocationsByScope(locations []models.MediaGroupLocation, scopePat
 	return filtered
 }
 
+// reconcileScannedRoots upserts the root snapshots this scan observed and,
+// when pruneUnseen is set, deletes the snapshots in scope that it did not.
+// Callers must pass pruneUnseen=false when the walk could not read part of the
+// tree: the observed set is then a lower bound, and pruning against it drops
+// snapshots for media that is still there.
 func (s *Scanner) reconcileScannedRoots(
 	ctx context.Context,
 	folderID int,
 	scopeRoots []string,
 	roots []models.ScannedMediaRoot,
+	pruneUnseen bool,
 ) error {
 	if s == nil || s.rootSnapshotRepo == nil {
 		return nil
@@ -3115,6 +3194,9 @@ func (s *Scanner) reconcileScannedRoots(
 		return err
 	}
 
+	if !pruneUnseen {
+		return nil
+	}
 	for scope, seenRoots := range seenByScope {
 		if err := s.rootSnapshotRepo.DeleteMissingInScope(ctx, folderID, scope, seenRoots); err != nil {
 			return err

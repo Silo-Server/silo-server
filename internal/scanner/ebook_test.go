@@ -1611,7 +1611,7 @@ func TestCollectEbookRootScansMidWalkSubtreeErrorExcludesRoot(t *testing.T) {
 	if len(scans) != 1 {
 		t.Fatalf("scans = %d, want 1", len(scans))
 	}
-	if scans[0].walkFailures == 0 || !scans[0].failed() {
+	if len(scans[0].walkFailures) == 0 || !scans[0].failed() {
 		t.Fatalf("scan = %+v, want walk failure recorded for unreadable subtree", scans[0])
 	}
 	if len(scans[0].files) != 1 {
