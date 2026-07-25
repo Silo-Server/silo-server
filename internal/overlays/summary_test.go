@@ -60,6 +60,80 @@ func TestNormalizeHDRUsesAllDolbyVisionEvidence(t *testing.T) {
 	}
 }
 
+func TestBuildSummaryPreservesAtmosCarrier(t *testing.T) {
+	tests := []struct {
+		name string
+		file *models.MediaFile
+		want string
+	}{
+		{
+			name: "E-AC-3 title",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   "Atmos",
+				Codec:   "eac3",
+				Default: true,
+			}}},
+			want: "DD+ Atmos",
+		},
+		{
+			name: "scanner profile",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   "ATSC A/52B (AC-3, E-AC-3)",
+				Codec:   "eac3",
+				Profile: "Dolby Digital Plus + Dolby Atmos",
+				Default: true,
+			}}},
+			want: "DD+ Atmos",
+		},
+		{
+			name: "TrueHD profile",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   "TrueHD Atmos 7.1",
+				Codec:   "truehd",
+				Profile: "Dolby TrueHD + Dolby Atmos",
+				Default: true,
+			}}},
+			want: "TrueHD Atmos",
+		},
+		{
+			name: "unknown carrier",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Title:   "Atmos",
+				Default: true,
+			}}},
+			want: "Atmos",
+		},
+		{
+			name: "default track wins",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{
+				{Codec: "truehd", Profile: "Dolby TrueHD + Dolby Atmos"},
+				{Codec: "eac3", Profile: "Dolby Digital Plus + Dolby Atmos", Default: true},
+			}},
+			want: "DD+ Atmos",
+		},
+		{
+			name: "non-Atmos E-AC-3 unchanged",
+			file: &models.MediaFile{AudioTracks: []models.AudioTrack{{
+				Codec:   "eac3",
+				Default: true,
+			}}},
+			want: "EAC3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := BuildSummary([]*models.MediaFile{tt.file})
+			if got == nil {
+				t.Fatal("expected non-nil summary")
+			}
+			if got.Audio != tt.want {
+				t.Fatalf("Audio = %q, want %q", got.Audio, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeVideoCodec(t *testing.T) {
 	cases := []struct {
 		name string

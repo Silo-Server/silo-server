@@ -69,6 +69,16 @@ describe("CardOverlays", () => {
     expect(texts).toEqual(["Atmos", "DV HDR10", "4K"]);
   });
 
+  it("keeps Atmos carrier details out of compact card overlays", () => {
+    for (const audio of ["DD+ Atmos", "TrueHD Atmos"]) {
+      const { container, unmount } = render(
+        <CardOverlays data={{ ...SAMPLE_MOVIE_DATA, audio }} prefs={prefsWithOnly("audio")} />,
+      );
+      expect(badgeTexts(container)).toEqual(["Atmos"]);
+      unmount();
+    }
+  });
+
   it("suppresses the text label when a wordmark icon already spells it", () => {
     const data = { ...SAMPLE_MOVIE_DATA, hdr: "HDR10", audio: "Atmos", video_codec: "AV1" };
     for (const id of ["hdr", "audio", "video_codec"] as OverlayId[]) {
