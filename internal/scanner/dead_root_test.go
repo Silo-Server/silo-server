@@ -1315,3 +1315,66 @@ func TestScanFolderBrokenSymlinkDoesNotFreezeRootReconciliation(t *testing.T) {
 		t.Fatalf("surviving title marked missing at %v", keeperMissing)
 	}
 }
+
+// TestReprobeNestedRootsCatchesMidScanChildDrop covers Codex review finding #5
+// on PR #472: a configured child mount that is healthy at the initial probe
+// but gone by the time its compacted parent is walked.
+//
+// Compaction folds the child into its parent, so it never gets a scope of its
+// own, and the post-walk re-probe only revisits scopes that walked empty —
+// never a populated parent. Without a re-probe the child's rows are marked
+// missing on the parent's success, which is the mid-scan disconnect this
+// protection exists for.
+func TestReprobeNestedRootsCatchesMidScanChildDrop(t *testing.T) {
+
+	base := t.TempDir()
+	parent := filepath.Join(base, "media")
+	child := filepath.Join(parent, "child-mount")
+	sibling := filepath.Join(base, "unrelated")
+	for _, d := range []string{parent, child, sibling} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", d, err)
+		}
+	}
+	// The child holds media, so it is a live mount rather than a bare
+	// mountpoint while it is healthy.
+	if err := os.WriteFile(filepath.Join(child, "Alpha (2020).mkv"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed child media: %v", err)
+	}
+	configured := []string{parent, child, sibling}
+
+	pool := newDeadRootTestPool(t)
+	s := &Scanner{fileRepo: NewFileRepository(pool)}
+
+	// Healthy child: nothing to protect.
+	got, err := s.reprobeNestedRoots(context.Background(), 1, configured, parent, false)
+	if err != nil {
+		t.Fatalf("reprobeNestedRoots (healthy): %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("protected = %v, want none while the child is reachable", got)
+	}
+
+	// The child mount drops mid-scan.
+	if err := os.RemoveAll(child); err != nil {
+		t.Fatalf("drop child: %v", err)
+	}
+	got, err = s.reprobeNestedRoots(context.Background(), 1, configured, parent, false)
+	if err != nil {
+		t.Fatalf("reprobeNestedRoots (dropped): %v", err)
+	}
+	if len(got) != 1 || got[0] != child {
+		t.Fatalf("protected = %v, want [%s]: a child that drops after the initial probe "+
+			"must be caught before its parent's scope is reconciled", got, child)
+	}
+
+	// Only roots nested under this parent are considered — a sibling root has
+	// its own scope and must not be swept in here.
+	got, err = s.reprobeNestedRoots(context.Background(), 1, configured, sibling, false)
+	if err != nil {
+		t.Fatalf("reprobeNestedRoots (sibling): %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("protected = %v, want none: %s has no nested configured roots", got, sibling)
+	}
+}

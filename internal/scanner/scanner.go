@@ -913,7 +913,11 @@ func (s *Scanner) scanPaths(
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
 	}
 
-	if err := s.reconcileScannedGroups(ctx, folder.ID, allowEmptyRootGuard, reconcileRoots, !allowEmptyRootGuard, groupInference); err != nil {
+	// Group pruning is subject to the same completeness rule as snapshot
+	// pruning: a subtree scan whose walk could not read part of its tree must
+	// not delete group locations for the portion it never saw.
+	if err := s.reconcileScannedGroups(ctx, folder.ID, allowEmptyRootGuard, reconcileRoots,
+		!allowEmptyRootGuard && len(walkFailures) == 0, groupInference); err != nil {
 		return nil, fmt.Errorf("reconciling scanned groups: %w", err)
 	}
 
@@ -1156,6 +1160,18 @@ func (s *Scanner) scanFolderByRoots(
 			if !cleanupArmed {
 				scopeProtected = append(scopeProtected, suspectRoots...)
 			}
+			// unreachableRoots/suspectRoots were sampled before the walk. A
+			// nested child can drop in between — healthy at probe time, gone
+			// by the time its parent is walked — and the post-walk re-probe
+			// below only revisits scopes that walked empty, never a populated
+			// parent like this one. Re-probe this root's configured children
+			// now so a mid-scan disconnect is caught before its rows are
+			// reconciled.
+			freshProtected, err := s.reprobeNestedRoots(ctx, folder.ID, configuredRoots, root, cleanupArmed)
+			if err != nil {
+				return nil, err
+			}
+			scopeProtected = append(scopeProtected, freshProtected...)
 			if err := s.applyScopedScan(ctx, folder, scope, false, scopeProtected); err != nil {
 				return nil, err
 			}
@@ -1406,6 +1422,9 @@ func removePath(paths []string, path string) []string {
 // deferred until the operator confirms or the files return. A root that
 // still has directory entries keeps the historical purge path.
 func (s *Scanner) suspectEmptyRoots(ctx context.Context, folderID int, configuredRoots, unreachableRoots []string) ([]string, error) {
+	if s == nil || s.fileRepo == nil {
+		return nil, nil
+	}
 	unreachableSet := make(map[string]bool, len(unreachableRoots))
 	for _, root := range unreachableRoots {
 		unreachableSet[root] = true
@@ -1798,6 +1817,49 @@ func (s *Scanner) markMissingExcludingProtected(
 		result.Missing++
 	}
 	logProtectedMissingSkips(ctx, folderID, result.MissingSkippedProtected, protectedRoots)
+}
+
+// reprobeNestedRoots re-checks the configured roots nested strictly beneath
+// parent and returns those that must now be protected from reconciliation.
+//
+// Root compaction folds a child mount into its parent for traversal, so a
+// child that dies after the initial probe leaves no scope of its own and is
+// never revisited by the post-walk re-probe, which only inspects scopes that
+// walked empty. Without this, a child dropping mid-scan is indistinguishable
+// from its contents having been deleted.
+//
+// cleanupArmed mirrors the caller's rule: an unreachable child is protected
+// regardless, while a suspect-empty one yields to an explicit operator
+// confirmation.
+func (s *Scanner) reprobeNestedRoots(
+	ctx context.Context,
+	folderID int,
+	configuredRoots []string,
+	parent string,
+	cleanupArmed bool,
+) ([]string, error) {
+	nested := make([]string, 0)
+	for _, root := range configuredRoots {
+		if root == parent {
+			continue
+		}
+		if pathWithinAnyRoot(root, []string{parent}) {
+			nested = append(nested, root)
+		}
+	}
+	if len(nested) == 0 {
+		return nil, nil
+	}
+
+	protected := probeUnreachableRoots(ctx, folderID, nested)
+	if cleanupArmed {
+		return protected, nil
+	}
+	suspect, err := s.suspectEmptyRoots(ctx, folderID, nested, protected)
+	if err != nil {
+		return nil, err
+	}
+	return append(protected, suspect...), nil
 }
 
 // emptyCleanupArmed reports whether the operator has armed the folder's
