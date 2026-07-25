@@ -1111,6 +1111,11 @@ func (s *Scanner) scanFolderByRoots(
 		return nil, err
 	}
 
+	// reprobedRoots accumulates roots found offline by the mid-loop re-probe,
+	// so later folder-wide cleanup honours them alongside the initial probe's
+	// results.
+	reprobedRoots := make([]string, 0)
+
 	pendingEmptyScopes := make([]*scopedScan, 0)
 	totalExisting := 0
 	seenAnyFiles := false
@@ -1172,6 +1177,15 @@ func (s *Scanner) scanFolderByRoots(
 				return nil, err
 			}
 			scopeProtected = append(scopeProtected, freshProtected...)
+			// A root discovered offline here must stay protected for the rest
+			// of the scan, not just for this scope. The folder-wide membership
+			// reconcile and trash sweep below run off reprobedRoots too —
+			// without that, rows under a child that dropped mid-scan and are
+			// already past the removal grace get hard-deleted by the very scan
+			// that noticed the outage.
+			for _, protectedRoot := range freshProtected {
+				reprobedRoots = appendUniquePath(reprobedRoots, protectedRoot)
+			}
 			if err := s.applyScopedScan(ctx, folder, scope, false, scopeProtected); err != nil {
 				return nil, err
 			}
@@ -1254,8 +1268,18 @@ func (s *Scanner) scanFolderByRoots(
 		suspectRoots = nil
 	}
 	result.SuspectEmptyRoots = suspectRoots
+	// A root that dropped mid-scan is as much an outage as one that failed the
+	// initial probe; report it so the folder warning and scan result do not
+	// present a partial scan as clean.
+	for _, protectedRoot := range reprobedRoots {
+		unreachableRoots = appendUniquePath(unreachableRoots, protectedRoot)
+	}
+	result.UnreachableRoots = unreachableRoots
 
 	protectedScanRoots := append(append([]string(nil), unreachableRoots...), suspectRoots...)
+	for _, protectedRoot := range reprobedRoots {
+		protectedScanRoots = appendUniquePath(protectedScanRoots, protectedRoot)
+	}
 	for _, pending := range pendingEmptyScopes {
 		beforeErrors := pending.result.Errors
 		// forceDeleteAll only ever fires for confirmed cleanup, and even then
@@ -1280,11 +1304,13 @@ func (s *Scanner) scanFolderByRoots(
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
 	}
 
-	protectedRoots := unreachableRoots
-	if len(suspectRoots) > 0 {
-		protectedRoots = make([]string, 0, len(unreachableRoots)+len(suspectRoots))
-		protectedRoots = append(append(protectedRoots, unreachableRoots...), suspectRoots...)
-	}
+	// Reuse the same protected set the scoped cleanup used, so membership
+	// removal and the trash sweep below honour roots the mid-loop re-probe
+	// found offline. Rebuilding from only the initial probe here would let a
+	// child that dropped during this scan have its already-missing rows hard
+	// deleted once they pass the removal grace — by the very scan that
+	// noticed the outage.
+	protectedRoots := protectedScanRoots
 	removedMemberships, deletedItems, orphanedImageDirs, err := s.reconcileLibraryMemberships(ctx, folder.ID, protectedRoots)
 	if err != nil {
 		return nil, fmt.Errorf("reconciling library membership for folder %d: %w", folder.ID, err)
@@ -1721,7 +1747,21 @@ func (s *Scanner) applyScopedScan(
 	// even though the media_files rows themselves stay protected below.
 	// Upserting what we did see is always safe; pruning is what must wait for
 	// a scan that read the whole tree.
-	pruneUnseen := len(scope.walkFailures) == 0
+	// Pruning deletes whatever this walk did not observe, so it is only sound
+	// when the walk actually observed the scope. Three cases must suppress it:
+	// an incomplete walk (some of the tree was unreadable), a scope that was
+	// never walked at all (an unreachable root gets nil walkRoots), and a
+	// scope containing a protected path (a suspect-empty child compacted into
+	// a populated parent). In each case the observed set is a lower bound, and
+	// pruning against it deletes snapshots, observed locations and group
+	// locations for media that is still there — corrupting later matching even
+	// though the media_files rows themselves are protected.
+	//
+	// Keeping stale metadata is harmless by comparison: the next complete scan
+	// prunes it.
+	pruneUnseen := len(scope.walkFailures) == 0 &&
+		len(scope.walkRoots) > 0 &&
+		!anyPathWithinRoots(protectedRoots, scope.reconcileRoots)
 	if err := s.reconcileScannedRoots(
 		ctx,
 		folder.ID,
@@ -1880,6 +1920,17 @@ func (s *Scanner) emptyCleanupArmed(ctx context.Context, folderID int) (bool, er
 		return false, nil
 	}
 	return folder.AllowEmptyCleanupOnce, nil
+}
+
+// anyPathWithinRoots reports whether any of paths lies at or under one of
+// roots. Used to detect a protected path inside a scope about to be pruned.
+func anyPathWithinRoots(paths, roots []string) bool {
+	for _, path := range paths {
+		if pathWithinAnyRoot(path, roots) {
+			return true
+		}
+	}
+	return false
 }
 
 // logIncompleteWalk reports that a scope's traversal could not read part of

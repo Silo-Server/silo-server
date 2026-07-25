@@ -1378,3 +1378,95 @@ func TestReprobeNestedRootsCatchesMidScanChildDrop(t *testing.T) {
 		t.Fatalf("protected = %v, want none: %s has no nested configured roots", got, sibling)
 	}
 }
+
+// TestScanFolderProtectedChildRootSurvivesTrashSweep asserts that a nested
+// child root which is offline at scan time keeps its already-missing rows
+// through the folder-wide trash sweep, even when those rows are long past the
+// removal grace.
+//
+// Scope note: this stages the child as unreachable BEFORE the scan, so the
+// initial probe classifies it and the protection comes from that path. It does
+// NOT reproduce the mid-scan drop behind Codex finding #6 — where the child is
+// healthy at probe time and dies during the walk, so only reprobeNestedRoots
+// sees it. Staging that race needs the drop to land between the probe and the
+// walk, which is not reachable from a test without hooks. The fix for that
+// path (carrying reprobedRoots into protectedScanRoots) is therefore covered
+// by inspection, not by this test; what this test does pin is that the sweep
+// honours the protected set it is given.
+//
+// Trash emptying is on with a zero grace, so any row left unprotected is
+// deleted immediately rather than merely hidden.
+func TestScanFolderProtectedChildRootSurvivesTrashSweep(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Mid-Scan Drop Sweep Test")
+
+	base := t.TempDir()
+	parent := filepath.Join(base, "media")
+	child := filepath.Join(parent, "child-mount")
+	parentFile := filepath.Join(parent, "Keeper (2020)", "Keeper (2020).mkv")
+	childFile := filepath.Join(child, "Child (2021)", "Child (2021).mkv")
+	for _, p := range []string{parentFile, childFile} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	folder := &models.MediaFolder{
+		ID: folderID, Paths: []string{parent, child}, Type: "movies",
+		Name: "Mid-Scan Drop Sweep Test", Enabled: true,
+	}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("baseline scan: %v", err)
+	}
+	var childID int
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, childFile).Scan(&childID); err != nil {
+		t.Fatalf("child row: %v", err)
+	}
+
+	// Put the child's row in the state the sweep would delete: already marked
+	// missing, well past the (zero) removal grace.
+	if _, err := pool.Exec(ctx,
+		`UPDATE media_files SET missing_since = NOW() - INTERVAL '48 hours' WHERE id = $1`,
+		childID); err != nil {
+		t.Fatalf("pre-mark child row: %v", err)
+	}
+
+	// The child mount drops. The parent stays healthy and still walks files,
+	// so the scan takes the populated-parent path.
+	if err := os.RemoveAll(child); err != nil {
+		t.Fatalf("drop child mount: %v", err)
+	}
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan after child drop: %v", err)
+	}
+
+	var survives bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM media_files WHERE id = $1)`, childID).Scan(&survives); err != nil {
+		t.Fatalf("existence check: %v", err)
+	}
+	if !survives {
+		t.Fatal("row under an offline child root was hard-deleted by the trash sweep; " +
+			"an outage must never be a trigger for permanent deletion")
+	}
+
+	// The parent's own file must be unaffected throughout.
+	var parentMissing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, parentFile).Scan(&parentMissing); err != nil {
+		t.Fatalf("parent row: %v", err)
+	}
+	if parentMissing != nil {
+		t.Fatalf("healthy parent file marked missing at %v", parentMissing)
+	}
+}
