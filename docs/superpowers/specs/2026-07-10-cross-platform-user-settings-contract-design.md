@@ -1122,10 +1122,10 @@ being held to the migration's schedule in either direction.
   including invalid/unknown-value failure cases.
 - The read-path benchmark shows no regression against the specialized tables being replaced.
 - Store-distributed Apple/Android builds are approved and available before the server release is
-  published. Note the ordering hazard this creates: `silo-android`'s `release.yml` publishes plain
-  versions straight to Play Store, and `silo-server` has no versioned releases at all — Docker
-  `latest` off the default branch. Operators therefore have no version number to reason about, so
-  the release notes must be unusually explicit about what to pull and when.
+  published.
+- Release notes name the server build to pull alongside the client versions. `silo-android`
+  publishes plain versions to Play Store and `silo-server` ships as Docker `latest` off the default
+  branch, so the notes carry the pairing that image tags do not.
 - Release notes state that server and apps must be upgraded together and that rollback requires
   reverting the binary, or restoring the pre-upgrade backup once the follow-up migration has
   dropped the superseded columns.
