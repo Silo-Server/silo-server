@@ -1249,6 +1249,7 @@ func scanRunResultFromIngest(result *libraryingest.Result) *evt.ScanRunResult {
 		resp.Updated = result.ScanResult.Updated
 		resp.Unchanged = result.ScanResult.Unchanged
 		resp.Missing = result.ScanResult.Missing
+		resp.MissingSkippedProtected = result.ScanResult.MissingSkippedProtected
 		resp.FilesDeleted = result.ScanResult.FilesDeleted
 		resp.MembershipsRemoved = result.ScanResult.MembershipsRemoved
 		resp.ItemsDeleted = result.ScanResult.ItemsDeleted

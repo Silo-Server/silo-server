@@ -762,12 +762,33 @@ func (s *Scanner) scanPaths(
 	applyGroupOverrides(&groupInference, groupOverrides)
 	result.RootObservations = rootInference.Observations
 	s.logRootInferenceDisagreements(rootInference.Assignments)
+
+	// Probe before any reconciliation, not just before missing-marking.
+	// Pruning deletes snapshots and observed/group locations the walk did not
+	// see, so it is unsound for the same reasons marking is: a suspect-empty
+	// mountpoint walks clean and reports no failures, and pruning against that
+	// empty inventory strips metadata for media that is still there. Deciding
+	// protection after these calls preserved the media rows while their
+	// snapshots had already been deleted.
+	protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
+	if err != nil {
+		return nil, err
+	}
+	// Wherever the walk could not read, its file list is a lower bound rather
+	// than an inventory, so anything cataloged under those paths must not be
+	// reconciled. Only those paths are protected — a dangling symlink must not
+	// exempt its whole library root forever.
+	if len(walkFailures) > 0 {
+		protectedRoots = append(append([]string(nil), protectedRoots...), walkFailures...)
+	}
+	pruneUnseen := len(walkFailures) == 0 && !anyPathWithinRoots(protectedRoots, reconcileRoots)
+
 	if err := s.reconcileScannedRoots(
 		ctx,
 		folder.ID,
 		reconcileRoots,
 		rootInference.Snapshots,
-		len(walkFailures) == 0,
+		pruneUnseen,
 	); err != nil {
 		return nil, fmt.Errorf("reconciling scanned roots: %w", err)
 	}
@@ -913,32 +934,13 @@ func (s *Scanner) scanPaths(
 		return nil, fmt.Errorf("syncing present library state for folder %d: %w", folder.ID, err)
 	}
 
-	// Group pruning is subject to the same completeness rule as snapshot
-	// pruning: a subtree scan whose walk could not read part of its tree must
-	// not delete group locations for the portion it never saw.
+	// Group pruning follows the same rule as snapshot pruning above.
 	if err := s.reconcileScannedGroups(ctx, folder.ID, allowEmptyRootGuard, reconcileRoots,
-		!allowEmptyRootGuard && len(walkFailures) == 0, groupInference); err != nil {
+		!allowEmptyRootGuard && pruneUnseen, groupInference); err != nil {
 		return nil, fmt.Errorf("reconciling scanned groups: %w", err)
 	}
 
-	// Probe the configured library roots before touching missing state. A
-	// scoped scan of a healthy subtree must not act on rows an unreachable or
-	// suspect-empty sibling root owns, and — more importantly — a root that is
-	// merely offline must not have its files marked missing at all: the walk
-	// found nothing there because the storage did not answer, not because the
-	// files are gone.
-	protectedRoots, err := s.protectedConfiguredRoots(ctx, folder)
-	if err != nil {
-		return nil, err
-	}
-	// Wherever the walk could not read, its file list is a lower bound rather
-	// than an inventory, so anything cataloged under those paths must not be
-	// reconciled. Only those paths are protected — a dangling symlink must not
-	// exempt its whole library root forever.
-	if len(walkFailures) > 0 {
-		protectedRoots = append(append([]string(nil), protectedRoots...), walkFailures...)
-	}
-
+	// protectedRoots was resolved above, before any reconciliation ran.
 	s.markMissingExcludingProtected(ctx, folder.ID, existingFiles, seenPaths, protectedRoots, result)
 
 	// Empty trash: delete files marked as missing for longer than the removal
@@ -1226,6 +1228,22 @@ func (s *Scanner) scanFolderByRoots(
 		root := firstScope(pending.reconcileRoots)
 		if root == "" || unreachableSet[root] || len(pending.existingFiles) == 0 {
 			continue
+		}
+		// Re-probe this scope's nested configured children too. A parent whose
+		// only media lived in a child walks empty when that child drops, and
+		// probing the parent alone says nothing — it still contains the
+		// child's bare mountpoint directory, so it reads as present and
+		// non-empty. Without this the child is never classified and its rows
+		// are marked or swept. The populated-scope branch does the same.
+		nestedUnreachable, nestedSuspect, nerr := s.reprobeNestedRoots(ctx, folder.ID, configuredRoots, root, cleanupArmed)
+		if nerr != nil {
+			return nil, nerr
+		}
+		for _, protectedRoot := range nestedUnreachable {
+			reprobedUnreachable = appendUniquePath(reprobedUnreachable, protectedRoot)
+		}
+		for _, protectedRoot := range nestedSuspect {
+			reprobedSuspect = appendUniquePath(reprobedSuspect, protectedRoot)
 		}
 		probe := rootcheck.ProbeWithTimeout(ctx, root, rootcheck.DefaultProbeTimeout)
 		if !probe.Reachable {

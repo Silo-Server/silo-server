@@ -1566,3 +1566,90 @@ func TestScanFolderUnreadableSubtreeSurvivesTrashSweep(t *testing.T) {
 		t.Fatalf("readable title marked missing at %v", keeperMissing)
 	}
 }
+
+// TestScanFolderEmptiedNestedChildUnderEmptyParentStaysVisible pins that a
+// nested child whose contents vanish keeps its rows visible, in the awkward
+// topology where the child holds the parent's only media and a healthy sibling
+// root keeps the folder-wide empty guard from firing.
+//
+// Scope note, stated because it is easy to misread: the child is emptied
+// BEFORE this scan, so the INITIAL probe classifies it as suspect-empty and
+// protection arrives through that path. It therefore does NOT exercise the
+// pending-scope re-probe added for Codex finding #11, which only matters when
+// the child drops AFTER the initial probe. Verified: this test still passes
+// with that re-probe disabled.
+//
+// Staging the real mid-scan race needs the drop to land between the probe and
+// the walk, which a test cannot reach without hooks. That fix — like the
+// populated-scope re-probe before it — rests on inspection, not on this test.
+// What this test does guard is the end-to-end outcome for the topology, which
+// no other test covers.
+func TestScanFolderEmptiedNestedChildUnderEmptyParentStaysVisible(t *testing.T) {
+	pool := newDeadRootTestPool(t)
+	ctx := context.Background()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", "Pending Empty Parent Test")
+
+	base := t.TempDir()
+	parent := filepath.Join(base, "parent")
+	child := filepath.Join(parent, "child-mount")
+	sibling := filepath.Join(base, "sibling")
+	// The parent's ONLY media is inside the child.
+	childFile := filepath.Join(child, "Child (2021)", "Child (2021).mkv")
+	siblingFile := filepath.Join(sibling, "Sibling (2020)", "Sibling (2020).mkv")
+	for _, p := range []string{childFile, siblingFile} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("fake movie payload"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	folder := &models.MediaFolder{
+		ID: folderID, Paths: []string{parent, child, sibling}, Type: "movies",
+		Name: "Pending Empty Parent Test", Enabled: true,
+	}
+	scanner := NewScanner(NewFileRepository(pool), "", nil, 2, true, 0)
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("baseline scan: %v", err)
+	}
+	var childID int
+	if err := pool.QueryRow(ctx,
+		`SELECT id FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, childFile).Scan(&childID); err != nil {
+		t.Fatalf("child row: %v", err)
+	}
+
+	// The child mount's contents vanish but its mountpoint directory remains,
+	// so the parent still looks present and non-empty from above.
+	if err := os.RemoveAll(filepath.Join(child, "Child (2021)")); err != nil {
+		t.Fatalf("empty child mount: %v", err)
+	}
+
+	if _, err := scanner.ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan after child emptied: %v", err)
+	}
+
+	var missing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND id = $2`,
+		folderID, childID).Scan(&missing); err != nil {
+		t.Fatalf("child row after scan (hard-deleted?): %v", err)
+	}
+	if missing != nil {
+		t.Fatalf("child row hidden at %v: an emptied nested child must stay visible when its "+
+			"parent also walks empty and a sibling root keeps the folder guard from firing", missing)
+	}
+
+	// The healthy sibling is untouched.
+	var siblingMissing *time.Time
+	if err := pool.QueryRow(ctx,
+		`SELECT missing_since FROM media_files WHERE media_folder_id = $1 AND file_path = $2`,
+		folderID, siblingFile).Scan(&siblingMissing); err != nil {
+		t.Fatalf("sibling row: %v", err)
+	}
+	if siblingMissing != nil {
+		t.Fatalf("healthy sibling marked missing at %v", siblingMissing)
+	}
+}
