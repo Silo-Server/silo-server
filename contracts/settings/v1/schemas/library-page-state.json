@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/library-page-state.json",
+  "title": "Library page state",
+  "description": "Remembered per-library browse state. Mirrors web/src/hooks/queries/libraryPageState.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "libraries"],
+  "properties": {
+    "version": { "const": 1 },
+    "libraries": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[0-9]+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["search"],
+        "properties": {
+          "search": { "type": "string", "maxLength": 256 }
+        }
+      },
+      "maxProperties": 512
+    }
+  }
+}

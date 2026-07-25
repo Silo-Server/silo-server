@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/subtitle-appearance.json",
+  "title": "Subtitle appearance",
+  "description": "Rendering appearance for subtitle tracks. Mirrors web/src/lib/subtitleAppearance.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fontSize",
+    "fontFamily",
+    "fontColor",
+    "backgroundColor",
+    "backgroundStyle",
+    "backgroundOpacity",
+    "textOutline",
+    "textOutlineColor",
+    "position"
+  ],
+  "properties": {
+    "fontSize": {
+      "type": "string",
+      "enum": ["small", "medium", "large", "xlarge", "xxlarge"]
+    },
+    "fontFamily": {
+      "type": "string",
+      "enum": ["sans-serif", "serif", "monospace"]
+    },
+    "fontColor": { "$ref": "#/$defs/hexColor" },
+    "backgroundColor": { "$ref": "#/$defs/hexColor" },
+    "backgroundStyle": {
+      "type": "string",
+      "enum": ["box", "shadow", "outline", "none"]
+    },
+    "backgroundOpacity": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "textOutline": { "type": "boolean" },
+    "textOutlineColor": { "$ref": "#/$defs/hexColor" },
+    "position": {
+      "type": "string",
+      "enum": ["bottom", "lower-third", "top"]
+    }
+  },
+  "$defs": {
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    }
+  }
+}

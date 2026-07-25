@@ -1,0 +1,675 @@
+{
+  "api_version": 1,
+  "revision": 1,
+  "definitions": [
+    {
+      "key": "playback.audio_language",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device", "profile_library", "profile_series"],
+      "resolution_order": [
+        "profile_series",
+        "profile_library",
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": { "type": "language_tag", "nullable": true },
+      "default_value": null,
+      "category": "playback",
+      "label": "Preferred audio language",
+      "description": "Choose which spoken language Silo should prefer first.",
+      "recommended_control": "select",
+      "notes": "Migrates user_profiles.language as the roaming fallback. Existing user_device_settings values become real overrides, and the per-series value comes from AudioPreference.audio_language. AudioPreference.audio_track_index and track_signature stay specialized: they identify a concrete track, not a default."
+    },
+    {
+      "key": "playback.subtitle_language",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device", "profile_library", "profile_series"],
+      "resolution_order": [
+        "profile_series",
+        "profile_library",
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": { "type": "language_tag", "nullable": true },
+      "default_value": null,
+      "category": "playback",
+      "label": "Preferred subtitle language",
+      "description": "Choose which subtitle language Silo should prefer first.",
+      "recommended_control": "select",
+      "notes": "Migrates user_profiles.subtitle_language, LibraryPlaybackPreference.subtitle_language, and SubtitlePreference.subtitle_language. SubtitlePreference.subtitle_track_index, external_subtitle_path, and track_signature stay specialized."
+    },
+    {
+      "key": "playback.subtitle_mode",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device", "profile_library", "profile_series"],
+      "resolution_order": [
+        "profile_series",
+        "profile_library",
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "auto", "label": "Auto" },
+          { "value": "always", "label": "Always on" },
+          { "value": "off", "label": "Off" }
+        ]
+      },
+      "default_value": "auto",
+      "category": "playback",
+      "label": "Subtitles",
+      "description": "When Silo should turn subtitles on.",
+      "recommended_control": "select",
+      "notes": "The legacy empty string means unset, not a fourth mode. Migration maps \"\" to no stored row so it resolves to the next scope."
+    },
+    {
+      "key": "playback.show_forced_subtitles",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device", "profile_library", "profile_series"],
+      "resolution_order": [
+        "profile_series",
+        "profile_library",
+        "profile_device",
+        "profile",
+        "default"
+      ],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "playback",
+      "label": "Show forced subtitles",
+      "description": "Show subtitles for foreign-language dialogue even when subtitles are off.",
+      "recommended_control": "switch",
+      "notes": "The existing Has* companion booleans on LibraryPlaybackPreference and SubtitlePreference encode set-vs-unset. Migration writes a row only where Has* is true, so explicit false stays distinct from unset."
+    },
+    {
+      "key": "playback.subtitle_appearance",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "object", "schema_ref": "subtitle-appearance.json" },
+      "default_value": {
+        "fontSize": "large",
+        "fontFamily": "sans-serif",
+        "fontColor": "#ffffff",
+        "backgroundColor": "#000000",
+        "backgroundStyle": "shadow",
+        "backgroundOpacity": 75,
+        "textOutline": false,
+        "textOutlineColor": "#000000",
+        "position": "bottom"
+      },
+      "category": "playback",
+      "label": "Subtitle appearance",
+      "description": "How subtitles are drawn during playback.",
+      "recommended_control": "panel",
+      "notes": "Renamed from the unprefixed legacy key \"subtitle_appearance\". Every other canonical key carries a domain prefix, and preserving accidental key names is an explicit non-goal of the design. Migration copies the account-level legacy fallback to every existing profile and leaves device overrides unchanged."
+    },
+    {
+      "key": "playback.preferred_quality",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "ordered": true,
+        "values": [
+          { "value": "auto", "label": "Auto" },
+          { "value": "328p" },
+          { "value": "420p" },
+          { "value": "480p" },
+          { "value": "720p" },
+          { "value": "720p-medium" },
+          { "value": "720p-high" },
+          { "value": "1080p-8" },
+          { "value": "1080p" },
+          { "value": "1080p-medium" },
+          { "value": "1080p-high" },
+          { "value": "2160p" },
+          { "value": "original", "label": "Original quality" }
+        ]
+      },
+      "default_value": "auto",
+      "constrained_by": {
+        "policy_input": "max_playback_quality",
+        "constraint": "ceiling"
+      },
+      "category": "playback",
+      "label": "Preferred quality",
+      "description": "Pick the quality Silo should prefer.",
+      "recommended_control": "select",
+      "notes": "Members are listed ascending so the ceiling constraint has a defined direction; \"auto\" sorts lowest because it never exceeds a cap. Migrates user_profiles.quality_preference as the profile fallback. The account/profile max_playback_quality columns stay in internal/policy and are NOT settings."
+    },
+    {
+      "key": "playback.auto_skip_intro",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "playback",
+      "label": "Auto-skip intros",
+      "description": "Jump past intros automatically when Silo can detect them.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "playback.auto_skip_credits",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "playback",
+      "label": "Auto-skip credits",
+      "description": "Move through end credits automatically when a skip is available.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "playback.auto_skip_recap",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "playback",
+      "label": "Auto-skip recaps",
+      "description": "Skip \"previously on\" recaps automatically when Silo can detect them.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "playback.auto_play_next",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "playback",
+      "label": "Auto-play next episode",
+      "description": "Continue to the next episode automatically.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "playback.auto_play_next_preview",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "playback",
+      "label": "Preview next episode",
+      "description": "Show a preview of the next episode while credits play.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "playback.next_up_prompt_seconds",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "integer", "minimum": 0, "maximum": 120 },
+      "default_value": 30,
+      "unit": "seconds",
+      "category": "playback",
+      "label": "Next up prompt",
+      "description": "How long before the end of an episode the next-up prompt appears.",
+      "recommended_control": "slider",
+      "notes": "Android currently writes player.next_up_prompt_seconds. That alias is migrated to this key and removed from production writes."
+    },
+    {
+      "key": "catalog.metadata_language",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "language_tag", "nullable": true },
+      "default_value": null,
+      "constrained_by": {
+        "policy_input": "profile_preferred_metadata_language",
+        "constraint": "allowlist"
+      },
+      "category": "catalog",
+      "label": "Metadata language",
+      "description": "Language Silo prefers for titles, descriptions, and artwork.",
+      "recommended_control": "select",
+      "notes": "Migrates user_profiles.preferred_metadata_language."
+    },
+    {
+      "key": "player.hdr_enabled",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "player",
+      "label": "HDR",
+      "description": "Allow HDR output on this device.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "player.dolby_vision_enabled",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "player",
+      "label": "Dolby Vision",
+      "description": "Allow Dolby Vision output on this device.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "player.dv_profile7_hdr10_fallback",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "category": "player",
+      "label": "Dolby Vision Profile 7 fallback",
+      "description": "Play Profile 7 sources as HDR10 when this device cannot decode them natively.",
+      "recommended_control": "switch",
+      "notes": "Android currently defaults this to true before hydration. The contract default is false, matching the server and Apple."
+    },
+    {
+      "key": "player.seek_cache_enabled",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "player",
+      "label": "Seek cache",
+      "description": "Keep recently played segments buffered for faster seeking.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "player.match_frame_rate",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["android", "android_tv", "tvos"],
+      "category": "player",
+      "label": "Match content frame rate",
+      "description": "Switch the display refresh rate to match what is playing.",
+      "recommended_control": "switch",
+      "notes": "Previously an unregistered Android device-setting write, so every write and reset was rejected by the server. Registered here."
+    },
+    {
+      "key": "player.playback_speed",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "number", "minimum": 0.25, "maximum": 3.0, "step": 0.05 },
+      "default_value": 1.0,
+      "unit": "x",
+      "category": "player",
+      "label": "Playback speed",
+      "description": "Default playback speed on this device.",
+      "recommended_control": "slider",
+      "notes": "Android currently clamps to 4.0. The contract maximum is 3.0, matching the server; the Android clamp and its unit test are corrected to match."
+    },
+    {
+      "key": "player.audio_sync_ms",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "integer", "minimum": -5000, "maximum": 5000 },
+      "default_value": 0,
+      "unit": "milliseconds",
+      "category": "player",
+      "label": "Audio sync offset",
+      "description": "Shift audio earlier or later to correct lip sync on this device.",
+      "recommended_control": "slider"
+    },
+    {
+      "key": "player.subtitle_sync_ms",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "integer", "minimum": -10000, "maximum": 10000 },
+      "default_value": 0,
+      "unit": "milliseconds",
+      "category": "player",
+      "label": "Subtitle sync offset",
+      "description": "Shift subtitles earlier or later on this device.",
+      "recommended_control": "slider"
+    },
+    {
+      "key": "player.video_gravity",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "fit", "label": "Fit" },
+          { "value": "fill", "label": "Fill" },
+          { "value": "stretch", "label": "Stretch" }
+        ]
+      },
+      "default_value": "fit",
+      "category": "player",
+      "label": "Video sizing",
+      "description": "How video fills the screen on this device.",
+      "recommended_control": "select"
+    },
+    {
+      "key": "player.orientation_mode",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "landscapeLocked", "label": "Landscape" },
+          { "value": "rotateFreely", "label": "Rotate freely" }
+        ]
+      },
+      "default_value": "landscapeLocked",
+      "platforms": ["ios", "android"],
+      "category": "player",
+      "label": "Screen orientation",
+      "description": "Whether the player rotates with the device.",
+      "recommended_control": "select"
+    },
+    {
+      "key": "player.sleep_timer_default_minutes",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "integer", "minimum": 0, "maximum": 480 },
+      "default_value": 0,
+      "unit": "minutes",
+      "category": "player",
+      "label": "Default sleep timer",
+      "description": "Preset duration for the sleep timer. 0 leaves it off.",
+      "recommended_control": "stepper",
+      "notes": "Previously an unregistered Android device-setting write. The design classes transient sleep timers as private local; the persisted default duration is a real preference, so it is registered while the running timer stays client-local."
+    },
+    {
+      "key": "ui.theme",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "midnight-cinema", "label": "Midnight Cinema" },
+          { "value": "cinema-light", "label": "Cinema Light" },
+          { "value": "cobalt-studio", "label": "Cobalt Studio" },
+          { "value": "oxblood-noir", "label": "Oxblood Noir" },
+          { "value": "evergreen-studio", "label": "Evergreen Studio" }
+        ]
+      },
+      "default_value": "midnight-cinema",
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Theme",
+      "description": "Colour theme for the Silo interface.",
+      "recommended_control": "select",
+      "notes": "Renamed from the unregistered legacy key \"ui_theme\", which the extension bag accepted without validation. Moved from account to profile scope: appearance is per household member, and the account row is copied to every profile during migration. Adding a theme is an additive enum widening. The admin-set default theme stays in server_settings and is not a user setting."
+    },
+    {
+      "key": "ui.text_scale",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "ordered": true,
+        "values": [
+          { "value": "default", "label": "Default" },
+          { "value": "large", "label": "Large" },
+          { "value": "x-large", "label": "Extra large" }
+        ]
+      },
+      "default_value": "default",
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Text size",
+      "description": "Overall interface text size.",
+      "recommended_control": "select",
+      "notes": "Renamed from the unregistered legacy key \"ui_text_scale\". Allows a device override because readable text size is partly a function of the screen you are sitting in front of."
+    },
+    {
+      "key": "ui.text_weight",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "default", "label": "Default" },
+          { "value": "strong", "label": "Bolder" }
+        ]
+      },
+      "default_value": "default",
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Text weight",
+      "description": "Use heavier interface text for readability.",
+      "recommended_control": "select",
+      "notes": "Renamed from the unregistered legacy key \"ui_text_weight\"."
+    },
+    {
+      "key": "ui.high_contrast",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "High contrast",
+      "description": "Increase contrast across the interface.",
+      "recommended_control": "switch",
+      "notes": "Renamed from the unregistered legacy key \"ui_high_contrast\"."
+    },
+    {
+      "key": "ui.custom_theme_vars",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "theme-var-overrides.json",
+        "nullable": true
+      },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Custom theme variables",
+      "description": "Per-token overrides applied on top of the selected theme.",
+      "recommended_control": "panel",
+      "notes": "Renamed from the unregistered legacy key \"ui_custom_theme_vars\", which stored arbitrary unvalidated JSON."
+    },
+    {
+      "key": "ui.custom_css",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": { "type": "string", "max_length": 65536, "nullable": true },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Custom CSS",
+      "description": "Raw CSS applied on top of the selected theme.",
+      "recommended_control": "text",
+      "notes": "Renamed from the unregistered legacy key \"ui_custom_css\". Sanitization stays in the web client (web/src/lib/cssSanitizer.ts); the contract only bounds length. This value is per-profile and is never applied to another profile's session."
+    },
+    {
+      "key": "ui.date_format",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "auto", "label": "Match device" },
+          { "value": "DD/MM/YYYY" },
+          { "value": "MM/DD/YYYY" },
+          { "value": "YYYY-MM-DD" }
+        ]
+      },
+      "default_value": "auto",
+      "category": "appearance",
+      "label": "Date format",
+      "description": "How dates are written across the interface.",
+      "recommended_control": "select",
+      "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
+    },
+    {
+      "key": "ui.time_format",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "auto", "label": "Match device" },
+          { "value": "12h", "label": "12-hour" },
+          { "value": "24h", "label": "24-hour" }
+        ]
+      },
+      "default_value": "auto",
+      "category": "appearance",
+      "label": "Time format",
+      "description": "How clock times are written across the interface.",
+      "recommended_control": "select",
+      "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
+    },
+    {
+      "key": "ui.library_page_state",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "library-page-state.json",
+        "nullable": true
+      },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "navigation",
+      "label": "Remembered library view",
+      "description": "Saved browse state for each library.",
+      "notes": "Navigation state, not a user-authored preference. Stays tied to one profile on one device and is not shown as a normal setting control."
+    },
+    {
+      "key": "ui.remember_library_page_state",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile_device"],
+      "resolution_order": ["profile_device", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "platforms": ["web"],
+      "category": "navigation",
+      "label": "Remember library view",
+      "description": "Return to where you left off when reopening a library.",
+      "recommended_control": "switch"
+    },
+    {
+      "key": "search.media_scope",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "all", "label": "Everything" },
+          { "value": "video", "label": "Movies and series" },
+          { "value": "audiobook", "label": "Audiobooks" }
+        ]
+      },
+      "default_value": "video",
+      "category": "search",
+      "label": "Search scope",
+      "description": "What search covers by default.",
+      "recommended_control": "select",
+      "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
+    },
+    {
+      "key": "downloads.wifi_only",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "platforms": ["ios", "android"],
+      "category": "downloads",
+      "label": "Download over Wi-Fi only",
+      "description": "Only download while connected to Wi-Fi.",
+      "recommended_control": "switch",
+      "notes": "Contract-known local: the value governs OS-level network constraints on the device holding the files, so it does not roam. Shared semantics across Apple and Android make it contract-owned rather than private."
+    },
+    {
+      "key": "downloads.keep_watched",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["ios", "android"],
+      "category": "downloads",
+      "label": "Keep watched downloads",
+      "description": "Do not suggest reclaiming space from downloads you have finished.",
+      "recommended_control": "switch",
+      "notes": "Contract-known local. Governs on-device storage cleanup prompts."
+    },
+    {
+      "key": "subtitle.matches_device",
+      "introduced_in": 1,
+      "persistence": "client_local",
+      "allowed_scopes": ["client_local"],
+      "resolution_order": ["client_local", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": false,
+      "platforms": ["ios", "tvos", "macos", "android", "android_tv"],
+      "category": "playback",
+      "label": "Match device caption settings",
+      "description": "Use the operating system's caption style instead of Silo's.",
+      "recommended_control": "switch",
+      "notes": "Contract-known local: reads OS accessibility settings that only exist on the device. When enabled, playback.subtitle_appearance is not applied. Apple's existing copy separating this from profile subtitle behavior is the UX baseline."
+    }
+  ]
+}
