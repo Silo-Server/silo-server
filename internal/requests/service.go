@@ -1557,17 +1557,24 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		// orphan in-progress downloads. Only take the shortcut for legacy/no-live
 		// -target requests; otherwise let per-target reconcile + aggregate drive
 		// completion.
-		hasLiveTargets, err := s.hasLiveTargets(ctx, req.ID)
+		live, err := s.liveTargets(ctx, req.ID)
 		if err != nil {
 			return reconcileUnchanged, err
 		}
-		if !hasLiveTargets {
+		if len(live) == 0 {
 			if req.Status == StatusCompleted {
 				return reconcileUnchanged, nil
 			}
 			if _, err := s.store.SetStatus(ctx, req.ID, StatusCompleted, Viewer{}); err != nil {
 				return reconcileUnchanged, err
 			}
+			return reconcileCompleted, nil
+		}
+		updated, retired, err := s.retireStalledTargets(ctx, req, live)
+		if err != nil {
+			return reconcileUnchanged, err
+		}
+		if retired && updated != nil && updated.Status == StatusCompleted {
 			return reconcileCompleted, nil
 		}
 	}
@@ -1654,19 +1661,67 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 	return change, nil
 }
 
-// hasLiveTargets reports whether the request has any non-terminal (queued or
-// downloading) fulfillment target.
-func (s *Service) hasLiveTargets(ctx context.Context, requestID string) (bool, error) {
+// liveTargets returns the request's non-terminal (queued or downloading)
+// fulfillment targets.
+func (s *Service) liveTargets(ctx context.Context, requestID string) ([]Target, error) {
 	targets, err := s.store.ListTargets(ctx, requestID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	var live []Target
 	for _, t := range targets {
 		if t.Status == StatusQueued || t.Status == StatusDownloading {
-			return true, nil
+			live = append(live, t)
 		}
 	}
-	return false, nil
+	return live, nil
+}
+
+// stalledTargetHorizon is how long a queued target may go without a single
+// status transition before presence-confirmed media is allowed to retire it.
+// Reconciliation runs on a schedule measured in minutes and only writes on a
+// real status change, so a target older than this has had many chances to move
+// and has not.
+const stalledTargetHorizon = 24 * time.Hour
+
+// retireStalledTargets is the backstop for a router that never reports
+// completion. The presence shortcut in reconcileRequest stays disabled for as
+// long as any target looks live, so a router that reports "queued" forever — a
+// buggy plugin, a connection pointing at an instance that no longer tracks the
+// item — pins the request open permanently even though the media is sitting in
+// the library.
+//
+// Targets that are actively downloading are never retired: those are exactly
+// the in-flight downloads the quality-agnostic presence check must not orphan.
+// Only targets stuck in queued past the horizon are closed out, and the request
+// status follows from the usual target aggregate. It returns the request as of
+// the last retirement, if any.
+func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []Target) (*Request, bool, error) {
+	cutoff := s.now().Add(-stalledTargetHorizon)
+	var updated *Request
+	retired := false
+	for _, t := range live {
+		if t.Status != StatusQueued || t.UpdatedAt.After(cutoff) {
+			continue
+		}
+		next, err := s.store.UpdateTargetStatus(ctx, t.ID, StatusCompleted, "", "presence_confirmed", "", Viewer{})
+		if err != nil {
+			return updated, retired, err
+		}
+		updated, retired = next, true
+		slog.WarnContext(ctx, "requests: retired stalled target on presence", "component", "requests",
+			"request_id", req.ID,
+			"target_id", t.ID,
+			"media_type", req.MediaType,
+			"tmdb_id", req.TMDBID,
+			"quality", t.Quality,
+			"integration_kind", t.IntegrationKind,
+			"external_id", t.ExternalID,
+			"external_status", t.ExternalStatus,
+			"target_updated_at", t.UpdatedAt,
+		)
+	}
+	return updated, retired, nil
 }
 
 func (s *Service) requestAvailable(ctx context.Context, req Request) (bool, error) {

@@ -829,6 +829,90 @@ func TestReconcileRequestsCompletesByStoredTVDBID(t *testing.T) {
 	}
 }
 
+// seedStalledPresenceRequest builds a presence-available request carrying one
+// live target whose last status transition was `age` ago.
+func seedStalledPresenceRequest(t *testing.T, status Status, age time.Duration) (*fakeStore, *Service, time.Time) {
+	t.Helper()
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	store := newFakeStore()
+	req := &Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeActive}
+	store.candidates = []*Request{req}
+	store.requests["req-1"] = req
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "router-1", IntegrationKind: "radarr",
+		Quality: Quality1080p, Status: status, ExternalID: "123", ExternalStatus: "queued",
+		UpdatedAt: now.Add(-age),
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	service := NewService(store, &fakeTMDBClient{}, &fakePresence{available: map[MediaType]map[int]bool{
+		MediaTypeMovie: {550: true},
+	}})
+	service.Now = func() time.Time { return now }
+	return store, service, now
+}
+
+// A router that never reports completion would otherwise pin the request open
+// forever, because the presence shortcut stays disabled while a target is live.
+func TestReconcileRequestsRetiresStalledQueuedTargetOnPresence(t *testing.T) {
+	store, service, _ := seedStalledPresenceRequest(t, StatusQueued, 48*time.Hour)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 1 {
+		t.Fatalf("result = %+v, want one completed", result)
+	}
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	if len(targets) != 1 || targets[0].Status != StatusCompleted {
+		t.Fatalf("targets = %+v, want the stalled target completed", targets)
+	}
+	if targets[0].ExternalStatus != "presence_confirmed" {
+		t.Fatalf("external status = %q, want presence_confirmed", targets[0].ExternalStatus)
+	}
+	if store.requests["req-1"].Status != StatusCompleted {
+		t.Fatalf("request status = %q, want completed", store.requests["req-1"].Status)
+	}
+}
+
+// Inside the horizon the router still owns the target — presence must not
+// short-circuit a submission that may simply be young.
+func TestReconcileRequestsKeepsRecentQueuedTargetOnPresence(t *testing.T) {
+	store, service, _ := seedStalledPresenceRequest(t, StatusQueued, time.Hour)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 0 {
+		t.Fatalf("result = %+v, want nothing completed", result)
+	}
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	if targets[0].Status != StatusQueued {
+		t.Fatalf("target status = %q, want queued", targets[0].Status)
+	}
+}
+
+// The presence check is quality-agnostic, so a 2160p target still downloading
+// against an already-present 1080p copy must never be retired out from under
+// the in-flight download.
+func TestReconcileRequestsNeverRetiresDownloadingTargetOnPresence(t *testing.T) {
+	store, service, _ := seedStalledPresenceRequest(t, StatusDownloading, 30*24*time.Hour)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 0 {
+		t.Fatalf("result = %+v, want nothing completed", result)
+	}
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	if targets[0].Status != StatusDownloading {
+		t.Fatalf("target status = %q, want downloading left alone", targets[0].Status)
+	}
+}
+
 func TestReconcileRequestsMarksDownloadingFromProvider(t *testing.T) {
 	store := newFakeStore()
 	store.integrations = []Integration{routerInst("router-1")}
