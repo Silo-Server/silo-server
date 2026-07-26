@@ -31,6 +31,39 @@ func NewProviderIDRepository(pool *pgxpool.Pool) *ProviderIDRepository {
 	return &ProviderIDRepository{pool: pool}
 }
 
+// sameTMDBID reports whether a stored TMDB identifier denotes the same title as
+// the numeric id we are attaching.
+//
+// TMDB's own URLs carry the id in "id-slug" form (/tv/1931-disney-s-adventures-
+// of-the-gummi-bears), and enough of that form has reached media_items.tmdb_id
+// that a plain string comparison rejects perfectly good matches — the presence
+// lookup then fails to backfill, and the client cannot tell that a title is
+// already in the library, so it offers to request something you own.
+//
+// The numeric prefix IS the id, so compare on that. Anything without one is not
+// a TMDB id and is left to fail the comparison as before.
+func sameTMDBID(stored, want string) bool {
+	return normalizeTMDBID(stored) == normalizeTMDBID(want)
+}
+
+// normalizeTMDBID reduces "1931-some-slug" to "1931" and leaves anything that
+// does not start with digits untouched.
+func normalizeTMDBID(value string) string {
+	trimmed := strings.TrimSpace(value)
+	end := 0
+	for end < len(trimmed) && trimmed[end] >= '0' && trimmed[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return trimmed
+	}
+	// Only "digits" or "digits-anything" are an id; "12ab" is not.
+	if end < len(trimmed) && trimmed[end] != '-' {
+		return trimmed
+	}
+	return trimmed[:end]
+}
+
 func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, itemType string, tmdbID int) error {
 	contentID = strings.TrimSpace(contentID)
 	itemType = strings.TrimSpace(itemType)
@@ -66,7 +99,7 @@ func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, item
 	if existingType != itemType {
 		return fmt.Errorf("media item type mismatch: got %q, want %q", existingType, itemType)
 	}
-	if existingTMDBID != "" && existingTMDBID != tmdbText {
+	if existingTMDBID != "" && !sameTMDBID(existingTMDBID, tmdbText) {
 		return fmt.Errorf("media item tmdb id conflict: got %q, want %q", existingTMDBID, tmdbText)
 	}
 
@@ -80,7 +113,7 @@ func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, item
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("loading media item tmdb provider id: %w", err)
 	}
-	if existingProviderTMDBID != "" && existingProviderTMDBID != tmdbText {
+	if existingProviderTMDBID != "" && !sameTMDBID(existingProviderTMDBID, tmdbText) {
 		return fmt.Errorf("media item tmdb provider id conflict: got %q, want %q", existingProviderTMDBID, tmdbText)
 	}
 
