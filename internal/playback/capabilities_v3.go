@@ -7,12 +7,25 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// SourceDurationSecondsV3 reports a media file's runtime, or nil when it is
+// unknown. models.MediaFile.Duration stores 0 for "probe failed", so a zero
+// must never reach a client as a duration. This mirrors the legacy start
+// response's fileDurationSeconds so both protocols answer identically.
+func SourceDurationSecondsV3(file *models.MediaFile) *float64 {
+	if file == nil || file.Duration <= 0 {
+		return nil
+	}
+	duration := float64(file.Duration)
+	return &duration
+}
+
 func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDescriptorV3 {
 	if file == nil {
 		return SourceDescriptorV3{DVEnhancementLayer: EnhancementUnknownV3}
 	}
 	source := SourceDescriptorV3{
 		MediaFileID:        file.ID,
+		DurationSeconds:    SourceDurationSecondsV3(file),
 		Container:          normalizeCodecV3(file.Container),
 		VideoCodec:         normalizeCodecV3(file.CodecVideo),
 		AudioCodec:         normalizeCodecV3(file.CodecAudio),

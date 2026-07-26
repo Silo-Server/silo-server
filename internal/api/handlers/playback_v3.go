@@ -2004,12 +2004,19 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 		plan.Timeline.TimelineOffsetSeconds = seek
 		windowStart := seek
 		plan.Timeline.SeekWindowStartSeconds = &windowStart
-		if durationSeconds > 0 {
-			windowEnd := durationSeconds
-			plan.Timeline.SeekWindowEndSeconds = &windowEnd
-		} else {
-			plan.Timeline.SeekWindowEndSeconds = nil
-		}
+		// A copy remux is served from FFmpeg's live, still-growing playlist
+		// (see BuildPlaybackManifest), so the seekable extent is whatever has
+		// been produced so far — a value this plan cannot know and could not
+		// keep current if it did. Publishing the media runtime here instead
+		// made the window look *complete*, which clients read as proof that
+		// any target inside it is locally seekable; they then native-seek past
+		// the produced head instead of asking for a reanchor. Leaving the end
+		// open marks the window incomplete, which with can_seek_anywhere=false
+		// routes every seek back through the server.
+		//
+		// The media runtime is published on source.duration_seconds, which is
+		// a fact about the file rather than a claim about this transport.
+		plan.Timeline.SeekWindowEndSeconds = nil
 		plan.Timeline.CanSeekAnywhere = false
 		plan.Timeline.SeekRestoration = "source_position"
 	} else {

@@ -1195,11 +1195,16 @@ func TestHandleStartPlaybackLegacyBranchPreservesTrailingBodyBehavior(t *testing
 }
 
 func TestConfigureHLSTimelineV3MatchesTransportSeekSemantics(t *testing.T) {
+	// A copy remux streams FFmpeg's growing playlist, so its seek window must
+	// stay open-ended even though the runtime is known. A bounded window reads
+	// as "complete", which clients treat as proof that any target inside it is
+	// locally seekable — sending them past the produced head instead of back
+	// to the server. The runtime belongs on source.duration_seconds.
 	copyPlan := &playback.PlanV3{Timeline: playback.TimelineV3{SourceStartSeconds: 17.3}}
 	copySeek, copySegment := configureHLSTimelineV3(copyPlan, "copy", 2, 600)
 	if copySeek != 17.3 || copySegment != 8 || copyPlan.Timeline.StreamOriginSeconds != 17.3 || copyPlan.Timeline.TimelineOffsetSeconds != 17.3 || copyPlan.Timeline.PlayerStartSeconds != 0 || copyPlan.Timeline.CanSeekAnywhere ||
 		copyPlan.Timeline.SeekWindowStartSeconds == nil || *copyPlan.Timeline.SeekWindowStartSeconds != 17.3 ||
-		copyPlan.Timeline.SeekWindowEndSeconds == nil || *copyPlan.Timeline.SeekWindowEndSeconds != 600 ||
+		copyPlan.Timeline.SeekWindowEndSeconds != nil ||
 		copyPlan.Timeline.SeekRestoration != "source_position" {
 		t.Fatalf("copy timeline=%#v seek=%v segment=%d", copyPlan.Timeline, copySeek, copySegment)
 	}

@@ -30,6 +30,7 @@ func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
 		FeatureDeviceQuirksV3:       {},
 		FeatureSeekReanchorV3:       {},
 		FeatureDirectStreamResumeV3: {},
+		FeaturePlanSourceDurationV3: {},
 	}
 	if len(first) != len(expected) {
 		t.Fatalf("server features = %v, want %d entries", first, len(expected))

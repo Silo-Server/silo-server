@@ -21,6 +21,7 @@ const (
 	FeatureDeviceQuirksV3         = "device_quirks_v1"
 	FeatureSeekReanchorV3         = "seek_reanchor_v1"
 	FeatureDirectStreamResumeV3   = "direct_stream_resume_v1"
+	FeaturePlanSourceDurationV3   = "plan_source_duration_v1"
 	PlanRecipeVersionV3           = "v3.2"
 	ClientDV7ToDV81V3             = "client_dv7_to_dv81"
 	ClientDV7ToHDR10V3            = "client_dv7_to_hdr10"
@@ -44,6 +45,12 @@ func ServerFeaturesV3() []string {
 		FeatureDeviceQuirksV3,
 		FeatureSeekReanchorV3,
 		FeatureDirectStreamResumeV3,
+		// Advertised so a client can tell "this server does not populate
+		// source.duration_seconds" apart from "this server knows the runtime
+		// is genuinely unknown". Without the distinction both look like an
+		// absent field, and a client cannot decide whether its own catalog
+		// fallback is still required.
+		FeaturePlanSourceDurationV3,
 	}
 }
 
@@ -423,7 +430,18 @@ type EffectiveRecipeV3 struct {
 }
 
 type SourceDescriptorV3 struct {
-	MediaFileID        int                `json:"media_file_id"`
+	MediaFileID int `json:"media_file_id"`
+	// DurationSeconds is the full runtime of this source, independent of where
+	// the delivery's timeline is anchored: never `total - source_start`, and
+	// never adjusted by timeline_offset_seconds.
+	//
+	// Absent means the server does not know the runtime. It is omitted rather
+	// than sent as null: clients that coerce null to a numeric default would
+	// read it as zero, which is the value this field exists to stop them
+	// inventing. A client must not substitute the playback engine's reported
+	// duration for it — on an HLS copy remux the engine reports the length
+	// produced so far, not the runtime.
+	DurationSeconds    *float64           `json:"duration_seconds,omitempty"`
 	Container          string             `json:"container,omitempty"`
 	VideoCodec         string             `json:"video_codec,omitempty"`
 	VideoProfile       string             `json:"video_profile,omitempty"`
