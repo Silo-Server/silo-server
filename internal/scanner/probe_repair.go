@@ -125,16 +125,21 @@ func reprobeMayScanPackets(file *models.MediaFile) bool {
 		return false
 	}
 	return file.Duration <= 0 ||
-		videoDurationImplausiblyShort(float64(file.Duration), file.FileSize, true)
+		videoDurationImplausible(float64(file.Duration), file.FileSize, true)
 }
 
-// legacyProbeDurationFixTime is when the probe duration parser stopped
-// treating large ffprobe durations as microseconds. Rows probed before this
-// may carry the collapsed durations that conversion produced. Rows probed
-// after it are authoritative: a still-short duration was re-derived from
-// packet timestamps, and re-flagging it would reprobe genuinely short clips
-// on every playback decision forever. Adjust if this fix ships later.
-var legacyProbeDurationFixTime = time.Date(2026, time.July, 18, 0, 0, 0, 0, time.UTC)
+// legacyProbeDurationFixTime marks the revision of the duration-validity rule
+// in probe.go. Rows probed before it were judged by an older, weaker rule and
+// are re-checked once under the current one. Rows probed after it are
+// authoritative: their duration already passed the current rule, and
+// re-flagging them would reprobe genuinely short clips on every playback
+// decision forever.
+//
+// Bump this whenever videoDurationImplausible changes, or existing rows never
+// re-converge on the improved rule. Last bumped when the implied-bitrate
+// ceiling was added, which catches durations the absolute floor missed —
+// a feature film probing as 61 seconds passed the old rule untouched.
+var legacyProbeDurationFixTime = time.Date(2026, time.July, 26, 0, 0, 0, 0, time.UTC)
 
 func needsLegacyDurationRepair(file *models.MediaFile) bool {
 	if file == nil {
@@ -144,7 +149,7 @@ func needsLegacyDurationRepair(file *models.MediaFile) bool {
 }
 
 func legacyDurationRepairNeeded(duration int, sizeBytes int64, hasVideo bool, probeUpdatedAt *time.Time) bool {
-	if !videoDurationImplausiblyShort(float64(duration), sizeBytes, hasVideo) {
+	if !videoDurationImplausible(float64(duration), sizeBytes, hasVideo) {
 		return false
 	}
 	return probeUpdatedAt == nil || probeUpdatedAt.Before(legacyProbeDurationFixTime)
