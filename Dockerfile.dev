@@ -29,6 +29,9 @@ COPY --from=frontend /app/web/dist web/dist
 COPY cmd/ cmd/
 COPY internal/ internal/
 COPY migrations/ migrations/
+# See Dockerfile: the settings contract is an embedded Go package outside
+# internal/, so the build fails without it.
+COPY contracts/ contracts/
 
 # Stage 3: Build Go binary for dev using a local plugin SDK checkout passed via
 # BuildKit named context `silo_plugin_sdk`.
