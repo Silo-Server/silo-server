@@ -26,8 +26,14 @@ var (
 	ErrConnectionNotAttached = errors.New("watch together session is not attached")
 	ErrInvalidSelection      = errors.New("watch together selection is invalid")
 	ErrSuggestionNotFound    = errors.New("watch together suggestion not found")
-	ErrDuplicateVote         = errors.New("watch together already voted")
-	ErrNotVoted              = errors.New("watch together not voted")
+	// ErrNotVoteWinner is returned when a vote-mode room is asked to promote
+	// something other than the title the room actually voted for.
+	ErrNotVoteWinner = errors.New("watch together suggestion is not the vote winner")
+	// ErrNoVotesCast is returned when a vote-mode room is asked to start before
+	// anyone has voted: there is no winner to promote yet.
+	ErrNoVotesCast   = errors.New("watch together room has no votes yet")
+	ErrDuplicateVote = errors.New("watch together already voted")
+	ErrNotVoted      = errors.New("watch together not voted")
 )
 
 const (
@@ -1873,9 +1879,54 @@ func (s *Service) PromoteSuggestion(
 		return Snapshot{}, ErrSuggestionNotFound
 	}
 
+	// In a vote room the host starts the winner; they do not get to overrule it.
+	// Being able to promote any suggestion would make "vote" host_pick with
+	// extra steps, and the tally on everyone else's screen would be a lie.
+	s.mu.Lock()
+	isVoteRoom := live.room.SelectionMode == RoomSelectionModeVote
+	s.mu.Unlock()
+	if isVoteRoom {
+		winner, err := s.VoteWinner(ctx, roomID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if winner.ID != suggestion.ID {
+			return Snapshot{}, ErrNotVoteWinner
+		}
+	}
+
 	return s.SelectItem(ctx, roomID, userID, profileID, SelectItemInput{
 		ContentID: suggestion.ContentID,
 	})
+}
+
+// VoteWinner returns the suggestion a vote-mode room has settled on.
+//
+// The repository already orders by vote_count DESC, created_at ASC, so the
+// winner is the head of the list and ties resolve to whoever suggested first —
+// deterministic, and it does not reward re-suggesting the same title.
+//
+// A room where nobody has voted has no winner. Returning the oldest suggestion
+// there would let a host "start the vote winner" for a vote that never
+// happened, which is exactly the confusion this mode exists to avoid.
+func (s *Service) VoteWinner(ctx context.Context, roomID string) (Suggestion, error) {
+	if s == nil || s.suggestions == nil {
+		return Suggestion{}, fmt.Errorf("watch together suggestions unavailable")
+	}
+	suggestions, err := s.suggestions.ListSuggestions(ctx, roomID, "")
+	if err != nil {
+		return Suggestion{}, err
+	}
+	return winnerFrom(suggestions)
+}
+
+// winnerFrom picks the winner out of an already-ordered suggestion list. Split
+// out so the rule can be tested without a database.
+func winnerFrom(ordered []Suggestion) (Suggestion, error) {
+	if len(ordered) == 0 || ordered[0].VoteCount <= 0 {
+		return Suggestion{}, ErrNoVotesCast
+	}
+	return ordered[0], nil
 }
 
 func (s *Service) prepareSuggestionDispatchesLocked(live *liveRoom, suggestions []Suggestion) []snapshotDispatch {

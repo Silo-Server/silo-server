@@ -568,6 +568,12 @@ func (h *WatchTogetherHandler) HandlePromoteSuggestion(w http.ResponseWriter, r 
 		switch {
 		case errors.Is(err, watchtogether.ErrRoomForbidden):
 			writeError(w, http.StatusForbidden, "forbidden", "Only the host can promote a suggestion")
+		case errors.Is(err, watchtogether.ErrNotVoteWinner):
+			writeError(w, http.StatusConflict, "not_vote_winner",
+				"This room votes for what plays; start the title that is winning")
+		case errors.Is(err, watchtogether.ErrNoVotesCast):
+			writeError(w, http.StatusConflict, "no_votes_cast",
+				"Nobody has voted yet")
 		case errors.Is(err, watchtogether.ErrSuggestionNotFound):
 			writeError(w, http.StatusNotFound, "not_found", "Suggestion not found")
 		case errors.Is(err, watchtogether.ErrRoomNotFound):
