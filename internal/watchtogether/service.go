@@ -170,6 +170,23 @@ type Service struct {
 	rooms map[string]*liveRoom
 }
 
+// defaultHostDisconnectTTL is how long a room survives its host's socket going
+// away without an explicit leave.
+//
+// This is not "how long before we assume the host left" — an explicit leave and
+// an explicit close both tear the room down immediately, so this timer only
+// ever covers a host who has NOT said they are going. At 15s it treated any
+// transient drop as a departure: a host who backgrounded the app, walked
+// through a tunnel, or simply navigated somewhere the client did not hold the
+// socket open lost the room for everybody, mid-conversation, with a
+// "host_left" nobody could explain.
+//
+// Two minutes is long enough to survive a reconnect, an app switch, or a
+// client that drops the socket while its user browses for something to
+// suggest; short enough that a genuinely departed host does not leave a room
+// sitting open all evening. The janitor still reaps idle rooms independently.
+const defaultHostDisconnectTTL = 2 * time.Minute
+
 func NewService(
 	repo RoomStore,
 	sessions RoomSessionLookup,
@@ -185,7 +202,7 @@ func NewService(
 		files:             files,
 		selectionResolver: selectionResolver,
 		profileNames:      profileNames,
-		hostDisconnectTTL: 15 * time.Second,
+		hostDisconnectTTL: defaultHostDisconnectTTL,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
