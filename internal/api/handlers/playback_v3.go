@@ -2121,7 +2121,7 @@ func optionalFloatEqualV3(left, right *float64) bool {
 //
 // Deliberately never blocks: detection decodes frames, and a playback start
 // must not wait on it. The first play of a file therefore plans without the
-// geometry — exactly today's behaviour — and later plays carry it.
+// geometry — exactly today's behavior — and later plays carry it.
 func (h *PlaybackHandler) letterboxForFileV3(file *models.MediaFile) playback.Letterbox {
 	if file == nil || strings.TrimSpace(file.FilePath) == "" {
 		return playback.Letterbox{}
@@ -2135,9 +2135,10 @@ func (h *PlaybackHandler) letterboxForFileV3(file *models.MediaFile) playback.Le
 	if len(file.VideoTracks) > 0 {
 		height = file.VideoTracks[0].Height
 	}
-	measured, ok := h.letterbox.Lookup(file.FilePath)
+	key := playback.LetterboxCacheKey(file.FilePath, file.FileSize)
+	measured, ok := h.letterbox.Lookup(key)
 	if !ok {
-		h.letterbox.Warm(file.FilePath, float64(file.Duration), height)
+		h.letterbox.Warm(key, file.FilePath, float64(file.Duration), height)
 		return playback.Letterbox{}
 	}
 	return measured

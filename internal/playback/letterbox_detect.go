@@ -69,7 +69,7 @@ const (
 //
 // A failed or nonsensical measurement returns a zero Letterbox rather than an
 // error the caller has to interpret: no measurement and "no bars" lead to the
-// same behaviour, which is today's behaviour.
+// same behavior, which is today's behavior.
 func DetectLetterbox(ctx context.Context, inputPath string, durationSeconds float64, frameHeight int, ffmpegPath string) Letterbox {
 	if strings.TrimSpace(inputPath) == "" || durationSeconds <= 0 || frameHeight <= 0 {
 		return Letterbox{}
@@ -216,12 +216,36 @@ func sanitizeLetterbox(value Letterbox) Letterbox {
 // slow to sit in the path of a playback-start response. Callers therefore get
 // whatever is already known (nothing, on the first play of a file) and a
 // measurement is warmed in the background for next time.
+//
+// In-memory and therefore cold after a restart: the first play of each file
+// plans without geometry, which is the behavior that existed before this
+// measurement did. Persisting it belongs on the media file row; see the note
+// on LetterboxCacheKey.
 type LetterboxCache struct {
 	ffmpegPath func() string
 
 	mu       sync.Mutex
 	measured map[string]Letterbox
+	// Insertion order, so the map can be bounded without holding a library's
+	// worth of entries forever on a long-lived server.
+	order    []string
 	inflight map[string]struct{}
+}
+
+// maxLetterboxEntries bounds the cache. Well past any plausible working set of
+// recently played files, and small enough that the map cannot grow into a leak
+// on a server that has been up for months.
+const maxLetterboxEntries = 4096
+
+// LetterboxCacheKey identifies a measurement.
+//
+// Path alone is not enough: replacing a file in place — an upgrade to a better
+// release, a re-encode — keeps the path and would otherwise serve the old
+// file's bars forever, putting subtitles in the wrong place with no way for a
+// user to clear it. Size changes on any real replacement, so the pair
+// invalidates itself.
+func LetterboxCacheKey(inputPath string, fileSize int64) string {
+	return inputPath + "|" + strconv.FormatInt(fileSize, 10)
 }
 
 func NewLetterboxCache(ffmpegPath func() string) *LetterboxCache {
@@ -233,32 +257,32 @@ func NewLetterboxCache(ffmpegPath func() string) *LetterboxCache {
 }
 
 // Lookup returns the known measurement for a source, if there is one.
-func (c *LetterboxCache) Lookup(inputPath string) (Letterbox, bool) {
+func (c *LetterboxCache) Lookup(key string) (Letterbox, bool) {
 	if c == nil {
 		return Letterbox{}, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	value, ok := c.measured[inputPath]
+	value, ok := c.measured[key]
 	return value, ok
 }
 
 // Warm measures the source in the background unless it is already known or a
 // measurement is already running for it. Safe to call on every playback start.
-func (c *LetterboxCache) Warm(inputPath string, durationSeconds float64, frameHeight int) {
+func (c *LetterboxCache) Warm(key, inputPath string, durationSeconds float64, frameHeight int) {
 	if c == nil || strings.TrimSpace(inputPath) == "" || durationSeconds <= 0 || frameHeight <= 0 {
 		return
 	}
 	c.mu.Lock()
-	if _, done := c.measured[inputPath]; done {
+	if _, done := c.measured[key]; done {
 		c.mu.Unlock()
 		return
 	}
-	if _, running := c.inflight[inputPath]; running {
+	if _, running := c.inflight[key]; running {
 		c.mu.Unlock()
 		return
 	}
-	c.inflight[inputPath] = struct{}{}
+	c.inflight[key] = struct{}{}
 	c.mu.Unlock()
 
 	go func() {
@@ -286,9 +310,24 @@ func (c *LetterboxCache) Warm(inputPath string, durationSeconds float64, frameHe
 		defer c.mu.Unlock()
 		// Store even a zero result: "measured, no bars" must not be retried on
 		// every single playback of a normal 16:9 file.
-		c.measured[inputPath] = value
-		delete(c.inflight, inputPath)
+		if _, exists := c.measured[key]; !exists {
+			c.order = append(c.order, key)
+		}
+		c.measured[key] = value
+		delete(c.inflight, key)
+		c.evictLocked()
 	}()
+}
+
+// evictLocked drops the oldest measurements once the cache is over its bound.
+// Oldest-first is the right order here: the cost of a wrong guess is one
+// re-measurement of a file nobody has played in a long time.
+func (c *LetterboxCache) evictLocked() {
+	for len(c.order) > maxLetterboxEntries {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.measured, oldest)
+	}
 }
 
 func (l Letterbox) String() string {

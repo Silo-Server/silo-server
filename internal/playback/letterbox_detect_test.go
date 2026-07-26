@@ -1,6 +1,9 @@
 package playback
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 // A 2.39:1 image inside a 1920x1080 frame: 140px of black top and bottom.
 const cropDetectSample = `
@@ -108,12 +111,48 @@ func TestSamplePositionsSpreadOverTheRuntime(t *testing.T) {
 func TestCacheIgnoresUnmeasurableInputs(t *testing.T) {
 	cache := NewLetterboxCache(func() string { return "" })
 
-	cache.Warm("", 100, 1080)
-	cache.Warm("/tmp/x.mkv", 0, 1080)
-	cache.Warm("/tmp/x.mkv", 100, 0)
+	cache.Warm("k", "", 100, 1080)
+	cache.Warm("k", "/tmp/x.mkv", 0, 1080)
+	cache.Warm("k", "/tmp/x.mkv", 100, 0)
 
-	if _, ok := cache.Lookup("/tmp/x.mkv"); ok {
+	if _, ok := cache.Lookup("k"); ok {
 		t.Fatal("an unmeasurable input was recorded")
+	}
+}
+
+// Replacing a file in place — an upgrade, a re-encode — keeps its path. Serving
+// the old file's bars would put subtitles in the wrong place with nothing a
+// user could do about it.
+func TestCacheKeyChangesWhenTheFileIsReplaced(t *testing.T) {
+	same := LetterboxCacheKey("/media/film.mkv", 8_000_000_000)
+	if LetterboxCacheKey("/media/film.mkv", 8_000_000_000) != same {
+		t.Fatal("the same file produced two keys")
+	}
+	if LetterboxCacheKey("/media/film.mkv", 12_000_000_000) == same {
+		t.Fatal("a replaced file reused the old measurement's key")
+	}
+}
+
+// A long-lived server must not accumulate one entry per file it has ever
+// played.
+func TestCacheIsBounded(t *testing.T) {
+	cache := NewLetterboxCache(func() string { return "" })
+
+	for i := range maxLetterboxEntries + 10 {
+		key := strconv.Itoa(i)
+		cache.measured[key] = Letterbox{}
+		cache.order = append(cache.order, key)
+	}
+	cache.evictLocked()
+
+	if len(cache.measured) != maxLetterboxEntries || len(cache.order) != maxLetterboxEntries {
+		t.Fatalf("cache held %d entries", len(cache.measured))
+	}
+	if _, ok := cache.measured["0"]; ok {
+		t.Fatal("the oldest entry survived eviction")
+	}
+	if _, ok := cache.measured[strconv.Itoa(maxLetterboxEntries+9)]; !ok {
+		t.Fatal("the newest entry was evicted")
 	}
 }
 
@@ -122,8 +161,8 @@ func TestCacheIgnoresUnmeasurableInputs(t *testing.T) {
 func TestNilCacheIsInert(t *testing.T) {
 	var cache *LetterboxCache
 
-	cache.Warm("/tmp/x.mkv", 100, 1080)
-	if _, ok := cache.Lookup("/tmp/x.mkv"); ok {
+	cache.Warm("k", "/tmp/x.mkv", 100, 1080)
+	if _, ok := cache.Lookup("k"); ok {
 		t.Fatal("a nil cache returned a measurement")
 	}
 }
