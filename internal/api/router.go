@@ -703,6 +703,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 		AttachRequestRouter(requestSvc, deps.PluginService)
 		requestSvc.SetCatalogChangeNotifier(sections.InvalidateResolvedListCache)
+		requestSvc.SetVirtualMediaCleanup(func(ctx context.Context, req mediarequests.Request) error {
+			tvdbID := ""
+			if req.TVDBID != nil {
+				tvdbID = strconv.Itoa(*req.TVDBID)
+			}
+			return itemRepo.CleanupRequestVirtualMedia(ctx, string(req.MediaType), req.TMDBID, tvdbID, req.IMDbID)
+		})
 		requestSvc.SetGroupPolicyProvider(accessGroupStore)
 		requestSvc.SetRequesterIdentityResolver(plugins.RequesterIdentityFromLookup(plugins.NewPgUserIdentityLookup(deps.DB)))
 		if viewerResolver != nil {
@@ -2918,6 +2925,7 @@ func NewRouter(deps Dependencies) chi.Router {
 									r.Post("/import/mdblist", libraryCollectionHandler.HandleImportMDBList)
 									r.Post("/import/tmdb", libraryCollectionHandler.HandleImportTMDBCollection)
 									r.Post("/import/trakt", libraryCollectionHandler.HandleImportTraktCollection)
+									r.Post("/purge-virtual", libraryCollectionHandler.PurgeVirtualPlaybackItems)
 								})
 							}
 							if libraryCollectionGroupHandler != nil {

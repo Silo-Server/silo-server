@@ -40,6 +40,7 @@ type VirtualMedia struct {
 	Genres                               []string
 	PosterPath, BackdropPath, VirtualURI string
 	RuntimeMinutes                       int
+	Source                               string
 	Episodes                             []VirtualEpisode
 	Variants                             []VirtualMediaVariant
 }
@@ -48,6 +49,11 @@ type VirtualMediaResult struct {
 	MediaID          string
 	LibraryID        string
 	EpisodesUpserted int
+}
+
+type VirtualReconcileResult struct {
+	ItemsRemoved int
+	FilesRemoved int
 }
 
 // VirtualMediaRegistrar owns transactional catalog registration for virtual
@@ -83,13 +89,17 @@ func (r *VirtualMediaRegistrar) Upsert(ctx context.Context, in VirtualMedia) (*V
 		return nil, fmt.Errorf("%w: %s cannot be added to %s library", ErrInvalidVirtualMedia, in.MediaType, folderType)
 	}
 	contentID := virtualContentID(in)
+	source := strings.TrimSpace(in.Source)
+	if source == "" {
+		source = "plugin"
+	}
 	status := "unmatched"
 	if in.Overview != "" || in.PosterPath != "" {
 		status = "matched"
 	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO media_items (content_id,type,title,year,imdb_id,tmdb_id,tvdb_id,overview,genres,poster_path,backdrop_path,runtime,matched_at,status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $13='matched' THEN now() END,$13)
+		INSERT INTO media_items (content_id,type,title,year,imdb_id,tmdb_id,tvdb_id,overview,genres,poster_path,backdrop_path,runtime,matched_at,status,virtual_owner_installation_id,virtual_source,virtual_last_seen_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CASE WHEN $13='matched' THEN now() END,$13,$14,$15,now())
 		ON CONFLICT (content_id) DO UPDATE SET type=EXCLUDED.type,title=EXCLUDED.title,
 		year=CASE WHEN EXCLUDED.year > 0 THEN EXCLUDED.year ELSE media_items.year END,
 		imdb_id=CASE WHEN EXCLUDED.imdb_id <> '' THEN EXCLUDED.imdb_id ELSE media_items.imdb_id END,
@@ -100,8 +110,9 @@ func (r *VirtualMediaRegistrar) Upsert(ctx context.Context, in VirtualMedia) (*V
 		poster_path=CASE WHEN EXCLUDED.poster_path <> '' THEN EXCLUDED.poster_path ELSE media_items.poster_path END,
 		backdrop_path=CASE WHEN EXCLUDED.backdrop_path <> '' THEN EXCLUDED.backdrop_path ELSE media_items.backdrop_path END,
 		runtime=CASE WHEN EXCLUDED.runtime > 0 THEN EXCLUDED.runtime ELSE media_items.runtime END,
-		matched_at=COALESCE(EXCLUDED.matched_at,media_items.matched_at),status=CASE WHEN EXCLUDED.status='matched' THEN 'matched' ELSE media_items.status END,updated_at=now()`,
-		contentID, in.MediaType, in.Title, in.Year, in.IMDbID, in.TMDBID, in.TVDBID, in.Overview, in.Genres, in.PosterPath, in.BackdropPath, in.RuntimeMinutes, status); err != nil {
+		matched_at=COALESCE(EXCLUDED.matched_at,media_items.matched_at),status=CASE WHEN EXCLUDED.status='matched' THEN 'matched' ELSE media_items.status END,
+		virtual_owner_installation_id=EXCLUDED.virtual_owner_installation_id,virtual_source=EXCLUDED.virtual_source,virtual_last_seen_at=now(),updated_at=now()`,
+		contentID, in.MediaType, in.Title, in.Year, in.IMDbID, in.TMDBID, in.TVDBID, in.Overview, in.Genres, in.PosterPath, in.BackdropPath, in.RuntimeMinutes, status, installationID, source); err != nil {
 		return nil, fmt.Errorf("upsert virtual media: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, contentID, folderID); err != nil {
@@ -138,6 +149,67 @@ func (r *VirtualMediaRegistrar) Upsert(ctx context.Context, in VirtualMedia) (*V
 		return nil, fmt.Errorf("commit virtual media transaction: %w", err)
 	}
 	return &VirtualMediaResult{MediaID: contentID, LibraryID: in.LibraryID, EpisodesUpserted: episodes}, nil
+}
+
+// ReconcileVirtualMedia removes stale virtual media owned by one plugin source.
+// Physical files and collection-linked items are preserved.
+func (r *VirtualMediaRegistrar) ReconcileVirtualMedia(ctx context.Context, installationID int, source string, keepIDs []string, libraryIDs []int) (VirtualReconcileResult, error) {
+	var result VirtualReconcileResult
+	if r == nil || r.pool == nil {
+		return result, errors.New("virtual catalog is unavailable")
+	}
+	source = strings.TrimSpace(source)
+	if installationID <= 0 || source == "" {
+		return result, errors.New("installation and source are required")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return result, fmt.Errorf("begin virtual reconciliation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	fileTag, err := tx.Exec(ctx, `
+		DELETE FROM media_files mf
+		USING media_items mi
+		WHERE mf.content_id = mi.content_id
+		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND mi.virtual_owner_installation_id = $1
+		  AND mi.virtual_source = $2
+		  AND NOT (mi.content_id = ANY($3::text[]))
+		  AND (cardinality($4::int[]) = 0 OR EXISTS (
+			SELECT 1 FROM media_item_libraries mil
+			WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($4::int[])
+		  ))`, installationID, source, keepIDs, libraryIDs)
+	if err != nil {
+		return result, fmt.Errorf("delete stale virtual files: %w", err)
+	}
+	result.FilesRemoved = int(fileTag.RowsAffected())
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.virtual_owner_installation_id = $1
+		  AND mi.virtual_source = $2
+		  AND NOT (mi.content_id = ANY($3::text[]))
+		  AND (cardinality($4::int[]) = 0 OR EXISTS (
+			SELECT 1 FROM media_item_libraries mil
+			WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($4::int[])
+		  ))
+		  AND NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id = mi.content_id)
+		  AND NOT EXISTS (SELECT 1 FROM library_collection_items lci WHERE lci.media_item_id = mi.content_id)
+		RETURNING mi.content_id`, installationID, source, keepIDs, libraryIDs)
+	if err != nil {
+		return result, fmt.Errorf("delete stale virtual media: %w", err)
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return result, fmt.Errorf("collect stale virtual media IDs: %w", err)
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return result, fmt.Errorf("enqueue stale virtual media search deletes: %w", err)
+	}
+	result.ItemsRemoved = len(deletedIDs)
+	if err := tx.Commit(ctx); err != nil {
+		return result, fmt.Errorf("commit virtual reconciliation: %w", err)
+	}
+	return result, nil
 }
 
 func validateVirtualMedia(in VirtualMedia) error {

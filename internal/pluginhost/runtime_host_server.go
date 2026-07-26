@@ -3,7 +3,9 @@ package pluginhost
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,6 +90,10 @@ func (f GlobalConfigSetterFunc) SetGlobalConfigEntry(ctx context.Context, instal
 // virtual media submitted by an installed plugin.
 type VirtualCatalogRegistrar interface {
 	UpsertVirtualMedia(context.Context, int, catalog.VirtualMedia) (*catalog.VirtualMediaResult, error)
+}
+
+type virtualCatalogReconciler interface {
+	ReconcileVirtualMedia(context.Context, int, string, []string, []int) (catalog.VirtualReconcileResult, error)
 }
 
 type VirtualCatalogRegistrarFunc func(context.Context, int, catalog.VirtualMedia) (*catalog.VirtualMediaResult, error)
@@ -228,7 +234,7 @@ func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv
 		IMDbID: req.GetImdbId(), TMDBID: req.GetTmdbId(), TVDBID: req.GetTvdbId(), Overview: req.GetOverview(),
 		Genres: req.GetGenres(), PosterPath: req.GetPosterPath(), BackdropPath: req.GetBackdropPath(),
 		VirtualURI: req.GetVirtualUri(), RuntimeMinutes: int(req.GetRuntimeMinutes()), Episodes: episodes,
-		Variants: variants,
+		Variants: variants, Source: req.GetSourceKey(),
 	}
 
 	result, err := s.virtualCatalog.UpsertVirtualMedia(ctx, s.installationID, vm)
@@ -236,6 +242,30 @@ func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv
 		return nil, err
 	}
 	return &pluginv1.UpsertVirtualMediaResponse{MediaId: result.MediaID, LibraryId: result.LibraryID, EpisodesUpserted: int32(result.EpisodesUpserted)}, nil
+}
+
+func (s *RuntimeHostServer) ReconcileVirtualMedia(ctx context.Context, req *pluginv1.ReconcileVirtualMediaRequest) (*pluginv1.ReconcileVirtualMediaResponse, error) {
+	reconciler, ok := s.virtualCatalog.(virtualCatalogReconciler)
+	if !ok {
+		return nil, errors.New("server: virtual catalog is not configured")
+	}
+	sourceKey := strings.TrimSpace(req.GetSourceKey())
+	if sourceKey == "" {
+		return nil, errors.New("source_key is required")
+	}
+	libraryIDs := make([]int, 0, len(req.GetLibraryIds()))
+	for _, value := range req.GetLibraryIds() {
+		id, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || id <= 0 {
+			return nil, fmt.Errorf("invalid library_id %q", value)
+		}
+		libraryIDs = append(libraryIDs, id)
+	}
+	result, err := reconciler.ReconcileVirtualMedia(ctx, s.installationID, sourceKey, req.GetKeepMediaIds(), libraryIDs)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.ReconcileVirtualMediaResponse{ItemsRemoved: int32(result.ItemsRemoved), FilesRemoved: int32(result.FilesRemoved)}, nil
 }
 
 // PublishEvent auto-prefixes the plugin's event name with "plugin.<plugin_id>."

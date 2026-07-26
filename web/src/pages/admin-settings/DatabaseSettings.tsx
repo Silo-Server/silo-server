@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ConnectionCheckResponse } from "@/api/types";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { usePurgeVirtualPlaybackItems } from "@/hooks/queries/admin/collections";
 import { useCheckAdminSettingsConnection } from "@/hooks/queries/admin/settings";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
 import { SettingField } from "./SettingField";
@@ -21,6 +23,7 @@ const KEYS = [
 export default function DatabaseSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
   const checkConnection = useCheckAdminSettingsConnection();
+  const purgeVirtual = usePurgeVirtualPlaybackItems();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
   const redisUrl = form.getValue("redis.url");
   const redisManagedByEnv = form.sensitiveManagedByEnv.includes("redis.url");
@@ -154,6 +157,30 @@ export default function DatabaseSettings() {
           )}
         </FieldGroup>
       </div>
+
+      <FieldGroup label="Danger Zone">
+        <div className="border-border/70 flex items-center justify-between gap-4 py-3">
+          <div className="space-y-1">
+            <span className="text-sm font-medium">Purge Virtual Library</span>
+            <p className="text-muted-foreground text-xs">
+              Remove all zero-storage virtual files and their orphaned catalog items.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={purgeVirtual.isPending}
+            onClick={() => {
+              if (window.confirm("Purge all zero-storage virtual library items?")) {
+                purgeVirtual.mutate();
+              }
+            }}
+          >
+            {purgeVirtual.isPending ? "Purging..." : "Purge Virtual Items"}
+          </Button>
+        </div>
+      </FieldGroup>
 
       <SaveBar
         dirtyCount={form.dirtyCount}

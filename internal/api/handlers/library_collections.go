@@ -3742,3 +3742,50 @@ func pointerStringValue(value *string) string {
 	}
 	return *value
 }
+
+// PurgeVirtualPlaybackItems handles POST /api/v1/admin/collections/purge-virtual.
+func (h *LibraryCollectionHandler) PurgeVirtualPlaybackItems(w http.ResponseWriter, r *http.Request) {
+	if h.itemRepo == nil {
+		http.Error(w, "item repository unavailable", http.StatusInternalServerError)
+		return
+	}
+	query := r.URL.Query()
+	parsePositive := func(key string) (int, error) {
+		value := strings.TrimSpace(query.Get(key))
+		if value == "" {
+			return 0, nil
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			return 0, fmt.Errorf("%s must be a non-negative integer", key)
+		}
+		return parsed, nil
+	}
+	libraryID, err := parsePositive("library_id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	installationID, err := parsePositive("installation_id")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	dryRun := strings.EqualFold(strings.TrimSpace(query.Get("dry_run")), "true") || query.Get("dry_run") == "1"
+	filesDeleted, itemsDeleted, err := h.itemRepo.PurgeVirtualPlaybackItems(r.Context(), catalog.VirtualPurgeOptions{
+		DryRun: dryRun, LibraryID: libraryID, InstallationID: installationID,
+	})
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to purge virtual playback items", "component", "api", "error", err)
+		http.Error(w, fmt.Sprintf("purge failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if !dryRun {
+		sections.InvalidateResolvedListCache()
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"success": true, "dry_run": dryRun, "files_deleted": filesDeleted, "items_deleted": itemsDeleted,
+		"message": fmt.Sprintf("%s %d virtual files and %d virtual media items", map[bool]string{true: "Would purge", false: "Purged"}[dryRun], filesDeleted, itemsDeleted),
+	})
+}

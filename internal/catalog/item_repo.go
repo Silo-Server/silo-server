@@ -32,6 +32,166 @@ type itemExecer interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
+type VirtualPurgeOptions struct {
+	DryRun         bool
+	LibraryID      int
+	InstallationID int
+}
+
+// PurgeVirtualPlaybackItems removes zero-storage virtual files and any
+// catalog items that no longer have a physical or virtual file. Filters are
+// optional and make administrative cleanup safe to scope.
+func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts VirtualPurgeOptions) (filesDeleted int64, itemsDeleted int64, err error) {
+	if r == nil || r.pool == nil {
+		return 0, 0, errors.New("item repository is not configured")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin virtual playback purge: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `
+		CREATE TEMP TABLE purge_virtual_items ON COMMIT DROP AS
+		SELECT DISTINCT mf.content_id FROM media_files mf
+		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
+		WHERE (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND ($1 = 0 OR mf.media_folder_id = $1)
+		  AND ($2 = 0 OR mi.virtual_owner_installation_id = $2)`, opts.LibraryID, opts.InstallationID); err != nil {
+		return 0, 0, fmt.Errorf("identify virtual media items: %w", err)
+	}
+	result, err := tx.Exec(ctx, `
+		DELETE FROM media_files
+		WHERE (container = 'virtual' OR file_path LIKE 'virtual://%')
+		  AND content_id IN (SELECT content_id FROM purge_virtual_items)
+		  AND ($1 = 0 OR media_folder_id = $1)`, opts.LibraryID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("delete virtual files: %w", err)
+	}
+	filesDeleted = result.RowsAffected()
+
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE EXISTS (SELECT 1 FROM purge_virtual_items pvi WHERE pvi.content_id = mi.content_id)
+		  AND NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id = mi.content_id)
+		RETURNING mi.content_id`)
+	if err != nil {
+		return 0, 0, fmt.Errorf("delete orphaned virtual media items: %w", err)
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return 0, 0, fmt.Errorf("collect deleted virtual media IDs: %w", err)
+	}
+	itemsDeleted = int64(len(deletedIDs))
+	if opts.DryRun {
+		return filesDeleted, itemsDeleted, nil
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return 0, 0, fmt.Errorf("enqueue virtual media search deletes: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM library_collection_items lci
+		WHERE NOT EXISTS (SELECT 1 FROM media_items mi WHERE mi.content_id = lci.media_item_id)`); err != nil {
+		return 0, 0, fmt.Errorf("clean virtual collection links: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("commit virtual playback purge: %w", err)
+	}
+	return filesDeleted, itemsDeleted, nil
+}
+
+// ReconcileCollectionVirtualItems removes collection-owned virtual items that
+// are no longer referenced by any server collection. Physical files and
+// plugin-owned/request virtual items are left untouched.
+func (r *ItemRepository) ReconcileCollectionVirtualItems(ctx context.Context, libraryIDs []int) (int64, error) {
+	if r == nil || r.pool == nil {
+		return 0, errors.New("item repository is not configured")
+	}
+	if len(libraryIDs) == 0 {
+		return 0, nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin collection virtual reconciliation: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.virtual_source = 'collection'
+		  AND EXISTS (
+			SELECT 1 FROM media_item_libraries mil
+			WHERE mil.content_id = mi.content_id AND mil.media_folder_id = ANY($1)
+		  )
+		  AND NOT EXISTS (SELECT 1 FROM library_collection_items lci WHERE lci.media_item_id = mi.content_id)
+		  AND NOT EXISTS (
+			SELECT 1 FROM media_files mf
+			WHERE mf.content_id = mi.content_id AND mf.container <> 'virtual' AND mf.file_path NOT LIKE 'virtual://%'
+		  )
+		RETURNING mi.content_id`, libraryIDs)
+	if err != nil {
+		return 0, fmt.Errorf("reconcile collection virtual items: %w", err)
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return 0, fmt.Errorf("collect reconciled virtual media IDs: %w", err)
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return 0, fmt.Errorf("enqueue reconciled virtual media search deletes: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit collection virtual reconciliation: %w", err)
+	}
+	return int64(len(deletedIDs)), nil
+}
+
+// CleanupRequestVirtualMedia removes only virtual sources for a cancelled
+// request. Physical files and collection membership are never removed.
+func (r *ItemRepository) CleanupRequestVirtualMedia(ctx context.Context, mediaType string, tmdbID int, tvdbID, imdbID string) error {
+	if r == nil || r.pool == nil {
+		return errors.New("item repository is not configured")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin request virtual cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM media_files mf
+		USING media_items mi
+		WHERE mf.content_id = mi.content_id
+		  AND (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
+		  AND mi.type = $1
+		  AND (($2 > 0 AND mi.tmdb_id = $2::text)
+		    OR ($3 <> '' AND mi.tvdb_id = $3)
+		    OR ($4 <> '' AND mi.imdb_id = $4))`, mediaType, tmdbID, strings.TrimSpace(tvdbID), strings.TrimSpace(imdbID)); err != nil {
+		return fmt.Errorf("delete request virtual files: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		DELETE FROM media_items mi
+		WHERE mi.type = $1
+		  AND NOT EXISTS (SELECT 1 FROM media_files mf WHERE mf.content_id = mi.content_id)
+		  AND NOT EXISTS (SELECT 1 FROM library_collection_items lci WHERE lci.media_item_id = mi.content_id)
+		  AND (($2 > 0 AND mi.tmdb_id = $2::text)
+		    OR ($3 <> '' AND mi.tvdb_id = $3)
+		    OR ($4 <> '' AND mi.imdb_id = $4))
+		RETURNING mi.content_id`, mediaType, tmdbID, strings.TrimSpace(tvdbID), strings.TrimSpace(imdbID))
+	if err != nil {
+		return fmt.Errorf("delete request virtual media items: %w", err)
+	}
+	deletedIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("collect request virtual media IDs: %w", err)
+	}
+	if err := EnqueueSearchIndexDeletes(ctx, tx, deletedIDs); err != nil {
+		return fmt.Errorf("enqueue request virtual media search deletes: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit request virtual cleanup: %w", err)
+	}
+	return nil
+}
+
 // NewItemRepository creates a new ItemRepository backed by the given pool.
 func NewItemRepository(pool *pgxpool.Pool) *ItemRepository {
 	return &ItemRepository{
@@ -649,6 +809,12 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItem(ctx context.Context, ite
 		)
 		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], virtualPath, "aiostreams://"); err != nil {
 		return fmt.Errorf("creating virtual playback file: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items
+		SET virtual_source = 'collection', virtual_last_seen_at = NOW(), updated_at = NOW()
+		WHERE content_id = $1`, item.ContentID); err != nil {
+		return fmt.Errorf("marking collection virtual item ownership: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit virtual item transaction: %w", err)
