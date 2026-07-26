@@ -199,6 +199,8 @@ func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv
 			HDR:            v.GetHdr(),
 			Bitrate:        int(v.GetBitrate()),
 			RuntimeMinutes: int(v.GetRuntimeMinutes()),
+			FileSize:       v.GetFileSize(), Container: v.GetContainer(), SourceType: v.GetSourceType(),
+			AudioLanguages: v.GetAudioLanguages(), SubtitleLanguages: v.GetSubtitleLanguages(), Availability: v.GetAvailability(),
 		})
 	}
 
@@ -219,6 +221,8 @@ func (s *RuntimeHostServer) UpsertVirtualMedia(ctx context.Context, req *pluginv
 				HDR:            v.GetHdr(),
 				Bitrate:        int(v.GetBitrate()),
 				RuntimeMinutes: int(v.GetRuntimeMinutes()),
+				FileSize:       v.GetFileSize(), Container: v.GetContainer(), SourceType: v.GetSourceType(),
+				AudioLanguages: v.GetAudioLanguages(), SubtitleLanguages: v.GetSubtitleLanguages(), Availability: v.GetAvailability(),
 			})
 		}
 		episodes = append(episodes, catalog.VirtualEpisode{
