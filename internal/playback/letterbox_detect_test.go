@@ -1,8 +1,12 @@
 package playback
 
 import (
+	"bytes"
+	"encoding/json"
 	"strconv"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // A 2.39:1 image inside a 1920x1080 frame: 140px of black top and bottom.
@@ -168,13 +172,44 @@ func TestNilCacheIsInert(t *testing.T) {
 }
 
 // The planner must pass a measurement through to the client contract verbatim:
-// the geometry describes the source, not a decision the planner makes.
+// the geometry describes the source, not a decision the planner makes, so no
+// route or delivery choice may alter or drop it.
 func TestPlannerPublishesLetterboxOnTheSource(t *testing.T) {
-	source := SourceDescriptorV3{Width: 1920, Height: 1080}
-	source.LetterboxTopFraction = 0.13
-	source.LetterboxBottomFraction = 0.13
+	file := &models.MediaFile{
+		ID: 7, FilePath: "/media/scope.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
+		Resolution: "1080p", Bitrate: 12_000, AudioChannels: 2,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 12_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}},
+		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
+	}
 
-	if source.LetterboxTopFraction != 0.13 || source.LetterboxBottomFraction != 0.13 {
-		t.Fatalf("source did not carry the measurement: %+v", source)
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request:       validStartRequestV3(),
+		RequestedFile: file,
+		EffectiveFile: file,
+		Settings:      PlannerSettingsV3{TranscodeEnabled: true},
+		Registry:      testTransformationRegistryV3(),
+		Letterbox:     Letterbox{TopFraction: 0.1287, BottomFraction: 0.1287},
+	})
+
+	if result.Plan == nil {
+		t.Fatalf("no plan produced: %#v", result)
+	}
+	if result.Plan.Source.LetterboxTopFraction != 0.1287 ||
+		result.Plan.Source.LetterboxBottomFraction != 0.1287 {
+		t.Fatalf("plan did not carry the measurement: %+v", result.Plan.Source)
+	}
+}
+
+// No measurement must leave the fields off the wire entirely, so a client can
+// tell "not measured" from a real zero without a sentinel.
+func TestPlannerOmitsAnUnmeasuredLetterbox(t *testing.T) {
+	source := SourceDescriptorV3{Width: 1920, Height: 1080}
+
+	encoded, err := json.Marshal(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte("letterbox")) {
+		t.Fatalf("an unmeasured source published letterbox fields: %s", encoded)
 	}
 }

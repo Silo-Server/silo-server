@@ -286,6 +286,22 @@ func (c *LetterboxCache) Warm(key, inputPath string, durationSeconds float64, fr
 	c.mu.Unlock()
 
 	go func() {
+		// Release the inflight slot no matter how this goroutine ends. Leaking
+		// it would permanently block re-measuring this file: Warm sees a
+		// measurement already running and returns, forever.
+		defer func() {
+			c.mu.Lock()
+			delete(c.inflight, key)
+			c.mu.Unlock()
+			// A subtitle overlay is not worth taking the server down for, and
+			// an unrecovered panic here would: this runs detached, so it would
+			// reach the runtime rather than any request's recovery middleware.
+			if r := recover(); r != nil {
+				slog.Error("letterbox measurement panicked",
+					"component", "playback", "input", inputPath, "panic", r)
+			}
+		}()
+
 		// Detached from the request that triggered it: the answer is for the
 		// NEXT play, so a client disconnecting must not cancel the measurement.
 		ctx, cancel := context.WithTimeout(context.Background(), sampleTimeout*sampleCount)
@@ -314,7 +330,6 @@ func (c *LetterboxCache) Warm(key, inputPath string, durationSeconds float64, fr
 			c.order = append(c.order, key)
 		}
 		c.measured[key] = value
-		delete(c.inflight, key)
 		c.evictLocked()
 	}()
 }
