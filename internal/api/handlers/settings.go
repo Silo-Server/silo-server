@@ -15,6 +15,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -157,12 +158,7 @@ var settingsRegistry = map[string]settingSpec{
 	"playback.audio_language": {
 		Scope:        scopeDevice,
 		DefaultValue: "",
-		Validate: func(value string) error {
-			if len(strings.TrimSpace(value)) > 32 {
-				return fmt.Errorf("playback.audio_language must be 32 characters or fewer")
-			}
-			return nil
-		},
+		Validate:     validateLanguageTagSetting("playback.audio_language"),
 	},
 	"playback.auto_skip_intro": {
 		Scope:        scopeDevice,
@@ -253,7 +249,7 @@ var settingsRegistry = map[string]settingSpec{
 	"player.playback_speed": {
 		Scope:        scopeDevice,
 		DefaultValue: "1",
-		Validate:     validateFloatRange("player.playback_speed", 0.25, 3.0),
+		Validate:     validateFloatRangeStep("player.playback_speed", 0.25, 3.0, 0.05),
 	},
 	"player.audio_sync_ms": {
 		Scope:        scopeDevice,
@@ -862,6 +858,18 @@ func validateIntRange(key string, min, max int) func(string) error {
 }
 
 func validateFloatRange(key string, min, max float64) func(string) error {
+	return validateFloatRangeStep(key, min, max, 0)
+}
+
+// validateFloatRangeStep enforces the range and, when step is positive, that
+// the value sits on the step grid anchored at min.
+//
+// The step check delegates to settingscontract.StepAligned so this endpoint
+// enforces exactly what contracts/settings/v1/manifest.json declares. Before
+// this, player.playback_speed advertised a 0.05 step that nothing enforced, so
+// the server happily stored 0.26 — a value no client's stepper can represent
+// and that every client would silently snap on the next write.
+func validateFloatRangeStep(key string, min, max, step float64) func(string) error {
 	return func(value string) error {
 		parsed, err := strconv.ParseFloat(value, 64)
 		if err != nil {
@@ -869,6 +877,33 @@ func validateFloatRange(key string, min, max float64) func(string) error {
 		}
 		if math.IsNaN(parsed) || parsed < min || parsed > max {
 			return fmt.Errorf("%s must be between %g and %g", key, min, max)
+		}
+		if !settingscontract.StepAligned(parsed, min, step) {
+			return fmt.Errorf("%s must be a multiple of %g starting from %g", key, step, min)
+		}
+		return nil
+	}
+}
+
+// validateLanguageTagSetting accepts a BCP 47 language tag, or the empty string.
+//
+// The empty string is the legacy wire form for "no preference": the string-only
+// settings API has no way to send null, and both the Android and web clients
+// send "" to clear the choice. The contract expresses the same state as null,
+// which is why every language definition there is nullable.
+//
+// Anything else must be a well-formed tag. The previous check was "32
+// characters or fewer", so the server accepted "!!!" for a field the manifest
+// declares as language_tag — and stored it where track matching would silently
+// never match.
+func validateLanguageTagSetting(key string) func(string) error {
+	return func(value string) error {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return nil
+		}
+		if _, ok := settingscontract.NormalizeLanguageTag(trimmed); !ok {
+			return fmt.Errorf("%s must be a BCP 47 language tag such as en or en-US", key)
 		}
 		return nil
 	}

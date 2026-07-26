@@ -139,3 +139,76 @@ func TestContractLoadsUnderTheServerBuild(t *testing.T) {
 		}
 	}
 }
+
+// TestAudioLanguageRejectsMalformedTags closes a drift measured against the
+// live server: the manifest declares playback.audio_language as language_tag,
+// but the registry check was "32 characters or fewer", so "!!!" was stored for
+// a field track matching would then silently never match.
+func TestAudioLanguageRejectsMalformedTags(t *testing.T) {
+	const key = "playback.audio_language"
+
+	// The empty string is how the string-only API says "no preference", and
+	// both Android and web send it to clear the choice. It must keep working.
+	accepted := []string{"", "  ", "en", "EN", "en-US", "en_US", "pt-BR", "zh-Hant-TW", "es-419"}
+	for _, v := range accepted {
+		if err := validateRegisteredSetting(key, v, scopeDevice); err != nil {
+			t.Errorf("value %q was rejected: %v", v, err)
+		}
+	}
+
+	rejected := []string{"!!!", "english please", "e", "en-", "-US", "en--US", "123", "<script>"}
+	for _, v := range rejected {
+		if err := validateRegisteredSetting(key, v, scopeDevice); err == nil {
+			t.Errorf("value %q was accepted; the manifest declares this key as language_tag", v)
+		}
+	}
+}
+
+// TestPlaybackSpeedEnforcesDeclaredStep closes the other measured drift: the
+// manifest declares step 0.05 over 0.25..3.0 and nothing enforced it, so the
+// server stored values no client's stepper can represent.
+func TestPlaybackSpeedEnforcesDeclaredStep(t *testing.T) {
+	const key = "player.playback_speed"
+
+	for _, v := range []string{"0.25", "0.75", "1", "1.0", "1.25", "1.4", "2.5", "3", "3.0"} {
+		if err := validateRegisteredSetting(key, v, scopeDevice); err != nil {
+			t.Errorf("on-step value %q was rejected: %v", v, err)
+		}
+	}
+	for _, v := range []string{"0.26", "1.4372", "1.01", "2.99"} {
+		if err := validateRegisteredSetting(key, v, scopeDevice); err == nil {
+			t.Errorf("off-step value %q was accepted despite the declared 0.05 step", v)
+		}
+	}
+	// Range still wins where both apply.
+	for _, v := range []string{"0.2", "3.05", "abc"} {
+		if err := validateRegisteredSetting(key, v, scopeDevice); err == nil {
+			t.Errorf("out-of-range value %q was accepted", v)
+		}
+	}
+}
+
+// TestRegistryStepMatchesTheManifest keeps the two in lockstep: if the manifest
+// widens or narrows the step, this fails until the registry follows.
+func TestRegistryStepMatchesTheManifest(t *testing.T) {
+	manifest, err := settingscontract.Load()
+	if err != nil {
+		t.Fatalf("loading contract: %v", err)
+	}
+	def, ok := manifest.Lookup("player.playback_speed")
+	if !ok {
+		t.Fatal("player.playback_speed is not in the manifest")
+	}
+	if def.ValueSchema.Step == nil {
+		t.Fatal("the manifest no longer declares a step; drop the registry check too")
+	}
+	step := *def.ValueSchema.Step
+	min := *def.ValueSchema.Minimum
+
+	// A value one half-step above the minimum must be rejected by the live
+	// validator for whatever step the manifest currently declares.
+	offStep := strconv.FormatFloat(min+step/2, 'f', -1, 64)
+	if err := validateRegisteredSetting("player.playback_speed", offStep, scopeDevice); err == nil {
+		t.Errorf("%s is off the manifest's declared %g step but was accepted", offStep, step)
+	}
+}

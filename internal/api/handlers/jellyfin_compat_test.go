@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -234,7 +235,7 @@ func TestRemoveJellyfinCompatWebDisablesWebSetting(t *testing.T) {
 	settings := &fakeServerSettingsStore{values: map[string]string{
 		"jellyfin_compat.enabled":         "true",
 		"jellyfin_compat.web_enabled":     "true",
-		"jellyfin_compat.web_install_dir": t.TempDir(),
+		"jellyfin_compat.web_install_dir": asyncWebInstallRoot(t),
 	}}
 	published := map[string]string{}
 	handler := &AdminHandler{
@@ -336,4 +337,22 @@ func TestPersistJellyfinCompatWebInstallSettingsEnablesWebUI(t *testing.T) {
 	if got := settings.values["jellyfin_compat.web_source_url"]; got != jellycompat.DefaultWebSourceURL {
 		t.Fatalf("jellyfin_compat.web_source_url = %q", got)
 	}
+}
+
+// asyncWebInstallRoot returns a temp dir for a handler that removes or installs
+// Jellyfin Web assets in a background goroutine.
+//
+// t.TempDir is wrong here: the endpoint returns 202 and its goroutine keeps
+// writing into the root after the test body returns, so t.TempDir's cleanup
+// intermittently trips "directory not empty" and fails an otherwise passing
+// test. os.RemoveAll recurses, so a late write is harmless, and cleanup errors
+// are ignored rather than failing the test.
+func asyncWebInstallRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "jellyfin-web-root-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
 }

@@ -432,6 +432,21 @@ func (v *ValueSchema) NormalizeValue(
 // exact multiple would reject values every client can legitimately produce.
 const stepTolerance = 1e-9
 
+// StepAligned reports whether value sits on the grid of `step` anchored at
+// `base`. A non-positive step imposes no constraint.
+//
+// Exported so the legacy settings registry in internal/api/handlers enforces
+// exactly what the manifest declares instead of carrying a second,
+// nearly-identical implementation — the duplication this contract exists to
+// remove.
+func StepAligned(value, base, step float64) bool {
+	if step <= 0 {
+		return true
+	}
+	steps := (value - base) / step
+	return math.Abs(steps-math.Round(steps))*step <= stepTolerance
+}
+
 func (v *ValueSchema) checkRange(value float64) error {
 	if v.Minimum != nil && value < *v.Minimum {
 		return fmt.Errorf("%g is below the minimum %g", value, *v.Minimum)
@@ -439,15 +454,14 @@ func (v *ValueSchema) checkRange(value float64) error {
 	if v.Maximum != nil && value > *v.Maximum {
 		return fmt.Errorf("%g is above the maximum %g", value, *v.Maximum)
 	}
-	if v.Step != nil && *v.Step > 0 {
+	if v.Step != nil {
 		// Steps are counted from the minimum, which is the only origin every
 		// client's stepper agrees on.
 		base := 0.0
 		if v.Minimum != nil {
 			base = *v.Minimum
 		}
-		steps := (value - base) / *v.Step
-		if math.Abs(steps-math.Round(steps))**v.Step > stepTolerance {
+		if !StepAligned(value, base, *v.Step) {
 			return fmt.Errorf("%g is not a multiple of the step %g from %g",
 				value, *v.Step, base)
 		}
