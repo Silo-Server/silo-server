@@ -422,6 +422,12 @@ type playbackSessionResponse struct {
 	DurationSeconds *float64            `json:"duration_seconds"`
 	SubtitleURLs    []subtitleURL       `json:"subtitle_urls,omitempty"`
 	PlaybackInfo    *playbackInfoResult `json:"playback_info,omitempty"`
+	// Black bars BAKED INTO the picture, as a fraction of the frame height.
+	// Also published on the v3 plan's source descriptor; carried here because
+	// the Apple clients read this response and do not speak v3. Absent means
+	// not measured, which is what a failed measurement reports too.
+	LetterboxTopFraction    float64 `json:"letterbox_top_fraction,omitempty"`
+	LetterboxBottomFraction float64 `json:"letterbox_bottom_fraction,omitempty"`
 }
 
 type playbackInfoResult struct {
@@ -1931,6 +1937,9 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 	resp := h.toPlaybackSessionResponse(session)
 	resp.DurationSeconds = fileDurationSeconds(effectiveFile)
 	resp.PlaybackInfo = buildPlaybackInfo(session, effectiveFile)
+	letterbox := h.letterboxForFileV3(effectiveFile)
+	resp.LetterboxTopFraction = letterbox.TopFraction
+	resp.LetterboxBottomFraction = letterbox.BottomFraction
 
 	var downloadedSubs []subtitles.DownloadedSubtitle
 	if h.SubtitleRepo != nil && effectiveFile != nil {
