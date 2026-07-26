@@ -181,8 +181,12 @@ type PlaybackHandler struct {
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig    func() config.PlaybackConfig
-	FFmpegLogSink     playback.FFmpegLogSink
+	PlaybackConfig func() config.PlaybackConfig
+	FFmpegLogSink  playback.FFmpegLogSink
+	// dvRPUProbe answers whether a given Profile 7 source survives the RPU
+	// strip. Built lazily; nil keeps the previous strip-always behaviour.
+	dvRPUProbe        *playback.DVRPUProbe
+	dvRPUProbeOnce    sync.Once
 	copySeekAnchor    copySeekAnchorResolver
 	realtimeCommandMu sync.Mutex
 	realtimeCommands  map[string]playbackCommandRecord
