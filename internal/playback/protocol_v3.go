@@ -441,25 +441,36 @@ type SourceDescriptorV3 struct {
 	// inventing. A client must not substitute the playback engine's reported
 	// duration for it — on an HLS copy remux the engine reports the length
 	// produced so far, not the runtime.
-	DurationSeconds    *float64           `json:"duration_seconds,omitempty"`
-	Container          string             `json:"container,omitempty"`
-	VideoCodec         string             `json:"video_codec,omitempty"`
-	VideoProfile       string             `json:"video_profile,omitempty"`
-	VideoLevel         int                `json:"video_level,omitempty"`
-	BitDepth           int                `json:"bit_depth,omitempty"`
-	ColorRange         string             `json:"color_range,omitempty"`
-	Width              int                `json:"width,omitempty"`
-	Height             int                `json:"height,omitempty"`
-	FrameRate          float64            `json:"frame_rate,omitempty"`
-	BitrateKbps        int                `json:"bitrate_kbps,omitempty"`
-	DynamicRange       string             `json:"dynamic_range,omitempty"`
-	HDR10Plus          bool               `json:"hdr10_plus"`
-	DVProfile          int                `json:"dolby_vision_profile,omitempty"`
-	DVBLCompatID       int                `json:"dv_bl_compat_id,omitempty"`
-	DVEnhancementLayer EnhancementLayerV3 `json:"dv_enhancement_layer"`
-	AudioCodec         string             `json:"audio_codec,omitempty"`
-	AudioChannels      int                `json:"audio_channels,omitempty"`
-	AudioLayout        string             `json:"audio_layout,omitempty"`
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+	Container       string   `json:"container,omitempty"`
+	VideoCodec      string   `json:"video_codec,omitempty"`
+	VideoProfile    string   `json:"video_profile,omitempty"`
+	VideoLevel      int      `json:"video_level,omitempty"`
+	BitDepth        int      `json:"bit_depth,omitempty"`
+	ColorRange      string   `json:"color_range,omitempty"`
+	Width           int      `json:"width,omitempty"`
+	Height          int      `json:"height,omitempty"`
+	// Letterbox fractions describe black bars BAKED INTO the picture, as a
+	// fraction of Height. Some sources encode a 2.39:1 image inside a 1920x1080
+	// frame, so Width/Height and the container's aspect ratio all describe a
+	// full-height 16:9 video and only the pixels reveal the bars. A client that
+	// anchors an overlay to the bottom of the frame — subtitles, most obviously
+	// — lands inside the bar without this.
+	//
+	// Absent means "not measured", which is also what a failed measurement
+	// reports: both leave a client doing exactly what it did before.
+	LetterboxTopFraction    float64            `json:"letterbox_top_fraction,omitempty"`
+	LetterboxBottomFraction float64            `json:"letterbox_bottom_fraction,omitempty"`
+	FrameRate               float64            `json:"frame_rate,omitempty"`
+	BitrateKbps             int                `json:"bitrate_kbps,omitempty"`
+	DynamicRange            string             `json:"dynamic_range,omitempty"`
+	HDR10Plus               bool               `json:"hdr10_plus"`
+	DVProfile               int                `json:"dolby_vision_profile,omitempty"`
+	DVBLCompatID            int                `json:"dv_bl_compat_id,omitempty"`
+	DVEnhancementLayer      EnhancementLayerV3 `json:"dv_enhancement_layer"`
+	AudioCodec              string             `json:"audio_codec,omitempty"`
+	AudioChannels           int                `json:"audio_channels,omitempty"`
+	AudioLayout             string             `json:"audio_layout,omitempty"`
 }
 
 type VideoClaimsV3 struct {

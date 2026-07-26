@@ -181,8 +181,13 @@ type PlaybackHandler struct {
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig    func() config.PlaybackConfig
-	FFmpegLogSink     playback.FFmpegLogSink
+	PlaybackConfig func() config.PlaybackConfig
+	FFmpegLogSink  playback.FFmpegLogSink
+	// letterbox measures baked-in black bars once per source so clients can
+	// keep overlays inside the picture. Built lazily; nil is a disabled
+	// detector, not an error.
+	letterbox         *playback.LetterboxCache
+	letterboxOnce     sync.Once
 	copySeekAnchor    copySeekAnchorResolver
 	realtimeCommandMu sync.Mutex
 	realtimeCommands  map[string]playbackCommandRecord

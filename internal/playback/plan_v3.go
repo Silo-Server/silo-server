@@ -21,6 +21,10 @@ type PlannerInputV3 struct {
 	EffectiveFile   *models.MediaFile
 	AudioTrackIndex int
 	Settings        PlannerSettingsV3
+	// Letterbox is the measured baked-in bar geometry for EffectiveFile, when
+	// one is known. Supplied by the caller rather than measured here: detection
+	// decodes frames, and the planner must stay a pure decision function.
+	Letterbox Letterbox
 	// Registry holds the transformations the local binary can execute.
 	// Progressive remux routes always gate on it: they run in this process.
 	Registry *TransformationRegistryV3
@@ -83,6 +87,8 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
+	source.LetterboxTopFraction = input.Letterbox.TopFraction
+	source.LetterboxBottomFraction = input.Letterbox.BottomFraction
 	// Subtitle renderability is engine-specific, so every candidate route is
 	// validated against the capabilities of the engine that would execute it.
 	// The direct engine remains the canonical policy for source-preserving
