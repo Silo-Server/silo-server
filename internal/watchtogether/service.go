@@ -26,17 +26,11 @@ var (
 	ErrConnectionNotAttached = errors.New("watch together session is not attached")
 	ErrInvalidSelection      = errors.New("watch together selection is invalid")
 	ErrSuggestionNotFound    = errors.New("watch together suggestion not found")
-	// ErrNotVoteWinner is returned when a vote-mode room is asked to promote
-	// something other than the title the room actually voted for.
-	ErrNotVoteWinner = errors.New("watch together suggestion is not the vote winner")
 	// ErrNoVotesCast is returned when a vote-mode room is asked to start before
 	// anyone has voted: there is no winner to promote yet.
-	ErrNoVotesCast = errors.New("watch together room has no votes yet")
-	// ErrVoteRoomSelection is returned when a vote room's selection is set
-	// directly instead of through the vote.
-	ErrVoteRoomSelection = errors.New("watch together vote room selects by vote")
-	ErrDuplicateVote     = errors.New("watch together already voted")
-	ErrNotVoted          = errors.New("watch together not voted")
+	ErrNoVotesCast   = errors.New("watch together room has no votes yet")
+	ErrDuplicateVote = errors.New("watch together already voted")
+	ErrNotVoted      = errors.New("watch together not voted")
 )
 
 const (
@@ -869,15 +863,6 @@ func (s *Service) SelectItem(
 	if live.room.HostUserID != userID || live.room.HostProfileID != profileID {
 		s.mu.Unlock()
 		return Snapshot{}, ErrRoomForbidden
-	}
-	// A vote room decides by tally, and this is the other door into the room's
-	// selection. Gating only PromoteSuggestion would leave the host able to set
-	// any title directly and bypass the vote entirely, which makes the counts on
-	// everyone else's screen decoration. Once the room is voting, the winner is
-	// the only way in.
-	if live.room.SelectionMode == RoomSelectionModeVote {
-		s.mu.Unlock()
-		return Snapshot{}, ErrVoteRoomSelection
 	}
 	if live.room.Phase == RoomPhaseEnded {
 		s.mu.Unlock()
@@ -1891,28 +1876,16 @@ func (s *Service) PromoteSuggestion(
 		return Snapshot{}, ErrSuggestionNotFound
 	}
 
-	// In a vote room the host starts the winner; they do not get to overrule it.
-	// Being able to promote any suggestion would make "vote" host_pick with
-	// extra steps, and the tally on everyone else's screen would be a lie.
-	s.mu.Lock()
-	isVoteRoom := live.room.SelectionMode == RoomSelectionModeVote
-	s.mu.Unlock()
-	if isVoteRoom {
-		winner, err := s.VoteWinner(ctx, roomID)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if winner.ID != suggestion.ID {
-			return Snapshot{}, ErrNotVoteWinner
-		}
-	}
-
 	return s.SelectItem(ctx, roomID, userID, profileID, SelectItemInput{
 		ContentID: suggestion.ContentID,
 	})
 }
 
 // VoteWinner returns the suggestion a vote-mode room has settled on.
+//
+// Advisory rather than binding: the host may start something else. It backs the
+// clients' "Start winner" action and their WINNING badge, so both platforms
+// agree with the server about who is leading.
 //
 // The repository already orders by vote_count DESC, created_at ASC, so the
 // winner is the head of the list and ties resolve to whoever suggested first —
