@@ -77,7 +77,7 @@ func (p *DVRPUProbe) CanStrip(ctx context.Context, key, inputPath string) bool {
 
 	started := time.Now()
 	ok := runDVRPUProbe(ctx, p.binary(), inputPath)
-	slog.Info("dolby vision rpu strip probed",
+	slog.InfoContext(ctx, "dolby vision rpu strip probed",
 		"component", "playback",
 		"input", inputPath,
 		"can_strip", ok,
