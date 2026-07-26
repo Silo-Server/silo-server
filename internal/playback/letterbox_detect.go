@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -269,7 +270,17 @@ func (c *LetterboxCache) Warm(inputPath string, durationSeconds float64, frameHe
 		if c.ffmpegPath != nil {
 			ffmpegPath = c.ffmpegPath()
 		}
+		started := time.Now()
 		value := DetectLetterbox(ctx, inputPath, durationSeconds, frameHeight, ffmpegPath)
+		slog.Info("letterbox measured",
+			"component", "playback",
+			"input", inputPath,
+			"frame_height", frameHeight,
+			"top_fraction", value.TopFraction,
+			"bottom_fraction", value.BottomFraction,
+			"detected", value.Detected(),
+			"took_ms", time.Since(started).Milliseconds(),
+		)
 
 		c.mu.Lock()
 		defer c.mu.Unlock()
