@@ -31,9 +31,12 @@ var (
 	ErrNotVoteWinner = errors.New("watch together suggestion is not the vote winner")
 	// ErrNoVotesCast is returned when a vote-mode room is asked to start before
 	// anyone has voted: there is no winner to promote yet.
-	ErrNoVotesCast   = errors.New("watch together room has no votes yet")
-	ErrDuplicateVote = errors.New("watch together already voted")
-	ErrNotVoted      = errors.New("watch together not voted")
+	ErrNoVotesCast = errors.New("watch together room has no votes yet")
+	// ErrVoteRoomSelection is returned when a vote room's selection is set
+	// directly instead of through the vote.
+	ErrVoteRoomSelection = errors.New("watch together vote room selects by vote")
+	ErrDuplicateVote     = errors.New("watch together already voted")
+	ErrNotVoted          = errors.New("watch together not voted")
 )
 
 const (
@@ -866,6 +869,15 @@ func (s *Service) SelectItem(
 	if live.room.HostUserID != userID || live.room.HostProfileID != profileID {
 		s.mu.Unlock()
 		return Snapshot{}, ErrRoomForbidden
+	}
+	// A vote room decides by tally, and this is the other door into the room's
+	// selection. Gating only PromoteSuggestion would leave the host able to set
+	// any title directly and bypass the vote entirely, which makes the counts on
+	// everyone else's screen decoration. Once the room is voting, the winner is
+	// the only way in.
+	if live.room.SelectionMode == RoomSelectionModeVote {
+		s.mu.Unlock()
+		return Snapshot{}, ErrVoteRoomSelection
 	}
 	if live.room.Phase == RoomPhaseEnded {
 		s.mu.Unlock()
