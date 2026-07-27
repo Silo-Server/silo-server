@@ -3149,6 +3149,9 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			switchedFileID = &alt.ID
 		}
 	}
+	if !videoCopy {
+		req.TargetResolution = clampEncodedTargetResolution(req.TargetResolution, file.Resolution)
+	}
 	if requestedFile != nil && file != nil && requestedFile.ID != file.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
 			slog.WarnContext(r.Context(), "requested transcode file preflight failed; continuing with alternate file", "component", "api",
@@ -3951,5 +3954,33 @@ func resolutionRank(res string) int {
 		return 0
 	default:
 		return 0
+	}
+}
+
+func clampEncodedTargetResolution(requestedResolution, sourceResolution string) string {
+	requestedHeight, requestedKnown := transcodeResolutionHeight(requestedResolution)
+	sourceHeight, sourceKnown := transcodeResolutionHeight(sourceResolution)
+	if !requestedKnown || !sourceKnown || requestedHeight <= sourceHeight {
+		return requestedResolution
+	}
+	return sourceResolution
+}
+
+func transcodeResolutionHeight(resolution string) (int, bool) {
+	switch resolution {
+	case "2160p":
+		return 2160, true
+	case "1080p":
+		return 1080, true
+	case "720p":
+		return 720, true
+	case "480p":
+		return 480, true
+	case "420p":
+		return 420, true
+	case "328p":
+		return 328, true
+	default:
+		return 0, false
 	}
 }
