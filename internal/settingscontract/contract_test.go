@@ -738,6 +738,71 @@ func TestEnumMembersCannotPredateTheirDefinition(t *testing.T) {
 	}
 }
 
+// TestDuplicatePropertiesAreRejected covers the case where the parser, not the
+// contract, decides what a value means. Both encoding/json and the schema
+// validator keep the last occurrence silently.
+func TestDuplicatePropertiesAreRejected(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	def, ok := manifest.Lookup(keySubtitleAppearance)
+	if !ok {
+		t.Fatal("playback.subtitle_appearance is not registered")
+	}
+
+	for name, raw := range map[string]string{
+		"top level": `{"fontSize":"small","fontSize":"large"}`,
+		"repeated with other properties": `{"fontSize":"small","position":"top",` +
+			`"fontSize":"large"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := def.ValueSchema.ValidateValue(json.RawMessage(raw), objSchemas)
+			if err == nil {
+				t.Fatal("a value with a repeated property was accepted")
+			}
+			if !strings.Contains(err.Error(), "repeats the property") {
+				t.Errorf("error %q does not name the repeated property", err)
+			}
+		})
+	}
+
+	// The same value without the repeat still validates, so the check is not
+	// simply rejecting everything.
+	if err := def.ValueSchema.ValidateValue(
+		json.RawMessage(`{"fontSize":"large","position":"top"}`), objSchemas); err != nil {
+		t.Fatalf("a value with distinct properties was rejected: %v", err)
+	}
+}
+
+// TestLoneSurrogatesAreRejected pins RFC 8785's requirement to terminate rather
+// than substitute. encoding/json turns an unpaired escape into U+FFFD and
+// reports success, which would have the server issue an ETag for bytes a
+// conforming client must refuse.
+func TestLoneSurrogatesAreRejected(t *testing.T) {
+	for name, raw := range map[string]string{
+		"leading alone":       `"\ud800"`,
+		"trailing alone":      `"\udc00"`,
+		"leading then normal": `"\ud800A"`,
+		"nested in an object": `{"a":"x\udbffy"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := canonicalize([]byte(raw)); err == nil {
+				t.Fatalf("canonicalized %s despite a lone surrogate", raw)
+			}
+		})
+	}
+
+	// A well-formed pair is a real character and must survive untouched.
+	encoded, err := canonicalize([]byte(`"😀"`))
+	if err != nil {
+		t.Fatalf("a valid surrogate pair was rejected: %v", err)
+	}
+	if want := "\"\U0001F600\""; string(encoded) != want {
+		t.Errorf("canonicalized pair = %s, want %s", encoded, want)
+	}
+}
+
 func TestValidateValueRejectsOutOfContractValues(t *testing.T) {
 	manifest, err := Load()
 	if err != nil {

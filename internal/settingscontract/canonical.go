@@ -160,6 +160,16 @@ func digestWithSchemas(manifest []byte) (string, error) {
 }
 
 func decodeJSON(raw []byte) (any, error) {
+	// Both checks run before the decode that would paper over what they catch.
+	// This is the shared entry point for the manifest, its public projection and
+	// every value schema, so all three get the same guarantees.
+	if err := rejectLoneSurrogates(raw); err != nil {
+		return nil, fmt.Errorf("canonicalization refused a lone surrogate: %w", err)
+	}
+	if err := rejectDuplicateKeys(raw); err != nil {
+		return nil, fmt.Errorf("canonicalization refused a duplicate key: %w", err)
+	}
+
 	var doc any
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()

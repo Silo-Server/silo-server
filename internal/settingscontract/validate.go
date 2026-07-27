@@ -452,6 +452,15 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 		if !ok {
 			return fmt.Errorf("no compiled schema for %q", v.SchemaRef)
 		}
+		// Ahead of the schema check, because jsonschema.UnmarshalJSON keeps the
+		// last of a repeated property and validates that. Which value survives
+		// would then depend on the parser rather than on the contract.
+		if err := rejectDuplicateKeys(trimmed); err != nil {
+			return err
+		}
+		if err := rejectLoneSurrogates(trimmed); err != nil {
+			return err
+		}
 		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(trimmed))
 		if err != nil {
 			return fmt.Errorf("expected an object: %w", err)
