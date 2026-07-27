@@ -147,7 +147,14 @@ func (s *diagnosticsChunkSessions) owner(id string, userID int) (diagnosticsChun
 // admission succeeds, since the eviction already happened). A false capOK
 // means the cap is full, or a concurrent init by the same user holds an
 // unfinished reservation — that racing call must not create a second session.
+//
+// The cap counts live sessions, unfinished reservations, AND the manager's
+// detached-writer sessions: a canceled session whose slow chunk writer is
+// still draining holds real disk and a connection until the writer's read
+// deadline, so a cancel-and-reinit loop must stall at the cap rather than
+// stack unbounded live writers behind it.
 func (s *diagnosticsChunkSessions) reserve(userID int) (previousID string, capOK bool) {
+	detached := s.manager.DetachedWriterSessions()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, inFlight := s.reserved[userID]; inFlight {
@@ -158,7 +165,7 @@ func (s *diagnosticsChunkSessions) reserve(userID int) (previousID string, capOK
 		delete(s.owners, id)
 		delete(s.byUser, userID)
 	}
-	if len(s.owners)+len(s.reserved) >= diagnosticsChunkSessionCap {
+	if len(s.owners)+len(s.reserved)+detached >= diagnosticsChunkSessionCap {
 		return previousID, false
 	}
 	s.reserved[userID] = struct{}{}
@@ -297,8 +304,11 @@ func (h *DiagnosticsHandler) HandleChunkedUploadInit(w http.ResponseWriter, r *h
 func (h *DiagnosticsHandler) HandleChunkedUploadChunk(w http.ResponseWriter, r *http.Request) {
 	// The integrated server's 30s ReadTimeout kills a 768 KiB chunk arriving
 	// below ~26 KiB/s — exactly the slow uplinks the chunked fallback exists
-	// for. Extend the read deadline the same way the single-shot upload does.
-	h.extendDiagnosticsUploadDeadlines(w, r, false)
+	// for. The write deadline needs lifting too: the 120s WriteTimeout starts
+	// at request start, so on a sufficiently slow uplink the stored chunk's
+	// JSON acknowledgement would miss it and the client would retry an
+	// already-accepted chunk.
+	h.extendDiagnosticsUploadDeadlines(w, r, true)
 
 	userID, ok := diagnosticsUserID(w, r)
 	if !ok {

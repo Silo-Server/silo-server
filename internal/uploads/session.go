@@ -74,6 +74,13 @@ type Manager struct {
 	maxChunkSize int64
 	now          func() time.Time
 	sessions     map[string]*session
+	// detached holds sessions removed from `sessions` (canceled or expired)
+	// whose chunk writers are still draining a request body into the spool.
+	// They keep holding real disk and a connection until the writer finishes
+	// or hits the read deadline, so callers enforcing admission caps must
+	// count them (DetachedWriterSessions) or a cancel-and-recreate loop could
+	// stack unbounded live writers behind a fixed session cap.
+	detached map[*session]struct{}
 }
 
 type session struct {
@@ -129,6 +136,7 @@ func NewManager(opts ManagerOptions) *Manager {
 		maxChunkSize: maxChunkSize,
 		now:          now,
 		sessions:     make(map[string]*session),
+		detached:     make(map[*session]struct{}),
 	}
 }
 
@@ -291,6 +299,17 @@ func (m *Manager) PutChunk(ctx context.Context, id string, index int, body io.Re
 	return s.info(), nil
 }
 
+// removeDetachedDirLocked reclaims a detached session once its last in-flight
+// writer has returned: drops it from the detached count and removes the spool
+// directory. Safe to call for every finishing writer of a dropped session.
+func (m *Manager) removeDetachedDirLocked(s *session) {
+	if s.writingCount() != 0 {
+		return
+	}
+	delete(m.detached, s)
+	_ = os.RemoveAll(s.dir)
+}
+
 // copyChunkBody writes exactly expectedSize bytes from body at offset,
 // rejecting short or oversized chunks. Runs without the manager lock held.
 func copyChunkBody(ctx context.Context, path string, offset int64, body io.Reader, expectedSize int64) (int64, error) {
@@ -320,17 +339,6 @@ func copyChunkBody(ctx context.Context, path string, offset int64, body io.Reade
 		return 0, fmt.Errorf("%w: chunk size must be %d bytes", ErrInvalidChunk, expectedSize)
 	}
 	return written, nil
-}
-
-// removeDetachedDirLocked reclaims the spool directory of a session that was
-// dropped from the map (canceled or expired) while this chunk write was in
-// flight, once no other writer remains. Cancel and the expiry sweep skip
-// directory removal for sessions with writers precisely so the final writer
-// can do it here without racing an open file handle.
-func (m *Manager) removeDetachedDirLocked(s *session) {
-	if s.writingCount() == 0 {
-		_ = os.RemoveAll(s.dir)
-	}
 }
 
 func (m *Manager) Complete(id string) (*CompletedUpload, error) {
@@ -384,12 +392,24 @@ func (m *Manager) Cancel(id string) error {
 		return ErrNotFound
 	}
 	delete(m.sessions, id)
-	// With a chunk write in flight the file handle is still open; the last
-	// finishing writer removes the directory (removeDetachedDirLocked).
+	// With a chunk write in flight the file handle is still open; park the
+	// session as detached — still counted by DetachedWriterSessions — and the
+	// last finishing writer removes the directory.
 	if s.writingCount() == 0 {
 		return os.RemoveAll(s.dir)
 	}
+	m.detached[s] = struct{}{}
 	return nil
+}
+
+// DetachedWriterSessions counts canceled/expired sessions whose chunk writers
+// are still draining request bodies into spool files. Admission caps must
+// include them: they hold connections and disk until each writer finishes or
+// times out.
+func (m *Manager) DetachedWriterSessions() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.detached)
 }
 
 func (m *Manager) getLocked(id string) (*session, error) {
@@ -405,6 +425,8 @@ func (m *Manager) getLocked(id string) (*session, error) {
 		delete(m.sessions, id)
 		if s.writingCount() == 0 {
 			_ = os.RemoveAll(s.dir)
+		} else {
+			m.detached[s] = struct{}{}
 		}
 		return nil, ErrExpired
 	}
@@ -419,6 +441,8 @@ func (m *Manager) cleanupExpiredLocked(now time.Time) {
 		delete(m.sessions, id)
 		if s.writingCount() == 0 {
 			_ = os.RemoveAll(s.dir)
+		} else {
+			m.detached[s] = struct{}{}
 		}
 	}
 }

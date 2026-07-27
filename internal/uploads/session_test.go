@@ -310,6 +310,51 @@ func (g *gatedReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+func TestManagerCountsDetachedWritersUntilTheyFinish(t *testing.T) {
+	manager := NewManager(ManagerOptions{
+		RootDir:      t.TempDir(),
+		MaxSize:      16,
+		MaxChunkSize: 4,
+		Now:          fixedNow(),
+	})
+	session, err := manager.Create(CreateRequest{Filename: "plugin.bin", SizeBytes: 4, ChunkSize: 4})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	// Stall a chunk write, then cancel the session out from under it — the
+	// cancel-and-recreate pattern a client uses to replace an upload. The
+	// stalled writer still holds a connection and the spool file, so it must
+	// stay visible to admission caps until it finishes.
+	firstStarted := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := manager.PutChunk(context.Background(), session.ID, 0, &gatedReader{
+			started: firstStarted,
+			release: release,
+			data:    []byte("abcd"),
+		}, 4)
+		done <- err
+	}()
+	<-firstStarted
+
+	if err := manager.Cancel(session.ID); err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+	if got := manager.DetachedWriterSessions(); got != 1 {
+		t.Fatalf("DetachedWriterSessions() during write = %d, want 1", got)
+	}
+
+	close(release)
+	if err := <-done; !errors.Is(err, ErrNotFound) {
+		t.Fatalf("stalled writer error = %v, want ErrNotFound", err)
+	}
+	if got := manager.DetachedWriterSessions(); got != 0 {
+		t.Fatalf("DetachedWriterSessions() after writer drained = %d, want 0", got)
+	}
+}
+
 func fixedNow() func() time.Time {
 	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
 	return func() time.Time {
