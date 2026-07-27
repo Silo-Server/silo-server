@@ -54,14 +54,10 @@ lint:
 	golangci-lint run
 	cd web && pnpm run lint
 
-# Tests that fail on main today and are tracked separately. Nothing in this list
-# is owned by the change that added it — the point of naming them individually,
-# rather than skipping whole packages, is that everything else stays gated and
-# the list can only shrink. Delete an entry along with its fix; do not add.
-GOTEST_KNOWN_FAILURES := TestHandleReplanPlaybackV3SeekFailureRecoveryNeverChangesMediaVersion|TestAutoscanMediaUpdatedIgnoresUnsupportedSidecars|TestAutoscanMediaUpdatedSidecarsScanParent|TestAutoscanMediaUpdatedRootSidecarDoesNotScanLibrary
-
-# Frontend test files that fail on main today. Same rules as
-# GOTEST_KNOWN_FAILURES: shrink-only, and never extend it to land a change.
+# Frontend test files that fail on main today. This list is shrink-only: delete
+# an entry along with its fix, and never extend it to land a change. The Go
+# suite has no equivalent — a Go test that cannot pass yet carries a t.Skip and
+# its reason in the source, where whoever reads the test finds it.
 WEBTEST_KNOWN_FAILURES := \
 	--exclude src/pages/Catalog.test.tsx \
 	--exclude src/pages/ItemDetail/SeasonContent.test.tsx \
@@ -81,7 +77,7 @@ embed-stub:
 test: test-go test-web
 
 test-go: embed-stub
-	go test -skip '$(GOTEST_KNOWN_FAILURES)' ./...
+	go test ./...
 
 test-web:
 	cd web && pnpm exec vitest run $(WEBTEST_KNOWN_FAILURES)

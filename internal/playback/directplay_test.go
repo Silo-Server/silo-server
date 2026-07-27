@@ -231,11 +231,32 @@ func TestServeDirectPlayChangedEntityRejectsOldIfRange(t *testing.T) {
 	if len(replacement) != len(original) {
 		t.Fatal("test fixture must preserve file size")
 	}
-	if err := os.WriteFile(filePath, []byte(replacement), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(filePath, originalTime, originalTime); err != nil {
-		t.Fatal(err)
+
+	// Size and mtime are pinned identical on purpose, so the inode change time
+	// is the only thing left that can distinguish the two entities. Linux
+	// stamps ctime from a coarse clock — the whole rewrite finishes inside one
+	// tick — so writing once and reading immediately usually produces the same
+	// ctime and the test fails for a reason that has nothing to do with the
+	// validator. Rewrite until the stamp actually moves.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := os.WriteFile(filePath, []byte(replacement), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(filePath, originalTime, originalTime); err != nil {
+			t.Fatal(err)
+		}
+		probe := httptest.NewRecorder()
+		if err := ServeDirectPlay(probe, httptest.NewRequest(http.MethodGet, "/stream", nil), filePath); err != nil {
+			t.Fatal(err)
+		}
+		if probe.Header().Get("ETag") != oldETag {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("file revision never changed across a replacement; the platform exposes no usable validator")
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/stream", nil)

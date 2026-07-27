@@ -274,31 +274,39 @@ func resolveAutoscanParentTarget(
 	return nil, true, parentErr
 }
 
+// parentFallbackAutoscanUpdateError reports whether a rejected path should be
+// retried against its parent directory. A sidecar Jellyfin notified us about —
+// Movie.nfo, poster.jpg — is not itself scannable, but the directory holding it
+// is, and that is the scan the client actually wants.
 func parentFallbackAutoscanUpdateError(err error) bool {
 	var reqErr *scantrigger.RequestError
 	if !errors.As(err, &reqErr) || reqErr.Status != http.StatusBadRequest {
 		return false
 	}
-	switch reqErr.Message {
-	case "Path does not exist",
-		"Path must be a file or directory",
-		"Unsupported media file extension":
+	switch reqErr.Reason {
+	case scantrigger.ReasonPathMissing,
+		scantrigger.ReasonPathNotFileOrDir,
+		scantrigger.ReasonUnsupportedExtension:
 		return true
 	default:
 		return false
 	}
 }
 
+// softAutoscanUpdateError reports whether a rejected path should be dropped
+// silently. Jellyfin clients batch updates for paths Silo does not manage, and
+// failing the whole batch over one of them would lose the updates that are
+// valid.
 func softAutoscanUpdateError(err error) bool {
 	var reqErr *scantrigger.RequestError
 	if !errors.As(err, &reqErr) || reqErr.Status != http.StatusBadRequest {
 		return false
 	}
-	switch reqErr.Message {
-	case "No library matches the given path",
-		"Path does not exist",
-		"Path must be a file or directory",
-		"Unsupported media file extension":
+	switch reqErr.Reason {
+	case scantrigger.ReasonNoLibraryMatch,
+		scantrigger.ReasonPathMissing,
+		scantrigger.ReasonPathNotFileOrDir,
+		scantrigger.ReasonUnsupportedExtension:
 		return true
 	default:
 		return false
