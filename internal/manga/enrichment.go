@@ -411,6 +411,22 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 		return errEnrichmentNoMatch
 	}
 
+	// The title gate cannot separate two different works that share a title,
+	// and the plugin's search contract carries no author to check at search
+	// time. The fetched credits can be checked, so a positive contradiction is
+	// recorded as a no-match rather than written.
+	if !metadata.AuthorsAgree(item.Author, accumulator.People) {
+		slog.InfoContext(ctx, "manga enrichment: author mismatch; treating as no match", "component", "manga",
+			"content_id", item.ContentID,
+			"title", item.Title,
+			"item_author", item.Author,
+		)
+		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
+			return err
+		}
+		return errEnrichmentNoMatch
+	}
+
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
 	}

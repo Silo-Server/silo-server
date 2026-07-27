@@ -565,6 +565,19 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
+	// The title gate cannot separate two different books that share a title,
+	// and the plugin's search contract carries no author to check at search
+	// time. The fetched credits can be checked, though, so a positive
+	// contradiction is rejected here rather than written.
+	if !metadata.AuthorsAgree(item.Author, accumulator.People) {
+		slog.InfoContext(ctx, "audiobook enrichment: author mismatch; treating as no match", "component", "audiobooks",
+			"content_id", item.ContentID,
+			"title", item.Title,
+			"item_author", item.Author,
+		)
+		return e.stampLastRefreshed(ctx, item.ContentID)
+	}
+
 	// Phase 3: Persist.
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)

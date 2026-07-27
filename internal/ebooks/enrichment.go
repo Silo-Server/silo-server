@@ -805,6 +805,25 @@ func (e *Enricher) enrichWithProvidersOutcome(
 		return EnrichmentOutcomeNoMatch, nil
 	}
 
+	// The title gate cannot separate two different books that share a title,
+	// and the plugin's search contract carries no author to check at search
+	// time. The fetched credits can be checked, though, so a positive
+	// contradiction is recorded as a no-match rather than written.
+	if !metadata.AuthorsAgree(item.Author, accumulator.People) {
+		slog.InfoContext(ctx, "ebook enrichment: author mismatch; treating as no match", "component", "ebooks",
+			"content_id", item.ContentID,
+			"title", item.Title,
+			"item_author", item.Author,
+		)
+		if err := requireEnrichmentClaim(ctx); err != nil {
+			return "", err
+		}
+		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
+			return "", err
+		}
+		return EnrichmentOutcomeNoMatch, nil
+	}
+
 	preserveEbookLocalMetadata(item, accumulator)
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
 		return "", fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
