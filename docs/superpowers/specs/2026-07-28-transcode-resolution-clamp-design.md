@@ -21,7 +21,8 @@ exceed the effective source file's resolution.
 
 The normalization rules are:
 
-- Preserve video-copy requests unchanged.
+- Do not apply the new clamp to video-copy requests; preserve their existing
+  downstream recipe normalization.
 - Preserve an empty or unrecognized requested resolution unchanged.
 - Preserve an empty or unrecognized effective source resolution unchanged.
 - Preserve targets at or below the effective source resolution.
