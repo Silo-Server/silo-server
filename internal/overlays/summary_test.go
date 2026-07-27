@@ -241,8 +241,17 @@ func TestNormalizeHDR(t *testing.T) {
 		}, "DV HDR10"},
 		{"dv via profile number only", &models.MediaFile{
 			HDR:         true,
-			VideoTracks: []models.VideoTrack{{DVProfile: 5}},
+			VideoTracks: []models.VideoTrack{{DVProfile: 7}},
 		}, "DV"},
+		// Profile 5 reaches the display as HDR10, so it must not be badged DV.
+		{"profile 5 is labelled by its hdr type", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{DVProfile: 5, ColorTransfer: "smpte2084"}},
+		}, "HDR10"},
+		{"profile 5 without color metadata falls back to hdr", &models.MediaFile{
+			HDR:         true,
+			VideoTracks: []models.VideoTrack{{DVProfile: 5}},
+		}, "HDR"},
 		{"dv via DOVI range type only", &models.MediaFile{
 			HDR: true,
 			VideoTracks: []models.VideoTrack{{
