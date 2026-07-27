@@ -214,7 +214,11 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			SELECT 1
 			FROM media_items mi
 			WHERE mi.type = 'audiobook'
-			  AND (mi.poster_path IS NULL OR mi.poster_path = '')
+			  AND NOT EXISTS (
+			      SELECT 1
+			      FROM media_item_provider_ids p
+			      WHERE p.content_id = mi.content_id
+			  )
 			  AND mi.last_refreshed IS NULL
 			LIMIT 1
 		)
@@ -274,9 +278,19 @@ func (e *Enricher) runBatch(ctx context.Context, items []enrichmentItemRow, enri
 }
 
 // claimBatch returns up to batchSize audiobook items that need enrichment.
-// "Needs enrichment" means poster_path IS NULL or empty AND last_refreshed IS NULL.
-// We skip items where last_refreshed IS NOT NULL — those have already had at
-// least one enrichment pass regardless of outcome.
+// "Needs enrichment" means the item has no provider identity at all AND
+// last_refreshed IS NULL. We skip items where last_refreshed IS NOT NULL —
+// those have already had at least one enrichment pass regardless of outcome,
+// which is what bounds retries: enrichItem stamps last_refreshed on a clean
+// no-match and deliberately withholds it on provider error, so unmatchable
+// items are tried once while transient failures come back.
+//
+// This keys on identity rather than on poster_path, which is what it used to
+// test. Audiobook files essentially always carry embedded cover art, so the
+// scanner gave every item a poster before enrichment ever looked at it and the
+// old predicate matched nothing: in production it selected 0 rows while 5,712
+// audiobooks had no provider ID, 5,710 of them holding a scanner-supplied
+// poster. Cover presence says nothing about whether an item was identified.
 func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) {
 	// One query: join media_item_libraries to get folder_id, join media_folders
 	// for metadata_language, and LEFT JOIN item_people to get the author name.
@@ -301,7 +315,11 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 		LEFT JOIN media_item_libraries mil ON mil.content_id = mi.content_id
 		LEFT JOIN media_folders mf ON mf.id = mil.media_folder_id
 		WHERE mi.type = 'audiobook'
-		  AND (mi.poster_path IS NULL OR mi.poster_path = '')
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM media_item_provider_ids p
+		      WHERE p.content_id = mi.content_id
+		  )
 		  AND mi.last_refreshed IS NULL
 		ORDER BY mi.created_at ASC
 		LIMIT $1
