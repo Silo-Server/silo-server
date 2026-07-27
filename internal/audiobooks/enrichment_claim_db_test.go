@@ -143,7 +143,7 @@ func TestHasPendingItemsMirrorsClaimBatch(t *testing.T) {
 
 	// Whatever else is in the test database, an unidentified item with a cover
 	// must make both agree that there is work.
-	seedAudiobook(t, pool, "mirror", "/covers/embedded.jpg", false)
+	fixtureID := seedAudiobook(t, pool, "mirror", "/covers/embedded.jpg", false)
 
 	pending, err := e.HasPendingItems(context.Background())
 	if err != nil {
@@ -152,7 +152,9 @@ func TestHasPendingItemsMirrorsClaimBatch(t *testing.T) {
 	if !pending {
 		t.Fatal("HasPendingItems reported no work while an unidentified audiobook exists")
 	}
-	if len(claimedIDs(t, e)) == 0 {
-		t.Fatal("HasPendingItems reported work but claimBatch claimed nothing")
+	// Assert the fixture itself, not just a non-empty set: unrelated rows in a
+	// shared test database could otherwise satisfy the check.
+	if !claimedIDs(t, e)[fixtureID] {
+		t.Fatal("HasPendingItems reported work but claimBatch did not claim the eligible fixture")
 	}
 }

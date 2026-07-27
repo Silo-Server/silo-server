@@ -387,3 +387,41 @@ func TestResultTitleFallsBackToOriginalTitle(t *testing.T) {
 		t.Errorf("ResultTitle = %q, want the original title when Name is empty", got)
 	}
 }
+
+// Composed and decomposed Unicode spellings of one title must compare equal.
+// Before NFC normalisation, a decomposed accent (e + U+0301) was a combining
+// mark to the punctuation strip and vanished, while the composed form kept its
+// letter -- so byte-level variants of the same title scored 0.
+func TestComposedAndDecomposedSpellingsMatch(t *testing.T) {
+	composed := "Café"    // U+00E9
+	decomposed := "Café" // e + combining acute
+	if s := TitleScore(composed, decomposed); s != 1 {
+		t.Errorf("TitleScore(composed, decomposed) = %.2f, want 1", s)
+	}
+	if _, ok := BestMatch(composed, []SearchResult{{Name: decomposed}}); !ok {
+		t.Error("decomposed spelling of an identical title was rejected")
+	}
+}
+
+// A volume-less alias must not rescue a primary title whose volume contradicts
+// the item's: aliases are often the bare series name, and accepting through
+// one persists IDs for a different book.
+func TestAliasCannotRescueAWrongVolumePrimary(t *testing.T) {
+	res := []SearchResult{{
+		Name:         "Dungeon In My Closet, Book 5",
+		TitleAliases: []TitleAlias{{Title: "Dungeon In My Closet"}},
+	}}
+	if _, ok := BestMatch("Dungeon In My Closet 2", res); ok {
+		t.Error("a wrong-volume primary was accepted via its volume-less alias")
+	}
+
+	// The alias path must still rescue a result whose primary merely differs
+	// textually without contradicting the volume.
+	translated := []SearchResult{{
+		Name:         "Sturmmutter",
+		TitleAliases: []TitleAlias{{Title: "Mother of Storms"}},
+	}}
+	if _, ok := BestMatch("Mother of Storms", translated); !ok {
+		t.Error("alias rescue for a translated title stopped working")
+	}
+}

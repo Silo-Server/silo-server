@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Search providers rank by their own relevance, not ours, and they answer
@@ -116,6 +118,11 @@ func foldNumberWords(normalised string) string {
 // otherwise, and containment carries the near-misses. That is coarse but
 // correct, and strictly better than the ASCII-only behaviour it replaces.
 func normaliseTitle(s string) string {
+	// Compose combining marks first: a decomposed "Café" (e + U+0301) would
+	// otherwise lose its accent to the punctuation strip -- U+0301 is \p{M},
+	// not \p{L} -- while the composed spelling keeps it, so two byte-level
+	// spellings of the same title scored 0 against each other.
+	s = norm.NFC.String(s)
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = editionNoiseRE.ReplaceAllString(s, " ")
 	s = nonAlnumRE.ReplaceAllString(s, " ")
@@ -291,6 +298,19 @@ func BestMatchYear(want string, wantYear int, results []SearchResult) (SearchRes
 		if strings.TrimSpace(name) == "" {
 			name = r.OriginalTitle
 		}
+
+		// A volume stated on the primary title that contradicts the wanted
+		// volume disqualifies the whole result, aliases included. Aliases are
+		// often the volume-less series name, and letting one rescue a
+		// wrong-volume primary would persist IDs for a different book --
+		// "Dungeon In My Closet, Book 5" must not be accepted for volume 2 via
+		// its generic "Dungeon In My Closet" alias.
+		if wv, wok := titleVolume(want); wok {
+			if cv, cok := titleVolume(name); cok && cv != wv {
+				continue
+			}
+		}
+
 		score := TitleScore(want, name)
 
 		// Aliases are provider-confirmed titles for the same work, so a

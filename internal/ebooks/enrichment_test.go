@@ -1424,6 +1424,10 @@ func TestCleanEbookSearchTitle(t *testing.T) {
 		{"The Wheel of Time (Book 2)", "", "The Wheel of Time"},
 		// Stacked markers peel rather than leaving a stray group behind.
 		{"Just One Night (The Raven Brothers Book 4) (2019)", "", "Just One Night"},
+		// A marker word without volume syntax is a title, not furniture: "book"
+		// alone must not condemn the parenthetical.
+		{"Markus Zusak Reader (The Book Thief)", "", "Markus Zusak Reader (The Book Thief)"},
+		{"Anthology (Complete Series)", "", "Anthology (Complete Series)"},
 		{"White Out [Badlands Thriller]", "", "White Out [Badlands Thriller]"},
 		{"Salem's Lot (2019)", "", "Salem's Lot"},
 		{"The Hobbit (Illustrated)", "", "The Hobbit (Illustrated)"},

@@ -1085,16 +1085,10 @@ func providerIDMapFromRows(rows []*models.MediaItemProviderID) map[string]string
 	return m
 }
 
-// providerIDOwnerLookup reports the content item (if any) that already owns a
-// given durable provider ID. *catalog.ProviderIDRepository satisfies it.
-type providerIDOwnerLookup interface {
-	FindContentIDByProviderIDs(
-		ctx context.Context,
-		providerIDs map[string]string,
-		itemType string,
-		excludeContentID string,
-	) (string, error)
-}
+// providerIDOwnerLookup is the shared ownership contract; see
+// metadata.ProviderIDOwnerLookup for why enrichment checks it before claiming
+// an ID.
+type providerIDOwnerLookup = metadata.ProviderIDOwnerLookup
 
 // providerIDOwner reports which other item already owns a provider ID, or ""
 // when it is free. Mirrors the guard the ebook enricher has always had: without

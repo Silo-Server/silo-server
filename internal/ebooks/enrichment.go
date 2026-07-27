@@ -944,11 +944,10 @@ func classifyEnrichmentError(err error) (EnrichmentErrorClass, time.Duration) {
 	}
 }
 
-// providerIDOwnerLookup reports the content item (if any) that already owns a
-// given set of durable provider IDs. *catalog.ProviderIDRepository satisfies it.
-type providerIDOwnerLookup interface {
-	FindContentIDByProviderIDs(ctx context.Context, providerIDs map[string]string, itemType, excludeContentID string) (string, error)
-}
+// providerIDOwnerLookup is the shared ownership contract; see
+// metadata.ProviderIDOwnerLookup for why enrichment checks it before claiming
+// an ID.
+type providerIDOwnerLookup = metadata.ProviderIDOwnerLookup
 
 // collectEbookMetadata queries every provider in the chain and accumulates
 // IDs and metadata. Individual provider failures are collected (not fatal) so
@@ -1384,9 +1383,13 @@ func filterEbookPeople(people []models.ItemPerson) []models.ItemPerson {
 // ebookTrailingGroupRE matches a single trailing (...) or [...] group.
 var ebookTrailingGroupRE = regexp.MustCompile(`\s*[\(\[]([^\)\]]*)[\)\]]\s*$`)
 
-// ebookSeriesNoiseRE flags a parenthetical as series/edition noise rather than
-// part of the real title: a book/volume/part marker, a "#N", or a bare year.
-var ebookSeriesNoiseRE = regexp.MustCompile(`(?i)\b(book|bk|vol|volume|series|part|saga|edition|novella?)\b|#\s*\d|^\s*\d{1,4}\s*$|\b(19|20)\d{2}\b`)
+// ebookSeriesNoiseRE flags a parenthetical as series/volume noise rather than
+// part of the real title. It requires actual volume syntax -- a marker word
+// followed by a number ("Book 4", "Vol. 2"), a "#N", a bare number, or a bare
+// year -- not merely a marker word. The word alone is not evidence: matching
+// bare "book" discarded meaningful suffixes like "(The Book Thief)", which is
+// a title, not furniture.
+var ebookSeriesNoiseRE = regexp.MustCompile(`(?i)\b(?:book|bk|vol|volume|series|part|saga|novella?)\b\.?\s*#?\s*\d{1,4}\b|#\s*\d|^\s*\d{1,4}\s*$|\b(19|20)\d{2}\b`)
 
 // ebookYearOnlyRE matches a parenthetical that is nothing but a year. Years are
 // already carried by SearchQuery.Year, so they are dropped from the text rather
