@@ -385,6 +385,7 @@ export const adminKeys = {
   requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,
   recommendationsStatus: () => ["admin", "recommendationsStatus"] as const,
   inviteCodes: () => ["admin", "inviteCodes"] as const,
+  invitations: () => ["admin", "invitations"] as const,
   apiKeys: () => ["admin", "apiKeys"] as const,
   rateLimitConfig: () => ["admin", "rateLimitConfig"] as const,
   playbackHistory: (params: {

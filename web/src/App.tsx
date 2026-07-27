@@ -75,10 +75,14 @@ import Recommendations from "@/pages/Recommendations";
 import RecommendationsSection from "@/pages/RecommendationsSection";
 import Calendar from "@/pages/Calendar";
 import Signup from "@/pages/Signup";
+import InviteClaim from "@/pages/InviteClaim";
+import HouseholdSetup from "@/pages/HouseholdSetup";
 import TasteSeed from "@/pages/TasteSeed";
 import { useFavorites } from "@/hooks/queries/favorites";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
 import { isTasteSeedDismissed } from "@/lib/tasteSeed";
+import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
+import { useOnboardingState } from "@/hooks/queries/onboarding";
 import SettingsLayout from "@/pages/SettingsLayout";
 import AppearanceSettings from "@/pages/settings/AppearanceSettings";
 import AccessibilitySettings from "@/pages/settings/AccessibilitySettings";
@@ -234,8 +238,14 @@ function RequireRequestsEnabled({ children }: { children: ReactNode }) {
 function TasteSeedGate({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
   const { data: favorites, isPending, isError } = useFavorites();
+  const onboarding = useOnboardingState({ enabled: profile !== null });
 
   if (isPending || isError || !profile) return <>{children}</>;
+
+  // While the feature tour is pending (or its state unknown) the tour owns
+  // the first-run moment — it ends by handing off to /taste-seed itself, so
+  // redirecting now would jump the queue.
+  if (onboarding.data === undefined || !onboarding.data.done) return <>{children}</>;
 
   const hasFavorites = (favorites?.length ?? 0) > 0;
   const dismissed = isTasteSeedDismissed(profile.id);
@@ -371,6 +381,8 @@ function AppRoutes() {
       <Route path="/activate" element={<ActivateDevice />} />
       <Route path="/setup" element={<SetupWizard />} />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/invite/:token" element={<InviteClaim />} />
+      <Route path="/household-setup" element={<HouseholdSetup />} />
       <Route
         path="/*"
         element={
@@ -489,9 +501,11 @@ function AppRoutes() {
                           <Route
                             path="/"
                             element={
-                              <TasteSeedGate>
-                                <Home />
-                              </TasteSeedGate>
+                              <OnboardingGate>
+                                <TasteSeedGate>
+                                  <Home />
+                                </TasteSeedGate>
+                              </OnboardingGate>
                             }
                           />
                           <Route path="/catalog" element={<Catalog />} />
