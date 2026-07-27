@@ -32,13 +32,20 @@ import (
 // sha/bytes/entries, quotas, profile attribution) applies identically. The
 // manifest is validated only for size at init; Ingest judges it at complete.
 //
-// Sessions spool to local disk and expire after diagnosticsChunkSessionTTL.
-// They do NOT hold the shared in-flight ingest slot while chunks stream in —
-// only complete acquires it, for the ingest itself — so a client that dies
-// mid-upload leaves nothing behind but spool bytes the TTL sweep reclaims,
-// and never blocks its user's later uploads. Concurrency is bounded by one
-// session per user (a new init replaces the previous session) plus a global
-// session cap.
+// Sessions spool to local disk and expire after diagnosticsChunkSessionTTL of
+// inactivity (chunk arrivals refresh the deadline). They do NOT hold the
+// shared in-flight ingest slot while chunks stream in — only complete
+// acquires it, for the ingest itself — so a client that dies mid-upload
+// leaves nothing behind but spool bytes the TTL sweep reclaims, and never
+// blocks its user's later uploads. Concurrency is bounded by one session per
+// user (a new init replaces the previous session) plus a global session cap,
+// both reserved atomically in init.
+//
+// Session state (ownership map + spool files) is process-local. That is fine
+// for the integrated single-process server this feature targets; a
+// multi-replica API deployment would need sticky routing for the few requests
+// of one chunked upload, or a chunk PUT landing on another replica answers
+// 404 and the client restarts from init.
 const (
 	// diagnosticsChunkSessionTTL bounds how long an in-progress chunked upload
 	// may sit idle before its spooled bytes are reclaimed. Generous enough for
@@ -84,6 +91,12 @@ type diagnosticsChunkSessions struct {
 	mu     sync.Mutex
 	owners map[string]diagnosticsChunkOwner
 	byUser map[int]string
+	// reserved counts init calls that have claimed a cap slot but not yet
+	// registered their created session in owners. Counting reservations and
+	// registrations together makes the per-user + global-cap admission atomic:
+	// concurrent inits cannot each pass the checks before any of them
+	// registers.
+	reserved map[int]struct{}
 }
 
 type diagnosticsChunkOwner struct {
@@ -92,7 +105,7 @@ type diagnosticsChunkOwner struct {
 }
 
 func newDiagnosticsChunkSessions(spoolDir string) *diagnosticsChunkSessions {
-	return &diagnosticsChunkSessions{
+	sessions := &diagnosticsChunkSessions{
 		manager: uploads.NewManager(uploads.ManagerOptions{
 			RootDir:      spoolDir,
 			TTL:          diagnosticsChunkSessionTTL,
@@ -101,9 +114,20 @@ func newDiagnosticsChunkSessions(spoolDir string) *diagnosticsChunkSessions {
 			// setting; the manager-level bound is just a hard backstop.
 			MaxSize: 256 << 20,
 		}),
-		owners: make(map[string]diagnosticsChunkOwner),
-		byUser: make(map[int]string),
+		owners:   make(map[string]diagnosticsChunkOwner),
+		byUser:   make(map[int]string),
+		reserved: make(map[int]struct{}),
 	}
+	// A restart leaves the previous process's spool directories on disk with
+	// no session map entry to ever expire them; reclaim them now.
+	sessions.manager.ReclaimOrphanedDirs()
+	return sessions
+}
+
+// startSweeper begins the timed expiry sweep. Split from the constructor so
+// tests can run without background goroutines.
+func (s *diagnosticsChunkSessions) startSweeper(stop <-chan struct{}) {
+	s.manager.StartExpirySweeper(time.Minute, stop)
 }
 
 // owner returns the session owner entry when id belongs to userID.
@@ -117,10 +141,43 @@ func (s *diagnosticsChunkSessions) owner(id string, userID int) (diagnosticsChun
 	return owner, true
 }
 
-func (s *diagnosticsChunkSessions) put(id string, owner diagnosticsChunkOwner) {
+// reserve atomically claims the user's session slot and a global cap slot,
+// evicting the user's own previous session first (its id is returned for the
+// caller to cancel outside the lock — the caller cancels it whether or not
+// admission succeeds, since the eviction already happened). A false capOK
+// means the cap is full, or a concurrent init by the same user holds an
+// unfinished reservation — that racing call must not create a second session.
+func (s *diagnosticsChunkSessions) reserve(userID int) (previousID string, capOK bool) {
 	s.mu.Lock()
-	s.owners[id] = owner
-	s.byUser[owner.userID] = id
+	defer s.mu.Unlock()
+	if _, inFlight := s.reserved[userID]; inFlight {
+		return "", false
+	}
+	if id, ok := s.byUser[userID]; ok {
+		previousID = id
+		delete(s.owners, id)
+		delete(s.byUser, userID)
+	}
+	if len(s.owners)+len(s.reserved) >= diagnosticsChunkSessionCap {
+		return previousID, false
+	}
+	s.reserved[userID] = struct{}{}
+	return previousID, true
+}
+
+// commit registers the created session under an existing reservation.
+func (s *diagnosticsChunkSessions) commit(userID int, id string, manifest []byte) {
+	s.mu.Lock()
+	delete(s.reserved, userID)
+	s.owners[id] = diagnosticsChunkOwner{userID: userID, manifest: manifest}
+	s.byUser[userID] = id
+	s.mu.Unlock()
+}
+
+// unreserve rolls back a reservation whose session creation failed.
+func (s *diagnosticsChunkSessions) unreserve(userID int) {
+	s.mu.Lock()
+	delete(s.reserved, userID)
 	s.mu.Unlock()
 }
 
@@ -136,24 +193,10 @@ func (s *diagnosticsChunkSessions) drop(id string) {
 	s.mu.Unlock()
 }
 
-// sessionIDForUser returns the user's open session id, if any.
-func (s *diagnosticsChunkSessions) sessionIDForUser(userID int) (string, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id, ok := s.byUser[userID]
-	return id, ok
-}
-
-func (s *diagnosticsChunkSessions) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.owners)
-}
-
 // sweepExpired drops owner entries whose manager session has expired or is
-// gone. The manager reclaims spool files on its own sweep; this keeps the
-// owner map (and the per-user slot it implies) from leaking alongside them.
-// Called from init, the only entry point that creates sessions.
+// gone, so the owner map (and the cap headroom it counts against) doesn't
+// leak alongside the manager's own spool cleanup. Called from init, the only
+// entry point that needs the freed headroom.
 func (s *diagnosticsChunkSessions) sweepExpired() {
 	s.mu.Lock()
 	stale := make([]string, 0, len(s.owners))
@@ -215,13 +258,14 @@ func (h *DiagnosticsHandler) HandleChunkedUploadInit(w http.ResponseWriter, r *h
 
 	h.chunkSessions.sweepExpired()
 
-	// One session per user: a new init replaces any previous one, so a client
-	// that died mid-upload can start over immediately instead of waiting out
-	// the TTL. The replaced spool is discarded.
-	if previousID, ok := h.chunkSessions.sessionIDForUser(userID); ok {
+	// Atomically evict the user's previous session (a new init replaces it,
+	// so a client that died mid-upload can start over immediately) and claim
+	// a cap slot. Cancel the evicted spool outside the lock either way.
+	previousID, capOK := h.chunkSessions.reserve(userID)
+	if previousID != "" {
 		h.abortChunkedUpload(previousID)
 	}
-	if h.chunkSessions.count() >= diagnosticsChunkSessionCap {
+	if !capOK {
 		h.logRejected(r.Context(), userID, "busy")
 		w.Header().Set("Retry-After", diagnosticsBusyRetryAfter)
 		writeError(w, http.StatusServiceUnavailable, "busy", "Diagnostics upload capacity is busy")
@@ -234,14 +278,12 @@ func (h *DiagnosticsHandler) HandleChunkedUploadInit(w http.ResponseWriter, r *h
 		ChunkSize: diagnostics.UploadChunkBytes,
 	})
 	if err != nil {
+		h.chunkSessions.unreserve(userID)
 		statusCode, message := uploadErrorResponse(err)
 		writeError(w, statusCode, "upload_error", message)
 		return
 	}
-	h.chunkSessions.put(session.ID, diagnosticsChunkOwner{
-		userID:   userID,
-		manifest: append([]byte(nil), req.Manifest...),
-	})
+	h.chunkSessions.commit(userID, session.ID, append([]byte(nil), req.Manifest...))
 
 	writeJSON(w, http.StatusCreated, diagnosticsChunkInitResponse{
 		UploadID:    session.ID,
@@ -253,6 +295,11 @@ func (h *DiagnosticsHandler) HandleChunkedUploadInit(w http.ResponseWriter, r *h
 
 // HandleChunkedUploadChunk handles PUT /diagnostics/reports/uploads/{upload_id}/chunks/{chunk_index}.
 func (h *DiagnosticsHandler) HandleChunkedUploadChunk(w http.ResponseWriter, r *http.Request) {
+	// The integrated server's 30s ReadTimeout kills a 768 KiB chunk arriving
+	// below ~26 KiB/s — exactly the slow uplinks the chunked fallback exists
+	// for. Extend the read deadline the same way the single-shot upload does.
+	h.extendDiagnosticsUploadDeadlines(w, r, false)
+
 	userID, ok := diagnosticsUserID(w, r)
 	if !ok {
 		return
@@ -288,6 +335,12 @@ func (h *DiagnosticsHandler) HandleChunkedUploadChunk(w http.ResponseWriter, r *
 
 // HandleChunkedUploadComplete handles POST /diagnostics/reports/uploads/{upload_id}/complete.
 func (h *DiagnosticsHandler) HandleChunkedUploadComplete(w http.ResponseWriter, r *http.Request) {
+	// Ingest + object-store write can outlast the server's 120s WriteTimeout;
+	// without the extension the stored report's 201 would be lost and the
+	// client would retry an upload that already succeeded (see the single-shot
+	// handler).
+	h.extendDiagnosticsUploadDeadlines(w, r, true)
+
 	userID, ok := diagnosticsUserID(w, r)
 	if !ok {
 		return
@@ -301,8 +354,22 @@ func (h *DiagnosticsHandler) HandleChunkedUploadComplete(w http.ResponseWriter, 
 
 	// Availability can have changed since init (admin toggle, storage loss);
 	// re-check so a completed spool is not ingested into a disabled feature.
-	if _, ok := h.diagnosticsUploadStatus(w, r, userID); !ok {
+	// Only a definitive non-available answer discards the session — a
+	// transient status load failure (500) keeps it so a retried complete can
+	// succeed without re-uploading every chunk.
+	status, statusErr := h.service.Status(r.Context(), userID)
+	if statusErr != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load diagnostics status")
+		return
+	}
+	if status.Status != diagnostics.StatusAvailable {
 		h.abortChunkedUpload(uploadID)
+		switch status.Status {
+		case diagnostics.StatusDisabled:
+			writeError(w, http.StatusForbidden, "disabled", "Diagnostics uploads are disabled")
+		default:
+			writeError(w, http.StatusServiceUnavailable, "storage_unavailable", "Diagnostics storage is not configured")
+		}
 		return
 	}
 

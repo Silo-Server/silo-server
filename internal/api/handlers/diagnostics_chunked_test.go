@@ -3,10 +3,12 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +17,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 )
+
+var errFakeStatusUnavailable = errors.New("status store temporarily unavailable")
 
 // newChunkedTestHandler returns a handler whose chunk spool lives in the
 // test's temp dir so parallel test runs never share state.
@@ -310,6 +314,89 @@ func TestDiagnosticsChunkedCompleteIngestErrorMapsLikeSingleShot(t *testing.T) {
 	// The failed session is consumed; a retry needs a fresh init and the slot
 	// must be free for it.
 	initChunkedUpload(t, router, 10, accessClaims())
+}
+
+func TestDiagnosticsChunkedUploadConcurrentInitsRespectSlotAtomically(t *testing.T) {
+	service := newFakeDiagnosticsService()
+	handler := newChunkedTestHandler(t, service)
+	router := chunkedRouter(handler)
+
+	// Fire concurrent inits for the same user. The reservation must admit at
+	// most one at a time — the losers get busy — so a single account can
+	// never fan out to multiple sessions and eat the global cap.
+	const attempts = 8
+	var wg sync.WaitGroup
+	codes := make([]int, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(slot int) {
+			defer wg.Done()
+			rec := doChunked(t, router, http.MethodPost, "/uploads",
+				[]byte(`{"manifest":{"ok":true},"bundle_bytes":10}`), accessClaims())
+			codes[slot] = rec.Code
+		}(i)
+	}
+	wg.Wait()
+
+	created := 0
+	for _, code := range codes {
+		switch code {
+		case http.StatusCreated:
+			created++
+		case http.StatusServiceUnavailable:
+		default:
+			t.Fatalf("unexpected init status %d", code)
+		}
+	}
+	if created < 1 {
+		t.Fatal("no init succeeded")
+	}
+	// However the race resolved, the user must end up with at most one live
+	// session and no leaked cap slots: after aborting it, a fresh init and
+	// full upload must succeed.
+	handler.chunkSessions.mu.Lock()
+	owned := len(handler.chunkSessions.owners)
+	reserved := len(handler.chunkSessions.reserved)
+	handler.chunkSessions.mu.Unlock()
+	if owned > 1 || reserved != 0 {
+		t.Fatalf("owners = %d (want ≤1), reserved = %d (want 0)", owned, reserved)
+	}
+
+	session := initChunkedUpload(t, router, 10, accessClaims())
+	rec := doChunked(t, router, http.MethodPut, "/uploads/"+session.UploadID+"/chunks/0",
+		[]byte("0123456789"), accessClaims())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("post-race chunk status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	rec = doChunked(t, router, http.MethodPost, "/uploads/"+session.UploadID+"/complete", nil, accessClaims())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("post-race complete status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDiagnosticsChunkedCompleteTransientStatusErrorKeepsSession(t *testing.T) {
+	service := newFakeDiagnosticsService()
+	handler := newChunkedTestHandler(t, service)
+	router := chunkedRouter(handler)
+
+	session := initChunkedUpload(t, router, 10, accessClaims())
+	rec := doChunked(t, router, http.MethodPut, "/uploads/"+session.UploadID+"/chunks/0",
+		[]byte("0123456789"), accessClaims())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chunk status = %d", rec.Code)
+	}
+
+	// A transient status failure must answer 500 WITHOUT destroying the fully
+	// uploaded spool; the retried complete succeeds with no re-upload.
+	service.setStatusErr(errFakeStatusUnavailable)
+	rec = doChunked(t, router, http.MethodPost, "/uploads/"+session.UploadID+"/complete", nil, accessClaims())
+	assertDiagnosticsError(t, rec, http.StatusInternalServerError, "internal_error")
+
+	service.setStatusErr(nil)
+	rec = doChunked(t, router, http.MethodPost, "/uploads/"+session.UploadID+"/complete", nil, accessClaims())
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("retried complete status = %d; body=%s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestDiagnosticsStatusAdvertisesUploadChunkBytes(t *testing.T) {

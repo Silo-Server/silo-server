@@ -706,6 +706,7 @@ func adminClaims() *auth.Claims {
 type fakeDiagnosticsService struct {
 	mu              sync.Mutex
 	status          diagnostics.Status
+	statusErr       error
 	statusCalls     int
 	ingestCalls     int
 	ingestErr       error
@@ -749,7 +750,16 @@ func (f *fakeDiagnosticsService) Status(context.Context, int) (diagnostics.Statu
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statusCalls++
+	if f.statusErr != nil {
+		return diagnostics.Status{}, f.statusErr
+	}
 	return f.status, nil
+}
+
+func (f *fakeDiagnosticsService) setStatusErr(err error) {
+	f.mu.Lock()
+	f.statusErr = err
+	f.mu.Unlock()
 }
 
 func (f *fakeDiagnosticsService) Ingest(_ context.Context, _ int, _ *string, manifestJSON []byte, bundle io.Reader) (diagnostics.IngestResult, error) {
