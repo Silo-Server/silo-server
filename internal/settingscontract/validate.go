@@ -780,3 +780,79 @@ func isAlpha(value string) bool {
 	}
 	return true
 }
+
+// CompareValues orders two values of this schema's type: negative when a sorts
+// below b, zero when they are equivalent, positive when a sorts above.
+//
+// This is what makes a ceiling or floor constraint mean anything. Numeric types
+// compare numerically; an ordered enum compares by declared member position,
+// which is why manifest.schema.json only permits those constraints on a numeric
+// type or an enum marked ordered — every other type has no defined direction to
+// cap in.
+//
+// A value that is not a member, or that will not decode, sorts as equivalent so
+// an unrecognized value is never silently narrowed. Validation is a separate
+// concern and has already rejected it by the time a constraint is applied.
+func (v *ValueSchema) CompareValues(a, b json.RawMessage) int {
+	switch v.Type {
+	case TypeInteger, TypeNumber:
+		left, okA := decodeFloat(a)
+		right, okB := decodeFloat(b)
+		if !okA || !okB {
+			return 0
+		}
+		switch {
+		case left < right:
+			return -1
+		case left > right:
+			return 1
+		default:
+			return 0
+		}
+
+	case TypeEnum:
+		if !v.Ordered {
+			return 0
+		}
+		left, okA := v.enumIndex(a)
+		right, okB := v.enumIndex(b)
+		if !okA || !okB {
+			return 0
+		}
+		switch {
+		case left < right:
+			return -1
+		case left > right:
+			return 1
+		default:
+			return 0
+		}
+	}
+	return 0
+}
+
+// enumIndex returns the declared position of raw among this schema's members.
+func (v *ValueSchema) enumIndex(raw json.RawMessage) (int, bool) {
+	var decoded any
+	if err := strictUnmarshal(bytes.TrimSpace(raw), &decoded); err != nil {
+		return 0, false
+	}
+	for i, member := range v.Values {
+		if enumMatches(decoded, member.Value) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func decodeFloat(raw json.RawMessage) (float64, bool) {
+	var number json.Number
+	if err := strictUnmarshal(bytes.TrimSpace(raw), &number); err != nil {
+		return 0, false
+	}
+	parsed, err := number.Float64()
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
