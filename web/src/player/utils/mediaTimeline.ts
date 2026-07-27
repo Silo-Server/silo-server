@@ -3,7 +3,9 @@ export function toMediaTime(playerTimeSeconds: number, streamOriginSeconds = 0):
 }
 
 export function toPlayerTime(mediaTimeSeconds: number, streamOriginSeconds = 0): number {
-  return Math.max(0, mediaTimeSeconds - streamOriginSeconds);
+  // Preserve negative offsets so callers can distinguish a target before the
+  // current HLS window from the locally seekable position at zero.
+  return mediaTimeSeconds - streamOriginSeconds;
 }
 
 /**
