@@ -181,8 +181,20 @@ func TestJWT_TamperedToken(t *testing.T) {
 		t.Fatalf("GenerateAccessToken() error: %v", err)
 	}
 
-	// Tamper with the token by modifying the last character of the signature.
-	tampered := token[:len(token)-1] + "X"
+	// Tamper with the token by flipping a bit in the middle of the signature.
+	//
+	// Not the last character: an HMAC-SHA256 signature is 32 bytes, so its
+	// base64url encoding is 43 characters and the last one carries only four
+	// significant bits. U, V, W and X all decode to the same trailing byte, so
+	// overwriting the last character with "X" left roughly one token in
+	// sixteen byte-identical and validly signed — a real 6% flake, measured
+	// over 50k distinct signatures.
+	middle := len(token) - 20
+	flipped := byte('A')
+	if token[middle] == flipped {
+		flipped = 'B'
+	}
+	tampered := token[:middle] + string(flipped) + token[middle+1:]
 
 	_, err = svc.ValidateToken(tampered)
 	if err == nil {
