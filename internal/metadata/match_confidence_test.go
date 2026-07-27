@@ -238,3 +238,43 @@ func TestYearsAreNotTreatedAsVolumes(t *testing.T) {
 		t.Error("a year was parsed as a volume number")
 	}
 }
+
+// Normalisation must not be ASCII-only. An earlier version stripped via
+// [^a-z0-9], which reduced non-Latin titles to the empty string -- an identical
+// Japanese title then scored 0 against itself and was rejected, and accented
+// Latin titles were shredded. That would have been a hard regression for
+// non-English content, which under the old blind results[0] path matched by
+// accident because nothing was checked at all.
+func TestNonLatinTitlesSurviveNormalisation(t *testing.T) {
+	for _, title := range []string{"進撃の巨人", "Мастер и Маргарита", "Blåbærsyltetøy"} {
+		if got := normaliseTitle(title); got == "" {
+			t.Errorf("normaliseTitle(%q) = %q, want the title's characters preserved", title, got)
+		}
+		if s := TitleScore(title, title); s != 1 {
+			t.Errorf("TitleScore(%q, itself) = %.2f, want 1", title, s)
+		}
+		if _, ok := BestMatch(title, []SearchResult{{Name: title}}); !ok {
+			t.Errorf("BestMatch(%q) rejected an identical title", title)
+		}
+	}
+}
+
+func TestNonLatinTitlesStillRejectDifferentTitles(t *testing.T) {
+	if _, ok := BestMatch("進撃の巨人", []SearchResult{{Name: "ドラゴンボール"}}); ok {
+		t.Error("two different Japanese titles matched")
+	}
+	if _, ok := BestMatch("Мастер и Маргарита", []SearchResult{{Name: "Преступление и наказание"}}); ok {
+		t.Error("two different Russian titles matched")
+	}
+}
+
+// Accented Latin must not be silently folded away: "Æblemos" and "Blåbær" are
+// distinct titles, and stripping the accents used to make both mostly empty.
+func TestAccentedLatinKeepsItsLetters(t *testing.T) {
+	if got := normaliseTitle("Blåbærsyltetøy"); got != "blåbærsyltetøy" {
+		t.Errorf("normaliseTitle = %q, want the accented letters kept", got)
+	}
+	if _, ok := BestMatch("Æblemos", []SearchResult{{Name: "Blåbærsyltetøy"}}); ok {
+		t.Error("two unrelated Danish titles matched")
+	}
+}

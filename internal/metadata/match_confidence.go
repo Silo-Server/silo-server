@@ -34,6 +34,12 @@ const (
 	// containment alone. "Bitcoin" is a substring of a great many audiobook
 	// titles; requiring some length stops very short titles from matching
 	// anything that happens to include them.
+	//
+	// Measured in bytes, not runes, and that is deliberate. For ASCII it is the
+	// character count this was calibrated against. For multi-byte scripts it is
+	// more permissive -- a four-character CJK title clears it -- which is the
+	// behaviour we want, because a short CJK title is specific in a way that a
+	// short English word like "Bitcoin" is not.
 	minContainmentLen = 12
 )
 
@@ -50,11 +56,23 @@ var (
 		`(?i)\b(?:book|bk|vol|volume|part|series|episode|ep)\b\.?\s*#?\s*(\d{1,4})\b`)
 	hashVolumeRE = regexp.MustCompile(`#\s*(\d{1,4})\b`)
 
-	nonAlnumRE = regexp.MustCompile(`[^a-z0-9]+`)
+	// Punctuation and separators only. Deliberately NOT [^a-z0-9]: that is
+	// ASCII-only, and this library is not. Stripping every non-ASCII rune
+	// reduced "進撃の巨人" to the empty string, so an identical Japanese title
+	// scored 0 against itself and was rejected outright, and accented Latin
+	// titles were shredded ("Blåbærsyltetøy" -> "bl b rsyltet y"). That would
+	// have been a hard regression for non-English content, which previously
+	// matched by accident because nothing was checked at all.
+	nonAlnumRE = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 )
 
 // normaliseTitle lowercases, strips edition decorations and punctuation, and
 // collapses whitespace so two spellings of the same title compare equal.
+//
+// Note for scripts that do not space their words (CJK): the whole title
+// normalises to a single token, so Dice gives 1 for an exact match and 0
+// otherwise, and containment carries the near-misses. That is coarse but
+// correct, and strictly better than the ASCII-only behaviour it replaces.
 func normaliseTitle(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = editionNoiseRE.ReplaceAllString(s, " ")
