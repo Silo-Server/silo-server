@@ -2,20 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://silo-server.dev/contracts/settings/v1/schemas/subtitle-appearance.json",
   "title": "Subtitle appearance",
-  "description": "Rendering appearance for subtitle tracks. Shared by the web, Apple and Android players; where they disagree the wider vocabulary wins, because a value a shipped client can already produce must stay storable.",
+  "description": "Rendering appearance for subtitle tracks. Shared by the web, Apple and Android players; where they disagree the wider vocabulary wins, because a value a shipped client can already produce must stay storable. A stored value is a sparse override: every property is optional, and a consumer merges what is present over this definition's default_value, which is complete. Requiring all nine would invalidate the partial objects the current API already stores and round-trips, so the migration would have to quarantine real user preferences. Resolution across scopes is unchanged and still first-wins — a device override replaces the profile's object rather than merging with it — because a device override means \"draw subtitles this way on this screen\", not \"amend the profile\".",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "fontSize",
-    "fontFamily",
-    "fontColor",
-    "backgroundColor",
-    "backgroundStyle",
-    "backgroundOpacity",
-    "textOutline",
-    "textOutlineColor",
-    "position"
-  ],
+  "minProperties": 1,
   "properties": {
     "fontSize": {
       "type": "string",

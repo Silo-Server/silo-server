@@ -810,6 +810,22 @@ func TestObjectValuesValidateAgainstTheirSchema(t *testing.T) {
 		t.Fatalf("valid subtitle appearance rejected: %v", err)
 	}
 
+	// A stored value is a sparse override merged over the default, and the
+	// current API already stores exactly these shapes — see the round trip in
+	// settings_device_test.go. Requiring all nine properties would make the
+	// migration quarantine preferences users really set.
+	for name, partial := range map[string]string{
+		"one property":   `{"fontSize":"small"}`,
+		"two properties": `{"fontSize":"xxlarge","position":"top"}`,
+		"only a color":   `{"fontColor":"#ff0000"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := def.ValueSchema.ValidateValue(json.RawMessage(partial), objSchemas); err != nil {
+				t.Fatalf("partial subtitle appearance %s rejected: %v", partial, err)
+			}
+		})
+	}
+
 	for name, invalid := range map[string]string{
 		"unknown field": `{"fontSize":"large","fontFamily":"sans-serif","fontColor":"#ffffff",
 			"backgroundColor":"#000000","backgroundStyle":"shadow","backgroundOpacity":75,
@@ -820,7 +836,10 @@ func TestObjectValuesValidateAgainstTheirSchema(t *testing.T) {
 		"malformed color": `{"fontSize":"large","fontFamily":"sans-serif","fontColor":"white",
 			"backgroundColor":"#000000","backgroundStyle":"shadow","backgroundOpacity":75,
 			"textOutline":false,"textOutlineColor":"#000000","position":"bottom"}`,
-		"missing field":  `{"fontSize":"large"}`,
+		// Sparse is allowed; empty is not. An override that overrides nothing is
+		// the same state as no override, and the contract represents that as
+		// unset rather than as a stored value.
+		"empty override": `{}`,
 		"arbitrary json": `{"anything":"goes"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
