@@ -406,3 +406,34 @@ func TestEveryPlannedRowValidates(t *testing.T) {
 		}
 	}
 }
+
+// TestRejectIdentityIsAlwaysValidJSON. Both backends store this column as JSON —
+// Postgres declares it jsonb NOT NULL, SQLite guards it with a json_valid CHECK
+// — so a reject carrying prose would fail to insert, and the migration would
+// abort on the very rows it exists to record.
+func TestRejectIdentityIsAlwaysValidJSON(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1", Language: str("!!!")}},
+		Settings: []LegacySetting{{Key: "totally.unknown", Value: "x"}},
+		DeviceSettings: []LegacyDeviceSetting{
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "maybe"},
+		},
+		SeriesPrefs: []LegacySeriesPreference{
+			{ProfileID: "p1", SeriesID: "s1", SubtitleLanguage: str("!!!")},
+		},
+		LibraryPrefs: []LegacyLibraryPreference{
+			{ProfileID: "p1", LibraryID: 4, AudioLanguage: str("!!!")},
+		},
+	})
+
+	if len(res.Rejects) == 0 {
+		t.Fatal("nothing was rejected, so this proves nothing")
+	}
+	for _, reject := range res.Rejects {
+		var decoded map[string]any
+		if err := json.Unmarshal(reject.Identity, &decoded); err != nil {
+			t.Errorf("identity %q for %s is not a JSON object: %v",
+				reject.Identity, reject.SourceKey, err)
+		}
+	}
+}

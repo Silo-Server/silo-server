@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 14
+const schemaVersion = 15
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -142,7 +142,25 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 15 {
+		if err := migrateToV15(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 15"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 15: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV15 backfills canonical setting values from the legacy tables.
+//
+// V14 created the tables; this fills them. It is the cutover's data half, and
+// it runs in the same transaction as every other step, so a database either
+// comes out fully migrated or untouched.
+func migrateToV15(tx *sql.Tx) error {
+	return migrateSettingsToCanonical(tx)
 }
 
 // migrateToV14 adds the canonical settings contract tables. InitSchema already

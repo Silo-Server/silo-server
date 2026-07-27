@@ -103,12 +103,31 @@ type Row struct {
 // Reject records a legacy value that could not be converted. It is written to
 // user_setting_migration_rejects so an operator can see exactly what did not
 // survive, rather than discovering it from a support ticket.
+//
+// Identity is JSON because both backends store it as one: Postgres declares the
+// column jsonb NOT NULL and SQLite guards it with a json_valid CHECK. A
+// free-form description would violate the schema on write, and a structured one
+// is queryable — "every reject for profile p1" is a jsonb predicate rather than
+// a LIKE over prose.
 type Reject struct {
 	SourceTable string
 	SourceKey   string
-	Identity    string
+	Identity    json.RawMessage
 	Value       string
 	Reason      string
+}
+
+// identityJSON builds the reject identity document. Only the fields that locate
+// the row are emitted, so a profile-column reject does not carry an empty
+// device id.
+func identityJSON(fields map[string]any) json.RawMessage {
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		// Only strings and ints reach here, so this cannot fire; an empty
+		// object still satisfies both backends' JSON constraint.
+		return json.RawMessage(`{}`)
+	}
+	return encoded
 }
 
 // Result is what one user's migration produced.
@@ -144,6 +163,15 @@ const (
 // keyPreferredQuality is the one key with bespoke handling: it decomposes into
 // two canonical keys rather than converting to one.
 const keyPreferredQuality = "playback.preferred_quality"
+
+// fieldProfileID is the identity field every non-account reject carries.
+const fieldProfileID = "profile_id"
+
+// accountIdentity locates a reject from the account-wide key/value table, which
+// has no profile, device or content to name.
+func accountIdentity() json.RawMessage {
+	return identityJSON(map[string]any{"scope": "account"})
+}
 
 // legacyQualityDecomposition maps each legacy compound quality value to the two
 // axes that replaced it.
@@ -231,8 +259,8 @@ func (p *Planner) Plan(in Input) Result {
 // planProfiles converts the six preference columns on user_profiles.
 func (p *Planner) planProfiles(profiles []LegacyProfile, res *Result) {
 	for _, profile := range profiles {
-		id := func(field string) string {
-			return fmt.Sprintf("profile=%s column=%s", profile.ID, field)
+		id := func(field string) json.RawMessage {
+			return identityJSON(map[string]any{fieldProfileID: profile.ID, "column": field})
 		}
 
 		// Language columns: the empty string is the legacy spelling of "no
@@ -290,8 +318,9 @@ func (p *Planner) planAccountSettings(
 		if !ok {
 			res.Rejects = append(res.Rejects, Reject{
 				SourceTable: sourceUserSettings, SourceKey: setting.Key,
-				Value:  setting.Value,
-				Reason: "no contract definition; the key was only ever accepted by the unknown-key extension bag",
+				Identity: accountIdentity(),
+				Value:    setting.Value,
+				Reason:   "no contract definition; the key was only ever accepted by the unknown-key extension bag",
 			})
 			continue
 		}
@@ -300,7 +329,8 @@ func (p *Planner) planAccountSettings(
 		if err != nil {
 			res.Rejects = append(res.Rejects, Reject{
 				SourceTable: sourceUserSettings, SourceKey: setting.Key,
-				Value: setting.Value, Reason: err.Error(),
+				Identity: accountIdentity(),
+				Value:    setting.Value, Reason: err.Error(),
 			})
 			continue
 		}
@@ -312,8 +342,9 @@ func (p *Planner) planAccountSettings(
 		if !def.AllowsScope(scope) {
 			res.Rejects = append(res.Rejects, Reject{
 				SourceTable: sourceUserSettings, SourceKey: setting.Key,
-				Value:  setting.Value,
-				Reason: fmt.Sprintf("%s does not allow profile scope", key),
+				Identity: accountIdentity(),
+				Value:    setting.Value,
+				Reason:   fmt.Sprintf("%s does not allow profile scope", key),
 			})
 			continue
 		}
@@ -328,7 +359,9 @@ func (p *Planner) planAccountSettings(
 func (p *Planner) planDeviceSettings(devices []LegacyDeviceSetting, res *Result) {
 	for _, row := range devices {
 		key := canonicalKey(row.Key)
-		identity := fmt.Sprintf("profile=%s device=%s", row.ProfileID, row.DeviceID)
+		identity := identityJSON(map[string]any{
+			fieldProfileID: row.ProfileID, "device_id": row.DeviceID,
+		})
 
 		if key == keyPreferredQuality {
 			p.addQuality(res, sourceUserDeviceSettings, identity,
@@ -375,7 +408,9 @@ func (p *Planner) planDeviceSettings(devices []LegacyDeviceSetting, res *Result)
 func (p *Planner) planSeriesPrefs(prefs []LegacySeriesPreference, res *Result) {
 	for _, pref := range prefs {
 		base := Row{ProfileID: pref.ProfileID, SeriesID: pref.SeriesID}
-		identity := fmt.Sprintf("profile=%s series=%s", pref.ProfileID, pref.SeriesID)
+		identity := identityJSON(map[string]any{
+			fieldProfileID: pref.ProfileID, "series_id": pref.SeriesID,
+		})
 		p.addPlaybackTriple(res, sourceSeriesPrefs, identity,
 			settingscontract.ScopeProfileSeries, base,
 			pref.AudioLanguage, pref.SubtitleLanguage, pref.SubtitleMode, pref.ShowForcedSubtitles)
@@ -385,7 +420,9 @@ func (p *Planner) planSeriesPrefs(prefs []LegacySeriesPreference, res *Result) {
 func (p *Planner) planLibraryPrefs(prefs []LegacyLibraryPreference, res *Result) {
 	for _, pref := range prefs {
 		base := Row{ProfileID: pref.ProfileID, LibraryID: pref.LibraryID}
-		identity := fmt.Sprintf("profile=%s library=%d", pref.ProfileID, pref.LibraryID)
+		identity := identityJSON(map[string]any{
+			fieldProfileID: pref.ProfileID, "library_id": pref.LibraryID,
+		})
 		p.addPlaybackTriple(res, sourceLibraryPrefs, identity,
 			settingscontract.ScopeProfileLibrary, base,
 			pref.AudioLanguage, pref.SubtitleLanguage, pref.SubtitleMode, pref.ShowForcedSubtitles)
@@ -396,7 +433,7 @@ func (p *Planner) planLibraryPrefs(prefs []LegacyLibraryPreference, res *Result)
 // library rows share. Both tables carry the same columns with the same
 // semantics, so they convert identically at different scopes.
 func (p *Planner) addPlaybackTriple(
-	res *Result, sourceTable, identity string,
+	res *Result, sourceTable string, identity json.RawMessage,
 	scope settingscontract.Scope, base Row,
 	audio, subtitle, mode *string, forced *bool,
 ) {
@@ -422,7 +459,7 @@ func (p *Planner) addPlaybackTriple(
 // spelling of "no preference" and produces no row; so does a value still equal
 // to the column default.
 func (p *Planner) addLanguage(
-	res *Result, sourceTable, identity, key string,
+	res *Result, sourceTable string, identity json.RawMessage, key string,
 	scope settingscontract.Scope, base Row, raw *string, columnDefault string,
 ) {
 	value := strings.TrimSpace(deref(raw))
@@ -444,7 +481,7 @@ func (p *Planner) addLanguage(
 // addQuality decomposes a legacy quality value into the two axes that replaced
 // it, writing up to two rows.
 func (p *Planner) addQuality(
-	res *Result, sourceTable, identity string,
+	res *Result, sourceTable string, identity json.RawMessage,
 	scope settingscontract.Scope, base Row, raw, columnDefault string,
 ) {
 	value := strings.TrimSpace(raw)
@@ -477,7 +514,7 @@ func (p *Planner) addQuality(
 // addValue appends a row after checking the value against its own definition,
 // so nothing reaches storage that the mutation endpoint would refuse.
 func (p *Planner) addValue(
-	res *Result, sourceTable, identity, key string,
+	res *Result, sourceTable string, identity json.RawMessage, key string,
 	scope settingscontract.Scope, base Row, value json.RawMessage,
 ) {
 	def, ok := p.contract.Lookup(key)
