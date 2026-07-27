@@ -67,6 +67,18 @@ func giveProviderID(t *testing.T, pool *pgxpool.Pool, contentID string) {
 	}
 }
 
+// newTestEnricher builds an Enricher wired to a real pool, matching what the
+// constructor does, so DB-backed tests exercise the same state store as
+// production rather than a hand-assembled struct that can drift from it.
+func newTestEnricher(pool *pgxpool.Pool) *Enricher {
+	return &Enricher{
+		pool:      pool,
+		chainRepo: metadata.NewChainRepository(pool),
+		state:     newEnrichmentStateStore(pool),
+		batchSize: 500,
+	}
+}
+
 func claimedIDs(t *testing.T, e *Enricher) map[string]bool {
 	t.Helper()
 	rows, err := e.claimBatch(context.Background())

@@ -100,6 +100,7 @@ type Enricher struct {
 	itemRepo       *catalog.ItemRepository
 	personRepo     *catalog.PersonRepository
 	providerIDs    *catalog.ProviderIDRepository
+	state          *enrichmentStateStore
 	imageCacher    audiobookCoverCacher
 	imageCacheJobs metadata.ImageCacheJobEnqueuer
 	workLinker     literaryWorkLinker
@@ -131,6 +132,7 @@ func NewEnricher(
 		itemRepo:    itemRepo,
 		personRepo:  personRepo,
 		providerIDs: providerIDs,
+		state:       newEnrichmentStateStore(pool),
 		batchSize:   batchSize,
 		workers:     audiobookEnrichWorkers(batchSize),
 	}
@@ -220,6 +222,13 @@ func (e *Enricher) HasPendingItems(ctx context.Context) (bool, error) {
 			      WHERE p.content_id = mi.content_id
 			  )
 			  AND mi.last_refreshed IS NULL
+			  AND NOT EXISTS (
+			      SELECT 1
+			      FROM audiobook_enrichment_state s
+			      WHERE s.content_id = mi.content_id
+			        AND s.next_attempt_at IS NOT NULL
+			        AND s.next_attempt_at > now()
+			  )
 			LIMIT 1
 		)
 	`).Scan(&exists)
@@ -321,6 +330,13 @@ func (e *Enricher) claimBatch(ctx context.Context) ([]enrichmentItemRow, error) 
 		      WHERE p.content_id = mi.content_id
 		  )
 		  AND mi.last_refreshed IS NULL
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM audiobook_enrichment_state s
+		      WHERE s.content_id = mi.content_id
+		        AND s.next_attempt_at IS NOT NULL
+		        AND s.next_attempt_at > now()
+		  )
 		ORDER BY mi.created_at ASC
 		LIMIT $1
 	`, e.batchSize)
@@ -377,6 +393,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			"title", item.Title,
 		)
 		// Still stamp last_refreshed so we don't loop forever on orphaned items.
+		e.recordOutcome(ctx, item.ContentID, EnrichmentOutcomeSkipped)
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
@@ -389,6 +406,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			"content_id", item.ContentID,
 			"folder_id", item.FolderID,
 		)
+		e.recordOutcome(ctx, item.ContentID, EnrichmentOutcomeSkipped)
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
@@ -552,9 +570,14 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		}
 		if len(providerErrs) > 0 {
 			// Transient provider trouble must not stamp the item terminally;
-			// surfacing an error lets the sweep retry it later instead.
+			// surfacing an error lets the sweep retry it later instead. Record
+			// the class too, so a rate-limited afternoon is afterwards
+			// distinguishable from a genuine no-match -- the distinction the
+			// ebook backlog lost.
+			joined := errors.Join(providerErrs...)
+			e.recordFailure(ctx, item.ContentID, classifyProviderError(joined), joined.Error())
 			return fmt.Errorf("no metadata obtained, %d provider error(s): %w",
-				len(providerErrs), errors.Join(providerErrs...))
+				len(providerErrs), joined)
 		}
 		// Providers ran cleanly but nothing matched — stamp last_refreshed so we
 		// skip on the next sweep.
@@ -562,6 +585,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			"content_id", item.ContentID,
 			"title", item.Title,
 		)
+		e.recordOutcome(ctx, item.ContentID, EnrichmentOutcomeNoMatch)
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
@@ -575,6 +599,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			"title", item.Title,
 			"item_author", item.Author,
 		)
+		e.recordOutcome(ctx, item.ContentID, EnrichmentOutcomeNoMatch)
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
@@ -584,6 +609,7 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	}
 	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
 	e.autoLinkLiteraryWork(ctx, item.ContentID)
+	e.recordOutcome(ctx, item.ContentID, EnrichmentOutcomeSuccess)
 
 	slog.InfoContext(ctx, "audiobook enrichment: enriched", "component", "audiobooks",
 		"content_id", item.ContentID,
@@ -934,4 +960,67 @@ func (e *Enricher) providerIDTaken(ctx context.Context, provider, id, selfConten
 		return "", nil
 	}
 	return e.providerIDs.FindContentIDByProviderIDs(ctx, map[string]string{provider: id}, "audiobook", selfContentID)
+}
+
+// recordOutcome stamps a terminal result. Bookkeeping must never fail the
+// enrichment that just succeeded, so a write error is logged and swallowed:
+// media_items.last_refreshed remains the authoritative eligibility signal, and
+// losing a state row costs reporting detail, not correctness.
+func (e *Enricher) recordOutcome(ctx context.Context, contentID string, outcome EnrichmentOutcome) {
+	if e == nil || e.state == nil {
+		return
+	}
+	if err := e.state.RecordOutcome(ctx, contentID, outcome); err != nil {
+		slog.WarnContext(ctx, "audiobook enrichment: could not record outcome", "component", "audiobooks",
+			"content_id", contentID,
+			"outcome", string(outcome),
+			"error", err,
+		)
+	}
+}
+
+// recordFailure stamps a classified failure and parks a retry. Swallowed for
+// the same reason as recordOutcome.
+func (e *Enricher) recordFailure(ctx context.Context, contentID string, class EnrichmentErrorClass, cause string) {
+	if e == nil || e.state == nil {
+		return
+	}
+	if err := e.state.RecordFailure(ctx, contentID, class, cause); err != nil {
+		slog.WarnContext(ctx, "audiobook enrichment: could not record failure", "component", "audiobooks",
+			"content_id", contentID,
+			"class", string(class),
+			"error", err,
+		)
+	}
+}
+
+// classifyProviderError sorts a provider failure into the classes that decide
+// how long the item is parked. Rate limiting is singled out because retrying
+// into a closed window is what turns a throttle into a backlog -- and because
+// a throttled answer recorded as a plain no-match is precisely how the ebook
+// side ended up with 90,721 unreadable rows.
+func classifyProviderError(err error) EnrichmentErrorClass {
+	if err == nil {
+		return EnrichmentErrorTransient
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "429"),
+		strings.Contains(msg, "rate limit"),
+		strings.Contains(msg, "ratelimit"),
+		strings.Contains(msg, "too many requests"),
+		strings.Contains(msg, "quota"):
+		return EnrichmentErrorRateLimited
+	case strings.Contains(msg, "401"),
+		strings.Contains(msg, "403"),
+		strings.Contains(msg, "unauthorized"),
+		strings.Contains(msg, "forbidden"),
+		strings.Contains(msg, "not implemented"):
+		// Credentials or a blocked endpoint: retrying soon changes nothing.
+		// audimeta answers every path with 403 today, which is exactly the
+		// shape this is meant to stop hammering.
+		return EnrichmentErrorPermanent
+	default:
+		return EnrichmentErrorTransient
+	}
 }

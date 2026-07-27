@@ -23,7 +23,7 @@ func TestEvaluate_EmptyRulesMatchesAll(t *testing.T) {
 
 func TestEvaluate_GenreContains(t *testing.T) {
 	qd := QueryDefinition{
-		Match: "all",
+		Match:  "all",
 		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "genre", Op: "contains", Value: "Sci"}}}},
 	}
 	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{})
@@ -34,7 +34,7 @@ func TestEvaluate_GenreContains(t *testing.T) {
 
 func TestEvaluate_YearBetween(t *testing.T) {
 	qd := QueryDefinition{
-		Match: "all",
+		Match:  "all",
 		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "year", Op: "between", Value: []any{2000, 2025}}}}},
 	}
 	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{})
@@ -45,7 +45,7 @@ func TestEvaluate_YearBetween(t *testing.T) {
 
 func TestEvaluate_AddedInLast14d(t *testing.T) {
 	qd := QueryDefinition{
-		Match: "all",
+		Match:  "all",
 		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "added_at", Op: "in_last", Value: "14d"}}}},
 	}
 	got := Evaluate(context.Background(), qd, sampleCandidates(), EvaluateOptions{Now: time.Now()})
@@ -72,7 +72,7 @@ func TestEvaluate_PersonalizedDroppedWithoutScope(t *testing.T) {
 	cands := sampleCandidates()
 	cands[0].IsFinished = true
 	qd := QueryDefinition{
-		Match: "all",
+		Match:  "all",
 		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "finished", Op: "is", Value: true}}}},
 	}
 	got := Evaluate(context.Background(), qd, cands, EvaluateOptions{AllowPersonalized: false})
@@ -91,7 +91,7 @@ func TestEvaluate_BookmarkCountGT(t *testing.T) {
 	cands[1].BookmarkCount = 0
 	cands[2].BookmarkCount = 2
 	qd := QueryDefinition{
-		Match: "all",
+		Match:  "all",
 		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "bookmark_count", Op: "gt", Value: 0}}}},
 	}
 	got := Evaluate(context.Background(), qd, cands, EvaluateOptions{AllowPersonalized: true})
@@ -133,7 +133,7 @@ func TestEvaluate_AbandonedRule(t *testing.T) {
 	cands[0].CurrentSeconds = 1000
 	cands[0].LastPlayedAt = time.Now().Add(-90 * 24 * time.Hour)
 	qd := QueryDefinition{
-		Match: "all",
+		Match:  "all",
 		Groups: []QueryGroup{{Match: "all", Rules: []QueryRule{{Field: "abandoned", Op: "is", Value: true}}}},
 	}
 	got := Evaluate(context.Background(), qd, cands, EvaluateOptions{AllowPersonalized: true, AbandonedAfter: 60 * 24 * time.Hour, Now: time.Now()})
