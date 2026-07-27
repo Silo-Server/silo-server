@@ -107,6 +107,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDs(ctx context.Context, session
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
 	presignCompatListItems(ctx, h.detailSvc, listItems)
+	fillListItemDurations(ctx, h.durationSrc, listItems)
 	result := make(map[string]upstreamListItem, len(listItems))
 	for _, listItem := range listItems {
 		result[listItem.ContentID] = listItem
@@ -136,6 +137,7 @@ func (h *ItemsHandler) fetchCompatItemsByContentIDsFallback(ctx context.Context,
 		listItems = append(listItems, mediaItemToListItem(item))
 	}
 	presignCompatListItems(ctx, h.detailSvc, listItems)
+	fillListItemDurations(ctx, h.durationSrc, listItems)
 	for _, listItem := range listItems {
 		result[listItem.ContentID] = listItem
 	}
@@ -362,6 +364,17 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 		return nil, fmt.Errorf("iterating compat episode targets: %w", err)
 	}
 
+	listItems := make([]upstreamListItem, 0, len(result))
+	for _, target := range result {
+		listItems = append(listItems, target.Item)
+	}
+	fillListItemDurations(ctx, h.durationSrc, listItems)
+	for _, item := range listItems {
+		target := result[item.ContentID]
+		target.Item = item
+		result[item.ContentID] = target
+	}
+
 	return result, nil
 }
 
@@ -469,6 +482,17 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			},
 			SeasonID: episode.SeasonID,
 		}
+	}
+
+	listItems := make([]upstreamListItem, 0, len(result))
+	for _, target := range result {
+		listItems = append(listItems, target.Item)
+	}
+	fillListItemDurations(ctx, h.durationSrc, listItems)
+	for _, item := range listItems {
+		target := result[item.ContentID]
+		target.Item = item
+		result[item.ContentID] = target
 	}
 
 	return result, nil

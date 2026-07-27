@@ -2926,6 +2926,44 @@ func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) (
 	return scanMediaFiles(rows)
 }
 
+// FirstDurationsByContentIDs returns the probed duration (seconds) of the
+// first live file backing each content id, using the same "first file with
+// duration > 0, ordered by id" rule as the v1 API's contentDurationSeconds.
+// Ids with no live probed file are absent from the map. Resolution is
+// intentionally not access-scoped; callers have already filtered the items.
+func (r *FileRepository) FirstDurationsByContentIDs(ctx context.Context, contentIDs []string) (map[string]int, error) {
+	result := make(map[string]int)
+	if len(contentIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (content_id) content_id, duration
+		FROM media_files
+		WHERE content_id = ANY($1)
+		  AND episode_id IS NULL
+		  AND missing_since IS NULL
+		  AND duration > 0
+		ORDER BY content_id, id ASC`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying first durations by content ids: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var contentID string
+		var duration int
+		if err := rows.Scan(&contentID, &duration); err != nil {
+			return nil, fmt.Errorf("scanning first duration by content id: %w", err)
+		}
+		result[contentID] = duration
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating first durations by content ids: %w", err)
+	}
+	return result, nil
+}
+
 // GetByExtraID returns the live files backing a local extra
 // (media_extras.content_id). Extras files carry no content_id/episode_id, so
 // this is their only ownership lookup.
@@ -3537,6 +3575,43 @@ func (r *FileRepository) GetByEpisodeID(ctx context.Context, episodeID string) (
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// FirstDurationsByEpisodeIDs returns the probed duration (seconds) of the
+// first live file backing each episode id, using the same "first file with
+// duration > 0, ordered by id" rule as the v1 API's contentDurationSeconds.
+// Ids with no live probed file are absent from the map. Resolution is
+// intentionally not access-scoped; callers have already filtered the items.
+func (r *FileRepository) FirstDurationsByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string]int, error) {
+	result := make(map[string]int)
+	if len(episodeIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (episode_id) episode_id, duration
+		FROM media_files
+		WHERE episode_id = ANY($1)
+		  AND missing_since IS NULL
+		  AND duration > 0
+		ORDER BY episode_id, id ASC`, episodeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying first durations by episode ids: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var episodeID string
+		var duration int
+		if err := rows.Scan(&episodeID, &duration); err != nil {
+			return nil, fmt.Errorf("scanning first duration by episode id: %w", err)
+		}
+		result[episodeID] = duration
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating first durations by episode ids: %w", err)
+	}
+	return result, nil
 }
 
 // ListMissingChapterThumbnails returns present media files in enabled,

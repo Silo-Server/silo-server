@@ -39,6 +39,7 @@ type ItemsHandler struct {
 	browseRepo   *catalog.BrowseRepository
 	personRepo   *catalog.PersonRepository
 	detailSvc    *catalog.DetailService
+	durationSrc  probedDurationSource
 	itemRepo     itemRepoForBatchLoader
 	episodeRepo  episodeRepoForBatchLoader
 	seasonRepo   imageSeasonRepository
@@ -75,6 +76,7 @@ func NewItemsHandler(content ContentService, userData UserDataService, codec *Re
 		browseRepo:   browseRepo,
 		personRepo:   personRepo,
 		detailSvc:    detailSvc,
+		durationSrc:  detailSvc,
 		itemRepo:     itemRepo,
 		episodeRepo:  episodeRepo,
 		accessFilter: accessFilter,
@@ -1322,6 +1324,7 @@ func (h *ItemsHandler) compatListItemsFromModels(ctx context.Context, filter cat
 		listItems = append(listItems, mediaItemToListItem(mi))
 	}
 	presignCompatListItems(ctx, h.detailSvc, listItems)
+	fillListItemDurations(ctx, h.durationSrc, listItems)
 	return listItems
 }
 
@@ -1705,6 +1708,7 @@ func (h *ItemsHandler) writeEpisodeModelsPage(w http.ResponseWriter, r *http.Req
 			upstreamEpisode.StillURL = firstNonEmpty(target.Item.StillURL, target.Item.PosterURL, upstreamEpisode.StillURL)
 			upstreamEpisode.SeriesTitle = firstNonEmpty(target.Item.SeriesTitle, upstreamEpisode.SeriesTitle)
 			upstreamEpisode.HasMediaFiles = target.Item.HasMediaFiles
+			upstreamEpisode.DurationSeconds = target.Item.DurationSeconds
 		}
 		dto := h.mapper.episodeFromUpstream(upstreamEpisode, favorites[episode.ContentID], progress[episode.ContentID])
 		dto.SeasonName = firstNonEmpty(seasonTitleByID[episode.SeasonID], seasonTitleByNumber[episode.SeasonNumber])
@@ -2058,7 +2062,7 @@ func (h *ItemsHandler) HandleSearchHints(w http.ResponseWriter, r *http.Request)
 			Name:             item.Title,
 			Type:             jellyfinItemType(item.Type),
 			ProductionYear:   item.Year,
-			RunTimeTicks:     minutesToTicks(item.Runtime),
+			RunTimeTicks:     runtimeTicks(item.DurationSeconds, item.Runtime),
 			PrimaryImageTag:  tagValue(item.PosterURL),
 			BackdropImageTag: tagValue(item.BackdropURL),
 			Series:           item.SeriesTitle,
@@ -2226,6 +2230,7 @@ func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Reques
 			listItems = append(listItems, mediaItemToListItem(mi))
 		}
 		presignCompatListItems(r.Context(), h.detailSvc, listItems)
+		fillListItemDurations(r.Context(), h.durationSrc, listItems)
 		h.rememberListImages(listItems)
 
 		progress, progressErr := resolveProgressForContentIDs(r.Context(), session, h.userData, contentIDsFromListItems(listItems))

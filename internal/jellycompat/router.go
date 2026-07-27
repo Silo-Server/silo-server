@@ -131,7 +131,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	imagesHandler.collections = itemsHandler.collections
 	imagesHandler.frontendFS = deps.FrontendFS
 	displayPrefsHandler := NewDisplayPreferencesHandler(deps.UserStoreProvider)
-	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
+	recsHandler := NewRecommendationsHandler(deps.Recommender, deps.ItemRepo, deps.DetailSvc, deps.ContentService, deps.UserDataService, deps.IDCodec, deps.Config, deps.AccessFilterFn)
 
 	r.Get("/System/Info/Public", systemHandler.HandlePublicInfo)
 	r.Get("/System/Info", systemHandler.HandleInfo)
