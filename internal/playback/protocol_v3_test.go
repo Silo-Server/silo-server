@@ -305,6 +305,14 @@ func TestOutputRangeEligibleV3Profile7UnknownEnhancementLayerHonorsClientProfile
 		claims.DolbyVisionReason != "profile_7_enhancement_layer_unknown" {
 		t.Fatalf("client without profile 7: ok = %t, claims = %#v", ok, claims)
 	}
+
+	// So does one that sends no HDR details at all, covering the nil guard.
+	req.Capabilities.HDRDetails = nil
+	req.ClientPlaybackContext.Output.HDRDetails = nil
+	if ok, claims := outputRangeEligibleV3(source, req); ok ||
+		claims.DolbyVisionReason != "profile_7_enhancement_layer_unknown" {
+		t.Fatalf("client without HDR details: ok = %t, claims = %#v", ok, claims)
+	}
 }
 
 func TestSourceDescriptorV3NormalizesLegacyHEVCMetadata(t *testing.T) {
