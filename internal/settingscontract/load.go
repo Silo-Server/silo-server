@@ -105,6 +105,20 @@ func ObjectSchema(ref string) (*jsonschema.Schema, bool) {
 	return schema, ok
 }
 
+// ObjectSchemas returns every compiled object schema, keyed by schema_ref.
+//
+// ValidateValue needs the whole set rather than one entry, and it is called
+// from outside this package now — the migration planner and the mutation
+// endpoint both validate values they did not author. Returning the live map
+// rather than a copy matches ValidateValue's own signature; callers treat it as
+// read-only, and it is built once at load.
+func ObjectSchemas() map[string]*jsonschema.Schema {
+	if _, err := Load(); err != nil {
+		return nil
+	}
+	return objSchemas
+}
+
 func load(fsys fs.FS) (contract, error) {
 	raw, err := fs.ReadFile(fsys, manifestPath)
 	if err != nil {

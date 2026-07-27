@@ -1,0 +1,408 @@
+package settingsmigrate
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+)
+
+func planner(t *testing.T) *Planner {
+	t.Helper()
+	contract, err := settingscontract.Load()
+	if err != nil {
+		t.Fatalf("loading contract: %v", err)
+	}
+	return New(contract, settingscontract.ObjectSchemas())
+}
+
+func str(v string) *string { return &v }
+func boolp(v bool) *bool   { return &v }
+
+// find returns the single row for a key at an identity, failing if there is not
+// exactly one.
+func find(t *testing.T, res Result, key string, match func(Row) bool) Row {
+	t.Helper()
+	var hits []Row
+	for _, row := range res.Rows {
+		if row.Key == key && (match == nil || match(row)) {
+			hits = append(hits, row)
+		}
+	}
+	if len(hits) != 1 {
+		t.Fatalf("found %d rows for %s, want 1 (rows: %+v, rejects: %+v)",
+			len(hits), key, res.Rows, res.Rejects)
+	}
+	return hits[0]
+}
+
+func hasKey(res Result, key string) bool {
+	for _, row := range res.Rows {
+		if row.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// TestColumnDefaultsDoNotBecomeChoices is the trap that would have hit every
+// user in the install. quality_preference is NOT NULL DEFAULT '1080p' while the
+// contract defaults to auto, so migrating the column unconditionally would pin
+// every profile to 1080p having never chosen it — and worse, that stored value
+// then outranks the contract default forever.
+func TestColumnDefaultsDoNotBecomeChoices(t *testing.T) {
+	res := planner(t).Plan(Input{Profiles: []LegacyProfile{{
+		ID:                  "p1",
+		Language:            str("en"),    // the column default
+		SubtitleMode:        str("auto"),  // the column default
+		QualityPreference:   str("1080p"), // the column default
+		ShowForcedSubtitles: boolp(true),  // the column default
+		SubtitleLanguage:    str(""),      // legacy spelling of unset
+	}}})
+
+	if len(res.Rows) != 0 {
+		t.Fatalf("a profile holding nothing but column defaults produced %d rows: %+v",
+			len(res.Rows), res.Rows)
+	}
+	if len(res.Rejects) != 0 {
+		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+}
+
+// The mirror: a value that differs from the column default is a real choice and
+// has to survive.
+func TestNonDefaultProfileValuesMigrate(t *testing.T) {
+	res := planner(t).Plan(Input{Profiles: []LegacyProfile{{
+		ID:                        "p1",
+		Language:                  str("ja"),
+		SubtitleLanguage:          str("en-US"),
+		SubtitleMode:              str("always"),
+		ShowForcedSubtitles:       boolp(false),
+		QualityPreference:         str("720p"),
+		PreferredMetadataLanguage: str("fr"),
+	}}})
+
+	if len(res.Rejects) != 0 {
+		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+	for key, want := range map[string]string{
+		"playback.audio_language":        `"ja"`,
+		"playback.subtitle_language":     `"en-US"`,
+		"playback.subtitle_mode":         `"always"`,
+		"playback.show_forced_subtitles": `false`,
+		"catalog.metadata_language":      `"fr"`,
+		"playback.preferred_quality":     `"720p"`,
+		"playback.max_bitrate_kbps":      `2000`,
+	} {
+		row := find(t, res, key, nil)
+		if string(row.Value) != want {
+			t.Errorf("%s = %s, want %s", key, row.Value, want)
+		}
+		if row.Scope != settingscontract.ScopeProfile || row.ProfileID != "p1" {
+			t.Errorf("%s landed at %s/%s, want profile/p1", key, row.Scope, row.ProfileID)
+		}
+	}
+}
+
+// TestLegacyQualityDecomposesIntoTwoAxes covers the whole ladder. None of these
+// may land in the rejects table: the point of splitting quality into resolution
+// and bitrate was that every legacy value converts losslessly.
+func TestLegacyQualityDecomposesIntoTwoAxes(t *testing.T) {
+	for legacy, want := range map[string]struct {
+		resolution string
+		kbps       string
+	}{
+		"1080p-high":   {`"1080p"`, `10000`},
+		"1080p":        {`"1080p"`, `6000`},
+		"1080p-medium": {`"1080p"`, `4500`},
+		"1080p-8":      {`"1080p"`, `6000`},
+		"720p-high":    {`"720p"`, `4000`},
+		"720p-medium":  {`"720p"`, `3000`},
+		"720p":         {`"720p"`, `2000`},
+		"480p":         {`"480p"`, `1500`},
+		"420p":         {`"480p"`, `720`},
+		"328p":         {`"480p"`, `720`},
+	} {
+		t.Run(legacy, func(t *testing.T) {
+			res := planner(t).Plan(Input{DeviceSettings: []LegacyDeviceSetting{{
+				ProfileID: "p1", DeviceID: "d1",
+				Key: "playback.preferred_quality", Value: legacy,
+			}}})
+
+			if len(res.Rejects) != 0 {
+				t.Fatalf("%s was rejected: %+v", legacy, res.Rejects)
+			}
+			quality := find(t, res, "playback.preferred_quality", nil)
+			if string(quality.Value) != want.resolution {
+				t.Errorf("resolution = %s, want %s", quality.Value, want.resolution)
+			}
+			bitrate := find(t, res, "playback.max_bitrate_kbps", nil)
+			if string(bitrate.Value) != want.kbps {
+				t.Errorf("bitrate = %s, want %s", bitrate.Value, want.kbps)
+			}
+			if bitrate.Scope != settingscontract.ScopeProfileDevice || bitrate.DeviceID != "d1" {
+				t.Errorf("bitrate landed at %s/%s", bitrate.Scope, bitrate.DeviceID)
+			}
+		})
+	}
+
+	// The three that carry no bitrate implication stay one row.
+	for _, sentinel := range []string{"auto", "original", "2160p"} {
+		t.Run(sentinel, func(t *testing.T) {
+			res := planner(t).Plan(Input{DeviceSettings: []LegacyDeviceSetting{{
+				ProfileID: "p1", DeviceID: "d1",
+				Key: "playback.preferred_quality", Value: sentinel,
+			}}})
+			if hasKey(res, "playback.max_bitrate_kbps") {
+				t.Errorf("%s invented a bitrate cap", sentinel)
+			}
+			row := find(t, res, "playback.preferred_quality", nil)
+			if string(row.Value) != `"`+sentinel+`"` {
+				t.Errorf("value = %s", row.Value)
+			}
+		})
+	}
+}
+
+// TestAccountSettingsFanOutToEveryProfile covers the account-to-profile move.
+// A household that shared one theme must each end up owning theirs, or the
+// first profile to change it would silently restyle everyone.
+func TestAccountSettingsFanOutToEveryProfile(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Settings: []LegacySetting{{Key: "ui_theme", Value: "cobalt-studio"}},
+		Profiles: []LegacyProfile{{ID: "p1"}, {ID: "p2"}, {ID: "p3"}},
+	})
+
+	seen := map[string]string{}
+	for _, row := range res.Rows {
+		if row.Key != "ui.theme" {
+			continue
+		}
+		if row.Scope != settingscontract.ScopeProfile {
+			t.Errorf("ui.theme landed at %s, want profile", row.Scope)
+		}
+		seen[row.ProfileID] = string(row.Value)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("ui.theme reached %d profiles, want 3: %+v", len(seen), seen)
+	}
+	for id, value := range seen {
+		if value != `"cobalt-studio"` {
+			t.Errorf("profile %s got %s", id, value)
+		}
+	}
+}
+
+// TestLegacyKeysAreRenamed pins the rename table. A key that keeps its legacy
+// spelling would be unreachable through generated bindings.
+func TestLegacyKeysAreRenamed(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1"}},
+		Settings: []LegacySetting{
+			{Key: "ui_text_scale", Value: "large"},
+			{Key: "ui_high_contrast", Value: "true"},
+			{Key: "next_up_mode", Value: "separate"},
+			{Key: "disabled_library_ids", Value: `[3,9]`},
+			{Key: "library_order", Value: `[9,3]`},
+		},
+	})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+	for key, want := range map[string]string{
+		"ui.text_scale":           `"large"`,
+		"ui.high_contrast":        `true`,
+		"ui.next_up_mode":         `"separate"`,
+		"ui.disabled_library_ids": `[3,9]`,
+		"ui.library_order":        `[9,3]`,
+	} {
+		row := find(t, res, key, nil)
+		if string(row.Value) != want {
+			t.Errorf("%s = %s, want %s", key, row.Value, want)
+		}
+	}
+}
+
+// TestLegacyStringsBecomeTypedJSON: the legacy store held everything as a
+// string, so "true" has to become a boolean and "30" a number, or every
+// generated binding fails to decode what the migration wrote.
+func TestLegacyStringsBecomeTypedJSON(t *testing.T) {
+	res := planner(t).Plan(Input{DeviceSettings: []LegacyDeviceSetting{
+		{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "true"},
+		{ProfileID: "p1", DeviceID: "d1", Key: "playback.next_up_prompt_seconds", Value: "30"},
+		{ProfileID: "p1", DeviceID: "d1", Key: "player.playback_speed", Value: "1.5"},
+	}})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+	for key, want := range map[string]string{
+		"playback.auto_skip_intro":        `true`,
+		"playback.next_up_prompt_seconds": `30`,
+		"player.playback_speed":           `1.5`,
+	} {
+		if got := string(find(t, res, key, nil).Value); got != want {
+			t.Errorf("%s = %s, want %s (typed, not a quoted string)", key, got, want)
+		}
+	}
+}
+
+// TestEmptyStringIsUnsetNotAValue. The legacy string API had no way to send
+// null, so both Android and web spell "clear my choice" as "". Storing that as
+// an empty string would make an explicitly-cleared setting outrank the default.
+func TestEmptyStringIsUnsetNotAValue(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1", SubtitleLanguage: str(""), SubtitleMode: str("")}},
+		DeviceSettings: []LegacyDeviceSetting{
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.audio_language", Value: ""},
+		},
+		SeriesPrefs: []LegacySeriesPreference{
+			{ProfileID: "p1", SeriesID: "s1", AudioLanguage: str(""), SubtitleMode: str("")},
+		},
+	})
+	if len(res.Rows) != 0 {
+		t.Fatalf("empty legacy values produced %d rows: %+v", len(res.Rows), res.Rows)
+	}
+	if len(res.Rejects) != 0 {
+		t.Fatalf("empty values were rejected rather than skipped: %+v", res.Rejects)
+	}
+}
+
+// TestSeriesAndLibraryPreferencesLandAtTheirScopes.
+func TestSeriesAndLibraryPreferencesLandAtTheirScopes(t *testing.T) {
+	res := planner(t).Plan(Input{
+		SeriesPrefs: []LegacySeriesPreference{{
+			ProfileID: "p1", SeriesID: "s1",
+			SubtitleLanguage: str("ja"), ShowForcedSubtitles: boolp(true),
+		}},
+		LibraryPrefs: []LegacyLibraryPreference{{
+			ProfileID: "p1", LibraryID: 7,
+			AudioLanguage: str("de"), SubtitleMode: str("always"),
+		}},
+	})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+
+	series := find(t, res, "playback.subtitle_language", nil)
+	if series.Scope != settingscontract.ScopeProfileSeries || series.SeriesID != "s1" {
+		t.Errorf("series pref landed at %s/%s", series.Scope, series.SeriesID)
+	}
+	library := find(t, res, "playback.audio_language", nil)
+	if library.Scope != settingscontract.ScopeProfileLibrary || library.LibraryID != 7 {
+		t.Errorf("library pref landed at %s/%d", library.Scope, library.LibraryID)
+	}
+
+	// show_forced_subtitles is nullable at these scopes, so true IS a real
+	// override here even though it is the default on the profile column.
+	forced := find(t, res, "playback.show_forced_subtitles", nil)
+	if string(forced.Value) != `true` || forced.Scope != settingscontract.ScopeProfileSeries {
+		t.Errorf("forced = %s at %s, want true at profile_series", forced.Value, forced.Scope)
+	}
+}
+
+// TestUnconvertibleValuesAreRejectedNotDropped. The whole reason the schema
+// ships a rejects table is that an operator should be able to see what did not
+// survive rather than learn it from a support ticket.
+func TestUnconvertibleValuesAreRejectedNotDropped(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{
+			{ID: "p1", Language: str("!!!")},
+			{ID: "p2", QualityPreference: str("240p")},
+		},
+		Settings: []LegacySetting{
+			{Key: "totally.unknown", Value: "x"},
+			{Key: "ui_theme", Value: "not-a-theme"},
+		},
+		DeviceSettings: []LegacyDeviceSetting{
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.auto_skip_intro", Value: "yes-please"},
+			{ProfileID: "p1", DeviceID: "d1", Key: "player.playback_speed", Value: "99"},
+		},
+	})
+
+	reasons := map[string]string{}
+	for _, reject := range res.Rejects {
+		reasons[reject.SourceKey] = reject.Reason
+	}
+	for _, want := range []string{
+		"playback.audio_language",    // "!!!" is not a language tag
+		"playback.preferred_quality", // 240p was never a quality
+		"totally.unknown",
+		"ui_theme",                 // not an enum member
+		"playback.auto_skip_intro", // not a boolean
+		"player.playback_speed",    // out of range
+	} {
+		if _, ok := reasons[want]; !ok {
+			t.Errorf("%s was dropped silently rather than rejected (rejects: %+v)", want, res.Rejects)
+		}
+	}
+	for _, reject := range res.Rejects {
+		if strings.TrimSpace(reject.Reason) == "" {
+			t.Errorf("reject %+v carries no reason", reject)
+		}
+	}
+}
+
+// TestJellycompatBlobsAreLeftAlone. Those rows ride the same table under
+// synthetic keys but are that subsystem's storage, not user settings.
+func TestJellycompatBlobsAreLeftAlone(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1"}},
+		Settings: []LegacySetting{
+			{Key: "jellycompat:displayprefs:usersettings:emby", Value: `{"a":1}`},
+		},
+	})
+	if len(res.Rows) != 0 || len(res.Rejects) != 0 {
+		t.Fatalf("jellycompat blob was migrated or rejected: rows=%+v rejects=%+v",
+			res.Rows, res.Rejects)
+	}
+}
+
+// TestEveryPlannedRowValidates is the safety net: whatever the rules above
+// decide, nothing may reach storage that the mutation endpoint would refuse.
+func TestEveryPlannedRowValidates(t *testing.T) {
+	contract, err := settingscontract.Load()
+	if err != nil {
+		t.Fatalf("loading contract: %v", err)
+	}
+	schemas := settingscontract.ObjectSchemas()
+
+	res := New(contract, schemas).Plan(Input{
+		Profiles: []LegacyProfile{{
+			ID: "p1", Language: str("ja"), SubtitleMode: str("always"),
+			QualityPreference: str("1080p-high"), ShowForcedSubtitles: boolp(false),
+		}},
+		Settings: []LegacySetting{
+			{Key: "ui_theme", Value: "cobalt-studio"},
+			{Key: "ui_custom_css", Value: "body { color: red; }"},
+			{Key: "subtitle_appearance", Value: `{"fontSize":"large"}`},
+		},
+		DeviceSettings: []LegacyDeviceSetting{
+			{ProfileID: "p1", DeviceID: "d1", Key: "player.audio_sync_ms", Value: "-250"},
+		},
+		SeriesPrefs:  []LegacySeriesPreference{{ProfileID: "p1", SeriesID: "s1", SubtitleLanguage: str("en")}},
+		LibraryPrefs: []LegacyLibraryPreference{{ProfileID: "p1", LibraryID: 2, AudioLanguage: str("de")}},
+	})
+
+	if len(res.Rows) == 0 {
+		t.Fatal("nothing was planned")
+	}
+	for _, row := range res.Rows {
+		def, ok := contract.Lookup(row.Key)
+		if !ok {
+			t.Errorf("planned a row for unregistered key %q", row.Key)
+			continue
+		}
+		if err := def.ValueSchema.ValidateValue(row.Value, schemas); err != nil {
+			t.Errorf("%s = %s would be refused by the mutation endpoint: %v",
+				row.Key, row.Value, err)
+		}
+		if !def.AllowsScope(row.Scope) {
+			t.Errorf("%s planned at %s, which the definition does not allow", row.Key, row.Scope)
+		}
+		var decoded any
+		if err := json.Unmarshal(row.Value, &decoded); err != nil {
+			t.Errorf("%s value is not valid JSON: %v", row.Key, err)
+		}
+	}
+}
