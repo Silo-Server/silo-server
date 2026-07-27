@@ -37,6 +37,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
+	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logstream"
@@ -355,6 +356,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build auth handler and auth middleware if DB and config are available.
 	var userRepo *auth.UserRepository
 	var inviteCodeRepo *auth.InviteCodeRepository
+	var invitationService *invitations.Service
 	var apiKeyRepo *auth.APIKeyRepository
 	var authService *auth.Service
 	var authHandler *handlers.AuthHandler
@@ -395,6 +397,17 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
+		}
+		if settingsRepo != nil {
+			invitationService = invitations.NewService(
+				invitations.NewRepository(deps.DB),
+				userRepo,
+				auth.NewAccountProvisioner(userRepo, deps.UserStoreProvider),
+				authService,
+				mail.NewSMTPSender(settingsRepo),
+				settingsRepo,
+				deps.PublicURL,
+			)
 		}
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		deviceLoginService = auth.NewDeviceLoginService(
@@ -1703,6 +1716,19 @@ func NewRouter(deps Dependencies) chi.Router {
 			}
 			authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
 
+			if invitationService != nil {
+				invitationHandler := handlers.NewInvitationHandler(invitationService)
+				r.Route("/invitations/{token}", func(r chi.Router) {
+					if deps.RateLimitMW != nil {
+						r.With(deps.RateLimitMW.AuthEndpointHandler("invitation")).Get("/", invitationHandler.HandleLookupInvitation)
+						r.With(deps.RateLimitMW.AuthEndpointHandler("invitation")).Post("/accept", invitationHandler.HandleAcceptInvitation)
+					} else {
+						r.Get("/", invitationHandler.HandleLookupInvitation)
+						r.Post("/accept", invitationHandler.HandleAcceptInvitation)
+					}
+				})
+			}
+
 			r.Route("/auth", func(r chi.Router) {
 				r.Get("/device/capability", authHandler.HandleDeviceCapability)
 				if deps.RateLimitMW != nil {
@@ -2883,6 +2909,16 @@ func NewRouter(deps Dependencies) chi.Router {
 									r.Post("/trigger/taste-profiles", adminRecsHandler.HandleTriggerTasteProfiles)
 									r.Post("/trigger/cowatch", adminRecsHandler.HandleTriggerCowatch)
 									r.Post("/trigger/recommendations", adminRecsHandler.HandleTriggerRecommendations)
+								})
+							}
+
+							if invitationService != nil {
+								adminInvitationHandler := handlers.NewAdminInvitationHandler(invitationService)
+								r.Route("/invitations", func(r chi.Router) {
+									r.Get("/", adminInvitationHandler.HandleListInvitations)
+									r.Post("/", adminInvitationHandler.HandleCreateInvitation)
+									r.Post("/{id}/resend", adminInvitationHandler.HandleResendInvitation)
+									r.Delete("/{id}", adminInvitationHandler.HandleRevokeInvitation)
 								})
 							}
 

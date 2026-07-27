@@ -1,0 +1,1355 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Invites &amp; Onboarding — Silo (mockups)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* Tokens mirror web/src/app.css [data-theme="midnight-cinema"] so these
+       mockups read as the real product, not a generic dark dashboard. */
+    :root {
+      --background: #141417;
+      --foreground: #e8e8ec;
+      --card: #1c1c20;
+      --popover: #18181c;
+      --primary: #e8e8ec;
+      --primary-foreground: #141417;
+      --secondary: #232328;
+      --muted: #1c1c20;
+      --muted-foreground: #9696a0;
+      --border: #28282e;
+      --input: #1c1c20;
+      --sidebar: #0f0f12;
+      --destructive: #ef4444;
+      --success: #81c995;
+      --warning: #e8a87c;
+      --info: #7ec8e3;
+      --radius: 0.75rem;
+      --font: "Outfit", system-ui, sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3, h4 { margin: 0; font-weight: 700; letter-spacing: -0.02em; }
+    p { margin: 0; }
+    button { font: inherit; color: inherit; cursor: pointer; }
+
+    /* ---------- doc chrome ---------- */
+    .doc { max-width: 1180px; margin: 0 auto; padding: 48px 28px 120px; }
+    .doc-head { border-bottom: 1px solid var(--border); padding-bottom: 28px; margin-bottom: 40px; }
+    .doc-head h1 { font-size: 34px; font-weight: 800; letter-spacing: -0.04em; }
+    .doc-head .sub { color: var(--muted-foreground); margin-top: 10px; max-width: 68ch; font-size: 15px; }
+    .doc-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+    .doc-meta span {
+      font: 500 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted-foreground); border: 1px solid var(--border);
+      padding: 6px 10px; border-radius: 999px;
+    }
+
+    .section { margin-top: 72px; }
+    .section > .label {
+      font: 500 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--muted-foreground); margin-bottom: 12px;
+    }
+    .section > h2 { font-size: 24px; letter-spacing: -0.03em; }
+    .section > .note { color: var(--muted-foreground); margin-top: 10px; max-width: 74ch; }
+
+    .frame {
+      margin-top: 24px; border: 1px solid var(--border); border-radius: 14px;
+      background: var(--background); overflow: hidden;
+    }
+    .frame-bar {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+      background: var(--sidebar);
+    }
+    .frame-bar .dots { display: flex; gap: 6px; }
+    .frame-bar .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--border); }
+    .frame-bar .path { font: 400 11px/1 var(--mono); color: var(--muted-foreground); }
+    .frame-body { padding: 26px; }
+
+    .callouts { display: grid; gap: 10px; margin-top: 18px; }
+    .callout {
+      display: grid; grid-template-columns: 22px 1fr; gap: 12px; align-items: start;
+      color: var(--muted-foreground); font-size: 13.5px;
+    }
+    .callout b {
+      display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+      background: var(--secondary); color: var(--foreground);
+      font: 600 11px/1 var(--mono);
+    }
+    .callout span strong { color: var(--foreground); font-weight: 600; }
+
+    /* ---------- shared UI atoms ---------- */
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px;
+    }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      height: 38px; padding: 0 16px; border-radius: 8px; border: 1px solid transparent;
+      font-weight: 600; font-size: 13.5px; white-space: nowrap;
+    }
+    .btn-primary { background: var(--primary); color: var(--primary-foreground); }
+    .btn-ghost { background: transparent; color: var(--muted-foreground); border-color: var(--border); }
+    .btn-quiet { background: transparent; color: var(--muted-foreground); border-color: transparent; }
+    .btn-sm { height: 32px; padding: 0 12px; font-size: 13px; }
+    .btn-lg { height: 44px; padding: 0 22px; font-size: 15px; }
+    .btn-block { width: 100%; }
+
+    .field { display: grid; gap: 7px; }
+    .field label { font-size: 13px; font-weight: 500; }
+    .field .hint { font-size: 12px; color: var(--muted-foreground); }
+    .input {
+      height: 38px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--input); color: var(--foreground); padding: 0 12px;
+      display: flex; align-items: center; font-size: 13.5px;
+    }
+    .input.ph { color: var(--muted-foreground); }
+    .input.locked { color: var(--muted-foreground); background: #17171b; }
+    .input-tall { height: auto; min-height: 74px; padding: 11px 12px; align-items: flex-start; line-height: 1.55; }
+
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px;
+      border-radius: 999px; font-size: 11.5px; font-weight: 600;
+      border: 1px solid var(--border); color: var(--muted-foreground);
+    }
+    .chip.on { color: var(--success); border-color: rgba(129,201,149,.4); background: rgba(129,201,149,.09); }
+    .chip.wait { color: var(--warning); border-color: rgba(232,168,124,.4); background: rgba(232,168,124,.09); }
+    .chip.dead { color: var(--muted-foreground); }
+    .chip.new { color: var(--info); border-color: rgba(126,200,227,.4); background: rgba(126,200,227,.09); }
+
+    .row { display: flex; align-items: center; gap: 12px; }
+    .between { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .stack { display: grid; gap: 16px; }
+    .stack-sm { display: grid; gap: 10px; }
+    .muted { color: var(--muted-foreground); }
+    .tiny { font-size: 12px; }
+    .mono { font-family: var(--mono); }
+    .rule { height: 1px; background: var(--border); }
+
+    .switch { width: 38px; height: 22px; border-radius: 999px; background: var(--secondary); position: relative; flex: none; }
+    .switch i { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--muted-foreground); }
+    .switch.on { background: var(--primary); }
+    .switch.on i { left: 19px; background: var(--primary-foreground); }
+
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left; font: 500 11px/1 var(--mono); text-transform: uppercase;
+      letter-spacing: 0.07em; color: var(--muted-foreground);
+      padding: 0 12px 11px; border-bottom: 1px solid var(--border);
+    }
+    td { padding: 13px 12px; border-bottom: 1px solid var(--border); font-size: 13.5px; vertical-align: middle; }
+    tr:last-child td { border-bottom: 0; }
+
+    /* ---------- admin: invite composer ---------- */
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 22px; }
+    .tab { padding: 10px 14px; font-size: 13.5px; font-weight: 500; color: var(--muted-foreground); border-bottom: 2px solid transparent; }
+    .tab.on { color: var(--foreground); border-bottom-color: var(--primary); }
+
+    .seg { display: inline-flex; padding: 3px; gap: 3px; background: var(--secondary); border-radius: 9px; }
+    .seg div { padding: 6px 13px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
+    .seg div.on { background: var(--card); color: var(--foreground); box-shadow: 0 1px 2px rgba(0,0,0,.35); }
+
+    .checkline { display: grid; grid-template-columns: 18px 1fr; gap: 11px; align-items: start; }
+    .box { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--border); background: var(--input); margin-top: 1px; }
+    .box.on { background: var(--primary); border-color: var(--primary); position: relative; }
+    .box.on::after {
+      content: ""; position: absolute; left: 5px; top: 2px; width: 5px; height: 9px;
+      border: solid var(--primary-foreground); border-width: 0 2px 2px 0; transform: rotate(45deg);
+    }
+
+    /* ---------- email ---------- */
+    .mail-canvas { background: #0b0b0d; padding: 34px 20px; }
+    .mail {
+      max-width: 520px; margin: 0 auto; background: #1c1c20;
+      border: 1px solid #2e2e35; border-radius: 12px; overflow: hidden;
+    }
+    .mail-head { padding: 26px 30px 0; text-align: center; }
+    .mail-wordmark { font-weight: 800; font-size: 19px; letter-spacing: -0.04em; color: #e8e8ec; }
+    .mail-body { padding: 22px 30px 28px; }
+    .mail-body h3 { font-size: 21px; letter-spacing: -0.03em; margin-bottom: 14px; }
+    .mail-body p { color: #b9b9c2; font-size: 14px; line-height: 1.65; margin-bottom: 14px; }
+    .mail-btn {
+      display: block; text-align: center; background: #e8e8ec; color: #141417;
+      font-weight: 700; padding: 13px; border-radius: 8px; margin: 22px 0 18px; font-size: 14.5px;
+    }
+    .mail-facts { border: 1px solid #2e2e35; border-radius: 9px; overflow: hidden; margin: 18px 0; }
+    .mail-facts div { display: flex; justify-content: space-between; gap: 14px; padding: 10px 14px; border-bottom: 1px solid #26262c; font-size: 13px; }
+    .mail-facts div:last-child { border-bottom: 0; }
+    .mail-facts span:first-child { color: #9696a0; }
+    .mail-foot { padding: 0 30px 26px; color: #7c7c86; font-size: 11.5px; line-height: 1.7; text-align: center; }
+    .mail-subject { max-width: 520px; margin: 0 auto 14px; color: var(--muted-foreground); font-size: 12.5px; }
+    .mail-subject b { color: var(--foreground); font-weight: 600; }
+
+    /* ---------- auth / claim ---------- */
+    .auth-shell {
+      min-height: 560px; display: grid; place-items: center; padding: 40px 20px;
+      background:
+        radial-gradient(900px 400px at 18% -8%, rgba(139,156,247,.13), transparent 60%),
+        radial-gradient(700px 380px at 88% 108%, rgba(126,200,227,.10), transparent 62%),
+        var(--background);
+    }
+    .auth-card { width: 100%; max-width: 400px; }
+    .steps { display: flex; align-items: flex-start; margin-bottom: 26px; }
+    .steps .st { display: grid; gap: 7px; justify-items: center; flex: none; padding: 0 4px; }
+    .steps .dot {
+      width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+      border: 1px solid var(--border); background: var(--secondary);
+      font: 600 10px/1 var(--mono); color: var(--muted-foreground);
+    }
+    .steps .dot.done { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+    .steps .dot.now { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
+    .steps .cap { font: 600 9.5px/1 var(--mono); letter-spacing: 0.1em; color: var(--muted-foreground); text-transform: uppercase; }
+    .steps .cap.now { color: var(--foreground); }
+    .steps .bar { flex: 1; height: 1px; background: var(--border); margin-top: 11px; }
+    .steps .bar.done { background: var(--primary); }
+
+    .meter { display: grid; gap: 6px; }
+    .meter .track { height: 4px; border-radius: 999px; background: var(--secondary); overflow: hidden; }
+    .meter .fill { height: 100%; border-radius: 999px; background: var(--success); width: 72%; }
+
+    /* ---------- household / profiles ---------- */
+    .ptiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 16px; }
+    .ptile { display: grid; gap: 10px; justify-items: center; text-align: center; }
+    .pavatar {
+      width: 84px; height: 84px; border-radius: 26px; display: grid; place-items: center;
+      font-size: 30px; font-weight: 700; background: var(--secondary);
+      border: 1px solid var(--border); position: relative;
+    }
+    .pavatar.you { background: linear-gradient(135deg,#2b2b33,#1d1d23); border-color: #34343c; }
+    .pavatar.kid { background: linear-gradient(135deg,#233028,#1a201c); border-color: rgba(129,201,149,.3); }
+    .pavatar.add { background: transparent; border: 1.5px dashed var(--border); color: var(--muted-foreground); font-size: 26px; font-weight: 400; }
+    .pbadge {
+      position: absolute; bottom: -7px; left: 50%; transform: translateX(-50%);
+      font: 600 9.5px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase;
+      background: var(--popover); border: 1px solid var(--border); border-radius: 999px;
+      padding: 4px 8px; color: var(--muted-foreground); white-space: nowrap;
+    }
+    .pname { font-size: 13px; font-weight: 600; margin-top: 4px; }
+    .pmeta { font-size: 11px; color: var(--muted-foreground); }
+
+    /* ---------- tour ---------- */
+    .tour-canvas {
+      position: relative; min-height: 520px; padding: 0;
+      background: var(--background); overflow: hidden;
+    }
+    .app-under { filter: blur(1.5px); opacity: 0.28; pointer-events: none; padding: 20px; }
+    .fake-nav { display: grid; grid-template-columns: 172px 1fr; gap: 20px; }
+    .fake-side { display: grid; gap: 9px; align-content: start; }
+    .fake-side div { height: 30px; border-radius: 7px; background: var(--secondary); }
+    .fake-side div:nth-child(3) { background: #2f2f36; }
+    .fake-main { display: grid; gap: 14px; align-content: start; }
+    .fake-hero { height: 128px; border-radius: 12px; background: linear-gradient(115deg,#26262e,#191920); }
+    .fake-shelf { display: grid; grid-template-columns: repeat(6,1fr); gap: 11px; }
+    .fake-shelf i { aspect-ratio: 2/3; border-radius: 9px; background: var(--secondary); display: block; }
+
+    .tour-scrim { position: absolute; inset: 0; background: rgba(10,10,12,.72); }
+    .tour-card {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+      width: min(560px, calc(100% - 48px));
+      background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+      padding: 26px; box-shadow: 0 24px 60px -12px rgba(0,0,0,.75);
+    }
+    .tour-eyebrow {
+      font: 600 10.5px/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted-foreground); margin-bottom: 12px;
+    }
+    .tour-card h3 { font-size: 22px; letter-spacing: -0.03em; margin-bottom: 10px; }
+    .tour-card > p { color: var(--muted-foreground); font-size: 14px; line-height: 1.65; }
+    .tour-visual {
+      margin: 20px 0; border: 1px solid var(--border); border-radius: 11px;
+      background: var(--popover); padding: 16px;
+    }
+    .tour-foot { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 22px; }
+    .pips { display: flex; gap: 6px; }
+    .pips i { width: 6px; height: 6px; border-radius: 50%; background: var(--secondary); display: block; }
+    .pips i.on { background: var(--primary); width: 18px; border-radius: 999px; }
+
+    /* spotlight variant */
+    .spot-target {
+      position: absolute; border-radius: 10px;
+      box-shadow: 0 0 0 9999px rgba(10,10,12,.76), 0 0 0 2px var(--primary);
+    }
+    .spot-pop {
+      position: absolute; width: 300px; background: var(--card);
+      border: 1px solid var(--border); border-radius: 13px; padding: 18px;
+      box-shadow: 0 20px 44px -12px rgba(0,0,0,.7);
+    }
+    .spot-pop h4 { font-size: 15px; margin-bottom: 7px; }
+    .spot-pop p { font-size: 13px; color: var(--muted-foreground); line-height: 1.6; }
+
+    /* ---------- phones ---------- */
+    .phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; margin-top: 24px; }
+    .phone {
+      border: 1px solid var(--border); border-radius: 30px; padding: 11px;
+      background: #0d0d10; box-shadow: 0 18px 40px -18px rgba(0,0,0,.85);
+    }
+    .phone-screen {
+      border-radius: 21px; overflow: hidden; background: var(--background);
+      min-height: 500px; display: flex; flex-direction: column; position: relative;
+    }
+    .phone-status {
+      display: flex; justify-content: space-between; padding: 11px 17px 5px;
+      font: 600 10.5px/1 var(--mono); color: var(--muted-foreground);
+    }
+    .phone-label { text-align: center; margin-top: 11px; font-size: 12.5px; color: var(--muted-foreground); }
+    .phone-label b { color: var(--foreground); font-weight: 600; display: block; font-size: 13px; margin-bottom: 2px; }
+    .phone-pad { padding: 20px 19px 22px; display: flex; flex-direction: column; flex: 1; }
+
+    .sheet {
+      margin-top: auto; background: var(--card); border: 1px solid var(--border);
+      border-radius: 18px 18px 0 0; padding: 20px 19px 24px; margin-inline: -19px; margin-bottom: -22px;
+    }
+    .grabber { width: 34px; height: 4px; border-radius: 999px; background: var(--secondary); margin: 0 auto 15px; }
+
+    /* ---------- tv ---------- */
+    .tv {
+      border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+      background: var(--background); min-height: 340px; position: relative;
+      display: grid; place-items: center; padding: 52px 40px;
+    }
+    .tv-focus { box-shadow: 0 0 0 2px var(--primary), 0 0 0 6px rgba(232,232,236,.14); }
+
+    /* ---------- state / flow diagram ---------- */
+    .flow { display: grid; gap: 0; margin-top: 22px; }
+    .flow-row { display: grid; grid-template-columns: 132px 1fr; gap: 20px; align-items: start; padding: 18px 0; border-bottom: 1px solid var(--border); }
+    .flow-row:last-child { border-bottom: 0; }
+    .flow-actor { font: 600 10.5px/1.5 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); padding-top: 2px; }
+    .flow-body b { display: block; margin-bottom: 5px; font-size: 14px; }
+    .flow-body p { color: var(--muted-foreground); font-size: 13.5px; }
+    .flow-body code { font: 400 12px/1.5 var(--mono); color: var(--info); }
+
+    .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 18px; }
+    .legend div { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted-foreground); }
+    .legend i { width: 10px; height: 10px; border-radius: 3px; display: block; }
+  </style>
+</head>
+<body>
+<div class="doc">
+
+  <header class="doc-head">
+    <h1>Invites &amp; Onboarding</h1>
+    <p class="sub">
+      Mockups for emailed, pre-provisioned invites and the server-driven feature tour that runs
+      after a new person signs in — on web, Android, and Apple. The current flow hands someone an
+      8-character code and drops them on an empty home screen; this replaces both halves.
+    </p>
+    <div class="doc-meta">
+      <span>Mockup · not implemented</span>
+      <span>Theme: midnight-cinema</span>
+      <span>Web · Android · iOS/tvOS</span>
+    </div>
+  </header>
+
+  <!-- ============================================================= -->
+  <section class="section">
+    <div class="label">01 — Admin</div>
+    <h2>Sending an invite</h2>
+    <p class="note">
+      The existing <em>Invite Codes</em> tab stays exactly as it is for the casual "drop a code in
+      Discord" case. A second tab, <strong>Invitations</strong>, is for inviting a specific person:
+      the admin scopes their access up front, and the invitee only sets a password.
+    </p>
+
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">/admin/users → Invitations</div>
+      </div>
+      <div class="frame-body">
+        <div class="tabs">
+          <div class="tab">Users</div>
+          <div class="tab">Defaults</div>
+          <div class="tab on">Invitations</div>
+          <div class="tab">Invite Codes</div>
+        </div>
+
+        <div class="between" style="margin-bottom:18px;">
+          <div>
+            <h3 style="font-size:17px;">Invitations</h3>
+            <p class="muted tiny" style="margin-top:4px;">
+              Email a personal link. Access is set here, so they only choose a password.
+            </p>
+          </div>
+          <button class="btn btn-primary btn-sm">+ Invite someone</button>
+        </div>
+
+        <div class="card" style="padding:0;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:34%">Recipient</th>
+                <th>Access</th>
+                <th>Status</th>
+                <th>Sent</th>
+                <th style="width:88px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div style="font-weight:600;">dana@example.com</div>
+                  <div class="muted tiny">Invited by quick</div>
+                </td>
+                <td class="muted">Household · All libraries</td>
+                <td><span class="chip on">Accepted</span></td>
+                <td class="muted tiny">2 days ago</td>
+                <td><button class="btn btn-quiet btn-sm">View user</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="font-weight:600;">marco@example.com</div>
+                  <div class="muted tiny">Invited by quick</div>
+                </td>
+                <td class="muted">Household · All libraries</td>
+                <td><span class="chip wait">Sent · expires in 6d</span></td>
+                <td class="muted tiny">18 hours ago</td>
+                <td><button class="btn btn-quiet btn-sm">Resend</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="font-weight:600;">kid@example.com</div>
+                  <div class="muted tiny">Invited by quick</div>
+                </td>
+                <td class="muted">Kids · Movies, Cartoons</td>
+                <td><span class="chip wait">Sent · expires in 2d</span></td>
+                <td class="muted tiny">5 days ago</td>
+                <td><button class="btn btn-quiet btn-sm">Resend</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div style="font-weight:600;">old@example.com</div>
+                  <div class="muted tiny">Invited by quick</div>
+                </td>
+                <td class="muted">Guests · Movies</td>
+                <td><span class="chip dead">Expired</span></td>
+                <td class="muted tiny">3 weeks ago</td>
+                <td><button class="btn btn-quiet btn-sm">Revoke</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="callouts">
+          <div class="callout"><b>1</b><span>
+            Status is honest about lifetime: <strong>Sent → Accepted / Expired / Revoked</strong>.
+            An admin can always see who has a live link outstanding.
+          </span></div>
+          <div class="callout"><b>2</b><span>
+            <strong>Resend mints a fresh token and invalidates the old one</strong> — a forwarded
+            or leaked link stops working the moment the invite is resent.
+          </span></div>
+          <div class="callout"><b>3</b><span>
+            Accepted rows link straight to the created user, so the invite list doubles as an
+            audit trail of how each account got here.
+          </span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- composer -->
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Dialog — Invite someone</div>
+      </div>
+      <div class="frame-body" style="background:var(--popover);">
+        <div style="max-width:520px;margin:0 auto;">
+          <div class="stack">
+            <div>
+              <h3 style="font-size:19px;">Invite someone</h3>
+              <p class="muted tiny" style="margin-top:6px;">
+                They get an email with a link. Their username is their email address, so all they
+                pick is a password.
+              </p>
+            </div>
+
+            <div class="field">
+              <label>Email address</label>
+              <div class="input">marco@example.com</div>
+              <div class="hint">This becomes both the destination and their sign-in username.</div>
+            </div>
+
+            <div class="grid-2">
+              <div class="field">
+                <label>Access group</label>
+                <div class="input">Household ▾</div>
+              </div>
+              <div class="field">
+                <label>Role</label>
+                <div class="input">User ▾</div>
+              </div>
+            </div>
+
+            <div class="field">
+              <label>Libraries</label>
+              <div class="input">All libraries ▾</div>
+              <div class="hint">Group permissions still apply on top; the stricter of the two wins.</div>
+            </div>
+
+            <div class="field">
+              <label>Personal note <span class="muted">(optional)</span></label>
+              <div class="input input-tall ph">Hey — set yourself up whenever. The 4K stuff is all under Movies.</div>
+              <div class="hint">Appears in the email above the button. Plain text.</div>
+            </div>
+
+            <div class="rule"></div>
+
+            <div class="stack-sm">
+              <div class="checkline">
+                <div class="box on"></div>
+                <div>
+                  <div style="font-weight:500;">Create their first profile automatically</div>
+                  <div class="muted tiny">Named from the part before the @. They can rename it later.</div>
+                </div>
+              </div>
+              <div class="checkline">
+                <div class="box on"></div>
+                <div>
+                  <div style="font-weight:500;">Show the feature tour on first sign-in</div>
+                  <div class="muted tiny">
+                    Walks through favorites, watchlists, requests, watch together, quality, subtitles,
+                    and notifications — skipping anything this server has turned off.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="rule"></div>
+
+            <div class="between">
+              <div class="tiny muted">Link expires in <b class="mono" style="color:var(--foreground)">7 days</b> · single use</div>
+              <div class="row">
+                <button class="btn btn-ghost">Cancel</button>
+                <button class="btn btn-primary">Send invite</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="callout"><b>4</b><span>
+        <strong>Email address is the username.</strong> Nothing to invent, nothing to forget, and it
+        matches how every other service they use behaves. Existing username accounts are untouched —
+        login accepts either.
+      </span></div>
+      <div class="callout"><b>5</b><span>
+        If SMTP isn't configured, the dialog swaps the send button for
+        <strong>"Copy invite link"</strong> and says so plainly, rather than silently failing to send.
+      </span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section class="section">
+    <div class="label">02 — Email</div>
+    <h2>What lands in their inbox</h2>
+    <p class="note">
+      Rendered with the existing <code class="mono">internal/mail</code> layout, so it matches the
+      notification and verification emails already going out. No images, no tracking pixel, works
+      link-free in a plain-text client.
+    </p>
+
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Invitation email</div>
+      </div>
+      <div class="mail-canvas">
+        <div class="mail-subject"><b>Subject:</b> Quick invited you to Silo</div>
+        <div class="mail">
+          <div class="mail-head"><div class="mail-wordmark">SILO</div></div>
+          <div class="mail-body">
+            <h3>You've been invited</h3>
+            <p><b style="color:#e8e8ec">Quick</b> set up an account for you on their Silo server.</p>
+            <p style="color:#9696a0;font-style:italic;border-left:2px solid #2e2e35;padding-left:12px;">
+              "Hey — set yourself up whenever. The 4K stuff is all under Movies."
+            </p>
+            <a class="mail-btn">Set your password</a>
+            <div class="mail-facts">
+              <div><span>Sign in with</span><span class="mono" style="color:#e8e8ec">marco@example.com</span></div>
+              <div><span>Access</span><span style="color:#e8e8ec">All libraries</span></div>
+              <div><span>Link expires</span><span style="color:#e8e8ec">In 7 days</span></div>
+            </div>
+            <p style="font-size:12.5px;color:#9696a0;">
+              Or paste this into your browser:<br>
+              <span class="mono" style="font-size:11.5px;word-break:break-all;">https://silo.example.com/invite/9f2c8a4e1b7d63f0</span>
+            </p>
+          </div>
+          <div class="mail-foot">
+            This link works once and expires in 7 days.<br>
+            If you weren't expecting this, ignore it — no account is created until you use the link.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="callout"><b>6</b><span>
+        <strong>No account exists until the link is used.</strong> An unopened invite leaves no row in
+        <code class="mono">users</code>, so a mistyped address can't create a dead account or squat a username.
+      </span></div>
+      <div class="callout"><b>7</b><span>
+        The email states the sign-in address explicitly — it's the one thing they'll need again on
+        the phone app, and it's the one thing they'd otherwise guess wrong.
+      </span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section class="section">
+    <div class="label">03 — Claim</div>
+    <h2>Setting a password</h2>
+    <p class="note">
+      One field. Everything else was decided when the invite was sent, so this screen has nothing to
+      ask. It reuses the existing <code class="mono">auth-shell</code> and journey-progress treatment
+      from Login and Signup.
+    </p>
+
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">/invite/9f2c8a4e1b7d63f0</div>
+      </div>
+      <div class="auth-shell">
+        <div class="auth-card">
+          <div class="steps">
+            <div class="st"><div class="dot done">✓</div><div class="cap">Invite</div></div>
+            <div class="bar done"></div>
+            <div class="st"><div class="dot now">2</div><div class="cap now">Password</div></div>
+            <div class="bar"></div>
+            <div class="st"><div class="dot">3</div><div class="cap">Household</div></div>
+          </div>
+
+          <div class="card">
+            <div class="stack">
+              <div>
+                <div style="font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted-foreground);font-family:var(--mono);margin-bottom:9px;">
+                  Invited by Quick
+                </div>
+                <h3 style="font-size:23px;">Welcome to Silo</h3>
+                <p class="muted tiny" style="margin-top:8px;line-height:1.6;">
+                  Choose a password and you're in. You'll sign in with your email address.
+                </p>
+              </div>
+
+              <div class="field">
+                <label>Email</label>
+                <div class="input locked">marco@example.com</div>
+              </div>
+
+              <div class="field">
+                <label>Password</label>
+                <div class="input">••••••••••••</div>
+                <div class="meter">
+                  <div class="track"><div class="fill"></div></div>
+                  <div class="hint">Strong · at least 8 characters</div>
+                </div>
+              </div>
+
+              <div class="field">
+                <label>Confirm password</label>
+                <div class="input">••••••••••••</div>
+              </div>
+
+              <button class="btn btn-primary btn-lg btn-block">Create account</button>
+
+              <p class="tiny muted" style="text-align:center;">
+                Already set this up? <span style="color:var(--foreground);text-decoration:underline;">Sign in</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="callout"><b>8</b><span>
+        <strong>An expired or used link doesn't dead-end.</strong> It renders a plain
+        "This invite has expired — ask Quick to send a new one" card with a sign-in link, not a 404.
+      </span></div>
+      <div class="callout"><b>9</b><span>
+        Submitting creates the account, redeems the token, and logs them straight in. They land on
+        the tour, not back at a login form.
+      </span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section class="section">
+    <div class="label">04 — Household</div>
+    <h2>Setting up the household</h2>
+    <p class="note">
+      Right after the password, before the tour: profiles for everyone on the couch. This is step 3
+      of the journey indicator on the claim screen. Kids get a content ceiling and library limits;
+      grandparents get big defaults and no clutter; the parent gets a PIN so nobody wanders into
+      their profile. All of it maps onto the profile model that already exists —
+      <code class="mono">is_child</code>, <code class="mono">max_content_rating</code>, PIN, and
+      per-profile library restrictions.
+    </p>
+
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Onboarding · who's watching?</div>
+      </div>
+      <div class="auth-shell" style="min-height:480px;">
+        <div style="width:100%;max-width:640px;">
+          <div class="steps" style="max-width:340px;margin:0 auto 34px;">
+            <div class="st"><div class="dot done">✓</div><div class="cap">Invite</div></div>
+            <div class="bar done"></div>
+            <div class="st"><div class="dot done">✓</div><div class="cap">Password</div></div>
+            <div class="bar done"></div>
+            <div class="st"><div class="dot now">3</div><div class="cap now">Household</div></div>
+          </div>
+
+          <div style="text-align:center;margin-bottom:30px;">
+            <h3 style="font-size:24px;">Who's watching?</h3>
+            <p class="muted tiny" style="margin-top:8px;">
+              Everyone gets their own history, watchlist, and recommendations.
+              Add the whole household now or later — this is your account either way.
+            </p>
+          </div>
+
+          <div class="ptiles">
+            <div class="ptile">
+              <div class="pavatar you">M<span class="pbadge">You · PIN</span></div>
+              <div><div class="pname">Marco</div><div class="pmeta">All libraries</div></div>
+            </div>
+            <div class="ptile">
+              <div class="pavatar">S</div>
+              <div><div class="pname">Sofia</div><div class="pmeta">All libraries</div></div>
+            </div>
+            <div class="ptile">
+              <div class="pavatar kid">E<span class="pbadge">Kids · PG</span></div>
+              <div><div class="pname">Emma</div><div class="pmeta">Movies, Cartoons</div></div>
+            </div>
+            <div class="ptile">
+              <div class="pavatar add">+</div>
+              <div><div class="pname muted" style="font-weight:500;">Add profile</div><div class="pmeta">&nbsp;</div></div>
+            </div>
+          </div>
+
+          <div class="row" style="justify-content:center;gap:12px;margin-top:36px;">
+            <button class="btn btn-ghost">Just me for now</button>
+            <button class="btn btn-primary">Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- profile editor dialog -->
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Dialog — Add a profile (kid preset shown)</div>
+      </div>
+      <div class="frame-body" style="background:var(--popover);">
+        <div style="max-width:500px;margin:0 auto;">
+          <div class="stack">
+            <div>
+              <h3 style="font-size:19px;">Add a profile</h3>
+              <p class="muted tiny" style="margin-top:6px;">
+                Profiles share your account — they're not separate logins.
+              </p>
+            </div>
+
+            <div class="grid-2">
+              <div class="field">
+                <label>Name</label>
+                <div class="input">Emma</div>
+              </div>
+              <div class="field">
+                <label>Avatar</label>
+                <div class="row" style="gap:8px;">
+                  <div style="width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#233028,#1a201c);border:2px solid var(--primary);"></div>
+                  <div style="width:38px;height:38px;border-radius:11px;background:var(--secondary);"></div>
+                  <div style="width:38px;height:38px;border-radius:11px;background:var(--secondary);"></div>
+                  <div style="width:38px;height:38px;border-radius:11px;border:1.5px dashed var(--border);display:grid;place-items:center;color:var(--muted-foreground);">+</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="between" style="padding:4px 0;">
+              <div>
+                <div style="font-weight:500;">Kids profile</div>
+                <div class="muted tiny">Simplified home screen, no requests, and the ceilings below.</div>
+              </div>
+              <div class="switch on"><i></i></div>
+            </div>
+
+            <div class="grid-2">
+              <div class="field">
+                <label>Content rating up to</label>
+                <div class="input">PG ▾</div>
+              </div>
+              <div class="field">
+                <label>Libraries</label>
+                <div class="input">Movies, Cartoons ▾</div>
+              </div>
+            </div>
+
+            <div class="rule"></div>
+
+            <div class="between" style="padding:2px 0;">
+              <div>
+                <div style="font-weight:500;">Require a PIN to open</div>
+                <div class="muted tiny">Usually for the parents' profiles, not the kids' — it keeps
+                the kids <em>out</em> of yours.</div>
+              </div>
+              <div class="switch"><i></i></div>
+            </div>
+
+            <div class="rule"></div>
+
+            <div class="between">
+              <span class="tiny muted">Everything here is editable later in Settings → Profiles.</span>
+              <div class="row">
+                <button class="btn btn-ghost">Cancel</button>
+                <button class="btn btn-primary">Add profile</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="callout"><b>10</b><span>
+        <strong>Profiles are not logins.</strong> They all share the invited account —
+        one password, one email, many viewers. That's the existing Silo model
+        (several profiles per <code class="mono">user_id</code>); this screen just surfaces it at the
+        right moment instead of leaving it buried in settings.
+      </span></div>
+      <div class="callout"><b>11</b><span>
+        <strong>The kids toggle is a preset, not a lecture.</strong> Flipping it on reveals the
+        rating ceiling and library picker with sensible defaults (PG, kid-flagged libraries
+        preselected when the admin marked any). Grandparents don't need a ceiling — for them you
+        just make a plain profile and skip all of this.
+      </span></div>
+      <div class="callout"><b>12</b><span>
+        <strong>PIN guidance matters more than the PIN field.</strong> The common mistake is
+        pinning the kid's profile; the useful move is pinning the <em>adults'</em>. One line of copy
+        fixes a support thread.
+      </span></div>
+      <div class="callout"><b>13</b><span>
+        <strong>"Just me for now" is a real path.</strong> It creates nothing extra, and the tour's
+        household stop reminds them it exists. No modal nagging on every launch.
+      </span></div>
+      <div class="callout"><b>14</b><span>
+        Each new profile starts its own taste-seed state, so Emma's picker shows
+        kid-appropriate titles filtered by her rating ceiling — the existing taste-seed
+        endpoint already scopes to the active profile.
+      </span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section class="section">
+    <div class="label">05 — Tour</div>
+    <h2>The first-run tour, on web</h2>
+    <p class="note">
+      This is the part that actually sells Silo. The steps come from the server, so a server with
+      requests disabled never shows a requests stop — and a stop added later shows up without a client
+      release. Two presentations: a full card for concept stops, a spotlight for "here's where it lives."
+    </p>
+
+    <!-- welcome -->
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Tour · step 1 of 8 — welcome</div>
+      </div>
+      <div class="tour-canvas">
+        <div class="app-under">
+          <div class="fake-nav">
+            <div class="fake-side"><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="fake-main">
+              <div class="fake-hero"></div>
+              <div class="fake-shelf"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <div class="fake-shelf"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </div>
+        <div class="tour-scrim"></div>
+        <div class="tour-card">
+          <div class="tour-eyebrow">Welcome · 2 minutes</div>
+          <h3>Silo isn't quite like the others</h3>
+          <p>
+            You've probably used Plex or Jellyfin. Most of this will feel familiar — but a handful of
+            things work differently here, and they're the reason this server exists. Quick look?
+          </p>
+          <div class="tour-visual">
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+              <div class="stack-sm" style="gap:6px;"><div style="font-size:12.5px;font-weight:600;">Watch together</div><div class="muted tiny">Synced rooms, no extensions</div></div>
+              <div class="stack-sm" style="gap:6px;"><div style="font-size:12.5px;font-weight:600;">Requests</div><div class="muted tiny">Ask for what's missing</div></div>
+              <div class="stack-sm" style="gap:6px;"><div style="font-size:12.5px;font-weight:600;">Real recommendations</div><div class="muted tiny">From your taste, not popularity</div></div>
+            </div>
+          </div>
+          <div class="tour-foot">
+            <button class="btn btn-quiet btn-sm">Skip tour</button>
+            <div class="row">
+              <div class="pips"><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+              <button class="btn btn-primary">Show me</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- interactive step: quality -->
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Tour · step 3 of 8 — playback quality (writes a real setting)</div>
+      </div>
+      <div class="tour-canvas">
+        <div class="app-under">
+          <div class="fake-nav">
+            <div class="fake-side"><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="fake-main"><div class="fake-hero"></div><div class="fake-shelf"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          </div>
+        </div>
+        <div class="tour-scrim"></div>
+        <div class="tour-card">
+          <div class="tour-eyebrow">Playback · step 3 of 8</div>
+          <h3>Pick a quality ceiling now, change it anywhere</h3>
+          <p>
+            Silo won't burn your data plan guessing. Set a ceiling and it sticks — per device, if you
+            want. You can override it for a single library or a single show later.
+          </p>
+          <div class="tour-visual">
+            <div class="stack-sm">
+              <div class="between">
+                <div>
+                  <div style="font-size:13px;font-weight:600;">Video quality</div>
+                  <div class="muted tiny">On this device</div>
+                </div>
+                <div class="seg"><div>Auto</div><div class="on">1080p</div><div>4K</div></div>
+              </div>
+              <div class="rule"></div>
+              <div class="between">
+                <div>
+                  <div style="font-size:13px;font-weight:600;">Auto-skip intros and recaps</div>
+                  <div class="muted tiny">Jump straight into the episode</div>
+                </div>
+                <div class="switch on"><i></i></div>
+              </div>
+            </div>
+          </div>
+          <p class="tiny muted">Saved as you go. Settings → Playback has the rest.</p>
+          <div class="tour-foot">
+            <button class="btn btn-quiet btn-sm">Skip tour</button>
+            <div class="row">
+              <button class="btn btn-ghost btn-sm">Back</button>
+              <div class="pips"><i></i><i></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+              <button class="btn btn-primary">Next</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- spotlight step -->
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Tour · step 6 of 8 — spotlight on the sidebar</div>
+      </div>
+      <div class="tour-canvas">
+        <div class="app-under" style="filter:none;opacity:1;">
+          <div class="fake-nav">
+            <div class="fake-side"><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="fake-main"><div class="fake-hero"></div><div class="fake-shelf"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          </div>
+        </div>
+        <div class="spot-target" style="left:20px;top:98px;width:172px;height:69px;"></div>
+        <div class="spot-pop" style="left:214px;top:96px;">
+          <h4>Watchlist and Favorites live here</h4>
+          <p>
+            Favorites teach recommendations what you like. The watchlist is the "get to it eventually"
+            pile — and Silo tells you when something on it lands.
+          </p>
+          <div class="tour-foot" style="margin-top:16px;">
+            <div class="pips"><i></i><i></i><i></i><i></i><i></i><i class="on"></i><i></i><i></i></div>
+            <button class="btn btn-primary btn-sm">Next</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- finish -->
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Tour · step 8 of 8 — finish</div>
+      </div>
+      <div class="tour-canvas">
+        <div class="app-under">
+          <div class="fake-nav">
+            <div class="fake-side"><div></div><div></div><div></div><div></div><div></div><div></div></div>
+            <div class="fake-main"><div class="fake-hero"></div><div class="fake-shelf"><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+          </div>
+        </div>
+        <div class="tour-scrim"></div>
+        <div class="tour-card">
+          <div class="tour-eyebrow">All set</div>
+          <h3>That's the tour</h3>
+          <p>Everything here is in Settings, and you can replay this any time from Settings → Personalize.</p>
+          <div class="tour-visual">
+            <div class="stack-sm">
+              <div class="between"><span style="font-size:13px;">Quality ceiling</span><span class="chip on">1080p</span></div>
+              <div class="between"><span style="font-size:13px;">Subtitles</span><span class="chip on">English · on for foreign audio</span></div>
+              <div class="between"><span style="font-size:13px;">Notifications</span><span class="chip on">Email · watchlist arrivals</span></div>
+              <div class="between"><span style="font-size:13px;">Favorites picked</span><span class="chip on">7 titles</span></div>
+            </div>
+          </div>
+          <div class="tour-foot">
+            <span class="tiny muted">Next: pick a few favorites so recommendations aren't cold.</span>
+            <button class="btn btn-primary">Start watching</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="callout"><b>15</b><span>
+        <strong>Steps that change a setting write it immediately</strong> through the existing settings
+        API. The tour isn't a slideshow with a "now go configure it yourself" ending — by step 8 their
+        account is genuinely set up.
+      </span></div>
+      <div class="callout"><b>16</b><span>
+        <strong>Skip is always one click away and always honored.</strong> Completion is stored per
+        profile on the server, so skipping on the phone doesn't re-prompt on the TV.
+      </span></div>
+      <div class="callout"><b>17</b><span>
+        This flows into the <em>existing</em> taste-seed picker rather than replacing it — the tour
+        ends by handing off to the screen that's already there.
+      </span></div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section class="section">
+    <div class="label">06 — Mobile</div>
+    <h2>Android and Apple</h2>
+    <p class="note">
+      Same server manifest, native presentation. The phone apps get a full-screen pager because
+      spotlights don't survive a 390pt viewport; tvOS gets a focus-driven variant with no text entry.
+    </p>
+
+    <div class="phones">
+      <!-- 1: deep link landing -->
+      <div>
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="phone-pad">
+              <div style="text-align:center;margin-bottom:26px;">
+                <div style="font-weight:800;font-size:17px;letter-spacing:-.04em;">SILO</div>
+              </div>
+              <div class="steps" style="max-width:210px;margin:0 auto 26px;">
+                <div class="st"><div class="dot done">✓</div><div class="cap">Server</div></div>
+                <div class="bar done"></div>
+                <div class="st"><div class="dot now">2</div><div class="cap now">Pass</div></div>
+                <div class="bar"></div>
+                <div class="st"><div class="dot">3</div><div class="cap">Family</div></div>
+              </div>
+              <h3 style="font-size:20px;text-align:center;">Welcome to Silo</h3>
+              <p class="muted tiny" style="text-align:center;margin:9px 0 22px;line-height:1.6;">
+                Invited by Quick · silo.example.com
+              </p>
+              <div class="stack">
+                <div class="field">
+                  <label>Email</label>
+                  <div class="input locked">marco@example.com</div>
+                </div>
+                <div class="field">
+                  <label>Password</label>
+                  <div class="input">••••••••••••</div>
+                </div>
+                <button class="btn btn-primary btn-lg btn-block">Create account</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label"><b>Tapping the email link</b>Universal link / App Link opens the app with server + token already filled. No "which server?" prompt.</div>
+      </div>
+
+      <!-- 2: household -->
+      <div>
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="phone-pad">
+              <div style="text-align:center;margin-bottom:22px;">
+                <h3 style="font-size:20px;">Who's watching?</h3>
+                <p class="muted tiny" style="margin-top:7px;line-height:1.55;">
+                  Everyone gets their own history and recommendations.
+                </p>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;justify-items:center;">
+                <div class="ptile">
+                  <div class="pavatar you" style="width:68px;height:68px;border-radius:20px;font-size:24px;">M<span class="pbadge">You · PIN</span></div>
+                  <div><div class="pname">Marco</div></div>
+                </div>
+                <div class="ptile">
+                  <div class="pavatar" style="width:68px;height:68px;border-radius:20px;font-size:24px;">S</div>
+                  <div><div class="pname">Sofia</div></div>
+                </div>
+                <div class="ptile">
+                  <div class="pavatar kid" style="width:68px;height:68px;border-radius:20px;font-size:24px;">E<span class="pbadge">Kids · PG</span></div>
+                  <div><div class="pname">Emma</div></div>
+                </div>
+                <div class="ptile">
+                  <div class="pavatar add" style="width:68px;height:68px;border-radius:20px;">+</div>
+                  <div><div class="pname muted" style="font-weight:500;">Add</div></div>
+                </div>
+              </div>
+              <div style="margin-top:auto;display:grid;gap:9px;">
+                <button class="btn btn-primary btn-lg btn-block">Continue</button>
+                <button class="btn btn-quiet btn-block">Just me for now</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label"><b>Household setup</b>Same step 3 as web. Tapping a tile edits it; the kid preset carries rating ceiling + libraries.</div>
+      </div>
+
+      <!-- 3: tour page -->
+      <div>
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="phone-pad">
+              <div class="between" style="margin-bottom:auto;">
+                <div class="pips"><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div>
+                <button class="btn btn-quiet btn-sm" style="padding:0;">Skip</button>
+              </div>
+              <div style="margin:auto 0;">
+                <div style="width:52px;height:52px;border-radius:14px;background:var(--secondary);margin-bottom:20px;"></div>
+                <div class="tour-eyebrow">Watch together</div>
+                <h3 style="font-size:24px;line-height:1.25;">Same movie,<br>different couches</h3>
+                <p class="muted" style="font-size:14px;line-height:1.65;margin-top:12px;">
+                  Start a room, send the link. Play, pause, and seek stay in sync for everyone —
+                  no browser extension, no screen share, and it works from the phone or the TV.
+                </p>
+              </div>
+              <button class="btn btn-primary btn-lg btn-block" style="margin-top:26px;">Next</button>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label"><b>Full-screen pager</b>Swipeable. One idea per page, illustration slot at the top, skip always reachable.</div>
+      </div>
+
+      <!-- 4: interactive step -->
+      <div>
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-status"><span>9:41</span><span>▮▮▮</span></div>
+            <div class="phone-pad">
+              <div class="between" style="margin-bottom:auto;">
+                <div class="pips"><i></i><i></i><i></i><i class="on"></i><i></i><i></i></div>
+                <button class="btn btn-quiet btn-sm" style="padding:0;">Skip</button>
+              </div>
+              <div style="margin:auto 0;">
+                <div class="tour-eyebrow">Subtitles</div>
+                <h3 style="font-size:22px;line-height:1.3;">Set them once, everywhere</h3>
+                <p class="muted tiny" style="margin-top:10px;line-height:1.6;">
+                  Language and appearance follow your profile across every device.
+                </p>
+              </div>
+              <div class="sheet">
+                <div class="grabber"></div>
+                <div class="stack-sm">
+                  <div class="field">
+                    <label>Subtitle language</label>
+                    <div class="input">English ▾</div>
+                  </div>
+                  <div class="between" style="padding-top:6px;">
+                    <div>
+                      <div style="font-size:13px;font-weight:500;">Only for foreign audio</div>
+                      <div class="muted tiny">Skip subtitles when it's already in English</div>
+                    </div>
+                    <div class="switch on"><i></i></div>
+                  </div>
+                  <button class="btn btn-primary btn-lg btn-block" style="margin-top:10px;">Next</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="phone-label"><b>Interactive stop</b>Native controls in a sheet, writing the same profile setting the web tour writes.</div>
+      </div>
+    </div>
+
+    <div class="frame" style="margin-top:32px;">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">tvOS / Android TV — focus-driven, no keyboard</div>
+      </div>
+      <div class="frame-body">
+        <div class="tv">
+          <div style="max-width:620px;text-align:center;">
+            <div class="tour-eyebrow">Step 2 of 5</div>
+            <h3 style="font-size:31px;letter-spacing:-.035em;">Your watchlist follows you here</h3>
+            <p class="muted" style="font-size:16px;line-height:1.6;margin-top:14px;">
+              Anything you add on your phone shows up on this screen, and Silo tells you when
+              something on it arrives.
+            </p>
+            <div class="row" style="justify-content:center;gap:14px;margin-top:30px;">
+              <button class="btn btn-ghost btn-lg">Skip</button>
+              <button class="btn btn-primary btn-lg tv-focus">Next</button>
+            </div>
+          </div>
+        </div>
+        <div class="callouts">
+          <div class="callout"><b>18</b><span>
+            TV gets a <strong>shortened manifest</strong> — the server marks steps that need text entry
+            or a settings write as unsuitable for a 10-foot UI, and the TV client requests the reduced set.
+          </span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <section class="section">
+    <div class="label">07 — Mechanics</div>
+    <h2>How the pieces connect</h2>
+
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Invite lifecycle</div>
+      </div>
+      <div class="frame-body">
+        <div class="flow">
+          <div class="flow-row">
+            <div class="flow-actor">Admin · web</div>
+            <div class="flow-body">
+              <b>Sends the invite</b>
+              <p><code>POST /api/v1/admin/invitations</code> — email, group, role, libraries, note.
+              Server stores only a SHA-256 of the token; the raw token exists in the email and nowhere else.</p>
+            </div>
+          </div>
+          <div class="flow-row">
+            <div class="flow-actor">Server</div>
+            <div class="flow-body">
+              <b>Sends mail through the shared sender</b>
+              <p><code>internal/mail</code> — same SMTP config, layout, and diagnostics as notifications.
+              If email is off, the endpoint returns the link for the admin to copy instead of failing.</p>
+            </div>
+          </div>
+          <div class="flow-row">
+            <div class="flow-actor">Invitee</div>
+            <div class="flow-body">
+              <b>Opens the link</b>
+              <p><code>GET /api/v1/invitations/{token}</code> — unauthenticated, returns only what the
+              claim screen renders: inviter name, email, expiry. Rate-limited alongside the other auth endpoints.</p>
+            </div>
+          </div>
+          <div class="flow-row">
+            <div class="flow-actor">Invitee</div>
+            <div class="flow-body">
+              <b>Sets a password</b>
+              <p><code>POST /api/v1/invitations/{token}/accept</code> — creates the user with the
+              pre-bound access, marks the invite accepted in the same transaction, and returns a
+              normal session token pair. Same shape as signup, so clients reuse their session plumbing.</p>
+            </div>
+          </div>
+          <div class="flow-row">
+            <div class="flow-actor">Invitee</div>
+            <div class="flow-body">
+              <b>Sets up the household</b>
+              <p><code>POST /api/v1/profiles</code> per added profile — the existing endpoint,
+              which already carries name, avatar, PIN, <code>is_child</code>, rating ceiling, and
+              per-profile library restrictions. No new backend surface for this step.</p>
+            </div>
+          </div>
+          <div class="flow-row">
+            <div class="flow-actor">Client</div>
+            <div class="flow-body">
+              <b>Asks what to show</b>
+              <p><code>GET /api/v1/onboarding/flow?surface=web</code> — ordered steps for this server
+              and this profile, with features that are off already filtered out.</p>
+            </div>
+          </div>
+          <div class="flow-row">
+            <div class="flow-actor">Client</div>
+            <div class="flow-body">
+              <b>Records progress</b>
+              <p><code>POST /api/v1/onboarding/progress</code> — per profile, so finishing on the web
+              means the phone doesn't ask again.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="frame-bar">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="path">Step manifest — clients render what they know, ignore the rest</div>
+      </div>
+      <div class="frame-body">
+        <div class="stack">
+          <p class="muted" style="font-size:13.5px;max-width:74ch;">
+            Every step carries a <code class="mono">kind</code> the client switches on. A client that
+            doesn't recognize a kind skips it silently — that's what lets the server add a stop without
+            waiting for three app store releases.
+          </p>
+          <div class="card" style="padding:0;">
+            <table>
+              <thead>
+                <tr><th style="width:30%">Step kind</th><th>What it does</th><th style="width:24%">Gated on</th></tr>
+              </thead>
+              <tbody>
+                <tr><td class="mono tiny">welcome</td><td>Framing card. Static copy from the server.</td><td class="muted tiny">Always</td></tr>
+                <tr><td class="mono tiny">feature_card</td><td>Explains one capability. Title, body, optional illustration key.</td><td class="muted tiny">Per feature</td></tr>
+                <tr><td class="mono tiny">setting_choice</td><td>Renders a control and writes a real profile setting.</td><td class="muted tiny">Setting key exists</td></tr>
+                <tr><td class="mono tiny">spotlight</td><td>Highlights a named UI anchor. Web and tablet only.</td><td class="muted tiny">Surface supports it</td></tr>
+                <tr><td class="mono tiny">handoff</td><td>Ends the tour by routing somewhere — e.g. the taste-seed picker.</td><td class="muted tiny">Always</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="legend">
+            <div><i style="background:var(--success)"></i> Shown — feature enabled on this server</div>
+            <div><i style="background:var(--muted-foreground)"></i> Skipped — feature off, or surface can't render it</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="callout"><b>19</b><span>
+        <strong>The tour is not invite-only.</strong> Everyone who hasn't seen it gets it, including
+        accounts that predate this work and anyone who signed up with a code. The invite just makes
+        the entrance nicer.
+      </span></div>
+      <div class="callout"><b>20</b><span>
+        <strong>Copy lives on the server</strong>, which means fixing an awkward sentence is a server
+        deploy — not three PRs and a review queue at Apple.
+      </span></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
