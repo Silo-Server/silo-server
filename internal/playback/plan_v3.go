@@ -34,10 +34,25 @@ type PlannerInputV3 struct {
 	// return a superset of Registry (local ∪ node capabilities) and should
 	// memoize; the transport layer re-validates whichever executor is
 	// actually selected.
-	HLSRegistry         func() *TransformationRegistryV3
+	HLSRegistry func() *TransformationRegistryV3
+	// DVRPUStrippable reports whether this particular source survives the
+	// Dolby Vision RPU strip. The registries answer whether the executor
+	// carries the transformation; this answers whether the file does, which
+	// no capability probe can. Nil means "assume it does", preserving the
+	// pre-probe behaviour for callers that cannot run one (the shadow
+	// planner, tests). Lazy for the same reason as HLSRegistry: it shells out
+	// to ffmpeg, so it is consulted only once every cheap eligibility gate
+	// has already passed and a strip route is genuinely on the table.
+	DVRPUStrippable     func() bool
 	Now                 time.Time
 	AttemptedKeys       []string
 	AdditionalSubtitles []SubtitleInventoryEntryV3
+}
+
+// dvRPUStrippable resolves the per-source strip verdict, defaulting to true
+// when no probe is wired in.
+func (input PlannerInputV3) dvRPUStrippable() bool {
+	return input.DVRPUStrippable == nil || input.DVRPUStrippable()
 }
 
 // hlsRegistry resolves the registry HLS deliveries gate on: the widened
@@ -129,8 +144,30 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	if !dvStripEligible && hlsEngineOK && source.DynamicRange == "dolby_vision" {
 		dvStripEligible = canStripDolbyVisionToHDR10V3(source, input.Request, input.hlsRegistry())
 	}
+	// A source whose RPU ffmpeg cannot parse must lose the strip here rather
+	// than at the transport, so that the plan's HDR10 promise, the durable
+	// session's RemuxDVMode and every restart derived from it stay consistent
+	// with what the pipeline can actually produce. Ordered last: the probe
+	// only runs once an executor has been found for a strip this client wants.
+	dvStripUnsupportedBySource := false
+	if dvStripEligible && !input.dvRPUStrippable() {
+		dvStripUnsupportedBySource = true
+		dvStripEligible = false
+		dvStripEligibleLocal = false
+	}
 	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
 	clientHDR10Eligible := canClientTransformDV7ToHDR10V3(source, input.Request)
+	// With the server strip gone, a client that cannot take the source range
+	// and cannot run its own DV transformation has no route left: this
+	// codebase has no tone-map recipe, so every remaining branch funnels into
+	// planVideoTranscodeV3's hdr_transcode_unsupported. Terminate here instead
+	// so the client is told the actual cause — a source whose Dolby Vision
+	// metadata cannot be removed — rather than a generic HDR message that
+	// sends the user looking for a missing encoder.
+	if dvStripUnsupportedBySource && !rangeOK && !clientDV81Eligible && !clientHDR10Eligible {
+		return terminalPlannerResultV3("dv_conversion_unsupported",
+			"This source's Dolby Vision metadata cannot be removed cleanly, and this device cannot play the source as it is.", false)
+	}
 
 	base := PlanV3{
 		ProtocolVersion:        ProtocolV3,
@@ -154,6 +191,14 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
 			Code:    "hdr_range_assumed_hdr10",
 			Message: "The source is flagged HDR without precise range metadata and is delivered as HDR10.",
+		})
+	}
+	if dvStripUnsupportedBySource {
+		// Say why the HDR10 route this client is capable of was not taken;
+		// otherwise the fallback looks like an unexplained quality drop.
+		base.DegradationWarnings = append(base.DegradationWarnings, DegradationWarningV3{
+			Code:    "dolby_vision_strip_unsupported_by_source",
+			Message: "This source's Dolby Vision metadata cannot be removed cleanly, so the validated HDR10 route is unavailable for it.",
 		})
 	}
 	if !detailedVideoEvidenceCompleteV3(source) {

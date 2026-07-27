@@ -181,12 +181,8 @@ type PlaybackHandler struct {
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
 	// playbackConfig(), which falls back to defaults when unset.
-	PlaybackConfig func() config.PlaybackConfig
-	FFmpegLogSink  playback.FFmpegLogSink
-	// dvRPUProbe answers whether a given Profile 7 source survives the RPU
-	// strip. Built lazily; nil keeps the previous strip-always behaviour.
-	dvRPUProbe        *playback.DVRPUProbe
-	dvRPUProbeOnce    sync.Once
+	PlaybackConfig    func() config.PlaybackConfig
+	FFmpegLogSink     playback.FFmpegLogSink
 	copySeekAnchor    copySeekAnchorResolver
 	realtimeCommandMu sync.Mutex
 	realtimeCommands  map[string]playbackCommandRecord
@@ -2613,8 +2609,12 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				}
 				// A v3 DV strip remux carries its bitstream filter in the
 				// durable session route; dropping it here would hand the node
-				// a DV7 copy recipe that leaves dangling RPUs.
-				if updatedSession.RemuxDVMode == playback.RemuxDVStripToHDR10V3 && strings.EqualFold(nodeReq.TargetCodecVideo, "copy") {
+				// a DV7 copy recipe that leaves dangling RPUs. Sources that
+				// fail the RPU probe are the exception — for them the filter
+				// rejects every packet, so re-adding it on an audio switch
+				// would hang a session that was playing a moment ago.
+				if updatedSession.RemuxDVMode == playback.RemuxDVStripToHDR10V3 && strings.EqualFold(nodeReq.TargetCodecVideo, "copy") &&
+					playback.DVRPUStrippable(r.Context(), h.playbackConfig().FFmpegPath, file.FilePath) {
 					nodeReq.VideoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
 				}
 
@@ -3104,10 +3104,21 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// for "copy" has no way to know the source needs the strip. Derived after
 	// the burn-in guard above so a copy request it rewrites to h264 never carries
 	// a copy-only bitstream filter.
+	//
+	// Gated on the per-source probe for the same reason the planner is: a
+	// source whose RPU ffmpeg cannot parse turns the filter into a per-packet
+	// rejection that never produces a segment, and this endpoint would
+	// otherwise put it back on every quality change, seek and burn-in restart
+	// of a session the planner had already routed away from it.
 	videoBitstreamFilter := ""
 	if strings.EqualFold(req.TargetCodecVideo, "copy") &&
 		(session.RemuxDVMode == playback.RemuxDVStripToHDR10V3 || file.PrimaryDVProfile() == 7) {
-		videoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
+		if playback.DVRPUStrippable(r.Context(), h.playbackConfig().FFmpegPath, file.FilePath) {
+			videoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
+		} else {
+			slog.WarnContext(r.Context(), "restart dropped the dolby vision rpu strip: source cannot be stripped",
+				"component", "api", "playback_session_id", req.SessionID, "file_id", file.ID)
+		}
 	}
 
 	// The request-level permission check above intentionally runs before the

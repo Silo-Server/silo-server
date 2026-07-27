@@ -1004,3 +1004,106 @@ func testTransformationRegistryV3() *TransformationRegistryV3 {
 		{Name: "server_dv7_to_hdr10", Available: true},
 	})
 }
+
+// A source whose RPU ffmpeg cannot parse must lose the strip in the plan, not
+// at the transport. The plan is what promises HDR10, and the durable session's
+// RemuxDVMode — re-read by every later restart, seek and audio switch — is
+// derived from it, so a plan that still names server_dv7_to_hdr10 puts the
+// hanging filter back no matter what the start path did with it. With no
+// tone-map recipe in the tree there is no route left for an HDR10-only client,
+// and the terminal has to name the real cause.
+func TestPlanPlaybackV3AbandonsStripForAnUnstrippableSource(t *testing.T) {
+	file := unstrippableProfile7FixtureV3()
+	req := hdr10OnlyProfile7RequestV3()
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
+	input := PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry}
+
+	// Baseline: with a parseable RPU this is the validated HDR10 remux.
+	if healthy := PlanPlaybackV3(input); healthy.Plan == nil || len(healthy.Plan.Transformations) != 1 || healthy.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
+		t.Fatalf("the strip route regressed for a healthy source: %#v", healthy)
+	}
+
+	input.DVRPUStrippable = func() bool { return false }
+	result := PlanPlaybackV3(input)
+	if result.Plan != nil {
+		t.Fatalf("a source that cannot be stripped was still planned onto a route: %#v", result.Plan)
+	}
+	if result.Terminal == nil || result.Terminal.Reason != "dv_conversion_unsupported" {
+		t.Fatalf("terminal = %#v, want the Dolby Vision cause rather than a generic HDR message", result.Terminal)
+	}
+}
+
+// The strip is a server capability, not the only one: a client that can do the
+// conversion itself must still get its route, with the reason the server route
+// was dropped attached.
+func TestPlanPlaybackV3KeepsTheClientTransformWhenTheSourceCannotBeStripped(t *testing.T) {
+	file := unstrippableProfile7FixtureV3()
+	req := hdr10OnlyProfile7RequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureClientVideoTransforms)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureClientVideoTransforms)
+	direct := req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	direct.Transformations = []TransformationV3{{Name: ClientDV7ToHDR10V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3}}
+	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = direct
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry,
+		DVRPUStrippable: func() bool { return false },
+	})
+	if result.Plan == nil {
+		t.Fatalf("terminal = %#v, want the client-side transformation route", result.Terminal)
+	}
+	for _, transformation := range result.Plan.Transformations {
+		if transformation.Name == "server_dv7_to_hdr10" {
+			t.Fatalf("the unusable server strip survived: %#v", result.Plan.Transformations)
+		}
+	}
+	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "dolby_vision_strip_unsupported_by_source") {
+		t.Fatalf("the client was not told why the server route was dropped: %#v", result.Plan.DegradationWarnings)
+	}
+}
+
+func unstrippableProfile7FixtureV3() *models.MediaFile {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].DVProfile = 7
+	file.VideoTracks[0].DVBLCompatID = 6
+	file.VideoTracks[0].DVELPresent = false
+	file.VideoTracks[0].DVEnhancementLayer = ""
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	return file
+}
+
+func hdr10OnlyProfile7RequestV3() StartRequestV3 {
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+	return req
+}
+
+// The probe is expensive, so it must sit behind every cheap gate: a source
+// nobody would strip anyway must never spawn one.
+func TestPlanPlaybackV3DoesNotProbeWhenNoStripIsOnTheTable(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].BitDepth = 8
+	req := validStartRequestV3()
+	probed := false
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings:        PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry:        testTransformationRegistryV3(),
+		DVRPUStrippable: func() bool { probed = true; return true },
+	})
+	if result.Plan == nil {
+		t.Fatalf("terminal = %#v", result.Terminal)
+	}
+	if probed {
+		t.Fatal("an ordinary SDR source paid for a Dolby Vision RPU probe")
+	}
+}
