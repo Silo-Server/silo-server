@@ -90,11 +90,25 @@ var productionPairs = []struct {
 		because: "shares only the common word 'origins'",
 	},
 	{
-		name:    "shares only boilerplate words",
-		want:    "All the Lies 1-3 - All the Lies: The Complete Collection",
-		got:     "The Sentinel: The Complete Jane Harper Collection",
+		name:    "two different boxed sets sharing only boilerplate",
+		want:    "All the Lies 1-3 - All the Lies: The Complete Trilogy",
+		got:     "The Sentinel: The Complete Jane Harper Trilogy: The Jane Harper Trilogy, Books 1-3 (Unabridged)",
 		accept:  false,
-		because: "'the complete collection' is store boilerplate, not identity",
+		because: "both are 'Books 1-3' sets, so 'the/complete/trilogy/1/3' overlap without sharing an identity",
+	},
+	{
+		name:    "series name matches but the volume is a different book",
+		want:    "Storm Princess Saga 2 - The Princess Must Strike",
+		got:     "The Princess Must Die: Storm Princess Saga, Book 1 (Unabridged)",
+		accept:  false,
+		because: "Must Strike is not Must Die, and volume 2 is not volume 1",
+	},
+	{
+		name:    "generic one-word title against an unrelated long one",
+		want:    "Bitcoin",
+		got:     "Bitcoin: Hard Money You Can't F*ck With: Why Bitcoin Will Be the Next Global Reserve Currency (Unabridged)",
+		accept:  false,
+		because: "a bare common noun cannot identify a specific book",
 	},
 }
 

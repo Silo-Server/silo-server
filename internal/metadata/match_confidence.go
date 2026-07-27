@@ -97,12 +97,37 @@ func titleVolume(s string) (int, bool) {
 	return 0, false
 }
 
+// titleStopwords carry no identifying signal but are common enough to inflate
+// overlap badly. Two unrelated boxed sets scored 0.56 -- over the threshold --
+// on "the" (three times), "complete", "trilogy" and the volume numbers of a
+// "Books 1-3" range. Dropping these takes that pair to 0.42, where it belongs.
+var titleStopwords = map[string]struct{}{
+	"a": {}, "an": {}, "the": {}, "of": {}, "and": {}, "or": {}, "to": {},
+	"in": {}, "on": {}, "at": {}, "for": {}, "with": {}, "from": {},
+}
+
+// contentWords drops stopwords, unless doing so would leave too little to
+// compare -- "A Man in Full" is mostly stopwords, and an empty token set
+// scores 0 against everything.
+func contentWords(fields []string) []string {
+	kept := make([]string, 0, len(fields))
+	for _, w := range fields {
+		if _, stop := titleStopwords[w]; !stop {
+			kept = append(kept, w)
+		}
+	}
+	if len(kept) < 2 {
+		return fields
+	}
+	return kept
+}
+
 // diceCoefficient scores word-set overlap between two normalised titles.
 // Chosen over edit distance because the differences that matter here are whole
 // words added or dropped -- an author prefix, a series parenthetical, a
 // subtitle -- not characters transposed.
 func diceCoefficient(a, b string) float64 {
-	aw, bw := strings.Fields(a), strings.Fields(b)
+	aw, bw := contentWords(strings.Fields(a)), contentWords(strings.Fields(b))
 	if len(aw) == 0 || len(bw) == 0 {
 		return 0
 	}
