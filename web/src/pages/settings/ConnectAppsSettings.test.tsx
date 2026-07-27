@@ -58,13 +58,19 @@ function makeProfile(overrides: Partial<Profile> = {}): Profile {
 
 function makeConnectInfo(
   overrides: Partial<CompatConnectInfo["jellyfin"]> = {},
+  accountOverrides: Partial<CompatConnectInfo["account"]> = {},
 ): CompatConnectInfo {
   return {
     jellyfin: {
       enabled: true,
+      pending_restart: false,
       public_url: "https://compat.example.test",
       server_name: "Example",
       ...overrides,
+    },
+    account: {
+      password_login_available: true,
+      ...accountOverrides,
     },
   };
 }
@@ -212,5 +218,82 @@ describe("ConnectAppsSettings", () => {
 
     expect(container.textContent).toContain("No public address configured");
     expect(container.textContent).toContain("johndoe#Doe Household");
+  });
+
+  it("reports a failed load instead of claiming compat is switched off", () => {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+    });
+
+    render();
+
+    expect(container.textContent).toContain("Couldn't load your sign-in details");
+    expect(container.textContent).not.toContain("is turned off");
+  });
+
+  // A failed profiles fetch leaves an empty list; without the error state the
+  // page would fall through and present the bare account name as sufficient.
+  it("withholds credentials when the profile list fails to load", () => {
+    mocks.useProfiles.mockReturnValue({ data: [], isLoading: false, isError: true });
+
+    render();
+
+    expect(container.textContent).toContain("Couldn't load your sign-in details");
+    expect(container.textContent).not.toContain("Every profile at a glance");
+  });
+
+  it("distinguishes a pending restart from a disabled compat API", () => {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: makeConnectInfo({ enabled: false, pending_restart: true }),
+      isLoading: false,
+    });
+
+    render();
+
+    expect(container.textContent).toContain("isn't running yet");
+    expect(container.textContent).toContain("server has to restart");
+  });
+
+  it("tells SSO accounts the compat API can't accept them", () => {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: makeConnectInfo({}, { password_login_available: false }),
+      isLoading: false,
+    });
+
+    render();
+
+    expect(container.textContent).toContain("This account can't sign in to a Jellyfin app");
+    expect(container.textContent).not.toContain("johndoe#Doe Household");
+  });
+
+  it("flags a loopback compat address rather than offering it for copying", () => {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: makeConnectInfo({ public_url: "http://127.0.0.1:8096" }),
+      isLoading: false,
+    });
+
+    render();
+
+    expect(container.textContent).toContain("only works on the server itself");
+    expect(
+      Array.from(container.querySelectorAll("button")).find(
+        (button) => button.getAttribute("aria-label") === "Copy Server",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("does not list a #-bearing profile as a usable credential in the summary", () => {
+    mocks.useProfiles.mockReturnValue({
+      data: [makeProfile(), makeProfile({ id: "profile-2", name: "Movie #2" })],
+      isLoading: false,
+    });
+
+    render();
+
+    expect(container.textContent).toContain("Every profile at a glance");
+    expect(container.textContent).toContain("rename to use from a Jellyfin app");
+    expect(container.textContent).not.toContain("johndoe#Movie #2");
   });
 });

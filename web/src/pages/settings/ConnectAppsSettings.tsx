@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import {
   buildJellyfinPasswordHint,
   buildJellyfinUsername,
+  isLoopbackURL,
   jellyfinUsernameIssue,
   JELLYFIN_APP_EXAMPLES,
   SILO_APP_EXAMPLES,
@@ -245,8 +246,16 @@ function TroubleshootingPanel({
 
 export default function ConnectAppsSettings() {
   const { user, profile: activeProfile } = useAuth();
-  const { data: profiles = [], isLoading: profilesLoading } = useProfiles();
-  const { data: connectInfo, isLoading: connectInfoLoading } = useCompatConnectInfo();
+  const {
+    data: profiles = [],
+    isLoading: profilesLoading,
+    isError: profilesFailed,
+  } = useProfiles();
+  const {
+    data: connectInfo,
+    isLoading: connectInfoLoading,
+    isError: connectInfoFailed,
+  } = useCompatConnectInfo();
 
   const [kind, setKind] = useState<AppKind>("jellyfin");
   const [selectedProfileID, setSelectedProfileID] = useState<string | null>(null);
@@ -265,9 +274,20 @@ export default function ConnectAppsSettings() {
   const accountUsername = user?.username ?? "";
   const siloURL = typeof window === "undefined" ? "" : window.location.origin;
   const compatEnabled = connectInfo?.jellyfin.enabled ?? false;
+  const compatPendingRestart = connectInfo?.jellyfin.pending_restart ?? false;
   const compatURL = connectInfo?.jellyfin.public_url?.trim() || null;
+  const compatURLIsLoopback = compatURL !== null && isLoopbackURL(compatURL);
+  // Absent field (older server) means the account can use a password.
+  const passwordLoginAvailable = connectInfo?.account?.password_login_available ?? true;
   const isJellyfin = kind === "jellyfin";
   const isLoading = profilesLoading || connectInfoLoading;
+  // A failed load must not read as "compat is switched off", and an empty
+  // profile list must not read as "your account name alone is enough".
+  const loadFailed = connectInfoFailed || profilesFailed;
+  // Everything below the credential panel is only meaningful when we actually
+  // showed credentials above it.
+  const showCompatCredentials =
+    isJellyfin && !isLoading && !loadFailed && compatEnabled && passwordLoginAvailable;
 
   const jellyfinUsername = selectedProfile
     ? buildJellyfinUsername(accountUsername, selectedProfile.name)
@@ -333,12 +353,34 @@ export default function ConnectAppsSettings() {
               <Skeleton key={index} className="h-[76px] w-full rounded-md" />
             ))}
           </div>
+        ) : loadFailed ? (
+          <div className="border-destructive/40 rounded-md border border-dashed px-3.5 py-4">
+            <p className="text-sm font-medium">Couldn't load your sign-in details</p>
+            <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+              Reload the page to try again. Credentials are withheld rather than guessed, so nothing
+              here is stale or wrong.
+            </p>
+          </div>
+        ) : isJellyfin && !passwordLoginAvailable ? (
+          <div className="border-border rounded-md border border-dashed px-3.5 py-4">
+            <p className="text-sm font-medium">This account can't sign in to a Jellyfin app</p>
+            <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
+              It signs in through an external provider rather than a Silo password, and the
+              compatibility API only accepts Silo passwords. Use a Silo app, or ask an administrator
+              about an account with password sign-in.
+            </p>
+          </div>
         ) : isJellyfin && !compatEnabled ? (
           <div className="border-border rounded-md border border-dashed px-3.5 py-4">
-            <p className="text-sm font-medium">The Jellyfin compatibility API is turned off</p>
+            <p className="text-sm font-medium">
+              {compatPendingRestart
+                ? "The Jellyfin compatibility API isn't running yet"
+                : "The Jellyfin compatibility API is turned off"}
+            </p>
             <p className="text-muted-foreground mt-1 text-sm leading-relaxed">
-              Third-party Jellyfin apps can't reach this server until an administrator enables it in
-              Admin → Settings → Compatibility.
+              {compatPendingRestart
+                ? "An administrator has turned it on, but the server has to restart before it starts accepting connections."
+                : "Third-party Jellyfin apps can't reach this server until an administrator enables it in Admin → Settings → Compatibility."}
             </p>
           </div>
         ) : (
@@ -356,16 +398,28 @@ export default function ConnectAppsSettings() {
                 label="Server"
                 icon={Server}
                 kind={kind}
-                copyValue={(isJellyfin ? compatURL : siloURL) ?? undefined}
+                copyValue={
+                  isJellyfin
+                    ? compatURLIsLoopback
+                      ? undefined
+                      : (compatURL ?? undefined)
+                    : siloURL
+                }
                 hint={
                   isJellyfin
-                    ? "The compatibility API listens on its own address — not the one this page is on."
+                    ? compatURLIsLoopback
+                      ? "This address only works on the server itself, so phones and TVs can't reach it. An administrator needs to set the compatibility API's public address."
+                      : "The compatibility API listens on its own address — not the one this page is on."
                     : undefined
                 }
               >
                 {isJellyfin ? (
                   compatURL ? (
-                    <code className="font-mono">{compatURL}</code>
+                    <code
+                      className={cn("font-mono", compatURLIsLoopback && "text-muted-foreground")}
+                    >
+                      {compatURL}
+                    </code>
                   ) : (
                     <span className="text-muted-foreground text-sm">
                       No public address configured — ask an administrator.
@@ -439,24 +493,42 @@ export default function ConnectAppsSettings() {
         )}
       </section>
 
-      {isJellyfin && compatEnabled && !isLoading ? (
+      {showCompatCredentials ? (
         <TroubleshootingPanel accountUsername={accountUsername} compatURL={compatURL} />
       ) : null}
 
-      {isJellyfin && compatEnabled && !isLoading && profiles.length > 1 ? (
+      {showCompatCredentials && profiles.length > 1 ? (
         <section className="surface-panel rounded-md border px-4 py-4 shadow-none sm:px-5">
           <h3 className="text-sm font-semibold">Every profile at a glance</h3>
           <ul className="mt-2.5 space-y-1.5">
-            {profiles.map((profile) => (
-              <li key={profile.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <HashString before={accountUsername} after={profile.name} />
-                {profile.has_pin ? (
-                  <Badge variant="outline" className="text-muted-foreground">
-                    needs #PIN
-                  </Badge>
-                ) : null}
-              </li>
-            ))}
+            {profiles.map((profile) => {
+              // Same guard as the Username field: a name containing # yields a
+              // username the resolver can't parse, so don't list one here either.
+              const issue = jellyfinUsernameIssue(profile.name);
+              return (
+                <li key={profile.id} className="flex flex-wrap items-center gap-2 text-sm">
+                  {issue ? (
+                    <>
+                      <span className="text-muted-foreground font-mono line-through">
+                        {profile.name}
+                      </span>
+                      <Badge variant="outline" className="text-muted-foreground">
+                        rename to use from a Jellyfin app
+                      </Badge>
+                    </>
+                  ) : (
+                    <>
+                      <HashString before={accountUsername} after={profile.name} />
+                      {profile.has_pin ? (
+                        <Badge variant="outline" className="text-muted-foreground">
+                          needs #PIN
+                        </Badge>
+                      ) : null}
+                    </>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       ) : null}

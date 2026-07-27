@@ -1838,7 +1838,18 @@ func NewRouter(deps Dependencies) chi.Router {
 		// diagnostics above: the settings card that renders this describes how
 		// to sign in, so it must not depend on a profile already being chosen.
 		if authMiddleware != nil {
-			compatConnectInfoHandler := handlers.NewCompatConnectInfoHandler(deps.Config, settingsRepo)
+			// userRepo is a concrete pointer, so it has to stay out of the
+			// interface parameter when unset — a typed nil would satisfy the
+			// handler's nil check and panic on first use.
+			var compatUsers handlers.UserRepository
+			if userRepo != nil {
+				compatUsers = userRepo
+			}
+			compatConnectInfoHandler := handlers.NewCompatConnectInfoHandler(
+				deps.Config,
+				settingsRepo,
+				compatUsers,
+			)
 			r.Group(func(r chi.Router) {
 				r.Use(authMiddleware.RequireAuth)
 				if deps.RateLimitMW != nil {

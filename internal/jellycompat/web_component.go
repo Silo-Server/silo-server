@@ -345,7 +345,7 @@ func compareStableWebVersions(left, right webStableVersion) int {
 }
 
 func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string) WebComponentStatus {
-	enabled := compatEnabled(cfg, settings)
+	enabled := configuredCompatEnabled(cfg, settings)
 
 	configuredWebEnabled := true
 	if cfg != nil {

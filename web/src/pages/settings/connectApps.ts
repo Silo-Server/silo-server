@@ -35,6 +35,32 @@ export function jellyfinUsernameIssue(profileName: string): string | null {
   return null;
 }
 
+/**
+ * Reports whether a compat address is only reachable from the server itself.
+ *
+ * `jellyfin_compat.public_url` defaults to http://127.0.0.1:8096, and on the
+ * phones and TVs this page names, a loopback address resolves to the client
+ * device. Presenting it as the server address sends people chasing a broken
+ * connection instead of an unset setting.
+ */
+export function isLoopbackURL(rawURL: string): boolean {
+  let host: string;
+  try {
+    host = new URL(rawURL).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  // Strip the brackets URL parsing keeps around IPv6 literals.
+  host = host.replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host === "::1" ||
+    host === "0.0.0.0" ||
+    host.endsWith(".localhost") ||
+    /^127\./.test(host)
+  );
+}
+
 /** Explains the password format for the selected profile, PIN or not. */
 export function buildJellyfinPasswordHint(
   profile: Pick<Profile, "name" | "has_pin"> | null,
