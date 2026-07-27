@@ -286,6 +286,27 @@ func TestPlanPlaybackV3DirectRequiresDetailedEvidence(t *testing.T) {
 	}
 }
 
+func TestOutputRangeEligibleV3Profile7UnknownEnhancementLayerHonorsClientProfile7Claim(t *testing.T) {
+	source := SourceDescriptorV3{DynamicRange: "dolby_vision", DVProfile: 7, DVEnhancementLayer: EnhancementUnknownV3}
+	req := validStartRequestV3()
+	req.Capabilities.HDR = true
+
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, HLG: true, DolbyVisionProfiles: []int{5, 7, 8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+	if ok, claims := outputRangeEligibleV3(source, req); !ok ||
+		!claims.DolbyVision || claims.DolbyVisionReason != "native_profile_supported" {
+		t.Fatalf("client claiming profile 7: ok = %t, claims = %#v", ok, claims)
+	}
+
+	// A client that does not list profile 7 keeps the original refusal.
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+	if ok, claims := outputRangeEligibleV3(source, req); ok ||
+		claims.DolbyVisionReason != "profile_7_enhancement_layer_unknown" {
+		t.Fatalf("client without profile 7: ok = %t, claims = %#v", ok, claims)
+	}
+}
+
 func TestSourceDescriptorV3NormalizesLegacyHEVCMetadata(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].BitDepth = 0

@@ -162,7 +162,11 @@ func outputRangeEligibleV3(source SourceDescriptorV3, request StartRequestV3) (b
 		claims.HLG = hdr != nil && hdr.HLG
 		return claims.HLG, claims
 	case "dolby_vision":
-		if source.DVProfile == 7 && source.DVEnhancementLayer == EnhancementUnknownV3 {
+		// An unprovable MEL/FEL split is the server's uncertainty, not the
+		// client's: one that lists profile 7 handles the split itself by
+		// dropping the enhancement layer, so take it at its word.
+		if source.DVProfile == 7 && source.DVEnhancementLayer == EnhancementUnknownV3 &&
+			!(hdr != nil && containsIntV3(hdr.DolbyVisionProfiles, 7)) {
 			claims.DolbyVisionReason = "profile_7_enhancement_layer_unknown"
 			return false, claims
 		}
