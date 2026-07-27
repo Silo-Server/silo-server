@@ -138,6 +138,13 @@ func resolvePluginCacheDir() string {
 	return filepath.Join(os.TempDir(), "silo-plugins")
 }
 
+func resolveReaderFontsDir() string {
+	if v := strings.TrimSpace(os.Getenv("SILO_READER_FONTS_DIR")); v != "" {
+		return v
+	}
+	return "/var/lib/silo/reader-fonts"
+}
+
 func buildBaseHandler(format string, level slog.Leveler, otelHandler slog.Handler) slog.Handler {
 	opts := &slog.HandlerOptions{Level: level}
 	var console slog.Handler
@@ -772,6 +779,7 @@ func main() {
 		OpsLogRepo:                   opsRepo,
 		FFmpegLogSink:                playback.NewSlogFFmpegLogSink(slog.Default(), nodeID),
 		PublicURL:                    os.Getenv("SILO_PUBLIC_URL"),
+		ReaderFontsDir:               resolveReaderFontsDir(),
 		RequestServerRestart: func(context.Context) error {
 			if !restartRequested.CompareAndSwap(false, true) {
 				return handlers.ErrServerRestartAlreadyRequested

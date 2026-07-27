@@ -60,6 +60,7 @@ import {
   LayoutGrid,
   Puzzle,
   BookHeadphones,
+  BookOpen,
   Send,
   Bell,
 } from "lucide-react";
@@ -721,6 +722,23 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
                 )}
                 <Clock className="h-[18px] w-[18px] shrink-0" />
                 <SidebarLabel show={showLabels}>History</SidebarLabel>
+              </ViewTransitionLink>
+            </li>
+            <li>
+              <ViewTransitionLink
+                to="/reading-stats"
+                onClick={onNavigate}
+                className={navLinkClass("/reading-stats")}
+                aria-current={isActive("/reading-stats") ? "page" : undefined}
+              >
+                {isActive("/reading-stats") && (
+                  <span
+                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                    style={{ background: "var(--primary)" }}
+                  />
+                )}
+                <BookOpen className="h-[18px] w-[18px] shrink-0" />
+                <SidebarLabel show={showLabels}>Reading stats</SidebarLabel>
               </ViewTransitionLink>
             </li>
           </ul>

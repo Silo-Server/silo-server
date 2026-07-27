@@ -189,6 +189,11 @@ type Dependencies struct {
 	// clients hitting /login, /api/*, /abs/api/*, and /abs/socket.io/* all
 	// resolve correctly. May be nil; no ABS routes are registered in that case.
 	ABSHandler absHandler
+
+	// ReaderFontsDir is the base directory for custom reader font blobs
+	// (see handlers.ReaderFontsHandler). Empty disables the
+	// /ebooks/reader-fonts routes even when DB is set.
+	ReaderFontsDir string
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -556,10 +561,28 @@ func NewRouter(deps Dependencies) chi.Router {
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
 	var ebookConfigStore *handlers.PGEbookReaderConfigStore
 	var ebookAnnotationStore *handlers.PGEbookReaderAnnotationStore
+	var readerFontsHandler *handlers.ReaderFontsHandler
+	var readingSessionsHandler *handlers.ReadingSessionsHandler
+	var readingMotivationHandler *handlers.ReadingMotivationHandler
 	if deps.DB != nil {
 		ebookProgressStore = handlers.NewPGEbookReaderProgressStore(deps.DB)
 		ebookConfigStore = handlers.NewPGEbookReaderConfigStore(deps.DB)
 		ebookAnnotationStore = handlers.NewPGEbookReaderAnnotationStore(deps.DB)
+		if deps.ReaderFontsDir != "" {
+			readerFontsHandler = &handlers.ReaderFontsHandler{
+				Store: handlers.NewPGReaderFontStore(deps.DB),
+				Dir:   deps.ReaderFontsDir,
+			}
+		}
+		readingSessionsHandler = &handlers.ReadingSessionsHandler{
+			Store:    handlers.NewPGReadingSessionStore(deps.DB),
+			Now:      func() time.Time { return time.Now().UTC() },
+			Progress: handlers.EbookProgressAdapter{Store: ebookProgressStore},
+		}
+		readingMotivationHandler = &handlers.ReadingMotivationHandler{
+			Store: handlers.NewPGReadingMotivationStore(deps.DB),
+			Now:   func() time.Time { return time.Now().UTC() },
+		}
 		browseRepo := catalog.NewBrowseRepository(deps.DB)
 		itemRepo = catalog.NewItemRepository(deps.DB)
 		searchIndexEvents := catalog.NewSearchIndexEventRepository(deps.DB)
@@ -2282,20 +2305,41 @@ func NewRouter(deps Dependencies) chi.Router {
 					})
 				}
 
-				if ebookReaderHandler != nil {
+				if ebookReaderHandler != nil || readerFontsHandler != nil || readingSessionsHandler != nil || readingMotivationHandler != nil {
 					r.Route("/ebooks", func(r chi.Router) {
 						r.Use(apimw.RequireProfile)
-						r.Get("/capability", ebookReaderHandler.HandleConversionCapability)
-						r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
-						r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
-						r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
-						r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
-						r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
-						r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
-						r.Get("/{content_id}/annotations", ebookReaderHandler.HandleListAnnotations)
-						r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
-						r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
-						r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
+
+						if ebookReaderHandler != nil {
+							r.Get("/capability", ebookReaderHandler.HandleConversionCapability)
+							r.Get("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+							r.Head("/{content_id}/files/{file_id}/read", ebookReaderHandler.HandleReadFile)
+							r.Get("/{content_id}/progress", ebookReaderHandler.HandleGetProgress)
+							r.Put("/{content_id}/progress", ebookReaderHandler.HandleSaveProgress)
+							r.Get("/{content_id}/reader-config", ebookReaderHandler.HandleGetConfig)
+							r.Put("/{content_id}/reader-config", ebookReaderHandler.HandleSaveConfig)
+							r.Get("/{content_id}/annotations", ebookReaderHandler.HandleListAnnotations)
+							r.Post("/{content_id}/annotations", ebookReaderHandler.HandleCreateAnnotation)
+							r.Patch("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleUpdateAnnotation)
+							r.Delete("/{content_id}/annotations/{annotation_id}", ebookReaderHandler.HandleDeleteAnnotation)
+						}
+
+						if readerFontsHandler != nil {
+							r.Get("/reader-fonts", readerFontsHandler.HandleList)
+							r.Post("/reader-fonts", readerFontsHandler.HandleUpload)
+							r.Delete("/reader-fonts/{font_id}", readerFontsHandler.HandleDelete)
+							r.Get("/reader-fonts/{font_id}/file", readerFontsHandler.HandleServeFile)
+						}
+
+						if readingSessionsHandler != nil {
+							r.Post("/{content_id}/reading-heartbeat", readingSessionsHandler.HandleHeartbeat)
+							r.Get("/reading-stats", readingSessionsHandler.HandleHistory)
+							r.Get("/{content_id}/reading-stats", readingSessionsHandler.HandleBookStats)
+						}
+
+						if readingMotivationHandler != nil {
+							r.Put("/reading-goals", readingMotivationHandler.HandlePutGoals)
+							r.Get("/reading-motivation", readingMotivationHandler.HandleGetMotivation)
+						}
 					})
 				}
 

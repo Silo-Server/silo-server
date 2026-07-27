@@ -175,7 +175,6 @@ describe("FoliateBookReader helpers", () => {
         maxWidth: 200,
         theme: "sepia",
         flow: "scrolled",
-        spread: "none",
       }),
     ).toMatchObject({
       fontSize: 180,
@@ -184,8 +183,36 @@ describe("FoliateBookReader helpers", () => {
       maxWidth: 96,
       theme: "sepia",
       flow: "scrolled",
-      spread: "none",
     });
+  });
+
+  it("migrates legacy theme and spread values", () => {
+    const settings = normalizeReaderSettings({ theme: "sepia", spread: "none" });
+    expect(settings.themeName).toBe("sepia");
+    expect(settings.themeVariant).toBe("light");
+    expect(settings.theme).toBe("sepia"); // legacy field still written
+    expect(settings.columns).toBe(1);
+  });
+
+  it("prefers explicit themeName/themeVariant over the legacy field", () => {
+    const settings = normalizeReaderSettings({
+      theme: "light",
+      themeName: "ocean",
+      themeVariant: "dark",
+    });
+    expect(settings.themeName).toBe("ocean");
+    expect(settings.themeVariant).toBe("dark");
+    expect(settings.theme).toBe("dark"); // legacy derived from the pair
+  });
+
+  it("clamps columns, columnGap, and defaults justify", () => {
+    expect(normalizeReaderSettings({ columns: 4 }).columns).toBe(4);
+    expect(normalizeReaderSettings({ columns: 7 }).columns).toBe("auto");
+    expect(normalizeReaderSettings({ columnGap: 80 }).columnGap).toBe(50);
+    expect(normalizeReaderSettings({ columnGap: -3 }).columnGap).toBe(0);
+    expect(normalizeReaderSettings({}).justify).toBe(false);
+    expect(normalizeReaderSettings({}).columns).toBe("auto");
+    expect(normalizeReaderSettings({}).customFontID).toBeNull();
   });
 
   it("defaults to the ebook publisher font instead of an unloaded named font", () => {
@@ -207,6 +234,18 @@ describe("FoliateBookReader helpers", () => {
     expect(
       normalizeReaderSettings({ fontFamily: "ui-serif, Georgia, Cambria, serif" }).fontFamily,
     ).toBe(READER_FONT_STACKS.serif);
+  });
+
+  it("falls back to inherit when fontFamily is custom but customFontID is missing", () => {
+    expect(normalizeReaderSettings({ fontFamily: "custom" }).fontFamily).toBe("inherit");
+    expect(normalizeReaderSettings({ fontFamily: "custom" }).customFontID).toBeNull();
+    expect(normalizeReaderSettings({ fontFamily: "custom", customFontID: -1 }).fontFamily).toBe(
+      "inherit",
+    );
+    // A valid pairing is left untouched.
+    expect(normalizeReaderSettings({ fontFamily: "custom", customFontID: 5 }).fontFamily).toBe(
+      "custom",
+    );
   });
 
   it("normalizes persisted reading ruler settings", () => {
@@ -237,6 +276,7 @@ describe("FoliateBookReader helpers", () => {
         hyphenation: false,
         rtl: true,
         writingMode: "vertical-rl",
+        justify: true,
       }),
     );
 
@@ -248,8 +288,43 @@ describe("FoliateBookReader helpers", () => {
     expect(styles).toContain("hyphens: none !important");
     expect(styles).toContain("line-height: 1.8 !important");
     expect(styles).toContain("max-width: 68ch !important");
+    expect(styles).toContain("text-align: justify !important");
     expect(styles).toContain("direction: rtl !important");
     expect(styles).toContain("writing-mode: vertical-rl !important");
+  });
+
+  it("injects an @font-face rule using the caller-supplied font url, never the raw API path", () => {
+    const styles = readerStyles(
+      normalizeReaderSettings({
+        fontFamily: "custom",
+        customFontID: 5,
+      }),
+      "blob:http://localhost/font-object-url",
+    );
+
+    expect(styles).toContain(
+      '@font-face { font-family: "silo-custom-font"; src: url("blob:http://localhost/font-object-url"); font-display: swap; }',
+    );
+    expect(styles).toContain('font-family: "silo-custom-font" !important');
+    // The endpoint requires a Bearer token + X-Profile-Id header a browser-native
+    // CSS fetch can never carry, so the raw API path must never land in the CSS.
+    expect(styles).not.toContain("/api/v1/");
+  });
+
+  it("omits the @font-face rule when no custom font is selected", () => {
+    const styles = readerStyles(normalizeReaderSettings({}));
+
+    expect(styles).not.toContain("@font-face");
+  });
+
+  it("omits the @font-face rule when the font url hasn't loaded (e.g. a rejected blob fetch), even though a custom font is selected", () => {
+    const settings = normalizeReaderSettings({ fontFamily: "custom", customFontID: 5 });
+
+    expect(readerStyles(settings, null)).not.toContain("@font-face");
+    expect(readerStyles(settings, undefined)).not.toContain("@font-face");
+    // Without a usable url the font-family also must not reference the custom
+    // family name (there is no matching @font-face to back it).
+    expect(readerStyles(settings, null)).not.toContain('"silo-custom-font"');
   });
 
   it("uses full available width in scrolled flow", () => {
@@ -295,6 +370,20 @@ describe("FoliateBookReader helpers", () => {
       margin: "20px",
       maxColumnCount: "1",
       maxInlineSize: "9999px",
+    });
+  });
+
+  it("computes explicit column count and gap from settings", () => {
+    expect(
+      readerRendererAttributes(
+        normalizeReaderSettings({
+          columns: 3,
+          columnGap: 20,
+        }),
+      ),
+    ).toMatchObject({
+      maxColumnCount: "3",
+      gap: "20%",
     });
   });
 });

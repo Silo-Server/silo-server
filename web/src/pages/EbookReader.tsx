@@ -4,24 +4,27 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent,
 } from "react";
 import {
   ArrowLeft,
   Bookmark,
-  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
+  Columns,
   Download,
   GripHorizontal,
   Highlighter,
   Library,
   ListTree,
   Loader2,
+  Moon,
   PanelRightClose,
   PanelRightOpen,
+  Palette,
   Pause,
   Play,
   RotateCcw,
@@ -32,20 +35,25 @@ import {
   Square,
   Trash2,
   Type,
+  Upload,
   Volume2,
 } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
+import { ApiClientError } from "@/api/client";
 import type { FileVersion } from "@/api/types";
 import PageBack from "@/components/PageBack";
 import { Button } from "@/components/ui/button";
+import { useReadingHeartbeat } from "@/hooks/useReadingHeartbeat";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useTTS } from "@/hooks/useTTS";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
+import { useBookReadingStats } from "@/hooks/queries/readingStats";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
+import { READER_THEMES, type ReaderThemeName } from "@/reader/readerThemes";
 import FoliateBookReader, {
   DEFAULT_READER_SETTINGS,
   READER_FONT_STACKS,
@@ -56,6 +64,7 @@ import FoliateBookReader, {
   readerFileFormat,
   type FoliateBookReaderHandle,
   type ReaderLoadState,
+  type ReaderLocationInfo,
   type ReaderSearchResult,
   type ReaderSelection,
   type ReaderSettings,
@@ -69,6 +78,16 @@ import {
   saveEbookReaderConfigKeepalive,
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
+import { chapterExtent, tapZoneAction } from "@/reader/readerNavigation";
+import {
+  deleteReaderFont,
+  fetchReaderFontObjectUrl,
+  fetchReaderFonts,
+  uploadReaderFont,
+  type ReaderFontMeta,
+} from "@/reader/readerFontsApi";
+import ReaderFooter from "@/reader/ReaderFooter";
+import ReaderShortcutsOverlay from "@/reader/ReaderShortcutsOverlay";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
@@ -193,6 +212,16 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
+// Distance from the top/bottom viewport edge (in px) within which a hovering
+// mouse brings hidden chrome back, mirroring desktop reader/video-player
+// conventions. Shared by the window-level mousemove listener (margin taps)
+// and the content-iframe pointer bridge (taps over the book text itself).
+const CHROME_REVEAL_EDGE_PX = 24;
+
+function isNearViewportEdge(clientY: number): boolean {
+  return clientY < CHROME_REVEAL_EDGE_PX || window.innerHeight - clientY < CHROME_REVEAL_EDGE_PX;
+}
+
 export default function EbookReader() {
   const { contentId = "" } = useParams<{ contentId: string }>();
   const navigate = useNavigate();
@@ -239,6 +268,12 @@ export default function EbookReader() {
   // ruler) is meaningless and the side panel steals width the pages need, so
   // it starts closed (the toggle still opens it).
   const isComicFormat = format === "cbz" || format === "cbr";
+  // isComicFormat is derived from the loaded item's file versions, so while
+  // the detail query is still pending it defaults to false — indistinguishable
+  // from a prose book. Trackers below must stay off until the item has
+  // actually loaded, or a keypress during that window can fire a stats GET
+  // and a spurious heartbeat for what turns out to be a comic.
+  const readerKindKnown = Boolean(item);
   const readerRef = useRef<FoliateBookReaderHandle>(null);
   const [loadedFile, setLoadedFile] = useState<ReaderLoadState | null>(null);
   const [readerProgress, setReaderProgress] = useState<number | null>(null);
@@ -257,6 +292,12 @@ export default function EbookReader() {
   );
   const [annotations, setAnnotations] = useState<EbookReaderAnnotation[]>([]);
   const [selection, setSelection] = useState<ReaderSelection | null>(null);
+  const [locationInfo, setLocationInfo] = useState<ReaderLocationInfo | null>(null);
+  // Mirrors locationInfo synchronously so the keyboard-shortcut handler can
+  // read the latest fraction without listing locationInfo as a dependency —
+  // that would rebind the window keydown listener on every relocate.
+  const locationInfoRef = useRef<ReaderLocationInfo | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [ttsRate, setTtsRate] = useState(1);
   const [ttsVoiceURI, setTtsVoiceURI] = useState("");
@@ -265,6 +306,15 @@ export default function EbookReader() {
   const readingSurfaceRef = useRef<HTMLElement | null>(null);
   const tts = useTTS();
   useScreenWakeLock(wakeLockEnabled);
+  const { noteActivity: noteReadingActivity } = useReadingHeartbeat({
+    contentId: readerKindKnown && !isComicFormat ? contentId || null : null,
+    getFraction: () => locationInfoRef.current?.fraction ?? readerProgress ?? 0,
+  });
+  // Pace/time-left estimates only make sense for prose; comics have no
+  // reading-speed signal to project against.
+  const readingStats = useBookReadingStats(
+    readerKindKnown && !isComicFormat && contentId ? contentId : undefined,
+  );
   const configLoadedRef = useRef(false);
   // Tracks settings the user changed in this session so a slow server config
   // fetch cannot clobber them after the fact.
@@ -276,11 +326,36 @@ export default function EbookReader() {
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<ReaderSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  // Comics always keep chrome visible (see the render gate below); this state
+  // only ever toggles for prose/paginated formats.
+  const [chromeVisible, setChromeVisible] = useState(true);
+  const [readerFonts, setReaderFonts] = useState<ReaderFontMeta[]>([]);
+  // Tracks a *successful* font-list load, separately from "a fetch attempt
+  // finished" — a transient failure must not be treated as "the list is
+  // empty" by the fallback-reset effect below, or it wipes a legitimately
+  // saved custom font selection.
+  const [readerFontsLoadOk, setReaderFontsLoadOk] = useState(false);
+  const readerFontsRequestedRef = useRef(false);
+  const [fontUploading, setFontUploading] = useState(false);
+  const [fontUploadError, setFontUploadError] = useState<string | null>(null);
   const progressLabel = formatReaderProgress(readerProgress);
   const tocEntries = useMemo(() => flattenToc(toc), [toc]);
+  const chapterBand = useMemo(() => {
+    if (!locationInfo || isComicFormat) return null;
+    const fractions = readerRef.current?.getSectionFractions() ?? [];
+    return chapterExtent(fractions, locationInfo.fraction);
+  }, [locationInfo, isComicFormat]);
   const handleFileLoaded = useCallback((state: ReaderLoadState | null) => {
     setLoadedFile(state);
   }, []);
+  const handleLocationChange = useCallback(
+    (info: ReaderLocationInfo) => {
+      locationInfoRef.current = info;
+      setLocationInfo(info);
+      noteReadingActivity();
+    },
+    [noteReadingActivity],
+  );
   const handleProgressChange = useCallback((progress: number | null) => {
     setReaderProgress(progress);
   }, []);
@@ -338,6 +413,111 @@ export default function EbookReader() {
       void saveEbookReaderConfig(contentId, { settings: defaults });
     }
   }, [contentId]);
+  // Uploaded fonts are fetched once, lazily, the first time the settings
+  // panel is opened rather than on mount — most reader sessions never touch
+  // it and this endpoint is per-profile, not per-book. Comics never show the
+  // font controls, so skip the fetch entirely for them.
+  useEffect(() => {
+    if (isComicFormat || panel !== "settings" || readerFontsRequestedRef.current) return;
+    readerFontsRequestedRef.current = true;
+    void fetchReaderFonts()
+      .then((fonts) => {
+        setReaderFonts(fonts);
+        setReaderFontsLoadOk(true);
+      })
+      .catch(() => {
+        // A transient failure shouldn't latch permanently — clear the guard
+        // so reopening the settings panel retries the fetch instead of
+        // leaving the font list (and the fallback-reset effect below)
+        // permanently unresolved.
+        readerFontsRequestedRef.current = false;
+      });
+  }, [panel, isComicFormat]);
+  // If the font a saved config points at no longer exists (deleted from this
+  // session or another one), fall back to the book's own typeface instead of
+  // silently rendering with whatever the browser last resolved "custom" to.
+  // Gated on a *successful* load (not just "a fetch attempt finished") so a
+  // transient fetch failure can't be mistaken for "the list is empty" and
+  // wipe a legitimately saved selection.
+  useEffect(() => {
+    if (!readerFontsLoadOk || readerSettings.customFontID == null) return;
+    if (readerFonts.some((font) => font.id === readerSettings.customFontID)) return;
+    updateReaderSettings({ customFontID: null, fontFamily: READER_FONT_STACKS.inherit });
+  }, [readerFontsLoadOk, readerFonts, readerSettings.customFontID, updateReaderSettings]);
+  // Holds an authenticated blob: URL for the selected custom font, since the
+  // reader's injected CSS can't fetch the protected font file itself (see
+  // readerFontsApi.fetchReaderFontObjectUrl for why). Re-fetched whenever the
+  // selection changes. The currently-live URL is tracked in a ref (rather
+  // than only in state) so it can be revoked exactly once it's superseded by
+  // a freshly fetched one, or on unmount — never while it's still the URL
+  // referenced by readerStyles, which would leave the reader pointed at a
+  // dead blob until the replacement arrives.
+  const [customFontUrl, setCustomFontUrl] = useState<string | null>(null);
+  const customFontUrlRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isComicFormat || readerSettings.customFontID == null) {
+      if (customFontUrlRef.current) {
+        URL.revokeObjectURL(customFontUrlRef.current);
+        customFontUrlRef.current = null;
+      }
+      setCustomFontUrl(null);
+      return;
+    }
+    let cancelled = false;
+    fetchReaderFontObjectUrl(readerSettings.customFontID)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        const previous = customFontUrlRef.current;
+        customFontUrlRef.current = url;
+        setCustomFontUrl(url);
+        if (previous) URL.revokeObjectURL(previous);
+      })
+      .catch(() => {
+        // Leave customFontUrl null; readerStyles falls back to the book's own
+        // typeface when no font url is available.
+        if (!cancelled) setCustomFontUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isComicFormat, readerSettings.customFontID]);
+  // Revokes whatever URL is still live when the reader itself unmounts (a
+  // font-selection change is handled above, inline with the fetch).
+  useEffect(() => {
+    return () => {
+      if (customFontUrlRef.current) {
+        URL.revokeObjectURL(customFontUrlRef.current);
+        customFontUrlRef.current = null;
+      }
+    };
+  }, []);
+  const handleFontUpload = useCallback(async (event: ReactChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setFontUploadError(null);
+    setFontUploading(true);
+    try {
+      const font = await uploadReaderFont(file);
+      setReaderFonts((current) => [...current, font]);
+    } catch (err) {
+      setFontUploadError(err instanceof ApiClientError ? err.message : "Font upload failed.");
+    } finally {
+      setFontUploading(false);
+    }
+  }, []);
+  const handleDeleteFont = useCallback(async (id: number) => {
+    setFontUploadError(null);
+    try {
+      await deleteReaderFont(id);
+      setReaderFonts((current) => current.filter((font) => font.id !== id));
+    } catch (err) {
+      setFontUploadError(err instanceof ApiClientError ? err.message : "Font delete failed.");
+    }
+  }, []);
   const handleSearchSubmit = useCallback(async () => {
     const query = searchText.trim();
     if (!query) {
@@ -352,12 +532,68 @@ export default function EbookReader() {
       setSearching(false);
     }
   }, [searchText]);
-  const handleProgressScrub = useCallback((value: string) => {
-    const next = Math.min(1, Math.max(0, Number(value) / 100));
+  const handleProgressScrub = useCallback((fraction: number) => {
+    const next = Math.min(1, Math.max(0, fraction));
     if (!Number.isFinite(next)) return;
     setReaderProgress(next);
+    // The footer prefers locationInfo.fraction over readerProgress, and that
+    // only otherwise updates from the next foliate relocate event — which can
+    // lag or never land mid-drag. Patch it optimistically too so the bar
+    // doesn't snap back to the last relocate's fraction after a scrub.
+    setLocationInfo((current) =>
+      current
+        ? { ...current, fraction: next }
+        : { fraction: next, sectionIndex: null, tocLabel: null },
+    );
     void readerRef.current?.goToFraction(next);
   }, []);
+  // Shared by both tap paths below: margin taps land on the outer section via
+  // a normal React pointerup, but taps on the book text itself are reported
+  // by FoliateBookReader through onContentPointerUp (see the comment on that
+  // prop) since foliate renders prose inside a same-origin iframe whose
+  // events never bubble to this page. Both read the surface element's rect
+  // through a ref rather than event.currentTarget so the same geometry
+  // applies regardless of which path fired.
+  const dispatchSurfaceTap = useCallback(
+    (clientX: number) => {
+      if (isComicFormat) return;
+      const rect = readingSurfaceRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return;
+      // Belt and braces: React's `selection` state lags a same-tick pointerup
+      // that just finished a text selection (FoliateBookReader defers the
+      // state update with setTimeout(0) to let native selection settle), so
+      // also consult the reader's synchronous live-selection signal.
+      const action = tapZoneAction({
+        xRatio: (clientX - rect.left) / rect.width,
+        flow: readerSettings.flow,
+        hasSelection: Boolean(selection) || (readerRef.current?.hasLiveSelection?.() ?? false),
+      });
+      if (action === "prev") readerRef.current?.prev();
+      else if (action === "next") readerRef.current?.next();
+      else if (action === "toggle-chrome") setChromeVisible((visible) => !visible);
+      noteReadingActivity();
+    },
+    [isComicFormat, readerSettings.flow, selection, noteReadingActivity],
+  );
+  const handleSurfacePointerUp = useCallback(
+    (event: PointerEvent<HTMLElement>) => {
+      dispatchSurfaceTap(event.clientX);
+    },
+    [dispatchSurfaceTap],
+  );
+  const handleContentPointerUp = useCallback(
+    (point: { clientX: number; clientY: number }) => {
+      dispatchSurfaceTap(point.clientX);
+    },
+    [dispatchSurfaceTap],
+  );
+  const handleContentPointerMove = useCallback(
+    (point: { clientY: number }) => {
+      if (chromeVisible) return;
+      if (isNearViewportEdge(point.clientY)) setChromeVisible(true);
+    },
+    [chromeVisible],
+  );
   const handleCreateHighlight = useCallback(async () => {
     if (!contentId || !selection) return;
     const created = await createEbookReaderAnnotation(contentId, {
@@ -371,9 +607,22 @@ export default function EbookReader() {
     readerRef.current?.clearSelection();
     setSelection(null);
   }, [contentId, selection]);
-  const handleCreateBookmark = useCallback(async () => {
+  // Toggle semantics: a bookmark "at" a location is identified by an exact
+  // match on the same location string handleCreateBookmark would compute for
+  // the current spot. If one already exists there, this removes it (same
+  // delete path the Notes panel uses); otherwise it creates one. Shared by
+  // both the `b` shortcut and the header bookmark button.
+  const handleToggleBookmark = useCallback(async () => {
     if (!contentId) return;
     const location = selection?.cfi || `fraction:${(readerProgress ?? 0).toFixed(6)}`;
+    const existing = annotations.find(
+      (annotation) => annotation.kind === "bookmark" && annotation.location === location,
+    );
+    if (existing) {
+      await deleteEbookReaderAnnotation(contentId, existing.id);
+      setAnnotations((current) => current.filter((annotation) => annotation.id !== existing.id));
+      return;
+    }
     const created = await createEbookReaderAnnotation(contentId, {
       kind: "bookmark",
       location,
@@ -381,7 +630,28 @@ export default function EbookReader() {
     });
     setAnnotations((current) => [created, ...current]);
     setPanel("notes");
-  }, [contentId, item?.title, readerProgress, selection]);
+  }, [annotations, contentId, item?.title, readerProgress, selection]);
+  // Mirrors handleToggleBookmark so the keyboard-shortcut handler can call the
+  // latest version without listing it as a dependency — it closes over
+  // readerProgress and annotations, which change often, and would otherwise
+  // force the window keydown listener to rebind constantly.
+  const bookmarkActionRef = useRef(handleToggleBookmark);
+  useEffect(() => {
+    bookmarkActionRef.current = handleToggleBookmark;
+  }, [handleToggleBookmark]);
+  const toggleFullscreen = useCallback(() => {
+    if (typeof document === "undefined") return;
+    try {
+      if (document.fullscreenElement) {
+        void document.exitFullscreen?.()?.catch(() => {});
+      } else {
+        void document.documentElement.requestFullscreen?.()?.catch(() => {});
+      }
+    } catch {
+      // Fullscreen API unsupported or blocked (e.g. embedded without
+      // allow="fullscreen"); ignore rather than surface a console error.
+    }
+  }, []);
   const handleAnnotationNavigate = useCallback((annotation: EbookReaderAnnotation) => {
     // Toolbar bookmarks store synthetic "fraction:<n>" locations that foliate's
     // goTo cannot resolve; route those through goToFraction instead.
@@ -434,6 +704,11 @@ export default function EbookReader() {
   }, []);
   const handleRulerPointerUp = useCallback(
     (event: PointerEvent<HTMLButtonElement>) => {
+      // The grip lives inside [data-reader-surface], which also listens for
+      // pointerup to turn pages on tap. Without this, releasing a drag (the
+      // grip sits near the surface's right edge) bubbles into that handler
+      // and reads as a next-page tap.
+      event.stopPropagation();
       const drag = rulerDragRef.current;
       if (!drag) return;
       rulerDragRef.current = null;
@@ -443,7 +718,10 @@ export default function EbookReader() {
     },
     [updateReaderSettings],
   );
-  const handleRulerPointerCancel = useCallback(() => {
+  const handleRulerPointerCancel = useCallback((event: PointerEvent<HTMLButtonElement>) => {
+    // See handleRulerPointerUp: stop this from bubbling into the surface's
+    // page-turn tap handler too.
+    event.stopPropagation();
     rulerDragRef.current = null;
     setRulerDragTop(null);
   }, []);
@@ -462,15 +740,70 @@ export default function EbookReader() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditableTarget(event.target)) return;
-      if (event.key === "ArrowLeft") {
-        readerRef.current?.prev();
-      } else if (event.key === "ArrowRight") {
-        readerRef.current?.next();
+      noteReadingActivity();
+      switch (event.key) {
+        case "ArrowLeft":
+          readerRef.current?.prev();
+          break;
+        case "ArrowRight":
+          readerRef.current?.next();
+          break;
+        case "Home":
+        case "End": {
+          if (isComicFormat) return;
+          const fractions = readerRef.current?.getSectionFractions() ?? [];
+          const extent = chapterExtent(fractions, locationInfoRef.current?.fraction ?? 0);
+          if (!extent) return;
+          event.preventDefault();
+          void readerRef.current?.goToFraction(event.key === "Home" ? extent.start : extent.end);
+          break;
+        }
+        case "t":
+          // Mirrors the header's panel-open toggle plus the Contents tab
+          // click: reopen onto Contents, or close if already showing it.
+          if (panelOpen && panel === "toc") {
+            setPanelOpen(false);
+          } else {
+            setPanelOpen(true);
+            setPanel("toc");
+          }
+          break;
+        case "s":
+          if (panelOpen && panel === "search") {
+            setPanelOpen(false);
+          } else {
+            setPanelOpen(true);
+            setPanel("search");
+          }
+          break;
+        case "b":
+          void bookmarkActionRef.current();
+          break;
+        case "f":
+          toggleFullscreen();
+          break;
+        case "?":
+          setShortcutsOpen(true);
+          break;
+        case "Escape":
+          // Precedence: shortcuts overlay, then the side panel, then chrome —
+          // each Escape closes the topmost thing the user opened before
+          // falling through to the next layer.
+          if (shortcutsOpen) {
+            setShortcutsOpen(false);
+          } else if (panelOpen) {
+            setPanelOpen(false);
+          } else {
+            setChromeVisible((visible) => !visible);
+          }
+          break;
+        default:
+          break;
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [isComicFormat, shortcutsOpen, panelOpen, panel, toggleFullscreen, noteReadingActivity]);
 
   useEffect(() => {
     if (!contentId) return;
@@ -530,6 +863,19 @@ export default function EbookReader() {
   useEffect(() => {
     void reloadAnnotations();
   }, [reloadAnnotations]);
+
+  // Lets a mouse hovering near the top/bottom edge bring hidden chrome back
+  // without a click, mirroring desktop reader/video-player conventions.
+  useEffect(() => {
+    if (chromeVisible) return;
+    const onMove = (event: MouseEvent) => {
+      if (isNearViewportEdge(event.clientY)) {
+        setChromeVisible(true);
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    return () => window.removeEventListener("mousemove", onMove);
+  }, [chromeVisible]);
   if (isLoading) {
     return (
       <div className="flex min-h-[70vh] items-center justify-center">
@@ -591,165 +937,164 @@ export default function EbookReader() {
     );
   }
 
+  const showChrome = chromeVisible || isComicFormat;
+
   return (
-    <div className="bg-background min-h-screen">
-      <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
-        <div className="flex h-14 items-center gap-3 px-4">
-          <Button asChild variant="ghost" size="icon" aria-label="Back">
-            <Link to={backHref}>
-              <ArrowLeft className="size-5" />
-            </Link>
-          </Button>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{item.title}</div>
-            <div className="text-muted-foreground truncate text-xs">{format.toUpperCase()}</div>
-          </div>
-          {nextChapterHref && nextChapter && (
-            <Button
-              asChild
-              variant="ghost"
-              size="sm"
-              className="hidden gap-1 sm:inline-flex"
-              title={`Next: ${nextChapter.label}`}
-            >
-              <Link to={nextChapterHref}>
-                <span className="text-muted-foreground max-w-36 truncate text-xs">
-                  {nextChapter.label}
-                </span>
-                <ChevronRight className="size-4" />
+    <div className="bg-background flex h-screen flex-col">
+      {showChrome && (
+        <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
+          <div className="flex h-14 items-center gap-3 px-4">
+            <Button asChild variant="ghost" size="icon" aria-label="Back">
+              <Link to={backHref}>
+                <ArrowLeft className="size-5" />
               </Link>
             </Button>
-          )}
-          {progressLabel && (
-            <div className="text-muted-foreground hidden min-w-12 text-center text-xs tabular-nums sm:block">
-              {progressLabel}
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">{item.title}</div>
+              <div className="text-muted-foreground truncate text-xs">{format.toUpperCase()}</div>
             </div>
-          )}
-          {isReaderSupportedFile(selectedFile) && readerFiles.length > 1 && (
-            <select
-              aria-label="Reader file"
-              value={selectedFile.file_id}
-              onChange={(event) => handleFileChange(event.target.value)}
-              className="border-border bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
-            >
-              {readerFiles.map((file) => (
-                <option key={file.file_id} value={file.file_id}>
-                  {readerFileLabel(file)}
-                </option>
-              ))}
-            </select>
-          )}
-          <div className="flex shrink-0 items-center gap-1">
-            {selection && (
+            {nextChapterHref && nextChapter && (
               <Button
-                variant="secondary"
+                asChild
+                variant="ghost"
                 size="sm"
-                aria-label="Highlight selection"
-                title="Highlight selection"
-                onClick={() => void handleCreateHighlight()}
+                className="hidden gap-1 sm:inline-flex"
+                title={`Next: ${nextChapter.label}`}
               >
-                <Highlighter className="size-4" />
-                Highlight
+                <Link to={nextChapterHref}>
+                  <span className="text-muted-foreground max-w-36 truncate text-xs">
+                    {nextChapter.label}
+                  </span>
+                  <ChevronRight className="size-4" />
+                </Link>
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Add bookmark"
-              title="Add bookmark"
-              onClick={() => void handleCreateBookmark()}
-            >
-              <Bookmark className="size-4" />
-            </Button>
-            {!isComicFormat && (
-              <Button
-                variant={readerSettings.readingRuler ? "secondary" : "ghost"}
-                size="icon-sm"
-                aria-label="Toggle reading ruler"
-                title="Reading ruler"
-                onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
-              >
-                <Ruler className="size-4" />
-              </Button>
+            {progressLabel && (
+              <div className="text-muted-foreground hidden min-w-12 text-center text-xs tabular-nums sm:block">
+                {progressLabel}
+              </div>
             )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={panelOpen ? "Close reader panel" : "Open reader panel"}
-              title={panelOpen ? "Close reader panel" : "Open reader panel"}
-              onClick={() => setPanelOpen((open) => !open)}
-            >
-              {panelOpen ? (
-                <PanelRightClose className="size-4" />
-              ) : (
-                <PanelRightOpen className="size-4" />
+            {isReaderSupportedFile(selectedFile) && readerFiles.length > 1 && (
+              <select
+                aria-label="Reader file"
+                value={selectedFile.file_id}
+                onChange={(event) => handleFileChange(event.target.value)}
+                className="border-border bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
+              >
+                {readerFiles.map((file) => (
+                  <option key={file.file_id} value={file.file_id}>
+                    {readerFileLabel(file)}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {selection && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label="Highlight selection"
+                  title="Highlight selection"
+                  onClick={() => void handleCreateHighlight()}
+                >
+                  <Highlighter className="size-4" />
+                  Highlight
+                </Button>
               )}
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Previous page"
-              title="Previous page"
-              onClick={() => readerRef.current?.prev()}
-            >
-              <ChevronLeft className="size-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Next page"
-              title="Next page"
-              onClick={() => readerRef.current?.next()}
-            >
-              <ChevronRight className="size-5" />
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Toggle bookmark"
+                title="Toggle bookmark"
+                onClick={() => void handleToggleBookmark()}
+              >
+                <Bookmark className="size-4" />
+              </Button>
+              {!isComicFormat && (
+                <Button
+                  variant={readerSettings.readingRuler ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  aria-label="Toggle reading ruler"
+                  title="Reading ruler"
+                  onClick={() =>
+                    updateReaderSettings({ readingRuler: !readerSettings.readingRuler })
+                  }
+                >
+                  <Ruler className="size-4" />
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={panelOpen ? "Close reader panel" : "Open reader panel"}
+                title={panelOpen ? "Close reader panel" : "Open reader panel"}
+                onClick={() => setPanelOpen((open) => !open)}
+              >
+                {panelOpen ? (
+                  <PanelRightClose className="size-4" />
+                ) : (
+                  <PanelRightOpen className="size-4" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Previous page"
+                title="Previous page"
+                onClick={() => readerRef.current?.prev()}
+              >
+                <ChevronLeft className="size-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Next page"
+                title="Next page"
+                onClick={() => readerRef.current?.next()}
+              >
+                <ChevronRight className="size-5" />
+              </Button>
+            </div>
+            {loadedFile && (
+              <Button asChild variant="outline" size="sm">
+                <a href={loadedFile.objectUrl} download={loadedFile.filename}>
+                  <Download className="size-4" />
+                  File
+                </a>
+              </Button>
+            )}
           </div>
-          {loadedFile && (
-            <Button asChild variant="outline" size="sm">
-              <a href={loadedFile.objectUrl} download={loadedFile.filename}>
-                <Download className="size-4" />
-                File
-              </a>
-            </Button>
-          )}
-        </div>
-        <div className="border-border/60 flex h-10 items-center gap-3 border-t px-4">
-          <BookOpen className="text-muted-foreground size-4 shrink-0" />
-          <input
-            aria-label="Reading progress"
-            type="range"
-            min="0"
-            max="100"
-            step="1"
-            value={Math.round((readerProgress ?? 0) * 100)}
-            onChange={(event) => handleProgressScrub(event.target.value)}
-            className="accent-primary h-2 min-w-0 flex-1"
-          />
-          <div className="text-muted-foreground w-11 text-right text-xs tabular-nums">
-            {progressLabel ?? "0%"}
-          </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       <main
         className={cn(
-          "grid h-[calc(100vh-6rem)] min-h-0 w-full overflow-hidden",
+          "grid min-h-0 w-full flex-1 overflow-hidden",
           panelOpen ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem]" : "grid-cols-1",
         )}
       >
         {isReaderSupportedFile(selectedFile) ? (
-          <section ref={readingSurfaceRef} className="relative min-h-0 min-w-0 overflow-hidden">
+          <section
+            ref={readingSurfaceRef}
+            data-reader-surface
+            onPointerUp={handleSurfacePointerUp}
+            className="relative min-h-0 min-w-0 overflow-hidden"
+          >
             <FoliateBookReader
               ref={readerRef}
               contentID={contentId}
               file={selectedFile}
               title={item.title}
               settings={readerSettings}
+              customFontUrl={customFontUrl}
               annotations={annotations}
               onFileLoaded={handleFileLoaded}
               onProgressChange={handleProgressChange}
               onReady={handleReaderReady}
               onSelectionChange={setSelection}
+              onLocationChange={handleLocationChange}
+              onContentPointerUp={handleContentPointerUp}
+              onContentPointerMove={handleContentPointerMove}
             />
             {readerSettings.readingRuler && (
               <div
@@ -1074,35 +1419,83 @@ export default function EbookReader() {
                     </label>
                   </div>
                   <div className="flex items-center gap-2 text-sm font-medium">
+                    <Palette className="size-4" />
+                    Theme
+                  </div>
+                  <div className="space-y-2">
+                    <div role="group" aria-label="Reader theme" className="grid grid-cols-5 gap-2">
+                      {(Object.keys(READER_THEMES) as ReaderThemeName[]).map((name) => {
+                        const definition = READER_THEMES[name];
+                        const swatch = definition[readerSettings.themeVariant] ?? definition.light;
+                        const active = readerSettings.themeName === name;
+                        return (
+                          <button
+                            key={name}
+                            type="button"
+                            data-theme-choice={name}
+                            title={definition.label}
+                            aria-label={definition.label}
+                            aria-pressed={active}
+                            onClick={() =>
+                              updateReaderSettings({
+                                themeName: name,
+                                themeVariant: readerSettings.themeVariant,
+                              })
+                            }
+                            style={{
+                              background: swatch.background,
+                              borderColor: swatch.foreground,
+                            }}
+                            className={cn(
+                              "focus-visible:ring-ring/50 size-8 rounded-full border-2 outline-none focus-visible:ring-[3px]",
+                              active ? "ring-ring ring-2 ring-offset-2" : "",
+                            )}
+                          />
+                        );
+                      })}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label="Reader dark mode"
+                      aria-pressed={readerSettings.themeVariant === "dark"}
+                      disabled={READER_THEMES[readerSettings.themeName].darkOnly === true}
+                      onClick={() =>
+                        updateReaderSettings({
+                          themeVariant: readerSettings.themeVariant === "dark" ? "light" : "dark",
+                        })
+                      }
+                      className="w-full justify-center gap-2"
+                    >
+                      <Moon className="size-4" />
+                      Dark mode
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm font-medium">
                     <Type className="size-4" />
                     Typography
                   </div>
-                  <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Theme</span>
-                    <select
-                      aria-label="Theme"
-                      value={readerSettings.theme}
-                      onChange={(event) =>
-                        updateReaderSettings({
-                          theme: event.target.value as ReaderSettings["theme"],
-                        })
-                      }
-                      className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                    >
-                      <option value="light">Light</option>
-                      <option value="sepia">Sepia</option>
-                      <option value="dark">Dark</option>
-                    </select>
-                  </label>
                   {!isComicFormat && (
                     <label className="block space-y-1 text-sm">
                       <span className="text-muted-foreground text-xs font-medium">Font</span>
                       <select
                         aria-label="Font family"
-                        value={readerSettings.fontFamily}
-                        onChange={(event) =>
-                          updateReaderSettings({ fontFamily: event.target.value })
+                        value={
+                          readerSettings.fontFamily === "custom" &&
+                          readerSettings.customFontID != null
+                            ? `custom:${readerSettings.customFontID}`
+                            : readerSettings.fontFamily
                         }
+                        onChange={(event) => {
+                          const raw = event.target.value;
+                          if (raw.startsWith("custom:")) {
+                            const id = Number(raw.slice("custom:".length));
+                            updateReaderSettings({ fontFamily: "custom", customFontID: id });
+                          } else {
+                            updateReaderSettings({ fontFamily: raw, customFontID: null });
+                          }
+                        }}
                         className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                       >
                         {READER_FONT_OPTIONS.map((option) => (
@@ -1112,9 +1505,74 @@ export default function EbookReader() {
                         ))}
                         {!READER_FONT_OPTIONS.some(
                           (option) => option.value === readerSettings.fontFamily,
-                        ) && <option value={readerSettings.fontFamily}>Custom</option>}
+                        ) &&
+                          readerSettings.fontFamily !== "custom" && (
+                            <option value={readerSettings.fontFamily}>Custom</option>
+                          )}
+                        {readerSettings.customFontID != null && !readerFontsLoadOk && (
+                          // The uploaded-fonts list (and thus the matching
+                          // <option>) hasn't loaded yet for a saved custom-font
+                          // selection; without this the select's value has no
+                          // matching option and renders blank instead of
+                          // showing what's selected.
+                          <option value={`custom:${readerSettings.customFontID}`} disabled>
+                            Loading uploaded font…
+                          </option>
+                        )}
+                        {readerFonts.length > 0 && (
+                          <optgroup label="Uploaded">
+                            {readerFonts.map((font) => (
+                              <option key={font.id} value={`custom:${font.id}`}>
+                                {font.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
                     </label>
+                  )}
+                  {!isComicFormat && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-muted-foreground text-xs font-medium">
+                          Uploaded fonts
+                        </span>
+                        <label className="text-foreground inline-flex cursor-pointer items-center gap-1 text-xs font-medium">
+                          <Upload className="size-3.5" />
+                          {fontUploading ? "Uploading…" : "Upload"}
+                          <input
+                            type="file"
+                            accept=".ttf,.otf,.woff,.woff2"
+                            aria-label="Upload font"
+                            disabled={fontUploading}
+                            onChange={(event) => void handleFontUpload(event)}
+                            className="sr-only"
+                          />
+                        </label>
+                      </div>
+                      {fontUploadError && <p className="text-xs text-red-600">{fontUploadError}</p>}
+                      {readerFonts.length > 0 && (
+                        <ul className="space-y-1">
+                          {readerFonts.map((font) => (
+                            <li
+                              key={font.id}
+                              className="flex items-center justify-between gap-2 text-sm"
+                            >
+                              <span className="min-w-0 truncate">{font.name}</span>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`Delete font ${font.name}`}
+                                title={`Delete font ${font.name}`}
+                                onClick={() => void handleDeleteFont(font.id)}
+                              >
+                                <Trash2 className="size-3" />
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   )}
                   {!isComicFormat && (
                     <ReaderRange
@@ -1166,6 +1624,45 @@ export default function EbookReader() {
                       onChange={(maxWidth) => updateReaderSettings({ maxWidth })}
                     />
                   )}
+                  {!isComicFormat && (
+                    <>
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Columns className="size-4" />
+                        Layout
+                      </div>
+                      <label className="block space-y-1 text-sm">
+                        <span className="text-muted-foreground text-xs font-medium">Columns</span>
+                        <select
+                          aria-label="Columns"
+                          value={String(readerSettings.columns)}
+                          onChange={(event) =>
+                            updateReaderSettings({
+                              columns:
+                                event.target.value === "auto"
+                                  ? "auto"
+                                  : (Number(event.target.value) as ReaderSettings["columns"]),
+                            })
+                          }
+                          className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
+                        >
+                          <option value="auto">Auto</option>
+                          <option value="1">1</option>
+                          <option value="2">2</option>
+                          <option value="3">3</option>
+                          <option value="4">4</option>
+                        </select>
+                      </label>
+                      <ReaderRange
+                        label="Column gap"
+                        value={readerSettings.columnGap}
+                        min={0}
+                        max={50}
+                        step={1}
+                        suffix="%"
+                        onChange={(columnGap) => updateReaderSettings({ columnGap })}
+                      />
+                    </>
+                  )}
                   <div className="border-border space-y-2 border-t pt-3">
                     {!isComicFormat && (
                       <label className="flex items-center justify-between gap-3 text-sm">
@@ -1176,6 +1673,19 @@ export default function EbookReader() {
                           checked={readerSettings.hyphenation}
                           onChange={(event) =>
                             updateReaderSettings({ hyphenation: event.target.checked })
+                          }
+                        />
+                      </label>
+                    )}
+                    {!isComicFormat && (
+                      <label className="flex items-center justify-between gap-3 text-sm">
+                        <span>Justify text</span>
+                        <input
+                          aria-label="Justify text"
+                          type="checkbox"
+                          checked={readerSettings.justify}
+                          onChange={(event) =>
+                            updateReaderSettings({ justify: event.target.checked })
                           }
                         />
                       </label>
@@ -1235,24 +1745,6 @@ export default function EbookReader() {
                       </select>
                     </label>
                   )}
-                  {readerSettings.flow !== "scrolled" && (
-                    <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground text-xs font-medium">Spread</span>
-                      <select
-                        aria-label="Spread"
-                        value={readerSettings.spread}
-                        onChange={(event) =>
-                          updateReaderSettings({
-                            spread: event.target.value as ReaderSettings["spread"],
-                          })
-                        }
-                        className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
-                      >
-                        <option value="auto">Auto</option>
-                        <option value="none">Single page</option>
-                      </select>
-                    </label>
-                  )}
                   <label className="block space-y-1 text-sm">
                     <span className="text-muted-foreground text-xs font-medium">Flow</span>
                     <select
@@ -1273,6 +1765,17 @@ export default function EbookReader() {
           </aside>
         )}
       </main>
+      {!isComicFormat && chromeVisible && (
+        <ReaderFooter
+          fraction={locationInfo?.fraction ?? readerProgress ?? 0}
+          extent={chapterBand}
+          chapterLabel={locationInfo?.tocLabel ?? null}
+          onScrub={handleProgressScrub}
+          onShowShortcuts={() => setShortcutsOpen(true)}
+          timeLeftSeconds={readingStats.data?.time_left_seconds ?? null}
+        />
+      )}
+      {shortcutsOpen && <ReaderShortcutsOverlay onClose={() => setShortcutsOpen(false)} />}
       {showEndOfBookNext && nextChapter && nextChapterHref && (
         <div className="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4">
           <Button

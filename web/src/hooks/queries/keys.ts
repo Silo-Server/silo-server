@@ -191,6 +191,16 @@ export const episodeKeys = {
 
 export const ebookKeys = {
   readerProgress: (contentId: string | undefined) => ["ebook-reader-progress", contentId] as const,
+  readingStats: (contentId: string | undefined) => ["reading-stats", contentId] as const,
+  readingHistory: (from?: string, to?: string, tz?: string) =>
+    ["reading-history", from ?? "default", to ?? "default", tz ?? "default"] as const,
+  // Unlike readingHistory, tz has no "default" placeholder here: the hook
+  // always resolves and passes a concrete tz, while callers that want to
+  // invalidate every tz variant (e.g. after a goal save) call this with no
+  // argument to get the bare ["reading-motivation"] prefix that matches all
+  // of them under react-query's default partial-key matching.
+  readingMotivation: (tz?: string) =>
+    tz ? (["reading-motivation", tz] as const) : (["reading-motivation"] as const),
 };
 
 export const libraryKeys = {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, createRef, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,6 +45,8 @@ vi.mock("foliate-js/view.js", () => ({}));
 
 import FoliateBookReader, {
   ebookReaderProgressQueryKey,
+  type FoliateBookReaderHandle,
+  type ReaderLocationInfo,
   type ReaderReadyState,
 } from "@/reader/FoliateBookReader";
 
@@ -60,6 +62,9 @@ class FakeFoliateView extends HTMLElement {
   close = vi.fn();
   init = vi.fn(async () => {});
   goToFraction = vi.fn(async () => {});
+  getSectionFractions = vi.fn((): number[] => []);
+  renderer: { getContents?: () => Array<{ doc: Document; index?: number }> } | undefined =
+    undefined;
   open = vi.fn((book: unknown) => {
     this.book = book;
     const behavior = viewOpenBehaviors.shift();
@@ -115,6 +120,34 @@ function viewAt(index: number): FakeFoliateView {
   return view;
 }
 
+// Builds a standalone Document (not attached to any real iframe) standing in
+// for one of foliate's content docs, with `defaultView.frameElement` stubbed
+// to report the given frame offset — mirroring the real relationship between
+// a content doc and the same-origin iframe foliate renders it into.
+function makeFakeContentDoc(frameRect: { left: number; top: number }): Document {
+  const doc = document.implementation.createHTMLDocument("content");
+  const frameElement = document.createElement("div");
+  frameElement.getBoundingClientRect = () =>
+    ({
+      left: frameRect.left,
+      top: frameRect.top,
+      width: 0,
+      height: 0,
+      right: frameRect.left,
+      bottom: frameRect.top,
+      x: frameRect.left,
+      y: frameRect.top,
+      toJSON() {
+        return {};
+      },
+    }) as DOMRect;
+  Object.defineProperty(doc, "defaultView", {
+    configurable: true,
+    value: { frameElement },
+  });
+  return doc;
+}
+
 function relocateEvent(current: number, cfi?: string) {
   return new CustomEvent("relocate", {
     detail: { cfi, location: { current, total: 10 } },
@@ -129,10 +162,19 @@ describe("FoliateBookReader open flow", () => {
   const fileA = makeFile(7, "a.epub");
   const fileB = makeFile(8, "b.epub");
 
-  function ui(file: FileVersion, props: { onReady?: (state: ReaderReadyState) => void } = {}) {
+  function ui(
+    file: FileVersion,
+    props: {
+      onReady?: (state: ReaderReadyState) => void;
+      onLocationChange?: (info: ReaderLocationInfo) => void;
+      onContentPointerUp?: (point: { clientX: number; clientY: number }) => void;
+      onContentPointerMove?: (point: { clientY: number }) => void;
+    } = {},
+    ref?: Ref<FoliateBookReaderHandle>,
+  ) {
     return (
       <QueryClientProvider client={queryClient}>
-        <FoliateBookReader contentID="book-1" file={file} title="Book" {...props} />
+        <FoliateBookReader contentID="book-1" file={file} title="Book" {...props} ref={ref} />
       </QueryClientProvider>
     );
   }
@@ -422,5 +464,174 @@ describe("FoliateBookReader open flow", () => {
       location: "epubcfi(/6/8)",
       progress: 0.5,
     });
+  });
+
+  it("reports location info on relocate", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const onLocationChange = vi.fn();
+
+    await act(async () => {
+      root.render(ui(fileA, { onLocationChange }));
+    });
+    const view = viewAt(0);
+
+    await act(async () => {
+      view.dispatchEvent(
+        new CustomEvent("relocate", {
+          detail: {
+            cfi: "epubcfi(/6/8!/4/2)",
+            fraction: 0.3,
+            index: 1,
+            tocItem: { label: "Chapter 2" },
+            location: { current: 29, total: 100 },
+          },
+        }),
+      );
+    });
+
+    expect(onLocationChange).toHaveBeenCalledWith({
+      fraction: 0.3,
+      sectionIndex: 1,
+      tocLabel: "Chapter 2",
+    });
+  });
+
+  it("ignores a relocate event reporting a non-finite fraction", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const onLocationChange = vi.fn();
+
+    await act(async () => {
+      root.render(ui(fileA, { onLocationChange }));
+    });
+    const view = viewAt(0);
+
+    await act(async () => {
+      view.dispatchEvent(
+        new CustomEvent("relocate", {
+          detail: {
+            cfi: "epubcfi(/6/8!/4/2)",
+            fraction: Number.NaN,
+            index: 1,
+            tocItem: { label: "Chapter 2" },
+            location: { current: 29, total: 100 },
+          },
+        }),
+      );
+    });
+
+    expect(onLocationChange).not.toHaveBeenCalled();
+  });
+
+  it("exposes section fractions through the handle", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const handleRef = createRef<FoliateBookReaderHandle>();
+
+    await act(async () => {
+      root.render(ui(fileA, {}, handleRef));
+    });
+    const view = viewAt(0);
+    view.getSectionFractions = vi.fn(() => [0, 0.25, 1]);
+
+    expect(handleRef.current?.getSectionFractions()).toEqual([0, 0.25, 1]);
+  });
+
+  it("forwards pointerup and mousemove from content iframes with viewport-adjusted coordinates", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const onContentPointerUp = vi.fn();
+    const onContentPointerMove = vi.fn();
+
+    await act(async () => {
+      root.render(ui(fileA, { onContentPointerUp, onContentPointerMove }));
+    });
+    const view = viewAt(0);
+
+    // foliate re-creates content docs and fires "create-overlay" for each;
+    // the frame sits at (40, 20) in outer viewport coordinates.
+    const contentDoc = makeFakeContentDoc({ left: 40, top: 20 });
+    view.renderer = { getContents: () => [{ doc: contentDoc, index: 0 }] };
+
+    await act(async () => {
+      view.dispatchEvent(new CustomEvent("create-overlay"));
+    });
+
+    await act(async () => {
+      contentDoc.dispatchEvent(new MouseEvent("pointerup", { clientX: 10, clientY: 5 }));
+    });
+    // iframe-local (10, 5) + frame offset (40, 20) => outer viewport (50, 25).
+    expect(onContentPointerUp).toHaveBeenCalledWith({ clientX: 50, clientY: 25 });
+
+    await act(async () => {
+      contentDoc.dispatchEvent(new MouseEvent("mousemove", { clientY: 5 }));
+    });
+    expect(onContentPointerMove).toHaveBeenCalledWith({ clientY: 25 });
+  });
+
+  it("updates hasLiveSelection synchronously, ahead of the deferred selection-change callback", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+    const handleRef = createRef<FoliateBookReaderHandle>();
+
+    await act(async () => {
+      root.render(ui(fileA, {}, handleRef));
+    });
+    const view = viewAt(0);
+
+    const contentDoc = makeFakeContentDoc({ left: 0, top: 0 });
+    let fakeSelection: { isCollapsed: boolean; rangeCount: number; toString: () => string } = {
+      isCollapsed: true,
+      rangeCount: 0,
+      toString: () => "",
+    };
+    contentDoc.getSelection = () => fakeSelection as unknown as Selection;
+    view.renderer = { getContents: () => [{ doc: contentDoc, index: 0 }] };
+
+    await act(async () => {
+      view.dispatchEvent(new CustomEvent("create-overlay"));
+    });
+    expect(handleRef.current?.hasLiveSelection()).toBe(false);
+
+    fakeSelection = { isCollapsed: false, rangeCount: 1, toString: () => "chosen text" };
+    act(() => {
+      contentDoc.dispatchEvent(new Event("selectionchange"));
+    });
+    // True immediately after the synchronous dispatch — this assertion runs
+    // before the listener's setTimeout(0) deferral could ever have fired, so
+    // it proves the ref updates synchronously rather than relying on that
+    // deferred emitSelectionChange callback.
+    expect(handleRef.current?.hasLiveSelection()).toBe(true);
+
+    fakeSelection = { isCollapsed: true, rangeCount: 0, toString: () => "" };
+    act(() => {
+      contentDoc.dispatchEvent(new Event("selectionchange"));
+    });
+    expect(handleRef.current?.hasLiveSelection()).toBe(false);
+  });
+
+  it("does not forward content pointer events when the callbacks are absent", async () => {
+    const book = makeBook("A");
+    mocks.loaderOpen.mockResolvedValue({ book });
+
+    await act(async () => {
+      root.render(ui(fileA));
+    });
+    const view = viewAt(0);
+
+    const contentDoc = makeFakeContentDoc({ left: 0, top: 0 });
+    view.renderer = { getContents: () => [{ doc: contentDoc, index: 0 }] };
+
+    await act(async () => {
+      view.dispatchEvent(new CustomEvent("create-overlay"));
+    });
+
+    // No onContentPointerUp/onContentPointerMove prop was supplied; dispatching
+    // must be a silent no-op rather than throwing.
+    expect(() => {
+      contentDoc.dispatchEvent(new MouseEvent("pointerup", { clientX: 10, clientY: 5 }));
+      contentDoc.dispatchEvent(new MouseEvent("mousemove", { clientY: 5 }));
+    }).not.toThrow();
   });
 });

@@ -10,22 +10,41 @@ import EbookReader from "./EbookReader";
 
 const mocks = vi.hoisted(() => ({
   useCatalogItemDetail: vi.fn(),
+  useBookReadingStats: vi.fn(),
   readerPrev: vi.fn(),
   readerNext: vi.fn(),
   readerGoTo: vi.fn(),
   readerGoToFraction: vi.fn(),
   readerSearch: vi.fn(),
+  hasLiveSelection: vi.fn(),
   captureReaderSettings: vi.fn(),
+  captureCustomFontUrl: vi.fn(),
   fetchEbookReaderConfig: vi.fn(),
   saveEbookReaderConfig: vi.fn(),
   saveEbookReaderConfigKeepalive: vi.fn(),
   fetchEbookReaderAnnotations: vi.fn(),
   createEbookReaderAnnotation: vi.fn(),
   deleteEbookReaderAnnotation: vi.fn(),
+  sendReadingHeartbeat: vi.fn(),
+  fetchReaderFonts: vi.fn(),
+  fetchReaderFontObjectUrl: vi.fn(),
+  uploadReaderFont: vi.fn(),
+  deleteReaderFont: vi.fn(),
+  lastOnLocationChange: undefined as
+    | ((info: { fraction: number; sectionIndex: number | null; tocLabel: string | null }) => void)
+    | undefined,
+  lastOnContentPointerUp: undefined as
+    | ((point: { clientX: number; clientY: number }) => void)
+    | undefined,
+  lastOnContentPointerMove: undefined as ((point: { clientY: number }) => void) | undefined,
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
   useCatalogItemDetail: mocks.useCatalogItemDetail,
+}));
+
+vi.mock("@/hooks/queries/readingStats", () => ({
+  useBookReadingStats: mocks.useBookReadingStats,
 }));
 
 vi.mock("@/components/PageBack", () => ({
@@ -39,6 +58,15 @@ vi.mock("@/reader/ebookReaderApi", () => ({
   fetchEbookReaderConfig: mocks.fetchEbookReaderConfig,
   saveEbookReaderConfig: mocks.saveEbookReaderConfig,
   saveEbookReaderConfigKeepalive: mocks.saveEbookReaderConfigKeepalive,
+  sendReadingHeartbeat: mocks.sendReadingHeartbeat,
+}));
+
+vi.mock("@/reader/readerFontsApi", () => ({
+  fetchReaderFonts: mocks.fetchReaderFonts,
+  fetchReaderFontObjectUrl: mocks.fetchReaderFontObjectUrl,
+  uploadReaderFont: mocks.uploadReaderFont,
+  deleteReaderFont: mocks.deleteReaderFont,
+  readerFontFileUrl: (id: number) => `/api/v1/ebooks/reader-fonts/${id}/file`,
 }));
 
 vi.mock("@/reader/FoliateBookReader", async () => {
@@ -61,14 +89,24 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         clearSelection: () => void;
         createSelectionAnnotation: () => { cfi: string; selectedText: string } | null;
         getReadableText: () => string;
+        getSectionFractions: () => number[];
+        hasLiveSelection: () => boolean;
       },
       {
         file: FileVersion;
         settings?: unknown;
+        customFontUrl?: string | null;
         annotations?: unknown[];
         onProgressChange?: (progress: number | null) => void;
         onFileLoaded?: (state: { objectUrl: string; filename: string } | null) => void;
         onSelectionChange?: (selection: { cfi: string; selectedText: string } | null) => void;
+        onLocationChange?: (info: {
+          fraction: number;
+          sectionIndex: number | null;
+          tocLabel: string | null;
+        }) => void;
+        onContentPointerUp?: (point: { clientX: number; clientY: number }) => void;
+        onContentPointerMove?: (point: { clientY: number }) => void;
         onReady?: (state: {
           toc: Array<{
             id: number;
@@ -80,10 +118,31 @@ vi.mock("@/reader/FoliateBookReader", async () => {
         }) => void;
       }
     >(function MockFoliateBookReader(
-      { file, settings, onProgressChange, onFileLoaded, onSelectionChange, onReady },
+      {
+        file,
+        settings,
+        customFontUrl,
+        onProgressChange,
+        onFileLoaded,
+        onSelectionChange,
+        onLocationChange,
+        onContentPointerUp,
+        onContentPointerMove,
+        onReady,
+      },
       ref,
     ) {
       mocks.captureReaderSettings(settings);
+      mocks.captureCustomFontUrl(customFontUrl);
+      useEffect(() => {
+        mocks.lastOnLocationChange = onLocationChange;
+      }, [onLocationChange]);
+      useEffect(() => {
+        mocks.lastOnContentPointerUp = onContentPointerUp;
+      }, [onContentPointerUp]);
+      useEffect(() => {
+        mocks.lastOnContentPointerMove = onContentPointerMove;
+      }, [onContentPointerMove]);
       useImperativeHandle(ref, () => ({
         prev: mocks.readerPrev,
         next: mocks.readerNext,
@@ -97,6 +156,8 @@ vi.mock("@/reader/FoliateBookReader", async () => {
           selectedText: "sample text",
         }),
         getReadableText: () => "Readable text for speech",
+        getSectionFractions: () => [0, 0.25, 0.6, 1],
+        hasLiveSelection: mocks.hasLiveSelection,
       }));
       useEffect(() => {
         onFileLoaded?.({ objectUrl: "blob:ebook", filename: "Reader.epub" });
@@ -218,6 +279,14 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function clickThemeSwatch(container: HTMLDivElement, name: string) {
+  container.querySelector<HTMLButtonElement>(`[data-theme-choice="${name}"]`)?.click();
+}
+
+function clickDarkModeToggle(container: HTMLDivElement) {
+  container.querySelector<HTMLButtonElement>('[aria-label="Reader dark mode"]')?.click();
+}
+
 describe("EbookReader", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -232,18 +301,30 @@ describe("EbookReader", () => {
     root = createRoot(container);
     installStorage();
     mocks.useCatalogItemDetail.mockReset();
+    mocks.useBookReadingStats.mockReset();
     mocks.readerPrev.mockReset();
     mocks.readerNext.mockReset();
     mocks.readerGoTo.mockReset();
     mocks.readerGoToFraction.mockReset();
     mocks.readerSearch.mockReset();
+    mocks.hasLiveSelection.mockReset();
+    mocks.hasLiveSelection.mockReturnValue(false);
     mocks.captureReaderSettings.mockReset();
+    mocks.captureCustomFontUrl.mockReset();
     mocks.fetchEbookReaderConfig.mockReset();
     mocks.saveEbookReaderConfig.mockReset();
     mocks.saveEbookReaderConfigKeepalive.mockReset();
     mocks.fetchEbookReaderAnnotations.mockReset();
     mocks.createEbookReaderAnnotation.mockReset();
     mocks.deleteEbookReaderAnnotation.mockReset();
+    mocks.sendReadingHeartbeat.mockReset();
+    mocks.fetchReaderFonts.mockReset();
+    mocks.fetchReaderFontObjectUrl.mockReset();
+    mocks.uploadReaderFont.mockReset();
+    mocks.deleteReaderFont.mockReset();
+    mocks.fetchReaderFonts.mockResolvedValue([]);
+    mocks.fetchReaderFontObjectUrl.mockImplementation(async (id: number) => `blob:mock-font-${id}`);
+    URL.revokeObjectURL = vi.fn();
     mocks.readerSearch.mockResolvedValue([
       { cfi: "epubcfi(/6/8)", label: "Chapter 2", excerpt: "Shanghai harbor" },
     ]);
@@ -261,12 +342,14 @@ describe("EbookReader", () => {
       color: "#facc15",
     });
     mocks.deleteEbookReaderAnnotation.mockResolvedValue(undefined);
+    mocks.sendReadingHeartbeat.mockResolvedValue(undefined);
     localStorage.clear();
     mocks.useCatalogItemDetail.mockReturnValue({
       data: makeEbookItem(),
       isLoading: false,
       error: null,
     });
+    mocks.useBookReadingStats.mockReturnValue({ data: undefined });
   });
 
   afterEach(async () => {
@@ -304,6 +387,39 @@ describe("EbookReader", () => {
 
     expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the time remaining in the footer once reading stats resolve", async () => {
+    mocks.useBookReadingStats.mockReturnValue({
+      data: { pace_fraction_per_hour: 0.1, time_left_seconds: 7800, book_seconds: 36000 },
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).toContain("2h 10m left");
+    expect(mocks.useBookReadingStats).toHaveBeenCalledWith("ebook-1");
+  });
+
+  it("omits the time remaining when reading stats haven't resolved", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).not.toContain("left");
   });
 
   it("preserves library context on the back-to-ebook link", async () => {
@@ -540,11 +656,9 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "dark";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "default");
+      clickDarkModeToggle(container);
     });
 
     await act(async () => {
@@ -585,11 +699,9 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "dark";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "default");
+      clickDarkModeToggle(container);
     });
     expect(mocks.saveEbookReaderConfig).not.toHaveBeenCalled();
 
@@ -628,11 +740,8 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "sepia";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "sepia");
     });
 
     await act(async () => {
@@ -753,6 +862,398 @@ describe("EbookReader", () => {
     expect(comfortable?.getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("renders the theme grid and switches palette pairs", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    const ocean = container.querySelector<HTMLButtonElement>('[data-theme-choice="ocean"]');
+    expect(ocean).not.toBeNull();
+    await act(async () => {
+      ocean?.click();
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ themeName: "ocean", theme: "light" }),
+    );
+
+    await act(async () => {
+      clickDarkModeToggle(container);
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ themeName: "ocean", themeVariant: "dark", theme: "dark" }),
+    );
+  });
+
+  it("disables the variant toggle for AMOLED", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    await act(async () => {
+      clickThemeSwatch(container, "amoled");
+    });
+
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Reader dark mode"]');
+    expect(toggle?.disabled).toBe(true);
+  });
+
+  it("offers uploaded fonts in the font picker and falls back on delete", async () => {
+    mocks.fetchReaderFonts.mockResolvedValue([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+    mocks.deleteReaderFont.mockResolvedValue(undefined);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    const uploadedGroup = font?.querySelector('optgroup[label="Uploaded"]');
+    expect(uploadedGroup).not.toBeNull();
+    const option = uploadedGroup?.querySelector<HTMLOptionElement>('option[value="custom:3"]');
+    expect(option?.textContent).toBe("Literata");
+
+    await act(async () => {
+      if (!font) return;
+      font.value = "custom:3";
+      font.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fontFamily: "custom", customFontID: 3 }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // The reader must receive an authenticated blob: URL for the font, never
+    // the raw API path (a browser-native @font-face fetch can't carry auth).
+    expect(mocks.fetchReaderFontObjectUrl).toHaveBeenCalledWith(3);
+    expect(mocks.captureCustomFontUrl).toHaveBeenLastCalledWith("blob:mock-font-3");
+
+    const deleteButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Delete font Literata"]',
+    );
+    await act(async () => {
+      deleteButton?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mocks.deleteReaderFont).toHaveBeenCalledWith(3);
+    expect(mocks.captureReaderSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fontFamily: "inherit", customFontID: null }),
+    );
+    // Falling back off the deleted font must revoke the blob: URL it created.
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock-font-3");
+    expect(mocks.captureCustomFontUrl).toHaveBeenLastCalledWith(null);
+  });
+
+  it("falls back to the book's own typeface when the font blob fetch fails", async () => {
+    mocks.fetchReaderFonts.mockResolvedValue([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+    mocks.fetchReaderFontObjectUrl.mockRejectedValue(new Error("network error"));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    await act(async () => {
+      if (!font) return;
+      font.value = "custom:3";
+      font.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFontObjectUrl).toHaveBeenCalledWith(3);
+    // A rejected fetch must leave the font url null rather than passing a
+    // stale/undefined value through to the reader's CSS.
+    expect(mocks.captureCustomFontUrl).toHaveBeenLastCalledWith(null);
+  });
+
+  it("shows a loading placeholder instead of a blank select while a saved custom font hasn't loaded yet", async () => {
+    mocks.fetchEbookReaderConfig.mockResolvedValue({
+      settings: { customFontID: 3, fontFamily: "custom" },
+    });
+    // Never resolves within this test, simulating the fonts list still loading.
+    mocks.fetchReaderFonts.mockReturnValue(new Promise(() => {}));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    expect(font?.value).toBe("custom:3");
+    const placeholder = font?.querySelector<HTMLOptionElement>('option[value="custom:3"]');
+    expect(placeholder).not.toBeNull();
+    expect(placeholder?.disabled).toBe(true);
+    expect(placeholder?.textContent).toBe("Loading uploaded font…");
+  });
+
+  it("keeps a saved custom font selection through a transient fonts-list fetch failure", async () => {
+    mocks.fetchReaderFonts.mockReset();
+    mocks.fetchReaderFonts.mockRejectedValue(new Error("network error"));
+    mocks.fetchEbookReaderConfig.mockResolvedValue({
+      settings: { customFontID: 3, fontFamily: "custom" },
+    });
+    vi.useFakeTimers();
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+
+    // Let the rejected fetchReaderFonts() promise settle.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+
+    expect(mocks.saveEbookReaderConfig).not.toHaveBeenCalledWith(
+      "ebook-1",
+      expect.objectContaining({
+        settings: expect.objectContaining({ customFontID: null }),
+      }),
+    );
+
+    vi.useRealTimers();
+  });
+
+  it("retries the fonts fetch after a failure the next time the panel opens", async () => {
+    mocks.fetchReaderFonts.mockReset();
+    mocks.fetchReaderFonts.mockRejectedValueOnce(new Error("network error"));
+    mocks.fetchReaderFonts.mockResolvedValueOnce([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    const tocTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Table of contents"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFonts).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      tocTab?.click();
+    });
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFonts).toHaveBeenCalledTimes(2);
+
+    const font = container.querySelector<HTMLSelectElement>('select[aria-label="Font family"]');
+    const uploadedGroup = font?.querySelector('optgroup[label="Uploaded"]');
+    expect(uploadedGroup).not.toBeNull();
+  });
+
+  it("skips the fonts fetch entirely for comic formats", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [makeVersion({ file_id: 8, file_name: "Comic.cbz", container: "cbz" })],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mocks.fetchReaderFonts).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a delete-font failure as an inline error instead of an unhandled rejection", async () => {
+    mocks.fetchReaderFonts.mockResolvedValue([
+      { id: 3, name: "Literata", filename: "l.woff2", created_at: "" },
+    ]);
+    mocks.deleteReaderFont.mockRejectedValue(new Error("boom"));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const settingsTab = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Reader settings"]',
+    );
+    await act(async () => {
+      settingsTab?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const deleteButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Delete font Literata"]',
+    );
+    await act(async () => {
+      deleteButton?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mocks.deleteReaderFont).toHaveBeenCalledWith(3);
+    // The font must still be listed — the optimistic removal never happened.
+    const uploadedGroup = container
+      .querySelector<HTMLSelectElement>('select[aria-label="Font family"]')
+      ?.querySelector('optgroup[label="Uploaded"]');
+    expect(uploadedGroup?.querySelector('option[value="custom:3"]')).not.toBeNull();
+    expect(container.textContent).toContain("Font delete failed.");
+  });
+
   it("toggles the persisted reading ruler overlay", async () => {
     await act(async () => {
       root.render(
@@ -779,6 +1280,64 @@ describe("EbookReader", () => {
     expect(handle?.getAttribute("aria-valuenow")).toBe("50");
   });
 
+  it("does not turn the page when releasing the reading-ruler drag", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const ruler = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Toggle reading ruler"]',
+    );
+    await act(async () => {
+      ruler?.click();
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    const grip = container.querySelector<HTMLButtonElement>(
+      '[role="slider"][aria-label="Reading ruler position"]',
+    )!;
+    // jsdom has no pointer-capture implementation; the grip's handlers call
+    // these unconditionally, so stub them the way a real button would provide.
+    grip.setPointerCapture = vi.fn();
+    grip.releasePointerCapture = vi.fn();
+
+    act(() => {
+      grip.dispatchEvent(
+        new PointerEvent("pointerdown", { clientY: 250, pointerId: 1, bubbles: true }),
+      );
+    });
+    act(() => {
+      // The grip sits near the reading surface's right edge; if this pointerup
+      // bubbles up to the surface's tap handler it reads as a next-page tap.
+      grip.dispatchEvent(
+        new PointerEvent("pointerup", { clientY: 250, pointerId: 1, bubbles: true }),
+      );
+    });
+
+    expect(mocks.readerNext).not.toHaveBeenCalled();
+  });
+
   it("constrains the reader grid so the side panel stays inside the viewport", async () => {
     await act(async () => {
       root.render(
@@ -797,6 +1356,95 @@ describe("EbookReader", () => {
     expect(main?.className).toContain("overflow-hidden");
     expect(readerPane?.className).toContain("min-w-0");
     expect(sidePanel?.className).toContain("min-w-0");
+  });
+
+  it("renders the chapter-aware footer instead of a header slider", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Chapter 2" });
+    });
+
+    const header = container.querySelector("header")!;
+    expect(header.querySelector('input[type="range"]')).toBeNull();
+    const footer = container.querySelector("footer")!;
+    expect(footer.textContent).toContain("Chapter 2");
+    expect(footer.textContent).toContain("30%");
+    expect(footer.querySelector("[data-chapter-band]")).not.toBeNull();
+  });
+
+  it("sends a reading heartbeat on relocate, then again every 30s", async () => {
+    vi.useFakeTimers();
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // Relocate is one of the activity signals: it should beat immediately
+    // rather than waiting up to 30s for the first tick.
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Chapter 2" });
+    });
+    expect(mocks.sendReadingHeartbeat).toHaveBeenCalledWith("ebook-1", 0.3);
+
+    mocks.sendReadingHeartbeat.mockClear();
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(mocks.sendReadingHeartbeat).toHaveBeenCalledWith("ebook-1", 0.3);
+
+    vi.useRealTimers();
+  });
+
+  it("does not send a heartbeat or enable the reading-stats query while the item detail is still loading", async () => {
+    // isComicFormat is derived from the loaded item's file versions, so
+    // while useCatalogItemDetail is still pending it's false — the same as
+    // a prose book. Without gating on the item being loaded, a keypress
+    // during this window would fire a stats GET and a spurious heartbeat
+    // for a book that might turn out to be a comic (which the reader must
+    // never track).
+    vi.useFakeTimers();
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight" }));
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(mocks.sendReadingHeartbeat).not.toHaveBeenCalled();
+    const lastReadingStatsCall =
+      mocks.useBookReadingStats.mock.calls[mocks.useBookReadingStats.mock.calls.length - 1];
+    expect(lastReadingStatsCall?.[0]).toBeUndefined();
+
+    vi.useRealTimers();
   });
 
   it("scrubs reader progress and supports keyboard page navigation", async () => {
@@ -827,6 +1475,272 @@ describe("EbookReader", () => {
 
     expect(mocks.readerPrev).toHaveBeenCalledTimes(1);
     expect(mocks.readerNext).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not snap the progress bar back after scrubbing", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // A prior relocate reported a stale fraction (30%); the footer prefers
+    // locationInfo.fraction over readerProgress, so scrubbing must update it
+    // too or the bar snaps back to 30% on the next render.
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Chapter 2" });
+    });
+
+    const scrubber = container.querySelector<HTMLInputElement>(
+      'input[aria-label="Reading progress"]',
+    );
+    await act(async () => {
+      if (!scrubber) return;
+      setInputValue(scrubber, "65");
+    });
+
+    expect(scrubber?.value).toBe("65");
+    expect(container.querySelector("footer")?.textContent).toContain("65%");
+  });
+
+  it("pages on edge taps and toggles chrome on middle tap", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // The mock reader reports an active selection on mount; clear it via the
+    // highlight action so tap zones are free to page/toggle chrome.
+    const highlight = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Highlight selection"]',
+    );
+    await act(async () => {
+      highlight?.click();
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 30, bubbles: true }));
+    });
+    expect(mocks.readerPrev).toHaveBeenCalled();
+
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 270, bubbles: true }));
+    });
+    expect(mocks.readerNext).toHaveBeenCalled();
+
+    expect(container.querySelector("header")).not.toBeNull();
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
+    });
+    expect(container.querySelector("header")).toBeNull();
+    expect(container.querySelector("footer")).toBeNull();
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
+    });
+    expect(container.querySelector("header")).not.toBeNull();
+  });
+
+  it("does not page-turn an edge tap that just finished a selection, even though React selection state already reads null", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // Clear the selection the mock reports on mount so React's `selection`
+    // state is null, mirroring the race: the pointerup ending a selection
+    // fires before FoliateBookReader's deferred onSelectionChange lands, so
+    // by the time dispatchSurfaceTap runs, `selection` is stale/null.
+    const highlight = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Highlight selection"]',
+    );
+    await act(async () => {
+      highlight?.click();
+    });
+
+    // The reader's synchronous live-selection signal still reports true —
+    // this is what dispatchSurfaceTap must also consult.
+    mocks.hasLiveSelection.mockReturnValue(true);
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    act(() => {
+      // An edge tap, which would otherwise page forward.
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 270, bubbles: true }));
+    });
+
+    expect(mocks.readerNext).not.toHaveBeenCalled();
+  });
+
+  // FoliateBookReader is mocked in this file, so these tests only exercise
+  // EbookReader's own dispatch logic once it receives already-converted
+  // viewport coordinates from onContentPointerUp/onContentPointerMove. The
+  // real bridging across the content iframe boundary — translating iframe
+  // pointer/mousemove events into those viewport coordinates via the frame
+  // element's getBoundingClientRect() — is covered by the component test in
+  // FoliateBookReader.component.test.tsx ("forwards pointerup and mousemove
+  // from content iframes with viewport-adjusted coordinates").
+  it("pages on edge taps and toggles chrome on middle tap reported through the content pointer bridge", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    // The mock reader reports an active selection on mount; clear it via the
+    // highlight action so tap zones are free to page/toggle chrome.
+    const highlight = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Highlight selection"]',
+    );
+    await act(async () => {
+      highlight?.click();
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    expect(mocks.lastOnContentPointerUp).toBeTypeOf("function");
+    expect(mocks.lastOnContentPointerMove).toBeTypeOf("function");
+
+    act(() => {
+      mocks.lastOnContentPointerUp?.({ clientX: 30, clientY: 10 });
+    });
+    expect(mocks.readerPrev).toHaveBeenCalled();
+
+    act(() => {
+      mocks.lastOnContentPointerUp?.({ clientX: 270, clientY: 10 });
+    });
+    expect(mocks.readerNext).toHaveBeenCalled();
+
+    expect(container.querySelector("header")).not.toBeNull();
+    act(() => {
+      mocks.lastOnContentPointerUp?.({ clientX: 150, clientY: 10 });
+    });
+    // Middle tap toggled chrome off.
+    expect(container.querySelector("header")).toBeNull();
+    expect(container.querySelector("footer")).toBeNull();
+
+    // With chrome hidden, a content mousemove near the top viewport edge
+    // (converted to outer coordinates by FoliateBookReader in real usage)
+    // must reveal chrome again, mirroring the window-level mousemove path.
+    act(() => {
+      mocks.lastOnContentPointerMove?.({ clientY: 500 });
+    });
+    expect(container.querySelector("header")).toBeNull();
+
+    act(() => {
+      mocks.lastOnContentPointerMove?.({ clientY: 5 });
+    });
+    expect(container.querySelector("header")).not.toBeNull();
+  });
+
+  it("always shows chrome and ignores tap zones for comic formats", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [makeVersion({ file_id: 8, file_name: "Comic.cbz", container: "cbz" })],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const surface = container.querySelector("[data-reader-surface]") as HTMLElement;
+    expect(surface).not.toBeNull();
+    surface.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        width: 300,
+        top: 0,
+        height: 500,
+        right: 300,
+        bottom: 500,
+        x: 0,
+        y: 0,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+
+    expect(container.querySelector("header")).not.toBeNull();
+    act(() => {
+      surface.dispatchEvent(new MouseEvent("pointerup", { clientX: 150, bubbles: true }));
+    });
+    // Comics never hide chrome, and the tap-zone handler is inert for them.
+    expect(container.querySelector("header")).not.toBeNull();
+    expect(mocks.readerPrev).not.toHaveBeenCalled();
+    expect(mocks.readerNext).not.toHaveBeenCalled();
   });
 
   it("loads annotations, creates highlights, and deletes annotations", async () => {
@@ -890,6 +1804,55 @@ describe("EbookReader", () => {
         selected_text: "sample text",
       }),
     );
+  });
+
+  it("toggles the bookmark at the current location on repeated `b` presses: creates, then deletes", async () => {
+    // The mock reader reports a live selection on mount (cfi
+    // "epubcfi(/6/4,/1:0,/1:12)"), so both presses resolve to the same
+    // location — handleToggleBookmark never clears it the way highlighting
+    // does.
+    mocks.createEbookReaderAnnotation.mockResolvedValueOnce({
+      id: "bm-1",
+      content_id: "ebook-1",
+      kind: "bookmark",
+      location: "epubcfi(/6/4,/1:0,/1:12)",
+      selected_text: "",
+      note: "Reader Book",
+      style: "",
+      color: "",
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b" }));
+    });
+
+    expect(mocks.createEbookReaderAnnotation).toHaveBeenCalledTimes(1);
+    expect(mocks.createEbookReaderAnnotation).toHaveBeenCalledWith("ebook-1", {
+      kind: "bookmark",
+      location: "epubcfi(/6/4,/1:0,/1:12)",
+      note: "Reader Book",
+    });
+    expect(mocks.deleteEbookReaderAnnotation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "b" }));
+    });
+
+    // Second press at the same location deletes the bookmark just created,
+    // and must not create a second one.
+    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteEbookReaderAnnotation).toHaveBeenCalledWith("ebook-1", "bm-1");
+    expect(mocks.createEbookReaderAnnotation).toHaveBeenCalledTimes(1);
   });
 
   it("navigates fraction bookmarks through goToFraction and CFI annotations through goTo", async () => {
@@ -977,11 +1940,9 @@ describe("EbookReader", () => {
       settingsTab?.click();
     });
 
-    const theme = container.querySelector<HTMLSelectElement>('select[aria-label="Theme"]');
     await act(async () => {
-      if (!theme) return;
-      theme.value = "dark";
-      theme.dispatchEvent(new Event("change", { bubbles: true }));
+      clickThemeSwatch(container, "default");
+      clickDarkModeToggle(container);
     });
 
     await act(async () => {
@@ -1181,6 +2142,129 @@ describe("EbookReader", () => {
     expect(value?.className).toContain("justify-self-end");
   });
 
+  it("binds the reader keyboard map with an input guard", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    const press = (key: string) => {
+      act(() => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      });
+    };
+
+    // Escape precedence: shortcuts overlay, then the side panel, then chrome.
+    press("?");
+    expect(container.textContent).toContain("Keyboard shortcuts");
+    expect(container.textContent).toContain("Previous / next page");
+    expect(container.querySelector("aside")).not.toBeNull(); // panel open by default
+
+    press("Escape"); // overlay open — Escape closes it first
+    expect(container.textContent).not.toContain("Previous / next page");
+    expect(container.querySelector("header")).not.toBeNull();
+    expect(container.querySelector("aside")).not.toBeNull(); // panel untouched
+
+    press("Escape"); // overlay closed, panel open — Escape closes the panel next
+    expect(container.querySelector("aside")).toBeNull();
+    expect(container.querySelector("header")).not.toBeNull(); // chrome untouched
+
+    press("Escape"); // overlay closed, panel closed — Escape now toggles chrome
+    expect(container.querySelector("header")).toBeNull();
+
+    press("Escape"); // bring chrome back so the panel toggle button is reachable
+    expect(container.querySelector("header")).not.toBeNull();
+
+    const openPanel = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open reader panel"]',
+    );
+    await act(async () => {
+      openPanel?.click();
+    });
+    expect(container.querySelector("aside")).not.toBeNull();
+
+    const closePanel = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close reader panel"]',
+    );
+    await act(async () => {
+      closePanel?.click();
+    });
+    expect(container.querySelector("aside")).toBeNull();
+
+    // A keydown originating from an editable target (event.target is the
+    // input, not window) must be ignored by the reader shortcut map.
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "t", bubbles: true }));
+    });
+    expect(container.querySelector("aside")).toBeNull();
+    document.body.removeChild(input);
+
+    // Outside of an editable target, "t" reopens the contents panel.
+    press("t");
+    expect(container.querySelector("aside")).not.toBeNull();
+  });
+
+  it("jumps to chapter bounds on Home and End using section fractions", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    act(() => {
+      mocks.lastOnLocationChange?.({ fraction: 0.3, sectionIndex: 1, tocLabel: "Ch 2" });
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Home" }));
+    });
+    expect(mocks.readerGoToFraction).toHaveBeenCalledWith(0.25);
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    });
+    expect(mocks.readerGoToFraction).toHaveBeenCalledWith(0.6);
+  });
+
+  it("keeps Home and End inert for comic formats", async () => {
+    mocks.useCatalogItemDetail.mockReturnValue({
+      data: makeEbookItem({
+        versions: [makeVersion({ file_id: 8, file_name: "Comic.cbz", container: "cbz" })],
+      }),
+      isLoading: false,
+      error: null,
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/reader/ebook/ebook-1"]}>
+          <Routes>
+            <Route path="/reader/ebook/:contentId" element={<EbookReader />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Home" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    });
+
+    expect(mocks.readerGoToFraction).not.toHaveBeenCalled();
+  });
+
   it("hides paginated-only controls in scrolled flow", async () => {
     await act(async () => {
       root.render(
@@ -1200,7 +2284,6 @@ describe("EbookReader", () => {
     });
 
     expect(container.querySelector('input[aria-label="Width"]')).not.toBeNull();
-    expect(container.querySelector('select[aria-label="Spread"]')).not.toBeNull();
 
     const flow = container.querySelector<HTMLSelectElement>('select[aria-label="Flow"]');
     await act(async () => {
@@ -1210,6 +2293,5 @@ describe("EbookReader", () => {
     });
 
     expect(container.querySelector('input[aria-label="Width"]')).toBeNull();
-    expect(container.querySelector('select[aria-label="Spread"]')).toBeNull();
   });
 });

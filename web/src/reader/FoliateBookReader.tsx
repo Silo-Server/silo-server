@@ -6,6 +6,14 @@ import type { FileVersion } from "@/api/types";
 import { ebookKeys } from "@/hooks/queries/keys";
 import type { EbookReaderAnnotation } from "@/reader/ebookReaderApi";
 import { DocumentLoader, type BookDoc, type TOCItem } from "@/reader/readest/libs/document";
+import {
+  legacyThemeFor,
+  READER_THEMES,
+  readerPalette,
+  themeFromLegacy,
+  type ReaderThemeName,
+  type ReaderThemeVariant,
+} from "@/reader/readerThemes";
 
 type FoliateViewElement = HTMLElement & {
   open: (book: BookDoc) => Promise<void>;
@@ -25,6 +33,7 @@ type FoliateViewElement = HTMLElement & {
     options: ReaderSearchOptions & { query: string },
   ) => AsyncGenerator<FoliateSearchResult>;
   clearSearch?: () => void;
+  getSectionFractions?: () => number[];
   renderer?: HTMLElement & {
     primaryIndex?: number;
     getContents?: () => Array<{ doc: Document; index?: number }>;
@@ -63,15 +72,28 @@ export type FoliateBookReaderHandle = {
   clearSelection: () => void;
   createSelectionAnnotation: () => ReaderSelection | null;
   getReadableText: () => string;
+  getSectionFractions: () => number[];
+  // Synchronous read of whether any content doc currently holds a
+  // non-collapsed selection. Unlike onSelectionChange (which the caller
+  // learns about through a state update that FoliateBookReader itself
+  // defers with setTimeout(0) to let native selection settle), this reads
+  // the live DOM selection directly, so it is safe to consult from a
+  // pointerup handler that must decide same-tick whether a tap ending a
+  // selection should also page-turn.
+  hasLiveSelection: () => boolean;
 };
 
 export type ReaderTheme = "light" | "sepia" | "dark";
 export type ReaderFlow = "paginated" | "scrolled";
-export type ReaderSpread = "auto" | "none";
+export type ReaderColumns = "auto" | 1 | 2 | 3 | 4;
 export type ReaderWritingMode = "auto" | "horizontal-tb" | "vertical-rl";
 
 export type ReaderSettings = {
+  // Legacy tri-state theme, kept in sync with themeName/themeVariant on every
+  // normalize so settings persisted by older clients keep rendering correctly.
   theme: ReaderTheme;
+  themeName: ReaderThemeName;
+  themeVariant: ReaderThemeVariant;
   fontFamily: string;
   fontSize: number;
   fontWeight: number;
@@ -79,13 +101,24 @@ export type ReaderSettings = {
   lineHeight: number;
   margin: number;
   maxWidth: number;
-  spread: ReaderSpread;
+  columns: ReaderColumns;
+  columnGap: number;
+  justify: boolean;
+  customFontID: number | null;
   flow: ReaderFlow;
   fontBrightness: number;
   rtl: boolean;
   writingMode: ReaderWritingMode;
   readingRuler: boolean;
   readingRulerTop: number;
+};
+
+// normalizeReaderSettings sanitizes both freshly typed updates and untyped
+// input (parsed JSON from localStorage/server config, which may still carry
+// fields from older settings shapes, e.g. the removed `spread`). Every known
+// field is accepted as `unknown` so per-field guards below decide validity.
+type ReaderSettingsInput = Partial<Record<keyof ReaderSettings, unknown>> & {
+  spread?: unknown;
 };
 
 export type ReaderReadyState = {
@@ -130,10 +163,19 @@ type FoliateSearchResult = {
 
 type RelocateDetail = {
   cfi?: string;
+  fraction?: number;
+  index?: number;
+  tocItem?: { label?: string };
   location?: {
     current?: number;
     total?: number;
   };
+};
+
+export type ReaderLocationInfo = {
+  fraction: number;
+  sectionIndex: number | null;
+  tocLabel: string | null;
 };
 
 // foliate book documents expose destroy() to release cached resource blob URLs,
@@ -160,6 +202,8 @@ const LEGACY_READER_FONT_ALIASES: Record<string, string> = {
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   theme: "light",
+  themeName: "default",
+  themeVariant: "light",
   fontFamily: READER_FONT_STACKS.inherit,
   fontSize: 112,
   fontWeight: 400,
@@ -167,7 +211,10 @@ export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   lineHeight: 1.65,
   margin: 24,
   maxWidth: 74,
-  spread: "auto",
+  columns: "auto",
+  columnGap: 7,
+  justify: false,
+  customFontID: null,
   flow: "paginated",
   fontBrightness: 100,
   rtl: false,
@@ -311,12 +358,16 @@ function isReaderFlow(value: unknown): value is ReaderFlow {
   return value === "paginated" || value === "scrolled";
 }
 
-function isReaderSpread(value: unknown): value is ReaderSpread {
-  return value === "auto" || value === "none";
-}
-
 function isReaderWritingMode(value: unknown): value is ReaderWritingMode {
   return value === "auto" || value === "horizontal-tb" || value === "vertical-rl";
+}
+
+function isReaderThemeName(value: unknown): value is ReaderThemeName {
+  return typeof value === "string" && value in READER_THEMES;
+}
+
+function isReaderThemeVariant(value: unknown): value is ReaderThemeVariant {
+  return value === "light" || value === "dark";
 }
 
 function normalizeReaderFontFamily(value: unknown): string {
@@ -325,37 +376,74 @@ function normalizeReaderFontFamily(value: unknown): string {
   return LEGACY_READER_FONT_ALIASES[trimmed] ?? trimmed;
 }
 
-export function normalizeReaderSettings(settings?: Partial<ReaderSettings>): ReaderSettings {
+export function normalizeReaderSettings(settings?: ReaderSettingsInput): ReaderSettings {
+  const raw = settings ?? {};
+
+  // The theme-pair fields win when present; otherwise fall back to whatever
+  // the legacy tri-state `theme` value (or its own default) maps to, so
+  // settings saved before the palette-pair model existed still resolve.
+  const explicitName = isReaderThemeName(raw.themeName) ? raw.themeName : null;
+  const explicitVariant = isReaderThemeVariant(raw.themeVariant) ? raw.themeVariant : null;
+  const legacyTheme = isReaderTheme(raw.theme) ? raw.theme : DEFAULT_READER_SETTINGS.theme;
+  const fromLegacy = themeFromLegacy(legacyTheme);
+  const themeName = explicitName ?? fromLegacy.themeName;
+  const themeVariant = explicitVariant ?? fromLegacy.themeVariant;
+
+  // `spread: "none"` was the pre-columns way to request single-page mode;
+  // migrate it to columns only when the caller didn't already send columns.
+  const columns: ReaderColumns =
+    raw.columns === 1 || raw.columns === 2 || raw.columns === 3 || raw.columns === 4
+      ? raw.columns
+      : raw.spread === "none"
+        ? 1
+        : DEFAULT_READER_SETTINGS.columns;
+
+  const fontFamily = normalizeReaderFontFamily(raw.fontFamily);
+  const customFontID =
+    typeof raw.customFontID === "number" &&
+    Number.isInteger(raw.customFontID) &&
+    raw.customFontID > 0
+      ? raw.customFontID
+      : null;
+
   return {
-    theme: isReaderTheme(settings?.theme) ? settings.theme : DEFAULT_READER_SETTINGS.theme,
-    fontFamily: normalizeReaderFontFamily(settings?.fontFamily),
-    fontSize: clampNumber(settings?.fontSize, DEFAULT_READER_SETTINGS.fontSize, 80, 180),
-    fontWeight: clampNumber(settings?.fontWeight, DEFAULT_READER_SETTINGS.fontWeight, 300, 800),
+    theme: legacyThemeFor(themeName, themeVariant),
+    themeName,
+    themeVariant,
+    // "custom" only means anything paired with a customFontID; without one
+    // (e.g. hand-edited or partially-migrated persisted settings) there's no
+    // font to render, so fall back to the book's own typeface rather than
+    // rendering an unstyled "silo-custom-font" with no @font-face rule.
+    fontFamily:
+      fontFamily === "custom" && customFontID == null ? READER_FONT_STACKS.inherit : fontFamily,
+    fontSize: clampNumber(raw.fontSize, DEFAULT_READER_SETTINGS.fontSize, 80, 180),
+    fontWeight: clampNumber(raw.fontWeight, DEFAULT_READER_SETTINGS.fontWeight, 300, 800),
     hyphenation:
-      typeof settings?.hyphenation === "boolean"
-        ? settings.hyphenation
-        : DEFAULT_READER_SETTINGS.hyphenation,
-    lineHeight: clampNumber(settings?.lineHeight, DEFAULT_READER_SETTINGS.lineHeight, 1.1, 2.4),
-    margin: clampNumber(settings?.margin, DEFAULT_READER_SETTINGS.margin, 0, 64),
-    maxWidth: clampNumber(settings?.maxWidth, DEFAULT_READER_SETTINGS.maxWidth, 42, 96),
-    spread: isReaderSpread(settings?.spread) ? settings.spread : DEFAULT_READER_SETTINGS.spread,
-    flow: isReaderFlow(settings?.flow) ? settings.flow : DEFAULT_READER_SETTINGS.flow,
+      typeof raw.hyphenation === "boolean" ? raw.hyphenation : DEFAULT_READER_SETTINGS.hyphenation,
+    lineHeight: clampNumber(raw.lineHeight, DEFAULT_READER_SETTINGS.lineHeight, 1.1, 2.4),
+    margin: clampNumber(raw.margin, DEFAULT_READER_SETTINGS.margin, 0, 64),
+    maxWidth: clampNumber(raw.maxWidth, DEFAULT_READER_SETTINGS.maxWidth, 42, 96),
+    columns,
+    columnGap: clampNumber(raw.columnGap, DEFAULT_READER_SETTINGS.columnGap, 0, 50),
+    justify: raw.justify === true,
+    customFontID,
+    flow: isReaderFlow(raw.flow) ? raw.flow : DEFAULT_READER_SETTINGS.flow,
     fontBrightness: clampNumber(
-      settings?.fontBrightness,
+      raw.fontBrightness,
       DEFAULT_READER_SETTINGS.fontBrightness,
       70,
       125,
     ),
-    rtl: typeof settings?.rtl === "boolean" ? settings.rtl : DEFAULT_READER_SETTINGS.rtl,
-    writingMode: isReaderWritingMode(settings?.writingMode)
-      ? settings.writingMode
+    rtl: typeof raw.rtl === "boolean" ? raw.rtl : DEFAULT_READER_SETTINGS.rtl,
+    writingMode: isReaderWritingMode(raw.writingMode)
+      ? raw.writingMode
       : DEFAULT_READER_SETTINGS.writingMode,
     readingRuler:
-      typeof settings?.readingRuler === "boolean"
-        ? settings.readingRuler
+      typeof raw.readingRuler === "boolean"
+        ? raw.readingRuler
         : DEFAULT_READER_SETTINGS.readingRuler,
     readingRulerTop: clampNumber(
-      settings?.readingRulerTop,
+      raw.readingRulerTop,
       DEFAULT_READER_SETTINGS.readingRulerTop,
       0,
       100,
@@ -392,36 +480,34 @@ export async function saveEbookReaderProgress(
   });
 }
 
-function readerColors(theme: ReaderTheme) {
-  switch (theme) {
-    case "dark":
-      return {
-        background: "#111827",
-        foreground: "#f8fafc",
-        link: "#93c5fd",
-        scheme: "dark",
-      };
-    case "sepia":
-      return {
-        background: "#f4ecd8",
-        foreground: "#2f261b",
-        link: "#8b5a2b",
-        scheme: "light",
-      };
-    default:
-      return {
-        background: "#ffffff",
-        foreground: "#171717",
-        link: "#2563eb",
-        scheme: "light",
-      };
-  }
-}
+const CUSTOM_FONT_FAMILY = "silo-custom-font";
 
-export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS) {
-  const colors = readerColors(settings.theme);
+/**
+ * Builds the CSS injected into foliate's srcdoc iframes. `customFontUrl` must
+ * be an already-authenticated `blob:` URL (see `fetchReaderFontObjectUrl` in
+ * `readerFontsApi.ts`) rather than the raw `/api/v1/...` font file path: the
+ * iframe's CSS engine fetches `@font-face` src URLs itself and cannot attach
+ * the bearer token or X-Profile-Id header the reader-fonts endpoint requires,
+ * so an API path here would 401 silently and the font would never render.
+ * When the url hasn't loaded yet (or failed to), the @font-face rule and the
+ * "silo-custom-font" family are both omitted so the book falls back to its
+ * own typeface instead of an unstyled custom font.
+ */
+export function readerStyles(
+  settings: ReaderSettings = DEFAULT_READER_SETTINGS,
+  customFontUrl?: string | null,
+) {
+  const colors = readerPalette(settings.themeName, settings.themeVariant);
   const contentMaxWidth = settings.flow === "scrolled" ? "none" : `${settings.maxWidth}ch`;
+  const fontFamily =
+    settings.fontFamily === "custom" && customFontUrl
+      ? `"${CUSTOM_FONT_FAMILY}"`
+      : settings.fontFamily;
+  const fontFace = customFontUrl
+    ? `@font-face { font-family: "${CUSTOM_FONT_FAMILY}"; src: url("${customFontUrl}"); font-display: swap; }`
+    : "";
   return `
+    ${fontFace}
     :root {
       --theme-bg-color: ${colors.background};
       --theme-fg-color: ${colors.foreground};
@@ -431,12 +517,13 @@ export function readerStyles(settings: ReaderSettings = DEFAULT_READER_SETTINGS)
     html, body {
       background: ${colors.background} !important;
       color: ${colors.foreground} !important;
-      font-family: ${settings.fontFamily} !important;
+      font-family: ${fontFamily} !important;
       font-size: ${settings.fontSize}% !important;
       font-weight: ${settings.fontWeight} !important;
       hyphens: ${settings.hyphenation ? "auto" : "none"} !important;
       line-height: ${settings.lineHeight} !important;
       max-width: ${contentMaxWidth} !important;
+      text-align: ${settings.justify ? "justify" : "initial"} !important;
       direction: ${settings.rtl ? "rtl" : "inherit"} !important;
       writing-mode: ${settings.writingMode === "auto" ? "inherit" : settings.writingMode} !important;
       filter: brightness(${settings.fontBrightness}%) !important;
@@ -456,10 +543,10 @@ export function readerRendererAttributes(settings: ReaderSettings) {
   const maxInlinePx = Math.round(settings.maxWidth * 10);
   return {
     flow: scrolled ? "scrolled" : null,
-    gap: "7%",
+    gap: `${settings.columnGap}%`,
     margin: `${settings.margin}px`,
     maxInlineSize: scrolled ? "9999px" : `${maxInlinePx}px`,
-    maxColumnCount: scrolled ? "1" : settings.spread === "none" ? "1" : "2",
+    maxColumnCount: scrolled ? "1" : settings.columns === "auto" ? "2" : String(settings.columns),
   };
 }
 
@@ -489,16 +576,32 @@ function flattenSearchResult(result: FoliateSearchResult): ReaderSearchResult[] 
   );
 }
 
+export type ReaderContentPoint = { clientX: number; clientY: number };
+export type ReaderContentVerticalPoint = { clientY: number };
+
 type FoliateBookReaderProps = {
   contentID: string;
   file: FileVersion;
   title: string;
   annotations?: EbookReaderAnnotation[];
   settings?: Partial<ReaderSettings>;
+  // Authenticated blob: URL for settings.customFontID's file, or null while
+  // it's loading/failed to load. See readerStyles' doc comment for why this
+  // can't just be derived from customFontID inside this component.
+  customFontUrl?: string | null;
   onFileLoaded?: (state: ReaderLoadState | null) => void;
   onProgressChange?: (progress: number | null) => void;
+  onLocationChange?: (info: ReaderLocationInfo) => void;
   onReady?: (state: ReaderReadyState) => void;
   onSelectionChange?: (selection: ReaderSelection | null) => void;
+  // foliate renders prose content inside a same-origin iframe that fills the
+  // reading surface, so a page's own pointerup/mousemove listeners never see
+  // taps or hovers over the book text (iframe events do not bubble to the
+  // parent document). These callbacks bridge that boundary: they fire with
+  // coordinates already translated into the outer viewport's space so
+  // callers can treat them like any other page-level pointer event.
+  onContentPointerUp?: (point: ReaderContentPoint) => void;
+  onContentPointerMove?: (point: ReaderContentVerticalPoint) => void;
 };
 
 const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderProps>(
@@ -509,10 +612,14 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       title,
       annotations = [],
       settings,
+      customFontUrl,
       onFileLoaded,
       onProgressChange,
+      onLocationChange,
       onReady,
       onSelectionChange,
+      onContentPointerUp,
+      onContentPointerMove,
     },
     ref,
   ) {
@@ -528,6 +635,25 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
     const annotationsRef = useRef<EbookReaderAnnotation[]>(annotations);
     const drawnCfisRef = useRef<Set<string>>(new Set());
     const selectionCleanupRef = useRef<(() => void)[]>([]);
+    // Synchronous mirror of "is there a live, non-collapsed selection",
+    // updated directly inside the selection listeners below (before their
+    // setTimeout(0) deferral) so hasLiveSelection() never reports stale data
+    // to a same-tick caller. See the FoliateBookReaderHandle doc comment.
+    const hasLiveSelectionRef = useRef(false);
+    // Held in refs (updated every render, read from listeners) rather than
+    // effect dependencies so the content-doc listeners below never need to be
+    // torn down and re-attached just because a caller passed a new inline
+    // callback identity.
+    const onContentPointerUpRef = useRef(onContentPointerUp);
+    onContentPointerUpRef.current = onContentPointerUp;
+    const onContentPointerMoveRef = useRef(onContentPointerMove);
+    onContentPointerMoveRef.current = onContentPointerMove;
+    // Same ref-mirroring pattern: applyReaderSettings reads the latest font
+    // url without needing to be redeclared (and re-diffed against the
+    // renderer) on every render just because a caller passed a new prop
+    // identity.
+    const customFontUrlRef = useRef<string | null | undefined>(customFontUrl);
+    customFontUrlRef.current = customFontUrl;
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -536,7 +662,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       settingsRef.current = normalized;
       const renderer = viewRef.current?.renderer;
       if (!renderer) return;
-      const styles = readerStyles(normalized);
+      const styles = readerStyles(normalized, customFontUrlRef.current);
       const attributes = readerRendererAttributes(normalized);
       // Settings such as the reading ruler never reach the renderer; re-styling and
       // re-rendering the book for those (or for any no-op update) causes visible jank.
@@ -583,6 +709,19 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       }
     }, []);
 
+    // Mirrors the collapsed/empty-text checks createSelectionAnnotation uses
+    // below, but only answers "is there a live selection" — no CFI/rect work
+    // — so it's cheap enough to call from every selection-related listener.
+    const computeHasLiveSelection = useCallback((): boolean => {
+      const contents = viewRef.current?.renderer?.getContents?.() ?? [];
+      for (const content of contents) {
+        const selection = content.doc.getSelection();
+        if (!selection || selection.isCollapsed || selection.rangeCount === 0) continue;
+        if (selection.toString().trim()) return true;
+      }
+      return false;
+    }, []);
+
     const createSelectionAnnotation = useCallback((): ReaderSelection | null => {
       const view = viewRef.current;
       const contents = view?.renderer?.getContents?.() ?? [];
@@ -614,23 +753,58 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       onSelectionChange?.(createSelectionAnnotation());
     }, [createSelectionAnnotation, onSelectionChange]);
 
+    // Wires listeners directly onto each content doc (one per rendered
+    // section/page, foliate re-creates them on "create-overlay"). This is the
+    // only reliable way to observe interaction with the book text: foliate
+    // renders it inside a same-origin iframe that fills the reading surface,
+    // and iframe-internal events never bubble out to the host page.
     const attachSelectionListeners = useCallback(() => {
       for (const cleanup of selectionCleanupRef.current) cleanup();
       selectionCleanupRef.current = [];
+      // Content docs are being (re)attached, so any previously live selection
+      // no longer applies.
+      hasLiveSelectionRef.current = false;
       const contents = viewRef.current?.renderer?.getContents?.() ?? [];
       for (const content of contents) {
         const doc = content.doc;
-        const handler = () => window.setTimeout(emitSelectionChange, 0);
+        const handler = () => {
+          // Synchronous, ahead of the deferred emitSelectionChange below, so
+          // a same-tick pointerup handler (e.g. EbookReader's tap dispatch)
+          // reading hasLiveSelection() never sees a stale value.
+          hasLiveSelectionRef.current = computeHasLiveSelection();
+          window.setTimeout(emitSelectionChange, 0);
+        };
         doc.addEventListener("selectionchange", handler);
         doc.addEventListener("pointerup", handler);
         doc.addEventListener("keyup", handler);
+        // Translate the iframe-local coordinates into outer viewport
+        // coordinates by adding the content iframe's own frame offset, the
+        // same technique createSelectionAnnotation uses above for selection
+        // rects.
+        const contentPointerUp = (event: PointerEvent) => {
+          const frameRect = doc.defaultView?.frameElement?.getBoundingClientRect();
+          onContentPointerUpRef.current?.({
+            clientX: event.clientX + (frameRect?.left ?? 0),
+            clientY: event.clientY + (frameRect?.top ?? 0),
+          });
+        };
+        const contentPointerMove = (event: MouseEvent) => {
+          const frameRect = doc.defaultView?.frameElement?.getBoundingClientRect();
+          onContentPointerMoveRef.current?.({
+            clientY: event.clientY + (frameRect?.top ?? 0),
+          });
+        };
+        doc.addEventListener("pointerup", contentPointerUp);
+        doc.addEventListener("mousemove", contentPointerMove);
         selectionCleanupRef.current.push(() => {
           doc.removeEventListener("selectionchange", handler);
           doc.removeEventListener("pointerup", handler);
           doc.removeEventListener("keyup", handler);
+          doc.removeEventListener("pointerup", contentPointerUp);
+          doc.removeEventListener("mousemove", contentPointerMove);
         });
       }
-    }, [emitSelectionChange]);
+    }, [computeHasLiveSelection, emitSelectionChange]);
 
     const getReadableText = useCallback(() => {
       const contents = viewRef.current?.renderer?.getContents?.() ?? [];
@@ -665,17 +839,22 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
         clearSearch: () => viewRef.current?.clearSearch?.(),
         clearSelection: () => {
           viewRef.current?.deselect?.();
+          hasLiveSelectionRef.current = false;
           onSelectionChange?.(null);
         },
         createSelectionAnnotation,
         getReadableText,
+        getSectionFractions: () => viewRef.current?.getSectionFractions?.() ?? [],
+        hasLiveSelection: () => hasLiveSelectionRef.current,
       }),
       [createSelectionAnnotation, getReadableText, onSelectionChange],
     );
 
     useEffect(() => {
       applyReaderSettings(settings);
-    }, [applyReaderSettings, settings]);
+      // customFontUrl is not part of `settings`, but changing it (font
+      // finishes loading, is replaced, or fails) still needs a re-style.
+    }, [applyReaderSettings, settings, customFontUrl]);
 
     useEffect(() => {
       annotationsRef.current = annotations;
@@ -840,13 +1019,22 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
             // Only the run that owns the live view may save progress for its file;
             // a superseded view firing late relocates must not overwrite it.
             if (!initializedRef.current || viewRef.current !== view) return;
-            const progress = progressFromRelocate(
-              (event as CustomEvent<RelocateDetail>).detail,
-              file.file_id,
-            );
+            const detail = (event as CustomEvent<RelocateDetail>).detail;
+            const progress = progressFromRelocate(detail, file.file_id);
             if (progress) {
               onProgressChange?.(progress.progress);
               scheduleProgressSave(progress);
+            }
+            const fraction = detail.fraction;
+            // typeof narrows fraction to number for the Math calls below;
+            // Number.isFinite on top of that rejects NaN/Infinity, which
+            // `typeof` alone would let through as a "number".
+            if (typeof fraction === "number" && Number.isFinite(fraction)) {
+              onLocationChange?.({
+                fraction: Math.min(1, Math.max(0, fraction)),
+                sectionIndex: typeof detail.index === "number" ? detail.index : null,
+                tocLabel: detail.tocItem?.label?.trim() || null,
+              });
             }
           });
           await view.open(book);
@@ -914,6 +1102,7 @@ const FoliateBookReader = forwardRef<FoliateBookReaderHandle, FoliateBookReaderP
       drawAnnotations,
       file,
       onFileLoaded,
+      onLocationChange,
       onProgressChange,
       onReady,
       queryClient,
