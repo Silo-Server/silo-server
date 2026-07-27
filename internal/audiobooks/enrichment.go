@@ -414,6 +414,10 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 	// rather than burning it terminally on a transient provider failure.
 	var providerErrs []error
 
+	// The title the first accepting provider settled on; later providers must
+	// agree with it before their IDs are merged in.
+	var agreedTitle string
+
 	for _, p := range providers {
 		sp, ok := p.(metadata.SearchProvider)
 		if !ok {
@@ -437,9 +441,12 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		// with something, and accepting the top row unconditionally is how an
 		// unrelated book -- or the wrong volume of the right series -- became
 		// an item's permanent identity.
-		match, ok := metadata.BestMatch(item.Title, results)
+		match, ok := metadata.BestMatchYear(item.Title, item.Year, results)
 		if !ok {
-			slog.DebugContext(ctx, "audiobook enrichment: no credible match", "component", "audiobooks",
+			// Info, not Debug: during a backlog drain the rejection rate is
+			// what separates "threshold too strict" from "providers answering
+			// badly", and it cannot be read from a log level nobody enables.
+			slog.InfoContext(ctx, "audiobook enrichment: no credible match", "component", "audiobooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"title", item.Title,
@@ -447,13 +454,48 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			)
 			continue
 		}
+
+		// Providers are scored independently, so two can each clear the bar
+		// while naming different books. Keep the first accepted title as the
+		// reference and admit later providers only when they agree, otherwise
+		// the item ends up holding IDs for two different works and the wrong
+		// one is indistinguishable afterwards.
+		matchedTitle := metadata.ResultTitle(match)
+		if agreedTitle == "" {
+			agreedTitle = matchedTitle
+		} else if !metadata.AgreesWith(agreedTitle, matchedTitle) {
+			slog.WarnContext(ctx, "audiobook enrichment: provider disagreement; skipping", "component", "audiobooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"accepted_title", agreedTitle,
+				"rejected_title", matchedTitle,
+			)
+			continue
+		}
+
 		// Take the accepted match's IDs as a candidate; later providers may fill gaps.
 		for k, v := range match.ProviderIDs {
-			if v != "" {
-				if _, exists := accumulatedIDs[k]; !exists {
-					accumulatedIDs[k] = v
-				}
+			if v == "" {
+				continue
 			}
+			if _, exists := accumulatedIDs[k]; exists {
+				continue
+			}
+			if owned, ownErr := e.providerIDTaken(ctx, k, v, item.ContentID); ownErr != nil {
+				// Don't claim an ID we couldn't verify is free; surface the
+				// error so the item retries rather than stamping terminally.
+				providerErrs = append(providerErrs, fmt.Errorf("%s ownership check %s=%s: %w", p.Slug(), k, v, ownErr))
+				continue
+			} else if owned != "" {
+				slog.InfoContext(ctx, "audiobook enrichment: provider id already owned by another item; skipping", "component", "audiobooks",
+					"provider", k,
+					"provider_id", v,
+					"content_id", item.ContentID,
+					"owned_by", owned,
+				)
+				continue
+			}
+			accumulatedIDs[k] = v
 		}
 		slog.DebugContext(ctx, "audiobook enrichment: search result", "component", "audiobooks",
 			"provider", p.Slug(),
@@ -865,4 +907,18 @@ func providerIDMapFromRows(rows []*models.MediaItemProviderID) map[string]string
 		}
 	}
 	return m
+}
+
+// providerIDTaken reports which other item already owns a provider ID, or ""
+// when it is free. Mirrors the guard the ebook enricher has always had: without
+// it, sibling volumes that resolve to the same provider work all claim the same
+// ID and the collision is invisible afterwards.
+//
+// A nil repository disables the check rather than failing closed, so tests and
+// partially wired constructions behave as before.
+func (e *Enricher) providerIDTaken(ctx context.Context, provider, id, selfContentID string) (string, error) {
+	if e == nil || e.providerIDs == nil {
+		return "", nil
+	}
+	return e.providerIDs.FindContentIDByProviderIDs(ctx, map[string]string{provider: id}, "audiobook", selfContentID)
 }

@@ -943,6 +943,10 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 	searchQuery, accumulatedIDs := buildEbookSearchQuery(item)
 	var providerErrs []error
 
+	// The title the first accepting provider settled on; later providers must
+	// agree with it before their IDs are merged in.
+	var agreedTitle string
+
 	for _, p := range providers {
 		sp, ok := p.(metadata.SearchProvider)
 		if !ok {
@@ -964,13 +968,32 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		// Score against item.Title, not searchQuery.Title: the query is
 		// deliberately cleaned before it goes out, but the check has to be
 		// against what we actually hold on disk.
-		match, matched := metadata.BestMatch(item.Title, results)
+		match, matched := metadata.BestMatchYear(item.Title, item.Year, results)
 		if !matched {
-			slog.DebugContext(ctx, "ebook enrichment: no credible match", "component", "ebooks",
+			// Info, not Debug: during a backlog drain the rejection rate is
+			// what separates "threshold too strict" from "providers answering
+			// badly", and it cannot be read from a log level nobody enables.
+			slog.InfoContext(ctx, "ebook enrichment: no credible match", "component", "ebooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"title", item.Title,
 				"candidates", len(results),
+			)
+			continue
+		}
+
+		// Providers are scored independently, so two can each clear the bar
+		// while naming different books. Keep the first accepted title as the
+		// reference and admit later providers only when they agree.
+		matchedTitle := metadata.ResultTitle(match)
+		if agreedTitle == "" {
+			agreedTitle = matchedTitle
+		} else if !metadata.AgreesWith(agreedTitle, matchedTitle) {
+			slog.WarnContext(ctx, "ebook enrichment: provider disagreement; skipping", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"accepted_title", agreedTitle,
+				"rejected_title", matchedTitle,
 			)
 			continue
 		}

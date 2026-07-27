@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,6 +42,11 @@ const (
 	// behaviour we want, because a short CJK title is specific in a way that a
 	// short English word like "Bitcoin" is not.
 	minContainmentLen = 12
+
+	// scoreTieEpsilon is how close two title scores must be to count as tied,
+	// at which point the year decides. Small enough that a genuinely better
+	// title still wins outright.
+	scoreTieEpsilon = 0.02
 )
 
 var (
@@ -66,6 +72,42 @@ var (
 	nonAlnumRE = regexp.MustCompile(`[^\p{L}\p{N}]+`)
 )
 
+// numberWords maps spelled-out and Roman numerals onto digits. Providers and
+// rippers disagree freely on the form: "Part II" against "Part 2",
+// "Slaughterhouse-Five" against "Slaughterhouse 5". Without folding these,
+// "Slaughterhouse 5" vs "Slaughterhouse-Five" scored exactly at the threshold
+// and matched only by luck, and a "Part II" volume never agreed with a "Part 2"
+// one -- which the volume rule then treats as a disagreement rather than the
+// same book.
+//
+// Deliberately stops at 30. Beyond that the spelled forms are compound
+// ("twenty-three") and vanishingly rare in titles, while single letters like
+// "i", "v" and "x" are far more likely to be initials or genuine words than
+// numerals -- "Malcolm X" must not become "Malcolm 10".
+var numberWords = map[string]string{
+	"one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+	"six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+	"eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+	"fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18",
+	"nineteen": "19", "twenty": "20", "thirty": "30",
+
+	"ii": "2", "iii": "3", "iv": "4", "vi": "6", "vii": "7", "viii": "8",
+	"ix": "9", "xi": "11", "xii": "12", "xiii": "13", "xiv": "14", "xv": "15",
+	"xvi": "16", "xvii": "17", "xviii": "18", "xix": "19", "xx": "20",
+}
+
+// foldNumberWords rewrites number words in an already-normalised title to
+// digits, leaving everything else alone.
+func foldNumberWords(normalised string) string {
+	fields := strings.Fields(normalised)
+	for i, f := range fields {
+		if digit, ok := numberWords[f]; ok {
+			fields[i] = digit
+		}
+	}
+	return strings.Join(fields, " ")
+}
+
 // normaliseTitle lowercases, strips edition decorations and punctuation, and
 // collapses whitespace so two spellings of the same title compare equal.
 //
@@ -77,7 +119,7 @@ func normaliseTitle(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = editionNoiseRE.ReplaceAllString(s, " ")
 	s = nonAlnumRE.ReplaceAllString(s, " ")
-	return strings.Join(strings.Fields(s), " ")
+	return foldNumberWords(strings.Join(strings.Fields(s), " "))
 }
 
 // titleVolume extracts a volume number, preferring an explicit marker
@@ -87,12 +129,18 @@ func normaliseTitle(s string) string {
 func titleVolume(s string) (int, bool) {
 	lower := strings.ToLower(s)
 
-	if m := volumeMarkerRE.FindStringSubmatch(lower); m != nil {
+	if m := hashVolumeRE.FindStringSubmatch(lower); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil {
 			return n, true
 		}
 	}
-	if m := hashVolumeRE.FindStringSubmatch(lower); m != nil {
+
+	// Work on the normalised form from here so that spelled and Roman numerals
+	// are already digits: "Book II" has to agree with "Book 2", and
+	// "Slaughterhouse-Five" with "Slaughterhouse 5".
+	folded := normaliseTitle(s)
+
+	if m := volumeMarkerRE.FindStringSubmatch(folded); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil {
 			return n, true
 		}
@@ -101,7 +149,7 @@ func titleVolume(s string) (int, bool) {
 	// A bare number standing as its own word, e.g. "Op-Center 4 - Acts of War"
 	// or "Dungeon In My Closet 2". Years are excluded: they date an edition
 	// rather than number a volume.
-	fields := strings.Fields(nonAlnumRE.ReplaceAllString(lower, " "))
+	fields := strings.Fields(folded)
 	for _, f := range fields {
 		n, err := strconv.Atoi(f)
 		if err != nil || n <= 0 || n > 999 {
@@ -200,14 +248,41 @@ func TitleScore(want, candidate string) float64 {
 	return score
 }
 
+// matchThreshold returns the score a candidate must reach. Overridable so the
+// bar can be retuned against a live library without a rebuild; the default is
+// the calibrated minTitleScore. Out-of-range values are ignored rather than
+// obeyed, since a typo'd 0 would accept everything and a typo'd 5 nothing.
+func matchThreshold() float64 {
+	raw := strings.TrimSpace(os.Getenv("SILO_METADATA_MATCH_MIN_SCORE"))
+	if raw == "" {
+		return minTitleScore
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v <= 0 || v > 1 {
+		return minTitleScore
+	}
+	return v
+}
+
 // BestMatch returns the highest-scoring credible candidate. ok is false when
 // nothing clears the bar, which callers must treat as "no match" rather than
 // falling back to results[0].
 //
 // want should be the title as it exists on disk, not a cleaned or truncated
 // search query: the point is to check the answer against what we actually
-// have.
+// have. wantYear may be 0 when unknown.
 func BestMatch(want string, results []SearchResult) (SearchResult, bool) {
+	return BestMatchYear(want, 0, results)
+}
+
+// BestMatchYear is BestMatch with the item's year used to break ties.
+//
+// Year is deliberately a tiebreak and never a gate. For books it is weak
+// evidence: an audiobook edition of a 1994 novel is routinely dated by its
+// recording, decades later, so rejecting on a year gap would throw away correct
+// matches wholesale. It only decides between candidates that have already
+// earned effectively the same title score.
+func BestMatchYear(want string, wantYear int, results []SearchResult) (SearchResult, bool) {
 	best, bestScore := SearchResult{}, 0.0
 	found := false
 
@@ -226,13 +301,70 @@ func BestMatch(want string, results []SearchResult) (SearchResult, bool) {
 			}
 		}
 
-		if score > bestScore {
+		switch {
+		case score > bestScore+scoreTieEpsilon:
 			best, bestScore, found = r, score, true
+		case found && score > bestScore-scoreTieEpsilon:
+			// Effectively tied on title. Prefer the nearer year when both are
+			// known; otherwise keep the incumbent.
+			if yearIsCloser(wantYear, r.Year, best.Year) {
+				best, bestScore = r, score
+			}
 		}
 	}
 
-	if !found || bestScore < minTitleScore {
+	// Strictly greater, not >=. A two-word title sharing exactly one word with
+	// a two-word candidate scores precisely 0.5 -- "Malcolm X" against
+	// "Malcolm 10" -- and that is the weakest possible evidence, not a match.
+	// Nothing correct is lost: in the calibration sample the worst true match
+	// scores 0.86.
+	if !found || bestScore <= matchThreshold() {
 		return SearchResult{}, false
 	}
 	return best, true
+}
+
+// yearIsCloser reports whether candidate's year sits nearer to want than the
+// incumbent's does. Unknown years (0) never win a tie.
+func yearIsCloser(want, candidate, incumbent int) bool {
+	if want == 0 || candidate == 0 {
+		return false
+	}
+	if incumbent == 0 {
+		return true
+	}
+	return abs(candidate-want) < abs(incumbent-want)
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// AgreesWith reports whether two accepted candidate titles describe the same
+// work, using the same bar as acceptance itself.
+//
+// Enrichment queries several providers and merges the IDs of every accepted
+// match into one map. Each provider is scored independently against the item,
+// so two of them can each clear the bar while naming different books -- one
+// answering with the right title, another with a plausible near-miss. Merging
+// both leaves the item carrying provider IDs for two different works, which is
+// worse than either answer alone: the wrong ID is indistinguishable from the
+// right one afterwards.
+//
+// Callers use this to keep the best-scoring match and admit a later provider's
+// IDs only when it agrees.
+func AgreesWith(a, b string) bool {
+	return TitleScore(a, b) > matchThreshold()
+}
+
+// ResultTitle returns the title to score a candidate by, falling back to the
+// original title when a provider leaves the primary one empty.
+func ResultTitle(r SearchResult) string {
+	if strings.TrimSpace(r.Name) != "" {
+		return r.Name
+	}
+	return r.OriginalTitle
 }

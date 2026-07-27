@@ -278,3 +278,112 @@ func TestAccentedLatinKeepsItsLetters(t *testing.T) {
 		t.Error("two unrelated Danish titles matched")
 	}
 }
+
+// Providers and rippers disagree on numeral form freely. Before folding these,
+// "Slaughterhouse 5" vs "Slaughterhouse-Five" scored exactly at the threshold
+// and matched only by luck, and a "Part II" volume never agreed with "Part 2".
+func TestNumeralFormsFold(t *testing.T) {
+	for _, tc := range []struct{ a, b string }{
+		{"Slaughterhouse 5", "Slaughterhouse-Five"},
+		{"Star Wars: Episode IV", "Star Wars: Episode 4"},
+		{"The Dark Tower Part II", "The Dark Tower Part 2"},
+		{"Ocean's 11", "Ocean's Eleven"},
+	} {
+		if s := TitleScore(tc.a, tc.b); s < minTitleScore {
+			t.Errorf("TitleScore(%q, %q) = %.2f, want >= %.2f", tc.a, tc.b, s, minTitleScore)
+		}
+	}
+}
+
+// Folding must not fire on single letters that are initials or words: a Roman
+// numeral reading of "X" or "I" would rewrite real titles into nonsense.
+func TestSingleLetterIsNotFoldedAsANumeral(t *testing.T) {
+	if got := normaliseTitle("Malcolm X"); got != "malcolm x" {
+		t.Errorf("normaliseTitle(%q) = %q, want the letter left alone", "Malcolm X", got)
+	}
+	if _, ok := BestMatch("Malcolm X", []SearchResult{{Name: "Malcolm 10"}}); ok {
+		t.Error("a single letter was read as a Roman numeral")
+	}
+}
+
+// A volume written as a Roman numeral must agree with the same volume in
+// digits, and still disagree with a different one.
+func TestVolumeAgreesAcrossNumeralForms(t *testing.T) {
+	if _, ok := BestMatch("The Dark Tower Book II", []SearchResult{{Name: "The Dark Tower Book 2"}}); !ok {
+		t.Error("Book II should match Book 2")
+	}
+	if s := TitleScore("The Dark Tower Book II", "The Dark Tower Book 3"); s != 0 {
+		t.Errorf("Book II vs Book 3 scored %.2f, want 0", s)
+	}
+}
+
+// Year breaks ties only. It must never override a clearly better title, since
+// for books it is weak evidence -- an audiobook edition of a 1994 novel is
+// routinely dated by its recording decades later.
+func TestYearBreaksTiesButNeverOverridesTitle(t *testing.T) {
+	tied := []SearchResult{
+		{Name: "The Silent Patient", Year: 2019},
+		{Name: "The Silent Patient", Year: 1975},
+	}
+	got, ok := BestMatchYear("The Silent Patient", 2019, tied)
+	if !ok {
+		t.Fatal("expected a match")
+	}
+	if got.Year != 2019 {
+		t.Errorf("tie broken to year %d, want 2019", got.Year)
+	}
+
+	// A far-off year must not beat a better title.
+	mixed := []SearchResult{
+		{Name: "Something Else Entirely", Year: 2019},
+		{Name: "The Silent Patient", Year: 1975},
+	}
+	got, ok = BestMatchYear("The Silent Patient", 2019, mixed)
+	if !ok || got.Name != "The Silent Patient" {
+		t.Errorf("year overrode the better title: got %q", got.Name)
+	}
+
+	// An unknown year on either side must not decide anything.
+	if _, ok := BestMatchYear("The Silent Patient", 0, tied); !ok {
+		t.Error("an unknown wanted year should not prevent a match")
+	}
+}
+
+func TestMatchThresholdOverride(t *testing.T) {
+	t.Setenv("SILO_METADATA_MATCH_MIN_SCORE", "0.95")
+	if _, ok := BestMatch("Op-Center 4 - Acts of War",
+		[]SearchResult{{Name: "Tom Clancy's Op-Center #4: Acts of War"}}); ok {
+		t.Error("a 0.90 match was accepted against a 0.95 threshold")
+	}
+
+	for _, bad := range []string{"0", "5", "-1", "abc", ""} {
+		t.Setenv("SILO_METADATA_MATCH_MIN_SCORE", bad)
+		if got := matchThreshold(); got != minTitleScore {
+			t.Errorf("threshold %q = %.2f, want the default %.2f (bad values must be ignored)", bad, got, minTitleScore)
+		}
+	}
+}
+
+// Two providers can each clear the bar while naming different books, so a
+// caller that merges both ends up with IDs for two works and no way to tell
+// which is right. AgreesWith is what stops that.
+func TestAgreesWithSeparatesProviderAnswers(t *testing.T) {
+	if !AgreesWith("Mother of Storms", "Mother of Storms (Unabridged)") {
+		t.Error("two spellings of the same title should agree")
+	}
+	if AgreesWith("The OP MC 8: God of Winning", "God of Winning: The OP MC, Book 1") {
+		t.Error("different volumes of one series must not agree")
+	}
+	if AgreesWith("Mother of Storms", "The Good Mothers") {
+		t.Error("unrelated titles must not agree")
+	}
+}
+
+func TestResultTitleFallsBackToOriginalTitle(t *testing.T) {
+	if got := ResultTitle(SearchResult{Name: "Primary", OriginalTitle: "Original"}); got != "Primary" {
+		t.Errorf("ResultTitle = %q, want the primary name", got)
+	}
+	if got := ResultTitle(SearchResult{OriginalTitle: "Original"}); got != "Original" {
+		t.Errorf("ResultTitle = %q, want the original title when Name is empty", got)
+	}
+}

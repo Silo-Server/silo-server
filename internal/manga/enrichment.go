@@ -380,7 +380,11 @@ func (e *Enricher) enrichWithProviders(ctx context.Context, item enrichmentItemR
 		return fmt.Errorf("%w: no metadata providers configured for folder %d", errEnrichmentSkipped, item.FolderID)
 	}
 
-	accumulator, accumulatedIDs, providerErrs := collectMangaMetadata(ctx, item, providers)
+	var owner providerIDOwnerLookup
+	if e.providerIDs != nil {
+		owner = e.providerIDs
+	}
+	accumulator, accumulatedIDs, providerErrs := collectMangaMetadata(ctx, item, providers, owner)
 
 	if item.HasPoster {
 		return e.enrichSecondaryOnly(ctx, item, accumulator, providerErrs)
@@ -483,9 +487,13 @@ func (e *Enricher) enrichSecondaryOnly(ctx context.Context, item enrichmentItemR
 // the caller can distinguish "providers answered, no match" from "providers
 // were unreachable". The search pass is skipped when the item already carries
 // provider IDs (a previously matched item only needs the by-ID fetch).
-func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider) (*metadata.MetadataResult, map[string]string, []error) {
+func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, owner providerIDOwnerLookup) (*metadata.MetadataResult, map[string]string, []error) {
 	searchQuery, accumulatedIDs := buildMangaSearchQuery(item)
 	var providerErrs []error
+
+	// The title the first accepting provider settled on; later providers must
+	// agree with it before their IDs are merged in.
+	var agreedTitle string
 
 	// An item that already carries provider IDs was matched before; the by-ID
 	// fetch below is enough and re-searching would spend a rate-limited
@@ -516,9 +524,12 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		// Volume numbers matter more here than anywhere: manga series run to
 		// dozens of volumes with near-identical titles, so the top result is
 		// routinely the right series and the wrong book.
-		match, matched := metadata.BestMatch(item.Title, results)
+		match, matched := metadata.BestMatchYear(item.Title, item.Year, results)
 		if !matched {
-			slog.DebugContext(ctx, "manga enrichment: no credible match", "component", "manga",
+			// Info, not Debug: the rejection rate is what separates "threshold
+			// too strict" from "providers answering badly", and it cannot be
+			// read from a log level nobody enables.
+			slog.InfoContext(ctx, "manga enrichment: no credible match", "component", "manga",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"title", item.Title,
@@ -526,12 +537,47 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 			)
 			continue
 		}
+
+		// Providers are scored independently, so two can each clear the bar
+		// while naming different volumes -- especially here, where series run
+		// to dozens of near-identical titles. Admit later providers only when
+		// they agree with the first accepted match.
+		matchedTitle := metadata.ResultTitle(match)
+		if agreedTitle == "" {
+			agreedTitle = matchedTitle
+		} else if !metadata.AgreesWith(agreedTitle, matchedTitle) {
+			slog.WarnContext(ctx, "manga enrichment: provider disagreement; skipping", "component", "manga",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"accepted_title", agreedTitle,
+				"rejected_title", matchedTitle,
+			)
+			continue
+		}
+
 		for k, v := range match.ProviderIDs {
-			if v != "" {
-				if _, exists := accumulatedIDs[k]; !exists {
-					accumulatedIDs[k] = v
-				}
+			if v == "" {
+				continue
 			}
+			if _, exists := accumulatedIDs[k]; exists {
+				continue
+			}
+			owned, ownErr := providerIDOwner(ctx, owner, k, v, item.ContentID)
+			if ownErr != nil {
+				// Don't claim an ID we couldn't verify is free; surface the
+				// error so the item retries rather than stamping terminally.
+				providerErrs = append(providerErrs, fmt.Errorf("%s ownership check %s=%s: %w", p.Slug(), k, v, ownErr))
+				continue
+			} else if owned != "" {
+				slog.InfoContext(ctx, "manga enrichment: provider id already owned by another item; skipping", "component", "manga",
+					"provider", k,
+					"provider_id", v,
+					"content_id", item.ContentID,
+					"owned_by", owned,
+				)
+				continue
+			}
+			accumulatedIDs[k] = v
 		}
 		slog.DebugContext(ctx, "manga enrichment: search result", "component", "manga",
 			"provider", p.Slug(),
@@ -1021,4 +1067,30 @@ func providerIDMapFromRows(rows []*models.MediaItemProviderID) map[string]string
 		}
 	}
 	return m
+}
+
+// providerIDOwnerLookup reports the content item (if any) that already owns a
+// given durable provider ID. *catalog.ProviderIDRepository satisfies it.
+type providerIDOwnerLookup interface {
+	FindContentIDByProviderIDs(
+		ctx context.Context,
+		providerIDs map[string]string,
+		itemType string,
+		excludeContentID string,
+	) (string, error)
+}
+
+// providerIDOwner reports which other item already owns a provider ID, or ""
+// when it is free. Mirrors the guard the ebook enricher has always had: without
+// it, sibling volumes that resolve to the same provider work all claim the same
+// ID and the collision is invisible afterwards. Manga is the most exposed to
+// this, since a series can run to dozens of near-identically titled volumes.
+//
+// A nil lookup disables the check rather than failing closed, so tests and
+// partially wired constructions behave as before.
+func providerIDOwner(ctx context.Context, owner providerIDOwnerLookup, provider, id, selfContentID string) (string, error) {
+	if owner == nil {
+		return "", nil
+	}
+	return owner.FindContentIDByProviderIDs(ctx, map[string]string{provider: id}, mangaContentType(), selfContentID)
 }
