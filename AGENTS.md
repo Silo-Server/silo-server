@@ -75,9 +75,10 @@ SDK, in the catalog, or in a specific plugin repo.
 / `make migrate-up` — read the `Makefile` for the rest. Local services:
 `docker compose up -d postgres redis`.
 
-`make test-go` skips the tests named in `GOTEST_KNOWN_FAILURES`, which are failures that predate the
-CI gate and are tracked separately. That list may only shrink: delete an entry together with its
-fix, and never add to it to make a new change pass.
+`make test-go` runs the whole Go suite. A Go test that cannot pass yet carries a `t.Skip` and the
+reason in its own source, not an entry in a Makefile variable. `make test-web` still skips the
+files in `WEBTEST_KNOWN_FAILURES`, which predate the CI gate; that list may only shrink — delete an
+entry together with its fix, and never add to it to make a new change pass.
 
 Before opening a merge request:
 
@@ -88,7 +89,11 @@ cd web && pnpm run lint && pnpm run format:check
 make verify-local-paths
 ```
 
-`.github/workflows/ci.yml` runs the same checks on every pull request.
+`.github/workflows/ci.yml` runs these on every pull request, with one difference worth knowing:
+`make lint` runs `golangci-lint` over the whole tree, while CI runs it with `--new-from-merge-base`
+so only the lines a branch touched have to be clean. The repo does not pass a full run today, so
+expect local output to include findings that are not yours and that CI will not fail on. Do not add
+to them.
 
 Go stays `gofmt`/`goimports` clean; the frontend follows `web/.prettierrc`.
 

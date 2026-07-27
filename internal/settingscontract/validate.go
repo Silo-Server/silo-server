@@ -278,8 +278,7 @@ func (b *Bound) validate(label string, widensUp bool, definitionRevision, manife
 	var errs []error
 	previousRevision := 0
 	for i, entry := range b.History {
-		switch {
-		case i == 0:
+		if i == 0 {
 			// The original bound may be written bare, which reads as "has held
 			// since the definition appeared".
 			if entry.IntroducedIn != 0 && entry.IntroducedIn != definitionRevision {
@@ -288,7 +287,7 @@ func (b *Bound) validate(label string, widensUp bool, definitionRevision, manife
 					label, entry.IntroducedIn, definitionRevision))
 			}
 			previousRevision = definitionRevision
-		default:
+		} else {
 			if entry.IntroducedIn == 0 {
 				errs = append(errs, fmt.Errorf(
 					"%s history entry %d must declare introduced_in", label, i))

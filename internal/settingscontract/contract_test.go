@@ -490,7 +490,7 @@ func sha256Of(manifest []byte, schemas map[string][]byte) string {
 			// so the test still observes a change.
 			canonical = schemas[name]
 		}
-		fmt.Fprintf(digest, "\n%d:%s\n%d:", len(name), name, len(canonical))
+		_, _ = fmt.Fprintf(digest, "\n%d:%s\n%d:", len(name), name, len(canonical))
 		digest.Write(canonical)
 	}
 	return `"` + hex.EncodeToString(digest.Sum(nil)) + `"`
@@ -668,7 +668,7 @@ func TestBoundsRoundTripInTheirAuthoredShape(t *testing.T) {
 			}
 			encoded, err := json.Marshal(bound)
 			if err != nil {
-				t.Fatalf("marshalling: %v", err)
+				t.Fatalf("marshaling: %v", err)
 			}
 			if string(encoded) != tc.raw {
 				t.Errorf("round trip = %s, want %s", encoded, tc.raw)

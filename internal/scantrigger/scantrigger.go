@@ -73,6 +73,22 @@ const (
 	ReasonUnsupportedExtension  Reason = "unsupported_extension"
 )
 
+// Error codes and the messages repeated across more than one rejection site.
+// Keeping them named means the same condition cannot end up worded two ways
+// depending on which branch produced it.
+const (
+	codeBadRequest  = "bad_request"
+	codeConflict    = "conflict"
+	codeNotFound    = "not_found"
+	codeUnavailable = "unavailable"
+
+	msgScannerUnavailable = "Scanner not available"
+	msgLibraryDisabled    = "Library is disabled"
+	msgPathRequired       = "Path is required"
+	msgUnsupportedExt     = "Unsupported media file extension for library type"
+	msgPathNotInspectable = "Path could not be inspected"
+)
+
 type RequestError struct {
 	Status  int
 	Code    string
@@ -100,7 +116,7 @@ func (r *Resolver) ResolveAll(ctx context.Context, requests []Request) ([]Target
 		usePathFolders := req.LibraryID == nil && strings.TrimSpace(req.Path) != ""
 		if usePathFolders && !pathFoldersLoaded {
 			if r == nil || r.folders == nil {
-				return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available", Reason: ReasonScannerUnavailable}
+				return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: codeUnavailable, Message: msgScannerUnavailable, Reason: ReasonScannerUnavailable}
 			}
 			folders, listErr := r.folders.List(ctx)
 			if listErr != nil {
@@ -128,18 +144,18 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) (*Target, error) {
 // and only returns ModeSubtree for paths below a configured library root.
 func (r *Resolver) ResolveMissingSubtree(ctx context.Context, subtreePath, trigger string) (*Target, error) {
 	if r == nil || r.folders == nil {
-		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available", Reason: ReasonScannerUnavailable}
+		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: codeUnavailable, Message: msgScannerUnavailable, Reason: ReasonScannerUnavailable}
 	}
 	cleanPath := filepath.Clean(subtreePath)
 	if strings.TrimSpace(subtreePath) == "" || cleanPath == "." {
-		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path is required", Reason: ReasonPathRequired}
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathRequired, Reason: ReasonPathRequired}
 	}
 	folder, matchedRoot, err := r.matchEnabledFolder(ctx, cleanPath)
 	if err != nil {
 		return nil, err
 	}
 	if filepath.Clean(cleanPath) == filepath.Clean(matchedRoot) {
-		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Subtree path must be below a library root", Reason: ReasonSubtreeOutsideLibrary}
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Subtree path must be below a library root", Reason: ReasonSubtreeOutsideLibrary}
 	}
 	return &Target{Folder: folder, Mode: ModeSubtree, Path: cleanPath, Trigger: normalizeTrigger(trigger)}, nil
 }
@@ -157,7 +173,7 @@ func (r *Resolver) matchEnabledFolder(ctx context.Context, cleanPath string) (*m
 		return nil, "", err
 	}
 	if folder != nil && !folder.Enabled {
-		return nil, "", &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled", Reason: ReasonLibraryDisabled}
+		return nil, "", &RequestError{Status: http.StatusConflict, Code: codeConflict, Message: msgLibraryDisabled, Reason: ReasonLibraryDisabled}
 	}
 	return folder, matchedRoot, nil
 }
@@ -183,25 +199,25 @@ func normalizeTrigger(trigger string) string {
 // unmounted share never resolves to a reconciling scan.
 func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string) (*Target, error) {
 	if r == nil || r.folders == nil {
-		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available", Reason: ReasonScannerUnavailable}
+		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: codeUnavailable, Message: msgScannerUnavailable, Reason: ReasonScannerUnavailable}
 	}
 	cleanPath := filepath.Clean(path)
 	if strings.TrimSpace(path) == "" || cleanPath == "." {
-		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path is required", Reason: ReasonPathRequired}
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathRequired, Reason: ReasonPathRequired}
 	}
 	if _, err := os.Lstat(cleanPath); err == nil {
-		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path still exists", Reason: ReasonPathStillExists}
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path still exists", Reason: ReasonPathStillExists}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		// Only a confirmed ENOENT counts as vanished. Permission or other
 		// stat failures must not reconcile still-existing files as missing.
-		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path could not be inspected", Reason: ReasonPathNotInspectable}
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathNotInspectable, Reason: ReasonPathNotInspectable}
 	}
 	folder, matchedRoot, err := r.matchEnabledFolder(ctx, cleanPath)
 	if err != nil {
 		return nil, err
 	}
 	if info, statErr := os.Stat(matchedRoot); statErr != nil || !info.IsDir() {
-		return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library root is not available", Reason: ReasonLibraryRootOffline}
+		return nil, &RequestError{Status: http.StatusConflict, Code: codeConflict, Message: "Library root is not available", Reason: ReasonLibraryRootOffline}
 	}
 	trigger = normalizeTrigger(trigger)
 
@@ -209,7 +225,7 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 		return &Target{Folder: folder, Mode: ModeFile, Path: cleanPath, Trigger: trigger}, nil
 	}
 	if supportsMediaFile(cleanPath) {
-		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Unsupported media file extension for library type", Reason: ReasonUnsupportedExtension}
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgUnsupportedExt, Reason: ReasonUnsupportedExtension}
 	}
 	scope := cleanPath
 	if filepath.Clean(scope) == filepath.Clean(matchedRoot) {
@@ -222,10 +238,10 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 
 func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*models.MediaFolder, usePathFolders bool) (*Target, error) {
 	if r == nil || r.folders == nil {
-		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available", Reason: ReasonScannerUnavailable}
+		return nil, &RequestError{Status: http.StatusServiceUnavailable, Code: codeUnavailable, Message: msgScannerUnavailable, Reason: ReasonScannerUnavailable}
 	}
 	if req.LibraryID == nil && strings.TrimSpace(req.Path) == "" {
-		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Either library_id or path is required", Reason: ReasonLibraryOrPathRequired}
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Either library_id or path is required", Reason: ReasonLibraryOrPathRequired}
 	}
 
 	var folder *models.MediaFolder
@@ -234,7 +250,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 		folder, err = r.folders.GetByID(ctx, *req.LibraryID)
 		if err != nil {
 			if errors.Is(err, catalog.ErrFolderNotFound) {
-				return nil, &RequestError{Status: http.StatusNotFound, Code: "not_found", Message: "Library not found", Reason: ReasonLibraryNotFound}
+				return nil, &RequestError{Status: http.StatusNotFound, Code: codeNotFound, Message: "Library not found", Reason: ReasonLibraryNotFound}
 			}
 			return nil, fmt.Errorf("fetching library for scan: %w", err)
 		}
@@ -246,7 +262,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 	}
 	if strings.TrimSpace(req.Path) == "" {
 		if folder != nil && !folder.Enabled {
-			return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled", Reason: ReasonLibraryDisabled}
+			return nil, &RequestError{Status: http.StatusConflict, Code: codeConflict, Message: msgLibraryDisabled, Reason: ReasonLibraryDisabled}
 		}
 		return &Target{Folder: folder, Mode: ModeLibrary, Trigger: trigger}, nil
 	}
@@ -259,7 +275,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 			return nil, err
 		}
 		if matchedRoot == "" {
-			return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path does not belong to the specified library", Reason: ReasonPathOutsideLibrary}
+			return nil, &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path does not belong to the specified library", Reason: ReasonPathOutsideLibrary}
 		}
 	} else {
 		folders := pathFolders
@@ -276,7 +292,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 		}
 	}
 	if folder != nil && !folder.Enabled {
-		return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled", Reason: ReasonLibraryDisabled}
+		return nil, &RequestError{Status: http.StatusConflict, Code: codeConflict, Message: msgLibraryDisabled, Reason: ReasonLibraryDisabled}
 	}
 
 	mode, err := ClassifyLibraryPath(cleanPath, matchedRoot, folder.Type)
@@ -299,7 +315,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 
 func EnqueueAll(ctx context.Context, queue Queuer, targets []Target) error {
 	if queue == nil {
-		return &RequestError{Status: http.StatusServiceUnavailable, Code: "unavailable", Message: "Scanner not available", Reason: ReasonScannerUnavailable}
+		return &RequestError{Status: http.StatusServiceUnavailable, Code: codeUnavailable, Message: msgScannerUnavailable, Reason: ReasonScannerUnavailable}
 	}
 	if err := queue.EnqueueScans(ctx, targets); err != nil {
 		return fmt.Errorf("queueing library scans: %w", err)
@@ -355,10 +371,10 @@ func MatchFolderForPath(targetPath string, folders []*models.MediaFolder) (*mode
 	}
 
 	if ambiguous {
-		return nil, "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path matches multiple libraries", Reason: ReasonPathAmbiguous}
+		return nil, "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path matches multiple libraries", Reason: ReasonPathAmbiguous}
 	}
 	if bestFolder == nil {
-		return nil, "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "No library matches the given path", Reason: ReasonNoLibraryMatch}
+		return nil, "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "No library matches the given path", Reason: ReasonNoLibraryMatch}
 	}
 	return bestFolder, bestRoot, nil
 }
@@ -376,21 +392,21 @@ func ClassifyLibraryPath(targetPath, matchedRoot, folderType string) (string, er
 	if err != nil {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
-			return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path does not exist", Reason: ReasonPathMissing}
+			return "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path does not exist", Reason: ReasonPathMissing}
 		case errors.Is(err, os.ErrPermission):
-			return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Permission denied for path", Reason: ReasonPathPermissionDenied}
+			return "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Permission denied for path", Reason: ReasonPathPermissionDenied}
 		default:
-			return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path could not be inspected", Reason: ReasonPathNotInspectable}
+			return "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgPathNotInspectable, Reason: ReasonPathNotInspectable}
 		}
 	}
 	if info.IsDir() {
 		return ModeSubtree, nil
 	}
 	if !info.Mode().IsRegular() {
-		return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path must be a file or directory", Reason: ReasonPathNotFileOrDir}
+		return "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: "Path must be a file or directory", Reason: ReasonPathNotFileOrDir}
 	}
 	if !supportsLibraryMediaFile(targetPath, folderType) {
-		return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Unsupported media file extension for library type", Reason: ReasonUnsupportedExtension}
+		return "", &RequestError{Status: http.StatusBadRequest, Code: codeBadRequest, Message: msgUnsupportedExt, Reason: ReasonUnsupportedExtension}
 	}
 	return ModeFile, nil
 }

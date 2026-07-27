@@ -15,6 +15,16 @@ env:
   GOPROXY: https://proxy.golang.org,direct
   GOPRIVATE: github.com/Silo-Server/*
   GONOSUMDB: github.com/Silo-Server/*
+  # Pinned so a lint gate cannot change its mind between two runs of the same
+  # commit. Built from source below rather than downloaded: a released binary
+  # refuses to run against a Go version newer than the one it was built with,
+  # and go.mod tracks Go closely enough that this repo is regularly ahead.
+  GOLANGCI_LINT_VERSION: v2.12.2
+
+# The default token is read-write. Nothing here needs to write, and a token
+# that cannot push is one fewer thing a compromised dependency can reach.
+permissions:
+  contents: read
 
 jobs:
   go:
@@ -23,6 +33,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # golangci-lint needs the merge base to tell this branch's lines from
+          # the ones it inherited.
+          fetch-depth: 0
+          persist-credentials: false
 
       # github.com/h2non/bimg binds libvips through cgo and pkg-config, so
       # nothing under ./... compiles without the headers. The Dockerfile
@@ -59,6 +74,26 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Scoped to the lines this branch touched. The repo does not pass a full
+      # golangci-lint run today — there are a few hundred pre-existing findings,
+      # which is why the Go half of `make lint` has never been enforced — and
+      # blocking every PR on a cleanup nobody has done would just get the gate
+      # removed again. New and changed lines have to be clean, so the count only
+      # falls from here.
+      - name: Install golangci-lint
+        run: go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+
+      - name: Lint changed lines
+        env:
+          # A PR carries its target branch; a push to main compares against
+          # main's own history, which leaves the merge base at HEAD and lints
+          # nothing new. Read through the environment rather than interpolated
+          # into the script.
+          BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          golangci-lint run --new-from-merge-base="origin/${BASE_REF}" ./...
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and
@@ -75,6 +110,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       # The pnpm version comes from web/package.json's packageManager field —
       # there is no package.json at the repo root, and `defaults.run` does not
@@ -115,6 +152,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - name: Verify no local paths leaked into committed docs
         run: make verify-local-paths

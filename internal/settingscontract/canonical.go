@@ -110,7 +110,7 @@ func PublicETag() (string, error) {
 // buildPublic strips maintainer-only fields and canonicalizes in one pass. The
 // decoded document is handed straight to the canonical writer, which already
 // understands map[string]any / []any / json.Number, rather than being
-// re-marshalled and re-parsed.
+// re-marshaled and re-parsed.
 func buildPublic(raw []byte) ([]byte, error) {
 	doc, err := decodeJSON(raw)
 	if err != nil {
@@ -151,7 +151,8 @@ func digestWithSchemas(manifest []byte) (string, error) {
 		}
 		// Length-prefixed so no combination of names and bodies can collide
 		// with a different combination.
-		fmt.Fprintf(digest, "\n%d:%s\n%d:", len(name), name, len(canonical))
+		// digest is a hash.Hash; its Write never returns an error.
+		_, _ = fmt.Fprintf(digest, "\n%d:%s\n%d:", len(name), name, len(canonical))
 		digest.Write(canonical)
 	}
 
