@@ -1362,11 +1362,23 @@ func cleanEbookSearchTitle(title, author string) string {
 	}
 	// Normalize trailing series/edition parentheticals. A bare year ("(2019)")
 	// is dropped because SearchQuery.Year already carries it. A series/volume
-	// marker ("(The Raven Brothers Book 4)", "[#3]") is UNWRAPPED — its words
-	// are kept, only the brackets removed — because the volume number is the
-	// per-volume disambiguator: dropping it makes every entry in a series search
-	// as the bare series name and collapse onto a single provider work. Other
+	// marker ("(The Raven Brothers Book 4)", "[#3]") is DROPPED too. Other
 	// parentheticals ("(Illustrated)") are meaningful title text and survive.
+	//
+	// The marker used to be unwrapped — brackets removed, words kept — so that
+	// distinct volumes searched distinctly rather than collapsing onto one
+	// provider work. That cost far more than it bought: retail furniture like
+	// "Second Skin Book 1" is not in provider catalogues, so it did not
+	// disambiguate the search, it broke it. Sampling 40 parked no_match ebooks
+	// against Open Library, the unwrapped form this function used to emit
+	// matched 0 while the bare title matched 24.
+	//
+	// Dropping it is safe now because the disambiguation moved to where it can
+	// actually work: metadata.BestMatch scores candidates against the raw
+	// item.Title, which still carries the volume, and treats a volume
+	// disagreement as fatal. So "Mad Dog" can be searched while a returned
+	// "Mad Dog (Savage Saints MC Book 2)" is still rejected for a Book 5 item.
+	// The series text never had to be in the query — it had to be in the check.
 	for {
 		m := ebookTrailingGroupRE.FindStringSubmatch(title)
 		if m == nil {
@@ -1382,8 +1394,8 @@ func cleanEbookSearchTitle(title, author string) string {
 			continue // peel stacked groups (e.g. a year behind a series marker)
 		}
 		if ebookSeriesNoiseRE.MatchString(inner) {
-			title = base + " " + inner
-			break
+			title = base
+			continue // peel stacked markers, e.g. "(Book 4) (2019)"
 		}
 		break // meaningful parenthetical — leave intact
 	}

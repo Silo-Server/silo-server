@@ -1412,12 +1412,18 @@ func TestCleanEbookSearchTitle(t *testing.T) {
 		{"Alice - Bob and Carol", "Bob", "Alice - Bob and Carol"},
 		{"Plain Title", "Some Author", "Plain Title"},
 		{"  spaced   out  ", "", "spaced out"},
-		// Series/volume markers are kept (unwrapped) so distinct volumes search
-		// distinctly instead of collapsing onto one provider work.
-		{"Just One Night (The Raven Brothers Book 4)", "", "Just One Night The Raven Brothers Book 4"},
-		{"Mistborn (The Mistborn Saga #1)", "", "Mistborn The Mistborn Saga #1"},
-		{"The Wheel of Time (Book 1)", "", "The Wheel of Time Book 1"},
-		{"The Wheel of Time (Book 2)", "", "The Wheel of Time Book 2"},
+		// Series/volume markers are dropped: they are retail furniture that no
+		// provider catalogue indexes, so carrying them into the query matched
+		// nothing. Volumes are told apart after the search instead, by
+		// metadata.BestMatch scoring against the raw title.
+		{"Just One Night (The Raven Brothers Book 4)", "", "Just One Night"},
+		{"Mistborn (The Mistborn Saga #1)", "", "Mistborn"},
+		// Two volumes of one series now issue the same query. That is the point:
+		// the query finds the work, and the volume check rejects the wrong book.
+		{"The Wheel of Time (Book 1)", "", "The Wheel of Time"},
+		{"The Wheel of Time (Book 2)", "", "The Wheel of Time"},
+		// Stacked markers peel rather than leaving a stray group behind.
+		{"Just One Night (The Raven Brothers Book 4) (2019)", "", "Just One Night"},
 		{"White Out [Badlands Thriller]", "", "White Out [Badlands Thriller]"},
 		{"Salem's Lot (2019)", "", "Salem's Lot"},
 		{"The Hobbit (Illustrated)", "", "The Hobbit (Illustrated)"},
