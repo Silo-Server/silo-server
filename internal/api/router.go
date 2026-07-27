@@ -1834,6 +1834,20 @@ func NewRouter(deps Dependencies) chi.Router {
 			})
 		}
 
+		// Compatibility-listener connection details. Account-scoped like
+		// diagnostics above: the settings card that renders this describes how
+		// to sign in, so it must not depend on a profile already being chosen.
+		if authMiddleware != nil {
+			compatConnectInfoHandler := handlers.NewCompatConnectInfoHandler(deps.Config, settingsRepo)
+			r.Group(func(r chi.Router) {
+				r.Use(authMiddleware.RequireAuth)
+				if deps.RateLimitMW != nil {
+					r.Use(deps.RateLimitMW.Handler)
+				}
+				r.Get("/compat/connect-info", compatConnectInfoHandler.HandleGetConnectInfo)
+			})
+		}
+
 		// All remaining routes require auth.
 		if authMiddleware != nil {
 			r.Group(func(r chi.Router) {

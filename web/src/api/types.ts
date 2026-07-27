@@ -150,6 +150,15 @@ export interface JellyfinCompatOperationStatus {
   error?: string;
 }
 
+/** Account-facing compat connection details from GET /compat/connect-info. */
+export interface CompatConnectInfo {
+  jellyfin: {
+    enabled: boolean;
+    public_url: string;
+    server_name: string;
+  };
+}
+
 export interface JellyfinCompatStatus {
   enabled: boolean;
   api_state: "disabled" | "enabled" | "error";

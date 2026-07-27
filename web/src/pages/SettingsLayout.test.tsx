@@ -111,9 +111,13 @@ describe("SettingsLayout", () => {
 
     await userEvent.type(screen.getByRole("searchbox", { name: "Search settings" }), "pin");
 
+    // Both nav rails render, so each surviving item appears twice. "pin" hits
+    // Profiles (where PINs are set) and Connect Apps (where the password#PIN
+    // format is explained).
     expect(screen.getAllByRole("link", { name: /Profiles/ })).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: /Connect Apps/ })).toHaveLength(2);
     expect(screen.queryByRole("link", { name: /Playback/ })).not.toBeInTheDocument();
-    expect(screen.getByText("1 match")).toBeInTheDocument();
+    expect(screen.getByText("2 matches")).toBeInTheDocument();
   });
 
   it("matches individual personal setting labels", async () => {

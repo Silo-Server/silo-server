@@ -158,6 +158,11 @@ export const profileKeys = {
   householdSessions: () => ["profiles", "household", "sessions"] as const,
 };
 
+export const compatKeys = {
+  all: ["compat"] as const,
+  connectInfo: () => ["compat", "connect-info"] as const,
+};
+
 export const personKeys = {
   all: ["people"] as const,
   search: (query: string, limit = 20) => ["people", "search", query, limit] as const,
