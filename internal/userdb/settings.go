@@ -166,12 +166,30 @@ func DeleteDeviceSetting(db *sql.DB, profileID, deviceID, key string) error {
 	return nil
 }
 
+// DeleteAllDeviceSettings clears everything one device holds for one profile.
+// It is the forget-device path, so it drops the canonical profile_device values
+// alongside the legacy string overrides: this database declares no foreign keys,
+// so nothing else would.
 func DeleteAllDeviceSettings(db *sql.DB, profileID, deviceID string) error {
-	_, err := db.Exec("DELETE FROM user_device_settings WHERE profile_id = ? AND device_id = ?", profileID, deviceID)
+	tx, err := db.Begin()
 	if err != nil {
+		return fmt.Errorf("beginning transaction to forget device %q: %w", deviceID, err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := tx.Exec(
+		"DELETE FROM user_device_settings WHERE profile_id = ? AND device_id = ?",
+		profileID, deviceID,
+	); err != nil {
 		return fmt.Errorf("deleting all device settings for device %q: %w", deviceID, err)
 	}
-	return nil
+	if _, err := tx.Exec(
+		"DELETE FROM user_setting_values WHERE scope = 'profile_device' AND profile_id = ? AND device_id = ?",
+		profileID, deviceID,
+	); err != nil {
+		return fmt.Errorf("deleting setting values for device %q: %w", deviceID, err)
+	}
+	return tx.Commit()
 }
 
 func DeleteDeviceSettingsByKey(db *sql.DB, key string) error {

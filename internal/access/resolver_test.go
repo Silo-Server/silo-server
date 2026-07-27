@@ -2,6 +2,7 @@ package access
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -269,6 +270,39 @@ func (s stubStore) UpsertLibraryPlaybackPreference(context.Context, userstore.Li
 	panic("unused")
 }
 func (s stubStore) DeleteLibraryPlaybackPreference(context.Context, string, int) error {
+	panic("unused")
+}
+func (s stubStore) GetSettingValue(context.Context, userstore.SettingIdentity) (*userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s stubStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s stubStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
+	panic("unused")
+}
+func (s stubStore) DeleteSettingValue(context.Context, userstore.SettingIdentity) (bool, error) {
+	panic("unused")
+}
+func (s stubStore) DeleteSettingValuesForProfile(context.Context, string) (int64, error) {
+	panic("unused")
+}
+func (s stubStore) DeleteSettingValuesForDevice(context.Context, string, string) (int64, error) {
+	panic("unused")
+}
+func (s stubStore) DeleteSettingValuesForLibrary(context.Context, int) (int64, error) {
+	panic("unused")
+}
+func (s stubStore) DeleteSettingValuesForSeries(context.Context, string) (int64, error) {
+	panic("unused")
+}
+func (s stubStore) GetSettingMutation(context.Context, string) (*userstore.SettingMutationRecord, error) {
+	panic("unused")
+}
+func (s stubStore) PutSettingMutation(context.Context, userstore.SettingMutationRecord) (userstore.SettingMutationRecord, bool, error) {
+	panic("unused")
+}
+func (s stubStore) DeleteExpiredSettingMutations(context.Context, time.Time) (int64, error) {
 	panic("unused")
 }
 

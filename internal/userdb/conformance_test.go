@@ -30,6 +30,14 @@ func TestSQLiteProgressSince(t *testing.T) {
 	storetest.RunProgressSince(t, newConformanceStore)
 }
 
+// TestSQLiteSettingValues runs the canonical settings-contract storage
+// conformance tests against the per-user SQLite backend. The Postgres backend
+// runs the same suite in internal/userstore/pgstore, which is what keeps the two
+// from drifting on scope identity, partial uniqueness and delete behavior.
+func TestSQLiteSettingValues(t *testing.T) {
+	storetest.RunSettingValues(t, newConformanceStore)
+}
+
 func TestSQLiteAddFavoriteAtReportsInsertion(t *testing.T) {
 	ctx := context.Background()
 	store := newConformanceStore(t)

@@ -2,6 +2,7 @@ package userstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -130,6 +131,49 @@ type UserStore interface {
 	ListLibraryPlaybackPreferences(ctx context.Context, profileID string) ([]LibraryPlaybackPreference, error)
 	UpsertLibraryPlaybackPreference(ctx context.Context, pref LibraryPlaybackPreference) error
 	DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error
+
+	// Canonical typed setting values (contracts/settings/v1).
+	//
+	// These back the settings contract's storage layer. The manifest remains
+	// the schema; the store holds validated JSON keyed by scope identity, and
+	// knows nothing about definitions, defaults or resolution order.
+
+	// GetSettingValue returns the explicit value at exactly one scope, or nil
+	// when that identity is unset. It does not resolve fallbacks.
+	GetSettingValue(ctx context.Context, id SettingIdentity) (*SettingValue, error)
+	// ListSettingValuesForResolution returns every candidate row for one
+	// resolution request in a single query, unranked. The resolver applies each
+	// definition's resolution order in Go; issuing one lookup per scope is a
+	// rejected implementation.
+	ListSettingValuesForResolution(ctx context.Context, query SettingResolutionQuery) ([]SettingValue, error)
+	// UpsertSettingValue writes the explicit value at one scope and increments
+	// that row's revision. Concurrent writes to one identity are
+	// last-write-wins in server receipt order; there is no compare-and-set
+	// precondition in v1.
+	UpsertSettingValue(ctx context.Context, id SettingIdentity, value json.RawMessage) (*SettingValue, error)
+	// DeleteSettingValue removes the explicit value at one scope — the `unset`
+	// operation — and reports whether a row existed.
+	DeleteSettingValue(ctx context.Context, id SettingIdentity) (bool, error)
+
+	// The scoped deletes below are application-enforced cleanup for identities
+	// this table cannot reference: the per-user SQLite store declares no foreign
+	// keys, and libraries, series and devices are not FK targets in Postgres
+	// either. Each removes only the rows scoped to the named entity.
+	DeleteSettingValuesForProfile(ctx context.Context, profileID string) (int64, error)
+	DeleteSettingValuesForDevice(ctx context.Context, profileID, deviceID string) (int64, error)
+	DeleteSettingValuesForLibrary(ctx context.Context, libraryID int) (int64, error)
+	DeleteSettingValuesForSeries(ctx context.Context, seriesID string) (int64, error)
+
+	// GetSettingMutation returns a recorded idempotency receipt, or nil.
+	GetSettingMutation(ctx context.Context, mutationID string) (*SettingMutationRecord, error)
+	// PutSettingMutation records a receipt without ever overwriting one. When
+	// the id is already recorded it returns the stored record with
+	// inserted=false, so the caller compares request hashes and answers
+	// already_applied or mutation_id_conflict.
+	PutSettingMutation(ctx context.Context, record SettingMutationRecord) (SettingMutationRecord, bool, error)
+	// DeleteExpiredSettingMutations removes receipts that expired before the
+	// given instant and reports how many. expires_at is not self-enforcing.
+	DeleteExpiredSettingMutations(ctx context.Context, before time.Time) (int64, error)
 }
 
 // DeviceRegistry is implemented by stores that track observed devices even

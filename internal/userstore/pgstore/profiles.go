@@ -272,6 +272,10 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
 
+	// user_setting_values is listed rather than left to its composite profile
+	// FK so both backends delete identically: the per-user SQLite store has no
+	// foreign keys at all. Account-scope rows carry a NULL profile_id and are
+	// untouched, which is what removing one household member has to mean.
 	cascadeTables := []string{
 		"user_favorites",
 		"user_watchlist",
@@ -279,6 +283,7 @@ func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error 
 		"user_personal_collections",
 		"user_series_playback_preferences",
 		"user_library_playback_preferences",
+		"user_setting_values",
 	}
 	for _, table := range cascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {

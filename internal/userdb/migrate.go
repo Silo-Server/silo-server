@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 13
+const schemaVersion = 14
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -133,7 +133,27 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 14 {
+		if err := migrateToV14(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 14"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 14: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV14 adds the canonical settings contract tables. InitSchema already
+// creates them with IF NOT EXISTS on every open, so this step is what records
+// that an existing database has them — the same shape migrateToV6 used for
+// series_playback_preferences.
+func migrateToV14(tx *sql.Tx) error {
+	if _, err := tx.Exec(settingContractSchema); err != nil {
+		return fmt.Errorf("creating settings contract tables: %w", err)
+	}
+	return nil
 }
 
 // migrateToV13 replaces the v1 watch_progress stamp triggers with the current

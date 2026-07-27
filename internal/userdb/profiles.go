@@ -292,7 +292,9 @@ func DeleteProfile(db *sql.DB, id string) error {
 		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
-	// Cascade-delete related tables.
+	// Cascade-delete related tables. This database declares no foreign keys, so
+	// user_setting_values is listed here; account-scope rows carry a NULL
+	// profile_id and are untouched, matching the Postgres backend.
 	cascadeTables := []string{
 		"favorites",
 		"watchlist",
@@ -301,6 +303,7 @@ func DeleteProfile(db *sql.DB, id string) error {
 		"profile_allowed_libraries",
 		"series_playback_preferences",
 		"library_playback_preferences",
+		"user_setting_values",
 	}
 	for _, table := range cascadeTables {
 		column := "profile_id"
