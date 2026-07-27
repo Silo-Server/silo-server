@@ -60,9 +60,14 @@ linters:
       locale: US
 
   exclusions:
+    # Anchored regexes, not directory names: `paths` matches anywhere in the
+    # path, so a bare `web` also excluded internal/jellycompat/web_component.go,
+    # internal/webhooksync/, internal/notifications/webhook*.go and every other
+    # non-test file with "web" in its name — 14 files that were being linted
+    # before.
     paths:
-      - web
-      - migrations
+      - ^web/
+      - ^migrations/
 
     rules:
       # Allow repeated strings in test files

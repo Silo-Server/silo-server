@@ -110,10 +110,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const fallbackTheme: ThemeId =
     !hasStoredThemeChoice && isValidTheme(adminDefaultTheme) ? adminDefaultTheme : localTheme;
 
-  const theme =
-    loadApiTheme && apiTheme
-      ? getInitialThemeFromApi(apiTheme, fallbackTheme, cacheOwner)
-      : fallbackTheme;
+  // The server's value is this account's own stored choice, so it wins outright
+  // whenever it is present and valid. It is deliberately not compared against
+  // the local cache: the effect below mirrors the server's value into that very
+  // cache, so any such comparison stops holding after the first render and the
+  // theme silently reverts to the default on the second.
+  const theme = loadApiTheme && isValidTheme(apiTheme) ? apiTheme : fallbackTheme;
   const textScale = loadApiTheme ? parseTextScale(apiTextScale ?? localTextScale) : localTextScale;
   const textWeight = loadApiTheme
     ? parseTextWeight(apiTextWeight ?? localTextWeight)
@@ -242,13 +244,4 @@ export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
   if (!ctx) throw new Error("useTheme must be used within ThemeProvider");
   return ctx;
-}
-
-function getInitialThemeFromApi(
-  apiTheme: string | null,
-  fallback: ThemeId,
-  cacheOwner: string | null,
-): ThemeId {
-  if (!apiTheme || !isValidTheme(apiTheme)) return fallback;
-  return appearanceCache.get(storage.KEYS.THEME, cacheOwner) !== apiTheme ? apiTheme : fallback;
 }

@@ -389,6 +389,14 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 		return errors.New("null is not allowed for this setting")
 	}
 
+	// Every type that can carry a string, not just the object branch: a lone
+	// surrogate in a plain string setting (ui.custom_css) decodes to U+FFFD on
+	// SQLite and is rejected outright by Postgres jsonb, so leaving this to the
+	// object case alone let the two backends disagree about the same value.
+	if err := rejectLoneSurrogates(trimmed); err != nil {
+		return err
+	}
+
 	switch v.Type {
 	case TypeBoolean:
 		var value bool
@@ -401,6 +409,9 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 		if err := strictUnmarshal(trimmed, &value); err != nil {
 			return fmt.Errorf("expected an integer: %w", err)
 		}
+		if err := rejectQuotedNumber(trimmed); err != nil {
+			return fmt.Errorf("expected an integer: %w", err)
+		}
 		parsed, err := value.Int64()
 		if err != nil {
 			return fmt.Errorf("expected an integer, got %s", value)
@@ -410,6 +421,9 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 	case TypeNumber:
 		var value json.Number
 		if err := strictUnmarshal(trimmed, &value); err != nil {
+			return fmt.Errorf("expected a number: %w", err)
+		}
+		if err := rejectQuotedNumber(trimmed); err != nil {
 			return fmt.Errorf("expected a number: %w", err)
 		}
 		parsed, err := value.Float64()
@@ -455,9 +469,6 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 		// last of a repeated property and validates that. Which value survives
 		// would then depend on the parser rather than on the contract.
 		if err := rejectDuplicateKeys(trimmed); err != nil {
-			return err
-		}
-		if err := rejectLoneSurrogates(trimmed); err != nil {
 			return err
 		}
 		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(trimmed))

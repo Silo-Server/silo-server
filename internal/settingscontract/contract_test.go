@@ -1173,3 +1173,82 @@ func TestNormalizeValueCanonicalizesLanguageTags(t *testing.T) {
 		t.Error(`NormalizeValue("") was accepted; unset must be null, not the empty string`)
 	}
 }
+
+// TestQuotedNumbersAreRejected covers a type confusion encoding/json will not
+// catch. json.Number is a string kind, so `"1.5"` unmarshals into it happily
+// and Float64 then parses the quoted digits — the value validates, and
+// NormalizeValue stores the quoted form into jsonb where every consumer reading
+// it as a number disagrees with the row.
+func TestQuotedNumbersAreRejected(t *testing.T) {
+	for name, tc := range map[string]struct {
+		schema *ValueSchema
+		raw    string
+	}{
+		"number":            {&ValueSchema{Type: TypeNumber}, `"1.5"`},
+		"integer":           {&ValueSchema{Type: TypeInteger}, `"3"`},
+		"integer with sign": {&ValueSchema{Type: TypeInteger}, `"-3"`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := tc.schema.ValidateValue(json.RawMessage(tc.raw), nil); err == nil {
+				t.Fatalf("%s was accepted for a %s setting", tc.raw, tc.schema.Type)
+			}
+			if _, err := tc.schema.NormalizeValue(json.RawMessage(tc.raw), nil); err == nil {
+				t.Fatalf("%s was stored for a %s setting", tc.raw, tc.schema.Type)
+			}
+		})
+	}
+
+	// The unquoted forms still validate, so the check is not rejecting numbers
+	// outright.
+	if err := (&ValueSchema{Type: TypeNumber}).ValidateValue(
+		json.RawMessage(`1.5`), nil); err != nil {
+		t.Errorf("1.5 was rejected for a number setting: %v", err)
+	}
+	if err := (&ValueSchema{Type: TypeInteger}).ValidateValue(
+		json.RawMessage(`3`), nil); err != nil {
+		t.Errorf("3 was rejected for an integer setting: %v", err)
+	}
+}
+
+// TestLoneSurrogatesAreRejectedForEveryType pins the check to the whole
+// validation path rather than the object branch it started in. A lone surrogate
+// decodes to U+FFFD on SQLite and is refused outright by Postgres jsonb, so a
+// string setting that skipped the check made the two backends disagree about
+// whether the same value could be stored at all.
+func TestLoneSurrogatesAreRejectedForEveryType(t *testing.T) {
+	for name, schema := range map[string]*ValueSchema{
+		"string":       {Type: TypeString},
+		"language tag": {Type: TypeLanguageTag},
+		"enum":         {Type: TypeEnum, Values: []EnumMember{{Value: "a"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := json.RawMessage(`"\ud800"`)
+			if err := schema.ValidateValue(raw, nil); err == nil {
+				t.Fatal("a lone surrogate was accepted")
+			}
+			if _, err := schema.NormalizeValue(raw, nil); err == nil {
+				t.Fatal("a lone surrogate was stored")
+			}
+		})
+	}
+
+	// ui.custom_css is the setting that actually carries free text, so pin it
+	// against the real manifest definition too.
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	def, ok := manifest.Lookup("ui.custom_css")
+	if !ok {
+		t.Fatal("ui.custom_css is not registered")
+	}
+	if err := def.ValueSchema.ValidateValue(
+		json.RawMessage(`"body { content: \"\ud800\"; }"`), objSchemas); err == nil {
+		t.Error("ui.custom_css accepted a lone surrogate")
+	}
+	// A well-formed pair is an ordinary character and must still store.
+	if err := def.ValueSchema.ValidateValue(
+		json.RawMessage(`"body::after { content: \"😀\"; }"`), objSchemas); err != nil {
+		t.Errorf("ui.custom_css rejected a valid surrogate pair: %v", err)
+	}
+}

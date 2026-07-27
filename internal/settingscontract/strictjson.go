@@ -13,6 +13,21 @@ import (
 // input that Go accepts by silently changing it, which is the dangerous shape
 // for a contract whose whole promise is that every peer agrees on the bytes.
 
+// rejectQuotedNumber reports an error if a value declared numeric arrived as a
+// JSON string.
+//
+// json.Number is a string kind, so encoding/json unmarshals `"1.5"` into it
+// without complaint and Float64/Int64 then parse the quoted digits happily. The
+// value would validate, and NormalizeValue would store the quoted form into
+// jsonb — where every consumer reading it as a number, and every client
+// comparing canonical bytes, disagrees with the row.
+func rejectQuotedNumber(raw []byte) error {
+	if len(raw) > 0 && raw[0] == '"' {
+		return errors.New("a numeric setting must not be sent as a JSON string")
+	}
+	return nil
+}
+
 // maxJSONDepth bounds the recursion in the duplicate-key scan. Setting values
 // arrive from the network, and the deepest schema the contract declares nests
 // three levels, so this is far above anything legitimate and still cannot be

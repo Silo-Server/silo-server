@@ -186,6 +186,31 @@ describe("appearance cache ownership", () => {
     expect(captured.custom.customCss).toBe("body { color: blue; }");
   });
 
+  it("keeps applying the server's theme once the mirror has written it back", () => {
+    signedInAs(2);
+    mocks.useSettings.mockReturnValue({
+      data: { ui_theme: "oxblood-noir", ui_text_scale: "x-large" },
+    });
+
+    const view = renderAppearance();
+    expect(view.captured.theme.theme).toBe("oxblood-noir");
+
+    // The mirror effect writes the server's theme into the same namespace the
+    // resolver reads. A resolver that compared the two would see them agree
+    // here and fall back to the default from the second render on, so this
+    // re-renders rather than trusting the first paint.
+    act(() => {
+      view.rerender();
+    });
+    act(() => {
+      view.rerender();
+    });
+
+    expect(view.captured.theme.theme).toBe("oxblood-noir");
+    expect(view.captured.theme.textScale).toBe("x-large");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("oxblood-noir");
+  });
+
   it("mirrors the server's appearance so the next cold start paints it", () => {
     signedInAs(2);
     mocks.useSettings.mockReturnValue({
