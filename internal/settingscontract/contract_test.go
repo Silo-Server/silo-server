@@ -1210,6 +1210,40 @@ func TestQuotedNumbersAreRejected(t *testing.T) {
 	}
 }
 
+// TestRawInvalidUTF8IsRejected covers the other path to the substitution
+// TestLoneSurrogatesAreRejectedForEveryType guards. A raw 0xff byte inside a
+// quoted string — what an HTTP body carries when a client encodes text in the
+// wrong charset — is not an escape, so the surrogate scan never sees it, but
+// encoding/json still turns it into U+FFFD and reports success. The value is
+// then stored verbatim, which SQLite's json_valid accepts and Postgres jsonb
+// refuses.
+func TestRawInvalidUTF8IsRejected(t *testing.T) {
+	for name, schema := range map[string]*ValueSchema{
+		"string": {Type: TypeString},
+		"object": {Type: TypeObject, SchemaRef: "subtitle-appearance.json"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := json.RawMessage([]byte{'"', 0xff, '"'})
+			if name == "object" {
+				raw = json.RawMessage(append(append([]byte(`{"fontSize":"`), 0xff), `"}`...))
+			}
+			if err := schema.ValidateValue(raw, objSchemas); err == nil {
+				t.Fatal("a value with a raw invalid UTF-8 byte was accepted")
+			}
+			if _, err := schema.NormalizeValue(raw, objSchemas); err == nil {
+				t.Fatal("a value with a raw invalid UTF-8 byte was stored")
+			}
+		})
+	}
+
+	// Valid multi-byte UTF-8 must still pass; the check is on well-formedness,
+	// not on being ASCII.
+	if err := (&ValueSchema{Type: TypeString}).ValidateValue(
+		json.RawMessage(`"日本語 — café 😀"`), nil); err != nil {
+		t.Errorf("valid multi-byte UTF-8 was rejected: %v", err)
+	}
+}
+
 // TestLoneSurrogatesAreRejectedForEveryType pins the check to the whole
 // validation path rather than the object branch it started in. A lone surrogate
 // decodes to U+FFFD on SQLite and is refused outright by Postgres jsonb, so a

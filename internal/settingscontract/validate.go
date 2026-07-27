@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
@@ -389,10 +390,19 @@ func (v *ValueSchema) ValidateValue(raw json.RawMessage, objectSchemas map[strin
 		return errors.New("null is not allowed for this setting")
 	}
 
-	// Every type that can carry a string, not just the object branch: a lone
-	// surrogate in a plain string setting (ui.custom_css) decodes to U+FFFD on
-	// SQLite and is rejected outright by Postgres jsonb, so leaving this to the
-	// object case alone let the two backends disagree about the same value.
+	// Both of these run for every type, not just the object branch: a value the
+	// decoder silently rewrites is stored verbatim, and the two backends do not
+	// agree on what they will store. Postgres jsonb rejects U+FFFD-producing
+	// input outright while SQLite's json_valid accepts it, so the same request
+	// succeeds on one deployment and fails on the other.
+	//
+	// Raw bytes and escapes are separate paths to the same substitution: an
+	// invalid UTF-8 byte arrives in the body as itself, a lone surrogate as a
+	// \u escape, and encoding/json turns both into U+FFFD while reporting
+	// success.
+	if !utf8.Valid(trimmed) {
+		return errors.New("value is not valid UTF-8")
+	}
 	if err := rejectLoneSurrogates(trimmed); err != nil {
 		return err
 	}
