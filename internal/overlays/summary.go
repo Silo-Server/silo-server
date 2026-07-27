@@ -90,35 +90,12 @@ func rangeRank(file *models.MediaFile) int {
 // rows may carry only dv_profile or a DOVI* video_range_type.
 func hasDolbyVision(tracks []models.VideoTrack) bool {
 	for _, track := range tracks {
-		if trackHasDolbyVision(track) {
+		if track.DolbyVision != "" || track.DVProfile > 0 ||
+			strings.HasPrefix(track.VideoRangeType, "DOVI") {
 			return true
 		}
 	}
 	return false
-}
-
-// hasPresentableDolbyVision reports whether a file will actually reach a
-// display as Dolby Vision. Profile 5 has no backward-compatible base layer, so
-// clients decode it and present HDR10 instead; badging it "DV" promises an
-// output they never deliver. Profiles 7 and 8 keep the label.
-//
-// Ranking still uses hasDolbyVision: a Profile 5 file does carry richer
-// metadata than a bare HDR row, so version selection must not be affected.
-func hasPresentableDolbyVision(tracks []models.VideoTrack) bool {
-	for _, track := range tracks {
-		if track.DVProfile == 5 {
-			continue
-		}
-		if trackHasDolbyVision(track) {
-			return true
-		}
-	}
-	return false
-}
-
-func trackHasDolbyVision(track models.VideoTrack) bool {
-	return track.DolbyVision != "" || track.DVProfile > 0 ||
-		strings.HasPrefix(track.VideoRangeType, "DOVI")
 }
 
 func normalizeResolution(value string) string {
@@ -148,7 +125,7 @@ func resolutionRank(value string) int {
 }
 
 func normalizeHDR(file *models.MediaFile) string {
-	hasDV := hasPresentableDolbyVision(file.VideoTracks)
+	hasDV := hasDolbyVision(file.VideoTracks)
 	hdrType := hdrTypeFromTracks(file.VideoTracks)
 
 	switch {
