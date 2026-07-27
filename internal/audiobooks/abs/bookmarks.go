@@ -31,7 +31,7 @@ type BookmarkStore interface {
 // the handlers use it. Intentionally narrow — only the fields the wire
 // format cares about.
 type Bookmark struct {
-	ID            string // ULID
+	ID            string  // ULID
 	LibraryItemID string
 	Time          float64 // fractional seconds
 	Title         string

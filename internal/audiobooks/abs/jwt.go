@@ -12,10 +12,10 @@ import (
 // Claims are the unified ABS JWT claim set. Different `Type` values denote
 // access, refresh, or session tokens.
 type Claims struct {
-	Type      string `json:"type"`          // access | refresh | session
-	UserID    string `json:"sub"`           // user id
-	ProfileID string `json:"pid,omitempty"` // empty = primary profile
-	JTI       string `json:"jti"`           // token id (revocable)
+	Type      string `json:"type"`            // access | refresh | session
+	UserID    string `json:"sub"`             // user id
+	ProfileID string `json:"pid,omitempty"`   // empty = primary profile
+	JTI       string `json:"jti"`             // token id (revocable)
 	DeviceID  string `json:"device_id,omitempty"`
 	SessionID string `json:"sid,omitempty"`
 	BookID    string `json:"bid,omitempty"`

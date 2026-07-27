@@ -2,8 +2,10 @@ package audiobooks
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // A failed attempt must be recorded WITHOUT a terminal outcome and with a
@@ -236,5 +238,35 @@ func TestRetryBackoffOrdering(t *testing.T) {
 	}
 	if capped := retryAfterFor(EnrichmentErrorTransient, 1000); capped > 6*time.Hour {
 		t.Errorf("transient backoff = %v, want capped at 6h", capped)
+	}
+}
+
+// A long cause whose 500-byte boundary falls inside a multi-byte rune must not
+// produce invalid UTF-8: Postgres rejects it, which would silently fail the
+// whole failure/backoff write and leave the item with no backoff at all.
+func TestRecordFailureTruncatesCauseOnARuneBoundary(t *testing.T) {
+	pool := newClaimTestPool(t)
+	store := newEnrichmentStateStore(pool)
+	ctx := context.Background()
+
+	contentID := seedAudiobook(t, pool, "utf8", "", false)
+
+	// 499 ASCII bytes then a 3-byte rune: the byte-index cut lands mid-rune.
+	cause := strings.Repeat("x", 499) + "日本語エラー"
+	if err := store.RecordFailure(ctx, contentID, EnrichmentErrorTransient, cause); err != nil {
+		t.Fatalf("RecordFailure with multi-byte cause: %v", err)
+	}
+
+	var stored string
+	if err := pool.QueryRow(ctx,
+		`SELECT last_error FROM audiobook_enrichment_state WHERE content_id = $1`,
+		contentID).Scan(&stored); err != nil {
+		t.Fatalf("read stored cause: %v", err)
+	}
+	if !utf8.ValidString(stored) {
+		t.Error("stored cause is not valid UTF-8")
+	}
+	if len(stored) == 0 || len(stored) > 500 {
+		t.Errorf("stored cause length = %d, want (0, 500]", len(stored))
 	}
 }

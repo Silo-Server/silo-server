@@ -3,6 +3,7 @@ package audiobooks
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,34 +41,39 @@ const (
 	EnrichmentErrorPermanent   EnrichmentErrorClass = "permanent"
 )
 
-// retryAfterFor returns how long to park an item given how it failed and how
-// many times it has already been tried.
+// backoffParams returns the per-attempt step and the ceiling for a failure
+// class. The parked interval is min(step * attempts, cap), computed inside the
+// upsert itself so the write stays a single atomic statement.
 //
 // Rate limiting backs off hardest and fastest: it is a statement about the
 // provider, not the item, and retrying into a closed window is what turns a
 // throttle into a backlog. Permanent failures are parked far out rather than
 // never, because "permanent" is a classification and classifications are wrong
-// sometimes.
+// sometimes -- the step equals the cap so attempts do not extend it.
+func backoffParams(class EnrichmentErrorClass) (step, ceiling time.Duration) {
+	switch class {
+	case EnrichmentErrorRateLimited:
+		return time.Hour, 24 * time.Hour
+	case EnrichmentErrorPermanent:
+		return 30 * 24 * time.Hour, 30 * 24 * time.Hour
+	default: // transient
+		return 15 * time.Minute, 6 * time.Hour
+	}
+}
+
+// retryAfterFor mirrors the SQL computation for tests and callers that reason
+// about the schedule in Go. Implemented via backoffParams so the two cannot
+// drift.
 func retryAfterFor(class EnrichmentErrorClass, attempts int) time.Duration {
 	if attempts < 1 {
 		attempts = 1
 	}
-	switch class {
-	case EnrichmentErrorRateLimited:
-		d := time.Duration(attempts) * time.Hour
-		if d > 24*time.Hour {
-			d = 24 * time.Hour
-		}
-		return d
-	case EnrichmentErrorPermanent:
-		return 30 * 24 * time.Hour
-	default: // transient
-		d := time.Duration(attempts) * 15 * time.Minute
-		if d > 6*time.Hour {
-			d = 6 * time.Hour
-		}
-		return d
+	step, ceiling := backoffParams(class)
+	d := time.Duration(attempts) * step
+	if d > ceiling {
+		d = ceiling
 	}
+	return d
 }
 
 // enrichmentStateStore records attempt history for audiobook enrichment.
@@ -120,38 +126,45 @@ func (s *enrichmentStateStore) RecordFailure(
 	if s == nil || s.pool == nil || contentID == "" {
 		return nil
 	}
-	// Truncate: a provider stack trace in a status column helps nobody and
-	// bloats every row that reads it.
+	// Truncate on a rune boundary: a provider stack trace in a status column
+	// helps nobody, and a byte-index slice can split a UTF-8 sequence --
+	// Postgres rejects invalid UTF-8, which would silently fail the whole
+	// failure/backoff write for that call.
 	const maxCause = 500
 	if len(cause) > maxCause {
-		cause = cause[:maxCause]
+		cause = strings.ToValidUTF8(cause[:maxCause], "")
 	}
 
-	var attempts int
-	err := s.pool.QueryRow(ctx, `
+	// One statement, deliberately. Recording the failure and parking the retry
+	// used to be two round trips, and anything landing between them -- a
+	// cancelled context, a dropped connection, a concurrent RecordOutcome on
+	// the same row -- left the item with an incremented attempts count but no
+	// backoff at all, immediately re-claimable against the very provider that
+	// just failed. The parked interval is min(step * attempts, cap), computed
+	// on the post-increment attempts value inside the upsert.
+	step, ceiling := backoffParams(class)
+	_, err := s.pool.Exec(ctx, `
 		INSERT INTO audiobook_enrichment_state (
 			content_id, attempts, last_error_class, last_error,
-			last_attempt_at, updated_at
-		) VALUES ($1, 1, $2, $3, now(), now())
+			next_attempt_at, last_attempt_at, updated_at
+		) VALUES (
+			$1, 1, $2, $3,
+			now() + make_interval(secs => LEAST($4::double precision, $5::double precision)),
+			now(), now()
+		)
 		ON CONFLICT (content_id) DO UPDATE SET
 			attempts         = audiobook_enrichment_state.attempts + 1,
 			last_error_class = EXCLUDED.last_error_class,
 			last_error       = EXCLUDED.last_error,
+			next_attempt_at  = now() + make_interval(secs => LEAST(
+				$4::double precision * (audiobook_enrichment_state.attempts + 1),
+				$5::double precision
+			)),
 			last_attempt_at  = now(),
 			updated_at       = now()
-		RETURNING attempts
-	`, contentID, string(class), cause).Scan(&attempts)
+	`, contentID, string(class), cause, step.Seconds(), ceiling.Seconds())
 	if err != nil {
 		return fmt.Errorf("recording audiobook enrichment failure: %w", err)
-	}
-
-	if _, err := s.pool.Exec(ctx, `
-		UPDATE audiobook_enrichment_state
-		   SET next_attempt_at = now() + $2::interval,
-		       updated_at      = now()
-		 WHERE content_id = $1
-	`, contentID, retryAfterFor(class, attempts).String()); err != nil {
-		return fmt.Errorf("parking audiobook enrichment retry: %w", err)
 	}
 	return nil
 }

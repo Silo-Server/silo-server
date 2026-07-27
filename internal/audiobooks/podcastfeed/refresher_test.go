@@ -17,8 +17,8 @@ import (
 type fakeStore struct {
 	mu sync.Mutex
 
-	feeds            []podcastfeed.PodcastFeed
-	existingByGUID   map[string]string
+	feeds           []podcastfeed.PodcastFeed
+	existingByGUID  map[string]string
 	upsertedEpisodes []podcastfeed.PodcastEpisode
 	refreshed        map[string]string // media_item_id → last_error
 }
