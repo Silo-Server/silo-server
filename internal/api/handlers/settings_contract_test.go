@@ -78,16 +78,27 @@ func TestRegistryDefaultsMatchTheContract(t *testing.T) {
 		}
 
 		t.Run(registryKey, func(t *testing.T) {
-			contractDefault, err := scalarDefault(def.DefaultValue)
-			if err != nil {
-				t.Skipf("contract default is not a scalar: %s", def.DefaultValue)
-			}
+			// The null case is settled before scalarDefault, which rejects null
+			// as non-scalar. Asking it first skipped the subtest and left the
+			// comparison below unreachable, so a nullable contract default could
+			// drift from the registry without failing anything.
+			//
 			// The legacy registry stores every value as a string and has no way
 			// to say "unset", so it spells that as the empty string. The
 			// contract spells it null, which is why the language settings are
-			// nullable. Those are the same statement, not a disagreement.
-			if spec.DefaultValue == "" && string(def.DefaultValue) == "null" {
+			// nullable. Those are the same statement, not a disagreement — but
+			// null against a non-empty registry default is a real one.
+			if strings.TrimSpace(string(def.DefaultValue)) == "null" {
+				if spec.DefaultValue != "" {
+					t.Errorf("default disagrees: settingsRegistry has %q, contract has null",
+						spec.DefaultValue)
+				}
 				return
+			}
+
+			contractDefault, err := scalarDefault(def.DefaultValue)
+			if err != nil {
+				t.Skipf("contract default is not a scalar: %s", def.DefaultValue)
 			}
 			if spec.DefaultValue != contractDefault {
 				t.Errorf("default disagrees: settingsRegistry has %q, contract has %q",

@@ -14,8 +14,7 @@ import type {
   TimeFormatPreference,
 } from "@/lib/datetime";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
-import { useOptionalAuth } from "@/hooks/useAuth";
-import { appearanceCacheOwner } from "@/hooks/themePreferences";
+import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import { appearanceCache, storage } from "@/utils/storage";
 
 export const DATE_FORMAT_SETTING_KEY = "ui.date_format";
@@ -49,13 +48,9 @@ const DateTimeFormatContext = createContext<DateTimeFormatContextValue | null>(n
  * lib/datetime, and exposes setters for the settings UI.
  */
 export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
-  const auth = useOptionalAuth();
-  // Same owner token as the theme caches, from the same function, so widening
+  // Same owner token as the theme caches, from the same hook, so widening
   // ownership can never move one provider and leave this one behind.
-  const cacheOwner = appearanceCacheOwner({
-    loading: auth?.loading ?? false,
-    user: auth?.user ? { id: auth.user.id } : null,
-  });
+  const cacheOwner = useAppearanceCacheOwner();
   const loadApiSettings = cacheOwner !== null;
   const { data: apiSettings } = useSettings({ enabled: loadApiSettings });
   const settingMutation = useSetSetting();

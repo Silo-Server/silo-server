@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"strings"
 	"sync"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -188,6 +189,12 @@ func compileObjectSchemas(fsys fs.FS) (map[string][]byte, map[string]*jsonschema
 			continue
 		}
 		name := entry.Name()
+		// schema_ref can only name a .json file, so anything else here is not a
+		// value schema. Parsing it anyway would turn a stray file — an editor
+		// backup, a .DS_Store — into a panic at startup via MustLoad.
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
 		body, err := fs.ReadFile(fsys, path.Join(schemasDir, name))
 		if err != nil {
 			return nil, nil, fmt.Errorf("reading value schema %s: %w", name, err)

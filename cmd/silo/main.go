@@ -401,7 +401,10 @@ func main() {
 	// not a runtime condition, so failing here — loudly, before the first
 	// request — is the whole point: the alternative is shipping an image whose
 	// contract disagrees with the clients that vendored it.
-	contract := settingscontract.MustLoad()
+	contract, err := settingscontract.Load()
+	if err != nil {
+		log.Fatalf("settings contract: %v", err)
+	}
 	contractETag, err := settingscontract.ETag()
 	if err != nil {
 		log.Fatalf("settings contract: %v", err)

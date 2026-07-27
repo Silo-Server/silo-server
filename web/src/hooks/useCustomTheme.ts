@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
-import { useOptionalAuth } from "@/hooks/useAuth";
-import { appearanceCacheOwner } from "@/hooks/themePreferences";
+import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import { appearanceCache, storage } from "@/utils/storage";
 import { parseVarsJson } from "@/lib/themeExport";
 import { sanitizeCss } from "@/lib/cssSanitizer";
@@ -29,13 +28,9 @@ interface UseCustomThemeResult {
 }
 
 export function useCustomTheme(): UseCustomThemeResult {
-  const auth = useOptionalAuth();
   // Owner of the localStorage warm start; null while auth bootstraps or when
   // nobody is signed in, which keeps the last look on the login screen.
-  const cacheOwner = appearanceCacheOwner({
-    loading: auth?.loading ?? false,
-    user: auth?.user ? { id: auth.user.id } : null,
-  });
+  const cacheOwner = useAppearanceCacheOwner();
   const loadApi = cacheOwner !== null;
 
   // API values

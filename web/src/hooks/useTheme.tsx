@@ -2,16 +2,15 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import type { ReactNode } from "react";
 import type { ThemeId } from "@/lib/themes";
 import { useSettings, useSetSetting } from "@/hooks/queries/settings";
-import { useOptionalAuth } from "@/hooks/useAuth";
 import { useBranding } from "@/hooks/useBranding";
 import { appearanceCache, storage } from "@/utils/storage";
 import {
-  appearanceCacheOwner,
   getInitialTheme,
   isValidTheme,
   parseHighContrast,
   parseTextScale,
   parseTextWeight,
+  useAppearanceCacheOwner,
 } from "@/hooks/themePreferences";
 import type { TextScale, TextWeight } from "@/hooks/themePreferences";
 
@@ -47,14 +46,10 @@ function applyHighContrastToDOM(value: boolean): void {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const auth = useOptionalAuth();
   // The account that owns the localStorage warm start. Null while auth is
   // bootstrapping or nobody is signed in, which still trusts the cache so the
   // app paints in the last look this device used.
-  const cacheOwner = appearanceCacheOwner({
-    loading: auth?.loading ?? false,
-    user: auth?.user ? { id: auth.user.id } : null,
-  });
+  const cacheOwner = useAppearanceCacheOwner();
   const loadApiTheme = cacheOwner !== null;
 
   const [themePreference, setThemePreference] = useState<ThemeId>(() =>

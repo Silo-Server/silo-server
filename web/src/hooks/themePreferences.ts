@@ -1,4 +1,5 @@
 import { appearanceCache, storage } from "@/utils/storage";
+import { useOptionalAuth } from "@/hooks/useAuth";
 import type { ThemeId } from "@/lib/themes";
 import { DEFAULT_THEME, THEME_IDS } from "@/lib/themes";
 
@@ -24,6 +25,23 @@ export interface AppearanceAuth {
  */
 export function appearanceCacheOwner({ loading, user }: AppearanceAuth): string | null {
   return !loading && user ? String(user.id) : null;
+}
+
+/**
+ * `appearanceCacheOwner` for the currently authenticated session.
+ *
+ * The three appearance providers each need the same owner token, and each was
+ * adapting the auth context to `AppearanceAuth` itself with identical code.
+ * That put the shape of auth back in three places, which is the duplication the
+ * doc comment above argues against: widening ownership has to be a change to
+ * this file alone.
+ */
+export function useAppearanceCacheOwner(): string | null {
+  const auth = useOptionalAuth();
+  return appearanceCacheOwner({
+    loading: auth?.loading ?? false,
+    user: auth?.user ? { id: auth.user.id } : null,
+  });
 }
 
 export function isValidTheme(value: string | null | undefined): value is ThemeId {

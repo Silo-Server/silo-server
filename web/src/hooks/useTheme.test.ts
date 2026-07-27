@@ -22,7 +22,11 @@ describe("appearanceCacheOwner", () => {
 
 describe("getInitialTheme", () => {
   beforeEach(() => {
-    Object.values(storage.KEYS).forEach((key) => storage.remove(key));
+    // Not storage.remove over storage.KEYS: appearanceCache writes namespaced
+    // keys ("silo-theme:1") and an owner pointer, none of which appear in
+    // storage.KEYS, so that cleanup left both behind and made these cases
+    // order-dependent. storage.test.ts already clears the whole store.
+    localStorage.clear();
   });
 
   it("warms up from the cache while the owner is unknown", () => {
