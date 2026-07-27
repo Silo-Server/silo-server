@@ -64,13 +64,13 @@ export function TourHost({ flow, onDone }: TourHostProps) {
   );
 
   const advance = useCallback(() => {
-    const next = index + 1;
-    if (next >= steps.length) {
+    const nextStep = steps[index + 1];
+    if (!nextStep) {
       finish({ skipped: false });
       return;
     }
-    progress.mutate({ tour_id: flow.tour_id, last_step: steps[next].id });
-    setIndex(next);
+    progress.mutate({ tour_id: flow.tour_id, last_step: nextStep.id });
+    setIndex(index + 1);
   }, [index, steps, finish, progress, flow.tour_id]);
 
   // Server sent nothing we can render — mark done (in an effect, not during
