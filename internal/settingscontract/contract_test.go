@@ -95,6 +95,16 @@ func TestEveryCurrentServerKeyIsRegistered(t *testing.T) {
 		"player.sleep_timer_default_minutes": "player.sleep_timer_default_minutes",
 		"player.next_up_prompt_seconds":      keyNextUpPrompt,
 
+		// Unregistered keys the web client writes through the extension bag.
+		// Two of these the server also reads back, so they cannot be demoted to
+		// client-local state: next_up_mode decides home section assembly, and
+		// card_overlays falls back to a server-wide admin default.
+		"card_overlays":        "ui.card_overlays",
+		"next_up_mode":         "ui.next_up_mode",
+		"sidebar_pins":         "ui.sidebar_pins",
+		"disabled_library_ids": "ui.disabled_library_ids",
+		"library_order":        "ui.library_order",
+
 		// Profile columns that become settings.
 		"user_profiles.language":                    keyAudioLanguage,
 		"user_profiles.subtitle_language":           "playback.subtitle_language",
@@ -1343,5 +1353,138 @@ func TestLibraryPageStateAcceptsTheWebClientsRealSearchStrings(t *testing.T) {
 	}
 	if err := def.ValueSchema.ValidateValue(oversized, objSchemas); err == nil {
 		t.Error("an 8KiB search string was accepted; the bound is not enforced")
+	}
+}
+
+// TestObjectSchemasAcceptTheShapesClientsStore exercises every schema_ref
+// against a real value.
+//
+// Nothing else does. Each of these definitions is nullable with a null default,
+// so TestDefaultsValidateAgainstTheirOwnSchema returns at the null branch
+// without ever compiling the reference — a schema_ref naming a file that does
+// not exist, or a schema that rejects the shape its client actually stores,
+// would pass every other test in this file.
+func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+
+	valid := map[string]string{
+		"ui.card_overlays": `{"version":2,"preset":"minimal","order":["hdr","year"],` +
+			`"items":{"hdr":{"enabled":true,"position":"top-left","accentColor":"#f5c518"},` +
+			`"year":{"enabled":false,"position":"bottom-right","showIcon":true}}}`,
+		"ui.sidebar_pins": `{"7":[{"type":"section","id":"recently-added","label":"Recently Added"}],` +
+			`"12":[{"type":"collection","id":"c-9","label":"Marvel"}]}`,
+		"ui.disabled_library_ids":      `[3,9]`,
+		"ui.library_order":             `[9,3,1]`,
+		"playback.subtitle_appearance": `{"fontSize":"large","position":"top"}`,
+		"ui.custom_theme_vars":         `{"color-bg":"#101014"}`,
+	}
+	for key, value := range valid {
+		t.Run(key, func(t *testing.T) {
+			def, ok := manifest.Lookup(key)
+			if !ok {
+				t.Fatalf("%s is not registered", key)
+			}
+			if err := def.ValueSchema.ValidateValue(json.RawMessage(value), objSchemas); err != nil {
+				t.Fatalf("a value the client stores was rejected: %v", err)
+			}
+		})
+	}
+
+	// Each schema must actually constrain something, or it is decoration.
+	invalid := map[string]string{
+		"ui.card_overlays":        `{"version":2,"preset":"nonesuch","order":[],"items":{}}`,
+		"ui.sidebar_pins":         `{"7":[{"type":"bogus","id":"x","label":"L"}]}`,
+		"ui.disabled_library_ids": `[0,-1]`,
+		"ui.library_order":        `[1,1]`,
+	}
+	for key, value := range invalid {
+		t.Run(key+" rejects", func(t *testing.T) {
+			def, ok := manifest.Lookup(key)
+			if !ok {
+				t.Fatalf("%s is not registered", key)
+			}
+			if err := def.ValueSchema.ValidateValue(json.RawMessage(value), objSchemas); err == nil {
+				t.Fatalf("%s was accepted", value)
+			}
+		})
+	}
+}
+
+// TestQualityIsTwoIndependentAxes pins the split that replaced the compound
+// ladder values. A client composes its own presets from these two, so the
+// contract must not constrain them jointly.
+func TestQualityIsTwoIndependentAxes(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	quality, ok := manifest.Lookup(keyPreferredQuality)
+	if !ok {
+		t.Fatal("playback.preferred_quality is not registered")
+	}
+	bitrate, ok := manifest.Lookup("playback.max_bitrate_kbps")
+	if !ok {
+		t.Fatal("playback.max_bitrate_kbps is not registered")
+	}
+
+	// The resolution axis carries no bitrate spellings.
+	for _, member := range quality.ValueSchema.Values {
+		if s, isString := member.Value.(string); isString && strings.Contains(s, "-") {
+			t.Errorf("quality member %q looks like a compound ladder rung; "+
+				"bitrate belongs to playback.max_bitrate_kbps", s)
+		}
+	}
+
+	// Uncapped has to be expressible, or every client invents a sentinel.
+	if !bitrate.ValueSchema.Nullable {
+		t.Error("max_bitrate_kbps must be nullable so uncapped is a real value")
+	}
+	if string(bitrate.DefaultValue) != jsonNull {
+		t.Errorf("max_bitrate_kbps defaults to %s, want null (uncapped)", bitrate.DefaultValue)
+	}
+
+	// Both axes must resolve identically, or a device override of one and a
+	// profile value of the other would compose into a pair the user never chose.
+	if len(quality.ResolutionOrder) != len(bitrate.ResolutionOrder) {
+		t.Fatalf("resolution orders differ: %v vs %v",
+			quality.ResolutionOrder, bitrate.ResolutionOrder)
+	}
+	for i := range quality.ResolutionOrder {
+		if quality.ResolutionOrder[i] != bitrate.ResolutionOrder[i] {
+			t.Errorf("resolution orders differ at %d: %q vs %q",
+				i, quality.ResolutionOrder[i], bitrate.ResolutionOrder[i])
+		}
+	}
+
+	// The legacy compound values decompose losslessly; this is the table the
+	// migration implements.
+	for _, tc := range []struct {
+		legacy     string
+		resolution string
+		kbps       int
+	}{
+		{"1080p-high", "1080p", 10000},
+		{"1080p", "1080p", 6000},
+		{"1080p-8", "1080p", 6000},
+		{"720p-high", "720p", 4000},
+		{"720p-medium", "720p", 3000},
+		{"720p", "720p", 2000},
+		{"480p", "480p", 1500},
+		{"420p", "480p", 720},
+		{"328p", "480p", 720},
+	} {
+		t.Run("decompose "+tc.legacy, func(t *testing.T) {
+			res, _ := json.Marshal(tc.resolution)
+			if err := quality.ValueSchema.ValidateValue(res, objSchemas); err != nil {
+				t.Errorf("resolution %q is not a member: %v", tc.resolution, err)
+			}
+			kbps, _ := json.Marshal(tc.kbps)
+			if err := bitrate.ValueSchema.ValidateValue(kbps, objSchemas); err != nil {
+				t.Errorf("bitrate %d is out of range: %v", tc.kbps, err)
+			}
+		})
 	}
 }

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://silo-server.dev/contracts/settings/v1/schemas/sidebar-pins.json",
+  "title": "Sidebar pins",
+  "description": "Sections and collections pinned into the sidebar, grouped by the library they belong to. Mirrors SidebarPins in web/src/api/types.ts.",
+  "type": "object",
+  "propertyNames": {
+    "description": "The group the pins sit under — a library id, or a well-known group name.",
+    "type": "string",
+    "maxLength": 64
+  },
+  "maxProperties": 512,
+  "additionalProperties": {
+    "type": "array",
+    "maxItems": 128,
+    "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "label"],
+      "properties": {
+        "type": { "type": "string", "enum": ["section", "collection"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "label": { "type": "string", "maxLength": 256 }
+      }
+    }
+  }
+}

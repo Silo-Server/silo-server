@@ -140,7 +140,27 @@
       "label": "Preferred quality",
       "description": "Pick the quality Silo should prefer.",
       "recommended_control": "select",
-      "notes": "Members are exactly the vocabulary the server already speaks: NormalizeQualityV3 in internal/playback/protocol_v3.go accepts auto, 480p, 720p, 1080p, 2160p and original and normalizes anything else to auto with a degradation warning. Transcode ladder rungs (328p, 720p-high, 1080p-8 and friends) are deliberately absent — they are encoder outputs, not user-facing choices, and registering them would have promised a preference the planner throws away. Members are listed ascending so the ceiling constraint has a defined direction; \"auto\" sorts lowest because it never exceeds a cap, and \"original\" highest because it is the uncapped source. Enforcing the ceiling needs internal/access/quality.go to learn both sentinels: qualityRank ranks neither today, so auto and original both tie at 0 with unset and a cap would let original through. That is Phase 2 work and the ordering it must implement is the one declared here. Migrates user_profiles.quality_preference as the profile fallback; because that column is NOT NULL DEFAULT '1080p', migration writes a profile row only where the value is not the column default, or every profile would be pinned to 1080p having never chosen it. The account/profile max_playback_quality columns stay in internal/policy and are NOT settings."
+      "notes": "The resolution axis. Members are exactly the vocabulary the server already speaks: NormalizeQualityV3 in internal/playback/protocol_v3.go accepts auto, 480p, 720p, 1080p, 2160p and original and normalizes anything else to auto with a degradation warning. Transcode ladder rungs (328p, 720p-high, 1080p-8 and friends) are deliberately absent — they were never a third dimension, only a bitrate spelled into the resolution string. web/src/player/hooks/useTranscodeQuality.ts already decomposes them, defining 1080p-high as {resolution: 1080p, bitrate: 10000} and sending the two to the server separately, so the compound form never reached the wire. playback.max_bitrate_kbps is now that second axis, and clients compose the two into whatever presets they want to show. Members are listed ascending so the ceiling constraint has a defined direction; \"auto\" sorts lowest because it never exceeds a cap, and \"original\" highest because it is the uncapped source. Enforcing the ceiling needs internal/access/quality.go to learn both sentinels: qualityRank ranks neither today, so auto and original both tie at 0 with unset and a cap would let original through. Migrates user_profiles.quality_preference as the profile fallback; because that column is NOT NULL DEFAULT '1080p', migration writes a profile row only where the value is not the column default, or every profile would be pinned to 1080p having never chosen it. The account/profile max_playback_quality columns stay in internal/policy and are NOT settings."
+    },
+    {
+      "key": "playback.max_bitrate_kbps",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": {
+        "type": "integer",
+        "nullable": true,
+        "minimum": 100,
+        "maximum": 200000
+      },
+      "default_value": null,
+      "unit": "kbps",
+      "category": "playback",
+      "label": "Maximum bitrate",
+      "description": "Cap how much bandwidth playback may use. No cap means Silo picks for the chosen resolution.",
+      "recommended_control": "select",
+      "notes": "The bitrate axis, orthogonal to playback.preferred_quality. Splitting them is what the clients were already doing: the in-player switcher sends resolution and bitrate as separate fields, and downloads (DownloadQuality in silo-android) dropped resolution entirely and kept only a bitrate ladder. Two values rather than one compound enum means a client can offer \"1080p High\" without the server having to agree on what \"High\" means — retuning a preset is a client release, not a contract break, and it stays additive under the widening rule. null is uncapped, which is why this is nullable rather than defaulting to a large number: absent and \"as much as you like\" are the same statement, and a numeric sentinel would have to be widened every time hardware improves. The bounds are deliberately loose — 100 kbps is below any watchable stream and 200 Mbps is above any remux — because this caps a preference, not a policy; entitlement limits live in internal/policy. Migration decomposes the legacy compound values: 1080p-high becomes (1080p, 10000), 720p-medium becomes (720p, 3000), 420p becomes (480p, 720), following the bitrates in web/src/player/hooks/useTranscodeQuality.ts, so no stored preference is lost to the rejects table."
     },
     {
       "key": "playback.auto_skip_intro",
@@ -614,6 +634,96 @@
       "description": "What search covers by default.",
       "recommended_control": "select",
       "notes": "Moved from account to profile scope; the account row is copied to every profile during migration."
+    },
+    {
+      "key": "ui.card_overlays",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "card-overlays.json",
+        "nullable": true
+      },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "appearance",
+      "label": "Poster badges",
+      "description": "Which badges appear on poster cards, and where.",
+      "notes": "Registered from the legacy unprefixed key card_overlays, which reached the server only through the unknown-key extension bag — stored as an arbitrary string with no validation. null means the user has expressed no preference, which is what lets the server-wide admin default in the overlay-config endpoint apply; writing a resolved-but-unchosen value would silently pin them. The admin default and the enabled kill switch stay in server_settings and are not user settings."
+    },
+    {
+      "key": "ui.next_up_mode",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "combined", "label": "With Continue Watching" },
+          { "value": "separate", "label": "Separate row" }
+        ]
+      },
+      "default_value": "combined",
+      "category": "navigation",
+      "label": "Next up episodes",
+      "description": "Whether upcoming episodes stay with Continue Watching or get their own row.",
+      "recommended_control": "select",
+      "notes": "Registered from the legacy unprefixed key next_up_mode. The server reads it directly when assembling home sections, so it cannot be client-local; that read moves to the canonical resolver at cutover. The legacy value was untyped and absent meant combined, which is why combined is the default rather than a third \"unset\" member."
+    },
+    {
+      "key": "ui.sidebar_pins",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "sidebar-pins.json",
+        "nullable": true
+      },
+      "default_value": null,
+      "platforms": ["web"],
+      "category": "navigation",
+      "label": "Pinned sidebar items",
+      "description": "Sections and collections pinned into the sidebar.",
+      "notes": "Registered from the legacy unprefixed key sidebar_pins. Navigation state rather than an authored preference, so it has no control; it is written by the pin affordances themselves."
+    },
+    {
+      "key": "ui.disabled_library_ids",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "library-id-list.json",
+        "nullable": true
+      },
+      "default_value": null,
+      "category": "navigation",
+      "label": "Hidden libraries",
+      "description": "Libraries you have hidden from your own browsing.",
+      "notes": "Registered from the legacy unprefixed key disabled_library_ids. This is the user hiding a library from themselves — it is not an access control. Library visibility enforcement lives in internal/access and internal/policy, and nothing here may be read as a permission. Profile scope rather than profile_device because hiding a library is a statement about what you want to see, not about one screen."
+    },
+    {
+      "key": "ui.library_order",
+      "introduced_in": 1,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "object",
+        "schema_ref": "library-id-list.json",
+        "nullable": true
+      },
+      "default_value": null,
+      "category": "navigation",
+      "label": "Library order",
+      "description": "The order your libraries appear in.",
+      "notes": "Registered from the legacy unprefixed key library_order. Shares library-id-list.json with ui.disabled_library_ids: both are normalized by the same normalizeLibraryIDs in web/src/hooks/queries/libraries.ts, which drops non-integers and duplicates. A library id absent from the list sorts after the ones present, so a stale id for a deleted library is inert and needs no cleanup hook."
     },
     {
       "key": "downloads.wifi_only",
