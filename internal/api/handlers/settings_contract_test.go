@@ -203,7 +203,10 @@ func TestRegistryStepMatchesTheManifest(t *testing.T) {
 		t.Fatal("the manifest no longer declares a step; drop the registry check too")
 	}
 	step := *def.ValueSchema.Step
-	min := *def.ValueSchema.Minimum
+	min, ok := def.ValueSchema.Minimum.Current()
+	if !ok {
+		t.Fatal("the manifest no longer declares a minimum for player.playback_speed")
+	}
 
 	// A value one half-step above the minimum must be rejected by the live
 	// validator for whatever step the manifest currently declares.

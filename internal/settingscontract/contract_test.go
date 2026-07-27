@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -604,6 +605,139 @@ func TestRevisionAwareFilteringHidesNewerElements(t *testing.T) {
 	}
 }
 
+// TestWidenedBoundsStayResolvableAtOlderRevisions is the case a bare scalar
+// plus a revision tag could not express. player.sleep_timer_default_minutes
+// ships with a 240 maximum; widening it to 480 later must not erase the 240,
+// because a client pinned to the newer revision still has to talk to servers
+// that enforce the older one.
+func TestWidenedBoundsStayResolvableAtOlderRevisions(t *testing.T) {
+	widened := &Bound{History: []BoundEntry{
+		{Value: 240},
+		{Value: 480, IntroducedIn: 3},
+	}}
+
+	for _, tc := range []struct {
+		revision int
+		want     float64
+	}{
+		{1, 240}, // the revision that introduced the definition
+		{2, 240}, // still before the widening
+		{3, 480}, // the widening itself
+		{9, 480}, // and everything after it
+	} {
+		got, ok := widened.AtRevision(tc.revision)
+		if !ok {
+			t.Errorf("AtRevision(%d) found no bound", tc.revision)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("AtRevision(%d) = %g, want %g", tc.revision, got, tc.want)
+		}
+	}
+
+	if got, _ := widened.Current(); got != 480 {
+		t.Errorf("Current() = %g, want the newest bound 480", got)
+	}
+
+	// The server validates against its own newest bound regardless of any
+	// peer's revision.
+	schema := &ValueSchema{Type: TypeInteger, Minimum: fixedBound(0), Maximum: widened}
+	if err := schema.ValidateValue(json.RawMessage(`480`), nil); err != nil {
+		t.Errorf("ValidateValue(480) = %v, want nil", err)
+	}
+	if err := schema.ValidateValue(json.RawMessage(`481`), nil); err == nil {
+		t.Error("481 was accepted above the widened maximum")
+	}
+}
+
+// TestBoundsRoundTripInTheirAuthoredShape keeps the manifest diff honest: a
+// bound nobody has widened must not sprout a history array when the contract is
+// re-serialized, or the ETag changes for a file nobody edited.
+func TestBoundsRoundTripInTheirAuthoredShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"bare", `240`},
+		{"history", `[{"value":240},{"value":480,"introduced_in":3}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var bound Bound
+			if err := json.Unmarshal([]byte(tc.raw), &bound); err != nil {
+				t.Fatalf("unmarshalling %s: %v", tc.raw, err)
+			}
+			encoded, err := json.Marshal(bound)
+			if err != nil {
+				t.Fatalf("marshalling: %v", err)
+			}
+			if string(encoded) != tc.raw {
+				t.Errorf("round trip = %s, want %s", encoded, tc.raw)
+			}
+		})
+	}
+}
+
+func TestBoundHistoriesAreValidated(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		maximum *Bound
+		want    string
+	}{
+		{
+			name:    "narrowing is not a widening",
+			maximum: &Bound{History: []BoundEntry{{Value: 480}, {Value: 240, IntroducedIn: 6}}},
+			want:    "narrows",
+		},
+		{
+			name:    "history must move forward",
+			maximum: &Bound{History: []BoundEntry{{Value: 240}, {Value: 480, IntroducedIn: 5}}},
+			want:    "not ordered",
+		},
+		{
+			name:    "later entries must say when they arrived",
+			maximum: &Bound{History: []BoundEntry{{Value: 240}, {Value: 480}}},
+			want:    "must declare introduced_in",
+		},
+		{
+			name:    "a bound cannot predate its definition",
+			maximum: &Bound{History: []BoundEntry{{Value: 240, IntroducedIn: 2}}},
+			want:    "the definition was introduced in 5",
+		},
+		{
+			name:    "a bound cannot postdate the manifest",
+			maximum: &Bound{History: []BoundEntry{{Value: 240}, {Value: 480, IntroducedIn: 99}}},
+			want:    "after the manifest revision",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &ValueSchema{Type: TypeInteger, Minimum: fixedBound(0), Maximum: tc.maximum}
+			errs := schema.validate(5, 10, nil)
+			if len(errs) == 0 {
+				t.Fatalf("validate accepted %s", tc.name)
+			}
+			if joined := errors.Join(errs...).Error(); !strings.Contains(joined, tc.want) {
+				t.Errorf("error %q does not mention %q", joined, tc.want)
+			}
+		})
+	}
+}
+
+// TestEnumMembersCannotPredateTheirDefinition is the enum half of the same
+// lower-bound rule allowed_scopes has always enforced.
+func TestEnumMembersCannotPredateTheirDefinition(t *testing.T) {
+	schema := &ValueSchema{
+		Type:   TypeEnum,
+		Values: []EnumMember{{Value: "old"}, {Value: "new", IntroducedIn: 2}},
+	}
+	errs := schema.validate(5, 10, nil)
+	if len(errs) == 0 {
+		t.Fatal("an enum member claiming to predate its definition was accepted")
+	}
+	if joined := errors.Join(errs...).Error(); !strings.Contains(joined, "before the definition's own 5") {
+		t.Errorf("error %q does not name the definition revision", joined)
+	}
+}
+
 func TestValidateValueRejectsOutOfContractValues(t *testing.T) {
 	manifest, err := Load()
 	if err != nil {
@@ -850,9 +984,15 @@ func TestEnumMatchingIsTypeSafe(t *testing.T) {
 		Type:   TypeEnum,
 		Values: []EnumMember{{Value: "3"}, {Value: float64(3)}},
 	}
-	if errs := mixed.validate(1, nil); len(errs) != 0 {
+	if errs := mixed.validate(1, 1, nil); len(errs) != 0 {
 		t.Errorf(`members "3" and 3 reported as duplicates: %v`, errs)
 	}
+}
+
+// fixedBound is a bound that has never been widened, which is every bound built
+// by hand in a test.
+func fixedBound(value float64) *Bound {
+	return &Bound{History: []BoundEntry{{Value: value}}}
 }
 
 // TestStepIsEnforced closes the gap between a declared constraint and the
@@ -860,9 +1000,9 @@ func TestEnumMatchingIsTypeSafe(t *testing.T) {
 // server that stores 1.4372 hands every client a value its stepper cannot
 // represent.
 func TestStepIsEnforced(t *testing.T) {
-	min, max, step := 0.25, 3.0, 0.05
+	step := 0.05
 	schema := &ValueSchema{
-		Type: TypeNumber, Minimum: &min, Maximum: &max, Step: &step,
+		Type: TypeNumber, Minimum: fixedBound(0.25), Maximum: fixedBound(3.0), Step: &step,
 	}
 
 	for _, raw := range []string{`0.25`, `0.75`, `1`, `1.25`, `1.4`, `2.5`, `3`} {

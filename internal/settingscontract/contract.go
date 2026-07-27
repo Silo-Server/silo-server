@@ -169,12 +169,9 @@ type ValueSchema struct {
 	Nullable bool      `json:"nullable,omitempty"`
 
 	// Numeric (integer, number).
-	Minimum *float64 `json:"minimum,omitempty"`
-	Maximum *float64 `json:"maximum,omitempty"`
+	Minimum *Bound   `json:"minimum,omitempty"`
+	Maximum *Bound   `json:"maximum,omitempty"`
 	Step    *float64 `json:"step,omitempty"`
-	// Revision tags for additively widened bounds.
-	MinimumIntroducedIn int `json:"minimum_introduced_in,omitempty"`
-	MaximumIntroducedIn int `json:"maximum_introduced_in,omitempty"`
 
 	// String.
 	MinLength *int   `json:"min_length,omitempty"`
@@ -191,6 +188,83 @@ type ValueSchema struct {
 	// compiledPattern is Pattern, compiled once when the manifest loads.
 	// ValidateValue runs per request, so it must not compile a regex per call.
 	compiledPattern *regexp.Regexp
+}
+
+// Bound is a numeric limit together with every earlier value it has had.
+//
+// A widened bound cannot be represented as one scalar plus the revision that
+// introduced it, because that discards the value it replaced. A client pinned
+// to the newer revision talking to a server on the older one would then have no
+// correct answer: honoring the new bound offers values the server rejects, and
+// filtering the tagged bound out leaves the setting with no bound at all.
+// Keeping the history lets AtRevision hand back the limit the peer actually
+// enforces.
+type Bound struct {
+	// History is ordered oldest first. The last entry is the bound in force on
+	// the manifest that declares it.
+	History []BoundEntry
+}
+
+// BoundEntry is one value of a bound and the revision that introduced it. A
+// zero IntroducedIn means the bound has held since its definition appeared.
+type BoundEntry struct {
+	Value        float64 `json:"value"`
+	IntroducedIn int     `json:"introduced_in,omitempty"`
+}
+
+// UnmarshalJSON accepts 240 or
+// [{"value":240},{"value":480,"introduced_in":3}]. The bare form is the common
+// case — most bounds are never widened — and keeping it readable is worth the
+// dual shape, the same trade ScopeEntry makes.
+func (b *Bound) UnmarshalJSON(data []byte) error {
+	var bare float64
+	if err := json.Unmarshal(data, &bare); err == nil {
+		b.History = []BoundEntry{{Value: bare}}
+		return nil
+	}
+	var history []BoundEntry
+	if err := json.Unmarshal(data, &history); err != nil {
+		return fmt.Errorf("bound must be a number or an array of {value, introduced_in}: %w", err)
+	}
+	b.History = history
+	return nil
+}
+
+// MarshalJSON emits the bare number when a bound has never been widened, so
+// round-tripping the manifest does not rewrite untouched entries.
+func (b Bound) MarshalJSON() ([]byte, error) {
+	if len(b.History) == 1 && b.History[0].IntroducedIn == 0 {
+		return json.Marshal(b.History[0].Value)
+	}
+	return json.Marshal(b.History)
+}
+
+// Current returns the bound in force on this manifest.
+func (b *Bound) Current() (float64, bool) {
+	if b == nil || len(b.History) == 0 {
+		return 0, false
+	}
+	return b.History[len(b.History)-1].Value, true
+}
+
+// AtRevision returns the bound a peer at revision enforces: the newest entry
+// introduced no later than that revision. Clients call this so they never offer
+// a value the connected server will refuse.
+func (b *Bound) AtRevision(revision int) (float64, bool) {
+	if b == nil {
+		return 0, false
+	}
+	var (
+		value float64
+		found bool
+	)
+	for _, entry := range b.History {
+		if entry.IntroducedIn > revision {
+			continue
+		}
+		value, found = entry.Value, true
+	}
+	return value, found
 }
 
 // EnumMember is one allowed enum value. Members are objects rather than bare

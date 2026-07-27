@@ -54,7 +54,7 @@ func (d *Definition) validate(manifestRevision int, objectSchemas map[string]*js
 
 	errs = append(errs, d.validateScopes(manifestRevision)...)
 	errs = append(errs, d.validateResolutionOrder()...)
-	errs = append(errs, d.ValueSchema.validate(manifestRevision, objectSchemas)...)
+	errs = append(errs, d.ValueSchema.validate(d.IntroducedIn, manifestRevision, objectSchemas)...)
 	errs = append(errs, d.validateDefault(objectSchemas)...)
 	errs = append(errs, d.validateConstraint()...)
 
@@ -156,7 +156,10 @@ func (d *Definition) validateResolutionOrder() []error {
 	return errs
 }
 
-func (v *ValueSchema) validate(manifestRevision int, objectSchemas map[string]*jsonschema.Schema) []error {
+func (v *ValueSchema) validate(
+	definitionRevision, manifestRevision int,
+	objectSchemas map[string]*jsonschema.Schema,
+) []error {
 	var errs []error
 
 	switch v.Type {
@@ -168,28 +171,27 @@ func (v *ValueSchema) validate(manifestRevision int, objectSchemas map[string]*j
 			errs = append(errs, fmt.Errorf("%s requires minimum and maximum", v.Type))
 			break
 		}
-		if *v.Minimum > *v.Maximum {
+		// A slice, not a map: ranging a map would order these errors randomly,
+		// so the same broken manifest would report differently from run to run.
+		for _, bound := range []struct {
+			label    string
+			bound    *Bound
+			widensUp bool
+		}{
+			{"minimum", v.Minimum, false},
+			{"maximum", v.Maximum, true},
+		} {
+			errs = append(errs, bound.bound.validate(
+				bound.label, bound.widensUp, definitionRevision, manifestRevision)...)
+		}
+		minimum, hasMinimum := v.Minimum.Current()
+		maximum, hasMaximum := v.Maximum.Current()
+		if hasMinimum && hasMaximum && minimum > maximum {
 			errs = append(errs, fmt.Errorf(
-				"minimum %g exceeds maximum %g", *v.Minimum, *v.Maximum))
+				"minimum %g exceeds maximum %g", minimum, maximum))
 		}
 		if v.Step != nil && *v.Step <= 0 {
 			errs = append(errs, fmt.Errorf("step must be positive, got %g", *v.Step))
-		}
-		// A slice, not a map: ranging a map would order these two errors
-		// randomly, so the same broken manifest would report differently from
-		// run to run.
-		for _, tagged := range []struct {
-			label string
-			rev   int
-		}{
-			{"minimum_introduced_in", v.MinimumIntroducedIn},
-			{"maximum_introduced_in", v.MaximumIntroducedIn},
-		} {
-			if tagged.rev != 0 && tagged.rev > manifestRevision {
-				errs = append(errs, fmt.Errorf(
-					"%s is %d, after the manifest revision %d",
-					tagged.label, tagged.rev, manifestRevision))
-			}
 		}
 
 	case TypeString:
@@ -228,10 +230,21 @@ func (v *ValueSchema) validate(manifestRevision int, objectSchemas map[string]*j
 				errs = append(errs, fmt.Errorf("enum repeats value %s", displayEnumValue(member.Value)))
 			}
 			seen[token] = struct{}{}
-			if member.IntroducedIn != 0 && member.IntroducedIn > manifestRevision {
-				errs = append(errs, fmt.Errorf(
-					"enum member %s claims introduced_in %d, after the manifest revision %d",
-					displayEnumValue(member.Value), member.IntroducedIn, manifestRevision))
+			if member.IntroducedIn != 0 {
+				// Same lower bound validateScopes enforces: a member cannot
+				// claim to predate the definition that contains it, or a client
+				// filtering by revision would offer it to a server too old to
+				// have the setting at all.
+				if member.IntroducedIn < definitionRevision {
+					errs = append(errs, fmt.Errorf(
+						"enum member %s claims introduced_in %d, before the definition's own %d",
+						displayEnumValue(member.Value), member.IntroducedIn, definitionRevision))
+				}
+				if member.IntroducedIn > manifestRevision {
+					errs = append(errs, fmt.Errorf(
+						"enum member %s claims introduced_in %d, after the manifest revision %d",
+						displayEnumValue(member.Value), member.IntroducedIn, manifestRevision))
+				}
 			}
 		}
 
@@ -247,6 +260,67 @@ func (v *ValueSchema) validate(manifestRevision int, objectSchemas map[string]*j
 
 	default:
 		errs = append(errs, fmt.Errorf("unknown value type %q", v.Type))
+	}
+
+	return errs
+}
+
+// validate checks a bound's history. widensUp says which direction is a
+// widening for this bound: a maximum may only grow and a minimum may only
+// shrink, because the manifest's widening rule says a later revision must
+// accept every value an earlier one did. A bound that moved the other way is a
+// narrowing, which needs a new key rather than a revision tag.
+func (b *Bound) validate(label string, widensUp bool, definitionRevision, manifestRevision int) []error {
+	if b == nil || len(b.History) == 0 {
+		return []error{fmt.Errorf("%s has no value", label)}
+	}
+
+	var errs []error
+	previousRevision := 0
+	for i, entry := range b.History {
+		switch {
+		case i == 0:
+			// The original bound may be written bare, which reads as "has held
+			// since the definition appeared".
+			if entry.IntroducedIn != 0 && entry.IntroducedIn != definitionRevision {
+				errs = append(errs, fmt.Errorf(
+					"%s history starts at revision %d, but the definition was introduced in %d",
+					label, entry.IntroducedIn, definitionRevision))
+			}
+			previousRevision = definitionRevision
+		default:
+			if entry.IntroducedIn == 0 {
+				errs = append(errs, fmt.Errorf(
+					"%s history entry %d must declare introduced_in", label, i))
+				continue
+			}
+			if entry.IntroducedIn <= previousRevision {
+				errs = append(errs, fmt.Errorf(
+					"%s history is not ordered: entry %d claims introduced_in %d, at or before %d",
+					label, i, entry.IntroducedIn, previousRevision))
+			}
+			previousRevision = entry.IntroducedIn
+		}
+
+		if entry.IntroducedIn > manifestRevision {
+			errs = append(errs, fmt.Errorf(
+				"%s history entry %d claims introduced_in %d, after the manifest revision %d",
+				label, i, entry.IntroducedIn, manifestRevision))
+		}
+
+		if i > 0 {
+			previous := b.History[i-1].Value
+			if widensUp && entry.Value < previous {
+				errs = append(errs, fmt.Errorf(
+					"%s narrows from %g to %g at revision %d; a narrowing needs a new key",
+					label, previous, entry.Value, entry.IntroducedIn))
+			}
+			if !widensUp && entry.Value > previous {
+				errs = append(errs, fmt.Errorf(
+					"%s narrows from %g to %g at revision %d; a narrowing needs a new key",
+					label, previous, entry.Value, entry.IntroducedIn))
+			}
+		}
 	}
 
 	return errs
@@ -447,19 +521,24 @@ func StepAligned(value, base, step float64) bool {
 	return math.Abs(steps-math.Round(steps))*step <= stepTolerance
 }
 
+// checkRange validates against the bounds this server enforces, which are
+// always the newest in the history. Revision filtering is a client-side concern
+// — the server accepts everything its own manifest allows.
 func (v *ValueSchema) checkRange(value float64) error {
-	if v.Minimum != nil && value < *v.Minimum {
-		return fmt.Errorf("%g is below the minimum %g", value, *v.Minimum)
+	minimum, hasMinimum := v.Minimum.Current()
+	if hasMinimum && value < minimum {
+		return fmt.Errorf("%g is below the minimum %g", value, minimum)
 	}
-	if v.Maximum != nil && value > *v.Maximum {
-		return fmt.Errorf("%g is above the maximum %g", value, *v.Maximum)
+	maximum, hasMaximum := v.Maximum.Current()
+	if hasMaximum && value > maximum {
+		return fmt.Errorf("%g is above the maximum %g", value, maximum)
 	}
 	if v.Step != nil {
 		// Steps are counted from the minimum, which is the only origin every
 		// client's stepper agrees on.
 		base := 0.0
-		if v.Minimum != nil {
-			base = *v.Minimum
+		if hasMinimum {
+			base = minimum
 		}
 		if !StepAligned(value, base, *v.Step) {
 			return fmt.Errorf("%g is not a multiple of the step %g from %g",

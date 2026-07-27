@@ -61,6 +61,44 @@
         }
       ]
     },
+    "integerBound": {
+      "description": "A numeric bound. Write a bare number for a bound that has never been widened. Widening replaces it with the full history, oldest first, so a client can recover the bound an older server still enforces; the bare form alone would discard it.",
+      "oneOf": [
+        { "type": "integer" },
+        {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value"],
+            "properties": {
+              "value": { "type": "integer" },
+              "introduced_in": { "$ref": "#/$defs/revisionRef" }
+            }
+          }
+        }
+      ]
+    },
+    "numberBound": {
+      "description": "A numeric bound. Write a bare number for a bound that has never been widened. Widening replaces it with the full history, oldest first, so a client can recover the bound an older server still enforces; the bare form alone would discard it.",
+      "oneOf": [
+        { "type": "number" },
+        {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value"],
+            "properties": {
+              "value": { "type": "number" },
+              "introduced_in": { "$ref": "#/$defs/revisionRef" }
+            }
+          }
+        }
+      ]
+    },
     "enumMember": {
       "description": "Enum members are objects so members added later can carry their own revision.",
       "type": "object",
@@ -90,12 +128,10 @@
           "required": ["type", "minimum", "maximum"],
           "properties": {
             "type": { "const": "integer" },
-            "minimum": { "type": "integer" },
-            "maximum": { "type": "integer" },
+            "minimum": { "$ref": "#/$defs/integerBound" },
+            "maximum": { "$ref": "#/$defs/integerBound" },
             "step": { "type": "integer", "exclusiveMinimum": 0 },
-            "nullable": { "type": "boolean", "default": false },
-            "minimum_introduced_in": { "$ref": "#/$defs/revisionRef" },
-            "maximum_introduced_in": { "$ref": "#/$defs/revisionRef" }
+            "nullable": { "type": "boolean", "default": false }
           }
         },
         {
@@ -104,12 +140,10 @@
           "required": ["type", "minimum", "maximum"],
           "properties": {
             "type": { "const": "number" },
-            "minimum": { "type": "number" },
-            "maximum": { "type": "number" },
+            "minimum": { "$ref": "#/$defs/numberBound" },
+            "maximum": { "$ref": "#/$defs/numberBound" },
             "step": { "type": "number", "exclusiveMinimum": 0 },
-            "nullable": { "type": "boolean", "default": false },
-            "minimum_introduced_in": { "$ref": "#/$defs/revisionRef" },
-            "maximum_introduced_in": { "$ref": "#/$defs/revisionRef" }
+            "nullable": { "type": "boolean", "default": false }
           }
         },
         {

@@ -400,7 +400,7 @@
       "label": "Default sleep timer",
       "description": "Duration the sleep timer starts on when you turn it on. 0 leaves it off.",
       "recommended_control": "stepper",
-      "notes": "Android keeps this device-local today and clamps to 0..240; it was never written to the server rather than written and rejected. The maximum matches that clamp rather than exceeding it, and the default matches Android's shipped 30, because a manifest that disagrees with the only client implementing a setting is the drift this contract exists to remove — and a default of 0 would silently turn the preset off for everyone at cutover. Raising the maximum later is additive under the widening rule: bump it and tag it with maximum_introduced_in. This is the duration the timer starts on, not whether one is running: the design classes a running sleep timer as private local, so only the persisted default is registered."
+      "notes": "Android keeps this device-local today and clamps to 0..240; it was never written to the server rather than written and rejected. The maximum matches that clamp rather than exceeding it, and the default matches Android's shipped 30, because a manifest that disagrees with the only client implementing a setting is the drift this contract exists to remove — and a default of 0 would silently turn the preset off for everyone at cutover. Raising the maximum later is additive under the widening rule: replace the bare maximum with its history so a client can still see the 240 an older server enforces. This is the duration the timer starts on, not whether one is running: the design classes a running sleep timer as private local, so only the persisted default is registered."
     },
     {
       "key": "ui.theme",
