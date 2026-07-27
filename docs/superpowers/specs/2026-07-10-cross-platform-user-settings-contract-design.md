@@ -521,6 +521,12 @@ the amendment process it describes only exists *after* lock. There is therefore 
 write and no exception to request: before lock, removing the legacy settings surface is simply in
 scope.
 
+That argument does not live only here. Reasoning kept in a design doc is invisible to whoever reads
+the policy later and sees a removal that appears to break it, so the removal is recorded in the
+**pre-lock removals** table in `docs/architecture/v1-scope.md`, which is the file that governs it.
+The table also carries the deadline: **this work must ship before the scope locks.** If it has not,
+the justification lapses and the removal goes through Deprecation/Sunset like anything else.
+
 **This is an argument for doing the work now rather than after lock.** After lock, the same removal
 would need the Deprecation/Sunset flow the v1 policy mandates and the codebase already implements
 (`internal/api/handlers/legacy_read_routes.go`), which reintroduces exactly the transitional

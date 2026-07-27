@@ -118,6 +118,11 @@ Additive-only within `/api/v1`:
 - New features expose capability endpoints for feature detection rather than relying on version
   sniffing. Contract strategy and tooling: issue #135.
 
+Treat this as binding. The one exception: `/api/v1` is not locked yet, so a removal taken before
+lock is in scope — but only when it is recorded in the pre-lock removals table in
+[docs/architecture/v1-scope.md](docs/architecture/v1-scope.md) and ships before the lock. Assume
+any removal not listed there is a mistake.
+
 ## Pull requests
 
 Conventional Commit subjects (`feat(playback): add realtime session hub`). One concern per PR.
