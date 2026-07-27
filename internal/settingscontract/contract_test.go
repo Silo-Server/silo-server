@@ -1286,3 +1286,62 @@ func TestLoneSurrogatesAreRejectedForEveryType(t *testing.T) {
 		t.Errorf("ui.custom_css rejected a valid surrogate pair: %v", err)
 	}
 }
+
+// TestLibraryPageStateAcceptsTheWebClientsRealSearchStrings pins the search
+// bound against what web/src/pages/libraryPageSearchParams.ts actually produces.
+//
+// An advanced view encodes every filter rule as three
+// groups[i][rules][j][field|op|value] keys, so the serialized string grows
+// about 150 characters per rule — measured at 216 for one rule, 518 for three,
+// 820 for five. The bound started at 256, which the current endpoint has never
+// enforced (it only checks that the value parses), so those rows are already
+// stored in production and would have failed the migration that types them.
+func TestLibraryPageStateAcceptsTheWebClientsRealSearchStrings(t *testing.T) {
+	manifest, err := Load()
+	if err != nil {
+		t.Fatalf("loading manifest: %v", err)
+	}
+	def, ok := manifest.Lookup("ui.library_page_state")
+	if !ok {
+		t.Fatal("ui.library_page_state is not registered")
+	}
+
+	// One group of n rules, in the key shape GROUP_RULE_PATTERN matches.
+	search := func(rules int) string {
+		parts := []string{"tab=movies", "sort=dateAdded", "order=desc", "groups%5B0%5D%5Bmatch%5D=all"}
+		for i := 0; i < rules; i++ {
+			for _, field := range []string{"field", "op", "value"} {
+				parts = append(parts, fmt.Sprintf(
+					"groups%%5B0%%5D%%5Brules%%5D%%5B%d%%5D%%5B%s%%5D=Science+Fiction", i, field))
+			}
+		}
+		return strings.Join(parts, "&")
+	}
+
+	for _, rules := range []int{1, 3, 5, 10} {
+		t.Run(fmt.Sprintf("%d rules", rules), func(t *testing.T) {
+			value, err := json.Marshal(map[string]any{
+				"version":   1,
+				"libraries": map[string]any{"7": map[string]any{"search": search(rules)}},
+			})
+			if err != nil {
+				t.Fatalf("encoding: %v", err)
+			}
+			if err := def.ValueSchema.ValidateValue(value, objSchemas); err != nil {
+				t.Fatalf("a %d-rule saved view was rejected: %v", rules, err)
+			}
+		})
+	}
+
+	// The bound still exists — this is not an unbounded string.
+	oversized, err := json.Marshal(map[string]any{
+		"version":   1,
+		"libraries": map[string]any{"7": map[string]any{"search": strings.Repeat("x", 8192)}},
+	})
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	if err := def.ValueSchema.ValidateValue(oversized, objSchemas); err == nil {
+		t.Error("an 8KiB search string was accepted; the bound is not enforced")
+	}
+}
