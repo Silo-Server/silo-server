@@ -513,7 +513,20 @@ func collectMangaMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if len(results) == 0 {
 			continue
 		}
-		for k, v := range results[0].ProviderIDs {
+		// Volume numbers matter more here than anywhere: manga series run to
+		// dozens of volumes with near-identical titles, so the top result is
+		// routinely the right series and the wrong book.
+		match, matched := metadata.BestMatch(item.Title, results)
+		if !matched {
+			slog.DebugContext(ctx, "manga enrichment: no credible match", "component", "manga",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"candidates", len(results),
+			)
+			continue
+		}
+		for k, v := range match.ProviderIDs {
 			if v != "" {
 				if _, exists := accumulatedIDs[k]; !exists {
 					accumulatedIDs[k] = v

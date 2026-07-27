@@ -662,7 +662,7 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 		&fakeEbookMetadataProvider{slug: "broken", searchErr: searchErr, getErr: getErr},
 		&fakeEbookMetadataProvider{
 			slug:    "working",
-			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"openlibrary": "OL1M"}}},
+			results: []metadata.SearchResult{{Name: "t", ProviderIDs: map[string]string{"openlibrary": "OL1M"}}},
 			result:  &metadata.MetadataResult{HasMetadata: true, Overview: "found"},
 		},
 	}
@@ -704,7 +704,7 @@ func TestCollectEbookMetadataSkipsProviderIDOwnedByAnotherItem(t *testing.T) {
 	providers := []metadata.Provider{
 		&fakeEbookMetadataProvider{
 			slug:    "bookinfo",
-			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
+			results: []metadata.SearchResult{{Name: "t", ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
 			result:  &metadata.MetadataResult{HasMetadata: true, Overview: "book one"},
 		},
 	}
@@ -725,7 +725,7 @@ func TestCollectEbookMetadataSurfacesOwnershipCheckError(t *testing.T) {
 	providers := []metadata.Provider{
 		&fakeEbookMetadataProvider{
 			slug:    "bookinfo",
-			results: []metadata.SearchResult{{ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
+			results: []metadata.SearchResult{{Name: "t", ProviderIDs: map[string]string{"bookinfo": "40817436"}}},
 		},
 	}
 	owner := &fakeProviderIDOwner{err: checkErr}

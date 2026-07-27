@@ -961,7 +961,20 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if len(results) == 0 {
 			continue
 		}
-		for k, v := range results[0].ProviderIDs {
+		// Score against item.Title, not searchQuery.Title: the query is
+		// deliberately cleaned before it goes out, but the check has to be
+		// against what we actually hold on disk.
+		match, matched := metadata.BestMatch(item.Title, results)
+		if !matched {
+			slog.DebugContext(ctx, "ebook enrichment: no credible match", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"candidates", len(results),
+			)
+			continue
+		}
+		for k, v := range match.ProviderIDs {
 			if v == "" {
 				continue
 			}

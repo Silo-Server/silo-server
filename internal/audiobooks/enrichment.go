@@ -432,8 +432,23 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		if len(results) == 0 {
 			continue
 		}
-		// Take the first result's IDs as a candidate; later providers may fill gaps.
-		for k, v := range results[0].ProviderIDs {
+		// Score candidates against the title on disk rather than trusting the
+		// provider's own ranking. Search backends answer nearly every query
+		// with something, and accepting the top row unconditionally is how an
+		// unrelated book -- or the wrong volume of the right series -- became
+		// an item's permanent identity.
+		match, ok := metadata.BestMatch(item.Title, results)
+		if !ok {
+			slog.DebugContext(ctx, "audiobook enrichment: no credible match", "component", "audiobooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"candidates", len(results),
+			)
+			continue
+		}
+		// Take the accepted match's IDs as a candidate; later providers may fill gaps.
+		for k, v := range match.ProviderIDs {
 			if v != "" {
 				if _, exists := accumulatedIDs[k]; !exists {
 					accumulatedIDs[k] = v
