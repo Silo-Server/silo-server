@@ -132,6 +132,10 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		goose.WithTableName(gooseVersionTable),
 		goose.WithAllowOutofOrder(true),
 		goose.WithSessionLocker(&legacyBootstrapLocker{delegate: locker}),
+		// The settings backfill is Go rather than SQL: it validates every value
+		// against the contract and re-encodes it as typed JSON, which SQL
+		// cannot do without duplicating the manifest.
+		goose.WithGoMigrations(settingsBackfillMigration()),
 	)
 	if err != nil {
 		_ = sqlDB.Close()
