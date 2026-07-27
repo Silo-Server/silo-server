@@ -139,8 +139,14 @@ func (p *DVRPUProbe) CanStrip(ctx context.Context, bin, inputPath string) bool {
 	p.inflight[key] = call
 	p.mu.Unlock()
 
+	// Detached from the caller: the leader is probing on behalf of every
+	// follower queued behind it, so its own client giving up must not turn a
+	// verdict the others are waiting on into an inconclusive fail-open — that
+	// would hand a live session the strip this source cannot survive. The
+	// probe stays bounded by dvRPUProbeTimeout, and a verdict reached after
+	// the leader has left is still worth caching for the next start.
 	started := time.Now()
-	verdict := runDVRPUProbe(ctx, bin, inputPath)
+	verdict := runDVRPUProbe(context.WithoutCancel(ctx), bin, inputPath)
 	call.strippable = verdict != dvRPUBroken
 
 	p.mu.Lock()
@@ -226,8 +232,10 @@ func runDVRPUProbe(ctx context.Context, bin, inputPath string) dvRPUVerdict {
 		return dvRPUBroken
 	}
 	if probeCtx.Err() != nil || ctx.Err() != nil {
-		// Timed out, or the caller went away, without the filter having said
-		// anything. Nothing was learned about the file.
+		// The run ended on the deadline rather than on ffmpeg's own verdict,
+		// with the filter having said nothing. Nothing was learned about the
+		// file. CanStrip detaches from the request, so in practice this is the
+		// timeout; the ctx check keeps the rule right for any other caller.
 		return dvRPUUnknown
 	}
 	if err != nil {

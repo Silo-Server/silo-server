@@ -112,21 +112,30 @@ func TestInconclusiveProbeIsNeitherFatalNorCached(t *testing.T) {
 	}
 }
 
-// A cancelled context must not be recorded as a rejection either.
-func TestCancelledProbeIsNotCached(t *testing.T) {
+// The leader probes on behalf of every follower queued behind it, so its own
+// client giving up must not abandon the run: the verdict is still reached and
+// still cached for the next start. While the probe rode the caller's context,
+// one client disconnecting turned the answer its neighbours were waiting on
+// into an inconclusive fail-open and hung them on the very source it had been
+// about to reject.
+func TestProbeSurvivesTheLeaderLeaving(t *testing.T) {
 	path := writeProbeFile(t, "not really a movie")
+	bin, runLog := writeRejectingFFmpeg(t)
 	probe := NewDVRPUProbe()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if !probe.CanStrip(ctx, "ffmpeg", path) {
-		t.Fatal("a cancelled probe suppressed the strip")
+	if probe.CanStrip(ctx, bin, path) {
+		t.Fatal("a cancelled caller abandoned the probe and fell back to stripping")
+	}
+	if runs := countRuns(t, runLog); runs != 1 {
+		t.Fatalf("the probe ran %d times, want 1", runs)
 	}
 	probe.mu.Lock()
 	cached := len(probe.results)
 	probe.mu.Unlock()
-	if cached != 0 {
-		t.Fatalf("a cancelled probe was cached: %d entries", cached)
+	if cached != 1 {
+		t.Fatalf("the verdict was not cached for the next start: %d entries", cached)
 	}
 }
 
