@@ -50,6 +50,7 @@ import (
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
@@ -564,6 +565,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	var catalogSearchService *catalog.CatalogSearchService
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
+	var onboardingHandler *handlers.OnboardingHandler
+	// Declared here (assigned in the playback block below) so the onboarding
+	// gates closure can reference it before that block runs.
+	var watchTogetherHandler *handlers.WatchTogetherHandler
 	var autoscanHandler *handlers.AutoscanHandler
 	var ebookReaderHandler *handlers.EbookReaderHandler
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
@@ -711,6 +716,35 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
+		// Onboarding tour manifest: gates consult live state at request time
+		// so admin toggles apply without a restart. The watch-together gate
+		// reads the handler variable assigned later in this function — by the
+		// time requests are served it is settled.
+		if deps.UserStoreProvider != nil {
+			onboardingGates := onboarding.Gates{
+				Requests: func(ctx context.Context) bool {
+					settings, err := requestsRepo.GetSettings(ctx)
+					return err == nil && settings.RequestsEnabled
+				},
+				WatchTogether: func(context.Context) bool {
+					return watchTogetherHandler != nil
+				},
+				Recommendations: func(ctx context.Context) bool {
+					if settingsRepo == nil {
+						return false
+					}
+					enabled, err := settingsRepo.Get(ctx, "recommendations.enabled")
+					return err == nil && enabled == "true"
+				},
+				Notifications: func(ctx context.Context) bool {
+					// The in-app inbox always exists; the step is about the
+					// wider system, so require a configured delivery channel.
+					return settingsRepo != nil && mail.NewSMTPSender(settingsRepo).Enabled(ctx)
+				},
+			}
+			onboardingHandler = handlers.NewOnboardingHandler(deps.UserStoreProvider, onboardingGates)
+		}
+
 		autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && deps.PluginService != nil {
 			autoscanSvc := BuildAutoscanService(
@@ -850,7 +884,6 @@ func NewRouter(deps Dependencies) chi.Router {
 	var adminPlaybackControlHandler *handlers.AdminPlaybackControlHandler
 	var playbackCommandDispatcher *playback.CommandDispatcher
 	var streamHandler *handlers.StreamHandler
-	var watchTogetherHandler *handlers.WatchTogetherHandler
 	if deps.SessionMgr != nil {
 		var playbackAdminStore handlers.PlaybackAdminStore
 		if deps.DB != nil {
@@ -2240,6 +2273,16 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/mine", requestHandler.HandleListMine)
 						r.Get("/{id}", requestHandler.HandleGet)
 						r.Post("/{id}/cancel", requestHandler.HandleCancel)
+					})
+				}
+
+				// Onboarding tour routes (profile-scoped).
+				if onboardingHandler != nil {
+					r.Route("/onboarding", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/flow", onboardingHandler.HandleGetFlow)
+						r.Get("/state", onboardingHandler.HandleGetState)
+						r.Post("/progress", onboardingHandler.HandlePostProgress)
 					})
 				}
 
