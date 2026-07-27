@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -64,7 +65,7 @@ func (s *PostgresUserStore) GetSettingValue(
 		args...,
 	)
 	value, err := scanSettingValue(row)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -233,7 +234,7 @@ func (s *PostgresUserStore) GetSettingMutation(
 		s.userID, mutationID,
 	)
 	record, err := scanSettingMutation(row)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -265,7 +266,7 @@ func (s *PostgresUserStore) PutSettingMutation(
 	if err == nil {
 		return stored, true, nil
 	}
-	if err != pgx.ErrNoRows {
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return userstore.SettingMutationRecord{}, false, fmt.Errorf("recording setting mutation %q: %w", record.MutationID, err)
 	}
 

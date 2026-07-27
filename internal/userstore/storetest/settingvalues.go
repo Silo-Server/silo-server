@@ -48,6 +48,13 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 const (
 	audioKey    = "playback.audio_language"
 	subtitleKey = "playback.subtitle_mode"
+
+	// Fixture identities. Named so a backend that mixes up two scope columns
+	// fails on the assertion rather than on a typo in one of the literals.
+	deviceApple  = "apple-tv"
+	seriesOne    = "s-1"
+	seriesTwo    = "s-2"
+	mutationHash = "hash-a"
 )
 
 // seedSettingProfiles creates the profiles every setting-value test addresses.
@@ -127,7 +134,7 @@ func testSettingValueScopes(t *testing.T, newStore func(t *testing.T) userstore.
 	}{
 		{"account", accountID(audioKey), `"en"`},
 		{"profile", profileID(audioKey, "p1"), `"fr"`},
-		{"profile_device", deviceID(audioKey, "p1", "apple-tv"), `"de"`},
+		{"profile_device", deviceID(audioKey, "p1", deviceApple), `"de"`},
 		{"profile_library", libraryID(audioKey, "p1", 42), `"es"`},
 		{"profile_series", seriesID(audioKey, "p1", "series-1"), `"ja"`},
 	}
@@ -304,13 +311,13 @@ func testSettingValuePartialUniqueness(t *testing.T, newStore func(t *testing.T)
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
 		profileID(audioKey, "p2"),
-		deviceID(audioKey, "p1", "apple-tv"),
+		deviceID(audioKey, "p1", deviceApple),
 		deviceID(audioKey, "p1", "iphone"),
-		deviceID(audioKey, "p2", "apple-tv"),
+		deviceID(audioKey, "p2", deviceApple),
 		libraryID(audioKey, "p1", 1),
 		libraryID(audioKey, "p1", 2),
-		seriesID(audioKey, "p1", "s-1"),
-		seriesID(audioKey, "p1", "s-2"),
+		seriesID(audioKey, "p1", seriesOne),
+		seriesID(audioKey, "p1", seriesTwo),
 	}
 
 	// Two writes each: the second must update its own row, never insert a
@@ -323,9 +330,9 @@ func testSettingValuePartialUniqueness(t *testing.T, newStore func(t *testing.T)
 	rows, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{audioKey},
 		ProfileID:  "p1",
-		DeviceID:   "apple-tv",
+		DeviceID:   deviceApple,
 		LibraryIDs: []int{1, 2},
-		SeriesIDs:  []string{"s-1", "s-2"},
+		SeriesIDs:  []string{seriesOne, seriesTwo},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution: %v", err)
@@ -334,11 +341,11 @@ func testSettingValuePartialUniqueness(t *testing.T, newStore func(t *testing.T)
 	want := []userstore.SettingIdentity{
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
-		deviceID(audioKey, "p1", "apple-tv"),
+		deviceID(audioKey, "p1", deviceApple),
 		libraryID(audioKey, "p1", 1),
 		libraryID(audioKey, "p1", 2),
-		seriesID(audioKey, "p1", "s-1"),
-		seriesID(audioKey, "p1", "s-2"),
+		seriesID(audioKey, "p1", seriesOne),
+		seriesID(audioKey, "p1", seriesTwo),
 	}
 	assertIdentitySet(t, rows, want)
 	for _, row := range rows {
@@ -375,13 +382,13 @@ func testSettingValueIdentityValidation(t *testing.T, newStore func(t *testing.T
 			Key: audioKey, Scope: settingscontract.ScopeProfileDevice, ProfileID: "p1",
 		}},
 		{"profile scope with device", userstore.SettingIdentity{
-			Key: audioKey, Scope: settingscontract.ScopeProfile, ProfileID: "p1", DeviceID: "apple-tv",
+			Key: audioKey, Scope: settingscontract.ScopeProfile, ProfileID: "p1", DeviceID: deviceApple,
 		}},
 		{"library scope without library", userstore.SettingIdentity{
 			Key: audioKey, Scope: settingscontract.ScopeProfileLibrary, ProfileID: "p1",
 		}},
 		{"series scope with library", userstore.SettingIdentity{
-			Key: audioKey, Scope: settingscontract.ScopeProfileSeries, ProfileID: "p1", SeriesID: "s-1", LibraryID: 4,
+			Key: audioKey, Scope: settingscontract.ScopeProfileSeries, ProfileID: "p1", SeriesID: seriesOne, LibraryID: 4,
 		}},
 		{"series scope without series", userstore.SettingIdentity{
 			Key: audioKey, Scope: settingscontract.ScopeProfileSeries, ProfileID: "p1",
@@ -425,10 +432,10 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 
 	mustUpsert(t, ctx, store, accountID(audioKey), `"en"`)
 	mustUpsert(t, ctx, store, profileID(audioKey, "p1"), `"fr"`)
-	mustUpsert(t, ctx, store, deviceID(audioKey, "p1", "apple-tv"), `"de"`)
+	mustUpsert(t, ctx, store, deviceID(audioKey, "p1", deviceApple), `"de"`)
 	mustUpsert(t, ctx, store, libraryID(audioKey, "p1", 42), `"es"`)
-	mustUpsert(t, ctx, store, seriesID(audioKey, "p1", "s-1"), `"ja"`)
-	mustUpsert(t, ctx, store, seriesID(audioKey, "p1", "s-2"), `"ko"`)
+	mustUpsert(t, ctx, store, seriesID(audioKey, "p1", seriesOne), `"ja"`)
+	mustUpsert(t, ctx, store, seriesID(audioKey, "p1", seriesTwo), `"ko"`)
 	mustUpsert(t, ctx, store, profileID(subtitleKey, "p1"), `"forced"`)
 
 	// Decoys: another profile, another device, another library, another series,
@@ -443,9 +450,9 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	rows, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{audioKey, subtitleKey},
 		ProfileID:  "p1",
-		DeviceID:   "apple-tv",
+		DeviceID:   deviceApple,
 		LibraryIDs: []int{42},
-		SeriesIDs:  []string{"s-1", "s-2"},
+		SeriesIDs:  []string{seriesOne, seriesTwo},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution: %v", err)
@@ -453,20 +460,20 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	assertIdentitySet(t, rows, []userstore.SettingIdentity{
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
-		deviceID(audioKey, "p1", "apple-tv"),
+		deviceID(audioKey, "p1", deviceApple),
 		libraryID(audioKey, "p1", 42),
-		seriesID(audioKey, "p1", "s-1"),
-		seriesID(audioKey, "p1", "s-2"),
+		seriesID(audioKey, "p1", seriesOne),
+		seriesID(audioKey, "p1", seriesTwo),
 		profileID(subtitleKey, "p1"),
 	})
 
 	// A batch resolves the same rows n single-context calls would, which is what
 	// lets a list view make one round trip instead of one per item.
-	for _, series := range []string{"s-1", "s-2"} {
+	for _, series := range []string{seriesOne, seriesTwo} {
 		single, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 			Keys:      []string{audioKey},
 			ProfileID: "p1",
-			DeviceID:  "apple-tv",
+			DeviceID:  deviceApple,
 			SeriesIDs: []string{series},
 		})
 		if err != nil {
@@ -475,7 +482,7 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 		assertIdentitySet(t, single, []userstore.SettingIdentity{
 			accountID(audioKey),
 			profileID(audioKey, "p1"),
-			deviceID(audioKey, "p1", "apple-tv"),
+			deviceID(audioKey, "p1", deviceApple),
 			seriesID(audioKey, "p1", series),
 		})
 	}
@@ -508,9 +515,9 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	dirty, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{audioKey, "", audioKey, "   "},
 		ProfileID:  "p1",
-		DeviceID:   "apple-tv",
+		DeviceID:   deviceApple,
 		LibraryIDs: []int{42, 42, 0, -1},
-		SeriesIDs:  []string{"s-1", "s-1", "", "  "},
+		SeriesIDs:  []string{seriesOne, seriesOne, "", "  "},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution(dirty): %v", err)
@@ -518,9 +525,9 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	assertIdentitySet(t, dirty, []userstore.SettingIdentity{
 		accountID(audioKey),
 		profileID(audioKey, "p1"),
-		deviceID(audioKey, "p1", "apple-tv"),
+		deviceID(audioKey, "p1", deviceApple),
 		libraryID(audioKey, "p1", 42),
-		seriesID(audioKey, "p1", "s-1"),
+		seriesID(audioKey, "p1", seriesOne),
 	})
 
 	// No keys is not an error and is not "everything".
@@ -563,15 +570,15 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 			accountID(audioKey),
 			profileID(audioKey, "p1"),
 			profileID(audioKey, "p2"),
-			deviceID(audioKey, "p1", "apple-tv"),
+			deviceID(audioKey, "p1", deviceApple),
 			deviceID(audioKey, "p1", "iphone"),
-			deviceID(audioKey, "p2", "apple-tv"),
+			deviceID(audioKey, "p2", deviceApple),
 			libraryID(audioKey, "p1", 1),
 			libraryID(audioKey, "p1", 2),
 			libraryID(audioKey, "p2", 1),
-			seriesID(audioKey, "p1", "s-1"),
-			seriesID(audioKey, "p1", "s-2"),
-			seriesID(audioKey, "p2", "s-1"),
+			seriesID(audioKey, "p1", seriesOne),
+			seriesID(audioKey, "p1", seriesTwo),
+			seriesID(audioKey, "p2", seriesOne),
 		}
 		for _, id := range identities {
 			mustUpsert(t, ctx, store, id, `"en"`)
@@ -602,14 +609,14 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 
 	t.Run("Device", func(t *testing.T) {
 		store, all := seed(t)
-		removed, err := store.DeleteSettingValuesForDevice(ctx, "p1", "apple-tv")
+		removed, err := store.DeleteSettingValuesForDevice(ctx, "p1", deviceApple)
 		if err != nil {
 			t.Fatalf("DeleteSettingValuesForDevice: %v", err)
 		}
 		if removed != 1 {
 			t.Fatalf("DeleteSettingValuesForDevice removed %d rows, want 1", removed)
 		}
-		assertRemaining(t, store, all, []userstore.SettingIdentity{deviceID(audioKey, "p1", "apple-tv")})
+		assertRemaining(t, store, all, []userstore.SettingIdentity{deviceID(audioKey, "p1", deviceApple)})
 	})
 
 	t.Run("ForgetDeviceThroughDeviceSettings", func(t *testing.T) {
@@ -617,21 +624,21 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 		// DeleteAllDeviceSettings is the forget-device path: it must clear the
 		// canonical profile_device values alongside the legacy string overrides.
 		if err := store.SetDeviceSetting(ctx, userstore.DeviceSettingEntry{
-			ProfileID: "p1", DeviceID: "apple-tv", Key: "player.playback_speed", Value: "1.25",
+			ProfileID: "p1", DeviceID: deviceApple, Key: "player.playback_speed", Value: "1.25",
 		}); err != nil {
 			t.Fatalf("SetDeviceSetting: %v", err)
 		}
-		if err := store.DeleteAllDeviceSettings(ctx, "p1", "apple-tv"); err != nil {
+		if err := store.DeleteAllDeviceSettings(ctx, "p1", deviceApple); err != nil {
 			t.Fatalf("DeleteAllDeviceSettings: %v", err)
 		}
-		legacy, err := store.GetDeviceSetting(ctx, "p1", "apple-tv", "player.playback_speed")
+		legacy, err := store.GetDeviceSetting(ctx, "p1", deviceApple, "player.playback_speed")
 		if err != nil {
 			t.Fatalf("GetDeviceSetting after forget: %v", err)
 		}
 		if legacy != nil {
 			t.Fatalf("GetDeviceSetting after forget = %+v, want nil", legacy)
 		}
-		assertRemaining(t, store, all, []userstore.SettingIdentity{deviceID(audioKey, "p1", "apple-tv")})
+		assertRemaining(t, store, all, []userstore.SettingIdentity{deviceID(audioKey, "p1", deviceApple)})
 	})
 
 	t.Run("Library", func(t *testing.T) {
@@ -651,7 +658,7 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 
 	t.Run("Series", func(t *testing.T) {
 		store, all := seed(t)
-		removed, err := store.DeleteSettingValuesForSeries(ctx, "s-1")
+		removed, err := store.DeleteSettingValuesForSeries(ctx, seriesOne)
 		if err != nil {
 			t.Fatalf("DeleteSettingValuesForSeries: %v", err)
 		}
@@ -659,8 +666,8 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 			t.Fatalf("DeleteSettingValuesForSeries removed %d rows, want 2 (one per profile)", removed)
 		}
 		assertRemaining(t, store, all, []userstore.SettingIdentity{
-			seriesID(audioKey, "p1", "s-1"),
-			seriesID(audioKey, "p2", "s-1"),
+			seriesID(audioKey, "p1", seriesOne),
+			seriesID(audioKey, "p2", seriesOne),
 		})
 	})
 
@@ -675,12 +682,12 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 		}
 		assertRemaining(t, store, all, []userstore.SettingIdentity{
 			profileID(audioKey, "p1"),
-			deviceID(audioKey, "p1", "apple-tv"),
+			deviceID(audioKey, "p1", deviceApple),
 			deviceID(audioKey, "p1", "iphone"),
 			libraryID(audioKey, "p1", 1),
 			libraryID(audioKey, "p1", 2),
-			seriesID(audioKey, "p1", "s-1"),
-			seriesID(audioKey, "p1", "s-2"),
+			seriesID(audioKey, "p1", seriesOne),
+			seriesID(audioKey, "p1", seriesTwo),
 		})
 	})
 
@@ -692,12 +699,12 @@ func testSettingValueDeletePaths(t *testing.T, newStore func(t *testing.T) users
 		// Account scope belongs to the account, not to any one household member.
 		assertRemaining(t, store, all, []userstore.SettingIdentity{
 			profileID(audioKey, "p1"),
-			deviceID(audioKey, "p1", "apple-tv"),
+			deviceID(audioKey, "p1", deviceApple),
 			deviceID(audioKey, "p1", "iphone"),
 			libraryID(audioKey, "p1", 1),
 			libraryID(audioKey, "p1", 2),
-			seriesID(audioKey, "p1", "s-1"),
-			seriesID(audioKey, "p1", "s-2"),
+			seriesID(audioKey, "p1", seriesOne),
+			seriesID(audioKey, "p1", seriesTwo),
 		})
 	})
 }
@@ -712,7 +719,7 @@ func testSettingMutationIdempotency(t *testing.T, newStore func(t *testing.T) us
 	expires := time.Now().UTC().Add(30 * 24 * time.Hour).Truncate(time.Second)
 	record := userstore.SettingMutationRecord{
 		MutationID:  "8cc515ad-88c5-48f0-a6cc-44d0a870e32c",
-		RequestHash: "hash-a",
+		RequestHash: mutationHash,
 		Result:      json.RawMessage(`{"status":"applied"}`),
 		ExpiresAt:   expires,
 	}
@@ -732,7 +739,7 @@ func testSettingMutationIdempotency(t *testing.T, newStore func(t *testing.T) us
 	if !inserted {
 		t.Fatal("PutSettingMutation reported no insertion for a new mutation id")
 	}
-	if stored.RequestHash != "hash-a" || !jsonEqual(stored.Result, record.Result) {
+	if stored.RequestHash != mutationHash || !jsonEqual(stored.Result, record.Result) {
 		t.Fatalf("PutSettingMutation stored %+v, want the submitted receipt", stored)
 	}
 	if !stored.ExpiresAt.Equal(expires) {
@@ -755,7 +762,7 @@ func testSettingMutationIdempotency(t *testing.T, newStore func(t *testing.T) us
 	if inserted {
 		t.Fatal("PutSettingMutation(replay) reported an insertion; the receipt already existed")
 	}
-	if existing.RequestHash != "hash-a" {
+	if existing.RequestHash != mutationHash {
 		t.Fatalf("PutSettingMutation(replay) request hash = %q, want the original hash-a", existing.RequestHash)
 	}
 	if !jsonEqual(existing.Result, record.Result) {
@@ -766,7 +773,7 @@ func testSettingMutationIdempotency(t *testing.T, newStore func(t *testing.T) us
 	if err != nil {
 		t.Fatalf("GetSettingMutation: %v", err)
 	}
-	if got == nil || got.RequestHash != "hash-a" {
+	if got == nil || got.RequestHash != mutationHash {
 		t.Fatalf("GetSettingMutation = %+v, want the original receipt", got)
 	}
 

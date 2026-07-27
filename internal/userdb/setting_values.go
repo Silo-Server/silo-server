@@ -3,6 +3,7 @@ package userdb
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -59,7 +60,7 @@ func GetSettingValue(db *sql.DB, id userstore.SettingIdentity) (*userstore.Setti
 	clause, args := settingIdentityPredicate(id)
 	row := db.QueryRow("SELECT "+settingValueColumns+" FROM user_setting_values WHERE "+clause, args...)
 	value, err := scanSettingValue(row)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -125,7 +126,7 @@ func ListSettingValuesForResolution(
 	if err != nil {
 		return nil, fmt.Errorf("listing setting values for resolution: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var values []userstore.SettingValue
 	for rows.Next() {
@@ -242,7 +243,7 @@ func GetSettingMutation(db *sql.DB, mutationID string) (*userstore.SettingMutati
 		FROM user_setting_mutations
 		WHERE mutation_id = ?`, mutationID)
 	record, err := scanSettingMutation(row)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
@@ -275,7 +276,7 @@ func PutSettingMutation(
 	if err == nil {
 		return stored, true, nil
 	}
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		return userstore.SettingMutationRecord{}, false, fmt.Errorf("recording setting mutation %q: %w", record.MutationID, err)
 	}
 
