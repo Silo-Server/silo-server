@@ -852,12 +852,30 @@ func (s *Service) UpdatePolicy(
 	return snapshot, nil
 }
 
+// SelectItem sets what the room plays at the host's direct request. In a vote
+// room that request is refused: the vote decides, and PromoteSuggestion is the
+// only way in.
 func (s *Service) SelectItem(
 	ctx context.Context,
 	roomID string,
 	userID int,
 	profileID string,
 	input SelectItemInput,
+) (Snapshot, error) {
+	return s.selectItem(ctx, roomID, userID, profileID, input, false)
+}
+
+// selectItem carries out a selection. viaVote is set only by PromoteSuggestion
+// once it has confirmed the suggestion is the room's winner — that call has
+// already satisfied the vote, so gating it here would leave a vote room with no
+// way at all to start playback.
+func (s *Service) selectItem(
+	ctx context.Context,
+	roomID string,
+	userID int,
+	profileID string,
+	input SelectItemInput,
+	viaVote bool,
 ) (Snapshot, error) {
 	if strings.TrimSpace(input.ContentID) == "" {
 		return Snapshot{}, ErrInvalidSelection
@@ -887,12 +905,12 @@ func (s *Service) SelectItem(
 		s.mu.Unlock()
 		return Snapshot{}, ErrRoomForbidden
 	}
-	// A vote room decides by tally, and this is the other door into the room's
-	// selection. Gating only PromoteSuggestion would leave the host able to set
-	// any title directly and bypass the vote entirely, which makes the counts on
-	// everyone else's screen decoration. Once the room is voting, the winner is
-	// the only way in.
-	if live.room.SelectionMode == RoomSelectionModeVote {
+	// A vote room decides by tally, and a direct selection is the other door
+	// into the room's selection. Gating only PromoteSuggestion would leave the
+	// host able to set any title directly and bypass the vote entirely, which
+	// makes the counts on everyone else's screen decoration. Once the room is
+	// voting, the winner is the only way in.
+	if !viaVote && live.room.SelectionMode == RoomSelectionModeVote {
 		s.mu.Unlock()
 		return Snapshot{}, ErrVoteRoomSelection
 	}
@@ -1911,6 +1929,14 @@ func (s *Service) PromoteSuggestion(
 	// In a vote room the host starts the winner; they do not get to overrule it.
 	// Being able to promote any suggestion would make "vote" host_pick with
 	// extra steps, and the tally on everyone else's screen would be a lie.
+	//
+	// The winner is read here and the selection commits a moment later, so a
+	// vote landing in between can start a title that has just stopped being the
+	// head of the tally. That is deliberate: the host pressed start on the
+	// standings they and the room could see, and a vote arriving during the
+	// round trip should not retroactively overrule the press. Closing the window
+	// would mean holding the room lock across a suggestion-store read, which
+	// stalls every other room for a race whose worst case is off by one vote.
 	s.mu.Lock()
 	isVoteRoom := live.room.SelectionMode == RoomSelectionModeVote
 	s.mu.Unlock()
@@ -1924,9 +1950,9 @@ func (s *Service) PromoteSuggestion(
 		}
 	}
 
-	return s.SelectItem(ctx, roomID, userID, profileID, SelectItemInput{
+	return s.selectItem(ctx, roomID, userID, profileID, SelectItemInput{
 		ContentID: suggestion.ContentID,
-	})
+	}, isVoteRoom)
 }
 
 // VoteWinner returns the suggestion a vote-mode room has settled on.
