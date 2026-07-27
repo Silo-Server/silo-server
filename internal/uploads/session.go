@@ -291,6 +291,20 @@ func (m *Manager) Complete(id string) (*CompletedUpload, error) {
 	}, nil
 }
 
+// Peek reports the session's current state without mutating it beyond the
+// shared expiry cleanup. Callers holding per-session state outside the
+// manager (e.g. diagnostics chunked uploads) use it to notice sessions the
+// manager has expired so their own bookkeeping can be released too.
+func (m *Manager) Peek(id string) (SessionInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, err := m.getLocked(id)
+	if err != nil {
+		return SessionInfo{}, err
+	}
+	return s.info(), nil
+}
+
 func (m *Manager) Cancel(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

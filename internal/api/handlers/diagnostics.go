@@ -8,6 +8,8 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -41,17 +43,19 @@ type DiagnosticsService interface {
 }
 
 type DiagnosticsHandler struct {
-	service      DiagnosticsService
-	adminService AdminDiagnosticsService
-	inflight     *diagnosticsInFlightLimiter
-	logger       *slog.Logger
+	service       DiagnosticsService
+	adminService  AdminDiagnosticsService
+	inflight      *diagnosticsInFlightLimiter
+	chunkSessions *diagnosticsChunkSessions
+	logger        *slog.Logger
 }
 
 func NewDiagnosticsHandler(service DiagnosticsService) *DiagnosticsHandler {
 	handler := &DiagnosticsHandler{
-		service:  service,
-		inflight: newDiagnosticsInFlightLimiter(4),
-		logger:   slog.Default(),
+		service:       service,
+		inflight:      newDiagnosticsInFlightLimiter(4),
+		chunkSessions: newDiagnosticsChunkSessions(filepath.Join(os.TempDir(), "silo-diagnostics-uploads")),
+		logger:        slog.Default(),
 	}
 	if adminService, ok := service.(AdminDiagnosticsService); ok {
 		handler.adminService = adminService

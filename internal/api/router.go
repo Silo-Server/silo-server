@@ -1830,6 +1830,15 @@ func NewRouter(deps Dependencies) chi.Router {
 				r.Route("/diagnostics", func(r chi.Router) {
 					r.Get("/status", diagnosticsHandler.HandleStatus)
 					r.Post("/reports", diagnosticsHandler.HandleUpload)
+					// Chunked fallback for bundles a fronting proxy's
+					// request-body cap rejects as one request. Same
+					// ingest/validation path; see diagnostics_chunked.go.
+					r.Route("/reports/uploads", func(r chi.Router) {
+						r.Post("/", diagnosticsHandler.HandleChunkedUploadInit)
+						r.Put("/{upload_id}/chunks/{chunk_index}", diagnosticsHandler.HandleChunkedUploadChunk)
+						r.Post("/{upload_id}/complete", diagnosticsHandler.HandleChunkedUploadComplete)
+						r.Delete("/{upload_id}", diagnosticsHandler.HandleChunkedUploadAbort)
+					})
 				})
 			})
 		}
