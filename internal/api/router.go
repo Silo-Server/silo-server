@@ -62,6 +62,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanqueue"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
 	"github.com/Silo-Server/silo-server/internal/subtitles/opensubtitles"
@@ -733,6 +734,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	var progressHandler *handlers.ProgressHandler
 	var collectionHandler *handlers.CollectionHandler
 	var settingsHandler *handlers.SettingsHandler
+	var settingValuesHandler *handlers.SettingValuesHandler
 	var homeDismissalHandler *handlers.HomeDismissalHandler
 	var subtitlePrefHandler *handlers.SubtitlePrefHandler
 	var audioPrefHandler *handlers.AudioPrefHandler
@@ -781,6 +783,13 @@ func NewRouter(deps Dependencies) chi.Router {
 		settingsHandler = handlers.NewSettingsHandler(deps.UserStoreProvider)
 		if settingsRepo != nil {
 			settingsHandler.SetServerSettings(settingsRepo)
+		}
+		// The canonical settings API. main.go has already loaded and validated
+		// the contract by the time the router is built, so a failure here is
+		// unreachable — but the handler is simply omitted rather than panicking,
+		// which degrades to "no typed settings routes" instead of no server.
+		if contract, err := settingscontract.Load(); err == nil {
+			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
 		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub
@@ -2214,6 +2223,21 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Put("/device/{key}", settingsHandler.HandleSetDeviceSetting)
 							r.Delete("/device/{key}", settingsHandler.HandleDeleteDeviceSetting)
 						})
+						// The canonical settings API. Registered before the
+						// catch-all /{key} routes below, which would otherwise
+						// swallow "contract" and "values" as setting names.
+						if settingValuesHandler != nil {
+							r.Get("/contract", settingValuesHandler.HandleGetContract)
+							r.Get("/contract/capabilities", settingValuesHandler.HandleGetCapabilities)
+							r.Group(func(r chi.Router) {
+								r.Use(apimw.RequireProfile)
+								r.Get("/values/effective", settingValuesHandler.HandleGetEffective)
+								r.Get("/values/{key}", settingValuesHandler.HandleGetValue)
+								r.Put("/values/{key}", settingValuesHandler.HandleSetValue)
+								r.Delete("/values/{key}", settingValuesHandler.HandleDeleteValue)
+							})
+						}
+
 						r.Get("/{key}", settingsHandler.HandleGetSetting)
 						r.Put("/{key}", settingsHandler.HandleSetSetting)
 						r.Delete("/{key}", settingsHandler.HandleDeleteSetting)
