@@ -538,6 +538,9 @@ func (s *progressCountingStore) GetSettingValue(context.Context, userstore.Setti
 func (s *progressCountingStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
 	panic("unused")
 }
+func (s *progressCountingStore) ListAllSettingValues(context.Context) ([]userstore.SettingValue, error) {
+	panic("unused")
+}
 func (s *progressCountingStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
 	panic("unused")
 }

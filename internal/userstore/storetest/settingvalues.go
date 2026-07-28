@@ -37,6 +37,9 @@ func RunSettingValues(t *testing.T, newStore func(t *testing.T) userstore.UserSt
 	t.Run("ResolutionCandidates", func(t *testing.T) {
 		testSettingValueResolution(t, newStore)
 	})
+	t.Run("ListAll", func(t *testing.T) {
+		testSettingValueListAll(t, newStore)
+	})
 	t.Run("DeletePaths", func(t *testing.T) {
 		testSettingValueDeletePaths(t, newStore)
 	})
@@ -190,6 +193,56 @@ func testSettingValueScopes(t *testing.T, newStore func(t *testing.T) userstore.
 		}
 		if got != nil {
 			t.Fatalf("GetSettingValue(neighbor %+v) = %+v, want nil", id, got)
+		}
+	}
+}
+
+// testSettingValueListAll pins the admin inspection read: every stored value
+// comes back regardless of scope, with its identity intact, and nothing is
+// invented for identities that were never written.
+func testSettingValueListAll(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
+	ctx := context.Background()
+	store := newStore(t)
+
+	empty, err := store.ListAllSettingValues(ctx)
+	if err != nil {
+		t.Fatalf("ListAllSettingValues(empty): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("ListAllSettingValues(empty) = %+v, want none", empty)
+	}
+
+	seedSettingProfiles(t, ctx, store, "p1", "p2")
+	seeded := map[userstore.SettingIdentity]string{
+		accountID(audioKey):                   `"en"`,
+		profileID(audioKey, "p1"):             `"fr"`,
+		profileID(subtitleKey, "p2"):          `"always"`,
+		deviceID(audioKey, "p1", deviceApple): `"de"`,
+		libraryID(audioKey, "p1", 42):         `"es"`,
+		seriesID(audioKey, "p1", seriesOne):   `"ja"`,
+	}
+	for id, value := range seeded {
+		mustUpsert(t, ctx, store, id, value)
+	}
+
+	all, err := store.ListAllSettingValues(ctx)
+	if err != nil {
+		t.Fatalf("ListAllSettingValues: %v", err)
+	}
+	if len(all) != len(seeded) {
+		t.Fatalf("ListAllSettingValues returned %d rows, want %d: %+v", len(all), len(seeded), all)
+	}
+	for _, got := range all {
+		want, ok := seeded[got.SettingIdentity]
+		if !ok {
+			t.Fatalf("ListAllSettingValues invented identity %+v", got.SettingIdentity)
+		}
+		if !jsonEqual(got.Value, json.RawMessage(want)) {
+			t.Fatalf("ListAllSettingValues(%+v) = %s, want %s", got.SettingIdentity, got.Value, want)
+		}
+		if got.Revision != 1 || got.UpdatedAt == "" {
+			t.Fatalf("ListAllSettingValues(%+v) revision/updated_at = %d/%q, want 1/set",
+				got.SettingIdentity, got.Revision, got.UpdatedAt)
 		}
 	}
 }

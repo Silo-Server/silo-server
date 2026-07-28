@@ -154,6 +154,11 @@ type UserStore interface {
 	// definition's resolution order in Go; issuing one lookup per scope is a
 	// rejected implementation.
 	ListSettingValuesForResolution(ctx context.Context, query SettingResolutionQuery) ([]SettingValue, error)
+	// ListAllSettingValues returns every explicit value this user has stored,
+	// across all scopes, in a stable (key, scope, identity) order. It serves
+	// the admin inspection surface; resolution reads keep going through
+	// ListSettingValuesForResolution.
+	ListAllSettingValues(ctx context.Context) ([]SettingValue, error)
 	// UpsertSettingValue writes the explicit value at one scope and increments
 	// that row's revision. Concurrent writes to one identity are
 	// last-write-wins in server receipt order; there is no compare-and-set

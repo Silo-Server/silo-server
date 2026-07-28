@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -189,6 +190,22 @@ func (h *SettingValuesHandler) HandleSetValue(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
+	h.setValueAt(w, r, store, apimw.GetUserID(r.Context()), identity)
+}
+
+// setValueAt is the write path shared by the session route and the admin
+// route: validation, normalization, idempotency and the change event are one
+// implementation regardless of who addresses the store. eventUserID names the
+// account whose settings changed — the session owner on the self-service
+// route, the target user on the admin route — so change events always reach
+// the clients whose settings moved.
+func (h *SettingValuesHandler) setValueAt(
+	w http.ResponseWriter,
+	r *http.Request,
+	store userstore.UserStore,
+	eventUserID int,
+	identity userstore.SettingIdentity,
+) {
 	def, ok := h.definitionFor(w, identity.Key)
 	if !ok {
 		return
@@ -247,7 +264,7 @@ func (h *SettingValuesHandler) HandleSetValue(w http.ResponseWriter, r *http.Req
 		return
 	}
 	publishUserSettingsEvent(r.Context(), h.EventsHub,
-		apimw.GetUserID(r.Context()), identity.ProfileID, identity.Key, string(identity.Scope))
+		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
 	writeJSON(w, http.StatusOK, settingValueToResponse(*stored))
 }
 
@@ -262,7 +279,18 @@ func (h *SettingValuesHandler) HandleDeleteValue(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
+	h.deleteValueAt(w, r, store, apimw.GetUserID(r.Context()), identity)
+}
 
+// deleteValueAt is the unset path shared by the session and admin routes. See
+// setValueAt for what eventUserID means.
+func (h *SettingValuesHandler) deleteValueAt(
+	w http.ResponseWriter,
+	r *http.Request,
+	store userstore.UserStore,
+	eventUserID int,
+	identity userstore.SettingIdentity,
+) {
 	removed, err := store.DeleteSettingValue(r.Context(), identity)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to clear the setting")
@@ -273,7 +301,7 @@ func (h *SettingValuesHandler) HandleDeleteValue(w http.ResponseWriter, r *http.
 		return
 	}
 	publishUserSettingsEvent(r.Context(), h.EventsHub,
-		apimw.GetUserID(r.Context()), identity.ProfileID, identity.Key, string(identity.Scope))
+		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -417,20 +445,8 @@ func (h *SettingValuesHandler) definitionFor(w http.ResponseWriter, key string) 
 func (h *SettingValuesHandler) identityFromRequest(
 	w http.ResponseWriter, r *http.Request,
 ) (userstore.SettingIdentity, bool) {
-	key := chi.URLParam(r, "key")
-	if strings.TrimSpace(key) == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "A setting key is required")
-		return userstore.SettingIdentity{}, false
-	}
-	if _, ok := h.definitionFor(w, key); !ok {
-		return userstore.SettingIdentity{}, false
-	}
-
-	query := r.URL.Query()
-	scope := settingscontract.Scope(strings.TrimSpace(query.Get("scope")))
-	if scope == "" {
-		writeError(w, http.StatusBadRequest, "bad_request",
-			"A scope is required: account, profile, profile_device, profile_library or profile_series")
+	key, scope, ok := h.keyedScopeFromRequest(w, r)
+	if !ok {
 		return userstore.SettingIdentity{}, false
 	}
 
@@ -454,7 +470,40 @@ func (h *SettingValuesHandler) identityFromRequest(
 			return userstore.SettingIdentity{}, false
 		}
 	}
-	if scope == settingscontract.ScopeProfileLibrary {
+
+	return h.completeIdentity(w, r.URL.Query(), identity)
+}
+
+// keyedScopeFromRequest parses the parts every scoped request names: a key
+// that exists in the contract and is remote, plus an explicit scope.
+func (h *SettingValuesHandler) keyedScopeFromRequest(
+	w http.ResponseWriter, r *http.Request,
+) (string, settingscontract.Scope, bool) {
+	key := chi.URLParam(r, "key")
+	if strings.TrimSpace(key) == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "A setting key is required")
+		return "", "", false
+	}
+	if _, ok := h.definitionFor(w, key); !ok {
+		return "", "", false
+	}
+
+	scope := settingscontract.Scope(strings.TrimSpace(r.URL.Query().Get("scope")))
+	if scope == "" {
+		writeError(w, http.StatusBadRequest, "bad_request",
+			"A scope is required: account, profile, profile_device, profile_library or profile_series")
+		return "", "", false
+	}
+	return key, scope, true
+}
+
+// completeIdentity fills the content-scope ids from the query, then runs the
+// checks the session and admin routes share: the identity matches its scope's
+// columns and the contract allows the key at that scope.
+func (h *SettingValuesHandler) completeIdentity(
+	w http.ResponseWriter, query url.Values, identity userstore.SettingIdentity,
+) (userstore.SettingIdentity, bool) {
+	if identity.Scope == settingscontract.ScopeProfileLibrary {
 		libraryID, err := strconv.Atoi(strings.TrimSpace(query.Get("library_id")))
 		if err != nil || libraryID <= 0 {
 			writeError(w, http.StatusBadRequest, "bad_request",
@@ -463,7 +512,7 @@ func (h *SettingValuesHandler) identityFromRequest(
 		}
 		identity.LibraryID = libraryID
 	}
-	if scope == settingscontract.ScopeProfileSeries {
+	if identity.Scope == settingscontract.ScopeProfileSeries {
 		identity.SeriesID = strings.TrimSpace(query.Get("series_id"))
 		if identity.SeriesID == "" {
 			writeError(w, http.StatusBadRequest, "bad_request",
@@ -479,10 +528,10 @@ func (h *SettingValuesHandler) identityFromRequest(
 
 	// The contract decides where a setting may be written, independently of
 	// whether the identity is well formed.
-	def, _ := h.contract.Lookup(key)
-	if !def.AllowsScope(scope) {
+	def, _ := h.contract.Lookup(identity.Key)
+	if !def.AllowsScope(identity.Scope) {
 		writeError(w, http.StatusBadRequest, "scope_not_allowed",
-			key+" cannot be set at "+string(scope))
+			identity.Key+" cannot be set at "+string(identity.Scope))
 		return userstore.SettingIdentity{}, false
 	}
 

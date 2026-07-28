@@ -2563,16 +2563,17 @@ func NewRouter(deps Dependencies) chi.Router {
 							r.Delete("/users/{id}", adminHandler.HandleDeleteUser)
 							r.Post("/users/{id}/impersonate", adminHandler.HandleImpersonateUser)
 							r.Get("/users/{id}/profiles", adminHandler.HandleListUserProfiles)
-							r.Get("/users/{id}/settings", adminHandler.HandleListUserSettings)
-							r.Get("/users/{id}/settings/{key}", adminHandler.HandleGetUserSetting)
-							r.Put("/users/{id}/settings/{key}", adminHandler.HandleUpdateUserSetting)
-							r.Delete("/users/{id}/settings/{key}", adminHandler.HandleDeleteUserSetting)
-							r.Get("/users/{id}/device-settings", adminHandler.HandleListUserDeviceSettings)
-							r.Get("/users/{id}/device-settings/{key}", adminHandler.HandleListUserDeviceSettingsByKey)
-							r.Put("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleUpdateUserDeviceSetting)
-							r.Delete("/users/{id}/device-settings/{key}", adminHandler.HandleDeleteUserDeviceSettingsByKey)
-							r.Delete("/users/{id}/profiles/{profile_id}/device-settings/{key}/{device_id}", adminHandler.HandleDeleteUserDeviceSetting)
-							r.Delete("/users/{id}/profiles/{profile_id}/devices/{device_id}/settings", adminHandler.HandleDeleteAllUserDeviceSettings)
+							// The canonical settings API's admin projection. It
+							// replaced the string-registry /users/{id}/settings*
+							// and device-settings* routes (see the pre-lock
+							// removals table in docs/architecture/v1-scope.md):
+							// one list across every scope, and set/delete at an
+							// explicit scope named in the query string.
+							if settingValuesHandler != nil {
+								r.Get("/users/{id}/settings/values", settingValuesHandler.HandleAdminListUserSettingValues)
+								r.Put("/users/{id}/settings/values/{key}", settingValuesHandler.HandleAdminSetUserSettingValue)
+								r.Delete("/users/{id}/settings/values/{key}", settingValuesHandler.HandleAdminDeleteUserSettingValue)
+							}
 							r.Get("/devices", adminHandler.HandleListDevices)
 							r.Get("/devices/{user_id}/{device_id}", adminHandler.HandleGetDevice)
 							if accessGroupHandler != nil {

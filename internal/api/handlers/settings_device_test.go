@@ -691,53 +691,6 @@ func TestRememberLibraryPageStateIsDeviceScopedBoolSetting(t *testing.T) {
 	}
 }
 
-func TestAdminCanResetSubtitleAppearanceDeviceOverrides(t *testing.T) {
-	store := newProfileTestStore(t)
-	for _, deviceID := range []string{"apple-tv", "iphone"} {
-		if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-			ProfileID: "profile-1",
-			DeviceID:  deviceID,
-			Key:       subtitleAppearanceSettingKey,
-			Value:     `{"fontSize":"small"}`,
-		}); err != nil {
-			t.Fatalf("SetDeviceSetting(%s): %v", deviceID, err)
-		}
-	}
-	handler := &AdminHandler{storeProv: testUserStoreProvider{store: store}}
-
-	req := httptest.NewRequest(http.MethodDelete, "/admin/users/7/profiles/profile-1/device-settings/subtitle_appearance/apple-tv", nil)
-	req = withRouteParams(req, map[string]string{
-		"id": "7", "profile_id": "profile-1", "key": subtitleAppearanceSettingKey, "device_id": "apple-tv",
-	})
-	rec := httptest.NewRecorder()
-	handler.HandleDeleteUserDeviceSetting(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("delete one status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	remaining, err := store.ListDeviceSettings(context.Background(), subtitleAppearanceSettingKey)
-	if err != nil {
-		t.Fatalf("ListDeviceSettings: %v", err)
-	}
-	if len(remaining) != 1 || remaining[0].DeviceID != "iphone" {
-		t.Fatalf("remaining = %#v", remaining)
-	}
-
-	req = httptest.NewRequest(http.MethodDelete, "/admin/users/7/device-settings/subtitle_appearance", nil)
-	req = withRouteParams(req, map[string]string{"id": "7", "key": subtitleAppearanceSettingKey})
-	rec = httptest.NewRecorder()
-	handler.HandleDeleteUserDeviceSettingsByKey(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("delete all status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	remaining, err = store.ListDeviceSettings(context.Background(), subtitleAppearanceSettingKey)
-	if err != nil {
-		t.Fatalf("ListDeviceSettings after delete all: %v", err)
-	}
-	if len(remaining) != 0 {
-		t.Fatalf("remaining after delete all = %#v", remaining)
-	}
-}
-
 func TestEffectiveSettingsAreIsolatedPerProfileOnSameDevice(t *testing.T) {
 	store := newProfileTestStore(t)
 	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Guest"}); err != nil {
@@ -908,54 +861,6 @@ func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
 	}
 	if len(detailResp.Profiles) != 1 || detailResp.Profiles[0].ProfileID != "profile-1" {
 		t.Fatalf("registered detail profiles = %#v", detailResp.Profiles)
-	}
-}
-
-func TestAdminCanResetAllOverridesForOneDevice(t *testing.T) {
-	store := newProfileTestStore(t)
-	for _, entry := range []userstore.DeviceSettingEntry{
-		{ProfileID: "profile-1", DeviceID: "living-room", Key: "player.playback_speed", Value: "1.25"},
-		{ProfileID: "profile-1", DeviceID: "living-room", Key: "player.audio_sync_ms", Value: "120"},
-		{ProfileID: "profile-1", DeviceID: "phone", Key: "player.hdr_enabled", Value: "false"},
-	} {
-		if err := store.SetDeviceSetting(context.Background(), entry); err != nil {
-			t.Fatalf("SetDeviceSetting: %v", err)
-		}
-	}
-
-	handler := &AdminHandler{storeProv: testUserStoreProvider{store: store}}
-	req := httptest.NewRequest(http.MethodDelete, "/admin/users/7/profiles/profile-1/devices/living-room/settings", nil)
-	req = withRouteParams(req, map[string]string{"id": "7", "profile_id": "profile-1", "device_id": "living-room"})
-	rec := httptest.NewRecorder()
-	handler.HandleDeleteAllUserDeviceSettings(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	entries, err := store.ListAllDeviceSettings(context.Background())
-	if err != nil {
-		t.Fatalf("ListAllDeviceSettings: %v", err)
-	}
-	if len(entries) != 1 || entries[0].DeviceID != "phone" {
-		t.Fatalf("entries after delete = %#v", entries)
-	}
-	registry, ok := store.(userstore.DeviceRegistry)
-	if !ok {
-		t.Fatalf("store does not support device registry")
-	}
-	devices, err := registry.ListDevices(context.Background())
-	if err != nil {
-		t.Fatalf("ListDevices: %v", err)
-	}
-	foundLivingRoom := false
-	for _, device := range devices {
-		if device.ProfileID == "profile-1" && device.DeviceID == "living-room" {
-			foundLivingRoom = true
-			break
-		}
-	}
-	if !foundLivingRoom {
-		t.Fatalf("registry devices after delete = %#v", devices)
 	}
 }
 

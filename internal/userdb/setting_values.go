@@ -139,6 +139,32 @@ func ListSettingValuesForResolution(
 	return values, rows.Err()
 }
 
+// ListAllSettingValues returns every stored explicit value across all scopes,
+// ordered by (key, scope, identity) so repeated reads page through the same
+// sequence. It backs the admin inspection surface, which wants the stored
+// truth rather than a resolution.
+func ListAllSettingValues(db *sql.DB) ([]userstore.SettingValue, error) {
+	rows, err := db.Query(`
+		SELECT ` + settingValueColumns + `
+		FROM user_setting_values
+		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(device_id, ''),
+		         COALESCE(library_id, 0), COALESCE(series_id, '')`)
+	if err != nil {
+		return nil, fmt.Errorf("listing all setting values: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var values []userstore.SettingValue
+	for rows.Next() {
+		value, err := scanSettingValue(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning setting value: %w", err)
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 // UpsertSettingValue writes the explicit value at one scope and increments that
 // row's revision.
 func UpsertSettingValue(

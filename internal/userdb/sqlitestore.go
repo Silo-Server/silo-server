@@ -440,6 +440,10 @@ func (s *SQLiteUserStore) ListSettingValuesForResolution(_ context.Context, quer
 	return ListSettingValuesForResolution(s.db, query)
 }
 
+func (s *SQLiteUserStore) ListAllSettingValues(_ context.Context) ([]userstore.SettingValue, error) {
+	return ListAllSettingValues(s.db)
+}
+
 func (s *SQLiteUserStore) UpsertSettingValue(_ context.Context, id userstore.SettingIdentity, value json.RawMessage) (*userstore.SettingValue, error) {
 	return UpsertSettingValue(s.db, id, value)
 }

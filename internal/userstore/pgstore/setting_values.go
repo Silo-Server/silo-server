@@ -124,6 +124,35 @@ func (s *PostgresUserStore) ListSettingValuesForResolution(
 	return values, rows.Err()
 }
 
+// ListAllSettingValues returns every stored explicit value across all scopes,
+// ordered by (key, scope, identity) so repeated reads page through the same
+// sequence. It backs the admin inspection surface, which wants the stored
+// truth rather than a resolution.
+func (s *PostgresUserStore) ListAllSettingValues(ctx context.Context) ([]userstore.SettingValue, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+settingValueColumns+`
+		FROM user_setting_values
+		WHERE user_id = $1
+		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(device_id, ''),
+		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
+		s.userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing all setting values: %w", err)
+	}
+	defer rows.Close()
+
+	var values []userstore.SettingValue
+	for rows.Next() {
+		value, err := scanSettingValue(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning setting value: %w", err)
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (s *PostgresUserStore) UpsertSettingValue(
 	ctx context.Context,
 	id userstore.SettingIdentity,
