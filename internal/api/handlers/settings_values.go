@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -313,15 +314,37 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 	})
 }
 
+// policyInputMaxPlaybackQuality is the policy_input name the contract binds
+// playback.preferred_quality's ceiling to. It must match the manifest's
+// constrained_by.policy_input, which is how the resolver looks the limit up.
+const policyInputMaxPlaybackQuality = "max_playback_quality"
+
 // constraintsFor gathers the policy inputs that narrow this viewer's settings.
 //
-// Nothing is wired yet: internal/policy resolves max_playback_quality and the
-// metadata-language allowlist against its own inputs, and binding them here is
-// the remaining half of the preferences-versus-restrictions seam. Returning nil
-// means no setting is narrowed, which is the same answer the legacy endpoint
-// gave — so this is a gap, not a regression.
-func (h *SettingValuesHandler) constraintsFor(_ *http.Request) settingsresolve.Constraints {
-	return nil
+// The routes are mounted inside RequireViewerAccess, so the resolved access
+// scope is already on the context. Scope.MaxPlaybackQuality holds a literal
+// member of the contract's quality enum ("1080p", "2160p"), so it feeds the
+// ceiling on playback.preferred_quality directly — no translation table. An
+// empty value means the policy does not cap this viewer, expressed by omitting
+// the key so the resolver leaves the preference alone.
+//
+// catalog.metadata_language deliberately gets no constraint: the manifest notes
+// record that the allowlist draft was circular, because the policy input it
+// would bind to is populated from the very preference it would narrow.
+func (h *SettingValuesHandler) constraintsFor(r *http.Request) settingsresolve.Constraints {
+	scope, ok := access.GetScope(r.Context())
+	if !ok {
+		return nil
+	}
+	quality := strings.TrimSpace(scope.MaxPlaybackQuality)
+	if quality == "" {
+		return nil
+	}
+	limit, err := json.Marshal(quality)
+	if err != nil {
+		return nil
+	}
+	return settingsresolve.Constraints{policyInputMaxPlaybackQuality: limit}
 }
 
 // recordMutation stores the idempotency receipt after a successful write.

@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -304,6 +305,81 @@ func TestEffectiveWithNoKeysReturnsEveryRemoteSetting(t *testing.T) {
 		if setting.Source != string(settingscontract.ScopeDefault) {
 			t.Errorf("%s resolved from %s with nothing stored", setting.Key, setting.Source)
 		}
+	}
+}
+
+// TestEffectiveAppliesViewerQualityCap wires the preferences-versus-restrictions
+// seam end to end: the access scope's MaxPlaybackQuality becomes the resolver's
+// ceiling, the effective value is the cap, and the authored preference survives
+// untouched so it takes effect the day the cap lifts.
+func TestEffectiveAppliesViewerQualityCap(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+
+	if rec := routeValues(t, handler, http.MethodPut, "playback.preferred_quality",
+		"scope=profile", []byte(`{"value":"2160p"}`)); rec.Code != http.StatusOK {
+		t.Fatalf("seeding preference = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	effective := func(maxQuality string) effectiveSettingValueResponse {
+		t.Helper()
+		req := valuesRequest(http.MethodGet,
+			"/settings/values/effective?keys=playback.preferred_quality", nil)
+		req = req.WithContext(access.SetScope(req.Context(), access.Scope{
+			UserID:             1,
+			ProfileID:          "profile-1",
+			MaxPlaybackQuality: maxQuality,
+		}))
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("effective = %d: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Settings []effectiveSettingValueResponse `json:"settings"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decoding: %v", err)
+		}
+		if len(body.Settings) != 1 {
+			t.Fatalf("got %d settings, want 1", len(body.Settings))
+		}
+		return body.Settings[0]
+	}
+
+	// Capped at 1080p: the cap is the answer, the choice is reported alongside.
+	got := effective("1080p")
+	if string(got.Value) != `"1080p"` {
+		t.Errorf("capped effective = %s, want \"1080p\"", got.Value)
+	}
+	if !got.Constrained || got.ConstraintKind != string(settingscontract.ConstraintCeiling) {
+		t.Errorf("constrained=%v kind=%q, want true/ceiling", got.Constrained, got.ConstraintKind)
+	}
+	if string(got.StoredValue) != `"2160p"` {
+		t.Errorf("stored_value = %s, want the authored \"2160p\" reported", got.StoredValue)
+	}
+
+	// The stored row itself was not rewritten by resolution.
+	stored, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
+		Key:       "playback.preferred_quality",
+		Scope:     settingscontract.ScopeProfile,
+		ProfileID: "profile-1",
+	})
+	if err != nil || stored == nil {
+		t.Fatalf("reading stored value: %v", err)
+	}
+	if string(stored.Value) != `"2160p"` {
+		t.Errorf("stored row = %s, want \"2160p\" untouched", stored.Value)
+	}
+
+	// An uncapped viewer ("" means the policy sets no cap) gets the preference
+	// as authored, with no constraint reported.
+	got = effective("")
+	if string(got.Value) != `"2160p"` || got.Constrained {
+		t.Errorf("uncapped effective = %s constrained=%v, want \"2160p\"/false",
+			got.Value, got.Constrained)
+	}
+	if got.StoredValue != nil {
+		t.Errorf("stored_value = %s, want absent when nothing was narrowed", got.StoredValue)
 	}
 }
 
