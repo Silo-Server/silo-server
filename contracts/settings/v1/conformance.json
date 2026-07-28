@@ -1,0 +1,503 @@
+{
+  "fixture_version": 1,
+  "manifest_revision": 1,
+  "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
+  "cases": [
+    {
+      "name": "resolution_order_series_wins",
+      "description": "The full ladder: with values stored at every scope a content key allows, profile_series beats profile_library, profile_device, and profile.",
+      "keys": ["playback.subtitle_language"],
+      "context": {
+        "profile_id": "p1",
+        "device_id": "d1",
+        "library_ids": [7],
+        "series_ids": ["s-101"]
+      },
+      "stored": [
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "de"
+        },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_library",
+          "profile_id": "p1",
+          "library_id": 7,
+          "value": "fr"
+        },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_series",
+          "profile_id": "p1",
+          "series_id": "s-101",
+          "value": "ja"
+        }
+      ],
+      "expected": [
+        { "key": "playback.subtitle_language", "value": "ja", "source": "profile_series" }
+      ]
+    },
+    {
+      "name": "resolution_order_library_beats_device",
+      "description": "Without a series row, the library row wins over the device and profile rows.",
+      "keys": ["playback.subtitle_language"],
+      "context": {
+        "profile_id": "p1",
+        "device_id": "d1",
+        "library_ids": [7],
+        "series_ids": ["s-101"]
+      },
+      "stored": [
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "de"
+        },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_library",
+          "profile_id": "p1",
+          "library_id": 7,
+          "value": "fr"
+        }
+      ],
+      "expected": [
+        { "key": "playback.subtitle_language", "value": "fr", "source": "profile_library" }
+      ]
+    },
+    {
+      "name": "resolution_order_device_beats_profile",
+      "description": "Without content rows, the device override wins over the profile fallback even though the context names a library and a series.",
+      "keys": ["playback.subtitle_language"],
+      "context": {
+        "profile_id": "p1",
+        "device_id": "d1",
+        "library_ids": [7],
+        "series_ids": ["s-101"]
+      },
+      "stored": [
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "de"
+        }
+      ],
+      "expected": [
+        { "key": "playback.subtitle_language", "value": "de", "source": "profile_device" }
+      ]
+    },
+    {
+      "name": "resolution_order_profile_alone",
+      "description": "A profile row alone resolves at profile scope.",
+      "keys": ["playback.subtitle_language"],
+      "context": {
+        "profile_id": "p1",
+        "device_id": "d1",
+        "library_ids": [7],
+        "series_ids": ["s-101"]
+      },
+      "stored": [
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" }
+      ],
+      "expected": [{ "key": "playback.subtitle_language", "value": "en", "source": "profile" }]
+    },
+    {
+      "name": "device_override_beats_profile_for_quality",
+      "description": "playback.preferred_quality has no content scopes; its device override wins over the profile value.",
+      "keys": ["playback.preferred_quality"],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "playback.preferred_quality",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "720p"
+        },
+        {
+          "key": "playback.preferred_quality",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "1080p"
+        }
+      ],
+      "expected": [
+        { "key": "playback.preferred_quality", "value": "1080p", "source": "profile_device" }
+      ]
+    },
+    {
+      "name": "missing_device_identity_drops_device_scope",
+      "description": "A caller with no device identity must not see a device override; the profile row answers instead. This is the anonymous jellycompat seed: a device row leaking here hands one device's settings to every client.",
+      "keys": ["playback.subtitle_language"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "de"
+        }
+      ],
+      "expected": [{ "key": "playback.subtitle_language", "value": "en", "source": "profile" }]
+    },
+    {
+      "name": "foreign_identity_rows_never_resolve",
+      "description": "Rows for another profile, another device, or another series must not resolve just because a batched read returned them; the answer falls to the contract default.",
+      "keys": ["playback.subtitle_language"],
+      "context": { "profile_id": "p1", "device_id": "d1", "series_ids": ["s-101"] },
+      "stored": [
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p2", "value": "xx" },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d2",
+          "value": "yy"
+        },
+        {
+          "key": "playback.subtitle_language",
+          "scope": "profile_series",
+          "profile_id": "p1",
+          "series_id": "s-other",
+          "value": "zz"
+        }
+      ],
+      "expected": [{ "key": "playback.subtitle_language", "value": null, "source": "default" }]
+    },
+    {
+      "name": "absent_values_resolve_to_contract_defaults",
+      "description": "Nothing stored resolves to each definition's default_value with source \"default\": enum, boolean, integer, and nullable language tag.",
+      "keys": [
+        "playback.subtitle_mode",
+        "playback.show_forced_subtitles",
+        "playback.next_up_prompt_seconds",
+        "playback.audio_language"
+      ],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "expected": [
+        { "key": "playback.subtitle_mode", "value": "auto", "source": "default" },
+        { "key": "playback.show_forced_subtitles", "value": true, "source": "default" },
+        { "key": "playback.next_up_prompt_seconds", "value": 30, "source": "default" },
+        { "key": "playback.audio_language", "value": null, "source": "default" }
+      ]
+    },
+    {
+      "name": "batch_resolves_each_key_independently",
+      "description": "One batch, three keys, three different sources: a device override, a profile value, and a default.",
+      "keys": [
+        "playback.preferred_quality",
+        "playback.subtitle_mode",
+        "playback.audio_language"
+      ],
+      "context": { "profile_id": "p1", "device_id": "d1" },
+      "stored": [
+        {
+          "key": "playback.preferred_quality",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": "1080p"
+        },
+        { "key": "playback.subtitle_mode", "scope": "profile", "profile_id": "p1", "value": "always" }
+      ],
+      "expected": [
+        { "key": "playback.preferred_quality", "value": "1080p", "source": "profile_device" },
+        { "key": "playback.subtitle_mode", "value": "always", "source": "profile" },
+        { "key": "playback.audio_language", "value": null, "source": "default" }
+      ]
+    },
+    {
+      "name": "ceiling_caps_stored_quality_and_reports_the_stored_value",
+      "description": "The manifest binds playback.preferred_quality to the max_playback_quality ceiling. A stored 2160p over a 1080p cap resolves to 1080p while the authored value survives, reported as stored_value with constrained:true.",
+      "keys": ["playback.preferred_quality"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "playback.preferred_quality",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "2160p"
+        }
+      ],
+      "constraints": { "max_playback_quality": "1080p" },
+      "expected": [
+        {
+          "key": "playback.preferred_quality",
+          "value": "1080p",
+          "source": "profile",
+          "constrained": true,
+          "stored_value": "2160p",
+          "constraint_kind": "ceiling"
+        }
+      ]
+    },
+    {
+      "name": "ceiling_leaves_quality_under_the_cap_alone",
+      "description": "A value at or under the cap passes through untouched and is not reported as constrained.",
+      "keys": ["playback.preferred_quality"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "playback.preferred_quality",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "720p"
+        }
+      ],
+      "constraints": { "max_playback_quality": "1080p" },
+      "expected": [{ "key": "playback.preferred_quality", "value": "720p", "source": "profile" }]
+    },
+    {
+      "name": "ceiling_ranks_auto_below_every_cap",
+      "description": "The ordered enum lists \"auto\" first because it never exceeds a cap: even the lowest cap leaves it alone.",
+      "keys": ["playback.preferred_quality"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "playback.preferred_quality",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "auto"
+        }
+      ],
+      "constraints": { "max_playback_quality": "480p" },
+      "expected": [{ "key": "playback.preferred_quality", "value": "auto", "source": "profile" }]
+    },
+    {
+      "name": "ceiling_caps_original_as_the_highest_member",
+      "description": "\"original\" is the uncapped source and ranks above every resolution, so any cap brings it down.",
+      "keys": ["playback.preferred_quality"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "playback.preferred_quality",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "original"
+        }
+      ],
+      "constraints": { "max_playback_quality": "2160p" },
+      "expected": [
+        {
+          "key": "playback.preferred_quality",
+          "value": "2160p",
+          "source": "profile",
+          "constrained": true,
+          "stored_value": "original",
+          "constraint_kind": "ceiling"
+        }
+      ]
+    },
+    {
+      "name": "null_bitrate_is_unbounded_and_a_ceiling_caps_it",
+      "description": "null on the nullable integer playback.max_bitrate_kbps means \"no cap of my own\", which is unbounded above. It has no numeric rank, so a resolver that compares it as equal lets the one value that most needs capping slip past; a ceiling must bring it down to the limit.",
+      "keys": ["playback.max_bitrate_kbps"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        { "key": "playback.max_bitrate_kbps", "scope": "profile", "profile_id": "p1", "value": null }
+      ],
+      "constraint_bindings": [
+        {
+          "key": "playback.max_bitrate_kbps",
+          "policy_input": "max_bitrate_kbps",
+          "constraint": "ceiling"
+        }
+      ],
+      "constraints": { "max_bitrate_kbps": 8000 },
+      "expected": [
+        {
+          "key": "playback.max_bitrate_kbps",
+          "value": 8000,
+          "source": "profile",
+          "constrained": true,
+          "stored_value": null,
+          "constraint_kind": "ceiling"
+        }
+      ]
+    },
+    {
+      "name": "default_null_bitrate_is_capped_by_a_ceiling",
+      "description": "The contract default for playback.max_bitrate_kbps is null, so even with nothing stored a ceiling caps the resolved default; source stays \"default\" and the null is reported as stored_value.",
+      "keys": ["playback.max_bitrate_kbps"],
+      "context": { "profile_id": "p1" },
+      "constraint_bindings": [
+        {
+          "key": "playback.max_bitrate_kbps",
+          "policy_input": "max_bitrate_kbps",
+          "constraint": "ceiling"
+        }
+      ],
+      "constraints": { "max_bitrate_kbps": 8000 },
+      "expected": [
+        {
+          "key": "playback.max_bitrate_kbps",
+          "value": 8000,
+          "source": "default",
+          "constrained": true,
+          "stored_value": null,
+          "constraint_kind": "ceiling"
+        }
+      ]
+    },
+    {
+      "name": "floor_leaves_an_unbounded_bitrate_alone",
+      "description": "The mirror rule: unbounded already satisfies any floor, so a floor must not touch a null numeric.",
+      "keys": ["playback.max_bitrate_kbps"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        { "key": "playback.max_bitrate_kbps", "scope": "profile", "profile_id": "p1", "value": null }
+      ],
+      "constraint_bindings": [
+        {
+          "key": "playback.max_bitrate_kbps",
+          "policy_input": "min_bitrate_kbps",
+          "constraint": "floor"
+        }
+      ],
+      "constraints": { "min_bitrate_kbps": 8000 },
+      "expected": [{ "key": "playback.max_bitrate_kbps", "value": null, "source": "profile" }]
+    },
+    {
+      "name": "allowlist_falls_back_when_the_default_is_outside_the_list",
+      "description": "With nothing stored, catalog.metadata_language resolves to its default null, which is outside the allowlist. The fallback is the first allowed member — not the definition default, which is exactly the value the policy forbids.",
+      "keys": ["catalog.metadata_language"],
+      "context": { "profile_id": "p1" },
+      "constraint_bindings": [
+        {
+          "key": "catalog.metadata_language",
+          "policy_input": "allowed_metadata_languages",
+          "constraint": "allowlist"
+        }
+      ],
+      "constraints": { "allowed_metadata_languages": ["en", "fr"] },
+      "expected": [
+        {
+          "key": "catalog.metadata_language",
+          "value": "en",
+          "source": "default",
+          "constrained": true,
+          "stored_value": null,
+          "constraint_kind": "allowlist"
+        }
+      ]
+    },
+    {
+      "name": "allowlist_replaces_a_forbidden_choice",
+      "description": "A stored value outside the allowlist is replaced by the first allowed member, with the authored choice preserved as stored_value.",
+      "keys": ["catalog.metadata_language"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        { "key": "catalog.metadata_language", "scope": "profile", "profile_id": "p1", "value": "ja" }
+      ],
+      "constraint_bindings": [
+        {
+          "key": "catalog.metadata_language",
+          "policy_input": "allowed_metadata_languages",
+          "constraint": "allowlist"
+        }
+      ],
+      "constraints": { "allowed_metadata_languages": ["en", "fr"] },
+      "expected": [
+        {
+          "key": "catalog.metadata_language",
+          "value": "en",
+          "source": "profile",
+          "constrained": true,
+          "stored_value": "ja",
+          "constraint_kind": "allowlist"
+        }
+      ]
+    },
+    {
+      "name": "allowlist_passes_a_permitted_choice",
+      "description": "A stored value inside the allowlist passes through untouched.",
+      "keys": ["catalog.metadata_language"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        { "key": "catalog.metadata_language", "scope": "profile", "profile_id": "p1", "value": "fr" }
+      ],
+      "constraint_bindings": [
+        {
+          "key": "catalog.metadata_language",
+          "policy_input": "allowed_metadata_languages",
+          "constraint": "allowlist"
+        }
+      ],
+      "constraints": { "allowed_metadata_languages": ["en", "fr"] },
+      "expected": [{ "key": "catalog.metadata_language", "value": "fr", "source": "profile" }]
+    },
+    {
+      "name": "subtitle_appearance_ignores_content_scopes",
+      "description": "playback.subtitle_appearance resolves profile_device then profile only. With a library and a series in the context, the device row still wins — and the sparse device object replaces the profile object outright rather than merging with it.",
+      "keys": ["playback.subtitle_appearance"],
+      "context": {
+        "profile_id": "p1",
+        "device_id": "d1",
+        "library_ids": [7],
+        "series_ids": ["s-101"]
+      },
+      "stored": [
+        {
+          "key": "playback.subtitle_appearance",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": { "fontSize": "medium", "fontColor": "#ffcc00" }
+        },
+        {
+          "key": "playback.subtitle_appearance",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": { "fontSize": "xxlarge", "position": "top" }
+        }
+      ],
+      "expected": [
+        {
+          "key": "playback.subtitle_appearance",
+          "value": { "fontSize": "xxlarge", "position": "top" },
+          "source": "profile_device"
+        }
+      ]
+    },
+    {
+      "name": "subtitle_appearance_falls_to_profile_without_device",
+      "description": "Without a device identity the profile's appearance object answers, unmerged.",
+      "keys": ["playback.subtitle_appearance"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "playback.subtitle_appearance",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": { "fontSize": "medium", "fontColor": "#ffcc00" }
+        },
+        {
+          "key": "playback.subtitle_appearance",
+          "scope": "profile_device",
+          "profile_id": "p1",
+          "device_id": "d1",
+          "value": { "fontSize": "xxlarge", "position": "top" }
+        }
+      ],
+      "expected": [
+        {
+          "key": "playback.subtitle_appearance",
+          "value": { "fontSize": "medium", "fontColor": "#ffcc00" },
+          "source": "profile"
+        }
+      ]
+    }
+  ]
+}

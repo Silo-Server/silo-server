@@ -127,9 +127,16 @@ export interface SettingDefinition {
   control?: string;
   unit?: string;
   values?: readonly { value: unknown; label: string }[];
+  /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */
+  ordered?: boolean;
   minimum?: number;
   maximum?: number;
   step?: number;
+  /** The policy input that narrows this setting, when the manifest binds one. */
+  constrainedBy?: {
+    policyInput: string;
+    constraint: "ceiling" | "floor" | "allowlist" | "locked";
+  };
 }
 
 export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
@@ -166,6 +173,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "20mbps", label: "20 Mbps" },
       { value: "original", label: "Original" },
     ],
+    ordered: true,
   },
   "downloads.keep_watched": {
     key: "downloads.keep_watched",
@@ -337,6 +345,8 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "2160p", label: "2160p / 4K" },
       { value: "original", label: "Original quality" },
     ],
+    ordered: true,
+    constrainedBy: { policyInput: "max_playback_quality", constraint: "ceiling" },
   },
   "playback.show_forced_subtitles": {
     key: "playback.show_forced_subtitles",
@@ -813,6 +823,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
       { value: "large", label: "Large" },
       { value: "x-large", label: "Extra large" },
     ],
+    ordered: true,
   },
   "ui.text_weight": {
     key: "ui.text_weight",

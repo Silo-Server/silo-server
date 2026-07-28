@@ -183,9 +183,16 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  control?: string;\n")
 	out.WriteString("  unit?: string;\n")
 	out.WriteString("  values?: readonly { value: unknown; label: string }[];\n")
+	out.WriteString("  /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */\n")
+	out.WriteString("  ordered?: boolean;\n")
 	out.WriteString("  minimum?: number;\n")
 	out.WriteString("  maximum?: number;\n")
 	out.WriteString("  step?: number;\n")
+	out.WriteString("  /** The policy input that narrows this setting, when the manifest binds one. */\n")
+	out.WriteString("  constrainedBy?: {\n")
+	out.WriteString("    policyInput: string;\n")
+	out.WriteString("    constraint: \"ceiling\" | \"floor\" | \"allowlist\" | \"locked\";\n")
+	out.WriteString("  };\n")
 	out.WriteString("}\n\n")
 
 	out.WriteString("export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {\n")
@@ -219,6 +226,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 			}
 			out.WriteString("    ],\n")
 		}
+		if def.ValueSchema.Ordered {
+			out.WriteString("    ordered: true,\n")
+		}
 		if minimum, ok := def.ValueSchema.Minimum.Current(); ok {
 			fmt.Fprintf(&out, "    minimum: %s,\n", trimFloat(minimum))
 		}
@@ -227,6 +237,10 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		}
 		if def.ValueSchema.Step != nil {
 			fmt.Fprintf(&out, "    step: %s,\n", trimFloat(*def.ValueSchema.Step))
+		}
+		if def.ConstrainedBy != nil {
+			fmt.Fprintf(&out, "    constrainedBy: { policyInput: %q, constraint: %q },\n",
+				def.ConstrainedBy.PolicyInput, def.ConstrainedBy.Constraint)
 		}
 		out.WriteString("  },\n")
 	}

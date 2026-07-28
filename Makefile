@@ -86,6 +86,11 @@ test-web:
 #
 # The client repos are siblings of this one (see CLAUDE.md); a missing checkout
 # is skipped rather than failing, so a server-only developer can still run this.
+#
+# The conformance fixture (contracts/settings/v1/conformance.json) travels with
+# the bindings: the vendored copy in web/src/lib is what the web runner reads.
+# The Kotlin and Swift copies land together with their runners in the client
+# repos, which will pick their own test-resource paths.
 SILO_ANDROID_DIR ?= $(abspath ../silo-android)
 SILO_APPLE_DIR ?= $(abspath ../silo-apple)
 
@@ -95,6 +100,7 @@ settings-bindings:
 	gofmt -w internal/settingskeys/keys.go
 	go run ./cmd/settingsgen -lang ts -out web/src/lib/settingsContract.ts
 	@cd web && pnpm exec prettier --write src/lib/settingsContract.ts >/dev/null
+	cp contracts/settings/v1/conformance.json web/src/lib/settingsConformance.json
 	@if [ -d "$(SILO_ANDROID_DIR)" ]; then \
 		go run ./cmd/settingsgen -lang kotlin \
 			-out "$(SILO_ANDROID_DIR)/shared/src/commonMain/kotlin/org/siloserver/silo/model/settings/SettingKeys.kt"; \
@@ -117,6 +123,8 @@ verify-settings-bindings:
 	@gofmt /tmp/silo-settings-go.check > /tmp/silo-settings-go.fmt
 	@diff -u internal/settingskeys/keys.go /tmp/silo-settings-go.fmt \
 		|| { echo "::error::internal/settingskeys/keys.go is stale; run make settings-bindings"; exit 1; }
+	@diff -u web/src/lib/settingsConformance.json contracts/settings/v1/conformance.json \
+		|| { echo "::error::web/src/lib/settingsConformance.json is stale; run make settings-bindings"; exit 1; }
 	@echo "settings bindings are current"
 
 # Check committed content for local machine path leaks.
