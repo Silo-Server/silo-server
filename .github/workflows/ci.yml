@@ -94,6 +94,11 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           golangci-lint run --new-from-merge-base="origin/${BASE_REF}" ./...
 
+      # A manifest change that does not regenerate leaves every client reading
+      # stale keys, which the contract exists to prevent.
+      - name: Verify settings bindings are current
+        run: make verify-settings-bindings
+
       # Runs the settings-contract gate among everything else: the embedded
       # manifest must parse, satisfy its own schema, hold every structural
       # invariant, and agree with the live settings registry on keys and

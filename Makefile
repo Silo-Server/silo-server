@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up settings-bindings verify-settings-bindings
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -81,6 +81,43 @@ test-go: embed-stub
 
 test-web:
 	cd web && pnpm exec vitest run $(WEBTEST_KNOWN_FAILURES)
+
+# Regenerate the settings-contract bindings for every language.
+#
+# The client repos are siblings of this one (see CLAUDE.md); a missing checkout
+# is skipped rather than failing, so a server-only developer can still run this.
+SILO_ANDROID_DIR ?= $(abspath ../silo-android)
+SILO_APPLE_DIR ?= $(abspath ../silo-apple)
+
+settings-bindings:
+	@mkdir -p internal/settingskeys
+	go run ./cmd/settingsgen -lang go -out internal/settingskeys/keys.go
+	gofmt -w internal/settingskeys/keys.go
+	go run ./cmd/settingsgen -lang ts -out web/src/lib/settingsContract.ts
+	@cd web && pnpm exec prettier --write src/lib/settingsContract.ts >/dev/null
+	@if [ -d "$(SILO_ANDROID_DIR)" ]; then \
+		go run ./cmd/settingsgen -lang kotlin \
+			-out "$(SILO_ANDROID_DIR)/shared/src/commonMain/kotlin/org/siloserver/silo/model/settings/SettingKeys.kt"; \
+		echo "wrote Kotlin bindings to $(SILO_ANDROID_DIR)"; \
+	else \
+		echo "skipping Kotlin: $(SILO_ANDROID_DIR) not checked out"; \
+	fi
+	@if [ -d "$(SILO_APPLE_DIR)" ]; then \
+		go run ./cmd/settingsgen -lang swift \
+			-out "$(SILO_APPLE_DIR)/iosApp/iosApp/Networking/SettingKeys.generated.swift"; \
+		echo "wrote Swift bindings to $(SILO_APPLE_DIR)"; \
+	else \
+		echo "skipping Swift: $(SILO_APPLE_DIR) not checked out"; \
+	fi
+
+# Fail when the committed bindings disagree with the manifest, so a manifest
+# change cannot merge without regenerating what every client reads.
+verify-settings-bindings:
+	@go run ./cmd/settingsgen -lang go > /tmp/silo-settings-go.check
+	@gofmt /tmp/silo-settings-go.check > /tmp/silo-settings-go.fmt
+	@diff -u internal/settingskeys/keys.go /tmp/silo-settings-go.fmt \
+		|| { echo "::error::internal/settingskeys/keys.go is stale; run make settings-bindings"; exit 1; }
+	@echo "settings bindings are current"
 
 # Check committed content for local machine path leaks.
 verify-local-paths:
