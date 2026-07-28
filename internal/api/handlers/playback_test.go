@@ -1359,7 +1359,7 @@ func TestHandleStartTranscode_PreservesRecomputedBaseMethodAfterFallback(t *test
 	if remoteStartReq.AudioTrackIndex != 1 {
 		t.Fatalf("remote audio_track_index = %d, want 1", remoteStartReq.AudioTrackIndex)
 	}
-	if remoteStartReq.TargetResolution != "1080p" {
+	if remoteStartReq.TargetResolution != transcodeResolution1080p {
 		t.Fatalf("remote target resolution = %q, want 1080p", remoteStartReq.TargetResolution)
 	}
 	if remoteStartReq.TargetBitrateKbps != 10000 {
@@ -1376,7 +1376,7 @@ func TestHandleStartTranscode_PreservesRecomputedBaseMethodAfterFallback(t *test
 	if session.BasePlayMethod != playback.PlayRemux {
 		t.Fatalf("session.BasePlayMethod = %q, want %q", session.BasePlayMethod, playback.PlayRemux)
 	}
-	if session.TargetResolution != "1080p" {
+	if session.TargetResolution != transcodeResolution1080p {
 		t.Fatalf("session target resolution = %q, want 1080p", session.TargetResolution)
 	}
 	if session.TargetBitrateKbps != 10000 {
@@ -2042,7 +2042,7 @@ func TestHandleStartTranscode_LocalPathPropagatesSelectedAudioTrack(t *testing.T
 	if got := transcodeSession.Opts().AudioTrackIndex; got != 1 {
 		t.Fatalf("local transcode audio track index = %d, want 1", got)
 	}
-	if got := transcodeSession.Opts().TargetResolution; got != "1080p" {
+	if got := transcodeSession.Opts().TargetResolution; got != transcodeResolution1080p {
 		t.Fatalf("local target resolution = %q, want 1080p", got)
 	}
 	if got := transcodeSession.Opts().TargetBitrateKbps; got != 10000 {
@@ -2052,7 +2052,7 @@ func TestHandleStartTranscode_LocalPathPropagatesSelectedAudioTrack(t *testing.T
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)
 	}
-	if session.TargetResolution != "1080p" {
+	if session.TargetResolution != transcodeResolution1080p {
 		t.Fatalf("session target resolution = %q, want 1080p", session.TargetResolution)
 	}
 	if session.TargetBitrateKbps != 10000 {
@@ -2439,7 +2439,7 @@ func TestHandleStartTranscode_SeekedCopyPreservedOnRemoteNode(t *testing.T) {
 		remoteStartReq.StreamOriginSeconds != 16 || !remoteStartReq.CopySeekAnchorResolved || remoteStartReq.StartSegmentNumber != 8 {
 		t.Fatalf("remote copy recipe = codec %q seek %v origin %v segment %d", remoteStartReq.TargetCodecVideo, remoteStartReq.SeekSeconds, remoteStartReq.StreamOriginSeconds, remoteStartReq.StartSegmentNumber)
 	}
-	if remoteStartReq.TargetResolution != "2160p" {
+	if remoteStartReq.TargetResolution != transcodeResolution2160p {
 		t.Fatalf("remote copy target resolution = %q, want unchanged 2160p", remoteStartReq.TargetResolution)
 	}
 	if !strings.HasPrefix(remoteStartReq.SessionID, session.ID+legacyTransportMarker) {
@@ -3412,45 +3412,45 @@ func TestClampEncodedTargetResolution(t *testing.T) {
 	}{
 		{
 			name:      "clamps 2160p to 1080p",
-			requested: "2160p",
-			source:    "1080p",
-			want:      "1080p",
+			requested: transcodeResolution2160p,
+			source:    transcodeResolution1080p,
+			want:      transcodeResolution1080p,
 		},
 		{
 			name:      "keeps lower target",
-			requested: "720p",
-			source:    "1080p",
-			want:      "720p",
+			requested: transcodeResolution720p,
+			source:    transcodeResolution1080p,
+			want:      transcodeResolution720p,
 		},
 		{
 			name:      "keeps equal target",
-			requested: "1080p",
-			source:    "1080p",
-			want:      "1080p",
+			requested: transcodeResolution1080p,
+			source:    transcodeResolution1080p,
+			want:      transcodeResolution1080p,
 		},
 		{
 			name:      "keeps empty target",
 			requested: "",
-			source:    "1080p",
+			source:    transcodeResolution1080p,
 			want:      "",
 		},
 		{
 			name:      "keeps unknown target",
-			requested: "source",
-			source:    "1080p",
-			want:      "source",
+			requested: "unrecognized-target",
+			source:    transcodeResolution1080p,
+			want:      "unrecognized-target",
 		},
 		{
 			name:      "keeps target for unknown source",
-			requested: "2160p",
+			requested: transcodeResolution2160p,
 			source:    "native",
-			want:      "2160p",
+			want:      transcodeResolution2160p,
 		},
 		{
 			name:      "supports low tiers",
-			requested: "480p",
-			source:    "420p",
-			want:      "420p",
+			requested: transcodeResolution480p,
+			source:    transcodeResolution420p,
+			want:      transcodeResolution420p,
 		},
 	}
 
@@ -3464,6 +3464,61 @@ func TestClampEncodedTargetResolution(t *testing.T) {
 					got,
 					tt.want,
 				)
+			}
+		})
+	}
+}
+
+func TestTranscodeResolutionHeight(t *testing.T) {
+	tests := []struct {
+		resolution string
+		wantHeight int
+		wantKnown  bool
+	}{
+		{resolution: transcodeResolution2160p, wantHeight: 2160, wantKnown: true},
+		{resolution: transcodeResolution1080p, wantHeight: 1080, wantKnown: true},
+		{resolution: transcodeResolution720p, wantHeight: 720, wantKnown: true},
+		{resolution: transcodeResolution480p, wantHeight: 480, wantKnown: true},
+		{resolution: transcodeResolution420p, wantHeight: 420, wantKnown: true},
+		{resolution: transcodeResolution328p, wantHeight: 328, wantKnown: true},
+		{resolution: "unrecognized-tier", wantHeight: 0, wantKnown: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.resolution, func(t *testing.T) {
+			gotHeight, gotKnown := transcodeResolutionHeight(tt.resolution)
+			if gotHeight != tt.wantHeight || gotKnown != tt.wantKnown {
+				t.Fatalf(
+					"transcodeResolutionHeight(%q) = (%d, %t), want (%d, %t)",
+					tt.resolution,
+					gotHeight,
+					gotKnown,
+					tt.wantHeight,
+					tt.wantKnown,
+				)
+			}
+		})
+	}
+}
+
+func TestResolutionRank(t *testing.T) {
+	tests := []struct {
+		resolution string
+		want       int
+	}{
+		{resolution: transcodeResolution2160p, want: 4},
+		{resolution: transcodeResolution1080p, want: 3},
+		{resolution: transcodeResolution720p, want: 2},
+		{resolution: transcodeResolution480p, want: 1},
+		{resolution: transcodeResolution420p, want: 0},
+		{resolution: transcodeResolution328p, want: 0},
+		{resolution: "unrecognized-tier", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.resolution, func(t *testing.T) {
+			if got := resolutionRank(tt.resolution); got != tt.want {
+				t.Fatalf("resolutionRank(%q) = %d, want %d", tt.resolution, got, tt.want)
 			}
 		})
 	}
