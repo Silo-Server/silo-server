@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { Bell, CalendarDays, Heart, Play, Sparkles, Subtitles, Users, Wand2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -89,9 +90,12 @@ export function TourHost({ flow, onDone }: TourHostProps) {
 
   const isLast = index === steps.length - 1;
 
-  return (
+  // Portaled to <body>: an ancestor in the app layout creates a fixed-position
+  // containing block, which would pin inset-0 to the content pane and leave
+  // the sidebar un-scrimmed and un-blurred.
+  return createPortal(
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-xl"
       role="dialog"
       aria-modal="true"
       aria-label="Feature tour"
@@ -139,7 +143,8 @@ export function TourHost({ flow, onDone }: TourHostProps) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
