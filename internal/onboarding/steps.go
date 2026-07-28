@@ -113,8 +113,8 @@ var tourSteps = []Step{
 		Body:         "Silo has native apps for iPhone, iPad, Apple TV, Android, and Android TV. Sign in with this same email address and your profile, Watchlist, and watch progress follow you to every screen.",
 		Illustration: StepIDApps,
 		Links: []StepLink{
-			{Label: "iPhone & Apple TV (TestFlight)", URL: "https://testflight.apple.com/join/XZy8cu5q"},
-			{Label: "Android & Android TV (Play Store)", URL: "https://play.google.com/store/apps/details?id=org.siloserver.silo"},
+			{Label: "iPhone & Apple TV", URL: "https://testflight.apple.com/join/XZy8cu5q"},
+			{Label: "Android & Android TV", URL: "https://play.google.com/store/apps/details?id=org.siloserver.silo"},
 		},
 		webOnly: true,
 	},

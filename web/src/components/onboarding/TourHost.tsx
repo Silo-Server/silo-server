@@ -15,7 +15,7 @@ import {
   Wand2,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { OnboardingFlow, OnboardingStep } from "@/api/types";
+import type { OnboardingFlow, OnboardingStep, OnboardingStepLink } from "@/api/types";
 import { getProfileToken } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
@@ -183,16 +183,76 @@ function StepBody({ step }: { step: OnboardingStep }) {
       {step.links && step.links.length > 0 && (
         <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           {step.links.map((link) => (
-            <Button key={link.url} variant="outline" size="sm" asChild className="max-w-full">
-              <a href={link.url} target="_blank" rel="noopener noreferrer">
-                <span className="truncate">{link.label}</span>
-                <ExternalLink className="ml-1.5 size-3.5 shrink-0" aria-hidden="true" />
-              </a>
-            </Button>
+            <StoreLink key={link.url} link={link} />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Store links render as badge-style buttons with the store's brand mark,
+ * inferred from the URL host so the server contract stays icon-free. Other
+ * links fall back to a plain external-link button.
+ */
+function StoreLink({ link }: { link: OnboardingStepLink }) {
+  const brand = link.url.includes("apple.com")
+    ? {
+        Icon: AppleLogo,
+        eyebrow: link.url.includes("testflight") ? "TestFlight beta" : "App Store",
+      }
+    : link.url.includes("play.google.com")
+      ? { Icon: GooglePlayLogo, eyebrow: "Google Play" }
+      : null;
+
+  if (!brand) {
+    return (
+      <Button variant="outline" size="sm" asChild className="max-w-full">
+        <a href={link.url} target="_blank" rel="noopener noreferrer">
+          <span className="truncate">{link.label}</span>
+          <ExternalLink className="ml-1.5 size-3.5 shrink-0" aria-hidden="true" />
+        </a>
+      </Button>
+    );
+  }
+
+  return (
+    <a
+      href={link.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="border-border bg-popover hover:bg-secondary focus-visible:ring-ring flex max-w-full items-center gap-3 rounded-xl border px-4 py-2.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+    >
+      <brand.Icon className="size-6 shrink-0" aria-hidden="true" />
+      <span className="min-w-0">
+        <span className="text-muted-foreground block text-[10px] leading-tight tracking-wide uppercase">
+          {brand.eyebrow}
+        </span>
+        <span className="block truncate text-sm leading-tight font-semibold">{link.label}</span>
+      </span>
+    </a>
+  );
+}
+
+/** Apple logo mark (brand shape, rendered in the current text color). */
+function AppleLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" />
+    </svg>
+  );
+}
+
+/** Google Play logo mark (brand shape, rendered in the current text color). */
+function GooglePlayLogo({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M3.61 1.81c-.36.38-.57.97-.57 1.73v16.92c0 .76.21 1.35.57 1.73l.09.08 9.48-9.48v-.22L3.7 1.72l-.09.09z" />
+      <path d="M16.34 15.95l-3.16-3.16v-.22l3.16-3.16.07.04 3.74 2.13c1.07.6 1.07 1.6 0 2.21l-3.74 2.12-.07.04z" />
+      <path d="M16.41 15.91l-3.23-3.23-9.57 9.57c.35.37 .93.42 1.59.05l11.21-6.39z" />
+      <path d="M16.41 8.45L5.2 2.07c-.66-.38-1.24-.33-1.59.05l9.57 9.56 3.23-3.23z" />
+    </svg>
   );
 }
 
