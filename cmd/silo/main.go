@@ -2059,6 +2059,11 @@ func main() {
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
 			taskMgr.Register(tasks.NewNotificationsRetentionTask(notificationSystem))
 		}
+		if userStoreProvider != nil {
+			taskMgr.Register(tasks.NewSettingMutationsRetentionTask(userstore.NewSettingMutationSweeper(
+				auth.NewUserRepository(deps.DB), userStoreProvider,
+			)))
+		}
 		if matchWorker != nil {
 			taskMgr.Register(tasks.NewMatchMediaTask(matchWorker))
 		}
