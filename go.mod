@@ -1,8 +1,8 @@
 module github.com/Silo-Server/silo-server
 
-// Remove this replacement after the virtual-catalog RuntimeHost contract ships
-// in an upstream SDK release.
-replace github.com/Silo-Server/silo-plugin-sdk => /opt/altmount/github/silo-plugin-sdk
+// Greenfield virtual playback consumes the additive SDK contract published on
+// the companion integration branch until it lands upstream.
+replace github.com/Silo-Server/silo-plugin-sdk => github.com/drondeseries/silo-plugin-sdk v0.10.1-0.20260728224823-9bf6c6dbf009
 
 go 1.26.4
 
