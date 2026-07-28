@@ -20,6 +20,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/Silo-Server/silo-server/internal/jellycompat/displayprefs"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 )
 
@@ -307,10 +308,12 @@ func (p *Planner) planAccountSettings(
 	for _, setting := range settings {
 		key := canonicalKey(setting.Key)
 
-		// jellycompat stashes its DisplayPreferences blobs in this table under
-		// synthetic keys. They are that subsystem's storage, not user settings,
-		// and they move to dedicated jellycompat storage rather than here.
-		if strings.HasPrefix(setting.Key, "jellycompat:") {
+		// jellycompat stashed its DisplayPreferences blobs in this table under
+		// synthetic keys. They are that subsystem's storage, not user settings:
+		// the migration step that follows this backfill moves them to the
+		// dedicated jellycompat_displayprefs table, so this planner must
+		// neither convert nor reject them.
+		if strings.HasPrefix(setting.Key, displayprefs.NamespacePrefix) {
 			continue
 		}
 

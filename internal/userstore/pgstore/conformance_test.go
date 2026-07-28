@@ -100,3 +100,45 @@ func TestPostgresSettingValues(t *testing.T) {
 		return newStore(pool, userID)
 	})
 }
+
+// TestPostgresJellycompatDisplayPrefs runs the Jellyfin DisplayPreferences
+// storage conformance tests against the Postgres backend; the per-user SQLite
+// backend runs the same suite in internal/userdb. Skips unless
+// SILO_TEST_DATABASE_URL is set and the migration is applied.
+func TestPostgresJellycompatDisplayPrefs(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	var table *string
+	err = pool.QueryRow(ctx, `SELECT table_name FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_name = 'jellycompat_displayprefs'`).Scan(&table)
+	if errors.Is(err, pgx.ErrNoRows) || table == nil {
+		t.Skip("jellycompat_displayprefs migration has not been applied")
+	}
+	if err != nil {
+		t.Fatalf("check migration: %v", err)
+	}
+
+	storetest.RunJellycompatDisplayPrefs(t, func(t *testing.T) userstore.UserStore {
+		var userID int
+		if err := pool.QueryRow(ctx,
+			`INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`,
+			fmt.Sprintf("conf-displayprefs-%d", time.Now().UnixNano()),
+		).Scan(&userID); err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		// jellycompat_displayprefs cascades from users.
+		t.Cleanup(func() {
+			_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+		})
+		return newStore(pool, userID)
+	})
+}

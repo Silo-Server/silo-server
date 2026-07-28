@@ -132,10 +132,15 @@ func newMigrationProvider(pool *pgxpool.Pool, fsys fs.FS, dir string) (*goose.Pr
 		goose.WithTableName(gooseVersionTable),
 		goose.WithAllowOutofOrder(true),
 		goose.WithSessionLocker(&legacyBootstrapLocker{delegate: locker}),
-		// The settings backfill is Go rather than SQL: it validates every value
-		// against the contract and re-encodes it as typed JSON, which SQL
-		// cannot do without duplicating the manifest.
-		goose.WithGoMigrations(settingsBackfillMigration()),
+		// These are Go rather than SQL because their conversion rules are
+		// shared with the per-user SQLite backend: the settings backfill
+		// validates every value against the contract and re-encodes it as
+		// typed JSON, and the displayprefs move parses the legacy jellycompat
+		// keys — neither expressible in SQL without duplicating those rules.
+		goose.WithGoMigrations(
+			settingsBackfillMigration(),
+			displayPrefsMoveMigration(),
+		),
 	)
 	if err != nil {
 		_ = sqlDB.Close()

@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 15
+const schemaVersion = 16
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -151,7 +151,29 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 16 {
+		if err := migrateToV16(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 16"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 16: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV16 rehomes the Jellyfin DisplayPreferences blobs from
+// user_settings (jellycompat:* keys) into the dedicated
+// jellycompat_displayprefs table, removing the last non-settings tenant of the
+// legacy key/value table. The table itself comes from InitSchema on this open;
+// executing the DDL again here records it for the version gate, the same shape
+// migrateToV14 used for the settings contract tables.
+func migrateToV16(tx *sql.Tx) error {
+	if _, err := tx.Exec(jellycompatDisplayPrefsSchema); err != nil {
+		return fmt.Errorf("creating jellycompat_displayprefs: %w", err)
+	}
+	return moveJellycompatDisplayPrefs(tx)
 }
 
 // migrateToV15 backfills canonical setting values from the legacy tables.

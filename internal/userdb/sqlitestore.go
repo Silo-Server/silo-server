@@ -370,6 +370,14 @@ func (s *SQLiteUserStore) ListAllDeviceSettings(_ context.Context) ([]userstore.
 	return ListAllDeviceSettings(s.db)
 }
 
+func (s *SQLiteUserStore) GetJellycompatDisplayPrefs(_ context.Context, prefsID, client string) (string, error) {
+	return GetJellycompatDisplayPrefs(s.db, prefsID, client)
+}
+
+func (s *SQLiteUserStore) SetJellycompatDisplayPrefs(_ context.Context, prefsID, client, value string) error {
+	return SetJellycompatDisplayPrefs(s.db, prefsID, client, value)
+}
+
 func (s *SQLiteUserStore) SetSubtitlePreference(_ context.Context, pref userstore.SubtitlePreference) error {
 	return SetSubtitlePreference(s.db, pref)
 }

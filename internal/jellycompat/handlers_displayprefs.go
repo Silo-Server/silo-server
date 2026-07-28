@@ -2,7 +2,6 @@ package jellycompat
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -32,8 +31,8 @@ type displayPreferencesDTO struct {
 }
 
 // DisplayPreferencesHandler serves Jellyfin display preferences endpoints,
-// persisting them via the user settings key-value store and seeding defaults
-// from the user's profile.
+// persisting the blobs verbatim in the dedicated jellycompat_displayprefs
+// table and seeding defaults from the user's profile.
 type DisplayPreferencesHandler struct {
 	storeProvider userstore.UserStoreProvider
 }
@@ -41,10 +40,6 @@ type DisplayPreferencesHandler struct {
 // NewDisplayPreferencesHandler creates a new display preferences handler.
 func NewDisplayPreferencesHandler(storeProvider userstore.UserStoreProvider) *DisplayPreferencesHandler {
 	return &DisplayPreferencesHandler{storeProvider: storeProvider}
-}
-
-func displayPrefsSettingKey(id, client string) string {
-	return fmt.Sprintf("jellycompat:displayprefs:%s:%s", id, client)
 }
 
 // HandleGetDisplayPreferences serves GET /DisplayPreferences/{displayPreferencesId}.
@@ -58,11 +53,11 @@ func (h *DisplayPreferencesHandler) HandleGetDisplayPreferences(w http.ResponseW
 	id := chi.URLParam(r, "displayPreferencesId")
 	client := r.URL.Query().Get("client")
 
-	// Try to load persisted preferences from user settings.
+	// Try to load persisted preferences.
 	if h.storeProvider != nil {
 		store, err := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID)
 		if err == nil {
-			val, err := store.GetSetting(r.Context(), displayPrefsSettingKey(id, client))
+			val, err := store.GetJellycompatDisplayPrefs(r.Context(), id, client)
 			if err == nil && val != "" {
 				var dto displayPreferencesDTO
 				if json.Unmarshal([]byte(val), &dto) == nil {
@@ -111,7 +106,7 @@ func (h *DisplayPreferencesHandler) HandleUpdateDisplayPreferences(w http.Respon
 		store, err := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID)
 		if err == nil {
 			encoded, _ := json.Marshal(dto)
-			_ = store.SetSetting(r.Context(), displayPrefsSettingKey(id, client), string(encoded))
+			_ = store.SetJellycompatDisplayPrefs(r.Context(), id, client, string(encoded))
 		}
 	}
 

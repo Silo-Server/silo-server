@@ -462,7 +462,13 @@ func (s *progressCountingStore) GetSetting(context.Context, string) (string, err
 	panic("unused")
 }
 func (s *progressCountingStore) SetSetting(context.Context, string, string) error { panic("unused") }
-func (s *progressCountingStore) DeleteSetting(context.Context, string) error      { panic("unused") }
+func (s *progressCountingStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) SetJellycompatDisplayPrefs(context.Context, string, string, string) error {
+	panic("unused")
+}
+func (s *progressCountingStore) DeleteSetting(context.Context, string) error { panic("unused") }
 func (s *progressCountingStore) ListSettings(context.Context) ([]userstore.SettingEntry, error) {
 	panic("unused")
 }

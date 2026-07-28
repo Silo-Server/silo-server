@@ -255,7 +255,24 @@ CREATE INDEX IF NOT EXISTS idx_home_item_dismissals_lookup
 
 CREATE INDEX IF NOT EXISTS idx_hidden_history_items_lookup
     ON hidden_history_items(profile_id, hidden_before);
-` + settingContractSchema
+` + settingContractSchema + jellycompatDisplayPrefsSchema
+
+// jellycompatDisplayPrefsSchema is the dedicated home for Jellyfin
+// DisplayPreferences blobs, which used to ride user_settings under synthetic
+// jellycompat:* keys. It mirrors the PostgreSQL table in
+// migrations/sql (jellycompat_displayprefs) with user_id omitted: this
+// database is already scoped to one user. The value is opaque Jellyfin client
+// JSON stored verbatim, so it is TEXT with no json_valid CHECK — this table
+// stores what the client sent, it does not interpret it.
+const jellycompatDisplayPrefsSchema = `
+CREATE TABLE IF NOT EXISTS jellycompat_displayprefs (
+    prefs_id   TEXT NOT NULL,
+    client     TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (prefs_id, client)
+);
+`
 
 // settingContractSchema is the per-user half of the canonical settings contract
 // storage. It mirrors the PostgreSQL shape in

@@ -765,23 +765,15 @@ func validateRegisteredSetting(key, value string, expectedScope settingsScope) e
 //
 // An unknown key is now simply not a user setting, so the legacy write path
 // rejects it and the canonical API — which validates against the manifest — is
-// the only way to store anything new.
+// the only way to store anything new. That includes the jellycompat:* keys the
+// Jellyfin DisplayPreferences blobs once rode this table under: they live in
+// the dedicated jellycompat_displayprefs table now, and this API neither
+// accepts nor surfaces them.
 func keyUsesUserScope(key string) bool {
 	key = canonicalDeviceSettingKey(key)
 	spec, ok := settingsRegistry[key]
-	if !ok {
-		// The jellycompat DisplayPreferences blobs ride this table under
-		// synthetic keys. They are that subsystem's storage rather than user
-		// settings, and they move to dedicated storage in the follow-up; until
-		// then they must keep working.
-		return strings.HasPrefix(key, jellycompatSettingPrefix)
-	}
-	return spec.Scope == scopeUser
+	return ok && spec.Scope == scopeUser
 }
-
-// jellycompatSettingPrefix marks rows that belong to the Jellyfin
-// compatibility layer rather than to the user settings system.
-const jellycompatSettingPrefix = "jellycompat:"
 
 func keyUsesDeviceScope(key string) bool {
 	key = canonicalDeviceSettingKey(key)

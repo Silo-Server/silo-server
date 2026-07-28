@@ -38,6 +38,13 @@ func TestSQLiteSettingValues(t *testing.T) {
 	storetest.RunSettingValues(t, newConformanceStore)
 }
 
+// TestSQLiteJellycompatDisplayPrefs runs the Jellyfin DisplayPreferences
+// storage conformance tests against the per-user SQLite backend; the Postgres
+// backend runs the same suite in internal/userstore/pgstore.
+func TestSQLiteJellycompatDisplayPrefs(t *testing.T) {
+	storetest.RunJellycompatDisplayPrefs(t, newConformanceStore)
+}
+
 func TestSQLiteAddFavoriteAtReportsInsertion(t *testing.T) {
 	ctx := context.Background()
 	store := newConformanceStore(t)

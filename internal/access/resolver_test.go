@@ -223,7 +223,13 @@ func (s stubStore) GetSetting(_ context.Context, key string) (string, error) {
 	}
 	return "", nil
 }
-func (s stubStore) SetSetting(context.Context, string, string) error               { panic("unused") }
+func (s stubStore) SetSetting(context.Context, string, string) error { panic("unused") }
+func (s stubStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
+	panic("unused")
+}
+func (s stubStore) SetJellycompatDisplayPrefs(context.Context, string, string, string) error {
+	panic("unused")
+}
 func (s stubStore) DeleteSetting(context.Context, string) error                    { panic("unused") }
 func (s stubStore) ListSettings(context.Context) ([]userstore.SettingEntry, error) { panic("unused") }
 func (s stubStore) GetDeviceSetting(context.Context, string, string, string) (*userstore.DeviceSettingEntry, error) {

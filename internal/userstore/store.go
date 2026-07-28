@@ -132,6 +132,14 @@ type UserStore interface {
 	UpsertLibraryPlaybackPreference(ctx context.Context, pref LibraryPlaybackPreference) error
 	DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error
 
+	// Jellyfin DisplayPreferences blobs, keyed by (prefs id, client) per user.
+	// They are the jellycompat subsystem's storage rather than user settings —
+	// the contract neither validates nor resolves them — so they live in the
+	// dedicated jellycompat_displayprefs table and hold opaque Jellyfin client
+	// JSON verbatim. Get returns "" when nothing is stored.
+	GetJellycompatDisplayPrefs(ctx context.Context, prefsID, client string) (string, error)
+	SetJellycompatDisplayPrefs(ctx context.Context, prefsID, client, value string) error
+
 	// Canonical typed setting values (contracts/settings/v1).
 	//
 	// These back the settings contract's storage layer. The manifest remains
