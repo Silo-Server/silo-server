@@ -754,11 +754,34 @@ func validateRegisteredSetting(key, value string, expectedScope settingsScope) e
 	return spec.Validate(value)
 }
 
+// keyUsesUserScope reports whether a key is stored at account scope by the
+// legacy endpoints.
+//
+// This used to return true for any *unregistered* key, which is the extension
+// bag: a client could invent a production setting unilaterally and the server
+// stored it as an unvalidated string. That is how six ui.* settings and five
+// orphan keys reached production untyped, and closing it is the point of the
+// contract.
+//
+// An unknown key is now simply not a user setting, so the legacy write path
+// rejects it and the canonical API — which validates against the manifest — is
+// the only way to store anything new.
 func keyUsesUserScope(key string) bool {
 	key = canonicalDeviceSettingKey(key)
 	spec, ok := settingsRegistry[key]
-	return !ok || spec.Scope == scopeUser
+	if !ok {
+		// The jellycompat DisplayPreferences blobs ride this table under
+		// synthetic keys. They are that subsystem's storage rather than user
+		// settings, and they move to dedicated storage in the follow-up; until
+		// then they must keep working.
+		return strings.HasPrefix(key, jellycompatSettingPrefix)
+	}
+	return spec.Scope == scopeUser
 }
+
+// jellycompatSettingPrefix marks rows that belong to the Jellyfin
+// compatibility layer rather than to the user settings system.
+const jellycompatSettingPrefix = "jellycompat:"
 
 func keyUsesDeviceScope(key string) bool {
 	key = canonicalDeviceSettingKey(key)
