@@ -9,22 +9,27 @@ export type TextWeight = "default" | "strong";
 export interface AppearanceAuth {
   loading: boolean;
   user: { id: number } | null;
+  profile: { id: string } | null;
 }
 
 /**
  * The namespace that owns the device-local appearance caches, or null while
- * auth is bootstrapping or nobody is signed in.
+ * auth is bootstrapping, nobody is signed in, or no profile has been selected
+ * yet.
  *
- * Appearance settings are user-scoped server side (`GET /settings` resolves
- * against `user_settings` for the authenticated user), so the user id is the
- * right owner token today. When appearance moves to profile scope — the
- * settings contract puts `ui.theme` at `profile`, and profiles on one account
- * share a user id — appending the active profile id here is the whole change:
- * every cache read and write in the app resolves its namespace through this
- * function, so no call site can be left behind.
+ * Appearance settings are profile-scoped in the settings contract (`ui.theme`
+ * lives at `profile`, with an optional `profile_device` override), and several
+ * profiles on one account share a user id — so the owner token is the user id
+ * plus the active profile id. Every cache read and write in the app resolves
+ * its namespace through this function, so no call site can be left behind.
+ *
+ * On the profile picker (user signed in, no profile chosen) the owner is null,
+ * which falls back to the last profile that wrote here — the same "keep the
+ * last look" behavior as the login screen — and gates off the settings request,
+ * which cannot resolve profile scope without an active profile anyway.
  */
-export function appearanceCacheOwner({ loading, user }: AppearanceAuth): string | null {
-  return !loading && user ? String(user.id) : null;
+export function appearanceCacheOwner({ loading, user, profile }: AppearanceAuth): string | null {
+  return !loading && user && profile ? `${user.id}:${profile.id}` : null;
 }
 
 /**
@@ -41,6 +46,7 @@ export function useAppearanceCacheOwner(): string | null {
   return appearanceCacheOwner({
     loading: auth?.loading ?? false,
     user: auth?.user ? { id: auth.user.id } : null,
+    profile: auth?.profile ? { id: auth.profile.id } : null,
   });
 }
 

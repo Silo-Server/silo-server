@@ -84,9 +84,10 @@ function namespaceFor(owner: string | null): string {
  * paint before the settings request resolves. Covers theme, text scale, text
  * weight, high contrast, custom theme tokens, custom CSS, and date/time format.
  *
- * Values are namespaced by the account that owns them (`silo-theme:7`), so a
- * second account signing in on a shared browser simply finds nothing where the
- * first account's values would have been. A miss is just a miss: every caller
+ * Values are namespaced by the identity that owns them — user id plus active
+ * profile id (`silo-theme:7:p1`) — so a second account or a sibling profile
+ * signing in on a shared browser simply finds nothing where the first one's
+ * values would have been. A miss is just a miss: every caller
  * already parses a missing value into the correct default, and the settings
  * response repopulates the namespace when it lands.
  *
@@ -94,9 +95,9 @@ function namespaceFor(owner: string | null): string {
  * Nothing is ever deleted, so returning to the first account still paints their
  * look with no cold start. There is no shared stamp for a second tab, a stale
  * debounce timer, or an out-of-order effect to race on. And widening ownership
- * — appearance is user-scoped server side today, but the settings contract
- * moves it to profile scope — is a change to `appearanceCacheOwner` alone,
- * which no caller can forget to apply.
+ * — appearance moved from user scope to profile scope with the settings
+ * contract, and the owner token widened with it — is a change to
+ * `appearanceCacheOwner` alone, which no caller can forget to apply.
  *
  * Values written before namespacing existed sit at the bare key and are simply
  * ignored. Those users take one cold paint, after which the mirror below has

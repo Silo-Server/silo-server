@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSettings, useSetSetting } from "@/hooks/queries/settings";
+import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
+import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import { appearanceCache, storage } from "@/utils/storage";
 import { parseVarsJson } from "@/lib/themeExport";
@@ -7,6 +9,21 @@ import { sanitizeCss } from "@/lib/cssSanitizer";
 import type { ThemeToken } from "@/lib/themeTokens";
 
 export type ThemeVarOverrides = Partial<Record<ThemeToken, string>>;
+
+/** Both custom-theme keys are profile-wide in the contract (no device scope). */
+const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
+
+const CUSTOM_THEME_KEYS = [SETTING_KEYS.UI_CUSTOM_THEME_VARS, SETTING_KEYS.UI_CUSTOM_CSS] as const;
+
+/**
+ * The canonical API stores `ui.custom_theme_vars` as a JSON object; the local
+ * cache still mirrors it as a JSON string. Accept either shape so a value that
+ * round-tripped through the legacy string endpoints keeps parsing.
+ */
+function parseVarsValue(value: unknown): ThemeVarOverrides {
+  if (typeof value === "string") return parseVarsJson(value);
+  return typeof value === "object" && value !== null ? (value as ThemeVarOverrides) : {};
+}
 
 interface UseCustomThemeResult {
   vars: ThemeVarOverrides;
@@ -28,16 +45,22 @@ interface UseCustomThemeResult {
 }
 
 export function useCustomTheme(): UseCustomThemeResult {
-  // Owner of the localStorage warm start; null while auth bootstraps or when
-  // nobody is signed in, which keeps the last look on the login screen.
+  // Owner of the localStorage warm start; null while auth bootstraps, when
+  // nobody is signed in, or before a profile is selected, which keeps the last
+  // look on the login and profile screens.
   const cacheOwner = useAppearanceCacheOwner();
   const loadApi = cacheOwner !== null;
 
-  // API values
-  const { data: apiSettings } = useSettings({ enabled: loadApi });
-  const apiVars = apiSettings?.ui_custom_theme_vars;
-  const apiCss = apiSettings?.ui_custom_css;
-  const settingMutation = useSetSetting();
+  // API values, one batched effective read for both keys. A source of
+  // "default" means this profile has stored nothing, which must leave the
+  // local draft alone rather than clearing it.
+  const { data: effectiveSettings } = useEffectiveSettings({
+    keys: CUSTOM_THEME_KEYS,
+    enabled: loadApi,
+  });
+  const varsSetting = effectiveSettings?.[SETTING_KEYS.UI_CUSTOM_THEME_VARS];
+  const cssSetting = effectiveSettings?.[SETTING_KEYS.UI_CUSTOM_CSS];
+  const settingMutation = useSetSettingValue();
 
   // Local draft state (for instant updates without waiting for API)
   const [localVars, setLocalVars] = useState<ThemeVarOverrides>(() =>
@@ -52,9 +75,10 @@ export function useCustomTheme(): UseCustomThemeResult {
   const varsTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const cssTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // A debounced persist closes over the account it was scheduled for. Drop any
-  // pending write when the account changes or the editor unmounts: otherwise a
-  // timer armed by the previous account fires against the new account's session
+  // A debounced persist closes over the identity it was scheduled for. Drop
+  // any pending write when the owner changes — a different account, or a
+  // sibling profile on the same account — or the editor unmounts: otherwise a
+  // timer armed by the previous identity fires against the new one's session
   // and stores their predecessor's CSS under their name.
   useEffect(() => {
     return () => {
@@ -64,10 +88,11 @@ export function useCustomTheme(): UseCustomThemeResult {
   }, [cacheOwner]);
 
   // This state was seeded for whoever was signed in when the hook mounted.
-  // Re-seed from the new owner's namespace when the account changes, so an
-  // account switch without a reload stops rendering the previous account's
-  // tokens even before their own settings arrive. Adjusted during render, so
-  // there is no frame in which the new account sees the old one's theme.
+  // Re-seed from the new owner's namespace when the identity changes, so an
+  // account or profile switch without a reload stops rendering the previous
+  // identity's tokens even before their own settings arrive. Adjusted during
+  // render, so there is no frame in which the new identity sees the old one's
+  // theme.
   const [seededOwner, setSeededOwner] = useState(cacheOwner);
   if (seededOwner !== cacheOwner) {
     setSeededOwner(cacheOwner);
@@ -76,27 +101,29 @@ export function useCustomTheme(): UseCustomThemeResult {
     setIsDirty(false);
   }
 
-  // Sync API values into local state when they arrive
+  // Sync stored API values into local state when they arrive
   useEffect(() => {
-    if (loadApi && apiVars !== undefined) {
-      const parsed = parseVarsJson(apiVars);
-      setLocalVars(parsed);
-      appearanceCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, JSON.stringify(parsed), cacheOwner);
-    }
-  }, [loadApi, apiVars, cacheOwner]);
+    if (!loadApi || varsSetting === undefined || varsSetting.source === "default") return;
+    const parsed = parseVarsValue(varsSetting.value);
+    setLocalVars(parsed);
+    appearanceCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, JSON.stringify(parsed), cacheOwner);
+  }, [loadApi, varsSetting, cacheOwner]);
 
   useEffect(() => {
-    if (loadApi && apiCss !== undefined && apiCss !== null) {
-      setLocalCss(apiCss);
-      appearanceCache.set(storage.KEYS.UI_CUSTOM_CSS, apiCss, cacheOwner);
-    }
-  }, [loadApi, apiCss, cacheOwner]);
+    if (!loadApi || cssSetting === undefined || cssSetting.source === "default") return;
+    if (typeof cssSetting.value !== "string") return;
+    setLocalCss(cssSetting.value);
+    appearanceCache.set(storage.KEYS.UI_CUSTOM_CSS, cssSetting.value, cacheOwner);
+  }, [loadApi, cssSetting, cacheOwner]);
 
   const persistVars = useCallback(
     (vars: ThemeVarOverrides) => {
-      const json = JSON.stringify(vars);
-      appearanceCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, json, cacheOwner);
-      settingMutation.mutate({ key: "ui_custom_theme_vars", value: json });
+      appearanceCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, JSON.stringify(vars), cacheOwner);
+      settingMutation.mutate({
+        key: SETTING_KEYS.UI_CUSTOM_THEME_VARS,
+        value: vars,
+        identity: PROFILE_SCOPE,
+      });
     },
     [settingMutation, cacheOwner],
   );
@@ -105,7 +132,11 @@ export function useCustomTheme(): UseCustomThemeResult {
     (css: string) => {
       const safe = sanitizeCss(css);
       appearanceCache.set(storage.KEYS.UI_CUSTOM_CSS, safe, cacheOwner);
-      settingMutation.mutate({ key: "ui_custom_css", value: safe });
+      settingMutation.mutate({
+        key: SETTING_KEYS.UI_CUSTOM_CSS,
+        value: safe,
+        identity: PROFILE_SCOPE,
+      });
     },
     [settingMutation, cacheOwner],
   );
