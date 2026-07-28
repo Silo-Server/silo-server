@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UserLibrary } from "@/api/types";
-import {
-  filterVisibleLibraries,
-  parseDisabledLibraryIDs,
-  serializeDisabledLibraryIDs,
-} from "./libraries";
+import { filterVisibleLibraries, normalizeLibraryIDs, parseLibraryIDList } from "./libraries";
 
 const libraries: UserLibrary[] = [
   { id: 1, name: "Movies", type: "movies", sort_order: 0 },
@@ -12,22 +8,29 @@ const libraries: UserLibrary[] = [
   { id: 3, name: "Anime", type: "series", sort_order: 2 },
 ];
 
-describe("parseDisabledLibraryIDs", () => {
+describe("parseLibraryIDList", () => {
   it("returns an empty list when the setting is missing or invalid", () => {
-    expect(parseDisabledLibraryIDs(null)).toEqual([]);
-    expect(parseDisabledLibraryIDs("")).toEqual([]);
-    expect(parseDisabledLibraryIDs("nope")).toEqual([]);
-    expect(parseDisabledLibraryIDs('{"ids":[1,2]}')).toEqual([]);
+    expect(parseLibraryIDList(null)).toEqual([]);
+    expect(parseLibraryIDList(undefined)).toEqual([]);
+    expect(parseLibraryIDList("")).toEqual([]);
+    expect(parseLibraryIDList("nope")).toEqual([]);
+    expect(parseLibraryIDList('{"ids":[1,2]}')).toEqual([]);
+    expect(parseLibraryIDList({ ids: [1, 2] })).toEqual([]);
+  });
+
+  it("accepts the canonical array value directly", () => {
+    expect(parseLibraryIDList([3, 1])).toEqual([3, 1]);
   });
 
   it("keeps only positive integer library ids", () => {
-    expect(parseDisabledLibraryIDs('[1,2,2,0,-1,3.5,"4"]')).toEqual([1, 2]);
+    expect(parseLibraryIDList([1, 2, 2, 0, -1, 3.5, "4"])).toEqual([1, 2]);
+    expect(parseLibraryIDList('[1,2,2,0,-1,3.5,"4"]')).toEqual([1, 2]);
   });
 });
 
-describe("serializeDisabledLibraryIDs", () => {
-  it("stores a normalized id list", () => {
-    expect(serializeDisabledLibraryIDs([3, 1, 3, -1, 0])).toBe("[3,1]");
+describe("normalizeLibraryIDs", () => {
+  it("produces a normalized id list", () => {
+    expect(normalizeLibraryIDs([3, 1, 3, -1, 0])).toEqual([3, 1]);
   });
 });
 

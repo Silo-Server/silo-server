@@ -12,13 +12,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   useAvailableUserLibraries: vi.fn(),
+  useLibraryDisplayPreferences: vi.fn(),
   useCurrentProfile: vi.fn(),
   useLibraryPlaybackPreferences: vi.fn(),
-  useDeleteDeviceSetting: vi.fn(),
   useEffectiveSettings: vi.fn(),
-  useSetting: vi.fn(),
-  useSetDeviceSetting: vi.fn(),
-  useSetSetting: vi.fn(),
+  useSetSettingValue: vi.fn(),
+  useClearSettingValue: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/libraries", async () => {
@@ -29,21 +28,21 @@ vi.mock("@/hooks/queries/libraries", async () => {
   return {
     ...actual,
     useAvailableUserLibraries: (...args: unknown[]) => mocks.useAvailableUserLibraries(...args),
+    useLibraryDisplayPreferences: (...args: unknown[]) =>
+      mocks.useLibraryDisplayPreferences(...args),
   };
 });
 
-vi.mock("@/hooks/queries/settings", async () => {
-  const actual = await vi.importActual<typeof import("@/hooks/queries/settings")>(
-    "@/hooks/queries/settings",
+vi.mock("@/hooks/queries/settingValues", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/queries/settingValues")>(
+    "@/hooks/queries/settingValues",
   );
 
   return {
     ...actual,
-    useDeleteDeviceSetting: (...args: unknown[]) => mocks.useDeleteDeviceSetting(...args),
     useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
-    useSetting: (...args: unknown[]) => mocks.useSetting(...args),
-    useSetDeviceSetting: (...args: unknown[]) => mocks.useSetDeviceSetting(...args),
-    useSetSetting: (...args: unknown[]) => mocks.useSetSetting(...args),
+    useSetSettingValue: (...args: unknown[]) => mocks.useSetSettingValue(...args),
+    useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
   };
 });
 
@@ -189,16 +188,20 @@ describe("LibrarySettings helpers", () => {
 describe("LibrarySettings", () => {
   beforeEach(() => {
     mocks.useAvailableUserLibraries.mockReset();
+    mocks.useLibraryDisplayPreferences.mockReset();
     mocks.useCurrentProfile.mockReset();
     mocks.useLibraryPlaybackPreferences.mockReset();
-    mocks.useDeleteDeviceSetting.mockReset();
     mocks.useEffectiveSettings.mockReset();
-    mocks.useSetting.mockReset();
-    mocks.useSetDeviceSetting.mockReset();
-    mocks.useSetSetting.mockReset();
+    mocks.useSetSettingValue.mockReset();
+    mocks.useClearSettingValue.mockReset();
 
     mocks.useAvailableUserLibraries.mockReturnValue({
       data: libraries,
+      isLoading: false,
+    });
+    mocks.useLibraryDisplayPreferences.mockReturnValue({
+      disabledLibraryIDs: [],
+      libraryOrder: [],
       isLoading: false,
     });
     mocks.useCurrentProfile.mockReturnValue({
@@ -209,25 +212,19 @@ describe("LibrarySettings", () => {
       data: [],
       isLoading: false,
     });
-    mocks.useDeleteDeviceSetting.mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    });
     mocks.useEffectiveSettings.mockReturnValue({
       data: {},
       isLoading: false,
     });
-    mocks.useSetting.mockReturnValue({
-      data: null,
-      isLoading: false,
-    });
-    mocks.useSetDeviceSetting.mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    });
-    mocks.useSetSetting.mockReturnValue({
+    mocks.useSetSettingValue.mockReturnValue({
       isPending: false,
       mutate: vi.fn(),
+      mutateAsync: vi.fn(),
+    });
+    mocks.useClearSettingValue.mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: vi.fn(),
     });
   });
 

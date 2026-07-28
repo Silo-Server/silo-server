@@ -52,6 +52,9 @@ interface EffectiveResponse {
   revision: number;
 }
 
+/** The cache shape one effective-settings query resolves to. */
+export type EffectiveSettingsMap = Partial<Record<SettingKey, EffectiveSetting>>;
+
 function identityQuery(identity: SettingIdentity): string {
   const params = new URLSearchParams({ scope: identity.scope });
   if (identity.libraryId !== undefined) params.set("library_id", String(identity.libraryId));
@@ -61,6 +64,28 @@ function identityQuery(identity: SettingIdentity): string {
 
 function activeProfileId() {
   return storage.get(storage.KEYS.PROFILE_ID);
+}
+
+/**
+ * The cache key one useEffectiveSettings call resolves under. Exported so a
+ * store that layers optimistic updates on top of an effective read (sidebar
+ * pins) can target the exact entry that read populated.
+ */
+export function effectiveSettingsQueryKey(options?: {
+  keys?: readonly SettingKey[];
+  libraryIds?: readonly number[];
+  seriesIds?: readonly string[];
+}) {
+  const { keys, libraryIds, seriesIds } = options ?? {};
+  return [
+    ...settingsKeys.all,
+    "values",
+    "effective",
+    activeProfileId(),
+    keys ? [...keys].sort().join(",") : "*",
+    libraryIds ? [...libraryIds].sort().join(",") : "",
+    seriesIds ? [...seriesIds].sort().join(",") : "",
+  ] as const;
 }
 
 /**
@@ -82,15 +107,7 @@ export function useEffectiveSettings(options?: {
   const seriesIds = options?.seriesIds;
 
   return useQuery({
-    queryKey: [
-      ...settingsKeys.all,
-      "values",
-      "effective",
-      activeProfileId(),
-      keys ? [...keys].sort().join(",") : "*",
-      libraryIds ? [...libraryIds].sort().join(",") : "",
-      seriesIds ? [...seriesIds].sort().join(",") : "",
-    ] as const,
+    queryKey: effectiveSettingsQueryKey({ keys, libraryIds, seriesIds }),
     queryFn: async () => {
       const params = new URLSearchParams();
       if (keys?.length) params.set("keys", keys.join(","));
@@ -100,7 +117,7 @@ export function useEffectiveSettings(options?: {
       const result = await api<EffectiveResponse>(
         `/settings/values/effective${query ? `?${query}` : ""}`,
       );
-      const byKey: Partial<Record<SettingKey, EffectiveSetting>> = {};
+      const byKey: EffectiveSettingsMap = {};
       for (const setting of result.settings) {
         byKey[setting.key] = setting;
       }

@@ -20,26 +20,19 @@ import {
   useSetLibraryPlaybackPreference,
 } from "@/hooks/queries/libraryPlaybackPreferences";
 import {
-  DISABLED_LIBRARY_IDS_SETTING_KEY,
-  LIBRARY_ORDER_SETTING_KEY,
   applyLibraryOrder,
-  parseDisabledLibraryIDs,
-  parseLibraryOrder,
-  serializeDisabledLibraryIDs,
-  serializeLibraryOrder,
+  normalizeLibraryIDs,
   useAvailableUserLibraries,
+  useLibraryDisplayPreferences,
 } from "@/hooks/queries/libraries";
 import {
-  useDeleteDeviceSetting,
+  useClearSettingValue,
   useEffectiveSettings,
-  useSetting,
-  useSetDeviceSetting,
-  useSetSetting,
-} from "@/hooks/queries/settings";
-import {
-  LIBRARY_PAGE_STATE_SETTING_KEY,
-  REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY,
-} from "@/hooks/queries/libraryPageState";
+  useSetSettingValue,
+} from "@/hooks/queries/settingValues";
+import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { ApiClientError } from "@/api/client";
 import {
   buildInheritedLanguageLabel,
   buildInheritedShowForcedSubtitlesLabel,
@@ -87,25 +80,48 @@ function sortLibrariesByOrder(libraries: UserLibrary[], ids: number[]) {
   return libraries.filter((library) => selected.has(library.id)).map((library) => library.id);
 }
 
-function RememberLibraryPageStateSetting({ profileId }: { profileId: string }) {
-  const { data: effective = {} } = useEffectiveSettings(profileId, [
-    REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY,
-  ]);
-  const setDeviceSetting = useSetDeviceSetting();
-  const deleteDeviceSetting = useDeleteDeviceSetting();
+/** Both library page state keys are profile+device scoped in the contract. */
+const DEVICE_SCOPE: SettingIdentity = { scope: "profile_device" };
+
+/** Visibility and order are profile-wide in the contract (no device scope). */
+const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
+
+// The canonical DELETE answers 404 when nothing was stored at that scope,
+// which for a reset flow means "already done", not a failure.
+async function clearIgnoringUnset(clear: ReturnType<typeof useClearSettingValue>, key: SettingKey) {
+  try {
+    await clear.mutateAsync({ key, identity: DEVICE_SCOPE });
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 404) {
+      return;
+    }
+    throw error;
+  }
+}
+
+function RememberLibraryPageStateSetting() {
+  const { data: effective } = useEffectiveSettings({
+    keys: [SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE],
+  });
+  const setValue = useSetSettingValue();
+  const clearValue = useClearSettingValue();
+  // Contract default is true; only an explicit false disables the feature.
   const rememberLibraryPages =
-    effective[REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY]?.effective_value !== "false";
-  const pending = setDeviceSetting.isPending || deleteDeviceSetting.isPending;
+    effective?.[SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE]?.value !== false;
+  const pending = setValue.isPending || clearValue.isPending;
 
   async function handleChange(checked: boolean) {
     try {
       if (checked) {
-        await deleteDeviceSetting.mutateAsync({ key: REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY });
+        // Clear the device override so the setting inherits its default again.
+        await clearIgnoringUnset(clearValue, SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE);
       } else {
-        await deleteDeviceSetting.mutateAsync({ key: LIBRARY_PAGE_STATE_SETTING_KEY });
-        await setDeviceSetting.mutateAsync({
-          key: REMEMBER_LIBRARY_PAGE_STATE_SETTING_KEY,
-          value: "false",
+        // Turning the feature off also discards the state saved so far.
+        await clearIgnoringUnset(clearValue, SETTING_KEYS.UI_LIBRARY_PAGE_STATE);
+        await setValue.mutateAsync({
+          key: SETTING_KEYS.UI_REMEMBER_LIBRARY_PAGE_STATE,
+          value: false,
+          identity: DEVICE_SCOPE,
         });
       }
       toast.success("Library page preference saved");
@@ -406,17 +422,17 @@ function LibraryCard({
 
 export default function LibrarySettings() {
   const { data: libraries, isLoading: librariesLoading } = useAvailableUserLibraries();
-  const { data: disabledSetting, isLoading: disabledSettingLoading } = useSetting(
-    DISABLED_LIBRARY_IDS_SETTING_KEY,
-  );
-  const { data: orderSetting, isLoading: orderSettingLoading } =
-    useSetting(LIBRARY_ORDER_SETTING_KEY);
+  const {
+    disabledLibraryIDs: savedDisabledLibraryIDs,
+    libraryOrder: savedLibraryOrder,
+    isLoading: libraryPrefsLoading,
+  } = useLibraryDisplayPreferences();
   const { profile: currentProfile, isLoading: profileLoading } = useCurrentProfile();
   const { data: playbackPreferences, isLoading: playbackPrefsLoading } =
     useLibraryPlaybackPreferences({
       enabled: !!currentProfile,
     });
-  const setSetting = useSetSetting();
+  const setSetting = useSetSettingValue();
   const [disabledLibraryIDs, setDisabledLibraryIDs] = useState<number[]>([]);
   const [orderedLibraries, setOrderedLibraries] = useState<UserLibrary[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -426,26 +442,31 @@ export default function LibrarySettings() {
   );
 
   useEffect(() => {
-    const parsedIDs = parseDisabledLibraryIDs(disabledSetting);
     // Keep the editable local order in sync with the latest saved setting.
     // This supports optimistic updates and rollback without changing behavior.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDisabledLibraryIDs(libraries ? sortLibrariesByOrder(libraries, parsedIDs) : parsedIDs);
-  }, [disabledSetting, libraries]);
+    setDisabledLibraryIDs(
+      libraries
+        ? sortLibrariesByOrder(libraries, savedDisabledLibraryIDs)
+        : savedDisabledLibraryIDs,
+    );
+  }, [savedDisabledLibraryIDs, libraries]);
 
   useEffect(() => {
     if (!libraries) return;
-    const order = parseLibraryOrder(orderSetting);
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setOrderedLibraries(order.length > 0 ? applyLibraryOrder(libraries, order) : libraries);
-  }, [libraries, orderSetting]);
+    setOrderedLibraries(
+      savedLibraryOrder.length > 0 ? applyLibraryOrder(libraries, savedLibraryOrder) : libraries,
+    );
+  }, [libraries, savedLibraryOrder]);
 
   function saveDisabledLibraries(nextDisabledLibraryIDs: number[], rollbackIDs: number[]) {
     setDisabledLibraryIDs(nextDisabledLibraryIDs);
     setSetting.mutate(
       {
-        key: DISABLED_LIBRARY_IDS_SETTING_KEY,
-        value: serializeDisabledLibraryIDs(nextDisabledLibraryIDs),
+        key: SETTING_KEYS.UI_DISABLED_LIBRARY_IDS,
+        value: normalizeLibraryIDs(nextDisabledLibraryIDs),
+        identity: PROFILE_SCOPE,
       },
       {
         onError: () => {
@@ -495,8 +516,9 @@ export default function LibrarySettings() {
     setOrderedLibraries(next);
     setSetting.mutate(
       {
-        key: LIBRARY_ORDER_SETTING_KEY,
-        value: serializeLibraryOrder(next.map((l) => l.id)),
+        key: SETTING_KEYS.UI_LIBRARY_ORDER,
+        value: normalizeLibraryIDs(next.map((l) => l.id)),
+        identity: PROFILE_SCOPE,
       },
       {
         onError: () => {
@@ -513,13 +535,7 @@ export default function LibrarySettings() {
 
   const activeLibrary = activeId != null ? orderedLibraries.find((l) => l.id === activeId) : null;
 
-  if (
-    librariesLoading ||
-    disabledSettingLoading ||
-    orderSettingLoading ||
-    profileLoading ||
-    playbackPrefsLoading
-  ) {
+  if (librariesLoading || libraryPrefsLoading || profileLoading || playbackPrefsLoading) {
     return <div className="text-muted-foreground pt-4">Loading libraries...</div>;
   }
 
@@ -557,7 +573,7 @@ export default function LibrarySettings() {
         title="Browsing"
         description="These preferences apply to this profile on the current device."
       >
-        <RememberLibraryPageStateSetting profileId={currentProfile.id} />
+        <RememberLibraryPageStateSetting />
       </SettingsGroup>
 
       <div className="surface-panel-subtle flex flex-col gap-4 rounded-[1.4rem] p-4 sm:flex-row sm:items-center sm:justify-between">
