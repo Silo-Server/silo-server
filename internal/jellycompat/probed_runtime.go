@@ -66,3 +66,23 @@ func fillListItemDurations(ctx context.Context, src probedDurationSource, items 
 		}
 	}
 }
+
+// fillEpisodeTargetDurations resolves durations when a caller builds its DTOs
+// directly from compat episode targets. Overlay-only callers already have an
+// enriched list item and must not pay for the same lookup again.
+func fillEpisodeTargetDurations(ctx context.Context, src probedDurationSource, targets map[string]compatEpisodeTarget) {
+	if len(targets) == 0 {
+		return
+	}
+
+	items := make([]upstreamListItem, 0, len(targets))
+	for _, target := range targets {
+		items = append(items, target.Item)
+	}
+	fillListItemDurations(ctx, src, items)
+	for _, item := range items {
+		target := targets[item.ContentID]
+		target.Item = item
+		targets[item.ContentID] = target
+	}
+}

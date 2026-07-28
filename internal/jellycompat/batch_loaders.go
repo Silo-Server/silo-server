@@ -364,18 +364,19 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDs(ctx context.Context
 		return nil, fmt.Errorf("iterating compat episode targets: %w", err)
 	}
 
-	listItems := make([]upstreamListItem, 0, len(result))
-	for _, target := range result {
-		listItems = append(listItems, target.Item)
-	}
-	fillListItemDurations(ctx, h.durationSrc, listItems)
-	for _, item := range listItems {
-		target := result[item.ContentID]
-		target.Item = item
-		result[item.ContentID] = target
-	}
-
 	return result, nil
+}
+
+// fetchCompatEpisodeTargetsByContentIDsWithDurations is for paths that build
+// their DTO directly from target.Item. List-page overlay paths must use the
+// metadata-only loader above because their list items are already enriched.
+func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsWithDurations(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]compatEpisodeTarget, error) {
+	targets, err := h.fetchCompatEpisodeTargetsByContentIDs(ctx, session, contentIDs, libraryID)
+	if err != nil {
+		return nil, err
+	}
+	fillEpisodeTargetDurations(ctx, h.durationSrc, targets)
+	return targets, nil
 }
 
 func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context.Context, session *Session, contentIDs []string, libraryID *int) (map[string]compatEpisodeTarget, error) {
@@ -482,17 +483,6 @@ func (h *ItemsHandler) fetchCompatEpisodeTargetsByContentIDsFallback(ctx context
 			},
 			SeasonID: episode.SeasonID,
 		}
-	}
-
-	listItems := make([]upstreamListItem, 0, len(result))
-	for _, target := range result {
-		listItems = append(listItems, target.Item)
-	}
-	fillListItemDurations(ctx, h.durationSrc, listItems)
-	for _, item := range listItems {
-		target := result[item.ContentID]
-		target.Item = item
-		result[item.ContentID] = target
 	}
 
 	return result, nil

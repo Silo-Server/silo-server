@@ -1650,7 +1650,7 @@ func (h *ItemsHandler) writeEpisodeModelsPage(w http.ResponseWriter, r *http.Req
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, contentIDs, nil)
+	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(r.Context(), session, contentIDs, nil)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -1884,7 +1884,7 @@ func (h *ItemsHandler) writeNextUpResponse(w http.ResponseWriter, r *http.Reques
 		writeCompatUpstreamError(w, err)
 		return
 	}
-	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDs(r.Context(), session, contentIDs, nil)
+	episodeTargets, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(r.Context(), session, contentIDs, nil)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
@@ -2913,7 +2913,7 @@ func (h *ItemsHandler) hydrateProgressItems(ctx context.Context, session *Sessio
 	if err != nil {
 		return nil, err
 	}
-	episodesByID, err := h.fetchCompatEpisodeTargetsByContentIDs(ctx, session, contentIDs, libraryID)
+	episodesByID, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(ctx, session, contentIDs, libraryID)
 	if err != nil {
 		return nil, err
 	}
