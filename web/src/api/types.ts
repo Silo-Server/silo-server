@@ -3694,16 +3694,6 @@ export interface UserLibrary {
   poster_url?: string;
 }
 
-export interface LibraryPlaybackPreference {
-  profile_id: string;
-  library_id: number;
-  audio_language?: string;
-  subtitle_language?: string;
-  subtitle_mode?: string;
-  show_forced_subtitles?: boolean;
-  updated_at?: string;
-}
-
 // Progress entry from GET /progress
 export interface ProgressEntry {
   media_item_id: string;
