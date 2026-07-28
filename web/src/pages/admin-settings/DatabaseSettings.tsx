@@ -173,7 +173,7 @@ export default function DatabaseSettings() {
             disabled={purgeVirtual.isPending}
             onClick={() => {
               if (window.confirm("Purge all zero-storage virtual library items?")) {
-                purgeVirtual.mutate();
+                purgeVirtual.mutate({});
               }
             }}
           >
