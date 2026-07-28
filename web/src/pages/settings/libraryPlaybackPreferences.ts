@@ -2,18 +2,12 @@ import type { EffectiveSettingsMap, SettingIdentity } from "@/hooks/queries/sett
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { optionsFor } from "@/lib/settingsDisplay";
 import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
-import { getLanguageName, LANGUAGES } from "@/player/utils/languageNames";
+import { getLanguageName } from "@/player/utils/languageNames";
 
 export const INHERIT_VALUE = "inherit";
 export const NONE_VALUE = "none";
 export const DEFAULT_SUBTITLE_MODE = "auto";
 export const DEFAULT_SHOW_FORCED_SUBTITLES = true;
-
-/**
- * Language choices for per-library playback overrides, re-exported from the
- * canonical language list so every supported language stays selectable.
- */
-export const LANGUAGE_OPTIONS = LANGUAGES;
 
 /** Behavior modes, from the contract rather than a parallel literal list. */
 export const SUBTITLE_MODE_OPTIONS = optionsFor(

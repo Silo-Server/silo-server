@@ -19,7 +19,8 @@ import {
   type SettingIdentity,
 } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
-import { LANGUAGE_OPTIONS, optionsFor } from "@/lib/settingsDisplay";
+import { optionsFor } from "@/lib/settingsDisplay";
+import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
 import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
 import {
   BACKGROUND_STYLE_OPTIONS,
@@ -254,7 +255,7 @@ export default function SubtitleAppearanceSettings() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">None</SelectItem>
-                {LANGUAGE_OPTIONS.filter((language) => language.value).map((language) => (
+                {NAMED_LANGUAGE_OPTIONS.map((language) => (
                   <SelectItem key={language.value} value={language.value}>
                     {language.label}
                   </SelectItem>

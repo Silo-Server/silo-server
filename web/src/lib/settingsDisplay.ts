@@ -3,7 +3,7 @@ import {
   type SettingDefinition,
   type SettingKey,
 } from "@/lib/settingsContract";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { LANGUAGE_OPTIONS, type SettingOption } from "@/lib/languageOptions";
 
 /**
  * Display helpers over the generated settings contract.
@@ -20,21 +20,6 @@ export type SettingDisplay = SettingDefinition;
 
 /** Control shapes the admin/settings widgets can render. */
 export type SettingControlKind = "switch" | "select" | "slider" | "stepper" | "panel" | "text";
-
-export interface SettingOption {
-  value: string;
-  label: string;
-}
-
-/**
- * Language choices for settings dropdowns, derived from the canonical language
- * list so every supported language stays selectable. The leading empty entry is
- * "no preference", which the contract spells as null.
- */
-export const LANGUAGE_OPTIONS: SettingOption[] = [
-  { value: "", label: "No preference" },
-  ...LANGUAGES.map(({ code, label }) => ({ value: code, label })),
-];
 
 /** The generated definition for a key, or null when this build has no such key. */
 export function getSettingDefinition(key: string): SettingDisplay | null {

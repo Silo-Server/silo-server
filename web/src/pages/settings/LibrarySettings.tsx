@@ -42,13 +42,13 @@ import {
   getProfileDefaultSubtitleModeHint,
   hasLibraryPlaybackOverride,
   INHERIT_VALUE,
-  LANGUAGE_OPTIONS,
   LIBRARY_PLAYBACK_KEYS,
   libraryScope,
   type LibraryPlaybackEditorState,
   NONE_VALUE,
   SUBTITLE_MODE_OPTIONS,
 } from "./libraryPlaybackPreferences";
+import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Eye, EyeOff, GripVertical, RotateCcw } from "lucide-react";
 import {
@@ -367,8 +367,8 @@ function LibraryCard({
               <SelectItem value={INHERIT_VALUE}>
                 {buildInheritedLanguageLabel(profileDefaults.audioLanguage ?? "")}
               </SelectItem>
-              {LANGUAGE_OPTIONS.map((language) => (
-                <SelectItem key={language.code} value={language.code}>
+              {NAMED_LANGUAGE_OPTIONS.map((language) => (
+                <SelectItem key={language.value} value={language.value}>
                   {language.label}
                 </SelectItem>
               ))}
@@ -385,8 +385,8 @@ function LibraryCard({
                 {buildInheritedSubtitleLanguageLabel(profileDefaults.subtitleLanguage ?? "")}
               </SelectItem>
               <SelectItem value={NONE_VALUE}>None</SelectItem>
-              {LANGUAGE_OPTIONS.map((language) => (
-                <SelectItem key={language.code} value={language.code}>
+              {NAMED_LANGUAGE_OPTIONS.map((language) => (
+                <SelectItem key={language.value} value={language.value}>
                   {language.label}
                 </SelectItem>
               ))}

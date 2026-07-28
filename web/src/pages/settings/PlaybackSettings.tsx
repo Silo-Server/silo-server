@@ -10,7 +10,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { LANGUAGE_OPTIONS, optionsFor } from "@/lib/settingsDisplay";
+import { optionsFor } from "@/lib/settingsDisplay";
+import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { QUALITY_PRESETS, describeQuality, presetById, presetIdFor } from "@/lib/qualityPresets";
 import {
@@ -205,7 +206,7 @@ export default function PlaybackSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">No preference</SelectItem>
-                  {LANGUAGE_OPTIONS.filter((language) => language.value).map((language) => (
+                  {NAMED_LANGUAGE_OPTIONS.map((language) => (
                     <SelectItem key={language.value} value={language.value}>
                       {language.label}
                     </SelectItem>
@@ -232,7 +233,7 @@ export default function PlaybackSettings() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Library default</SelectItem>
-                  {LANGUAGE_OPTIONS.filter((language) => language.value).map((language) => (
+                  {NAMED_LANGUAGE_OPTIONS.map((language) => (
                     <SelectItem key={language.value} value={language.value}>
                       {language.label}
                     </SelectItem>
