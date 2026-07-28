@@ -7,7 +7,10 @@ import (
 
 func gatesAllOn() Gates {
 	on := func(context.Context) bool { return true }
-	return Gates{Requests: on, WatchTogether: on, Recommendations: on, Notifications: on, Calendar: on}
+	return Gates{
+		Requests: on, WatchTogether: on, Recommendations: on,
+		Notifications: on, Calendar: on, JellyfinCompat: on,
+	}
 }
 
 func stepIDs(flow Flow) []string {
@@ -68,6 +71,35 @@ func TestFlowForTVDropsInputSteps(t *testing.T) {
 		if step.Kind == KindSettingChoice {
 			t.Errorf("TV surface got setting_choice step %q", step.ID)
 		}
+	}
+}
+
+func TestWebOnlyStepsSkippedOffWeb(t *testing.T) {
+	webIDs := stepIDs(FlowFor(context.Background(), gatesAllOn(), SurfaceWeb, false))
+	for _, want := range []string{StepIDApps, StepIDJellyfinCompat} {
+		if !contains(webIDs, want) {
+			t.Errorf("web surface missing %q", want)
+		}
+	}
+	// The apps card is pointless inside the apps it advertises, and TV can't
+	// open store links either.
+	for _, surface := range []string{SurfacePhone, SurfaceTV} {
+		ids := stepIDs(FlowFor(context.Background(), gatesAllOn(), surface, false))
+		for _, gated := range []string{StepIDApps, StepIDJellyfinCompat} {
+			if contains(ids, gated) {
+				t.Errorf("surface %q got web-only step %q", surface, gated)
+			}
+		}
+	}
+}
+
+func TestJellyfinStepGated(t *testing.T) {
+	ids := stepIDs(FlowFor(context.Background(), Gates{}, SurfaceWeb, false))
+	if contains(ids, StepIDJellyfinCompat) {
+		t.Error("jellyfin step shown with compat disabled")
+	}
+	if !contains(ids, StepIDApps) {
+		t.Error("apps step must not depend on the jellyfin gate")
 	}
 }
 

@@ -741,6 +741,19 @@ func NewRouter(deps Dependencies) chi.Router {
 					// wider system, so require a configured delivery channel.
 					return settingsRepo != nil && mail.NewSMTPSender(settingsRepo).Enabled(ctx)
 				},
+				JellyfinCompat: func(ctx context.Context) bool {
+					if settingsRepo == nil {
+						return false
+					}
+					// Unset means the default applies, and the default is on
+					// (config.DefaultAdminSettings) — only an explicit "false"
+					// hides the step.
+					enabled, err := settingsRepo.Get(ctx, "jellyfin_compat.enabled")
+					if err != nil {
+						return false
+					}
+					return strings.TrimSpace(enabled) != "false"
+				},
 			}
 			onboardingHandler = handlers.NewOnboardingHandler(deps.UserStoreProvider, onboardingGates)
 		}

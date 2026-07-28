@@ -41,6 +41,7 @@ const (
 	gateRecommendations = "recommendations"
 	gateNotifications   = "notifications"
 	gateCalendar        = "calendar"
+	gateJellyfinCompat  = "jellyfin_compat"
 )
 
 // Setting targets: which existing API a setting_choice writes through.
@@ -64,11 +65,23 @@ type Step struct {
 	Route string `json:"route,omitempty"`
 	// ActionLabel labels the optional feature_card route action.
 	ActionLabel string `json:"action_label,omitempty"`
+	// Links are external URLs (store listings, docs) rendered as outbound
+	// buttons. Additive: clients that predate the field ignore it.
+	Links []StepLink `json:"links,omitempty"`
 
 	// needsInput marks steps unsuitable for 10-foot surfaces.
 	needsInput bool
+	// webOnly marks steps that only make sense in a browser (e.g. "install
+	// the apps" — pointless inside the app it advertises).
+	webOnly bool
 	// gate names the feature flag that must be on; empty = always shown.
 	gate string
+}
+
+// StepLink is one outbound link on a step.
+type StepLink struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
 }
 
 // SettingSpec describes the control a setting_choice renders and where the
@@ -107,6 +120,7 @@ type Gates struct {
 	Recommendations func(ctx context.Context) bool
 	Notifications   func(ctx context.Context) bool
 	Calendar        func(ctx context.Context) bool
+	JellyfinCompat  func(ctx context.Context) bool
 }
 
 func (g Gates) enabled(ctx context.Context, gate string) bool {
@@ -116,6 +130,7 @@ func (g Gates) enabled(ctx context.Context, gate string) bool {
 		gateRecommendations: g.Recommendations,
 		gateNotifications:   g.Notifications,
 		gateCalendar:        g.Calendar,
+		gateJellyfinCompat:  g.JellyfinCompat,
 	}[gate]
 	if check == nil {
 		return false
@@ -133,6 +148,9 @@ func FlowFor(ctx context.Context, gates Gates, surface string, isChild bool) Flo
 			continue
 		}
 		if surface == SurfaceTV && step.needsInput {
+			continue
+		}
+		if surface != SurfaceWeb && step.webOnly {
 			continue
 		}
 		if isChild && step.gate == gateRequests {

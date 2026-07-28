@@ -7,6 +7,8 @@ const (
 	StepIDWatchTogether   = "watch-together"
 	StepIDRequests        = "requests"
 	StepIDRecommendations = "recommendations"
+	StepIDApps            = "apps"
+	StepIDJellyfinCompat  = "jellyfin-compat"
 	StepIDHandoffTaste    = "handoff-taste"
 )
 
@@ -103,6 +105,27 @@ var tourSteps = []Step{
 		Route:        "/calendar",
 		ActionLabel:  "Open Calendar",
 		gate:         gateNotifications,
+	},
+	{
+		ID:           StepIDApps,
+		Kind:         KindFeatureCard,
+		Title:        "Take Silo with you",
+		Body:         "Silo has native apps for iPhone, iPad, Apple TV, Android, and Android TV. Sign in with this same email address and your profile, Watchlist, and watch progress follow you to every screen.",
+		Illustration: StepIDApps,
+		Links: []StepLink{
+			{Label: "iPhone & Apple TV (TestFlight)", URL: "https://testflight.apple.com/join/XZy8cu5q"},
+			{Label: "Android & Android TV (Play Store)", URL: "https://play.google.com/store/apps/details?id=org.siloserver.silo"},
+		},
+		webOnly: true,
+	},
+	{
+		ID:           StepIDJellyfinCompat,
+		Kind:         KindFeatureCard,
+		Title:        "Already use a Jellyfin app? It works here",
+		Body:         "Silo speaks the Jellyfin API, so players like Infuse, VidHub, Findroid, and Swiftfin can connect to this server directly — add it as a Jellyfin server with this address and your Silo sign-in.",
+		Illustration: "jellyfin",
+		webOnly:      true,
+		gate:         gateJellyfinCompat,
 	},
 	{
 		ID:    StepIDHandoffTaste,

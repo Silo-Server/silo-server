@@ -4155,6 +4155,11 @@ export interface OnboardingSettingSpec {
   label?: string;
 }
 
+export interface OnboardingStepLink {
+  label: string;
+  url: string;
+}
+
 export interface OnboardingStep {
   id: string;
   // Open string: the client renders kinds it knows and skips the rest.
@@ -4165,6 +4170,7 @@ export interface OnboardingStep {
   setting?: OnboardingSettingSpec;
   route?: string;
   action_label?: string;
+  links?: OnboardingStepLink[];
 }
 
 export interface OnboardingFlow {

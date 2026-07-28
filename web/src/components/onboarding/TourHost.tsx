@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
-import { Bell, CalendarDays, Heart, Play, Sparkles, Subtitles, Users, Wand2 } from "lucide-react";
+import {
+  Bell,
+  CalendarDays,
+  ExternalLink,
+  Heart,
+  MonitorSmartphone,
+  Play,
+  Plug,
+  Sparkles,
+  Subtitles,
+  Users,
+  Wand2,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { OnboardingFlow, OnboardingStep } from "@/api/types";
 import { getProfileToken } from "@/api/client";
@@ -33,6 +45,8 @@ const ILLUSTRATIONS: Record<string, LucideIcon> = {
   playback: Play,
   subtitles: Subtitles,
   notifications: Bell,
+  apps: MonitorSmartphone,
+  jellyfin: Plug,
 };
 
 interface TourHostProps {
@@ -163,6 +177,18 @@ function StepBody({ step }: { step: OnboardingStep }) {
       {step.kind === "setting_choice" && step.setting && (
         <div className="border-border bg-popover mt-5 rounded-xl border p-4">
           <SettingControl step={step} />
+        </div>
+      )}
+      {step.links && step.links.length > 0 && (
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+          {step.links.map((link) => (
+            <Button key={link.url} variant="outline" size="sm" asChild>
+              <a href={link.url} target="_blank" rel="noopener noreferrer">
+                {link.label}
+                <ExternalLink className="ml-1.5 size-3.5" aria-hidden="true" />
+              </a>
+            </Button>
+          ))}
         </div>
       )}
     </div>
