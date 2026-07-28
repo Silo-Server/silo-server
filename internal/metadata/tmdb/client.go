@@ -24,6 +24,11 @@ const (
 	maxResponseBody            = 1 << 20 // 1 MB
 	maxCollectionPresetResults = 500
 	defaultResponseCacheTTL    = 2 * time.Hour
+	// certificationCacheTTL is deliberately much longer than the shared
+	// response TTL: a certification is assigned at release and effectively
+	// never changes. The stale-window failure mode is safe — a title that
+	// gains a cert stays hidden (fail-closed) for at most the TTL.
+	certificationCacheTTL = 7 * 24 * time.Hour
 )
 
 // Client is an HTTP client for the TMDB collection preset API surface.
@@ -35,6 +40,7 @@ type Client struct {
 	discoverSectionCache *cache.TTLCache[*MediaPage]
 	discoverPageCache    *cache.TTLCache[*MediaPage]
 	externalIDCache      *cache.TTLCache[*ExternalIDs]
+	certificationCache   *cache.TTLCache[string]
 	cacheGroup           singleflight.Group
 	responseCacheTTL     time.Duration
 }
@@ -55,6 +61,7 @@ func NewClient(apiKey string, rateLimit int) *Client {
 		discoverSectionCache: cache.NewTTLCache[*MediaPage](),
 		discoverPageCache:    cache.NewTTLCache[*MediaPage](),
 		externalIDCache:      cache.NewTTLCache[*ExternalIDs](),
+		certificationCache:   cache.NewTTLCache[string](),
 		responseCacheTTL:     defaultResponseCacheTTL,
 	}
 }
@@ -77,6 +84,9 @@ func (c *Client) Close() {
 	}
 	if c.externalIDCache != nil {
 		c.externalIDCache.Close()
+	}
+	if c.certificationCache != nil {
+		c.certificationCache.Close()
 	}
 }
 
@@ -1140,6 +1150,78 @@ func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 	}
 	cloned := *ids
 	return &cloned
+}
+
+// GetCertification returns the normalized content rating for a TMDB title
+// ("PG-13", "TV-MA", ...), or "" when TMDB has none. It uses the dedicated
+// release_dates / content_ratings sub-resources instead of the full detail
+// payload for the same reason GetExternalIDs does: the detail response is
+// 100+ KB and uncached, while these are a country list of a few KB.
+//
+// Results go through the same pickers as GetMediaDetail
+// (pickMovieCertification / pickTVRating) so a title's rating used for
+// discovery filtering can never disagree with the rating shown on its
+// detail page. mediaType accepts Silo-facing "movie"/"series" plus
+// TMDB-facing "tv".
+func (c *Client) GetCertification(ctx context.Context, mediaType string, id int) (string, error) {
+	var path string
+	switch mediaType {
+	case "movie":
+		path = fmt.Sprintf("/movie/%d/release_dates", id)
+	case "series", "tv":
+		path = fmt.Sprintf("/tv/%d/content_ratings", id)
+	default:
+		return "", fmt.Errorf("tmdb: invalid media type: %q", mediaType)
+	}
+
+	cacheKey := "certification:" + path
+	if c.certificationCache != nil {
+		if cached, ok := c.certificationCache.Get(cacheKey); ok {
+			return cached, nil
+		}
+	}
+
+	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
+		if c.certificationCache != nil {
+			if cached, ok := c.certificationCache.Get(cacheKey); ok {
+				return cached, nil
+			}
+		}
+		cert, err := c.fetchCertification(ctx, mediaType, path)
+		if err != nil {
+			return nil, err
+		}
+		// "" (no certification on TMDB) is cached too: it is by far the most
+		// common case and refetching it on every page load would defeat the
+		// cache exactly where fail-closed filtering needs it most.
+		if c.certificationCache != nil {
+			c.certificationCache.Set(cacheKey, cert, certificationCacheTTL)
+		}
+		return cert, nil
+	})
+	if err != nil {
+		return "", err
+	}
+	cert, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("tmdb: invalid cached certification response")
+	}
+	return cert, nil
+}
+
+func (c *Client) fetchCertification(ctx context.Context, mediaType, path string) (string, error) {
+	if mediaType == "movie" {
+		var resp releaseDatesResponse
+		if err := c.doGet(ctx, path, &resp); err != nil {
+			return "", err
+		}
+		return pickMovieCertification(&resp), nil
+	}
+	var resp contentRatingsResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return "", err
+	}
+	return pickTVRating(&resp), nil
 }
 
 func (c *Client) fetchExternalIDs(ctx context.Context, path string) (*ExternalIDs, error) {

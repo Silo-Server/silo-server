@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestNewClientUsesProjectAPIKeyWhenEmpty(t *testing.T) {
@@ -884,5 +885,123 @@ func TestGetExternalIDs(t *testing.T) {
 	}
 	if ids.TVDBID != 12345 {
 		t.Fatalf("TVDBID = %d, want 12345", ids.TVDBID)
+	}
+}
+
+func TestGetCertificationUsesSubResourceEndpoints(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/movie/603/release_dates":
+			// Type 3 (theatrical) US entry wins over the earlier NR entry.
+			_, _ = w.Write([]byte(`{"results":[
+				{"iso_3166_1":"DE","release_dates":[{"certification":"16","type":3}]},
+				{"iso_3166_1":"US","release_dates":[{"certification":"NR","type":2},{"certification":"R","type":3}]}
+			]}`))
+		case "/tv/1396/content_ratings":
+			_, _ = w.Write([]byte(`{"results":[
+				{"iso_3166_1":"DE","rating":"16"},
+				{"iso_3166_1":"US","rating":"TV-MA"}
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	movieCert, err := client.GetCertification(context.Background(), "movie", 603)
+	if err != nil {
+		t.Fatalf("movie GetCertification returned error: %v", err)
+	}
+	if movieCert != "R" {
+		t.Fatalf("movie certification = %q, want R", movieCert)
+	}
+
+	// Both Silo-facing "series" and TMDB-facing "tv" resolve TV titles.
+	for _, mediaType := range []string{"series", "tv"} {
+		tvCert, err := client.GetCertification(context.Background(), mediaType, 1396)
+		if err != nil {
+			t.Fatalf("tv GetCertification(%q) returned error: %v", mediaType, err)
+		}
+		if tvCert != "TV-MA" {
+			t.Fatalf("tv certification (%q) = %q, want TV-MA", mediaType, tvCert)
+		}
+	}
+
+	if _, err := client.GetCertification(context.Background(), "bogus", 1); err == nil {
+		t.Fatal("GetCertification accepted invalid media type")
+	}
+}
+
+func TestGetCertificationCachesIncludingEmpty(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		// No certification anywhere: the common case, which must be cached
+		// too or fail-closed filtering refetches it on every page load.
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	for i := 0; i < 3; i++ {
+		cert, err := client.GetCertification(context.Background(), "movie", 42)
+		if err != nil {
+			t.Fatalf("GetCertification returned error: %v", err)
+		}
+		if cert != "" {
+			t.Fatalf("certification = %q, want empty", cert)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls = %d, want 1 (empty result must be cached)", got)
+	}
+}
+
+func TestGetCertificationSingleflightsConcurrentCallers(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","rating":"TV-PG"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	const callers = 8
+	results := make(chan string, callers)
+	errs := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			cert, err := client.GetCertification(context.Background(), "tv", 1396)
+			results <- cert
+			errs <- err
+		}()
+	}
+	// Give the goroutines time to pile onto the singleflight, then release
+	// the one in-flight upstream request.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	for i := 0; i < callers; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("GetCertification returned error: %v", err)
+		}
+		if cert := <-results; cert != "TV-PG" {
+			t.Fatalf("certification = %q, want TV-PG", cert)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("upstream calls = %d, want 1 (singleflight)", got)
 	}
 }

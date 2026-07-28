@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 )
 
@@ -136,11 +137,15 @@ func (s *Service) BrowseStudio(ctx context.Context, viewer Viewer, slug, sort st
 	if err != nil {
 		return nil, err
 	}
-	tmdbPage, err := s.tmdb.DiscoverPage(ctx, "movie", tmdb.DiscoverParams{
+	params, err := s.browseDiscoverParams(ctx, viewer, "movie", tmdb.DiscoverParams{
 		SortBy:        tmdbSort,
 		WithCompanies: []int{studio.TMDBID},
 		VoteCountGte:  voteCountFloorForSort(sortKey),
-	}, page)
+	})
+	if err != nil {
+		return nil, err
+	}
+	tmdbPage, err := s.tmdb.DiscoverPage(ctx, "movie", params, page)
 	if err != nil {
 		return nil, err
 	}
@@ -177,11 +182,15 @@ func (s *Service) BrowseNetwork(ctx context.Context, viewer Viewer, slug, sort s
 	if err != nil {
 		return nil, err
 	}
-	tmdbPage, err := s.tmdb.DiscoverPage(ctx, "tv", tmdb.DiscoverParams{
+	params, err := s.browseDiscoverParams(ctx, viewer, "tv", tmdb.DiscoverParams{
 		SortBy:       tmdbSort,
 		WithNetworks: []int{network.TMDBID},
 		VoteCountGte: voteCountFloorForSort(sortKey),
-	}, page)
+	})
+	if err != nil {
+		return nil, err
+	}
+	tmdbPage, err := s.tmdb.DiscoverPage(ctx, "tv", params, page)
 	if err != nil {
 		return nil, err
 	}
@@ -239,11 +248,15 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 	if err != nil {
 		return nil, err
 	}
-	tmdbPage, err := s.tmdb.DiscoverPage(ctx, tmdbMediaType, tmdb.DiscoverParams{
+	params, err := s.browseDiscoverParams(ctx, viewer, tmdbMediaType, tmdb.DiscoverParams{
 		SortBy:       tmdbSort,
 		WithGenres:   []int{genreID},
 		VoteCountGte: voteCountFloorForSort(sortKey),
-	}, page)
+	})
+	if err != nil {
+		return nil, err
+	}
+	tmdbPage, err := s.tmdb.DiscoverPage(ctx, tmdbMediaType, params, page)
 	if err != nil {
 		return nil, err
 	}
@@ -261,6 +274,61 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 		TotalPages:  enriched.TotalPages,
 		Results:     enriched.Results,
 	}, nil
+}
+
+// certificationCeilingFor maps a Silo rating ceiling (which spans both the
+// movie and TV ladders — see access.RatingRank) onto the US certification
+// string TMDB's certification.lte understands for the given media type.
+// Returns "" for an empty or unrecognized ceiling, in which case the caller
+// omits the parameter.
+//
+// This push-down is a cost optimization only: TMDB ranks "NR" below "G" and
+// matches a title when any one of its US cert entries qualifies, so
+// over-ceiling titles still come back (verified ~5% at a G ceiling). The
+// authoritative filter is enrichPage's post-hoc certification check. The
+// mapping is also intentionally coarse in two spots: rank 3 maps to "R"
+// (also excluding NC-17 upstream, which the post-filter would allow at an R
+// ceiling — stricter is fine for a pre-filter), and TV rank 0 maps to "TV-G"
+// (TMDB order 3) rather than "TV-Y" so TV-Y/TV-Y7 titles are not excluded
+// upstream of our own ladder, which ranks them together.
+func certificationCeilingFor(ceiling, tmdbMediaType string) string {
+	rank, ok := access.RatingRank(ceiling)
+	if !ok {
+		return ""
+	}
+	if tmdbMediaType == "tv" {
+		switch rank {
+		case 0:
+			return "TV-G"
+		case 1:
+			return "TV-PG"
+		case 2:
+			return "TV-14"
+		default:
+			return "TV-MA"
+		}
+	}
+	switch rank {
+	case 0:
+		return "G"
+	case 1:
+		return "PG"
+	case 2:
+		return "PG-13"
+	default:
+		return "R"
+	}
+}
+
+// browseDiscoverParams applies the viewer's rating ceiling as a TMDB-side
+// certification.lte pre-filter on top of the base params.
+func (s *Service) browseDiscoverParams(ctx context.Context, viewer Viewer, tmdbMediaType string, params tmdb.DiscoverParams) (tmdb.DiscoverParams, error) {
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return tmdb.DiscoverParams{}, err
+	}
+	params.CertificationLte = certificationCeilingFor(ceiling, tmdbMediaType)
+	return params, nil
 }
 
 func normalizeBrowseSort(sort, tmdbMediaType string) (string, string, error) {

@@ -3357,15 +3357,29 @@ type scopeEntitlementResolver struct {
 }
 
 func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
-	scope, err := r.resolver.Resolve(ctx, access.ResolveInput{
-		UserID:              userID,
-		ProfileID:           profileID,
-		SkipPINVerification: true,
-	})
+	scope, err := r.resolveScope(ctx, userID, profileID)
 	if err != nil {
 		return "", err
 	}
 	return scope.MaxPlaybackQuality, nil
+}
+
+// MaxContentRating implements mediarequests.ContentRatingResolver so request
+// discovery honors the profile's parental rating ceiling.
+func (r scopeEntitlementResolver) MaxContentRating(ctx context.Context, userID int, profileID string) (string, error) {
+	scope, err := r.resolveScope(ctx, userID, profileID)
+	if err != nil {
+		return "", err
+	}
+	return scope.MaxContentRating, nil
+}
+
+func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, profileID string) (access.Scope, error) {
+	return r.resolver.Resolve(ctx, access.ResolveInput{
+		UserID:              userID,
+		ProfileID:           profileID,
+		SkipPINVerification: true,
+	})
 }
 
 // metadataAIConfigFromServer derives the metadata translation service config
