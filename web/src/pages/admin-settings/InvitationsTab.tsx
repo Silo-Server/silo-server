@@ -43,6 +43,36 @@ import { Copy, MailPlus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDate } from "@/lib/datetime";
 
+// The claim-link box shown after create/resend. min-w-0 + overflow-hidden on
+// every level matters: the URL is one unbreakable token, and without them it
+// forces the dialog wider than the viewport on phones.
+function ClaimLinkBox({
+  claimUrl,
+  finePrint,
+  onCopy,
+  onDone,
+}: {
+  claimUrl: string;
+  finePrint: string;
+  onCopy: (text: string) => void;
+  onDone: () => void;
+}) {
+  return (
+    <div className="min-w-0 space-y-4">
+      <div className="bg-muted min-w-0 overflow-hidden rounded-md p-2.5">
+        <code className="block truncate text-xs">{claimUrl}</code>
+      </div>
+      <p className="text-muted-foreground text-xs">{finePrint}</p>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="outline" onClick={() => onCopy(claimUrl)}>
+          <Copy className="mr-1.5 h-4 w-4" /> Copy link
+        </Button>
+        <Button onClick={onDone}>Done</Button>
+      </div>
+    </div>
+  );
+}
+
 const STATUS_BADGES: Record<InvitationStatus, { label: string; variant: "default" | "outline" }> = {
   pending: { label: "Sent", variant: "default" },
   accepted: { label: "Accepted", variant: "outline" },
@@ -56,10 +86,21 @@ export default function InvitationsTab() {
   const revoke = useRevokeInvitation();
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState<Invitation | null>(null);
+  // A resend mints a fresh single-use link; the response is the only chance
+  // to read it, so we offer it for copying right away.
+  const [resendResult, setResendResult] = useState<SendInvitationResponse | null>(null);
 
   function handleCopy(text: string) {
     navigator.clipboard.writeText(text);
     toast.success("Copied to clipboard");
+  }
+
+  function handleResend(id: number) {
+    resend.mutate(id, {
+      onSuccess: (data) => {
+        if (data.claim_url) setResendResult(data);
+      },
+    });
   }
 
   if (isLoading) return <div>Loading invitations...</div>;
@@ -80,6 +121,32 @@ export default function InvitationsTab() {
           setConfirmRevoke(null);
         }}
       />
+
+      <Dialog
+        open={resendResult !== null}
+        onOpenChange={(open) => {
+          if (!open) setResendResult(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Fresh invitation link</DialogTitle>
+            <DialogDescription>
+              {resendResult?.email_sent
+                ? `Emailed to ${resendResult.invitation.email}. You can also copy the link and send it to them directly.`
+                : "Email isn't configured on this server, so nothing was sent — deliver this link yourself."}
+            </DialogDescription>
+          </DialogHeader>
+          {resendResult?.claim_url && (
+            <ClaimLinkBox
+              claimUrl={resendResult.claim_url}
+              finePrint="The link works once; any previous link for this invitation has stopped working."
+              onCopy={handleCopy}
+              onDone={() => setResendResult(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <div className="flex items-start justify-between gap-4">
         <p className="text-muted-foreground max-w-xl text-sm">
@@ -125,7 +192,7 @@ export default function InvitationsTab() {
               <InvitationRow
                 key={inv.id}
                 invitation={inv}
-                onResend={() => resend.mutate(inv.id)}
+                onResend={() => handleResend(inv.id)}
                 onRevoke={() => setConfirmRevoke(inv)}
                 resending={resend.isPending}
               />
@@ -215,9 +282,10 @@ function CreateInvitationForm({
   const [note, setNote] = useState("");
   const [createProfile, setCreateProfile] = useState(true);
   const [showTour, setShowTour] = useState(true);
-  // When email isn't configured the server returns the claim URL instead of
-  // sending; we keep the dialog open and show it for manual delivery.
-  const [manualLink, setManualLink] = useState<string | null>(null);
+  // After creation we keep the dialog open to show the claim link — the
+  // token is only readable in this response, so this is the one chance to
+  // copy it. emailSent changes the copy: delivered vs deliver-it-yourself.
+  const [result, setResult] = useState<{ claimUrl: string; emailSent: boolean } | null>(null);
 
   const defaultGroup = useMemo(() => accessGroups.find((g) => g.is_default), [accessGroups]);
 
@@ -237,35 +305,31 @@ function CreateInvitationForm({
         onSuccess: (data: SendInvitationResponse) => {
           if (data.email_sent) {
             toast.success(`Invitation sent to ${data.invitation.email}`);
+          }
+          if (data.claim_url) {
+            setResult({ claimUrl: data.claim_url, emailSent: data.email_sent });
+          } else {
             onClose();
-          } else if (data.claim_url) {
-            setManualLink(data.claim_url);
           }
         },
       },
     );
   }
 
-  if (manualLink) {
+  if (result) {
     return (
-      <div className="space-y-4">
+      <div className="min-w-0 space-y-4">
         <p className="text-sm">
-          Email isn&apos;t configured on this server, so nothing was sent. The invitation was
-          created — deliver this link yourself:
+          {result.emailSent
+            ? "Invitation emailed. You can also copy the link and send it to them directly:"
+            : "Email isn't configured on this server, so nothing was sent. The invitation was created — deliver this link yourself:"}
         </p>
-        <div className="bg-muted flex items-center gap-2 rounded-md p-2">
-          <code className="min-w-0 flex-1 truncate text-xs">{manualLink}</code>
-          <Button variant="ghost" size="sm" onClick={() => onCopy(manualLink)}>
-            <Copy className="h-4 w-4" />
-          </Button>
-        </div>
-        <p className="text-muted-foreground text-xs">
-          The link works once and expires in 7 days. Resending later mints a fresh link and kills
-          this one.
-        </p>
-        <div className="flex justify-end">
-          <Button onClick={onClose}>Done</Button>
-        </div>
+        <ClaimLinkBox
+          claimUrl={result.claimUrl}
+          finePrint="The link works once and expires in 7 days. Resending later mints a fresh link and kills this one."
+          onCopy={onCopy}
+          onDone={onClose}
+        />
       </div>
     );
   }

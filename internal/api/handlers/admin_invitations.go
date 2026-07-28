@@ -57,8 +57,9 @@ type invitationResponse struct {
 type sendInvitationResponse struct {
 	Invitation invitationResponse `json:"invitation"`
 	EmailSent  bool               `json:"email_sent"`
-	// ClaimURL is only populated when email did not send, so the admin can
-	// deliver the link manually. It embeds the single-use token.
+	// ClaimURL embeds the single-use token, so this response is the only
+	// chance to read it — the server keeps just the hash. Returned even when
+	// the email sent, so the admin can also deliver the link directly.
 	ClaimURL string `json:"claim_url,omitempty"`
 }
 
@@ -188,9 +189,7 @@ func buildSendResponse(result *invitations.SendResult) sendInvitationResponse {
 	resp := sendInvitationResponse{
 		Invitation: toInvitationResponse(result.Invitation, time.Now()),
 		EmailSent:  result.EmailSent,
-	}
-	if !result.EmailSent {
-		resp.ClaimURL = result.ClaimURL
+		ClaimURL:   result.ClaimURL,
 	}
 	return resp
 }
