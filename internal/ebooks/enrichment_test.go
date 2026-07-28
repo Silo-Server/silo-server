@@ -667,10 +667,13 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 		},
 	}
 
-	accumulator, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "t"}, providers, nil)
+	accumulator, ids, errs, authorMismatch := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c1", Title: "t"}, providers, nil)
 
 	if len(errs) != 2 || !errors.Is(errs[0], searchErr) || !errors.Is(errs[1], getErr) {
 		t.Fatalf("provider errors = %v, want both broken-provider errors", errs)
+	}
+	if authorMismatch {
+		t.Fatal("metadata without a positive author contradiction was rejected")
 	}
 	if accumulator.Overview != "found" {
 		t.Fatalf("accumulator overview = %q, want metadata from the working provider", accumulator.Overview)
@@ -680,6 +683,43 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 	}
 	if ids["openlibrary"] != "OL1M" {
 		t.Fatalf("accumulated IDs = %v, want search-result openlibrary ID", ids)
+	}
+}
+
+func TestCollectEbookMetadataRejectsEachProviderAuthorBeforeMerging(t *testing.T) {
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{
+			slug:    "wrong",
+			results: []metadata.SearchResult{{Name: "Shared Title", ProviderIDs: map[string]string{"wrong": "1"}}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				Overview:    "wrong provider overview",
+				People: []models.ItemPerson{{
+					Person: models.Person{Name: "Wrong Author"}, Kind: models.PersonKindAuthor,
+				}},
+			},
+		},
+		&fakeEbookMetadataProvider{
+			slug:    "right",
+			results: []metadata.SearchResult{{Name: "Shared Title", ProviderIDs: map[string]string{"right": "2"}}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				People: []models.ItemPerson{{
+					Person: models.Person{Name: "Right Author"}, Kind: models.PersonKindAuthor,
+				}},
+			},
+		},
+	}
+
+	accumulator, _, _, authorMismatch := collectEbookMetadata(context.Background(), enrichmentItemRow{
+		ContentID: "shared", Title: "Shared Title", Author: "Right Author",
+	}, providers, nil)
+
+	if !authorMismatch {
+		t.Fatal("a provider with a contradictory author did not fail the item closed")
+	}
+	if accumulator.Overview != "" || accumulator.HasMetadata {
+		t.Fatalf("contradictory provider metadata was merged before validation: %+v", accumulator)
 	}
 }
 
@@ -710,7 +750,7 @@ func TestCollectEbookMetadataSkipsProviderIDOwnedByAnotherItem(t *testing.T) {
 	}
 	owner := &fakeProviderIDOwner{ownerByID: map[string]string{"40817436": "other-book"}}
 
-	_, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
+	_, ids, errs, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
 
 	if len(errs) != 0 {
 		t.Fatalf("unexpected provider errors: %v", errs)
@@ -730,13 +770,54 @@ func TestCollectEbookMetadataSurfacesOwnershipCheckError(t *testing.T) {
 	}
 	owner := &fakeProviderIDOwner{err: checkErr}
 
-	_, ids, errs := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
+	_, ids, errs, _ := collectEbookMetadata(context.Background(), enrichmentItemRow{ContentID: "c2", Title: "t"}, providers, owner)
 
 	if len(errs) != 1 || !errors.Is(errs[0], checkErr) {
 		t.Fatalf("provider errors = %v, want the ownership-check error", errs)
 	}
 	if _, ok := ids["bookinfo"]; ok {
 		t.Fatalf("provider id claimed despite failed ownership check: %v", ids)
+	}
+}
+
+func TestCollectEbookMetadataDoesNotReintroduceOwnedCrossID(t *testing.T) {
+	providers := []metadata.Provider{
+		&fakeEbookMetadataProvider{
+			slug: "bookinfo",
+			results: []metadata.SearchResult{{
+				Name: "t",
+				ProviderIDs: map[string]string{
+					"bookinfo":    "owned-id",
+					"openlibrary": "free-id",
+				},
+			}},
+			result: &metadata.MetadataResult{
+				HasMetadata: true,
+				Overview:    "usable metadata",
+				ProviderIDs: map[string]string{
+					"bookinfo":    "owned-id",
+					"openlibrary": "free-id",
+				},
+			},
+		},
+	}
+	owner := &fakeProviderIDOwner{ownerByID: map[string]string{"owned-id": "other-book"}}
+
+	accumulator, ids, errs, authorMismatch := collectEbookMetadata(
+		context.Background(),
+		enrichmentItemRow{ContentID: "this-book", Title: "t"},
+		providers,
+		owner,
+	)
+
+	if len(errs) != 0 || authorMismatch {
+		t.Fatalf("collect errors = %v, authorMismatch = %v", errs, authorMismatch)
+	}
+	if accumulator.Overview != "usable metadata" || ids["openlibrary"] != "free-id" {
+		t.Fatalf("usable metadata/identity was lost: accumulator=%+v ids=%v", accumulator, ids)
+	}
+	if _, exists := ids["bookinfo"]; exists {
+		t.Fatalf("metadata response reintroduced an owned cross-ID: %v", ids)
 	}
 }
 
@@ -992,9 +1073,10 @@ func TestBuildEbookMetadataRequestCarriesAccumulatedISBN(t *testing.T) {
 }
 
 type fakeEbookProviderIDRepository struct {
-	rows  map[string][]*models.MediaItemProviderID
-	err   error
-	calls [][]string
+	rows       map[string][]*models.MediaItemProviderID
+	err        error
+	replaceErr error
+	calls      [][]string
 }
 
 func (f *fakeEbookProviderIDRepository) GetByContentIDs(
@@ -1006,7 +1088,7 @@ func (f *fakeEbookProviderIDRepository) GetByContentIDs(
 }
 
 func (f *fakeEbookProviderIDRepository) ReplaceByContentID(context.Context, string, map[string]string) error {
-	return nil
+	return f.replaceErr
 }
 
 func (f *fakeEbookProviderIDRepository) FindContentIDByProviderIDs(
@@ -1016,6 +1098,21 @@ func (f *fakeEbookProviderIDRepository) FindContentIDByProviderIDs(
 	string,
 ) (string, error) {
 	return "", nil
+}
+
+func TestPersistReturnsProviderIDFailure(t *testing.T) {
+	replaceErr := errors.New("provider identity already belongs to another item")
+	e := &Enricher{providerIDs: &fakeEbookProviderIDRepository{replaceErr: replaceErr}}
+	ctx := withEnrichmentClaimCheck(context.Background(), func(context.Context) error { return nil })
+
+	err := e.persist(ctx, "ebook-1", map[string]string{"isbn": "9780306406157"}, &metadata.MetadataResult{
+		HasMetadata: true,
+		Overview:    "remote overview",
+	})
+
+	if !errors.Is(err, replaceErr) {
+		t.Fatalf("persist error = %v, want provider-ID failure %v", err, replaceErr)
+	}
 }
 
 func TestEnricherLoadsProviderIDsInOneBatchAndSurfacesErrors(t *testing.T) {

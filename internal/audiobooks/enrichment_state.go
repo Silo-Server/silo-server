@@ -61,21 +61,6 @@ func backoffParams(class EnrichmentErrorClass) (step, ceiling time.Duration) {
 	}
 }
 
-// retryAfterFor mirrors the SQL computation for tests and callers that reason
-// about the schedule in Go. Implemented via backoffParams so the two cannot
-// drift.
-func retryAfterFor(class EnrichmentErrorClass, attempts int) time.Duration {
-	if attempts < 1 {
-		attempts = 1
-	}
-	step, ceiling := backoffParams(class)
-	d := time.Duration(attempts) * step
-	if d > ceiling {
-		d = ceiling
-	}
-	return d
-}
-
 // enrichmentStateStore records attempt history for audiobook enrichment.
 // A nil pool makes every method a no-op so partially wired constructions and
 // tests behave exactly as they did before this table existed.

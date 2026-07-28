@@ -2,14 +2,18 @@ package audiobooks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func newClaimTestPool(t *testing.T) *pgxpool.Pool {
@@ -156,5 +160,58 @@ func TestHasPendingItemsMirrorsClaimBatch(t *testing.T) {
 	// shared test database could otherwise satisfy the check.
 	if !claimedIDs(t, e)[fixtureID] {
 		t.Fatal("HasPendingItems reported work but claimBatch did not claim the eligible fixture")
+	}
+}
+
+type failingTxAudiobookItemRepository struct {
+	err error
+}
+
+func (f *failingTxAudiobookItemRepository) UpdateMetadata(context.Context, string, *catalog.MetadataUpdate) error {
+	return f.err
+}
+
+func (f *failingTxAudiobookItemRepository) UpdateMetadataTx(context.Context, pgx.Tx, string, *catalog.MetadataUpdate) error {
+	return f.err
+}
+
+func (f *failingTxAudiobookItemRepository) ReplacePeople(context.Context, string, []models.ItemPerson) error {
+	return nil
+}
+
+func TestPersistRollsBackProviderIDsWhenMetadataWriteFails(t *testing.T) {
+	pool := newClaimTestPool(t)
+	contentID := seedAudiobook(t, pool, "atomic-persist", "/covers/embedded.jpg", false)
+	updateErr := errors.New("metadata write failed")
+	e := &Enricher{
+		pool:        pool,
+		itemRepo:    &failingTxAudiobookItemRepository{err: updateErr},
+		providerIDs: catalog.NewProviderIDRepository(pool),
+	}
+
+	err := e.persist(context.Background(), contentID, map[string]string{
+		"asin": fmt.Sprintf("B0TX%d", time.Now().UnixNano()),
+	}, &metadata.MetadataResult{HasMetadata: true, Overview: "remote overview"})
+	if !errors.Is(err, updateErr) {
+		t.Fatalf("persist error = %v, want %v", err, updateErr)
+	}
+
+	var (
+		providerIDCount int
+		overview        string
+		lastRefreshed   *time.Time
+	)
+	if err := pool.QueryRow(context.Background(), `
+		SELECT
+			(SELECT COUNT(*) FROM media_item_provider_ids WHERE content_id = mi.content_id),
+			COALESCE(mi.overview, ''),
+			mi.last_refreshed
+		FROM media_items mi
+		WHERE mi.content_id = $1
+	`, contentID).Scan(&providerIDCount, &overview, &lastRefreshed); err != nil {
+		t.Fatalf("read rolled-back audiobook: %v", err)
+	}
+	if providerIDCount != 0 || overview != "" || lastRefreshed != nil {
+		t.Fatalf("partial enrichment committed: provider_ids=%d overview=%q last_refreshed=%v", providerIDCount, overview, lastRefreshed)
 	}
 }

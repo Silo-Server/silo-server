@@ -38,6 +38,9 @@ func TestAuthorsAgreeRejectsADifferentPerson(t *testing.T) {
 		{"Stephen King", "Dean Koontz"},
 		{"Andy Weir", "Ernest Cline"},
 		{"J.K. Rowling", "J.R.R. Tolkien"},
+		// Cyrillic initials share the same leading UTF-8 byte but are distinct
+		// runes; comparing byte slices used to accept this pair.
+		{"Алексей Иванов", "Борис Иванов"},
 	}
 	for _, tc := range cases {
 		if AuthorsAgree(tc.item, authorPeople(tc.credited)) {

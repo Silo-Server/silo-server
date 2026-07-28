@@ -222,6 +222,20 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
+// retryAfterFor mirrors the SQL computation so the tests can assert the
+// schedule without adding a test-only helper to the production package.
+func retryAfterFor(class EnrichmentErrorClass, attempts int) time.Duration {
+	if attempts < 1 {
+		attempts = 1
+	}
+	step, ceiling := backoffParams(class)
+	d := time.Duration(attempts) * step
+	if d > ceiling {
+		return ceiling
+	}
+	return d
+}
+
 // Backoff shape: rate limiting must back off harder than a transient blip,
 // because retrying into a closed window is what turns a throttle into a
 // backlog.

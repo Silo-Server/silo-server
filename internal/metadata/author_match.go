@@ -3,6 +3,7 @@ package metadata
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
@@ -96,7 +97,9 @@ func sharesInitial(a, b []string) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return true
 	}
-	return a[0][:1] == b[0][:1]
+	aInitial, _ := utf8.DecodeRuneInString(a[0])
+	bInitial, _ := utf8.DecodeRuneInString(b[0])
+	return aInitial == bInitial
 }
 
 // isSubsequence reports whether every token of sub appears in order within all.

@@ -1684,6 +1684,26 @@ func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]mod
 // setting only the non-nil fields in upd. Always bumps updated_at.
 // Returns ErrItemNotFound if no row matches contentID.
 func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, upd *MetadataUpdate) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin metadata update tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if err := r.UpdateMetadataTx(ctx, tx, contentID, upd); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit metadata update tx: %w", err)
+	}
+	return nil
+}
+
+// UpdateMetadataTx applies the same metadata update using the caller's
+// transaction. It lets workflows that also replace durable identity keep the
+// identity, scalar metadata, search-index event, and terminal timestamp in one
+// atomic write.
+func (r *ItemRepository) UpdateMetadataTx(ctx context.Context, tx pgx.Tx, contentID string, upd *MetadataUpdate) error {
 	var setClauses []string
 	var args []any
 	argIdx := 1
@@ -1787,12 +1807,6 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 		strings.Join(setClauses, ", "), argIdx)
 	args = append(args, contentID)
 
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin metadata update tx: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("updating media item metadata: %w", err)
@@ -1802,9 +1816,6 @@ func (r *ItemRepository) UpdateMetadata(ctx context.Context, contentID string, u
 	}
 	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
 		return fmt.Errorf("enqueueing catalog search metadata update: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit metadata update tx: %w", err)
 	}
 	return nil
 }

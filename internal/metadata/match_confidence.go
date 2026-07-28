@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -61,8 +62,12 @@ var (
 	// A volume marker in any of the shapes providers and rippers use:
 	// "Book 4", "Vol. 2", "#3", "Part 7", "Series 2", or a bare trailing number.
 	volumeMarkerRE = regexp.MustCompile(
-		`(?i)\b(?:book|bk|vol|volume|part|series|episode|ep)\b\.?\s*#?\s*(\d{1,4})\b`)
-	hashVolumeRE = regexp.MustCompile(`#\s*(\d{1,4})\b`)
+		`(?i)\b(?:books?|bks?|vols?|volumes?|parts?|series|episodes?|eps?)\b\.?\s*#?\s*(\d{1,4})\b`)
+	hashVolumeRE  = regexp.MustCompile(`#\s*(\d{1,4})\b`)
+	volumeRangeRE = regexp.MustCompile(
+		`(?i)\b(?:books?|bks?|vols?|volumes?|parts?|episodes?|eps?)\b\.?\s*#?\s*(\d{1,3})\s*[-–—]\s*#?\s*(\d{1,3})\b`)
+	bareVolumeRangeRE = regexp.MustCompile(
+		`(?:^|[^\p{L}\p{N}])(\d{1,3})\s*[-–—]\s*(\d{1,3})(?:$|[^\p{L}\p{N}])`)
 
 	// Punctuation and separators only. Deliberately NOT [^a-z0-9]: that is
 	// ASCII-only, and this library is not. Stripping every non-ASCII rune
@@ -129,16 +134,31 @@ func normaliseTitle(s string) string {
 	return foldNumberWords(strings.Join(strings.Fields(s), " "))
 }
 
-// titleVolume extracts a volume number, preferring an explicit marker
-// ("Book 4", "#3") over a bare trailing number. Returns ok=false when the
-// title carries no volume at all, which is common and must not be treated as
-// a disagreement.
-func titleVolume(s string) (int, bool) {
+type volumeIdentity struct {
+	first int
+	last  int
+}
+
+// titleVolume extracts a single volume or a complete volume range, preferring
+// explicit forms ("Books 1-3", "Book 4", "#3") over a bare number. Returns
+// ok=false when the title carries no volume at all, which is common and must
+// not be treated as a disagreement.
+func titleVolume(s string) (volumeIdentity, bool) {
 	lower := strings.ToLower(s)
+
+	for _, re := range []*regexp.Regexp{volumeRangeRE, bareVolumeRangeRE} {
+		if m := re.FindStringSubmatch(lower); m != nil {
+			first, firstErr := strconv.Atoi(m[1])
+			last, lastErr := strconv.Atoi(m[2])
+			if firstErr == nil && lastErr == nil && first > 0 && last > 0 {
+				return volumeIdentity{first: first, last: last}, true
+			}
+		}
+	}
 
 	if m := hashVolumeRE.FindStringSubmatch(lower); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil {
-			return n, true
+			return volumeIdentity{first: n, last: n}, true
 		}
 	}
 
@@ -149,7 +169,7 @@ func titleVolume(s string) (int, bool) {
 
 	if m := volumeMarkerRE.FindStringSubmatch(folded); m != nil {
 		if n, err := strconv.Atoi(m[1]); err == nil {
-			return n, true
+			return volumeIdentity{first: n, last: n}, true
 		}
 	}
 
@@ -162,12 +182,9 @@ func titleVolume(s string) (int, bool) {
 		if err != nil || n <= 0 || n > 999 {
 			continue
 		}
-		if n >= 1000 || (n >= 1900 && n <= 2100) {
-			continue
-		}
-		return n, true
+		return volumeIdentity{first: n, last: n}, true
 	}
-	return 0, false
+	return volumeIdentity{}, false
 }
 
 // titleStopwords carry no identifying signal but are common enough to inflate
@@ -265,7 +282,7 @@ func matchThreshold() float64 {
 		return minTitleScore
 	}
 	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v <= 0 || v > 1 {
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 || v > 1 {
 		return minTitleScore
 	}
 	return v
@@ -289,8 +306,14 @@ func BestMatch(want string, results []SearchResult) (SearchResult, bool) {
 // recording, decades later, so rejecting on a year gap would throw away correct
 // matches wholesale. It only decides between candidates that have already
 // earned effectively the same title score.
-func BestMatchYear(want string, wantYear int, results []SearchResult) (SearchResult, bool) {
-	best, bestScore := SearchResult{}, 0.0
+type bestMatchSelection struct {
+	result       SearchResult
+	score        float64
+	matchedTitle string
+}
+
+func selectBestMatchYear(want string, wantYear int, results []SearchResult) (bestMatchSelection, bool) {
+	best := bestMatchSelection{}
 	found := false
 
 	for _, r := range results {
@@ -312,23 +335,26 @@ func BestMatchYear(want string, wantYear int, results []SearchResult) (SearchRes
 		}
 
 		score := TitleScore(want, name)
+		matchedTitle := name
 
 		// Aliases are provider-confirmed titles for the same work, so a
 		// translated or regional spelling should not be penalised.
 		for _, alias := range r.TitleAliases {
 			if s := TitleScore(want, alias.Title); s > score {
 				score = s
+				matchedTitle = alias.Title
 			}
 		}
 
 		switch {
-		case score > bestScore+scoreTieEpsilon:
-			best, bestScore, found = r, score, true
-		case found && score > bestScore-scoreTieEpsilon:
+		case score > best.score+scoreTieEpsilon:
+			best = bestMatchSelection{result: r, score: score, matchedTitle: matchedTitle}
+			found = true
+		case found && score > best.score-scoreTieEpsilon:
 			// Effectively tied on title. Prefer the nearer year when both are
 			// known; otherwise keep the incumbent.
-			if yearIsCloser(wantYear, r.Year, best.Year) {
-				best, bestScore = r, score
+			if yearIsCloser(wantYear, r.Year, best.result.Year) {
+				best = bestMatchSelection{result: r, score: score, matchedTitle: matchedTitle}
 			}
 		}
 	}
@@ -338,10 +364,18 @@ func BestMatchYear(want string, wantYear int, results []SearchResult) (SearchRes
 	// "Malcolm 10" -- and that is the weakest possible evidence, not a match.
 	// Nothing correct is lost: in the calibration sample the worst true match
 	// scores 0.86.
-	if !found || bestScore <= matchThreshold() {
-		return SearchResult{}, false
+	if !found || best.score <= matchThreshold() {
+		return bestMatchSelection{}, false
 	}
 	return best, true
+}
+
+func BestMatchYear(want string, wantYear int, results []SearchResult) (SearchResult, bool) {
+	best, ok := selectBestMatchYear(want, wantYear, results)
+	if !ok {
+		return SearchResult{}, false
+	}
+	return best.result, true
 }
 
 // yearIsCloser reports whether candidate's year sits nearer to want than the
@@ -378,13 +412,4 @@ func abs(n int) int {
 // IDs only when it agrees.
 func AgreesWith(a, b string) bool {
 	return TitleScore(a, b) > matchThreshold()
-}
-
-// ResultTitle returns the title to score a candidate by, falling back to the
-// original title when a provider leaves the primary one empty.
-func ResultTitle(r SearchResult) string {
-	if strings.TrimSpace(r.Name) != "" {
-		return r.Name
-	}
-	return r.OriginalTitle
 }

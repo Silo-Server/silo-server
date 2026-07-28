@@ -2,12 +2,16 @@ package audiobooks
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/metadata"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // TestEnricherRunFansOut verifies that runBatch processes a claimed batch with
@@ -168,4 +172,38 @@ func (f *fakeAudiobookImageCacher) CacheImage(_ context.Context, req metadata.Ca
 		Thumbhash:    "thumb",
 		Ext:          ".webp",
 	}, nil
+}
+
+type failingAudiobookProviderIDRepository struct {
+	err error
+}
+
+func (f *failingAudiobookProviderIDRepository) GetByContentID(context.Context, string) ([]*models.MediaItemProviderID, error) {
+	return nil, nil
+}
+
+func (f *failingAudiobookProviderIDRepository) ReplaceByContentID(context.Context, string, map[string]string) error {
+	return f.err
+}
+
+func (f *failingAudiobookProviderIDRepository) ReplaceByContentIDTx(context.Context, pgx.Tx, string, string, map[string]string) error {
+	return f.err
+}
+
+func (f *failingAudiobookProviderIDRepository) FindContentIDByProviderIDs(context.Context, map[string]string, string, string) (string, error) {
+	return "", nil
+}
+
+func TestPersistReturnsProviderIDFailure(t *testing.T) {
+	replaceErr := errors.New("provider identity already belongs to another item")
+	e := &Enricher{providerIDs: &failingAudiobookProviderIDRepository{err: replaceErr}}
+
+	err := e.persist(context.Background(), "audiobook-1", map[string]string{"asin": "B001"}, &metadata.MetadataResult{
+		HasMetadata: true,
+		Overview:    "remote overview",
+	})
+
+	if !errors.Is(err, replaceErr) {
+		t.Fatalf("persist error = %v, want provider-ID failure %v", err, replaceErr)
+	}
 }

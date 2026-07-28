@@ -19,9 +19,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"google.golang.org/genproto/googleapis/rpc/errdetails"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -777,11 +774,20 @@ func (e *Enricher) enrichWithProvidersOutcome(
 		return EnrichmentOutcomeSkipped, nil
 	}
 
-	var owner providerIDOwnerLookup
+	var owner metadata.ProviderIDOwnerLookup
 	if e.providerIDs != nil {
 		owner = e.providerIDs
 	}
-	accumulator, accumulatedIDs, providerErrs := collectEbookMetadata(ctx, item, providers, owner)
+	accumulator, accumulatedIDs, providerErrs, authorMismatch := collectEbookMetadata(ctx, item, providers, owner)
+	if authorMismatch {
+		if err := requireEnrichmentClaim(ctx); err != nil {
+			return "", err
+		}
+		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
+			return "", err
+		}
+		return EnrichmentOutcomeNoMatch, nil
+	}
 
 	if !accumulator.HasMetadata && accumulator.PosterPath == "" && accumulator.Overview == "" {
 		if err := ctx.Err(); err != nil {
@@ -795,25 +801,6 @@ func (e *Enricher) enrichWithProvidersOutcome(
 		slog.InfoContext(ctx, "ebook enrichment: no metadata found", "component", "ebooks",
 			"content_id", item.ContentID,
 			"title", item.Title,
-		)
-		if err := requireEnrichmentClaim(ctx); err != nil {
-			return "", err
-		}
-		if err := e.stampLastRefreshed(ctx, item.ContentID); err != nil {
-			return "", err
-		}
-		return EnrichmentOutcomeNoMatch, nil
-	}
-
-	// The title gate cannot separate two different books that share a title,
-	// and the plugin's search contract carries no author to check at search
-	// time. The fetched credits can be checked, though, so a positive
-	// contradiction is recorded as a no-match rather than written.
-	if !metadata.AuthorsAgree(item.Author, accumulator.People) {
-		slog.InfoContext(ctx, "ebook enrichment: author mismatch; treating as no match", "component", "ebooks",
-			"content_id", item.ContentID,
-			"title", item.Title,
-			"item_author", item.Author,
 		)
 		if err := requireEnrichmentClaim(ctx); err != nil {
 			return "", err
@@ -919,35 +906,16 @@ func ebookArtworkOwnedByRemoteProvider(path string) bool {
 }
 
 func classifyEnrichmentError(err error) (EnrichmentErrorClass, time.Duration) {
-	grpcStatus, ok := status.FromError(err)
-	if !ok {
-		return EnrichmentErrorTransient, 0
-	}
-
-	switch grpcStatus.Code() {
-	case codes.ResourceExhausted:
-		for _, detail := range grpcStatus.Details() {
-			if retry, ok := detail.(*errdetails.RetryInfo); ok && retry.GetRetryDelay() != nil {
-				return EnrichmentErrorRateLimited, retry.GetRetryDelay().AsDuration()
-			}
-		}
-		return EnrichmentErrorRateLimited, 0
-	case codes.InvalidArgument,
-		codes.NotFound,
-		codes.PermissionDenied,
-		codes.Unauthenticated,
-		codes.FailedPrecondition,
-		codes.Unimplemented:
-		return EnrichmentErrorPermanent, 0
+	class, retryAfter := metadata.ClassifyProviderError(err)
+	switch class {
+	case metadata.ProviderErrorRateLimited:
+		return EnrichmentErrorRateLimited, retryAfter
+	case metadata.ProviderErrorPermanent:
+		return EnrichmentErrorPermanent, retryAfter
 	default:
-		return EnrichmentErrorTransient, 0
+		return EnrichmentErrorTransient, retryAfter
 	}
 }
-
-// providerIDOwnerLookup is the shared ownership contract; see
-// metadata.ProviderIDOwnerLookup for why enrichment checks it before claiming
-// an ID.
-type providerIDOwnerLookup = metadata.ProviderIDOwnerLookup
 
 // collectEbookMetadata queries every provider in the chain and accumulates
 // IDs and metadata. Individual provider failures are collected (not fatal) so
@@ -957,7 +925,7 @@ type providerIDOwnerLookup = metadata.ProviderIDOwnerLookup
 // the same provider work (e.g. two series volumes searched as the bare series
 // name) must not steal each other's identity, which would mis-tag the loser and
 // violate the (provider, provider_id, item_type) uniqueness constraint on persist.
-func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, owner providerIDOwnerLookup) (*metadata.MetadataResult, map[string]string, []error) {
+func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers []metadata.Provider, owner metadata.ProviderIDOwnerLookup) (*metadata.MetadataResult, map[string]string, []error, bool) {
 	searchQuery, accumulatedIDs := buildEbookSearchQuery(item)
 	var providerErrs []error
 
@@ -983,11 +951,31 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if len(results) == 0 {
 			continue
 		}
-		// Score against item.Title, not searchQuery.Title: the query is
-		// deliberately cleaned before it goes out, but the check has to be
-		// against what we actually hold on disk.
-		match, matched := metadata.BestMatchYear(item.Title, item.Year, results)
-		if !matched {
+		admission, admitErr := metadata.AdmitSearchMatch(ctx, metadata.SearchMatchAdmissionRequest{
+			WantTitle:           item.Title,
+			WantYear:            item.Year,
+			Results:             results,
+			AgreedTitle:         agreedTitle,
+			ExistingProviderIDs: accumulatedIDs,
+			Owner:               owner,
+			ItemType:            ebookContentType(),
+			ContentID:           item.ContentID,
+		})
+		if admitErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))
+			continue
+		}
+		for _, conflict := range admission.Conflicts {
+			slog.InfoContext(ctx, "ebook enrichment: provider id already owned by another item; skipping match", "component", "ebooks",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+
+		switch admission.Status {
+		case metadata.SearchMatchNoCredibleMatch:
 			// Info, not Debug: during a backlog drain the rejection rate is
 			// what separates "threshold too strict" from "providers answering
 			// badly", and it cannot be read from a log level nobody enables.
@@ -998,49 +986,19 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 				"candidates", len(results),
 			)
 			continue
-		}
-
-		// Providers are scored independently, so two can each clear the bar
-		// while naming different books. Keep the first accepted title as the
-		// reference and admit later providers only when they agree.
-		matchedTitle := metadata.ResultTitle(match)
-		if agreedTitle == "" {
-			agreedTitle = matchedTitle
-		} else if !metadata.AgreesWith(agreedTitle, matchedTitle) {
+		case metadata.SearchMatchProviderDisagreement:
 			slog.WarnContext(ctx, "ebook enrichment: provider disagreement; skipping", "component", "ebooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"accepted_title", agreedTitle,
-				"rejected_title", matchedTitle,
+				"rejected_title", admission.MatchedTitle,
 			)
 			continue
+		case metadata.SearchMatchNoUsableProviderIDs:
+			continue
 		}
-		for k, v := range match.ProviderIDs {
-			if v == "" {
-				continue
-			}
-			if _, exists := accumulatedIDs[k]; exists {
-				continue
-			}
-			if owner != nil {
-				ownerID, ownErr := owner.FindContentIDByProviderIDs(ctx, map[string]string{k: v}, ebookContentType(), item.ContentID)
-				if ownErr != nil {
-					// Don't claim an ID we couldn't verify is free, and surface
-					// the error so the item retries rather than terminally
-					// stamping as "no match".
-					providerErrs = append(providerErrs, fmt.Errorf("%s ownership check %s=%s: %w", p.Slug(), k, v, ownErr))
-					continue
-				}
-				if ownerID != "" {
-					slog.InfoContext(ctx, "ebook enrichment: provider id already owned by another item; skipping match", "component", "ebooks",
-						"provider", k,
-						"provider_id", v,
-						"content_id", item.ContentID,
-						"owned_by", ownerID,
-					)
-					continue
-				}
-			}
+		agreedTitle = admission.AgreedTitle
+		for k, v := range admission.ProviderIDs {
 			accumulatedIDs[k] = v
 		}
 		slog.DebugContext(ctx, "ebook enrichment: search result", "component", "ebooks",
@@ -1072,6 +1030,37 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		if result == nil || !result.HasMetadata {
 			continue
 		}
+		if !metadata.AuthorsAgree(item.Author, result.People) {
+			slog.InfoContext(ctx, "ebook enrichment: author mismatch; treating as no match", "component", "ebooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"item_author", item.Author,
+			)
+			return accumulator, accumulator.ProviderIDs, providerErrs, true
+		}
+		identity, identityErr := metadata.AdmitProviderIDs(ctx, metadata.ProviderIDAdmissionRequest{
+			CandidateProviderIDs: filterEbookProviderIDs(result.ProviderIDs),
+			ExistingProviderIDs:  accumulator.ProviderIDs,
+			Owner:                owner,
+			ItemType:             ebookContentType(),
+			ContentID:            item.ContentID,
+		})
+		if identityErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), identityErr))
+			continue
+		}
+		for _, conflict := range identity.Conflicts {
+			slog.InfoContext(ctx, "ebook enrichment: metadata provider id already owned by another item; skipping", "component", "ebooks",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+		admittedResult := *result
+		admittedResult.ProviderIDs = identity.ProviderIDs
+		result = &admittedResult
 		accumulator.HasMetadata = true
 		mergeEnrichmentProviderIDs(accumulator, result)
 		metadata.MergeMetadata(result, accumulator, nil, metadata.MergeFillEmpty)
@@ -1084,7 +1073,7 @@ func collectEbookMetadata(ctx context.Context, item enrichmentItemRow, providers
 		)
 	}
 
-	return accumulator, accumulator.ProviderIDs, providerErrs
+	return accumulator, accumulator.ProviderIDs, providerErrs, false
 }
 
 func (e *Enricher) autoLinkLiteraryWork(ctx context.Context, contentID string) {
@@ -1257,10 +1246,7 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	providerIDs = filterEbookProviderIDs(providerIDs)
 	if e.providerIDs != nil && len(providerIDs) > 0 {
 		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
-			slog.WarnContext(ctx, "ebook enrichment: failed to persist provider IDs", "component", "ebooks",
-				"content_id", contentID,
-				"error", err,
-			)
+			return fmt.Errorf("persisting ebook provider IDs: %w", err)
 		}
 	}
 

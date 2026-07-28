@@ -231,6 +231,21 @@ func TestVolumeDisagreementIsFatalRegardlessOfOverlap(t *testing.T) {
 	}
 }
 
+func TestVolumeRangeDisagreementIsFatalRegardlessOfOverlap(t *testing.T) {
+	want := "Dragon Saga Books 1-3"
+	candidate := "Dragon Saga Books 1-4"
+	if score := TitleScore(want, candidate); score != 0 {
+		t.Fatalf("range mismatch scored %.2f, want 0", score)
+	}
+	if _, ok := BestMatch(want, []SearchResult{{Name: candidate}}); ok {
+		t.Fatal("different boxed-set ranges were accepted as the same work")
+	}
+
+	if score := TitleScore("Dragon Saga Books 1–3", "Dragon Saga Books 1-3"); score != 1 {
+		t.Fatalf("equivalent dash spellings scored %.2f, want 1", score)
+	}
+}
+
 // Years date an edition; they must not be read as volume numbers, or every
 // title carrying a year would collide with every other.
 func TestYearsAreNotTreatedAsVolumes(t *testing.T) {
@@ -356,7 +371,7 @@ func TestMatchThresholdOverride(t *testing.T) {
 		t.Error("a 0.90 match was accepted against a 0.95 threshold")
 	}
 
-	for _, bad := range []string{"0", "5", "-1", "abc", ""} {
+	for _, bad := range []string{"0", "5", "-1", "abc", "", "NaN", "+Inf", "-Inf"} {
 		t.Setenv("SILO_METADATA_MATCH_MIN_SCORE", bad)
 		if got := matchThreshold(); got != minTitleScore {
 			t.Errorf("threshold %q = %.2f, want the default %.2f (bad values must be ignored)", bad, got, minTitleScore)
@@ -376,15 +391,6 @@ func TestAgreesWithSeparatesProviderAnswers(t *testing.T) {
 	}
 	if AgreesWith("Mother of Storms", "The Good Mothers") {
 		t.Error("unrelated titles must not agree")
-	}
-}
-
-func TestResultTitleFallsBackToOriginalTitle(t *testing.T) {
-	if got := ResultTitle(SearchResult{Name: "Primary", OriginalTitle: "Original"}); got != "Primary" {
-		t.Errorf("ResultTitle = %q, want the primary name", got)
-	}
-	if got := ResultTitle(SearchResult{OriginalTitle: "Original"}); got != "Original" {
-		t.Errorf("ResultTitle = %q, want the original title when Name is empty", got)
 	}
 }
 

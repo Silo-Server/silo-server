@@ -4,11 +4,11 @@ package audiobooks
 // metadata (poster_path, overview, etc.) by querying the configured
 // metadata-provider chain for each item's library folder.
 //
-// Design: periodic sweep (option c from the plan) — no queue table required.
-// The sweep selects up to batchSize audiobook items where poster_path is empty,
-// resolves the per-folder provider chain at content_level='audiobook', calls
-// Search + GetMetadata on each enabled provider in order, and writes results
-// back via ItemRepository.UpdateMetadata + PersonRepository + ItemRepository.ReplacePeople.
+// Design: a periodic, state-backed sweep selects up to batchSize audiobooks
+// that have no durable provider identity, have not completed enrichment, and
+// are due for retry. It resolves the per-folder provider chain, calls Search +
+// GetMetadata, then commits provider IDs, scalar metadata, the search-index
+// event, and terminal timestamp atomically. People credits follow best-effort.
 //
 // Movie/TV enrichment is entirely unaffected: it continues through
 // internal/metadata.MetadataService.Process via the existing worker.
@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -92,14 +93,27 @@ type enrichmentItemRow struct {
 	ProviderIDs map[string]string
 }
 
+type audiobookProviderIDRepository interface {
+	metadata.ProviderIDOwnerLookup
+	GetByContentID(ctx context.Context, contentID string) ([]*models.MediaItemProviderID, error)
+	ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error
+	ReplaceByContentIDTx(ctx context.Context, tx pgx.Tx, contentID, itemType string, providerIDs map[string]string) error
+}
+
+type audiobookItemRepository interface {
+	UpdateMetadata(ctx context.Context, contentID string, upd *catalog.MetadataUpdate) error
+	UpdateMetadataTx(ctx context.Context, tx pgx.Tx, contentID string, upd *catalog.MetadataUpdate) error
+	ReplacePeople(ctx context.Context, contentID string, people []models.ItemPerson) error
+}
+
 // Enricher drives the audiobook metadata enrichment sweep.
 type Enricher struct {
 	pool           *pgxpool.Pool
 	chainRepo      *metadata.ChainRepository
 	resolver       *metadata.PluginResolverAdapter
-	itemRepo       *catalog.ItemRepository
+	itemRepo       audiobookItemRepository
 	personRepo     *catalog.PersonRepository
-	providerIDs    *catalog.ProviderIDRepository
+	providerIDs    audiobookProviderIDRepository
 	state          *enrichmentStateStore
 	imageCacher    audiobookCoverCacher
 	imageCacheJobs metadata.ImageCacheJobEnqueuer
@@ -451,16 +465,31 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 			providerErrs = append(providerErrs, fmt.Errorf("%s search: %w", p.Slug(), searchErr))
 			continue
 		}
-		if len(results) == 0 {
+		admission, admitErr := metadata.AdmitSearchMatch(ctx, metadata.SearchMatchAdmissionRequest{
+			WantTitle:           item.Title,
+			WantYear:            item.Year,
+			Results:             results,
+			AgreedTitle:         agreedTitle,
+			ExistingProviderIDs: accumulatedIDs,
+			Owner:               e.providerIDs,
+			ItemType:            "audiobook",
+			ContentID:           item.ContentID,
+		})
+		if admitErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s candidate admission: %w", p.Slug(), admitErr))
 			continue
 		}
-		// Score candidates against the title on disk rather than trusting the
-		// provider's own ranking. Search backends answer nearly every query
-		// with something, and accepting the top row unconditionally is how an
-		// unrelated book -- or the wrong volume of the right series -- became
-		// an item's permanent identity.
-		match, ok := metadata.BestMatchYear(item.Title, item.Year, results)
-		if !ok {
+		for _, conflict := range admission.Conflicts {
+			slog.InfoContext(ctx, "audiobook enrichment: provider id already owned by another item; skipping", "component", "audiobooks",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+
+		switch admission.Status {
+		case metadata.SearchMatchNoCredibleMatch:
 			// Info, not Debug: during a backlog drain the rejection rate is
 			// what separates "threshold too strict" from "providers answering
 			// badly", and it cannot be read from a log level nobody enables.
@@ -471,48 +500,19 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 				"candidates", len(results),
 			)
 			continue
-		}
-
-		// Providers are scored independently, so two can each clear the bar
-		// while naming different books. Keep the first accepted title as the
-		// reference and admit later providers only when they agree, otherwise
-		// the item ends up holding IDs for two different works and the wrong
-		// one is indistinguishable afterwards.
-		matchedTitle := metadata.ResultTitle(match)
-		if agreedTitle == "" {
-			agreedTitle = matchedTitle
-		} else if !metadata.AgreesWith(agreedTitle, matchedTitle) {
+		case metadata.SearchMatchProviderDisagreement:
 			slog.WarnContext(ctx, "audiobook enrichment: provider disagreement; skipping", "component", "audiobooks",
 				"provider", p.Slug(),
 				"content_id", item.ContentID,
 				"accepted_title", agreedTitle,
-				"rejected_title", matchedTitle,
+				"rejected_title", admission.MatchedTitle,
 			)
 			continue
+		case metadata.SearchMatchNoUsableProviderIDs:
+			continue
 		}
-
-		// Take the accepted match's IDs as a candidate; later providers may fill gaps.
-		for k, v := range match.ProviderIDs {
-			if v == "" {
-				continue
-			}
-			if _, exists := accumulatedIDs[k]; exists {
-				continue
-			}
-			if owned, ownErr := e.providerIDTaken(ctx, k, v, item.ContentID); ownErr != nil {
-				// Don't claim an ID we couldn't verify is free; surface the
-				// error so the item retries rather than stamping terminally.
-				providerErrs = append(providerErrs, fmt.Errorf("%s ownership check %s=%s: %w", p.Slug(), k, v, ownErr))
-				continue
-			} else if owned != "" {
-				slog.InfoContext(ctx, "audiobook enrichment: provider id already owned by another item; skipping", "component", "audiobooks",
-					"provider", k,
-					"provider_id", v,
-					"content_id", item.ContentID,
-					"owned_by", owned,
-				)
-				continue
-			}
+		agreedTitle = admission.AgreedTitle
+		for k, v := range admission.ProviderIDs {
 			accumulatedIDs[k] = v
 		}
 		slog.DebugContext(ctx, "audiobook enrichment: search result", "component", "audiobooks",
@@ -549,6 +549,41 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		if result == nil || !result.HasMetadata {
 			continue
 		}
+		// Validate each provider before its fields or IDs enter the shared
+		// accumulator. Checking only the aggregate lets a later correct author
+		// validate an earlier same-title result for a different book.
+		if !metadata.AuthorsAgree(item.Author, result.People) {
+			slog.InfoContext(ctx, "audiobook enrichment: author mismatch; treating as no match", "component", "audiobooks",
+				"provider", p.Slug(),
+				"content_id", item.ContentID,
+				"title", item.Title,
+				"item_author", item.Author,
+			)
+			e.recordOutcome(ctx, item.ContentID, EnrichmentOutcomeNoMatch)
+			return e.stampLastRefreshed(ctx, item.ContentID)
+		}
+		identity, identityErr := metadata.AdmitProviderIDs(ctx, metadata.ProviderIDAdmissionRequest{
+			CandidateProviderIDs: result.ProviderIDs,
+			ExistingProviderIDs:  accumulator.ProviderIDs,
+			Owner:                e.providerIDs,
+			ItemType:             "audiobook",
+			ContentID:            item.ContentID,
+		})
+		if identityErr != nil {
+			providerErrs = append(providerErrs, fmt.Errorf("%s metadata identity admission: %w", p.Slug(), identityErr))
+			continue
+		}
+		for _, conflict := range identity.Conflicts {
+			slog.InfoContext(ctx, "audiobook enrichment: metadata provider id already owned by another item; skipping", "component", "audiobooks",
+				"provider", conflict.Provider,
+				"provider_id", conflict.ProviderID,
+				"content_id", item.ContentID,
+				"owned_by", conflict.OwnedBy,
+			)
+		}
+		admittedResult := *result
+		admittedResult.ProviderIDs = identity.ProviderIDs
+		result = &admittedResult
 		// Bootstrap subsequent providers with any newly discovered IDs.
 		mergeEnrichmentProviderIDs(accumulator, result)
 		accumulatedIDs = accumulator.ProviderIDs
@@ -589,23 +624,11 @@ func (e *Enricher) enrichItem(ctx context.Context, item enrichmentItemRow) error
 		return e.stampLastRefreshed(ctx, item.ContentID)
 	}
 
-	// The title gate cannot separate two different books that share a title,
-	// and the plugin's search contract carries no author to check at search
-	// time. The fetched credits can be checked, though, so a positive
-	// contradiction is rejected here rather than written.
-	if !metadata.AuthorsAgree(item.Author, accumulator.People) {
-		slog.InfoContext(ctx, "audiobook enrichment: author mismatch; treating as no match", "component", "audiobooks",
-			"content_id", item.ContentID,
-			"title", item.Title,
-			"item_author", item.Author,
-		)
-		e.recordOutcome(ctx, item.ContentID, EnrichmentOutcomeNoMatch)
-		return e.stampLastRefreshed(ctx, item.ContentID)
-	}
-
 	// Phase 3: Persist.
 	if err := e.persist(ctx, item.ContentID, accumulatedIDs, accumulator); err != nil {
-		return fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
+		persistErr := fmt.Errorf("persisting enrichment for %s: %w", item.ContentID, err)
+		e.recordFailure(ctx, item.ContentID, classifyProviderError(persistErr), persistErr.Error())
+		return persistErr
 	}
 	e.enqueueRemoteArtwork(ctx, item.ContentID, accumulator)
 	e.autoLinkLiteraryWork(ctx, item.ContentID)
@@ -748,20 +771,22 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 		upd.Year = &result.Year
 	}
 
-	// Write provider IDs (ASIN, etc.) to the durable provider_id table.
-	if e.providerIDs != nil && len(providerIDs) > 0 {
-		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
-			// Non-fatal: log and continue.
-			slog.WarnContext(ctx, "audiobook enrichment: failed to persist provider IDs", "component", "audiobooks",
-				"content_id", contentID,
-				"error", err,
-			)
+	if e.pool != nil && e.itemRepo != nil && e.providerIDs != nil && len(providerIDs) > 0 {
+		if err := e.persistMetadataAndProviderIDsTx(ctx, contentID, providerIDs, upd); err != nil {
+			return err
 		}
-	}
-
-	// Write scalar metadata and stamp last_refreshed + matched_at.
-	if err := e.updateMetadataAndTimestamps(ctx, contentID, upd); err != nil {
-		return err
+	} else {
+		// Partially wired tests retain the legacy calls. Production always takes
+		// the transaction path above so an identity can never commit without
+		// its metadata and terminal timestamp.
+		if e.providerIDs != nil && len(providerIDs) > 0 {
+			if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
+				return fmt.Errorf("persisting audiobook provider IDs: %w", err)
+			}
+		}
+		if err := e.updateMetadataAndTimestamps(ctx, contentID, upd); err != nil {
+			return err
+		}
 	}
 
 	// Write people (authors / narrators).
@@ -775,6 +800,40 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 		}
 	}
 
+	return nil
+}
+
+func (e *Enricher) persistMetadataAndProviderIDsTx(
+	ctx context.Context,
+	contentID string,
+	providerIDs map[string]string,
+	upd *catalog.MetadataUpdate,
+) error {
+	tx, err := e.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning audiobook enrichment transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := e.providerIDs.ReplaceByContentIDTx(ctx, tx, contentID, "audiobook", providerIDs); err != nil {
+		return fmt.Errorf("persisting audiobook provider IDs: %w", err)
+	}
+	if err := e.itemRepo.UpdateMetadataTx(ctx, tx, contentID, upd); err != nil {
+		return fmt.Errorf("updating audiobook metadata: %w", err)
+	}
+	now := time.Now().UTC()
+	if _, err := tx.Exec(ctx, `
+		UPDATE media_items
+		SET last_refreshed = $1,
+		    matched_at     = COALESCE(matched_at, $1),
+		    status         = CASE WHEN status = 'pending' THEN 'matched' ELSE status END
+		WHERE content_id = $2
+	`, now, contentID); err != nil {
+		return fmt.Errorf("stamping audiobook enrichment transaction: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("committing audiobook enrichment transaction: %w", err)
+	}
 	return nil
 }
 
@@ -948,20 +1007,6 @@ func providerIDMapFromRows(rows []*models.MediaItemProviderID) map[string]string
 	return m
 }
 
-// providerIDTaken reports which other item already owns a provider ID, or ""
-// when it is free. Mirrors the guard the ebook enricher has always had: without
-// it, sibling volumes that resolve to the same provider work all claim the same
-// ID and the collision is invisible afterwards.
-//
-// A nil repository disables the check rather than failing closed, so tests and
-// partially wired constructions behave as before.
-func (e *Enricher) providerIDTaken(ctx context.Context, provider, id, selfContentID string) (string, error) {
-	if e == nil || e.providerIDs == nil {
-		return "", nil
-	}
-	return e.providerIDs.FindContentIDByProviderIDs(ctx, map[string]string{provider: id}, "audiobook", selfContentID)
-}
-
 // recordOutcome stamps a terminal result. Bookkeeping must never fail the
 // enrichment that just succeeded, so a write error is logged and swallowed:
 // media_items.last_refreshed remains the authoritative eligibility signal, and
@@ -1000,25 +1045,11 @@ func (e *Enricher) recordFailure(ctx context.Context, contentID string, class En
 // a throttled answer recorded as a plain no-match is precisely how the ebook
 // side ended up with 90,721 unreadable rows.
 func classifyProviderError(err error) EnrichmentErrorClass {
-	if err == nil {
-		return EnrichmentErrorTransient
-	}
-	msg := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(msg, "429"),
-		strings.Contains(msg, "rate limit"),
-		strings.Contains(msg, "ratelimit"),
-		strings.Contains(msg, "too many requests"),
-		strings.Contains(msg, "quota"):
+	class, _ := metadata.ClassifyProviderError(err)
+	switch class {
+	case metadata.ProviderErrorRateLimited:
 		return EnrichmentErrorRateLimited
-	case strings.Contains(msg, "401"),
-		strings.Contains(msg, "403"),
-		strings.Contains(msg, "unauthorized"),
-		strings.Contains(msg, "forbidden"),
-		strings.Contains(msg, "not implemented"):
-		// Credentials or a blocked endpoint: retrying soon changes nothing.
-		// audimeta answers every path with 403 today, which is exactly the
-		// shape this is meant to stop hammering.
+	case metadata.ProviderErrorPermanent:
 		return EnrichmentErrorPermanent
 	default:
 		return EnrichmentErrorTransient
