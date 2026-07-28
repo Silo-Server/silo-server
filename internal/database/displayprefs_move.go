@@ -46,6 +46,13 @@ func displayPrefsMoveMigration() *goose.Migration {
 // settings API's unknown-key carve-out, which this cutover removes; those rows
 // are recorded in user_setting_migration_rejects for operator inspection
 // rather than silently deleted.
+//
+// Every delete names the exact (user_id, key) pair this transaction read,
+// never the key pattern. Under READ COMMITTED each statement takes its own
+// snapshot, so a pattern delete would also catch a row an old-binary app
+// instance committed between the SELECT and the DELETE during a rolling
+// deploy — destroying it without ever copying it. A row written after the
+// SELECT instead survives as a stranded legacy row, which a re-run picks up.
 func moveDisplayPrefs(ctx context.Context, tx *sql.Tx) error {
 	type legacyRow struct {
 		userID     int
@@ -77,9 +84,7 @@ ON CONFLICT (user_id, prefs_id, client) DO NOTHING`,
 				return fmt.Errorf("moving display prefs %q for user %d: %w",
 					row.key, row.userID, err)
 			}
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, `
+		} else if _, err := tx.ExecContext(ctx, `
 INSERT INTO user_setting_migration_rejects
     (user_id, source_table, source_key, identity, value, reason)
 VALUES ($1, 'user_settings', $2, '{"scope":"account"}'::jsonb, $3, $4)`,
@@ -88,13 +93,16 @@ VALUES ($1, 'user_settings', $2, '{"scope":"account"}'::jsonb, $3, $4)`,
 			return fmt.Errorf("recording displayprefs reject %q for user %d: %w",
 				reject.Key, row.userID, err)
 		}
-	}
 
-	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM user_settings WHERE key LIKE $1`,
-		displayprefs.LegacyKeyPattern(),
-	); err != nil {
-		return fmt.Errorf("deleting jellycompat rows from user_settings: %w", err)
+		// Deleted only once its copy or reject insert succeeded, and only this
+		// exact row — see the function comment.
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM user_settings WHERE user_id = $1 AND key = $2`,
+			row.userID, row.key,
+		); err != nil {
+			return fmt.Errorf("deleting jellycompat row %q for user %d: %w",
+				row.key, row.userID, err)
+		}
 	}
 	return nil
 }
@@ -105,6 +113,12 @@ VALUES ($1, 'user_settings', $2, '{"scope":"account"}'::jsonb, $3, $4)`,
 // rows restore from the audit table. Both sides then discard what the up
 // migration wrote, so the follow-up table drop removes nothing that is not
 // already back in user_settings.
+//
+// The same read-then-scoped-delete shape as moveDisplayPrefs: under READ
+// COMMITTED a blanket delete sees rows committed after this transaction's
+// reads (a new-binary instance still serving DisplayPreferences writes into
+// jellycompat_displayprefs during the rollback window) and would drop them
+// without restoring them.
 func unmoveDisplayPrefs(ctx context.Context, tx *sql.Tx) error {
 	type movedRow struct {
 		userID                 int
@@ -133,28 +147,55 @@ ON CONFLICT (user_id, key) DO NOTHING`,
 			return fmt.Errorf("restoring display prefs %q/%q for user %d: %w",
 				row.prefsID, row.client, row.userID, err)
 		}
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM jellycompat_displayprefs
+ WHERE user_id = $1 AND prefs_id = $2 AND client = $3`,
+			row.userID, row.prefsID, row.client,
+		); err != nil {
+			return fmt.Errorf("clearing moved display prefs %q/%q for user %d: %w",
+				row.prefsID, row.client, row.userID, err)
+		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO user_settings (user_id, key, value)
-SELECT user_id, source_key, COALESCE(value, '')
+	// Rejects restore by primary key for the same reason: only migrations
+	// write this table, but the audit trail must never lose a row it did not
+	// just put back.
+	type rejectRow struct {
+		id     int64
+		userID int
+		key    string
+		value  string
+	}
+	var rejects []rejectRow
+	if err := eachRow(ctx, tx, `
+SELECT id, user_id, source_key, COALESCE(value, '')
   FROM user_setting_migration_rejects
- WHERE source_table = 'user_settings' AND source_key LIKE $1
-ON CONFLICT (user_id, key) DO NOTHING`,
-		displayprefs.LegacyKeyPattern(),
-	); err != nil {
-		return fmt.Errorf("restoring rejected jellycompat rows: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `DELETE FROM jellycompat_displayprefs`); err != nil {
-		return fmt.Errorf("clearing jellycompat_displayprefs: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-DELETE FROM user_setting_migration_rejects
  WHERE source_table = 'user_settings' AND source_key LIKE $1`,
-		displayprefs.LegacyKeyPattern(),
-	); err != nil {
-		return fmt.Errorf("clearing displayprefs rejects: %w", err)
+		func(scan func(...any) error) error {
+			var row rejectRow
+			if err := scan(&row.id, &row.userID, &row.key, &row.value); err != nil {
+				return err
+			}
+			rejects = append(rejects, row)
+			return nil
+		}, displayprefs.LegacyKeyPattern()); err != nil {
+		return fmt.Errorf("reading displayprefs rejects: %w", err)
+	}
+	for _, row := range rejects {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO user_settings (user_id, key, value)
+VALUES ($1, $2, $3)
+ON CONFLICT (user_id, key) DO NOTHING`,
+			row.userID, row.key, row.value,
+		); err != nil {
+			return fmt.Errorf("restoring rejected jellycompat row %q for user %d: %w",
+				row.key, row.userID, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM user_setting_migration_rejects WHERE id = $1`, row.id,
+		); err != nil {
+			return fmt.Errorf("clearing displayprefs reject %d: %w", row.id, err)
+		}
 	}
 	return nil
 }

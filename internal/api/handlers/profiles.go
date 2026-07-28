@@ -15,6 +15,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -35,6 +36,10 @@ type ProfileHandler struct {
 	DeviceLibraryPurger interface {
 		PurgeProfileDevices(ctx context.Context, userID int, profileID string) error
 	}
+	// EventsHub, when set, receives a user_settings.changed event for every
+	// canonical setting row a profile mutation syncs (see
+	// profiles_settings_sync.go). Nil (as in tests) simply skips publishing.
+	EventsHub *evt.Hub
 }
 
 // NewProfileHandler creates a new ProfileHandler.
@@ -315,6 +320,14 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Planned before anything is written: a preference value the canonical
+	// store would refuse must fail the request while it is still a no-op.
+	settingsSync, err := planCreateProfileSettingsSync(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
 	store, err := h.storeProvider.ForUser(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to access user store")
@@ -414,6 +427,18 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 
 	if err := store.CreateProfile(r.Context(), profile); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to create profile")
+		return
+	}
+
+	// The canonical rows are what every server-side reader resolves; the
+	// columns written above are only what the legacy response reports. A
+	// failure here is surfaced rather than swallowed — the profile exists, but
+	// a preference that silently never applies is exactly the divergence this
+	// sync exists to prevent.
+	if err := h.applyProfileSettingsSync(r.Context(), store, userID, profileID, settingsSync); err != nil {
+		slog.ErrorContext(r.Context(), "profile create failed to sync canonical settings",
+			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 		return
 	}
 
@@ -566,6 +591,15 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
+	// Planned before the column write so an invalid preference fails while the
+	// request is still a no-op; applied after it so the canonical rows never
+	// lead the columns on a request that ends up rejected.
+	settingsSync, err := planUpdateProfileSettingsSync(req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+
 	input := userstore.UpdateProfileInput{
 		Name:                       req.Name,
 		Avatar:                     avatarRef,
@@ -589,6 +623,17 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 
 	if err := store.UpdateProfile(r.Context(), profileID, input); err != nil {
 		writeError(w, http.StatusNotFound, "not_found", "Profile not found")
+		return
+	}
+	// Mirror the preference fields into the canonical rows the readers
+	// resolve; the columns updated above only feed the legacy response shape.
+	// A failure is a 500 rather than a shrug: the client retries, the column
+	// write above is idempotent, and the alternative is a preference that
+	// looks saved but never applies.
+	if err := h.applyProfileSettingsSync(r.Context(), store, userID, profileID, settingsSync); err != nil {
+		slog.ErrorContext(r.Context(), "profile update failed to sync canonical settings",
+			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 		return
 	}
 	if currentProfile.Avatar != "" && avatarRef != nil && avatarRefReplacesUpload(currentProfile.Avatar, *avatarRef) {

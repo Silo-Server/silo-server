@@ -748,6 +748,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.UserStoreProvider != nil {
 		profileHandler = handlers.NewProfileHandler(deps.UserStoreProvider)
 		profileHandler.UserRepo = userRepo
+		profileHandler.EventsHub = deps.EventsHub
 		profileHandler.ProfileTokens = profileTokenService
 		profileHandler.AvatarStore = deps.S3Private
 		profileHandler.SessionsReader = playbackSessionsLoader

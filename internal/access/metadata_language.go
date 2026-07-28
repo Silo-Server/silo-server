@@ -3,6 +3,7 @@ package access
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
@@ -25,19 +26,30 @@ import (
 //
 // A resolution failure degrades to "" — the contract default, meaning "inherit
 // the library's metadata language" — rather than failing scope resolution: the
-// language is a presentation preference, not an access boundary.
+// language is a presentation preference, not an access boundary. The failure
+// itself is logged, though: before the cutover this value rode on the profile
+// row whose load failure was a hard error, and a store outage that silently
+// degrades every profile's metadata language would otherwise be
+// indistinguishable from "nobody set a preference".
 func PreferredMetadataLanguage(ctx context.Context, store userstore.UserStore, profileID string) string {
 	if store == nil || profileID == "" {
 		return ""
 	}
 	contract, err := settingscontract.Load()
 	if err != nil {
+		slog.WarnContext(ctx, "metadata language resolution degraded to default: loading settings contract failed",
+			"component", "access", "profile_id", profileID, "error", err)
 		return ""
 	}
 	resolved, err := settingsresolve.New(contract).Resolve(ctx, store,
 		settingsresolve.Context{ProfileID: profileID},
 		[]string{settingskeys.CatalogMetadataLanguage}, nil)
-	if err != nil || len(resolved) == 0 {
+	if err != nil {
+		slog.WarnContext(ctx, "metadata language resolution degraded to default: reading setting values failed",
+			"component", "access", "profile_id", profileID, "error", err)
+		return ""
+	}
+	if len(resolved) == 0 {
 		return ""
 	}
 	// The contract default is null — "no preference" — which unmarshals to "",

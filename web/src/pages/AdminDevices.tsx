@@ -1513,6 +1513,11 @@ function DeviceDetailPanel({
               userId: data.user_id,
               profileId: profileToReset.id,
               deviceId: data.device_id,
+              keys: data.settings
+                .filter(
+                  (setting) => (setting.profile_id || UNKNOWN_PROFILE_ID) === profileToReset.id,
+                )
+                .map((setting) => setting.key),
             });
           }
           setProfileToReset(null);

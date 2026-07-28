@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useParams, Link } from "react-router";
 import {
   type AdminDeviceSetting,
+  type AdminUserSettingEntry,
   useAdminUser,
   useUpdateUser,
   useDeleteUser,
@@ -20,13 +21,7 @@ import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import { useAdminPlaybackHistory } from "@/hooks/queries/admin/history";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useUserIPs } from "@/hooks/queries/admin/ips";
-import type {
-  AdminSettingEntry,
-  AdminUser,
-  AdminUserProfile,
-  UpdateUserRequest,
-  UserIPEntry,
-} from "@/api/types";
+import type { AdminUser, AdminUserProfile, UpdateUserRequest, UserIPEntry } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LibraryAccessSelector } from "@/components/LibraryAccessSelector";
@@ -538,26 +533,50 @@ function UserSettingsTab({ userId }: { userId: number }) {
     );
   }
 
-  const renderSettingRow = (entry: AdminSettingEntry) => {
+  const renderSettingRow = (entry: AdminUserSettingEntry) => {
     const definition = getSettingDefinition(entry.key);
     const label = definition?.label ?? entry.key;
-    const description = definition?.description ?? "Stored account preference.";
+    const description = definition?.description ?? "Stored preference.";
+    // A key can be stored at several scopes (or for several profiles,
+    // libraries or series) at once, so a row is identified by its full
+    // identity, and every mutation addresses exactly that row.
+    const identity = {
+      scope: entry.scope,
+      profileId: entry.profile_id,
+      libraryId: entry.library_id,
+      seriesId: entry.series_id,
+    };
+    const rowKey = [
+      entry.key,
+      entry.scope,
+      entry.profile_id ?? "",
+      entry.library_id ?? "",
+      entry.series_id ?? "",
+    ].join(":");
+    const scopeDetail = [
+      entry.profile_id ? `profile ${entry.profile_id}` : null,
+      entry.library_id ? `library ${entry.library_id}` : null,
+      entry.series_id ? `series ${entry.series_id}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
     return (
       <div
-        key={entry.key}
+        key={rowKey}
         className="border-border/50 grid gap-3 border-t py-4 first:border-t-0 first:pt-0 md:grid-cols-[minmax(0,1fr)_auto]"
       >
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-sm font-medium">{label}</div>
             <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-slate-200">
-              Explicit
+              {entry.scope}
             </span>
           </div>
           <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
           <p className="text-muted-foreground text-xs">
             Current: {formatSettingValue(entry.key, entry.value)}
+            {scopeDetail ? ` · ${scopeDetail}` : ""}
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 md:items-end">
@@ -570,13 +589,14 @@ function UserSettingsTab({ userId }: { userId: number }) {
                 updateSetting.mutate({
                   userId,
                   key: entry.key,
+                  identity,
                   value,
                 })
               }
             />
           ) : (
             <Input
-              key={`${entry.key}:${entry.value}`}
+              key={`${rowKey}:${entry.value}`}
               defaultValue={entry.value}
               disabled={updateSetting.isPending || deleteSetting.isPending}
               className="w-full min-w-[180px] sm:w-[220px]"
@@ -585,6 +605,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
                 updateSetting.mutate({
                   userId,
                   key: entry.key,
+                  identity,
                   value: event.currentTarget.value,
                 });
               }}
@@ -594,7 +615,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
             variant="ghost"
             size="sm"
             className="h-7 rounded-full px-2 text-xs"
-            onClick={() => deleteSetting.mutate({ userId, key: entry.key })}
+            onClick={() => deleteSetting.mutate({ userId, key: entry.key, identity })}
             disabled={updateSetting.isPending || deleteSetting.isPending}
           >
             <RotateCcw className="mr-1 h-3 w-3" />
@@ -613,9 +634,10 @@ function UserSettingsTab({ userId }: { userId: number }) {
             <Settings2 className="h-4 w-4 text-emerald-100" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold">User Playback Settings</h3>
+            <h3 className="text-sm font-semibold">User Settings</h3>
             <p className="text-muted-foreground text-sm">
-              Account-wide playback preferences that follow this user across devices.
+              Explicit values this user has stored, across account, profile, library and series
+              scopes. Device overrides live in the next tab.
             </p>
           </div>
         </div>
@@ -642,6 +664,7 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
     deviceId: string;
     profileId: string;
     profileName?: string;
+    keys: string[];
   } | null>(null);
   const [settingToReset, setSettingToReset] = useState<AdminDeviceSetting | null>(null);
   const [jsonEditor, setJsonEditor] = useState<AdminDeviceSetting | null>(null);
@@ -701,6 +724,7 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
               userId,
               profileId: deviceToReset.profileId,
               deviceId: deviceToReset.deviceId,
+              keys: deviceToReset.keys,
             });
           }
           setDeviceToReset(null);
@@ -890,7 +914,15 @@ function DeviceOverridesTab({ userId }: { userId: number }) {
                     }),
                   )}
                   onResetProfile={(profileId, profileName) =>
-                    setDeviceToReset({ deviceId, profileId, profileName })
+                    setDeviceToReset({
+                      deviceId,
+                      profileId,
+                      profileName,
+                      keys:
+                        profiles
+                          .find((profile) => profile.profileId === profileId)
+                          ?.entries.map((entry) => entry.key) ?? [],
+                    })
                   }
                   onEditJson={(setting) => {
                     setJsonEditor(setting);

@@ -3,8 +3,10 @@ package database
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -166,6 +168,178 @@ SELECT value FROM user_settings
 			t.Errorf("rollback left %d rows in jellycompat_displayprefs", blobs)
 		}
 	})
+}
+
+// TestPostgresDisplayPrefsMoveDoesNotDeleteConcurrentWrites reproduces the
+// rolling-deploy window: the goose lock only excludes other migrators, so an
+// old-binary app instance can commit a jellycompat row into user_settings
+// while the move transaction sits between its SELECT and its deletes. Under
+// READ COMMITTED each statement snapshots independently, so a pattern-based
+// DELETE would see — and destroy — a row the SELECT never copied. The move
+// must instead delete only the exact rows it read, leaving the late row
+// stranded in user_settings for a re-run to pick up.
+//
+// The stall is real: an uncommitted conflicting insert on
+// jellycompat_displayprefs blocks the move's ON CONFLICT insert, the late
+// legacy row commits during the stall, and releasing the blocker lets the
+// move finish.
+func TestPostgresDisplayPrefsMoveDoesNotDeleteConcurrentWrites(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	if err := RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
+		t.Fatalf("initial migration: %v", err)
+	}
+
+	var userID int
+	err = pool.QueryRow(ctx, `
+INSERT INTO users (username, email, password_hash, role)
+VALUES ('displayprefs-racetest', 'displayprefs-racetest@example.com', 'x', 'user')
+ON CONFLICT (username) DO UPDATE SET email = EXCLUDED.email
+RETURNING id`).Scan(&userID)
+	if err != nil {
+		t.Fatalf("seeding user: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = $1`, userID)
+	})
+	for _, stmt := range []string{
+		`DELETE FROM user_settings WHERE user_id = $1`,
+		`DELETE FROM jellycompat_displayprefs WHERE user_id = $1`,
+		`DELETE FROM user_setting_migration_rejects WHERE user_id = $1`,
+	} {
+		if _, err := pool.Exec(ctx, stmt, userID); err != nil {
+			t.Fatalf("clearing prior rows: %v", err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO user_settings (user_id, key, value) VALUES ($1, $2, $3)`,
+		userID, "jellycompat:displayprefs:usersettings:emby", `{"SortBy":"SortName"}`); err != nil {
+		t.Fatalf("seeding legacy row: %v", err)
+	}
+
+	sqlDB := stdlib.OpenDBFromPool(pool)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	// The blocker: an uncommitted insert on the identity the seeded legacy row
+	// maps to, so the move's copy insert waits on this transaction.
+	blockerTx, err := sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin blocker: %v", err)
+	}
+	blockerReleased := false
+	defer func() {
+		if !blockerReleased {
+			_ = blockerTx.Rollback()
+		}
+	}()
+	if _, err := blockerTx.ExecContext(ctx, `
+INSERT INTO jellycompat_displayprefs (user_id, prefs_id, client, value)
+VALUES ($1, 'usersettings', 'emby', 'blocker')`, userID); err != nil {
+		t.Fatalf("blocker insert: %v", err)
+	}
+
+	moveDone := make(chan error, 1)
+	go func() {
+		tx, err := sqlDB.BeginTx(ctx, nil)
+		if err != nil {
+			moveDone <- fmt.Errorf("begin move: %w", err)
+			return
+		}
+		if err := moveDisplayPrefs(ctx, tx); err != nil {
+			_ = tx.Rollback()
+			moveDone <- fmt.Errorf("moveDisplayPrefs: %w", err)
+			return
+		}
+		moveDone <- tx.Commit()
+	}()
+
+	// Wait until the move transaction is provably parked on the blocker's
+	// lock: its SELECT over user_settings has happened, its deletes have not.
+	waitDeadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM pg_stat_activity
+ WHERE wait_event_type = 'Lock' AND query LIKE '%jellycompat_displayprefs%'`).
+			Scan(&waiting); err != nil {
+			t.Fatalf("polling pg_stat_activity: %v", err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(waitDeadline) {
+			t.Fatal("the move never blocked on the conflicting insert")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// The old binary's handler commits a fresh DisplayPreferences row now —
+	// after the move's SELECT, before its deletes.
+	const lateKey = "jellycompat:displayprefs:late:acme"
+	if _, err := pool.Exec(ctx, `
+INSERT INTO user_settings (user_id, key, value) VALUES ($1, $2, $3)`,
+		userID, lateKey, `{"SortBy":"DateCreated"}`); err != nil {
+		t.Fatalf("committing the late legacy row: %v", err)
+	}
+
+	blockerReleased = true
+	if err := blockerTx.Rollback(); err != nil {
+		t.Fatalf("releasing blocker: %v", err)
+	}
+	if err := <-moveDone; err != nil {
+		t.Fatalf("move under contention: %v", err)
+	}
+
+	// The late row must not have been destroyed: it was never copied, so it
+	// must still ride user_settings.
+	var lateRows int
+	if err := pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM user_settings WHERE user_id = $1 AND key = $2`,
+		userID, lateKey).Scan(&lateRows); err != nil {
+		t.Fatalf("counting the late row: %v", err)
+	}
+	if lateRows != 1 {
+		var copied, rejected int
+		_ = pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM jellycompat_displayprefs
+ WHERE user_id = $1 AND prefs_id = 'late'`, userID).Scan(&copied)
+		_ = pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM user_setting_migration_rejects
+ WHERE user_id = $1 AND source_key = $2`, userID, lateKey).Scan(&rejected)
+		t.Fatalf("late row gone from user_settings (copied=%d rejected=%d): "+
+			"a concurrently committed row was deleted without being moved",
+			copied, rejected)
+	}
+
+	// A re-run — which the stranded row exists to allow — picks it up.
+	tx, err := sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin re-run: %v", err)
+	}
+	if err := moveDisplayPrefs(ctx, tx); err != nil {
+		t.Fatalf("re-run: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit re-run: %v", err)
+	}
+	var copied int
+	if err := pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM jellycompat_displayprefs
+ WHERE user_id = $1 AND prefs_id = 'late' AND client = 'acme'`, userID).Scan(&copied); err != nil {
+		t.Fatalf("counting the re-run copy: %v", err)
+	}
+	if copied != 1 {
+		t.Errorf("re-run copied %d late rows, want 1", copied)
+	}
 }
 
 // seedLegacyDisplayPrefsRows writes the pre-cutover user_settings rows: two

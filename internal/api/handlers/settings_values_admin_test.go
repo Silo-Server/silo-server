@@ -12,6 +12,8 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/cache"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -298,4 +300,55 @@ func TestAdminSetRefusesUnknownKeysAndProfiles(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("unknown profile = %d, want 404: %s", rec.Code, rec.Body.String())
 	}
+}
+
+// TestAdminMutationsAttributeEventsToTheTargetUser pins the admin-specific
+// half of the change-event contract: the envelope is addressed to the user
+// whose settings moved — the target named in the path — never to the acting
+// admin. Addressing the admin instead would leave the target's devices stale
+// on exactly the change they most need to hear about, while poking the
+// admin's own devices for nothing. The acting admin (user 1) and the target
+// (user 7) are distinct here precisely so the two attributions cannot alias.
+func TestAdminMutationsAttributeEventsToTheTargetUser(t *testing.T) {
+	env := newAdminValuesEnv(t)
+	env.handler.EventsHub = evt.NewHub("test", &cache.NoopEventBus{})
+	events, unsubscribe := env.handler.EventsHub.Subscribe()
+	defer unsubscribe()
+
+	target := "/admin/users/7/settings/values/playback.subtitle_mode?scope=profile&profile_id=profile-1"
+
+	assertTargetEnvelope := func(operation string) {
+		t.Helper()
+		var envelope evt.Envelope
+		select {
+		case envelope = <-events:
+		default:
+			t.Fatalf("admin %s published no event", operation)
+		}
+		if envelope.UserID != adminValuesTargetID {
+			t.Errorf("admin %s event addressed to user %d, want the target %d",
+				operation, envelope.UserID, adminValuesTargetID)
+		}
+		if envelope.UserID == adminValuesAdminID {
+			t.Errorf("admin %s event addressed to the acting admin", operation)
+		}
+		if envelope.ProfileID != "profile-1" {
+			t.Errorf("admin %s event profile = %q, want profile-1", operation, envelope.ProfileID)
+		}
+		if envelope.Channel != evt.ChannelUserSettings || envelope.Event != userSettingsChangedEvent {
+			t.Errorf("admin %s published %s on %s, want %s on %s",
+				operation, envelope.Event, envelope.Channel,
+				userSettingsChangedEvent, evt.ChannelUserSettings)
+		}
+	}
+
+	if rec := env.do(t, "admin", http.MethodPut, target, []byte(`{"value":"always"}`)); rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rec.Code, rec.Body.String())
+	}
+	assertTargetEnvelope("PUT")
+
+	if rec := env.do(t, "admin", http.MethodDelete, target, nil); rec.Code != http.StatusNoContent {
+		t.Fatalf("DELETE = %d: %s", rec.Code, rec.Body.String())
+	}
+	assertTargetEnvelope("DELETE")
 }

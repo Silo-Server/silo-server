@@ -439,6 +439,80 @@
       "expected": [{ "key": "catalog.metadata_language", "value": "fr", "source": "profile" }]
     },
     {
+      "name": "locked_replaces_a_differing_choice",
+      "description": "locked is total: the policy value replaces the user's outright, and the authored choice is preserved as stored_value so it takes effect the day the lock lifts.",
+      "keys": ["playback.subtitle_mode"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        { "key": "playback.subtitle_mode", "scope": "profile", "profile_id": "p1", "value": "off" }
+      ],
+      "constraint_bindings": [
+        {
+          "key": "playback.subtitle_mode",
+          "policy_input": "forced_subtitle_mode",
+          "constraint": "locked"
+        }
+      ],
+      "constraints": { "forced_subtitle_mode": "always" },
+      "expected": [
+        {
+          "key": "playback.subtitle_mode",
+          "value": "always",
+          "source": "profile",
+          "constrained": true,
+          "stored_value": "off",
+          "constraint_kind": "locked"
+        }
+      ]
+    },
+    {
+      "name": "locked_leaves_an_equal_value_unconstrained",
+      "description": "A stored value already equal to the lock is not a narrowing: it passes through with no constrained flag, so clients do not tell the user their own choice was overridden.",
+      "keys": ["playback.subtitle_mode"],
+      "context": { "profile_id": "p1" },
+      "stored": [
+        {
+          "key": "playback.subtitle_mode",
+          "scope": "profile",
+          "profile_id": "p1",
+          "value": "always"
+        }
+      ],
+      "constraint_bindings": [
+        {
+          "key": "playback.subtitle_mode",
+          "policy_input": "forced_subtitle_mode",
+          "constraint": "locked"
+        }
+      ],
+      "constraints": { "forced_subtitle_mode": "always" },
+      "expected": [{ "key": "playback.subtitle_mode", "value": "always", "source": "profile" }]
+    },
+    {
+      "name": "locked_replaces_the_contract_default",
+      "description": "With nothing stored, the lock replaces even the contract default: source stays \"default\" and the default is reported as stored_value, exactly like a capped default.",
+      "keys": ["playback.subtitle_mode"],
+      "context": { "profile_id": "p1" },
+      "constraint_bindings": [
+        {
+          "key": "playback.subtitle_mode",
+          "policy_input": "forced_subtitle_mode",
+          "constraint": "locked"
+        }
+      ],
+      "constraints": { "forced_subtitle_mode": "always" },
+      "expected": [
+        {
+          "key": "playback.subtitle_mode",
+          "value": "always",
+          "source": "default",
+          "constrained": true,
+          "stored_value": "auto",
+          "constraint_kind": "locked"
+        }
+      ]
+    },
+    {
       "name": "subtitle_appearance_ignores_content_scopes",
       "description": "playback.subtitle_appearance resolves profile_device then profile only. With a library and a series in the context, the device row still wins — and the sparse device object replaces the profile object outright rather than merging with it.",
       "keys": ["playback.subtitle_appearance"],
