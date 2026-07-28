@@ -70,7 +70,7 @@ import {
   setAssignedPermission,
 } from "@/lib/permissions";
 import { RegistrySettingControl } from "@/components/settings/RegistrySettingControl";
-import { formatSettingValue, getSettingDefinition } from "@/lib/settingsManifest";
+import { formatSettingValue, getSettingDefinition } from "@/lib/settingsDisplay";
 import {
   DeviceProfileTabs,
   PlatformTile,

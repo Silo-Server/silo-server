@@ -90,10 +90,25 @@ const VALID_FONT_FAMILIES: Set<string> = new Set(FONT_FAMILY_OPTIONS.map((o) => 
 const VALID_BG_STYLES: Set<string> = new Set(BACKGROUND_STYLE_OPTIONS.map((o) => o.value));
 const VALID_POSITIONS: Set<string> = new Set(POSITION_OPTIONS.map((o) => o.value));
 
-export function parseSubtitleAppearance(json: string | null): SubtitleAppearance {
-  if (!json) return { ...DEFAULT_SUBTITLE_APPEARANCE };
+/**
+ * Coerces a stored subtitle appearance into a complete, valid one.
+ *
+ * Accepts both shapes the value has had: the canonical settings API stores it
+ * as a typed JSON object, while the legacy string-only endpoint stored the same
+ * object JSON-encoded into a string. Taking `unknown` means a caller never has
+ * to know which surface it read from, and every field still falls back to the
+ * default individually, so a partial or corrupt value degrades one field at a
+ * time rather than resetting the whole appearance.
+ */
+export function parseSubtitleAppearance(value: unknown): SubtitleAppearance {
+  if (value === null || value === undefined || value === "") {
+    return { ...DEFAULT_SUBTITLE_APPEARANCE };
+  }
   try {
-    const p = JSON.parse(json) as Record<string, unknown>;
+    const p = (typeof value === "string" ? JSON.parse(value) : value) as Record<string, unknown>;
+    if (typeof p !== "object" || p === null || Array.isArray(p)) {
+      return { ...DEFAULT_SUBTITLE_APPEARANCE };
+    }
     return {
       fontSize: VALID_FONT_SIZES.has(p.fontSize as string)
         ? (p.fontSize as SubtitleAppearance["fontSize"])

@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import type { LibraryPlaybackPreference, Profile, UserLibrary } from "@/api/types";
+import type { UserLibrary } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
@@ -14,11 +14,6 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
-import {
-  useDeleteLibraryPlaybackPreference,
-  useLibraryPlaybackPreferences,
-  useSetLibraryPlaybackPreference,
-} from "@/hooks/queries/libraryPlaybackPreferences";
 import {
   applyLibraryOrder,
   normalizeLibraryIDs,
@@ -38,7 +33,7 @@ import {
   buildInheritedShowForcedSubtitlesLabel,
   buildInheritedSubtitleLanguageLabel,
   buildInheritedSubtitleModeLabel,
-  buildLibraryPlaybackRequest,
+  buildLibraryPlaybackMutations,
   buildLibraryPlaybackSummaryFromState,
   createLibraryPlaybackEditorState,
   getProfileDefaultForcedSubtitlesHint,
@@ -48,10 +43,10 @@ import {
   hasLibraryPlaybackOverride,
   INHERIT_VALUE,
   LANGUAGE_OPTIONS,
+  LIBRARY_PLAYBACK_KEYS,
+  libraryScope,
   type LibraryPlaybackEditorState,
   NONE_VALUE,
-  ORIGINAL_LANGUAGE_LABEL,
-  ORIGINAL_LANGUAGE_VALUE,
   SUBTITLE_MODE_OPTIONS,
 } from "./libraryPlaybackPreferences";
 import { toast } from "sonner";
@@ -210,71 +205,102 @@ function LibraryCard({
   library,
   enabled,
   visibilityDisabled = false,
-  preference,
-  profile,
+  profileDefaults,
   onToggleVisibility,
 }: {
   library: UserLibrary;
   enabled: boolean;
   visibilityDisabled?: boolean;
-  preference: LibraryPlaybackPreference | null;
-  profile: Profile;
+  /** The values this library falls back to, for the "Profile default" hints. */
+  profileDefaults: {
+    audioLanguage: string | null;
+    subtitleLanguage: string | null;
+    subtitleMode: string;
+    showForcedSubtitles: boolean;
+  };
   onToggleVisibility: (checked: boolean) => void;
 }) {
   const controlId = useId();
-  const setPlaybackPreference = useSetLibraryPlaybackPreference();
-  const deletePlaybackPreference = useDeleteLibraryPlaybackPreference();
+  // Resolved with this library in context, so each key reports whether the
+  // answer came from the library's own row or from a wider scope.
+  const { data: effective } = useEffectiveSettings({
+    keys: LIBRARY_PLAYBACK_KEYS,
+    libraryIds: [library.id],
+  });
+  const setValue = useSetSettingValue();
+  const clearValue = useClearSettingValue();
   const [expanded, setExpanded] = useState(false);
-  const [editorState, setEditorState] = useState(() =>
-    createLibraryPlaybackEditorState(preference),
-  );
+  const [editorState, setEditorState] = useState(() => createLibraryPlaybackEditorState(effective));
 
   useEffect(() => {
-    // Keep the inline editor aligned with cached mutations and profile switches.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEditorState(createLibraryPlaybackEditorState(preference));
-  }, [preference, profile.id]);
+    // Keep the inline editor aligned with the resolved values, which change on
+    // a profile switch as well as after a save.
+    setEditorState(createLibraryPlaybackEditorState(effective));
+  }, [effective]);
 
-  const playbackPending = setPlaybackPreference.isPending || deletePlaybackPreference.isPending;
+  const playbackPending = setValue.isPending || clearValue.isPending;
   const summaryText = buildLibraryPlaybackSummaryFromState(editorState);
   const hasOverride = hasLibraryPlaybackOverride(editorState);
 
-  function savePlaybackState(
+  /**
+   * Applies an editor state as canonical per-key writes at profile_library.
+   *
+   * Each key moves independently: the legacy endpoint replaced one composite
+   * row, so clearing one field meant re-sending the other three, and a
+   * concurrent change to any of them was lost. One write per changed key has no
+   * such coupling, and "inherit" is expressed by deleting that key's row rather
+   * than by omitting a field from a composite body.
+   */
+  async function savePlaybackState(
     nextState: LibraryPlaybackEditorState,
     rollbackState: LibraryPlaybackEditorState,
   ) {
     setEditorState(nextState);
+    const scope = libraryScope(library.id);
 
-    const onError = () => {
+    try {
+      for (const mutation of buildLibraryPlaybackMutations(nextState)) {
+        if (mutation.value === undefined) {
+          try {
+            await clearValue.mutateAsync({ key: mutation.key, identity: scope });
+          } catch (error) {
+            // Nothing stored at this scope already inherits, which is the
+            // state the clear asks for.
+            if (!(error instanceof ApiClientError && error.status === 404)) throw error;
+          }
+          continue;
+        }
+        await setValue.mutateAsync({
+          key: mutation.key,
+          value: mutation.value,
+          identity: scope,
+        });
+      }
+      if (!hasLibraryPlaybackOverride(nextState)) {
+        setExpanded(false);
+      }
+    } catch {
       setEditorState(rollbackState);
       toast.error("Failed to update playback defaults");
-    };
-
-    if (!hasLibraryPlaybackOverride(nextState)) {
-      deletePlaybackPreference.mutate(library.id, {
-        onError,
-        onSuccess: () => setExpanded(false),
-      });
-      return;
     }
-
-    setPlaybackPreference.mutate(
-      {
-        libraryId: library.id,
-        body: buildLibraryPlaybackRequest(nextState),
-      },
-      { onError },
-    );
   }
 
   function handlePlaybackChange(field: keyof LibraryPlaybackEditorState, value: string) {
     const rollbackState = editorState;
     const nextState = { ...editorState, [field]: value };
-    savePlaybackState(nextState, rollbackState);
+    void savePlaybackState(nextState, rollbackState);
   }
 
   function handleReset() {
-    savePlaybackState(createLibraryPlaybackEditorState(null), editorState);
+    void savePlaybackState(
+      {
+        audioLanguage: INHERIT_VALUE,
+        subtitleLanguage: INHERIT_VALUE,
+        subtitleMode: INHERIT_VALUE,
+        showForcedSubtitles: INHERIT_VALUE,
+      },
+      editorState,
+    );
   }
 
   return (
@@ -335,13 +361,12 @@ function LibraryCard({
               label="Spoken language"
               value={editorState.audioLanguage}
               disabled={playbackPending}
-              hint={getProfileDefaultLanguageHint(profile.language)}
+              hint={getProfileDefaultLanguageHint(profileDefaults.audioLanguage)}
               onChange={(value) => handlePlaybackChange("audioLanguage", value)}
             >
               <SelectItem value={INHERIT_VALUE}>
-                {buildInheritedLanguageLabel(profile.language)}
+                {buildInheritedLanguageLabel(profileDefaults.audioLanguage ?? "")}
               </SelectItem>
-              <SelectItem value={ORIGINAL_LANGUAGE_VALUE}>{ORIGINAL_LANGUAGE_LABEL}</SelectItem>
               {LANGUAGE_OPTIONS.map((language) => (
                 <SelectItem key={language.code} value={language.code}>
                   {language.label}
@@ -353,11 +378,11 @@ function LibraryCard({
               label="Subtitle language"
               value={editorState.subtitleLanguage}
               disabled={playbackPending}
-              hint={getProfileDefaultSubtitleLanguageHint(profile.subtitle_language)}
+              hint={getProfileDefaultSubtitleLanguageHint(profileDefaults.subtitleLanguage)}
               onChange={(value) => handlePlaybackChange("subtitleLanguage", value)}
             >
               <SelectItem value={INHERIT_VALUE}>
-                {buildInheritedSubtitleLanguageLabel(profile.subtitle_language)}
+                {buildInheritedSubtitleLanguageLabel(profileDefaults.subtitleLanguage ?? "")}
               </SelectItem>
               <SelectItem value={NONE_VALUE}>None</SelectItem>
               {LANGUAGE_OPTIONS.map((language) => (
@@ -371,11 +396,11 @@ function LibraryCard({
               label="Subtitle behavior"
               value={editorState.subtitleMode}
               disabled={playbackPending}
-              hint={getProfileDefaultSubtitleModeHint(profile.subtitle_mode)}
+              hint={getProfileDefaultSubtitleModeHint(profileDefaults.subtitleMode)}
               onChange={(value) => handlePlaybackChange("subtitleMode", value)}
             >
               <SelectItem value={INHERIT_VALUE}>
-                {buildInheritedSubtitleModeLabel(profile.subtitle_mode)}
+                {buildInheritedSubtitleModeLabel(profileDefaults.subtitleMode)}
               </SelectItem>
               {SUBTITLE_MODE_OPTIONS.map((mode) => (
                 <SelectItem key={mode.value} value={mode.value}>
@@ -388,11 +413,11 @@ function LibraryCard({
               label="Forced subtitles"
               value={editorState.showForcedSubtitles}
               disabled={playbackPending}
-              hint={getProfileDefaultForcedSubtitlesHint(profile.show_forced_subtitles)}
+              hint={getProfileDefaultForcedSubtitlesHint(profileDefaults.showForcedSubtitles)}
               onChange={(value) => handlePlaybackChange("showForcedSubtitles", value)}
             >
               <SelectItem value={INHERIT_VALUE}>
-                {buildInheritedShowForcedSubtitlesLabel(profile.show_forced_subtitles)}
+                {buildInheritedShowForcedSubtitlesLabel(profileDefaults.showForcedSubtitles)}
               </SelectItem>
               <SelectItem value="on">On</SelectItem>
               <SelectItem value="off">Off</SelectItem>
@@ -428,10 +453,13 @@ export default function LibrarySettings() {
     isLoading: libraryPrefsLoading,
   } = useLibraryDisplayPreferences();
   const { profile: currentProfile, isLoading: profileLoading } = useCurrentProfile();
-  const { data: playbackPreferences, isLoading: playbackPrefsLoading } =
-    useLibraryPlaybackPreferences({
-      enabled: !!currentProfile,
-    });
+  // Resolved with no library in context, so these are exactly the values a
+  // library inherits when it holds no override of its own — which is what the
+  // "Profile default" hints on each card have to name.
+  const { data: profileDefaultSettings, isLoading: playbackPrefsLoading } = useEffectiveSettings({
+    keys: LIBRARY_PLAYBACK_KEYS,
+    enabled: !!currentProfile,
+  });
   const setSetting = useSetSettingValue();
   const [disabledLibraryIDs, setDisabledLibraryIDs] = useState<number[]>([]);
   const [orderedLibraries, setOrderedLibraries] = useState<UserLibrary[]>([]);
@@ -555,9 +583,22 @@ export default function LibrarySettings() {
   const visibleCount = libraries.filter(
     (library) => !disabledLibraryIDs.includes(library.id),
   ).length;
-  const preferencesByLibraryId = new Map(
-    (playbackPreferences ?? []).map((preference) => [preference.library_id, preference]),
-  );
+  const profileDefaults = {
+    audioLanguage:
+      (profileDefaultSettings?.[SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE]?.value as string | null) ??
+      null,
+    subtitleLanguage:
+      (profileDefaultSettings?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.value as string | null) ??
+      null,
+    subtitleMode:
+      (profileDefaultSettings?.[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]?.value as
+        | string
+        | undefined) ?? "auto",
+    showForcedSubtitles:
+      (profileDefaultSettings?.[SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES]?.value as
+        | boolean
+        | undefined) ?? true,
+  };
 
   return (
     <div className="space-y-6">
@@ -625,8 +666,7 @@ export default function LibrarySettings() {
                     library={library}
                     enabled={enabled}
                     visibilityDisabled={setSetting.isPending}
-                    preference={preferencesByLibraryId.get(library.id) ?? null}
-                    profile={currentProfile}
+                    profileDefaults={profileDefaults}
                     onToggleVisibility={(checked) => handleLibraryToggle(library.id, checked)}
                   />
                 </SortableLibraryCard>

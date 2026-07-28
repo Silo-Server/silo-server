@@ -1,11 +1,11 @@
-import type { LibraryPlaybackPreference } from "@/api/types";
-import type { UpdateLibraryPlaybackPreferenceRequest } from "@/hooks/queries/libraryPlaybackPreferences";
+import type { EffectiveSettingsMap, SettingIdentity } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { optionsFor } from "@/lib/settingsDisplay";
+import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
 import { getLanguageName, LANGUAGES } from "@/player/utils/languageNames";
 
 export const INHERIT_VALUE = "inherit";
 export const NONE_VALUE = "none";
-export const ORIGINAL_LANGUAGE_VALUE = "original";
-export const ORIGINAL_LANGUAGE_LABEL = "Original Language";
 export const DEFAULT_SUBTITLE_MODE = "auto";
 export const DEFAULT_SHOW_FORCED_SUBTITLES = true;
 
@@ -15,11 +15,27 @@ export const DEFAULT_SHOW_FORCED_SUBTITLES = true;
  */
 export const LANGUAGE_OPTIONS = LANGUAGES;
 
-export const SUBTITLE_MODE_OPTIONS = [
-  { value: "auto", label: "Auto" },
-  { value: "always", label: "Always" },
-  { value: "off", label: "Off" },
-] as const;
+/** Behavior modes, from the contract rather than a parallel literal list. */
+export const SUBTITLE_MODE_OPTIONS = optionsFor(
+  SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE],
+);
+
+/**
+ * The four playback preferences a library can override. All four are declared
+ * at profile_library in the manifest, resolving above the device and profile
+ * rows and below a per-series choice.
+ */
+export const LIBRARY_PLAYBACK_KEYS: SettingKey[] = [
+  SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+  SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
+  SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
+  SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
+];
+
+/** The identity a per-library write addresses. */
+export function libraryScope(libraryId: number): SettingIdentity {
+  return { scope: "profile_library", libraryId };
+}
 
 export type LibraryPlaybackEditorState = {
   audioLanguage: string;
@@ -28,14 +44,17 @@ export type LibraryPlaybackEditorState = {
   showForcedSubtitles: string;
 };
 
+/** One canonical write implied by an editor change: a set, or a clear. */
+export interface LibraryPlaybackMutation {
+  key: SettingKey;
+  /** Absent means "clear the row at this scope so the library inherits again". */
+  value?: unknown;
+}
+
 export function getLanguageLabel(code: string) {
-  if (code === ORIGINAL_LANGUAGE_VALUE) {
-    return ORIGINAL_LANGUAGE_LABEL;
-  }
   if (!code) {
     return code;
   }
-
   return getLanguageName(code);
 }
 
@@ -49,28 +68,6 @@ export function getSubtitleLanguageLabel(value: string) {
 
 export function getForcedSubtitlesLabel(value: string) {
   return value === "on" ? "On" : "Off";
-}
-
-export function buildLibraryPlaybackSummary(preference: LibraryPlaybackPreference | null) {
-  if (!preference) {
-    return "Uses profile defaults";
-  }
-
-  const parts: string[] = [];
-  if (preference.audio_language !== undefined) {
-    parts.push(`Audio: ${getLanguageLabel(preference.audio_language)}`);
-  }
-  if (preference.subtitle_language !== undefined) {
-    parts.push(`Subtitles: ${getSubtitleLanguageLabel(preference.subtitle_language)}`);
-  }
-  if (preference.subtitle_mode !== undefined) {
-    parts.push(`Behavior: ${getSubtitleModeLabel(preference.subtitle_mode)}`);
-  }
-  if (preference.show_forced_subtitles !== undefined) {
-    parts.push(`Forced subtitles: ${preference.show_forced_subtitles ? "On" : "Off"}`);
-  }
-
-  return parts.length > 0 ? parts.join(" • ") : "Uses profile defaults";
 }
 
 export function buildLibraryPlaybackSummaryFromState(state: LibraryPlaybackEditorState) {
@@ -94,33 +91,33 @@ export function buildLibraryPlaybackSummaryFromState(state: LibraryPlaybackEdito
   return parts.length > 0 ? parts.join(" • ") : "Uses profile defaults";
 }
 
+/**
+ * Reads the editor state for one library out of a resolved settings map.
+ *
+ * The distinction the editor needs — "this library overrides the value" versus
+ * "it inherits" — is the resolved source, not the value: a library row holding
+ * the same value as the profile is still an override, and a library row holding
+ * null is an explicit "no subtitles" rather than an absent choice. Reading
+ * source rather than comparing values is what keeps those three cases apart.
+ */
 export function createLibraryPlaybackEditorState(
-  preference: LibraryPlaybackPreference | null,
+  effective: EffectiveSettingsMap | undefined,
 ): LibraryPlaybackEditorState {
-  if (!preference) {
-    return {
-      audioLanguage: INHERIT_VALUE,
-      subtitleLanguage: INHERIT_VALUE,
-      subtitleMode: INHERIT_VALUE,
-      showForcedSubtitles: INHERIT_VALUE,
-    };
-  }
+  const overridden = (key: SettingKey) =>
+    effective?.[key]?.source === "profile_library" ? effective[key] : undefined;
+
+  const audio = overridden(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE);
+  const subtitleLanguage = overridden(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE);
+  const subtitleMode = overridden(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE);
+  const forced = overridden(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES);
 
   return {
-    audioLanguage: preference.audio_language ?? INHERIT_VALUE,
+    audioLanguage: (audio?.value as string | null) ?? (audio ? NONE_VALUE : INHERIT_VALUE),
     subtitleLanguage:
-      preference.subtitle_language === undefined
-        ? INHERIT_VALUE
-        : preference.subtitle_language === ""
-          ? NONE_VALUE
-          : preference.subtitle_language,
-    subtitleMode: preference.subtitle_mode ?? INHERIT_VALUE,
+      (subtitleLanguage?.value as string | null) ?? (subtitleLanguage ? NONE_VALUE : INHERIT_VALUE),
+    subtitleMode: (subtitleMode?.value as string | undefined) ?? INHERIT_VALUE,
     showForcedSubtitles:
-      preference.show_forced_subtitles === undefined
-        ? INHERIT_VALUE
-        : preference.show_forced_subtitles
-          ? "on"
-          : "off",
+      forced === undefined ? INHERIT_VALUE : (forced.value as boolean) ? "on" : "off",
   };
 }
 
@@ -133,25 +130,37 @@ export function hasLibraryPlaybackOverride(state: LibraryPlaybackEditorState) {
   );
 }
 
-export function buildLibraryPlaybackRequest(
+/**
+ * The canonical writes one editor state implies, one per key.
+ *
+ * "Inherit" is the absence of a row, so it plans a clear rather than a stored
+ * sentinel — which is what lets a later change to the profile default reach a
+ * library the user never overrode.
+ */
+export function buildLibraryPlaybackMutations(
   state: LibraryPlaybackEditorState,
-): UpdateLibraryPlaybackPreferenceRequest {
-  const request: UpdateLibraryPlaybackPreferenceRequest = {};
+): LibraryPlaybackMutation[] {
+  return [
+    planLanguage(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, state.audioLanguage),
+    planLanguage(SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE, state.subtitleLanguage),
+    state.subtitleMode === INHERIT_VALUE
+      ? { key: SETTING_KEYS.PLAYBACK_SUBTITLE_MODE }
+      : { key: SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, value: state.subtitleMode },
+    state.showForcedSubtitles === INHERIT_VALUE
+      ? { key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES }
+      : {
+          key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
+          value: state.showForcedSubtitles === "on",
+        },
+  ];
+}
 
-  if (state.audioLanguage !== INHERIT_VALUE) {
-    request.audio_language = state.audioLanguage;
-  }
-  if (state.subtitleLanguage !== INHERIT_VALUE) {
-    request.subtitle_language = state.subtitleLanguage === NONE_VALUE ? "" : state.subtitleLanguage;
-  }
-  if (state.subtitleMode !== INHERIT_VALUE) {
-    request.subtitle_mode = state.subtitleMode;
-  }
-  if (state.showForcedSubtitles !== INHERIT_VALUE) {
-    request.show_forced_subtitles = state.showForcedSubtitles === "on";
-  }
-
-  return request;
+// A language field has three states, and the contract spells each differently:
+// inherit is no row, "None" is a stored null, and a code is a stored tag.
+function planLanguage(key: SettingKey, value: string): LibraryPlaybackMutation {
+  if (value === INHERIT_VALUE) return { key };
+  if (value === NONE_VALUE) return { key, value: null };
+  return { key, value };
 }
 
 export function buildInheritedLanguageLabel(_value: string) {
@@ -170,15 +179,15 @@ export function buildInheritedShowForcedSubtitlesLabel(_value: boolean | undefin
   return "Profile default";
 }
 
-export function getProfileDefaultLanguageHint(value: string) {
-  return `Default: ${getLanguageLabel(value)}`;
+export function getProfileDefaultLanguageHint(value: string | null | undefined) {
+  return `Default: ${value ? getLanguageLabel(value) : "No preference"}`;
 }
 
-export function getProfileDefaultSubtitleLanguageHint(value: string) {
+export function getProfileDefaultSubtitleLanguageHint(value: string | null | undefined) {
   return `Default: ${value ? getLanguageLabel(value) : "None"}`;
 }
 
-export function getProfileDefaultSubtitleModeHint(value: string) {
+export function getProfileDefaultSubtitleModeHint(value: string | null | undefined) {
   return `Default: ${getSubtitleModeLabel(value || DEFAULT_SUBTITLE_MODE)}`;
 }
 

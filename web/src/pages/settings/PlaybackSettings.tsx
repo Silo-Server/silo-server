@@ -1,13 +1,4 @@
-import { getProfileToken } from "@/api/client";
-import { useAuth } from "@/hooks/useAuth";
-import { useUpdateProfile } from "@/hooks/queries/profiles";
-import {
-  useDeleteSetting,
-  useEffectiveSettings,
-  useSetDeviceSetting,
-  useSetSetting,
-  useSetting,
-} from "@/hooks/queries/settings";
+import { ApiClientError } from "@/api/client";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { Button } from "@/components/ui/button";
@@ -19,91 +10,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { LANGUAGE_OPTIONS } from "@/lib/settingsManifest";
+import { LANGUAGE_OPTIONS, optionsFor } from "@/lib/settingsDisplay";
+import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { QUALITY_PRESETS, describeQuality, presetById, presetIdFor } from "@/lib/qualityPresets";
 import {
   useClearSettingValue,
-  useEffectiveSettings as useEffectiveSettingValues,
+  useEffectiveSettings,
   useSetSettingValue,
+  type SettingIdentity,
 } from "@/hooks/queries/settingValues";
 import { toast } from "sonner";
 
-const AUTO_PLAY_NEXT_KEY = "playback.auto_play_next";
+/**
+ * Every preference on this screen is the profile's own choice. A device, a
+ * library, or a series can override several of them, and the contract resolves
+ * those above the profile row — but this screen edits the profile layer, which
+ * is what "Defaults" means here.
+ */
+const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 
-function AutoPlayNextSetting({ profileId }: { profileId: string }) {
-  const { data: effective = {} } = useEffectiveSettings(profileId, [AUTO_PLAY_NEXT_KEY]);
-  const setDeviceSetting = useSetDeviceSetting();
-  const autoplay = effective[AUTO_PLAY_NEXT_KEY]?.effective_value !== "false";
+/** Read in one batch: the screen wants every key at once. */
+const PLAYBACK_KEYS: SettingKey[] = [
+  SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
+  SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT,
+  SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
+  SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
+  SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+  SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
+  SETTING_KEYS.CATALOG_METADATA_LANGUAGE,
+  SETTING_KEYS.UI_NEXT_UP_MODE,
+];
 
-  return (
-    <SettingRow
-      label="Auto-play next episode"
-      description="Start the next episode automatically after the current one ends."
-      control={(id) => (
-        <Switch
-          id={id}
-          checked={autoplay}
-          disabled={setDeviceSetting.isPending}
-          onCheckedChange={(checked) =>
-            setDeviceSetting.mutate(
-              { key: AUTO_PLAY_NEXT_KEY, value: checked ? "true" : "false" },
-              {
-                onSuccess: () => toast.success("Auto-play preference saved"),
-                onError: () => toast.error("Failed to save auto-play preference"),
-              },
-            )
-          }
-        />
-      )}
-    />
-  );
-}
-
-function NextUpSetting() {
-  const { data: nextUpMode, isLoading } = useSetting("next_up_mode");
-  const setSetting = useSetSetting();
-  const deleteSetting = useDeleteSetting();
-  const currentValue = nextUpMode || "combined";
-
-  return (
-    <SettingRow
-      label="Next up episodes"
-      description="Choose whether upcoming episodes stay with Continue Watching or get their own row."
-      control={(id) => (
-        <div className="flex items-center gap-2">
-          <Select
-            value={currentValue}
-            onValueChange={(value) =>
-              setSetting.mutate(
-                { key: "next_up_mode", value },
-                { onSuccess: () => toast.success("Next up preference saved") },
-              )
-            }
-            disabled={isLoading || setSetting.isPending}
-          >
-            <SelectTrigger id={id} className="w-full sm:w-[240px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="combined">With Continue Watching</SelectItem>
-              <SelectItem value="separate">Separate row</SelectItem>
-            </SelectContent>
-          </Select>
-          {nextUpMode ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-9 rounded-full px-3"
-              onClick={() => deleteSetting.mutate({ key: "next_up_mode" })}
-            >
-              Reset
-            </Button>
-          ) : null}
-        </div>
-      )}
-    />
-  );
-}
+const NEXT_UP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MODE]);
 
 /**
  * Quality is two settings behind one picker.
@@ -116,7 +54,7 @@ function NextUpSetting() {
  * truthful label rather than a picker showing the wrong entry.
  */
 function QualitySetting() {
-  const { data: effective } = useEffectiveSettingValues({
+  const { data: effective } = useEffectiveSettings({
     keys: ["playback.preferred_quality", "playback.max_bitrate_kbps"],
   });
   const setValue = useSetSettingValue();
@@ -196,28 +134,41 @@ function QualitySetting() {
 }
 
 export default function PlaybackSettings() {
-  const { profile, selectProfile } = useAuth();
-  const updateMutation = useUpdateProfile();
-  const currentProfileToken = getProfileToken() ?? undefined;
+  const { data: effective } = useEffectiveSettings({ keys: PLAYBACK_KEYS });
+  const setValue = useSetSettingValue();
+  const clearValue = useClearSettingValue();
 
-  if (!profile) return null;
+  // The effective endpoint resolves an unset key to the contract default, so
+  // every control below reads its value from the same answer rather than from
+  // a local literal that could disagree with the server about "unset".
+  const read = <T,>(key: SettingKey) =>
+    (effective?.[key]?.value ?? SETTING_DEFINITIONS[key].defaultValue) as T;
 
-  const saveProfileField = (body: {
-    language?: string;
-    preferred_metadata_language?: string;
-    auto_skip_intro?: boolean;
-    auto_skip_credits?: boolean;
-    auto_skip_recap?: boolean;
-    auto_play_next_preview?: boolean;
-  }) => {
-    updateMutation.mutate(
-      { id: profile.id, body },
-      {
-        onSuccess: (updatedProfile) => selectProfile(updatedProfile, currentProfileToken),
-        onError: () => toast.error("Failed to save profile setting"),
-      },
+  const saveValue = (key: SettingKey, value: unknown) => {
+    setValue.mutate(
+      { key, value, identity: PROFILE_SCOPE },
+      { onError: () => toast.error("Failed to save playback setting") },
     );
   };
+
+  const nextUpMode = read<string>(SETTING_KEYS.UI_NEXT_UP_MODE);
+  // Whether the profile has actually chosen, which is what gates the reset
+  // affordance: the resolved value is the default until a row exists.
+  const nextUpChosen = effective?.[SETTING_KEYS.UI_NEXT_UP_MODE]?.source === "profile";
+  const pending = setValue.isPending || clearValue.isPending;
+
+  async function resetNextUpMode() {
+    try {
+      await clearValue.mutateAsync({
+        key: SETTING_KEYS.UI_NEXT_UP_MODE,
+        identity: PROFILE_SCOPE,
+      });
+    } catch (error) {
+      // Nothing stored is the state a reset asks for.
+      if (error instanceof ApiClientError && error.status === 404) return;
+      toast.error("Failed to reset the next up preference");
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -242,16 +193,14 @@ export default function PlaybackSettings() {
           control={(id) => (
             <div className="w-full">
               <Select
-                value={profile.language || "none"}
+                value={read<string | null>(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE) ?? "none"}
                 onValueChange={(value) =>
-                  saveProfileField({ language: value === "none" ? "" : value })
+                  // The contract spells "no preference" as null, where the
+                  // legacy profile column spelled it as the empty string.
+                  saveValue(SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE, value === "none" ? null : value)
                 }
               >
-                <SelectTrigger
-                  id={id}
-                  className="w-full sm:w-[220px]"
-                  disabled={updateMutation.isPending}
-                >
+                <SelectTrigger id={id} className="w-full sm:w-[220px]" disabled={pending}>
                   <SelectValue placeholder="No preference" />
                 </SelectTrigger>
                 <SelectContent>
@@ -273,18 +222,12 @@ export default function PlaybackSettings() {
           control={(id) => (
             <div className="w-full">
               <Select
-                value={profile.preferred_metadata_language || "none"}
+                value={read<string | null>(SETTING_KEYS.CATALOG_METADATA_LANGUAGE) ?? "none"}
                 onValueChange={(value) =>
-                  saveProfileField({
-                    preferred_metadata_language: value === "none" ? "" : value,
-                  })
+                  saveValue(SETTING_KEYS.CATALOG_METADATA_LANGUAGE, value === "none" ? null : value)
                 }
               >
-                <SelectTrigger
-                  id={id}
-                  className="w-full sm:w-[220px]"
-                  disabled={updateMutation.isPending}
-                >
+                <SelectTrigger id={id} className="w-full sm:w-[220px]" disabled={pending}>
                   <SelectValue placeholder="Library default" />
                 </SelectTrigger>
                 <SelectContent>
@@ -306,9 +249,11 @@ export default function PlaybackSettings() {
           control={(id) => (
             <Switch
               id={id}
-              checked={profile.auto_skip_intro ?? false}
-              disabled={updateMutation.isPending}
-              onCheckedChange={(checked) => saveProfileField({ auto_skip_intro: checked })}
+              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO, checked)
+              }
             />
           )}
         />
@@ -319,9 +264,11 @@ export default function PlaybackSettings() {
           control={(id) => (
             <Switch
               id={id}
-              checked={profile.auto_skip_credits ?? false}
-              disabled={updateMutation.isPending}
-              onCheckedChange={(checked) => saveProfileField({ auto_skip_credits: checked })}
+              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS, checked)
+              }
             />
           )}
         />
@@ -332,9 +279,11 @@ export default function PlaybackSettings() {
           control={(id) => (
             <Switch
               id={id}
-              checked={profile.auto_skip_recap ?? false}
-              disabled={updateMutation.isPending}
-              onCheckedChange={(checked) => saveProfileField({ auto_skip_recap: checked })}
+              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP, checked)
+              }
             />
           )}
         />
@@ -345,16 +294,65 @@ export default function PlaybackSettings() {
           control={(id) => (
             <Switch
               id={id}
-              checked={profile.auto_play_next_preview ?? false}
-              disabled={updateMutation.isPending}
-              onCheckedChange={(checked) => saveProfileField({ auto_play_next_preview: checked })}
+              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW, checked)
+              }
             />
           )}
         />
 
-        <AutoPlayNextSetting profileId={profile.id} />
+        <SettingRow
+          label="Auto-play next episode"
+          description="Start the next episode automatically after the current one ends."
+          control={(id) => (
+            <Switch
+              id={id}
+              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT)}
+              disabled={pending}
+              onCheckedChange={(checked) =>
+                saveValue(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT, checked)
+              }
+            />
+          )}
+        />
 
-        <NextUpSetting />
+        <SettingRow
+          label="Next up episodes"
+          description="Choose whether upcoming episodes stay with Continue Watching or get their own row."
+          control={(id) => (
+            <div className="flex items-center gap-2">
+              <Select
+                value={nextUpMode}
+                onValueChange={(value) => saveValue(SETTING_KEYS.UI_NEXT_UP_MODE, value)}
+                disabled={pending}
+              >
+                <SelectTrigger id={id} className="w-full sm:w-[240px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {NEXT_UP_MODES.map((mode) => (
+                    <SelectItem key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {nextUpChosen ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 rounded-full px-3"
+                  onClick={resetNextUpMode}
+                  disabled={pending}
+                >
+                  Reset
+                </Button>
+              ) : null}
+            </div>
+          )}
+        />
       </SettingsGroup>
     </div>
   );

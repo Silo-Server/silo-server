@@ -167,6 +167,22 @@ export function WatchPage({
     [session],
   );
 
+  /**
+   * Persists an in-player subtitle choice for the whole series.
+   *
+   * The choice splits across two stores, along the line the contract draws.
+   * The language and the on/off mode are preferences — "this show, in
+   * English, always on" — so they are canonical settings written at
+   * profile_series, where the manifest resolves them above a library, a
+   * device, and the profile. The track index and signature are not
+   * preferences: they identify one concrete track in one file, so they stay on
+   * the specialized per-series route that has always held them.
+   *
+   * The two writes are independent on purpose. A failed settings write must not
+   * cost the user the track they picked, and a failed track write must not cost
+   * them the language — so each is best effort on its own rather than one
+   * composite request that half-applies.
+   */
   const handleSubtitleChanged = useCallback(
     (index: number | null) => {
       const seriesId = seriesContext?.seriesId ?? contentId;
@@ -187,6 +203,22 @@ export function WatchPage({
             hearing_impaired: track.hearing_impaired,
           }
         : null;
+
+      const seriesScope = `scope=profile_series&series_id=${encodeURIComponent(seriesId)}`;
+      const writeSetting = (key: string, value: unknown) =>
+        playerFetch(config, `/settings/values/${key}?${seriesScope}`, {
+          method: "PUT",
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // Best effort.
+        });
+
+      // The contract spells "no preference" as null, where the legacy route
+      // spelled it as the empty string. Turning subtitles off stores mode
+      // "off" and clears the language rather than storing an empty one.
+      void writeSetting("playback.subtitle_language", track?.language || null);
+      void writeSetting("playback.subtitle_mode", derivePersistedSubtitleMode(index));
+      void writeSetting("playback.show_forced_subtitles", showForcedSubtitles);
 
       playerFetch(config, `/subtitle-prefs/${seriesId}`, {
         method: "PUT",

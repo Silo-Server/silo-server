@@ -36,7 +36,8 @@ import {
   type DeviceProfileTabEntry,
   type PlatformKind,
 } from "@/components/admin/deviceOverrides";
-import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsManifest";
+import { ALL_DEVICE_SETTING_KEYS } from "@/lib/settingsDisplay";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
 import { cn } from "@/lib/utils";
 
@@ -1532,7 +1533,9 @@ function DeviceDetailPanel({
       */}
       <AdminSubtitleAppearanceDialog
         setting={
-          jsonEditor && jsonEditor.setting.key === "subtitle_appearance" ? jsonEditor.setting : null
+          jsonEditor && jsonEditor.setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
+            ? jsonEditor.setting
+            : null
         }
         isOverride={jsonEditor?.isOverride ?? false}
         onClose={closeJsonEditor}
@@ -1557,7 +1560,10 @@ function DeviceDetailPanel({
       />
 
       <Dialog
-        open={jsonEditor !== null && jsonEditor.setting.key !== "subtitle_appearance"}
+        open={
+          jsonEditor !== null &&
+          jsonEditor.setting.key !== SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
+        }
         onOpenChange={(open) => {
           if (!open) closeJsonEditor();
         }}

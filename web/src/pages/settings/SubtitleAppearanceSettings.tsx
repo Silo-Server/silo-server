@@ -1,6 +1,5 @@
-import { useId, useMemo, useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { RotateCcw } from "lucide-react";
-import { getProfileToken } from "@/api/client";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -13,15 +12,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useSubtitleAppearanceSetting } from "@/hooks/queries/subtitleAppearance";
 import {
-  useDeleteDeviceSetting,
   useEffectiveSettings,
-  useSetDeviceSetting,
-} from "@/hooks/queries/settings";
-import { useUpdateProfile } from "@/hooks/queries/profiles";
-import { useAuth } from "@/hooks/useAuth";
-import { useCurrentProfile } from "@/hooks/useCurrentProfile";
-import { LANGUAGE_OPTIONS } from "@/lib/settingsManifest";
+  useSetSettingValue,
+  type SettingIdentity,
+} from "@/hooks/queries/settingValues";
+import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
+import { LANGUAGE_OPTIONS, optionsFor } from "@/lib/settingsDisplay";
+import { SETTING_DEFINITIONS } from "@/lib/settingsContract";
 import {
   BACKGROUND_STYLE_OPTIONS,
   BG_COLOR_PALETTE,
@@ -29,18 +28,25 @@ import {
   FONT_COLOR_PALETTE,
   FONT_FAMILY_OPTIONS,
   FONT_SIZE_OPTIONS,
-  parseSubtitleAppearance,
   POSITION_OPTIONS,
 } from "@/lib/subtitleAppearance";
 import type { SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { toast } from "sonner";
 
-const SETTINGS_KEY = "subtitle_appearance";
-const SUBTITLE_MODES = [
-  { value: "auto", label: "Auto" },
-  { value: "always", label: "Always" },
-  { value: "off", label: "Off" },
-] as const;
+/** Subtitle behavior is a profile preference; a device tunes only appearance. */
+const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
+
+/**
+ * The behavior modes come from the contract rather than a literal list, so a
+ * member added to the manifest appears here without a matching edit.
+ */
+const SUBTITLE_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]);
+
+const BEHAVIOR_KEYS: SettingKey[] = [
+  SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
+  SETTING_KEYS.PLAYBACK_SUBTITLE_MODE,
+  SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
+];
 
 interface ColorPaletteProps {
   colors: { hex: string; label: string }[];
@@ -123,17 +129,26 @@ function SettingRow({ label, description, labelForControl = true, children }: Se
 }
 
 export default function SubtitleAppearanceSettings() {
-  const { selectProfile } = useAuth();
-  const { profile } = useCurrentProfile();
-  const { data: effective = {} } = useEffectiveSettings(profile?.id, [SETTINGS_KEY]);
-  const updateMutation = useUpdateProfile();
-  const setDeviceSetting = useSetDeviceSetting();
-  const deleteDeviceSetting = useDeleteDeviceSetting();
-  const currentProfileToken = getProfileToken() ?? undefined;
-  const effectiveEntry = effective[SETTINGS_KEY];
+  const {
+    appearance: effectiveSettings,
+    hasDeviceOverride,
+    save: saveAppearance,
+    reset: resetAppearance,
+    isSaving,
+    isResetting,
+  } = useSubtitleAppearanceSetting();
+  const { data: behavior } = useEffectiveSettings({ keys: BEHAVIOR_KEYS });
+  const setValue = useSetSettingValue();
 
-  const effectiveJson = effectiveEntry?.effective_value ?? null;
-  const effectiveSettings = useMemo(() => parseSubtitleAppearance(effectiveJson), [effectiveJson]);
+  // The effective endpoint resolves an unset key to the contract default, so a
+  // control can read its value straight off the answer without a local literal.
+  const subtitleLanguage =
+    (behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE]?.value as string | null | undefined) ?? "";
+  const subtitleMode =
+    (behavior?.[SETTING_KEYS.PLAYBACK_SUBTITLE_MODE]?.value as string | undefined) ?? "auto";
+  const showForcedSubtitles =
+    (behavior?.[SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES]?.value as boolean | undefined) ?? true;
+
   const [draftState, setDraftState] = useState<{
     key: string;
     settings: SubtitleAppearance;
@@ -162,43 +177,38 @@ export default function SubtitleAppearanceSettings() {
     });
   }
 
-  function handleSave() {
-    setDeviceSetting.mutate(
-      { key: SETTINGS_KEY, value: JSON.stringify(settings) },
-      {
-        onSuccess: () => toast.success("Subtitle appearance saved"),
-        onError: () => toast.error("Failed to save subtitle appearance"),
-      },
-    );
+  async function handleSave() {
+    try {
+      await saveAppearance(settings);
+      toast.success("Subtitle appearance saved");
+    } catch {
+      toast.error("Failed to save subtitle appearance");
+    }
   }
 
-  function handleUseFallback() {
-    deleteDeviceSetting.mutate(
-      { key: SETTINGS_KEY },
-      {
-        onSuccess: () => toast.success("Subtitle appearance reset"),
-        onError: () => toast.error("Failed to reset subtitle appearance"),
-      },
-    );
+  async function handleUseFallback() {
+    try {
+      await resetAppearance();
+      toast.success("Subtitle appearance reset");
+    } catch {
+      toast.error("Failed to reset subtitle appearance");
+    }
   }
 
-  function saveProfileField(body: {
-    subtitle_language?: string;
-    subtitle_mode?: string;
-    show_forced_subtitles?: boolean;
-  }) {
-    if (!profile) return;
-    updateMutation.mutate(
-      { id: profile.id, body },
-      {
-        onSuccess: (updatedProfile) => selectProfile(updatedProfile, currentProfileToken),
-        onError: () => toast.error("Failed to save subtitle setting"),
-      },
+  /**
+   * Subtitle behavior writes at profile scope: it is the household member's
+   * choice, not the screen's, and the contract resolves a series, library, or
+   * device override above it.
+   */
+  function saveBehavior(key: SettingKey, value: unknown) {
+    setValue.mutate(
+      { key, value, identity: PROFILE_SCOPE },
+      { onError: () => toast.error("Failed to save subtitle setting") },
     );
   }
 
   const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(effectiveSettings);
-  const hasDeviceOverride = effectiveEntry?.has_device_override ?? false;
+  const behaviorPending = setValue.isPending;
   const usesTextOutline = settings.textOutline || settings.backgroundStyle === "outline";
   const isBoxStyle = settings.backgroundStyle === "box";
   const { containerStyle, cueStyle } = computeSubtitleStyles(settings);
@@ -224,16 +234,21 @@ export default function SubtitleAppearanceSettings() {
         >
           {({ id, descriptionId }) => (
             <Select
-              value={profile?.subtitle_language || "none"}
+              value={subtitleLanguage || "none"}
               onValueChange={(value) =>
-                saveProfileField({ subtitle_language: value === "none" ? "" : value })
+                // The contract spells "no preference" as null, not the empty
+                // string the legacy profile column used.
+                saveBehavior(
+                  SETTING_KEYS.PLAYBACK_SUBTITLE_LANGUAGE,
+                  value === "none" ? null : value,
+                )
               }
             >
               <SelectTrigger
                 id={id}
                 aria-describedby={descriptionId}
                 className="w-full sm:w-[220px]"
-                disabled={updateMutation.isPending}
+                disabled={behaviorPending}
               >
                 <SelectValue placeholder="None" />
               </SelectTrigger>
@@ -252,14 +267,14 @@ export default function SubtitleAppearanceSettings() {
         <SettingRow label="Subtitle behavior" description="Decide when subtitles should appear.">
           {({ id, descriptionId }) => (
             <Select
-              value={profile?.subtitle_mode || "auto"}
-              onValueChange={(value) => saveProfileField({ subtitle_mode: value })}
+              value={subtitleMode}
+              onValueChange={(value) => saveBehavior(SETTING_KEYS.PLAYBACK_SUBTITLE_MODE, value)}
             >
               <SelectTrigger
                 id={id}
                 aria-describedby={descriptionId}
                 className="w-full sm:w-[220px]"
-                disabled={updateMutation.isPending}
+                disabled={behaviorPending}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -282,9 +297,11 @@ export default function SubtitleAppearanceSettings() {
             <Switch
               id={id}
               aria-describedby={descriptionId}
-              checked={profile?.show_forced_subtitles ?? true}
-              disabled={updateMutation.isPending}
-              onCheckedChange={(checked) => saveProfileField({ show_forced_subtitles: checked })}
+              checked={showForcedSubtitles}
+              disabled={behaviorPending}
+              onCheckedChange={(checked) =>
+                saveBehavior(SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES, checked)
+              }
             />
           )}
         </SettingRow>
@@ -317,22 +334,18 @@ export default function SubtitleAppearanceSettings() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={handleSave} disabled={!hasUnsavedChanges || setDeviceSetting.isPending}>
+          <Button onClick={handleSave} disabled={!hasUnsavedChanges || isSaving}>
             Save Appearance
           </Button>
           <Button
             variant="outline"
             onClick={discardLocalChanges}
-            disabled={!hasUnsavedChanges || setDeviceSetting.isPending}
+            disabled={!hasUnsavedChanges || isSaving}
           >
             Discard Changes
           </Button>
           {hasDeviceOverride ? (
-            <Button
-              variant="ghost"
-              onClick={handleUseFallback}
-              disabled={deleteDeviceSetting.isPending}
-            >
+            <Button variant="ghost" onClick={handleUseFallback} disabled={isResetting}>
               <RotateCcw className="mr-2 h-4 w-4" />
               Reset Appearance
             </Button>

@@ -3,10 +3,10 @@ import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, X } from "lucide-react";
 import type { EpisodeRef } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
-import { useEffectiveSettings, useSetDeviceSetting } from "@/hooks/queries/settings";
+import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
-import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { preferredDateLocale } from "@/lib/datetime";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 
@@ -22,7 +22,6 @@ interface PlayingNextScreenProps {
 }
 
 const COUNTDOWN_SECONDS = 10;
-const AUTOPLAY_SETTING_KEY = "playback.auto_play_next";
 
 export function PlayingNextScreen({
   seriesId,
@@ -36,15 +35,26 @@ export function PlayingNextScreen({
 }: PlayingNextScreenProps) {
   useDateTimeFormat();
   // -- Auto-play setting --
-  const { profile } = useCurrentProfile();
-  const { data: effectiveSettings } = useEffectiveSettings(profile?.id, [AUTOPLAY_SETTING_KEY]);
-  const setDeviceSetting = useSetDeviceSetting();
-  const autoplay = effectiveSettings?.[AUTOPLAY_SETTING_KEY]?.effective_value !== "false";
+  const { data: effectiveSettings } = useEffectiveSettings({
+    keys: [SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT],
+  });
+  const setValue = useSetSettingValue();
+  // Contract default is true; the effective endpoint resolves an unset key to
+  // it, so an absent answer (first paint) reads the same as a stored true.
+  const autoplay =
+    (effectiveSettings?.[SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT]?.value as boolean | undefined) ??
+    true;
 
   const toggleAutoplay = useCallback(() => {
-    const newValue = autoplay ? "false" : "true";
-    setDeviceSetting.mutate({ key: AUTOPLAY_SETTING_KEY, value: newValue });
-  }, [autoplay, setDeviceSetting]);
+    // Turning autoplay off from the player is a choice about this screen, so it
+    // writes at profile_device — the profile keeps whatever it chose in
+    // settings, and the contract resolves the device row above it.
+    setValue.mutate({
+      key: SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT,
+      value: !autoplay,
+      identity: { scope: "profile_device" },
+    });
+  }, [autoplay, setValue]);
 
   // -- Countdown (only starts after video has ended) --
   const [secondsRemaining, setSecondsRemaining] = useState(COUNTDOWN_SECONDS);
