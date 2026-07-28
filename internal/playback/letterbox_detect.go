@@ -75,24 +75,29 @@ func DetectLetterbox(ctx context.Context, inputPath string, durationSeconds floa
 		return Letterbox{}
 	}
 
-	var result *Letterbox
+	samples := make([]Letterbox, 0, sampleCount)
 	for _, position := range samplePositions(durationSeconds) {
 		sample, ok := detectLetterboxAt(ctx, inputPath, position, frameHeight, ffmpegPath)
 		if !ok {
 			continue
 		}
-		if result == nil {
-			sample := sample
-			result = &sample
-			continue
-		}
-		intersected := result.intersect(sample)
-		result = &intersected
+		samples = append(samples, sample)
 	}
-	if result == nil {
+	return intersectLetterboxSamples(samples)
+}
+
+func intersectLetterboxSamples(samples []Letterbox) Letterbox {
+	// Every point is required. Accepting one dark-but-successful sample after
+	// the other seeks fail would recreate the false positive that sampling is
+	// meant to eliminate.
+	if len(samples) != sampleCount {
 		return Letterbox{}
 	}
-	return sanitizeLetterbox(*result)
+	result := samples[0]
+	for _, sample := range samples[1:] {
+		result = result.intersect(sample)
+	}
+	return sanitizeLetterbox(result)
 }
 
 // samplePositions spreads samples over the middle of the runtime, avoiding the
@@ -223,19 +228,27 @@ func sanitizeLetterbox(value Letterbox) Letterbox {
 // on LetterboxCacheKey.
 type LetterboxCache struct {
 	ffmpegPath func() string
+	detect     func(context.Context, string, float64, int, string) Letterbox
 
 	mu       sync.Mutex
 	measured map[string]Letterbox
 	// Insertion order, so the map can be bounded without holding a library's
 	// worth of entries forever on a long-lived server.
-	order    []string
-	inflight map[string]struct{}
+	order     []string
+	inflight  map[string]struct{}
+	warmSlots chan struct{}
 }
 
-// maxLetterboxEntries bounds the cache. Well past any plausible working set of
-// recently played files, and small enough that the map cannot grow into a leak
-// on a server that has been up for months.
-const maxLetterboxEntries = 4096
+const (
+	// maxLetterboxEntries bounds the cache. Well past any plausible working set
+	// of recently played files, and small enough that the map cannot grow into a
+	// leak on a server that has been up for months.
+	maxLetterboxEntries = 4096
+	// letterboxWarmSlots caps concurrent background measurements. Each one
+	// launches ffmpeg four times and reads from the media store, so excess warms
+	// are dropped rather than queued; the next play retries them.
+	letterboxWarmSlots = 2
+)
 
 // LetterboxCacheKey identifies a measurement.
 //
@@ -251,8 +264,10 @@ func LetterboxCacheKey(inputPath string, fileSize int64) string {
 func NewLetterboxCache(ffmpegPath func() string) *LetterboxCache {
 	return &LetterboxCache{
 		ffmpegPath: ffmpegPath,
+		detect:     DetectLetterbox,
 		measured:   make(map[string]Letterbox),
 		inflight:   make(map[string]struct{}),
+		warmSlots:  make(chan struct{}, letterboxWarmSlots),
 	}
 }
 
@@ -282,6 +297,14 @@ func (c *LetterboxCache) Warm(key, inputPath string, durationSeconds float64, fr
 		c.mu.Unlock()
 		return
 	}
+	select {
+	case c.warmSlots <- struct{}{}:
+	default:
+		c.mu.Unlock()
+		slog.Debug("letterbox measurement skipped: all warm slots busy",
+			"component", "playback", "input", inputPath)
+		return
+	}
 	c.inflight[key] = struct{}{}
 	c.mu.Unlock()
 
@@ -293,6 +316,7 @@ func (c *LetterboxCache) Warm(key, inputPath string, durationSeconds float64, fr
 			c.mu.Lock()
 			delete(c.inflight, key)
 			c.mu.Unlock()
+			<-c.warmSlots
 			// A subtitle overlay is not worth taking the server down for, and
 			// an unrecovered panic here would: this runs detached, so it would
 			// reach the runtime rather than any request's recovery middleware.
@@ -311,7 +335,11 @@ func (c *LetterboxCache) Warm(key, inputPath string, durationSeconds float64, fr
 			ffmpegPath = c.ffmpegPath()
 		}
 		started := time.Now()
-		value := DetectLetterbox(ctx, inputPath, durationSeconds, frameHeight, ffmpegPath)
+		detect := c.detect
+		if detect == nil {
+			detect = DetectLetterbox
+		}
+		value := detect(ctx, inputPath, durationSeconds, frameHeight, ffmpegPath)
 		slog.Info("letterbox measured",
 			"component", "playback",
 			"input", inputPath,

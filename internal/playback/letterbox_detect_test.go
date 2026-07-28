@@ -2,9 +2,11 @@ package playback
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -75,6 +77,23 @@ func TestIntersectKeepsTheSmallerBarPerEdge(t *testing.T) {
 
 	if got.TopFraction != 0.13 || got.BottomFraction != 0.13 {
 		t.Fatalf("a dark sample widened the bars: %v", got)
+	}
+}
+
+func TestIntersectLetterboxSamplesRequiresEveryPoint(t *testing.T) {
+	samples := []Letterbox{
+		{TopFraction: 0.13, BottomFraction: 0.13},
+		{TopFraction: 0.14, BottomFraction: 0.14},
+		{TopFraction: 0.13, BottomFraction: 0.13},
+		{TopFraction: 0.40, BottomFraction: 0.35},
+	}
+
+	got := intersectLetterboxSamples(samples)
+	if got.TopFraction != 0.13 || got.BottomFraction != 0.13 {
+		t.Fatalf("complete intersection = %v", got)
+	}
+	if got := intersectLetterboxSamples(samples[:sampleCount-1]); got != (Letterbox{}) {
+		t.Fatalf("incomplete intersection = %v, want no measurement", got)
 	}
 }
 
@@ -158,6 +177,71 @@ func TestCacheIsBounded(t *testing.T) {
 	if _, ok := cache.measured[strconv.Itoa(maxLetterboxEntries+9)]; !ok {
 		t.Fatal("the newest entry was evicted")
 	}
+}
+
+func TestCacheBoundsConcurrentMeasurementsAndRetriesDroppedWarm(t *testing.T) {
+	cache := NewLetterboxCache(func() string { return "" })
+	started := make(chan string, letterboxWarmSlots+1)
+	release := make(chan struct{})
+	cache.detect = func(_ context.Context, inputPath string, _ float64, _ int, _ string) Letterbox {
+		started <- inputPath
+		<-release
+		return Letterbox{}
+	}
+
+	for i := range letterboxWarmSlots {
+		key := strconv.Itoa(i)
+		cache.Warm(key, "/media/"+key+".mkv", 100, 1080)
+	}
+	for range letterboxWarmSlots {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("measurement did not start")
+		}
+	}
+
+	overflowKey := "overflow"
+	cache.Warm(overflowKey, "/media/overflow.mkv", 100, 1080)
+	cache.mu.Lock()
+	_, reserved := cache.inflight[overflowKey]
+	cache.mu.Unlock()
+	if reserved {
+		t.Fatal("dropped measurement retained an in-flight reservation")
+	}
+	select {
+	case inputPath := <-started:
+		t.Fatalf("measurement exceeded slot bound: %s", inputPath)
+	default:
+	}
+
+	close(release)
+	for i := range letterboxWarmSlots {
+		waitForLetterboxMeasurement(t, cache, strconv.Itoa(i))
+	}
+
+	cache.Warm(overflowKey, "/media/overflow.mkv", 100, 1080)
+	select {
+	case inputPath := <-started:
+		if inputPath != "/media/overflow.mkv" {
+			t.Fatalf("retried measurement input = %q", inputPath)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("dropped measurement was not retried once a slot freed")
+	}
+	waitForLetterboxMeasurement(t, cache, overflowKey)
+}
+
+func waitForLetterboxMeasurement(t *testing.T, cache *LetterboxCache, key string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if _, ok := cache.Lookup(key); ok {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("measurement %q did not finish", key)
 }
 
 // A nil cache is a disabled cache, not a crash: callers should not have to
