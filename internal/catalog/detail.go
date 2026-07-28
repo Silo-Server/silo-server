@@ -18,6 +18,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -614,6 +617,10 @@ type DetailService struct {
 	originalLangFn    func(context.Context, string) string
 	probeEnsurer      PlaybackProbeEnsurer
 	chapterThumbs     ChapterThumbnailQueuer
+
+	// resolver is built once on first use; see settingsResolver.
+	resolverOnce sync.Once
+	resolver     *settingsresolve.Resolver
 }
 
 // NewDetailService creates a new DetailService.
@@ -2612,6 +2619,18 @@ func (s *DetailService) newWatchDetail(
 	}
 }
 
+// effectiveSubtitleDefaults resolves the subtitle preferences that apply to one
+// item, through the canonical resolver.
+//
+// This used to be four levels of hand-written precedence — profile columns,
+// then a library preference row, then a series preference row, each partially
+// overriding the last through Has* flags. The order lives in the manifest now
+// (profile_series, profile_library, profile_device, profile, default), so this
+// function and the contract cannot disagree about which override wins, and a
+// new scope is a manifest change rather than another branch here.
+//
+// The track signature stays on its specialized table: it identifies a concrete
+// track rather than expressing a preference, so it is not a setting.
 func (s *DetailService) effectiveSubtitleDefaults(
 	ctx context.Context,
 	filter AccessFilter,
@@ -2629,44 +2648,50 @@ func (s *DetailService) effectiveSubtitleDefaults(
 		return defaults
 	}
 
-	if profile, err := store.GetProfile(ctx, filter.ProfileID); err == nil && profile != nil {
-		defaults.Language = profile.SubtitleLanguage
-		defaults.Mode = profile.SubtitleMode
-		defaults.ShowForced = profile.ShowForcedSubtitles
-		defaults.HasLanguage = true
-		defaults.HasMode = true
-		defaults.HasShowForced = true
+	rc := settingsresolve.Context{ProfileID: filter.ProfileID}
+	if libraryID := preferredPlayableLibraryID(files, filter.SelectedFileID); libraryID > 0 {
+		rc.LibraryIDs = []int{libraryID}
+	}
+	if seriesID != "" {
+		rc.SeriesIDs = []string{seriesID}
 	}
 
-	if libraryID := preferredPlayableLibraryID(files, filter.SelectedFileID); libraryID > 0 {
-		if pref, err := store.GetLibraryPlaybackPreference(ctx, filter.ProfileID, libraryID); err == nil && pref != nil {
-			if pref.HasSubtitleLanguage {
-				defaults.Language = pref.SubtitleLanguage
-				defaults.HasLanguage = true
-			}
-			if pref.HasSubtitleMode {
-				defaults.Mode = pref.SubtitleMode
-				defaults.HasMode = true
-			}
-			if pref.HasShowForcedSubtitles {
-				defaults.ShowForced = pref.ShowForcedSubtitles
-				defaults.HasShowForced = true
+	resolved, err := s.settingsResolver().Resolve(ctx, store, rc, []string{
+		settingskeys.PlaybackSubtitleLanguage,
+		settingskeys.PlaybackSubtitleMode,
+		settingskeys.PlaybackShowForcedSubtitles,
+	}, nil)
+	if err == nil {
+		for _, eff := range resolved {
+			// A value that resolved to the contract default is not a stored
+			// preference, and the callers distinguish the two through the Has*
+			// flags: an unset language must not read as "the user chose empty".
+			stored := eff.Source != settingscontract.ScopeDefault
+			switch eff.Key {
+			case settingskeys.PlaybackSubtitleLanguage:
+				var language string
+				if json.Unmarshal(eff.Value, &language) == nil && stored {
+					defaults.Language = language
+					defaults.HasLanguage = true
+				}
+			case settingskeys.PlaybackSubtitleMode:
+				var mode string
+				if json.Unmarshal(eff.Value, &mode) == nil && stored {
+					defaults.Mode = mode
+					defaults.HasMode = true
+				}
+			case settingskeys.PlaybackShowForcedSubtitles:
+				var forced bool
+				if json.Unmarshal(eff.Value, &forced) == nil && stored {
+					defaults.ShowForced = forced
+					defaults.HasShowForced = true
+				}
 			}
 		}
 	}
 
 	if seriesID != "" {
 		if pref, err := store.GetSubtitlePreference(ctx, filter.ProfileID, seriesID); err == nil && pref != nil {
-			defaults.Language = pref.SubtitleLanguage
-			defaults.HasLanguage = true
-			if pref.SubtitleMode != "" {
-				defaults.Mode = pref.SubtitleMode
-				defaults.HasMode = true
-			}
-			if pref.HasShowForcedSubtitles {
-				defaults.ShowForced = pref.ShowForcedSubtitles
-				defaults.HasShowForced = true
-			}
 			if pref.TrackSignature != nil && !pref.TrackSignature.IsZero() {
 				defaults.TrackSignature = pref.TrackSignature
 			}
@@ -2674,6 +2699,23 @@ func (s *DetailService) effectiveSubtitleDefaults(
 	}
 
 	return defaults
+}
+
+// settingsResolver lazily builds the resolver over the embedded contract.
+//
+// The contract is validated at startup, so a load failure here is unreachable;
+// returning a resolver with no contract makes Resolve error rather than panic,
+// which degrades this to "no stored preferences" instead of failing the detail
+// request.
+func (s *DetailService) settingsResolver() *settingsresolve.Resolver {
+	s.resolverOnce.Do(func() {
+		contract, err := settingscontract.Load()
+		if err != nil {
+			return
+		}
+		s.resolver = settingsresolve.New(contract)
+	})
+	return s.resolver
 }
 
 func (s *DetailService) effectiveVersionDefaults(
@@ -2810,26 +2852,51 @@ func (r *audioPrefResolver) audioPreference(ctx context.Context) *playback.Audio
 	return &cp
 }
 
+// profileLanguage is the audio language with no content context — the profile's
+// own preference, resolved through the contract rather than read off the
+// profile column it migrated from.
 func (r *audioPrefResolver) profileLanguage(ctx context.Context) string {
 	if !r.profileDone {
 		r.profileDone = true
-		if profile, profileErr := r.store.GetProfile(ctx, r.profileID); profileErr == nil && profile != nil {
-			r.profileLang = strings.TrimSpace(profile.Language)
-		}
+		r.profileLang = r.svc.resolvedAudioLanguage(ctx, r.store, settingsresolve.Context{
+			ProfileID: r.profileID,
+		})
 	}
 	return r.profileLang
 }
 
+// libraryAudioLanguage resolves with a library in context, so a library
+// override wins over the profile value and the resolver applies the same
+// precedence the manifest declares.
 func (r *audioPrefResolver) libraryAudioLanguage(ctx context.Context, libraryID int) string {
 	if lang, ok := r.libLang[libraryID]; ok {
 		return lang
 	}
-	lang := ""
-	if pref, prefErr := r.store.GetLibraryPlaybackPreference(ctx, r.profileID, libraryID); prefErr == nil && pref != nil {
-		lang = strings.TrimSpace(pref.AudioLanguage)
-	}
+	lang := r.svc.resolvedAudioLanguage(ctx, r.store, settingsresolve.Context{
+		ProfileID:  r.profileID,
+		LibraryIDs: []int{libraryID},
+	})
 	r.libLang[libraryID] = lang
 	return lang
+}
+
+// resolvedAudioLanguage returns the effective playback.audio_language for one
+// context, or "" when nothing is stored.
+func (s *DetailService) resolvedAudioLanguage(
+	ctx context.Context, store userstore.UserStore, rc settingsresolve.Context,
+) string {
+	resolved, err := s.settingsResolver().Resolve(ctx, store, rc,
+		[]string{settingskeys.PlaybackAudioLanguage}, nil)
+	if err != nil || len(resolved) == 0 {
+		return ""
+	}
+	// The contract default is null, which means "no preference" — the caller
+	// treats "" the same way, so an unset language needs no special case.
+	var language string
+	if json.Unmarshal(resolved[0].Value, &language) != nil {
+		return ""
+	}
+	return strings.TrimSpace(language)
 }
 
 func (r *audioPrefResolver) originalLanguage(ctx context.Context) string {

@@ -17,11 +17,19 @@ type countingUserStore struct {
 	getProfile     int32
 	getAudioPref   int32
 	getLibraryPref int32
+	resolveValues  int32
 }
 
 func (c *countingUserStore) GetProfile(ctx context.Context, id string) (*userstore.Profile, error) {
 	atomic.AddInt32(&c.getProfile, 1)
 	return c.UserStore.GetProfile(ctx, id)
+}
+
+func (c *countingUserStore) ListSettingValuesForResolution(
+	ctx context.Context, query userstore.SettingResolutionQuery,
+) ([]userstore.SettingValue, error) {
+	atomic.AddInt32(&c.resolveValues, 1)
+	return c.UserStore.ListSettingValuesForResolution(ctx, query)
 }
 
 func (c *countingUserStore) GetAudioPreference(ctx context.Context, profileID, seriesID string) (*userstore.AudioPreference, error) {
@@ -56,13 +64,15 @@ func TestBuildPlaybackInfo_AudioPrefLookupsDoNotScaleWithFileCount(t *testing.T)
 	filter := AccessFilter{UserID: 1, ProfileID: "profile-1"}
 	service.buildPlaybackInfo(context.Background(), files, filter, "book-1")
 
-	if got := atomic.LoadInt32(&counting.getProfile); got != 1 {
-		t.Fatalf("GetProfile called %d times for %d files; want 1 (lookup must not scale with file count)", got, fileCount)
+	// The audio language now resolves through the settings contract, which
+	// memoizes per profile and per library exactly as the profile-column
+	// lookups it replaced did. Two reads: one with no content context for the
+	// profile-level answer, one naming the folder's library.
+	if got := atomic.LoadInt32(&counting.resolveValues); got > 2 {
+		t.Fatalf("resolved settings %d times for %d files; want at most 2 "+
+			"(lookup must not scale with file count)", got, fileCount)
 	}
 	if got := atomic.LoadInt32(&counting.getAudioPref); got != 1 {
 		t.Fatalf("GetAudioPreference called %d times for %d files; want 1", got, fileCount)
-	}
-	if got := atomic.LoadInt32(&counting.getLibraryPref); got != 1 {
-		t.Fatalf("GetLibraryPlaybackPreference called %d times for one folder; want 1", got)
 	}
 }

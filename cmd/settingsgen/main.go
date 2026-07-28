@@ -278,8 +278,15 @@ func generateKotlin(contract *settingscontract.Manifest, pkg string) ([]byte, er
 		{"INT_KEYS", []settingscontract.ValueType{settingscontract.TypeInteger}},
 		{"DOUBLE_KEYS", []settingscontract.ValueType{settingscontract.TypeNumber}},
 	} {
+		// Remote only: these tables drive how a value read back from the
+		// server is parsed, and a client_local key never comes back from the
+		// server at all. Listing one would describe a wire format that has no
+		// wire.
 		fmt.Fprintf(&out, "\n    val %s: Set<String> = setOf(\n", group.name)
 		for _, def := range sortedDefinitions(contract) {
+			if !def.IsRemote() {
+				continue
+			}
 			for _, want := range group.types {
 				if def.ValueSchema.Type == want {
 					fmt.Fprintf(&out, "        %s,\n", screamingCase(def.Key))
