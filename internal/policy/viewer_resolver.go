@@ -103,7 +103,12 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		policyInput.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
 		policyInput.ProfileLibraryIDs = slices.Clone(profile.AllowedLibraryIDs)
 		policyInput.ProfileHasPIN = profile.PINHash != ""
-		policyInput.ProfileMetadataLang = profile.PreferredMetadataLanguage
+		// Resolved canonically (profile scope -> contract default), not read off
+		// the legacy profile column it migrated from. scope.rego relays this
+		// value unchanged as a preference; the manifest deliberately declares no
+		// constraint on it, since constraining a setting by a policy input fed
+		// from that same setting would be circular.
+		policyInput.ProfileMetadataLang = access.PreferredMetadataLanguage(ctx, store, input.ProfileID)
 	}
 
 	if r.pdp == nil {

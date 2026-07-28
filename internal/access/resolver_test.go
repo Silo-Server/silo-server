@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -40,6 +42,10 @@ type stubStore struct {
 	profile  *userstore.Profile
 	err      error
 	settings map[string]string
+	// settingValues are the canonical setting rows the resolver may read
+	// through ListSettingValuesForResolution. Scope matching is the
+	// resolver's job, so the stub returns them unfiltered.
+	settingValues []userstore.SettingValue
 }
 
 func (s stubStore) CreateProfile(context.Context, userstore.Profile) error { panic("unused") }
@@ -276,7 +282,7 @@ func (s stubStore) GetSettingValue(context.Context, userstore.SettingIdentity) (
 	panic("unused")
 }
 func (s stubStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
-	panic("unused")
+	return s.settingValues, nil
 }
 func (s stubStore) UpsertSettingValue(context.Context, userstore.SettingIdentity, json.RawMessage) (*userstore.SettingValue, error) {
 	panic("unused")
@@ -458,6 +464,60 @@ func TestResolver_DisabledLibraries_NoProfile(t *testing.T) {
 	}
 	if len(scope.DisabledLibraryIDs) != 1 || scope.DisabledLibraryIDs[0] != 7 {
 		t.Fatalf("DisabledLibraryIDs = %v, want [7]", scope.DisabledLibraryIDs)
+	}
+}
+
+func TestResolver_MetadataLanguageResolvesCanonically(t *testing.T) {
+	// The canonical catalog.metadata_language row wins; the legacy profile
+	// column carries a decoy value that must no longer be read.
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		stubStoreProvider{store: stubStore{
+			profile: &userstore.Profile{
+				ID:                        "prof-1",
+				PreferredMetadataLanguage: "fr",
+			},
+			settingValues: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key:       settingskeys.CatalogMetadataLanguage,
+					Scope:     settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`"de"`),
+			}},
+		}},
+		nil,
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if scope.PreferredMetadataLanguage != "de" {
+		t.Fatalf("PreferredMetadataLanguage = %q, want canonical value %q", scope.PreferredMetadataLanguage, "de")
+	}
+}
+
+func TestResolver_MetadataLanguageIgnoresLegacyColumn(t *testing.T) {
+	// A profile with only the legacy column value falls to the contract
+	// default ("" — inherit), proving the column is no longer read.
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		stubStoreProvider{store: stubStore{
+			profile: &userstore.Profile{
+				ID:                        "prof-1",
+				PreferredMetadataLanguage: "fr",
+			},
+		}},
+		nil,
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if scope.PreferredMetadataLanguage != "" {
+		t.Fatalf("PreferredMetadataLanguage = %q, want contract default \"\"", scope.PreferredMetadataLanguage)
 	}
 }
 

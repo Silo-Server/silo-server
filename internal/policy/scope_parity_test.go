@@ -10,8 +10,30 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
+
+// parityMetadataLang is the canonically stored catalog.metadata_language for
+// the parity profile. parityProfile's legacy column deliberately carries a
+// different value, so a resolver that regresses to reading the column breaks
+// parity instead of passing by coincidence.
+const parityMetadataLang = "fr"
+
+func parityMetadataLangValues(profile *userstore.Profile) []userstore.SettingValue {
+	if profile == nil {
+		return nil
+	}
+	return []userstore.SettingValue{{
+		SettingIdentity: userstore.SettingIdentity{
+			Key:       settingskeys.CatalogMetadataLanguage,
+			Scope:     settingscontract.ScopeProfile,
+			ProfileID: profile.ID,
+		},
+		Value: json.RawMessage(`"` + parityMetadataLang + `"`),
+	}}
+}
 
 func TestResolveViewerScopeParity(t *testing.T) {
 	ctx := context.Background()
@@ -84,8 +106,9 @@ func TestResolveViewerScopeParity(t *testing.T) {
 										profile.MaxContentRating = ratingCase.value
 									}
 									store := parityStore{
-										profile:  profile,
-										settings: disabledSetting(disabledCase.ids),
+										profile:       profile,
+										settings:      disabledSetting(disabledCase.ids),
+										settingValues: parityMetadataLangValues(profile),
 									}
 									resolver := access.NewResolver(
 										parityUserRepo{user: user},
@@ -170,11 +193,13 @@ func profileRatingCases(profile *userstore.Profile) []namedString {
 
 func parityProfile(restricted bool, allowed []int) *userstore.Profile {
 	return &userstore.Profile{
-		ID:                         "prof-1",
-		PINHash:                    "pin-hash",
-		MaxContentRating:           "PG-13",
-		MaxPlaybackQuality:         "720p",
-		PreferredMetadataLanguage:  "fr",
+		ID:                 "prof-1",
+		PINHash:            "pin-hash",
+		MaxContentRating:   "PG-13",
+		MaxPlaybackQuality: "720p",
+		// A decoy: the canonical value is parityMetadataLang, stored through
+		// parityMetadataLangValues. This column must no longer be read.
+		PreferredMetadataLanguage:  "hu",
 		LibraryRestrictionsEnabled: restricted,
 		AllowedLibraryIDs:          cloneParityInts(allowed),
 	}
@@ -205,7 +230,9 @@ func scopeInputFromParity(user *models.User, profile *userstore.Profile, disable
 		input.ProfileLibraryIDs = cloneParityInts(profile.AllowedLibraryIDs)
 		input.ProfileHasPIN = profile.PINHash != ""
 		input.ProfileVerified = verified
-		input.ProfileMetadataLang = profile.PreferredMetadataLanguage
+		// Canonically resolved, mirroring ViewerResolver — the legacy profile
+		// column is no longer a policy input.
+		input.ProfileMetadataLang = parityMetadataLang
 	}
 	return input
 }
@@ -287,8 +314,13 @@ func (p parityStoreProvider) Close() error {
 
 type parityStore struct {
 	userstore.UserStore
-	profile  *userstore.Profile
-	settings map[string]string
+	profile       *userstore.Profile
+	settings      map[string]string
+	settingValues []userstore.SettingValue
+}
+
+func (s parityStore) ListSettingValuesForResolution(context.Context, userstore.SettingResolutionQuery) ([]userstore.SettingValue, error) {
+	return s.settingValues, nil
 }
 
 func (s parityStore) GetProfile(_ context.Context, id string) (*userstore.Profile, error) {
