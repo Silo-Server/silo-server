@@ -114,20 +114,21 @@ export function TourHost({ flow, onDone }: TourHostProps) {
       aria-modal="true"
       aria-label="Feature tour"
     >
-      <div className="bg-card border-border w-full max-w-lg rounded-2xl border p-6 shadow-2xl sm:p-7">
+      <div className="bg-card border-border max-h-[85dvh] w-full max-w-lg overflow-y-auto rounded-2xl border p-6 shadow-2xl sm:p-7">
         <StepBody step={step} />
 
-        <div className="mt-7 flex items-center justify-between gap-3">
+        <div className="mt-7 flex flex-wrap items-center justify-between gap-3">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => finish({ skipped: true })}
-            className="text-muted-foreground"
+            className="text-muted-foreground shrink-0"
           >
             Skip tour
           </Button>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5" aria-hidden="true">
+          <div className="flex min-w-0 items-center gap-4">
+            {/* Pips are decorative; on phones they'd crowd the buttons out. */}
+            <div className="hidden items-center gap-1.5 sm:flex" aria-hidden="true">
               {steps.map((s, i) => (
                 <span
                   key={s.id}
@@ -138,7 +139,7 @@ export function TourHost({ flow, onDone }: TourHostProps) {
                 />
               ))}
             </div>
-            <div className="flex gap-2">
+            <div className="flex shrink-0 gap-2">
               {index > 0 && (
                 <Button variant="outline" size="sm" onClick={() => setIndex(index - 1)}>
                   Back
@@ -180,12 +181,12 @@ function StepBody({ step }: { step: OnboardingStep }) {
         </div>
       )}
       {step.links && step.links.length > 0 && (
-        <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           {step.links.map((link) => (
-            <Button key={link.url} variant="outline" size="sm" asChild>
+            <Button key={link.url} variant="outline" size="sm" asChild className="max-w-full">
               <a href={link.url} target="_blank" rel="noopener noreferrer">
-                {link.label}
-                <ExternalLink className="ml-1.5 size-3.5" aria-hidden="true" />
+                <span className="truncate">{link.label}</span>
+                <ExternalLink className="ml-1.5 size-3.5 shrink-0" aria-hidden="true" />
               </a>
             </Button>
           ))}
