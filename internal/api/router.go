@@ -790,6 +790,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		// which degrades to "no typed settings routes" instead of no server.
 		if contract, err := settingscontract.Load(); err == nil {
 			settingValuesHandler = handlers.NewSettingValuesHandler(deps.UserStoreProvider, contract)
+			settingValuesHandler.EventsHub = deps.EventsHub
 		}
 		homeDismissalHandler = handlers.NewHomeDismissalHandler(deps.UserStoreProvider)
 		homeDismissalHandler.EventsHub = deps.EventsHub

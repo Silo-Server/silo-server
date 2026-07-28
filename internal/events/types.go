@@ -15,6 +15,7 @@ const (
 	ChannelScans         EventChannel = "scans"
 	ChannelHistoryImport EventChannel = "history_import"
 	ChannelUserState     EventChannel = "user_state"
+	ChannelUserSettings  EventChannel = "user_settings"
 	ChannelSettings      EventChannel = "settings"
 	ChannelPlugins       EventChannel = "plugins"
 	// ChannelNotifications carries profile-scoped user notifications
@@ -31,6 +32,7 @@ var AllChannels = []EventChannel{
 	ChannelScans,
 	ChannelHistoryImport,
 	ChannelUserState,
+	ChannelUserSettings,
 	ChannelSettings,
 	ChannelPlugins,
 	ChannelNotifications,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -31,6 +32,10 @@ type SettingValuesHandler struct {
 	storeProvider userstore.UserStoreProvider
 	contract      *settingscontract.Manifest
 	resolver      *settingsresolve.Resolver
+
+	// EventsHub, when set, receives a user_settings.changed event after every
+	// successful write or delete. Nil (as in tests) simply skips publishing.
+	EventsHub *evt.Hub
 }
 
 // NewSettingValuesHandler builds the handler over the embedded contract.
@@ -241,6 +246,8 @@ func (h *SettingValuesHandler) HandleSetValue(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
 		return
 	}
+	publishUserSettingsEvent(r.Context(), h.EventsHub,
+		apimw.GetUserID(r.Context()), identity.ProfileID, identity.Key, string(identity.Scope))
 	writeJSON(w, http.StatusOK, settingValueToResponse(*stored))
 }
 
@@ -265,6 +272,8 @@ func (h *SettingValuesHandler) HandleDeleteValue(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusNotFound, "not_found", "No value is set at this scope")
 		return
 	}
+	publishUserSettingsEvent(r.Context(), h.EventsHub,
+		apimw.GetUserID(r.Context()), identity.ProfileID, identity.Key, string(identity.Scope))
 	w.WriteHeader(http.StatusNoContent)
 }
 
