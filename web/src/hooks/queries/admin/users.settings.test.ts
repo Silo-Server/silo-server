@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 
 import {
+  useAdminDeviceOverrides,
   useAdminUserDeviceSettings,
   useAdminUserSettings,
   useDeleteAdminUserSetting,
@@ -153,6 +154,50 @@ describe("admin canonical settings hooks", () => {
         updated_at: "2026-07-28T11:00:00Z",
       },
     ]);
+  });
+
+  it("scopes the device panel's overrides to one device, from the canonical list", async () => {
+    // The device detail endpoint reports the legacy user_device_settings
+    // table, which nothing canonical writes to; the panel has to read the
+    // values API or an override written since the cutover never appears.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = String(input);
+        if (url === "/api/v1/admin/users/7/settings/values") {
+          return jsonResponse({
+            revision: 1,
+            values: [
+              ...valuesResponse.values,
+              {
+                key: "player.hdr_enabled",
+                scope: "profile_device",
+                profile_id: "p1",
+                device_id: "phone-9",
+                value: false,
+                revision: 1,
+              },
+            ],
+          });
+        }
+        if (url === "/api/v1/admin/devices") {
+          return jsonResponse({ devices: [] });
+        }
+        if (url === "/api/v1/admin/users/7/profiles") {
+          return jsonResponse([{ id: "p1", name: "Laura" }]);
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    const { result } = renderHook(() => useAdminDeviceOverrides(7, "tv-1"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.data.length).toBe(1));
+
+    // Only tv-1's row, and never a non-device-scoped row from the same list.
+    expect(result.current.data.map((setting) => setting.key)).toEqual(["player.audio_sync_ms"]);
+    expect(result.current.data[0].device_id).toBe("tv-1");
   });
 
   it("writes a user setting to the canonical route with a typed value", async () => {

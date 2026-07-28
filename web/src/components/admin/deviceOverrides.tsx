@@ -682,7 +682,9 @@ export function DeviceProfileTabs({
         </div>
         <button
           type="button"
-          onClick={() => onResetProfile(active.settings[0]?.profile_id ?? "", active.profileName)}
+          // The tab's own id, not the first row's: a profile registered on the
+          // device with no override yet has no row to read it from.
+          onClick={() => onResetProfile(active.profileId, active.profileName)}
           disabled={resetPending || overrideCount === 0}
           className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground inline-flex items-center gap-1 text-[11.5px] transition-colors disabled:opacity-40"
         >

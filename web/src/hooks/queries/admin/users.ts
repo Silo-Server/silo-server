@@ -360,6 +360,25 @@ export function useAdminUserDeviceSettings(userId: number) {
   return { data, isLoading: values.isLoading, isError: values.isError };
 }
 
+/**
+ * One device's overrides, canonically.
+ *
+ * The device *detail* endpoint (GET /admin/devices/{user}/{device}) still
+ * reports rows straight out of the legacy user_device_settings table, which
+ * the settings-contract migration folded into user_setting_values and which
+ * nothing canonical writes to any more. Reading the values API instead means
+ * the panel shows both storage generations — the migrated legacy rows and
+ * everything written since — rather than a table that only ever shrinks.
+ */
+export function useAdminDeviceOverrides(userId: number, deviceId: string) {
+  const settings = useAdminUserDeviceSettings(userId);
+  const data = useMemo(
+    () => settings.data.filter((setting) => setting.device_id === deviceId),
+    [settings.data, deviceId],
+  );
+  return { data, isLoading: settings.isLoading, isError: settings.isError };
+}
+
 export function useUpdateAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   return useMutation({
