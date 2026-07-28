@@ -12,6 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { clearHouseholdSetupDone, setTourSuppressed } from "@/lib/onboarding";
+import { buildInviteDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
+import { Smartphone } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -83,6 +85,15 @@ export default function InviteClaim() {
 
   const invitation = lookup.data;
 
+  // On Android, offer to continue in the native app — the app registers
+  // silo://invite and has the full claim flow. A user-tapped custom-scheme
+  // link is the one context where silo:// works reliably; we never fire it
+  // automatically (there is no installed-check, and a miss shows an OS
+  // error). iOS joins once the Apple app registers the scheme.
+  const platform = detectMobilePlatform(navigator.userAgent);
+  const appLink =
+    platform === "android" ? buildInviteDeepLink(window.location.origin, token) : null;
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (password !== confirmPassword) {
@@ -130,6 +141,25 @@ export default function InviteClaim() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {appLink && (
+            <div className="mb-6 space-y-3">
+              <Button asChild size="lg" className="h-12 w-full text-base font-semibold">
+                <a href={appLink}>
+                  <Smartphone className="mr-2 h-5 w-5" /> Open in the Silo app
+                </a>
+              </Button>
+              <p className="text-muted-foreground text-center text-xs">
+                Nothing happens? The app isn&apos;t installed — just continue below.
+              </p>
+              <div className="flex items-center gap-3">
+                <div className="border-border flex-1 border-t" />
+                <span className="text-muted-foreground text-xs uppercase">
+                  or set up in the browser
+                </span>
+                <div className="border-border flex-1 border-t" />
+              </div>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="invite-email">Email</Label>
@@ -143,7 +173,9 @@ export default function InviteClaim() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="new-password"
-                autoFocus
+                // On mobile, focusing here pops the keyboard over the
+                // open-in-app button — the primary action when it's shown.
+                autoFocus={!appLink}
                 required
               />
             </div>
