@@ -137,7 +137,7 @@ func (s *Service) BrowseStudio(ctx context.Context, viewer Viewer, slug, sort st
 	if err != nil {
 		return nil, err
 	}
-	params, err := s.browseDiscoverParams(ctx, viewer, "movie", tmdb.DiscoverParams{
+	params, ceiling, err := s.browseDiscoverParams(ctx, viewer, "movie", tmdb.DiscoverParams{
 		SortBy:        tmdbSort,
 		WithCompanies: []int{studio.TMDBID},
 		VoteCountGte:  voteCountFloorForSort(sortKey),
@@ -149,7 +149,7 @@ func (s *Service) BrowseStudio(ctx context.Context, viewer Viewer, slug, sort st
 	if err != nil {
 		return nil, err
 	}
-	enriched, err := s.enrichPage(ctx, viewer, tmdbPage)
+	enriched, err := s.enrichPageWithCeiling(ctx, viewer, tmdbPage, ceiling)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func (s *Service) BrowseNetwork(ctx context.Context, viewer Viewer, slug, sort s
 	if err != nil {
 		return nil, err
 	}
-	params, err := s.browseDiscoverParams(ctx, viewer, "tv", tmdb.DiscoverParams{
+	params, ceiling, err := s.browseDiscoverParams(ctx, viewer, "tv", tmdb.DiscoverParams{
 		SortBy:       tmdbSort,
 		WithNetworks: []int{network.TMDBID},
 		VoteCountGte: voteCountFloorForSort(sortKey),
@@ -194,7 +194,7 @@ func (s *Service) BrowseNetwork(ctx context.Context, viewer Viewer, slug, sort s
 	if err != nil {
 		return nil, err
 	}
-	enriched, err := s.enrichPage(ctx, viewer, tmdbPage)
+	enriched, err := s.enrichPageWithCeiling(ctx, viewer, tmdbPage, ceiling)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +248,7 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 	if err != nil {
 		return nil, err
 	}
-	params, err := s.browseDiscoverParams(ctx, viewer, tmdbMediaType, tmdb.DiscoverParams{
+	params, ceiling, err := s.browseDiscoverParams(ctx, viewer, tmdbMediaType, tmdb.DiscoverParams{
 		SortBy:       tmdbSort,
 		WithGenres:   []int{genreID},
 		VoteCountGte: voteCountFloorForSort(sortKey),
@@ -260,7 +260,7 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 	if err != nil {
 		return nil, err
 	}
-	enriched, err := s.enrichPage(ctx, viewer, tmdbPage)
+	enriched, err := s.enrichPageWithCeiling(ctx, viewer, tmdbPage, ceiling)
 	if err != nil {
 		return nil, err
 	}
@@ -324,14 +324,16 @@ func certificationCeilingFor(ceiling, tmdbMediaType string) string {
 }
 
 // browseDiscoverParams applies the viewer's rating ceiling as a TMDB-side
-// certification.lte pre-filter on top of the base params.
-func (s *Service) browseDiscoverParams(ctx context.Context, viewer Viewer, tmdbMediaType string, params tmdb.DiscoverParams) (tmdb.DiscoverParams, error) {
+// certification.lte pre-filter on top of the base params. It returns the
+// resolved ceiling so the caller can reuse it for post-filter enrichment
+// without a second scope resolution.
+func (s *Service) browseDiscoverParams(ctx context.Context, viewer Viewer, tmdbMediaType string, params tmdb.DiscoverParams) (tmdb.DiscoverParams, string, error) {
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
 	if err != nil {
-		return tmdb.DiscoverParams{}, err
+		return tmdb.DiscoverParams{}, "", err
 	}
 	params.CertificationLte = certificationCeilingFor(ceiling, tmdbMediaType)
-	return params, nil
+	return params, ceiling, nil
 }
 
 func normalizeBrowseSort(sort, tmdbMediaType string) (string, string, error) {

@@ -448,10 +448,20 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 }
 
 func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, page int) (*DiscoverySection, error) {
-	return s.discover(ctx, viewer, section, page, sectionBackfillBudgetSingle)
+	if s == nil || s.store == nil || s.tmdb == nil {
+		return nil, fmt.Errorf("request service is not configured")
+	}
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	return s.discover(ctx, viewer, section, page, sectionBackfillBudgetSingle, ceiling)
 }
 
-func (s *Service) discover(ctx context.Context, viewer Viewer, section string, page, backfillBudget int) (*DiscoverySection, error) {
+// discover renders one section for an already-resolved ceiling. Callers own
+// the ceiling lookup so a DiscoverAll fan-out resolves the viewer scope once,
+// not once per section per page.
+func (s *Service) discover(ctx context.Context, viewer Viewer, section string, page, backfillBudget int, ceiling string) (*DiscoverySection, error) {
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
@@ -462,11 +472,8 @@ func (s *Service) discover(ctx context.Context, viewer Viewer, section string, p
 	if _, ok := discoverySectionTitles[section]; !ok {
 		return nil, fmt.Errorf("%w: invalid discovery section", ErrInvalidInput)
 	}
-	ceiling, err := s.viewerContentCeiling(ctx, viewer)
-	if err != nil {
-		return nil, err
-	}
 	var raw *tmdb.MediaPage
+	var err error
 	var nextPage int
 	if ceiling != "" {
 		raw, nextPage, err = s.backfillSectionPage(ctx, section, page, backfillBudget, ceiling)
@@ -476,7 +483,7 @@ func (s *Service) discover(ctx context.Context, viewer Viewer, section string, p
 	if err != nil {
 		return nil, err
 	}
-	enriched, err := s.enrichPage(ctx, viewer, raw)
+	enriched, err := s.enrichPageWithCeiling(ctx, viewer, raw, ceiling)
 	if err != nil {
 		return nil, err
 	}
@@ -498,13 +505,17 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
 	sections := make([]DiscoverySection, len(discoverySectionOrder))
 	group, gctx := errgroup.WithContext(ctx)
 	group.SetLimit(externalIDHydrationConcurrency)
 	for i, key := range discoverySectionOrder {
 		i, key := i, key
 		group.Go(func() error {
-			section, err := s.discover(gctx, viewer, key, 1, sectionBackfillBudgetAggregate)
+			section, err := s.discover(gctx, viewer, key, 1, sectionBackfillBudgetAggregate, ceiling)
 			if err != nil {
 				return err
 			}
@@ -545,15 +556,27 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 	}
 
 	// Deep-linking a detail page must not bypass the discovery rating filter.
-	// The detail payload already carries the certification, so this costs no
-	// extra TMDB call. ErrNotFound rather than ErrForbidden: a restricted
-	// profile shouldn't learn the title exists.
+	// The guard uses the US-only enforcement certification (GetCertification,
+	// cached), NOT raw.ContentRating: the display rating falls back to any
+	// country's cert, and a foreign "PG"/"G" is the same string as the US
+	// rating, so it would pass the US ladder. ErrNotFound rather than
+	// ErrForbidden: a restricted profile shouldn't learn the title exists.
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
 	if err != nil {
 		return nil, err
 	}
-	if ceiling != "" && !access.RatingAllowed(raw.ContentRating, ceiling) {
-		return nil, ErrNotFound
+	if ceiling != "" {
+		client, ok := s.tmdb.(TMDBCertificationClient)
+		if !ok {
+			return nil, fmt.Errorf("requests: tmdb client cannot resolve certifications")
+		}
+		cert, err := client.GetCertification(ctx, tmdbMediaType(mediaType), tmdbID)
+		if err != nil {
+			return nil, err
+		}
+		if !access.RatingAllowed(cert, ceiling) {
+			return nil, ErrNotFound
+		}
 	}
 
 	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
@@ -620,7 +643,7 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 
 	if len(raw.Recommendations) > 0 {
 		recPage := &tmdb.MediaPage{Results: raw.Recommendations}
-		enriched, err := s.enrichPage(ctx, viewer, recPage)
+		enriched, err := s.enrichPageWithCeiling(ctx, viewer, recPage, ceiling)
 		if err != nil {
 			return nil, err
 		}
@@ -1344,13 +1367,23 @@ func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePol
 }
 
 func (s *Service) enrichPage(ctx context.Context, viewer Viewer, raw *tmdb.MediaPage) (*MediaPage, error) {
-	if raw == nil {
-		return &MediaPage{Results: []MediaResult{}}, nil
-	}
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
 	if err != nil {
 		return nil, err
 	}
+	return s.enrichPageWithCeiling(ctx, viewer, raw, ceiling)
+}
+
+// enrichPageWithCeiling is enrichPage for callers that already resolved the
+// viewer's rating ceiling (discovery, browse, detail). The production
+// resolver loads the user, profile, and policy on every call, so resolving
+// once per request instead of again per page matters — DiscoverAll otherwise
+// doubles to 12 resolutions per load.
+func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw *tmdb.MediaPage, ceiling string) (*MediaPage, error) {
+	if raw == nil {
+		return &MediaPage{Results: []MediaResult{}}, nil
+	}
+	var err error
 	if ceiling != "" {
 		// Filtering before the presence/active-request lookups below means
 		// those (and their external-ID hydration) only pay for surviving items.

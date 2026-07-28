@@ -2,6 +2,7 @@ package tmdb
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -949,8 +950,12 @@ func TestGetCertificationIgnoresForeignFallback(t *testing.T) {
 		case "/tv/2/content_ratings":
 			_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"AU","rating":"PG"}]}`))
 		case "/movie/3/release_dates":
-			// Festival NR + theatrical PG-13 in the US: theatrical wins.
+			// Festival NR + theatrical PG-13 in the US: the rated entry wins.
 			_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"NR","type":2},{"certification":"PG-13","type":3}]}]}`))
+		case "/movie/4/release_dates":
+			// Two US theatrical entries that disagree (PG re-release + R):
+			// enforcement must take the STRICTEST, not the first.
+			_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"PG","type":3},{"certification":"R","type":3}]}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -968,6 +973,51 @@ func TestGetCertificationIgnoresForeignFallback(t *testing.T) {
 	}
 	if cert, err := client.GetCertification(context.Background(), "movie", 3); err != nil || cert != "PG-13" {
 		t.Fatalf("US theatrical cert = %q, %v; want PG-13", cert, err)
+	}
+	if cert, err := client.GetCertification(context.Background(), "movie", 4); err != nil || cert != "R" {
+		t.Fatalf("disagreeing US certs = %q, %v; want strictest (R)", cert, err)
+	}
+}
+
+// TestGetCertificationCallerStopsWaitingOnCancel pins the DoChan behavior: a
+// caller whose context dies mid-flight returns promptly with ctx.Err() while
+// the shared detached fetch continues for the surviving waiters.
+func TestGetCertificationCallerStopsWaitingOnCancel(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","rating":"TV-PG"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := client.GetCertification(ctx, "tv", 1396)
+		errCh <- err
+	}()
+	<-started
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled caller error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled caller still blocked on the shared fetch")
+	}
+
+	// The detached fetch is still completable for a fresh caller.
+	close(release)
+	if cert, err := client.GetCertification(context.Background(), "tv", 1396); err != nil || cert != "TV-PG" {
+		t.Fatalf("surviving caller cert = %q, %v; want TV-PG", cert, err)
 	}
 }
 

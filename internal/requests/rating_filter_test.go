@@ -3,6 +3,7 @@ package requests
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
@@ -323,6 +324,43 @@ func TestDiscoverBackfillPreservesOverflowAcrossPages(t *testing.T) {
 	}
 }
 
+// countingCeiling counts scope resolutions; the production resolver hits the
+// user store and policy engine per call, so call count is a real cost.
+type countingCeiling struct {
+	rating string
+	calls  atomic.Int64
+}
+
+func (f *countingCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
+	return "", nil
+}
+
+func (f *countingCeiling) MaxContentRating(context.Context, int, string) (string, error) {
+	f.calls.Add(1)
+	return f.rating, nil
+}
+
+func TestDiscoverAllResolvesCeilingOnce(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &pagedCertTMDBClient{
+		certTMDBClient: certTMDBClient{certs: map[int]string{}},
+		pages: map[int]*tmdb.MediaPage{
+			1: {Page: 1, TotalPages: 1, Results: nil},
+		},
+	}
+	service := NewService(store, client, &fakePresence{})
+	ceiling := &countingCeiling{rating: "PG"}
+	service.SetEntitlementResolver(ceiling)
+
+	if _, err := service.DiscoverAll(context.Background(), testViewer(1)); err != nil {
+		t.Fatalf("DiscoverAll returned error: %v", err)
+	}
+	if got := ceiling.calls.Load(); got != 1 {
+		t.Fatalf("ceiling resolutions = %d, want 1 for the whole DiscoverAll", got)
+	}
+}
+
 func TestDiscoverAllUsesSmallerBackfillBudget(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
@@ -361,6 +399,7 @@ func TestGetDetailBlocksTitleAboveCeiling(t *testing.T) {
 			Title:         "Adult Movie",
 			ContentRating: "R",
 		}},
+		certs: map[int]string{42: "R"},
 	}
 	service := newRatedService(store, client, nil, "PG")
 
@@ -376,6 +415,29 @@ func TestGetDetailBlocksTitleAboveCeiling(t *testing.T) {
 	}
 	if detail.TMDBID != 42 {
 		t.Fatalf("detail id = %d, want 42", detail.TMDBID)
+	}
+}
+
+// TestGetDetailIgnoresForeignDisplayRating pins the round-2 review finding:
+// the guard compares the US-only enforcement certification, not the detail
+// payload's display rating. A foreign "PG" (same string as US PG) in the
+// display field must not admit a title whose US certification is unresolved.
+func TestGetDetailIgnoresForeignDisplayRating(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	client := &certTMDBClient{
+		fakeTMDBClient: fakeTMDBClient{detail: &tmdb.MediaDetail{
+			MediaType:     "movie",
+			ID:            77,
+			Title:         "Foreign Only",
+			ContentRating: "PG", // display fallback from a non-US country
+		}},
+		certs: map[int]string{77: ""}, // US-only enforcement lookup: unresolved
+	}
+	service := newRatedService(store, client, nil, "PG")
+
+	if _, err := service.GetDetail(context.Background(), testViewer(1), MediaTypeMovie, 77); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetDetail error = %v, want ErrNotFound (foreign display rating must not pass)", err)
 	}
 }
 

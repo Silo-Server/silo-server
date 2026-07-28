@@ -1185,16 +1185,16 @@ func (c *Client) GetCertification(ctx context.Context, mediaType string, id int)
 		}
 	}
 
-	value, err, _ := c.cacheGroup.Do(cacheKey, func() (any, error) {
+	// DoChan + select rather than Do: the shared fetch must survive any one
+	// caller's disconnect (it runs detached with its own bound), while each
+	// caller must still be able to stop waiting on its own cancellation
+	// instead of being pinned for up to the fetch timeout.
+	resultCh := c.cacheGroup.DoChan(cacheKey, func() (any, error) {
 		if c.certificationCache != nil {
 			if cached, ok := c.certificationCache.Get(cacheKey); ok {
 				return cached, nil
 			}
 		}
-		// The singleflight closure runs on the first caller's context, but its
-		// result is shared by every concurrent waiter. Detach from that
-		// caller's cancellation (with our own bound) so one disconnecting
-		// client can't fail the fetch for everyone else piled on the key.
 		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), certificationFetchTimeout)
 		defer cancel()
 		cert, err := c.fetchCertification(fetchCtx, mediaType, path)
@@ -1209,14 +1209,19 @@ func (c *Client) GetCertification(ctx context.Context, mediaType string, id int)
 		}
 		return cert, nil
 	})
-	if err != nil {
-		return "", err
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		cert, ok := result.Val.(string)
+		if !ok {
+			return "", fmt.Errorf("tmdb: invalid cached certification response")
+		}
+		return cert, nil
 	}
-	cert, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("tmdb: invalid cached certification response")
-	}
-	return cert, nil
 }
 
 func (c *Client) fetchCertification(ctx context.Context, mediaType, path string) (string, error) {
@@ -1234,16 +1239,27 @@ func (c *Client) fetchCertification(ctx context.Context, mediaType, path string)
 	return pickUSTVRating(&resp), nil
 }
 
+// usCertificationRank orders US movie certifications for strictest-wins
+// resolution across multiple release entries. Mirrors TMDB's own
+// /certification/movie/list ordering. Unknown strings (including "NR") rank
+// -1 and lose to any recognized rating; a title with ONLY unknown/NR entries
+// resolves to that string and fails closed downstream.
+var usCertificationRank = map[string]int{
+	"G": 1, "PG": 2, "PG-13": 3, "R": 4, "NC-17": 5,
+}
+
 // pickUSMovieCertification is the enforcement-path variant of
-// pickMovieCertification: US entries only, no foreign fallback. Within the
-// US it keeps the display picker's preference (theatrical release first) but
-// resolves multi-entry disagreements — e.g. a festival "NR" alongside a
-// theatrical "PG-13" — instead of returning whichever appears first.
+// pickMovieCertification: US entries only, no foreign fallback. A title can
+// carry several US entries whose certifications disagree — festival "NR" next
+// to a theatrical "PG-13", or re-releases rated "PG" and "R" — and TMDB's
+// entry order is not meaningful, so the STRICTEST recognized rating wins:
+// enforcement must not admit a title on its most lenient certificate.
 func pickUSMovieCertification(rd *releaseDatesResponse) string {
 	if rd == nil {
 		return ""
 	}
-	var fallback string
+	var picked string
+	pickedRank := -1
 	for _, country := range rd.Results {
 		if !strings.EqualFold(country.ISO3166, "US") {
 			continue
@@ -1253,16 +1269,14 @@ func pickUSMovieCertification(rd *releaseDatesResponse) string {
 			if cert == "" {
 				continue
 			}
-			if entry.Type == 3 {
-				return cert
-			}
-			// Prefer a real rating over "NR" from a different release type.
-			if fallback == "" || strings.EqualFold(fallback, "NR") {
-				fallback = cert
+			rank := usCertificationRank[strings.ToUpper(cert)] // unknown -> 0
+			if rank > pickedRank || picked == "" {
+				picked = cert
+				pickedRank = rank
 			}
 		}
 	}
-	return fallback
+	return picked
 }
 
 // pickUSTVRating is the enforcement-path variant of pickTVRating: US only.
