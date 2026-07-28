@@ -2625,6 +2625,10 @@ export type EventChannel =
   | "scans"
   | "history_import"
   | "user_state"
+  // Per-account settings changed somewhere (another device, or an admin
+  // editing this account). Identity only, never a value — see
+  // useSettingValuesRealtime.
+  | "user_settings"
   | "settings"
   | "notifications";
 

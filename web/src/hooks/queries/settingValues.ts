@@ -1,7 +1,9 @@
+import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { storage } from "@/utils/storage";
 import { SETTING_DEFINITIONS, SETTINGS_REVISION, type SettingKey } from "@/lib/settingsContract";
+import { useEventChannel } from "@/components/realtimeEventsContext";
 import { settingsKeys } from "./keys";
 
 /**
@@ -217,4 +219,53 @@ export function useContractIsAheadOfServer() {
   const { data } = useSettingsCapabilities();
   if (!data) return false;
   return SETTINGS_REVISION > data.revision;
+}
+
+/** The user_settings.changed payload. Identity only — never a value. */
+interface UserSettingsChangedPayload {
+  key?: string;
+  scope?: SettingScope;
+  profile_id?: string;
+}
+
+/**
+ * Keeps this client's resolved settings honest while another device edits them.
+ *
+ * The server publishes user_settings.changed on every canonical write and
+ * delete, carrying only what changed and never the value — admins receive
+ * other accounts' events, so a value in the payload would leak private
+ * settings. The event is therefore a pure invalidation signal: mark the value
+ * queries stale and let react-query refetch the ones a mounted screen is
+ * actually reading. Nothing is written into the cache from the socket.
+ *
+ * A burst (a settings screen saving several keys, or a profile sync writing a
+ * batch) costs one refetch, not one per event: invalidateQueries only marks
+ * the entries stale and react-query coalesces the resulting fetches per key.
+ */
+export function useSettingValuesRealtime() {
+  const qc = useQueryClient();
+
+  const handlers = useMemo(
+    () => ({
+      onEvent: (message: unknown) => {
+        const event = message as { event?: string; data?: UserSettingsChangedPayload };
+        if (event?.event !== "user_settings.changed") return;
+
+        // One account can have several profiles, and admins additionally
+        // receive other accounts' user-scoped events (the frame carries no
+        // user id to filter on, so that case falls through to a harmless
+        // refetch). A profile-addressed change to a profile that is not the
+        // signed-in one cannot alter what we resolve, so it is dropped. An
+        // account-scoped change carries no profile and does affect us.
+        const changedProfile = event.data?.profile_id;
+        const activeProfile = activeProfileId();
+        if (changedProfile && activeProfile && changedProfile !== activeProfile) return;
+
+        qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+      },
+    }),
+    [qc],
+  );
+
+  useEventChannel("user_settings", handlers);
 }
