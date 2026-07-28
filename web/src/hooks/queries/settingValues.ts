@@ -1,0 +1,203 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/api/client";
+import { storage } from "@/utils/storage";
+import { SETTING_DEFINITIONS, SETTINGS_REVISION, type SettingKey } from "@/lib/settingsContract";
+import { settingsKeys } from "./keys";
+
+/**
+ * Typed access to the canonical settings API.
+ *
+ * The hooks in ./settings.ts speak the legacy string-only endpoints: every
+ * value is a string, scope is implied by which function you call, and an
+ * unknown key is silently accepted. These speak the contract instead — values
+ * are typed JSON, scope is explicit, and a key that is not in the manifest
+ * cannot be expressed because SettingKey is generated from it.
+ */
+
+/** The five scopes a value can live at. */
+export type SettingScope =
+  | "account"
+  | "profile"
+  | "profile_device"
+  | "profile_library"
+  | "profile_series";
+
+/** Where a resolved value came from, or "default" when nothing was stored. */
+export type SettingSource = SettingScope | "default";
+
+export interface SettingIdentity {
+  scope: SettingScope;
+  /** Required for profile_library. */
+  libraryId?: number;
+  /** Required for profile_series. */
+  seriesId?: string;
+}
+
+export interface EffectiveSetting<T = unknown> {
+  key: SettingKey;
+  value: T;
+  source: SettingSource;
+  /** Present only when policy narrowed the answer; this is what the user chose. */
+  stored_value?: T;
+  constrained?: boolean;
+  constraint_kind?: "ceiling" | "floor" | "allowlist" | "locked";
+  /** The scope holding the value, so a reset can target it exactly. */
+  scope?: SettingScope;
+  library_id?: number;
+  series_id?: string;
+}
+
+interface EffectiveResponse {
+  settings: EffectiveSetting[];
+  revision: number;
+}
+
+function identityQuery(identity: SettingIdentity): string {
+  const params = new URLSearchParams({ scope: identity.scope });
+  if (identity.libraryId !== undefined) params.set("library_id", String(identity.libraryId));
+  if (identity.seriesId !== undefined) params.set("series_id", identity.seriesId);
+  return params.toString();
+}
+
+function activeProfileId() {
+  return storage.get(storage.KEYS.PROFILE_ID);
+}
+
+/**
+ * Resolve settings the way the server does, including the scope each answer
+ * came from.
+ *
+ * Batched on purpose: a settings screen wants every key at once and a series
+ * view wants several keys for one series, and the server answers either in one
+ * read. Passing no keys returns every remote setting.
+ */
+export function useEffectiveSettings(options?: {
+  keys?: readonly SettingKey[];
+  libraryIds?: readonly number[];
+  seriesIds?: readonly string[];
+  enabled?: boolean;
+}) {
+  const keys = options?.keys;
+  const libraryIds = options?.libraryIds;
+  const seriesIds = options?.seriesIds;
+
+  return useQuery({
+    queryKey: [
+      ...settingsKeys.all,
+      "values",
+      "effective",
+      activeProfileId(),
+      keys ? [...keys].sort().join(",") : "*",
+      libraryIds ? [...libraryIds].sort().join(",") : "",
+      seriesIds ? [...seriesIds].sort().join(",") : "",
+    ] as const,
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (keys?.length) params.set("keys", keys.join(","));
+      if (libraryIds?.length) params.set("library_ids", libraryIds.join(","));
+      if (seriesIds?.length) params.set("series_ids", seriesIds.join(","));
+      const query = params.toString();
+      const result = await api<EffectiveResponse>(
+        `/settings/values/effective${query ? `?${query}` : ""}`,
+      );
+      const byKey: Partial<Record<SettingKey, EffectiveSetting>> = {};
+      for (const setting of result.settings) {
+        byKey[setting.key] = setting;
+      }
+      return byKey;
+    },
+    enabled: options?.enabled ?? true,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * The effective value for one key, already unwrapped, falling back to the
+ * contract default while the request is in flight.
+ *
+ * The default comes from the generated table rather than a literal at the call
+ * site, which is what stops a client and the server disagreeing about what
+ * "unset" means — the bug that made every default-on toggle flip off against a
+ * server that did not know the key.
+ */
+export function useSettingValue<T = unknown>(
+  key: SettingKey,
+  options?: { libraryIds?: readonly number[]; seriesIds?: readonly string[]; enabled?: boolean },
+) {
+  const query = useEffectiveSettings({ keys: [key], ...options });
+  const setting = query.data?.[key];
+  return {
+    ...query,
+    value: (setting?.value ?? SETTING_DEFINITIONS[key].defaultValue) as T,
+    source: setting?.source ?? "default",
+    constrained: setting?.constrained ?? false,
+    setting,
+  };
+}
+
+/** Write one value at one scope. */
+export function useSetSettingValue() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      key,
+      value,
+      identity,
+      mutationId,
+    }: {
+      key: SettingKey;
+      value: unknown;
+      identity: SettingIdentity;
+      /** Optional idempotency key; a retry with the same id replays rather than re-applying. */
+      mutationId?: string;
+    }) =>
+      api(`/settings/values/${key}?${identityQuery(identity)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(mutationId ? { "X-Silo-Mutation-Id": mutationId } : {}),
+        },
+        body: JSON.stringify({ value }),
+      }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+    },
+  });
+}
+
+/** Clear the value at one scope, so the setting inherits again. */
+export function useClearSettingValue() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ key, identity }: { key: SettingKey; identity: SettingIdentity }) =>
+      api(`/settings/values/${key}?${identityQuery(identity)}`, { method: "DELETE" }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
+    },
+  });
+}
+
+/**
+ * The server's contract revision, for the server-upgrade-required case: a
+ * client built against a newer manifest hides definitions the connected server
+ * does not know rather than offering a choice it will refuse.
+ */
+export function useSettingsCapabilities() {
+  return useQuery({
+    queryKey: [...settingsKeys.all, "capabilities"] as const,
+    queryFn: () =>
+      api<{ api_version: number; revision: number; contract_etag: string }>(
+        "/settings/contract/capabilities",
+      ),
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/** Whether this build's contract is newer than the connected server's. */
+export function useContractIsAheadOfServer() {
+  const { data } = useSettingsCapabilities();
+  if (!data) return false;
+  return SETTINGS_REVISION > data.revision;
+}

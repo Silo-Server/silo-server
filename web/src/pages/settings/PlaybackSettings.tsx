@@ -20,6 +20,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { LANGUAGE_OPTIONS } from "@/lib/settingsManifest";
+import { QUALITY_PRESETS, describeQuality, presetById, presetIdFor } from "@/lib/qualityPresets";
+import {
+  useClearSettingValue,
+  useEffectiveSettings as useEffectiveSettingValues,
+  useSetSettingValue,
+} from "@/hooks/queries/settingValues";
 import { toast } from "sonner";
 
 const AUTO_PLAY_NEXT_KEY = "playback.auto_play_next";
@@ -99,6 +105,96 @@ function NextUpSetting() {
   );
 }
 
+/**
+ * Quality is two settings behind one picker.
+ *
+ * The server stores a resolution cap and a bandwidth cap independently, which
+ * is what the player has always sent on the wire. Presenting them as one list
+ * keeps the choice simple while leaving the two axes free: a preset is a
+ * client-side pairing, so retuning what "High" means never needs the server to
+ * agree, and someone who sets the axes separately through the API still gets a
+ * truthful label rather than a picker showing the wrong entry.
+ */
+function QualitySetting() {
+  const { data: effective } = useEffectiveSettingValues({
+    keys: ["playback.preferred_quality", "playback.max_bitrate_kbps"],
+  });
+  const setValue = useSetSettingValue();
+  const clearValue = useClearSettingValue();
+
+  const resolution = effective?.["playback.preferred_quality"]?.value as string | undefined;
+  const bitrate = effective?.["playback.max_bitrate_kbps"]?.value as number | null | undefined;
+  const selected = presetIdFor(resolution, bitrate);
+
+  const apply = (presetId: string) => {
+    const preset = presetById(presetId);
+    if (!preset) return;
+
+    setValue.mutate(
+      {
+        key: "playback.preferred_quality",
+        value: preset.resolution,
+        identity: { scope: "profile" },
+      },
+      { onError: () => toast.error("Failed to save video quality") },
+    );
+
+    // An uncapped preset clears the bitrate rather than storing a sentinel, so
+    // "no cap" stays the absence of a value at every layer.
+    if (preset.bitrateKbps === null) {
+      clearValue.mutate(
+        { key: "playback.max_bitrate_kbps", identity: { scope: "profile" } },
+        {
+          // Already absent is the desired state, so a 404 is success.
+          onError: () => undefined,
+        },
+      );
+    } else {
+      setValue.mutate(
+        {
+          key: "playback.max_bitrate_kbps",
+          value: preset.bitrateKbps,
+          identity: { scope: "profile" },
+        },
+        { onError: () => toast.error("Failed to save maximum bitrate") },
+      );
+    }
+  };
+
+  const pending = setValue.isPending || clearValue.isPending;
+
+  return (
+    <SettingRow
+      label="Video quality"
+      description="Choose the quality your profile should request when playback begins."
+      control={(id) => (
+        <div className="w-full">
+          <Select value={selected ?? "__custom"} onValueChange={apply}>
+            <SelectTrigger id={id} className="w-full sm:w-[260px]" disabled={pending}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {selected === null && (
+                <SelectItem value="__custom" disabled>
+                  {describeQuality(resolution, bitrate)}
+                </SelectItem>
+              )}
+              {QUALITY_PRESETS.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  {preset.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground mt-1.5 text-xs">
+            {describeQuality(resolution, bitrate)}
+          </p>
+        </div>
+      )}
+    />
+  );
+}
+
 export default function PlaybackSettings() {
   const { profile, selectProfile } = useAuth();
   const updateMutation = useUpdateProfile();
@@ -106,13 +202,7 @@ export default function PlaybackSettings() {
 
   if (!profile) return null;
 
-  const qualityPreference =
-    profile.quality_preference?.toLowerCase() === "4k"
-      ? "2160p"
-      : profile.quality_preference || "auto";
-
   const saveProfileField = (body: {
-    quality_preference?: string;
     language?: string;
     preferred_metadata_language?: string;
     auto_skip_intro?: boolean;
@@ -144,34 +234,7 @@ export default function PlaybackSettings() {
         title="Defaults"
         description="These preferences apply unless a library or item has a more specific playback choice."
       >
-        <SettingRow
-          label="Video quality"
-          description="Choose the quality your profile should request when playback begins."
-          control={(id) => (
-            <div className="w-full">
-              <Select
-                value={qualityPreference}
-                onValueChange={(value) => saveProfileField({ quality_preference: value })}
-              >
-                <SelectTrigger
-                  id={id}
-                  className="w-full sm:w-[220px]"
-                  disabled={updateMutation.isPending}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="auto">Auto</SelectItem>
-                  <SelectItem value="original">Original</SelectItem>
-                  <SelectItem value="2160p">4K</SelectItem>
-                  <SelectItem value="1080p">1080p</SelectItem>
-                  <SelectItem value="720p">720p</SelectItem>
-                  <SelectItem value="480p">480p</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        />
+        <QualitySetting />
 
         <SettingRow
           label="Spoken language"
