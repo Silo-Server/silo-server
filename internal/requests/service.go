@@ -77,6 +77,12 @@ type DiscoverySection struct {
 	TotalPages   int           `json:"total_pages"`
 	TotalResults int           `json:"total_results"`
 	Results      []MediaResult `json:"results"`
+	// NextPage is the cursor to request for the following page, needed when
+	// rating-filter backfill consumes more than one TMDB page per request
+	// (page+1 would repeat consumed pages). 0 when there are no more pages.
+	// Additive v1 field; absent (0) also when the viewer is unrestricted and
+	// plain page+1 semantics apply.
+	NextPage int `json:"next_page,omitempty"`
 }
 
 func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *Service {
@@ -193,58 +199,72 @@ func (s *Service) hydrateCertifications(ctx context.Context, raw *tmdb.MediaPage
 // Section backfill: fail-closed filtering hides most of a TMDB section page
 // for a restricted profile (typically 15+ of 20, since unrated titles are
 // dropped), which renders as a nearly empty carousel. To compensate, a
-// restricted viewer's section page is built from a fixed window ("stride") of
-// consecutive TMDB pages, filtered, and capped back to one page's worth.
+// restricted viewer's section page consumes consecutive TMDB pages, starting
+// at the requested page, until a page's worth of titles survives filtering or
+// the per-request budget (sectionBackfillMaxPagesPerRequest) is spent.
 //
-// The stride is what keeps pagination stable: Silo page N always maps to TMDB
-// pages [(N-1)*stride+1 .. N*stride], so consecutive Silo pages never overlap
-// and never skip titles, regardless of how many items each window loses to
-// filtering. The cost is bounded (stride list fetches + certification lookups,
-// all cached shared across profiles), unlike "keep fetching until full", which
-// is unbounded on a strict ceiling.
+// Pagination stays honest through two properties: `page` keeps plain TMDB
+// cursor semantics (same as for unrestricted viewers), and the response's
+// next_page reports the cursor after the last TMDB page actually consumed.
+// Every survivor from a consumed page is returned — nothing is trimmed and no
+// consumed page is partially dropped — so resuming at next_page never skips
+// or repeats an allowed title. The budget also bounds the cold-cache cost: a
+// permissive ceiling (R/TV-MA) fills from one TMDB page and stops immediately,
+// while a strict ceiling spends at most the budget per request.
 const (
-	sectionBackfillStride  = 5
-	sectionResultsPerPage  = 20
-	sectionBackfillMaxPage = 500 // TMDB hard-caps page at 500
+	// Per-request TMDB page budgets. A single-section request can afford a
+	// deeper scan than the six-section DiscoverAll aggregate: on a cold
+	// certification cache each consumed page costs up to 20 cert lookups
+	// against the client's rate limiter, so DiscoverAll's worst case is
+	// 6 sections x sectionBackfillBudgetAggregate pages x 20. Keeping the
+	// aggregate budget small bounds the first-paint latency for a restricted
+	// profile; the per-section endpoint (carousel "load more") gets the
+	// deeper budget. Steady state is unaffected — certifications are cached
+	// for 7 days, shared across all profiles.
+	sectionBackfillBudgetSingle    = 5
+	sectionBackfillBudgetAggregate = 2
+	sectionResultsPerPage          = 20
+	sectionBackfillMaxPage         = 500 // TMDB hard-caps page at 500
 )
 
-func (s *Service) backfillSectionPage(ctx context.Context, section string, page int, ceiling string) (*tmdb.MediaPage, error) {
+func (s *Service) backfillSectionPage(ctx context.Context, section string, page, pageBudget int, ceiling string) (result *tmdb.MediaPage, nextPage int, err error) {
 	if page <= 0 {
 		page = 1
 	}
-	windowStart := (page-1)*sectionBackfillStride + 1
-	windowEnd := windowStart + sectionBackfillStride - 1
+	if pageBudget <= 0 {
+		pageBudget = 1
+	}
 
 	out := &tmdb.MediaPage{Page: page}
 	var results []tmdb.MediaResult
 	// Trending/popular orderings shift between fetches, so consecutive TMDB
-	// pages can overlap; dedupe within the window.
+	// pages can overlap; dedupe within the request.
 	seen := map[certKey]bool{}
-	totalPages := windowEnd // until TMDB tells us the real count, assume the window exists
-	for next := windowStart; next <= windowEnd && next <= totalPages && next <= sectionBackfillMaxPage; next++ {
-		// A full page's worth already survived — stop fetching. Survivors in
-		// the window's remaining pages are dropped, not deferred (the next
-		// Silo page starts at a fresh window). That's a deliberate trade:
-		// with a ceiling set, survival rates are low enough that a window
-		// rarely overfills, and window-aligned pages are what guarantee no
-		// duplicates across pages.
+	totalPages := page // until TMDB tells us the real count, assume the current page exists
+	consumed := 0
+	for next := page; consumed < pageBudget && next <= totalPages && next <= sectionBackfillMaxPage; next++ {
+		// Enough survived — stop before spending another TMDB page. Titles on
+		// unconsumed pages are not lost: next_page points at the first page
+		// this request did not consume.
 		if len(results) >= sectionResultsPerPage {
 			break
 		}
 		raw, err := s.tmdb.DiscoverSection(ctx, section, next)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if raw == nil {
 			break
 		}
+		consumed++
+		nextPage = next + 1
 		if raw.TotalPages > 0 {
 			totalPages = raw.TotalPages
 			out.TotalResults = raw.TotalResults
 		}
 		filtered, err := s.filterPageByCeiling(ctx, raw, ceiling)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, item := range filtered.Results {
 			key := certKey{mediaType: MediaType(item.MediaType), id: item.ID}
@@ -254,15 +274,15 @@ func (s *Service) backfillSectionPage(ctx context.Context, section string, page 
 			}
 		}
 	}
-	if len(results) > sectionResultsPerPage {
-		results = results[:sectionResultsPerPage]
-	}
 	out.Results = results
-	// Page count is in whole windows so a paging client advances window by
-	// window and never revisits a TMDB page. TotalResults stays TMDB's
-	// unfiltered count (the filtered total is unknowable without a full scan).
-	out.TotalPages = (totalPages + sectionBackfillStride - 1) / sectionBackfillStride
-	return out, nil
+	// TotalPages/TotalResults stay TMDB's unfiltered counts — page keeps TMDB
+	// cursor semantics, and the filtered totals are unknowable without a full
+	// scan. next_page is the honest resume cursor.
+	out.TotalPages = totalPages
+	if nextPage > totalPages || nextPage > sectionBackfillMaxPage {
+		nextPage = 0 // exhausted
+	}
+	return out, nextPage, nil
 }
 
 // ensureCreateAllowedByCeiling rejects request submissions for titles above
@@ -428,6 +448,10 @@ func (s *Service) Search(ctx context.Context, viewer Viewer, query string, media
 }
 
 func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, page int) (*DiscoverySection, error) {
+	return s.discover(ctx, viewer, section, page, sectionBackfillBudgetSingle)
+}
+
+func (s *Service) discover(ctx context.Context, viewer Viewer, section string, page, backfillBudget int) (*DiscoverySection, error) {
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
@@ -443,8 +467,9 @@ func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, p
 		return nil, err
 	}
 	var raw *tmdb.MediaPage
+	var nextPage int
 	if ceiling != "" {
-		raw, err = s.backfillSectionPage(ctx, section, page, ceiling)
+		raw, nextPage, err = s.backfillSectionPage(ctx, section, page, backfillBudget, ceiling)
 	} else {
 		raw, err = s.tmdb.DiscoverSection(ctx, section, page)
 	}
@@ -462,6 +487,7 @@ func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, p
 		TotalPages:   enriched.TotalPages,
 		TotalResults: enriched.TotalResults,
 		Results:      enriched.Results,
+		NextPage:     nextPage,
 	}, nil
 }
 
@@ -478,7 +504,7 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 	for i, key := range discoverySectionOrder {
 		i, key := i, key
 		group.Go(func() error {
-			section, err := s.Discover(gctx, viewer, key, 1)
+			section, err := s.discover(gctx, viewer, key, 1, sectionBackfillBudgetAggregate)
 			if err != nil {
 				return err
 			}
@@ -994,7 +1020,15 @@ func (s *Service) GetFeatureStatus(ctx context.Context, _ Viewer) (FeatureStatus
 	if err != nil {
 		return FeatureStatus{}, err
 	}
-	return FeatureStatus{RequestsEnabled: settings.RequestsEnabled}, nil
+	// Rating enforcement is active when the wiring can resolve both a
+	// profile ceiling and per-title certifications; with either missing the
+	// server behaves like an older version, and clients should know that.
+	_, hasRatings := s.entitlements.(ContentRatingResolver)
+	_, hasCerts := s.tmdb.(TMDBCertificationClient)
+	return FeatureStatus{
+		RequestsEnabled:            settings.RequestsEnabled,
+		RatingRestrictionsEnforced: hasRatings && hasCerts,
+	}, nil
 }
 
 func (s *Service) ensureRequestsEnabled(ctx context.Context) error {

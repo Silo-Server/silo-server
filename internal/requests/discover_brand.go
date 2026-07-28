@@ -285,12 +285,15 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 // This push-down is a cost optimization only: TMDB ranks "NR" below "G" and
 // matches a title when any one of its US cert entries qualifies, so
 // over-ceiling titles still come back (verified ~5% at a G ceiling). The
-// authoritative filter is enrichPage's post-hoc certification check. The
-// mapping is also intentionally coarse in two spots: rank 3 maps to "R"
-// (also excluding NC-17 upstream, which the post-filter would allow at an R
-// ceiling — stricter is fine for a pre-filter), and TV rank 0 maps to "TV-G"
-// (TMDB order 3) rather than "TV-Y" so TV-Y/TV-Y7 titles are not excluded
-// upstream of our own ladder, which ranks them together.
+// authoritative filter is enrichPage's post-hoc certification check.
+//
+// Because that post-filter cannot resurrect titles TMDB already omitted, the
+// mapping must be a SUPERSET of what access.RatingAllowed permits at the
+// ceiling, never a subset. Two spots encode that: rank 3 maps to TMDB's
+// maximum on each ladder ("NC-17"/"TV-MA" — an R ceiling locally allows
+// NC-17, since both are rank 3), and TV rank 0 maps to "TV-G" (TMDB order 3)
+// rather than "TV-Y" so TV-Y/TV-Y7 titles are not excluded upstream of our
+// own ladder, which ranks them together.
 func certificationCeilingFor(ceiling, tmdbMediaType string) string {
 	rank, ok := access.RatingRank(ceiling)
 	if !ok {
@@ -316,7 +319,7 @@ func certificationCeilingFor(ceiling, tmdbMediaType string) string {
 	case 2:
 		return "PG-13"
 	default:
-		return "R"
+		return "NC-17"
 	}
 }
 

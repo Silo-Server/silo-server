@@ -936,6 +936,89 @@ func TestGetCertificationUsesSubResourceEndpoints(t *testing.T) {
 	}
 }
 
+// TestGetCertificationIgnoresForeignFallback pins the enforcement-path
+// contract: a title with only foreign certifications resolves to "" (fail
+// closed on the US ladder), unlike the display path, which falls back to any
+// country. A Canadian "PG" must not read as US PG.
+func TestGetCertificationIgnoresForeignFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/movie/1/release_dates":
+			_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"CA","release_dates":[{"certification":"PG","type":3}]}]}`))
+		case "/tv/2/content_ratings":
+			_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"AU","rating":"PG"}]}`))
+		case "/movie/3/release_dates":
+			// Festival NR + theatrical PG-13 in the US: theatrical wins.
+			_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","release_dates":[{"certification":"NR","type":2},{"certification":"PG-13","type":3}]}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	if cert, err := client.GetCertification(context.Background(), "movie", 1); err != nil || cert != "" {
+		t.Fatalf("foreign-only movie cert = %q, %v; want empty", cert, err)
+	}
+	if cert, err := client.GetCertification(context.Background(), "tv", 2); err != nil || cert != "" {
+		t.Fatalf("foreign-only tv cert = %q, %v; want empty", cert, err)
+	}
+	if cert, err := client.GetCertification(context.Background(), "movie", 3); err != nil || cert != "PG-13" {
+		t.Fatalf("US theatrical cert = %q, %v; want PG-13", cert, err)
+	}
+}
+
+// TestGetCertificationSurvivesFirstCallerCancellation pins the singleflight
+// context fix: the shared fetch runs detached from the initiating caller, so
+// that caller disconnecting must not poison the result for concurrent waiters.
+func TestGetCertificationSurvivesFirstCallerCancellation(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"iso_3166_1":"US","rating":"TV-PG"}]}`))
+	}))
+	defer server.Close()
+
+	client := NewClient("test-key", 1000)
+	client.SetBaseURL(server.URL)
+
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstErr := make(chan error, 1)
+	go func() {
+		_, err := client.GetCertification(firstCtx, "tv", 1396)
+		firstErr <- err
+	}()
+	<-started
+
+	secondCert := make(chan string, 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		cert, err := client.GetCertification(context.Background(), "tv", 1396)
+		secondCert <- cert
+		secondErr <- err
+	}()
+	// Let the second caller pile onto the in-flight singleflight key, then
+	// kill the initiating caller's context before the upstream responds.
+	time.Sleep(50 * time.Millisecond)
+	cancelFirst()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+
+	if err := <-secondErr; err != nil {
+		t.Fatalf("second caller failed after first caller cancelled: %v", err)
+	}
+	if cert := <-secondCert; cert != "TV-PG" {
+		t.Fatalf("second caller cert = %q, want TV-PG", cert)
+	}
+	<-firstErr // first caller may or may not error; just reap it
+}
+
 func TestGetCertificationCachesIncludingEmpty(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

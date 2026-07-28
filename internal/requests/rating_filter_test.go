@@ -53,10 +53,9 @@ func TestDiscoverFiltersResultsAboveCeiling(t *testing.T) {
 	if len(section.Results) != 1 || section.Results[0].TMDBID != 1 {
 		t.Fatalf("results = %+v, want only the G-rated title", section.Results)
 	}
-	// Restricted sections page in whole backfill windows: TMDB's 10 pages
-	// collapse to ceil(10/5) = 2 Silo pages. TotalResults stays TMDB's count.
-	if section.TotalPages != 2 || section.TotalResults != 200 {
-		t.Fatalf("totals = %d/%d, want 2/200", section.TotalPages, section.TotalResults)
+	// TMDB's totals pass through untouched (page keeps TMDB cursor semantics).
+	if section.TotalPages != 10 || section.TotalResults != 200 {
+		t.Fatalf("totals = %d/%d, want TMDB's 10/200", section.TotalPages, section.TotalResults)
 	}
 	// Filtering runs before presence lookup, so hidden titles never reach it.
 	for _, candidate := range presence.got {
@@ -139,7 +138,9 @@ type pagedCertTMDBClient struct {
 }
 
 func (f *pagedCertTMDBClient) DiscoverSection(_ context.Context, _ string, page int) (*tmdb.MediaPage, error) {
+	f.mu.Lock()
 	f.fetchedPage = append(f.fetchedPage, page)
+	f.mu.Unlock()
 	if p, ok := f.pages[page]; ok {
 		return p, nil
 	}
@@ -188,9 +189,12 @@ func TestDiscoverBackfillsSectionFromLaterPages(t *testing.T) {
 	if got := client.fetchedPage; len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
 		t.Fatalf("fetched TMDB pages = %v, want [1 2 3] (stop at TotalPages)", got)
 	}
-	// 3 TMDB pages collapse into 1 backfill window.
-	if section.TotalPages != 1 {
-		t.Fatalf("TotalPages = %d, want 1", section.TotalPages)
+	if section.TotalPages != 3 {
+		t.Fatalf("TotalPages = %d, want TMDB's 3", section.TotalPages)
+	}
+	// All upstream pages were consumed within budget — nothing left to resume.
+	if section.NextPage != 0 {
+		t.Fatalf("NextPage = %d, want 0 (exhausted)", section.NextPage)
 	}
 }
 
@@ -225,7 +229,7 @@ func TestDiscoverBackfillStopsWhenPageFull(t *testing.T) {
 	}
 }
 
-func TestDiscoverBackfillSecondPageUsesNextWindow(t *testing.T) {
+func TestDiscoverBackfillNextPageResumesWithoutSkippingOrRepeating(t *testing.T) {
 	store := newFakeStore()
 	store.settings.RequestsEnabled = true
 	certs := map[int]string{}
@@ -243,20 +247,107 @@ func TestDiscoverBackfillSecondPageUsesNextWindow(t *testing.T) {
 	service := NewService(store, client, &fakePresence{})
 	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
 
-	section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 2)
+	// One survivor per page and a budget of 5: page 1 consumes TMDB 1-5.
+	first, err := service.Discover(context.Background(), testViewer(1), "trending_movies", 1)
 	if err != nil {
 		t.Fatalf("Discover returned error: %v", err)
 	}
-	// Silo page 2 = TMDB pages 6-10; no overlap with page 1's window.
+	if first.NextPage != 6 {
+		t.Fatalf("NextPage = %d, want 6", first.NextPage)
+	}
+	client.fetchedPage = nil
+	second, err := service.Discover(context.Background(), testViewer(1), "trending_movies", first.NextPage)
+	if err != nil {
+		t.Fatalf("Discover returned error: %v", err)
+	}
 	if got := client.fetchedPage; len(got) != 5 || got[0] != 6 || got[4] != 10 {
 		t.Fatalf("fetched TMDB pages = %v, want [6 7 8 9 10]", got)
 	}
-	ids := make([]int, 0, len(section.Results))
-	for _, r := range section.Results {
+	var ids []int
+	for _, r := range append(first.Results, second.Results...) {
 		ids = append(ids, r.TMDBID)
 	}
-	if len(ids) != 5 || ids[0] != 600 || ids[4] != 1000 {
-		t.Fatalf("result ids = %v, want [600 700 800 900 1000]", ids)
+	if len(ids) != 10 || ids[0] != 100 || ids[9] != 1000 {
+		t.Fatalf("combined ids = %v, want 100..1000 with no gap or repeat", ids)
+	}
+	if second.NextPage != 0 {
+		t.Fatalf("NextPage after last page = %d, want 0", second.NextPage)
+	}
+}
+
+// TestDiscoverBackfillPreservesOverflowAcrossPages pins the review regression:
+// with a permissive ceiling most of TMDB page 1 survives, and an early "20
+// survived, stop scanning" break must not drop the un-consumed pages —
+// NextPage has to resume exactly where consumption stopped.
+func TestDiscoverBackfillPreservesOverflowAcrossPages(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	certs := map[int]string{}
+	pages := map[int]*tmdb.MediaPage{}
+	for p := 1; p <= 3; p++ {
+		var results []tmdb.MediaResult
+		for i := 0; i < 20; i++ {
+			id := p*100 + i
+			results = append(results, tmdb.MediaResult{ID: id, MediaType: "movie", Title: "Movie"})
+			certs[id] = "R" // permissive ceiling: everything survives
+		}
+		pages[p] = &tmdb.MediaPage{Page: p, TotalPages: 3, TotalResults: 60, Results: results}
+	}
+	client := &pagedCertTMDBClient{
+		certTMDBClient: certTMDBClient{certs: certs},
+		pages:          pages,
+	}
+	service := NewService(store, client, &fakePresence{})
+	service.SetEntitlementResolver(ratedCeiling{rating: "R"})
+
+	seen := map[int]bool{}
+	page := 1
+	for hops := 0; page > 0; hops++ {
+		if hops > 10 {
+			t.Fatal("pagination did not terminate")
+		}
+		section, err := service.Discover(context.Background(), testViewer(1), "trending_movies", page)
+		if err != nil {
+			t.Fatalf("Discover(page=%d) returned error: %v", page, err)
+		}
+		for _, r := range section.Results {
+			if seen[r.TMDBID] {
+				t.Fatalf("title %d repeated across pages", r.TMDBID)
+			}
+			seen[r.TMDBID] = true
+		}
+		page = section.NextPage
+	}
+	if len(seen) != 60 {
+		t.Fatalf("saw %d unique titles across all pages, want all 60 (overflow lost)", len(seen))
+	}
+}
+
+func TestDiscoverAllUsesSmallerBackfillBudget(t *testing.T) {
+	store := newFakeStore()
+	store.settings.RequestsEnabled = true
+	// Nothing survives filtering, so backfill always runs to its budget.
+	pages := map[int]*tmdb.MediaPage{}
+	for p := 1; p <= 10; p++ {
+		pages[p] = &tmdb.MediaPage{Page: p, TotalPages: 10, TotalResults: 200,
+			Results: []tmdb.MediaResult{{ID: p * 100, MediaType: "movie", Title: "Movie"}}}
+	}
+	client := &pagedCertTMDBClient{
+		certTMDBClient: certTMDBClient{certs: map[int]string{}}, // all unrated -> dropped
+		pages:          pages,
+	}
+	service := NewService(store, client, &fakePresence{})
+	service.SetEntitlementResolver(ratedCeiling{rating: "PG"})
+
+	sections, err := service.DiscoverAll(context.Background(), testViewer(1))
+	if err != nil {
+		t.Fatalf("DiscoverAll returned error: %v", err)
+	}
+	// 6 sections x aggregate budget of 2 pages = 12 list fetches, bounding the
+	// cold-path cost the review flagged (vs 6 x 5 = 30 at the single budget).
+	want := len(sections) * sectionBackfillBudgetAggregate
+	if got := len(client.fetchedPage); got != want {
+		t.Fatalf("total TMDB page fetches = %d, want %d", got, want)
 	}
 }
 
@@ -381,8 +472,11 @@ func TestCertificationCeilingFor(t *testing.T) {
 		{"G", "movie", "G"},
 		{"PG", "movie", "PG"},
 		{"PG-13", "movie", "PG-13"},
-		{"R", "movie", "R"},
-		{"NC-17", "movie", "R"}, // rank 3 maps to R; stricter upstream is fine
+		// Rank 3 maps to the ladder maximum: an R ceiling locally allows
+		// NC-17 (same rank), and the pre-filter must stay a superset of the
+		// post-filter or allowed titles vanish upstream unrecoverably.
+		{"R", "movie", "NC-17"},
+		{"NC-17", "movie", "NC-17"},
 		{"TV-G", "tv", "TV-G"},
 		{"TV-Y7", "tv", "TV-PG"},
 		{"TV-14", "tv", "TV-14"},

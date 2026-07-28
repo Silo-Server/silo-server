@@ -29,6 +29,9 @@ const (
 	// never changes. The stale-window failure mode is safe — a title that
 	// gains a cert stays hidden (fail-closed) for at most the TTL.
 	certificationCacheTTL = 7 * 24 * time.Hour
+	// certificationFetchTimeout bounds the shared (caller-detached)
+	// singleflight fetch; see GetCertification.
+	certificationFetchTimeout = 30 * time.Second
 )
 
 // Client is an HTTP client for the TMDB collection preset API surface.
@@ -1152,17 +1155,18 @@ func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 	return &cloned
 }
 
-// GetCertification returns the normalized content rating for a TMDB title
-// ("PG-13", "TV-MA", ...), or "" when TMDB has none. It uses the dedicated
-// release_dates / content_ratings sub-resources instead of the full detail
-// payload for the same reason GetExternalIDs does: the detail response is
-// 100+ KB and uncached, while these are a country list of a few KB.
+// GetCertification returns the US content rating for a TMDB title ("PG-13",
+// "TV-MA", ...), or "" when the title has no US certification. It uses the
+// dedicated release_dates / content_ratings sub-resources instead of the full
+// detail payload for the same reason GetExternalIDs does: the detail response
+// is 100+ KB and uncached, while these are a country list of a few KB.
 //
-// Results go through the same pickers as GetMediaDetail
-// (pickMovieCertification / pickTVRating) so a title's rating used for
-// discovery filtering can never disagree with the rating shown on its
-// detail page. mediaType accepts Silo-facing "movie"/"series" plus
-// TMDB-facing "tv".
+// Unlike GetMediaDetail's display rating, this deliberately does NOT fall
+// back to another country's certification: the value feeds the US-scale
+// parental-control ladder, where a foreign "PG" (Canada, Australia, ...) is
+// not evidence of US-PG content. No US entry means unresolved, which the
+// ladder treats as fail-closed. mediaType accepts Silo-facing
+// "movie"/"series" plus TMDB-facing "tv".
 func (c *Client) GetCertification(ctx context.Context, mediaType string, id int) (string, error) {
 	var path string
 	switch mediaType {
@@ -1187,7 +1191,13 @@ func (c *Client) GetCertification(ctx context.Context, mediaType string, id int)
 				return cached, nil
 			}
 		}
-		cert, err := c.fetchCertification(ctx, mediaType, path)
+		// The singleflight closure runs on the first caller's context, but its
+		// result is shared by every concurrent waiter. Detach from that
+		// caller's cancellation (with our own bound) so one disconnecting
+		// client can't fail the fetch for everyone else piled on the key.
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), certificationFetchTimeout)
+		defer cancel()
+		cert, err := c.fetchCertification(fetchCtx, mediaType, path)
 		if err != nil {
 			return nil, err
 		}
@@ -1215,13 +1225,59 @@ func (c *Client) fetchCertification(ctx context.Context, mediaType, path string)
 		if err := c.doGet(ctx, path, &resp); err != nil {
 			return "", err
 		}
-		return pickMovieCertification(&resp), nil
+		return pickUSMovieCertification(&resp), nil
 	}
 	var resp contentRatingsResponse
 	if err := c.doGet(ctx, path, &resp); err != nil {
 		return "", err
 	}
-	return pickTVRating(&resp), nil
+	return pickUSTVRating(&resp), nil
+}
+
+// pickUSMovieCertification is the enforcement-path variant of
+// pickMovieCertification: US entries only, no foreign fallback. Within the
+// US it keeps the display picker's preference (theatrical release first) but
+// resolves multi-entry disagreements — e.g. a festival "NR" alongside a
+// theatrical "PG-13" — instead of returning whichever appears first.
+func pickUSMovieCertification(rd *releaseDatesResponse) string {
+	if rd == nil {
+		return ""
+	}
+	var fallback string
+	for _, country := range rd.Results {
+		if !strings.EqualFold(country.ISO3166, "US") {
+			continue
+		}
+		for _, entry := range country.ReleaseDates {
+			cert := strings.TrimSpace(entry.Certification)
+			if cert == "" {
+				continue
+			}
+			if entry.Type == 3 {
+				return cert
+			}
+			// Prefer a real rating over "NR" from a different release type.
+			if fallback == "" || strings.EqualFold(fallback, "NR") {
+				fallback = cert
+			}
+		}
+	}
+	return fallback
+}
+
+// pickUSTVRating is the enforcement-path variant of pickTVRating: US only.
+func pickUSTVRating(cr *contentRatingsResponse) string {
+	if cr == nil {
+		return ""
+	}
+	for _, entry := range cr.Results {
+		if strings.EqualFold(entry.ISO3166, "US") {
+			if rating := strings.TrimSpace(entry.Rating); rating != "" {
+				return rating
+			}
+		}
+	}
+	return ""
 }
 
 func (c *Client) fetchExternalIDs(ctx context.Context, path string) (*ExternalIDs, error) {
