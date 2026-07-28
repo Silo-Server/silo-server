@@ -1021,8 +1021,8 @@ func main() {
 			LibraryLister:   pluginhost.NewLibraryLister(libDataSource),
 			CatalogPresence: catalogPresence,
 			VirtualCatalog: pluginhost.VirtualCatalogRegistrarFunc(
-				func(ctx context.Context, _ int, req catalog.VirtualMedia) (*catalog.VirtualMediaResult, error) {
-					result, err := virtualRegistrar.Upsert(ctx, req)
+				func(ctx context.Context, installationID int, req catalog.VirtualMedia) (*catalog.VirtualMediaResult, error) {
+					result, err := virtualRegistrar.UpsertVirtualMedia(ctx, installationID, req)
 					if err != nil {
 						return nil, err
 					}
