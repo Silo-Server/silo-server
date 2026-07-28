@@ -496,10 +496,6 @@ func playbackClientDisplayName(name, version, userAgent string) string {
 		return rule.label
 	}
 
-	if label := androidDeviceLabel(userAgent); label != "" {
-		return label
-	}
-
 	switch {
 	case strings.Contains(lower, "applecoremedia"):
 		return "Apple player"
@@ -514,6 +510,9 @@ func playbackClientDisplayName(name, version, userAgent string) string {
 	case strings.Contains(lower, "python-requests"):
 		return "Python requests"
 	default:
+		if label := androidDeviceLabel(userAgent); label != "" {
+			return label
+		}
 		return firstUserAgentProduct(userAgent)
 	}
 }
@@ -525,9 +524,10 @@ func playbackClientDisplayName(name, version, userAgent string) string {
 var knownAndroidDeviceLabels = map[string]string{
 	"AFTKRT":            "Fire TV Stick 4K Max",
 	"AFTMM":             "Fire TV Stick 4K",
-	"AFTKM":             "Fire TV Stick 4K Max (1st Gen)",
-	"AFTKA":             "Fire TV Stick 4K Max (2nd Gen)",
-	"AFTSS":             "Fire TV Stick (3rd Gen)",
+	"AFTKM":             "Fire TV Stick 4K (2nd Gen)",
+	"AFTKA":             "Fire TV Stick 4K Max (1st Gen)",
+	"AFTSSS":            "Fire TV Stick (3rd Gen)",
+	"AFTSS":             "Fire TV Stick Lite (1st Gen)",
 	"AFTT":              "Fire TV Stick (2nd Gen)",
 	"AFTB":              "Fire TV (1st Gen)",
 	"AFTS":              "Fire TV (2nd Gen)",
@@ -549,10 +549,24 @@ func androidDeviceLabel(userAgent string) string {
 		return ""
 	}
 
-	model := strings.TrimSpace(userAgent[:buildIndex])
-	if separator := strings.LastIndex(model, ";"); separator >= 0 {
-		model = model[separator+1:]
+	prefix := userAgent[:buildIndex]
+	separator := strings.LastIndex(prefix, ";")
+	if separator < 0 {
+		return ""
 	}
+	hasAndroidPlatform := false
+	for _, segment := range strings.Split(prefix[:separator], ";") {
+		segment = strings.TrimSpace(strings.Trim(segment, "()"))
+		if strings.HasPrefix(strings.ToLower(segment), "android ") {
+			hasAndroidPlatform = true
+			break
+		}
+	}
+	if !hasAndroidPlatform {
+		return ""
+	}
+
+	model := prefix[separator+1:]
 	model = strings.TrimSpace(strings.Trim(strings.TrimSpace(model), "();"))
 	if model == "" {
 		return ""
