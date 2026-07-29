@@ -235,6 +235,10 @@ type VideoTrack struct {
 	// bitstream scan and held in memory, never serialized to the database
 	// (`json:"-"`). nil means "not analyzed in this process yet".
 	MultiplePPS *bool `json:"-"`
+	// VideoCopyUnsafe is set when conflicting PPS data is detected or when the
+	// safety scan cannot establish that video stream-copy is safe. It is
+	// runtime-only so transient scan failures are retried on a later request.
+	VideoCopyUnsafe bool `json:"-"`
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.

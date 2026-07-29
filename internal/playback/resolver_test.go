@@ -82,6 +82,23 @@ func TestResolver_CopyUnsafeForcesTranscode(t *testing.T) {
 	}
 }
 
+func TestResolver_UnknownCopySafetyForcesTranscode(t *testing.T) {
+	// An inconclusive safety scan must not fail open to video stream-copy.
+	file := &models.MediaFile{
+		CodecVideo: "h264", CodecAudio: "dts", Container: "mkv",
+		Resolution: "1080p", HDR: false,
+		VideoTracks: []models.VideoTrack{{
+			Codec:           "h264",
+			VideoCopyUnsafe: true,
+		}},
+	}
+	decision := playback.Resolve(file, defaultCaps(), defaultSettings())
+
+	if decision.Method != playback.PlayTranscode {
+		t.Errorf("method = %q, want transcode", decision.Method)
+	}
+}
+
 func TestResolver_CopySafeStillRemuxes(t *testing.T) {
 	safe := false
 	// The same shape with the copy-safety scan resolved to safe keeps remuxing.

@@ -68,7 +68,9 @@ func annexBHasConflictingPPS(data []byte) bool {
 		if byID[id] == nil {
 			byID[id] = make(map[string]struct{})
 		}
-		byID[id][string(nal)] = struct{}{}
+		// nal_ref_idc belongs to the NAL header, not the PPS definition. Two
+		// otherwise-identical PPS payloads may carry different valid priorities.
+		byID[id][string(nal[1:])] = struct{}{}
 		if len(byID[id]) > 1 {
 			return true
 		}

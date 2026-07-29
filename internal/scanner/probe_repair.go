@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -147,9 +148,15 @@ func (e *PlaybackProbeEnsurer) ensureCopySafety(ctx context.Context, file *model
 	multi, err := DetectMultiplePPSH264(scanCtx, e.ffmpegPath, file.FilePath)
 	cancel()
 	if err != nil {
-		// Leave the flag unset so a transient failure retries on the next play
-		// rather than caching a wrong answer; the copy path stays available.
-		return file, err
+		// Unknown safety must not fail open to the video-copy path this probe is
+		// intended to guard. Leave MultiplePPS unset and do not cache the result,
+		// so a later request retries the scan without misreporting the cause.
+		slog.WarnContext(ctx, "video copy-safety scan failed; disabling stream copy",
+			"component", "scanner",
+			"file_id", file.ID,
+			"error", err,
+		)
+		return fileWithCopySafety(file, nil, true), nil
 	}
 
 	e.copySafety.Store(file.ID, copySafetyResult{size: file.FileSize, multi: multi})
@@ -160,11 +167,16 @@ func (e *PlaybackProbeEnsurer) ensureCopySafety(ctx context.Context, file *model
 // MultiplePPS flag set on its first video track, without mutating the caller's
 // file or its shared VideoTracks slice.
 func fileWithMultiplePPS(file *models.MediaFile, multi bool) *models.MediaFile {
+	value := multi
+	return fileWithCopySafety(file, &value, multi)
+}
+
+func fileWithCopySafety(file *models.MediaFile, multiplePPS *bool, copyUnsafe bool) *models.MediaFile {
 	updated := *file
 	tracks := make([]models.VideoTrack, len(file.VideoTracks))
 	copy(tracks, file.VideoTracks)
-	value := multi
-	tracks[0].MultiplePPS = &value
+	tracks[0].MultiplePPS = multiplePPS
+	tracks[0].VideoCopyUnsafe = copyUnsafe
 	updated.VideoTracks = tracks
 	return &updated
 }

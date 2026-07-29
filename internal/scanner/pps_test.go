@@ -30,6 +30,15 @@ func TestAnnexBHasConflictingPPS(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "same pps payload with different nal priority is safe",
+			// nal_ref_idc is header metadata, not part of the PPS definition.
+			data: annexB(
+				[]byte{0x28, 0xee, 0x35, 0x25},
+				[]byte{0x68, 0xee, 0x35, 0x25},
+			),
+			want: false,
+		},
+		{
 			name: "same id redefined with different content is unsafe",
 			// both decode to pic_parameter_set_id=0 (leading bit set) but differ.
 			data: annexB(pps(0xee, 0x35, 0x25), pps(0xe9, 0x23, 0x52, 0x50)),

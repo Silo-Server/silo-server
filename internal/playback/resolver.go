@@ -270,10 +270,12 @@ func containsStr(slice []string, s string) bool {
 // videoCopyUnsafeFile reports whether the file's video stream cannot be safely
 // stream-copied into an avc1/fMP4 segment. It is set once by the multi-PPS
 // bitstream scan (H.264 sources that redefine a pic_parameter_set_id in-band
-// with conflicting content). nil/false means copy is safe or not yet analyzed.
+// with conflicting content). Scan failures also disable copy for the current
+// decision while remaining eligible for retry on a later request.
 func videoCopyUnsafeFile(file *models.MediaFile) bool {
 	if file == nil || len(file.VideoTracks) == 0 {
 		return false
 	}
-	return file.VideoTracks[0].MultiplePPS != nil && *file.VideoTracks[0].MultiplePPS
+	track := file.VideoTracks[0]
+	return track.VideoCopyUnsafe || (track.MultiplePPS != nil && *track.MultiplePPS)
 }
