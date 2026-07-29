@@ -13,6 +13,11 @@ const (
 	BuiltinArrWebhookPluginID     = "silo.autoscan.arr-webhook"
 	BuiltinArrWebhookCapabilityID = "arr-webhook"
 	builtinArrWebhookDisplayName  = "Sonarr/Radarr Webhook"
+
+	// WebhookProviderConfigKey is the source_config key naming which arr
+	// service posts to a webhook source's endpoint ("auto", "sonarr",
+	// "radarr").
+	WebhookProviderConfigKey = "webhook_provider"
 )
 
 // BuiltinArrWebhookSource returns the host-built-in ARR webhook source
@@ -23,6 +28,32 @@ func BuiltinArrWebhookSource() DiscoveredSource {
 		PluginID:     BuiltinArrWebhookPluginID,
 		CapabilityID: BuiltinArrWebhookCapabilityID,
 		DisplayName:  builtinArrWebhookDisplayName,
+		Description:  "Sonarr or Radarr posts to Silo the moment an import finishes.",
+		// Webhook-only and credential-free: the provider pushes to a Silo
+		// endpoint, so the flow skips both the delivery-mode question and the
+		// connection step. This descriptor is what the admin UI used to infer
+		// from a hardcoded plugin-id comparison.
+		Descriptor: ScanSourceDescriptor{
+			DeliveryModes:   []string{DeliveryModeWebhook},
+			Connection:      ConnectionNone,
+			ConnectionKinds: []string{"sonarr", "radarr"},
+			Summary:         "No API key needed — paste one URL into Sonarr/Radarr → Settings → Connect → Webhook.",
+			ConfigForm: &AdminForm{
+				Fields: []AdminFormField{
+					{
+						Key:         WebhookProviderConfigKey,
+						Label:       "Provider",
+						Description: "Which service posts to this endpoint. Auto-detects from the first delivery.",
+						Control:     ControlSelect,
+						Options: []AdminFormOption{
+							{Value: "auto", Label: "Detect automatically"},
+							{Value: "sonarr", Label: "Sonarr"},
+							{Value: "radarr", Label: "Radarr"},
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -43,6 +74,13 @@ type DiscoveredSource struct {
 	// DisplayName is a human-friendly label for the capability (from the
 	// capability's manifest display_name, falling back to plugin/capability ids).
 	DisplayName string
+	// Description is the capability's manifest description, shown under the
+	// display name in the Add-source picker. Empty when unset.
+	Description string
+	// Descriptor is the setup contract the Add-source flow builds its steps
+	// from. A capability that declares nothing carries
+	// DefaultScanSourceDescriptor, so this is never a zero value in practice.
+	Descriptor ScanSourceDescriptor
 }
 
 // ScanSourceLister enumerates every installed scan_source.v1 capability so the
@@ -84,6 +122,11 @@ type AvailableScanSource struct {
 	PluginID     string `json:"plugin_id"`
 	CapabilityID string `json:"capability_id"`
 	DisplayName  string `json:"display_name"`
+	Description  string `json:"description,omitempty"`
+	// Descriptor tells the Add-source flow which steps to ask for. Always
+	// populated: discovery substitutes DefaultScanSourceDescriptor for
+	// capabilities that declare nothing.
+	Descriptor ScanSourceDescriptor `json:"descriptor"`
 }
 
 // ListAvailableScanSources enumerates every installed scan_source capability so
@@ -100,10 +143,19 @@ func (s *Service) ListAvailableScanSources(ctx context.Context) ([]AvailableScan
 	}
 	out := make([]AvailableScanSource, 0, len(discovered))
 	for _, d := range discovered {
+		descriptor := d.Descriptor
+		// A lister that predates descriptors (or a hand-built test double)
+		// leaves this empty; substituting the default keeps the contract
+		// "always populated" true for every consumer downstream.
+		if len(descriptor.DeliveryModes) == 0 {
+			descriptor = DefaultScanSourceDescriptor()
+		}
 		out = append(out, AvailableScanSource{
 			PluginID:     d.PluginID,
 			CapabilityID: d.CapabilityID,
 			DisplayName:  d.DisplayName,
+			Description:  d.Description,
+			Descriptor:   descriptor,
 		})
 	}
 	return out, nil

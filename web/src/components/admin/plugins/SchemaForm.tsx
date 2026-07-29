@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Loader2 } from "lucide-react";
 
@@ -162,9 +162,22 @@ export function SchemaForm({
   }, [clientErrors, errors]);
 
   const valid = Object.keys(clientErrors).length === 0;
+
+  // Report validity only when it actually changes, and key the effect on that
+  // value alone. Callers routinely pass an inline arrow, which would otherwise
+  // give the effect a new dependency every render; if that callback also sets
+  // parent state, the pair loops until React throws "maximum update depth"
+  // (error #185). Holding the callback in a ref keeps it current without making
+  // its identity a trigger.
+  const validityCallbackRef = useRef(onValidityChange);
+  validityCallbackRef.current = onValidityChange;
+
+  const lastReportedValidRef = useRef<boolean | null>(null);
   useEffect(() => {
-    onValidityChange?.(valid);
-  }, [valid, onValidityChange]);
+    if (lastReportedValidRef.current === valid) return;
+    lastReportedValidRef.current = valid;
+    validityCallbackRef.current?.(valid);
+  }, [valid]);
 
   function setField(key: string, value: unknown) {
     onChange({ ...values, [key]: value });
