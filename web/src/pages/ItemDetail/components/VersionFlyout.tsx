@@ -15,6 +15,7 @@ import { resolutionScore } from "./versionRankingUtils";
 // ---------------------------------------------------------------------------
 
 export function buildQualitySummary(version: FileVersion): string {
+  if (version.file_path?.includes("results=all")) return "More results…";
   const parts: string[] = [];
 
   if (version.resolution) parts.push(version.resolution);

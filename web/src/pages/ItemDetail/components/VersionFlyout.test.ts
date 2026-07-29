@@ -32,6 +32,12 @@ describe("buildQualitySummary", () => {
     expect(buildQualitySummary(version)).toBe("2160p · HEVC · HDR · TrueHD");
   });
 
+  it("labels the just-in-time virtual results action", () => {
+    expect(
+      buildQualitySummary(makeVersion({ file_path: "virtual://movie/tt1?results=all" })),
+    ).toBe("More results…");
+  });
+
   it("omits HDR segment when hdr is false", () => {
     const version = makeVersion({
       resolution: "1080p",
