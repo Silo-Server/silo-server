@@ -179,7 +179,7 @@ func (s *Service) TestGlobalConfigWithClears(
 			Cause:   err,
 		}
 	}
-	if _, err := metadataProviderConnectionCheckCapabilityID(manifest); err != nil {
+	if _, _, err := connectionCheckCapabilityID(manifest); err != nil {
 		return err
 	}
 

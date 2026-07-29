@@ -728,6 +728,36 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 	}
 }
 
+func TestServiceTestGlobalConfigAcceptsRequestRouterConnectionChecks(t *testing.T) {
+	manifest := connectionTestManifest(t, "com.example.virtual", "0.1.0")
+	manifest.GlobalConfigSchema[0].JsonSchema = `{"type":"object","properties":{},"additionalProperties":false}`
+	manifest.Capabilities = []*pluginv1.CapabilityDescriptor{{
+		Type: "request_router.v1",
+		Id:   "virtual-requests",
+	}}
+	installPath := writeInstalledPluginManifest(t, manifest)
+	host := &fakeServiceHost{startResult: &fakePluginClient{manifest: manifest}}
+	service := &Service{
+		installations: newFakeServiceInstallationStore(&Installation{
+			ID: 9, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(), InstallPath: installPath,
+		}),
+		host: host,
+	}
+	originalProbe := runPluginConnectionCheck
+	t.Cleanup(func() { runPluginConnectionCheck = originalProbe })
+	probed := false
+	runPluginConnectionCheck = func(context.Context, pluginClient, *pluginv1.PluginManifest) error {
+		probed = true
+		return nil
+	}
+	if err := service.TestGlobalConfig(context.Background(), 9, "connection", map[string]any{}); err != nil {
+		t.Fatalf("TestGlobalConfig() returned error: %v", err)
+	}
+	if !probed {
+		t.Fatal("request-router connection check was not invoked")
+	}
+}
+
 func TestServiceTestGlobalConfigStopsTemporaryInstanceOnProbeFailure(t *testing.T) {
 	originalProbe := runPluginConnectionCheck
 	t.Cleanup(func() {
