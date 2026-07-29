@@ -2586,7 +2586,10 @@ func (h *AdminHandler) HandleUpdateSetting(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		req.Value = normalized
+	case "ai.base_url", "ai.chat_model", "ai.asr_model":
+		req.Value = strings.TrimSpace(req.Value)
 	case "ai.asr_base_url":
+		req.Value = strings.TrimSpace(req.Value)
 		if llm.IsChatOnlyGateway(req.Value) {
 			writeError(w, http.StatusBadRequest, "bad_request",
 				"This endpoint cannot produce timestamped transcriptions (chat-only gateway). "+

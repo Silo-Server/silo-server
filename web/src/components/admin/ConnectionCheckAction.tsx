@@ -30,7 +30,11 @@ export function ConnectionCheckAction({
         {isPending ? pendingLabel : label}
       </Button>
       {result ? (
-        <span className={`text-sm ${result.success ? "text-green-600" : "text-red-600"}`}>
+        <span
+          role="status"
+          aria-live="polite"
+          className={`text-sm ${result.success ? "text-green-600" : "text-red-600"}`}
+        >
           {result.message}
         </span>
       ) : null}

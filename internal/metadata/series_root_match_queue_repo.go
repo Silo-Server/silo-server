@@ -107,7 +107,7 @@ func (r *SeriesRootMatchQueueRepository) EnqueueSeriesRoot(ctx context.Context, 
 			roots.media_folder_id,
 			roots.observed_root_path,
 			`+seriesMatchQueueInputFingerprintSQL("roots.observed_root_path", "roots.media_folder_id", "roots.metadata_language")+`,
-			`+fmt.Sprintf("%d", matcherRevision)+`,
+			`+fmt.Sprintf("%d", seriesMatcherRevision)+`,
 			NOW() + $3::interval,
 			NOW()
 		FROM eligible_roots roots
@@ -214,7 +214,7 @@ func (r *SeriesRootMatchQueueRepository) SyncForFolder(ctx context.Context, fold
 			roots.media_folder_id,
 			roots.observed_root_path,
 			`+seriesMatchQueueInputFingerprintSQL("roots.observed_root_path", "roots.media_folder_id", "roots.metadata_language")+`,
-			`+fmt.Sprintf("%d", matcherRevision)+`,
+			`+fmt.Sprintf("%d", seriesMatcherRevision)+`,
 			NOW() + $2::interval,
 			NOW()
 		FROM eligible_roots roots
@@ -327,7 +327,7 @@ func (r *SeriesRootMatchQueueRepository) SyncInScope(ctx context.Context, folder
 		)
 		SELECT roots.media_folder_id, roots.observed_root_path,
 			`+seriesMatchQueueInputFingerprintSQL("roots.observed_root_path", "roots.media_folder_id", "roots.metadata_language")+`,
-			`+fmt.Sprintf("%d", matcherRevision)+`, NOW() + $4::interval, NOW()
+			`+fmt.Sprintf("%d", seriesMatcherRevision)+`, NOW() + $4::interval, NOW()
 		FROM in_scope_roots roots
 		ON CONFLICT (media_folder_id, observed_root_path)
 		DO UPDATE SET
@@ -745,7 +745,7 @@ func (r *SeriesRootMatchQueueRepository) RetryNowByFolder(ctx context.Context, f
 			deterministic_attempt_count = 0,
 			failure_kind = '', failure_detail = '{}'::jsonb, last_error = '', parked_at = NULL,
 			rerun_requested = true,
-			input_fingerprint = current_inputs.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", matcherRevision)+`, updated_at = NOW()
+			input_fingerprint = current_inputs.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", seriesMatcherRevision)+`, updated_at = NOW()
 		FROM current_inputs
 		WHERE series_root_match_queue.media_folder_id = current_inputs.media_folder_id
 		  AND series_root_match_queue.observed_root_path = current_inputs.observed_root_path
@@ -773,11 +773,11 @@ func (r *SeriesRootMatchQueueRepository) WakeForChangedInputs(ctx context.Contex
 			deterministic_attempt_count = 0,
 			failure_kind = '', failure_detail = '{}'::jsonb, last_error = '', parked_at = NULL,
 			rerun_requested = true,
-			input_fingerprint = changed.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", matcherRevision)+`, updated_at = NOW()
+			input_fingerprint = changed.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", seriesMatcherRevision)+`, updated_at = NOW()
 		FROM changed
 		WHERE changed.media_folder_id = q.media_folder_id
 		  AND changed.observed_root_path = q.observed_root_path
-		  AND (q.input_fingerprint <> changed.input_fingerprint OR q.matcher_revision <> `+fmt.Sprintf("%d", matcherRevision)+`)
+		  AND (q.input_fingerprint <> changed.input_fingerprint OR q.matcher_revision <> `+fmt.Sprintf("%d", seriesMatcherRevision)+`)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("waking series matches with changed inputs: %w", err)

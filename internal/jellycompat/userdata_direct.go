@@ -99,6 +99,7 @@ func (s *directUserDataService) ListFavorites(ctx context.Context, session *Sess
 	// type into one PresignImageURLsWithExpiry call for the whole page.
 	result := slicePage(ordered, offset, limit)
 	presignCompatListItems(ctx, s.detailSvc, result)
+	fillListItemDurations(ctx, s.detailSvc, result)
 	if result == nil {
 		result = []upstreamListItem{}
 	}

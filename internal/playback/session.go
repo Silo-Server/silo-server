@@ -27,6 +27,7 @@ type Session struct {
 	ClientName           string // reported playback client name, when available
 	ClientVersion        string // reported playback client version, when available
 	ClientUserAgent      string // trimmed request user agent for the playback session
+	IsJellyfinCompat     bool   // immutable origin identity for Jellyfin compatibility sessions
 
 	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)
 	TranscodeTransportID string // remote node process identity; empty means session ID
@@ -140,6 +141,7 @@ type ClientInfo struct {
 	Name      string
 	Version   string
 	UserAgent string
+	IsCompat  bool
 }
 
 // WithClientInfo stores playback client metadata on a context.
@@ -437,6 +439,7 @@ func newSession(
 		ClientName:           normalizeClientMetadataValue(clientInfo.Name, 128),
 		ClientVersion:        normalizeClientMetadataValue(clientInfo.Version, 64),
 		ClientUserAgent:      normalizeClientMetadataValue(clientInfo.UserAgent, 512),
+		IsJellyfinCompat:     clientInfo.IsCompat,
 		StartedAt:            now,
 		UpdatedAt:            now,
 		LastActivityAt:       now,

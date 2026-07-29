@@ -3149,6 +3149,9 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			switchedFileID = &alt.ID
 		}
 	}
+	if !videoCopy {
+		req.TargetResolution = clampEncodedTargetResolution(req.TargetResolution, file.Resolution)
+	}
 	if requestedFile != nil && file != nil && requestedFile.ID != file.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
 			slog.WarnContext(r.Context(), "requested transcode file preflight failed; continuing with alternate file", "component", "api",
@@ -3936,20 +3939,60 @@ func (h *PlaybackHandler) findAlternateFile(ctx context.Context, source *models.
 	return candidates[0], nil
 }
 
+const (
+	transcodeResolution2160p = "2160p"
+	transcodeResolution1080p = "1080p"
+	transcodeResolution720p  = "720p"
+	transcodeResolution480p  = "480p"
+	transcodeResolution420p  = "420p"
+	transcodeResolution328p  = "328p"
+)
+
 // resolutionRank returns a numeric rank for resolution sorting.
 func resolutionRank(res string) int {
-	switch res {
-	case "2160p":
-		return 4
-	case "1080p":
-		return 3
-	case "720p":
-		return 2
-	case "480p":
-		return 1
-	case "328p":
+	height, known := transcodeResolutionHeight(res)
+	if !known {
 		return 0
+	}
+
+	switch {
+	case height >= 2160:
+		return 4
+	case height >= 1080:
+		return 3
+	case height >= 720:
+		return 2
+	case height >= 480:
+		return 1
 	default:
 		return 0
+	}
+}
+
+func clampEncodedTargetResolution(requestedResolution, sourceResolution string) string {
+	requestedHeight, requestedKnown := transcodeResolutionHeight(requestedResolution)
+	sourceHeight, sourceKnown := transcodeResolutionHeight(sourceResolution)
+	if !requestedKnown || !sourceKnown || requestedHeight <= sourceHeight {
+		return requestedResolution
+	}
+	return sourceResolution
+}
+
+func transcodeResolutionHeight(resolution string) (int, bool) {
+	switch resolution {
+	case transcodeResolution2160p:
+		return 2160, true
+	case transcodeResolution1080p:
+		return 1080, true
+	case transcodeResolution720p:
+		return 720, true
+	case transcodeResolution480p:
+		return 480, true
+	case transcodeResolution420p:
+		return 420, true
+	case transcodeResolution328p:
+		return 328, true
+	default:
+		return 0, false
 	}
 }

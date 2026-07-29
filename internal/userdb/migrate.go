@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 13
+const schemaVersion = 14
 
 func runMigrations(db *sql.DB) error {
 	version, err := userVersion(db)
@@ -133,7 +133,36 @@ func runMigrations(db *sql.DB) error {
 		}
 	}
 
+	if version < 14 {
+		if err := migrateToV14(tx); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("PRAGMA user_version = 14"); err != nil {
+			return fmt.Errorf("setting sqlite user_version 14: %w", err)
+		}
+	}
+
 	return tx.Commit()
+}
+
+// migrateToV14 adds the per-profile onboarding-tour state table. Keyed by
+// (profile_id, tour_id): finishing or skipping the tour on one device is
+// respected everywhere, and a future materially-different tour can use a new
+// tour_id without clobbering history.
+func migrateToV14(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE IF NOT EXISTS profile_onboarding (
+		profile_id TEXT NOT NULL,
+		tour_id TEXT NOT NULL,
+		last_step TEXT NOT NULL DEFAULT '',
+		completed_at TEXT,
+		skipped_at TEXT,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY (profile_id, tour_id)
+	)`)
+	if err != nil {
+		return fmt.Errorf("creating profile_onboarding: %w", err)
+	}
+	return nil
 }
 
 // migrateToV13 replaces the v1 watch_progress stamp triggers with the current

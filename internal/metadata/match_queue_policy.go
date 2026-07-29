@@ -15,7 +15,8 @@ var (
 )
 
 const (
-	matcherRevision            = 9
+	movieMatcherRevision       = 10
+	seriesMatcherRevision      = 10
 	movieQueueRetryDelay       = 15 * time.Second
 	seriesRootQueueQuietWindow = 10 * time.Second
 	seriesRootQueueRetryDelay  = 30 * time.Second
@@ -50,7 +51,7 @@ func matchQueueBackoffExpr(basePlaceholder, maxPlaceholder string) string {
 // matchQueueInputFingerprintSQL returns a deterministic SQL expression for
 // inputs that can change a result without changing the queue key. Arguments
 // are internal SQL expressions selected by repository code, never user input.
-func matchQueueInputFingerprintSQL(pathExpression, typeExpression, folderIDExpression, languageExpression string) string {
+func matchQueueInputFingerprintSQL(pathExpression, typeExpression, folderIDExpression, languageExpression string, matcherRevision int) string {
 	return fmt.Sprintf(`md5(%s || '|' || COALESCE(%s, '') || '|' || COALESCE(%s, '') || '|%d|' || COALESCE((
 		SELECT string_agg(
 			chain.priority::text || ':' || installation.id::text || ':' || installation.plugin_id || ':' ||
@@ -84,7 +85,7 @@ func seriesMatchQueueInputFingerprintSQL(rootExpression, folderIDExpression, lan
 		  AND shape_file.missing_since IS NULL
 		  AND shape_file.extra_id IS NULL
 	), ''))`, rootExpression, folderIDExpression, rootExpression)
-	return matchQueueInputFingerprintSQL(shapeExpression, "'series'", folderIDExpression, languageExpression)
+	return matchQueueInputFingerprintSQL(shapeExpression, "'series'", folderIDExpression, languageExpression, seriesMatcherRevision)
 }
 
 func boundedMatchFailureMessage(message string) string {

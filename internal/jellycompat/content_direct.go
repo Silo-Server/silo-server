@@ -506,6 +506,7 @@ func (s *directContentService) BrowseItems(ctx context.Context, session *Session
 	if len(collected) > requestedLimit {
 		collected = collected[:requestedLimit]
 	}
+	fillListItemDurations(ctx, s.detailSvc, collected)
 
 	// The handler's resolveUserStateForContentIDs overlay only covers items
 	// with their own progress rows, which a series never has — aggregate
@@ -594,6 +595,7 @@ func (s *directContentService) SearchItems(ctx context.Context, session *Session
 		listItems = append(listItems, mediaItemToListItem(mi))
 	}
 	presignCompatListItems(ctx, s.detailSvc, listItems)
+	fillListItemDurations(ctx, s.detailSvc, listItems)
 	s.enrichListItemsUserData(ctx, session, listItems)
 
 	return &upstreamBrowseResponse{

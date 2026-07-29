@@ -100,6 +100,11 @@ type Settings struct {
 
 type FeatureStatus struct {
 	RequestsEnabled bool `json:"requests_enabled"`
+	// RatingRestrictionsEnforced advertises that discovery/search results are
+	// filtered by the profile's max content rating and that over-ceiling
+	// detail (404) and create (403) requests are rejected. Additive v1
+	// capability field so clients can feature-detect instead of version-sniff.
+	RatingRestrictionsEnforced bool `json:"rating_restrictions_enforced"`
 }
 
 type UserLimit struct {

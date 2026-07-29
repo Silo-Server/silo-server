@@ -24,6 +24,14 @@ const (
 	maxResponseBody            = 1 << 20 // 1 MB
 	maxCollectionPresetResults = 500
 	defaultResponseCacheTTL    = 2 * time.Hour
+	// certificationCacheTTL is deliberately much longer than the shared
+	// response TTL: a certification is assigned at release and effectively
+	// never changes. The stale-window failure mode is safe — a title that
+	// gains a cert stays hidden (fail-closed) for at most the TTL.
+	certificationCacheTTL = 7 * 24 * time.Hour
+	// certificationFetchTimeout bounds the shared (caller-detached)
+	// singleflight fetch; see GetCertification.
+	certificationFetchTimeout = 30 * time.Second
 )
 
 // Client is an HTTP client for the TMDB collection preset API surface.
@@ -35,6 +43,7 @@ type Client struct {
 	discoverSectionCache *cache.TTLCache[*MediaPage]
 	discoverPageCache    *cache.TTLCache[*MediaPage]
 	externalIDCache      *cache.TTLCache[*ExternalIDs]
+	certificationCache   *cache.TTLCache[string]
 	cacheGroup           singleflight.Group
 	responseCacheTTL     time.Duration
 }
@@ -55,6 +64,7 @@ func NewClient(apiKey string, rateLimit int) *Client {
 		discoverSectionCache: cache.NewTTLCache[*MediaPage](),
 		discoverPageCache:    cache.NewTTLCache[*MediaPage](),
 		externalIDCache:      cache.NewTTLCache[*ExternalIDs](),
+		certificationCache:   cache.NewTTLCache[string](),
 		responseCacheTTL:     defaultResponseCacheTTL,
 	}
 }
@@ -77,6 +87,9 @@ func (c *Client) Close() {
 	}
 	if c.externalIDCache != nil {
 		c.externalIDCache.Close()
+	}
+	if c.certificationCache != nil {
+		c.certificationCache.Close()
 	}
 }
 
@@ -1140,6 +1153,145 @@ func cloneExternalIDs(ids *ExternalIDs) *ExternalIDs {
 	}
 	cloned := *ids
 	return &cloned
+}
+
+// GetCertification returns the US content rating for a TMDB title ("PG-13",
+// "TV-MA", ...), or "" when the title has no US certification. It uses the
+// dedicated release_dates / content_ratings sub-resources instead of the full
+// detail payload for the same reason GetExternalIDs does: the detail response
+// is 100+ KB and uncached, while these are a country list of a few KB.
+//
+// Unlike GetMediaDetail's display rating, this deliberately does NOT fall
+// back to another country's certification: the value feeds the US-scale
+// parental-control ladder, where a foreign "PG" (Canada, Australia, ...) is
+// not evidence of US-PG content. No US entry means unresolved, which the
+// ladder treats as fail-closed. mediaType accepts Silo-facing
+// "movie"/"series" plus TMDB-facing "tv".
+func (c *Client) GetCertification(ctx context.Context, mediaType string, id int) (string, error) {
+	var path string
+	switch mediaType {
+	case "movie":
+		path = fmt.Sprintf("/movie/%d/release_dates", id)
+	case "series", "tv":
+		path = fmt.Sprintf("/tv/%d/content_ratings", id)
+	default:
+		return "", fmt.Errorf("tmdb: invalid media type: %q", mediaType)
+	}
+
+	cacheKey := "certification:" + path
+	if c.certificationCache != nil {
+		if cached, ok := c.certificationCache.Get(cacheKey); ok {
+			return cached, nil
+		}
+	}
+
+	// DoChan + select rather than Do: the shared fetch must survive any one
+	// caller's disconnect (it runs detached with its own bound), while each
+	// caller must still be able to stop waiting on its own cancellation
+	// instead of being pinned for up to the fetch timeout.
+	resultCh := c.cacheGroup.DoChan(cacheKey, func() (any, error) {
+		if c.certificationCache != nil {
+			if cached, ok := c.certificationCache.Get(cacheKey); ok {
+				return cached, nil
+			}
+		}
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), certificationFetchTimeout)
+		defer cancel()
+		cert, err := c.fetchCertification(fetchCtx, mediaType, path)
+		if err != nil {
+			return nil, err
+		}
+		// "" (no certification on TMDB) is cached too: it is by far the most
+		// common case and refetching it on every page load would defeat the
+		// cache exactly where fail-closed filtering needs it most.
+		if c.certificationCache != nil {
+			c.certificationCache.Set(cacheKey, cert, certificationCacheTTL)
+		}
+		return cert, nil
+	})
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return "", result.Err
+		}
+		cert, ok := result.Val.(string)
+		if !ok {
+			return "", fmt.Errorf("tmdb: invalid cached certification response")
+		}
+		return cert, nil
+	}
+}
+
+func (c *Client) fetchCertification(ctx context.Context, mediaType, path string) (string, error) {
+	if mediaType == "movie" {
+		var resp releaseDatesResponse
+		if err := c.doGet(ctx, path, &resp); err != nil {
+			return "", err
+		}
+		return pickUSMovieCertification(&resp), nil
+	}
+	var resp contentRatingsResponse
+	if err := c.doGet(ctx, path, &resp); err != nil {
+		return "", err
+	}
+	return pickUSTVRating(&resp), nil
+}
+
+// usCertificationRank orders US movie certifications for strictest-wins
+// resolution across multiple release entries. Mirrors TMDB's own
+// /certification/movie/list ordering. Unknown strings (including "NR") rank
+// -1 and lose to any recognized rating; a title with ONLY unknown/NR entries
+// resolves to that string and fails closed downstream.
+var usCertificationRank = map[string]int{
+	"G": 1, "PG": 2, "PG-13": 3, "R": 4, "NC-17": 5,
+}
+
+// pickUSMovieCertification is the enforcement-path variant of
+// pickMovieCertification: US entries only, no foreign fallback. A title can
+// carry several US entries whose certifications disagree — festival "NR" next
+// to a theatrical "PG-13", or re-releases rated "PG" and "R" — and TMDB's
+// entry order is not meaningful, so the STRICTEST recognized rating wins:
+// enforcement must not admit a title on its most lenient certificate.
+func pickUSMovieCertification(rd *releaseDatesResponse) string {
+	if rd == nil {
+		return ""
+	}
+	var picked string
+	pickedRank := -1
+	for _, country := range rd.Results {
+		if !strings.EqualFold(country.ISO3166, "US") {
+			continue
+		}
+		for _, entry := range country.ReleaseDates {
+			cert := strings.TrimSpace(entry.Certification)
+			if cert == "" {
+				continue
+			}
+			rank := usCertificationRank[strings.ToUpper(cert)] // unknown -> 0
+			if rank > pickedRank || picked == "" {
+				picked = cert
+				pickedRank = rank
+			}
+		}
+	}
+	return picked
+}
+
+// pickUSTVRating is the enforcement-path variant of pickTVRating: US only.
+func pickUSTVRating(cr *contentRatingsResponse) string {
+	if cr == nil {
+		return ""
+	}
+	for _, entry := range cr.Results {
+		if strings.EqualFold(entry.ISO3166, "US") {
+			if rating := strings.TrimSpace(entry.Rating); rating != "" {
+				return rating
+			}
+		}
+	}
+	return ""
 }
 
 func (c *Client) fetchExternalIDs(ctx context.Context, path string) (*ExternalIDs, error) {

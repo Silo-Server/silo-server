@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2058,15 +2059,16 @@ func (f *fakePresence) LookupTMDB(_ context.Context, mediaType MediaType, ids []
 }
 
 type fakeTMDBClient struct {
-	mu              sync.Mutex
-	page            *tmdb.MediaPage
-	externalIDs     *tmdb.ExternalIDs
-	externalIDsByID map[int]*tmdb.ExternalIDs
-	externalIDCalls []int
-	detail          *tmdb.MediaDetail
-	discoverPage    *tmdb.MediaPage
-	discoverErr     error
-	searchMediaType string
+	mu                sync.Mutex
+	page              *tmdb.MediaPage
+	externalIDs       *tmdb.ExternalIDs
+	externalIDsByID   map[int]*tmdb.ExternalIDs
+	externalIDCalls   []int
+	detail            *tmdb.MediaDetail
+	discoverPage      *tmdb.MediaPage
+	discoverErr       error
+	searchMediaType   string
+	gotDiscoverParams tmdb.DiscoverParams
 }
 
 func (f *fakeTMDBClient) SearchMedia(_ context.Context, mediaType, _ string, _ int) (*tmdb.MediaPage, error) {
@@ -2078,7 +2080,10 @@ func (f *fakeTMDBClient) DiscoverSection(context.Context, string, int) (*tmdb.Me
 	return f.page, nil
 }
 
-func (f *fakeTMDBClient) DiscoverPage(context.Context, string, tmdb.DiscoverParams, int) (*tmdb.MediaPage, error) {
+func (f *fakeTMDBClient) DiscoverPage(_ context.Context, _ string, params tmdb.DiscoverParams, _ int) (*tmdb.MediaPage, error) {
+	f.mu.Lock()
+	f.gotDiscoverParams = params
+	f.mu.Unlock()
 	if f.discoverErr != nil {
 		return nil, f.discoverErr
 	}
@@ -2102,10 +2107,44 @@ func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.Med
 	return f.detail, nil
 }
 
+// certTMDBClient layers GetCertification onto fakeTMDBClient so a service
+// under a rating ceiling can hydrate certifications. Kept separate from
+// fakeTMDBClient so tests without certifications pin that the plain client
+// does NOT satisfy TMDBCertificationClient.
+type certTMDBClient struct {
+	fakeTMDBClient
+	certs     map[int]string // tmdb id -> certification
+	certErr   error
+	certCalls atomic.Int64
+}
+
+func (f *certTMDBClient) GetCertification(_ context.Context, _ string, id int) (string, error) {
+	f.certCalls.Add(1)
+	if f.certErr != nil {
+		return "", f.certErr
+	}
+	return f.certs[id], nil
+}
+
 type fixedCeiling struct{ q string }
 
 func (f fixedCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
 	return f.q, nil
+}
+
+// ratedCeiling implements both EntitlementResolver and ContentRatingResolver.
+type ratedCeiling struct {
+	q         string
+	rating    string
+	ratingErr error
+}
+
+func (f ratedCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
+	return f.q, nil
+}
+
+func (f ratedCeiling) MaxContentRating(context.Context, int, string) (string, error) {
+	return f.rating, f.ratingErr
 }
 
 // fakeRouterProvider is a canned RequestRouterProvider standing in for a
