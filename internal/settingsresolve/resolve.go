@@ -111,6 +111,77 @@ func (r *Resolver) Resolve(
 		return nil, fmt.Errorf("settingsresolve: no contract")
 	}
 
+	known, defs := r.knownKeys(keys)
+	if len(known) == 0 {
+		return nil, nil
+	}
+
+	stored, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
+		Keys:       known,
+		ProfileIDs: nonEmpty(rc.ProfileID),
+		DeviceID:   rc.DeviceID,
+		LibraryIDs: rc.LibraryIDs,
+		SeriesIDs:  rc.SeriesIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
+	}
+
+	return r.rank(known, defs, stored, rc, constraints), nil
+}
+
+// ResolveProfiles resolves the same keys for several profiles in one store
+// read, returning each profile's effective values keyed by profile id.
+//
+// It exists for the household shape Resolve cannot serve without a read per
+// profile: GET /profiles serves a preference block for every profile on the
+// account, and looping Resolve would turn one list request into n round trips.
+// Ranking is per profile against the shared candidate set, so the answer for
+// each id is identical to what a single-profile Resolve would return.
+//
+// Content contexts are deliberately absent: a profile list has no library or
+// series in play, so only the account, profile, and profile_device scopes can
+// contribute.
+func (r *Resolver) ResolveProfiles(
+	ctx context.Context,
+	store Store,
+	profileIDs []string,
+	keys []string,
+	constraints Constraints,
+) (map[string][]Effective, error) {
+	if r == nil || r.contract == nil {
+		return nil, fmt.Errorf("settingsresolve: no contract")
+	}
+	if len(profileIDs) == 0 {
+		return nil, nil
+	}
+
+	known, defs := r.knownKeys(keys)
+	if len(known) == 0 {
+		return nil, nil
+	}
+
+	stored, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
+		Keys:       known,
+		ProfileIDs: profileIDs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
+	}
+
+	out := make(map[string][]Effective, len(profileIDs))
+	for _, profileID := range profileIDs {
+		if _, seen := out[profileID]; seen {
+			continue
+		}
+		out[profileID] = r.rank(known, defs, stored, Context{ProfileID: profileID}, constraints)
+	}
+	return out, nil
+}
+
+// knownKeys filters requested keys down to the remotely-stored definitions this
+// contract declares, preserving request order and dropping duplicates.
+func (r *Resolver) knownKeys(keys []string) ([]string, map[string]*settingscontract.Definition) {
 	known := make([]string, 0, len(keys))
 	defs := make(map[string]*settingscontract.Definition, len(keys))
 	for _, key := range keys {
@@ -126,21 +197,19 @@ func (r *Resolver) Resolve(
 		defs[key] = def
 		known = append(known, key)
 	}
-	if len(known) == 0 {
-		return nil, nil
-	}
+	return known, defs
+}
 
-	stored, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-		Keys:       known,
-		ProfileID:  rc.ProfileID,
-		DeviceID:   rc.DeviceID,
-		LibraryIDs: rc.LibraryIDs,
-		SeriesIDs:  rc.SeriesIDs,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("settingsresolve: reading candidates: %w", err)
-	}
-
+// rank turns one candidate set into one context's effective values. Candidates
+// that belong to another profile are filtered by pickForScope, which is what
+// lets a batched read serve several profiles from the same rows.
+func (r *Resolver) rank(
+	known []string,
+	defs map[string]*settingscontract.Definition,
+	stored []userstore.SettingValue,
+	rc Context,
+	constraints Constraints,
+) []Effective {
 	byKey := make(map[string][]userstore.SettingValue, len(known))
 	for _, row := range stored {
 		byKey[row.Key] = append(byKey[row.Key], row)
@@ -150,7 +219,14 @@ func (r *Resolver) Resolve(
 	for _, key := range known {
 		out = append(out, r.resolveOne(defs[key], byKey[key], rc, constraints))
 	}
-	return out, nil
+	return out
+}
+
+func nonEmpty(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 // resolveOne ranks one key's candidates by its declared resolution order.

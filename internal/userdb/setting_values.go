@@ -82,11 +82,14 @@ func ListSettingValuesForResolution(
 		return nil, nil
 	}
 
-	args := make([]any, 0, len(q.Keys)+len(q.LibraryIDs)+len(q.SeriesIDs)+2)
+	args := make([]any, 0, len(q.Keys)+len(q.ProfileIDs)+len(q.LibraryIDs)+len(q.SeriesIDs)+1)
 	for _, key := range q.Keys {
 		args = append(args, key)
 	}
-	args = append(args, q.ProfileID, q.DeviceID)
+	for _, profileID := range q.ProfileIDs {
+		args = append(args, profileID)
+	}
+	args = append(args, q.DeviceID)
 	for _, libraryID := range q.LibraryIDs {
 		args = append(args, libraryID)
 	}
@@ -94,6 +97,13 @@ func ListSettingValuesForResolution(
 		args = append(args, seriesID)
 	}
 
+	// An empty id set is spelled as the false literal rather than an empty
+	// IN (), which is a syntax error in SQLite. It drops the scope entirely,
+	// which is what "no profile in play" and "no content context" both mean.
+	profileClause := "0"
+	if len(q.ProfileIDs) > 0 {
+		profileClause = "profile_id IN (" + placeholders(len(q.ProfileIDs)) + ")"
+	}
 	libraryClause := "0"
 	if len(q.LibraryIDs) > 0 {
 		libraryClause = "scope = 'profile_library' AND library_id IN (" + placeholders(len(q.LibraryIDs)) + ")"
@@ -110,7 +120,7 @@ func ListSettingValuesForResolution(
 		  AND (
 		        scope = 'account'
 		     OR (
-		          profile_id = ?
+		          `+profileClause+`
 		          AND (
 		                scope = 'profile'
 		             OR (scope = 'profile_device' AND device_id = ?)

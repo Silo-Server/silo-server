@@ -95,7 +95,7 @@ func (s *PostgresUserStore) ListSettingValuesForResolution(
 		  AND (
 		        scope = 'account'
 		     OR (
-		          profile_id = $3
+		          profile_id = ANY($3::text[])
 		          AND (
 		                scope = 'profile'
 		             OR (scope = 'profile_device' AND device_id = $4)
@@ -106,7 +106,7 @@ func (s *PostgresUserStore) ListSettingValuesForResolution(
 		      )
 		ORDER BY key, scope, COALESCE(profile_id, ''), COALESCE(device_id, ''),
 		         COALESCE(library_id, 0), COALESCE(series_id, '')`,
-		s.userID, q.Keys, q.ProfileID, q.DeviceID, q.LibraryIDs, q.SeriesIDs,
+		s.userID, q.Keys, q.ProfileIDs, q.DeviceID, q.LibraryIDs, q.SeriesIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing setting values for resolution: %w", err)

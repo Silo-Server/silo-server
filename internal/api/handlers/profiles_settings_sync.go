@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -168,4 +170,147 @@ func (h *ProfileHandler) applyProfileSettingsSync(
 			write.key, string(settingscontract.ScopeProfile))
 	}
 	return nil
+}
+
+// --- Read side ---
+//
+// The profile DTO's preference fields are served from the same canonical rows
+// the sync above writes, not from the legacy columns. Without this, a
+// preference saved through PUT /settings/values lands in user_setting_values
+// and is invisible in every profile DTO reader on every platform: the columns
+// only move when a client goes through POST/PUT /profiles, and the cutover
+// direction is that they stop being read rather than start being dual-written.
+//
+// The fallback is the contract default, never the column. A column holding a
+// pre-cutover value that the one-time backfill already converted would
+// otherwise resurface the moment its canonical row is unset — the "clear this
+// preference" path would read as "restore the value from before the cutover".
+
+// profilePreferences is the resolved form of the DTO's preference block. Each
+// field is the effective value for one profile, already defaulted, so the
+// serializer copies rather than decides.
+type profilePreferences struct {
+	AudioLanguage       string
+	MetadataLanguage    string
+	SubtitleLanguage    string
+	SubtitleMode        string
+	ShowForcedSubtitles bool
+}
+
+// profilePreferenceKeys are the canonical keys behind the DTO's preference
+// fields, in DTO field order.
+//
+// quality_preference has no entry: the legacy column is a single compound
+// value while the contract splits it across playback.preferred_quality and
+// playback.max_bitrate_kbps, so there is no lossless read and the field stays
+// column-backed. The auto_skip_* and auto_play_next_preview fields likewise
+// stay column-backed here — the sync path never mirrored them, so their
+// canonical rows can be older than the columns.
+var profilePreferenceKeys = []string{
+	settingskeys.PlaybackAudioLanguage,
+	settingskeys.CatalogMetadataLanguage,
+	settingskeys.PlaybackSubtitleLanguage,
+	settingskeys.PlaybackSubtitleMode,
+	settingskeys.PlaybackShowForcedSubtitles,
+}
+
+// resolveProfilePreferences resolves the preference block for every listed
+// profile in one store read.
+//
+// One read for the whole household rather than one per profile: GET /profiles
+// serves several profiles and this is on its hot path. A resolution failure
+// degrades to contract defaults rather than failing the request — these are
+// presentation preferences, not an access boundary — but it is logged, because
+// a store outage that silently hands every profile the defaults is otherwise
+// indistinguishable from a household that never set anything.
+func resolveProfilePreferences(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileIDs []string,
+) map[string]profilePreferences {
+	defaults := contractProfilePreferences()
+	out := make(map[string]profilePreferences, len(profileIDs))
+	for _, id := range profileIDs {
+		out[id] = defaults
+	}
+	if store == nil || len(profileIDs) == 0 {
+		return out
+	}
+
+	contract, err := settingscontract.Load()
+	if err != nil {
+		slog.WarnContext(ctx, "profile preferences degraded to contract defaults: loading settings contract failed",
+			"component", "api", "error", err)
+		return out
+	}
+	resolved, err := settingsresolve.New(contract).ResolveProfiles(
+		ctx, store, profileIDs, profilePreferenceKeys, nil)
+	if err != nil {
+		slog.WarnContext(ctx, "profile preferences degraded to contract defaults: reading setting values failed",
+			"component", "api", "profiles", len(profileIDs), "error", err)
+		return out
+	}
+
+	for profileID, effective := range resolved {
+		prefs := defaults
+		for _, eff := range effective {
+			applyProfilePreference(&prefs, eff.Key, eff.Value)
+		}
+		out[profileID] = prefs
+	}
+	return out
+}
+
+// contractProfilePreferences is the block every profile starts from: the
+// contract's own defaults, decoded once per request.
+//
+// It is derived from the manifest rather than hard-coded so a default that
+// changes there changes here too. A contract that fails to load leaves the Go
+// zero values, which is the same "no preference" the empty string and false
+// have always spelled in this DTO.
+func contractProfilePreferences() profilePreferences {
+	var prefs profilePreferences
+	contract, err := settingscontract.Load()
+	if err != nil {
+		return prefs
+	}
+	for _, key := range profilePreferenceKeys {
+		def, ok := contract.Lookup(key)
+		if !ok {
+			continue
+		}
+		applyProfilePreference(&prefs, key, def.DefaultValue)
+	}
+	return prefs
+}
+
+// applyProfilePreference decodes one canonical value into its DTO field.
+//
+// A value that fails to decode leaves the field as it was, so a single
+// malformed row degrades one field to its default instead of the whole block.
+// The language keys default to JSON null, which unmarshals into "" — the same
+// spelling of "no preference" the legacy columns used.
+func applyProfilePreference(prefs *profilePreferences, key string, value json.RawMessage) {
+	switch key {
+	case settingskeys.PlaybackAudioLanguage:
+		decodeSettingString(value, &prefs.AudioLanguage)
+	case settingskeys.CatalogMetadataLanguage:
+		decodeSettingString(value, &prefs.MetadataLanguage)
+	case settingskeys.PlaybackSubtitleLanguage:
+		decodeSettingString(value, &prefs.SubtitleLanguage)
+	case settingskeys.PlaybackSubtitleMode:
+		decodeSettingString(value, &prefs.SubtitleMode)
+	case settingskeys.PlaybackShowForcedSubtitles:
+		var forced bool
+		if json.Unmarshal(value, &forced) == nil {
+			prefs.ShowForcedSubtitles = forced
+		}
+	}
+}
+
+func decodeSettingString(value json.RawMessage, dst *string) {
+	var decoded string
+	if json.Unmarshal(value, &decoded) == nil {
+		*dst = strings.TrimSpace(decoded)
+	}
 }

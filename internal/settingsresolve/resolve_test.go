@@ -373,3 +373,71 @@ func TestStoreErrorsPropagate(t *testing.T) {
 // fake it, which is exactly the seam that lets an incompatible signature go
 // unnoticed until a caller wires the two together.
 var _ Store = (userstore.UserStore)(nil)
+
+// TestResolveProfilesRanksPerProfileInOneRead is the household shape: several
+// profiles resolved from one candidate set, each getting exactly what a
+// single-profile Resolve would have returned, and no profile inheriting
+// another's value. GET /profiles is the caller that makes this matter — a read
+// per profile would turn one list request into n round trips.
+func TestResolveProfilesRanksPerProfileInOneRead(t *testing.T) {
+	const key = "playback.subtitle_language"
+	store := &fakeStore{rows: []userstore.SettingValue{
+		row(key, settingscontract.ScopeAccount, `"en"`, userstore.SettingIdentity{}),
+		row(key, settingscontract.ScopeProfile, `"fr"`,
+			userstore.SettingIdentity{ProfileID: "p1"}),
+		row(key, settingscontract.ScopeProfile, `"ja"`,
+			userstore.SettingIdentity{ProfileID: "p2"}),
+	}}
+
+	got, err := New(mustContract(t)).ResolveProfiles(context.Background(), store,
+		[]string{"p1", "p2", "p3"}, []string{key}, nil)
+	if err != nil {
+		t.Fatalf("ResolveProfiles: %v", err)
+	}
+	if len(store.queries) != 1 {
+		t.Fatalf("issued %d reads for 3 profiles, want 1", len(store.queries))
+	}
+	if len(store.queries[0].ProfileIDs) != 3 {
+		t.Errorf("query carried %d profile ids, want 3", len(store.queries[0].ProfileIDs))
+	}
+
+	// p3 has no row of its own. The account-scope row is not in this key's
+	// resolution order, so p3 falls to the contract default rather than
+	// inheriting a neighbor's language.
+	for profileID, want := range map[string]string{
+		"p1": `"fr"`,
+		"p2": `"ja"`,
+		"p3": `null`,
+	} {
+		effective, ok := got[profileID]
+		if !ok {
+			t.Errorf("no result for %s", profileID)
+			continue
+		}
+		if len(effective) != 1 {
+			t.Errorf("%s returned %d results, want 1", profileID, len(effective))
+			continue
+		}
+		if string(effective[0].Value) != want {
+			t.Errorf("%s resolved to %s, want %s", profileID, effective[0].Value, want)
+		}
+	}
+}
+
+// TestResolveProfilesWithoutProfilesReadsNothing: an account with no profiles
+// is not an error and must not issue a read that would return every
+// account-scope row for no one to use.
+func TestResolveProfilesWithoutProfilesReadsNothing(t *testing.T) {
+	store := &fakeStore{}
+	got, err := New(mustContract(t)).ResolveProfiles(context.Background(), store,
+		nil, []string{"playback.subtitle_mode"}, nil)
+	if err != nil {
+		t.Fatalf("ResolveProfiles: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("returned %d results for no profiles, want none", len(got))
+	}
+	if len(store.queries) != 0 {
+		t.Errorf("issued %d reads for no profiles, want none", len(store.queries))
+	}
+}

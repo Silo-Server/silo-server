@@ -280,11 +280,8 @@ func (h *ProfileHandler) HandleListProfiles(w http.ResponseWriter, r *http.Reque
 	}
 
 	resp := profileListResponse{
-		Profiles:            make([]profileResponse, 0, len(profiles)),
+		Profiles:            h.toProfileResponses(r.Context(), store, profiles),
 		AvatarUploadEnabled: h.AvatarStore != nil,
-	}
-	for _, p := range profiles {
-		resp.Profiles = append(resp.Profiles, h.toProfileResponse(r.Context(), p))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -481,7 +478,7 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 		created = *p
 	}
 
-	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), created))
+	writeJSON(w, http.StatusCreated, h.toProfileResponse(r.Context(), store, created))
 }
 
 // HandleUpdateProfile handles PUT /profiles/{id}.
@@ -649,7 +646,7 @@ func (h *ProfileHandler) HandleUpdateProfile(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), *profile))
+	writeJSON(w, http.StatusOK, h.toProfileResponse(r.Context(), store, *profile))
 }
 
 // HandleDeleteProfile handles DELETE /profiles/{id}.
@@ -792,7 +789,43 @@ func (h *ProfileHandler) HandleVerifyPIN(w http.ResponseWriter, r *http.Request)
 
 // --- Helpers ---
 
-func (h *ProfileHandler) toProfileResponse(ctx context.Context, p userstore.Profile) profileResponse {
+// toProfileResponse serializes one profile, resolving its preference block on
+// its own. Callers serializing several profiles must use toProfileResponses
+// instead so the whole list costs one store read.
+func (h *ProfileHandler) toProfileResponse(
+	ctx context.Context, store userstore.UserStore, p userstore.Profile,
+) profileResponse {
+	prefs := resolveProfilePreferences(ctx, store, []string{p.ID})
+	return h.profileResponseWith(ctx, p, prefs[p.ID])
+}
+
+// toProfileResponses serializes a whole household, resolving every profile's
+// preference block in one store read rather than one per profile.
+func (h *ProfileHandler) toProfileResponses(
+	ctx context.Context, store userstore.UserStore, profiles []userstore.Profile,
+) []profileResponse {
+	ids := make([]string, 0, len(profiles))
+	for _, p := range profiles {
+		ids = append(ids, p.ID)
+	}
+	prefs := resolveProfilePreferences(ctx, store, ids)
+
+	out := make([]profileResponse, 0, len(profiles))
+	for _, p := range profiles {
+		out = append(out, h.profileResponseWith(ctx, p, prefs[p.ID]))
+	}
+	return out
+}
+
+// profileResponseWith builds the DTO from a profile row and its already
+// resolved preferences.
+//
+// The preference fields come from prefs rather than from p: those five are
+// canonical now, and the legacy columns behind them are written but no longer
+// read (see profiles_settings_sync.go). Everything else is still column-backed.
+func (h *ProfileHandler) profileResponseWith(
+	ctx context.Context, p userstore.Profile, prefs profilePreferences,
+) profileResponse {
 	avatarSource, avatarURL := resolveProfileAvatar(ctx, h.AvatarStore, h.AvatarTTL, p.Avatar)
 	return profileResponse{
 		ID:                         p.ID,
@@ -805,15 +838,15 @@ func (h *ProfileHandler) toProfileResponse(ctx context.Context, p userstore.Prof
 		IsPrimary:                  p.IsPrimary,
 		MaxContentRating:           p.MaxContentRating,
 		QualityPreference:          p.QualityPreference,
-		Language:                   p.Language,
-		PreferredMetadataLanguage:  p.PreferredMetadataLanguage,
-		SubtitleLanguage:           p.SubtitleLanguage,
-		SubtitleMode:               p.SubtitleMode,
+		Language:                   prefs.AudioLanguage,
+		PreferredMetadataLanguage:  prefs.MetadataLanguage,
+		SubtitleLanguage:           prefs.SubtitleLanguage,
+		SubtitleMode:               prefs.SubtitleMode,
 		AutoSkipIntro:              p.AutoSkipIntro,
 		AutoSkipCredits:            p.AutoSkipCredits,
 		AutoSkipRecap:              p.AutoSkipRecap,
 		AutoPlayNextPreview:        p.AutoPlayNextPreview,
-		ShowForcedSubtitles:        p.ShowForcedSubtitles,
+		ShowForcedSubtitles:        prefs.ShowForcedSubtitles,
 		LibraryRestrictionsEnabled: p.LibraryRestrictionsEnabled,
 		AllowedLibraryIDs:          append([]int(nil), p.AllowedLibraryIDs...),
 		MaxPlaybackQuality:         access.NormalizePlaybackQuality(p.MaxPlaybackQuality),

@@ -121,7 +121,7 @@ func TestPostgresResolutionIssuesOneQuery(t *testing.T) {
 	tracer.reset()
 	rows, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{key, "playback.subtitle_mode", "playback.subtitle_language"},
-		ProfileID:  "p1",
+		ProfileIDs: []string{"p1"},
 		DeviceID:   "apple-tv",
 		LibraryIDs: []int{42, 43},
 		SeriesIDs:  []string{"s-1", "s-2", "s-3"},

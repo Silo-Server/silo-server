@@ -382,7 +382,7 @@ func testSettingValuePartialUniqueness(t *testing.T, newStore func(t *testing.T)
 
 	rows, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{audioKey},
-		ProfileID:  "p1",
+		ProfileIDs: []string{"p1"},
 		DeviceID:   deviceApple,
 		LibraryIDs: []int{1, 2},
 		SeriesIDs:  []string{seriesOne, seriesTwo},
@@ -502,7 +502,7 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	// The batched shape: two content contexts resolved in one call.
 	rows, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{audioKey, subtitleKey},
-		ProfileID:  "p1",
+		ProfileIDs: []string{"p1"},
 		DeviceID:   deviceApple,
 		LibraryIDs: []int{42},
 		SeriesIDs:  []string{seriesOne, seriesTwo},
@@ -524,10 +524,10 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	// lets a list view make one round trip instead of one per item.
 	for _, series := range []string{seriesOne, seriesTwo} {
 		single, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-			Keys:      []string{audioKey},
-			ProfileID: "p1",
-			DeviceID:  deviceApple,
-			SeriesIDs: []string{series},
+			Keys:       []string{audioKey},
+			ProfileIDs: []string{"p1"},
+			DeviceID:   deviceApple,
+			SeriesIDs:  []string{series},
 		})
 		if err != nil {
 			t.Fatalf("ListSettingValuesForResolution(%s): %v", series, err)
@@ -543,8 +543,8 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	// No device identity — an incognito window, or jellycompat's seed — drops
 	// profile_device candidates without touching the roaming ones.
 	noDevice, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-		Keys:      []string{audioKey},
-		ProfileID: "p1",
+		Keys:       []string{audioKey},
+		ProfileIDs: []string{"p1"},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution(no device): %v", err)
@@ -563,11 +563,28 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	}
 	assertIdentitySet(t, accountOnly, []userstore.SettingIdentity{accountID(audioKey)})
 
+	// The household shape: several profiles in one read, which is what lets
+	// GET /profiles serve a preference block per profile without a read each.
+	// Every profile's own rows come back, and one profile's value can never
+	// leak into another's because the identity travels on the row.
+	household, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
+		Keys:       []string{audioKey},
+		ProfileIDs: []string{"p1", "p2"},
+	})
+	if err != nil {
+		t.Fatalf("ListSettingValuesForResolution(household): %v", err)
+	}
+	assertIdentitySet(t, household, []userstore.SettingIdentity{
+		accountID(audioKey),
+		profileID(audioKey, "p1"),
+		profileID(audioKey, "p2"),
+	})
+
 	// Blank and duplicate context ids are compacted rather than bound as
 	// literals, so they neither match a '' row nor multiply the result set.
 	dirty, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
 		Keys:       []string{audioKey, "", audioKey, "   "},
-		ProfileID:  "p1",
+		ProfileIDs: []string{"p1", "p1", "", "  "},
 		DeviceID:   deviceApple,
 		LibraryIDs: []int{42, 42, 0, -1},
 		SeriesIDs:  []string{seriesOne, seriesOne, "", "  "},
@@ -584,7 +601,8 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	})
 
 	// No keys is not an error and is not "everything".
-	none, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{ProfileID: "p1"})
+	none, err := store.ListSettingValuesForResolution(ctx,
+		userstore.SettingResolutionQuery{ProfileIDs: []string{"p1"}})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution(no keys): %v", err)
 	}
@@ -595,8 +613,8 @@ func testSettingValueResolution(t *testing.T, newStore func(t *testing.T) userst
 	// An unknown key resolves to nothing rather than erroring; rejecting unknown
 	// keys is the contract layer's job, not the store's.
 	unknown, err := store.ListSettingValuesForResolution(ctx, userstore.SettingResolutionQuery{
-		Keys:      []string{"playback.not_a_setting"},
-		ProfileID: "p1",
+		Keys:       []string{"playback.not_a_setting"},
+		ProfileIDs: []string{"p1"},
 	})
 	if err != nil {
 		t.Fatalf("ListSettingValuesForResolution(unknown key): %v", err)

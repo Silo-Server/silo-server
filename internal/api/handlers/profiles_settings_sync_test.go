@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -224,4 +225,219 @@ func TestUpdateProfilePublishesUserSettingsEvents(t *testing.T) {
 		t.Errorf("unexpected extra event for %s", extra.Data)
 	default:
 	}
+}
+
+// --- Read side ---
+//
+// The mirror of the tests above: the DTO's preference fields are served from
+// the canonical rows, so a write that never touched a legacy column is still
+// visible to every profile-DTO reader on every platform.
+
+// listProfilesVia sends GET /profiles as profile-1's own session.
+func listProfilesVia(t *testing.T, handler *ProfileHandler) profileListResponse {
+	t.Helper()
+	req := newAuthorizedProfileRequestWithRole(http.MethodGet, "/profiles", "", "user", "profile-1")
+	rr := httptest.NewRecorder()
+	handler.HandleListProfiles(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /profiles = %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp profileListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decoding profile list: %v", err)
+	}
+	return resp
+}
+
+func profileFromList(t *testing.T, resp profileListResponse, profileID string) profileResponse {
+	t.Helper()
+	for _, p := range resp.Profiles {
+		if p.ID == profileID {
+			return p
+		}
+	}
+	t.Fatalf("profile %s missing from the list response", profileID)
+	return profileResponse{}
+}
+
+// TestListProfilesServesCanonicalWrite is the cross-client coherence gap this
+// read path exists to close: a preference saved through PUT
+// /settings/values?scope=profile writes only user_setting_values, and the
+// profile DTO — which the Apple clients read — must reflect it on the next GET
+// without the legacy column having moved at all.
+func TestListProfilesServesCanonicalWrite(t *testing.T) {
+	ctx := context.Background()
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	before, err := store.GetProfile(ctx, "profile-1")
+	if err != nil || before == nil {
+		t.Fatalf("reading the profile before the canonical write: %v", err)
+	}
+
+	for key, value := range map[string]string{
+		settingskeys.PlaybackAudioLanguage:       `"de"`,
+		settingskeys.CatalogMetadataLanguage:     `"fr"`,
+		settingskeys.PlaybackSubtitleLanguage:    `"ja"`,
+		settingskeys.PlaybackSubtitleMode:        `"always"`,
+		settingskeys.PlaybackShowForcedSubtitles: `false`,
+	} {
+		if _, err := store.UpsertSettingValue(ctx, userstore.SettingIdentity{
+			Key:       key,
+			Scope:     settingscontract.ScopeProfile,
+			ProfileID: "profile-1",
+		}, json.RawMessage(value)); err != nil {
+			t.Fatalf("canonical write of %s: %v", key, err)
+		}
+	}
+
+	got := profileFromList(t, listProfilesVia(t, handler), "profile-1")
+	if got.Language != "de" {
+		t.Errorf("language = %q, want %q", got.Language, "de")
+	}
+	if got.PreferredMetadataLanguage != "fr" {
+		t.Errorf("preferred_metadata_language = %q, want %q", got.PreferredMetadataLanguage, "fr")
+	}
+	if got.SubtitleLanguage != "ja" {
+		t.Errorf("subtitle_language = %q, want %q", got.SubtitleLanguage, "ja")
+	}
+	if got.SubtitleMode != "always" {
+		t.Errorf("subtitle_mode = %q, want %q", got.SubtitleMode, "always")
+	}
+	if got.ShowForcedSubtitles {
+		t.Error("show_forced_subtitles = true, want false")
+	}
+
+	// The legacy columns never moved: the canonical write is the only storage
+	// involved, which is precisely why reading the columns hid it.
+	after, err := store.GetProfile(ctx, "profile-1")
+	if err != nil || after == nil {
+		t.Fatalf("reading the profile after the canonical write: %v", err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Errorf("a canonical write moved the legacy columns:\n before = %+v\n after  = %+v", before, after)
+	}
+}
+
+// TestListProfilesFallsBackToContractDefaults: a profile with neither a
+// canonical row nor column data serves the contract's defaults, not the
+// columns' schema defaults. subtitle_mode is the one that shows the
+// difference is real — the column defaults to 'auto' and so does the
+// contract, so show_forced_subtitles and the languages carry the assertion.
+func TestListProfilesFallsBackToContractDefaults(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	got := profileFromList(t, listProfilesVia(t, handler), "profile-1")
+	if got.Language != "" {
+		t.Errorf("language = %q, want the contract default \"\"", got.Language)
+	}
+	if got.PreferredMetadataLanguage != "" {
+		t.Errorf("preferred_metadata_language = %q, want the contract default \"\"",
+			got.PreferredMetadataLanguage)
+	}
+	if got.SubtitleLanguage != "" {
+		t.Errorf("subtitle_language = %q, want the contract default \"\"", got.SubtitleLanguage)
+	}
+	if got.SubtitleMode != "auto" {
+		t.Errorf("subtitle_mode = %q, want the contract default %q", got.SubtitleMode, "auto")
+	}
+	if !got.ShowForcedSubtitles {
+		t.Error("show_forced_subtitles = false, want the contract default true")
+	}
+}
+
+// TestListProfilesRoundTripsLegacyWrite: the legacy write path still works
+// end to end. The columns are no longer read, so this only passes because the
+// write mirrors into the canonical rows — which is the whole cutover shape,
+// and the regression that would break every shipped client if the sync broke.
+func TestListProfilesRoundTripsLegacyWrite(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	rr := updateProfileVia(t, handler, "profile-1",
+		`{"language":"es","preferred_metadata_language":"it","subtitle_language":"ko",`+
+			`"subtitle_mode":"off","show_forced_subtitles":false}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// The update response and the next list must agree; both serve resolution.
+	var updated profileResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decoding update response: %v", err)
+	}
+	listed := profileFromList(t, listProfilesVia(t, handler), "profile-1")
+	if !reflect.DeepEqual(updated, listed) {
+		t.Errorf("update response and list disagree:\n update = %+v\n list   = %+v", updated, listed)
+	}
+
+	if listed.Language != "es" {
+		t.Errorf("language = %q, want %q", listed.Language, "es")
+	}
+	if listed.PreferredMetadataLanguage != "it" {
+		t.Errorf("preferred_metadata_language = %q, want %q", listed.PreferredMetadataLanguage, "it")
+	}
+	if listed.SubtitleLanguage != "ko" {
+		t.Errorf("subtitle_language = %q, want %q", listed.SubtitleLanguage, "ko")
+	}
+	if listed.SubtitleMode != "off" {
+		t.Errorf("subtitle_mode = %q, want %q", listed.SubtitleMode, "off")
+	}
+	if listed.ShowForcedSubtitles {
+		t.Error("show_forced_subtitles = true, want false")
+	}
+}
+
+// TestListProfilesResolvesHouseholdInOneRead: the list serves several
+// profiles, so it must not cost a store read each. It also pins that one
+// profile's preference never leaks into another's.
+func TestListProfilesResolvesHouseholdInOneRead(t *testing.T) {
+	ctx := context.Background()
+	base := newProfileTestStore(t)
+	if err := base.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Kids"}); err != nil {
+		t.Fatalf("creating the second profile: %v", err)
+	}
+	for profileID, language := range map[string]string{
+		"profile-1": `"de"`,
+		"profile-2": `"ja"`,
+	} {
+		if _, err := base.UpsertSettingValue(ctx, userstore.SettingIdentity{
+			Key:       settingskeys.PlaybackSubtitleLanguage,
+			Scope:     settingscontract.ScopeProfile,
+			ProfileID: profileID,
+		}, json.RawMessage(language)); err != nil {
+			t.Fatalf("canonical write for %s: %v", profileID, err)
+		}
+	}
+
+	store := &countingResolutionStore{UserStore: base}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	resp := listProfilesVia(t, handler)
+	if got := profileFromList(t, resp, "profile-1").SubtitleLanguage; got != "de" {
+		t.Errorf("profile-1 subtitle_language = %q, want %q", got, "de")
+	}
+	if got := profileFromList(t, resp, "profile-2").SubtitleLanguage; got != "ja" {
+		t.Errorf("profile-2 subtitle_language = %q, want %q", got, "ja")
+	}
+	if store.reads != 1 {
+		t.Errorf("listing %d profiles issued %d resolution reads, want 1",
+			len(resp.Profiles), store.reads)
+	}
+}
+
+// countingResolutionStore counts the batched resolution reads a request makes,
+// so a regression to one read per profile fails rather than merely slowing
+// the list down.
+type countingResolutionStore struct {
+	userstore.UserStore
+	reads int
+}
+
+func (s *countingResolutionStore) ListSettingValuesForResolution(
+	ctx context.Context, query userstore.SettingResolutionQuery,
+) ([]userstore.SettingValue, error) {
+	s.reads++
+	return s.UserStore.ListSettingValuesForResolution(ctx, query)
 }

@@ -110,9 +110,14 @@ type SettingValue struct {
 type SettingResolutionQuery struct {
 	Keys []string
 
-	// ProfileID drops every profile-anchored scope when empty, leaving only
-	// account-scope candidates.
-	ProfileID string
+	// ProfileIDs are the profiles in play. Empty drops every profile-anchored
+	// scope, leaving only account-scope candidates.
+	//
+	// Several ids is the household shape: GET /profiles serves a preference
+	// block per profile, so it passes every profile once and the resolver ranks
+	// each profile's candidates in Go. One read per profile is a rejected
+	// implementation for the same reason one read per item is.
+	ProfileIDs []string
 	// DeviceID drops profile_device candidates when empty, which is what an
 	// unidentified client (jellycompat's DisplayPreferences seed) needs.
 	DeviceID string
@@ -129,7 +134,7 @@ type SettingResolutionQuery struct {
 func (q SettingResolutionQuery) Normalized() SettingResolutionQuery {
 	return SettingResolutionQuery{
 		Keys:       compactStrings(q.Keys),
-		ProfileID:  strings.TrimSpace(q.ProfileID),
+		ProfileIDs: compactStrings(q.ProfileIDs),
 		DeviceID:   strings.TrimSpace(q.DeviceID),
 		LibraryIDs: compactPositiveInts(q.LibraryIDs),
 		SeriesIDs:  compactStrings(q.SeriesIDs),
