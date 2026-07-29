@@ -822,8 +822,8 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 	}
 	virtualPath := "virtual://" + mediaType + "/" + strings.TrimSpace(item.ImdbID)
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
-		SELECT $1, $2, $3, 0
+		INSERT INTO media_files (content_id, media_folder_id, file_path, file_size, container)
+		SELECT $1, $2, $3, 0, 'virtual'
 		WHERE NOT EXISTS (
 			SELECT 1 FROM media_files
 			WHERE content_id = $1 AND left(file_path, 10) <> $4

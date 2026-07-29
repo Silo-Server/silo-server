@@ -52,11 +52,36 @@ func TestVirtualMediaVariantsUpsert(t *testing.T) {
 		t.Fatalf("upsert failed: %v", err)
 	}
 
-	// Verify two virtual files were inserted
+	// Verify two virtual files were inserted and default container is "virtual"
 	var count int
 	pool.QueryRow(ctx, "SELECT count(*) FROM media_files WHERE content_id=$1 AND container='virtual'", res.MediaID).Scan(&count)
 	if count != 2 {
 		t.Fatalf("expected 2 variants, got %d", count)
+	}
+
+	// Test variant with supplied container and file size
+	inWithSupplied := VirtualMedia{
+		LibraryID: "999", MediaType: "movie", Title: "Custom Variant Movie", TMDBID: "m2",
+		RuntimeMinutes: 120,
+		Variants: []VirtualMediaVariant{
+			{VirtualURI: "virtual://m2/1080p", Resolution: "1080p", CodecVideo: "h264", Container: "mkv", FileSize: 104857600},
+		},
+	}
+	resSupplied, err := reg.Upsert(ctx, inWithSupplied)
+	if err != nil {
+		t.Fatalf("upsert custom variant failed: %v", err)
+	}
+	var container string
+	var fileSize int64
+	err = pool.QueryRow(ctx, "SELECT container, file_size FROM media_files WHERE content_id=$1 AND file_path=$2", resSupplied.MediaID, "virtual://m2/1080p").Scan(&container, &fileSize)
+	if err != nil {
+		t.Fatalf("failed to query custom variant file: %v", err)
+	}
+	if container != "virtual" {
+		t.Fatalf("expected container 'virtual', got %q", container)
+	}
+	if fileSize != 104857600 {
+		t.Fatalf("expected file_size 104857600, got %d", fileSize)
 	}
 
 	// Verify idempotency

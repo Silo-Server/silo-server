@@ -1,3 +1,5 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,6 +16,18 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
   useCheckAdminSettingsConnection: (...args: unknown[]) =>
     useCheckAdminSettingsConnectionMock(...args),
 }));
+
+function renderWithQueryClient(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  return renderToStaticMarkup(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 function makeForm(redisUrl: string, managedByEnv = false) {
   return {
@@ -43,7 +57,7 @@ describe("DatabaseSettings", () => {
   it("shows Redis controls in the Database tab", () => {
     useSettingsFormMock.mockReturnValue(makeForm(""));
 
-    const markup = renderToStaticMarkup(<DatabaseSettings />);
+    const markup = renderWithQueryClient(<DatabaseSettings />);
 
     expect(markup).toContain("Redis");
     expect(markup).toContain("Enable Redis");
@@ -53,7 +67,7 @@ describe("DatabaseSettings", () => {
   it("shows the Redis connection URL when Redis is enabled", () => {
     useSettingsFormMock.mockReturnValue(makeForm("redis://cache:6379"));
 
-    const markup = renderToStaticMarkup(<DatabaseSettings />);
+    const markup = renderWithQueryClient(<DatabaseSettings />);
 
     expect(markup).toContain("Enable Redis");
     expect(markup).toContain("Connection URL");
@@ -63,7 +77,7 @@ describe("DatabaseSettings", () => {
   it("shows when Redis is managed by environment configuration", () => {
     useSettingsFormMock.mockReturnValue(makeForm("", true));
 
-    const markup = renderToStaticMarkup(<DatabaseSettings />);
+    const markup = renderWithQueryClient(<DatabaseSettings />);
 
     expect(markup).toContain("Managed by environment");
     expect(markup).toContain("REDIS_URL");

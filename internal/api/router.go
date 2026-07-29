@@ -922,7 +922,7 @@ func NewRouter(deps Dependencies) chi.Router {
 					}
 					out := make([]handlers.VirtualPlaybackStream, 0, len(streams))
 					for _, stream := range streams {
-						out = append(out, handlers.VirtualPlaybackStream{ID: stream.ID, Label: stream.Label, URI: stream.URI, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR, SourceType: stream.SourceType, FileSize: stream.FileSize})
+						out = append(out, handlers.VirtualPlaybackStream{ID: stream.ID, Label: stream.Label, URI: stream.URI, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR, SourceType: stream.SourceType, FileSize: stream.FileSize, Container: stream.Container})
 					}
 					return out, nil
 				})
@@ -932,7 +932,11 @@ func NewRouter(deps Dependencies) chi.Router {
 							continue
 						}
 						now := time.Now()
-						_, err := deps.FileRepo.Upsert(ctx, models.MediaFile{ContentID: source.ContentID, MediaFolderID: source.MediaFolderID, FilePath: stream.URI, FileSize: stream.FileSize, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual", ProbeUpdatedAt: &now})
+						fileSize := stream.FileSize
+						if fileSize < 0 {
+							fileSize = 0
+						}
+						_, err := deps.FileRepo.Upsert(ctx, models.MediaFile{ContentID: source.ContentID, MediaFolderID: source.MediaFolderID, FilePath: stream.URI, FileSize: fileSize, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual", ProbeUpdatedAt: &now})
 						if err != nil {
 							return err
 						}

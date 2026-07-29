@@ -7,7 +7,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -33,6 +35,7 @@ type VirtualPlaybackStream struct {
 	HDR        string `json:"hdr,omitempty"`
 	SourceType string `json:"source_type,omitempty"`
 	FileSize   int64  `json:"file_size,omitempty"`
+	Container  string `json:"container,omitempty"`
 }
 
 type VirtualPlaybackStreamLister interface {
@@ -49,8 +52,28 @@ func (f VirtualPlaybackStreamListerFunc) ListVirtualPlaybackStreams(ctx context.
 // files.
 type VirtualPlaybackStreamSink func(context.Context, *models.MediaFile, []VirtualPlaybackStream) error
 
+var (
+	jitWorkerSem     chan struct{}
+	jitWorkerSemOnce sync.Once
+)
+
+func jitSemaphore() chan struct{} {
+	jitWorkerSemOnce.Do(func() {
+		jitWorkerSem = make(chan struct{}, 8)
+	})
+	return jitWorkerSem
+}
+
 func isVirtualPlaybackFile(file *models.MediaFile) bool {
 	return file != nil && strings.HasPrefix(file.FilePath, virtualPlaybackPrefix)
+}
+
+func isHLSVirtualStreamURL(streamURL string) bool {
+	u, err := url.Parse(streamURL)
+	if err != nil {
+		return strings.Contains(strings.ToLower(streamURL), ".m3u8")
+	}
+	return strings.Contains(strings.ToLower(u.Path), ".m3u8") || strings.Contains(strings.ToLower(u.RawQuery), ".m3u8")
 }
 
 func (h *PlaybackHandler) resolveVirtualPlayback(r *http.Request, file *models.MediaFile, profileID string) (string, error) {
@@ -67,17 +90,29 @@ func (h *PlaybackHandler) loadVirtualPlaybackCandidates(ctx context.Context, fil
 	if h.VirtualPlaybackStreamLister == nil || h.VirtualPlaybackStreamSink == nil || file == nil {
 		return
 	}
-	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
-	defer cancel()
-	streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(probeCtx, file.FilePath)
-	if err != nil || len(streams) == 0 {
-		if err != nil {
-			slog.Debug("list JIT virtual playback candidates", "file_id", file.ID, "error", err)
-		}
+	if ctx.Err() != nil {
 		return
 	}
-	if err := h.VirtualPlaybackStreamSink(probeCtx, file, streams); err != nil {
-		slog.Debug("persist JIT virtual playback candidates", "file_id", file.ID, "error", err)
+	sem := jitSemaphore()
+	select {
+	case sem <- struct{}{}:
+		go func(bgCtx context.Context, f *models.MediaFile) {
+			defer func() { <-sem }()
+			probeCtx, cancel := context.WithTimeout(context.WithoutCancel(bgCtx), 8*time.Second)
+			defer cancel()
+			streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(probeCtx, f.FilePath)
+			if err != nil || len(streams) == 0 {
+				if err != nil {
+					slog.Debug("list JIT virtual playback candidates", "file_id", f.ID, "error", err)
+				}
+				return
+			}
+			if err := h.VirtualPlaybackStreamSink(probeCtx, f, streams); err != nil {
+				slog.Debug("persist JIT virtual playback candidates", "file_id", f.ID, "error", err)
+			}
+		}(ctx, file)
+	default:
+		slog.Debug("skipping JIT candidate persistence: worker pool busy", "file_id", file.ID)
 	}
 }
 
@@ -104,18 +139,26 @@ func (h *PlaybackHandler) startVirtualPlaybackV3(r *http.Request, req playback.S
 	h.loadVirtualPlaybackCandidates(r.Context(), file)
 	planHash := sha256.Sum256([]byte(req.PlaybackAttemptID + "\x00" + file.FilePath))
 	planID := "virtual:" + hex.EncodeToString(planHash[:8])
+
+	engine := playback.EngineMedia3DirectV3
+	streamProtocol := playback.StreamHTTPProgressiveV3
+	if isHLSVirtualStreamURL(streamURL) {
+		engine = playback.EngineMedia3HLSV3
+		streamProtocol = playback.StreamHLSV3
+	}
+
 	plan := playback.PlanV3{
 		ProtocolVersion:      playback.ProtocolV3,
 		PlanID:               planID,
 		SessionID:            session.ID,
 		ExpiresAt:            playback.NewPlanExpiryV3(time.Now()),
 		Delivery:             playback.DeliveryOriginalHTTPV3,
-		Engine:               playback.EngineMedia3DirectV3,
+		Engine:               engine,
 		DecisionReason:       "virtual_playback_resolver",
 		RequestedMediaFileID: file.ID,
 		EffectiveMediaFileID: file.ID,
 		Source:               playback.SourceDescriptorV3{MediaFileID: file.ID},
-		Stream:               playback.StreamV3{Protocol: playback.StreamHTTPProgressiveV3, URL: streamURL, Headers: map[string]string{}, HeaderRefresh: playback.HeaderRefreshSessionV3},
+		Stream:               playback.StreamV3{Protocol: streamProtocol, URL: streamURL, Headers: map[string]string{}, HeaderRefresh: playback.HeaderRefreshSessionV3},
 		Timeline:             playback.TimelineV3{SourceStartSeconds: position, PlayerStartSeconds: position, CanSeekAnywhere: true, SeekRestoration: "player_position"},
 		Transformations:      []playback.TransformationV3{},
 		AppliedQuirks:        []playback.AppliedQuirkV3{},

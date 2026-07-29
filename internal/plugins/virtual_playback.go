@@ -39,9 +39,10 @@ type VirtualPlaybackStream struct {
 	HDR        string `json:"hdr,omitempty"`
 	SourceType string `json:"source_type,omitempty"`
 	FileSize   int64  `json:"file_size,omitempty"`
+	Container  string `json:"container,omitempty"`
 }
 
-// ListVirtualPlaybackStreams asks the enabled virtual playback plugin for
+// ListVirtualPlaybackStreams asks enabled virtual playback plugins for
 // current provider candidates. It is intended for just-in-time picker
 // population at play time; collection sync must not call it.
 func (s *Service) ListVirtualPlaybackStreams(ctx context.Context, virtualPath string) ([]VirtualPlaybackStream, error) {
@@ -73,16 +74,19 @@ func (s *Service) ListVirtualPlaybackStreams(ctx context.Context, virtualPath st
 				Headers: map[string]string{"X-Silo-List-Streams": "true"},
 			})
 			if err != nil {
-				return nil, fmt.Errorf("list virtual playback streams: %w", err)
+				continue
 			}
 			if response.GetStatusCode() < 200 || response.GetStatusCode() >= 300 {
-				return nil, fmt.Errorf("virtual playback plugin returned status %d", response.GetStatusCode())
+				continue
 			}
 			var payload struct {
 				Streams []VirtualPlaybackStream `json:"streams"`
 			}
 			if err := json.Unmarshal(response.GetBody(), &payload); err != nil {
-				return nil, fmt.Errorf("decode virtual playback streams: %w", err)
+				continue
+			}
+			if len(payload.Streams) == 0 {
+				continue
 			}
 			return payload.Streams, nil
 		}

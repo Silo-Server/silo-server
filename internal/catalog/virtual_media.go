@@ -332,6 +332,10 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 	if v.HDR != "" {
 		isHDR = true
 	}
+	fileSize := v.FileSize
+	if fileSize < 0 {
+		fileSize = 0
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO media_files(
 			content_id,episode_id,media_folder_id,file_path,file_size,container,duration,probe_source,probe_updated_at,
@@ -356,7 +360,7 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 			edition_raw=EXCLUDED.edition_raw,
 			audio_tracks=EXCLUDED.audio_tracks,
 			subtitle_tracks=EXCLUDED.subtitle_tracks`,
-		contentID, episodeID, folderID, v.VirtualURI, runtimeSeconds(v.RuntimeMinutes), v.Resolution, v.CodecVideo, v.CodecAudio, isHDR, v.Bitrate, v.Label, v.FileSize, v.Container, v.AudioLanguages, v.SubtitleLanguages)
+		contentID, episodeID, folderID, v.VirtualURI, runtimeSeconds(v.RuntimeMinutes), v.Resolution, v.CodecVideo, v.CodecAudio, isHDR, v.Bitrate, v.Label, fileSize, "virtual", v.AudioLanguages, v.SubtitleLanguages)
 	if err != nil {
 		return fmt.Errorf("upsert virtual file variant: %w", err)
 	}

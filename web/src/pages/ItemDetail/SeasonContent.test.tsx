@@ -1,9 +1,22 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemDetail } from "@/api/types";
 import SeasonContent from "./SeasonContent";
+
+function renderWithQueryClient(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  return renderToStaticMarkup(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 const mocks = vi.hoisted(() => {
   let capturedActionBarProps: Record<string, unknown> | null = null;
@@ -182,7 +195,7 @@ describe("SeasonContent", () => {
   });
 
   it("does not pass rating props to ActionBar", () => {
-    renderToStaticMarkup(
+    renderWithQueryClient(
       <MemoryRouter initialEntries={["/item/season-1"]}>
         <SeasonContent item={makeSeasonItem()} />
       </MemoryRouter>,
@@ -216,7 +229,7 @@ describe("SeasonContent", () => {
       error: null,
     });
 
-    renderToStaticMarkup(
+    renderWithQueryClient(
       <MemoryRouter initialEntries={["/item/season-1"]}>
         <SeasonContent item={makeSeasonItem()} />
       </MemoryRouter>,
@@ -236,7 +249,7 @@ describe("SeasonContent", () => {
       onTranslate,
     });
 
-    renderToStaticMarkup(
+    renderWithQueryClient(
       <MemoryRouter initialEntries={["/item/season-1"]}>
         <SeasonContent item={makeSeasonItem({ pending_translation_language: "fr" })} />
       </MemoryRouter>,

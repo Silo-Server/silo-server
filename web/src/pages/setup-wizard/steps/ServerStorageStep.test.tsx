@@ -1,9 +1,30 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ServerStorageStep } from "./ServerStorageStep";
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+}
+
+function renderWithQueryClient(ui: ReactNode) {
+  const client = createTestQueryClient();
+  return renderToStaticMarkup(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
+function renderWithProviders(ui: ReactNode) {
+  const client = createTestQueryClient();
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
 
 const useSettingsFormMock = vi.fn();
 const useWizardContextMock = vi.fn();
@@ -12,9 +33,13 @@ const useJellyfinCompatStatusMock = vi.fn();
 const useInstallJellyfinCompatWebMock = vi.fn();
 const useQueryMock = vi.fn();
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: (...args: unknown[]) => useQueryMock(...args),
-}));
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
+  return {
+    ...actual,
+    useQuery: (...args: unknown[]) => useQueryMock(...args),
+  };
+});
 
 vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
@@ -97,12 +122,18 @@ function mockStep({
 describe("ServerStorageStep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    class ResizeObserverMock {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
   });
 
   it("renders connection check actions for Redis and public/private S3 storage", () => {
     mockStep();
 
-    const markup = renderToStaticMarkup(<ServerStorageStep />);
+    const markup = renderWithQueryClient(<ServerStorageStep />);
 
     expect(markup).toContain("Public Assets Storage");
     expect(markup).toContain("Private Internal Storage");
@@ -125,7 +156,7 @@ describe("ServerStorageStep", () => {
       },
     });
 
-    render(<ServerStorageStep />);
+    renderWithProviders(<ServerStorageStep />);
 
     expect(screen.getByRole("switch", { name: "Enable Jellyfin-compatible API" })).toHaveAttribute(
       "aria-checked",
@@ -142,7 +173,7 @@ describe("ServerStorageStep", () => {
     const installMutateAsync = vi.fn(() => installAccepted);
     const { markDone } = mockStep({ installMutateAsync });
 
-    render(<ServerStorageStep />);
+    renderWithProviders(<ServerStorageStep />);
 
     await userEvent.click(screen.getByRole("button", { name: "Install Web UI" }));
     expect(screen.getByRole("button", { name: "Web UI will be installed" })).toBeInTheDocument();
@@ -160,7 +191,7 @@ describe("ServerStorageStep", () => {
     const installMutateAsync = vi.fn().mockRejectedValue(new Error("missing prerequisite"));
     const { markDone } = mockStep({ installMutateAsync });
 
-    render(<ServerStorageStep />);
+    renderWithProviders(<ServerStorageStep />);
 
     await userEvent.click(screen.getByRole("button", { name: "Install Web UI" }));
     await userEvent.click(screen.getByRole("button", { name: "Save & continue" }));

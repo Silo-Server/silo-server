@@ -208,6 +208,13 @@ func (c *Client) HTTPRoutes(capabilityID string) (*HTTPRoutesClient, error) {
 	}, nil
 }
 
+func NewHTTPRoutesClientForTest(client pluginv1.HttpRoutesClient, timeout time.Duration) *HTTPRoutesClient {
+	if timeout <= 0 {
+		timeout = DefaultRouteTimeout
+	}
+	return &HTTPRoutesClient{client: client, timeout: timeout}
+}
+
 func (c *Client) markUnhealthy() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
