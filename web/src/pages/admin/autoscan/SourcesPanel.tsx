@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -1025,20 +1025,36 @@ function SourceRow({
   // for sources that declare none, which is why this can be null.
   // The built-in webhook's provider field is rendered by WebhookEndpointSection
   // above, so exclude it here rather than showing the same control twice.
-  const rowConfigFields = (descriptor.config_form?.fields ?? []).filter(
-    (field) => !(isWebhook && field.key === WEBHOOK_PROVIDER_KEY),
+  const rowConfigFields = useMemo(
+    () =>
+      (descriptor.config_form?.fields ?? []).filter(
+        (field) => !(isWebhook && field.key === WEBHOOK_PROVIDER_KEY),
+      ),
+    [descriptor.config_form?.fields, isWebhook],
   );
+
+  // Stable identity matters: SchemaForm reports validity from an effect keyed on
+  // its descriptor and callback, so rebuilding either inline re-fires it every
+  // render and loops through setEdit (React error #185).
+  const rowConfigDescriptor = useMemo(
+    () => ({
+      ...descriptor,
+      config_form: { ...(descriptor.config_form ?? { fields: [] }), fields: rowConfigFields },
+    }),
+    [descriptor, rowConfigFields],
+  );
+
+  const handleRowConfigValidity = useCallback((configValid: boolean) => {
+    setEdit((ed) => (ed.configValid === configValid ? ed : { ...ed, configValid }));
+  }, []);
 
   const sourceConfigEditor = rowConfigFields.length ? (
     <div className="border-border mt-3 space-y-3 rounded-md border p-3">
       <SourceConfigForm
-        descriptor={{
-          ...descriptor,
-          config_form: { ...descriptor.config_form, fields: rowConfigFields },
-        }}
+        descriptor={rowConfigDescriptor}
         values={edit.sourceConfig}
         onChange={(next) => setEdit((ed) => ({ ...ed, sourceConfig: next }))}
-        onValidityChange={(configValid) => setEdit((ed) => ({ ...ed, configValid }))}
+        onValidityChange={handleRowConfigValidity}
         idPrefix={`source-config-${source.id}`}
       />
       <Button
@@ -1313,6 +1329,10 @@ function AddSourceDialog({
     onOpenChange(false);
   }
 
+  const handleAddConfigValidity = useCallback((configValid: boolean) => {
+    setForm((f) => (f.configValid === configValid ? f : { ...f, configValid }));
+  }, []);
+
   function selectPlugin(value: string) {
     const plugin = plugins.find((p) => pluginKey(p.plugin_id, p.capability_id) === value);
     const next = descriptorFor(plugin);
@@ -1566,7 +1586,7 @@ function AddSourceDialog({
                 descriptor={descriptor}
                 values={form.sourceConfig}
                 onChange={(sourceConfig) => setForm((f) => ({ ...f, sourceConfig }))}
-                onValidityChange={(configValid) => setForm((f) => ({ ...f, configValid }))}
+                onValidityChange={handleAddConfigValidity}
                 idPrefix="add-source-config"
               />
             )}
