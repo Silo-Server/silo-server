@@ -342,6 +342,7 @@ function TemplateBundleApplyView({
   }, [groups]);
   const [libraryIds, setLibraryIds] = useState<number[]>(initialIds);
   const [deleteExisting, setDeleteExisting] = useState(false);
+  const [virtualPlayback, setVirtualPlayback] = useState(false);
   const [homeFeatured, setHomeFeatured] = useState<string | null>(null);
   const [libraryFeatured, setLibraryFeatured] = useState<Record<number, string>>({});
   const [result, setResult] = useState<ApplyCollectionTemplateBundleResponse | null>(null);
@@ -394,6 +395,7 @@ function TemplateBundleApplyView({
           library_ids: libraryIds,
           dry_run: true,
           delete_existing: deleteExisting,
+          virtual_playback: virtualPlayback,
           featured,
         },
       },
@@ -413,6 +415,7 @@ function TemplateBundleApplyView({
         body: {
           library_ids: libraryIds,
           delete_existing: deleteExisting,
+          virtual_playback: virtualPlayback,
           featured,
         },
       },
@@ -511,6 +514,17 @@ function TemplateBundleApplyView({
           </span>
         </span>
         <Switch checked={deleteExisting} onCheckedChange={setDeleteExisting} />
+      </label>
+
+      <label className="flex items-center justify-between gap-3 rounded-md border p-3">
+        <span className="space-y-1">
+          <span className="block text-sm font-medium">Zero-storage virtual playback</span>
+          <span className="text-muted-foreground block text-xs">
+            Create database-only entries for items not already in the selected libraries and resolve
+            them through Silo Virtual Library.
+          </span>
+        </span>
+        <Switch checked={virtualPlayback} onCheckedChange={setVirtualPlayback} />
       </label>
 
       <div className="flex justify-end gap-2">

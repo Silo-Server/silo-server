@@ -271,6 +271,10 @@ export function parseTraktPresetSourceConfig(
   return { sourceKind, preset, mediaType, profileId, listUrl, limit };
 }
 
+function sourceConfigVirtualPlayback(collection: LibraryCollection | null): boolean {
+  return collection?.source_config?.virtual_playback === true;
+}
+
 export function buildTMDBPresetSourceInput({
   preset,
   mediaType,
@@ -429,6 +433,27 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-start justify-between gap-4 text-sm">
       <span className="text-muted-foreground">{label}</span>
       <span className="max-w-[16rem] text-right font-medium">{value}</span>
+    </div>
+  );
+}
+
+function VirtualPlaybackField({
+  checked,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
+      <div>
+        <p className="text-sm font-medium">Zero-storage virtual playback</p>
+        <p className="text-muted-foreground text-xs">
+          Keep database-only entries for items outside the selected libraries and resolve them at
+          playback time through Silo Virtual Library.
+        </p>
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
   );
 }
@@ -687,6 +712,7 @@ export function TMDBPresetForm({
   const [mediaType, setMediaType] = useState<TMDBMediaType>("all");
   const [limit, setLimit] = useState("");
   const [featured, setFeatured] = useState(true);
+  const [virtualPlayback, setVirtualPlayback] = useState(false);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [backdropFile, setBackdropFile] = useState<File | null>(null);
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
@@ -717,6 +743,7 @@ export function TMDBPresetForm({
           media_type: normalizedMediaType,
           limit: parsedLimit,
           featured,
+          virtual_playback: virtualPlayback,
           poster_source_url: posterSourceUrl.trim() || undefined,
           backdrop_source_url: backdropSourceUrl.trim() || undefined,
           sync_schedule: tmdbSyncSchedule.trim() || undefined,
@@ -884,6 +911,8 @@ export function TMDBPresetForm({
 
         <SyncScheduleField value={tmdbSyncSchedule} onChange={setTmdbSyncSchedule} />
 
+        <VirtualPlaybackField checked={virtualPlayback} onCheckedChange={setVirtualPlayback} />
+
         <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
           <div>
             <p className="text-sm font-medium">Feature on library tab</p>
@@ -929,6 +958,7 @@ export function TraktPresetForm({
   const [profileId, setProfileId] = useState("");
   const [limit, setLimit] = useState("");
   const [featured, setFeatured] = useState(true);
+  const [virtualPlayback, setVirtualPlayback] = useState(false);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [backdropFile, setBackdropFile] = useState<File | null>(null);
   const [posterSourceUrl, setPosterSourceUrl] = useState("");
@@ -966,6 +996,7 @@ export function TraktPresetForm({
               }),
           limit: parsedLimit,
           featured,
+          virtual_playback: virtualPlayback,
           poster_source_url: posterSourceUrl.trim() || undefined,
           backdrop_source_url: backdropSourceUrl.trim() || undefined,
           sync_schedule: syncSchedule.trim() || undefined,
@@ -1120,6 +1151,8 @@ export function TraktPresetForm({
             </p>
           </div>
         ) : null}
+
+        <VirtualPlaybackField checked={virtualPlayback} onCheckedChange={setVirtualPlayback} />
 
         <div className="space-y-2">
           <Label htmlFor="trakt-limit">Max Items</Label>
@@ -1329,15 +1362,7 @@ export function MDBListImportForm({
 
         <SyncScheduleField value={syncSchedule} onChange={setSyncSchedule} />
 
-        <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
-          <div>
-            <p className="text-sm font-medium">Zero-storage virtual playback</p>
-            <p className="text-muted-foreground text-xs">
-              Create database-only movie entries for unmatched IMDb IDs and resolve them through AIOStreams.
-            </p>
-          </div>
-          <Switch checked={virtualPlayback} onCheckedChange={setVirtualPlayback} />
-        </div>
+        <VirtualPlaybackField checked={virtualPlayback} onCheckedChange={setVirtualPlayback} />
 
         <div className="border-border flex items-center justify-between rounded-lg border px-4 py-3">
           <div>
@@ -1381,6 +1406,9 @@ export function CollectionEditForm({
   const [title, setTitle] = useState(collection.title ?? "");
   const [description, setDescription] = useState(collection.description ?? "");
   const [featured, setFeatured] = useState(collection.featured ?? false);
+  const [virtualPlayback, setVirtualPlayback] = useState(() =>
+    sourceConfigVirtualPlayback(collection),
+  );
   const [visibility, setVisibility] = useState<"visible" | "hidden">(collection.visibility);
   const [posterFile, setPosterFile] = useState<File | null>(null);
   const [backdropFile, setBackdropFile] = useState<File | null>(null);
@@ -1452,6 +1480,7 @@ export function CollectionEditForm({
       sourceConfig = {
         mode: "mdblist_json",
         url: sourceUrl,
+        virtual_playback: virtualPlayback,
         ...(parsedSourceLimit ? { limit: parsedSourceLimit } : {}),
       };
     } else if (isTMDBCollection) {
@@ -1463,6 +1492,7 @@ export function CollectionEditForm({
       });
       sourceUrlValue = tmdbSource.source_url;
       sourceConfig = tmdbSource.source_config;
+      sourceConfig.virtual_playback = virtualPlayback;
     } else if (isTraktCollection) {
       if (isTraktListMode) {
         const traktListSource = buildTraktListSourceInput({
@@ -1471,6 +1501,7 @@ export function CollectionEditForm({
         });
         sourceUrlValue = traktListSource.source_url;
         sourceConfig = traktListSource.source_config;
+        sourceConfig.virtual_playback = virtualPlayback;
       } else {
         sourceUrlValue =
           traktPreset === "recommended"
@@ -1483,6 +1514,7 @@ export function CollectionEditForm({
           media_type: traktMediaType,
           ...(traktPreset === "recommended" ? { profile_id: traktProfileId } : {}),
           ...(parsedTraktLimit ? { limit: parsedTraktLimit } : {}),
+          virtual_playback: virtualPlayback,
         };
       }
     }
@@ -1638,6 +1670,8 @@ export function CollectionEditForm({
         ) : null}
 
         <SyncScheduleField value={editSyncSchedule} onChange={setEditSyncSchedule} />
+
+        <VirtualPlaybackField checked={virtualPlayback} onCheckedChange={setVirtualPlayback} />
 
         {isTMDBCollection ? (
           <div className="grid gap-4 md:grid-cols-2">

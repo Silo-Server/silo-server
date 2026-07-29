@@ -113,12 +113,14 @@ export interface ApplyCollectionTemplateBundleRequest {
   library_ids: number[];
   dry_run?: boolean;
   delete_existing?: boolean;
+  virtual_playback?: boolean;
   featured?: ApplyCollectionTemplateBundleFeaturedRequest;
 }
 
 export interface ApplyCollectionTemplateBundleJobRequest {
   library_ids: number[];
   delete_existing?: boolean;
+  virtual_playback?: boolean;
   featured?: ApplyCollectionTemplateBundleFeaturedRequest;
 }
 

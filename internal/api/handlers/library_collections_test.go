@@ -28,7 +28,7 @@ func TestNormalizeTraktPresetRequest(t *testing.T) {
 
 func TestBuildTMDBCollectionSourceConfig(t *testing.T) {
 	limit := 12
-	raw, err := buildTMDBCollectionSourceConfig(86311, &limit)
+	raw, err := buildTMDBCollectionSourceConfig(86311, &limit, false)
 	if err != nil {
 		t.Fatalf("buildTMDBCollectionSourceConfig: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestBuildTMDBCollectionSourceConfig_PlaceholderOmitsCollectionID(t *testing
 	// CollectionID == 0 is a documented placeholder; with omitempty the JSON
 	// must drop the field entirely so older sync code that didn't know about
 	// the field still works.
-	raw, err := buildTMDBCollectionSourceConfig(0, nil)
+	raw, err := buildTMDBCollectionSourceConfig(0, nil, false)
 	if err != nil {
 		t.Fatalf("buildTMDBCollectionSourceConfig: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestBuildTMDBDiscoverSourceConfigRoundTrips(t *testing.T) {
 		WithRuntimeLte:   240,
 		OriginalLanguage: "en",
 	}
-	raw, err := buildTMDBDiscoverSourceConfig("movie", spec, &limit)
+	raw, err := buildTMDBDiscoverSourceConfig("movie", spec, &limit, false)
 	if err != nil {
 		t.Fatalf("buildTMDBDiscoverSourceConfig: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestBuildTMDBDiscoverSourceConfigRoundTrips(t *testing.T) {
 func TestBuildTMDBDiscoverSourceConfigMinimal(t *testing.T) {
 	raw, err := buildTMDBDiscoverSourceConfig("tv", importTMDBDiscoverSpecBody{
 		SortBy: "vote_average.desc",
-	}, nil)
+	}, nil, false)
 	if err != nil {
 		t.Fatalf("buildTMDBDiscoverSourceConfig: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestValidateTMDBDiscoverRequest(t *testing.T) {
 
 func TestBuildTraktSourceConfig(t *testing.T) {
 	limit := 25
-	raw, err := buildTraktSourceConfig("recommended", "movie", "prof-1", &limit)
+	raw, err := buildTraktSourceConfig("recommended", "movie", "prof-1", &limit, false)
 	if err != nil {
 		t.Fatalf("buildTraktSourceConfig: %v", err)
 	}

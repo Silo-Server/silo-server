@@ -8,10 +8,11 @@ import (
 const JobTypeTemplateBundleApply = "template_bundle_apply"
 
 type TemplateBundleApplyRequest struct {
-	BundleID       string                              `json:"bundle_id"`
-	LibraryIDs     []int                               `json:"library_ids"`
-	DeleteExisting bool                                `json:"delete_existing"`
-	Featured       *TemplateBundleApplyFeaturedRequest `json:"featured,omitempty"`
+	BundleID        string                              `json:"bundle_id"`
+	LibraryIDs      []int                               `json:"library_ids"`
+	DeleteExisting  bool                                `json:"delete_existing"`
+	VirtualPlayback bool                                `json:"virtual_playback,omitempty"`
+	Featured        *TemplateBundleApplyFeaturedRequest `json:"featured,omitempty"`
 }
 
 type TemplateBundleApplyFeaturedRequest struct {

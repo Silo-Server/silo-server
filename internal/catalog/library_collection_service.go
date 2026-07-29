@@ -528,6 +528,14 @@ func (s *LibraryCollectionService) syncTMDBPresetCollection(ctx context.Context,
 			return nil, err
 		}
 		if item == nil {
+			if cfg.VirtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, 0, entry.IMDbID, entry.ID, entry.TVDBID)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if item == nil {
 			slog.DebugContext(ctx, "TMDB preset sync: no match", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
@@ -693,6 +701,14 @@ func (s *LibraryCollectionService) syncTMDBFranchiseCollection(ctx context.Conte
 		item, err := s.resolveTMDBEntry(ctx, collection.LibraryIDs, entry)
 		if err != nil {
 			return nil, err
+		}
+		if item == nil {
+			if cfg.VirtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, 0, entry.IMDbID, entry.ID, entry.TVDBID)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 		if item == nil {
 			slog.DebugContext(ctx, "TMDB franchise sync: no match", "component", "catalog",
@@ -873,6 +889,14 @@ func (s *LibraryCollectionService) syncTMDBDiscoverCollection(ctx context.Contex
 			return nil, err
 		}
 		if item == nil {
+			if cfg.VirtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, 0, entry.IMDbID, entry.ID, entry.TVDBID)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if item == nil {
 			slog.DebugContext(ctx, "TMDB discover sync: no match", "component", "catalog",
 				"rank", i+1,
 				"title", entry.Title,
@@ -1023,7 +1047,7 @@ func (s *LibraryCollectionService) syncTraktPresetCollection(ctx context.Context
 		"count", len(results),
 	)
 
-	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts)
+	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, cfg.VirtualPlayback, startedAt, opts)
 }
 
 // syncTraktListCollection populates a collection from a user-authored Trakt
@@ -1061,7 +1085,7 @@ func (s *LibraryCollectionService) syncTraktListCollection(ctx context.Context, 
 		"count", len(results),
 	)
 
-	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, startedAt, opts)
+	return s.completeTraktEntrySync(ctx, collection, results, cfg.Limit, cfg.VirtualPlayback, startedAt, opts)
 }
 
 // ParseTraktListURL extracts the user and list slug from a trakt.tv list URL
@@ -1111,7 +1135,7 @@ func ParseTraktListURL(raw string) (user, list string, err error) {
 // completeTraktEntrySync matches fetched Trakt entries against the
 // collection's libraries and records the sync run. Shared by the preset and
 // user-list sources.
-func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, collection *models.LibraryCollection, results []TraktCollectionEntry, limit *int, startedAt time.Time, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
+func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, collection *models.LibraryCollection, results []TraktCollectionEntry, limit *int, virtualPlayback bool, startedAt time.Time, opts SyncCollectionOptions) (*models.LibraryCollectionSyncRun, error) {
 	matchedItems := make([]LibraryCollectionItemInput, 0, len(results))
 	seenContentIDs := make(map[string]int, len(results))
 	warnings := make([]string, 0)
@@ -1125,6 +1149,14 @@ func (s *LibraryCollectionService) completeTraktEntrySync(ctx context.Context, c
 		item, err := s.resolveTraktEntry(ctx, collection.LibraryIDs, entry)
 		if err != nil {
 			return nil, err
+		}
+		if item == nil {
+			if virtualPlayback && strings.TrimSpace(entry.IMDbID) != "" {
+				item, err = s.createVirtualCollectionItem(ctx, collection, entry.MediaType, entry.Title, entry.Year, entry.IMDbID, entry.TMDBID, entry.TVDBID)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 		if item == nil {
 			unmatchedCount++
@@ -1217,6 +1249,28 @@ func (s *LibraryCollectionService) recordFailedCollectionSync(ctx context.Contex
 		StartedAt:    startedAt,
 		CompletedAt:  syncTimestamp(),
 	})
+}
+
+func (s *LibraryCollectionService) createVirtualCollectionItem(ctx context.Context, collection *models.LibraryCollection, mediaType, title string, year int, imdbID string, tmdbID, tvdbID int) (*models.MediaItem, error) {
+	contentID, err := idgen.NextID()
+	if err != nil {
+		return nil, fmt.Errorf("generating virtual media id: %w", err)
+	}
+	itemType := "movie"
+	if mediaType == "tv" || mediaType == "series" {
+		itemType = "series"
+	}
+	item := &models.MediaItem{ContentID: contentID, Type: itemType, Title: title, SortTitle: title, Year: year, ImdbID: strings.TrimSpace(imdbID), Status: "matched"}
+	if tmdbID > 0 {
+		item.TmdbID = fmt.Sprintf("%d", tmdbID)
+	}
+	if tvdbID > 0 {
+		item.TvdbID = fmt.Sprintf("%d", tvdbID)
+	}
+	if err := s.items.MaterializeVirtualPlaybackItem(ctx, item, collection.LibraryIDs); err != nil {
+		return nil, fmt.Errorf("materializing virtual item %q: %w", title, err)
+	}
+	return item, nil
 }
 
 // resolveTMDBEntry finds a media item in the library matching a TMDB preset entry.

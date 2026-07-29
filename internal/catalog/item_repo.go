@@ -799,15 +799,19 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItem(ctx context.Context, ite
 			return fmt.Errorf("linking virtual item to library: %w", err)
 		}
 	}
-	virtualPath := "aiostreams://movie/" + strings.TrimSpace(item.ImdbID)
+	mediaType := strings.TrimSpace(item.Type)
+	if mediaType == "" {
+		mediaType = "movie"
+	}
+	virtualPath := "virtual://" + mediaType + "/" + strings.TrimSpace(item.ImdbID)
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
 		SELECT $1, $2, $3, 0
 		WHERE NOT EXISTS (
 			SELECT 1 FROM media_files
-			WHERE content_id = $1 AND left(file_path, 13) <> $4
+			WHERE content_id = $1 AND left(file_path, 10) <> $4
 		)
-		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], virtualPath, "aiostreams://"); err != nil {
+		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], virtualPath, "virtual://"); err != nil {
 		return fmt.Errorf("creating virtual playback file: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
