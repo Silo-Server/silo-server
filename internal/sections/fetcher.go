@@ -1092,7 +1092,7 @@ func (f *Fetcher) ListOverlaySummaries(ctx context.Context, contentIDs []string,
 	}
 
 	rows, err := f.pool.Query(ctx, `
-		SELECT content_id, episode_id, file_path, resolution, codec_audio, audio_tracks, hdr, video_tracks,
+		SELECT content_id, episode_id, file_path, resolution, codec_audio, audio_tracks, COALESCE(hdr, false), video_tracks,
 		       codec_video, audio_channels, container, subtitle_tracks, external_subtitles, edition_key
 		FROM media_files
 		WHERE (content_id = ANY($1) OR episode_id = ANY($1)) AND missing_since IS NULL
