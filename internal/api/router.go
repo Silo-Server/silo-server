@@ -936,7 +936,15 @@ func NewRouter(deps Dependencies) chi.Router {
 						if fileSize < 0 {
 							fileSize = 0
 						}
-						_, err := deps.FileRepo.Upsert(ctx, models.MediaFile{ContentID: source.ContentID, MediaFolderID: source.MediaFolderID, FilePath: stream.URI, FileSize: fileSize, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual", ProbeUpdatedAt: &now})
+						_, err := deps.FileRepo.Upsert(ctx, models.MediaFile{
+							ContentID: source.ContentID, MediaFolderID: source.MediaFolderID,
+							EpisodeID: source.EpisodeID, SeasonNumber: source.SeasonNumber,
+							EpisodeNumber: source.EpisodeNumber, FilePath: stream.URI,
+							FileSize: fileSize, Resolution: stream.Resolution,
+							CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio,
+							HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual",
+							ProbeUpdatedAt: &now,
+						})
 						if err != nil {
 							return err
 						}
