@@ -173,6 +173,7 @@ export function PluginConfigForm({
     Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])),
   );
   const [testResult, setTestResult] = useState<ConnectionCheckResponse | null>(null);
+  const [profilePreview, setProfilePreview] = useState<string | null>(null);
   const [clearSecrets, setClearSecrets] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -182,6 +183,7 @@ export function PluginConfigForm({
 
   function handleChange(next: PluginConfigValue) {
     setTestResult(null);
+    setProfilePreview(null);
     setValues(next);
     setClearSecrets((current) => {
       const updated = new Set(current);
@@ -238,6 +240,35 @@ export function PluginConfigForm({
         onChange={handleChange}
         idPrefix={schema.key}
       />
+
+      {fields.some((field) => field.key === "quality_profiles") ? (
+        <div className="space-y-2 rounded-md border border-dashed p-2.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              const raw = values.quality_profiles;
+              try {
+                const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+                if (!Array.isArray(parsed)) throw new Error("Profiles must be a JSON array.");
+                const labels = parsed.map((profile, index) => {
+                  if (!profile || typeof profile !== "object" || typeof profile.label !== "string" || !profile.label.trim()) {
+                    throw new Error(`Profile ${index + 1} must have a label.`);
+                  }
+                  return profile.label.trim();
+                });
+                setProfilePreview(`Valid configuration: ${labels.join(", ")}`);
+              } catch (error) {
+                setProfilePreview(error instanceof Error ? error.message : "Invalid profiles JSON.");
+              }
+            }}
+          >
+            Validate profiles
+          </Button>
+          {profilePreview ? <p className="text-muted-foreground text-xs">{profilePreview}</p> : null}
+        </div>
+      ) : null}
 
       {configuredSecrets.length > 0 ? (
         <div className="space-y-2 rounded-md border border-dashed p-2.5">
