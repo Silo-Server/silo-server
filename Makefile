@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up settings-bindings verify-settings-bindings
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -118,20 +118,32 @@ settings-bindings:
 
 # Fail when the committed bindings disagree with the manifest, so a manifest
 # change cannot merge without regenerating what every client reads.
+#
+# Split in two because the generated TypeScript is compared after prettier, and
+# only the Web CI job has pnpm: the Go job runs this target, the Web job runs
+# verify-settings-bindings-web. Locally, `verify-settings-bindings-all` is both.
 verify-settings-bindings:
 	@CHECK_DIR=$$(mktemp -d) && trap 'rm -rf "$$CHECK_DIR"' EXIT && \
 	go run ./cmd/settingsgen -lang go | gofmt > "$$CHECK_DIR/keys.go" && \
 	diff -u internal/settingskeys/keys.go "$$CHECK_DIR/keys.go" \
 		|| { echo "::error::internal/settingskeys/keys.go is stale; run make settings-bindings"; exit 1; }
+	@diff -u web/src/lib/settingsConformance.json contracts/settings/v1/conformance.json \
+		|| { echo "::error::web/src/lib/settingsConformance.json is stale; run make settings-bindings"; exit 1; }
+	@echo "settings bindings are current"
+
+# The half that needs pnpm: regenerate the web binding, format it the way the
+# bindings target does, and compare. Without this a manifest change could merge
+# with a stale settingsContract.ts, which is what every web control renders from.
+verify-settings-bindings-web:
 	@CHECK_DIR=$$(mktemp -d) && trap 'rm -rf "$$CHECK_DIR"' EXIT && \
 	go run ./cmd/settingsgen -lang ts -out "$$CHECK_DIR/settingsContract.ts" && \
 	cd web && pnpm exec prettier --log-level silent --config .prettierrc \
 		--write "$$CHECK_DIR/settingsContract.ts" && cd .. && \
 	diff -u web/src/lib/settingsContract.ts "$$CHECK_DIR/settingsContract.ts" \
 		|| { echo "::error::web/src/lib/settingsContract.ts is stale; run make settings-bindings"; exit 1; }
-	@diff -u web/src/lib/settingsConformance.json contracts/settings/v1/conformance.json \
-		|| { echo "::error::web/src/lib/settingsConformance.json is stale; run make settings-bindings"; exit 1; }
-	@echo "settings bindings are current"
+	@echo "web settings binding is current"
+
+verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-web
 
 # Check committed content for local machine path leaks.
 verify-local-paths:

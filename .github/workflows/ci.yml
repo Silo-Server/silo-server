@@ -151,6 +151,19 @@ jobs:
         working-directory: .
         run: make test-web
 
+      # The generated web binding is compared after prettier, so this half of
+      # the bindings check lives here rather than in the Go job, which has no
+      # pnpm. It needs Go to run the generator.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify the generated web settings binding is current
+        working-directory: .
+        run: make verify-settings-bindings-web
+
   docs:
     name: Docs hygiene
     runs-on: ubuntu-latest

@@ -6,6 +6,7 @@ import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { useBranding } from "@/hooks/useBranding";
 import { appearanceCache, storage } from "@/utils/storage";
+import type { StorageKey } from "@/utils/storage";
 import {
   getInitialTheme,
   isValidTheme,
@@ -190,7 +191,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (!loadApiTheme || effectiveSettings === undefined) return;
     const mirror = (
       key: (typeof APPEARANCE_KEYS)[number],
-      cacheKey: storage.StorageKey,
+      cacheKey: StorageKey,
       value: string | undefined,
     ) => {
       if (value !== undefined) {
