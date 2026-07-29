@@ -233,6 +233,27 @@ describe("buildSchemaValues type-driven coercion (#15)", () => {
     expect(out.root_folder).toBe("007"); // string preserved, NOT 7
     expect(out.tags).toEqual([1, 2]);
   });
+
+  it("parses JSON textarea values declared as arrays", () => {
+    const d: PluginAdminForm = {
+      fields: [
+        {
+          key: "quality_profiles",
+          label: "Quality profiles",
+          control: "TEXTAREA",
+          required: false,
+          secret: false,
+          multiline: true,
+        },
+      ],
+    };
+    const out = buildSchemaValues(
+      d,
+      { quality_profiles: '[{"label":"1080p"}]' },
+      { quality_profiles: "array" },
+    );
+    expect(out.quality_profiles).toEqual([{ label: "1080p" }]);
+  });
 });
 
 describe("buildSchemaValues default_value (#6)", () => {

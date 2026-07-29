@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 
 import { SchemaForm } from "./SchemaForm";
-import { buildSchemaValues } from "./schemaFormUtils";
+import { buildSchemaValues, parseFieldTypes } from "./schemaFormUtils";
 
 type PluginConfigValue = Record<string, unknown>;
 
@@ -115,6 +115,9 @@ function defaultValueForField(field: SupportedField): string | boolean {
     if (typeof field.default_value === "string") {
       return field.default_value;
     }
+    if (Array.isArray(field.default_value) || typeof field.default_value === "object") {
+      return JSON.stringify(field.default_value, null, 2);
+    }
   }
   if (field.control === "SWITCH") {
     return false;
@@ -132,6 +135,9 @@ function valueForField(field: SupportedField, configValue?: PluginConfigValue): 
   }
   if (typeof raw === "string") {
     return raw;
+  }
+  if (Array.isArray(raw) || (raw !== null && typeof raw === "object")) {
+    return JSON.stringify(raw, null, 2);
   }
   return defaultValueForField(field);
 }
@@ -152,6 +158,7 @@ export function PluginConfigForm({
     }
     return parsedFallback.fields;
   }, [parsedFallback.fields, schema.admin_form?.fields]);
+  const fieldTypes = useMemo(() => parseFieldTypes(schema.json_schema), [schema.json_schema]);
 
   const supported =
     fields.length > 0 && (schema.admin_form?.fields?.length ? true : parsedFallback.supported);
@@ -204,7 +211,11 @@ export function PluginConfigForm({
 
     try {
       setTestResult(
-        await onTest(schema.key, buildSchemaValues(descriptor, values), Array.from(clearSecrets)),
+        await onTest(
+          schema.key,
+          buildSchemaValues(descriptor, values, fieldTypes),
+          Array.from(clearSecrets),
+        ),
       );
     } catch (error) {
       setTestResult({
@@ -254,7 +265,12 @@ export function PluginConfigForm({
                 if (!Array.isArray(parsed)) throw new Error("Profiles must be a JSON array.");
                 const seen = new Set<string>();
                 const labels = parsed.map((profile, index) => {
-                  if (!profile || typeof profile !== "object" || typeof profile.label !== "string" || !profile.label.trim()) {
+                  if (
+                    !profile ||
+                    typeof profile !== "object" ||
+                    typeof profile.label !== "string" ||
+                    !profile.label.trim()
+                  ) {
                     throw new Error(`Profile ${index + 1} must have a label.`);
                   }
                   const typed = profile as Record<string, unknown>;
@@ -279,13 +295,17 @@ export function PluginConfigForm({
                 });
                 setProfilePreview(`Valid configuration: ${labels.join(", ")}`);
               } catch (error) {
-                setProfilePreview(error instanceof Error ? error.message : "Invalid profiles JSON.");
+                setProfilePreview(
+                  error instanceof Error ? error.message : "Invalid profiles JSON.",
+                );
               }
             }}
           >
             Validate profiles
           </Button>
-          {profilePreview ? <p className="text-muted-foreground text-xs">{profilePreview}</p> : null}
+          {profilePreview ? (
+            <p className="text-muted-foreground text-xs">{profilePreview}</p>
+          ) : null}
         </div>
       ) : null}
 
@@ -338,7 +358,11 @@ export function PluginConfigForm({
           variant="outline"
           disabled={isSaving || isTesting}
           onClick={() =>
-            onSave(schema.key, buildSchemaValues(descriptor, values), Array.from(clearSecrets))
+            onSave(
+              schema.key,
+              buildSchemaValues(descriptor, values, fieldTypes),
+              Array.from(clearSecrets),
+            )
           }
         >
           {schema.admin_form?.submit_label || "Save config"}
