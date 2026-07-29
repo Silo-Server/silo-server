@@ -24,7 +24,8 @@ import {
 } from "@/lib/historyRemoval";
 
 import {
-  buildCatalogApiSearchParams,
+  buildCatalogFilterSearchParams,
+  buildCatalogQueryUpdateHref,
   catalogSourceAllowsOverlay,
   parseCatalogSearchParams,
 } from "./catalogSearchParams";
@@ -132,6 +133,10 @@ function CatalogResults({
       query_definition: { ...state.query_definition, media_scope: preferredScope },
     };
   }, [hasExplicitScope, preferredScope, state]);
+  const buildSearchHref = useCallback(
+    (query: string) => buildCatalogQueryUpdateHref(effectiveState, query),
+    [effectiveState],
+  );
 
   const mediaScope = effectiveState.query_definition.media_scope;
   const activeChipScope: SearchMediaScope =
@@ -257,7 +262,12 @@ function CatalogResults({
 
       {state.source === "query" ? (
         <div className="flex flex-col items-center gap-3">
-          <SearchBar prominent initialQuery={state.q ?? ""} autoFocus />
+          <SearchBar
+            prominent
+            initialQuery={state.q ?? ""}
+            autoFocus
+            buildSearchHref={buildSearchHref}
+          />
           <SearchScopeChips activeScope={activeChipScope} onScopeChange={handleChipScopeChange} />
         </div>
       ) : null}
@@ -265,7 +275,7 @@ function CatalogResults({
       <CatalogFiltersPanel
         state={effectiveState}
         onStateChange={(nextState) => {
-          const nextSearchParams = buildCatalogApiSearchParams(nextState);
+          const nextSearchParams = buildCatalogFilterSearchParams(nextState);
           if (nextSearchParams.toString() !== searchParams.toString()) {
             setSearchParams(nextSearchParams);
           }

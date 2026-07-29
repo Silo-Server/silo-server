@@ -76,23 +76,6 @@ const definitions: SettingDefinition[] = [
     defaultValue: "false",
   },
   {
-    key: "playback.auto_skip_recap",
-    scope: "device",
-    label: "Auto-skip recaps",
-    description: "Skip 'previously on…' recaps automatically when Silo can detect them.",
-    control: "switch",
-    defaultValue: "false",
-  },
-  {
-    key: "playback.auto_play_next_preview",
-    scope: "device",
-    label: "Start next episode at preview",
-    description:
-      "Begin playing the next episode when the current one reaches its next-episode preview teaser, rather than waiting for the end credits.",
-    control: "switch",
-    defaultValue: "false",
-  },
-  {
     key: "playback.auto_play_next",
     scope: "device",
     label: "Auto-play next episode",
@@ -141,12 +124,28 @@ const definitions: SettingDefinition[] = [
     defaultValue: "true",
   },
   {
+    key: "player.dolby_vision_enabled",
+    scope: "device",
+    label: "Dolby Vision enabled",
+    description: "Allow Dolby Vision playback when this device and display support it.",
+    control: "switch",
+    defaultValue: "true",
+  },
+  {
     key: "player.dv_profile7_hdr10_fallback",
     scope: "device",
     label: "Profile 7 HDR10 fallback",
     description: "Play Dolby Vision Profile 7 as the HDR10 base layer on this device.",
     control: "switch",
     defaultValue: "false",
+  },
+  {
+    key: "player.seek_cache_enabled",
+    scope: "device",
+    label: "Seek cache",
+    description: "Cache nearby playback data to make repeated seeks faster on this device.",
+    control: "switch",
+    defaultValue: "true",
   },
   {
     key: "player.playback_speed",

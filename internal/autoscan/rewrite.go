@@ -10,7 +10,7 @@ func normalizeSeparators(path string) string {
 }
 
 // applyRewrites returns path with the MOST-SPECIFIC matching prefix rewrite
-// applied, or path unchanged when none match.
+// applied, or the normalized path unchanged when none match.
 //
 // "Most-specific" means the longest matching From wins, not the first one in the
 // slice. A first-match strategy lets a broad rewrite (From="/data") shadow a
@@ -18,6 +18,25 @@ func normalizeSeparators(path string) string {
 // be listed first; the arr plugin review flagged exactly this. Selecting the
 // longest matching prefix makes the result independent of rule ordering.
 func applyRewrites(path string, rewrites []PathRewrite) string {
+	// Normalize the incoming path the SAME way the stored From is normalized
+	// below. Separator swapping alone is not enough: a Windows UNC path like
+	// `\\NAS\Media\TV\...` becomes `//NAS/Media/TV/...`, while normalizePath
+	// collapses the From's leading `//` to `/NAS/Media/TV` — an asymmetry that
+	// made UNC roots unmatchable by any rewrite rule.
+	//
+	// A trailing separator is semantic downstream — filepath.Dir("/x/Show/")
+	// is the directory itself while filepath.Dir("/x/Show") is its parent, so
+	// legacy-scope changes rely on it to scan the notified directory rather
+	// than collapsing to a broader parent scan. normalizePath strips it for
+	// matching; restore it on whatever we return.
+	trailing := strings.HasSuffix(normalizeSeparators(strings.TrimSpace(path)), "/")
+	path = normalizePath(path)
+	restoreTrailing := func(p string) string {
+		if trailing && p != "/" {
+			return p + "/"
+		}
+		return p
+	}
 	bestIdx := -1
 	bestLen := -1
 	var bestTrimmed string
@@ -42,7 +61,9 @@ func applyRewrites(path string, rewrites []PathRewrite) string {
 		}
 	}
 	if bestIdx < 0 {
-		return path
+		return restoreTrailing(path)
 	}
-	return strings.TrimSpace(rewrites[bestIdx].To) + strings.TrimPrefix(path, bestTrimmed)
+	// Normalize the joined result too: a To stored with a trailing slash would
+	// otherwise yield a doubled separator at the join point.
+	return restoreTrailing(normalizePath(strings.TrimSpace(rewrites[bestIdx].To) + strings.TrimPrefix(path, bestTrimmed)))
 }

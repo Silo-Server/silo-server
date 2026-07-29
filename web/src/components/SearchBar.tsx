@@ -12,18 +12,25 @@ interface SearchBarProps {
   initialQuery?: string;
   autoFocus?: boolean;
   prominent?: boolean;
+  buildSearchHref?: (query: string) => string;
 }
 
 export default function SearchBar({
   initialQuery = "",
   autoFocus = false,
   prominent = false,
+  buildSearchHref = buildQueryCatalogHref,
 }: SearchBarProps) {
   const [query, setQuery] = useState(initialQuery);
   const navigate = useViewTransitionNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const isInitialMount = useRef(true);
+  const buildSearchHrefRef = useRef(buildSearchHref);
   const debouncedQuery = useDebounce(query, SEARCH_NAVIGATION_DEBOUNCE_MS);
+
+  useEffect(() => {
+    buildSearchHrefRef.current = buildSearchHref;
+  }, [buildSearchHref]);
 
   useEffect(() => {
     if (autoFocus && inputRef.current) {
@@ -39,14 +46,14 @@ export default function SearchBar({
       return;
     }
     if (debouncedQuery.trim()) {
-      navigate(buildQueryCatalogHref(debouncedQuery.trim()), { replace: true });
+      navigate(buildSearchHrefRef.current(debouncedQuery.trim()), { replace: true });
     }
   }, [debouncedQuery, prominent, navigate]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (query.trim()) {
-      navigate(buildQueryCatalogHref(query.trim()));
+      navigate(buildSearchHref(query.trim()));
     }
   }
 

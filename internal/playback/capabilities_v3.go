@@ -7,12 +7,25 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+// SourceDurationSecondsV3 reports a media file's runtime, or nil when it is
+// unknown. models.MediaFile.Duration stores 0 for "probe failed", so a zero
+// must never reach a client as a duration. This mirrors the legacy start
+// response's fileDurationSeconds so both protocols answer identically.
+func SourceDurationSecondsV3(file *models.MediaFile) *float64 {
+	if file == nil || file.Duration <= 0 {
+		return nil
+	}
+	duration := float64(file.Duration)
+	return &duration
+}
+
 func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDescriptorV3 {
 	if file == nil {
 		return SourceDescriptorV3{DVEnhancementLayer: EnhancementUnknownV3}
 	}
 	source := SourceDescriptorV3{
 		MediaFileID:        file.ID,
+		DurationSeconds:    SourceDurationSecondsV3(file),
 		Container:          normalizeCodecV3(file.Container),
 		VideoCodec:         normalizeCodecV3(file.CodecVideo),
 		AudioCodec:         normalizeCodecV3(file.CodecAudio),
@@ -26,6 +39,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		source.VideoProfile = strings.ToLower(strings.TrimSpace(track.Profile))
 		source.VideoLevel = track.Level
 		source.BitDepth = models.NormalizeVideoBitDepth(track.BitDepth, track.PixelFormat, track.Profile)
+		source.ColorRange = normalizeColorRangeV3(track.ColorRange)
 		source.Width = track.Width
 		source.Height = track.Height
 		source.FrameRate = parseFrameRateV3(track.FrameRate)
@@ -36,6 +50,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		source.HDR10Plus = track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+")
 		source.DVProfile = track.DVProfile
 		source.DVBLCompatID = track.DVBLCompatID
+		source.VideoCopyUnsafe = videoCopyUnsafeFile(file)
 		switch EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer)) {
 		case EnhancementNoneV3, EnhancementMELV3, EnhancementFELV3, EnhancementUnknownV3:
 			source.DVEnhancementLayer = EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer))
@@ -71,6 +86,15 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		}
 	}
 	return source
+}
+
+func normalizeColorRangeV3(value string) string {
+	switch normalized := strings.ToLower(strings.TrimSpace(value)); normalized {
+	case "tv", "pc", "unknown":
+		return normalized
+	default:
+		return ""
+	}
 }
 
 func detailedVideoEligibleV3(source SourceDescriptorV3, request StartRequestV3) bool {

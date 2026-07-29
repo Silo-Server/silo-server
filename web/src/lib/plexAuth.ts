@@ -1,3 +1,5 @@
+import { randomUUID } from "./uuid";
+
 const PLEX_TV_BASE_URL = "https://plex.tv";
 const PLEX_AUTH_BASE_URL = "https://app.plex.tv/auth#?";
 const PLEX_PRODUCT = "Silo";
@@ -63,10 +65,7 @@ export function getPlexClientIdentifier(): string {
     return stored;
   }
 
-  const generated =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
-      : `silo-${Date.now()}`;
+  const generated = randomUUID();
   setStoredPlexClientIdentifier(generated);
   return generated;
 }

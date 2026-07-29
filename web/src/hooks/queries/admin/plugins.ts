@@ -30,10 +30,12 @@ const ADMIN_STALE_TIME = 30_000;
 export const CHECK_PLUGIN_UPDATES_TASK_KEY = "check_plugin_updates";
 
 function invalidatePluginQueries(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: adminKeys.pluginRepositories() });
-  queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalog() });
-  queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() });
-  queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalogSettings() });
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: adminKeys.pluginRepositories() }),
+    queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalog() }),
+    queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() }),
+    queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalogSettings() }),
+  ]);
 }
 
 // useAdminPluginInstallations is a slim hook for callers (e.g. AdminSidebar)
@@ -328,9 +330,9 @@ export function useSavePluginConfig() {
         method: "PUT",
         body: JSON.stringify(body),
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Plugin config saved");
-      invalidatePluginQueries(queryClient);
+      await invalidatePluginQueries(queryClient);
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : "Failed to save plugin config");
@@ -357,7 +359,7 @@ export function useSavePluginAuthBinding() {
         body: JSON.stringify(body),
       }),
     onSuccess: () => {
-      toast.success("Auth binding saved");
+      toast.success("Auth binding saved — restart the server to apply it");
       invalidatePluginQueries(queryClient);
     },
     onError: (error) => {
@@ -385,8 +387,12 @@ export function useSavePluginTaskBinding() {
           body: JSON.stringify(body),
         },
       ),
-    onSuccess: () => {
-      toast.success("Task binding saved");
+    onSuccess: (data) => {
+      toast.success(
+        data.restart_required
+          ? "Task binding saved — restart the server to apply it"
+          : "Task binding saved",
+      );
       invalidatePluginQueries(queryClient);
     },
     onError: (error) => {

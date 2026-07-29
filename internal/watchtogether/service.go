@@ -26,8 +26,17 @@ var (
 	ErrConnectionNotAttached = errors.New("watch together session is not attached")
 	ErrInvalidSelection      = errors.New("watch together selection is invalid")
 	ErrSuggestionNotFound    = errors.New("watch together suggestion not found")
-	ErrDuplicateVote         = errors.New("watch together already voted")
-	ErrNotVoted              = errors.New("watch together not voted")
+	// ErrNotVoteWinner is returned when a vote-mode room is asked to promote
+	// something other than the title the room actually voted for.
+	ErrNotVoteWinner = errors.New("watch together suggestion is not the vote winner")
+	// ErrNoVotesCast is returned when a vote-mode room is asked to start before
+	// anyone has voted: there is no winner to promote yet.
+	ErrNoVotesCast = errors.New("watch together room has no votes yet")
+	// ErrVoteRoomSelection is returned when a vote room's selection is set
+	// directly instead of through the vote.
+	ErrVoteRoomSelection = errors.New("watch together vote room selects by vote")
+	ErrDuplicateVote     = errors.New("watch together already voted")
+	ErrNotVoted          = errors.New("watch together not voted")
 )
 
 const (
@@ -161,6 +170,23 @@ type Service struct {
 	rooms map[string]*liveRoom
 }
 
+// defaultHostDisconnectTTL is how long a room survives its host's socket going
+// away without an explicit leave.
+//
+// This is not "how long before we assume the host left" — an explicit leave and
+// an explicit close both tear the room down immediately, so this timer only
+// ever covers a host who has NOT said they are going. At 15s it treated any
+// transient drop as a departure: a host who backgrounded the app, walked
+// through a tunnel, or simply navigated somewhere the client did not hold the
+// socket open lost the room for everybody, mid-conversation, with a
+// "host_left" nobody could explain.
+//
+// Two minutes is long enough to survive a reconnect, an app switch, or a
+// client that drops the socket while its user browses for something to
+// suggest; short enough that a genuinely departed host does not leave a room
+// sitting open all evening. The janitor still reaps idle rooms independently.
+const defaultHostDisconnectTTL = 2 * time.Minute
+
 func NewService(
 	repo RoomStore,
 	sessions RoomSessionLookup,
@@ -176,7 +202,7 @@ func NewService(
 		files:             files,
 		selectionResolver: selectionResolver,
 		profileNames:      profileNames,
-		hostDisconnectTTL: 15 * time.Second,
+		hostDisconnectTTL: defaultHostDisconnectTTL,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -826,12 +852,30 @@ func (s *Service) UpdatePolicy(
 	return snapshot, nil
 }
 
+// SelectItem sets what the room plays at the host's direct request. In a vote
+// room that request is refused: the vote decides, and PromoteSuggestion is the
+// only way in.
 func (s *Service) SelectItem(
 	ctx context.Context,
 	roomID string,
 	userID int,
 	profileID string,
 	input SelectItemInput,
+) (Snapshot, error) {
+	return s.selectItem(ctx, roomID, userID, profileID, input, false)
+}
+
+// selectItem carries out a selection. viaVote is set only by PromoteSuggestion
+// once it has confirmed the suggestion is the room's winner — that call has
+// already satisfied the vote, so gating it here would leave a vote room with no
+// way at all to start playback.
+func (s *Service) selectItem(
+	ctx context.Context,
+	roomID string,
+	userID int,
+	profileID string,
+	input SelectItemInput,
+	viaVote bool,
 ) (Snapshot, error) {
 	if strings.TrimSpace(input.ContentID) == "" {
 		return Snapshot{}, ErrInvalidSelection
@@ -860,6 +904,15 @@ func (s *Service) SelectItem(
 	if live.room.HostUserID != userID || live.room.HostProfileID != profileID {
 		s.mu.Unlock()
 		return Snapshot{}, ErrRoomForbidden
+	}
+	// A vote room decides by tally, and a direct selection is the other door
+	// into the room's selection. Gating only PromoteSuggestion would leave the
+	// host able to set any title directly and bypass the vote entirely, which
+	// makes the counts on everyone else's screen decoration. Once the room is
+	// voting, the winner is the only way in.
+	if !viaVote && live.room.SelectionMode == RoomSelectionModeVote {
+		s.mu.Unlock()
+		return Snapshot{}, ErrVoteRoomSelection
 	}
 	if live.room.Phase == RoomPhaseEnded {
 		s.mu.Unlock()
@@ -1873,9 +1926,62 @@ func (s *Service) PromoteSuggestion(
 		return Snapshot{}, ErrSuggestionNotFound
 	}
 
-	return s.SelectItem(ctx, roomID, userID, profileID, SelectItemInput{
+	// In a vote room the host starts the winner; they do not get to overrule it.
+	// Being able to promote any suggestion would make "vote" host_pick with
+	// extra steps, and the tally on everyone else's screen would be a lie.
+	//
+	// The winner is read here and the selection commits a moment later, so a
+	// vote landing in between can start a title that has just stopped being the
+	// head of the tally. That is deliberate: the host pressed start on the
+	// standings they and the room could see, and a vote arriving during the
+	// round trip should not retroactively overrule the press. Closing the window
+	// would mean holding the room lock across a suggestion-store read, which
+	// stalls every other room for a race whose worst case is off by one vote.
+	s.mu.Lock()
+	isVoteRoom := live.room.SelectionMode == RoomSelectionModeVote
+	s.mu.Unlock()
+	if isVoteRoom {
+		winner, err := s.VoteWinner(ctx, roomID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if winner.ID != suggestion.ID {
+			return Snapshot{}, ErrNotVoteWinner
+		}
+	}
+
+	return s.selectItem(ctx, roomID, userID, profileID, SelectItemInput{
 		ContentID: suggestion.ContentID,
-	})
+	}, isVoteRoom)
+}
+
+// VoteWinner returns the suggestion a vote-mode room has settled on.
+//
+// The repository already orders by vote_count DESC, created_at ASC, so the
+// winner is the head of the list and ties resolve to whoever suggested first —
+// deterministic, and it does not reward re-suggesting the same title.
+//
+// A room where nobody has voted has no winner. Returning the oldest suggestion
+// there would let a host "start the vote winner" for a vote that never
+// happened, which is exactly the confusion this mode exists to avoid.
+func (s *Service) VoteWinner(ctx context.Context, roomID string) (Suggestion, error) {
+	if s == nil || s.suggestions == nil {
+		return Suggestion{}, fmt.Errorf("watch together suggestions unavailable")
+	}
+	suggestions, err := s.suggestions.ListSuggestions(ctx, roomID, "")
+	if err != nil {
+		return Suggestion{}, err
+	}
+	return winnerFrom(suggestions)
+}
+
+// winnerFrom picks the winner out of an already-ordered suggestion list. Split
+// out so the rule can be tested without a database.
+func winnerFrom(ordered []Suggestion) (Suggestion, error) {
+	if len(ordered) == 0 || ordered[0].VoteCount <= 0 {
+		return Suggestion{}, ErrNoVotesCast
+	}
+	return ordered[0], nil
 }
 
 func (s *Service) prepareSuggestionDispatchesLocked(live *liveRoom, suggestions []Suggestion) []snapshotDispatch {

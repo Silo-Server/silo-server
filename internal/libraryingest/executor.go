@@ -320,34 +320,36 @@ func (e *Executor) ingest(ctx context.Context, folder *models.MediaFolder, mode 
 		}),
 	})
 	for _, scopePath := range matchScopes {
-		matchStarted := time.Now()
-		matched, err := e.matcher.ProcessAllByFolderAndPathPrefix(scanCtx, folder.ID, scopePath, runStartedAt)
-		result.MatchDuration += time.Since(matchStarted)
-		result.MatchedFiles += matched
-		reportProgress(scanCtx, ProgressUpdate{
-			Phase:        "matching",
-			Message:      "Matching unmatched items",
-			CurrentScope: scopePath,
-			MatchedFiles: result.MatchedFiles,
-		})
-		if err != nil {
-			return result, fmt.Errorf("match scope %q: %w", scopePath, err)
-		}
+		if !usesDedicatedEnrichment(folder.Type) {
+			matchStarted := time.Now()
+			matched, err := e.matcher.ProcessAllByFolderAndPathPrefix(scanCtx, folder.ID, scopePath, runStartedAt)
+			result.MatchDuration += time.Since(matchStarted)
+			result.MatchedFiles += matched
+			reportProgress(scanCtx, ProgressUpdate{
+				Phase:        "matching",
+				Message:      "Matching unmatched items",
+				CurrentScope: scopePath,
+				MatchedFiles: result.MatchedFiles,
+			})
+			if err != nil {
+				return result, fmt.Errorf("match scope %q: %w", scopePath, err)
+			}
 
-		retryStarted := time.Now()
-		retried, stillUnmatched, err := e.matcher.RetryUnmatchedItemsByFolderAndPathPrefix(scanCtx, folder.ID, scopePath)
-		result.RetryDuration += time.Since(retryStarted)
-		result.RetriedItems += retried
-		result.StillUnmatchedWarnings += stillUnmatched
-		reportProgress(scanCtx, ProgressUpdate{
-			Phase:        "retrying",
-			Message:      "Retrying unmatched items",
-			CurrentScope: scopePath,
-			MatchedFiles: result.MatchedFiles,
-			RetriedItems: result.RetriedItems,
-		})
-		if err != nil {
-			return result, fmt.Errorf("retry scope %q: %w", scopePath, err)
+			retryStarted := time.Now()
+			retried, stillUnmatched, err := e.matcher.RetryUnmatchedItemsByFolderAndPathPrefix(scanCtx, folder.ID, scopePath)
+			result.RetryDuration += time.Since(retryStarted)
+			result.RetriedItems += retried
+			result.StillUnmatchedWarnings += stillUnmatched
+			reportProgress(scanCtx, ProgressUpdate{
+				Phase:        "retrying",
+				Message:      "Retrying unmatched items",
+				CurrentScope: scopePath,
+				MatchedFiles: result.MatchedFiles,
+				RetriedItems: result.RetriedItems,
+			})
+			if err != nil {
+				return result, fmt.Errorf("retry scope %q: %w", scopePath, err)
+			}
 		}
 		if err := e.scanner.FinalizeVariantsByPathPrefix(scanCtx, folder, scopePath); err != nil {
 			return result, fmt.Errorf("finalize variants for scope %q: %w", scopePath, err)
@@ -461,6 +463,10 @@ func scopeMatchPaths(folder *models.MediaFolder, mode scopeMode, scopePath strin
 	default:
 		return nil
 	}
+}
+
+func usesDedicatedEnrichment(folderType string) bool {
+	return librarykind.Of(folderType).Ebook
 }
 
 func shouldWaitForTVQueueSettle(folder *models.MediaFolder, scanResult *scanner.ScanResult) bool {

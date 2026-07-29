@@ -18,6 +18,76 @@ import (
 
 const ebookCoverTestThumbhash = "thumb"
 
+type fakeEbookEnrichmentQueue struct {
+	contentID      string
+	priority       int
+	err            error
+	reconcileCalls int
+	reconcileLimit int
+	reconcileErr   error
+	inspected      int
+	wrapped        bool
+}
+
+func (f *fakeEbookEnrichmentQueue) Enqueue(_ context.Context, contentID string, priority int) error {
+	f.contentID = contentID
+	f.priority = priority
+	return f.err
+}
+
+func (f *fakeEbookEnrichmentQueue) ReconcileMissing(_ context.Context, _ int, _ int, limit int) (int, int, bool, error) {
+	f.reconcileCalls++
+	f.reconcileLimit = limit
+	return 0, f.inspected, f.wrapped, f.reconcileErr
+}
+
+func TestScannerEbookEnrichmentHookEnqueuesHighPriorityWork(t *testing.T) {
+	queue := &fakeEbookEnrichmentQueue{}
+	s := &Scanner{}
+	s.SetEbookEnrichmentQueue(queue)
+
+	if err := s.enqueueEbookEnrichment(context.Background(), "ebook-1"); err != nil {
+		t.Fatalf("enqueueEbookEnrichment() error = %v", err)
+	}
+	if queue.contentID != "ebook-1" || queue.priority != 100 {
+		t.Fatalf("enqueue = (%q, %d), want (ebook-1, 100)", queue.contentID, queue.priority)
+	}
+}
+
+func TestScannerEbookEnrichmentHookDoesNotFailScanOnQueueFailure(t *testing.T) {
+	queueErr := errors.New("queue unavailable")
+	s := &Scanner{}
+	s.SetEbookEnrichmentQueue(&fakeEbookEnrichmentQueue{err: queueErr})
+
+	err := s.enqueueEbookEnrichment(context.Background(), "ebook-1")
+	if err != nil {
+		t.Fatalf("enqueueEbookEnrichment() error = %v, want nil", err)
+	}
+}
+
+func TestScannerEbookEnrichmentReconciliationIsBoundedAndNonFatal(t *testing.T) {
+	queue := &fakeEbookEnrichmentQueue{reconcileErr: errors.New("queue unavailable")}
+	s := &Scanner{}
+	s.SetEbookEnrichmentQueue(queue)
+
+	if err := s.reconcileEbookScan(
+		context.Background(),
+		&models.MediaFolder{ID: 17},
+		nil,
+		nil,
+		true,
+	); err != nil {
+		t.Fatalf("reconcileEbookScan() error = %v", err)
+	}
+
+	if queue.reconcileCalls != 1 {
+		t.Fatalf("reconcile calls = %d, want 1", queue.reconcileCalls)
+	}
+	if queue.reconcileLimit <= 0 || queue.reconcileLimit > 1000 {
+		t.Fatalf("reconcile limit = %d, want bounded positive limit", queue.reconcileLimit)
+	}
+}
+
 type recordingEbookExecutor struct {
 	queries []string
 	args    [][]any
@@ -265,6 +335,97 @@ func TestParseEbookEPUBMetadataHandlesWindows1251OPF(t *testing.T) {
 	if got.Title != "Война и мир" || strings.Join(got.Authors, ", ") != "Толстой" {
 		t.Fatalf("parsed windows-1251 metadata = title %q authors %v", got.Title, got.Authors)
 	}
+}
+
+func TestParseEbookFileAppliesExternalOPFSidecar(t *testing.T) {
+	dir := t.TempDir()
+	bookPath := filepath.Join(dir, "Dune.cbr")
+	if err := os.WriteFile(bookPath, nil, 0o644); err != nil {
+		t.Fatalf("write book: %v", err)
+	}
+	sidecar := `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata>
+    <dc:title>Dune</dc:title>
+    <dc:creator>Frank Herbert</dc:creator>
+    <dc:description>A desert planet and a dangerous inheritance.</dc:description>
+    <dc:identifier>9780441172719</dc:identifier>
+    <dc:subject>Science Fiction</dc:subject>
+  </metadata>
+</package>`
+	if err := os.WriteFile(filepath.Join(dir, "Dune.opf"), []byte(sidecar), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	got, err := parseEbookFile(bookPath)
+	if err != nil {
+		t.Fatalf("parseEbookFile: %v", err)
+	}
+	if got.Title != "Dune" || len(got.Authors) != 1 || got.Authors[0] != "Frank Herbert" {
+		t.Fatalf("sidecar identity = title %q authors %v", got.Title, got.Authors)
+	}
+	if got.Description == "" || got.ISBN != "9780441172719" {
+		t.Fatalf("sidecar metadata = description %q ISBN %q", got.Description, got.ISBN)
+	}
+	if got.Format != "cbr" {
+		t.Fatalf("Format = %q, want original file format cbr", got.Format)
+	}
+}
+
+func TestParseEbookOPFSidecarRejectsSymlinkedSidecar(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "outside-library.opf")
+	sidecar := `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata><dc:title>Smuggled</dc:title></metadata>
+</package>`
+	if err := os.WriteFile(target, []byte(sidecar), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	link := filepath.Join(dir, "Dune.opf")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if _, err := parseEbookOPFSidecar(link); err == nil {
+		t.Fatal("parseEbookOPFSidecar accepted a symlinked sidecar; a leaf swapped to a symlink after the Lstat gate would be followed to its target")
+	}
+}
+
+func TestInsertEbookISBNProviderIDReplacesStaleISBN(t *testing.T) {
+	exec := &recordingEbookExecutor{}
+	if err := insertEbookISBNProviderID(context.Background(), exec, "book-1", "9780441172719"); err != nil {
+		t.Fatalf("insertEbookISBNProviderID: %v", err)
+	}
+	if len(exec.queries) != 1 {
+		t.Fatalf("queries = %d, want 1", len(exec.queries))
+	}
+	query := strings.Join(strings.Fields(exec.queries[0]), " ")
+	if !strings.Contains(query, "ON CONFLICT (content_id, provider) DO UPDATE") ||
+		!strings.Contains(query, "provider_id = EXCLUDED.provider_id") {
+		t.Fatalf("ISBN insert does not replace a stale value on rescan:\n%s", query)
+	}
+}
+
+func TestInsertEbookISBNProviderIDToleratesISBNOwnedByAnotherItem(t *testing.T) {
+	exec := &erroringEbookExecutor{err: &pgconn.PgError{Code: "23505"}}
+	if err := insertEbookISBNProviderID(context.Background(), exec, "book-1", "9780441172719"); err != nil {
+		t.Fatalf("unique-violation on the (provider, provider_id) constraint must not fail the scan, got %v", err)
+	}
+
+	boom := errors.New("connection lost")
+	exec = &erroringEbookExecutor{err: boom}
+	if err := insertEbookISBNProviderID(context.Background(), exec, "book-1", "9780441172719"); !errors.Is(err, boom) {
+		t.Fatalf("non-unique-violation error = %v, want %v", err, boom)
+	}
+}
+
+type erroringEbookExecutor struct {
+	err error
+}
+
+func (e *erroringEbookExecutor) Exec(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, e.err
 }
 
 func TestParseEbookEPUBMetadataAllowsXMLVersion11(t *testing.T) {
@@ -1385,7 +1546,7 @@ func TestCollectEbookRootScansExcludesUnmountedRootFromReconciliation(t *testing
 	}
 }
 
-func TestCollectEbookRootScansTreatsNonDirectoryRootAsFailed(t *testing.T) {
+func TestCollectEbookRootScansTreatsSingleFileRootAsNonReconciling(t *testing.T) {
 	dir := t.TempDir()
 	fileRoot := filepath.Join(dir, "book.epub")
 	if err := os.WriteFile(fileRoot, []byte("x"), 0o644); err != nil {
@@ -1396,8 +1557,8 @@ func TestCollectEbookRootScansTreatsNonDirectoryRootAsFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collectEbookRootScans: %v", err)
 	}
-	if len(scans) != 1 || !scans[0].failed() {
-		t.Fatalf("scans = %+v, want one failed scan for a non-directory root", scans)
+	if len(scans) != 1 || scans[0].failed() || !scans[0].fileOnly {
+		t.Fatalf("scans = %+v, want one healthy file-only scan", scans)
 	}
 	// The file itself is still indexed; only reconciliation is withheld.
 	if len(scans[0].files) != 1 {
@@ -1405,6 +1566,21 @@ func TestCollectEbookRootScansTreatsNonDirectoryRootAsFailed(t *testing.T) {
 	}
 	if roots, _ := splitEbookReconcileRoots(scans); len(roots) != 0 {
 		t.Fatalf("reconcileRoots = %v, want none", roots)
+	}
+}
+
+func TestCollectEbookRootScansIncludesCompoundFB2ZipFile(t *testing.T) {
+	fileRoot := filepath.Join(t.TempDir(), "book.fb2.zip")
+	if err := os.WriteFile(fileRoot, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write ebook: %v", err)
+	}
+
+	scans, err := collectEbookRootScans(context.Background(), 44, []string{fileRoot})
+	if err != nil {
+		t.Fatalf("collectEbookRootScans: %v", err)
+	}
+	if len(scans) != 1 || len(scans[0].files) != 1 || scans[0].files[0] != fileRoot {
+		t.Fatalf("scans = %+v, want compound-extension file indexed", scans)
 	}
 }
 
@@ -1435,7 +1611,7 @@ func TestCollectEbookRootScansMidWalkSubtreeErrorExcludesRoot(t *testing.T) {
 	if len(scans) != 1 {
 		t.Fatalf("scans = %d, want 1", len(scans))
 	}
-	if scans[0].walkFailures == 0 || !scans[0].failed() {
+	if len(scans[0].walkFailures) == 0 || !scans[0].failed() {
 		t.Fatalf("scan = %+v, want walk failure recorded for unreadable subtree", scans[0])
 	}
 	if len(scans[0].files) != 1 {

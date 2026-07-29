@@ -629,7 +629,7 @@ func (s *Service) resolveConnection(ctx context.Context, connectionID string) (R
 func rewriteChanges(changes []Change, rewrites []PathRewrite) []Change {
 	rewritten := make([]Change, 0, len(changes))
 	for _, change := range changes {
-		path := applyRewrites(normalizeSeparators(change.SourcePath), rewrites)
+		path := applyRewrites(change.SourcePath, rewrites)
 		rewritten = append(rewritten, Change{SourcePath: path, Scope: change.Scope})
 	}
 	return rewritten

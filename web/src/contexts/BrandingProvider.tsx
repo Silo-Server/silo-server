@@ -19,6 +19,7 @@ interface BrandingApiResponse {
   mark_url?: string;
   favicon_url?: string;
   login_bg_url?: string;
+  storage_available?: boolean;
 }
 
 export interface BrandingContextValue {
@@ -33,6 +34,8 @@ export interface BrandingContextValue {
   markUrl: string | null;
   faviconUrl: string | null;
   loginBgUrl: string | null;
+  /** Whether the running server has an active object-store client for assets. */
+  storageAvailable: boolean;
 }
 
 const DEFAULT_BRANDING: BrandingContextValue = {
@@ -44,6 +47,7 @@ const DEFAULT_BRANDING: BrandingContextValue = {
   markUrl: null,
   faviconUrl: null,
   loginBgUrl: null,
+  storageAvailable: false,
 };
 
 // A non-null default means useBranding() is safe to call anywhere (e.g. in
@@ -60,6 +64,7 @@ function mapResponse(data: BrandingApiResponse | undefined): BrandingContextValu
     markUrl: data?.mark_url || null,
     faviconUrl: data?.favicon_url || null,
     loginBgUrl: data?.login_bg_url || null,
+    storageAvailable: data?.storage_available ?? false,
   };
 }
 

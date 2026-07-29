@@ -96,8 +96,8 @@ export default function EmailSettings() {
       <div className="mb-6 space-y-2">
         <h2 className="text-xl font-semibold tracking-tight">Email</h2>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Outbound email via your own SMTP server. Used by features that send mail — notification
-          emails, account flows — once they are enabled.
+          Outbound email via your own SMTP server. Used for notification-address verification and
+          notification digests once those features are enabled.
         </p>
       </div>
 

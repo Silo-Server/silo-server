@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { api, apiResponse } from "@/api/client";
 import type {
+  AdminSettingUpdateResponse,
   DiagnosticReport,
   DiagnosticReportListResponse,
   DiagnosticReportSummary,
@@ -35,6 +36,31 @@ export function useDiagnosticsStatus() {
     queryKey: adminKeys.diagnosticStatus(),
     queryFn: () => api<DiagnosticStatus>("/diagnostics/status"),
     staleTime: 30_000,
+  });
+}
+
+export function useUpdateDiagnosticsUploadsEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      api<AdminSettingUpdateResponse>("/admin/settings/diagnostics.uploads_enabled", {
+        method: "PUT",
+        body: JSON.stringify({ value: enabled ? "true" : "false" }),
+      }),
+    onSuccess: async (_result, enabled) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.diagnosticStatus() }),
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+      ]);
+      toast.success(
+        enabled ? "Client diagnostic uploads enabled" : "Client diagnostic uploads disabled",
+      );
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to update client diagnostic uploads",
+      );
+    },
   });
 }
 

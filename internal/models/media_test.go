@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestPersonKindAudiobookRoles(t *testing.T) {
 	cases := []struct {
@@ -36,6 +39,37 @@ func TestNormalizeVideoBitDepth(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			if got := NormalizeVideoBitDepth(test.explicit, test.pixelFormat, test.profile); got != test.want {
 				t.Fatalf("NormalizeVideoBitDepth(%d, %q, %q) = %d, want %d", test.explicit, test.pixelFormat, test.profile, got, test.want)
+			}
+		})
+	}
+}
+
+func TestVideoTrackColorRangeJSON(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		value   string
+		present bool
+	}{
+		{name: "limited", value: "tv", present: true},
+		{name: "full", value: "pc", present: true},
+		{name: "unspecified", value: "unknown", present: true},
+		{name: "empty omitted", value: "", present: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data, err := json.Marshal(VideoTrack{ColorRange: test.value})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(data, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			got, present := decoded["color_range"]
+			if present != test.present {
+				t.Fatalf("color_range present = %v, want %v (%s)", present, test.present, data)
+			}
+			if test.present && got != test.value {
+				t.Fatalf("color_range = %#v, want %q", got, test.value)
 			}
 		})
 	}

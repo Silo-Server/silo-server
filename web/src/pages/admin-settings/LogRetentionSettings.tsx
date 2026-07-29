@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
+import { useAdminServerSettings, useUpdateServerSettings } from "@/hooks/queries/admin/settings";
 
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "./SaveBar";
@@ -55,7 +55,7 @@ function createBucketRow(policy?: Partial<LogRetentionBucketPolicy>, fallbackID 
 
 export default function LogRetentionSettings() {
   const { data: settings, isLoading } = useAdminServerSettings();
-  const updateSetting = useUpdateServerSetting();
+  const updateSettings = useUpdateServerSettings();
 
   const [localValues, setLocalValues] = useState<Record<string, string>>({});
   const [bucketRows, setBucketRows] = useState<BucketRow[]>([]);
@@ -160,19 +160,20 @@ export default function LogRetentionSettings() {
 
   async function save() {
     setSaveError("");
-    const requests = Array.from(dirty).map((key) => {
-      const value =
+    const values = Object.fromEntries(
+      Array.from(dirty).map((key) => [
+        key,
         key === OPSLOG_BUCKET_POLICIES_KEY
           ? serializeBucketPolicies(effectiveBucketRows)
-          : (effectiveLocalValues[key] ?? "");
-      return updateSetting.mutateAsync({ key, value });
-    });
+          : (effectiveLocalValues[key] ?? ""),
+      ]),
+    );
     try {
-      await Promise.all(requests);
+      const result = await updateSettings.mutateAsync(values);
       setDirty(new Set());
-      setRestartRequired(true);
+      setRestartRequired((current) => current || result.restart_required);
     } catch {
-      setSaveError("Failed to save some settings. Please try again.");
+      setSaveError("Failed to save settings. No changes were applied.");
     }
   }
 
@@ -207,7 +208,7 @@ export default function LogRetentionSettings() {
         </p>
       </div>
 
-      <div className="flex-1 space-y-6">
+      <fieldset disabled={updateSettings.isPending} className="flex-1 space-y-6">
         <FieldGroup label="Global Limits">
           <SettingField
             label="Retention Days"
@@ -243,7 +244,7 @@ export default function LogRetentionSettings() {
           <SettingField
             label="Decision Log Verbosity"
             type="select"
-            hint="Digest stores hashes only. Verbose stores sampled input and result payloads."
+            hint="Digest omits sampled input and result payloads. Verbose can store those samples in addition to decision metadata."
             value={getValue(POLICY_DECISION_LOG_VERBOSITY_KEY) || "digest"}
             onChange={(value) => setValue(POLICY_DECISION_LOG_VERBOSITY_KEY, value)}
             options={[
@@ -395,17 +396,17 @@ export default function LogRetentionSettings() {
 
             <div className="text-muted-foreground text-xs leading-5">
               Matching rows are pruned oldest-first when they exceed the bucket rule. Global caps
-              still apply afterward, so noisy buckets cannot crowd out playback or error logs.
+              then prune the oldest rows across every remaining bucket.
             </div>
           </div>
         </FieldGroup>
-      </div>
+      </fieldset>
 
       <SaveBar
         dirtyCount={dirtyCount}
         onSave={save}
         onDiscard={discard}
-        isSaving={updateSetting.isPending}
+        isSaving={updateSettings.isPending}
         restartRequired={restartRequired}
       />
     </div>

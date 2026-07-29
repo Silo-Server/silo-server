@@ -18,6 +18,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/catalog/filesplit"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -106,16 +107,9 @@ type mergeItemRequest struct {
 	Into string `json:"into"`
 }
 
-// splitFile is the slice of media_files the split logic needs.
-type splitFile struct {
-	ID               int
-	MediaFolderID    int
-	FilePath         string
-	ObservedRootPath string
-	SeasonNumber     int
-	EpisodeNumber    int
-	EpisodeID        string
-}
+// splitFile remains a local alias so the HTTP layer and the automatic repair
+// path share the same transactional file-move primitive.
+type splitFile = filesplit.File
 
 type itemFileResponse struct {
 	ID               int    `json:"id"`
@@ -229,8 +223,6 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	episodePairs := deriveEpisodePairs(sourceItem, moved, target.contentID)
-
 	// Everything transactional happens here; a dry run rolls back at the end.
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -247,7 +239,14 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
-	if err := moveFilesToItem(ctx, tx, target.contentID, moved); err != nil {
+	moveResult, err := filesplit.Move(ctx, tx, filesplit.Options{
+		FromContentID: sourceID,
+		ToContentID:   target.contentID,
+		ItemType:      sourceItem.Type,
+		Files:         moved,
+		HistoryMode:   mode,
+	})
+	if err != nil {
 		slog.ErrorContext(ctx, "admin split: moving files", "component", "api", "target", target.contentID, "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to move files")
 		return
@@ -264,18 +263,8 @@ func (h *AdminSplitHandler) HandleSplitItem(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	report, err := reattribute.Run(ctx, tx, reattribute.Options{
-		FromContentID: sourceID,
-		ToContentID:   target.contentID,
-		MovedFileIDs:  fileIDs(moved),
-		Mode:          mode,
-		EpisodePairs:  episodePairs,
-	})
-	if err != nil {
-		slog.ErrorContext(ctx, "admin split: reattributing user state", "component", "api", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reattribute user state")
-		return
-	}
+	report := moveResult.Reattribution
+	episodePairs := moveResult.EpisodePairs
 
 	if !req.DryRun {
 		if err := tx.Commit(ctx); err != nil {
@@ -449,29 +438,17 @@ func (h *AdminSplitHandler) resolveSplitTarget(
 // possible when the target id is provider-anchored; local targets get no
 // episode-level reattribution (state stays behind, reported to the operator).
 func deriveEpisodePairs(sourceItem *models.MediaItem, moved []splitFile, targetContentID string) []reattribute.IDPair {
-	if sourceItem.Type != "series" || !contentid.IsProviderAnchored(targetContentID) {
-		return nil
-	}
-	seen := map[string]bool{}
-	var pairs []reattribute.IDPair
-	for _, f := range moved {
-		if f.EpisodeID == "" || f.SeasonNumber <= 0 || f.EpisodeNumber <= 0 || seen[f.EpisodeID] {
-			continue
-		}
-		newID, ok := contentid.ForEpisode(targetContentID, f.SeasonNumber, f.EpisodeNumber)
-		if !ok || newID == f.EpisodeID {
-			continue
-		}
-		seen[f.EpisodeID] = true
-		pairs = append(pairs, reattribute.IDPair{From: f.EpisodeID, To: newID})
-	}
-	return pairs
+	return filesplit.DeriveEpisodePairs(sourceItem.Type, moved, targetContentID)
 }
 
 func (h *AdminSplitHandler) loadItemFiles(ctx context.Context, contentID string) ([]splitFile, error) {
 	rows, err := h.pool.Query(ctx, `
-		SELECT id, media_folder_id, file_path,
+		SELECT id, COALESCE(content_id, ''), media_folder_id, file_path,
+		       COALESCE(canonical_root_path, ''),
 		       COALESCE(observed_root_path, ''),
+		       COALESCE(group_key_version, 1),
+		       COALESCE(content_group_key, ''),
+		       COALESCE(base_type, ''),
 		       COALESCE(season_number, 0),
 		       COALESCE(episode_number, 0),
 		       COALESCE(episode_id, '')
@@ -487,7 +464,20 @@ func (h *AdminSplitHandler) loadItemFiles(ctx context.Context, contentID string)
 	var files []splitFile
 	for rows.Next() {
 		var f splitFile
-		if err := rows.Scan(&f.ID, &f.MediaFolderID, &f.FilePath, &f.ObservedRootPath, &f.SeasonNumber, &f.EpisodeNumber, &f.EpisodeID); err != nil {
+		if err := rows.Scan(
+			&f.ID,
+			&f.ContentID,
+			&f.MediaFolderID,
+			&f.FilePath,
+			&f.CanonicalRootPath,
+			&f.ObservedRootPath,
+			&f.GroupKeyVersion,
+			&f.ContentGroupKey,
+			&f.BaseType,
+			&f.SeasonNumber,
+			&f.EpisodeNumber,
+			&f.EpisodeID,
+		); err != nil {
 			return nil, err
 		}
 		if f.ObservedRootPath == "" {
@@ -522,33 +512,6 @@ func insertSkeletonItem(ctx context.Context, tx pgx.Tx, target splitTarget, sour
 			VALUES ($1, $2)
 			ON CONFLICT DO NOTHING
 		`, target.contentID, folderID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func moveFilesToItem(ctx context.Context, tx pgx.Tx, targetContentID string, moved []splitFile) error {
-	// episode_id resets: the metadata refresh / scanner relink recreates the
-	// links against the target series' (deterministic) episode rows.
-	_, err := tx.Exec(ctx, `
-		UPDATE media_files
-		SET content_id = $1,
-			episode_id = NULL,
-			match_attempted_at = NULL,
-			updated_at = NOW()
-		WHERE id = ANY($2::int[])
-	`, targetContentID, fileIDs(moved))
-	if err != nil {
-		return err
-	}
-	// Library membership for the target in every folder that received files.
-	for _, folderID := range distinctFolderIDs(moved) {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO media_item_libraries (content_id, media_folder_id)
-			VALUES ($1, $2)
-			ON CONFLICT DO NOTHING
-		`, targetContentID, folderID); err != nil {
 			return err
 		}
 	}
@@ -686,14 +649,6 @@ func (h *AdminSplitHandler) runPostSplitFollowUps(sourceID string, target splitT
 			}
 		}
 	}()
-}
-
-func fileIDs(files []splitFile) []int {
-	ids := make([]int, 0, len(files))
-	for _, f := range files {
-		ids = append(ids, f.ID)
-	}
-	return ids
 }
 
 func distinctFolderIDs(files []splitFile) []int {

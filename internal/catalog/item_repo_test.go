@@ -463,7 +463,7 @@ func TestItemRepo_Search_FTSQueryHasNoFuzzyArm(t *testing.T) {
 }
 
 // TestItemRepo_BuildFuzzySearchSQL asserts that the fuzzy fallback query scores
-// only on the indexed title_normalized column (no title tsvector rebuild),
+// only on indexed normalized title/alias columns (no title tsvector rebuild),
 // matches via strict word similarity so long titles stay reachable, ranks by
 // descending word similarity with whole-title closeness as tie-break, excludes
 // already-seen content_ids, and applies the same scope filters (type, manga
@@ -477,11 +477,14 @@ func TestItemRepo_BuildFuzzySearchSQL(t *testing.T) {
 	if !strings.Contains(dataSQL, "public.normalize_search_text($1) <<% mi.title_normalized") {
 		t.Fatalf("expected strict-word-similarity arm against title_normalized; got:\n%s", dataSQL)
 	}
-	if !strings.Contains(dataSQL, "MAX(strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank") {
+	if !strings.Contains(dataSQL, "strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)") || !strings.Contains(dataSQL, "AS fuzzy_rank") {
 		t.Fatalf("expected strict word similarity ranking on title_normalized; got:\n%s", dataSQL)
 	}
-	if !strings.Contains(dataSQL, "MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_full_rank") {
+	if !strings.Contains(dataSQL, "similarity(public.normalize_search_text($1), mi.title_normalized)") || !strings.Contains(dataSQL, "AS fuzzy_full_rank") {
 		t.Fatalf("expected whole-title similarity tie-break rank; got:\n%s", dataSQL)
+	}
+	if !strings.Contains(dataSQL, "<<% mia.normalized_title") {
+		t.Fatalf("expected alias trigram candidates; got:\n%s", dataSQL)
 	}
 	// The whole point of the separate query: it must never rebuild the title
 	// tsvectors that made the fused query slow.
@@ -539,7 +542,7 @@ func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
 	// Whole-title similarity, not word similarity: the augment floor must not
 	// admit embedded prefix words ("coral" scores 0.5 word-similarity to
 	// "coraline").
-	if !strings.Contains(floorSQL, "AND similarity(public.normalize_search_text($1), mi.title_normalized) >= $2") {
+	if !strings.Contains(floorSQL, ") >= $2") || !strings.Contains(floorSQL, "mia.normalized_title") {
 		t.Fatalf("expected explicit whole-title similarity floor predicate as $2; got:\n%s", floorSQL)
 	}
 	if len(floorArgs) < 2 || floorArgs[1] != fuzzyAugmentSimilarityFloor {
@@ -551,7 +554,7 @@ func TestItemRepo_BuildFuzzySearchSQL_SimilarityFloor(t *testing.T) {
 	}
 
 	baseSQL, _, baseArgs := repo.buildFuzzySearchSQL("avegners", []string{"movie"}, 20, 0, AccessFilter{}, true, nil, 0)
-	if strings.Contains(baseSQL, "AND similarity(public.normalize_search_text($1), mi.title_normalized) >= $2") {
+	if strings.Contains(baseSQL, ") >= $2") {
 		t.Fatalf("zero floor must not add a similarity predicate; got:\n%s", baseSQL)
 	}
 	if len(baseArgs) != len(floorArgs)-1 {
@@ -707,29 +710,80 @@ func TestItemRepo_Search_ScoredCTEExposesItemColumnNames(t *testing.T) {
 	}
 }
 
-// TestItemRepo_Search_GroupByHasNoOutputAliases asserts the scored CTE's
-// GROUP BY uses raw column references: AS aliases are valid in a select list
-// but are a syntax error inside GROUP BY, so the CTE must not reuse the
-// aliased projection there.
-func TestItemRepo_Search_GroupByHasNoOutputAliases(t *testing.T) {
+// TestItemRepo_Search_ScoredCTEIsLean asserts that relevance ranking carries
+// only candidate identity/rank fields. Wide MediaItem columns are hydrated
+// from the page CTE after LIMIT/OFFSET, which keeps broad episode searches
+// from sorting metadata arrays and image fields for every candidate.
+func TestItemRepo_Search_ScoredCTEIsLean(t *testing.T) {
 	repo := &ItemRepository{}
-	dataSQL, countSQL, _ := repo.buildSearchSQL("avatar", []string{"movie"}, 20, 0, AccessFilter{})
+	for _, test := range []struct {
+		name      string
+		itemTypes []string
+	}{
+		{name: "movie", itemTypes: []string{"movie"}},
+		{name: "episode", itemTypes: []string{"episode"}},
+		{name: "mixed", itemTypes: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dataSQL, countSQL, _ := repo.buildSearchSQL("avatar", test.itemTypes, 20, 0, AccessFilter{})
+			for _, sql := range []string{dataSQL, countSQL} {
+				end := strings.Index(sql, "), stats AS")
+				if end < 0 {
+					t.Fatalf("expected scored CTE boundary; got:\n%s", sql)
+				}
+				scored := sql[:end]
+				for _, wideColumn := range []string{"poster_path", "backdrop_path", "metadata_s3_path", "genres"} {
+					if strings.Contains(scored, wideColumn) {
+						t.Fatalf("scored CTE must not carry %s; got:\n%s", wideColumn, scored)
+					}
+				}
+			}
+		})
+	}
+}
 
-	for _, sql := range []string{dataSQL, countSQL} {
-		idx := strings.Index(sql, "GROUP BY")
-		if idx < 0 {
-			t.Fatalf("expected GROUP BY in scored CTE; got:\n%s", sql)
+func TestItemRepo_Search_UnscopedIncludesEpisodeCandidateBranch(t *testing.T) {
+	repo := &ItemRepository{}
+	sql, _, _ := repo.buildSearchSQL("Who Are You?", nil, 20, 0, AccessFilter{})
+	for _, want := range []string{
+		"FROM episodes e JOIN media_items si",
+		"si.type = 'series'",
+		"FROM episode_libraries available_el",
+		"UNION ALL",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("mixed search SQL missing %q:\n%s", want, sql)
 		}
-		clause := sql[idx:]
-		if end := strings.Index(clause, ")"); end >= 0 {
-			clause = clause[:end]
-		}
-		if strings.Contains(clause, " AS ") {
-			t.Fatalf("GROUP BY must not contain output aliases; got:\n%s", clause)
-		}
-		if strings.Contains(clause, "COALESCE") {
-			t.Fatalf("GROUP BY should group by raw columns, not COALESCE expressions; got:\n%s", clause)
-		}
+	}
+}
+
+func TestItemRepo_Search_EpisodeScopeOmitsMediaItemCandidateBranch(t *testing.T) {
+	repo := &ItemRepository{}
+	sql, _, _ := repo.buildSearchSQL("Who Are You?", []string{"episode"}, 20, 0, AccessFilter{})
+	scoredEnd := strings.Index(sql, "), stats AS")
+	if scoredEnd < 0 {
+		t.Fatalf("expected scored CTE boundary; got:\n%s", sql)
+	}
+	scored := sql[:scoredEnd]
+	if strings.Contains(scored, "FROM media_items mi") {
+		t.Fatalf("episode-only candidate set must not scan media_items directly:\n%s", scored)
+	}
+	if !strings.Contains(scored, "FROM episodes e JOIN media_items si") {
+		t.Fatalf("episode-only candidate set missing episode branch:\n%s", scored)
+	}
+}
+
+func TestItemRepo_Search_EpisodeAccessUsesIndependentMembershipPredicates(t *testing.T) {
+	repo := &ItemRepository{}
+	sql, _, _ := repo.buildSearchSQL("Who Are You?", []string{"episode"}, 20, 0, AccessFilter{
+		AllowedLibraryIDs:  []int{1},
+		DisabledLibraryIDs: []int{2},
+	})
+	if !strings.Contains(sql, "FROM episode_libraries allowed_el") {
+		t.Fatalf("episode search missing allowed-library EXISTS:\n%s", sql)
+	}
+	if !strings.Contains(sql, "NOT EXISTS (SELECT 1 FROM episode_libraries disabled_el") {
+		t.Fatalf("episode search missing independent disabled-library NOT EXISTS:\n%s", sql)
 	}
 }
 

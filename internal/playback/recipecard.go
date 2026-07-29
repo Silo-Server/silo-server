@@ -38,9 +38,10 @@ type RecipeCard struct {
 	// Jellyfin pill) survive reconstruction. Carried only by stored cards —
 	// deliberately NOT projected into stream-token claims, where a user agent
 	// would bloat every stream URL.
-	ClientName      string `json:"client_name,omitempty"`
-	ClientVersion   string `json:"client_version,omitempty"`
-	ClientUserAgent string `json:"client_user_agent,omitempty"`
+	ClientName       string `json:"client_name,omitempty"`
+	ClientVersion    string `json:"client_version,omitempty"`
+	ClientUserAgent  string `json:"client_user_agent,omitempty"`
+	IsJellyfinCompat bool   `json:"is_jellyfin_compat,omitempty"`
 
 	// Encode parameters — mirror of the byte-affecting TranscodeOpts fields.
 	// Unused (zero) for direct/remux cards, which carry no segment-based encode.

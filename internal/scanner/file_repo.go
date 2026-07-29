@@ -2198,6 +2198,50 @@ func (r *FileRepository) CountUnmatchedMatchBacklogByFolder(ctx context.Context,
 	return total, nil
 }
 
+// CountUnmatchedMatchBacklogByFolders counts raw matcher work for multiple
+// libraries in one query. Libraries without eligible files are omitted.
+func (r *FileRepository) CountUnmatchedMatchBacklogByFolders(ctx context.Context, folderIDs []int, mode RawMatchBacklogMode) (map[int]int, error) {
+	counts := make(map[int]int, len(folderIDs))
+	if len(folderIDs) == 0 {
+		return counts, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT mf.media_folder_id, COUNT(*)
+		FROM media_files mf
+		JOIN media_folders folders ON folders.id = mf.media_folder_id
+		WHERE mf.media_folder_id = ANY($1)
+		  AND (mf.content_id IS NULL OR mf.content_id = '') AND mf.extra_id IS NULL
+		  AND mf.missing_since IS NULL
+		  AND mf.match_suppressed_at IS NULL
+		  AND folders.enabled = true
+		  AND (
+			$2 = 'generic'
+			OR ($2 = 'non_series' AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows'))
+			OR (
+				$2 = 'mixed'
+				AND lower(trim(folders.type)) NOT IN ('series', 'tv', 'show', 'tvshows', 'movie', 'movies')
+				AND lower(trim(COALESCE(mf.base_type, ''))) NOT IN ('series', 'movie')
+			)
+		  )
+		GROUP BY mf.media_folder_id
+	`, folderIDs, string(normalizeRawMatchBacklogMode(mode)))
+	if err != nil {
+		return nil, fmt.Errorf("counting unmatched match backlog by folders: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var folderID, count int
+		if err := rows.Scan(&folderID, &count); err != nil {
+			return nil, fmt.Errorf("scanning unmatched match backlog counts: %w", err)
+		}
+		counts[folderID] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating unmatched match backlog counts: %w", err)
+	}
+	return counts, nil
+}
+
 // ListUnmatchedMatchBacklogByFolder lists raw unmatched files that are still
 // eligible for the background matcher.
 func (r *FileRepository) ListUnmatchedMatchBacklogByFolder(ctx context.Context, folderID int, mode RawMatchBacklogMode, limit int, offset int) ([]*models.MediaFile, int, error) {
@@ -2638,6 +2682,58 @@ func (r *FileRepository) DeleteMissingByFolder(ctx context.Context, folderID int
 	return int(tag.RowsAffected()), nil
 }
 
+// ListRootsWithCatalogedFiles returns the subset of roots (in input order)
+// that still have any media_files rows at or under them in the folder,
+// whether those rows are present or already marked missing.
+//
+// This is the proactive counterpart to ListRootsWithOnlyMissingFiles. That
+// query requires a root to have NO live rows left, which means it can only
+// recognise a lost mount after a scan has already marked its files missing —
+// i.e. after the damage is done. For deciding whether to mark in the first
+// place, the question is simply "does the catalog believe anything lives
+// here", because an empty-but-reachable directory that still owns cataloged
+// files is the signature of a dropped mount exposing its bare mountpoint.
+//
+// A genuinely emptied root also matches, which is intended: emptying a root
+// is confirmed through the operator's one-time cleanup allowance rather than
+// inferred from a single scan.
+func (r *FileRepository) ListRootsWithCatalogedFiles(ctx context.Context, folderID int, roots []string) ([]string, error) {
+	if len(roots) == 0 {
+		return nil, nil
+	}
+	patterns := make([]string, len(roots))
+	for i, root := range roots {
+		patterns[i] = pathscope.PrefixLike(root)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT r.root
+		FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS r(root, pattern, ord)
+		WHERE EXISTS (
+			SELECT 1 FROM media_files mf
+			WHERE mf.media_folder_id = $1
+			  AND (mf.file_path = r.root OR mf.file_path LIKE r.pattern ESCAPE '\')
+		)
+		ORDER BY r.ord
+	`, folderID, roots, patterns)
+	if err != nil {
+		return nil, fmt.Errorf("querying roots with cataloged files: %w", err)
+	}
+	defer rows.Close()
+
+	occupied := make([]string, 0)
+	for rows.Next() {
+		var root string
+		if err := rows.Scan(&root); err != nil {
+			return nil, fmt.Errorf("scanning root with cataloged files: %w", err)
+		}
+		occupied = append(occupied, root)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating roots with cataloged files: %w", err)
+	}
+	return occupied, nil
+}
+
 // ListRootsWithOnlyMissingFiles returns the subset of roots (in input order)
 // that still have media_files rows at or under them in the folder but none
 // that are present (missing_since IS NULL). A reachable root in this state is
@@ -2828,6 +2924,44 @@ func (r *FileRepository) GetByContentID(ctx context.Context, contentID string) (
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// FirstDurationsByContentIDs returns the probed duration (seconds) of the
+// first live file backing each content id, using the same "first file with
+// duration > 0, ordered by id" rule as the v1 API's contentDurationSeconds.
+// Ids with no live probed file are absent from the map. Resolution is
+// intentionally not access-scoped; callers have already filtered the items.
+func (r *FileRepository) FirstDurationsByContentIDs(ctx context.Context, contentIDs []string) (map[string]int, error) {
+	result := make(map[string]int)
+	if len(contentIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (content_id) content_id, duration
+		FROM media_files
+		WHERE content_id = ANY($1)
+		  AND episode_id IS NULL
+		  AND missing_since IS NULL
+		  AND duration > 0
+		ORDER BY content_id, id ASC`, contentIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying first durations by content ids: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var contentID string
+		var duration int
+		if err := rows.Scan(&contentID, &duration); err != nil {
+			return nil, fmt.Errorf("scanning first duration by content id: %w", err)
+		}
+		result[contentID] = duration
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating first durations by content ids: %w", err)
+	}
+	return result, nil
 }
 
 // GetByExtraID returns the live files backing a local extra
@@ -3441,6 +3575,43 @@ func (r *FileRepository) GetByEpisodeID(ctx context.Context, episodeID string) (
 	defer rows.Close()
 
 	return scanMediaFiles(rows)
+}
+
+// FirstDurationsByEpisodeIDs returns the probed duration (seconds) of the
+// first live file backing each episode id, using the same "first file with
+// duration > 0, ordered by id" rule as the v1 API's contentDurationSeconds.
+// Ids with no live probed file are absent from the map. Resolution is
+// intentionally not access-scoped; callers have already filtered the items.
+func (r *FileRepository) FirstDurationsByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string]int, error) {
+	result := make(map[string]int)
+	if len(episodeIDs) == 0 {
+		return result, nil
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT ON (episode_id) episode_id, duration
+		FROM media_files
+		WHERE episode_id = ANY($1)
+		  AND missing_since IS NULL
+		  AND duration > 0
+		ORDER BY episode_id, id ASC`, episodeIDs)
+	if err != nil {
+		return nil, fmt.Errorf("querying first durations by episode ids: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var episodeID string
+		var duration int
+		if err := rows.Scan(&episodeID, &duration); err != nil {
+			return nil, fmt.Errorf("scanning first duration by episode id: %w", err)
+		}
+		result[episodeID] = duration
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating first durations by episode ids: %w", err)
+	}
+	return result, nil
 }
 
 // ListMissingChapterThumbnails returns present media files in enabled,

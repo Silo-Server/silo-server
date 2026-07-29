@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/protobuf/proto"
@@ -58,6 +59,13 @@ type serviceInstallationStore interface {
 type serviceConfigStore interface {
 	ListGlobalConfigs(ctx context.Context, installationID int) ([]*RuntimeConfig, error)
 	PutGlobalConfig(ctx context.Context, installationID int, key string, value map[string]any) error
+	CompareAndSwapGlobalConfig(
+		ctx context.Context,
+		installationID int,
+		key string,
+		value map[string]any,
+		expectedUpdatedAt *time.Time,
+	) (bool, error)
 }
 
 type Service struct {
@@ -96,7 +104,7 @@ type Service struct {
 func (s *Service) SetEventDispatcher(d *EventDispatcher) { s.dispatcher = d }
 
 // AddLifecycleHook registers a callback invoked after plugin install, enable,
-// disable, uninstall, or preload lifecycle changes.
+// disable, uninstall, preload, or runtime-configuration changes.
 func (s *Service) AddLifecycleHook(hook func(context.Context)) {
 	if s == nil || hook == nil {
 		return

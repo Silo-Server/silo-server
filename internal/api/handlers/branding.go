@@ -27,30 +27,32 @@ func NewBrandingHandler(svc *branding.Service) *BrandingHandler {
 // the v1 API rules. Asset URLs are stable, cache-bustable paths (empty when no
 // custom asset is set).
 type brandingResponse struct {
-	ServerName    string `json:"server_name"`
-	LoginSubtitle string `json:"login_subtitle"`
-	AccentColor   string `json:"accent_color,omitempty"`
-	DefaultTheme  string `json:"default_theme,omitempty"`
-	WordmarkURL   string `json:"wordmark_url,omitempty"`
-	MarkURL       string `json:"mark_url,omitempty"`
-	FaviconURL    string `json:"favicon_url,omitempty"`
-	LoginBgURL    string `json:"login_bg_url,omitempty"`
+	ServerName       string `json:"server_name"`
+	LoginSubtitle    string `json:"login_subtitle"`
+	AccentColor      string `json:"accent_color,omitempty"`
+	DefaultTheme     string `json:"default_theme,omitempty"`
+	WordmarkURL      string `json:"wordmark_url,omitempty"`
+	MarkURL          string `json:"mark_url,omitempty"`
+	FaviconURL       string `json:"favicon_url,omitempty"`
+	LoginBgURL       string `json:"login_bg_url,omitempty"`
+	StorageAvailable bool   `json:"storage_available"`
 }
 
 // HandleGetBranding returns the server branding configuration. Public endpoint —
 // no authentication required so branding applies before login (white-label).
 func (h *BrandingHandler) HandleGetBranding(w http.ResponseWriter, r *http.Request) {
 	snap := h.svc.Load(r.Context())
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, brandingResponse{
-		ServerName:    snap.ServerName,
-		LoginSubtitle: snap.LoginSubtitle,
-		AccentColor:   snap.AccentColor,
-		DefaultTheme:  snap.DefaultTheme,
-		WordmarkURL:   snap.AssetURL(branding.KindWordmark),
-		MarkURL:       snap.AssetURL(branding.KindMark),
-		FaviconURL:    snap.AssetURL(branding.KindFavicon),
-		LoginBgURL:    snap.AssetURL(branding.KindLoginBg),
+		ServerName:       snap.ServerName,
+		LoginSubtitle:    snap.LoginSubtitle,
+		AccentColor:      snap.AccentColor,
+		DefaultTheme:     snap.DefaultTheme,
+		WordmarkURL:      snap.AssetURL(branding.KindWordmark),
+		MarkURL:          snap.AssetURL(branding.KindMark),
+		FaviconURL:       snap.AssetURL(branding.KindFavicon),
+		LoginBgURL:       snap.AssetURL(branding.KindLoginBg),
+		StorageAvailable: h.svc.HasStorage(),
 	})
 }
 

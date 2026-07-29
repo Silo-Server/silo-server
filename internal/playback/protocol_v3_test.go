@@ -18,6 +18,45 @@ func hasDegradationWarningV3(warnings []DegradationWarningV3, code string) bool 
 	return false
 }
 
+func TestServerFeaturesV3ReturnsCompleteIndependentSlices(t *testing.T) {
+	first := ServerFeaturesV3()
+	second := ServerFeaturesV3()
+	expected := map[string]struct{}{
+		FeaturePlaybackPlanV3:       {},
+		FeatureMedia3Only:           {},
+		FeatureDetailedDecodeV3:     {},
+		FeatureLayoutPassthrough:    {},
+		FeatureRouteDiagnostics:     {},
+		FeatureDeviceQuirksV3:       {},
+		FeatureSeekReanchorV3:       {},
+		FeatureDirectStreamResumeV3: {},
+		FeaturePlanSourceDurationV3: {},
+	}
+	if len(first) != len(expected) {
+		t.Fatalf("server features = %v, want %d entries", first, len(expected))
+	}
+	seen := make(map[string]struct{}, len(first))
+	for _, feature := range first {
+		if _, ok := expected[feature]; !ok {
+			t.Fatalf("server features contain unexpected %q: %v", feature, first)
+		}
+		if _, duplicate := seen[feature]; duplicate {
+			t.Fatalf("server features contain duplicate %q: %v", feature, first)
+		}
+		seen[feature] = struct{}{}
+	}
+	for feature := range expected {
+		if _, ok := seen[feature]; !ok {
+			t.Fatalf("server features omitted %q: %v", feature, first)
+		}
+	}
+
+	first[0] = "mutated"
+	if second[0] != FeaturePlaybackPlanV3 {
+		t.Fatalf("feature slices share backing storage: %v", second)
+	}
+}
+
 func TestStartRequestV3Validation(t *testing.T) {
 	index := 1
 	req := validStartRequestV3()
@@ -265,6 +304,28 @@ func TestSourceDescriptorV3NormalizesLegacyHEVCMetadata(t *testing.T) {
 	}
 }
 
+func TestSourceDescriptorV3PreservesCanonicalColorRange(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "limited", input: "tv", want: "tv"},
+		{name: "full", input: "pc", want: "pc"},
+		{name: "unspecified", input: "unknown", want: "unknown"},
+		{name: "normalizes case and whitespace", input: " PC ", want: "pc"},
+		{name: "rejects non-ffmpeg value", input: "limited", want: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file := detailedFixtureFileV3()
+			file.VideoTracks[0].ColorRange = test.input
+			if got := SourceDescriptorFromFileV3(file, 0).ColorRange; got != test.want {
+				t.Fatalf("color range = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestPlanPlaybackV3DirectPlaysLegacyHDR10WithInferredBitDepth(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].BitDepth = 0
@@ -432,6 +493,48 @@ func TestPlanPlaybackV3AudioAdaptationCopiesVideo(t *testing.T) {
 	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetVideoCodec != "" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+// copyUnsafeFixtureV3 returns an SDR source that would normally take a
+// video-copy remux (its audio needs conversion, its container is not offered),
+// with the copy-safety flag settable by the caller.
+func copyUnsafeFixtureV3(multiPPS bool) (*models.MediaFile, StartRequestV3) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].ColorTransfer = "bt709"
+	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
+	file.CodecAudio = "truehd"
+	file.VideoTracks[0].MultiplePPS = &multiPPS
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.Containers = []string{"mp4"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	return file, req
+}
+
+func TestPlanPlaybackV3CopyUnsafeSourceForcesTranscode(t *testing.T) {
+	// The source carries conflicting in-band PPS, so the video stream-copy remux
+	// is disqualified and planning must fall through to a real transcode.
+	file, req := copyUnsafeFixtureV3(true)
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.PlayMethod != PlayTranscode {
+		t.Fatalf("PlayMethod = %q, want transcode; result = %s", result.PlayMethod, ExplainPlannerResultV3(result))
+	}
+	if result.Plan == nil || result.Plan.DecisionReason != "copy_routes_exhausted" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3CopySafeSourceStillCopies(t *testing.T) {
+	// The identical source with the copy-safety scan resolved to safe keeps the
+	// cheap video stream-copy remux.
+	file, req := copyUnsafeFixtureV3(false)
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetVideoCodec != "" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
 	}
 }
 
@@ -933,7 +1036,7 @@ func validStartRequestV3() StartRequestV3 {
 }
 
 func detailedFixtureFileV3() *models.MediaFile {
-	return &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", Container: "mkv", CodecVideo: "hevc", CodecAudio: "aac", Resolution: "2160p", Bitrate: 60_000, AudioChannels: 2, VideoTracks: []models.VideoTrack{{Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160, FrameRate: "24000/1001", Bitrate: 60_000, BitDepth: 10, VideoRange: "HDR", VideoRangeType: "HDR10"}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
+	return &models.MediaFile{ID: 42, FilePath: "/media/movie.mkv", Container: "mkv", CodecVideo: "hevc", CodecAudio: "aac", Resolution: "2160p", Bitrate: 60_000, AudioChannels: 2, VideoTracks: []models.VideoTrack{{Codec: "hevc", Profile: "Main 10", Level: 153, Width: 3840, Height: 2160, FrameRate: "24000/1001", Bitrate: 60_000, BitDepth: 10, VideoRange: "HDR", VideoRangeType: "HDR10", ColorRange: "tv"}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}}}
 }
 
 func testTransformationRegistryV3() *TransformationRegistryV3 {
@@ -942,4 +1045,107 @@ func testTransformationRegistryV3() *TransformationRegistryV3 {
 		{Name: "video_to_h264", Available: true},
 		{Name: "server_dv7_to_hdr10", Available: true},
 	})
+}
+
+// A source whose RPU ffmpeg cannot parse must lose the strip in the plan, not
+// at the transport. The plan is what promises HDR10, and the durable session's
+// RemuxDVMode — re-read by every later restart, seek and audio switch — is
+// derived from it, so a plan that still names server_dv7_to_hdr10 puts the
+// hanging filter back no matter what the start path did with it. With no
+// tone-map recipe in the tree there is no route left for an HDR10-only client,
+// and the terminal has to name the real cause.
+func TestPlanPlaybackV3AbandonsStripForAnUnstrippableSource(t *testing.T) {
+	file := unstrippableProfile7FixtureV3()
+	req := hdr10OnlyProfile7RequestV3()
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
+	input := PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry}
+
+	// Baseline: with a parseable RPU this is the validated HDR10 remux.
+	if healthy := PlanPlaybackV3(input); healthy.Plan == nil || len(healthy.Plan.Transformations) != 1 || healthy.Plan.Transformations[0].Name != "server_dv7_to_hdr10" {
+		t.Fatalf("the strip route regressed for a healthy source: %#v", healthy)
+	}
+
+	input.DVRPUStrippable = func() bool { return false }
+	result := PlanPlaybackV3(input)
+	if result.Plan != nil {
+		t.Fatalf("a source that cannot be stripped was still planned onto a route: %#v", result.Plan)
+	}
+	if result.Terminal == nil || result.Terminal.Reason != "dv_conversion_unsupported" {
+		t.Fatalf("terminal = %#v, want the Dolby Vision cause rather than a generic HDR message", result.Terminal)
+	}
+}
+
+// The strip is a server capability, not the only one: a client that can do the
+// conversion itself must still get its route, with the reason the server route
+// was dropped attached.
+func TestPlanPlaybackV3KeepsTheClientTransformWhenTheSourceCannotBeStripped(t *testing.T) {
+	file := unstrippableProfile7FixtureV3()
+	req := hdr10OnlyProfile7RequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureClientVideoTransforms)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureClientVideoTransforms)
+	direct := req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)]
+	direct.Transformations = []TransformationV3{{Name: ClientDV7ToHDR10V3, Executor: "client", RecipeVersion: ClientDVTransformVersionV3}}
+	req.ClientPlaybackContext.Engines[string(EngineMedia3DirectV3)] = direct
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{{Name: "server_dv7_to_hdr10", Available: true}})
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: registry,
+		DVRPUStrippable: func() bool { return false },
+	})
+	if result.Plan == nil {
+		t.Fatalf("terminal = %#v, want the client-side transformation route", result.Terminal)
+	}
+	for _, transformation := range result.Plan.Transformations {
+		if transformation.Name == "server_dv7_to_hdr10" {
+			t.Fatalf("the unusable server strip survived: %#v", result.Plan.Transformations)
+		}
+	}
+	if !hasDegradationWarningV3(result.Plan.DegradationWarnings, "dolby_vision_strip_unsupported_by_source") {
+		t.Fatalf("the client was not told why the server route was dropped: %#v", result.Plan.DegradationWarnings)
+	}
+}
+
+func unstrippableProfile7FixtureV3() *models.MediaFile {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].DVProfile = 7
+	file.VideoTracks[0].DVBLCompatID = 6
+	file.VideoTracks[0].DVELPresent = false
+	file.VideoTracks[0].DVEnhancementLayer = ""
+	file.VideoTracks[0].VideoRange = "DolbyVision"
+	file.VideoTracks[0].VideoRangeType = "DOVIWithEL"
+	return file
+}
+
+func hdr10OnlyProfile7RequestV3() StartRequestV3 {
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	req.Capabilities.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{5, 8}}
+	req.ClientPlaybackContext.Output.HDRDetails = req.Capabilities.HDRDetails
+	return req
+}
+
+// The probe is expensive, so it must sit behind every cheap gate: a source
+// nobody would strip anyway must never spawn one.
+func TestPlanPlaybackV3DoesNotProbeWhenNoStripIsOnTheTable(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].BitDepth = 8
+	req := validStartRequestV3()
+	probed := false
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings:        PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry:        testTransformationRegistryV3(),
+		DVRPUStrippable: func() bool { probed = true; return true },
+	})
+	if result.Plan == nil {
+		t.Fatalf("terminal = %#v", result.Terminal)
+	}
+	if probed {
+		t.Fatal("an ordinary SDR source paid for a Dolby Vision RPU probe")
+	}
 }

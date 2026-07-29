@@ -150,7 +150,7 @@ function ChannelFormDialog({
             JSON.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <fieldset disabled={pending} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="server-channel-name">Name</Label>
             <Input
@@ -190,7 +190,7 @@ function ChannelFormDialog({
               ))}
             </div>
           ))}
-        </div>
+        </fieldset>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel

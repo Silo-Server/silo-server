@@ -109,26 +109,38 @@ func TestResolverRejectsMissingSubtreeAtLibraryRoot(t *testing.T) {
 	}
 }
 
-func TestResolverResolvesVanishedFileToParentSubtree(t *testing.T) {
-	root := t.TempDir()
-	movieDir := filepath.Join(root, "Movie (2026)")
-	if err := os.Mkdir(movieDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	vanished := filepath.Join(movieDir, "Movie (2026).mkv")
-	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
-		ID:      20,
-		Name:    "Movies",
-		Enabled: true,
-		Paths:   []string{root},
-	}}}
+func TestResolverResolvesVanishedMediaFileAsExactFile(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		libraryType string
+	}{
+		{name: "Movie.mkv", libraryType: "movies"},
+		{name: "Book.epub", libraryType: "ebooks"},
+		{name: "Audiobook.m4b", libraryType: "audiobooks"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			mediaDir := filepath.Join(root, "Title")
+			if err := os.Mkdir(mediaDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			vanished := filepath.Join(mediaDir, tc.name)
+			repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+				ID:      20,
+				Name:    "Media",
+				Type:    tc.libraryType,
+				Enabled: true,
+				Paths:   []string{root},
+			}}}
 
-	target, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
-	if err != nil {
-		t.Fatalf("ResolveVanishedPath returned error: %v", err)
-	}
-	if target.Folder == nil || target.Folder.ID != 20 || target.Mode != ModeSubtree || target.Path != movieDir {
-		t.Fatalf("unexpected target: %#v", target)
+			target, err := NewResolver(repo).ResolveVanishedPath(context.Background(), vanished, "autoscan")
+			if err != nil {
+				t.Fatalf("ResolveVanishedPath returned error: %v", err)
+			}
+			if target.Folder == nil || target.Folder.ID != 20 || target.Mode != ModeFile || target.Path != vanished {
+				t.Fatalf("unexpected target: %#v", target)
+			}
+		})
 	}
 }
 
@@ -151,12 +163,13 @@ func TestResolverResolvesVanishedDirToItself(t *testing.T) {
 	}
 }
 
-func TestResolverResolvesVanishedFileDirectlyUnderRootToLibraryScan(t *testing.T) {
+func TestResolverResolvesVanishedFileDirectlyUnderRootAsExactFile(t *testing.T) {
 	root := t.TempDir()
 	vanished := filepath.Join(root, "Movie (2026).mkv")
 	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
 		ID:      22,
 		Name:    "Movies",
+		Type:    "movies",
 		Enabled: true,
 		Paths:   []string{root},
 	}}}
@@ -165,7 +178,7 @@ func TestResolverResolvesVanishedFileDirectlyUnderRootToLibraryScan(t *testing.T
 	if err != nil {
 		t.Fatalf("ResolveVanishedPath returned error: %v", err)
 	}
-	if target.Folder == nil || target.Folder.ID != 22 || target.Mode != ModeLibrary || target.Path != "" {
+	if target.Folder == nil || target.Folder.ID != 22 || target.Mode != ModeFile || target.Path != vanished {
 		t.Fatalf("unexpected target: %#v", target)
 	}
 }
@@ -280,6 +293,64 @@ func TestResolverClassifiesVideoFile(t *testing.T) {
 	}
 	if target.Folder == nil || target.Folder.ID != 9 || target.Mode != ModeFile || target.Path != filepath.Clean(filePath) {
 		t.Fatalf("unexpected target: %#v", target)
+	}
+}
+
+func TestResolverClassifiesAudioAndEbookFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		libraryType string
+	}{
+		{name: "Book.epub", libraryType: "ebooks"},
+		{name: "Book.fb2.zip", libraryType: "ebooks"},
+		{name: "Audiobook.m4b", libraryType: "audiobooks"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			filePath := filepath.Join(root, tc.name)
+			if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+				ID:      25,
+				Name:    "Media",
+				Type:    tc.libraryType,
+				Enabled: true,
+				Paths:   []string{root},
+			}}}
+
+			target, err := NewResolver(repo).Resolve(context.Background(), Request{Path: filePath})
+			if err != nil {
+				t.Fatalf("Resolve returned error: %v", err)
+			}
+			if target.Mode != ModeFile || target.Path != filepath.Clean(filePath) {
+				t.Fatalf("unexpected target: %#v", target)
+			}
+		})
+	}
+}
+
+func TestResolverRejectsPodcastFileTargetUntilPodcastPipelineSupportsIt(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "Episode.mp3")
+	if err := os.WriteFile(filePath, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := &fakeFolderRepo{folders: []*models.MediaFolder{{
+		ID:      26,
+		Name:    "Podcasts",
+		Type:    "podcasts",
+		Enabled: true,
+		Paths:   []string{root},
+	}}}
+
+	_, err := NewResolver(repo).Resolve(context.Background(), Request{Path: filePath})
+	var reqErr *RequestError
+	if !errors.As(err, &reqErr) {
+		t.Fatalf("expected RequestError, got %T: %v", err, err)
+	}
+	if reqErr.Status != http.StatusBadRequest || reqErr.Message != "Unsupported media file extension for library type" {
+		t.Fatalf("unexpected error: %#v", reqErr)
 	}
 }
 

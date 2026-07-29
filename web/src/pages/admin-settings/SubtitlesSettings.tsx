@@ -7,6 +7,16 @@ import {
 import type { SubtitleProviderConfig } from "@/api/types";
 
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -47,11 +57,22 @@ function defaultSubtitleFormState(config: SubtitleProviderConfig): SubtitleProvi
   };
 }
 
+function subtitleProviderDraft(form: SubtitleProviderFormState, withAccount: boolean) {
+  const user = form.username;
+  const pass = form.password;
+  const key = form.api_key;
+  return {
+    enabled: form.enabled,
+    ...(withAccount ? { username: user, password: pass } : { api_key: key }),
+  };
+}
+
 function SubtitleProviderCard({ config }: { config: SubtitleProviderConfig }) {
   const [form, setForm] = useState<SubtitleProviderFormState>(() =>
     defaultSubtitleFormState(config),
   );
   const [testResult, setTestResult] = useState<SubtitleTestResult | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const updateProvider = useUpdateSubtitleProvider();
   const testProvider = useTestSubtitleProvider();
@@ -66,6 +87,8 @@ function SubtitleProviderCard({ config }: { config: SubtitleProviderConfig }) {
   const providerName = config.provider_name;
   const displayName = SUBTITLE_PROVIDER_NAMES[providerName] ?? providerName;
   const isOpenSubtitles = providerName === "opensubtitles";
+  const credentialsConfigured =
+    (isOpenSubtitles && config.has_credentials) || (!isOpenSubtitles && config.has_api_key);
 
   function handleSave() {
     updateProvider.mutate({
@@ -81,21 +104,30 @@ function SubtitleProviderCard({ config }: { config: SubtitleProviderConfig }) {
 
   function handleTest() {
     setTestResult(null);
-    testProvider.mutate(providerName, {
-      onSuccess: (result) => {
-        setTestResult({ success: result.success, error: result.error });
+    testProvider.mutate(
+      {
+        provider: providerName,
+        config: subtitleProviderDraft(form, isOpenSubtitles),
       },
-      onError: (err) => {
-        setTestResult({
-          success: false,
-          error: err instanceof Error ? err.message : "Test failed",
-        });
+      {
+        onSuccess: (result) => {
+          setTestResult({ success: result.success, error: result.error });
+        },
+        onError: (err) => {
+          setTestResult({
+            success: false,
+            error: err instanceof Error ? err.message : "Test failed",
+          });
+        },
       },
-    });
+    );
   }
 
   return (
-    <div className="border-border bg-surface space-y-4 rounded-lg border px-5 py-4">
+    <fieldset
+      disabled={updateProvider.isPending || testProvider.isPending}
+      className="border-border bg-surface space-y-4 rounded-lg border px-5 py-4"
+    >
       {/* Header row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -182,6 +214,15 @@ function SubtitleProviderCard({ config }: { config: SubtitleProviderConfig }) {
         <Button onClick={handleSave} disabled={updateProvider.isPending}>
           {updateProvider.isPending ? "Saving..." : "Save"}
         </Button>
+        {credentialsConfigured && (
+          <Button
+            variant="ghost"
+            onClick={() => setConfirmClear(true)}
+            disabled={updateProvider.isPending}
+          >
+            Clear credentials
+          </Button>
+        )}
         {testResult !== null && (
           <span className={`text-sm ${testResult.success ? "text-green-500" : "text-red-500"}`}>
             {testResult.success
@@ -190,7 +231,42 @@ function SubtitleProviderCard({ config }: { config: SubtitleProviderConfig }) {
           </span>
         )}
       </div>
-    </div>
+      <p className="text-muted-foreground text-xs">
+        Test Connection uses the values currently entered above. Saving applies provider changes
+        live to new searches.
+      </p>
+      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear {displayName} credentials?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The provider will be disabled and removed from live subtitle searches immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={updateProvider.isPending}
+              onClick={() =>
+                updateProvider.mutate(
+                  { provider: providerName, config: { enabled: false, clear_credentials: true } },
+                  {
+                    onSuccess: () => {
+                      setForm(defaultSubtitleFormState({ ...config, enabled: false }));
+                      setTestResult(null);
+                      setConfirmClear(false);
+                    },
+                  },
+                )
+              }
+            >
+              {updateProvider.isPending ? "Clearing..." : "Clear and disable"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </fieldset>
   );
 }
 

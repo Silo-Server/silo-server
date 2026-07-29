@@ -1,5 +1,4 @@
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { ReactNode } from "react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type {
@@ -36,6 +35,8 @@ import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
+import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/MetadataMatcherQueuesSection";
+import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -717,6 +718,7 @@ export default function AdminLibraries() {
       </DndContext>
 
       <UnmatchedItemsSection />
+      <MetadataMatcherQueuesSection libraries={libraries} />
       <AmbiguousRootsSection libraries={libraries} />
       {skippedRoots.length > 0 ? <SkippedRootsSection skippedRoots={skippedRoots} /> : null}
       {staleIDs.length > 0 && <StaleIDsSection staleIDs={staleIDs} />}
@@ -1213,64 +1215,6 @@ function usePagination<T>(items: T[], pageSize = PAGE_SIZE) {
     rangeStart: items.length === 0 ? 0 : clamped * pageSize + 1,
     rangeEnd: Math.min((clamped + 1) * pageSize, items.length),
   };
-}
-
-function CollapsibleDiagnosticsSection({
-  title,
-  description,
-  count,
-  icon,
-  iconClassName,
-  open,
-  onOpenChange,
-  children,
-}: {
-  title: string;
-  description: string;
-  count: number;
-  icon: ReactNode;
-  iconClassName?: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  children: ReactNode;
-}) {
-  return (
-    <section className="surface-panel-subtle overflow-hidden rounded-2xl">
-      <button
-        type="button"
-        className="hover:bg-surface-hover/40 flex w-full items-center gap-3 px-5 py-4 text-left transition-colors"
-        aria-expanded={open}
-        onClick={() => onOpenChange(!open)}
-      >
-        <div
-          className={cn(
-            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-            iconClassName ?? "bg-amber-500/10",
-          )}
-        >
-          {icon}
-        </div>
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <h2 className="text-sm font-semibold tracking-wide">{title}</h2>
-          <p className="text-muted-foreground text-xs leading-relaxed">{description}</p>
-        </div>
-        {open ? (
-          <Badge variant="secondary" className="text-[11px] tabular-nums">
-            {count}
-          </Badge>
-        ) : (
-          <div className="text-2xl leading-none font-bold tabular-nums">{count}</div>
-        )}
-        <ChevronDown
-          className={cn(
-            "text-muted-foreground h-4 w-4 shrink-0 transition-transform",
-            !open && "-rotate-90",
-          )}
-        />
-      </button>
-      {open ? <div className="px-3 pb-3">{children}</div> : null}
-    </section>
-  );
 }
 
 function PaginationBar({

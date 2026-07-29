@@ -11,6 +11,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+const streamAuthTestUserRole = "user"
+
 // stubTokenValidator returns preconfigured claims/err for any token string.
 type stubTokenValidator struct {
 	claims *auth.Claims
@@ -122,7 +124,7 @@ func TestRequireStreamAuth_ValidBearerTakesPrecedenceOverStreamToken(t *testing.
 	// Bearer resolves to user 100; the ?st= authenticator would resolve a
 	// DIFFERENT user (7). The bearer identity must win.
 	am := NewAuthMiddleware(
-		stubTokenValidator{claims: &auth.Claims{UserID: 100, SessionID: "s", Role: "user", TokenType: auth.TokenTypeAccess}},
+		stubTokenValidator{claims: &auth.Claims{UserID: 100, SessionID: "s", Role: streamAuthTestUserRole, TokenType: auth.TokenTypeAccess}},
 		stubSessionValidator{valid: true},
 		nil, nil,
 	)

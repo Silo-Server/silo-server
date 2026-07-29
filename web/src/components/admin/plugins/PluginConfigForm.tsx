@@ -18,8 +18,13 @@ type PluginConfigValue = Record<string, unknown>;
 type Props = {
   schema: PluginConfigSchema;
   value?: PluginConfigValue;
-  onSave: (key: string, value: PluginConfigValue) => void;
-  onTest?: (key: string, value: PluginConfigValue) => Promise<ConnectionCheckResponse>;
+  configuredSecrets?: string[];
+  onSave: (key: string, value: PluginConfigValue, clearSecrets: string[]) => void;
+  onTest?: (
+    key: string,
+    value: PluginConfigValue,
+    clearSecrets: string[],
+  ) => Promise<ConnectionCheckResponse>;
   isSaving?: boolean;
   isTesting?: boolean;
 };
@@ -46,7 +51,16 @@ function parseJSONSchema(schema: PluginConfigSchema): ParsedObjectSchema {
     const parsed = JSON.parse(schema.json_schema) as {
       type?: string;
       required?: string[];
-      properties?: Record<string, { type?: string; title?: string; description?: string }>;
+      properties?: Record<
+        string,
+        {
+          type?: string;
+          title?: string;
+          description?: string;
+          writeOnly?: boolean;
+          format?: string;
+        }
+      >;
     };
     if (parsed.type !== "object" || !parsed.properties) {
       return { supported: false, fields: [] };
@@ -57,12 +71,15 @@ function parseJSONSchema(schema: PluginConfigSchema): ParsedObjectSchema {
       if (!propertyType || !["string", "number", "integer", "boolean"].includes(propertyType)) {
         return null;
       }
+      const isSensitive = property.writeOnly === true || property.format === "password";
       const control =
         propertyType === "boolean"
           ? "SWITCH"
           : propertyType === "number" || propertyType === "integer"
             ? "NUMBER"
-            : "TEXT";
+            : isSensitive
+              ? "PASSWORD"
+              : "TEXT";
       return {
         key,
         label: property.title || humanizeKey(key),
@@ -70,7 +87,7 @@ function parseJSONSchema(schema: PluginConfigSchema): ParsedObjectSchema {
         control,
         placeholder: "",
         required: parsed.required?.includes(key) ?? false,
-        secret: false,
+        secret: isSensitive,
         multiline: false,
         options: [],
         rows: 0,
@@ -122,6 +139,7 @@ function valueForField(field: SupportedField, configValue?: PluginConfigValue): 
 export function PluginConfigForm({
   schema,
   value,
+  configuredSecrets = [],
   onSave,
   onTest,
   isSaving = false,
@@ -138,23 +156,43 @@ export function PluginConfigForm({
   const supported =
     fields.length > 0 && (schema.admin_form?.fields?.length ? true : parsedFallback.supported);
 
-  const descriptor = useMemo<PluginAdminForm>(
-    () => schema.admin_form ?? { fields },
-    [schema.admin_form, fields],
-  );
+  const descriptor = useMemo<PluginAdminForm>(() => {
+    const base = schema.admin_form ?? { fields };
+    const configured = new Set(configuredSecrets);
+    return {
+      ...base,
+      fields: base.fields.map((field) =>
+        configured.has(field.key) && (field.secret || field.control === "PASSWORD")
+          ? { ...field, placeholder: "Saved secret — leave blank to keep" }
+          : field,
+      ),
+    };
+  }, [configuredSecrets, fields, schema.admin_form]);
 
   const [values, setValues] = useState<PluginConfigValue>(() =>
     Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])),
   );
   const [testResult, setTestResult] = useState<ConnectionCheckResponse | null>(null);
+  const [clearSecrets, setClearSecrets] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setValues(Object.fromEntries(fields.map((field) => [field.key, valueForField(field, value)])));
+    setClearSecrets(new Set());
   }, [fields, value]);
 
   function handleChange(next: PluginConfigValue) {
     setTestResult(null);
     setValues(next);
+    setClearSecrets((current) => {
+      const updated = new Set(current);
+      for (const key of configuredSecrets) {
+        const replacement = next[key];
+        if (typeof replacement === "string" && replacement.trim() !== "") {
+          updated.delete(key);
+        }
+      }
+      return updated;
+    });
   }
 
   async function handleTest() {
@@ -163,7 +201,9 @@ export function PluginConfigForm({
     }
 
     try {
-      setTestResult(await onTest(schema.key, buildSchemaValues(descriptor, values)));
+      setTestResult(
+        await onTest(schema.key, buildSchemaValues(descriptor, values), Array.from(clearSecrets)),
+      );
     } catch (error) {
       setTestResult({
         success: false,
@@ -184,7 +224,7 @@ export function PluginConfigForm({
   }
 
   return (
-    <div className="space-y-3 rounded-md border p-3">
+    <fieldset disabled={isSaving || isTesting} className="space-y-3 rounded-md border p-3">
       <div className="space-y-1">
         <Label>{schema.title || schema.key}</Label>
         {schema.description ? (
@@ -199,6 +239,41 @@ export function PluginConfigForm({
         idPrefix={schema.key}
       />
 
+      {configuredSecrets.length > 0 ? (
+        <div className="space-y-2 rounded-md border border-dashed p-2.5">
+          {configuredSecrets.map((key) => {
+            const field = fields.find((candidate) => candidate.key === key);
+            const clearing = clearSecrets.has(key);
+            const required = field?.required === true;
+            return (
+              <div key={key} className="flex items-center justify-between gap-3 text-xs">
+                <span className={clearing ? "text-destructive" : "text-muted-foreground"}>
+                  {field?.label || humanizeKey(key)}: {clearing ? "will be cleared" : "saved"}
+                  {required ? " (required)" : ""}
+                </span>
+                {!required ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="ghost"
+                    onClick={() =>
+                      setClearSecrets((current) => {
+                        const updated = new Set(current);
+                        if (updated.has(key)) updated.delete(key);
+                        else updated.add(key);
+                        return updated;
+                      })
+                    }
+                  >
+                    {clearing ? "Keep saved secret" : "Clear saved secret"}
+                  </Button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-3">
         {onTest ? (
           <ConnectionCheckAction
@@ -212,11 +287,13 @@ export function PluginConfigForm({
           size="sm"
           variant="outline"
           disabled={isSaving || isTesting}
-          onClick={() => onSave(schema.key, buildSchemaValues(descriptor, values))}
+          onClick={() =>
+            onSave(schema.key, buildSchemaValues(descriptor, values), Array.from(clearSecrets))
+          }
         >
           {schema.admin_form?.submit_label || "Save config"}
         </Button>
       </div>
-    </div>
+    </fieldset>
   );
 }

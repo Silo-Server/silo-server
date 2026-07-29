@@ -33,29 +33,17 @@ doing these in order, not from skipping them.
 
 ## Operating principles
 
-- **Default to "maybe nothing needs fixing."** Coding agents "fix" already-correct
-  or stale code in a large fraction of cases because they don't stop to confirm the
-  problem is real. Confirm the issue reproduces on current `main` before changing
-  anything — it may already be fixed.
-- **Root cause over symptom.** A fix you can't explain is a fix you can't trust.
-- **Verify by execution, not by reading.** Build/lint/tests are the primary
-  correctness signal. The adversarial review is a *second* layer on top — never a
-  substitute for green checks. If you can't verify it, don't ship it.
-- **Smallest correct change.** Match surrounding code's idioms, naming, and comment
-  density. Put code in the package that owns the behavior (CLAUDE.md); don't create
-  catch-all helpers or duplicate logic — search for an existing helper before
-  writing a new one, and extract shared logic instead of copying.
-- **Don't trust recall for APIs.** Verify every symbol, function, and signature you
-  call actually exists by grepping the codebase — agents hallucinate plausible-looking
-  APIs.
-- **Don't gold-plate.** A reviewer told to find gaps will always find some. Address
-  what affects correctness or the issue's stated requirements; treat the rest as
-  optional. Extra abstraction "just in case" is a defect, not diligence.
-- **Know when to stop.** See [Stop and ask](#stop-and-ask). Autonomy is for
-  execution, not for inventing product decisions or shipping unverifiable guesses.
+- **Default to "maybe nothing needs fixing."** Agents "fix" already-correct or stale
+  code in a large fraction of cases because they don't stop to confirm the problem is
+  real. Confirm the issue reproduces on current `main` before changing anything.
+- **Verify by execution.** Build/lint/tests are the primary correctness signal. The
+  adversarial review is a *second* layer on top, never a substitute for green checks.
+- **Don't trust recall for APIs.** Grep for every symbol and signature you call —
+  hallucinated-but-plausible APIs are a common failure here.
+- **Know when to stop.** See [Stop and ask](#stop-and-ask). Autonomy is for execution,
+  not for inventing product decisions or shipping unverifiable guesses.
 
-Track the phases below with a task list (TaskCreate/TaskUpdate) so progress is
-visible and nothing is skipped on long runs.
+Track the phases below with a task list so progress is visible on long runs.
 
 ## Workflow
 
@@ -122,8 +110,8 @@ build-out.
 
 ### 4. Implement
 
-Make the change, scoped to this one concern (one concern per PR). Respect the hard
-rules:
+Make the change, scoped to this one concern (one concern per PR). The two hard rules
+that a reviewer cannot un-break after the fact:
 
 - **API:** additive-only within `/api/v1` — never rename/remove a response field,
   change a field's type, or repurpose a status code. New behavior = new
@@ -131,8 +119,6 @@ rules:
 - **Migrations:** new DB changes are Goose SQL migrations via
   `make migrate-create NAME=...` (timestamped). Never `goose fix`, never paired
   `.up.sql`/`.down.sql`.
-- **Maintainability:** extract shared logic instead of duplicating; change existing
-  code rather than bolting on local workarounds.
 
 For a bug, the failing test from step 3 should now pass.
 
@@ -179,11 +165,9 @@ Do not open the PR while a material, un-rebutted adversarial finding stands.
 ### 7. Commit, push, open the PR
 
 Conventional Commit subjects scoped to the domain, e.g.
-`fix(playback): guard against nil session on reconnect`. End commit messages with:
-
-```
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-```
+`fix(playback): guard against nil session on reconnect`, ending with the
+`Co-Authored-By:` trailer for the model you are actually running as — don't copy a
+model name from this file or from an older commit.
 
 Push and open a **ready** (non-draft) PR against `main`:
 

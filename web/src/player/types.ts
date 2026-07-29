@@ -79,6 +79,7 @@ export interface PlayerVideoTrack {
   frame_rate?: string;
   bitrate?: number;
   video_range?: string;
+  color_range?: string;
   color_primaries?: string;
   color_space?: string;
   color_transfer?: string;

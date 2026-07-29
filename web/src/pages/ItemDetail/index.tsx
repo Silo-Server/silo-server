@@ -17,6 +17,8 @@ import {
   CrewSkeleton,
   RecommendationGridSkeleton,
 } from "./components/SectionSkeletons";
+import { useSidebarItemDetailsReady } from "@/components/sidebarItemNavigationContext";
+import { parseOptionalLibraryId } from "@/components/sidebarItemNavigation";
 
 function ItemDetailSkeleton() {
   return (
@@ -72,9 +74,9 @@ function ItemDetailSkeleton() {
 export default function ItemDetail() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  const libraryIdParam = searchParams.get("libraryId");
-  const libraryId = libraryIdParam ? Number(libraryIdParam) : undefined;
+  const libraryId = parseOptionalLibraryId(searchParams.get("libraryId"));
   const { data: item, isLoading: loading, error: itemError } = useCatalogItemDetail(id, libraryId);
+  const itemDetailsReady = useSidebarItemDetailsReady();
 
   useDocumentTitle(item?.title ?? "Item");
 
@@ -84,7 +86,7 @@ export default function ItemDetail() {
     }
   }, [itemError]);
 
-  if (loading) {
+  if (loading || !itemDetailsReady) {
     return <ItemDetailSkeleton />;
   }
 

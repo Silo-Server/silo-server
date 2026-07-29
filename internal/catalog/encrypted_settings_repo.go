@@ -157,6 +157,13 @@ type settingsBatchWriter interface {
 	SetMany(ctx context.Context, values map[string]string) error
 }
 
+type settingsAtomicUpdater interface {
+	UpdateAtomic(
+		ctx context.Context,
+		update func(current map[string]string) (map[string]string, error),
+	) error
+}
+
 // SetMany encrypts every sensitive member before delegating one atomic batch
 // to the raw settings repository.
 func (r *EncryptedSettingsRepo) SetMany(ctx context.Context, values map[string]string) error {
@@ -176,6 +183,45 @@ func (r *EncryptedSettingsRepo) SetMany(ctx context.Context, values map[string]s
 		encrypted[key] = value
 	}
 	return inner.SetMany(ctx, encrypted)
+}
+
+// UpdateAtomic preserves the raw repository's cross-process serialization
+// while presenting plaintext to the validator and encrypting only the returned
+// writes before they reach server_settings.
+func (r *EncryptedSettingsRepo) UpdateAtomic(
+	ctx context.Context,
+	update func(current map[string]string) (map[string]string, error),
+) error {
+	inner, ok := r.inner.(settingsAtomicUpdater)
+	if !ok {
+		return fmt.Errorf("settings store does not support atomic updates")
+	}
+	return inner.UpdateAtomic(ctx, func(rawCurrent map[string]string) (map[string]string, error) {
+		current := make(map[string]string, len(rawCurrent))
+		for key, value := range rawCurrent {
+			plain, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+			if err != nil {
+				return nil, fmt.Errorf("decrypt setting %q: %w", key, err)
+			}
+			current[key] = plain
+		}
+		writes, err := update(current)
+		if err != nil {
+			return nil, err
+		}
+		encrypted := make(map[string]string, len(writes))
+		for key, value := range writes {
+			if SensitiveSettingKeys[key] && value != "" {
+				ciphertext, err := r.cipher.Encrypt(value, secret.SettingsAAD(key))
+				if err != nil {
+					return nil, fmt.Errorf("encrypt setting %q: %w", key, err)
+				}
+				value = ciphertext
+			}
+			encrypted[key] = value
+		}
+		return encrypted, nil
+	})
 }
 
 // SetIfAbsent applies Set's encryption contract to a conditional write: the

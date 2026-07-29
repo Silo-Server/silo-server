@@ -20,6 +20,8 @@ const (
 	FeatureRouteDiagnostics       = "playback_route_diagnostics"
 	FeatureDeviceQuirksV3         = "device_quirks_v1"
 	FeatureSeekReanchorV3         = "seek_reanchor_v1"
+	FeatureDirectStreamResumeV3   = "direct_stream_resume_v1"
+	FeaturePlanSourceDurationV3   = "plan_source_duration_v1"
 	PlanRecipeVersionV3           = "v3.2"
 	ClientDV7ToDV81V3             = "client_dv7_to_dv81"
 	ClientDV7ToHDR10V3            = "client_dv7_to_hdr10"
@@ -29,6 +31,28 @@ const (
 	ClientSurfaceRecoveryV3       = "client_surface_recovery_v1"
 	DeviceQuirkRegistryRevisionV3 = "2026-07-13.1"
 )
+
+// ServerFeaturesV3 returns the complete feature set advertised by protocol-v3
+// capability and decision responses. A fresh slice prevents callers from
+// mutating the shared contract.
+func ServerFeaturesV3() []string {
+	return []string{
+		FeaturePlaybackPlanV3,
+		FeatureMedia3Only,
+		FeatureDetailedDecodeV3,
+		FeatureLayoutPassthrough,
+		FeatureRouteDiagnostics,
+		FeatureDeviceQuirksV3,
+		FeatureSeekReanchorV3,
+		FeatureDirectStreamResumeV3,
+		// Advertised so a client can tell "this server does not populate
+		// source.duration_seconds" apart from "this server knows the runtime
+		// is genuinely unknown". Without the distinction both look like an
+		// absent field, and a client cannot decide whether its own catalog
+		// fallback is still required.
+		FeaturePlanSourceDurationV3,
+	}
+}
 
 type DecisionOutcomeV3 string
 
@@ -406,12 +430,24 @@ type EffectiveRecipeV3 struct {
 }
 
 type SourceDescriptorV3 struct {
-	MediaFileID        int                `json:"media_file_id"`
+	MediaFileID int `json:"media_file_id"`
+	// DurationSeconds is the full runtime of this source, independent of where
+	// the delivery's timeline is anchored: never `total - source_start`, and
+	// never adjusted by timeline_offset_seconds.
+	//
+	// Absent means the server does not know the runtime. It is omitted rather
+	// than sent as null: clients that coerce null to a numeric default would
+	// read it as zero, which is the value this field exists to stop them
+	// inventing. A client must not substitute the playback engine's reported
+	// duration for it — on an HLS copy remux the engine reports the length
+	// produced so far, not the runtime.
+	DurationSeconds    *float64           `json:"duration_seconds,omitempty"`
 	Container          string             `json:"container,omitempty"`
 	VideoCodec         string             `json:"video_codec,omitempty"`
 	VideoProfile       string             `json:"video_profile,omitempty"`
 	VideoLevel         int                `json:"video_level,omitempty"`
 	BitDepth           int                `json:"bit_depth,omitempty"`
+	ColorRange         string             `json:"color_range,omitempty"`
 	Width              int                `json:"width,omitempty"`
 	Height             int                `json:"height,omitempty"`
 	FrameRate          float64            `json:"frame_rate,omitempty"`
@@ -424,6 +460,10 @@ type SourceDescriptorV3 struct {
 	AudioCodec         string             `json:"audio_codec,omitempty"`
 	AudioChannels      int                `json:"audio_channels,omitempty"`
 	AudioLayout        string             `json:"audio_layout,omitempty"`
+	// VideoCopyUnsafe marks a source whose video stream cannot be safely
+	// stream-copied into an avc1/fMP4 segment (H.264 with conflicting in-band
+	// PPS). Copy/remux routes are disqualified for it; a real encode is used.
+	VideoCopyUnsafe bool `json:"video_copy_unsafe,omitempty"`
 }
 
 type VideoClaimsV3 struct {
@@ -811,7 +851,7 @@ func HasFeatureV3(features []string, wanted string) bool {
 func NewTerminalResponseV3(reason, message string, retryable bool) DecisionResponseV3 {
 	return DecisionResponseV3{
 		ProtocolVersion: ProtocolV3,
-		ServerFeatures:  []string{FeaturePlaybackPlanV3, FeatureMedia3Only, FeatureDeviceQuirksV3, FeatureSeekReanchorV3},
+		ServerFeatures:  ServerFeaturesV3(),
 		Outcome:         OutcomeAdaptationUnavailableV3,
 		Terminal:        &TerminalV3{Reason: reason, Message: message, Retryable: retryable},
 	}

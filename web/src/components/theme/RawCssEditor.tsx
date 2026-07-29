@@ -41,7 +41,7 @@ export function RawCssEditor({ value, onChange }: RawCssEditorProps) {
 
       <div className="flex items-center justify-between">
         <p className="text-muted-foreground text-[11px]">
-          Changes apply immediately. Saved automatically.
+          Preview updates as you type. Saved automatically after you pause.
         </p>
         <span
           className={cn(

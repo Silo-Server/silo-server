@@ -1,3 +1,4 @@
+//nolint:goconst // Repeated titles and provider IDs keep NFO scenarios recognizable.
 package metadata
 
 import (
@@ -97,6 +98,73 @@ func (p *remoteStubProvider) lastMetadataIDs() map[string]string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return copyMap(p.lastMetaIDs)
+}
+
+func (p *remoteStubProvider) lastSearchProviderIDs() map[string]string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return copyMap(p.lastSearchIDs)
+}
+
+func TestInitialMatch_MalformedNFOIdentityDoesNotSuppressTitleSearch(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness()
+	nfo := &localHintStubProvider{
+		hints:         map[string]string{"tmdb": "not-a-number", "imdb": "nm1234567"},
+		searchResults: []SearchResult{{Name: "The Matrix", Year: 1999, Provider: "nfo", ProviderIDs: map[string]string{"tmdb": "not-a-number"}}},
+		metadata:      &MetadataResult{HasMetadata: true, Title: "The Matrix"},
+	}
+	remote := &remoteStubProvider{
+		slug: "tmdb",
+		searchResults: []SearchResult{{
+			Name: "The Matrix", Year: 1999, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+		}},
+		metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", Year: 1999, ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"}},
+	}
+
+	result, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		Hints: &MatchHints{Title: "The Matrix", Year: 1999, Type: "movie"},
+		Mode:  ModeInitialMatch,
+	}, []Provider{nfo, remote})
+	if err != nil {
+		t.Fatalf("ProcessWithProviders() error = %v", err)
+	}
+	if result == nil || !result.Updated {
+		t.Fatalf("result = %#v, want title-based remote match", result)
+	}
+	if ids := remote.lastSearchProviderIDs(); ids["tmdb"] != "" || ids["imdb"] != "" {
+		t.Fatalf("remote search received malformed trusted IDs: %#v", ids)
+	}
+}
+
+func TestInitialMatch_MalformedScannerIdentityDoesNotSuppressTitleSearch(t *testing.T) {
+	t.Parallel()
+	h := newTestHarness()
+	remote := &remoteStubProvider{
+		slug: "tmdb",
+		searchResults: []SearchResult{{
+			Name: "The Matrix", Year: 1999, Provider: "tmdb",
+			ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
+		}},
+		metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", Year: 1999, ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"}},
+	}
+
+	result, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		Hints: &MatchHints{
+			Title: "The Matrix", Year: 1999, Type: "movie",
+			TmdbID: "not-a-number", ImdbID: "nm1234567",
+		},
+		Mode: ModeInitialMatch,
+	}, []Provider{remote})
+	if err != nil {
+		t.Fatalf("ProcessWithProviders() error = %v", err)
+	}
+	if result == nil || !result.Updated {
+		t.Fatalf("result = %#v, want title-based remote match", result)
+	}
+	if ids := remote.lastSearchProviderIDs(); ids["tmdb"] != "" || ids["imdb"] != "" {
+		t.Fatalf("remote search received malformed scanner IDs: %#v", ids)
+	}
 }
 
 func seedMovieItem(t *testing.T, h *testHarness, contentID, title string, year int) {

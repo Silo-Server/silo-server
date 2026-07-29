@@ -1,4 +1,5 @@
 import { useMemo, useState, type ComponentType } from "react";
+import { AlertTriangle } from "lucide-react";
 import { useSearchParams } from "react-router";
 
 import { SideNavItem, SideNavSection } from "@/components/SideNav";
@@ -13,6 +14,7 @@ import {
   type AdminSettingsSearchItem,
 } from "@/lib/adminSettingsSearch";
 import { cn } from "@/lib/utils";
+import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 
 import EmailSettings from "./EmailSettings";
 import NotificationsAdminSettings from "./NotificationsAdminSettings";
@@ -34,6 +36,7 @@ import LogRetentionSettings from "./LogRetentionSettings";
 import ThemeSettings from "./ThemeSettings";
 import BrandingSettings from "./BrandingSettings";
 import OverlaySettings from "./OverlaySettings";
+import { RestartServerButton } from "./RestartServerButton";
 
 interface SettingsNav extends AdminSettingsSearchItem {
   component: ComponentType;
@@ -88,6 +91,7 @@ const SETTINGS_NAV: SettingsNav[] = ADMIN_SETTINGS_NAV.map((item) => ({
 export default function AdminSettingsLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [settingsSearch, setSettingsSearch] = useState("");
+  const { data: serverStatus } = useAdminServerStatus();
   const rawActiveId = searchParams.get("tab") || "general";
   const activeId = rawActiveId === "jellyfin" ? "compatibility-proxies" : rawActiveId;
   const filteredSettingsGroups = useMemo(
@@ -112,7 +116,8 @@ export default function AdminSettingsLayout() {
         <div className="min-w-0 space-y-3">
           <h1 className="page-title text-[clamp(2rem,4vw,3rem)]">Settings</h1>
           <p className="page-subtitle text-sm sm:text-base">
-            Configure server-wide settings. Most changes require a server restart to take effect.
+            Configure server-wide settings. Most changes apply live; startup-bound fields show a
+            restart warning after they are saved.
           </p>
         </div>
         <SettingsSearchInput
@@ -123,6 +128,19 @@ export default function AdminSettingsLayout() {
           className="w-full sm:max-w-sm"
         />
       </div>
+
+      {serverStatus?.restart_required && (
+        <div
+          role="status"
+          className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="text-foreground/80 flex items-center gap-2 text-sm">
+            <AlertTriangle className="h-4 w-4" />
+            <span>Server restart required for saved settings to take effect.</span>
+          </div>
+          <RestartServerButton />
+        </div>
+      )}
 
       <div className="surface-panel flex min-h-[500px] flex-col overflow-hidden rounded-[1.8rem] border-0 lg:flex-row">
         {/* Mobile: horizontal scrolling pill bar */}

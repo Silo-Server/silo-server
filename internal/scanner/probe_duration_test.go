@@ -237,3 +237,80 @@ func TestDurationFromProbeMetadataRejectsCollapsedTimestampSpanForLargeVideo(t *
 		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
 	}
 }
+
+// A feature film that probes far short of its real runtime clears the absolute
+// floor but implies an impossible bitrate. This is the case that reached
+// clients as a 90-minute movie displayed as ~1 minute.
+func TestDurationFromProbeMetadataRejectsImpossibleImpliedBitrate(t *testing.T) {
+	t.Parallel()
+
+	raw := &ffprobeOutput{
+		Format: ffprobeFormat{
+			Duration: "61.000000",
+			Size:     "107374182400", // 100 GiB => ~14 Gbps at 61s
+		},
+		Streams: []ffprobeStream{{
+			CodecType:    "video",
+			AvgFrameRate: "24/1",
+		}},
+	}
+
+	got, ok := durationFromProbeMetadata(raw)
+	if ok || got != 0 {
+		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 0, false", got, ok)
+	}
+}
+
+// The implied-bitrate rule must not reject genuinely short clips. A 30-second
+// 4K clip at 100 MiB implies ~28 Mbps, which is ordinary.
+func TestDurationFromProbeMetadataKeepsGenuineShortHighBitrateClip(t *testing.T) {
+	t.Parallel()
+
+	raw := &ffprobeOutput{
+		Format: ffprobeFormat{
+			Duration: "30.000000",
+			Size:     "104857600",
+		},
+		Streams: []ffprobeStream{{
+			CodecType:    "video",
+			AvgFrameRate: "60/1",
+		}},
+	}
+
+	got, ok := durationFromProbeMetadata(raw)
+	if !ok || got != 30 {
+		t.Fatalf("durationFromProbeMetadata() = %d, %v; want 30, true", got, ok)
+	}
+}
+
+func TestVideoDurationImplausible(t *testing.T) {
+	t.Parallel()
+
+	const gib = int64(1024 * 1024 * 1024)
+	tests := []struct {
+		name     string
+		duration float64
+		size     int64
+		hasVideo bool
+		want     bool
+	}{
+		{name: "feature film probed as one minute", duration: 61, size: 100 * gib, want: true, hasVideo: true},
+		{name: "legacy microsecond collapse", duration: 3, size: 2 * gib, want: true, hasVideo: true},
+		{name: "genuine short clip", duration: 30, size: 100 * 1024 * 1024, want: false, hasVideo: true},
+		{name: "ordinary feature film", duration: 5400, size: 8 * gib, want: false, hasVideo: true},
+		{name: "uhd remux at full runtime", duration: 7200, size: 80 * gib, want: false, hasVideo: true},
+		{name: "audio only is never flagged", duration: 1, size: 100 * gib, want: false, hasVideo: false},
+		{name: "unknown size cannot be judged", duration: 61, size: 0, want: false, hasVideo: true},
+		{name: "unknown duration is not this rule's job", duration: 0, size: 100 * gib, want: false, hasVideo: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := videoDurationImplausible(tc.duration, tc.size, tc.hasVideo); got != tc.want {
+				t.Fatalf("videoDurationImplausible(%v, %d, %v) = %v; want %v",
+					tc.duration, tc.size, tc.hasVideo, got, tc.want)
+			}
+		})
+	}
+}

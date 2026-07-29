@@ -27,6 +27,16 @@ import { Link } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { adminKeys } from "@/hooks/queries/keys";
@@ -45,6 +55,7 @@ const KEYS = [
   "notifications.webhooks_enabled",
   "notifications.web_push_enabled",
   "notifications.apple_push_delivery_enabled",
+  "notifications.android_push_delivery_enabled",
   // Relay lifecycle fields are read for status but are never edited through
   // the shared settings form; credential endpoints replace them atomically.
   "notifications.push_relay_url",
@@ -431,6 +442,49 @@ function TestDiscordRow({ unsaved }: { unsaved: boolean }) {
   );
 }
 
+function ClearDiscordCredentialsRow({
+  configured,
+  onClear,
+}: {
+  configured: boolean;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!configured) return null;
+
+  return (
+    <div className="py-2">
+      <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)}>
+        Clear Discord credentials
+      </Button>
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear all Discord credentials?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This stages removal of the client ID, client secret, and bot token. Discord linking
+              and delivery stop after you save the settings form.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                onClear();
+                setOpen(false);
+                toast.info("Discord credential removal staged. Save changes to apply it.");
+              }}
+            >
+              Stage credential removal
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 function RegisterRelayRow({
   relayURL,
   deploymentID,
@@ -446,10 +500,11 @@ function RegisterRelayRow({
   expiresAt: string;
   reregistrationRequired: boolean;
   urlEdited: boolean;
-  onRegistered: () => void;
+  onRegistered: (submittedRelayURL: string) => void;
 }) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [result, setResult] = useState<AppleRelayRegisterResult | null>(null);
 
   const configured = deploymentID.trim() !== "";
@@ -489,10 +544,31 @@ function RegisterRelayRow({
           queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
         }),
       ]);
-      onRegistered();
+      onRegistered(relayURL);
       toast.success("Push relay registered");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Relay registration failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const clearRelay = async () => {
+    if (pending) return;
+    setPending(true);
+    setResult(null);
+    try {
+      await api<void>("/admin/notifications/push/relay", { method: "DELETE" });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
+        queryClient.invalidateQueries({
+          queryKey: [...adminKeys.serverSettings(), "sensitive-status"] as const,
+        }),
+      ]);
+      setConfirmClear(false);
+      toast.success("Push relay credential cleared");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to clear relay credential");
     } finally {
       setPending(false);
     }
@@ -517,6 +593,16 @@ function RegisterRelayRow({
           )}
           {actionLabel}
         </Button>
+        {configured && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={pending}
+            onClick={() => setConfirmClear(true)}
+          >
+            Clear credential
+          </Button>
+        )}
       </div>
       {reregistrationRequired && (
         <div className="text-xs text-amber-500">
@@ -540,26 +626,48 @@ function RegisterRelayRow({
           {result.relay_request_id ? ` — relay ${result.relay_request_id}` : ""}
         </div>
       )}
+      <AlertDialog open={confirmClear} onOpenChange={setConfirmClear}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear the push relay credential?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Mobile push delivery will stop until a relay is registered again. This clears the
+              local deployment identity and lets you select a different relay origin.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={pending}
+              onClick={() => void clearRelay()}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {pending ? "Clearing..." : "Clear credential"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
-function ApplePushPrivacyDisclosure() {
+function MobilePushPrivacyDisclosure() {
   return (
     <div className="space-y-2 py-3">
       <div className="text-sm font-medium">Privacy disclosure</div>
       <div className="text-muted-foreground space-y-2 text-xs leading-relaxed">
         <p>
           If you enable push notifications, your Silo Server sends a content-free request to Silo's
-          push relay so Silo can deliver notifications through Apple Push Notification service.
+          push relay so Silo can deliver notifications through Apple Push Notification service or
+          Firebase Cloud Messaging.
         </p>
         <p>
           The relay does not receive notification titles, message bodies, media names, user names,
           profile names, or your server URL. It does process technical metadata needed to deliver
           and operate the service, including an opaque deployment identifier, push delivery timing,
           request status, app topic, the IP address your self-hosted Silo Server uses to contact the
-          relay, and a hashed device push token. Apple may also process standard APNs delivery
-          metadata.
+          relay, and a hashed device push token. Apple or Google may also process standard push
+          delivery metadata for their platform.
         </p>
         <p>
           Push notifications are generic; the app fetches private content directly from your Silo
@@ -611,6 +719,8 @@ export default function NotificationsAdminSettings() {
   const serverChannelsOn = isOn("notifications.server_channels_enabled");
   // Mobile push, Discord, and personal webhooks are opt-in (default off).
   const applePushOn = form.getValue("notifications.apple_push_delivery_enabled") === "true";
+  const androidPushOn = form.getValue("notifications.android_push_delivery_enabled") === "true";
+  const mobilePushOn = applePushOn || androidPushOn;
   const discordOn = form.getValue("notifications.discord_enabled") === "true";
   const webhooksOn = form.getValue("notifications.webhooks_enabled") === "true";
 
@@ -645,7 +755,7 @@ export default function NotificationsAdminSettings() {
   const channelStates = [
     uiOn,
     webPushOn,
-    applePushOn,
+    mobilePushOn,
     emailOn,
     discordOn,
     webhooksOn,
@@ -755,21 +865,42 @@ export default function NotificationsAdminSettings() {
           <ChannelCard
             icon={RadioTower}
             title="Silo Push Relay"
-            description="Mobile push delivery through Silo's relay. Apple devices use APNs today; Android support will use the same relay when available."
-            enabled={applePushOn}
-            onEnabledChange={setToggle("notifications.apple_push_delivery_enabled")}
+            description="Content-free mobile wakeups through Silo's relay, delivered by APNs or FCM."
+            enabled={mobilePushOn}
+            onEnabledChange={(enabled) => {
+              form.setValue("notifications.apple_push_delivery_enabled", String(enabled));
+              form.setValue("notifications.android_push_delivery_enabled", String(enabled));
+            }}
             chips={
               pushRelayReregistrationRequired ? (
                 <Chip tone="warning">Re-registration required</Chip>
               ) : pushRelayAPIKeyReady ? (
                 <Chip tone="positive">Relay configured</Chip>
               ) : (
-                <Chip tone={applePushOn ? "warning" : "neutral"}>Relay registration required</Chip>
+                <Chip tone={mobilePushOn ? "warning" : "neutral"}>Relay registration required</Chip>
               )
             }
           >
             <div className="divide-border divide-y">
-              <ApplePushPrivacyDisclosure />
+              <MobilePushPrivacyDisclosure />
+              <SettingField
+                label="Apple Push (APNs)"
+                hint="Deliver generic wakeups to registered iPhone, iPad, Apple TV, and Mac devices."
+                type="toggle"
+                value={String(applePushOn)}
+                onChange={(value) =>
+                  form.setValue("notifications.apple_push_delivery_enabled", value)
+                }
+              />
+              <SettingField
+                label="Android Push (FCM)"
+                hint="Deliver generic wakeups to registered Android phone and TV devices."
+                type="toggle"
+                value={String(androidPushOn)}
+                onChange={(value) =>
+                  form.setValue("notifications.android_push_delivery_enabled", value)
+                }
+              />
               <SettingField
                 label="Relay URL"
                 hint="Public relay endpoint used by this Silo server; stored when you register"
@@ -784,7 +915,12 @@ export default function NotificationsAdminSettings() {
                 expiresAt={pushRelayExpiresAt}
                 reregistrationRequired={pushRelayReregistrationRequired}
                 urlEdited={pushRelayURLEdited}
-                onRegistered={() => setPushRelayURLDraft(null)}
+                onRegistered={(submittedRelayURL) =>
+                  setPushRelayURLDraft((currentDraft) => {
+                    const currentURL = currentDraft ?? savedPushRelayURL;
+                    return currentURL === submittedRelayURL ? null : currentDraft;
+                  })
+                }
               />
             </div>
           </ChannelCard>
@@ -878,6 +1014,19 @@ export default function NotificationsAdminSettings() {
                 onChange={(v) => form.setValue("discord.bot_token", v)}
               />
               <TestDiscordRow unsaved={discordCredentialsDirty} />
+              <ClearDiscordCredentialsRow
+                configured={
+                  form.getValue("discord.client_id").trim() !== "" ||
+                  form.sensitiveConfigured.some((key) =>
+                    ["discord.client_secret", "discord.bot_token"].includes(key),
+                  )
+                }
+                onClear={() => {
+                  form.setValue("discord.client_id", "");
+                  form.setValue("discord.client_secret", "");
+                  form.setValue("discord.bot_token", "");
+                }}
+              />
             </div>
             <SubsectionLabel>Delivery</SubsectionLabel>
             <div className="divide-border divide-y">

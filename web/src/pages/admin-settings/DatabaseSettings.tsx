@@ -16,8 +16,6 @@ const KEYS = [
   "userdb.backend",
   "userdb.pool_max_open",
   "userdb.idle_timeout",
-  "userdb.litestream_sync",
-  "userdb.stale_grace_seconds",
 ];
 
 export default function DatabaseSettings() {
@@ -97,6 +95,7 @@ export default function DatabaseSettings() {
             onChange={(value) => {
               if (value === "true") {
                 setRedisEnabledOverride(true);
+                form.resetValue("redis.url");
                 return;
               }
               setRedisEnabledOverride(false);
@@ -128,36 +127,31 @@ export default function DatabaseSettings() {
         <FieldGroup label="User Database">
           <SettingField
             label="User DB Backend"
-            hint="postgres or sqlite"
+            type="select"
+            options={[
+              { value: "postgres", label: "PostgreSQL" },
+              { value: "sqlite", label: "SQLite" },
+            ]}
             value={form.getValue("userdb.backend")}
             onChange={(v) => form.setValue("userdb.backend", v)}
           />
-          <SettingField
-            label="Pool Max Open"
-            type="number"
-            value={form.getValue("userdb.pool_max_open")}
-            onChange={(v) => form.setValue("userdb.pool_max_open", v)}
-          />
-          <SettingField
-            label="Idle Timeout"
-            type="duration"
-            hint="e.g. 12h"
-            value={form.getValue("userdb.idle_timeout")}
-            onChange={(v) => form.setValue("userdb.idle_timeout", v)}
-          />
-          <SettingField
-            label="Litestream Sync Interval"
-            type="duration"
-            hint="e.g. 1s"
-            value={form.getValue("userdb.litestream_sync")}
-            onChange={(v) => form.setValue("userdb.litestream_sync", v)}
-          />
-          <SettingField
-            label="Stale Grace Seconds"
-            type="number"
-            value={form.getValue("userdb.stale_grace_seconds")}
-            onChange={(v) => form.setValue("userdb.stale_grace_seconds", v)}
-          />
+          {form.getValue("userdb.backend") === "sqlite" && (
+            <>
+              <SettingField
+                label="Pool Max Open"
+                type="number"
+                value={form.getValue("userdb.pool_max_open")}
+                onChange={(v) => form.setValue("userdb.pool_max_open", v)}
+              />
+              <SettingField
+                label="Idle Timeout"
+                type="duration"
+                hint="How long an inactive per-user SQLite connection remains open, e.g. 12h"
+                value={form.getValue("userdb.idle_timeout")}
+                onChange={(v) => form.setValue("userdb.idle_timeout", v)}
+              />
+            </>
+          )}
         </FieldGroup>
       </div>
 

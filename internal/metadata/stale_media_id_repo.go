@@ -4,12 +4,71 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
+
+// IsActionableStaleProviderID reports whether a failed provider ID is still
+// part of the item's canonical identity. IDs learned only as secondary
+// cross-references are useful negative-cache entries, but they do not mean a
+// successfully matched item itself needs repair. Unmatched items remain
+// actionable because a rejected path-provided ID may be their only diagnosis.
+func IsActionableStaleProviderID(item *models.MediaItem, staleID *models.StaleMediaID) bool {
+	if item == nil || staleID == nil {
+		return false
+	}
+	providerID := strings.TrimSpace(staleID.ProviderID)
+	if providerID == "" {
+		return false
+	}
+	provider := strings.ToLower(strings.TrimSpace(staleID.Provider))
+	if provider != contentid.ProviderTMDB && provider != contentid.ProviderTVDB && provider != contentid.ProviderIMDB {
+		return false
+	}
+	anchorProvider, anchorID, hasAnchor := contentid.ProviderAnchor(item.ContentID)
+	if hasAnchor && provider == anchorProvider && providerIDValuesEqual(provider, providerID, anchorID) {
+		return true
+	}
+	var currentID string
+	switch provider {
+	case contentid.ProviderTMDB:
+		currentID = item.TmdbID
+	case contentid.ProviderTVDB:
+		currentID = item.TvdbID
+	case contentid.ProviderIMDB:
+		currentID = item.ImdbID
+	}
+	if providerIDValuesEqual(provider, providerID, currentID) {
+		return true
+	}
+	// Unmatched/skeleton items often have only a bad ID parsed from their path;
+	// it has not yet reached the denormalized provider columns or a provider
+	// anchor. Those failures are precisely what the admin stale-ID list must
+	// surface for manual correction.
+	return !strings.EqualFold(strings.TrimSpace(item.Status), string(MatchOutcomeMatched))
+}
+
+func providerIDValuesEqual(provider, left, right string) bool {
+	left = normalizeProviderIDComparisonValue(provider, left)
+	right = normalizeProviderIDComparisonValue(provider, right)
+	if left == "" || right == "" {
+		return false
+	}
+	return left == right
+}
+
+func normalizeProviderIDComparisonValue(provider, providerID string) string {
+	providerID = strings.TrimSpace(providerID)
+	if strings.EqualFold(strings.TrimSpace(provider), contentid.ProviderIMDB) {
+		return strings.ToLower(providerID)
+	}
+	return providerID
+}
 
 // StaleMediaIDRepository persists external IDs that 404 during metadata refresh.
 type StaleMediaIDRepository struct {
@@ -47,14 +106,15 @@ func scanStaleMediaIDs(rows pgx.Rows) ([]*models.StaleMediaID, error) {
 	return ids, nil
 }
 
-// Upsert inserts or updates a stale external ID record.
+// Upsert inserts or updates one stale external ID value. A provider can have
+// multiple rejected values for the same item; retaining each value prevents a
+// later provider response from resurrecting an older known-dead cross-reference.
 func (r *StaleMediaIDRepository) Upsert(ctx context.Context, contentID, provider, providerID string) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO stale_media_ids (content_id, provider, provider_id, first_seen_at, last_seen_at)
 		VALUES ($1, $2, $3, NOW(), NOW())
-		ON CONFLICT (content_id, provider) DO UPDATE
-		SET provider_id = EXCLUDED.provider_id,
-		    last_seen_at = NOW()
+		ON CONFLICT (content_id, provider, provider_id) DO UPDATE
+		SET last_seen_at = NOW()
 	`, contentID, provider, providerID)
 	return resolveStaleUpsertError(err, contentID, provider)
 }
@@ -97,7 +157,7 @@ func (r *StaleMediaIDRepository) GetByContentID(ctx context.Context, contentID s
 		SELECT `+staleMediaIDColumns+`
 		FROM stale_media_ids
 		WHERE content_id = $1
-		ORDER BY provider ASC
+		ORDER BY provider ASC, provider_id ASC
 	`, contentID)
 	if err != nil {
 		return nil, fmt.Errorf("getting stale media IDs by content_id: %w", err)

@@ -93,8 +93,111 @@ func parseEbookFile(path string) (book parsedEbook, err error) {
 	default:
 		err = fmt.Errorf("unsupported ebook format: %s", filepath.Ext(path))
 	}
+	if err == nil {
+		if sidecarPath := ebookOPFSidecarPath(path); sidecarPath != "" {
+			sidecar, sidecarErr := parseEbookOPFSidecar(sidecarPath)
+			if sidecarErr != nil {
+				return book, sidecarErr
+			}
+			applyEbookSidecarMetadata(&book, sidecar)
+		}
+	}
 	book.sanitize()
 	return book, err
+}
+
+func ebookOPFSidecarPath(ebookPath string) string {
+	candidate := filepath.Join(filepath.Dir(ebookPath), ebookTitleFromPath(ebookPath)+".opf")
+	info, err := os.Lstat(candidate)
+	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return ""
+	}
+	return candidate
+}
+
+func parseEbookOPFSidecar(sidecarPath string) (parsedEbook, error) {
+	var book parsedEbook
+	leafInfo, err := os.Lstat(sidecarPath)
+	if err != nil {
+		return book, fmt.Errorf("stat ebook OPF sidecar %s: %w", sidecarPath, err)
+	}
+	if !leafInfo.Mode().IsRegular() {
+		return book, fmt.Errorf("ebook OPF sidecar is not a regular file: %s", sidecarPath)
+	}
+	file, err := os.Open(sidecarPath)
+	if err != nil {
+		return book, fmt.Errorf("open ebook OPF sidecar %s: %w", sidecarPath, err)
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return book, fmt.Errorf("stat ebook OPF sidecar %s: %w", sidecarPath, err)
+	}
+	// Close the symlink-swap window: os.Open follows symlinks, so a leaf swapped
+	// to a symlink between the Lstat above and this Open would be followed to its
+	// target. Reject unless the opened handle is the exact file Lstat inspected,
+	// so metadata can never be ingested from outside the library root.
+	if !os.SameFile(leafInfo, info) {
+		return book, fmt.Errorf("ebook OPF sidecar is not a regular file: %s", sidecarPath)
+	}
+	if info.Size() > maxEPUBMetadataEntrySize {
+		return book, fmt.Errorf("ebook OPF sidecar too large: %s", sidecarPath)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, maxEPUBMetadataEntrySize+1))
+	if err != nil {
+		return book, fmt.Errorf("read ebook OPF sidecar %s: %w", sidecarPath, err)
+	}
+	if len(data) > maxEPUBMetadataEntrySize {
+		return book, fmt.Errorf("ebook OPF sidecar too large: %s", sidecarPath)
+	}
+	if err := parseEPUBOPFMetadata(data, &book); err != nil {
+		return book, fmt.Errorf("parse ebook OPF sidecar %s: %w", sidecarPath, err)
+	}
+	book.sanitize()
+	return book, nil
+}
+
+func applyEbookSidecarMetadata(book *parsedEbook, sidecar parsedEbook) {
+	if book == nil {
+		return
+	}
+	if sidecar.Title != "" {
+		book.Title = sidecar.Title
+	}
+	if len(sidecar.Authors) > 0 {
+		book.Authors = append([]string(nil), sidecar.Authors...)
+	}
+	if sidecar.Description != "" {
+		book.Description = sidecar.Description
+	}
+	if sidecar.Publisher != "" {
+		book.Publisher = sidecar.Publisher
+	}
+	if !sidecar.PublishedAt.IsZero() {
+		book.PublishedAt = sidecar.PublishedAt
+	}
+	if sidecar.Year > 0 {
+		book.Year = sidecar.Year
+	}
+	if sidecar.Language != "" {
+		book.Language = sidecar.Language
+	}
+	if sidecar.ISBN != "" {
+		book.ISBN = sidecar.ISBN
+	}
+	if sidecar.Series != "" {
+		book.Series = sidecar.Series
+	}
+	if sidecar.SeriesIndex != "" {
+		book.SeriesIndex = sidecar.SeriesIndex
+	}
+	if len(sidecar.Genres) > 0 {
+		book.Genres = append([]string(nil), sidecar.Genres...)
+	}
+	if sidecar.PageCount > 0 {
+		book.PageCount = sidecar.PageCount
+	}
 }
 
 func parseEbookPDF(path string) (parsedEbook, error) {

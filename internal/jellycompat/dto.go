@@ -264,6 +264,7 @@ type mediaStreamDTO struct {
 	AspectRatio            string  `json:"AspectRatio,omitempty"`
 	VideoRange             string  `json:"VideoRange,omitempty"`
 	VideoRangeType         string  `json:"VideoRangeType,omitempty"`
+	ColorRange             string  `json:"ColorRange,omitempty"`
 	ColorPrimaries         string  `json:"ColorPrimaries,omitempty"`
 	ColorSpace             string  `json:"ColorSpace,omitempty"`
 	ColorTransfer          string  `json:"ColorTransfer,omitempty"`

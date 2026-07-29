@@ -367,6 +367,9 @@ func (h *WatchTogetherHandler) HandleSelectRoomItem(w http.ResponseWriter, r *ht
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, watchtogether.ErrVoteRoomSelection):
+			writeError(w, http.StatusConflict, "vote_room_selection",
+				"This room votes for what plays; start the winning suggestion instead")
 		case errors.Is(err, watchtogether.ErrRoomForbidden):
 			writeError(w, http.StatusForbidden, "forbidden", "Only the host can start or switch room playback")
 		case errors.Is(err, watchtogether.ErrRoomNotFound):
@@ -568,6 +571,18 @@ func (h *WatchTogetherHandler) HandlePromoteSuggestion(w http.ResponseWriter, r 
 		switch {
 		case errors.Is(err, watchtogether.ErrRoomForbidden):
 			writeError(w, http.StatusForbidden, "forbidden", "Only the host can promote a suggestion")
+		case errors.Is(err, watchtogether.ErrNotVoteWinner):
+			writeError(w, http.StatusConflict, "not_vote_winner",
+				"This room votes for what plays; start the title that is winning")
+		case errors.Is(err, watchtogether.ErrNoVotesCast):
+			writeError(w, http.StatusConflict, "no_votes_cast",
+				"Nobody has voted yet")
+		// Promoting the winner is the sanctioned way into a vote room's
+		// selection, so this should not escape the service. Mapped anyway so a
+		// regression in that path reads as a conflict rather than a 500.
+		case errors.Is(err, watchtogether.ErrVoteRoomSelection):
+			writeError(w, http.StatusConflict, "vote_room_selection",
+				"This room votes for what plays; start the winning suggestion instead")
 		case errors.Is(err, watchtogether.ErrSuggestionNotFound):
 			writeError(w, http.StatusNotFound, "not_found", "Suggestion not found")
 		case errors.Is(err, watchtogether.ErrRoomNotFound):

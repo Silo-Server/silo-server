@@ -11,20 +11,28 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
+const (
+	pluginInstallationIDSetting = "plugin_installation_id"
+	capabilityIDSetting         = "capability_id"
+)
+
 type fakePluginMetadataClient struct {
+	searchResponse *pluginv1.SearchMetadataResponse
 	response       *pluginv1.GetMetadataResponse
 	imagesResponse *pluginv1.GetImagesResponse
 	seasonsResp    *pluginv1.GetSeasonsResponse
 	episodesResp   *pluginv1.GetEpisodesResponse
 
+	searchReq      *pluginv1.SearchMetadataRequest
 	getMetadataReq *pluginv1.GetMetadataRequest
 	getImagesReq   *pluginv1.GetImagesRequest
 	getSeasonsReq  *pluginv1.GetSeasonsRequest
 	getEpisodesReq *pluginv1.GetEpisodesRequest
 }
 
-func (f *fakePluginMetadataClient) Search(context.Context, *pluginv1.SearchMetadataRequest) (*pluginv1.SearchMetadataResponse, error) {
-	return nil, nil
+func (f *fakePluginMetadataClient) Search(_ context.Context, req *pluginv1.SearchMetadataRequest) (*pluginv1.SearchMetadataResponse, error) {
+	f.searchReq = req
+	return f.searchResponse, nil
 }
 
 func (f *fakePluginMetadataClient) GetMetadata(_ context.Context, req *pluginv1.GetMetadataRequest) (*pluginv1.GetMetadataResponse, error) {
@@ -68,6 +76,75 @@ func setPluginMetadataItemReleaseDate(t *testing.T, item *pluginv1.MetadataItem,
 	}
 
 	item.ProtoReflect().Set(field, protoreflect.ValueOfString(value))
+}
+
+//nolint:goconst // Keep the production-shaped protobuf fixture readable in place.
+func TestPluginProviderSearch_MapsLocalizedTitlesAndCrossReferences(t *testing.T) {
+	const localizedJapanesePrimaryTitle = "十兵衛ちゃん -ラブリー眼帯の秘密-"
+	client := &fakePluginMetadataClient{
+		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{
+			{
+				ProviderId:       localizedTVDBID,
+				ItemType:         anchoredItemTypeSeries,
+				Title:            localizedJapanesePrimaryTitle,
+				OriginalTitle:    localizedOriginalTitle,
+				Year:             1999,
+				TitleLanguage:    "ja",
+				TitleIsFallback:  true,
+				OriginalLanguage: "ja",
+				TitleAliases: []*pluginv1.TitleAlias{
+					{Title: localizedEnglishTitle, Language: "en", Kind: testAlternateAliasKind},
+				},
+				ProviderIds: mustStructFromStringMap(t, map[string]string{
+					testTMDBProvider: localizedTMDBID,
+					testIMDBProvider: "tt0213338",
+				}),
+			},
+		}},
+	}
+
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		pluginInstallationIDSetting: "1",
+		capabilityIDSetting:         testTVDBProvider,
+	}, func(context.Context, int, string) (pluginMetadataClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+	}
+
+	results, err := provider.Search(context.Background(), SearchQuery{
+		Title:       localizedEnglishTitle,
+		ContentType: anchoredItemTypeSeries,
+		Language:    "en",
+	})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if client.searchReq == nil || client.searchReq.GetQuery() != localizedEnglishTitle || client.searchReq.GetItemType() != anchoredItemTypeSeries || client.searchReq.GetLanguage() != "en" {
+		t.Fatalf("captured search request = %+v", client.searchReq)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Search() returned %d results, want 1", len(results))
+	}
+	got := results[0]
+	if got.Name != localizedJapanesePrimaryTitle || got.OriginalTitle != localizedOriginalTitle || got.Year != 1999 {
+		t.Fatalf("localized identity fields = %+v", got)
+	}
+	if got.TitleLanguage != "ja" || !got.TitleIsFallback || got.OriginalLanguage != "ja" {
+		t.Fatalf("language/fallback fields = language:%q fallback:%v original:%q", got.TitleLanguage, got.TitleIsFallback, got.OriginalLanguage)
+	}
+	wantAliases := []TitleAlias{{Title: localizedEnglishTitle, Language: "en", Kind: testAlternateAliasKind, Provider: testTVDBProvider}}
+	if !reflect.DeepEqual(got.TitleAliases, wantAliases) {
+		t.Fatalf("TitleAliases = %#v, want %#v", got.TitleAliases, wantAliases)
+	}
+	if !reflect.DeepEqual(got.ProviderIDs, map[string]string{
+		testTVDBProvider: localizedTVDBID,
+		testTMDBProvider: localizedTMDBID,
+		testIMDBProvider: "tt0213338",
+	}) {
+		t.Fatalf("ProviderIDs = %#v", got.ProviderIDs)
+	}
 }
 
 func TestPluginProviderGetMetadata_MapsReleaseDate(t *testing.T) {

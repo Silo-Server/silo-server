@@ -94,9 +94,13 @@
   --duration-glacial: 700ms;
   --duration-cinematic: 1200ms;
   --duration-drift: 2000ms;
+  /* Sidebar immersion collapse — see `.sidebar-surface`. */
+  --duration-sidebar-collapse: 300ms;
 
   /* ── Motion: Easing ────────────────────────────────────────── */
   --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Long, flat tail — keeps the moving edge from appearing to step near the end. */
+  --ease-sidebar-collapse: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-in: cubic-bezier(0.4, 0, 1, 1);
   --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
@@ -260,14 +264,21 @@
     --duration-drift: 0ms;
     --duration-glacial: 0ms;
     --duration-slow: 150ms;
+    --duration-sidebar-collapse: 0ms;
     --animate-ken-burns-a: none;
     --animate-ken-burns-b: none;
   }
   .ambient-glow {
     transition: none;
   }
-  .sidebar-transition,
-  .main-transition {
+  /* Collapsing the sidebar becomes an instant state change: the frame, the
+     content under it, and everything cross-fading inside all stop animating. */
+  .sidebar-surface,
+  .sidebar-inner,
+  .sidebar-fade,
+  .sidebar-row-shift,
+  .sidebar-main-stage,
+  .impersonation-banner {
     transition: none;
   }
   .player-breathe,
@@ -857,13 +868,81 @@
       opacity var(--duration-cinematic) var(--ease-gentle);
   }
 
-  /* ── Sidebar Immersion Transitions ─────────────────────────── */
-  .sidebar-transition {
-    transition: width var(--duration-normal) var(--ease-default);
+  /* ── Sidebar Immersion ─────────────────────────────────────── */
+  /* The desktop sidebar is physically 260px wide in EVERY state. Entering a
+     detail page snaps the real layout — main's margin, the impersonation
+     banner, `--app-sidebar-offset` — from 260px to 64px in one pass, and the
+     sidebar and main content are held at their old visual positions for one
+     frame, then travel together to the 64px rail. The item route commits its
+     lightweight shell first; metadata and artwork stay gated until this
+     compositor motion has completed.
+     Nothing here touches width, margin, or any other layout property, so the
+     document is laid out once per navigation instead of once per frame. Holding
+     the surface at a constant size also means its 40px backdrop blur is
+     rasterized against unchanging geometry rather than re-blurred each frame. */
+  /* Two transforms that cancel out. `.sidebar-surface` is a 260px frame with
+     `overflow: hidden` that slides 196px left, so its right edge — and the
+     border drawn on it — sweeps from x=260 down to x=64. `.sidebar-inner`
+     slides the same distance the other way, so its content stays pinned to the
+     viewport and is progressively cut off by the frame's edge.
+
+     Why not animate the clip directly: Chrome runs `clip-path` transitions on
+     the main thread. Entering a detail page blocks that thread for longer than
+     the animation lasts (267ms and 209ms frozen frames measured on a real
+     navigation), which swallowed the collapse whole. `transform` is composited
+     and keeps advancing through exactly the same block. */
+  .sidebar-surface {
     overflow: hidden;
+    transform: translateX(0);
+    transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
   }
-  .main-transition {
-    transition: margin-left var(--duration-normal) var(--ease-default);
+  .sidebar-surface[data-collapsed="true"] {
+    transform: translateX(-196px);
+  }
+  .sidebar-inner {
+    transform: translateX(0);
+    transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
+  }
+  .sidebar-surface[data-collapsed="true"] .sidebar-inner {
+    transform: translateX(196px);
+  }
+
+  /* Main's margin snaps directly to the destination so the document lays out
+     once. Until the route is ready to animate, an inverse transform places the
+     new layout at the old visual offset. Removing that compensation on the
+     same state change that moves the sidebar keeps their edges locked together. */
+  @media (min-width: 64rem) {
+    .sidebar-main-stage {
+      transform: none;
+      transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
+    }
+    .sidebar-main-stage[data-sidebar-target-collapsed="true"]:not(
+        [data-sidebar-visual-collapsed="true"]
+      ) {
+      transform: translateX(196px);
+      transition: none;
+    }
+    .sidebar-main-stage:not(
+        [data-sidebar-target-collapsed="true"]
+      )[data-sidebar-visual-collapsed="true"] {
+      transform: translateX(-196px);
+      transition: none;
+    }
+  }
+
+  /* Sidebar contents keep their expanded layout in both states — only opacity
+     and transform change, so the nav never reflows mid-animation. Labels that
+     used to animate `max-width` now just fade; the frame does the hiding. */
+  .sidebar-fade {
+    transition: opacity var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
+  }
+  .sidebar-row-shift {
+    transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
+  }
+  .sidebar-surface[data-collapsed="true"] .sidebar-row-shift {
+    /* Slides the library rows left by their reserved chevron slot so their
+       icons line up with the rest of the rail's icon column. */
+    transform: translateX(var(--sidebar-row-shift, 0px));
   }
 
   /* ── Sidebar Scrollbar ────────────────────────────────────── */
@@ -1848,8 +1927,10 @@
     --impersonation-accent-soft: oklch(0.82 0.14 78 / 0.12);
     --impersonation-accent-line: oklch(0.82 0.14 78 / 0.32);
 
+    /* Snaps straight to the destination so the document lays out once; the
+       compensation transform below carries the edge across. Animating this
+       margin instead would re-run layout on every frame. */
     margin-left: var(--app-sidebar-offset);
-    transition: margin-left var(--duration-normal) var(--ease-default);
     position: sticky;
     background: linear-gradient(
       180deg,
@@ -1862,6 +1943,48 @@
     box-shadow:
       inset 0 1px 0 color-mix(in srgb, var(--impersonation-accent) 22%, transparent),
       0 10px 32px -20px rgb(0 0 0 / 0.65);
+  }
+
+  /* The banner renders above the routes, outside Layout, so it tracks the
+     sidebar through root attributes rather than the props `.sidebar-main-stage`
+     reads in-tree. The mechanism is identical: the margin above snaps to the
+     destination, and an inverse transform holds the previous visual offset for
+     one frame before releasing to zero on the same state change that moves the
+     sidebar — so both edges travel together on the compositor.
+
+     Without this the banner jumped instantly while the sidebar took 300ms, and
+     since it is `z-50` against the sidebar's `z-40`/`45` it painted over the
+     logo on the way in and left a gap on the way out.
+
+     Breakpoint deliberately matches `--app-sidebar-offset` (1024px) rather than
+     Tailwind's `lg` (64rem): `html[data-text-scale]` re-bases rem, so at large
+     text those two diverge and the compensation must follow whichever query
+     actually changes the margin it is compensating for. */
+  /* While the banner holds its previous offset it is translated right, so its
+     right edge sits briefly past the viewport. Layout already clips its own
+     subtree this way; the banner is mounted above it, so the app root needs the
+     same treatment or that overhang becomes a document-level horizontal scroll
+     for the length of the transition. `clip` rather than `hidden` so this never
+     becomes a scroll container and the banner's `position: sticky` keeps
+     resolving against the viewport. */
+  #root {
+    overflow-x: clip;
+  }
+
+  @media (min-width: 1024px) {
+    .impersonation-banner {
+      transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
+    }
+    :root[data-sidebar-collapsed="true"]:not([data-sidebar-visual-collapsed="true"])
+      .impersonation-banner {
+      transform: translateX(196px);
+      transition: none;
+    }
+    :root:not([data-sidebar-collapsed="true"])[data-sidebar-visual-collapsed="true"]
+      .impersonation-banner {
+      transform: translateX(-196px);
+      transition: none;
+    }
   }
 
   /* Luminous top accent line — fades in from both edges so the

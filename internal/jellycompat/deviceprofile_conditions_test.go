@@ -1,6 +1,7 @@
 package jellycompat
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -270,6 +271,55 @@ func TestBuildMediaStreamsUsesJellyfinVideoRangeType(t *testing.T) {
 	}
 	if streams[0].VideoRangeType != "DOVIWithEL" {
 		t.Fatalf("VideoRangeType = %q, want DOVIWithEL", streams[0].VideoRangeType)
+	}
+}
+
+func TestBuildMediaStreamsPreservesColorRange(t *testing.T) {
+	tests := []struct {
+		name           string
+		colorRange     string
+		wantColorRange string
+		wantJSONField  bool
+	}{
+		{name: "limited", colorRange: "tv", wantColorRange: "tv", wantJSONField: true},
+		{name: "full", colorRange: "pc", wantColorRange: "pc", wantJSONField: true},
+		{name: "internal unknown sentinel", colorRange: "unknown"},
+		{name: "missing"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version := catalog.FileVersion{
+				VideoTracks: []models.VideoTrack{{
+					Codec:      "h264",
+					ColorRange: tt.colorRange,
+				}},
+			}
+
+			streams := buildMediaStreams("item", "source", version)
+			if len(streams) != 1 {
+				t.Fatalf("streams length = %d, want 1", len(streams))
+			}
+			if got := streams[0].ColorRange; got != tt.wantColorRange {
+				t.Fatalf("ColorRange = %q, want %q", got, tt.wantColorRange)
+			}
+
+			payload, err := json.Marshal(streams[0])
+			if err != nil {
+				t.Fatalf("marshal media stream: %v", err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(payload, &decoded); err != nil {
+				t.Fatalf("unmarshal media stream: %v", err)
+			}
+			got, present := decoded["ColorRange"]
+			if present != tt.wantJSONField {
+				t.Fatalf("JSON ColorRange present = %v, want %v (value %#v)", present, tt.wantJSONField, got)
+			}
+			if tt.wantJSONField && got != tt.wantColorRange {
+				t.Fatalf("JSON ColorRange = %#v, want %q", got, tt.wantColorRange)
+			}
+		})
 	}
 }
 

@@ -61,7 +61,8 @@ point of keeping the key out of the database. Recovery means re-entering the
 affected credentials:
 
 - Re-enter Sonarr/Radarr and Autoscan API keys, S3 keys, watch-sync connections,
-  history-import tokens, and subtitle provider credentials.
+  history-import tokens, subtitle provider credentials, and plugin runtime
+  configuration.
 - `auth.jwt_secret` becomes unreadable, so all existing sessions are invalid and
   users must log in again (a new secret is generated on next boot if the row is
   cleared — see below).
@@ -79,7 +80,11 @@ remaining plaintext in place:
 3. the two arr `api_key_ref` columns — these are **resolved-then-encrypted**: a
    legacy row that held a `server_settings` reference (e.g.
    `requests.radarr.api_key`) is collapsed to the real credential before being
-   encrypted.
+   encrypted,
+4. whole `plugin_runtime_configs.config_value` objects. Plugin config is
+   intentionally opaque to the host storage layer: plugins may write undeclared
+   keys and manifest annotations may be unavailable or change over time, so
+   manifest-selected field encryption cannot fail closed.
 
 The backfill is safe to run repeatedly: already-encrypted values are skipped, and
 a per-row guard makes concurrent multi-node boots converge without
@@ -92,7 +97,9 @@ whatever the primary encrypted. No manual steps are required.
 Downgrading to a binary that predates this change is **not** safe while secrets
 are encrypted, because the old binary has no read path: it would read
 `enc:v1:auth.jwt_secret` as a literal JWT secret (invalidating all sessions) and
-read `enc:v1:`-prefixed integration keys as garbage credentials.
+read `enc:v1:`-prefixed integration keys as garbage credentials. It would also
+pass the reserved plugin-config envelope object to plugins instead of their
+configuration.
 
 To downgrade safely you must first return the affected values to plaintext, for
 example:
@@ -123,7 +130,10 @@ history-import admin/session tokens and temporary server-list credentials,
 subtitle provider `api_key`/`password`,
 the Jellyfin-compat session's bridged Silo access/refresh tokens
 (`jellycompat_sessions.streamapp_access_token` / `streamapp_refresh_token`), and
-the ABS signing key.
+the ABS signing key. Plugin runtime configuration is encrypted as one opaque
+row-bound envelope rather than by manifest field. Consequently, runtime code
+must use `RuntimeConfigStore`; database JSON-member queries and indexes are not
+supported for `plugin_runtime_configs.config_value`.
 
 Deliberately **not** encrypted (tracked as follow-ups):
 
@@ -132,11 +142,6 @@ Deliberately **not** encrypted (tracked as follow-ups):
   lookup. They need a deterministic **blind-index hash** column instead:
   `api_keys.api_key`, `webhook_sync_connections.webhook_secret`,
   `jellycompat_sessions.token`, and `watch_together_rooms.join_token`.
-- **Plugin runtime config** — `plugin_runtime_configs.config_value` is opaque
-  plugin-defined JSONB whose secret fields are manifest-declared and whose runtime
-  lives in a separate repo; encrypting it correctly needs a coordinated,
-  manifest-aware design.
-
 Excluded (not a gap): `plex_sync_connections.*` is a dead table (zero Go
 references); `oauth_completion.token_ciphertext` is already AES-GCM;
 `users.password_hash` and the `*_hash` columns are already hashed.

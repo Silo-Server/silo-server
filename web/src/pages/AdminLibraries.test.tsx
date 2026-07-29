@@ -243,7 +243,7 @@ describe("AdminLibraries", () => {
     expect(markup).toContain("Scanner roots that stay visible");
   });
 
-  it("does not show metadata matcher queue counts in the library status", () => {
+  it("shows metadata matcher pending and parked counts", () => {
     mocks.useLibraryMetadataMatchQueues.mockReturnValue({
       data: [
         {
@@ -252,6 +252,8 @@ describe("AdminLibraries", () => {
           series_count: 2,
           raw_file_count: 0,
           total_count: 3,
+          pending_count: 2,
+          parked_count: 1,
         },
       ],
       isLoading: false,
@@ -259,9 +261,11 @@ describe("AdminLibraries", () => {
 
     const markup = renderPage();
 
-    expect(markup).toContain("Enabled");
-    expect(markup).not.toContain("3 matching");
-    expect(markup).not.toContain("View backlog");
+    expect(markup).toContain("Metadata Matcher");
+    expect(markup).toContain("Pending and parked items that still need a provider match.");
+    // The total renders as element text (">3<"); a bare "3" would also match
+    // Tailwind class names like p-3 and prove nothing.
+    expect(markup).toMatch(/>\s*3\s*</);
   });
 
   it("shows active scan progress in the library task status row", () => {

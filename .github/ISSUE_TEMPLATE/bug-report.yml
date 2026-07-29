@@ -1,0 +1,93 @@
+name: Bug report
+description: Report something broken in Silo server or web UI
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Raw logs only. Never AI-summarize logs. You must have reproduced this yourself on a real deployment before filing.
+
+        Fabricated or AI-hallucinated reports are an instant block. Read [CONTRIBUTING.md](https://github.com/Silo-Server/silo-server/blob/main/CONTRIBUTING.md) first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What broke? What did you actually observe?
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps you ran on a real deployment.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: silo-version
+    attributes:
+      label: Silo version / commit
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker
+        - Bare metal / systemd
+        - Local dev build
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: clients-affected
+    attributes:
+      label: Clients affected
+      options:
+        - label: Web UI
+        - label: Android
+        - label: iOS/tvOS/macOS
+        - label: Jellyfin-compat client (Infuse, Findroid, ...)
+        - label: Other/not client-specific
+  - type: textarea
+    id: relevant-logs
+    attributes:
+      label: Relevant logs
+      description: Paste raw server logs.
+      placeholder: paste raw server logs; write "no logs available" if genuinely none
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: ai-involvement
+    attributes:
+      label: AI involvement in this report
+      options:
+        - None — written by a human
+        - AI-assisted, human verified the repro
+        - AI-generated, human verified the repro
+    validations:
+      required: true
+  - type: input
+    id: ai-tool-model
+    attributes:
+      label: AI tool + model
+      placeholder: e.g. Claude Code / claude-fable-5 — or n/a
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I reproduced this myself on a real deployment
+          required: true
+        - label: Logs above are raw copy-paste, not AI-summarized
+          required: true

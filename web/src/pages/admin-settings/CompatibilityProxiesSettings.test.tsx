@@ -9,6 +9,22 @@ vi.mock("@/hooks/useSettingsForm", () => ({
   useSettingsForm: (...args: unknown[]) => useSettingsFormMock(...args),
 }));
 
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  useJellyfinCompatStatus: () => ({
+    isLoading: false,
+    data: {
+      enabled: false,
+      web_enabled: false,
+      api_state: "stopped",
+      web_state: "missing",
+      prerequisites: [],
+    },
+  }),
+  useInstallJellyfinCompatWeb: () => ({ mutate: vi.fn(), isPending: false }),
+  useRemoveJellyfinCompatWeb: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateJellyfinCompatSettings: () => ({ mutate: vi.fn(), isPending: false }),
+}));
+
 describe("CompatibilityProxiesSettings", () => {
   it("shows Jellyfin and Audiobookshelf proxy settings", () => {
     useSettingsFormMock.mockReturnValue({
@@ -20,6 +36,7 @@ describe("CompatibilityProxiesSettings", () => {
       },
       setValue: vi.fn(),
       dirtyCount: 0,
+      dirtyKeys: [],
       save: vi.fn(),
       discard: vi.fn(),
       isSaving: false,

@@ -75,6 +75,7 @@ import {
   useSavePluginAuthBinding,
   useSavePluginConfig,
   useSavePluginTaskBinding,
+  useTestPluginConfig,
   useUpdatePluginInstallation,
   useUpdatePluginCatalogSettings,
   useUpdatePluginRepository,
@@ -282,6 +283,7 @@ function InstalledPluginCard({
   const updateInstallation = useUpdatePluginInstallation();
   const deleteInstallation = useDeletePluginInstallation();
   const applyUpdate = useApplyPluginUpdate();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const capabilities = installation.capabilities ?? [];
   const presentation = installation.presentation ?? catalogEntry?.presentation;
   const repoURL = installation.repo_url || catalogEntry?.repo_url;
@@ -291,160 +293,193 @@ function InstalledPluginCard({
   );
 
   return (
-    <div className="surface-panel-subtle group relative overflow-hidden rounded-xl transition-all">
-      <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
-        {/* Left: icon + info */}
-        <div className="flex items-start gap-4">
-          <div
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${
-              installation.enabled ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"
-            }`}
-          >
-            <Blocks className="h-5 w-5" />
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-[15px] leading-tight font-semibold">
-                {pluginDisplayName(installation.plugin_id, presentation)}
-              </h3>
-              <Badge variant="secondary" className="font-mono text-[11px]">
-                {installation.version}
-              </Badge>
-              <Badge variant="outline" className="text-[11px]">
-                {sourceLabel(installation.source_kind)}
-              </Badge>
-              {installation.available_version && (
-                <Badge variant="outline" className="border-amber-500/40 text-[11px] text-amber-500">
-                  {installation.version} &rarr; {installation.available_version} available
-                </Badge>
-              )}
-              {installation.updates_paused ? (
-                <Badge variant="outline" className="text-muted-foreground text-[11px]">
-                  Updates paused
-                </Badge>
-              ) : null}
-              {installation.available_version && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-6 px-2 text-[11px]"
-                  disabled={applyUpdate.isPending}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    applyUpdate.mutate(installation.id);
-                  }}
-                >
-                  {applyUpdate.isPending ? (
-                    <>
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      Updating...
-                    </>
-                  ) : (
-                    "Update"
-                  )}
-                </Button>
-              )}
-              <span className="flex items-center gap-1.5">
-                <span
-                  className={`inline-block h-2 w-2 rounded-full ${installation.enabled ? "bg-success" : "bg-muted-foreground"}`}
-                />
-                <span className="text-muted-foreground text-[11px] font-medium">
-                  {installation.enabled ? "Active" : "Inactive"}
-                </span>
-              </span>
+    <>
+      <div className="surface-panel-subtle group relative overflow-hidden rounded-xl transition-all">
+        <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+          {/* Left: icon + info */}
+          <div className="flex items-start gap-4">
+            <div
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold ${
+                installation.enabled
+                  ? "bg-primary/15 text-primary"
+                  : "bg-muted text-muted-foreground"
+              }`}
+            >
+              <Blocks className="h-5 w-5" />
             </div>
-            <p className="text-muted-foreground font-mono text-[11px]">{installation.plugin_id}</p>
-            <p className="text-muted-foreground max-w-3xl text-xs leading-relaxed">
-              {pluginSummary(presentation, capabilities)}
-            </p>
-            {capabilities.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {capabilities.map((cap) => (
-                  <span
-                    key={`${cap.type}:${cap.id}`}
-                    className="bg-muted text-muted-foreground inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium"
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-[15px] leading-tight font-semibold">
+                  {pluginDisplayName(installation.plugin_id, presentation)}
+                </h3>
+                <Badge variant="secondary" className="font-mono text-[11px]">
+                  {installation.version}
+                </Badge>
+                <Badge variant="outline" className="text-[11px]">
+                  {sourceLabel(installation.source_kind)}
+                </Badge>
+                {installation.available_version && (
+                  <Badge
+                    variant="outline"
+                    className="border-amber-500/40 text-[11px] text-amber-500"
                   >
-                    {cap.display_name || capabilityLabel(cap.type)}
-                  </span>
-                ))}
-              </div>
-            )}
-            <PluginResourceLinks presentation={presentation} repoURL={repoURL} />
-          </div>
-        </div>
-
-        {/* Right: actions */}
-        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:ml-4">
-          {adminRoutes.length > 0 ? (
-            <>
-              {adminRoutes.map((route) => {
-                const href = pluginRouteHref(installation.id, route.path);
-                return (
+                    {installation.version} &rarr; {installation.available_version} available
+                  </Badge>
+                )}
+                {installation.updates_paused ? (
+                  <Badge variant="outline" className="text-muted-foreground text-[11px]">
+                    Updates paused
+                  </Badge>
+                ) : null}
+                {installation.available_version && (
                   <Button
-                    key={route.id}
                     variant="outline"
                     size="sm"
-                    onClick={() => void navigateToPluginRoute(href)}
+                    className="h-6 px-2 text-[11px]"
+                    disabled={applyUpdate.isPending}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      applyUpdate.mutate(installation.id);
+                    }}
                   >
-                    <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                    {route.navigation_label || route.path}
+                    {applyUpdate.isPending ? (
+                      <>
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        Updating...
+                      </>
+                    ) : (
+                      "Update"
+                    )}
                   </Button>
-                );
-              })}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                title="Plugin settings"
-                aria-label="Plugin settings"
-                onClick={() => onConfigure(installation)}
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-              </Button>
-            </>
-          ) : (
-            <Button variant="outline" size="sm" onClick={() => onConfigure(installation)}>
-              <Settings2 className="mr-1.5 h-3.5 w-3.5" />
-              Configure
-            </Button>
-          )}
-          <Select
-            value={installation.update_policy ?? "auto"}
-            onValueChange={(value) =>
-              updateInstallation.mutate({
-                id: installation.id,
-                body: { update_policy: value },
-              })
-            }
-          >
-            <SelectTrigger size="sm" className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="auto">Auto</SelectItem>
-              <SelectItem value="notify">Notify</SelectItem>
-              <SelectItem value="off">Off</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5">
-            <Switch
-              size="sm"
-              checked={installation.enabled}
-              onCheckedChange={(checked) =>
-                updateInstallation.mutate({ id: installation.id, body: { enabled: checked } })
-              }
-            />
+                )}
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${installation.enabled ? "bg-success" : "bg-muted-foreground"}`}
+                  />
+                  <span className="text-muted-foreground text-[11px] font-medium">
+                    {installation.enabled ? "Active" : "Inactive"}
+                  </span>
+                </span>
+              </div>
+              <p className="text-muted-foreground font-mono text-[11px]">
+                {installation.plugin_id}
+              </p>
+              <p className="text-muted-foreground max-w-3xl text-xs leading-relaxed">
+                {pluginSummary(presentation, capabilities)}
+              </p>
+              {capabilities.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {capabilities.map((cap) => (
+                    <span
+                      key={`${cap.type}:${cap.id}`}
+                      className="bg-muted text-muted-foreground inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium"
+                    >
+                      {cap.display_name || capabilityLabel(cap.type)}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <PluginResourceLinks presentation={presentation} repoURL={repoURL} />
+            </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={() => deleteInstallation.mutate(installation.id)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+
+          {/* Right: actions */}
+          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:ml-4">
+            {adminRoutes.length > 0 ? (
+              <>
+                {adminRoutes.map((route) => {
+                  const href = pluginRouteHref(installation.id, route.path);
+                  return (
+                    <Button
+                      key={route.id}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void navigateToPluginRoute(href)}
+                    >
+                      <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                      {route.navigation_label || route.path}
+                    </Button>
+                  );
+                })}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Plugin settings"
+                  aria-label="Plugin settings"
+                  onClick={() => onConfigure(installation)}
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            ) : (
+              <Button variant="outline" size="sm" onClick={() => onConfigure(installation)}>
+                <Settings2 className="mr-1.5 h-3.5 w-3.5" />
+                Configure
+              </Button>
+            )}
+            <Select
+              value={installation.update_policy ?? "auto"}
+              onValueChange={(value) =>
+                updateInstallation.mutate({
+                  id: installation.id,
+                  body: { update_policy: value },
+                })
+              }
+            >
+              <SelectTrigger size="sm" className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">Auto</SelectItem>
+                <SelectItem value="notify">Notify</SelectItem>
+                <SelectItem value="off">Off</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5">
+              <Switch
+                size="sm"
+                checked={installation.enabled}
+                onCheckedChange={(checked) =>
+                  updateInstallation.mutate({ id: installation.id, body: { enabled: checked } })
+                }
+              />
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => setConfirmDelete(true)}
+              aria-label={`Uninstall ${pluginDisplayName(installation.plugin_id, presentation)}`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
-    </div>
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Uninstall {pluginDisplayName(installation.plugin_id, presentation)}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Silo will stop the plugin, then remove its installation, configuration, and installed
+              files. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteInstallation.mutate(installation.id)}
+              disabled={deleteInstallation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteInstallation.isPending ? "Uninstalling..." : "Uninstall plugin"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -458,6 +493,7 @@ function ConfigureDialog({
   onClose: () => void;
 }) {
   const saveConfig = useSavePluginConfig();
+  const testConfig = useTestPluginConfig();
   const saveAuthBinding = useSavePluginAuthBinding();
   const saveTaskBinding = useSavePluginTaskBinding();
   const capabilities = installation.capabilities ?? [];
@@ -508,9 +544,26 @@ function ConfigureDialog({
                       key={schema.key}
                       schema={schema}
                       value={globalConfigs.find((entry) => entry.key === schema.key)?.value}
+                      configuredSecrets={
+                        globalConfigs.find((entry) => entry.key === schema.key)?.configured_secrets
+                      }
                       isSaving={saveConfig.isPending}
-                      onSave={(key, nextValue) =>
-                        saveConfig.mutate({ id: installation.id, body: { key, value: nextValue } })
+                      isTesting={testConfig.isPending}
+                      onTest={(key, nextValue, clearSecrets) =>
+                        testConfig.mutateAsync({
+                          id: installation.id,
+                          body: { key, value: nextValue, clear_secrets: clearSecrets },
+                        })
+                      }
+                      onSave={(key, nextValue, clearSecrets) =>
+                        saveConfig.mutate({
+                          id: installation.id,
+                          body: {
+                            key,
+                            value: nextValue,
+                            clear_secrets: clearSecrets,
+                          },
+                        })
                       }
                     />
                   ))}
@@ -530,6 +583,10 @@ function ConfigureDialog({
               </AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-3">
+                  <p className="text-muted-foreground text-xs">
+                    Auth-provider bindings are registered at server startup. Saved changes require a
+                    restart.
+                  </p>
                   {authCapabilities.map((capability, index) => {
                     const binding = authBindings.find((e) => e.capability_id === capability.id);
                     return (
@@ -545,6 +602,7 @@ function ConfigureDialog({
                         </div>
                         <Switch
                           checked={binding?.enabled ?? false}
+                          disabled={saveAuthBinding.isPending}
                           onCheckedChange={(checked) =>
                             saveAuthBinding.mutate({
                               id: installation.id,
@@ -577,6 +635,10 @@ function ConfigureDialog({
               </AccordionTrigger>
               <AccordionContent>
                 <div className="space-y-3">
+                  <p className="text-muted-foreground text-xs">
+                    Enable or disable each declared task binding. Task registration is rebuilt at
+                    server startup, so saved changes require a restart.
+                  </p>
                   {taskCapabilities.map((capability) => {
                     const binding = taskBindings.find((e) => e.capability_id === capability.id);
                     return (
@@ -589,23 +651,24 @@ function ConfigureDialog({
                             {capability.display_name || capability.id}
                           </p>
                           <p className="text-muted-foreground font-mono text-xs">{capability.id}</p>
+                          <p className="text-muted-foreground mt-1 text-xs">
+                            Trigger: {JSON.stringify(binding?.trigger ?? { type: "startup" })}
+                          </p>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
+                        <Switch
+                          checked={binding?.enabled ?? true}
+                          disabled={saveTaskBinding.isPending}
+                          onCheckedChange={(checked) =>
                             saveTaskBinding.mutate({
                               id: installation.id,
                               capabilityId: capability.id,
                               body: {
-                                enabled: binding?.enabled ?? true,
+                                enabled: checked,
                                 trigger: binding?.trigger ?? { type: "startup" },
                               },
                             })
                           }
-                        >
-                          Save binding
-                        </Button>
+                        />
                       </div>
                     );
                   })}

@@ -42,3 +42,23 @@ func (c *MatchQueueCoordinator) EnqueueSeriesRoot(ctx context.Context, folderID 
 	}
 	return c.seriesRepo.EnqueueSeriesRoot(ctx, folderID, observedRootPath)
 }
+
+// WakeForChangedInputs recalculates queue fingerprints after a provider
+// lifecycle event. Only work whose effective provider chain (or another
+// fingerprint input) changed is reset, including pending rows in backoff.
+func (c *MatchQueueCoordinator) WakeForChangedInputs(ctx context.Context) error {
+	if c == nil {
+		return nil
+	}
+	if c.movieRepo != nil {
+		if _, err := c.movieRepo.WakeForChangedInputs(ctx); err != nil {
+			return err
+		}
+	}
+	if c.seriesRepo != nil {
+		if _, err := c.seriesRepo.WakeForChangedInputs(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}

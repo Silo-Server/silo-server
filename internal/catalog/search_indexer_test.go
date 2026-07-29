@@ -137,6 +137,37 @@ func TestAttachDocumentVectorsSkipsWhenSemanticDisabled(t *testing.T) {
 	}
 }
 
+func TestCatalogSearchDocumentIncludesPersistedAliases(t *testing.T) {
+	pool := newSemanticCoverageTestPool(t)
+	ctx := context.Background()
+	var aliasTable *string
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.media_item_aliases')::text`).Scan(&aliasTable); err != nil {
+		t.Fatalf("check media_item_aliases table: %v", err)
+	}
+	if aliasTable == nil || *aliasTable == "" {
+		t.Skip("test database has not applied media item aliases migration")
+	}
+	contentID := fmt.Sprintf("alias-doc-%d", time.Now().UnixNano())
+	seedSemanticCoverageMediaItem(t, pool, contentID, "series", "matched")
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = $1`, contentID) })
+	if _, err := pool.Exec(ctx, `UPDATE media_items SET title = '倒凶十将伝', original_title = '倒凶十将伝' WHERE content_id = $1`, contentID); err != nil {
+		t.Fatalf("seed native title: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_item_aliases (content_id, title, language, kind, provider)
+		VALUES ($1, '10 Tokyo Warriors', 'en', 'alternate', 'tvdb')`, contentID); err != nil {
+		t.Fatalf("seed alias: %v", err)
+	}
+
+	docs, err := NewCatalogSearchIndexer(pool, nil).LoadDocumentsByIDs(ctx, []string{contentID}, []string{catalogTestContentTypeSeries}, "", false, false)
+	if err != nil {
+		t.Fatalf("LoadDocumentsByIDs(): %v", err)
+	}
+	if len(docs) != 1 || !slices.Contains(docs[0].TitleVariants, "10 Tokyo Warriors") {
+		t.Fatalf("documents = %#v, want English alias in title variants", docs)
+	}
+}
+
 // TestCountCatalogSearchVectorDocumentsModelCoverage verifies case (a): an
 // embedding stored under a different model is excluded when a model is
 // requested, but counted when the model filter is empty.

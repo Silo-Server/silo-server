@@ -28,6 +28,10 @@ const deviceSeenThrottle = 5 * time.Minute
 
 const subtitleAppearanceSettingKey = "subtitle_appearance"
 const (
+	legacyAndroidNextUpPromptSettingKey = "player.next_up_prompt_seconds"
+	canonicalNextUpPromptSettingKey     = "playback.next_up_prompt_seconds"
+)
+const (
 	libraryPageStateSettingKey         = "ui.library_page_state"
 	rememberLibraryPageStateSettingKey = "ui.remember_library_page_state"
 	searchMediaScopeSettingKey         = "search.media_scope"
@@ -185,10 +189,10 @@ var settingsRegistry = map[string]settingSpec{
 		DefaultValue: "true",
 		Validate:     validateBoolSetting("playback.auto_play_next"),
 	},
-	"playback.next_up_prompt_seconds": {
+	canonicalNextUpPromptSettingKey: {
 		Scope:        scopeDevice,
 		DefaultValue: "30",
-		Validate:     validateIntRange("playback.next_up_prompt_seconds", 0, 120),
+		Validate:     validateIntRange(canonicalNextUpPromptSettingKey, 0, 120),
 	},
 	subtitleAppearanceSettingKey: {
 		Scope:        scopeDevice,
@@ -424,6 +428,8 @@ func (h *SettingsHandler) HandleGetDeviceSetting(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
 		return
 	}
+	requestedKey := key
+	key = canonicalDeviceSettingKey(key)
 	if !keyUsesDeviceScope(key) {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeDevice))
 		return
@@ -440,7 +446,7 @@ func (h *SettingsHandler) HandleGetDeviceSetting(w http.ResponseWriter, r *http.
 	}
 	h.registerRequestDevice(r.Context(), store, profileID, device)
 
-	value, err := store.GetDeviceSetting(r.Context(), profileID, device.DeviceID, key)
+	value, err := getDeviceSettingWithLegacyFallback(r.Context(), store, profileID, device.DeviceID, key)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to get device setting")
 		return
@@ -451,7 +457,7 @@ func (h *SettingsHandler) HandleGetDeviceSetting(w http.ResponseWriter, r *http.
 	}
 
 	writeJSON(w, http.StatusOK, settingResponse{
-		Key:   key,
+		Key:   requestedKey,
 		Value: value.Value,
 	})
 }
@@ -470,6 +476,7 @@ func (h *SettingsHandler) HandleSetDeviceSetting(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
 		return
 	}
+	key = canonicalDeviceSettingKey(key)
 	if !keyUsesDeviceScope(key) {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeDevice))
 		return
@@ -506,6 +513,15 @@ func (h *SettingsHandler) HandleSetDeviceSetting(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set device setting")
 		return
 	}
+	if legacyKey, ok := legacyDeviceSettingKey(key); ok {
+		if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, legacyKey); err != nil {
+			slog.WarnContext(r.Context(), "failed to clean up legacy device setting after canonical write",
+				"legacy_key", legacyKey,
+				"canonical_key", key,
+				"error", err,
+			)
+		}
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -524,6 +540,7 @@ func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "bad_request", "Setting key is required")
 		return
 	}
+	key = canonicalDeviceSettingKey(key)
 	if !keyUsesDeviceScope(key) {
 		writeError(w, http.StatusBadRequest, "bad_request", fmt.Sprintf("%s is not a %s setting", key, scopeDevice))
 		return
@@ -540,6 +557,12 @@ func (h *SettingsHandler) HandleDeleteDeviceSetting(w http.ResponseWriter, r *ht
 	}
 	h.registerRequestDevice(r.Context(), store, profileID, device)
 
+	if legacyKey, ok := legacyDeviceSettingKey(key); ok {
+		if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, legacyKey); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
+			return
+		}
+	}
 	if err := store.DeleteDeviceSetting(r.Context(), profileID, device.DeviceID, key); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to delete device setting")
 		return
@@ -721,6 +744,7 @@ func parseSettingKeys(raw string) []string {
 }
 
 func validateRegisteredSetting(key, value string, expectedScope settingsScope) error {
+	key = canonicalDeviceSettingKey(key)
 	spec, ok := settingsRegistry[key]
 	if !ok {
 		return nil
@@ -735,27 +759,67 @@ func validateRegisteredSetting(key, value string, expectedScope settingsScope) e
 }
 
 func keyUsesUserScope(key string) bool {
+	key = canonicalDeviceSettingKey(key)
 	spec, ok := settingsRegistry[key]
 	return !ok || spec.Scope == scopeUser
 }
 
 func keyUsesDeviceScope(key string) bool {
+	key = canonicalDeviceSettingKey(key)
 	spec, ok := settingsRegistry[key]
 	return ok && spec.Scope == scopeDevice
 }
 
 func isMigratedPlaybackSetting(key string) bool {
+	key = canonicalDeviceSettingKey(key)
 	switch key {
 	case "playback.preferred_quality",
 		"playback.audio_language",
 		"playback.auto_skip_intro",
 		"playback.auto_skip_credits",
 		"playback.auto_play_next",
-		"playback.next_up_prompt_seconds":
+		canonicalNextUpPromptSettingKey:
 		return true
 	default:
 		return false
 	}
+}
+
+// canonicalDeviceSettingKey keeps the Android key shipped before the server's
+// canonical playback namespace was finalized working without storing two
+// independent values. New clients should use playback.next_up_prompt_seconds.
+func canonicalDeviceSettingKey(key string) string {
+	if key == legacyAndroidNextUpPromptSettingKey {
+		return canonicalNextUpPromptSettingKey
+	}
+	return key
+}
+
+func legacyDeviceSettingKey(key string) (string, bool) {
+	if canonicalDeviceSettingKey(key) == canonicalNextUpPromptSettingKey {
+		return legacyAndroidNextUpPromptSettingKey, true
+	}
+	return "", false
+}
+
+// getDeviceSettingWithLegacyFallback is a read-only canonical-first lookup for
+// the Android key used before the playback namespace was finalized. Canonical
+// PUT and DELETE requests own migration and cleanup.
+func getDeviceSettingWithLegacyFallback(
+	ctx context.Context,
+	store userstore.UserStore,
+	profileID, deviceID, key string,
+) (*userstore.DeviceSettingEntry, error) {
+	override, err := store.GetDeviceSetting(ctx, profileID, deviceID, key)
+	if err != nil || override != nil {
+		return override, err
+	}
+
+	legacyKey, ok := legacyDeviceSettingKey(key)
+	if !ok {
+		return nil, nil
+	}
+	return store.GetDeviceSetting(ctx, profileID, deviceID, legacyKey)
 }
 
 func usesLegacyUserFallback(key string) bool {
@@ -827,9 +891,11 @@ func (h *SettingsHandler) resolveEffectiveSetting(
 	device requestDeviceMetadata,
 	key string,
 ) (effectiveSettingResponse, error) {
+	requestedKey := key
+	key = canonicalDeviceSettingKey(key)
 	spec, hasSpec := settingsRegistry[key]
 	resolved := effectiveSettingResponse{
-		Key:            key,
+		Key:            requestedKey,
 		ProfileID:      profileID,
 		DeviceID:       device.DeviceID,
 		DeviceName:     device.DeviceName,
@@ -845,7 +911,7 @@ func (h *SettingsHandler) resolveEffectiveSetting(
 			resolved.Source = "unset"
 		}
 		if device.DeviceID != "" {
-			override, err := store.GetDeviceSetting(ctx, profileID, device.DeviceID, key)
+			override, err := getDeviceSettingWithLegacyFallback(ctx, store, profileID, device.DeviceID, key)
 			if err != nil {
 				return effectiveSettingResponse{}, err
 			}

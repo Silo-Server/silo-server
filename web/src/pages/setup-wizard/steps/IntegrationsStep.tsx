@@ -63,18 +63,30 @@ function ProviderCard({ config }: { config: SubtitleProviderConfig }) {
 
   function handleTest() {
     setTestResult(null);
-    testProvider.mutate(providerName, {
-      onSuccess: (result) => setTestResult({ success: result.success, error: result.error }),
-      onError: (err) =>
-        setTestResult({
-          success: false,
-          error: err instanceof Error ? err.message : "Test failed",
-        }),
-    });
+    testProvider.mutate(
+      {
+        provider: providerName,
+        config: {
+          enabled,
+          ...(isOpenSubtitles ? { username, password } : { api_key: apiKey }),
+        },
+      },
+      {
+        onSuccess: (result) => setTestResult({ success: result.success, error: result.error }),
+        onError: (err) =>
+          setTestResult({
+            success: false,
+            error: err instanceof Error ? err.message : "Test failed",
+          }),
+      },
+    );
   }
 
   return (
-    <div className="bg-foreground/[0.03] hover:bg-foreground/[0.05] border-foreground/[0.07] rounded-xl border transition-colors">
+    <fieldset
+      disabled={updateProvider.isPending || testProvider.isPending}
+      className="bg-foreground/[0.03] hover:bg-foreground/[0.05] border-foreground/[0.07] rounded-xl border transition-colors"
+    >
       {/* Card header */}
       <div className="flex items-center justify-between px-4 py-3.5">
         <div className="min-w-0 flex-1">
@@ -166,7 +178,7 @@ function ProviderCard({ config }: { config: SubtitleProviderConfig }) {
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 }
 

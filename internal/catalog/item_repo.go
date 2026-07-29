@@ -167,9 +167,9 @@ const trgmWordSimilarityThreshold = 0.30
 const fuzzyAugmentSimilarityFloor = 0.45
 
 // itemColumnNames lists, in scan order, every column selected by media_items
-// item queries. Shared by itemColumns, qualifiedItemColumns,
-// qualifiedListItemColumns, and qualifiedItemColumnRefs so the select lists
-// can never drift from each other or from scanItem.
+// item queries. Shared by itemColumns, qualifiedItemColumns, and
+// qualifiedListItemColumns so the select lists can never drift from each
+// other or from scanItem.
 var itemColumnNames = []string{
 	"content_id", "type", "title", "sort_title", "default_metadata_language", "original_title", "year", "genres",
 	"content_rating", "runtime", "overview", "tagline",
@@ -1228,188 +1228,10 @@ func (r *ItemRepository) buildSearchSQLWithTotal(query string, itemTypes []strin
 // buildSearchSQLFromParsed is the FTS query builder proper; the string-taking
 // wrappers above parse first. SearchPage parses once and calls this directly so
 // the same parsedSearchQuery feeds the FTS builder, the fuzzy builder, and the
-// eligibility gate without re-parsing.
+// eligibility gate without re-parsing. The mixed builder unions media_items and
+// episode candidates into one ranked page.
 func (r *ItemRepository) buildSearchSQLFromParsed(parsed parsedSearchQuery, itemTypes []string, limit, offset int, filter AccessFilter, includeTotal bool) (dataSQL, countSQL string, args []any) {
-	searchText := searchTextFromParsed(parsed)
-	if searchText == "" {
-		return "", "", nil
-	}
-	var conditions []string
-	titlePrefixIdx := 2
-	args = []any{searchText, buildTitlePrefixTsQuery(searchText)}
-	argIdx := 3
-
-	// All title-side text on both sides of @@ flows through
-	// public.normalize_search_text() (migrations 127 / 138), which strips
-	// non-alphanumeric chars, drops standalone "and" tokens, and normalizes
-	// common title numbers. The expression must match
-	// idx_media_items_search_title_fields exactly for the GIN index to be used.
-	//
-	// Overview uses the 'english' config which natively treats "and" as a
-	// stop word, so it does not need explicit normalization.
-	titleVector := `(
-		setweight(to_tsvector('simple', public.normalize_search_text(COALESCE(mi.title, ''))), 'A') ||
-		setweight(to_tsvector('simple', public.normalize_search_text(COALESCE(mi.original_title, ''))), 'A') ||
-		setweight(to_tsvector('simple', public.normalize_search_text(COALESCE(mi.sort_title, ''))), 'B')
-	)`
-	overviewVector := `to_tsvector('english', COALESCE(mi.overview, ''))`
-	normalizedTitleExpr := `public.normalize_search_text(%s)`
-	titleQuery := `websearch_to_tsquery('simple', public.normalize_search_text($1))`
-	titlePrefixQuery := fmt.Sprintf("to_tsquery('simple', $%d)", titlePrefixIdx)
-	titleMatch := fmt.Sprintf("%s @@ %s", titleVector, titleQuery)
-	titlePrefixMatch := fmt.Sprintf("($%d <> '' AND %s @@ %s)", titlePrefixIdx, titleVector, titlePrefixQuery)
-	overviewMatch := fmt.Sprintf("%s @@ websearch_to_tsquery('english', $1)", overviewVector)
-
-	// Keep the base match condition index-friendly; exact-title logic is used as
-	// a ranking boost later, not as an additional scan predicate. The trigram
-	// (typo-tolerant) arm intentionally lives in buildFuzzySearchSQL, not here:
-	// OR-ing the % operator into this WHERE forced a lossy bitmap recheck that
-	// rebuilt the title tsvectors for thousands of near-miss rows. SearchPage
-	// invokes the fuzzy path separately only when this FTS query is sparse.
-	conditions = append(conditions, fmt.Sprintf("(%s OR %s OR %s)", titleMatch, titlePrefixMatch, overviewMatch))
-
-	fromClause := appendSearchScopeFilters(itemTypes, filter, &conditions, &args, &argIdx)
-
-	whereClause := "WHERE " + strings.Join(conditions, " AND ")
-
-	// Bind ExactTitleHint exactly once. The same arg index is referenced by
-	// both contiguous_title_match and exact_title_match (used as ranking
-	// signals in the ORDER BY). The post-CTE WHERE itself gates on title_rank
-	// > 0 (true title FTS match), not on contiguous_title_match.
-	exactIdx := argIdx
-	args = append(args, parsed.ExactTitleHint)
-	argIdx++
-
-	// mi.title uses the title_normalized stored generated column (migrations
-	// 105 / 127), so the LIKE '%pattern%' arm hits the gin_trgm_ops index
-	// instead of recomputing normalization per row. original_title and
-	// sort_title do not have a trigram index of their own, so their LIKE
-	// arms call public.normalize_search_text() per row. The tsvector @@
-	// path covers all three via idx_media_items_search_title_fields.
-	contiguousTitleMatch := fmt.Sprintf(`(
-		$%d <> '' AND (
-			%s LIKE '%%' || $%d || '%%' OR
-			%s LIKE '%%' || $%d || '%%' OR
-			%s LIKE '%%' || $%d || '%%'
-		)
-	)`,
-		exactIdx,
-		"mi.title_normalized", exactIdx,
-		fmt.Sprintf(normalizedTitleExpr, "mi.original_title"), exactIdx,
-		fmt.Sprintf(normalizedTitleExpr, "mi.sort_title"), exactIdx,
-	)
-
-	var yearArg any
-	if parsed.Year != nil {
-		yearArg = *parsed.Year
-	}
-	yearIdx := argIdx
-	args = append(args, yearArg)
-	argIdx++
-	phraseIdx := argIdx
-	args = append(args, parsed.Phrase)
-	argIdx++
-
-	exactTitleMatch := fmt.Sprintf(`(
-		$%d <> '' AND (
-			%s = $%d OR
-			%s = $%d OR
-			%s = $%d
-		)
-	)`,
-		exactIdx,
-		"mi.title_normalized", exactIdx,
-		fmt.Sprintf(normalizedTitleExpr, "mi.original_title"), exactIdx,
-		fmt.Sprintf(normalizedTitleExpr, "mi.sort_title"), exactIdx,
-	)
-
-	// Qualified column names inside the CTE, grouped so the MAX(...) ranking
-	// aggregates below are legal. The select list aliases coalesced columns back
-	// to their own names (poster_path etc.) so the outer query can re-reference
-	// them; GROUP BY needs the raw references because output aliases are invalid
-	// there.
-	qualifiedCols := qualifiedItemColumns("mi")
-	groupByCols := qualifiedItemColumnRefs("mi")
-	scoredCTE := fmt.Sprintf(`
-		WITH scored AS (
-			SELECT
-				%s,
-				MAX(CASE
-					WHEN %s THEN 1
-					ELSE 0
-				END) AS exact_title_match,
-				MAX(CASE
-					WHEN %s THEN 1
-					ELSE 0
-				END) AS contiguous_title_match,
-				MAX(CASE
-					WHEN $%d::int IS NOT NULL AND mi.year = $%d::int THEN 1
-					ELSE 0
-				END) AS year_match,
-				MAX(ts_rank_cd(%s, %s)) AS title_rank,
-				MAX(CASE
-					WHEN $%d <> '' THEN ts_rank_cd(%s, %s)
-					ELSE 0
-				END) AS title_prefix_rank,
-				MAX(ts_rank_cd(%s, websearch_to_tsquery('english', $1))) AS overview_rank,
-				MAX(CASE
-					WHEN $%d <> '' THEN ts_rank_cd(%s, phraseto_tsquery('simple', public.normalize_search_text($%d)))
-					ELSE 0
-				END) AS phrase_rank
-			FROM %s
-			%s
-			GROUP BY %s
-		)
-	`, qualifiedCols, exactTitleMatch, contiguousTitleMatch, yearIdx, yearIdx, titleVector, titleQuery, titlePrefixIdx, titleVector, titlePrefixQuery, overviewVector, phraseIdx, titleVector, phraseIdx, fromClause, whereClause, groupByCols)
-
-	// COUNT(*) OVER () runs after the GROUP BY in the scored CTE collapses
-	// duplicates from the library JOIN, so the window count preserves the
-	// COUNT(DISTINCT mi.content_id) semantics of the prior 2-query path.
-	// The stats CTE + CROSS JOIN below means the window count reflects the
-	// post-filter row count automatically.
-	//
-	// The stats CTE gates on title_rank > 0 (true title FTS match) rather
-	// than contiguous_title_match (LIKE substring), so reordered-token title
-	// queries like "order law" → "Law and Order" aren't wrongly demoted to
-	// the overview-fallback bucket. The post-CTE WHERE then keeps every title
-	// FTS hit, and admits overview-only rows only when no title hit exists
-	// anywhere in the candidate set AND the overview rank clears
-	// overviewMatchFloor. This suppresses single-occurrence body matches
-	// (which score at PostgreSQL's default D weight of 0.1) for common
-	// single-word queries like "obsession" that would otherwise flood
-	// results with description-only hits.
-	//
-	// countSQL is a count-only sibling that omits LIMIT/OFFSET/ORDER BY. It is
-	// invoked only as a fallback when the data SELECT returns an empty page
-	// past offset 0 — COUNT(*) OVER () emits no rows in that case so total
-	// would otherwise default to 0.
-	statsCTE := `
-		, stats AS (
-			SELECT MAX(CASE WHEN title_rank > 0 OR title_prefix_rank > 0 THEN 1 ELSE 0 END) AS has_title_match
-			FROM scored
-		)`
-	// postFilter is the FROM + CROSS JOIN + WHERE shared by both dataSQL and
-	// countSQL. Keeping it in one string ensures the empty-page fallback count
-	// can never drift from the data query's filter.
-	postFilter := fmt.Sprintf(`FROM scored
-		CROSS JOIN stats
-		WHERE scored.title_rank > 0
-		   OR scored.title_prefix_rank > 0
-		   OR (COALESCE(stats.has_title_match, 0) = 0 AND scored.overview_rank >= %g)`, overviewMatchFloor)
-	totalColumn := ""
-	if includeTotal {
-		totalColumn = ", COUNT(*) OVER () AS total_count"
-	}
-	dataSQL = scoredCTE + statsCTE + fmt.Sprintf(`
-			SELECT %s%s
-			%s
-			ORDER BY exact_title_match DESC, contiguous_title_match DESC, year_match DESC, phrase_rank DESC, title_rank DESC, title_prefix_rank DESC, overview_rank DESC, LOWER(title) ASC, content_id ASC
-			LIMIT $%d OFFSET $%d`, itemColumns, totalColumn, postFilter, argIdx, argIdx+1)
-	countSQL = scoredCTE + statsCTE + fmt.Sprintf(`
-		SELECT COUNT(*)
-		%s`, postFilter)
-	args = append(args, limit, offset)
-	return dataSQL, countSQL, args
+	return r.buildMixedSearchSQLFromParsed(parsed, itemTypes, limit, offset, filter, includeTotal)
 }
 
 // appendSearchScopeFilters appends the scope predicates shared by the FTS search
@@ -1503,13 +1325,26 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 	// word-boundary extent of the title instead, and at equal thresholds it is
 	// a strict superset of % (the whole string is itself a valid extent). The
 	// same gin_trgm_ops index serves both operators.
-	conditions := []string{"public.normalize_search_text($1) <<% mi.title_normalized"}
+	// The alias arm is a scalar array subquery (InitPlan) for the same reason
+	// as the FTS builder's alias arms: `= ANY(param)` keeps the outer OR a
+	// BitmapOr over the two gin_trgm_ops indexes, where an `IN (subquery)` arm
+	// would force a seq scan evaluating <<% against every media_items row.
+	conditions := []string{`(
+		public.normalize_search_text($1) <<% mi.title_normalized OR
+		mi.content_id = ANY(COALESCE((
+			SELECT array_agg(DISTINCT mia.content_id) FROM media_item_aliases mia
+			WHERE public.normalize_search_text($1) <<% mia.normalized_title
+		), '{}'::text[]))
+	)`}
 	if minSimilarity > 0 {
 		// The floor is whole-title similarity, NOT word similarity: augmenting
 		// a query that already has hits must only admit near-identical titles,
 		// and word similarity rates embedded prefix words far too high (see
 		// fuzzyAugmentSimilarityFloor).
-		conditions = append(conditions, fmt.Sprintf("similarity(public.normalize_search_text($1), mi.title_normalized) >= $%d", argIdx))
+		conditions = append(conditions, fmt.Sprintf(`GREATEST(
+			similarity(public.normalize_search_text($1), mi.title_normalized),
+			COALESCE((SELECT MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
+		) >= $%d`, argIdx))
 		args = append(args, minSimilarity)
 		argIdx++
 	}
@@ -1538,8 +1373,14 @@ func (r *ItemRepository) buildFuzzySearchFromParsed(parsed parsedSearchQuery, it
 		WITH scored AS (
 			SELECT
 				%s,
-				MAX(strict_word_similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_rank,
-				MAX(similarity(public.normalize_search_text($1), mi.title_normalized)) AS fuzzy_full_rank
+				MAX(GREATEST(
+					strict_word_similarity(public.normalize_search_text($1), mi.title_normalized),
+					COALESCE((SELECT MAX(strict_word_similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
+				)) AS fuzzy_rank,
+				MAX(GREATEST(
+					similarity(public.normalize_search_text($1), mi.title_normalized),
+					COALESCE((SELECT MAX(similarity(public.normalize_search_text($1), mia.normalized_title)) FROM media_item_aliases mia WHERE mia.content_id = mi.content_id), 0)
+				)) AS fuzzy_full_rank
 			FROM %s
 			%s
 			GROUP BY %s

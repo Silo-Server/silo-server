@@ -70,7 +70,8 @@ type ProcessRequest struct {
 	// folder-scoped manual refreshes when the library's configured
 	// language differs from the item's stamp, so changing a library's
 	// metadata language actually re-fetches titles/overviews.
-	AdoptLanguage bool
+	AdoptLanguage            bool
+	recordedStaleProviderIDs providerIDValueSet
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -78,7 +79,49 @@ type ProcessResult struct {
 	ContentID string
 	IsNew     bool // True if this was an initial match (new item created)
 	Updated   bool // True if any fields were changed
+	Decision  *MatchDecision
 }
+
+// MatchDecision is a bounded, persistence-safe explanation of an automatic
+// matcher outcome. It intentionally excludes artwork and provider payloads.
+type MatchDecision struct {
+	Outcome        MatchOutcome             `json:"outcome"`
+	CandidateCount int                      `json:"candidate_count"`
+	Threshold      float64                  `json:"threshold"`
+	TopCandidates  []MatchDecisionCandidate `json:"top_candidates,omitempty"`
+}
+
+type MatchDecisionCandidate struct {
+	Title        string            `json:"title"`
+	MatchedTitle string            `json:"matched_title,omitempty"`
+	Year         int               `json:"year,omitempty"`
+	ProviderIDs  map[string]string `json:"provider_ids,omitempty"`
+	Sources      []string          `json:"sources,omitempty"`
+	Score        float64           `json:"score"`
+	Reasons      []string          `json:"reasons,omitempty"`
+}
+
+type MatchFailure struct {
+	Kind     MatchOutcome
+	Message  string
+	Decision *MatchDecision
+}
+
+// MatchOutcome is the stable matcher/queue failure taxonomy exposed in
+// bounded diagnostics. Keep additions backward-compatible with persisted
+// failure_kind values and the admin API.
+type MatchOutcome string
+
+const (
+	MatchOutcomeMatched               MatchOutcome = "matched"
+	MatchOutcomeNoCandidates          MatchOutcome = "no_candidates"
+	MatchOutcomeCandidateRejected     MatchOutcome = "candidate_rejected"
+	MatchOutcomeTrustedIDConflict     MatchOutcome = "trusted_id_conflict"
+	MatchOutcomeTrustedIDTypeMismatch MatchOutcome = "trusted_id_type_mismatch"
+	MatchOutcomeMetadataEmpty         MatchOutcome = "metadata_empty"
+	MatchOutcomeProviderTransient     MatchOutcome = "provider_transient"
+	MatchOutcomeProviderPermanent     MatchOutcome = "provider_permanent"
+)
 
 // MatchHints carries scanner-extracted data into the pipeline.
 // Adapted from matcher.MatchHints with FilePath added for local providers.
@@ -99,6 +142,17 @@ type MatchHints struct {
 	ObservedRootPath          string
 	AllGroupFilePaths         []string
 	PrimarySidecarSearchPaths []string
+	// AlternateIdentities are independently parsed title/year hypotheses from
+	// the filename and surrounding directories. They are tried only after the
+	// primary scanner identity fails, keeping provider traffic bounded while
+	// allowing a good filename to recover from a stale or release-like folder.
+	AlternateIdentities []MatchIdentityHint
+}
+
+type MatchIdentityHint struct {
+	Title  string
+	Year   int
+	Source string
 }
 
 // SearchQuery is passed to SearchProvider.Search().
@@ -118,13 +172,33 @@ type SearchQuery struct {
 
 // SearchResult is returned from SearchProvider.Search().
 type SearchResult struct {
-	Name        string
-	Year        int
-	ProviderIDs map[string]string
-	ImageURL    string
-	Overview    string
-	Provider    string // Slug of the provider that returned this
+	Name             string
+	OriginalTitle    string
+	TitleAliases     []TitleAlias
+	TitleLanguage    string
+	TitleIsFallback  bool
+	OriginalLanguage string
+	Year             int
+	ProviderIDs      map[string]string
+	ImageURL         string
+	Overview         string
+	Provider         string // Slug of the provider that returned this
 }
+
+// TitleAlias is a provider-confirmed title for the same work.
+type TitleAlias struct {
+	Title    string `json:"title"`
+	Language string `json:"language,omitempty"`
+	Kind     string `json:"kind"`
+	Provider string `json:"provider,omitempty"`
+}
+
+const (
+	titleAliasKindOriginal  = "original"
+	titleAliasKindLocalized = "localized"
+	matchContentTypeMovie   = "movie"
+	matchContentTypeSeries  = "series"
+)
 
 // MetadataRequest is passed to MetadataProvider.GetMetadata().
 type MetadataRequest struct {
@@ -163,24 +237,44 @@ type PersonDetailResult struct {
 
 // MetadataResult carries structured metadata from a single provider.
 type MetadataResult struct {
-	HasMetadata      bool
-	ProviderIDs      map[string]string
-	Title            string
-	OriginalTitle    string
-	SortTitle        string
-	Overview         string
-	Tagline          string
-	Year             int
-	Runtime          int
-	Genres           []string
-	Studios          []string
-	Networks         []string
-	Countries        []string
-	Keywords         []string
-	OriginalLanguage string
-	ContentRating    string
-	Ratings          Ratings
-	People           []models.ItemPerson
+	HasMetadata          bool
+	ProviderIDs          map[string]string
+	Title                string
+	OriginalTitle        string
+	SortTitle            string
+	Overview             string
+	Tagline              string
+	Year                 int
+	Runtime              int
+	Genres               []string
+	Studios              []string
+	Networks             []string
+	Countries            []string
+	Keywords             []string
+	OriginalLanguage     string
+	TitleAliases         []TitleAlias
+	TitleAliasesComplete bool
+	TitleLanguage        string
+	TitleIsFallback      bool
+	// titleAliasProviders records whether each contributing provider declared
+	// its aliases to be an authoritative snapshot. False means merge-only,
+	// which is the safe default for legacy plugins and partial responses.
+	titleAliasProviders map[string]bool
+	// quarantinedProviderIDKeys prevents unresolved conflicting IDs from being
+	// reintroduced by later provider details or durable merge.
+	quarantinedProviderIDKeys map[string]struct{}
+	// replacedProviderIDKeys forces an owning-provider consensus replacement to
+	// overwrite the corresponding stored provider-ID column during merge.
+	replacedProviderIDKeys map[string]struct{}
+	// recordedStaleProviderIDs contains provider values known dead before this
+	// refresh and suppresses them when durable state is merged.
+	recordedStaleProviderIDs providerIDValueSet
+	// sameRunStaleProviderIDs contains identity values that 404ed during this
+	// refresh and prevents them from being persisted by the same operation.
+	sameRunStaleProviderIDs providerIDValueSet
+	ContentRating           string
+	Ratings                 Ratings
+	People                  []models.ItemPerson
 	// Images (S3 paths or URLs).
 	PosterPath        string
 	PosterThumbhash   string

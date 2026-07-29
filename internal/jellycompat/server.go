@@ -20,6 +20,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
+	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
 // Dependencies holds the pluggable pieces used by the compat server.
@@ -92,14 +93,16 @@ type Dependencies struct {
 	// admin live-session table right after compat playback starts/stops, so
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
-	SessionSyncer     PlaybackSessionSyncer
-	FileResolver      FilePathResolver
-	UserStoreProvider userstore.UserStoreProvider
-	AccessFilterFn    AccessFilterResolver
-	NodePlanner       nodepool.SessionPlanner
-	JWTSecret         string
-	Recommender       recommendations.Recommender
-	RecWorker         *recommendations.Worker
+	SessionSyncer          PlaybackSessionSyncer
+	FileResolver           FilePathResolver
+	UserStoreProvider      userstore.UserStoreProvider
+	WatchScrobbler         PlaybackWatchScrobbler
+	StableIdentityResolver watchsync.ScrobbleIdentityResolver
+	AccessFilterFn         AccessFilterResolver
+	NodePlanner            nodepool.SessionPlanner
+	JWTSecret              string
+	Recommender            recommendations.Recommender
+	RecWorker              *recommendations.Worker
 
 	// Settings (optional; reads server_settings for watched threshold, etc.)
 	SettingsRepo SettingsReader
@@ -168,11 +171,15 @@ func (s *Server) SessionStore() *SessionStore {
 
 // StartBackgroundTasks starts background goroutines tied to the server lifecycle.
 // Call this once after constructing the server; goroutines stop when ctx is cancelled.
-func (s *Server) StartBackgroundTasks(ctx context.Context) {
+// The returned channel closes after the initial terminal recovery scan so
+// callers can order broader stale-session sweeps behind authoritative compat
+// recovery without delaying HTTP startup.
+func (s *Server) StartBackgroundTasks(ctx context.Context) <-chan struct{} {
 	if s.deps.DB != nil {
 		repo := NewSessionRepository(s.deps.DB, s.deps.SecretCipher)
 		StartSessionCleanupWithPlaybackStore(ctx, repo, s.deps.PlaybackStore, 1*time.Hour)
 	}
+	return StartTerminalScrobbleRecovery(ctx, s.deps.PlaybackStore, s.deps.WatchScrobbler, 30*time.Second)
 }
 
 // NewDependencies fills in sensible defaults for optional compat dependencies.

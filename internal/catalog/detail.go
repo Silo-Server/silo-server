@@ -34,6 +34,11 @@ type extraFileFetcher interface {
 	GetByExtraID(ctx context.Context, extraID string) ([]*models.MediaFile, error)
 }
 
+type batchDurationFetcher interface {
+	FirstDurationsByContentIDs(ctx context.Context, ids []string) (map[string]int, error)
+	FirstDurationsByEpisodeIDs(ctx context.Context, ids []string) (map[string]int, error)
+}
+
 type PlaybackProbeEnsurer interface {
 	Ensure(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error)
 }
@@ -88,6 +93,42 @@ type WorkFormatSummary struct {
 	Type      string `json:"type"`
 	ContentID string `json:"content_id"`
 	LibraryID int    `json:"library_id,omitempty"`
+}
+
+// ProbedDurationsByContentIDs resolves first-file probed durations when the
+// configured file fetcher supports the optional batch extension.
+func (s *DetailService) ProbedDurationsByContentIDs(ctx context.Context, ids []string) map[string]int {
+	if s == nil || s.fileFetcher == nil || len(ids) == 0 {
+		return nil
+	}
+	fetcher, ok := s.fileFetcher.(batchDurationFetcher)
+	if !ok {
+		return nil
+	}
+	durations, err := fetcher.FirstDurationsByContentIDs(ctx, ids)
+	if err != nil {
+		slog.Warn("failed to fetch probed content durations", "error", err, "id_count", len(ids))
+		return nil
+	}
+	return durations
+}
+
+// ProbedDurationsByEpisodeIDs resolves first-file probed durations when the
+// configured file fetcher supports the optional batch extension.
+func (s *DetailService) ProbedDurationsByEpisodeIDs(ctx context.Context, ids []string) map[string]int {
+	if s == nil || s.fileFetcher == nil || len(ids) == 0 {
+		return nil
+	}
+	fetcher, ok := s.fileFetcher.(batchDurationFetcher)
+	if !ok {
+		return nil
+	}
+	durations, err := fetcher.FirstDurationsByEpisodeIDs(ctx, ids)
+	if err != nil {
+		slog.Warn("failed to fetch probed episode durations", "error", err, "id_count", len(ids))
+		return nil
+	}
+	return durations
 }
 
 // ItemDetail is the full detail response for a single media item, including
@@ -3397,7 +3438,8 @@ func (s *DetailService) buildVersionChapters(ctx context.Context, file *models.M
 
 func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 	tracks := make([]VersionSubtitleTrack, 0, len(file.SubtitleTracks)+len(file.ExternalSubtitles))
-	for _, sub := range file.SubtitleTracks {
+	nextExternalIndex := len(file.VideoTracks) + len(file.AudioTracks)
+	for i, sub := range file.SubtitleTracks {
 		tracks = append(tracks, VersionSubtitleTrack{
 			Index:           sub.Index,
 			Language:        sub.Language,
@@ -3411,9 +3453,23 @@ func buildVersionSubtitleTracks(file *models.MediaFile) []VersionSubtitleTrack {
 			External:        sub.External,
 			FileName:        sub.FileName,
 		})
+
+		index := sub.Index
+		if index <= 0 {
+			index = len(file.VideoTracks) + len(file.AudioTracks) + i
+		}
+		if index >= nextExternalIndex {
+			nextExternalIndex = index + 1
+		}
 	}
-	for _, sub := range file.ExternalSubtitles {
+	// Zero means "use positional fallback" to downstream consumers and is
+	// omitted from JSON, so external tracks always receive positive indexes.
+	if nextExternalIndex < 1 {
+		nextExternalIndex = 1
+	}
+	for i, sub := range file.ExternalSubtitles {
 		tracks = append(tracks, VersionSubtitleTrack{
+			Index:           nextExternalIndex + i,
 			Language:        sub.Language,
 			Codec:           sub.Format,
 			Title:           firstNonEmpty(sub.Title, filepath.Base(sub.Path)),

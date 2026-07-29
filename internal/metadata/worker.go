@@ -16,6 +16,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
@@ -52,6 +53,9 @@ func (w *MatchWorker) SetConcurrency(workers, batchSize int) {
 
 func (w *MatchWorker) workerCount() int    { return int(w.workers.Load()) }
 func (w *MatchWorker) claimBatchSize() int { return int(w.batchSize.Load()) }
+func (w *MatchWorker) queueClaimSize() int {
+	return min(w.workerCount(), w.claimBatchSize())
+}
 
 type NonSeriesFileClaimer interface {
 	ClaimUnmatchedNonSeries(ctx context.Context, limit int) ([]*models.MediaFile, error)
@@ -68,17 +72,21 @@ type MatchSuppressionChecker interface {
 }
 
 type MovieFileClaimer interface {
-	Claim(ctx context.Context, limit int) ([]*models.MediaFile, error)
-	ClaimByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int, attemptBefore time.Time) ([]*models.MediaFile, error)
-	Delete(ctx context.Context, mediaFileID int) error
-	UpdateError(ctx context.Context, mediaFileID int, errText string) error
+	Claim(ctx context.Context, limit int) ([]models.MovieMatchJob, error)
+	ClaimByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int, attemptBefore time.Time) ([]models.MovieMatchJob, error)
+	Delete(ctx context.Context, mediaFileID int, leaseToken string) error
+	UpdateError(ctx context.Context, mediaFileID int, leaseToken, errText string) error
+	UpdateFailure(ctx context.Context, mediaFileID int, leaseToken string, failure MatchFailure) error
+	ReleaseLease(ctx context.Context, leaseToken string) (int, error)
 }
 
 type SeriesRootClaimer interface {
 	Claim(ctx context.Context, limit int) ([]models.SeriesRootMatchJob, error)
 	ClaimByFolderAndPathPrefix(ctx context.Context, folderID int, pathPrefix string, limit int, attemptBefore time.Time) ([]models.SeriesRootMatchJob, error)
-	Delete(ctx context.Context, folderID int, observedRootPath string) error
-	UpdateError(ctx context.Context, folderID int, observedRootPath string, errText string) error
+	Delete(ctx context.Context, folderID int, observedRootPath, leaseToken string) error
+	UpdateError(ctx context.Context, folderID int, observedRootPath, leaseToken, errText string) error
+	UpdateFailure(ctx context.Context, folderID int, observedRootPath, leaseToken string, failure MatchFailure) error
+	ReleaseLease(ctx context.Context, leaseToken string) (int, error)
 	ListByFolder(ctx context.Context, folderID int, limit int, offset int) ([]models.SeriesRootMatchQueueEntry, int, error)
 	CountByFolder(ctx context.Context, folderID int) (int, error)
 }
@@ -151,25 +159,11 @@ func (w *MatchWorker) Run(ctx context.Context) {
 // processUnmatched fetches a batch of unmatched files and processes them.
 func (w *MatchWorker) processUnmatched(ctx context.Context) {
 	if w.enableTVSeriesRootQueue && w.seriesClaimer != nil {
-		jobs, err := w.seriesClaimer.Claim(ctx, w.claimBatchSize())
-		if err != nil {
-			slog.ErrorContext(ctx, "metadata: failed to claim unmatched series roots", "component", "metadata", "error", err)
-		} else if len(jobs) > 0 {
-			slog.InfoContext(ctx, "metadata: processing unmatched series roots", "component", "metadata", "count", len(jobs))
-			if _, err := w.processSeriesRoots(ctx, jobs); err != nil {
-				slog.ErrorContext(ctx, "metadata: failed to process unmatched series roots", "component", "metadata", "error", err)
-			}
-		}
+		w.processBackgroundSeriesQueue(ctx)
 	}
 
 	if w.movieClaimer != nil {
-		files, err := w.movieClaimer.Claim(ctx, w.claimBatchSize())
-		if err != nil {
-			slog.ErrorContext(ctx, "metadata: failed to claim queued movie files", "component", "metadata", "error", err)
-		} else if len(files) > 0 {
-			slog.InfoContext(ctx, "metadata: processing queued movie files", "component", "metadata", "count", len(files))
-			w.processQueuedMovieFiles(ctx, files)
-		}
+		w.processBackgroundMovieQueue(ctx)
 	}
 
 	files, err := w.claimBackgroundFiles(ctx)
@@ -183,6 +177,51 @@ func (w *MatchWorker) processUnmatched(ctx context.Context) {
 
 	slog.InfoContext(ctx, "metadata: processing unmatched files", "component", "metadata", "count", len(files))
 	w.processFiles(ctx, files)
+}
+
+func (w *MatchWorker) processBackgroundSeriesQueue(ctx context.Context) {
+	remaining := w.claimBatchSize()
+	for remaining > 0 && ctx.Err() == nil {
+		claimLimit := min(w.queueClaimSize(), remaining)
+		jobs, err := w.seriesClaimer.Claim(ctx, claimLimit)
+		if err != nil {
+			slog.ErrorContext(ctx, "metadata: failed to claim unmatched series roots", "component", "metadata", "error", err)
+			return
+		}
+		if len(jobs) == 0 {
+			return
+		}
+		slog.InfoContext(ctx, "metadata: processing unmatched series roots", "component", "metadata", "count", len(jobs))
+		if _, err := w.processSeriesRoots(ctx, jobs); err != nil {
+			slog.ErrorContext(ctx, "metadata: failed to process unmatched series roots", "component", "metadata", "error", err)
+			return
+		}
+		remaining -= len(jobs)
+		if len(jobs) < claimLimit {
+			return
+		}
+	}
+}
+
+func (w *MatchWorker) processBackgroundMovieQueue(ctx context.Context) {
+	remaining := w.claimBatchSize()
+	for remaining > 0 && ctx.Err() == nil {
+		claimLimit := min(w.queueClaimSize(), remaining)
+		jobs, err := w.movieClaimer.Claim(ctx, claimLimit)
+		if err != nil {
+			slog.ErrorContext(ctx, "metadata: failed to claim queued movie files", "component", "metadata", "error", err)
+			return
+		}
+		if len(jobs) == 0 {
+			return
+		}
+		slog.InfoContext(ctx, "metadata: processing queued movie files", "component", "metadata", "count", len(jobs))
+		w.processQueuedMovieFiles(ctx, jobs)
+		remaining -= len(jobs)
+		if len(jobs) < claimLimit {
+			return
+		}
+	}
 }
 
 func (w *MatchWorker) processFile(ctx context.Context, file *models.MediaFile) {
@@ -332,6 +371,7 @@ func (w *MatchWorker) buildProcessRequestForGroup(ctx context.Context, represent
 		ImdbID:                    skeleton.ImdbID,
 		TvdbID:                    skeleton.TvdbID,
 		HintSource:                "scanner",
+		AlternateIdentities:       queuedMatchIdentityAlternates(representative, skeleton),
 	}
 
 	return ProcessRequest{
@@ -340,6 +380,62 @@ func (w *MatchWorker) buildProcessRequestForGroup(ctx context.Context, represent
 		FolderID:  formatFolderID(representative.MediaFolderID),
 		Mode:      ModeInitialMatch,
 	}
+}
+
+const maxAlternateMatchIdentities = 3
+
+func queuedMatchIdentityAlternates(file *models.MediaFile, skeleton *skeletonResult) []MatchIdentityHint {
+	if file == nil || skeleton == nil {
+		return nil
+	}
+
+	seen := map[string]struct{}{
+		matchIdentityKey(skeleton.Title, skeleton.Year): {},
+	}
+	out := make([]MatchIdentityHint, 0, maxAlternateMatchIdentities)
+	add := func(title string, year int, source string) {
+		title = strings.TrimSpace(naming.StripComparisonSafeEditionSuffix(title))
+		key := matchIdentityKey(title, year)
+		if title == "" || key == "" {
+			return
+		}
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, MatchIdentityHint{Title: title, Year: year, Source: source})
+	}
+
+	itemType := strings.ToLower(strings.TrimSpace(skeleton.Type))
+	if parsed := naming.ParseFilename(file.FilePath, itemType); parsed != nil {
+		add(parsed.Title, parsed.Year, "current_path")
+	}
+
+	if itemType == matchContentTypeMovie {
+		base := strings.TrimSuffix(filepath.Base(file.FilePath), filepath.Ext(file.FilePath))
+		stem := naming.ParseInferMovieStem(base, skeleton.Title, skeleton.Year)
+		add(stem.Title, stem.Year, "filename")
+
+		observedRoot := strings.TrimSpace(skeleton.ObservedRootPath)
+		if observedRoot == "" {
+			observedRoot = filepath.Dir(file.FilePath)
+		}
+		rootStem := naming.ParseInferMovieStem(filepath.Base(observedRoot), "", 0)
+		add(rootStem.Title, rootStem.Year, "release_folder")
+	}
+
+	if len(out) > maxAlternateMatchIdentities {
+		out = out[:maxAlternateMatchIdentities]
+	}
+	return out
+}
+
+func matchIdentityKey(title string, year int) string {
+	title = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(title)), " "))
+	if title == "" {
+		return ""
+	}
+	return title + "\x00" + strconv.Itoa(year)
 }
 
 func compactUniquePaths(paths []string) []string {
@@ -371,21 +467,49 @@ func (w *MatchWorker) ProcessFile(ctx context.Context, file *models.MediaFile) {
 // number of files processed.
 func (w *MatchWorker) ProcessBatch(ctx context.Context) (processed int, err error) {
 	if w.enableTVSeriesRootQueue && w.seriesClaimer != nil {
-		jobs, err := w.seriesClaimer.Claim(ctx, w.claimBatchSize())
-		if err != nil {
-			return 0, err
+		claimed := 0
+		for claimed < w.claimBatchSize() {
+			claimLimit := min(w.queueClaimSize(), w.claimBatchSize()-claimed)
+			jobs, err := w.seriesClaimer.Claim(ctx, claimLimit)
+			if err != nil {
+				return processed, err
+			}
+			if len(jobs) == 0 {
+				break
+			}
+			claimed += len(jobs)
+			batchProcessed, err := w.processSeriesRoots(ctx, jobs)
+			processed += batchProcessed
+			if err != nil {
+				return processed, err
+			}
+			if len(jobs) < claimLimit {
+				break
+			}
 		}
-		if len(jobs) > 0 {
-			return w.processSeriesRoots(ctx, jobs)
+		if claimed > 0 {
+			return processed, nil
 		}
 	}
 	if w.movieClaimer != nil {
-		files, err := w.movieClaimer.Claim(ctx, w.claimBatchSize())
-		if err != nil {
-			return 0, err
+		claimed := 0
+		for claimed < w.claimBatchSize() {
+			claimLimit := min(w.queueClaimSize(), w.claimBatchSize()-claimed)
+			jobs, err := w.movieClaimer.Claim(ctx, claimLimit)
+			if err != nil {
+				return processed, err
+			}
+			if len(jobs) == 0 {
+				break
+			}
+			claimed += len(jobs)
+			processed += w.processQueuedMovieFiles(ctx, jobs)
+			if len(jobs) < claimLimit {
+				break
+			}
 		}
-		if len(files) > 0 {
-			return w.processQueuedMovieFiles(ctx, files), nil
+		if claimed > 0 {
+			return processed, nil
 		}
 	}
 
@@ -408,28 +532,51 @@ func (w *MatchWorker) ProcessBatchByFolderAndPathPrefix(ctx context.Context, fol
 		return 0, err
 	}
 	if useSeriesQueue {
-		jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
-		if err != nil {
-			return 0, err
+		claimed := 0
+		for claimed < w.claimBatchSize() {
+			claimLimit := min(w.queueClaimSize(), w.claimBatchSize()-claimed)
+			jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, claimLimit, attemptBefore)
+			if err != nil {
+				return processed, err
+			}
+			if len(jobs) == 0 {
+				break
+			}
+			claimed += len(jobs)
+			batchProcessed, err := w.processSeriesRoots(ctx, jobs)
+			processed += batchProcessed
+			if err != nil {
+				return processed, err
+			}
+			if len(jobs) < claimLimit {
+				break
+			}
 		}
-		processed, err := w.processSeriesRoots(ctx, jobs)
-		if err != nil || processed > 0 {
-			return processed, err
+		if processed > 0 {
+			return processed, nil
 		}
 	}
 	if useSeriesQueue && !useMovieQueue {
 		return processed, nil
 	}
 	if useMovieQueue {
-		files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
-		if err != nil {
-			return 0, err
+		claimed := 0
+		for claimed < w.claimBatchSize() {
+			claimLimit := min(w.queueClaimSize(), w.claimBatchSize()-claimed)
+			jobs, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, claimLimit, attemptBefore)
+			if err != nil {
+				return processed, err
+			}
+			if len(jobs) == 0 {
+				break
+			}
+			claimed += len(jobs)
+			processed += w.processQueuedMovieFiles(ctx, jobs)
+			if len(jobs) < claimLimit {
+				break
+			}
 		}
-		processed := w.processQueuedMovieFiles(ctx, files)
-		if processed > 0 {
-			return processed, nil
-		}
-		if !useSeriesQueue {
+		if processed > 0 || !useSeriesQueue {
 			return processed, nil
 		}
 	}
@@ -463,7 +610,7 @@ func (w *MatchWorker) ProcessAllByFolderAndPathPrefix(ctx context.Context, folde
 		}
 
 		if useSeriesQueue {
-			jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
+			jobs, err := w.seriesClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.queueClaimSize(), attemptBefore)
 			if err != nil {
 				return processed, err
 			}
@@ -477,12 +624,12 @@ func (w *MatchWorker) ProcessAllByFolderAndPathPrefix(ctx context.Context, folde
 			}
 		}
 		if useMovieQueue {
-			files, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.claimBatchSize(), attemptBefore)
+			jobs, err := w.movieClaimer.ClaimByFolderAndPathPrefix(ctx, folderID, pathPrefix, w.queueClaimSize(), attemptBefore)
 			if err != nil {
 				return processed, err
 			}
-			if len(files) > 0 {
-				batchProcessed := w.processQueuedMovieFiles(ctx, files)
+			if len(jobs) > 0 {
+				batchProcessed := w.processQueuedMovieFiles(ctx, jobs)
 				processed += batchProcessed
 				continue
 			}
@@ -583,16 +730,17 @@ func (w *MatchWorker) isMatchSuppressed(ctx context.Context, file *models.MediaF
 	return suppressed
 }
 
-func (w *MatchWorker) processQueuedMovieFiles(ctx context.Context, files []*models.MediaFile) int {
-	if len(files) == 0 {
+func (w *MatchWorker) processQueuedMovieFiles(ctx context.Context, jobs []models.MovieMatchJob) int {
+	if len(jobs) == 0 {
 		return 0
 	}
+	defer w.releaseMovieLeases(jobs)
 
-	fileChan := make(chan *models.MediaFile, len(files))
-	for _, f := range files {
-		fileChan <- f
+	jobChan := make(chan models.MovieMatchJob, len(jobs))
+	for _, job := range jobs {
+		jobChan <- job
 	}
-	close(fileChan)
+	close(jobChan)
 
 	var (
 		wg        sync.WaitGroup
@@ -601,11 +749,11 @@ func (w *MatchWorker) processQueuedMovieFiles(ctx context.Context, files []*mode
 	)
 	for i := 0; i < w.workerCount(); i++ {
 		wg.Go(func() {
-			for file := range fileChan {
+			for job := range jobChan {
 				if ctx.Err() != nil {
 					return
 				}
-				if w.processQueuedMovieFile(ctx, file, &folders) {
+				if w.processQueuedMovieFile(ctx, job, &folders) {
 					processed.Add(1)
 				}
 			}
@@ -616,7 +764,28 @@ func (w *MatchWorker) processQueuedMovieFiles(ctx context.Context, files []*mode
 	return int(processed.Load())
 }
 
-func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.MediaFile, folderEnabledCache *sync.Map) bool {
+func (w *MatchWorker) releaseMovieLeases(jobs []models.MovieMatchJob) {
+	if w == nil || w.movieClaimer == nil {
+		return
+	}
+	tokens := make(map[string]struct{})
+	for _, job := range jobs {
+		if token := strings.TrimSpace(job.LeaseToken); token != "" {
+			tokens[token] = struct{}{}
+		}
+	}
+	for token := range tokens {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := w.movieClaimer.ReleaseLease(releaseCtx, token)
+		cancel()
+		if err != nil {
+			slog.Warn("metadata: failed to release unfinished movie match lease", "component", "metadata", "error", err)
+		}
+	}
+}
+
+func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, job models.MovieMatchJob, folderEnabledCache *sync.Map) bool {
+	file := job.File
 	if file == nil || w == nil || w.service == nil || w.movieClaimer == nil {
 		return false
 	}
@@ -624,10 +793,10 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		return false
 	}
 
-	skeleton, reusedLinkedItem, err := w.queuedMovieSkeleton(ctx, file)
+	skeleton, reusedLinkedItem, err := w.queuedMovieSkeleton(ctx, file, job.RerunRequested)
 	if err != nil {
 		queueErr := truncateSeriesQueueError(err.Error())
-		if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, queueErr); updateErr != nil {
+		if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, job.LeaseToken, queueErr); updateErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
@@ -647,7 +816,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		// Dequeue immediately; the recorded skipped root keeps the file out of
 		// future enqueues (see movieQueueFileEligibleCond), so this drains rows
 		// claimed before the skipped root was recorded.
-		if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
+		if err := w.movieClaimer.Delete(ctx, file.ID, job.LeaseToken); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to delete skipped movie queue row", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
@@ -658,7 +827,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		return true
 	}
 	if skeleton == nil || strings.TrimSpace(skeleton.ContentID) == "" {
-		if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, truncateSeriesQueueError("movie queue claimed without a content id")); updateErr != nil {
+		if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, job.LeaseToken, truncateSeriesQueueError("movie queue claimed without a content id")); updateErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
@@ -668,7 +837,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		return false
 	}
 	if skeleton.ItemStatus == "ambiguous" {
-		if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
+		if err := w.movieClaimer.Delete(ctx, file.ID, job.LeaseToken); err != nil {
 			slog.WarnContext(ctx, "metadata: failed to delete ambiguous movie queue row", "component", "metadata",
 				"file_id", file.ID,
 				"path", file.FilePath,
@@ -684,7 +853,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		result, processErr := w.service.Process(ctx, req)
 		if processErr != nil {
 			queueErr := truncateSeriesQueueError(processErr.Error())
-			if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, queueErr); updateErr != nil {
+			if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, job.LeaseToken, queueErr); updateErr != nil {
 				slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 					"file_id", file.ID,
 					"path", file.FilePath,
@@ -699,7 +868,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 			w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched", "content_id", skeleton.ContentID, "file_id", file.ID, "path", file.FilePath)
 			return false
 		} else if result != nil && !result.Updated {
-			if updateErr := w.movieClaimer.UpdateError(ctx, file.ID, truncateSeriesQueueError(ErrMetadataNotFound.Error())); updateErr != nil {
+			if updateErr := w.updateMovieFailure(ctx, file.ID, job.LeaseToken, result.Decision); updateErr != nil {
 				slog.WarnContext(ctx, "metadata: failed to update movie queue error", "component", "metadata",
 					"file_id", file.ID,
 					"path", file.FilePath,
@@ -712,7 +881,7 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 		w.publishCatalogItemChanged(ctx, file.MediaFolderID, resultContentID(result, skeleton.ContentID), "metadata_updated")
 	}
 
-	if err := w.movieClaimer.Delete(ctx, file.ID); err != nil {
+	if err := w.movieClaimer.Delete(ctx, file.ID, job.LeaseToken); err != nil {
 		slog.WarnContext(ctx, "metadata: failed to delete movie queue row", "component", "metadata",
 			"file_id", file.ID,
 			"path", file.FilePath,
@@ -723,19 +892,20 @@ func (w *MatchWorker) processQueuedMovieFile(ctx context.Context, file *models.M
 	return true
 }
 
-func (w *MatchWorker) queuedMovieSkeleton(ctx context.Context, file *models.MediaFile) (*skeletonResult, bool, error) {
-	if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, file); ok {
+func (w *MatchWorker) queuedMovieSkeleton(ctx context.Context, file *models.MediaFile, allowMatched bool) (*skeletonResult, bool, error) {
+	if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, file, allowMatched); ok {
 		return skeleton, true, nil
 	}
 
-	skeleton, err := w.service.createOrFindSkeleton(ctx, file, file.MediaFolderID)
+	currentFile := reparseQueuedFileIdentity(file, "movie")
+	skeleton, err := w.service.createOrFindSkeleton(ctx, currentFile, currentFile.MediaFolderID)
 	if err != nil {
 		return nil, false, err
 	}
 	return skeleton, false, nil
 }
 
-func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *models.MediaFile) (*skeletonResult, bool) {
+func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *models.MediaFile, allowMatched bool) (*skeletonResult, bool) {
 	if w == nil || w.service == nil || w.service.itemRepo == nil || file == nil {
 		return nil, false
 	}
@@ -749,7 +919,10 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 		return nil, false
 	}
 	status := strings.ToLower(strings.TrimSpace(item.Status))
-	if !isSkeletonLikeStatus(status) && status != "ambiguous" {
+	reusableStatus := isSkeletonLikeStatus(status) ||
+		status == "ambiguous" ||
+		(allowMatched && status == string(MatchOutcomeMatched))
+	if !reusableStatus {
 		return nil, false
 	}
 
@@ -776,6 +949,34 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 	if year == 0 {
 		year = file.BaseYear
 	}
+	currentFile := reparseQueuedFileIdentity(file, itemType)
+	if currentFile.BaseTitle != "" {
+		title = currentFile.BaseTitle
+	}
+	if currentFile.BaseYear != 0 {
+		year = currentFile.BaseYear
+	}
+	if currentFile.BaseType != "" {
+		itemType = currentFile.BaseType
+	}
+
+	refreshedIDs := trustedStructuredIDsForSkeleton(file.FilePath, observedRootPath, rootPath)
+	// This is an unmatched-style skeleton being re-evaluated. Structured path
+	// IDs are current input; IDs that disappeared from the path must not remain
+	// trusted forever merely because an older parser copied them onto the
+	// provisional item.
+	tmdbID, imdbID, tvdbID := "", "", ""
+	if refreshedIDs != nil {
+		if refreshedIDs.TmdbID != "" {
+			tmdbID = refreshedIDs.TmdbID
+		}
+		if refreshedIDs.ImdbID != "" {
+			imdbID = refreshedIDs.ImdbID
+		}
+		if refreshedIDs.TvdbID != "" {
+			tvdbID = refreshedIDs.TvdbID
+		}
+	}
 
 	return &skeletonResult{
 		ContentID:        item.ContentID,
@@ -787,10 +988,35 @@ func (w *MatchWorker) reusableQueuedMovieSkeleton(ctx context.Context, file *mod
 		Title:            title,
 		Year:             year,
 		Type:             itemType,
-		TmdbID:           item.TmdbID,
-		ImdbID:           item.ImdbID,
-		TvdbID:           item.TvdbID,
+		TmdbID:           tmdbID,
+		ImdbID:           imdbID,
+		TvdbID:           tvdbID,
 	}, true
+}
+
+// reparseQueuedFileIdentity refreshes the in-memory scanner identity from the
+// current path without mutating the persisted scan row. Queue entries can live
+// across parser releases, including entries that have not created a skeleton
+// yet, so both fresh and reusable skeleton paths must use this view.
+func reparseQueuedFileIdentity(file *models.MediaFile, fallbackType string) *models.MediaFile {
+	if file == nil {
+		return nil
+	}
+	current := *file
+	parseType := strings.TrimSpace(fallbackType)
+	if parseType == "" {
+		parseType = strings.TrimSpace(current.BaseType)
+	}
+	if parsed := naming.ParseFilename(current.FilePath, parseType); parsed != nil {
+		if parsed.Title != "" {
+			current.BaseTitle = parsed.Title
+		}
+		current.BaseYear = parsed.Year
+		if parsed.Type != "" {
+			current.BaseType = parsed.Type
+		}
+	}
+	return &current
 }
 
 func scopedMatcherPath(useSeriesQueue bool, useMovieQueue bool) string {
@@ -810,6 +1036,7 @@ func (w *MatchWorker) processSeriesRoots(ctx context.Context, jobs []models.Seri
 	if len(jobs) == 0 {
 		return 0, nil
 	}
+	defer w.releaseSeriesLeases(jobs)
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -852,6 +1079,26 @@ func (w *MatchWorker) processSeriesRoots(ctx context.Context, jobs []models.Seri
 	return int(processed.Load()), firstErr
 }
 
+func (w *MatchWorker) releaseSeriesLeases(jobs []models.SeriesRootMatchJob) {
+	if w == nil || w.seriesClaimer == nil {
+		return
+	}
+	tokens := make(map[string]struct{})
+	for _, job := range jobs {
+		if token := strings.TrimSpace(job.LeaseToken); token != "" {
+			tokens[token] = struct{}{}
+		}
+	}
+	for token := range tokens {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := w.seriesClaimer.ReleaseLease(releaseCtx, token)
+		cancel()
+		if err != nil {
+			slog.Warn("metadata: failed to release unfinished series match lease", "component", "metadata", "error", err)
+		}
+	}
+}
+
 func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRootMatchJob, folderEnabledCache *sync.Map) (int, error) {
 	if !w.folderEnabled(ctx, job.MediaFolderID, folderEnabledCache) {
 		return 0, nil
@@ -865,7 +1112,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		return 0, fmt.Errorf("loading files for series root %d/%s: %w", job.MediaFolderID, job.ObservedRootPath, err)
 	}
 	if len(groupFiles) == 0 {
-		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath); err != nil {
+		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken); err != nil {
 			return 0, err
 		}
 		slog.InfoContext(ctx, "metadata: series root dropped because files disappeared", "component", "metadata",
@@ -877,19 +1124,19 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 
 	representative := selectRepresentativeGroupFile(groupFiles)
 	if representative == nil {
-		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath); err != nil {
+		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken); err != nil {
 			return 0, err
 		}
 		return 0, nil
 	}
 	if !hasUnlinkedGroupFile(groupFiles) {
 		if strings.TrimSpace(representative.ContentID) != "" {
-			if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, representative); ok && skeleton.ItemStatus != "ambiguous" {
+			if skeleton, ok := w.reusableQueuedMovieSkeleton(ctx, representative, job.RerunRequested); ok && skeleton.ItemStatus != "ambiguous" {
 				req := w.buildProcessRequestForGroup(ctx, representative, skeleton, groupFiles)
 				result, processErr := w.service.Process(ctx, req)
 				if processErr != nil {
 					queueErr := truncateSeriesQueueError(processErr.Error())
-					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, queueErr); updateErr != nil {
+					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, queueErr); updateErr != nil {
 						return 0, updateErr
 					}
 					slog.WarnContext(ctx, "metadata: enrichment failed", "component", "metadata",
@@ -907,7 +1154,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 					return 0, nil
 				}
 				if result != nil && !result.Updated {
-					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(ErrMetadataNotFound.Error())); updateErr != nil {
+					if updateErr := w.updateSeriesFailure(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, result.Decision); updateErr != nil {
 						return 0, updateErr
 					}
 					w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched",
@@ -933,23 +1180,24 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 						"folder_id", job.MediaFolderID,
 						"observed_root_path", job.ObservedRootPath)
 				} else {
-					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+					if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 						return 0, updateErr
 					}
 					return 0, fmt.Errorf("ensuring series episode links for %s: %w", representative.ContentID, err)
 				}
 			}
 		}
-		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath); err != nil {
+		if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken); err != nil {
 			return 0, err
 		}
 		return len(groupFiles), nil
 	}
 
-	skeleton, err := w.service.createOrFindSkeleton(ctx, representative, job.MediaFolderID)
+	currentRepresentative := reparseQueuedFileIdentity(representative, "series")
+	skeleton, err := w.service.createOrFindSkeleton(ctx, currentRepresentative, job.MediaFolderID)
 	if err != nil {
 		queueErr := truncateSeriesQueueError(err.Error())
-		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, queueErr); updateErr != nil {
+		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, queueErr); updateErr != nil {
 			return 0, updateErr
 		}
 		slog.WarnContext(ctx, "metadata: series root skeleton creation failed", "component", "metadata",
@@ -965,18 +1213,33 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 	}
 
 	if _, err := w.service.fileRepo.UpdateContentIDByObservedRootPath(ctx, job.MediaFolderID, job.ObservedRootPath, skeleton.ContentID); err != nil {
-		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 			return 0, updateErr
 		}
 		return 0, fmt.Errorf("relinking series root %d/%s: %w", job.MediaFolderID, job.ObservedRootPath, err)
 	}
 
-	if skeleton.IsNew && skeleton.ItemStatus != "ambiguous" {
+	needsInitialMatch := skeleton.IsNew || job.RerunRequested
+	if !needsInitialMatch && strings.TrimSpace(skeleton.ContentID) != "" && w.service.itemRepo != nil {
+		item, loadErr := w.service.itemRepo.GetByID(ctx, skeleton.ContentID)
+		if loadErr != nil {
+			queueErr := truncateSeriesQueueError(loadErr.Error())
+			if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, queueErr); updateErr != nil {
+				return 0, updateErr
+			}
+			return 0, fmt.Errorf("loading linked series skeleton %s: %w", skeleton.ContentID, loadErr)
+		}
+		if item != nil {
+			skeleton.ItemStatus = item.Status
+			needsInitialMatch = isSkeletonLikeStatus(item.Status)
+		}
+	}
+	if needsInitialMatch && skeleton.ItemStatus != "ambiguous" {
 		req := w.buildProcessRequestForGroup(ctx, representative, skeleton, groupFiles)
 		result, processErr := w.service.Process(ctx, req)
 		if processErr != nil {
 			queueErr := truncateSeriesQueueError(processErr.Error())
-			if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, queueErr); updateErr != nil {
+			if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, queueErr); updateErr != nil {
 				return 0, updateErr
 			}
 			slog.WarnContext(ctx, "metadata: enrichment failed", "component", "metadata",
@@ -998,7 +1261,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 			}
 			return 0, nil
 		} else if result != nil && !result.Updated {
-			if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(ErrMetadataNotFound.Error())); updateErr != nil {
+			if updateErr := w.updateSeriesFailure(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, result.Decision); updateErr != nil {
 				return 0, updateErr
 			}
 			w.logStatusUpdateFailure(ctx, skeleton.ContentID, "unmatched",
@@ -1021,7 +1284,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 
 	finalContentID, err := w.service.fileRepo.FindContentIDByObservedRootPath(ctx, job.MediaFolderID, job.ObservedRootPath, "series")
 	if err != nil {
-		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+		if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 			return 0, updateErr
 		}
 		return 0, fmt.Errorf("resolving final content for series root %d/%s: %w", job.MediaFolderID, job.ObservedRootPath, err)
@@ -1037,7 +1300,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 					"folder_id", job.MediaFolderID,
 					"observed_root_path", job.ObservedRootPath)
 			} else {
-				if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, truncateSeriesQueueError(err.Error())); updateErr != nil {
+				if updateErr := w.seriesClaimer.UpdateError(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken, truncateSeriesQueueError(err.Error())); updateErr != nil {
 					return 0, updateErr
 				}
 				return 0, fmt.Errorf("ensuring series episode links for %s: %w", finalContentID, err)
@@ -1048,7 +1311,7 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		}
 	}
 
-	if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath); err != nil {
+	if err := w.seriesClaimer.Delete(ctx, job.MediaFolderID, job.ObservedRootPath, job.LeaseToken); err != nil {
 		return 0, err
 	}
 
@@ -1059,6 +1322,41 @@ func (w *MatchWorker) processSeriesRoot(ctx context.Context, job models.SeriesRo
 		"file_count", len(groupFiles),
 	)
 	return len(groupFiles), nil
+}
+
+func matchFailureFromDecision(decision *MatchDecision) MatchFailure {
+	kind := MatchOutcomeMetadataEmpty
+	if decision != nil && strings.TrimSpace(string(decision.Outcome)) != "" {
+		kind = decision.Outcome
+	}
+	message := ErrMetadataNotFound.Error()
+	if decision != nil {
+		switch decision.Outcome {
+		case MatchOutcomeNoCandidates:
+			message = "no provider candidates returned"
+		case MatchOutcomeCandidateRejected:
+			message = "provider candidates did not meet the automatic match threshold"
+		case MatchOutcomeTrustedIDConflict:
+			message = "provider candidates conflicted with a trusted external ID"
+		case MatchOutcomeTrustedIDTypeMismatch:
+			message = "trusted external ID resolves to the opposite library type"
+		case MatchOutcomeMetadataEmpty:
+			message = "selected providers returned no usable metadata"
+		case MatchOutcomeProviderTransient:
+			message = "metadata provider is temporarily unavailable"
+		case MatchOutcomeProviderPermanent:
+			message = "metadata provider rejected the request permanently"
+		}
+	}
+	return MatchFailure{Kind: kind, Message: message, Decision: decision}
+}
+
+func (w *MatchWorker) updateMovieFailure(ctx context.Context, mediaFileID int, leaseToken string, decision *MatchDecision) error {
+	return w.movieClaimer.UpdateFailure(ctx, mediaFileID, leaseToken, matchFailureFromDecision(decision))
+}
+
+func (w *MatchWorker) updateSeriesFailure(ctx context.Context, folderID int, observedRootPath, leaseToken string, decision *MatchDecision) error {
+	return w.seriesClaimer.UpdateFailure(ctx, folderID, observedRootPath, leaseToken, matchFailureFromDecision(decision))
 }
 
 func (w *MatchWorker) logStatusUpdateFailure(ctx context.Context, contentID, status string, attrs ...any) {
@@ -1321,6 +1619,19 @@ func (w *MatchWorker) RetryUnmatchedItemsByFolderAndPathPrefix(ctx context.Conte
 			"folder_id", folderID,
 			"path_prefix", pathPrefix,
 			"repaired_items", repaired,
+		)
+	}
+
+	repaired, repairErr := w.service.repairAnchoredIdentityMismatchesByFolderAndPathPrefix(ctx, folderID, pathPrefix)
+	retried += repaired
+	if repairErr != nil {
+		return retried, stillUnmatched, repairErr
+	}
+	if repaired > 0 {
+		slog.InfoContext(ctx, "metadata: repaired provider-anchored roots in scope", "component", "metadata",
+			"folder_id", folderID,
+			"path_prefix", pathPrefix,
+			"repaired_roots", repaired,
 		)
 	}
 

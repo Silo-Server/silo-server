@@ -88,6 +88,19 @@ func (s *Service) TestGlobalConfig(
 	key string,
 	value map[string]any,
 ) error {
+	return s.TestGlobalConfigWithClears(ctx, installationID, key, value, nil)
+}
+
+// TestGlobalConfigWithClears tests the exact prospective configuration,
+// including explicit removals of saved secrets. This keeps a successful probe
+// from describing credentials the operator has already staged for deletion.
+func (s *Service) TestGlobalConfigWithClears(
+	ctx context.Context,
+	installationID int,
+	key string,
+	value map[string]any,
+	clearSecrets []string,
+) error {
 	if strings.TrimSpace(key) == "" {
 		return &ConnectionTestError{Message: "Config key is required"}
 	}
@@ -103,7 +116,28 @@ func (s *Service) TestGlobalConfig(
 	if value == nil {
 		value = map[string]any{}
 	}
-	if err := ValidateGlobalConfigValue(manifest, key, value); err != nil {
+	submitted := value
+	secretFields := GlobalConfigSecretFields(manifest, key)
+	secretPaths := GlobalConfigSecretPaths(manifest, key)
+	clearSet, err := validatedSecretClearSet(key, secretFields, clearSecrets)
+	if err != nil {
+		return &ConnectionTestError{Message: err.Error(), Cause: err}
+	}
+	value, err = s.preserveStoredSecrets(
+		ctx,
+		installationID,
+		key,
+		value,
+		secretPaths,
+	)
+	if err != nil {
+		return err
+	}
+	for field := range clearSet {
+		delete(value, field)
+	}
+	projection := globalConfigValidationProjection(manifest, key, value, submitted)
+	if err := ValidateGlobalConfigValue(manifest, key, projection); err != nil {
 		return &ConnectionTestError{
 			Message: err.Error(),
 			Cause:   err,

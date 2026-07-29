@@ -38,6 +38,7 @@ import {
   useAllUserCollections,
   type CollectionOption,
 } from "@/hooks/queries/useAllUserCollections";
+import { randomUUID } from "@/lib/uuid";
 
 const CATEGORY_LABELS: Record<Category, string> = {
   library_staples: "Library",
@@ -142,7 +143,7 @@ export function buildProfileSectionSaveEntry({
   }
 
   return {
-    id: section?.id ?? crypto.randomUUID(),
+    id: section?.id ?? randomUUID(),
     section_type: sectionType,
     title: title || sectionTypeLabel(sectionType),
     featured,

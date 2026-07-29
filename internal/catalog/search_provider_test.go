@@ -150,6 +150,14 @@ func TestCatalogSearchMeilisearchSettingsIncludeEmbeddersWhenSemanticEnabled(t *
 	}
 }
 
+func TestCatalogSearchMeilisearchSettingsFilterLibraryIDs(t *testing.T) {
+	settings := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)
+	filterable, ok := settings["filterableAttributes"].([]string)
+	if !ok || !reflect.DeepEqual(filterable, []string{"type", "library_ids"}) {
+		t.Fatalf("filterable attributes = %#v", settings["filterableAttributes"])
+	}
+}
+
 func TestCatalogSearchDocumentPayloadBatchesSplitVectorDocs(t *testing.T) {
 	vector := make([]float32, 128)
 	docs := []catalogSearchDocument{
@@ -293,6 +301,156 @@ func TestMeilisearchSearchRequestBuildsHybridWhenCoverageReady(t *testing.T) {
 	}
 	if req.Hybrid == nil || req.Vector == nil {
 		t.Fatalf("ready coverage should emit hybrid request: %#v", req)
+	}
+}
+
+func TestMeilisearchEpisodeSearchRemainsKeywordOnly(t *testing.T) {
+	vectorizer := &fakeCatalogSearchVectorizer{vector: []float32{0.5, 0.25}}
+	provider := &MeilisearchSearchProvider{config: MeilisearchProviderConfig{
+		SemanticEnabled: true,
+		SemanticRatio:   0.4,
+		Embedder:        DefaultMeilisearchEmbedder,
+		Vectorizer:      vectorizer,
+		Coverage:        fakeCoverageGate{ready: true},
+	}}
+	req, fallback := provider.buildMeilisearchSearchRequest(context.Background(), CatalogSearchRequest{
+		Query:     "Who Are You",
+		ItemTypes: []string{"episode"},
+		Access:    AccessFilter{AllowedLibraryIDs: []int{4, 9}, DisabledLibraryIDs: []int{12}},
+	})
+	if fallback != "" || req.Hybrid != nil || req.Vector != nil {
+		t.Fatalf("episode request should be keyword-only, fallback/request = %q/%#v", fallback, req)
+	}
+	for _, want := range []string{`type = "episode"`, "library_ids IN [4, 9]", "library_ids NOT IN [12]"} {
+		if !strings.Contains(req.Filter, want) {
+			t.Fatalf("episode filter missing %q: %s", want, req.Filter)
+		}
+	}
+	if vectorizer.calls != 0 {
+		t.Fatalf("episode request generated a vector, calls=%d", vectorizer.calls)
+	}
+}
+
+func TestMeilisearchMixedSemanticSearchBuildsFederation(t *testing.T) {
+	provider := &MeilisearchSearchProvider{config: MeilisearchProviderConfig{}}
+	base := meilisearchSearchRequest{
+		Query:                "Who Are You",
+		AttributesToRetrieve: []string{"content_id"},
+		MatchingStrategy:     "all",
+		Vector:               []float32{0.5, 0.25},
+		Hybrid:               &meilisearchHybridRequest{Embedder: DefaultMeilisearchEmbedder, SemanticRatio: 0.4},
+	}
+	federated := provider.buildFederatedSearchRequest("catalog-v3", CatalogSearchRequest{
+		Access: AccessFilter{AllowedLibraryIDs: []int{4}},
+	}, base, 100, 25)
+	if federated.Federation.Offset != 100 || federated.Federation.Limit != 25 {
+		t.Fatalf("federation pagination = %#v", federated.Federation)
+	}
+	if len(federated.Queries) != 2 {
+		t.Fatalf("federated queries = %#v", federated.Queries)
+	}
+	media, episode := federated.Queries[0], federated.Queries[1]
+	if media.Hybrid == nil || len(media.Vector) == 0 || !strings.Contains(media.Filter, `type != "episode"`) {
+		t.Fatalf("media federation branch = %#v", media)
+	}
+	if episode.Hybrid != nil || episode.Vector != nil || !strings.Contains(episode.Filter, `type = "episode"`) {
+		t.Fatalf("episode federation branch = %#v", episode)
+	}
+	if media.FederationOptions.Weight != 1 || episode.FederationOptions.Weight != 1 {
+		t.Fatalf("federation weights = %v/%v", media.FederationOptions.Weight, episode.FederationOptions.Weight)
+	}
+}
+
+func TestMeilisearchFederationUnsupportedClassification(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "missing index during rebuild swap is transient",
+			err: &meilisearchHTTPError{
+				StatusCode: http.StatusNotFound,
+				Code:       "index_not_found",
+				Message:    "Index catalog_rebuild_old not found.",
+			},
+			want: false,
+		},
+		{
+			name: "missing multi-search route is unsupported",
+			err: &meilisearchHTTPError{
+				StatusCode: http.StatusNotFound,
+				Code:       "not_found",
+				Message:    "The multi-search route does not exist.",
+			},
+			want: true,
+		},
+		{
+			name: "older server rejects federation field",
+			err: &meilisearchHTTPError{
+				StatusCode: http.StatusBadRequest,
+				Code:       "bad_request",
+				Message:    "Unknown field federation: expected queries.",
+			},
+			want: true,
+		},
+		{
+			name: "invalid federated request is not a capability result",
+			err: &meilisearchHTTPError{
+				StatusCode: http.StatusBadRequest,
+				Code:       "invalid_multi_search_query_federated",
+				Message:    "A query has federationOptions but federation is missing.",
+			},
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isMeilisearchFederationUnsupported(test.err); got != test.want {
+				t.Fatalf("isMeilisearchFederationUnsupported(%v) = %t, want %t", test.err, got, test.want)
+			}
+		})
+	}
+}
+
+func TestMeilisearchFederationUnsupportedCacheExpiresAndRecovers(t *testing.T) {
+	provider := &MeilisearchSearchProvider{}
+	provider.markFederationUnsupported()
+	if !provider.isFederationUnsupported() {
+		t.Fatal("fresh unsupported result should be cached")
+	}
+
+	provider.federationMu.Lock()
+	provider.federationUnsupportedAt = time.Now().Add(-meilisearchFederationCapabilityCacheTTL)
+	provider.federationMu.Unlock()
+	if provider.isFederationUnsupported() {
+		t.Fatal("expired unsupported result should permit a federation re-probe")
+	}
+
+	provider.markFederationSupported()
+	if provider.isFederationUnsupported() {
+		t.Fatal("successful federation probe should clear the unsupported result")
+	}
+}
+
+func TestCatalogSearchEpisodeDocumentsNeverCarryVectors(t *testing.T) {
+	docs := []catalogSearchDocument{
+		{ContentID: "movie-1", Type: "movie"},
+		{ContentID: "episode-1", Type: "episode"},
+	}
+	count := setCatalogSearchDocumentVectors(docs, map[string][]float32{
+		"movie-1":   {0.1, 0.2},
+		"episode-1": {0.3, 0.4},
+	}, DefaultMeilisearchEmbedder)
+	if count != 1 || docs[0].Vectors == nil {
+		t.Fatalf("media vector assignment = count %d, vectors %#v", count, docs[0].Vectors)
+	}
+	// Episodes must carry the explicit `_vectors.<embedder>: null` opt-out:
+	// omitting _vectors entirely fails indexing under a userProvided embedder.
+	episodeVector, ok := docs[1].Vectors[DefaultMeilisearchEmbedder]
+	if !ok || episodeVector != nil {
+		t.Fatalf("episode vectors = %#v, want explicit nil opt-out", docs[1].Vectors)
 	}
 }
 

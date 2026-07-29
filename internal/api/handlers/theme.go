@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/config"
 )
 
 // ThemeSettingsReader is the subset of ServerSettingsStore needed by ThemeHandler.
@@ -23,14 +25,20 @@ type ThemeHandler struct {
 	catalogMu      sync.RWMutex
 	catalogCache   []byte
 	catalogFetched time.Time
+	catalogURL     string
 	httpClient     *http.Client
 }
 
 // NewThemeHandler creates a ThemeHandler.
 func NewThemeHandler(settings ThemeSettingsReader) *ThemeHandler {
 	return &ThemeHandler{
-		settings:   settings,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		settings: settings,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(req *http.Request, _ []*http.Request) error {
+				return config.ValidateThemeRemoteURL(req.URL)
+			},
+		},
 	}
 }
 
@@ -47,18 +55,11 @@ func (h *ThemeHandler) HandleAdminCSS(w http.ResponseWriter, r *http.Request) {
 	vars, _ := h.settings.Get(r.Context(), "ui.admin_theme_vars")
 	rawCSS, _ := h.settings.Get(r.Context(), "ui.admin_custom_css")
 
-	w.Header().Set("Cache-Control", "public, max-age=60")
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, adminCssResponse{
 		Vars:   vars,
 		RawCSS: rawCSS,
 	})
-}
-
-// allowedDownloadHosts restricts which hosts the theme download proxy will fetch from.
-var allowedDownloadHosts = map[string]bool{
-	"raw.githubusercontent.com":     true,
-	"github.com":                    true,
-	"objects.githubusercontent.com": true,
 }
 
 // HandleDownload proxies a theme file download from an allowed host.
@@ -75,9 +76,8 @@ func (h *ThemeHandler) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid URL")
 		return
 	}
-
-	if !allowedDownloadHosts[parsed.Hostname()] {
-		writeError(w, http.StatusForbidden, "host_not_allowed", "Theme downloads are only allowed from approved hosts")
+	if config.ValidateThemeRemoteURL(parsed) != nil {
+		writeError(w, http.StatusForbidden, "host_not_allowed", "Theme downloads are only allowed over HTTPS from approved hosts")
 		return
 	}
 
@@ -117,8 +117,7 @@ func (h *ThemeHandler) HandleDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 const (
-	defaultCatalogURL = "https://raw.githubusercontent.com/Silo-Server/silo-themes/main/catalog.json"
-	catalogCacheTTL   = 1 * time.Hour
+	catalogCacheTTL = 1 * time.Hour
 )
 
 // writeStaleCatalog serves a cached catalog response with the stale header.
@@ -131,23 +130,32 @@ func writeStaleCatalog(w http.ResponseWriter, cached []byte) {
 
 // HandleCatalog proxies the theme catalog from a remote URL with caching.
 func (h *ThemeHandler) HandleCatalog(w http.ResponseWriter, r *http.Request) {
-	// Check cache first.
+	// Read and validate the configured origin before consulting the cache. A
+	// cache entry belongs to one URL and must never mask a saved URL change.
+	catalogURL, _ := h.settings.Get(r.Context(), "theme.catalog_url")
+	if catalogURL == "" {
+		catalogURL = config.DefaultThemeCatalogURL
+	}
+	parsedCatalogURL, err := url.Parse(catalogURL)
+	if err != nil || config.ValidateThemeRemoteURL(parsedCatalogURL) != nil {
+		writeError(w, http.StatusBadRequest, "catalog_url_invalid", "Theme catalog URL must use HTTPS on an approved GitHub host")
+		return
+	}
+
 	h.catalogMu.RLock()
 	cached := h.catalogCache
 	age := time.Since(h.catalogFetched)
+	cachedURL := h.catalogURL
 	h.catalogMu.RUnlock()
+	if cachedURL != catalogURL {
+		cached = nil
+	}
 
 	if cached != nil && age < catalogCacheTTL {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(cached)
 		return
-	}
-
-	// Determine catalog URL from server settings.
-	catalogURL, _ := h.settings.Get(r.Context(), "theme.catalog_url")
-	if catalogURL == "" {
-		catalogURL = defaultCatalogURL
 	}
 
 	// Fetch from upstream.
@@ -198,6 +206,7 @@ func (h *ThemeHandler) HandleCatalog(w http.ResponseWriter, r *http.Request) {
 	h.catalogMu.Lock()
 	h.catalogCache = body
 	h.catalogFetched = time.Now()
+	h.catalogURL = catalogURL
 	h.catalogMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
@@ -211,6 +220,7 @@ func (h *ThemeHandler) HandleCatalogRefresh(w http.ResponseWriter, r *http.Reque
 	h.catalogMu.Lock()
 	h.catalogCache = nil
 	h.catalogFetched = time.Time{}
+	h.catalogURL = ""
 	h.catalogMu.Unlock()
 
 	// Immediately fetch fresh data so the caller gets the updated catalog.

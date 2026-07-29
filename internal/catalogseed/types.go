@@ -156,6 +156,7 @@ type VideoTrackRecord struct {
 	Bitrate         int    `json:"bitrate,omitempty"`
 	VideoRange      string `json:"video_range,omitempty"`
 	VideoRangeType  string `json:"video_range_type,omitempty"`
+	ColorRange      string `json:"color_range,omitempty"`
 	ColorPrimaries  string `json:"color_primaries,omitempty"`
 	ColorSpace      string `json:"color_space,omitempty"`
 	ColorTransfer   string `json:"color_transfer,omitempty"`

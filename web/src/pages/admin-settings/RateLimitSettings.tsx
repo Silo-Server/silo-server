@@ -31,7 +31,7 @@ const DEFAULT_AUTH_ENDPOINT: RateLimitAuthEndpointConfig = {
 };
 
 const DEFAULT_CONFIG: RateLimitConfig = {
-  enabled: false,
+  enabled: true,
   backend: "memory",
   global_requests_per_second: 1000,
   tiers: {
@@ -45,6 +45,10 @@ const DEFAULT_CONFIG: RateLimitConfig = {
     login: { requests_per_minute: 20, burst: 10 },
     signup: { requests_per_minute: 10, burst: 6 },
     setup: { requests_per_minute: 10, burst: 6 },
+    device_start: { requests_per_minute: 20, burst: 10 },
+    device_lookup: { requests_per_minute: 60, burst: 20 },
+    device_poll: { requests_per_minute: 120, burst: 30 },
+    autoscan_webhook: { requests_per_minute: 60, burst: 30 },
   },
 };
 
@@ -57,6 +61,10 @@ const AUTH_ENDPOINT_LABELS: Record<string, string> = {
   login: "Login",
   signup: "Signup",
   setup: "Setup",
+  device_start: "Device Authorization Start",
+  device_lookup: "Device Authorization Lookup",
+  device_poll: "Device Authorization Polling",
+  autoscan_webhook: "Autoscan Webhook",
 };
 
 export default function RateLimitSettings() {
@@ -77,11 +85,14 @@ export default function RateLimitSettings() {
       ip_requests_per_minute:
         serverConfig.ip_requests_per_minute ?? DEFAULT_CONFIG.ip_requests_per_minute,
       ip_burst: serverConfig.ip_burst ?? DEFAULT_CONFIG.ip_burst,
-      auth_endpoints: {
-        login: serverConfig.auth_endpoints?.login ?? DEFAULT_CONFIG.auth_endpoints.login!,
-        signup: serverConfig.auth_endpoints?.signup ?? DEFAULT_CONFIG.auth_endpoints.signup!,
-        setup: serverConfig.auth_endpoints?.setup ?? DEFAULT_CONFIG.auth_endpoints.setup!,
-      },
+      auth_endpoints: Object.fromEntries(
+        Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => [
+          endpoint,
+          serverConfig.auth_endpoints?.[endpoint] ??
+            DEFAULT_CONFIG.auth_endpoints[endpoint] ??
+            DEFAULT_AUTH_ENDPOINT,
+        ]),
+      ),
     };
   }, [serverConfig]);
   const hydratedKey = JSON.stringify(hydratedConfig);
@@ -103,7 +114,7 @@ export default function RateLimitSettings() {
 
   function handleTierChange(tier: string, field: keyof RateLimitTierConfig, value: string) {
     const num = parseInt(value, 10);
-    if (isNaN(num) || num < 0) return;
+    if (isNaN(num) || num <= 0) return;
     updateConfigState((prev) => {
       const existing: RateLimitTierConfig = prev.tiers[tier] ?? DEFAULT_TIER;
       return {
@@ -125,7 +136,7 @@ export default function RateLimitSettings() {
     value: string,
   ) {
     const num = parseInt(value, 10);
-    if (isNaN(num) || num < 0) return;
+    if (isNaN(num) || num <= 0) return;
     updateConfigState((prev) => {
       const existing: RateLimitAuthEndpointConfig =
         prev.auth_endpoints[endpoint] ?? DEFAULT_AUTH_ENDPOINT;
@@ -162,11 +173,12 @@ export default function RateLimitSettings() {
       <div className="mb-6 space-y-2">
         <h2 className="text-xl font-semibold tracking-tight">Rate Limiting</h2>
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Configure request budgets for API keys, IPs, and authentication endpoints.
+          Configure request budgets for protected API routes, API keys, and public authentication or
+          Autoscan endpoints.
         </p>
       </div>
 
-      <div className="max-w-2xl space-y-4">
+      <fieldset disabled={updateConfig.isPending} className="max-w-2xl space-y-4">
         {pendingRestart && (
           <div className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-foreground/80 flex items-center gap-2 text-xs">
@@ -214,8 +226,8 @@ export default function RateLimitSettings() {
               </SelectContent>
             </Select>
             <p className="text-muted-foreground text-xs">
-              Requires a restart to take effect. Redis is recommended for multi-instance
-              deployments.
+              Backend changes require a restart. Redis is recommended for multi-instance deployments
+              and must first be configured under Database.
             </p>
           </div>
         </div>
@@ -240,7 +252,7 @@ export default function RateLimitSettings() {
               className="w-full sm:w-40"
             />
             <p className="text-muted-foreground text-xs">
-              Maximum requests per second across all clients combined.
+              Maximum requests per second across every route protected by the rate limiter.
             </p>
           </div>
         </div>
@@ -248,7 +260,8 @@ export default function RateLimitSettings() {
         <div className="surface-panel rounded-2xl border-0 px-5 py-4">
           <div className="mb-1 text-sm font-semibold">Per-IP Limits</div>
           <p className="text-muted-foreground mb-3 text-xs">
-            Applied to all authenticated requests from a single IP address.
+            Shared across protected authenticated routes and the public auth/Autoscan endpoints for
+            one IP address.
           </p>
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="space-y-1">
@@ -365,7 +378,8 @@ export default function RateLimitSettings() {
         <div className="surface-panel rounded-2xl border-0 px-5 py-4">
           <div className="mb-1 text-sm font-semibold">Auth Endpoint Limits</div>
           <p className="text-muted-foreground mb-3 text-xs">
-            Per-IP limits for authentication endpoints to prevent brute-force attacks.
+            Per-IP limits for public authentication and Autoscan endpoints. These apply in addition
+            to the global and shared per-IP budgets above.
           </p>
           <div className="space-y-4">
             {Object.keys(AUTH_ENDPOINT_LABELS).map((endpoint) => {
@@ -418,7 +432,7 @@ export default function RateLimitSettings() {
             {updateConfig.isPending ? "Saving..." : "Save Changes"}
           </Button>
         </div>
-      </div>
+      </fieldset>
     </div>
   );
 }

@@ -10,7 +10,10 @@
 package httpstream
 
 import (
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -32,6 +35,15 @@ const (
 	// readFromChunk bounds each ReadFrom slice so the deadline keeps rolling
 	// during zero-copy (sendfile) transfers of large files.
 	readFromChunk int64 = 64 << 20
+)
+
+// StreamOutcome classifies how a streaming response ended.
+type StreamOutcome string
+
+const (
+	OutcomeCompleted   StreamOutcome = "completed"
+	OutcomeStalledReap StreamOutcome = "stalled_reap"
+	OutcomeClientGone  StreamOutcome = "client_gone"
 )
 
 // StallWindow returns the configured stall window for streaming responses.
@@ -58,6 +70,10 @@ type RollingDeadlineWriter struct {
 	step     time.Duration
 	lastBump time.Time
 	disabled bool
+
+	statusCode    int
+	bytesWritten  int64
+	firstWriteErr error
 }
 
 // NewRollingDeadlineWriter wraps w with the configured stall window.
@@ -95,12 +111,20 @@ func (s *RollingDeadlineWriter) Header() http.Header { return s.w.Header() }
 
 func (s *RollingDeadlineWriter) WriteHeader(code int) {
 	s.bump()
+	if s.statusCode == 0 {
+		s.statusCode = code
+	}
 	s.w.WriteHeader(code)
 }
 
 func (s *RollingDeadlineWriter) Write(p []byte) (int, error) {
 	s.bump()
-	return s.w.Write(p)
+	if s.statusCode == 0 {
+		s.statusCode = http.StatusOK
+	}
+	n, err := s.w.Write(p)
+	s.recordWrite(int64(n), err)
+	return n, err
 }
 
 // ReadFrom preserves the underlying ResponseWriter's io.ReaderFrom fast path
@@ -116,8 +140,12 @@ func (s *RollingDeadlineWriter) ReadFrom(r io.Reader) (int64, error) {
 	var total int64
 	for {
 		s.bump()
+		if s.statusCode == 0 {
+			s.statusCode = http.StatusOK
+		}
 		n, err := rf.ReadFrom(io.LimitReader(r, readFromChunk))
 		total += n
+		s.recordWrite(n, err)
 		if err != nil {
 			return total, err
 		}
@@ -132,7 +160,48 @@ func (s *RollingDeadlineWriter) Flush() {
 	_ = s.rc.Flush()
 }
 
+// StatusCode returns the response status observed by the wrapper.
+func (s *RollingDeadlineWriter) StatusCode() int {
+	return s.statusCode
+}
+
+// BytesWritten returns the number of response body bytes accepted by the
+// underlying writer.
+func (s *RollingDeadlineWriter) BytesWritten() int64 {
+	return s.bytesWritten
+}
+
+// Outcome classifies the first write failure, or a canceled request when no
+// write failure was surfaced by the transport.
+func (s *RollingDeadlineWriter) Outcome(ctx context.Context) StreamOutcome {
+	if isTimeoutError(s.firstWriteErr) {
+		return OutcomeStalledReap
+	}
+	if s.firstWriteErr != nil || (ctx != nil && ctx.Err() != nil) {
+		return OutcomeClientGone
+	}
+	return OutcomeCompleted
+}
+
 // Unwrap lets http.ResponseController traverse to the underlying writer.
 func (s *RollingDeadlineWriter) Unwrap() http.ResponseWriter { return s.w }
+
+func (s *RollingDeadlineWriter) recordWrite(n int64, err error) {
+	s.bytesWritten += n
+	if err != nil && s.firstWriteErr == nil {
+		s.firstWriteErr = err
+	}
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
 
 type writerOnly struct{ io.Writer }

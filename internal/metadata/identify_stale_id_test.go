@@ -38,8 +38,8 @@ func (p *notFoundMetadataProvider) GetMetadata(_ context.Context, req MetadataRe
 // issue #268: an item has a durable tmdb ID already recorded as stale; the
 // admin rematches it to a different provider via the Apply Match flow
 // (ModeIdentify). The stale tmdb ID must not be re-injected into the identify
-// request, and after the successful rematch the item's stale rows must be
-// cleared rather than re-recorded with a fresh last_seen.
+// request. The rejected value remains a non-actionable negative-cache entry so
+// a later detail response cannot resurrect it.
 func TestProcess_IdentifyDoesNotResurrectRecordedStaleProviderID(t *testing.T) {
 	h := newTestHarness()
 	ctx := context.Background()
@@ -80,7 +80,9 @@ func TestProcess_IdentifyDoesNotResurrectRecordedStaleProviderID(t *testing.T) {
 		response: &MetadataResult{
 			HasMetadata: true,
 			Title:       "Formula 1: Drive to Survive",
-			ProviderIDs: map[string]string{"tvdb": "417585"},
+			// A detail response may repeat the known-dead cross-reference; it
+			// must not undo the stale suppression while bootstrapping new IDs.
+			ProviderIDs: map[string]string{testTVDBProvider: "417585", testTMDBProvider: "324880"},
 		},
 	}
 
@@ -104,13 +106,62 @@ func TestProcess_IdentifyDoesNotResurrectRecordedStaleProviderID(t *testing.T) {
 	if got := req.ProviderIDs["tvdb"]; got != "417585" {
 		t.Errorf("identify request tvdb id = %q, want 417585", got)
 	}
+	providerRepo.mu.Lock()
+	persisted := providerRepo.lastReplace["existing-1"]
+	providerRepo.mu.Unlock()
+	if persisted["tmdb"] != "" {
+		t.Errorf("known-dead detail cross-reference was restored: %#v", persisted)
+	}
 
 	stale, err := staleRepo.GetByContentID(ctx, "existing-1")
 	if err != nil {
 		t.Fatalf("get stale rows: %v", err)
 	}
-	if len(stale) != 0 {
-		t.Errorf("stale rows after successful rematch = %v, want none", stale)
+	if len(stale) != 1 || stale[0].Provider != "tmdb" || stale[0].ProviderID != "324880" {
+		t.Errorf("stale rows after successful rematch = %#v, want retained tmdb=324880 negative cache", stale)
+	}
+}
+
+func TestProcess_IdentifyPreservesProviderAnchoredContentID(t *testing.T) {
+	const (
+		contentID      = "movie-tmdb-777"
+		correctedTitle = "Corrected Movie"
+	)
+	h := newTestHarness()
+	ctx := context.Background()
+	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
+		ContentID: contentID, Type: "movie", Title: correctedTitle, Year: 2020,
+		Status: "matched", TmdbID: "777",
+		Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+	}); err != nil {
+		t.Fatalf("upsert existing item: %v", err)
+	}
+	providerRepo := newFakeProviderIDRepo()
+	providerRepo.set(contentID, &models.MediaItemProviderID{
+		ContentID: contentID, ItemType: "movie", Provider: "tmdb", ProviderID: "777",
+	})
+	h.service.providerIDRepo = providerRepo
+	staleRepo := newFakeStaleIDRepo()
+	staleRepo.set(contentID, &models.StaleMediaID{
+		ContentID: contentID, Provider: "tmdb", ProviderID: "777",
+	})
+	h.service.staleIDRepo = staleRepo
+
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: correctedTitle,
+		ProviderIDs: map[string]string{testIMDBProvider: "tt0000777"},
+	}}
+	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
+		ContentID:   contentID,
+		ProviderIDs: map[string]string{testIMDBProvider: "tt0000777"},
+		Language:    "en",
+		Mode:        ModeIdentify,
+	}, []Provider{provider})
+	if err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+	if result == nil || result.ContentID != contentID {
+		t.Fatalf("result content id = %#v, want %s preserved", result, contentID)
 	}
 }
 
@@ -241,5 +292,19 @@ func TestProcess_IdentifyKeepsUserSuppliedIDEvenIfRecordedStale(t *testing.T) {
 	req := provider.lastRequest()
 	if got := req.ProviderIDs["tmdb"]; got != "324880" {
 		t.Errorf("identify request tmdb id = %q, want 324880 (user-supplied id must survive)", got)
+	}
+	item, err := h.itemRepo.GetByID(ctx, "existing-1")
+	if err != nil {
+		t.Fatalf("load identified item: %v", err)
+	}
+	if item.TmdbID != "324880" {
+		t.Errorf("persisted tmdb id = %q, want explicitly retried 324880", item.TmdbID)
+	}
+	staleRows, err := staleRepo.GetByContentID(ctx, "existing-1")
+	if err != nil {
+		t.Fatalf("load stale rows: %v", err)
+	}
+	if len(staleRows) != 0 {
+		t.Errorf("stale rows after successful explicit retry = %#v, want none", staleRows)
 	}
 }

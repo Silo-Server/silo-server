@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -44,4 +45,62 @@ func TestPausedSessionSurvivesIntentionalPause(t *testing.T) {
 	if _, err := m.GetSession(session.ID); err == nil {
 		t.Fatal("session survived past the paused grace; abandoned sessions must still be reaped")
 	}
+}
+
+func TestSequentialRangedTransportsSurviveIdleAndPausedGrace(t *testing.T) {
+	m := NewSessionManager(0, 0)
+	session, err := m.StartSession(1, "profile-1", 100, PlayDirect, false)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+
+	setLastActivity := func(age time.Duration) {
+		t.Helper()
+		m.mu.Lock()
+		s := m.sessions[session.ID]
+		s.LastActivityAt = time.Now().Add(-age)
+		s.UpdatedAt = s.LastActivityAt
+		m.mu.Unlock()
+	}
+	assertPresent := func(stage string) {
+		t.Helper()
+		if _, err := m.GetSession(session.ID); err != nil {
+			t.Fatalf("%s: session was cleaned: %v", stage, err)
+		}
+	}
+
+	const activeGrace = 2 * time.Minute
+	for cycle := 1; cycle <= 3; cycle++ {
+		setLastActivity(activeGrace / 2)
+		m.CleanInactive(activeGrace, DefaultPausedSessionGrace)
+		assertPresent(fmt.Sprintf("idle gap before transport %d", cycle))
+
+		if err := m.BeginTransport(session.ID); err != nil {
+			t.Fatalf("BeginTransport(%d): %v", cycle, err)
+		}
+		setLastActivity(activeGrace + time.Minute)
+		m.CleanInactive(activeGrace, DefaultPausedSessionGrace)
+		assertPresent(fmt.Sprintf("active transport %d", cycle))
+		if err := m.EndTransport(session.ID); err != nil {
+			t.Fatalf("EndTransport(%d): %v", cycle, err)
+		}
+	}
+
+	if err := m.UpdateProgress(session.ID, 42, true); err != nil {
+		t.Fatalf("UpdateProgress(paused): %v", err)
+	}
+	setLastActivity(DefaultPausedSessionGrace - time.Minute)
+	m.CleanInactive(activeGrace, DefaultPausedSessionGrace)
+	assertPresent("late paused idle gap")
+
+	if err := m.BeginTransport(session.ID); err != nil {
+		t.Fatalf("BeginTransport(late range): %v", err)
+	}
+	setLastActivity(DefaultPausedSessionGrace + time.Minute)
+	m.CleanInactive(activeGrace, DefaultPausedSessionGrace)
+	assertPresent("late ranged transport active")
+	if err := m.EndTransport(session.ID); err != nil {
+		t.Fatalf("EndTransport(late range): %v", err)
+	}
+	assertPresent("completed ranged transport sequence")
 }

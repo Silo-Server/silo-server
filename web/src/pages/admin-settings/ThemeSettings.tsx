@@ -16,6 +16,10 @@ export default function ThemeSettings() {
   const [vars, setVars] = useState<ThemeVarOverrides>({});
   const [rawCss, setRawCss] = useState("");
   const [catalogUrl, setCatalogUrl] = useState("");
+  const mutateSettingRef = useRef(updateSetting.mutate);
+  useEffect(() => {
+    mutateSettingRef.current = updateSetting.mutate;
+  }, [updateSetting.mutate]);
 
   // Only seed local state once from the first server response
   const seededRef = useRef(false);
@@ -34,12 +38,43 @@ export default function ThemeSettings() {
   // Debounce timers
   const varsTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const cssTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingVarsRef = useRef<ThemeVarOverrides | null>(null);
+  const pendingCssRef = useRef<string | null>(null);
 
-  const persistVars = useCallback(
-    (newVars: ThemeVarOverrides) => {
-      updateSetting.mutate({ key: "ui.admin_theme_vars", value: JSON.stringify(newVars) });
+  const persistVars = useCallback((newVars: ThemeVarOverrides) => {
+    mutateSettingRef.current({
+      key: "ui.admin_theme_vars",
+      value: JSON.stringify(newVars),
+    });
+  }, []);
+
+  const flushPendingVars = useCallback(() => {
+    clearTimeout(varsTimerRef.current);
+    varsTimerRef.current = undefined;
+    const pending = pendingVarsRef.current;
+    if (pending === null) return;
+    pendingVarsRef.current = null;
+    persistVars(pending);
+  }, [persistVars]);
+
+  const flushPendingCss = useCallback(() => {
+    clearTimeout(cssTimerRef.current);
+    cssTimerRef.current = undefined;
+    const pending = pendingCssRef.current;
+    if (pending === null) return;
+    pendingCssRef.current = null;
+    mutateSettingRef.current({
+      key: "ui.admin_custom_css",
+      value: sanitizeCss(pending),
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      flushPendingVars();
+      flushPendingCss();
     },
-    [updateSetting],
+    [flushPendingCss, flushPendingVars],
   );
 
   const handleSetVar = useCallback(
@@ -47,15 +82,19 @@ export default function ThemeSettings() {
       setVars((prev) => {
         const next = { ...prev, [token]: value };
         clearTimeout(varsTimerRef.current);
-        varsTimerRef.current = setTimeout(() => persistVars(next), 500);
+        pendingVarsRef.current = next;
+        varsTimerRef.current = setTimeout(flushPendingVars, 500);
         return next;
       });
     },
-    [persistVars],
+    [flushPendingVars],
   );
 
   const handleResetVar = useCallback(
     (token: ThemeToken) => {
+      clearTimeout(varsTimerRef.current);
+      varsTimerRef.current = undefined;
+      pendingVarsRef.current = null;
       setVars((prev) => {
         const next = { ...prev };
         delete next[token];
@@ -70,23 +109,28 @@ export default function ThemeSettings() {
     (css: string) => {
       setRawCss(css);
       clearTimeout(cssTimerRef.current);
-      cssTimerRef.current = setTimeout(() => {
-        updateSetting.mutate({ key: "ui.admin_custom_css", value: sanitizeCss(css) });
-      }, 1000);
+      pendingCssRef.current = css;
+      cssTimerRef.current = setTimeout(flushPendingCss, 1000);
     },
-    [updateSetting],
+    [flushPendingCss],
   );
 
   const handleCatalogUrlBlur = useCallback(() => {
-    updateSetting.mutate({ key: "theme.catalog_url", value: catalogUrl });
-  }, [updateSetting, catalogUrl]);
+    mutateSettingRef.current({ key: "theme.catalog_url", value: catalogUrl });
+  }, [catalogUrl]);
 
   const handleResetAll = useCallback(() => {
+    clearTimeout(varsTimerRef.current);
+    clearTimeout(cssTimerRef.current);
+    varsTimerRef.current = undefined;
+    cssTimerRef.current = undefined;
+    pendingVarsRef.current = null;
+    pendingCssRef.current = null;
     setVars({});
     setRawCss("");
     persistVars({});
-    updateSetting.mutate({ key: "ui.admin_custom_css", value: "" });
-  }, [persistVars, updateSetting]);
+    mutateSettingRef.current({ key: "ui.admin_custom_css", value: "" });
+  }, [persistVars]);
 
   const hasOverrides = Object.keys(vars).length > 0 || rawCss.length > 0;
 
@@ -137,7 +181,8 @@ export default function ThemeSettings() {
       <div>
         <h4 className="mb-2 text-sm font-medium">Theme Catalog URL</h4>
         <p className="text-muted-foreground mb-2 text-[13px]">
-          URL of the community theme catalog JSON index. Users browse this in their settings.
+          HTTPS URL of the GitHub-hosted community theme catalog JSON index. Users browse this in
+          their settings.
         </p>
         <input
           type="url"

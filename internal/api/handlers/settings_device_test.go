@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,6 +66,18 @@ func (p mappedTestUserStoreProvider) ForUser(_ context.Context, userID int) (use
 }
 
 func (p mappedTestUserStoreProvider) Close() error { return nil }
+
+type legacyAliasFailureStore struct {
+	userstore.UserStore
+	failLegacyDelete bool
+}
+
+func (s legacyAliasFailureStore) DeleteDeviceSetting(ctx context.Context, profileID, deviceID, key string) error {
+	if s.failLegacyDelete && key == legacyAndroidNextUpPromptSettingKey {
+		return errors.New("legacy delete failed")
+	}
+	return s.UserStore.DeleteDeviceSetting(ctx, profileID, deviceID, key)
+}
 
 func newIsolatedProfileTestStore(t *testing.T, suffix string) userstore.UserStore {
 	t.Helper()
@@ -220,6 +233,319 @@ func TestGetEffectiveSettingsResolvesUserDeviceAndDefaultSources(t *testing.T) {
 	if got := byKey[rememberLibraryPageStateSettingKey]; got.EffectiveValue != "true" || got.Source != "default" {
 		t.Fatalf("remember_library_page_state = %#v", got)
 	}
+}
+
+func TestAndroidNextUpSettingAliasUsesCanonicalStoredValue(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/settings/device/"+legacyAndroidNextUpPromptSettingKey,
+		bytes.NewBufferString(`{"value":"60"}`),
+	)
+	req = withRouteParams(req, map[string]string{"key": legacyAndroidNextUpPromptSettingKey})
+	req.Header.Set(deviceIDHeader, "android-tv")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleSetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	canonical, err := store.GetDeviceSetting(
+		context.Background(), "profile-1", "android-tv", "playback.next_up_prompt_seconds",
+	)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting: %v", err)
+	}
+	if canonical == nil || canonical.Value != "60" {
+		t.Fatalf("canonical setting = %#v, want value 60", canonical)
+	}
+	legacy, err := store.GetDeviceSetting(
+		context.Background(), "profile-1", "android-tv", legacyAndroidNextUpPromptSettingKey,
+	)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting legacy: %v", err)
+	}
+	if legacy != nil {
+		t.Fatalf("legacy duplicate setting = %#v, want nil", legacy)
+	}
+
+	resolved, err := handler.resolveEffectiveSetting(
+		context.Background(),
+		store,
+		"profile-1",
+		requestDeviceMetadata{DeviceID: "android-tv"},
+		legacyAndroidNextUpPromptSettingKey,
+	)
+	if err != nil {
+		t.Fatalf("resolveEffectiveSetting: %v", err)
+	}
+	if resolved.Key != legacyAndroidNextUpPromptSettingKey || resolved.EffectiveValue != "60" {
+		t.Fatalf("resolved alias = %#v", resolved)
+	}
+}
+
+func TestAndroidNextUpSettingAliasReadsLegacyDeviceRowWithoutMigration(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
+		ProfileID: "profile-1",
+		DeviceID:  "android-tv",
+		Key:       legacyAndroidNextUpPromptSettingKey,
+		Value:     "45",
+	}); err != nil {
+		t.Fatalf("SetDeviceSetting legacy: %v", err)
+	}
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/settings/device/"+legacyAndroidNextUpPromptSettingKey,
+		nil,
+	)
+	req = withRouteParams(req, map[string]string{"key": legacyAndroidNextUpPromptSettingKey})
+	req.Header.Set(deviceIDHeader, "android-tv")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response settingResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if response.Key != legacyAndroidNextUpPromptSettingKey || response.Value != "45" {
+		t.Fatalf("response = %#v", response)
+	}
+	canonical, err := store.GetDeviceSetting(
+		context.Background(), "profile-1", "android-tv", canonicalNextUpPromptSettingKey,
+	)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting canonical: %v", err)
+	}
+	if canonical != nil {
+		t.Fatalf("canonical setting = %#v, want nil after read-only GET", canonical)
+	}
+	legacy, err := store.GetDeviceSetting(
+		context.Background(), "profile-1", "android-tv", legacyAndroidNextUpPromptSettingKey,
+	)
+	if err != nil {
+		t.Fatalf("GetDeviceSetting legacy: %v", err)
+	}
+	if legacy == nil || legacy.Value != "45" {
+		t.Fatalf("legacy setting = %#v, want unchanged value 45", legacy)
+	}
+}
+
+func TestAndroidNextUpSettingCanonicalGetEchoesCanonicalKey(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
+		ProfileID: "profile-1",
+		DeviceID:  "android-tv",
+		Key:       canonicalNextUpPromptSettingKey,
+		Value:     "60",
+	}); err != nil {
+		t.Fatalf("SetDeviceSetting canonical: %v", err)
+	}
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/settings/device/"+canonicalNextUpPromptSettingKey,
+		nil,
+	)
+	req = withRouteParams(req, map[string]string{"key": canonicalNextUpPromptSettingKey})
+	req.Header.Set(deviceIDHeader, "android-tv")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleGetDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var response settingResponse
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if response.Key != canonicalNextUpPromptSettingKey || response.Value != "60" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestAndroidNextUpSettingAliasPrefersCanonicalDeviceRow(t *testing.T) {
+	store := newProfileTestStore(t)
+	for key, value := range map[string]string{
+		legacyAndroidNextUpPromptSettingKey: "45",
+		canonicalNextUpPromptSettingKey:     "60",
+	} {
+		if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
+			ProfileID: "profile-1",
+			DeviceID:  "android-tv",
+			Key:       key,
+			Value:     value,
+		}); err != nil {
+			t.Fatalf("SetDeviceSetting %s: %v", key, err)
+		}
+	}
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	resolved, err := handler.resolveEffectiveSetting(
+		context.Background(),
+		store,
+		"profile-1",
+		requestDeviceMetadata{DeviceID: "android-tv"},
+		legacyAndroidNextUpPromptSettingKey,
+	)
+	if err != nil {
+		t.Fatalf("resolveEffectiveSetting: %v", err)
+	}
+	if resolved.EffectiveValue != "60" || resolved.Source != "device" {
+		t.Fatalf("resolved = %#v, want canonical device value 60", resolved)
+	}
+}
+
+func TestAndroidNextUpSettingDeleteRemovesCanonicalAndLegacyRows(t *testing.T) {
+	store := newProfileTestStore(t)
+	for key, value := range map[string]string{
+		legacyAndroidNextUpPromptSettingKey: "45",
+		canonicalNextUpPromptSettingKey:     "60",
+	} {
+		if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
+			ProfileID: "profile-1",
+			DeviceID:  "android-tv",
+			Key:       key,
+			Value:     value,
+		}); err != nil {
+			t.Fatalf("SetDeviceSetting %s: %v", key, err)
+		}
+	}
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	req := httptest.NewRequest(
+		http.MethodDelete,
+		"/settings/device/"+legacyAndroidNextUpPromptSettingKey,
+		nil,
+	)
+	req = withRouteParams(req, map[string]string{"key": legacyAndroidNextUpPromptSettingKey})
+	req.Header.Set(deviceIDHeader, "android-tv")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleDeleteDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, key := range []string{canonicalNextUpPromptSettingKey, legacyAndroidNextUpPromptSettingKey} {
+		value, err := store.GetDeviceSetting(context.Background(), "profile-1", "android-tv", key)
+		if err != nil {
+			t.Fatalf("GetDeviceSetting %s: %v", key, err)
+		}
+		if value != nil {
+			t.Fatalf("setting %s = %#v, want nil", key, value)
+		}
+	}
+}
+
+func TestAndroidNextUpSettingAliasDoesNotUseOrDeleteUserRow(t *testing.T) {
+	store := newProfileTestStore(t)
+	if err := store.SetSetting(context.Background(), legacyAndroidNextUpPromptSettingKey, "50"); err != nil {
+		t.Fatalf("SetSetting legacy: %v", err)
+	}
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+
+	resolved, err := handler.resolveEffectiveSetting(
+		context.Background(),
+		store,
+		"profile-1",
+		requestDeviceMetadata{DeviceID: "android-tv"},
+		legacyAndroidNextUpPromptSettingKey,
+	)
+	if err != nil {
+		t.Fatalf("resolveEffectiveSetting: %v", err)
+	}
+	if resolved.EffectiveValue != "30" || resolved.Source != "default" {
+		t.Fatalf("resolved = %#v, want default value 30", resolved)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodDelete,
+		"/settings/device/"+legacyAndroidNextUpPromptSettingKey,
+		nil,
+	)
+	req = withRouteParams(req, map[string]string{"key": legacyAndroidNextUpPromptSettingKey})
+	req.Header.Set(deviceIDHeader, "android-tv")
+	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+	rec := httptest.NewRecorder()
+
+	handler.HandleDeleteDeviceSetting(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	legacyUserValue, err := store.GetSetting(context.Background(), legacyAndroidNextUpPromptSettingKey)
+	if err != nil {
+		t.Fatalf("GetSetting legacy: %v", err)
+	}
+	if legacyUserValue != "50" {
+		t.Fatalf("legacy user setting = %q, want unchanged value 50", legacyUserValue)
+	}
+}
+
+func TestAndroidNextUpSettingAliasCleanupFailures(t *testing.T) {
+	t.Run("PUT succeeds when legacy cleanup fails", func(t *testing.T) {
+		baseStore := newProfileTestStore(t)
+		store := legacyAliasFailureStore{UserStore: baseStore, failLegacyDelete: true}
+		handler := NewSettingsHandler(testUserStoreProvider{store: store})
+		req := httptest.NewRequest(
+			http.MethodPut,
+			"/settings/device/"+legacyAndroidNextUpPromptSettingKey,
+			bytes.NewBufferString(`{"value":"60"}`),
+		)
+		req = withRouteParams(req, map[string]string{"key": legacyAndroidNextUpPromptSettingKey})
+		req.Header.Set(deviceIDHeader, "android-tv")
+		req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+		rec := httptest.NewRecorder()
+
+		handler.HandleSetDeviceSetting(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+		}
+		canonical, err := baseStore.GetDeviceSetting(
+			context.Background(), "profile-1", "android-tv", canonicalNextUpPromptSettingKey,
+		)
+		if err != nil {
+			t.Fatalf("GetDeviceSetting canonical: %v", err)
+		}
+		if canonical == nil || canonical.Value != "60" {
+			t.Fatalf("canonical setting = %#v, want value 60", canonical)
+		}
+	})
+
+	t.Run("DELETE reports legacy cleanup failure", func(t *testing.T) {
+		baseStore := newProfileTestStore(t)
+		store := legacyAliasFailureStore{UserStore: baseStore, failLegacyDelete: true}
+		handler := NewSettingsHandler(testUserStoreProvider{store: store})
+		req := httptest.NewRequest(
+			http.MethodDelete,
+			"/settings/device/"+legacyAndroidNextUpPromptSettingKey,
+			nil,
+		)
+		req = withRouteParams(req, map[string]string{"key": legacyAndroidNextUpPromptSettingKey})
+		req.Header.Set(deviceIDHeader, "android-tv")
+		req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
+		rec := httptest.NewRecorder()
+
+		handler.HandleDeleteDeviceSetting(rec, req)
+
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestGenericSettingsRejectInvalidRegisteredValues(t *testing.T) {

@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# Talk to a running Silo deployment — local or over SSH — using the settings in
+# `.silo-dev.env`. Run `scripts/silo-dev help` for the subcommands.
+set -euo pipefail
+
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+env_file=${SILO_DEV_ENV_FILE:-"$repo_root/.silo-dev.env"}
+
+if [[ -f "$env_file" ]]; then
+	set -a
+	# shellcheck disable=SC1090
+	. "$env_file"
+	set +a
+fi
+
+SILO_URL=${SILO_URL:-http://localhost:8090}
+SILO_SSH=${SILO_SSH:-}
+SILO_DIR=${SILO_DIR:-/opt/silo}
+SILO_COMPOSE_FILE=${SILO_COMPOSE_FILE:-docker-compose.yml}
+SILO_SERVICE=${SILO_SERVICE:-silo}
+SILO_POSTGRES_SERVICE=${SILO_POSTGRES_SERVICE:-postgres}
+SILO_DB_USER=${SILO_DB_USER:-silo}
+SILO_DB_NAME=${SILO_DB_NAME:-silo}
+
+die() {
+	printf 'silo-dev: %s\n' "$1" >&2
+	exit 1
+}
+
+need_env_file() {
+	[[ -f "$env_file" ]] || die "no ${env_file##*/} — copy .silo-dev.env.example to .silo-dev.env and fill it in"
+}
+
+# Run a shell command on whichever host Silo runs on.
+on_host() {
+	if [[ -n "$SILO_SSH" ]]; then
+		ssh "$SILO_SSH" "$@"
+	else
+		bash -lc "$@"
+	fi
+}
+
+compose() {
+	on_host "cd $(printf '%q' "$SILO_DIR") && COMPOSE_FILE=$(printf '%q' "$SILO_COMPOSE_FILE") docker compose $*"
+}
+
+# POST /auth/login and print the access token.
+token() {
+	need_env_file
+	[[ -n "${SILO_ADMIN_USER:-}" && -n "${SILO_ADMIN_PASSWORD:-}" ]] ||
+		die "set SILO_ADMIN_USER and SILO_ADMIN_PASSWORD in ${env_file##*/}"
+
+	local body
+	body=$(SILO_ADMIN_USER="$SILO_ADMIN_USER" SILO_ADMIN_PASSWORD="$SILO_ADMIN_PASSWORD" \
+		python3 -c 'import json,os;print(json.dumps({"username":os.environ["SILO_ADMIN_USER"],"password":os.environ["SILO_ADMIN_PASSWORD"]}))')
+
+	curl -fsS -X POST "$SILO_URL/api/v1/auth/login" \
+		-H 'Content-Type: application/json' \
+		--data-binary "$body" |
+		python3 -c 'import json,sys;print(json.load(sys.stdin)["access_token"])'
+}
+
+usage() {
+	cat <<'EOF'
+usage: scripts/silo-dev <command> [args]
+
+  doctor                 check config and reachability, then report what works
+  env                    print the resolved settings (secrets masked)
+  sh <command...>        run a shell command on the host running Silo
+  compose <args...>      docker compose against the deployment's stack
+  logs [args...]         compose logs for the Silo service (default: --tail 200)
+  psql <sql>             run one SQL statement against the Silo database
+  token                  print an access token for SILO_ADMIN_USER
+  api <path> [curl...]   authenticated request against the API, e.g. api /api/v1/health
+
+Settings come from .silo-dev.env (see .silo-dev.env.example). With SILO_SSH
+empty, host commands run locally.
+EOF
+}
+
+cmd=${1:-help}
+if [[ $# -gt 0 ]]; then shift; fi
+
+case "$cmd" in
+help | -h | --help)
+	usage
+	;;
+
+env)
+	mask() { [[ -n "${1:-}" ]] && printf 'set' || printf 'empty'; }
+	cat <<EOF
+config file        $env_file $([[ -f "$env_file" ]] && echo '(found)' || echo '(MISSING)')
+SILO_URL           $SILO_URL
+SILO_SSH           ${SILO_SSH:-<local>}
+SILO_DIR           $SILO_DIR
+SILO_COMPOSE_FILE  $SILO_COMPOSE_FILE
+SILO_SERVICE       $SILO_SERVICE
+database           $SILO_DB_USER@$SILO_POSTGRES_SERVICE/$SILO_DB_NAME
+SILO_ADMIN_USER    ${SILO_ADMIN_USER:-<unset>}
+SILO_ADMIN_PASSWORD $(mask "${SILO_ADMIN_PASSWORD:-}")
+SILO_MEDIA_ROOT    ${SILO_MEDIA_ROOT:-<unset>}
+EOF
+	;;
+
+doctor)
+	need_env_file
+	status=0
+	printf 'api      '
+	if curl -fsS --max-time 10 "$SILO_URL/api/v1/health" >/dev/null 2>&1; then
+		printf 'ok (%s)\n' "$SILO_URL"
+	else
+		printf 'FAIL — %s/api/v1/health did not respond\n' "$SILO_URL"
+		status=1
+	fi
+
+	printf 'host     '
+	if on_host 'true' >/dev/null 2>&1; then
+		printf 'ok (%s)\n' "${SILO_SSH:-local}"
+	else
+		printf 'FAIL — cannot run commands on %s\n' "${SILO_SSH:-local shell}"
+		status=1
+	fi
+
+	printf 'compose  '
+	if compose ps --services >/dev/null 2>&1; then
+		printf 'ok (%s in %s)\n' "$SILO_COMPOSE_FILE" "$SILO_DIR"
+	else
+		printf 'FAIL — no compose stack at %s\n' "$SILO_DIR"
+		status=1
+	fi
+
+	printf 'database '
+	if compose "exec -T $SILO_POSTGRES_SERVICE psql -U $SILO_DB_USER -d $SILO_DB_NAME -tAc 'select 1'" >/dev/null 2>&1; then
+		printf 'ok (%s/%s)\n' "$SILO_DB_USER" "$SILO_DB_NAME"
+	else
+		printf 'FAIL — psql as %s on %s failed; check POSTGRES_USER/POSTGRES_DB in the deployment .env\n' \
+			"$SILO_DB_USER" "$SILO_DB_NAME"
+		status=1
+	fi
+
+	printf 'auth     '
+	if [[ -z "${SILO_ADMIN_USER:-}" ]]; then
+		printf 'skipped — SILO_ADMIN_USER not set\n'
+	elif token >/dev/null 2>&1; then
+		printf 'ok (%s)\n' "$SILO_ADMIN_USER"
+	else
+		printf 'FAIL — login rejected for %s\n' "$SILO_ADMIN_USER"
+		status=1
+	fi
+	exit "$status"
+	;;
+
+sh)
+	[[ $# -gt 0 ]] || die 'sh needs a command'
+	on_host "$*"
+	;;
+
+compose)
+	compose "$*"
+	;;
+
+logs)
+	compose "logs $SILO_SERVICE ${*:---tail 200}"
+	;;
+
+psql)
+	[[ $# -gt 0 ]] || die 'psql needs a SQL statement'
+	sql=$*
+	compose "exec -T $SILO_POSTGRES_SERVICE psql -U $SILO_DB_USER -d $SILO_DB_NAME -P pager=off -c $(printf '%q' "$sql")"
+	;;
+
+token)
+	token
+	;;
+
+api)
+	[[ $# -gt 0 ]] || die 'api needs a path, e.g. /api/v1/health'
+	path=$1
+	shift
+	curl -fsS -H "Authorization: Bearer $(token)" "$SILO_URL$path" "$@"
+	;;
+
+*)
+	usage >&2
+	die "unknown command: $cmd"
+	;;
+esac

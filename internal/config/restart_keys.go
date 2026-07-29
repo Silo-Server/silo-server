@@ -53,6 +53,10 @@ var restartRequiredKeys = map[string]bool{
 
 	// External API clients built once at startup.
 	"tmdb.api_key": true,
+	// The Trakt collection browser captures its public client ID when the
+	// router is built. Watch-sync flows read both credentials live, but a
+	// restart is still required for the collection adapter to converge.
+	"watchsync.trakt.client_id": true,
 
 	// Compat listeners and session stores.
 	"audiobookshelf_compat.enabled": true,

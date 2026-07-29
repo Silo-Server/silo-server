@@ -327,9 +327,14 @@ func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *sec
 	if err != nil {
 		slog.ErrorContext(ctx, "secret backfill: arr api keys", "component", "app", "error", err)
 	}
-	if total := settingsN + columnsN + historyServersN + arrN; total > 0 {
+	pluginConfigsN, err := plugins.NewRuntimeConfigStore(pool, cipher).BackfillEncryptedConfigs(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "secret backfill: plugin runtime configs", "component", "app", "error", err)
+	}
+	if total := settingsN + columnsN + historyServersN + arrN + pluginConfigsN; total > 0 {
 		slog.InfoContext(ctx, "secret backfill: encrypted plaintext credentials at rest", "component", "app",
-			"settings", settingsN, "columns", columnsN, "history_session_servers", historyServersN, "arr_keys", arrN, "total", total)
+			"settings", settingsN, "columns", columnsN, "history_session_servers", historyServersN,
+			"arr_keys", arrN, "plugin_configs", pluginConfigsN, "total", total)
 	}
 }
 
@@ -721,6 +726,14 @@ func main() {
 		bootstrapSensitiveConfigured["redis.url"] = true
 		bootstrapSensitiveValues["redis.url"] = bc.RedisURL
 	}
+	if rawTrustedProxies := strings.TrimSpace(os.Getenv(clientip.EnvTrustedProxies)); rawTrustedProxies != "" {
+		normalizedTrustedProxies, normalizeErr := clientip.NormalizeCIDRList(rawTrustedProxies)
+		if normalizeErr != nil {
+			log.Fatalf("invalid %s: %v", clientip.EnvTrustedProxies, normalizeErr)
+		}
+		bootstrapSensitiveConfigured[clientip.SettingTrustedProxies] = true
+		bootstrapSensitiveValues[clientip.SettingTrustedProxies] = normalizedTrustedProxies
+	}
 
 	// Shared Redis client for components needing raw Redis beyond the event
 	// bus (websocket handshake tickets, session listing). Nil on Redis-less
@@ -736,6 +749,9 @@ func main() {
 	// OnServerSettingUpdated closure, which only runs on admin requests after
 	// startup completes.
 	var ipResolver *clientip.Resolver
+	normalizedBootstrapRedisURL, bootstrapRedisURLErr := config.NormalizeRedisURL(bc.RedisURL)
+	redisBootstrapAvailable := (normalizedBootstrapRedisURL != "" && bootstrapRedisURLErr == nil) ||
+		(strings.TrimSpace(cfg.Redis.SentinelMaster) != "" && len(cfg.Redis.SentinelAddresses) > 0)
 
 	deps := api.Dependencies{
 		Config:                       cfg,
@@ -743,6 +759,7 @@ func main() {
 		OnConfigChange:               configWatcher.OnChange,
 		BootstrapSensitiveConfigured: bootstrapSensitiveConfigured,
 		BootstrapSensitiveValues:     bootstrapSensitiveValues,
+		RedisBootstrapAvailable:      redisBootstrapAvailable,
 		AppContext:                   appCtx,
 		DB:                           pool,
 		SecretCipher:                 dataCipher,
@@ -910,8 +927,9 @@ func main() {
 			s.SetWorkers(updated.Scanner.Workers)
 		})
 		s.SetLiteraryWorkLinker(literaryWorkService)
+		s.SetEbookEnrichmentQueue(ebooks.NewEnrichmentQueue(deps.DB))
 		deps.Scanner = s
-		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, 10*time.Second)
+		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, cfg.Playback.FFmpegPath, 10*time.Second)
 		slog.Info("scanner initialized")
 	}
 
@@ -947,7 +965,7 @@ func main() {
 		pluginCacheDir := resolvePluginCacheDir()
 		repositoryStore := plugins.NewRepositoryStore(deps.DB)
 		installationStore := plugins.NewInstallationStore(deps.DB)
-		runtimeConfigStore := plugins.NewRuntimeConfigStore(deps.DB)
+		runtimeConfigStore := plugins.NewRuntimeConfigStore(deps.DB, deps.SecretCipher)
 		catalogService := plugins.NewCatalogService(repositoryStore, plugins.CatalogServiceOptions{
 			SiloAPIVersion: plugins.DefaultSiloAPIVersion,
 		})
@@ -1210,6 +1228,35 @@ func main() {
 		deps.MovieMatchQueueRepo = movieQueueRepo
 		deps.SeriesRootMatchQueueRepo = seriesQueueRepo
 		matchQueueCoordinator = metadata.NewMatchQueueCoordinator(movieQueueRepo, seriesQueueRepo)
+		backgroundInit = append(backgroundInit, func(ctx context.Context) {
+			if err := matchQueueCoordinator.WakeForChangedInputs(ctx); err != nil {
+				slog.WarnContext(ctx, "refresh metadata match queue inputs at startup failed", "component", "app", "error", err)
+			}
+		})
+		if pluginService != nil {
+			matchInputChanged := make(chan struct{}, 1)
+			go func() {
+				for {
+					select {
+					case <-appCtx.Done():
+						return
+					case <-matchInputChanged:
+						if err := matchQueueCoordinator.WakeForChangedInputs(appCtx); err != nil {
+							slog.WarnContext(appCtx, "wake metadata matches after plugin lifecycle change failed", "component", "app", "error", err)
+						}
+					}
+				}
+			}()
+			pluginService.AddLifecycleHook(func(context.Context) {
+				// Queue fingerprint reconciliation may touch thousands of parked
+				// rows. Coalesce lifecycle bursts and keep plugin admin requests
+				// independent of that background database work.
+				select {
+				case matchInputChanged <- struct{}{}:
+				default:
+				}
+			})
+		}
 		rootClaimRepo = catalog.NewRootClaimRepository(deps.DB)
 		groupClaimRepo = catalog.NewGroupClaimRepository(deps.DB)
 		pluginResolver := metadata.NewPluginResolverAdapter(pluginService)
@@ -1584,6 +1631,7 @@ func main() {
 
 	// Step 6: Create playback session manager and wire into dependencies.
 	sessionMgr := playback.NewSessionManager(6, 2) // defaults from plan: max_streams=6, max_transcodes=2
+	var compatTerminalRecoveryReady <-chan struct{}
 	if userStoreProvider != nil {
 		deps.UserStoreProvider = userStoreProvider
 	}
@@ -1595,6 +1643,13 @@ func main() {
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider)
 		backgroundInit = append(backgroundInit, func(ctx context.Context) {
+			if compatTerminalRecoveryReady != nil {
+				select {
+				case <-compatTerminalRecoveryReady:
+				case <-ctx.Done():
+					return
+				}
+			}
 			if err := watchProviderService.SweepOpenScrobbles(ctx); err != nil {
 				slog.WarnContext(ctx, "failed to sweep open watch provider scrobbles", "component", "app", "error", err)
 			}
@@ -1913,6 +1968,7 @@ func main() {
 			taskMgr.Register(tasks.NewScanLibrariesTask(deps.FolderRepo, deps.LibraryScanQueue, deps.EventBus))
 		}
 		taskMgr.Register(tasks.NewCleanupOrphanedMediaItemsTask(catalog.NewOrphanedProvisionalCleaner(deps.DB)))
+		taskMgr.Register(tasks.NewBackfillMediaItemAliasesTask(catalog.NewItemAliasRepository(deps.DB)))
 		if deps.S3Public != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.S3Public),
@@ -2094,6 +2150,7 @@ func main() {
 		}
 		if ebookEnricher != nil {
 			taskMgr.Register(tasks.NewSyncEbookMetadataTask(ebookEnricher))
+			taskMgr.Register(tasks.NewBackfillEbookMetadataTask(ebookEnricher))
 		}
 		if mangaEnricher != nil {
 			taskMgr.Register(tasks.NewSyncMangaMetadataTask(mangaEnricher))
@@ -2451,6 +2508,7 @@ func main() {
 			compatDeps.SeasonRepo = seasonRepo
 			compatDeps.EpisodeRepo = episodeRepo
 			compatDeps.ProviderIDRepo = providerIDRepo
+			compatDeps.StableIdentityResolver = watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, providerIDRepo)
 			compatDeps.DetailSvc = detailSvc
 			compatDeps.FolderRepo = folderRepo
 			compatDeps.SessionMgr = sessionMgr
@@ -2458,6 +2516,9 @@ func main() {
 			compatDeps.WatchCompletionObserver = deps.WatchCompletionObserver
 			compatDeps.SettingsRepo = settingsRepo
 			compatDeps.PersonRepo = personRepo
+			if watchProviderService != nil {
+				compatDeps.WatchScrobbler = watchProviderService
+			}
 			compatSearchService := catalog.NewCatalogSearchService(
 				appCtx,
 				settingsRepo,
@@ -2537,7 +2598,7 @@ func main() {
 
 		compat := jellycompat.NewServerWithDependencies(compatDeps)
 		compatServer = compat
-		compat.StartBackgroundTasks(context.Background())
+		compatTerminalRecoveryReady = compat.StartBackgroundTasks(context.Background())
 		compatSrv = compat.HTTPServer()
 		compatSrv.ReadTimeout = 30 * time.Second
 		compatSrv.WriteTimeout = 0
@@ -3195,15 +3256,29 @@ type scopeEntitlementResolver struct {
 }
 
 func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
-	scope, err := r.resolver.Resolve(ctx, access.ResolveInput{
-		UserID:              userID,
-		ProfileID:           profileID,
-		SkipPINVerification: true,
-	})
+	scope, err := r.resolveScope(ctx, userID, profileID)
 	if err != nil {
 		return "", err
 	}
 	return scope.MaxPlaybackQuality, nil
+}
+
+// MaxContentRating implements mediarequests.ContentRatingResolver so request
+// discovery honors the profile's parental rating ceiling.
+func (r scopeEntitlementResolver) MaxContentRating(ctx context.Context, userID int, profileID string) (string, error) {
+	scope, err := r.resolveScope(ctx, userID, profileID)
+	if err != nil {
+		return "", err
+	}
+	return scope.MaxContentRating, nil
+}
+
+func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, profileID string) (access.Scope, error) {
+	return r.resolver.Resolve(ctx, access.ResolveInput{
+		UserID:              userID,
+		ProfileID:           profileID,
+		SkipPINVerification: true,
+	})
 }
 
 // audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which

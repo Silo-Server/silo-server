@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +36,8 @@ const (
 	// semanticCapabilityProbeTTL rate-limits the embedder capability check
 	// (settings fetch + hybrid probe) so a healthy index is validated at most
 	// once per window. The probe is advisory only and never trips the circuit.
-	semanticCapabilityProbeTTL = 5 * time.Minute
+	semanticCapabilityProbeTTL              = 5 * time.Minute
+	meilisearchFederationCapabilityCacheTTL = 5 * time.Minute
 )
 
 var meilisearchTitleSearchAttributes = []string{
@@ -43,6 +45,7 @@ var meilisearchTitleSearchAttributes = []string{
 	"original_title",
 	"sort_title",
 	"title_variants",
+	"overview",
 }
 
 type meilisearchIndexStateStore interface {
@@ -97,6 +100,10 @@ type MeilisearchSearchProvider struct {
 	capMu       sync.Mutex
 	capCache    CatalogSearchSemanticCapability
 	capCachedAt time.Time
+
+	federationMu            sync.Mutex
+	federationUnsupported   bool
+	federationUnsupportedAt time.Time
 }
 
 type cachedCatalogSearchQueryVector struct {
@@ -151,6 +158,14 @@ func NewMeilisearchSearchProvider(
 }
 
 func (p *MeilisearchSearchProvider) Search(ctx context.Context, req CatalogSearchRequest) (*CatalogSearchResult, error) {
+	if req.Access.AllowedLibraryIDs != nil && len(req.Access.AllowedLibraryIDs) == 0 {
+		return &CatalogSearchResult{
+			Items:      []*models.MediaItem{},
+			TotalExact: !req.SkipTotal,
+			Provider:   SearchProviderMeilisearch,
+			Mode:       "keyword",
+		}, nil
+	}
 	if p == nil || p.client == nil {
 		return p.fallbackSearch(ctx, req, "meilisearch not configured")
 	}
@@ -270,6 +285,13 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 	estimatedTotalHits := 0
 	exhausted := false
 	baseSearchReq, semanticFallback := p.buildMeilisearchSearchRequest(ctx, req)
+	useFederation := baseSearchReq.Hybrid != nil && searchRequestMixesEpisodeAndMedia(req.ItemTypes)
+	if useFederation && p.isFederationUnsupported() {
+		semanticFallback = "meilisearch federation unsupported; using keyword search"
+		baseSearchReq.Vector = nil
+		baseSearchReq.Hybrid = nil
+		useFederation = false
+	}
 
 	for len(accessible) < target && !exhausted {
 		if scanned >= meilisearchCandidateScanCap {
@@ -282,8 +304,27 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 		searchReq := baseSearchReq
 		searchReq.Offset = meiliOffset
 		searchReq.Limit = nextLimit
-		resp, err := p.client.Search(ctx, indexUID, searchReq)
-		if err != nil && baseSearchReq.Hybrid != nil {
+		var resp meilisearchSearchResponse
+		var err error
+		if useFederation {
+			resp, err = p.client.FederatedSearch(ctx, p.buildFederatedSearchRequest(indexUID, req, baseSearchReq, meiliOffset, nextLimit))
+			if err == nil {
+				p.markFederationSupported()
+			} else if isMeilisearchFederationUnsupported(err) {
+				p.markFederationUnsupported()
+				semanticFallback = "meilisearch federation unsupported; using keyword search"
+				baseSearchReq.Vector = nil
+				baseSearchReq.Hybrid = nil
+				useFederation = false
+				searchReq = baseSearchReq
+				searchReq.Offset = meiliOffset
+				searchReq.Limit = nextLimit
+				resp, err = p.client.Search(ctx, indexUID, searchReq)
+			}
+		} else {
+			resp, err = p.client.Search(ctx, indexUID, searchReq)
+		}
+		if err != nil && baseSearchReq.Hybrid != nil && !useFederation {
 			semanticFallback = "meilisearch hybrid search failed: " + err.Error()
 			baseSearchReq.Vector = nil
 			baseSearchReq.Hybrid = nil
@@ -316,7 +357,7 @@ func (p *MeilisearchSearchProvider) searchMeilisearch(ctx context.Context, req C
 			position[id] = i
 			ids = append(ids, id)
 		}
-		hydrated, err := p.itemRepo.GetByIDsWithAccess(ctx, ids, req.Access)
+		hydrated, err := p.itemRepo.GetSearchItemsByIDsWithAccess(ctx, ids, req.Access)
 		if err != nil {
 			return nil, err
 		}
@@ -371,13 +412,13 @@ func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Co
 	if p == nil {
 		return meilisearchSearchRequest{
 			Query:                strings.TrimSpace(req.Query),
-			Filter:               meilisearchTypeFilter(req.ItemTypes),
+			Filter:               meilisearchSearchFilter(req.ItemTypes, req.Access),
 			AttributesToRetrieve: []string{"content_id"},
 		}, ""
 	}
 	searchReq := meilisearchSearchRequest{
 		Query:                strings.TrimSpace(req.Query),
-		Filter:               meilisearchTypeFilter(req.ItemTypes),
+		Filter:               meilisearchSearchFilter(req.ItemTypes, req.Access),
 		AttributesToRetrieve: []string{"content_id"},
 		AttributesToSearchOn: p.attributesToSearchOnForRequest(req),
 		MatchingStrategy:     p.matchingStrategyForRequest(req),
@@ -412,7 +453,126 @@ func (p *MeilisearchSearchProvider) shouldUseSemanticSearch(req CatalogSearchReq
 	if p == nil || !p.config.SemanticEnabled {
 		return false
 	}
+	mediaTypes, includesEpisodes := splitSearchItemTypes(req.ItemTypes)
+	if includesEpisodes && len(req.ItemTypes) > 0 && len(mediaTypes) == 0 {
+		return false
+	}
 	return len(catalogSearchQueryTerms(req.Query)) >= meilisearchShortHybridMinTerms
+}
+
+func searchRequestMixesEpisodeAndMedia(itemTypes []string) bool {
+	mediaTypes, includesEpisodes := splitSearchItemTypes(itemTypes)
+	return includesEpisodes && (len(itemTypes) == 0 || len(mediaTypes) > 0)
+}
+
+func (p *MeilisearchSearchProvider) buildFederatedSearchRequest(
+	indexUID string,
+	req CatalogSearchRequest,
+	base meilisearchSearchRequest,
+	offset, limit int,
+) meilisearchFederatedSearchRequest {
+	mediaTypes, _ := splitSearchItemTypes(req.ItemTypes)
+	mediaFilter := ""
+	if len(req.ItemTypes) == 0 {
+		mediaFilter = joinMeilisearchFilters(`type != "episode"`, meilisearchSearchFilter(nil, req.Access))
+	} else {
+		mediaFilter = meilisearchSearchFilter(mediaTypes, req.Access)
+	}
+	episodeFilter := meilisearchSearchFilter([]string{"episode"}, req.Access)
+	mediaQuery := meilisearchFederatedQuery{
+		IndexUID:             indexUID,
+		Query:                base.Query,
+		Filter:               mediaFilter,
+		AttributesToRetrieve: base.AttributesToRetrieve,
+		AttributesToSearchOn: base.AttributesToSearchOn,
+		MatchingStrategy:     base.MatchingStrategy,
+		Vector:               base.Vector,
+		Hybrid:               base.Hybrid,
+	}
+	mediaQuery.FederationOptions.Weight = 1
+	episodeQuery := meilisearchFederatedQuery{
+		IndexUID:             indexUID,
+		Query:                base.Query,
+		Filter:               episodeFilter,
+		AttributesToRetrieve: base.AttributesToRetrieve,
+		AttributesToSearchOn: base.AttributesToSearchOn,
+		MatchingStrategy:     base.MatchingStrategy,
+	}
+	episodeQuery.FederationOptions.Weight = 1
+	return meilisearchFederatedSearchRequest{
+		Federation: meilisearchFederationOptions{Offset: offset, Limit: limit},
+		Queries:    []meilisearchFederatedQuery{mediaQuery, episodeQuery},
+	}
+}
+
+func joinMeilisearchFilters(parts ...string) string {
+	cleaned := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			cleaned = append(cleaned, part)
+		}
+	}
+	return strings.Join(cleaned, " AND ")
+}
+
+func (p *MeilisearchSearchProvider) isFederationUnsupported() bool {
+	p.federationMu.Lock()
+	defer p.federationMu.Unlock()
+	if !p.federationUnsupported {
+		return false
+	}
+	return p.federationUnsupportedAt.IsZero() ||
+		time.Since(p.federationUnsupportedAt) < meilisearchFederationCapabilityCacheTTL
+}
+
+func (p *MeilisearchSearchProvider) markFederationUnsupported() {
+	p.federationMu.Lock()
+	p.federationUnsupported = true
+	p.federationUnsupportedAt = time.Now()
+	p.federationMu.Unlock()
+}
+
+func (p *MeilisearchSearchProvider) markFederationSupported() {
+	p.federationMu.Lock()
+	p.federationUnsupported = false
+	p.federationUnsupportedAt = time.Time{}
+	p.federationMu.Unlock()
+}
+
+func isMeilisearchFederationUnsupported(err error) bool {
+	var httpErr *meilisearchHTTPError
+	if !errors.As(err, &httpErr) {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(httpErr.Code))
+	message := strings.ToLower(strings.TrimSpace(httpErr.Message))
+	if httpErr.StatusCode == http.StatusNotFound {
+		// A cached active index can disappear during an atomic rebuild swap.
+		// That is a resource miss, not evidence that this Meilisearch process
+		// lacks federation; caching it would disable mixed hybrid search until
+		// Silo restarts even after the provider refreshes the active index UID.
+		if code == "index_not_found" || code == "document_not_found" {
+			return false
+		}
+		return code == "not_found" ||
+			(code == "" && (strings.Contains(message, "route") || strings.Contains(message, "multi-search")))
+	}
+	if httpErr.StatusCode != http.StatusBadRequest {
+		return false
+	}
+
+	// Older Meilisearch versions expose /multi-search but reject the newer
+	// federation object as an unknown field. Cache only that capability-shaped
+	// failure; malformed or incompatible federated queries should keep falling
+	// through to PostgreSQL so a request bug is not hidden for the process life.
+	details := code + " " + message
+	mentionsFederation := strings.Contains(details, "federation")
+	unsupported := strings.Contains(details, "not supported") ||
+		strings.Contains(details, "unsupported") ||
+		strings.Contains(details, "unknown field") ||
+		strings.Contains(details, "unrecognized field") ||
+		strings.Contains(details, "feature not enabled")
+	return mentionsFederation && unsupported
 }
 
 func (p *MeilisearchSearchProvider) matchingStrategyForRequest(req CatalogSearchRequest) string {
@@ -738,6 +898,31 @@ func meilisearchTypeFilter(itemTypes []string) string {
 		return parts[0]
 	}
 	return "(" + strings.Join(parts, " OR ") + ")"
+}
+
+func meilisearchSearchFilter(itemTypes []string, access AccessFilter) string {
+	parts := make([]string, 0, 4)
+	if typeFilter := meilisearchTypeFilter(itemTypes); typeFilter != "" {
+		parts = append(parts, typeFilter)
+	}
+	if access.AllowedLibraryIDs != nil {
+		parts = append(parts, "library_ids IN ["+joinMeilisearchIntFilterValues(access.AllowedLibraryIDs)+"]")
+	}
+	if len(access.DisabledLibraryIDs) > 0 {
+		if access.AllowedLibraryIDs == nil {
+			parts = append(parts, "library_ids IS NOT EMPTY")
+		}
+		parts = append(parts, "library_ids NOT IN ["+joinMeilisearchIntFilterValues(access.DisabledLibraryIDs)+"]")
+	}
+	return strings.Join(parts, " AND ")
+}
+
+func joinMeilisearchIntFilterValues(values []int) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, strconv.Itoa(value))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func normalizeCatalogSearchQueryForVector(query string) string {

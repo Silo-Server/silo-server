@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
+import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Bug, Download, ExternalLink, FilterX, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import type { DiagnosticReport, DiagnosticReportState, DiagnosticReportSummary } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DateTimePicker } from "@/components/DateTimePicker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +33,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import {
   downloadDiagnosticReport,
@@ -39,6 +42,7 @@ import {
   useDiagnosticReport,
   useDiagnosticReports,
   useDiagnosticsStatus,
+  useUpdateDiagnosticsUploadsEnabled,
 } from "@/hooks/queries/admin/diagnostics";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 
@@ -95,10 +99,12 @@ export default function AdminDiagnostics() {
   }, [activeCursor, searchParams]);
 
   const status = useDiagnosticsStatus();
+  const updateUploadsEnabled = useUpdateDiagnosticsUploadsEnabled();
   const reports = useDiagnosticReports(query);
   const selectedReport = useDiagnosticReport(selectedID);
   const deleteReport = useDeleteDiagnosticReport();
   const hasAppliedFilters = FILTER_KEYS.some((key) => searchParams.has(key));
+  const uploadsEnabled = status.data !== undefined && status.data.status !== "disabled";
 
   function setFilter<Key extends keyof FilterDraft>(key: Key, value: FilterDraft[Key]) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -170,12 +176,25 @@ export default function AdminDiagnostics() {
             Review client crash reports, device context, and correlated playback sessions.
           </p>
         </div>
-        <div className="text-right">
-          <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
-            Retention
+        <div className="flex items-center gap-5 sm:gap-6">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="diagnostics-uploads-enabled" className="text-muted-foreground text-sm">
+              Client uploads
+            </Label>
+            <Switch
+              id="diagnostics-uploads-enabled"
+              checked={uploadsEnabled}
+              onCheckedChange={(enabled) => updateUploadsEnabled.mutate(enabled)}
+              disabled={!status.data || status.isError || updateUploadsEnabled.isPending}
+            />
           </div>
-          <div className="text-sm">
-            {status.data ? `${status.data.retention_days} days` : "Loading..."}
+          <div className="text-right">
+            <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
+              Retention
+            </div>
+            <div className="text-sm">
+              {status.data ? `${status.data.retention_days} days` : "Loading..."}
+            </div>
           </div>
         </div>
       </div>
@@ -185,24 +204,22 @@ export default function AdminDiagnostics() {
       )}
 
       <form
-        className="surface-panel-subtle grid gap-3 rounded-2xl p-4 md:grid-cols-2 xl:grid-cols-[110px_150px_170px_1fr_1fr_180px_auto] xl:items-end"
+        className="surface-panel-subtle flex flex-wrap items-end gap-x-3 gap-y-4 rounded-2xl p-4"
         onSubmit={applyFilters}
       >
-        <div className="space-y-2">
-          <Label htmlFor="diagnostics-user">User</Label>
+        <FilterField label="User" htmlFor="diagnostics-user" className="w-24">
           <Input
             id="diagnostics-user"
             type="number"
             min={1}
             step={1}
             inputMode="numeric"
-            placeholder="42"
+            placeholder="Any"
             value={filters.userID}
             onChange={(event) => setFilter("userID", event.target.value)}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="diagnostics-platform">Platform</Label>
+        </FilterField>
+        <FilterField label="Platform" htmlFor="diagnostics-platform" className="min-w-36 flex-1">
           <Select value={filters.platform} onValueChange={(value) => setFilter("platform", value)}>
             <SelectTrigger id="diagnostics-platform" className="w-full">
               <SelectValue />
@@ -215,9 +232,8 @@ export default function AdminDiagnostics() {
               <SelectItem value="tvos">tvOS</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="diagnostics-type">Report type</Label>
+        </FilterField>
+        <FilterField label="Report type" htmlFor="diagnostics-type" className="min-w-36 flex-1">
           <Select
             value={filters.reportType}
             onValueChange={(value) => setFilter("reportType", value)}
@@ -235,36 +251,31 @@ export default function AdminDiagnostics() {
               <SelectItem value="manual">Manual</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="diagnostics-from">From</Label>
-          <Input
+        </FilterField>
+        <FilterField label="From" htmlFor="diagnostics-from" className="min-w-44 flex-1">
+          <DateTimePicker
             id="diagnostics-from"
-            type="datetime-local"
             value={filters.from}
-            onChange={(event) => setFilter("from", event.target.value)}
+            onChange={(value) => setFilter("from", value)}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="diagnostics-to">To</Label>
-          <Input
+        </FilterField>
+        <FilterField label="To" htmlFor="diagnostics-to" className="min-w-44 flex-1">
+          <DateTimePicker
             id="diagnostics-to"
-            type="datetime-local"
             value={filters.to}
-            onChange={(event) => setFilter("to", event.target.value)}
+            onChange={(value) => setFilter("to", value)}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="diagnostics-short-id">Short ID</Label>
+        </FilterField>
+        <FilterField label="Short ID" htmlFor="diagnostics-short-id" className="min-w-32 flex-1">
           <Input
             id="diagnostics-short-id"
-            className="font-mono text-xs uppercase"
+            className="font-mono uppercase placeholder:normal-case"
             placeholder="Exact ID"
             value={filters.shortID}
             onChange={(event) => setFilter("shortID", event.target.value)}
           />
-        </div>
-        <div className="flex gap-2 md:col-span-2 xl:col-span-1">
+        </FilterField>
+        <div className="ml-auto flex gap-2">
           <Button type="submit">Apply</Button>
           <Button
             type="button"
@@ -409,6 +420,30 @@ export default function AdminDiagnostics() {
           });
         }}
       />
+    </div>
+  );
+}
+
+function FilterField({
+  label,
+  htmlFor,
+  className,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <Label
+        htmlFor={htmlFor}
+        className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase"
+      >
+        {label}
+      </Label>
+      {children}
     </div>
   );
 }
@@ -576,7 +611,7 @@ function DiagnosticReportDetail({
 function FeatureStatusBanner({ status }: { status: "disabled" | "storage_unavailable" }) {
   const message =
     status === "disabled"
-      ? "Client diagnostic uploads are currently disabled. Reports from when the feature was enabled may still be available below."
+      ? "Client diagnostic uploads are currently disabled. Use the Client uploads toggle above to enable them. Reports from when the feature was enabled may still be available below."
       : "Client diagnostic storage is currently unavailable. Existing report metadata may still be available below.";
   return (
     <div className="border-border bg-muted/30 text-muted-foreground flex items-start gap-3 rounded-xl border px-4 py-3 text-sm">

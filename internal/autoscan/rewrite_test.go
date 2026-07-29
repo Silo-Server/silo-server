@@ -33,8 +33,7 @@ func TestApplyRewrites(t *testing.T) {
 
 // TestApplyRewritesNormalizesStoredFrom verifies that a Windows-style / dup-slash
 // stored From is normalized the same way coveredBy/normalizePath does, so a
-// rewrite the suggester reports as "covered" actually matches at poll time. The
-// incoming path is already separator-normalized by PollOnce before applyRewrites.
+// rewrite the suggester reports as "covered" actually matches at poll time.
 func TestApplyRewritesNormalizesStoredFrom(t *testing.T) {
 	// Backslash From: a Windows-hosted arr root stored verbatim.
 	winFrom := []PathRewrite{{From: `D:\data\tv`, To: "/mnt/media/tv"}}
@@ -50,6 +49,61 @@ func TestApplyRewritesNormalizesStoredFrom(t *testing.T) {
 	dupFrom := []PathRewrite{{From: "/data//tv/", To: "/mnt/media/tv"}}
 	if got := applyRewrites("/data/tv/Show/E.mkv", dupFrom); got != "/mnt/media/tv/Show/E.mkv" {
 		t.Fatalf("dup-slash From should match collapsed path, got %q", got)
+	}
+}
+
+// TestApplyRewritesUNCPath verifies a Windows UNC root (\\NAS\Media\TV) from a
+// Windows-hosted arr matches its rewrite rule. Separator swapping alone turns
+// the incoming path into //NAS/... while the From normalizes to /NAS/..., so
+// the prefix never matched — both sides must go through normalizePath.
+func TestApplyRewritesUNCPath(t *testing.T) {
+	incoming := `\\NAS\Media\TV\Show\S01\E01.mkv`
+	for _, from := range []string{`\\NAS\Media\TV`, "//NAS/Media/TV", "/NAS/Media/TV"} {
+		rw := []PathRewrite{{From: from, To: "/mnt/media/tv"}}
+		if got := applyRewrites(incoming, rw); got != "/mnt/media/tv/Show/S01/E01.mkv" {
+			t.Fatalf("UNC path with From=%q: got %q", from, got)
+		}
+	}
+
+	// An unmatched UNC path still comes back normalized (collapsed slashes),
+	// consistent with what the resolver sees for matched paths.
+	if got := applyRewrites(incoming, nil); got != "/NAS/Media/TV/Show/S01/E01.mkv" {
+		t.Fatalf("unmatched UNC path: got %q", got)
+	}
+
+	// A trailing-slash To must not produce a doubled separator at the join.
+	slashTo := []PathRewrite{{From: `\\NAS\Media\TV`, To: "/mnt/media/tv/"}}
+	if got := applyRewrites(incoming, slashTo); got != "/mnt/media/tv/Show/S01/E01.mkv" {
+		t.Fatalf("trailing-slash To: got %q", got)
+	}
+}
+
+// TestApplyRewritesPreservesTrailingSlash verifies a trailing separator on the
+// incoming path survives normalization and rewriting. It is semantic for
+// legacy-scope changes: filepath.Dir("/x/Show/") is the directory itself while
+// filepath.Dir("/x/Show") is its parent, so dropping it would widen a targeted
+// directory notification into a parent/library scan.
+func TestApplyRewritesPreservesTrailingSlash(t *testing.T) {
+	rw := []PathRewrite{{From: "/data/tv", To: "/mnt/media/tv"}}
+	if got := applyRewrites("/data/tv/Show/", rw); got != "/mnt/media/tv/Show/" {
+		t.Fatalf("rewritten dir: got %q", got)
+	}
+	// Unmatched paths keep it too.
+	if got := applyRewrites("/other/Show/", rw); got != "/other/Show/" {
+		t.Fatalf("unmatched dir: got %q", got)
+	}
+	// Windows separator form: trailing backslash counts as a trailing separator.
+	unc := []PathRewrite{{From: `\\NAS\Media\TV`, To: "/mnt/media/tv"}}
+	if got := applyRewrites(`\\NAS\Media\TV\Show\`, unc); got != "/mnt/media/tv/Show/" {
+		t.Fatalf("UNC dir: got %q", got)
+	}
+	// Files without a trailing separator stay without one.
+	if got := applyRewrites("/data/tv/Show/E01.mkv", rw); got != "/mnt/media/tv/Show/E01.mkv" {
+		t.Fatalf("file: got %q", got)
+	}
+	// Bare root never doubles.
+	if got := applyRewrites("/", nil); got != "/" {
+		t.Fatalf("root: got %q", got)
 	}
 }
 

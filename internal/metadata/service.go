@@ -25,6 +25,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scanner"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // FileContentUpdater updates content_id on media_files.
@@ -234,8 +236,93 @@ func dropProviderID(providerIDs map[string]string, provider string) {
 	delete(providerIDs, strings.ToLower(strings.TrimSpace(provider)))
 }
 
+type providerIDValueSet map[string]map[string]struct{}
+
+func (s providerIDValueSet) add(provider, providerID string) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	providerID = normalizeProviderIDComparisonValue(provider, providerID)
+	if provider == "" || providerID == "" {
+		return
+	}
+	if s[provider] == nil {
+		s[provider] = make(map[string]struct{})
+	}
+	s[provider][providerID] = struct{}{}
+}
+
+func (s providerIDValueSet) remove(provider, providerID string) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	providerID = normalizeProviderIDComparisonValue(provider, providerID)
+	values := s[provider]
+	if providerID == "" || len(values) == 0 {
+		return
+	}
+	delete(values, providerID)
+	if len(values) == 0 {
+		delete(s, provider)
+	}
+}
+
+func cloneProviderIDValueSet(src providerIDValueSet) providerIDValueSet {
+	if len(src) == 0 {
+		return make(providerIDValueSet)
+	}
+	dst := make(providerIDValueSet, len(src))
+	for provider, values := range src {
+		dst[provider] = maps.Clone(values)
+	}
+	return dst
+}
+
+type provider404State struct {
+	// dropped tracks every provider value rejected in this run so an
+	// accumulator copy cannot resurrect it for later phases.
+	dropped providerIDValueSet
+	// stale tracks durable values that must not be persisted as current item
+	// identity and must remain in the negative cache.
+	stale providerIDValueSet
+}
+
+func newProvider404State() *provider404State {
+	return &provider404State{
+		dropped: make(providerIDValueSet),
+		stale:   make(providerIDValueSet),
+	}
+}
+
+func (s *provider404State) record(provider, providerID string) {
+	if s == nil {
+		return
+	}
+	s.dropped.add(provider, providerID)
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	providerID = strings.TrimSpace(providerID)
+	if isDurableProviderSlug(provider) && providerID != "" {
+		s.stale.add(provider, providerID)
+	}
+}
+
+func upsertStaleProviderIDValues(
+	ctx context.Context,
+	repo metadataStaleIDRepo,
+	contentID string,
+	values providerIDValueSet,
+) {
+	if repo == nil || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	for provider, providerIDs := range values {
+		for providerID := range providerIDs {
+			if err := repo.Upsert(ctx, contentID, provider, providerID); err != nil {
+				slog.WarnContext(ctx, "metadata: failed to record stale ID", "component", "metadata",
+					"content_id", contentID, "provider", provider, "provider_id", providerID, "error", err)
+			}
+		}
+	}
+}
+
 func handleProvider404(
-	provider404s map[string]string,
+	provider404s *provider404State,
 	providerIDs map[string]string,
 	provider string,
 	err error,
@@ -252,9 +339,7 @@ func handleProvider404(
 
 	logAttrs := append([]any{"provider", provider}, attrs...)
 	if providerID := strings.TrimSpace(providerIDs[provider]); providerID != "" {
-		if provider404s != nil && isDurableProviderSlug(provider) {
-			provider404s[provider] = providerID
-		}
+		provider404s.record(provider, providerID)
 		logAttrs = append(logAttrs, "provider_id", providerID)
 		dropProviderID(providerIDs, provider)
 	}
@@ -263,7 +348,7 @@ func handleProvider404(
 	return true
 }
 
-func handleChildProvider404(
+func handleScopedProvider404(
 	provider string,
 	providerIDs map[string]string,
 	err error,
@@ -281,7 +366,7 @@ func handleChildProvider404(
 		}
 	}
 	logAttrs = append(logAttrs, "error", err)
-	slog.Info("metadata: provider returned 404 for unavailable child metadata", logAttrs...)
+	slog.Info("metadata: provider returned 404 for unavailable scoped metadata", logAttrs...)
 	return true
 }
 
@@ -297,6 +382,7 @@ type MetadataService struct {
 	libraryRepo             metadataLibraryRepo
 	folderRepo              metadataFolderRepo
 	itemLocalizationRepo    *catalog.MediaItemLocalizationRepository
+	itemAliasRepo           *catalog.ItemAliasRepository
 	seasonLocalizationRepo  *catalog.SeasonLocalizationRepository
 	episodeLocalizationRepo *catalog.EpisodeLocalizationRepository
 	autoTranslator          AutoTranslator // optional; set via SetAutoTranslator
@@ -387,6 +473,7 @@ func NewMetadataService(
 	rootClaimRepo *catalog.RootClaimRepository,
 ) *MetadataService {
 	var itemLocalizationRepo *catalog.MediaItemLocalizationRepository
+	var itemAliasRepo *catalog.ItemAliasRepository
 	var seasonLocalizationRepo *catalog.SeasonLocalizationRepository
 	var episodeLocalizationRepo *catalog.EpisodeLocalizationRepository
 	var scannedRootRepo metadataScannedRootRepo
@@ -401,6 +488,7 @@ func NewMetadataService(
 		dbPool = pool
 		videoRepo = catalog.NewVideoRepository(pool)
 		itemLocalizationRepo = catalog.NewMediaItemLocalizationRepository(pool)
+		itemAliasRepo = catalog.NewItemAliasRepository(pool)
 		seasonLocalizationRepo = catalog.NewSeasonLocalizationRepository(pool)
 		episodeLocalizationRepo = catalog.NewEpisodeLocalizationRepository(pool)
 		scannedRootRepo = scanner.NewScannedRootRepository(pool)
@@ -420,6 +508,7 @@ func NewMetadataService(
 		libraryRepo:             libraryRepo,
 		folderRepo:              folderRepo,
 		itemLocalizationRepo:    itemLocalizationRepo,
+		itemAliasRepo:           itemAliasRepo,
 		seasonLocalizationRepo:  seasonLocalizationRepo,
 		episodeLocalizationRepo: episodeLocalizationRepo,
 		personRepo:              personRepo,
@@ -569,6 +658,9 @@ func (s *MetadataService) Process(ctx context.Context, req ProcessRequest) (*Pro
 		}
 		final.IsNew = final.IsNew || result.IsNew
 		final.Updated = final.Updated || result.Updated
+		if result.Decision != nil {
+			final.Decision = result.Decision
+		}
 	}
 
 	s.maybeAutoTranslate(ctx, folderID, final.ContentID)
@@ -1030,21 +1122,30 @@ func (s *MetadataService) loadDurableProviderIDs(ctx context.Context, contentID 
 	return providerIDMapFromRows(ids), nil
 }
 
-func (s *MetadataService) suppressRecordedStaleProviderIDs(
-	ctx context.Context,
-	contentID string,
-	providerIDs map[string]string,
-) error {
-	if s == nil || s.staleIDRepo == nil || strings.TrimSpace(contentID) == "" || len(providerIDs) == 0 {
-		return nil
+func (s *MetadataService) loadRecordedStaleProviderIDs(ctx context.Context, contentID string) (providerIDValueSet, error) {
+	staleValues := make(providerIDValueSet)
+	if s == nil || s.staleIDRepo == nil || strings.TrimSpace(contentID) == "" {
+		return staleValues, nil
 	}
 
 	staleIDs, err := s.staleIDRepo.GetByContentID(ctx, contentID)
 	if err != nil {
-		return fmt.Errorf("loading stale provider ids for %s: %w", contentID, err)
+		return nil, fmt.Errorf("loading stale provider ids for %s: %w", contentID, err)
 	}
-	if len(staleIDs) == 0 {
-		return nil
+	for _, staleID := range staleIDs {
+		if staleID == nil {
+			continue
+		}
+		provider := strings.ToLower(strings.TrimSpace(staleID.Provider))
+		providerID := strings.TrimSpace(staleID.ProviderID)
+		staleValues.add(provider, providerID)
+	}
+	return staleValues, nil
+}
+
+func suppressProviderIDValues(providerIDs map[string]string, staleValues providerIDValueSet) {
+	if len(providerIDs) == 0 || len(staleValues) == 0 {
+		return
 	}
 	// Index the incoming map by normalized provider key so suppression cannot
 	// be bypassed by casing or padding differences between the stored stale
@@ -1057,23 +1158,32 @@ func (s *MetadataService) suppressRecordedStaleProviderIDs(
 		}
 		keysByProvider[normalized] = append(keysByProvider[normalized], key)
 	}
-	for _, staleID := range staleIDs {
-		if staleID == nil {
-			continue
-		}
-		provider := strings.ToLower(strings.TrimSpace(staleID.Provider))
-		if provider == "" {
-			continue
-		}
-		staleValue := strings.TrimSpace(staleID.ProviderID)
+	for provider, staleProviderValues := range staleValues {
+		provider = strings.ToLower(strings.TrimSpace(provider))
 		for _, key := range keysByProvider[provider] {
-			if strings.TrimSpace(providerIDs[key]) != staleValue {
+			value := normalizeProviderIDComparisonValue(provider, providerIDs[key])
+			if _, stale := staleProviderValues[value]; !stale {
 				continue
 			}
 			delete(providerIDs, key)
 		}
 	}
-	return nil
+}
+
+func applyProvider404sToAccumulator(accumulator *MetadataResult, provider404s *provider404State) {
+	if accumulator == nil || provider404s == nil {
+		return
+	}
+	accumulator.sameRunStaleProviderIDs = cloneProviderIDValueSet(provider404s.stale)
+	suppressProviderIDValues(accumulator.ProviderIDs, provider404s.dropped)
+}
+
+func shouldReanchorProviderContentID(
+	contentID string,
+	isNew bool,
+	mode RefreshMode,
+) bool {
+	return !isNew && mode == ModeManualRefresh && contentid.IsProviderAnchored(contentID)
 }
 
 // ProcessWithProviders runs the pipeline with explicit providers (for testing).
@@ -1092,6 +1202,10 @@ func (s *MetadataService) prepareProcessRequest(ctx context.Context, req Process
 	if err != nil {
 		return req, err
 	}
+	req.recordedStaleProviderIDs, err = s.loadRecordedStaleProviderIDs(ctx, req.ContentID)
+	if err != nil {
+		return req, err
+	}
 	if len(durableIDs) == 0 {
 		return req, nil
 	}
@@ -1102,9 +1216,7 @@ func (s *MetadataService) prepareProcessRequest(ctx context.Context, req Process
 	// Only the injected set is filtered: IDs the caller supplied explicitly
 	// in req.ProviderIDs stay untouched, so an admin deliberately
 	// re-selecting a previously-stale ID still retries it.
-	if err := s.suppressRecordedStaleProviderIDs(ctx, req.ContentID, durableIDs); err != nil {
-		return req, err
-	}
+	suppressProviderIDValues(durableIDs, req.recordedStaleProviderIDs)
 	if len(durableIDs) == 0 {
 		return req, nil
 	}
@@ -1140,33 +1252,37 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 	// Phase 1: Search — find provider IDs.
 	accumulatedIDs := make(map[string]string)
 	maps.Copy(accumulatedIDs, req.ProviderIDs)
+	sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
 
 	// Track provider 404s as stale external IDs. This applies to initial match
 	// as well so bad embedded folder/file IDs can be recorded and dropped
 	// without surfacing as generic provider failures.
-	var provider404s map[string]string
-	if req.ContentID != "" {
-		provider404s = make(map[string]string)
-	}
+	provider404s := newProvider404State()
+	recordStaleIDs := req.ContentID != ""
+	var matchDecision *MatchDecision
+	var providerMatchErrors []error
+	quarantinedProviderIDKeys := make(map[string]struct{})
+	replacedProviderIDKeys := make(map[string]struct{})
 
 	switch req.Mode {
 	case ModeInitialMatch:
 		if req.Hints == nil {
 			return nil, fmt.Errorf("initial match requires hints")
 		}
+		selectionHints := sanitizedMatchHintProviderIDs(req.Hints)
 		// Seed external IDs from hints. Hints.ContentID is Silo's local
 		// skeleton item ID, not a searchable provider ID.
-		if req.Hints.FileHash != "" {
-			accumulatedIDs["oshash"] = req.Hints.FileHash
+		if selectionHints.FileHash != "" {
+			accumulatedIDs["oshash"] = selectionHints.FileHash
 		}
-		if req.Hints.TmdbID != "" {
-			accumulatedIDs["tmdb"] = req.Hints.TmdbID
+		if selectionHints.TmdbID != "" {
+			accumulatedIDs["tmdb"] = selectionHints.TmdbID
 		}
-		if req.Hints.TvdbID != "" {
-			accumulatedIDs["tvdb"] = req.Hints.TvdbID
+		if selectionHints.TvdbID != "" {
+			accumulatedIDs["tvdb"] = selectionHints.TvdbID
 		}
-		if req.Hints.ImdbID != "" {
-			accumulatedIDs["imdb"] = req.Hints.ImdbID
+		if selectionHints.ImdbID != "" {
+			accumulatedIDs["imdb"] = selectionHints.ImdbID
 		}
 		// Add filepath for local providers.
 		if req.Hints.RepresentativeFilePath != "" {
@@ -1174,9 +1290,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		} else if req.Hints.FilePath != "" {
 			accumulatedIDs["_filepath"] = req.Hints.FilePath
 		}
-		if err := s.suppressRecordedStaleProviderIDs(ctx, req.ContentID, accumulatedIDs); err != nil {
-			return nil, err
-		}
+		suppressProviderIDValues(accumulatedIDs, req.recordedStaleProviderIDs)
 
 		// Run search providers and choose a decisive normalized winner instead of
 		// letting the first non-empty result win.
@@ -1200,53 +1314,58 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			protectedKeys[key] = true
 		}
 		wonHints := applyBuiltinIdentityHints(ctx, itemChain, searchQuery, accumulatedIDs, protectedKeys)
-		selectionHints := req.Hints
 		if len(wonHints) > 0 {
-			hintsCopy := *req.Hints
+			hintsCopy := *selectionHints
 			overrideHintIDs(&hintsCopy, wonHints)
 			selectionHints = &hintsCopy
 		}
 		searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
-		allResults := make([]SearchResult, 0)
-		for _, p := range itemChain {
-			sp, ok := p.(SearchProvider)
-			if !ok {
-				continue
-			}
-			results, err := sp.Search(ctx, searchQuery)
-			if err != nil {
-				if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
-					"title", req.Hints.Title,
-					"year", req.Hints.Year,
-				) {
+		searchProviders := func(query SearchQuery) []SearchResult {
+			resultsForQuery := make([]SearchResult, 0)
+			for _, p := range itemChain {
+				sp, ok := p.(SearchProvider)
+				if !ok {
 					continue
 				}
-				slog.WarnContext(ctx, "metadata: search provider error", "component", "metadata",
-					"provider", p.Slug(), "error", err)
-				continue
-			}
-			slog.DebugContext(ctx, "metadata: provider search result", "component", "metadata",
-				"provider", p.Slug(),
-				"query_title", searchQuery.Title,
-				"query_year", searchQuery.Year,
-				"result_count", len(results),
-			)
-			for _, result := range results {
-				if searchResultConflictsWithTrustedIDs(accumulatedIDs, result.ProviderIDs) {
-					slog.WarnContext(ctx, "metadata: skipping conflicting search result", "component", "metadata",
-						"provider", p.Slug(),
-						"title", req.Hints.Title,
-						"year", req.Hints.Year,
-						"hinted_ids", accumulatedIDs,
-						"candidate_ids", result.ProviderIDs,
-					)
+				results, searchErr := sp.Search(ctx, query)
+				if searchErr != nil {
+					if handleProvider404(provider404s, accumulatedIDs, p.Slug(), searchErr,
+						"title", query.Title,
+						"year", query.Year,
+					) {
+						providerMatchErrors = append(providerMatchErrors, searchErr)
+						continue
+					}
+					slog.WarnContext(ctx, "metadata: search provider error", "component", "metadata",
+						"provider", p.Slug(), "error", searchErr)
+					providerMatchErrors = append(providerMatchErrors, searchErr)
 					continue
 				}
-				allResults = append(allResults, result)
+				slog.DebugContext(ctx, "metadata: provider search result", "component", "metadata",
+					"provider", p.Slug(),
+					"query_title", query.Title,
+					"query_year", query.Year,
+					"result_count", len(results),
+				)
+				for _, result := range results {
+					if searchResultConflictsWithTrustedIDs(accumulatedIDs, result.ProviderIDs) {
+						slog.WarnContext(ctx, "metadata: retaining conflicting search result for rejection diagnostics", "component", "metadata",
+							"provider", p.Slug(),
+							"title", query.Title,
+							"year", query.Year,
+							"hinted_ids", accumulatedIDs,
+							"candidate_ids", result.ProviderIDs,
+						)
+					}
+					resultsForQuery = append(resultsForQuery, result)
+				}
 			}
+			return resultsForQuery
 		}
 
-		candidates := NormalizeCandidates(allResults, contentType)
+		allResults := searchProviders(searchQuery)
+
+		candidates := NormalizeCandidatesForLanguage(allResults, contentType, searchQuery.Language)
 		slog.DebugContext(ctx, "metadata: search candidates assembled", "component", "metadata",
 			"query_title", searchQuery.Title,
 			"query_year", searchQuery.Year,
@@ -1257,17 +1376,75 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		for _, p := range itemChain {
 			providerPriority = append(providerPriority, p.Slug())
 		}
-		if winner, ok := selectInitialMatchCandidate(selectionHints, candidates, providerPriority); ok && winner != nil {
-			for k, v := range winner.ProviderIDs {
-				if v != "" {
-					accumulatedIDs[k] = v
+		trySelection := func(hints *MatchHints, selectionCandidates []MatchCandidate) (*MatchCandidate, bool) {
+			selected, ok := selectInitialMatchCandidate(hints, selectionCandidates, providerPriority)
+			if ok {
+				return selected, true
+			}
+			episodeWinner, validationErrors := validateSeriesMatchByEpisodes(
+				ctx, hints, selectionCandidates, itemChain, searchQuery.Language,
+			)
+			providerMatchErrors = append(providerMatchErrors, validationErrors...)
+			return episodeWinner, episodeWinner != nil
+		}
+
+		effectiveHints := selectionHints
+		winner, matched := trySelection(selectionHints, candidates)
+		// Structured IDs remain decisive and never fall back to a title search.
+		// For title/year identities, try independently parsed path hypotheses only
+		// after the primary identity fails. Each attempt is bounded and scored
+		// against the identity that produced its provider query.
+		if !matched && !trustedHintIDsPresent(selectionHints) {
+			for _, alternate := range compactAlternateMatchIdentities(selectionHints) {
+				alternateHints := *selectionHints
+				alternateHints.Title = alternate.Title
+				alternateHints.Year = alternate.Year
+				alternateHints.HintSource = alternate.Source
+				alternateHints.AlternateIdentities = nil
+
+				alternateQuery := searchQuery
+				alternateQuery.Title = alternate.Title
+				alternateQuery.Year = alternate.Year
+				alternateResults := searchProviders(alternateQuery)
+				alternateCandidates := NormalizeCandidatesForLanguage(alternateResults, contentType, alternateQuery.Language)
+				if len(alternateCandidates) == 0 {
+					continue
+				}
+				alternateWinner, alternateMatched := trySelection(&alternateHints, alternateCandidates)
+				if len(candidates) == 0 || alternateMatched || bestCandidateScore(&alternateHints, alternateCandidates) > bestCandidateScore(effectiveHints, candidates) {
+					candidates = alternateCandidates
+					effectiveHints = &alternateHints
+				}
+				if alternateMatched {
+					winner = alternateWinner
+					matched = true
+					break
 				}
 			}
+		}
+		trustedIDTypeMismatch := false
+		if !matched && len(candidates) == 0 && trustedHintIDsPresent(selectionHints) {
+			if mismatchCandidates := s.trustedIDTypeMismatchCandidates(
+				ctx, selectionHints, accumulatedIDs, searchQuery.Language, resolveChain,
+			); len(mismatchCandidates) > 0 {
+				candidates = mismatchCandidates
+				effectiveHints = selectionHints
+				trustedIDTypeMismatch = true
+			}
+		}
+		matchDecision = buildMatchDecision(effectiveHints, candidates, winner, matched, providerMatchErrors)
+		if trustedIDTypeMismatch {
+			matchDecision.Outcome = MatchOutcomeTrustedIDTypeMismatch
+		}
+		if matched && winner != nil {
+			maps.Copy(replacedProviderIDKeys,
+				applyCandidateProviderIDConsensus(accumulatedIDs, winner, quarantinedProviderIDKeys))
 		}
 
 	case ModeIdentify:
 		// Use user-provided IDs directly.
 		maps.Copy(accumulatedIDs, req.ProviderIDs)
+		sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
 		if contentType == "" && req.ContentID != "" {
 			if existing, err := s.itemRepo.GetByID(ctx, req.ContentID); err == nil {
 				contentType = existing.Type
@@ -1297,10 +1474,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if existing.ImdbID != "" {
 			accumulatedIDs["imdb"] = existing.ImdbID
 		}
+		sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
 		contentType = existing.Type
-		if err := s.suppressRecordedStaleProviderIDs(ctx, req.ContentID, accumulatedIDs); err != nil {
-			return nil, err
-		}
+		suppressProviderIDValues(accumulatedIDs, req.recordedStaleProviderIDs)
 
 		// Re-resolve itemChain now that contentType is known.
 		itemLevel = providerChainContentLevel(contentType)
@@ -1355,28 +1531,38 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			}
 			for _, result := range results {
 				if searchResultConflictsWithTrustedIDs(accumulatedIDs, result.ProviderIDs) {
-					continue
+					slog.WarnContext(ctx, "metadata: retaining conflicting refresh search result for trusted-id rejection", "component", "metadata",
+						"provider", p.Slug(), "content_id", req.ContentID,
+						"hinted_ids", accumulatedIDs, "candidate_ids", result.ProviderIDs)
 				}
 				allResults = append(allResults, result)
 			}
 		}
-		candidates := NormalizeCandidates(allResults, contentType)
-		if winner, ok := selectRefreshMatchCandidate(existing, wonHints, candidates); ok && winner != nil {
-			for k, v := range winner.ProviderIDs {
-				if v != "" {
-					accumulatedIDs[k] = v
-				}
-			}
+		candidates := NormalizeCandidatesForLanguage(allResults, contentType, searchQuery.Language)
+		selectionItem := mediaItemWithProviderIDs(existing, accumulatedIDs)
+		if winner, ok := selectRefreshMatchCandidate(selectionItem, wonHints, candidates); ok && winner != nil {
+			maps.Copy(replacedProviderIDKeys,
+				applyCandidateProviderIDConsensus(accumulatedIDs, winner, quarantinedProviderIDKeys))
 		}
 	}
 	if req.Mode != ModeIdentify {
-		if err := s.suppressRecordedStaleProviderIDs(ctx, req.ContentID, accumulatedIDs); err != nil {
-			return nil, err
-		}
+		suppressProviderIDValues(accumulatedIDs, req.recordedStaleProviderIDs)
 	}
 
 	// Phase 2: Metadata — all MetadataProviders run, results merge into accumulator.
-	accumulator := &MetadataResult{ProviderIDs: copyMap(accumulatedIDs)}
+	recordedStaleIDs := cloneProviderIDValueSet(req.recordedStaleProviderIDs)
+	if req.Mode == ModeIdentify {
+		// A caller-provided identify value is an explicit retry. If it succeeds,
+		// allow it to replace its old stale record; a new 404 will still enter the
+		// same-run rejection set below.
+		for provider, providerID := range req.ProviderIDs {
+			recordedStaleIDs.remove(provider, providerID)
+		}
+	}
+	accumulator := &MetadataResult{
+		ProviderIDs:              copyMap(accumulatedIDs),
+		recordedStaleProviderIDs: recordedStaleIDs,
+	}
 	filePath := ""
 	representativeFilePath := ""
 	observedRootPath := ""
@@ -1429,15 +1615,22 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
 				"content_id", req.ContentID,
 			) {
+				if req.Mode == ModeInitialMatch {
+					providerMatchErrors = append(providerMatchErrors, err)
+				}
 				continue
 			}
 			slog.WarnContext(ctx, "metadata: provider error", "component", "metadata",
 				"provider", p.Slug(), "error", err)
+			if req.Mode == ModeInitialMatch {
+				providerMatchErrors = append(providerMatchErrors, err)
+			}
 			continue
 		}
 		if result == nil || !result.HasMetadata {
 			continue
 		}
+		result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
 		// Identity-hint providers contribute IDs exclusively through the
 		// trusted-hint phase: their Phase-2 results merge metadata fields but
 		// never inject provider-id keys that conflict with or extend the
@@ -1445,11 +1638,29 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		if isIdentityHinter {
 			result.ProviderIDs = nil
 		}
+		for key := range quarantinedProviderIDKeys {
+			delete(result.ProviderIDs, key)
+		}
+		mergePreferredTitleMetadata(accumulator, result, req.Language, p.Slug(), !isIdentityHinter)
 		// Bootstrap: feed new IDs to subsequent providers.
 		mergeProviderIDs(accumulator, result)
 		accumulatedIDs = accumulator.ProviderIDs
 		// Merge fields into accumulator (FillEmpty — first provider wins).
 		MergeMetadata(result, accumulator, nil, MergeFillEmpty)
+	}
+	if len(quarantinedProviderIDKeys) > 0 {
+		accumulator.quarantinedProviderIDKeys = maps.Clone(quarantinedProviderIDKeys)
+	}
+	// Search and item-metadata 404s are identity evidence. Apply them before
+	// artwork and child phases so a copied accumulator cannot reintroduce a
+	// rejected ID. Detail responses may also repeat a value recorded stale by an
+	// earlier run, so suppress that set again after all detail merges. Scoped
+	// 404s below are deliberately non-destructive.
+	suppressProviderIDValues(accumulator.ProviderIDs, accumulator.recordedStaleProviderIDs)
+	applyProvider404sToAccumulator(accumulator, provider404s)
+	accumulatedIDs = accumulator.ProviderIDs
+	if len(replacedProviderIDKeys) > 0 {
+		accumulator.replacedProviderIDKeys = maps.Clone(replacedProviderIDKeys)
 	}
 	// Phase 3: Images — all ImageProviders run, collect all available images.
 	var allImages []RemoteImage
@@ -1473,7 +1684,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			PrimarySidecarSearchPaths: primarySidecarSearchPaths,
 		})
 		if err != nil {
-			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
+			if handleScopedProvider404(p.Slug(), accumulatedIDs, err,
 				"content_id", req.ContentID,
 			) {
 				continue
@@ -1516,10 +1727,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 				SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
 			})
 			if err != nil {
-				// Pass nil for provider404s so this refresh can drop the
-				// provider from the in-memory merge without recording a durable
-				// stale item ID from the season chain.
-				if handleProvider404(nil, accumulatedIDs, p.Slug(), err,
+				// A missing season endpoint is scoped metadata, not proof that the
+				// parent series identity is stale.
+				if handleScopedProvider404(p.Slug(), accumulatedIDs, err,
 					"content_id", req.ContentID,
 					"season", 0,
 				) {
@@ -1573,7 +1783,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 						EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
 					})
 					if err != nil {
-						if handleChildProvider404(p.Slug(), accumulatedIDs, err,
+						if handleScopedProvider404(p.Slug(), accumulatedIDs, err,
 							"content_id", req.ContentID,
 							"season", seasonNumber,
 						) {
@@ -1589,57 +1799,62 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			allEpisodes = flattenEpisodeResults(episodeResults)
 		}
 	}
-
 	// Phase 5: Merge & Persist.
 	if !accumulator.HasMetadata && accumulator.Title == "" {
 		// Record stale IDs for providers that returned 404.
-		if s.staleIDRepo != nil && req.ContentID != "" && provider404s != nil {
-			for slug, providerID := range provider404s {
-				if providerID != "" {
-					if err := s.staleIDRepo.Upsert(ctx, req.ContentID, slug, providerID); err != nil {
-						slog.WarnContext(ctx, "metadata: failed to record stale ID", "component", "metadata",
-							"content_id", req.ContentID, "provider", slug, "provider_id", providerID, "error", err)
-					}
-				}
-			}
+		upsertStaleProviderIDValues(ctx, s.staleIDRepo, req.ContentID, provider404s.stale)
+		if matchDecision == nil {
+			matchDecision = &MatchDecision{Outcome: MatchOutcomeMetadataEmpty, Threshold: automaticMatchAcceptanceFloor}
+		} else if matchDecision.Outcome == MatchOutcomeMatched {
+			matchDecision.Outcome = MatchOutcomeMetadataEmpty
 		}
-		return &ProcessResult{Updated: false}, nil
+		if hasTransientMatchError(providerMatchErrors) {
+			matchDecision.Outcome = MatchOutcomeProviderTransient
+		} else if len(providerMatchErrors) > 0 &&
+			(matchDecision.Outcome == MatchOutcomeNoCandidates || matchDecision.Outcome == MatchOutcomeMetadataEmpty) {
+			// Optional corroboration failures must not turn a successfully
+			// completed search with rejected candidates into a permanent provider
+			// failure. The candidate decision remains actionable and deterministic.
+			matchDecision.Outcome = MatchOutcomeProviderPermanent
+		}
+		return &ProcessResult{Updated: false, Decision: matchDecision}, nil
 	}
 
 	result, err := s.mergeAndPersist(ctx, req, accumulator, allImages, allSeasons, allEpisodes, contentType)
 	if err != nil {
 		return nil, err
 	}
+	if result != nil && strings.TrimSpace(result.ContentID) != "" {
+		if err := s.persistItemAliases(ctx, result.ContentID, req.Language, accumulator); err != nil {
+			return nil, err
+		}
+	}
 
-	// Refresh stale ID records on successful refresh: clear anything resolved,
-	// then keep only the providers that still 404ed during this run.
+	// Refresh stale ID records on successful refresh: clear anything explicitly
+	// resolved, then retain every earlier or current rejected value.
 	// Stale-ID follow-up targets the canonical content ID the item was
 	// persisted/merged into. When mergeAndPersist canonicalizes this item into
 	// an existing one, req.ContentID is the now-deleted source: clearing or
 	// recording stale IDs against it would touch nothing (or FK-violate), so
 	// the still-404ing providers must be recorded on result.ContentID instead.
-	// provider404s is only allocated when req.ContentID was set (the refresh
-	// targeted a known item). Guarding on it preserves the original gating so a
-	// content-id-less refresh that canonicalizes into an existing item does not
-	// wipe that item's stale rows without re-recording any.
+	// recordStaleIDs preserves the original gating so a content-id-less refresh
+	// that canonicalizes into an existing item does not wipe that item's stale
+	// rows without re-recording any.
 	followUpContentID := refreshFollowUpContentID(req.ContentID, result)
-	if s.staleIDRepo != nil && followUpContentID != "" && provider404s != nil {
+	if s.staleIDRepo != nil && recordStaleIDs && followUpContentID != "" {
 		if delErr := s.staleIDRepo.DeleteByContentID(ctx, followUpContentID); delErr != nil {
 			slog.WarnContext(ctx, "metadata: failed to clear stale IDs after refresh", "component", "metadata",
 				"content_id", followUpContentID, "error", delErr)
 		}
-		for slug, providerID := range provider404s {
-			if providerID == "" {
-				continue
-			}
-			if upsertErr := s.staleIDRepo.Upsert(ctx, followUpContentID, slug, providerID); upsertErr != nil {
-				slog.WarnContext(ctx, "metadata: failed to persist stale provider ID after partial refresh", "component", "metadata",
-					"content_id", followUpContentID,
-					"provider", slug,
-					"provider_id", providerID,
-					"error", upsertErr)
+		// Explicit ModeIdentify retries remove a successful value from
+		// recordedStaleProviderIDs; current-run 404s add it back through stale.
+		staleValues := cloneProviderIDValueSet(accumulator.recordedStaleProviderIDs)
+		for provider, providerIDs := range provider404s.stale {
+			for providerID := range providerIDs {
+				staleValues.add(provider, providerID)
 			}
 		}
+		upsertStaleProviderIDValues(ctx, s.staleIDRepo, followUpContentID, staleValues)
 	}
 	if result != nil && strings.TrimSpace(result.ContentID) != "" {
 		if syncErr := s.syncRefreshDebtForItem(ctx, result.ContentID); syncErr != nil {
@@ -1649,7 +1864,209 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		}
 	}
 
+	if result != nil {
+		result.Decision = matchDecision
+	}
 	return result, nil
+}
+
+func buildMatchDecision(hints *MatchHints, candidates []MatchCandidate, winner *MatchCandidate, matched bool, providerErrors []error) *MatchDecision {
+	decision := &MatchDecision{CandidateCount: len(candidates), Threshold: automaticMatchAcceptanceFloor}
+	switch {
+	case matched && winner != nil:
+		decision.Outcome = MatchOutcomeMatched
+	case hasTransientMatchError(providerErrors):
+		decision.Outcome = MatchOutcomeProviderTransient
+	case len(providerErrors) > 0 && len(candidates) == 0:
+		decision.Outcome = MatchOutcomeProviderPermanent
+	case len(candidates) == 0:
+		decision.Outcome = MatchOutcomeNoCandidates
+	case candidatesConflictWithTrustedIDs(hints, candidates):
+		decision.Outcome = MatchOutcomeTrustedIDConflict
+	default:
+		decision.Outcome = MatchOutcomeCandidateRejected
+	}
+
+	scored := make([]MatchCandidate, len(candidates))
+	copy(scored, candidates)
+	for i := range scored {
+		annotateCandidateMatch(&scored[i], hints)
+	}
+	sort.SliceStable(scored, func(i, j int) bool { return scored[i].MatchScore > scored[j].MatchScore })
+	if len(scored) > 3 {
+		scored = scored[:3]
+	}
+	for _, candidate := range scored {
+		reasons := append([]string(nil), candidate.MatchReasons...)
+		if matched && winner != nil && sameMatchCandidate(candidate, *winner) {
+			for _, reason := range winner.MatchReasons {
+				if !slices.Contains(reasons, reason) {
+					reasons = append(reasons, reason)
+				}
+			}
+		}
+		decision.TopCandidates = append(decision.TopCandidates, MatchDecisionCandidate{
+			Title: candidate.Title, MatchedTitle: candidate.MatchedTitle, Year: candidate.Year,
+			ProviderIDs: copyMap(candidate.ProviderIDs), Sources: append([]string(nil), candidate.Sources...),
+			Score: candidate.MatchScore, Reasons: reasons,
+		})
+	}
+	return decision
+}
+
+func sameMatchCandidate(left, right MatchCandidate) bool {
+	leftKey, rightKey := normalizedKey(left.ProviderIDs), normalizedKey(right.ProviderIDs)
+	if leftKey != "" || rightKey != "" {
+		return leftKey != "" && leftKey == rightKey
+	}
+	if left.Title != right.Title || left.OriginalTitle != right.OriginalTitle ||
+		left.Year != right.Year || left.ContentType != right.ContentType ||
+		!slices.Equal(left.Sources, right.Sources) || len(left.ProviderIDs) != len(right.ProviderIDs) {
+		return false
+	}
+	for key, value := range left.ProviderIDs {
+		if right.ProviderIDs[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func hasTransientMatchError(errs []error) bool {
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		switch status.Code(err) {
+		case codes.DeadlineExceeded, codes.ResourceExhausted, codes.Aborted, codes.Unavailable:
+			return true
+		}
+		message := strings.ToLower(err.Error())
+		for _, marker := range []string{"timeout", "deadline exceeded", "connection reset", "connection refused", "temporarily unavailable", "unavailable", "rate limit", "too many requests", "http 429", "http 500", "http 502", "http 503", "http 504"} {
+			if strings.Contains(message, marker) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mergePreferredTitleMetadata(accumulator, result *MetadataResult, language, provider string, attributeAliases bool) {
+	if accumulator == nil || result == nil {
+		return
+	}
+	if attributeAliases {
+		if accumulator.titleAliasProviders == nil {
+			accumulator.titleAliasProviders = make(map[string]bool)
+		}
+		providerComplete, providerSeen := accumulator.titleAliasProviders[provider]
+		if !providerSeen {
+			accumulator.titleAliasProviders[provider] = result.TitleAliasesComplete
+		} else {
+			// Multiple installations can share a provider slug. The aggregate is
+			// authoritative only when every contributing response says its alias
+			// snapshot is complete; one legacy/partial response removes deletion
+			// authority for the shared provider scope.
+			accumulator.titleAliasProviders[provider] = providerComplete && result.TitleAliasesComplete
+		}
+		if strings.TrimSpace(result.Title) != "" {
+			kind := titleAliasKindLocalized
+			if strings.TrimSpace(result.OriginalTitle) != "" && strings.EqualFold(strings.TrimSpace(result.Title), strings.TrimSpace(result.OriginalTitle)) &&
+				(baseMetadataLanguage(result.OriginalLanguage) == "" || baseMetadataLanguage(result.TitleLanguage) == baseMetadataLanguage(result.OriginalLanguage)) {
+				kind = titleAliasKindOriginal
+			}
+			accumulator.TitleAliases = appendUniqueTitleAlias(accumulator.TitleAliases, TitleAlias{
+				Title: result.Title, Language: baseMetadataLanguage(result.TitleLanguage), Kind: kind, Provider: provider,
+			})
+		}
+		for _, alias := range result.TitleAliases {
+			if alias.Provider == "" {
+				alias.Provider = provider
+			}
+			accumulator.TitleAliases = appendUniqueTitleAlias(accumulator.TitleAliases, alias)
+		}
+		if result.OriginalTitle != "" && !strings.EqualFold(result.OriginalTitle, result.Title) {
+			accumulator.TitleAliases = appendUniqueTitleAlias(accumulator.TitleAliases, TitleAlias{
+				Title: result.OriginalTitle, Language: baseMetadataLanguage(result.OriginalLanguage), Kind: titleAliasKindOriginal, Provider: provider,
+			})
+		}
+	}
+	if accumulator.OriginalTitle == "" && strings.TrimSpace(result.OriginalTitle) != "" {
+		accumulator.OriginalTitle = result.OriginalTitle
+	}
+
+	title, titleLanguage, fallback, rank := preferredMetadataResultTitle(result, language)
+	currentRank := metadataTitlePreferenceRank(accumulator.TitleLanguage, accumulator.TitleIsFallback, language)
+	if strings.TrimSpace(accumulator.Title) != "" && currentRank == 0 {
+		currentRank = 1
+	}
+	if strings.TrimSpace(accumulator.Title) == "" || rank > currentRank {
+		accumulator.Title = title
+		accumulator.TitleLanguage = titleLanguage
+		accumulator.TitleIsFallback = fallback
+	}
+}
+
+func (s *MetadataService) persistItemAliases(ctx context.Context, contentID, language string, result *MetadataResult) error {
+	if s == nil || s.itemAliasRepo == nil || result == nil {
+		return nil
+	}
+	byProvider := make(map[string][]models.MediaItemAlias)
+	for _, alias := range result.TitleAliases {
+		provider := strings.TrimSpace(alias.Provider)
+		if provider == "" {
+			continue
+		}
+		byProvider[provider] = append(byProvider[provider], models.MediaItemAlias{
+			ContentID: contentID, Title: alias.Title, Language: alias.Language, Kind: alias.Kind, Provider: provider,
+		})
+	}
+	for provider, complete := range result.titleAliasProviders {
+		if err := s.itemAliasRepo.RefreshProviderLanguage(ctx, contentID, provider, language, byProvider[provider], complete); err != nil {
+			return fmt.Errorf("persisting %s title aliases: %w", provider, err)
+		}
+	}
+	return nil
+}
+
+func preferredMetadataResultTitle(result *MetadataResult, language string) (string, string, bool, int) {
+	requested := baseMetadataLanguage(language)
+	titleLanguage := baseMetadataLanguage(result.TitleLanguage)
+	if strings.TrimSpace(result.Title) != "" && requested != "" && titleLanguage == requested && !result.TitleIsFallback {
+		return result.Title, titleLanguage, false, 3
+	}
+	for _, alias := range result.TitleAliases {
+		if strings.TrimSpace(alias.Title) != "" && requested != "" && baseMetadataLanguage(alias.Language) == requested {
+			return alias.Title, requested, false, 2
+		}
+	}
+	if strings.TrimSpace(result.Title) != "" && titleLanguage == "" && !result.TitleIsFallback {
+		return result.Title, "", false, 3
+	}
+	if requested != "" && strings.TrimSpace(result.OriginalTitle) != "" {
+		return result.OriginalTitle, baseMetadataLanguage(result.OriginalLanguage), true, 1
+	}
+	if strings.TrimSpace(result.Title) != "" {
+		return result.Title, titleLanguage, result.TitleIsFallback, 1
+	}
+	return result.OriginalTitle, baseMetadataLanguage(result.OriginalLanguage), true, 1
+}
+
+func metadataTitlePreferenceRank(titleLanguage string, fallback bool, language string) int {
+	if strings.TrimSpace(titleLanguage) == "" {
+		// A provider that does not participate in the language contract (notably
+		// the local NFO provider and older plugins) retains normal first-provider
+		// priority. Only an explicitly marked fallback may be displaced by a
+		// later requested-language result.
+		if fallback {
+			return 1
+		}
+		return 3
+	}
+	if baseMetadataLanguage(titleLanguage) == baseMetadataLanguage(language) && !fallback {
+		return 3
+	}
+	return 1
 }
 
 // refreshFollowUpContentID returns the content ID that a completed refresh's
@@ -1675,6 +2092,12 @@ func (s *MetadataService) mergeAndPersist(
 	episodes []EpisodeResult,
 	contentType string,
 ) (*ProcessResult, error) {
+	// Quarantined IDs are unsafe for deduplication, canonical ID derivation, and
+	// persistence regardless of whether this is a new item or a refresh.
+	for key := range accumulator.quarantinedProviderIDKeys {
+		delete(accumulator.ProviderIDs, key)
+	}
+
 	// Determine merge mode.
 	var mergeMode MergeMode
 	switch req.Mode {
@@ -1775,12 +2198,11 @@ func (s *MetadataService) mergeAndPersist(
 
 	// Re-anchor an already provider-anchored item whose corrected identity now
 	// derives a different anchor — the recovery path when an admin fixes a wrong
-	// <uniqueid> in an NFO. Manual refresh only: the accumulator's IDs are seeded
-	// from the item's stored IDs and only a trusted NFO hint (which wins on
-	// manual refresh) can change them here, so a scheduled/background refresh
-	// never flips a stored identity. Reuses the local-promotion machinery under
-	// the provider-dedup lock; a no-op when the derived anchor is unchanged.
-	if !isNew && req.Mode == ModeManualRefresh && contentid.IsProviderAnchored(contentID) {
+	// <uniqueid> in an NFO. Manual refresh only: scheduled jobs and ModeIdentify
+	// must preserve the client-visible content_id even when an external ID is
+	// stale. Reuses the local-promotion machinery under the provider-dedup lock;
+	// a no-op when the derived anchor is unchanged.
+	if shouldReanchorProviderContentID(contentID, isNew, req.Mode) {
 		reanchored, err := s.reanchorContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType)
 		if err != nil {
@@ -1800,11 +2222,16 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
+	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
+	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
 	if len(durableIDs) > 0 {
 		if accumulator.ProviderIDs == nil {
 			accumulator.ProviderIDs = make(map[string]string, len(durableIDs))
 		}
 		for key, value := range durableIDs {
+			if _, quarantined := accumulator.quarantinedProviderIDKeys[key]; quarantined {
+				continue
+			}
 			if _, exists := accumulator.ProviderIDs[key]; !exists {
 				accumulator.ProviderIDs[key] = value
 			}
@@ -1835,6 +2262,11 @@ func (s *MetadataService) mergeAndPersist(
 
 	if existingItem != nil {
 		existingResult := itemToMetadataResult(existingItem)
+		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.recordedStaleProviderIDs)
+		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.sameRunStaleProviderIDs)
+		for key := range accumulator.replacedProviderIDKeys {
+			delete(existingResult.ProviderIDs, key)
+		}
 		if req.Mode == ModeInitialMatch && isSkeletonLikeStatus(existingItem.Status) {
 			existingResult.Title = ""
 			existingResult.SortTitle = ""
@@ -1845,6 +2277,13 @@ func (s *MetadataService) mergeAndPersist(
 		} else {
 			MergeGlobalMetadata(accumulator, existingResult, locked, mergeMode)
 		}
+		for key := range accumulator.quarantinedProviderIDKeys {
+			delete(existingResult.ProviderIDs, key)
+		}
+		existingResult.quarantinedProviderIDKeys = accumulator.quarantinedProviderIDKeys
+		existingResult.replacedProviderIDKeys = accumulator.replacedProviderIDKeys
+		existingResult.recordedStaleProviderIDs = accumulator.recordedStaleProviderIDs
+		existingResult.sameRunStaleProviderIDs = accumulator.sameRunStaleProviderIDs
 		accumulator = existingResult
 	}
 
@@ -2384,10 +2823,13 @@ func (s *MetadataService) syncRefreshDebtForItem(ctx context.Context, contentID 
 	if itemHasEpisodeMetadataDebt(item) && hasRefreshDebtReason(existingReasonMask, RefreshDebtReasonEpisodeIncomplete) {
 		reasonMask |= RefreshDebtReasonEpisodeIncomplete
 	}
-	if staleReason, err := s.currentStaleRefreshDebtReason(ctx, contentID); err != nil {
+	staleReason, missingTMDBRejected, err := s.currentStaleRefreshDebtState(ctx, contentID, item)
+	if err != nil {
 		return err
-	} else {
-		reasonMask |= staleReason
+	}
+	reasonMask |= staleReason
+	if missingTMDBRejected {
+		reasonMask &^= RefreshDebtReasonProviderIDIncomplete
 	}
 
 	if reasonMask == 0 {
@@ -2517,11 +2959,14 @@ func (s *MetadataService) syncRefreshDebtFailure(ctx context.Context, contentID 
 	if itemHasEpisodeMetadataDebt(item) && hasRefreshDebtReason(existingReasonMask, RefreshDebtReasonEpisodeIncomplete) {
 		reasonMask |= RefreshDebtReasonEpisodeIncomplete
 	}
-	staleReason, err := s.currentStaleRefreshDebtReason(ctx, contentID)
+	staleReason, missingTMDBRejected, err := s.currentStaleRefreshDebtState(ctx, contentID, item)
 	if err != nil {
 		return err
 	}
 	reasonMask |= staleReason
+	if missingTMDBRejected {
+		reasonMask &^= RefreshDebtReasonProviderIDIncomplete
+	}
 	if strings.EqualFold(strings.TrimSpace(item.Status), "matched") &&
 		!hasRefreshDebtReason(reasonMask, RefreshDebtReasonProviderIDIncomplete) {
 		// Items missing provider IDs fail for that reason, not because the
@@ -2622,18 +3067,28 @@ func (s *MetadataService) currentRefreshDebtTargetReasonMask(ctx context.Context
 	return debt.ReasonMask, nil
 }
 
-func (s *MetadataService) currentStaleRefreshDebtReason(ctx context.Context, contentID string) (int64, error) {
+func (s *MetadataService) currentStaleRefreshDebtState(
+	ctx context.Context,
+	contentID string,
+	item *models.MediaItem,
+) (reason int64, missingTMDBRejected bool, err error) {
 	if s == nil || s.staleIDRepo == nil || strings.TrimSpace(contentID) == "" {
-		return 0, nil
+		return 0, false, nil
 	}
 	ids, err := s.staleIDRepo.GetByContentID(ctx, contentID)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	if len(ids) == 0 {
-		return 0, nil
+	for _, staleID := range ids {
+		if staleID != nil && strings.EqualFold(strings.TrimSpace(staleID.Provider), contentid.ProviderTMDB) &&
+			strings.TrimSpace(staleID.ProviderID) != "" {
+			missingTMDBRejected = true
+		}
+		if IsActionableStaleProviderID(item, staleID) {
+			reason = RefreshDebtReasonStaleProviderID
+		}
 	}
-	return RefreshDebtReasonStaleProviderID, nil
+	return reason, missingTMDBRejected, nil
 }
 
 func itemHasEpisodeMetadataDebt(item *models.MediaItem) bool {
@@ -2749,9 +3204,12 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 		return nil, err
 	}
 	maps.Copy(accumulatedIDs, durableIDs)
-	if err := s.suppressRecordedStaleProviderIDs(ctx, series.ContentID, accumulatedIDs); err != nil {
+	sanitizeCanonicalProviderIDsInPlace(accumulatedIDs)
+	recordedStaleIDs, err := s.loadRecordedStaleProviderIDs(ctx, series.ContentID)
+	if err != nil {
 		return nil, err
 	}
+	suppressProviderIDValues(accumulatedIDs, recordedStaleIDs)
 
 	itemChain, err := s.resolveChainCached(ctx, folderID, "series")
 	if err != nil {
@@ -2773,7 +3231,7 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 	searchQuery = suppressTitleYearFallbackForTrustedIDs(searchQuery)
 
 	allResults := make([]SearchResult, 0)
-	provider404s := make(map[string]string)
+	provider404s := newProvider404State()
 	for _, p := range itemChain {
 		sp, ok := p.(SearchProvider)
 		if !ok {
@@ -2792,22 +3250,20 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 		}
 		for _, result := range results {
 			if searchResultConflictsWithTrustedIDs(accumulatedIDs, result.ProviderIDs) {
-				continue
+				slog.WarnContext(ctx, "metadata: retaining conflicting target-refresh result for consensus", "component", "metadata",
+					"provider", p.Slug(), "content_id", series.ContentID,
+					"hinted_ids", accumulatedIDs, "candidate_ids", result.ProviderIDs)
 			}
 			allResults = append(allResults, result)
 		}
 	}
-	candidates := NormalizeCandidates(allResults, series.Type)
-	if winner, ok := selectRefreshMatchCandidate(series, nil, candidates); ok && winner != nil {
-		for k, v := range winner.ProviderIDs {
-			if v != "" {
-				accumulatedIDs[k] = v
-			}
-		}
+	candidates := NormalizeCandidatesForLanguage(allResults, series.Type, searchQuery.Language)
+	selectionItem := mediaItemWithProviderIDs(series, accumulatedIDs)
+	if winner, ok := selectRefreshMatchCandidate(selectionItem, nil, candidates); ok && winner != nil {
+		applyCandidateProviderIDConsensus(accumulatedIDs, winner, nil)
 	}
-	if err := s.suppressRecordedStaleProviderIDs(ctx, series.ContentID, accumulatedIDs); err != nil {
-		return nil, err
-	}
+	suppressProviderIDValues(accumulatedIDs, recordedStaleIDs)
+	suppressProviderIDValues(accumulatedIDs, provider404s.dropped)
 	return accumulatedIDs, nil
 }
 
@@ -2830,7 +3286,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			SeasonDirectoryPaths: childCtx.seasonDirectoryPaths,
 		})
 		if err != nil {
-			if handleProvider404(nil, providerIDs, p.Slug(), err, "season", seasonNumber) {
+			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
 			}
 			slog.WarnContext(ctx, "metadata: target season provider error", "component", "metadata",
@@ -2866,7 +3322,7 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			EpisodeFilePaths: childCtx.episodeFilePaths[seasonNumber],
 		})
 		if err != nil {
-			if handleChildProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
+			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
 			}
 			slog.WarnContext(ctx, "metadata: target episode provider error", "component", "metadata",
@@ -6357,6 +6813,63 @@ func searchResultConflictsWithTrustedIDs(hintedIDs, candidateIDs map[string]stri
 	return false
 }
 
+// applyCandidateProviderIDConsensus replaces accumulated canonical IDs with a
+// normalized winner. Compatible IDs retain the historical aggregator/plugin
+// bootstrap behavior. When providers conflict, an owning-provider value wins;
+// unresolved keys are removed and carried in quarantine through Phase 2 so
+// detail responses cannot reintroduce them. The returned keys are deliberate
+// replacements that must overwrite stored provider IDs at merge.
+func applyCandidateProviderIDConsensus(accumulatedIDs map[string]string, winner *MatchCandidate, quarantine map[string]struct{}) map[string]struct{} {
+	replaced := make(map[string]struct{})
+	if winner == nil {
+		return replaced
+	}
+	locallyQuarantined := make(map[string]struct{}, len(winner.ConflictingProviderIDKeys))
+	for _, key := range winner.ConflictingProviderIDKeys {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key == "" {
+			continue
+		}
+		delete(accumulatedIDs, key)
+		if replacement := strings.TrimSpace(winner.ConfirmedProviderIDs[key]); replacement != "" {
+			accumulatedIDs[key] = replacement
+			delete(quarantine, key)
+			replaced[key] = struct{}{}
+			continue
+		}
+		locallyQuarantined[key] = struct{}{}
+		if quarantine != nil {
+			quarantine[key] = struct{}{}
+		}
+	}
+	for key, value := range winner.ProviderIDs {
+		key = strings.ToLower(strings.TrimSpace(key))
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		if _, quarantined := locallyQuarantined[key]; quarantined {
+			continue
+		}
+		if _, quarantined := quarantine[key]; quarantined {
+			continue
+		}
+		accumulatedIDs[key] = value
+	}
+	return replaced
+}
+
+func mediaItemWithProviderIDs(item *models.MediaItem, providerIDs map[string]string) *models.MediaItem {
+	if item == nil {
+		return nil
+	}
+	selectionItem := *item
+	selectionItem.TmdbID = strings.TrimSpace(providerIDs[contentid.ProviderTMDB])
+	selectionItem.TvdbID = strings.TrimSpace(providerIDs[contentid.ProviderTVDB])
+	selectionItem.ImdbID = strings.TrimSpace(providerIDs[contentid.ProviderIMDB])
+	return &selectionItem
+}
+
 // applyBuiltinIdentityHints consults the chain's IdentityHintProviders (the
 // built-in NFO provider) and folds their curated tmdb/imdb/tvdb ids into
 // accumulatedIDs ahead of Phase-1 search. Keys in protected (stored durable
@@ -6379,8 +6892,12 @@ func applyBuiltinIdentityHints(
 		}
 		hints := hinter.IdentityHints(ctx, query)
 		for _, key := range trustedSearchIDKeys {
-			value := strings.TrimSpace(hints[key])
-			if value == "" {
+			value, valid := sanitizeProviderIDValue(key, hints[key])
+			if !valid {
+				if strings.TrimSpace(hints[key]) != "" {
+					slog.WarnContext(ctx, "metadata: ignoring malformed local identity hint", "component", "metadata",
+						"provider", p.Slug(), "key", key, "value", strings.TrimSpace(hints[key]))
+				}
 				continue
 			}
 			current := strings.TrimSpace(accumulatedIDs[key])

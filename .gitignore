@@ -30,6 +30,8 @@ silo.yaml
 .env
 .env.*
 !.env.example
+# Per-developer settings for the agent skills (hosts, credentials, tokens).
+.silo-dev.env
 
 # Developer-specific make targets
 Makefile.local
@@ -49,12 +51,17 @@ web/*.tsbuildinfo
 docs/inspiration
 
 
-.agents/
-# Ignore everything in .claude/ except committed, shared skills.
+# `.agents/skills` is a symlink to `.claude/skills` so non-Claude agents find the
+# same files; everything else under .agents/ is per-developer scratch.
+/.agents/*
+!/.agents/skills
+# Ignore everything in .claude/ except the committed, shared skills.
 /.claude/*
 !/.claude/skills/
-/.claude/skills/*
-!/.claude/skills/issue-to-pr/
+# Skills may carry per-developer state next to their instructions (the global
+# *.local.md rule above covers notes; these cover tokens and run state).
+**/.secrets/
+**/.state/
 .cursor/
 .superpowers/
 .codex/

@@ -14,8 +14,16 @@ export function useAdminPublicCss() {
     queryFn: async () => {
       try {
         const result = await api<AdminCssResponse>("/theme/admin-css");
+        let vars: Record<string, string> = {};
+        if (result.vars) {
+          try {
+            vars = JSON.parse(result.vars) as Record<string, string>;
+          } catch {
+            // Keep valid raw CSS active even if a legacy vars row is corrupt.
+          }
+        }
         return {
-          vars: result.vars ? (JSON.parse(result.vars) as Record<string, string>) : {},
+          vars,
           rawCss: result.raw_css ?? "",
         };
       } catch {

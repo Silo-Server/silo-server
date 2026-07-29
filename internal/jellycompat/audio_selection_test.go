@@ -66,9 +66,12 @@ func (m *testCompatSessionManager) UpdateProgress(sessionID string, position flo
 		isPaused:  isPaused,
 	})
 	if m.sessions != nil {
-		if _, ok := m.sessions[sessionID]; !ok {
+		session, ok := m.sessions[sessionID]
+		if !ok {
 			return playback.ErrSessionNotFound
 		}
+		session.Position = position
+		session.IsPaused = isPaused
 	}
 	return nil
 }
@@ -111,6 +114,7 @@ func (m *testCompatSessionManager) UpdateAudioTrack(sessionID string, audioTrack
 
 func (m *testCompatSessionManager) StopSession(sessionID string) error {
 	m.stopCalls = append(m.stopCalls, sessionID)
+	delete(m.sessions, sessionID)
 	return nil
 }
 

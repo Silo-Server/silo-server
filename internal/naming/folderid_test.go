@@ -9,6 +9,9 @@ func TestParseFolderIDs_BracketedBareImdb(t *testing.T) {
 		{"square brackets", "17 Blocks (2021) [tt10011226]", "tt10011226"},
 		{"curly braces", "Some Show {tt1234567}", "tt1234567"},
 		{"8-digit tt", "Movie (2024) [tt12345678]", "tt12345678"},
+		{"9-digit tt", "Movie (2024) [tt123456789]", "tt123456789"},
+		{"10-digit tt", "Movie (2024) [tt1234567890]", "tt1234567890"},
+		{"parentheses production pattern", "10 Tricks (2022) (tt0473100) [WEBDL-1080p.AAC.h264.GNOME].mp4", "tt0473100"},
 	}
 	for _, c := range cases {
 		got := ParseFolderIDs(c.folder)
@@ -25,6 +28,34 @@ func TestParseFolderIDs_BracketedBareImdb(t *testing.T) {
 	}
 	if got := ParseFolderIDs("17 Blocks (2021)"); got != nil {
 		t.Errorf("no-id folder must return nil, got %+v", got)
+	}
+}
+
+func TestParseStructuredFolderIDs_ParenthesizedProviderIDs(t *testing.T) {
+	tests := []struct {
+		name string
+		want FolderIDHints
+	}{
+		{"Movie (imdb-tt1375666)", FolderIDHints{ImdbID: "tt1375666"}},
+		{"Movie (tmdb-27205)", FolderIDHints{TmdbID: "27205"}},
+		{"Show (tvdbid-81189)", FolderIDHints{TvdbID: "81189"}},
+	}
+	for _, tt := range tests {
+		got := ParseStructuredFolderIDs(tt.name)
+		if got == nil || *got != tt.want {
+			t.Errorf("ParseStructuredFolderIDs(%q) = %+v, want %+v", tt.name, got, tt.want)
+		}
+	}
+
+	for _, invalid := range []string{
+		"Movie (tt123)", "Movie (tt12345678901)", "Movie (tmdb-12x)",
+		"Movie (imdb-1234567)", "Movie [tmdb-123)", "Movie {tt1234567]",
+		"Movie (tmdb-0)", "Show (tvdb-000)", "Movie (tt0000000)",
+		"Movie (imdb-tt0000000)", "District 9", "Beverly Hills 90210",
+	} {
+		if got := ParseStructuredFolderIDs(invalid); got != nil {
+			t.Errorf("ParseStructuredFolderIDs(%q) = %+v, want nil", invalid, got)
+		}
 	}
 }
 

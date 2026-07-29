@@ -54,7 +54,7 @@ func buildLegacySearchCatalogValues(values url.Values) (url.Values, bool) {
 	if len(types) > 1 {
 		return nil, false
 	}
-	if len(types) == 1 && types[0] != "movie" && types[0] != "series" {
+	if len(types) == 1 && types[0] != "movie" && types[0] != "series" && types[0] != "episode" {
 		return nil, false
 	}
 

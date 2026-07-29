@@ -228,3 +228,23 @@ func (r *PgRepository) UpsertProviderConfig(ctx context.Context, cfg *ProviderCo
 	}
 	return nil
 }
+
+// ClearProviderCredentials atomically disables a provider and removes every
+// stored credential. The normal upsert deliberately treats blank values as
+// "keep existing", so deletion must use this explicit path.
+func (r *PgRepository) ClearProviderCredentials(ctx context.Context, providerName string) error {
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO subtitle_provider_config (provider_name, enabled, api_key, username, password, updated_at)
+		VALUES ($1, false, '', '', '', NOW())
+		ON CONFLICT (provider_name) DO UPDATE SET
+			enabled = false,
+			api_key = '',
+			username = '',
+			password = '',
+			updated_at = NOW()
+	`, providerName)
+	if err != nil {
+		return fmt.Errorf("clear subtitle provider credentials: %w", err)
+	}
+	return nil
+}

@@ -88,7 +88,7 @@ export default function DownloadSettings() {
           />
           <SettingField
             label="Artifact Directory"
-            hint="Where prepared (remux/transcode) download files are written. Empty = a 'downloads' subdirectory under the transcode directory."
+            hint="Where prepared (remux/transcode) download files are written. Empty = a 'silo-download-artifacts' directory beside the transcode directory."
             value={form.getValue("download.artifact_dir")}
             onChange={(v) => form.setValue("download.artifact_dir", v)}
           />

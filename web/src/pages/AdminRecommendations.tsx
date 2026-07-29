@@ -11,7 +11,7 @@ import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction"
 import {
   useAdminServerSettings,
   useCheckAdminSettingsConnection,
-  useUpdateServerSetting,
+  useUpdateServerSettings,
   useAdminSensitiveStatus,
 } from "@/hooks/queries/admin/settings";
 import {
@@ -75,6 +75,7 @@ function RecSettingField({
 }: RecSettingFieldProps) {
   const { key, label, type, hint, defaultValue } = field;
   const effectiveServerValue = serverValue || defaultValue || "";
+  const [confirmClear, setConfirmClear] = useState(false);
 
   if (type === "toggle") {
     const checked = serverValue === "true";
@@ -119,6 +120,46 @@ function RecSettingField({
           disabled={isPending}
           className="max-w-md"
         />
+        {isConfigured && !confirmClear && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setConfirmClear(true)}
+            disabled={isPending}
+          >
+            Clear credential
+          </Button>
+        )}
+        {confirmClear && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-muted-foreground text-xs">
+              Remove this credential from the server?
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={() => {
+                onLocalChange(key, "");
+                onCommit(key, "");
+                setConfirmClear(false);
+              }}
+              disabled={isPending}
+            >
+              Confirm clear
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setConfirmClear(false)}
+              disabled={isPending}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
         {hint && <p className="text-muted-foreground text-xs">{hint}</p>}
       </div>
     );
@@ -291,7 +332,7 @@ function RecEmbeddingLockCard({
 export default function AdminRecommendations() {
   const { data: settings, isLoading } = useAdminServerSettings();
   const { data: sensitiveData } = useAdminSensitiveStatus();
-  const updateSetting = useUpdateServerSetting();
+  const updateSettings = useUpdateServerSettings();
   const checkConnection = useCheckAdminSettingsConnection();
   const { data: status } = useRecommendationsStatus();
 
@@ -337,26 +378,31 @@ export default function AdminRecommendations() {
   async function handleCommit(key: string, value: string) {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
     try {
-      await updateSetting.mutateAsync({ key, value });
+      const result = await updateSettings.mutateAsync({ [key]: value });
+      const field = getAllRecommendationFields().find((candidate) => candidate.key === key);
+      setLocalValues((prev) => ({
+        ...prev,
+        [key]: field?.type === "password" ? "" : (result.values[key] ?? value),
+      }));
       setDirtyKeys((prev) => {
         const next = new Set(prev);
         next.delete(key);
         return next;
       });
-      setRestartRequired(true);
+      setRestartRequired((current) => current || result.restart_required);
     } catch {
-      // useUpdateServerSetting already reports failures.
+      // useUpdateServerSettings already reports failures.
     }
   }
 
   function handleToggle(key: string, checked: boolean) {
     setConnectionResult(null);
     setLocalValues((prev) => ({ ...prev, [key]: checked ? "true" : "false" }));
-    updateSetting.mutate(
-      { key, value: checked ? "true" : "false" },
+    updateSettings.mutate(
+      { [key]: checked ? "true" : "false" },
       {
-        onSuccess: () => {
-          setRestartRequired(true);
+        onSuccess: (result) => {
+          setRestartRequired((current) => current || result.restart_required);
         },
       },
     );
@@ -364,26 +410,26 @@ export default function AdminRecommendations() {
 
   async function applyEmbeddingPreset(preset: RecommendationProviderPreset) {
     try {
-      await updateSetting.mutateAsync({ key: EMBEDDING_BASE_URL_KEY, value: preset.baseUrl });
-      setLocalValues((prev) => ({ ...prev, [EMBEDDING_BASE_URL_KEY]: preset.baseUrl }));
+      const result = await updateSettings.mutateAsync({
+        [EMBEDDING_BASE_URL_KEY]: preset.baseUrl,
+        [EMBEDDING_MODEL_KEY]: preset.model,
+      });
+      setLocalValues((prev) => ({
+        ...prev,
+        [EMBEDDING_BASE_URL_KEY]: result.values[EMBEDDING_BASE_URL_KEY] ?? preset.baseUrl,
+        [EMBEDDING_MODEL_KEY]: result.values[EMBEDDING_MODEL_KEY] ?? preset.model,
+      }));
       setDirtyKeys((prev) => {
         const next = new Set(prev);
         next.delete(EMBEDDING_BASE_URL_KEY);
-        return next;
-      });
-
-      await updateSetting.mutateAsync({ key: EMBEDDING_MODEL_KEY, value: preset.model });
-      setLocalValues((prev) => ({ ...prev, [EMBEDDING_MODEL_KEY]: preset.model }));
-      setDirtyKeys((prev) => {
-        const next = new Set(prev);
         next.delete(EMBEDDING_MODEL_KEY);
         return next;
       });
 
-      setRestartRequired(true);
+      setRestartRequired((current) => current || result.restart_required);
       setConnectionResult(null);
     } catch {
-      // useUpdateServerSetting already reports failures.
+      // useUpdateServerSettings already reports failures.
     }
   }
 
@@ -540,7 +586,7 @@ export default function AdminRecommendations() {
                               type="button"
                               aria-pressed={selected}
                               onClick={() => void applyEmbeddingPreset(preset)}
-                              disabled={updateSetting.isPending}
+                              disabled={updateSettings.isPending}
                               className={`min-w-[8.5rem] rounded-md border px-3 py-2 text-left transition-colors ${
                                 selected
                                   ? "border-foreground/20 bg-foreground/10 text-foreground"
@@ -571,7 +617,7 @@ export default function AdminRecommendations() {
                       serverValue={serverSettings[field.key] ?? ""}
                       localValues={localValues}
                       sensitiveConfigured={sensitiveConfigured}
-                      isPending={updateSetting.isPending}
+                      isPending={updateSettings.isPending}
                       onLocalChange={handleLocalChange}
                       onCommit={(key, value) => void handleCommit(key, value)}
                       onToggle={handleToggle}
@@ -583,7 +629,7 @@ export default function AdminRecommendations() {
                         onClick={() => handleCheckConnection(serverSettings)}
                         result={connectionResult}
                         isPending={checkConnection.isPending}
-                        disabled={updateSetting.isPending}
+                        disabled={updateSettings.isPending}
                       />
                     </div>
                   ) : null}

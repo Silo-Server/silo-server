@@ -37,7 +37,7 @@ const (
 	DefaultMeilisearchIndex            = "silo_media_items"
 	DefaultMeilisearchTimeoutMS        = 800
 	DefaultMeilisearchMatchingStrategy = "last"
-	SearchMeilisearchSchemaVersion     = 2
+	SearchMeilisearchSchemaVersion     = 3
 
 	DefaultMeilisearchSyncBatchSize     = 500
 	DefaultMeilisearchRebuildBatchSize  = 5000

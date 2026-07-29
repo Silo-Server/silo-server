@@ -1388,28 +1388,7 @@ func (h *PlaybackHandler) scrobbleEventForSession(ctx context.Context, session *
 		DurationSeconds:   duration,
 		OccurredAt:        time.Now().UTC(),
 	}
-	if h.StableIdentityResolver == nil {
-		event.Kind = "movie"
-		return event
-	}
-	identity := h.StableIdentityResolver.ResolveHistoryIdentity(ctx, mediaItemID)
-	event.Kind = identity.StableType
-	if event.Kind == "" {
-		event.Kind = "movie"
-	}
-	event.SeasonNumber = intPtrValue(identity.Season)
-	event.EpisodeNumber = intPtrValue(identity.Episode)
-	if identity.ProviderIDs != nil {
-		event.IMDbID = identity.ProviderIDs["imdb"]
-		event.TMDBID = identity.ProviderIDs["tmdb"]
-		event.TVDBID = identity.ProviderIDs["tvdb"]
-	}
-	if identity.SeriesProviderIDs != nil {
-		event.SeriesIMDbID = identity.SeriesProviderIDs["imdb"]
-		event.SeriesTMDBID = identity.SeriesProviderIDs["tmdb"]
-		event.SeriesTVDBID = identity.SeriesProviderIDs["tvdb"]
-	}
-	return event
+	return watchsync.ResolveScrobbleIdentity(ctx, h.StableIdentityResolver, event)
 }
 
 func (h *PlaybackHandler) scrobbleEventForStoppedSession(
@@ -1444,13 +1423,6 @@ func (h *PlaybackHandler) scrobbleEventForStoppedSession(
 	event.HistoryID = stopResult.HistoryID
 	event.Completed = stopResult.Completed
 	return event, true
-}
-
-func intPtrValue(value *int) int {
-	if value == nil {
-		return 0
-	}
-	return *value
 }
 
 func (h *PlaybackHandler) buildAdminHistoryEntry(
@@ -2696,8 +2668,12 @@ func (h *PlaybackHandler) HandleChangeAudioTrack(w http.ResponseWriter, r *http.
 				}
 				// A v3 DV strip remux carries its bitstream filter in the
 				// durable session route; dropping it here would hand the node
-				// a DV7 copy recipe that leaves dangling RPUs.
-				if updatedSession.RemuxDVMode == playback.RemuxDVStripToHDR10V3 && strings.EqualFold(nodeReq.TargetCodecVideo, "copy") {
+				// a DV7 copy recipe that leaves dangling RPUs. Sources that
+				// fail the RPU probe are the exception — for them the filter
+				// rejects every packet, so re-adding it on an audio switch
+				// would hang a session that was playing a moment ago.
+				if updatedSession.RemuxDVMode == playback.RemuxDVStripToHDR10V3 && strings.EqualFold(nodeReq.TargetCodecVideo, "copy") &&
+					playback.DVRPUStrippable(r.Context(), h.playbackConfig().FFmpegPath, file.FilePath) {
 					nodeReq.VideoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
 				}
 
@@ -3187,10 +3163,21 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 	// for "copy" has no way to know the source needs the strip. Derived after
 	// the burn-in guard above so a copy request it rewrites to h264 never carries
 	// a copy-only bitstream filter.
+	//
+	// Gated on the per-source probe for the same reason the planner is: a
+	// source whose RPU ffmpeg cannot parse turns the filter into a per-packet
+	// rejection that never produces a segment, and this endpoint would
+	// otherwise put it back on every quality change, seek and burn-in restart
+	// of a session the planner had already routed away from it.
 	videoBitstreamFilter := ""
 	if strings.EqualFold(req.TargetCodecVideo, "copy") &&
 		(session.RemuxDVMode == playback.RemuxDVStripToHDR10V3 || file.PrimaryDVProfile() == 7) {
-		videoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
+		if playback.DVRPUStrippable(r.Context(), h.playbackConfig().FFmpegPath, file.FilePath) {
+			videoBitstreamFilter = playback.DV7ToHDR10BitstreamFilter
+		} else {
+			slog.WarnContext(r.Context(), "restart dropped the dolby vision rpu strip: source cannot be stripped",
+				"component", "api", "playback_session_id", req.SessionID, "file_id", file.ID)
+		}
 	}
 
 	// The request-level permission check above intentionally runs before the
@@ -3220,6 +3207,9 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 			file = h.ensurePlaybackProbe(r.Context(), file)
 			switchedFileID = &alt.ID
 		}
+	}
+	if !videoCopy {
+		req.TargetResolution = clampEncodedTargetResolution(req.TargetResolution, file.Resolution)
 	}
 	if requestedFile != nil && file != nil && requestedFile.ID != file.ID {
 		if err := preflightPlaybackFile(r.Context(), requestedFile, h.MissingMarker, h.EventsHub); err != nil && !isPlaybackFileMissing(err) {
@@ -4008,20 +3998,60 @@ func (h *PlaybackHandler) findAlternateFile(ctx context.Context, source *models.
 	return candidates[0], nil
 }
 
+const (
+	transcodeResolution2160p = "2160p"
+	transcodeResolution1080p = "1080p"
+	transcodeResolution720p  = "720p"
+	transcodeResolution480p  = "480p"
+	transcodeResolution420p  = "420p"
+	transcodeResolution328p  = "328p"
+)
+
 // resolutionRank returns a numeric rank for resolution sorting.
 func resolutionRank(res string) int {
-	switch res {
-	case "2160p":
-		return 4
-	case "1080p":
-		return 3
-	case "720p":
-		return 2
-	case "480p":
-		return 1
-	case "328p":
+	height, known := transcodeResolutionHeight(res)
+	if !known {
 		return 0
+	}
+
+	switch {
+	case height >= 2160:
+		return 4
+	case height >= 1080:
+		return 3
+	case height >= 720:
+		return 2
+	case height >= 480:
+		return 1
 	default:
 		return 0
+	}
+}
+
+func clampEncodedTargetResolution(requestedResolution, sourceResolution string) string {
+	requestedHeight, requestedKnown := transcodeResolutionHeight(requestedResolution)
+	sourceHeight, sourceKnown := transcodeResolutionHeight(sourceResolution)
+	if !requestedKnown || !sourceKnown || requestedHeight <= sourceHeight {
+		return requestedResolution
+	}
+	return sourceResolution
+}
+
+func transcodeResolutionHeight(resolution string) (int, bool) {
+	switch resolution {
+	case transcodeResolution2160p:
+		return 2160, true
+	case transcodeResolution1080p:
+		return 1080, true
+	case transcodeResolution720p:
+		return 720, true
+	case transcodeResolution480p:
+		return 480, true
+	case transcodeResolution420p:
+		return 420, true
+	case transcodeResolution328p:
+		return 328, true
+	default:
+		return 0, false
 	}
 }

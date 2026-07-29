@@ -99,6 +99,13 @@ func (c *Client) Top(ctx context.Context) ([]ListSummary, error) {
 	return c.fetchLists(ctx, "/lists/top", q)
 }
 
+// Check verifies that the configured API key can reach an authenticated
+// discovery endpoint without exposing or persisting any returned list data.
+func (c *Client) Check(ctx context.Context) error {
+	_, err := c.Top(ctx)
+	return err
+}
+
 func (c *Client) fetchLists(ctx context.Context, path string, q url.Values) ([]ListSummary, error) {
 	if !c.Configured() {
 		return nil, ErrNotConfigured

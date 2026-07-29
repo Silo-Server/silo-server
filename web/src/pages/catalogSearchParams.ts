@@ -181,6 +181,28 @@ export function buildCatalogHref(state: CatalogSearchState): string {
   return `/catalog?${params.toString()}`;
 }
 
+// Interactive query filters need an explicit `all` sentinel. Internally an
+// unscoped query is represented by an undefined media_scope, but omitting the
+// URL type makes Catalog reapply the user's saved default (normally `video`).
+// Keep this behavior scoped to filter updates so fresh search URLs can still
+// inherit that preference.
+export function buildCatalogFilterSearchParams(state: CatalogSearchState): URLSearchParams {
+  const params = buildCatalogApiSearchParams(state);
+  if (state.source === "query" && !state.type_override && !state.query_definition.media_scope) {
+    params.set("type", "all");
+  }
+  return params;
+}
+
+export function buildCatalogQueryUpdateHref(state: CatalogSearchState, q: string): string {
+  const params = buildCatalogFilterSearchParams({
+    ...state,
+    source: "query",
+    q,
+  });
+  return `/catalog?${params.toString()}`;
+}
+
 export function buildQueryCatalogHref(q?: string): string {
   return buildCatalogHref({
     source: "query",

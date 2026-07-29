@@ -180,6 +180,26 @@ func (h *AdminApplePushHandler) HandleRegisterRelay(w http.ResponseWriter, r *ht
 	})
 }
 
+// HandleClearRelay handles DELETE /admin/notifications/push/relay. Clearing
+// the local capability is deliberately explicit: it lets an administrator
+// change relay origins or recover from a revoked deployment without exposing
+// credential fields through the generic settings endpoint.
+func (h *AdminApplePushHandler) HandleClearRelay(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.settings == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "Settings store is not available")
+		return
+	}
+	settings := notifications.NewSettings(h.settings)
+	if h.system != nil && h.system.Settings != nil {
+		settings = h.system.Settings
+	}
+	if err := settings.UpdatePushRelayCredential(r.Context(), notifications.PushRelayCredential{}); err != nil {
+		writeError(w, http.StatusInternalServerError, "settings_error", "Failed to clear push relay credential")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func mapRelayRegistrationError(err error) (int, string, string) {
 	var relayErr notifications.RelayCredentialError
 	if !errors.As(err, &relayErr) {

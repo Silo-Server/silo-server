@@ -12,7 +12,10 @@ import (
 )
 
 type fakeRateLimitStore struct {
-	values map[string]string
+	values       map[string]string
+	setCalls     int
+	setManyCalls int
+	atomicCalls  int
 }
 
 func newFakeRateLimitStore() *fakeRateLimitStore {
@@ -24,7 +27,16 @@ func (s *fakeRateLimitStore) Get(_ context.Context, key string) (string, error) 
 }
 
 func (s *fakeRateLimitStore) Set(_ context.Context, key, value string) error {
+	s.setCalls++
 	s.values[key] = value
+	return nil
+}
+
+func (s *fakeRateLimitStore) SetMany(_ context.Context, values map[string]string) error {
+	s.setManyCalls++
+	for key, value := range values {
+		s.values[key] = value
+	}
 	return nil
 }
 
@@ -34,6 +46,49 @@ func (s *fakeRateLimitStore) GetAll(_ context.Context) (map[string]string, error
 		out[k] = v
 	}
 	return out, nil
+}
+
+func (s *fakeRateLimitStore) UpdateAtomic(
+	ctx context.Context,
+	update func(current map[string]string) (map[string]string, error),
+) error {
+	s.atomicCalls++
+	current, err := s.GetAll(ctx)
+	if err != nil {
+		return err
+	}
+	writes, err := update(current)
+	if err != nil || len(writes) == 0 {
+		return err
+	}
+	return s.SetMany(ctx, writes)
+}
+
+type postCommitOverwriteRateLimitStore struct {
+	*fakeRateLimitStore
+}
+
+func (s *postCommitOverwriteRateLimitStore) UpdateAtomic(
+	ctx context.Context,
+	update func(current map[string]string) (map[string]string, error),
+) error {
+	s.atomicCalls++
+	current, err := s.GetAll(ctx)
+	if err != nil {
+		return err
+	}
+	writes, err := update(current)
+	if err != nil || len(writes) == 0 {
+		return err
+	}
+	if err := s.SetMany(ctx, writes); err != nil {
+		return err
+	}
+
+	// Model a later request committing before this handler performs its
+	// post-commit reload and restart decision.
+	s.values["ratelimit.enabled"] = "false"
+	return nil
 }
 
 func newRunningRateLimitMiddleware(t *testing.T, store ratelimit.SettingsStore) *ratelimit.Middleware {
@@ -86,7 +141,8 @@ func TestRateLimitHandlerWithoutRunningLimiter(t *testing.T) {
 	// endpoints must still work so an admin can re-enable it from the UI.
 	store := newFakeRateLimitStore()
 	store.values["ratelimit.enabled"] = "false"
-	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+	tracker := NewServerRestartStatusTracker()
+	h := NewRateLimitHandler(store, nil, nil, tracker, true)
 
 	got := getRateLimitConfig(t, h)
 	if got.Enabled {
@@ -106,6 +162,12 @@ func TestRateLimitHandlerWithoutRunningLimiter(t *testing.T) {
 	if store.values["ratelimit.backend"] != "redis" {
 		t.Errorf("ratelimit.backend = %q, want \"redis\"", store.values["ratelimit.backend"])
 	}
+	if store.setManyCalls != 1 {
+		t.Fatalf("atomic writes = %d, want 1", store.setManyCalls)
+	}
+	if !tracker.Snapshot().RestartRequired {
+		t.Fatal("enabling a stopped limiter did not update server restart status")
+	}
 
 	resp = putRateLimitConfig(t, h, `{"enabled":false,"backend":"redis"}`)
 	if resp["restart_required"] != false {
@@ -113,10 +175,26 @@ func TestRateLimitHandlerWithoutRunningLimiter(t *testing.T) {
 	}
 }
 
+func TestRateLimitHandlerUsesLatestCommittedSettingsAfterAtomicWrite(t *testing.T) {
+	baseStore := newFakeRateLimitStore()
+	baseStore.values["ratelimit.enabled"] = "false"
+	store := &postCommitOverwriteRateLimitStore{fakeRateLimitStore: baseStore}
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+
+	resp := putRateLimitConfig(t, h, `{"enabled":true}`)
+
+	if resp["restart_required"] != false {
+		t.Fatalf("restart_required = %v, want false from latest committed disabled state", resp["restart_required"])
+	}
+	if got := store.values["ratelimit.enabled"]; got != "false" {
+		t.Fatalf("ratelimit.enabled = %q, want later committed value false", got)
+	}
+}
+
 func TestRateLimitHandlerWithRunningLimiter(t *testing.T) {
 	store := newFakeRateLimitStore()
 	mw := newRunningRateLimitMiddleware(t, store)
-	h := NewRateLimitHandler(store, mw, nil, NewServerRestartStatusTracker())
+	h := NewRateLimitHandler(store, mw, nil, NewServerRestartStatusTracker(), true)
 
 	got := getRateLimitConfig(t, h)
 	if !got.Active {
@@ -136,5 +214,142 @@ func TestRateLimitHandlerWithRunningLimiter(t *testing.T) {
 	resp = putRateLimitConfig(t, h, `{"enabled":true,"backend":"redis"}`)
 	if resp["restart_required"] != true {
 		t.Errorf("backend change: restart_required = %v, want true", resp["restart_required"])
+	}
+}
+
+func TestRateLimitHandlerRejectsExplicitZeroWithoutWriting(t *testing.T) {
+	store := newFakeRateLimitStore()
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
+		`{"tiers":{"standard":{"requests_per_second":0}}}`,
+	))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConfig(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.setManyCalls != 0 || store.setCalls != 0 {
+		t.Fatalf("invalid request wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
+	}
+}
+
+func TestRateLimitHandlerRejectsOverflowingGlobalRateWithoutWriting(t *testing.T) {
+	store := newFakeRateLimitStore()
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
+		`{"global_requests_per_second":1e308}`,
+	))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConfig(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.setManyCalls != 0 || store.setCalls != 0 {
+		t.Fatalf("invalid request wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
+	}
+}
+
+func TestRateLimitHandlerRejectsOverflowingBurstWithoutWriting(t *testing.T) {
+	store := newFakeRateLimitStore()
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
+		`{"ip_burst":9223372036854775807}`,
+	))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConfig(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.setManyCalls != 0 || store.setCalls != 0 {
+		t.Fatalf("invalid request wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
+	}
+}
+
+func TestRateLimitHandlerRejectsRedisWithoutRedisConfiguration(t *testing.T) {
+	store := newFakeRateLimitStore()
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
+		`{"backend":"redis"}`,
+	))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConfig(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.setManyCalls != 0 {
+		t.Fatalf("invalid Redis selection wrote settings: SetMany=%d", store.setManyCalls)
+	}
+}
+
+func TestRateLimitHandlerRejectsMalformedPersistedRedisURL(t *testing.T) {
+	store := newFakeRateLimitStore()
+	store.values["redis.url"] = "not-a-url"
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
+		`{"backend":"redis"}`,
+	))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConfig(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.setManyCalls != 0 {
+		t.Fatalf("invalid Redis selection wrote settings: SetMany=%d", store.setManyCalls)
+	}
+}
+
+func TestRateLimitHandlerAcceptsBootstrapRedisDespiteStalePersistedURL(t *testing.T) {
+	store := newFakeRateLimitStore()
+	store.values["redis.url"] = " redis://cache.example.invalid:6379 "
+	h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker(), true)
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
+		`{"backend":"redis"}`,
+	))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConfig(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.values["ratelimit.backend"] != "redis" {
+		t.Fatalf("ratelimit.backend = %q, want redis", store.values["ratelimit.backend"])
+	}
+}
+
+func TestRateLimitHandlerDoesNotTreatActiveRedisAsDurableConfiguration(t *testing.T) {
+	store := newFakeRateLimitStore()
+	perKey := ratelimit.NewMemoryLimiter()
+	global := ratelimit.NewMemoryLimiter()
+	t.Cleanup(func() {
+		perKey.Close()
+		global.Close()
+	})
+	// isMemory=false models a process currently using Redis. With no stored or
+	// bootstrap transport, that active state cannot survive the next restart.
+	mw := ratelimit.NewMiddleware(perKey, global, store, false)
+	h := NewRateLimitHandler(store, mw, nil, NewServerRestartStatusTracker())
+
+	req := httptest.NewRequest(http.MethodPut, "/admin/rate-limits/config", strings.NewReader(
+		`{"backend":"redis"}`,
+	))
+	rec := httptest.NewRecorder()
+	h.HandleUpdateConfig(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("PUT status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	if store.setManyCalls != 0 {
+		t.Fatalf("invalid Redis selection wrote settings: SetMany=%d", store.setManyCalls)
 	}
 }

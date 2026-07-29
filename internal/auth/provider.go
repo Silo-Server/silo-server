@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	netmail "net/mail"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -41,6 +43,17 @@ type LocalProvider struct {
 	sessions *SessionRepository
 }
 
+// looksLikeEmail reports whether the login identifier is a plausible bare
+// email address, gating the email-column fallback in Authenticate.
+func looksLikeEmail(identifier string) bool {
+	identifier = strings.TrimSpace(identifier)
+	if !strings.Contains(identifier, "@") {
+		return false
+	}
+	parsed, err := netmail.ParseAddress(identifier)
+	return err == nil && parsed.Address == identifier
+}
+
 // NewLocalProvider creates a new LocalProvider backed by the given repositories.
 func NewLocalProvider(users *UserRepository, sessions *SessionRepository) *LocalProvider {
 	return &LocalProvider{
@@ -52,8 +65,18 @@ func NewLocalProvider(users *UserRepository, sessions *SessionRepository) *Local
 // Authenticate validates the username/password pair against the database.
 // Returns ErrInvalidCredentials if the user is not found or the password
 // does not match. Returns ErrUserDisabled if the user's account is disabled.
+//
+// The identifier may also be an email address: when the username lookup
+// misses and the input parses as an email, the email column is tried.
+// Invited accounts have username == email, but someone who signed up with a
+// separate username should still be able to type the address they remember.
+// Both columns are citext UNIQUE over the same identity space, so the
+// fallback cannot resolve ambiguously.
 func (p *LocalProvider) Authenticate(ctx context.Context, creds Credentials) (*models.User, error) {
 	user, err := p.users.GetByUsername(ctx, creds.Username)
+	if err != nil && IsNotFound(err) && looksLikeEmail(creds.Username) {
+		user, err = p.users.GetByEmail(ctx, creds.Username)
+	}
 	if err != nil {
 		if IsNotFound(err) {
 			return nil, ErrInvalidCredentials

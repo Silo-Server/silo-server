@@ -53,8 +53,9 @@ func (s *Scanner) ScanEbookFolder(ctx context.Context, folder *models.MediaFolde
 type ebookRootScan struct {
 	root         string
 	files        []string
-	rootErr      error // root stat failed, or the root is not a directory
-	walkFailures int   // entries within the subtree the walk could not read or resolve
+	fileOnly     bool     // explicit single-file scan; index it but never reconcile a subtree
+	rootErr      error    // root stat failed, or the root is not a directory
+	walkFailures []string // logical paths within the subtree the walk could not read or resolve
 }
 
 // failed reports whether the walk under this root is known to be incomplete.
@@ -63,7 +64,7 @@ type ebookRootScan struct {
 // a mid-walk subtree error) must not cascade into marking — and, with
 // empty_trash_after_scan, deleting — everything under it.
 func (r *ebookRootScan) failed() bool {
-	return r.rootErr != nil || r.walkFailures > 0
+	return r.rootErr != nil || len(r.walkFailures) > 0
 }
 
 // collectEbookRootScans walks every configured root with the shared
@@ -88,7 +89,11 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots []string) ([
 			// Unmounted/missing/permission-broken root: failed, not empty.
 			scan.rootErr = fmt.Errorf("stat root: %w", statErr)
 		case !info.IsDir():
-			scan.rootErr = fmt.Errorf("root is not a directory after symlink resolution")
+			if info.Mode().IsRegular() && SupportsEbookFile(cleanRoot) {
+				scan.fileOnly = true
+			} else {
+				scan.rootErr = fmt.Errorf("root is not a directory after symlink resolution")
+			}
 		}
 		if statErr == nil {
 			if err := walkLogicalTree(ctx, cleanRoot, cleanRoot, walkModeEbook, visitedPhysicalDirs, &scan.files, &scan.walkFailures); err != nil {
@@ -99,7 +104,7 @@ func collectEbookRootScans(ctx context.Context, folderID int, roots []string) ([
 			slog.WarnContext(ctx, "ebook scan: root walk incomplete; root excluded from missing-file reconciliation", "component", "scanner",
 				"folder_id", folderID,
 				"root", cleanRoot,
-				"walk_failures", scan.walkFailures,
+				"walk_failures", len(scan.walkFailures),
 				"error", scan.rootErr,
 			)
 		}
@@ -115,7 +120,7 @@ func splitEbookReconcileRoots(scans []ebookRootScan) (reconcileRoots []string, s
 	reconcileRoots = make([]string, 0, len(scans))
 	for i := range scans {
 		scan := &scans[i]
-		if scan.failed() {
+		if scan.failed() || scan.fileOnly {
 			continue
 		}
 		if len(scan.files) > 0 {
@@ -161,8 +166,8 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 		processed int64
 		failed    int64
 		skipped   int64
-		failMu    sync.Mutex
-		failures  []error
+		cancelMu  sync.Mutex
+		failures  scanFailures
 		cancelErr error
 	)
 	start := time.Now()
@@ -176,17 +181,15 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 				}
 				if err := s.reconcileEbookFile(ctx, folder, path, &skipped, groupLocks); err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						failMu.Lock()
+						cancelMu.Lock()
 						if cancelErr == nil {
 							cancelErr = err
 						}
-						failMu.Unlock()
+						cancelMu.Unlock()
 						return
 					}
 					atomic.AddInt64(&failed, 1)
-					failMu.Lock()
-					failures = append(failures, fmt.Errorf("%s: %w", path, err))
-					failMu.Unlock()
+					failures.addf("%s: %w", path, err)
 					slog.WarnContext(ctx, "ebook scan: file failed", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", path,
@@ -240,7 +243,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 		failedCount := atomic.LoadInt64(&failed)
 		skippedCount := atomic.LoadInt64(&skipped)
 		if failedCount > 0 && skippedCount == 0 && failedCount == processedCount {
-			return fmt.Errorf("ebook scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
+			return fmt.Errorf("ebook scan failed for every attempted folder_id=%d: %w", folder.ID, failures.join())
 		}
 	}
 
@@ -365,9 +368,19 @@ func (s *Scanner) emptyCleanupDecision(
 // reconcileEbookScan applies the post-walk safety policy and then performs
 // missing-file reconciliation for the roots that walked cleanly.
 func (s *Scanner) reconcileEbookScan(ctx context.Context, folder *models.MediaFolder, scans []ebookRootScan, seenPaths map[string]bool, fullScan bool) error {
+	if folder != nil {
+		defer s.reconcileMissingEbookEnrichment(ctx, folder.ID)
+	}
 	reconcileRoots, _ := splitEbookReconcileRoots(scans)
 	if len(reconcileRoots) == 0 {
-		if len(scans) > 0 {
+		allFailed := len(scans) > 0
+		for i := range scans {
+			if !scans[i].failed() {
+				allFailed = false
+				break
+			}
+		}
+		if allFailed {
 			slog.WarnContext(ctx, "ebook scan: every root walk failed; skipping missing-file reconciliation", "component", "scanner",
 				"folder_id", folder.ID,
 			)
@@ -474,6 +487,14 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 	}
 	size := info.Size()
 	modifiedAt := normalizeFileModifiedAt(info.ModTime())
+	if sidecarPath := ebookOPFSidecarPath(filePath); sidecarPath != "" {
+		if sidecarInfo, statErr := os.Stat(sidecarPath); statErr == nil {
+			sidecarModifiedAt := normalizeFileModifiedAt(sidecarInfo.ModTime())
+			if sidecarModifiedAt.After(modifiedAt) {
+				modifiedAt = sidecarModifiedAt
+			}
+		}
+	}
 
 	existingContentID, isUnchanged, skipErr := s.ebookFileShouldSkip(ctx, folder, filePath, size, modifiedAt)
 	if skipErr != nil {
@@ -544,6 +565,9 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 			return fmt.Errorf("upsert ebook ISBN provider id: %w", err)
 		}
 	}
+	if err := s.enqueueEbookEnrichment(ctx, contentID); err != nil {
+		return fmt.Errorf("enqueue ebook enrichment: %w", err)
+	}
 	s.autoLinkLiteraryWork(ctx, contentID)
 	slog.InfoContext(ctx, "ebook scan: indexed", "component", "scanner",
 		"folder_id", folder.ID,
@@ -553,6 +577,58 @@ func (s *Scanner) reconcileEbookFile(ctx context.Context, folder *models.MediaFo
 		"path", filePath,
 	)
 	return nil
+}
+
+const ebookEnrichmentPriority = 100
+const ebookEnrichmentReconcileLimit = 500
+
+func (s *Scanner) enqueueEbookEnrichment(ctx context.Context, contentID string) error {
+	if s == nil || s.ebookEnrichmentQueue == nil || strings.TrimSpace(contentID) == "" {
+		return nil
+	}
+	if err := s.ebookEnrichmentQueue.Enqueue(ctx, contentID, ebookEnrichmentPriority); err != nil {
+		slog.WarnContext(ctx, "ebook scan: metadata enrichment enqueue failed",
+			"component", "scanner",
+			"content_id", contentID,
+			"error", err,
+		)
+	}
+	return nil
+}
+
+func (s *Scanner) reconcileMissingEbookEnrichment(ctx context.Context, folderID int) {
+	if s == nil || s.ebookEnrichmentQueue == nil || folderID <= 0 {
+		return
+	}
+	reconciled, inspected, wrapped, err := s.ebookEnrichmentQueue.ReconcileMissing(
+		ctx,
+		folderID,
+		ebookEnrichmentPriority,
+		ebookEnrichmentReconcileLimit,
+	)
+	if err != nil {
+		slog.WarnContext(ctx, "ebook scan: metadata enrichment reconciliation failed",
+			"component", "scanner",
+			"folder_id", folderID,
+			"limit", ebookEnrichmentReconcileLimit,
+			"error", err,
+		)
+		return
+	}
+	if reconciled > 0 {
+		slog.InfoContext(ctx, "ebook scan: repaired missing metadata enrichment jobs",
+			"component", "scanner",
+			"folder_id", folderID,
+			"reconciled", reconciled,
+		)
+	}
+	slog.DebugContext(ctx, "ebook scan: metadata enrichment reconciliation window complete",
+		"component", "scanner",
+		"folder_id", folderID,
+		"inspected", inspected,
+		"reconciled", reconciled,
+		"wrapped", wrapped,
+	)
 }
 
 func (s *Scanner) autoLinkLiteraryWork(ctx context.Context, contentID string) {
@@ -1226,8 +1302,17 @@ func insertEbookISBNProviderID(ctx context.Context, exec ebookSQLExecutor, conte
 	_, err := exec.Exec(ctx, `
 		INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type)
 		VALUES ($1, 'isbn', $2, 'ebook')
-		ON CONFLICT DO NOTHING
+		ON CONFLICT (content_id, provider) DO UPDATE SET
+			provider_id = EXCLUDED.provider_id,
+			updated_at = NOW()
+		WHERE media_item_provider_ids.provider_id IS DISTINCT FROM EXCLUDED.provider_id
 	`, contentID, isbn)
+	// A different item may already own this ISBN under the (provider, provider_id)
+	// unique constraint; duplicate copies must not fail the scan.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return nil
+	}
 	return err
 }
 

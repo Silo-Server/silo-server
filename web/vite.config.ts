@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import os from "os";
 
 /// <reference types="vitest" />
 
@@ -9,6 +10,19 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const apiProxyTarget = env.VITE_API_PROXY_TARGET || "http://localhost:8090";
   const hmrClientPort = Number(env.VITE_HMR_CLIENT_PORT || "");
+  // Vite only lets bare IPv4 hosts through unlisted, so a dev server reached by
+  // name — the local mDNS name, or a Tailscale MagicDNS name when someone views
+  // the dev UI from another device on the tailnet — has to be allowed here.
+  // VITE_ALLOWED_HOSTS adds any others (comma-separated).
+  const allowedHosts = [
+    "silo.local",
+    ".ts.net",
+    os.hostname(),
+    ...(env.VITE_ALLOWED_HOSTS || "")
+      .split(",")
+      .map((host) => host.trim())
+      .filter(Boolean),
+  ];
   // Remote backends (e.g. the hosted dev server) sit behind vhost-routing
   // proxies that reject a localhost Host header; local backends don't care
   // either way but keeping Host intact preserves existing behavior.
@@ -37,7 +51,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "0.0.0.0",
-      allowedHosts: ["silo.local"],
+      allowedHosts,
       hmr:
         Number.isFinite(hmrClientPort) && hmrClientPort > 0
           ? { clientPort: hmrClientPort }

@@ -38,14 +38,15 @@ func newReportLivenessHandler(upstreamID string, registerUpstream bool) (*Playba
 
 	playbackStore := NewPlaybackSessionStore(time.Hour, nil)
 	playbackStore.Put(PlaybackSession{
-		ID:                 "play-1",
-		CompatToken:        "token-1",
-		ItemID:             "movie-1",
-		RouteItemID:        encodedItemID,
-		UserID:             "user-1",
-		UpstreamSessionID:  upstreamID,
-		UpstreamPlayMethod: "direct",
-		MediaSources:       []PlaybackMediaSource{source},
+		ID:                       "play-1",
+		CompatToken:              "token-1",
+		ItemID:                   "movie-1",
+		RouteItemID:              encodedItemID,
+		UserID:                   "user-1",
+		UpstreamSessionID:        upstreamID,
+		UpstreamPlayMethod:       "direct",
+		ProgressPersistenceKnown: true,
+		MediaSources:             []PlaybackMediaSource{source},
 	})
 
 	sessions := map[string]*playback.Session{}
@@ -336,11 +337,9 @@ func TestHandlePlaybackReport_StopViaAliasTearsDown(t *testing.T) {
 	}
 }
 
-// TestHandlePlaybackReport_StopViaRouteMatchDoesNotTearDown proves a Stopped
-// report that only matched by item/source route (an ambiguous match when the
-// same item plays twice under one token) must not tear down the session it
-// happened to hit; stale cleanup owns that session's end of life.
-func TestHandlePlaybackReport_StopViaRouteMatchDoesNotTearDown(t *testing.T) {
+// TestHandlePlaybackReport_StopViaUniqueRouteDoesNotTearDown proves a delayed
+// Stopped report cannot use a same-item route to tear down a newer play.
+func TestHandlePlaybackReport_StopViaUniqueRouteDoesNotTearDown(t *testing.T) {
 	handler, mgr, encodedItemID, sourceID := newReportLivenessHandler("upstream-1", true)
 
 	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(
@@ -354,14 +353,85 @@ func TestHandlePlaybackReport_StopViaRouteMatchDoesNotTearDown(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 	}
 	if len(mgr.stopCalls) != 0 {
-		t.Fatalf("StopSession calls = %v, want none for an ambiguous route-only match", mgr.stopCalls)
+		t.Fatalf("StopSession calls = %v, want none", mgr.stopCalls)
 	}
 	if _, ok := handler.playbackStore.Get("play-1"); !ok {
-		t.Fatal("expected route-only Stopped report to leave the play session in place")
+		t.Fatal("route-only Stopped report tore down the active play session")
 	}
-	// The final position still lands on the upstream session.
-	if len(mgr.progressUpdates) != 1 || mgr.progressUpdates[0].sessionID != "upstream-1" {
-		t.Fatalf("progress updates = %+v, want one update on upstream-1", mgr.progressUpdates)
+	if len(mgr.progressUpdates) != 0 {
+		t.Fatalf("progress updates = %+v, want none", mgr.progressUpdates)
+	}
+}
+
+// TestHandlePlaybackReport_StopViaAmbiguousRouteDoesNotTearDown proves route
+// fallback refuses to choose when the same item/source is playing twice under
+// one token.
+func TestHandlePlaybackReport_StopViaAmbiguousRouteDoesNotTearDown(t *testing.T) {
+	handler, mgr, encodedItemID, sourceID := newReportLivenessHandler("upstream-1", true)
+	original, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("original play session missing")
+	}
+	sibling := *original
+	sibling.ID = "play-2"
+	sibling.UpstreamSessionID = "upstream-2"
+	handler.playbackStore.Put(sibling)
+	mgr.sessions["upstream-2"] = &playback.Session{ID: "upstream-2", PlayMethod: playback.PlayDirect}
+
+	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(
+		`{"PlaySessionId":"never-seen-psid","ItemId":"`+encodedItemID+`","MediaSourceId":"`+sourceID+`","PositionTicks":9000000000}`))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+	rec := httptest.NewRecorder()
+	handler.HandleSessionPlayingStopped(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(mgr.stopCalls) != 0 || len(mgr.progressUpdates) != 0 {
+		t.Fatalf("ambiguous route mutated playback: stops=%v progress=%+v", mgr.stopCalls, mgr.progressUpdates)
+	}
+	if _, ok := handler.playbackStore.Get("play-1"); !ok {
+		t.Fatal("ambiguous route removed play-1")
+	}
+	if _, ok := handler.playbackStore.Get("play-2"); !ok {
+		t.Fatal("ambiguous route removed play-2")
+	}
+}
+
+func TestHandlePlaybackReport_StopRejectsMixedRouteIdentifiers(t *testing.T) {
+	handler, mgr, encodedItemID, _ := newReportLivenessHandler("upstream-1", true)
+	original, ok := handler.playbackStore.Get("play-1")
+	if !ok {
+		t.Fatal("original play session missing")
+	}
+	sibling := *original
+	sibling.ID = "play-2"
+	sibling.ItemID = "movie-2"
+	sibling.RouteItemID = handler.codec.EncodeStringID(EncodedIDItem, "movie-2")
+	sibling.UpstreamSessionID = "upstream-2"
+	sibling.MediaSources = []PlaybackMediaSource{{ID: "source-2", FileID: 43}}
+	handler.playbackStore.Put(sibling)
+	mgr.sessions["upstream-2"] = &playback.Session{ID: "upstream-2", PlayMethod: playback.PlayDirect}
+
+	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(
+		`{"PlaySessionId":"stale-play-id","ItemId":"`+encodedItemID+`","MediaSourceId":"source-2","PositionTicks":9000000000}`))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+	rec := httptest.NewRecorder()
+	handler.HandleSessionPlayingStopped(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if len(mgr.stopCalls) != 0 || len(mgr.progressUpdates) != 0 {
+		t.Fatalf("mixed route identifiers mutated playback: stops=%v progress=%+v", mgr.stopCalls, mgr.progressUpdates)
+	}
+	if _, ok := handler.playbackStore.Get("play-1"); !ok {
+		t.Fatal("mixed route identifiers removed play-1")
+	}
+	if _, ok := handler.playbackStore.Get("play-2"); !ok {
+		t.Fatal("mixed route identifiers removed play-2")
 	}
 }
 

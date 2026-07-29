@@ -106,6 +106,30 @@ type meilisearchSearchResponse struct {
 	Query              string                 `json:"query"`
 }
 
+type meilisearchFederatedSearchRequest struct {
+	Federation meilisearchFederationOptions `json:"federation"`
+	Queries    []meilisearchFederatedQuery  `json:"queries"`
+}
+
+type meilisearchFederationOptions struct {
+	Offset int `json:"offset"`
+	Limit  int `json:"limit"`
+}
+
+type meilisearchFederatedQuery struct {
+	IndexUID             string                    `json:"indexUid"`
+	Query                string                    `json:"q"`
+	Filter               string                    `json:"filter,omitempty"`
+	AttributesToRetrieve []string                  `json:"attributesToRetrieve"`
+	AttributesToSearchOn []string                  `json:"attributesToSearchOn,omitempty"`
+	MatchingStrategy     string                    `json:"matchingStrategy,omitempty"`
+	Vector               []float32                 `json:"vector,omitempty"`
+	Hybrid               *meilisearchHybridRequest `json:"hybrid,omitempty"`
+	FederationOptions    struct {
+		Weight float64 `json:"weight"`
+	} `json:"federationOptions"`
+}
+
 type meilisearchStatsResponse struct {
 	NumberOfDocuments int `json:"numberOfDocuments"`
 }
@@ -214,6 +238,12 @@ func (c *meilisearchClient) GetSettings(ctx context.Context, uid string) (meilis
 func (c *meilisearchClient) Search(ctx context.Context, uid string, req meilisearchSearchRequest) (meilisearchSearchResponse, error) {
 	var out meilisearchSearchResponse
 	err := c.do(ctx, http.MethodPost, "/indexes/"+url.PathEscape(uid)+"/search", req, &out)
+	return out, err
+}
+
+func (c *meilisearchClient) FederatedSearch(ctx context.Context, req meilisearchFederatedSearchRequest) (meilisearchSearchResponse, error) {
+	var out meilisearchSearchResponse
+	err := c.do(ctx, http.MethodPost, "/multi-search", req, &out)
 	return out, err
 }
 

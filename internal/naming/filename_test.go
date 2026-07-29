@@ -282,6 +282,60 @@ func TestParseFilename(t *testing.T) {
 	}
 }
 
+func TestParseFilename_StripsStructuredProviderIDsFromTitles(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		path      string
+		wantTitle string
+		wantYear  int
+	}{
+		{
+			path:      "/movies/10 Tricks (2022)/10 Tricks (2022) (tt0473100) [WEBDL-1080p.AAC.h264.GNOME].mp4",
+			wantTitle: "10 Tricks",
+			wantYear:  2022,
+		},
+		{path: "/movies/Some Movie [tt1234567]/Some Movie.mkv", wantTitle: "Some Movie"},
+		{path: "/movies/Some Movie (tmdb-12345)/Some Movie.mkv", wantTitle: "Some Movie"},
+	} {
+		hints := ParseFilename(test.path, "movie")
+		if hints.Title != test.wantTitle || hints.Year != test.wantYear {
+			t.Errorf("ParseFilename(%q) = title %q year %d, want %q/%d", test.path, hints.Title, hints.Year, test.wantTitle, test.wantYear)
+		}
+	}
+}
+
+func TestParseFilename_SeriesReleasePackDirectoryUsesParentShowRoot(t *testing.T) {
+	path := "/library/Becoming You/Becoming.You.S01.HDR.2160p.WEB-DL.DDP5.1.H.265-ROCCaT/Becoming.You.S01E01.HDR.2160p.WEB-DL.mkv"
+
+	hints := ParseFilename(path, "series")
+	if hints == nil {
+		t.Fatal("ParseFilename returned nil")
+		return
+	}
+	if hints.Title != "Becoming You" || hints.Year != 0 || hints.Type != "series" {
+		t.Fatalf("ParseFilename() = title %q year %d type %q, want Becoming You/0/series", hints.Title, hints.Year, hints.Type)
+	}
+	root, ok := DetectSeriesRoot(path, "series")
+	if !ok || root.RootPath != "/library/Becoming You" {
+		t.Fatalf("DetectSeriesRoot() = %+v, %v", root, ok)
+	}
+}
+
+func TestParseFilename_SeriesReleasePackDirectoryRequiresCoherentParent(t *testing.T) {
+	t.Parallel()
+	flatPath := "/library/Becoming.You.S01.HDR.2160p.WEB-DL-GROUP/Becoming.You.S01E01.mkv"
+	root, ok := DetectSeriesRoot(flatPath, "series")
+	if !ok || root.RootPath != "/library/Becoming.You.S01.HDR.2160p.WEB-DL-GROUP" {
+		t.Fatalf("flat release root = %+v, %v; must not collapse to the library root", root, ok)
+	}
+
+	nestedPath := "/library/Becoming You (2020)/Becoming.You.S01.1080p.WEB-DL/Becoming.You.S01E01.mkv"
+	root, ok = DetectSeriesRoot(nestedPath, "series")
+	if !ok || root.RootPath != "/library/Becoming You (2020)" {
+		t.Fatalf("nested release root = %+v, %v; want coherent parent show folder", root, ok)
+	}
+}
+
 func TestResolvePathContext(t *testing.T) {
 	tests := []struct {
 		name                    string

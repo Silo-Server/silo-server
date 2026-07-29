@@ -284,6 +284,13 @@ func IsProviderAnchored(contentID string) bool {
 	return ok
 }
 
+// ProviderAnchor returns the canonical provider and provider ID embedded in a
+// provider-derived content ID. It accepts movie, series, season, and episode
+// IDs; child IDs return their parent series anchor.
+func ProviderAnchor(contentID string) (provider, providerID string, ok bool) {
+	return parseAnchored(strings.TrimSpace(contentID))
+}
+
 // parseAnchored validates a provider-anchored content_id against the exact
 // per-kind arity and component shape, returning the canonical (provider,
 // seriesId-or-id) anchor when it is well-formed:

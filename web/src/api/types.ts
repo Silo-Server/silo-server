@@ -150,6 +150,22 @@ export interface JellyfinCompatOperationStatus {
   error?: string;
 }
 
+/** Account-facing compat connection details from GET /compat/connect-info. */
+export interface CompatConnectInfo {
+  jellyfin: {
+    /** Whether a listener is accepting connections now, not what is configured. */
+    enabled: boolean;
+    /** An admin changed the enabled setting; it applies on the next restart. */
+    pending_restart: boolean;
+    public_url: string;
+    server_name: string;
+  };
+  account: {
+    /** False for SSO/plugin-provisioned accounts, which cannot use compat login. */
+    password_login_available: boolean;
+  };
+}
+
 export interface JellyfinCompatStatus {
   enabled: boolean;
   api_state: "disabled" | "enabled" | "error";
@@ -970,6 +986,7 @@ export interface VersionVideoTrack {
   bitrate?: number;
   video_range?: string;
   video_range_type?: string;
+  color_range?: string;
   color_primaries?: string;
   color_space?: string;
   color_transfer?: string;
@@ -3037,6 +3054,8 @@ export interface LibraryMetadataMatchQueueStatus {
   series_count: number;
   raw_file_count: number;
   total_count: number;
+  pending_count: number;
+  parked_count: number;
 }
 
 export interface LibraryMovieMatchQueueEntry {
@@ -3048,6 +3067,12 @@ export interface LibraryMovieMatchQueueEntry {
   last_attempted_at?: string;
   attempt_count: number;
   last_error?: string;
+  state: "pending" | "parked";
+  failure_kind?: string;
+  failure_detail?: LibraryMetadataMatchFailureDetail;
+  deterministic_attempt_count: number;
+  matcher_revision: number;
+  parked_at?: string;
   updated_at: string;
 }
 
@@ -3059,7 +3084,32 @@ export interface LibrarySeriesMatchQueueEntry {
   last_attempted_at?: string;
   attempt_count: number;
   last_error?: string;
+  state: "pending" | "parked";
+  failure_kind?: string;
+  failure_detail?: LibraryMetadataMatchFailureDetail;
+  deterministic_attempt_count: number;
+  matcher_revision: number;
+  parked_at?: string;
   updated_at: string;
+}
+
+export interface LibraryMetadataMatchFailureDetail {
+  message?: string;
+  decision?: {
+    outcome: string;
+    candidate_count: number;
+    threshold: number;
+    top_candidates?: Array<{
+      title: string;
+      matched_title?: string;
+      year?: number;
+      score: number;
+      provider_ids?: Record<string, string>;
+      sources?: string[];
+      reasons?: string[];
+    }>;
+  };
+  [key: string]: unknown;
 }
 
 export interface LibraryRawMatchBacklogEntry {
@@ -3075,6 +3125,8 @@ export interface LibraryRawMatchBacklogEntry {
 }
 
 export interface LibraryMetadataMatchQueueDetail extends LibraryMetadataMatchQueueStatus {
+  limit: number;
+  offset: number;
   movies: LibraryMovieMatchQueueEntry[];
   series: LibrarySeriesMatchQueueEntry[];
   raw_files: LibraryRawMatchBacklogEntry[];
@@ -3422,6 +3474,8 @@ export interface PluginAsset {
 export interface PluginConfigValue {
   key: string;
   value: Record<string, unknown>;
+  /** Secret fields saved on the server but redacted from value. */
+  configured_secrets?: string[];
 }
 
 export interface PluginAuthBinding {
@@ -3552,6 +3606,8 @@ export interface UpdatePluginInstallationRequest {
 export interface SavePluginConfigRequest {
   key: string;
   value: Record<string, unknown>;
+  /** Explicitly clear these manifest-declared secret fields. */
+  clear_secrets?: string[];
 }
 
 export interface SavePluginAuthBindingRequest {
@@ -4039,6 +4095,99 @@ export interface TopUpInviteCodeRequest {
   additional_uses: number;
 }
 
+// Emailed invitations
+export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+
+export interface Invitation {
+  id: number;
+  email: string;
+  role: string;
+  access_group_id?: number;
+  library_ids?: number[];
+  create_profile: boolean;
+  show_tour: boolean;
+  note?: string;
+  invited_by: number;
+  invited_by_name?: string;
+  status: InvitationStatus;
+  expires_at: string;
+  accepted_at?: string;
+  accepted_user_id?: number;
+  created_at: string;
+}
+
+export interface CreateInvitationRequest {
+  email: string;
+  role?: string;
+  access_group_id?: number | null;
+  library_ids?: number[] | null;
+  create_profile?: boolean;
+  show_tour?: boolean;
+  note?: string;
+}
+
+export interface SendInvitationResponse {
+  invitation: Invitation;
+  email_sent: boolean;
+  /** Only readable in this response — the server stores just the token hash. */
+  claim_url?: string;
+}
+
+export interface InvitationLookupResponse {
+  email: string;
+  inviter_name?: string;
+  server_name: string;
+  expires_at: string;
+  show_tour: boolean;
+}
+
+// Onboarding tour (server-driven manifest)
+export interface OnboardingSettingOption {
+  value: string;
+  label: string;
+}
+
+export interface OnboardingSettingSpec {
+  target: "profile_field" | "setting" | "device_setting";
+  key: string;
+  control: "segmented" | "toggle" | "select";
+  options?: OnboardingSettingOption[];
+  default?: string;
+  label?: string;
+}
+
+export interface OnboardingStepLink {
+  label: string;
+  url: string;
+}
+
+export interface OnboardingStep {
+  id: string;
+  // Open string: the client renders kinds it knows and skips the rest.
+  kind: string;
+  title?: string;
+  body?: string;
+  illustration?: string;
+  setting?: OnboardingSettingSpec;
+  route?: string;
+  action_label?: string;
+  links?: OnboardingStepLink[];
+}
+
+export interface OnboardingFlow {
+  version: number;
+  tour_id: string;
+  steps: OnboardingStep[];
+}
+
+export interface OnboardingState {
+  tour_id: string;
+  last_step?: string;
+  completed_at?: string;
+  skipped_at?: string;
+  done: boolean;
+}
+
 // API Keys
 export interface AdminAPIKey {
   id: number;
@@ -4095,6 +4244,23 @@ export interface AdminSettingUpdateResponse {
   value?: string;
   /** True when the saved value only takes effect after a server restart. */
   restart_required?: boolean;
+}
+
+/** Response of the atomic PUT /admin/settings endpoint. */
+export interface AdminSettingsUpdateResponse {
+  /** Saved non-sensitive values. Secret values are intentionally omitted. */
+  values: Record<string, string>;
+  restart_required: boolean;
+  restart_required_keys?: string[];
+}
+
+export interface AdminServerStatus {
+  started_at: string;
+  restart_required: boolean;
+  restart_required_at?: string;
+  restart_required_reason?: string;
+  restart_requested: boolean;
+  restart_requested_at?: string;
 }
 
 // IP visibility
@@ -4237,6 +4403,7 @@ export interface SubtitleProviderUpdateRequest {
   api_key?: string;
   username?: string;
   password?: string;
+  clear_credentials?: boolean;
 }
 
 export interface SubtitleProviderTestRequest {
@@ -4339,6 +4506,13 @@ export interface TaskInfo {
 // Match dialog types
 export interface MatchCandidate {
   title: string;
+  original_title?: string;
+  aliases?: Array<{ title: string; language?: string; kind: string; provider?: string }>;
+  title_language?: string;
+  title_is_fallback?: boolean;
+  matched_title?: string;
+  match_score?: number;
+  match_reasons?: string[];
   year: number;
   content_type: string;
   provider_ids: Record<string, string>;

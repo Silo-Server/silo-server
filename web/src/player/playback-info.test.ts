@@ -28,6 +28,7 @@ function makeVersion(overrides: Partial<PlayerFileVersion> = {}): PlayerFileVers
         height: 2160,
         bitrate: 21900,
         video_range: "HDR10",
+        color_range: "tv",
         dolby_vision: "Profile 8.1",
       },
     ],
@@ -95,6 +96,7 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Current Source File", "Video range type")).toBe(
       "Dolby Vision Profile 8.1 (HDR10)",
     );
+    expect(rowValue(sections, "Current Source File", "Color range")).toBe("Limited (tv)");
     expect(rowValue(sections, "Current Source File", "Audio codec")).toBe(
       "EAC3 Dolby Digital Plus + Dolby Atmos",
     );
@@ -146,6 +148,27 @@ describe("playback info helpers", () => {
     expect(rowValue(sections, "Current Source File", "Container")).toBe("—");
     expect(rowValue(sections, "Current Source File", "Size")).toBe("—");
     expect(rowValue(sections, "Current Source File", "Audio sample rate")).toBe("—");
+    expect(rowValue(sections, "Current Source File", "Color range")).toBe("—");
+  });
+
+  it("formats full and unspecified source color ranges", () => {
+    const full = buildPlaybackInfoSections({
+      streamUrl: "/api/v1/stream/full",
+      playMethod: "direct",
+      playbackInfo: null,
+      currentSourceVersion: makeVersion({ video_tracks: [{ color_range: "pc" }] }),
+      runtimeStats: {},
+    });
+    const unknown = buildPlaybackInfoSections({
+      streamUrl: "/api/v1/stream/unknown",
+      playMethod: "direct",
+      playbackInfo: null,
+      currentSourceVersion: makeVersion({ video_tracks: [{ color_range: "unknown" }] }),
+      runtimeStats: {},
+    });
+
+    expect(rowValue(full, "Current Source File", "Color range")).toBe("Full (pc)");
+    expect(rowValue(unknown, "Current Source File", "Color range")).toBe("Unknown");
   });
 
   it("shows the requested source when playback auto-switches to a lower version", () => {

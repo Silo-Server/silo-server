@@ -46,6 +46,7 @@ func parseQuiet(quietCSV string) []string {
 	prefixes := make([]string, 0, len(parts))
 	for _, p := range parts {
 		p = strings.TrimSpace(p)
+		p = strings.TrimSuffix(p, ":")
 		if p != "" {
 			prefixes = append(prefixes, p+":")
 		}

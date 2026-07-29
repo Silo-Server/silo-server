@@ -130,6 +130,10 @@ type UserStore interface {
 	ListLibraryPlaybackPreferences(ctx context.Context, profileID string) ([]LibraryPlaybackPreference, error)
 	UpsertLibraryPlaybackPreference(ctx context.Context, pref LibraryPlaybackPreference) error
 	DeleteLibraryPlaybackPreference(ctx context.Context, profileID string, libraryID int) error
+
+	// Onboarding
+	GetOnboardingState(ctx context.Context, profileID, tourID string) (*OnboardingState, error)
+	UpsertOnboardingState(ctx context.Context, state OnboardingState) error
 }
 
 // DeviceRegistry is implemented by stores that track observed devices even

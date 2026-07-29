@@ -64,11 +64,8 @@ func (s *ServerChannelService) List(ctx context.Context) ([]ServerChannel, error
 // Create validates and persists a new server channel. For generic channels
 // the returned signingSecret is shown exactly once.
 func (s *ServerChannelService) Create(ctx context.Context, createdByUserID int, input ServerChannelInput) (*ServerChannel, string, error) {
-	// The kill switch blocks new destinations; existing channels stay
-	// manageable (list/update/delete) so a later disable never strands rows.
-	if !s.settings.ServerChannelsEnabled(ctx) {
-		return nil, "", ErrServerChannelsDisabled
-	}
+	// The kill switch gates delivery in the worker, not configuration. Admins
+	// can prepare and test destinations while delivery remains disabled.
 	if input.Name == nil || input.URL == nil {
 		return nil, "", fmt.Errorf("%w: name and url are required", ErrServerChannelInvalid)
 	}
@@ -258,9 +255,6 @@ func (s *ServerChannelService) RotateSecret(ctx context.Context, id string) (str
 // Test synchronously POSTs a clearly marked sample content digest. Test sends
 // never touch the watermark or failure counters.
 func (s *ServerChannelService) Test(ctx context.Context, id string) (*WebhookTestResult, error) {
-	if !s.settings.ServerChannelsEnabled(ctx) {
-		return nil, ErrServerChannelsDisabled
-	}
 	ch, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err

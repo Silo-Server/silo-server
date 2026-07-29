@@ -27,6 +27,7 @@ import RecipeConfigDrawer from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { AddPayload } from "@/components/RecipeGallery/RecipeConfigDrawer";
 import type { GalleryPreset, RecipeDefinition } from "@/lib/recipes";
 import { fetchRecipeCatalog } from "@/lib/recipes";
+import { randomUUID } from "@/lib/uuid";
 import { Plus } from "lucide-react";
 import {
   SectionDragOverlay,
@@ -165,7 +166,7 @@ export function buildProfileGallerySection(
   position: number,
 ): SettingsSectionEntry {
   return {
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     section_type: payload.section_type,
     title: payload.title,
     featured: payload.featured,

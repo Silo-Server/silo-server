@@ -704,29 +704,32 @@ func adminClaims() *auth.Claims {
 }
 
 type fakeDiagnosticsService struct {
-	mu            sync.Mutex
-	status        diagnostics.Status
-	statusCalls   int
-	ingestCalls   int
-	ingestErr     error
-	started       chan struct{}
-	block         chan struct{}
-	listCalls     int
-	listFilters   diagnostics.ListFilters
-	listResult    diagnostics.ListResult
-	listErr       error
-	getReport     *diagnostics.Report
-	getErr        error
-	presignURL    string
-	presignErr    error
-	presignCalls  int
-	presignExpiry time.Duration
-	effectiveTTL  time.Duration
-	openCalls     int
-	openData      []byte
-	openErr       error
-	deleteReport  *diagnostics.Report
-	deleteErr     error
+	mu              sync.Mutex
+	status          diagnostics.Status
+	statusErr       error
+	statusCalls     int
+	ingestCalls     int
+	ingestErr       error
+	lastManifest    []byte
+	lastBundleBytes int64
+	started         chan struct{}
+	block           chan struct{}
+	listCalls       int
+	listFilters     diagnostics.ListFilters
+	listResult      diagnostics.ListResult
+	listErr         error
+	getReport       *diagnostics.Report
+	getErr          error
+	presignURL      string
+	presignErr      error
+	presignCalls    int
+	presignExpiry   time.Duration
+	effectiveTTL    time.Duration
+	openCalls       int
+	openData        []byte
+	openErr         error
+	deleteReport    *diagnostics.Report
+	deleteErr       error
 }
 
 func newFakeDiagnosticsService() *fakeDiagnosticsService {
@@ -747,12 +750,22 @@ func (f *fakeDiagnosticsService) Status(context.Context, int) (diagnostics.Statu
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statusCalls++
+	if f.statusErr != nil {
+		return diagnostics.Status{}, f.statusErr
+	}
 	return f.status, nil
 }
 
-func (f *fakeDiagnosticsService) Ingest(_ context.Context, _ int, _ *string, _ []byte, bundle io.Reader) (diagnostics.IngestResult, error) {
+func (f *fakeDiagnosticsService) setStatusErr(err error) {
+	f.mu.Lock()
+	f.statusErr = err
+	f.mu.Unlock()
+}
+
+func (f *fakeDiagnosticsService) Ingest(_ context.Context, _ int, _ *string, manifestJSON []byte, bundle io.Reader) (diagnostics.IngestResult, error) {
 	f.mu.Lock()
 	f.ingestCalls++
+	f.lastManifest = append([]byte(nil), manifestJSON...)
 	started := f.started
 	block := f.block
 	err := f.ingestErr
@@ -767,9 +780,13 @@ func (f *fakeDiagnosticsService) Ingest(_ context.Context, _ int, _ *string, _ [
 	if err != nil {
 		return diagnostics.IngestResult{}, err
 	}
-	if _, err := io.ReadAll(bundle); err != nil {
+	consumed, err := io.Copy(io.Discard, bundle)
+	if err != nil {
 		return diagnostics.IngestResult{}, err
 	}
+	f.mu.Lock()
+	f.lastBundleBytes = consumed
+	f.mu.Unlock()
 	return diagnostics.IngestResult{
 		ReportID: "11111111-1111-1111-1111-111111111111",
 		ShortID:  "SILO-ABCDEF123456",

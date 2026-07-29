@@ -27,6 +27,7 @@ function makeForm() {
         case "notifications.ui_enabled":
         case "notifications.web_push_enabled":
         case "notifications.apple_push_delivery_enabled":
+        case "notifications.android_push_delivery_enabled":
           return "true";
         case "notifications.push_relay_url":
           return "https://push.siloserver.org";
@@ -79,6 +80,7 @@ describe("NotificationsAdminSettings", () => {
     expect(useSettingsFormMock).toHaveBeenCalledWith({
       keys: expect.arrayContaining([
         "notifications.apple_push_delivery_enabled",
+        "notifications.android_push_delivery_enabled",
         "notifications.push_relay_deployment_id",
         "notifications.push_relay_expires_at",
         "notifications.push_relay_key_prefix",
@@ -100,13 +102,14 @@ describe("NotificationsAdminSettings", () => {
     render(renderPage());
 
     expect(screen.getByText("Silo Push Relay")).toBeInTheDocument();
-    expect(screen.getByText(/Mobile push delivery through Silo's relay/)).toBeInTheDocument();
-    expect(screen.getByText(/Android support will use the same relay/)).toBeInTheDocument();
+    expect(screen.getByText(/delivered by APNs or FCM/)).toBeInTheDocument();
     expect(screen.getByText("Relay configured")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /Silo Push Relay/ }));
 
     expect(screen.getByText("Privacy disclosure")).toBeInTheDocument();
+    expect(screen.getByText("Apple Push (APNs)")).toBeInTheDocument();
+    expect(screen.getByText("Android Push (FCM)")).toBeInTheDocument();
     expect(screen.getByText(/content-free request to Silo's push relay/)).toBeInTheDocument();
     expect(screen.getByText(/does not receive notification titles/)).toBeInTheDocument();
     expect(screen.getByText(/fetches private content directly/)).toBeInTheDocument();

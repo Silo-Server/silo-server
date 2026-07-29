@@ -23,7 +23,7 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
     isPending: false,
     mutateAsync: (...args: unknown[]) => mocks.checkConnectionMutateAsync(...args),
   }),
-  useUpdateServerSetting: () => ({
+  useUpdateServerSettings: () => ({
     isPending: false,
     mutate: (...args: unknown[]) => mocks.updateMutate(...args),
     mutateAsync: (...args: unknown[]) => mocks.updateMutateAsync(...args),
@@ -125,7 +125,7 @@ describe("AdminRecommendations", () => {
       success: true,
       message: "Embedding connection successful.",
     });
-    mocks.updateMutateAsync.mockResolvedValue(undefined);
+    mocks.updateMutateAsync.mockResolvedValue({ values: {}, restart_required: true });
   });
 
   afterEach(async () => {
@@ -142,24 +142,22 @@ describe("AdminRecommendations", () => {
   }
 
   it("applies a provider preset to the embedding settings", async () => {
+    mocks.updateMutateAsync.mockResolvedValueOnce({
+      values: {
+        "recommendations.embedding_base_url": "https://generativelanguage.googleapis.com/canonical",
+        "recommendations.embedding_model": "canonical-gemini-model",
+      },
+      restart_required: true,
+    });
     await render();
 
     await click(findButton(container, "Gemini"));
 
-    expect(mocks.updateMutateAsync.mock.calls).toEqual([
-      [
-        {
-          key: "recommendations.embedding_base_url",
-          value: "https://generativelanguage.googleapis.com",
-        },
-      ],
-      [
-        {
-          key: "recommendations.embedding_model",
-          value: "gemini-embedding-001",
-        },
-      ],
-    ]);
+    expect(mocks.updateMutateAsync).toHaveBeenCalledOnce();
+    expect(mocks.updateMutateAsync).toHaveBeenCalledWith({
+      "recommendations.embedding_base_url": "https://generativelanguage.googleapis.com",
+      "recommendations.embedding_model": "gemini-embedding-001",
+    });
 
     const baseUrlInput = container.querySelector<HTMLInputElement>(
       'input[id="recommendations.embedding_base_url"]',
@@ -168,9 +166,8 @@ describe("AdminRecommendations", () => {
       'input[id="recommendations.embedding_model"]',
     );
 
-    expect(baseUrlInput?.value).toBe("https://generativelanguage.googleapis.com");
-    expect(modelInput?.value).toBe("gemini-embedding-001");
-    expect(findButton(container, "Gemini")?.getAttribute("aria-pressed")).toBe("true");
+    expect(baseUrlInput?.value).toBe("https://generativelanguage.googleapis.com/canonical");
+    expect(modelInput?.value).toBe("canonical-gemini-model");
   });
 
   it("checks the current unsaved embedding draft", async () => {

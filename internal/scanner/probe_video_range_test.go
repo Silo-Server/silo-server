@@ -1,6 +1,44 @@
 package scanner
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
+)
+
+func TestProbePipelinePreservesVideoColorRange(t *testing.T) {
+	tests := []struct {
+		name           string
+		colorRange     string
+		wantColorRange string
+	}{
+		{name: "limited", colorRange: "tv", wantColorRange: "tv"},
+		{name: "full", colorRange: "pc", wantColorRange: "pc"},
+		{name: "unspecified", wantColorRange: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rawJSON := `{"streams":[{"codec_type":"video","codec_name":"h264","color_range":"` + tt.colorRange + `"}]}`
+			var raw ffprobeOutput
+			if err := json.Unmarshal([]byte(rawJSON), &raw); err != nil {
+				t.Fatalf("unmarshal ffprobe output: %v", err)
+			}
+
+			probe := convertProbeData(&raw)
+			file := &models.MediaFile{}
+			applyProbeData(file, probe, "local")
+
+			if len(file.VideoTracks) != 1 {
+				t.Fatalf("VideoTracks length = %d, want 1", len(file.VideoTracks))
+			}
+			if got := file.VideoTracks[0].ColorRange; got != tt.wantColorRange {
+				t.Fatalf("ColorRange = %q, want %q", got, tt.wantColorRange)
+			}
+		})
+	}
+}
 
 func TestConvertProbeDataVideoRangeTypes(t *testing.T) {
 	tests := []struct {

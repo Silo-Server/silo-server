@@ -10,9 +10,9 @@ import (
 )
 
 var (
-	// folderTagRe matches bracketed or braced provider-ID tags like
-	// [tmdbid-27205], {tvdb-81189}, [imdbid-tt1375666], etc.
-	folderTagRe = regexp.MustCompile(`\s*[{\[](tmdb|tmdbid|imdb|imdbid|tvdb|tvdbid)-[\w]+[}\]]`)
+	// folderTagRe matches strict provider-ID tags in square, curly, or round
+	// brackets, including Plex-style bare IMDb tags such as (tt0473100).
+	folderTagRe = regexp.MustCompile(`(?i)\s*(?:\((?:(?:tmdb|tmdbid|tvdb|tvdbid)-\d+|(?:imdb|imdbid)-tt\d{7,10}|tt\d{7,10})\)|\[(?:(?:tmdb|tmdbid|tvdb|tvdbid)-\d+|(?:imdb|imdbid)-tt\d{7,10}|tt\d{7,10})\]|\{(?:(?:tmdb|tmdbid|tvdb|tvdbid)-\d+|(?:imdb|imdbid)-tt\d{7,10}|tt\d{7,10})\})`)
 
 	// titleYearRe matches "Title (Year)" with optional trailing content.
 	titleYearRe = regexp.MustCompile(`^(.+?)\s*\((\d{4})\)`)
@@ -34,6 +34,13 @@ var (
 
 	// specialsDirRe matches common specials/extras folders.
 	specialsDirRe = regexp.MustCompile(`(?i)^(?:specials?|extras?)$`)
+
+	// seasonReleaseDirRe recognizes release-pack directories such as
+	// "Show.Name.S01.2160p.WEB-DL-GROUP". These are season containers, not
+	// show roots; treating them as roots fragments one show into one metadata
+	// item per release directory and searches providers with the release name.
+	seasonReleaseDirRe  = regexp.MustCompile(`(?i)(?:^|[ ._-])s\d{1,4}(?:[ ._-]|$)`)
+	seasonReleaseTechRe = regexp.MustCompile(`(?i)(?:^|[ ._-])(?:2160p|1080p|720p|576p|480p|web(?:[ ._-]?dl|rip)?|blu[ ._-]?ray|bluray|hdtv|remux|x26[45]|h26[45]|hevc)(?:[ ._-]|$)`)
 )
 
 // ResolvePathContext classifies a media path using both naming heuristics and
@@ -272,7 +279,7 @@ func detectMovieFolderEvidence(parentBase string, nameNoExt string, hasSeasonStr
 }
 
 func hasExplicitFolderIDs(name string) bool {
-	return folderIDPattern.MatchString(name)
+	return ParseStructuredFolderIDs(name) != nil
 }
 
 func parseTitleYearCandidate(name string) (string, int) {
@@ -307,6 +314,12 @@ func collapseWhitespace(value string) string {
 
 func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool) (*SeriesRoot, bool) {
 	parentDir := path.Dir(filePath)
+	if isSeasonReleaseDirectoryForParent(path.Base(parentDir), path.Base(path.Dir(parentDir))) {
+		rootPath := path.Dir(parentDir)
+		if rootPath != "." && rootPath != "/" && rootPath != "" {
+			return &SeriesRoot{RootPath: rootPath, FolderName: path.Base(rootPath)}, true
+		}
+	}
 	for current := parentDir; current != "." && current != "/" && current != ""; current = path.Dir(current) {
 		segment := path.Base(current)
 		if isSeasonDirSegment(segment, hasEpisodePattern || forceParent) || specialsDirRe.MatchString(segment) {
@@ -332,6 +345,26 @@ func deriveSeriesRoot(filePath string, hasEpisodePattern bool, forceParent bool)
 	}
 
 	return nil, false
+}
+
+func isSeasonReleaseDirectory(segment string) bool {
+	return seasonReleaseDirRe.MatchString(segment) && seasonReleaseTechRe.MatchString(segment)
+}
+
+func isSeasonReleaseDirectoryForParent(segment, parentSegment string) bool {
+	if !isSeasonReleaseDirectory(segment) {
+		return false
+	}
+	location := seasonReleaseDirRe.FindStringIndex(segment)
+	if location == nil || location[0] == 0 {
+		return false
+	}
+	releaseTitle := strings.Trim(segment[:location[0]], " ._-")
+	parentTitle, _ := parseTitleYearCandidate(parentSegment)
+	if parentTitle == "" {
+		parentTitle = parentSegment
+	}
+	return inferTitlesCoherent(releaseTitle, parentTitle)
 }
 
 func deriveMovieRoot(filePath string) (*CanonicalRoot, bool) {

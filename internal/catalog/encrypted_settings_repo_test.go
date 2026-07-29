@@ -25,6 +25,20 @@ func (s *memSettings) GetAll(_ context.Context) (map[string]string, error) {
 	}
 	return out, nil
 }
+func (s *memSettings) UpdateAtomic(
+	_ context.Context,
+	update func(current map[string]string) (map[string]string, error),
+) error {
+	current, _ := s.GetAll(context.Background())
+	writes, err := update(current)
+	if err != nil {
+		return err
+	}
+	for key, value := range writes {
+		s.m[key] = value
+	}
+	return nil
+}
 
 func newCipher(t *testing.T) *secret.Cipher {
 	t.Helper()
@@ -135,6 +149,38 @@ func TestEncryptedSettings_GetAllDecrypts(t *testing.T) {
 	}
 	if all["server.mode"] != "integrated" {
 		t.Fatalf("GetAll non-sensitive = %q", all["server.mode"])
+	}
+}
+
+func TestEncryptedSettings_UpdateAtomicUsesPlaintextContract(t *testing.T) {
+	ctx := context.Background()
+	raw := newMemSettings()
+	dec := NewEncryptedSettingsRepo(raw, newCipher(t))
+	if err := dec.Set(ctx, "tmdb.api_key", "old-secret"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	err := dec.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+		if current["tmdb.api_key"] != "old-secret" {
+			t.Fatalf("callback value = %q, want plaintext", current["tmdb.api_key"])
+		}
+		return map[string]string{
+			"tmdb.api_key":     "new-secret",
+			"server.log_level": "debug",
+		}, nil
+	})
+	if err != nil {
+		t.Fatalf("UpdateAtomic: %v", err)
+	}
+	if !secret.IsEncrypted(raw.m["tmdb.api_key"]) {
+		t.Fatalf("raw sensitive value = %q, want ciphertext", raw.m["tmdb.api_key"])
+	}
+	if raw.m["server.log_level"] != "debug" {
+		t.Fatalf("raw non-sensitive value = %q, want debug", raw.m["server.log_level"])
+	}
+	got, err := dec.Get(ctx, "tmdb.api_key")
+	if err != nil || got != "new-secret" {
+		t.Fatalf("Get = %q, %v; want new-secret", got, err)
 	}
 }
 

@@ -43,8 +43,9 @@ var demoBlockedRoutes = []blockedRoute{
 	{methods: []string{"POST"}, prefix: "/api/v1/subtitles/upload"},
 	{methods: []string{"DELETE"}, prefix: "/api/v1/subtitles/"},
 	// Diagnostics report uploads/deletes write DB rows and private-bucket blobs;
-	// GET /api/v1/diagnostics/status is unaffected (GETs always pass).
-	{methods: []string{"POST", "DELETE"}, prefix: "/api/v1/diagnostics/reports"},
+	// GET /api/v1/diagnostics/status is unaffected (GETs always pass). PUT
+	// covers the chunked-upload chunk route under /reports/uploads.
+	{methods: []string{"POST", "PUT", "DELETE"}, prefix: "/api/v1/diagnostics/reports"},
 }
 
 // Guard is an HTTP middleware that enforces demo mode restrictions.

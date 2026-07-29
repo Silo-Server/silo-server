@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/librarykind"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/scanner"
 )
@@ -143,10 +144,11 @@ func normalizeTrigger(trigger string) string {
 
 // ResolveVanishedPath resolves a change for a path that no longer exists on
 // disk (a file deleted by an upgrade/replacement, or a removed directory) to a
-// reconciling scan target. Paths with a supported video extension map to a
-// subtree scan of their parent directory; other paths map to a subtree scan of
-// the path itself. The scoped scan marks the vanished files missing so stale
-// versions stop being offered for playback.
+// reconciling scan target. Paths with a supported extension for their library
+// map to an exact file scan; paths with a media extension the library type
+// does not support are rejected; remaining paths map to a subtree scan of the
+// path itself. The scoped scan marks vanished files missing so stale versions
+// stop being offered for playback.
 //
 // Two guards keep this from turning transient storage loss into cleanup:
 // the path must actually be gone (a still-existing path is rejected — use
@@ -176,10 +178,13 @@ func (r *Resolver) ResolveVanishedPath(ctx context.Context, path, trigger string
 	}
 	trigger = normalizeTrigger(trigger)
 
-	scope := cleanPath
-	if scanner.SupportsVideoFile(cleanPath) {
-		scope = filepath.Dir(cleanPath)
+	if supportsLibraryMediaFile(cleanPath, folder.Type) {
+		return &Target{Folder: folder, Mode: ModeFile, Path: cleanPath, Trigger: trigger}, nil
 	}
+	if supportsMediaFile(cleanPath) {
+		return nil, &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Unsupported media file extension for library type"}
+	}
+	scope := cleanPath
 	if filepath.Clean(scope) == filepath.Clean(matchedRoot) {
 		// A vanished entry directly under the root reconciles via a full
 		// library scan, which keeps the empty-root guard in play.
@@ -247,7 +252,7 @@ func (r *Resolver) resolve(ctx context.Context, req Request, pathFolders []*mode
 		return nil, &RequestError{Status: http.StatusConflict, Code: "conflict", Message: "Library is disabled"}
 	}
 
-	mode, err := ClassifyPath(cleanPath, matchedRoot)
+	mode, err := ClassifyLibraryPath(cleanPath, matchedRoot, folder.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -332,6 +337,10 @@ func MatchFolderForPath(targetPath string, folders []*models.MediaFolder) (*mode
 }
 
 func ClassifyPath(targetPath, matchedRoot string) (string, error) {
+	return ClassifyLibraryPath(targetPath, matchedRoot, "")
+}
+
+func ClassifyLibraryPath(targetPath, matchedRoot, folderType string) (string, error) {
 	if filepath.Clean(targetPath) == filepath.Clean(matchedRoot) {
 		return ModeLibrary, nil
 	}
@@ -353,10 +362,29 @@ func ClassifyPath(targetPath, matchedRoot string) (string, error) {
 	if !info.Mode().IsRegular() {
 		return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Path must be a file or directory"}
 	}
-	if !scanner.SupportsVideoFile(targetPath) {
-		return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Unsupported media file extension"}
+	if !supportsLibraryMediaFile(targetPath, folderType) {
+		return "", &RequestError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Unsupported media file extension for library type"}
 	}
 	return ModeFile, nil
+}
+
+func supportsLibraryMediaFile(path, folderType string) bool {
+	switch {
+	case librarykind.IsAudiobook(folderType):
+		return scanner.SupportsAudioFile(path)
+	case librarykind.IsEbook(folderType), librarykind.IsManga(folderType):
+		return scanner.SupportsEbookFile(path)
+	case librarykind.IsPodcast(folderType):
+		return false
+	default:
+		return scanner.SupportsVideoFile(path)
+	}
+}
+
+func supportsMediaFile(path string) bool {
+	return scanner.SupportsVideoFile(path) ||
+		scanner.SupportsAudioFile(path) ||
+		scanner.SupportsEbookFile(path)
 }
 
 func PathWithinRoot(targetPath, rootPath string) bool {

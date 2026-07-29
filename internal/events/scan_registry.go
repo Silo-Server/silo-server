@@ -7,24 +7,29 @@ import (
 )
 
 type ScanRunResult struct {
-	New                    int    `json:"new"`
-	Updated                int    `json:"updated"`
-	Unchanged              int    `json:"unchanged"`
-	Missing                int    `json:"missing"`
-	FilesDeleted           int    `json:"files_deleted"`
-	MembershipsRemoved     int    `json:"memberships_removed"`
-	ItemsDeleted           int    `json:"items_deleted"`
-	MatchedFiles           int    `json:"matched_files"`
-	RetriedItems           int    `json:"retried_items"`
-	StillUnmatchedWarnings int    `json:"still_unmatched_warnings"`
-	Skipped                int    `json:"skipped"`
-	Errors                 int    `json:"errors"`
-	Phase                  string `json:"phase,omitempty"`
-	Message                string `json:"message,omitempty"`
-	CurrentScope           string `json:"current_scope,omitempty"`
-	TotalFiles             int    `json:"total_files,omitempty"`
-	FilesDiscovered        int    `json:"files_discovered,omitempty"`
-	FilesProcessed         int    `json:"files_processed,omitempty"`
+	New       int `json:"new"`
+	Updated   int `json:"updated"`
+	Unchanged int `json:"unchanged"`
+	Missing   int `json:"missing"`
+	// MissingSkippedProtected counts files a scan declined to mark missing
+	// because their root was offline or unreadable. A non-zero value means the
+	// library is partly unavailable, not partly gone — without it a scan that
+	// covered for absent storage reports as an all-zero no-op.
+	MissingSkippedProtected int    `json:"missing_skipped_protected"`
+	FilesDeleted            int    `json:"files_deleted"`
+	MembershipsRemoved      int    `json:"memberships_removed"`
+	ItemsDeleted            int    `json:"items_deleted"`
+	MatchedFiles            int    `json:"matched_files"`
+	RetriedItems            int    `json:"retried_items"`
+	StillUnmatchedWarnings  int    `json:"still_unmatched_warnings"`
+	Skipped                 int    `json:"skipped"`
+	Errors                  int    `json:"errors"`
+	Phase                   string `json:"phase,omitempty"`
+	Message                 string `json:"message,omitempty"`
+	CurrentScope            string `json:"current_scope,omitempty"`
+	TotalFiles              int    `json:"total_files,omitempty"`
+	FilesDiscovered         int    `json:"files_discovered,omitempty"`
+	FilesProcessed          int    `json:"files_processed,omitempty"`
 }
 
 type ScanRun struct {

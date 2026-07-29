@@ -353,7 +353,7 @@ func (h *PlaybackHandler) HandlePlaybackCapabilityV3(w http.ResponseWriter, r *h
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
-	response.Features = []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureDetailedDecodeV3, playback.FeatureLayoutPassthrough, playback.FeatureRouteDiagnostics, playback.FeatureDeviceQuirksV3, playback.FeatureSeekReanchorV3}
+	response.Features = playback.ServerFeaturesV3()
 	response.Deliveries = []playback.DeliveryV3{playback.DeliveryOriginalHTTPV3, playback.DeliveryRemuxProgressiveV3, playback.DeliveryRemuxHLSV3, playback.DeliveryTranscodeHLSV3}
 	response.Transformations = h.transformationRegistryV3(r.Context()).Advertised()
 	writeJSON(w, http.StatusOK, response)
@@ -425,7 +425,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
 		AudioTrackIndex: audioIndex, Settings: settings,
-		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(),
+		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
 	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
@@ -440,7 +440,7 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 				writePlaybackFilePreflightError(w, err)
 				return
 			}
-			result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+			result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: settings, Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 		}
 	}
 	if result.Terminal != nil {
@@ -536,7 +536,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "subtitle_artifact_unavailable", message: "Failed to prepare the selected subtitle artifact.", cause: err}
 	}
-	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureRouteDiagnostics, playback.FeatureDeviceQuirksV3, playback.FeatureSeekReanchorV3}, Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
+	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	record := playback.AttemptRecordV3{PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, UserID: userID, ProfileID: profileID, RequestedMediaFileID: requestedFile.ID, EffectiveMediaFileID: effectiveFile.ID, CurrentPlanID: result.Plan.PlanID, CurrentPlan: *result.Plan, NormalizedRequest: req, RequestDigest: requestDigest, ExpiresAt: time.Now().Add(playback.MaxTokenTTL)}
 	if err := h.updateV3SessionState(r.Context(), session, effectiveFile, result, transport); err != nil {
 		transport.rollback()
@@ -1212,7 +1212,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			attemptedKeys = append(attemptedKeys, currentKey)
 		}
 	}
-	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+	result := playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && replanAllowsAlternateFileV3(operation, start.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			alternate = h.ensurePlaybackProbe(r.Context(), alternate)
@@ -1222,7 +1222,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				if err := preflightPlaybackFile(r.Context(), alternate, h.MissingMarker, h.EventsHub); err == nil {
 					effectiveFile = alternate
 					audioIndex = remappedAudio
-					result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
+					result = playback.PlanPlaybackV3(playback.PlannerInputV3{Request: start, RequestedFile: plannerRequestedFile, EffectiveFile: effectiveFile, AudioTrackIndex: audioIndex, Settings: h.plannerSettingsV3(r.Context()), Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(), AttemptedKeys: attemptedKeys, AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile)})
 				}
 			}
 		}
@@ -1270,7 +1270,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 		}
 	}
-	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureRouteDiagnostics, playback.FeatureDeviceQuirksV3, playback.FeatureSeekReanchorV3}, Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
+	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	updated := *record
 	updated.CurrentPlanID = result.Plan.PlanID
 	updated.CurrentPlan = *result.Plan
@@ -1846,7 +1846,7 @@ func decisionResponseFromAttemptV3(record *playback.AttemptRecordV3) playback.De
 	if plan.RuntimeCorrections == nil {
 		plan.RuntimeCorrections = []string{}
 	}
-	return playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: []string{playback.FeaturePlaybackPlanV3, playback.FeatureMedia3Only, playback.FeatureRouteDiagnostics, playback.FeatureDeviceQuirksV3, playback.FeatureSeekReanchorV3}, Outcome: playback.OutcomePlayableV3, SessionID: record.SessionID, PlaybackPlan: &plan}
+	return playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.ServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: record.SessionID, PlaybackPlan: &plan}
 }
 
 func completedReplanResponseMatchesAttemptV3(raw json.RawMessage, record *playback.AttemptRecordV3) bool {
@@ -1990,6 +1990,29 @@ func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 	return ""
 }
 
+// lazyDVRPUStrippableV3 defers (and memoizes) the per-source RPU probe so the
+// planner only shells out to ffmpeg when a Dolby Vision strip route is
+// genuinely on the table; every other start never touches it.
+//
+// The probe belongs to planning, not to the transport: the plan's HDR10 promise
+// and the durable session's RemuxDVMode are both derived from the strip
+// decision and are re-read by the restart and audio-switch paths, so
+// suppressing the filter downstream would leave those claims describing a
+// stream the server is no longer producing.
+func (h *PlaybackHandler) lazyDVRPUStrippableV3(ctx context.Context, file *models.MediaFile) func() bool {
+	if file == nil || strings.TrimSpace(file.FilePath) == "" {
+		return nil
+	}
+	var once sync.Once
+	strippable := true
+	return func() bool {
+		once.Do(func() {
+			strippable = playback.DVRPUStrippable(ctx, h.playbackConfig().FFmpegPath, file.FilePath)
+		})
+		return strippable
+	}
+}
+
 func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDuration int, durationSeconds float64) (float64, int) {
 	if plan == nil {
 		return 0, 0
@@ -2004,12 +2027,19 @@ func configureHLSTimelineV3(plan *playback.PlanV3, videoCodec string, segmentDur
 		plan.Timeline.TimelineOffsetSeconds = seek
 		windowStart := seek
 		plan.Timeline.SeekWindowStartSeconds = &windowStart
-		if durationSeconds > 0 {
-			windowEnd := durationSeconds
-			plan.Timeline.SeekWindowEndSeconds = &windowEnd
-		} else {
-			plan.Timeline.SeekWindowEndSeconds = nil
-		}
+		// A copy remux is served from FFmpeg's live, still-growing playlist
+		// (see BuildPlaybackManifest), so the seekable extent is whatever has
+		// been produced so far — a value this plan cannot know and could not
+		// keep current if it did. Publishing the media runtime here instead
+		// made the window look *complete*, which clients read as proof that
+		// any target inside it is locally seekable; they then native-seek past
+		// the produced head instead of asking for a reanchor. Leaving the end
+		// open marks the window incomplete, which with can_seek_anywhere=false
+		// routes every seek back through the server.
+		//
+		// The media runtime is published on source.duration_seconds, which is
+		// a fact about the file rather than a claim about this transport.
+		plan.Timeline.SeekWindowEndSeconds = nil
 		plan.Timeline.CanSeekAnywhere = false
 		plan.Timeline.SeekRestoration = "source_position"
 	} else {

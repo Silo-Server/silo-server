@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildCatalogApiSearchParams,
+  buildCatalogFilterSearchParams,
+  buildCatalogQueryUpdateHref,
   buildCatalogHref,
   buildPersonCatalogHref,
   buildPersonalCatalogHref,
@@ -127,6 +129,37 @@ describe("catalogSourceAllowsOverlay", () => {
 });
 
 describe("buildCatalogHref", () => {
+  it("preserves type=all when the query filter selects All Media", () => {
+    const state = parseCatalogSearchParams(params("source=query&q=heat&type=video"));
+    state.query_definition = {
+      ...state.query_definition,
+      media_scope: undefined,
+    };
+
+    const built = buildCatalogFilterSearchParams(state);
+
+    expect(built.get("type")).toBe("all");
+    expect(parseCatalogSearchParams(built).query_definition.media_scope).toBeUndefined();
+  });
+
+  it("preserves All Media and other filters when the live query changes", () => {
+    const state = parseCatalogSearchParams(
+      params("source=query&q=heat&type=all&genre=Drama&sort=title&order=asc"),
+    );
+
+    const href = buildCatalogQueryUpdateHref(state, "heater");
+    const built = new URL(`http://example.test${href}`);
+
+    expect(built.searchParams.get("q")).toBe("heater");
+    expect(built.searchParams.get("type")).toBe("all");
+    expect(built.searchParams.get("sort")).toBe("title");
+    expect(built.searchParams.get("order")).toBe("asc");
+    expect(parseCatalogSearchParams(built.searchParams).query_definition.groups).toContainEqual({
+      match: "all",
+      rules: [{ field: "genre", op: "contains", value: "Drama" }],
+    });
+  });
+
   it("keeps explicit added-at sorting in query-source URLs", () => {
     expect(
       buildCatalogApiSearchParams({

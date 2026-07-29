@@ -3,6 +3,7 @@ import { Check, Film, Library, Loader2, Plus, Tv } from "lucide-react";
 import type { MediaRequest, RequestMediaResult } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { formatRequestReason, formatRequestStatus, tmdbImageURL } from "@/lib/mediaRequests";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 
 const POSTER_WIDTH = "w-[148px] sm:w-[164px] lg:w-[184px]";
 
@@ -198,14 +199,14 @@ function MineCard({ request, fluid }: { request: MediaRequest; fluid?: boolean }
 
 function LibraryCardLink({ contentID, title }: { contentID: string; title: string }) {
   return (
-    <Link
+    <ViewTransitionLink
       to={`/item/${encodeURIComponent(contentID)}`}
       aria-label={`Open ${title} in library`}
       className="absolute top-2 left-2 inline-flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full bg-black/70 px-2 py-[3px] text-[10px] leading-none font-semibold tracking-[0.06em] text-white uppercase shadow-sm ring-1 shadow-white/15 backdrop-blur-md transition-colors hover:bg-black/85 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
     >
       <Library className="h-3 w-3 shrink-0" strokeWidth={2.4} aria-hidden />
       <span className="truncate">Library</span>
-    </Link>
+    </ViewTransitionLink>
   );
 }
 

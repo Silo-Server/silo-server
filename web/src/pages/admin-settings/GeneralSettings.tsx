@@ -15,6 +15,7 @@ const KEYS = [
 
 export default function GeneralSettings() {
   const form = useSettingsForm({ keys: useMemo(() => KEYS, []) });
+  const trustedProxiesManaged = form.sensitiveManagedByEnv.includes("clientip.trusted_proxies");
 
   if (form.isLoading)
     return (
@@ -73,8 +74,8 @@ export default function GeneralSettings() {
             ]}
           />
           <SettingField
-            label="Quiet Subsystems"
-            hint="Comma-separated subsystem prefixes to silence"
+            label="Quiet Log Prefixes"
+            hint="Comma-separated message prefixes to silence, such as metadata or scanner. A trailing colon is optional."
             value={form.getValue("server.log_quiet")}
             onChange={(v) => form.setValue("server.log_quiet", v)}
           />
@@ -84,11 +85,15 @@ export default function GeneralSettings() {
           <SettingField
             label="Trusted Proxies"
             hint={
-              "Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, " +
-              "e.g. 172.16.0.0/12, 203.0.113.7/32. Applies without a restart."
+              (trustedProxiesManaged
+                ? "Managed by SILO_TRUSTED_PROXIES. Remove that environment variable to edit here. "
+                : "") +
+              "Comma-separated CIDRs of reverse proxies whose X-Forwarded-For is trusted, e.g. " +
+              "172.16.0.0/12, 203.0.113.7/32. Applies without a restart."
             }
             value={form.getValue("clientip.trusted_proxies")}
             onChange={(v) => form.setValue("clientip.trusted_proxies", v)}
+            disabled={trustedProxiesManaged}
           />
           <div className="border-border/60 bg-muted/30 my-3 rounded-lg border px-3 py-2">
             <p className="text-sm font-medium">Choosing trusted proxy ranges</p>

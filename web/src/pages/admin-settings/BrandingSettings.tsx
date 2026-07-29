@@ -49,6 +49,7 @@ export default function BrandingSettings() {
   // s3.public_bucket is not managed here, but getValue falls back to the full
   // settings response so we can still gate the asset uploads on it.
   const s3Configured = Boolean(form.getValue("s3.public_bucket"));
+  const assetStorageAvailable = branding.storageAvailable;
 
   // Accent recolors the primary action color, focus ring, and sidebar accent
   // (ACCENT_TOKENS). It merges into any overrides set via the Theming tab so
@@ -122,13 +123,22 @@ export default function BrandingSettings() {
             </p>
           </div>
 
-          {!s3Configured && (
+          {!assetStorageAvailable && (
             <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
               <p className="text-muted-foreground text-[13px] leading-relaxed">
-                Image uploads require S3 object storage. Configure a public bucket in{" "}
-                <span className="text-foreground font-medium">Storage</span> settings to enable
-                custom logos, favicon, and login background.
+                {s3Configured ? (
+                  <>
+                    The public bucket is saved, but object storage is not active in this process
+                    yet. Restart the server to enable image uploads.
+                  </>
+                ) : (
+                  <>
+                    Image uploads require S3 object storage. Configure a public bucket in{" "}
+                    <span className="text-foreground font-medium">Storage</span> settings, then
+                    restart the server.
+                  </>
+                )}
               </p>
             </div>
           )}
@@ -140,7 +150,7 @@ export default function BrandingSettings() {
               kind="wordmark"
               currentUrl={branding.wordmarkUrl}
               accept={IMAGE_ACCEPT}
-              enabled={s3Configured}
+              enabled={assetStorageAvailable}
               preview="wide"
             />
             <BrandingAssetField
@@ -149,7 +159,7 @@ export default function BrandingSettings() {
               kind="mark"
               currentUrl={branding.markUrl}
               accept={IMAGE_ACCEPT}
-              enabled={s3Configured}
+              enabled={assetStorageAvailable}
               preview="square"
             />
             <BrandingAssetField
@@ -158,7 +168,7 @@ export default function BrandingSettings() {
               kind="favicon"
               currentUrl={branding.faviconUrl}
               accept={FAVICON_ACCEPT}
-              enabled={s3Configured}
+              enabled={assetStorageAvailable}
               preview="square"
             />
             <BrandingAssetField
@@ -167,7 +177,7 @@ export default function BrandingSettings() {
               kind="login_bg"
               currentUrl={branding.loginBgUrl}
               accept={IMAGE_ACCEPT}
-              enabled={s3Configured}
+              enabled={assetStorageAvailable}
               preview="wide"
             />
           </div>

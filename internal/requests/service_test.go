@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -826,6 +827,126 @@ func TestReconcileRequestsCompletesByStoredTVDBID(t *testing.T) {
 	}
 	if result.Completed != 1 {
 		t.Fatalf("completed = %d, want 1", result.Completed)
+	}
+}
+
+// seedStalledPresenceRequest builds a presence-available request carrying one
+// live target whose last status transition was `age` ago.
+func seedStalledPresenceRequest(t *testing.T, status Status, age time.Duration) (*fakeStore, *Service, time.Time) {
+	t.Helper()
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	store := newFakeStore()
+	req := &Request{ID: "req-1", MediaType: MediaTypeMovie, TMDBID: 550, Status: StatusQueued, Outcome: OutcomeActive}
+	store.candidates = []*Request{req}
+	store.requests["req-1"] = req
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "router-1", IntegrationKind: "radarr",
+		Quality: Quality1080p, Status: status, ExternalID: "123", ExternalStatus: "queued",
+		UpdatedAt: now.Add(-age),
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	service := NewService(store, &fakeTMDBClient{}, &fakePresence{available: map[MediaType]map[int]bool{
+		MediaTypeMovie: {550: true},
+	}})
+	service.Now = func() time.Time { return now }
+	return store, service, now
+}
+
+// A router that never reports completion would otherwise pin the request open
+// forever, because the presence shortcut stays disabled while a target is live.
+func TestReconcileRequestsRetiresStalledQueuedTargetOnPresence(t *testing.T) {
+	store, service, _ := seedStalledPresenceRequest(t, StatusQueued, 48*time.Hour)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 1 {
+		t.Fatalf("result = %+v, want one completed", result)
+	}
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	if len(targets) != 1 || targets[0].Status != StatusCompleted {
+		t.Fatalf("targets = %+v, want the stalled target completed", targets)
+	}
+	if targets[0].ExternalStatus != ExternalStatusPresenceConfirmed {
+		t.Fatalf("external status = %q, want %s", targets[0].ExternalStatus, ExternalStatusPresenceConfirmed)
+	}
+	if store.requests["req-1"].Status != StatusCompleted {
+		t.Fatalf("request status = %q, want completed", store.requests["req-1"].Status)
+	}
+}
+
+// Inside the horizon the router still owns the target — presence must not
+// short-circuit a submission that may simply be young.
+func TestReconcileRequestsKeepsRecentQueuedTargetOnPresence(t *testing.T) {
+	store, service, _ := seedStalledPresenceRequest(t, StatusQueued, time.Hour)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 0 {
+		t.Fatalf("result = %+v, want nothing completed", result)
+	}
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	if targets[0].Status != StatusQueued {
+		t.Fatalf("target status = %q, want queued", targets[0].Status)
+	}
+}
+
+// The presence check is quality-agnostic, so a 2160p target still downloading
+// against an already-present 1080p copy must never be retired out from under
+// the in-flight download.
+func TestReconcileRequestsNeverRetiresDownloadingTargetOnPresence(t *testing.T) {
+	store, service, _ := seedStalledPresenceRequest(t, StatusDownloading, 30*24*time.Hour)
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 0 {
+		t.Fatalf("result = %+v, want nothing completed", result)
+	}
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	if targets[0].Status != StatusDownloading {
+		t.Fatalf("target status = %q, want downloading left alone", targets[0].Status)
+	}
+}
+
+// Partial retirement: the stalled quality is closed out while a sibling target
+// that is genuinely downloading keeps the request open.
+func TestReconcileRequestsRetiresStalledQueuedWhileDownloadingStaysOpen(t *testing.T) {
+	store, service, now := seedStalledPresenceRequest(t, StatusQueued, 48*time.Hour)
+	if _, err := store.CreateTarget(context.Background(), Target{
+		RequestID: "req-1", IntegrationID: "router-1", IntegrationKind: "radarr",
+		Quality: Quality2160p, Status: StatusDownloading, ExternalID: "456", ExternalStatus: "downloading",
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+
+	result, err := service.ReconcileRequests(context.Background(), 100)
+	if err != nil {
+		t.Fatalf("ReconcileRequests returned error: %v", err)
+	}
+	if result.Completed != 0 {
+		t.Fatalf("result = %+v, want nothing completed while a download is in flight", result)
+	}
+
+	targets, _ := store.ListTargets(context.Background(), "req-1")
+	byQuality := map[Quality]Target{}
+	for _, t := range targets {
+		byQuality[t.Quality] = t
+	}
+	if got := byQuality[Quality1080p]; got.Status != StatusCompleted || got.ExternalStatus != ExternalStatusPresenceConfirmed {
+		t.Fatalf("1080p target = %+v, want completed via presence", got)
+	}
+	if got := byQuality[Quality2160p]; got.Status != StatusDownloading {
+		t.Fatalf("2160p target = %+v, want left downloading", got)
+	}
+	if store.requests["req-1"].Status != StatusDownloading {
+		t.Fatalf("request status = %q, want downloading (the live target keeps it open)", store.requests["req-1"].Status)
 	}
 }
 
@@ -1938,15 +2059,16 @@ func (f *fakePresence) LookupTMDB(_ context.Context, mediaType MediaType, ids []
 }
 
 type fakeTMDBClient struct {
-	mu              sync.Mutex
-	page            *tmdb.MediaPage
-	externalIDs     *tmdb.ExternalIDs
-	externalIDsByID map[int]*tmdb.ExternalIDs
-	externalIDCalls []int
-	detail          *tmdb.MediaDetail
-	discoverPage    *tmdb.MediaPage
-	discoverErr     error
-	searchMediaType string
+	mu                sync.Mutex
+	page              *tmdb.MediaPage
+	externalIDs       *tmdb.ExternalIDs
+	externalIDsByID   map[int]*tmdb.ExternalIDs
+	externalIDCalls   []int
+	detail            *tmdb.MediaDetail
+	discoverPage      *tmdb.MediaPage
+	discoverErr       error
+	searchMediaType   string
+	gotDiscoverParams tmdb.DiscoverParams
 }
 
 func (f *fakeTMDBClient) SearchMedia(_ context.Context, mediaType, _ string, _ int) (*tmdb.MediaPage, error) {
@@ -1958,7 +2080,10 @@ func (f *fakeTMDBClient) DiscoverSection(context.Context, string, int) (*tmdb.Me
 	return f.page, nil
 }
 
-func (f *fakeTMDBClient) DiscoverPage(context.Context, string, tmdb.DiscoverParams, int) (*tmdb.MediaPage, error) {
+func (f *fakeTMDBClient) DiscoverPage(_ context.Context, _ string, params tmdb.DiscoverParams, _ int) (*tmdb.MediaPage, error) {
+	f.mu.Lock()
+	f.gotDiscoverParams = params
+	f.mu.Unlock()
 	if f.discoverErr != nil {
 		return nil, f.discoverErr
 	}
@@ -1982,10 +2107,44 @@ func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.Med
 	return f.detail, nil
 }
 
+// certTMDBClient layers GetCertification onto fakeTMDBClient so a service
+// under a rating ceiling can hydrate certifications. Kept separate from
+// fakeTMDBClient so tests without certifications pin that the plain client
+// does NOT satisfy TMDBCertificationClient.
+type certTMDBClient struct {
+	fakeTMDBClient
+	certs     map[int]string // tmdb id -> certification
+	certErr   error
+	certCalls atomic.Int64
+}
+
+func (f *certTMDBClient) GetCertification(_ context.Context, _ string, id int) (string, error) {
+	f.certCalls.Add(1)
+	if f.certErr != nil {
+		return "", f.certErr
+	}
+	return f.certs[id], nil
+}
+
 type fixedCeiling struct{ q string }
 
 func (f fixedCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
 	return f.q, nil
+}
+
+// ratedCeiling implements both EntitlementResolver and ContentRatingResolver.
+type ratedCeiling struct {
+	q         string
+	rating    string
+	ratingErr error
+}
+
+func (f ratedCeiling) MaxPlaybackQuality(context.Context, int, string) (string, error) {
+	return f.q, nil
+}
+
+func (f ratedCeiling) MaxContentRating(context.Context, int, string) (string, error) {
+	return f.rating, f.ratingErr
 }
 
 // fakeRouterProvider is a canned RequestRouterProvider standing in for a

@@ -16,7 +16,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/streamtoken"
 )
 
-const streamAuthTestSecret = "test-stream-secret"
+const (
+	streamAuthTestSecret    = "test-stream-secret"
+	streamAuthTestProfileID = "profile-9"
+)
 
 // rejectingTokenValidator fails every bearer/JWT validation, so the end-to-end
 // test's only successful auth path is the ?st= stream token.
@@ -52,7 +55,7 @@ func streamTokenReq(pathSession, token string) *http.Request {
 
 func TestNewStreamTokenAuthenticator_ValidTokenAuthenticates(t *testing.T) {
 	authFn := NewStreamTokenAuthenticator(streamAuthTestSecret)
-	tok := signTestStreamToken(t, "sess-abc", 42, "profile-9", time.Hour)
+	tok := signTestStreamToken(t, "sess-abc", 42, streamAuthTestProfileID, time.Hour)
 
 	claims, profileID, ok := authFn(streamTokenReq("sess-abc", tok))
 	if !ok {
@@ -67,14 +70,14 @@ func TestNewStreamTokenAuthenticator_ValidTokenAuthenticates(t *testing.T) {
 	if claims.Role != "" {
 		t.Fatalf("claims role = %q, want empty (a ?st= token grants no role)", claims.Role)
 	}
-	if profileID != "profile-9" {
+	if profileID != streamAuthTestProfileID {
 		t.Fatalf("profile id = %q, want profile-9", profileID)
 	}
 }
 
 func TestNewStreamTokenAuthenticator_ExpiredTokenRejected(t *testing.T) {
 	authFn := NewStreamTokenAuthenticator(streamAuthTestSecret)
-	tok := signTestStreamToken(t, "sess-abc", 42, "profile-9", -time.Minute) // already expired
+	tok := signTestStreamToken(t, "sess-abc", 42, streamAuthTestProfileID, -time.Minute) // already expired
 
 	if _, _, ok := authFn(streamTokenReq("sess-abc", tok)); ok {
 		t.Fatal("expected expired ?st= token to be rejected")
@@ -84,7 +87,7 @@ func TestNewStreamTokenAuthenticator_ExpiredTokenRejected(t *testing.T) {
 func TestNewStreamTokenAuthenticator_SessionMismatchRejected(t *testing.T) {
 	authFn := NewStreamTokenAuthenticator(streamAuthTestSecret)
 	// Token minted for sess-abc, but the path matched sess-other.
-	tok := signTestStreamToken(t, "sess-abc", 42, "profile-9", time.Hour)
+	tok := signTestStreamToken(t, "sess-abc", 42, streamAuthTestProfileID, time.Hour)
 
 	if _, _, ok := authFn(streamTokenReq("sess-other", tok)); ok {
 		t.Fatal("expected a ?st= token bound to a different session to be rejected")
@@ -93,7 +96,7 @@ func TestNewStreamTokenAuthenticator_SessionMismatchRejected(t *testing.T) {
 
 func TestNewStreamTokenAuthenticator_WrongSecretRejected(t *testing.T) {
 	authFn := NewStreamTokenAuthenticator("a-different-secret")
-	tok := signTestStreamToken(t, "sess-abc", 42, "profile-9", time.Hour)
+	tok := signTestStreamToken(t, "sess-abc", 42, streamAuthTestProfileID, time.Hour)
 
 	if _, _, ok := authFn(streamTokenReq("sess-abc", tok)); ok {
 		t.Fatal("expected a ?st= token signed with a different secret to be rejected")

@@ -202,12 +202,17 @@ func (p *PluginProvider) Search(ctx context.Context, query SearchQuery) ([]Searc
 	results := make([]SearchResult, 0, len(response.GetResults()))
 	for _, result := range response.GetResults() {
 		results = append(results, SearchResult{
-			Name:        result.GetTitle(),
-			Year:        int(result.GetYear()),
-			ProviderIDs: mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()),
-			ImageURL:    result.GetImageUrl(),
-			Overview:    result.GetOverview(),
-			Provider:    p.Slug(),
+			Name:             result.GetTitle(),
+			OriginalTitle:    result.GetOriginalTitle(),
+			TitleAliases:     titleAliasesFromPlugin(result.GetTitleAliases(), p.Slug()),
+			TitleLanguage:    result.GetTitleLanguage(),
+			TitleIsFallback:  result.GetTitleIsFallback(),
+			OriginalLanguage: result.GetOriginalLanguage(),
+			Year:             int(result.GetYear()),
+			ProviderIDs:      mergePluginProviderIDs(p.capabilityID, result.GetProviderId(), result.GetProviderIds()),
+			ImageURL:         result.GetImageUrl(),
+			Overview:         result.GetOverview(),
+			Provider:         p.Slug(),
 		})
 	}
 	return results, nil
@@ -244,37 +249,54 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 	}
 
 	return &MetadataResult{
-		HasMetadata:       true,
-		ProviderIDs:       mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()),
-		Title:             response.GetItem().GetTitle(),
-		OriginalTitle:     response.GetItem().GetOriginalTitle(),
-		SortTitle:         response.GetItem().GetSortTitle(),
-		Overview:          response.GetItem().GetOverview(),
-		Tagline:           response.GetItem().GetTagline(),
-		Year:              int(response.GetItem().GetYear()),
-		Runtime:           int(response.GetItem().GetRuntime()),
-		Genres:            append([]string(nil), response.GetItem().GetGenres()...),
-		Keywords:          keywordsFromPluginMetadata(response.GetItem().GetMetadata()),
-		Studios:           append([]string(nil), response.GetItem().GetStudios()...),
-		Networks:          append([]string(nil), response.GetItem().GetNetworks()...),
-		Countries:         append([]string(nil), response.GetItem().GetCountries()...),
-		OriginalLanguage:  response.GetItem().GetOriginalLanguage(),
-		ContentRating:     response.GetItem().GetContentRating(),
-		Ratings:           ratingsFromStruct(response.GetItem().GetRatings()),
-		People:            peopleFromRecords(response.GetItem().GetPeople()),
-		Videos:            videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
-		PosterPath:        response.GetItem().GetPosterPath(),
-		PosterThumbhash:   response.GetItem().GetPosterThumbhash(),
-		BackdropPath:      response.GetItem().GetBackdropPath(),
-		ShowStatus:        response.GetItem().GetStatus(),
-		BackdropThumbhash: response.GetItem().GetBackdropThumbhash(),
-		LogoPath:          response.GetItem().GetLogoPath(),
-		SeasonCount:       int(response.GetItem().GetSeasonCount()),
-		FirstAirDate:      response.GetItem().GetFirstAirDate(),
-		LastAirDate:       response.GetItem().GetLastAirDate(),
-		AirTime:           response.GetItem().GetAirTime(),
-		ReleaseDate:       response.GetItem().GetReleaseDate(),
+		HasMetadata:          true,
+		ProviderIDs:          mergePluginProviderIDs(p.capabilityID, response.GetItem().GetProviderId(), response.GetItem().GetProviderIds()),
+		Title:                response.GetItem().GetTitle(),
+		OriginalTitle:        response.GetItem().GetOriginalTitle(),
+		TitleAliases:         titleAliasesFromPlugin(response.GetItem().GetTitleAliases(), p.Slug()),
+		TitleAliasesComplete: response.GetItem().GetTitleAliasesComplete(),
+		TitleLanguage:        response.GetItem().GetTitleLanguage(),
+		TitleIsFallback:      response.GetItem().GetTitleIsFallback(),
+		SortTitle:            response.GetItem().GetSortTitle(),
+		Overview:             response.GetItem().GetOverview(),
+		Tagline:              response.GetItem().GetTagline(),
+		Year:                 int(response.GetItem().GetYear()),
+		Runtime:              int(response.GetItem().GetRuntime()),
+		Genres:               append([]string(nil), response.GetItem().GetGenres()...),
+		Keywords:             keywordsFromPluginMetadata(response.GetItem().GetMetadata()),
+		Studios:              append([]string(nil), response.GetItem().GetStudios()...),
+		Networks:             append([]string(nil), response.GetItem().GetNetworks()...),
+		Countries:            append([]string(nil), response.GetItem().GetCountries()...),
+		OriginalLanguage:     response.GetItem().GetOriginalLanguage(),
+		ContentRating:        response.GetItem().GetContentRating(),
+		Ratings:              ratingsFromStruct(response.GetItem().GetRatings()),
+		People:               peopleFromRecords(response.GetItem().GetPeople()),
+		Videos:               videosFromRecords(p.Slug(), response.GetItem().GetVideos()),
+		PosterPath:           response.GetItem().GetPosterPath(),
+		PosterThumbhash:      response.GetItem().GetPosterThumbhash(),
+		BackdropPath:         response.GetItem().GetBackdropPath(),
+		ShowStatus:           response.GetItem().GetStatus(),
+		BackdropThumbhash:    response.GetItem().GetBackdropThumbhash(),
+		LogoPath:             response.GetItem().GetLogoPath(),
+		SeasonCount:          int(response.GetItem().GetSeasonCount()),
+		FirstAirDate:         response.GetItem().GetFirstAirDate(),
+		LastAirDate:          response.GetItem().GetLastAirDate(),
+		AirTime:              response.GetItem().GetAirTime(),
+		ReleaseDate:          response.GetItem().GetReleaseDate(),
 	}, nil
+}
+
+func titleAliasesFromPlugin(aliases []*pluginv1.TitleAlias, provider string) []TitleAlias {
+	out := make([]TitleAlias, 0, len(aliases))
+	for _, alias := range aliases {
+		if alias == nil || strings.TrimSpace(alias.GetTitle()) == "" {
+			continue
+		}
+		out = append(out, TitleAlias{
+			Title: alias.GetTitle(), Language: alias.GetLanguage(), Kind: alias.GetKind(), Provider: provider,
+		})
+	}
+	return out
 }
 
 func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRequest) (*PersonDetailResult, error) {

@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // ScannedMediaGroup is the persisted group-inference snapshot for one logical
 // content group inside a library folder.
@@ -100,16 +103,23 @@ type MediaGroupLocation struct {
 	LastSeenAt       time.Time
 }
 
-// SeriesRootMatchQueueEntry represents one pending initial series-root job.
+// SeriesRootMatchQueueEntry represents one pending or parked series-root job.
 type SeriesRootMatchQueueEntry struct {
-	MediaFolderID    int
-	ObservedRootPath string
-	FirstQueuedAt    time.Time
-	AvailableAt      time.Time
-	LastAttemptedAt  *time.Time
-	AttemptCount     int
-	LastError        string
-	UpdatedAt        time.Time
+	MediaFolderID             int
+	ObservedRootPath          string
+	FirstQueuedAt             time.Time
+	AvailableAt               time.Time
+	LastAttemptedAt           *time.Time
+	AttemptCount              int
+	LastError                 string
+	State                     string
+	FailureKind               string
+	FailureDetail             json.RawMessage
+	DeterministicAttemptCount int
+	InputFingerprint          string
+	MatcherRevision           int
+	ParkedAt                  *time.Time
+	UpdatedAt                 time.Time
 }
 
 // SeriesRootMatchJob is the claimed work payload returned to the matcher.
@@ -118,17 +128,34 @@ type SeriesRootMatchJob struct {
 	ObservedRootPath  string
 	SampleFilePath    string
 	ObservedFileCount int
+	LeaseToken        string
+	RerunRequested    bool
 }
 
-// MovieMatchQueueEntry represents one pending initial movie-file job.
+// MovieMatchJob is a claimed movie file plus the ownership token required to
+// complete, fail, or release that exact claim.
+type MovieMatchJob struct {
+	File           *MediaFile
+	LeaseToken     string
+	RerunRequested bool
+}
+
+// MovieMatchQueueEntry represents one pending or parked movie-file job.
 type MovieMatchQueueEntry struct {
-	MediaFileID     int
-	MediaFolderID   int
-	FilePath        string
-	FirstQueuedAt   time.Time
-	AvailableAt     time.Time
-	LastAttemptedAt *time.Time
-	AttemptCount    int
-	LastError       string
-	UpdatedAt       time.Time
+	MediaFileID               int
+	MediaFolderID             int
+	FilePath                  string
+	FirstQueuedAt             time.Time
+	AvailableAt               time.Time
+	LastAttemptedAt           *time.Time
+	AttemptCount              int
+	LastError                 string
+	State                     string
+	FailureKind               string
+	FailureDetail             json.RawMessage
+	DeterministicAttemptCount int
+	InputFingerprint          string
+	MatcherRevision           int
+	ParkedAt                  *time.Time
+	UpdatedAt                 time.Time
 }

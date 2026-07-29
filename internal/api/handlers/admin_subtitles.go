@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/subtitles"
@@ -20,10 +22,11 @@ type SubtitleProviderFactory func(cfg *subtitles.ProviderConfig) (subtitles.Prov
 
 // AdminSubtitleHandler handles admin operations for subtitle provider management.
 type AdminSubtitleHandler struct {
-	repo            subtitles.Repository
-	manager         *subtitles.Manager
-	pool            *pgxpool.Pool
-	providerFactory SubtitleProviderFactory
+	repo             subtitles.Repository
+	manager          *subtitles.Manager
+	pool             *pgxpool.Pool
+	providerFactory  SubtitleProviderFactory
+	providerReloadMu sync.Mutex
 }
 
 // NewAdminSubtitleHandler creates a new AdminSubtitleHandler.
@@ -35,10 +38,15 @@ func NewAdminSubtitleHandler(repo subtitles.Repository) *AdminSubtitleHandler {
 }
 
 type updateSubtitleProviderRequest struct {
-	Enabled  bool   `json:"enabled"`
-	APIKey   string `json:"api_key"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Enabled          bool   `json:"enabled"`
+	APIKey           string `json:"api_key"`
+	Username         string `json:"username"`
+	Password         string `json:"password"`
+	ClearCredentials bool   `json:"clear_credentials"`
+}
+
+type subtitleProviderCredentialClearer interface {
+	ClearProviderCredentials(ctx context.Context, providerName string) error
 }
 
 var builtinSubtitleProviders = []string{"opensubtitles", "subdl", "subsource"}
@@ -61,11 +69,48 @@ func (h *AdminSubtitleHandler) HandleUpdateProvider(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider name")
 		return
 	}
+	knownProvider := knownSubtitleProvider(providerName)
 
 	var req updateSubtitleProviderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
 		return
+	}
+	if req.ClearCredentials {
+		clearer, ok := h.repo.(subtitleProviderCredentialClearer)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "update_error", "Provider credential clearing is not supported")
+			return
+		}
+		if err := clearer.ClearProviderCredentials(r.Context(), providerName); err != nil {
+			writeError(w, http.StatusInternalServerError, "update_error", "Failed to clear provider credentials")
+			return
+		}
+		if knownProvider {
+			if err := h.reloadProviderFromRepository(r.Context(), providerName); err != nil {
+				writeError(w, http.StatusInternalServerError, "update_error", "Credentials cleared but latest provider config could not be applied")
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{ //nolint:goconst // JSON response keys stay inline.
+			"status": "ok", "applied_live": knownProvider && h.manager != nil,
+		})
+		return
+	}
+
+	stored, err := h.repo.GetProviderConfig(r.Context(), providerName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "update_error", "Failed to load provider config")
+		return
+	}
+	req = preserveSubtitleProviderFields(stored, req)
+
+	if req.Enabled && knownProvider {
+		_, err = h.providerFactory(subtitleProviderConfigFromRequest(providerName, req))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_provider_config", err.Error())
+			return
+		}
 	}
 
 	cfg := &subtitles.ProviderConfig{
@@ -81,7 +126,48 @@ func (h *AdminSubtitleHandler) HandleUpdateProvider(w http.ResponseWriter, r *ht
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok"})
+	if knownProvider {
+		if err := h.reloadProviderFromRepository(r.Context(), providerName); err != nil {
+			writeError(w, http.StatusInternalServerError, "update_error", "Provider saved but latest config could not be applied")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ok", "applied_live": knownProvider && h.manager != nil,
+	})
+}
+
+// reloadProviderFromRepository serializes the read-and-apply phase and always
+// rebuilds from durable state. A concurrent request may commit after this
+// request, but its own reload cannot be overtaken by an older request applying
+// request-local state afterward.
+func (h *AdminSubtitleHandler) reloadProviderFromRepository(ctx context.Context, providerName string) error {
+	if h.manager == nil {
+		return nil
+	}
+
+	h.providerReloadMu.Lock()
+	defer h.providerReloadMu.Unlock()
+
+	cfg, err := h.repo.GetProviderConfig(ctx, providerName)
+	if err != nil {
+		return fmt.Errorf("load latest provider config: %w", err)
+	}
+
+	var provider subtitles.Provider
+	if cfg != nil && cfg.Enabled {
+		provider, err = h.providerFactory(cfg)
+		if err != nil {
+			return fmt.Errorf("create provider from latest config: %w", err)
+		}
+	}
+
+	h.manager.RemoveProvider(providerName)
+	if provider != nil {
+		h.manager.RegisterProvider(provider)
+	}
+	return nil
 }
 
 // HandleTestProvider handles POST /api/v1/admin/subtitle-providers/{provider}/test
@@ -92,19 +178,27 @@ func (h *AdminSubtitleHandler) HandleTestProvider(w http.ResponseWriter, r *http
 		return
 	}
 
-	cfg, err := h.repo.GetProviderConfig(r.Context(), providerName)
+	var req updateSubtitleProviderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid_request", "Invalid request body")
+		return
+	}
+
+	stored, err := h.repo.GetProviderConfig(r.Context(), providerName)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false, "error": fmt.Sprintf("Failed to load config: %v", err),
 		})
 		return
 	}
-	if cfg == nil {
+	if stored == nil && req.APIKey == "" && req.Username == "" && req.Password == "" {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"success": false, "error": "Provider not found",
+			"success": false, "error": "Provider credentials are not configured",
 		})
 		return
 	}
+	req = preserveSubtitleProviderFields(stored, req)
+	cfg := subtitleProviderConfigFromRequest(providerName, req)
 
 	provider, err := h.providerFactory(cfg)
 	if err != nil {
@@ -140,6 +234,40 @@ func (h *AdminSubtitleHandler) HandleTestProvider(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 	})
+}
+
+func preserveSubtitleProviderFields(stored *subtitles.ProviderConfig, req updateSubtitleProviderRequest) updateSubtitleProviderRequest {
+	if stored == nil {
+		return req
+	}
+	preserveEmpty := func(draft *string, current string) {
+		if *draft == "" {
+			*draft = current
+		}
+	}
+	preserveEmpty(&req.APIKey, stored.APIKey)
+	preserveEmpty(&req.Username, stored.Username)
+	preserveEmpty(&req.Password, stored.Password)
+	return req
+}
+
+func subtitleProviderConfigFromRequest(providerName string, req updateSubtitleProviderRequest) *subtitles.ProviderConfig {
+	return &subtitles.ProviderConfig{
+		ProviderName: providerName,
+		Enabled:      req.Enabled,
+		APIKey:       req.APIKey,
+		Username:     req.Username,
+		Password:     req.Password,
+	}
+}
+
+func knownSubtitleProvider(name string) bool {
+	for _, providerName := range builtinSubtitleProviders {
+		if name == providerName {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultProviderFactory(cfg *subtitles.ProviderConfig) (subtitles.Provider, error) {

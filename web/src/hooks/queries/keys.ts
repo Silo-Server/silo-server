@@ -158,6 +158,11 @@ export const profileKeys = {
   householdSessions: () => ["profiles", "household", "sessions"] as const,
 };
 
+export const compatKeys = {
+  all: ["compat"] as const,
+  connectInfo: () => ["compat", "connect-info"] as const,
+};
+
 export const personKeys = {
   all: ["people"] as const,
   search: (query: string, limit = 20) => ["people", "search", query, limit] as const,
@@ -370,6 +375,7 @@ export const adminKeys = {
   stats: () => ["admin", "stats"] as const,
   sessions: () => ["admin", "sessions"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
+  serverStatus: () => ["admin", "serverStatus"] as const,
   catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
   requestsRoot: () => ["admin", "requests"] as const,
@@ -379,6 +385,7 @@ export const adminKeys = {
   requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,
   recommendationsStatus: () => ["admin", "recommendationsStatus"] as const,
   inviteCodes: () => ["admin", "inviteCodes"] as const,
+  invitations: () => ["admin", "invitations"] as const,
   apiKeys: () => ["admin", "apiKeys"] as const,
   rateLimitConfig: () => ["admin", "rateLimitConfig"] as const,
   playbackHistory: (params: {

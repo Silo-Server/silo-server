@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +27,10 @@ type serviceFakeRepo struct {
 	scrobbleConnections []Connection
 	scrobbleSessions    []ScrobbleSession
 	scrobbleUpdates     []scrobbleUpdate
+	reopenedScrobbles   []scrobbleUpdate
+	confirmedScrobbles  map[string]bool
+	confirmingScrobbles map[string]time.Time
+	scrobbleMu          sync.Mutex
 }
 
 type scrobbleUpdate struct {
@@ -40,8 +45,10 @@ type scrobbleUpdate struct {
 
 func newServiceFakeRepo() *serviceFakeRepo {
 	return &serviceFakeRepo{
-		connections: make(map[string]Connection),
-		sessions:    make(map[string]DeviceAuthSession),
+		connections:         make(map[string]Connection),
+		sessions:            make(map[string]DeviceAuthSession),
+		confirmedScrobbles:  make(map[string]bool),
+		confirmingScrobbles: make(map[string]time.Time),
 		settings: map[string]string{
 			"watchsync.trakt.client_id":     "client-id",
 			"watchsync.trakt.client_secret": "client-secret",
@@ -423,6 +430,67 @@ func (r *serviceFakeRepo) UpsertScrobbleSession(_ context.Context, _ ScrobbleEve
 	return nil
 }
 
+func (r *serviceFakeRepo) PrepareConfirmedScrobbleStop(_ context.Context, event ScrobbleEvent, connectionID string, _ time.Time) (confirmedStopPreparation, time.Time, error) {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	key := event.PlaybackSessionID + "|" + connectionID
+	if r.confirmedScrobbles[key] {
+		return confirmedStopAlreadySent, time.Time{}, nil
+	}
+	if !r.confirmingScrobbles[key].IsZero() {
+		return confirmedStopInProgress, time.Time{}, nil
+	}
+	claimVersion := time.Now()
+	r.confirmingScrobbles[key] = claimVersion
+	r.reopenedScrobbles = append(r.reopenedScrobbles, scrobbleUpdate{
+		playbackSessionID: event.PlaybackSessionID,
+		connectionID:      connectionID,
+		action:            "stop",
+		positionSeconds:   event.PositionSeconds,
+		historyID:         event.HistoryID,
+	})
+	return confirmedStopPrepared, claimVersion, nil
+}
+
+func (r *serviceFakeRepo) CompleteConfirmedScrobbleStop(_ context.Context, playbackSessionID string, connectionID string, positionSeconds float64, historyID string, claimVersion time.Time, stopSentAt time.Time) error {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	key := playbackSessionID + "|" + connectionID
+	if r.confirmingScrobbles[key] != claimVersion {
+		return errConfirmedStopClaimLost
+	}
+	delete(r.confirmingScrobbles, key)
+	r.confirmedScrobbles[key] = true
+	r.scrobbleUpdates = append(r.scrobbleUpdates, scrobbleUpdate{
+		playbackSessionID: playbackSessionID,
+		connectionID:      connectionID,
+		action:            "stop_confirmed",
+		positionSeconds:   positionSeconds,
+		historyID:         historyID,
+		stopSentAt:        &stopSentAt,
+	})
+	return nil
+}
+
+func (r *serviceFakeRepo) FailConfirmedScrobbleStop(_ context.Context, playbackSessionID string, connectionID string, positionSeconds float64, historyID string, claimVersion time.Time, lastError string) error {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	key := playbackSessionID + "|" + connectionID
+	if r.confirmingScrobbles[key] != claimVersion {
+		return errConfirmedStopClaimLost
+	}
+	delete(r.confirmingScrobbles, key)
+	r.scrobbleUpdates = append(r.scrobbleUpdates, scrobbleUpdate{
+		playbackSessionID: playbackSessionID,
+		connectionID:      connectionID,
+		action:            "stop_confirming",
+		positionSeconds:   positionSeconds,
+		historyID:         historyID,
+		lastError:         lastError,
+	})
+	return nil
+}
+
 func (r *serviceFakeRepo) UpdateScrobbleSession(_ context.Context, playbackSessionID string, connectionID string, action string, positionSeconds float64, historyID string, lastError string, stopSentAt *time.Time) error {
 	r.scrobbleUpdates = append(r.scrobbleUpdates, scrobbleUpdate{
 		playbackSessionID: playbackSessionID,
@@ -673,6 +741,22 @@ type scrobblerStub struct {
 	refreshErr    error
 	stopConns     chan Connection
 	stopEvents    chan ScrobbleEvent
+	stopStarted   chan struct{}
+	stopRelease   chan struct{}
+	stopFailures  *atomic.Int32
+}
+
+type keyedScrobblerStub struct {
+	scrobblerStub
+	key string
+}
+
+func (p keyedScrobblerStub) Key() string {
+	return p.key
+}
+
+func (p keyedScrobblerStub) DisplayName() string {
+	return p.key
 }
 
 func (p scrobblerStub) Key() string {
@@ -696,11 +780,20 @@ func (p scrobblerStub) Pause(context.Context, ServerConfig, Connection, Scrobble
 }
 
 func (p scrobblerStub) Stop(_ context.Context, _ ServerConfig, conn Connection, event ScrobbleEvent) error {
+	if p.stopStarted != nil {
+		p.stopStarted <- struct{}{}
+	}
+	if p.stopRelease != nil {
+		<-p.stopRelease
+	}
 	if p.stopConns != nil {
 		p.stopConns <- conn
 	}
 	if p.stopEvents != nil {
 		p.stopEvents <- event
+	}
+	if p.stopFailures != nil && p.stopFailures.Add(-1) >= 0 {
+		return errors.New("stop failed")
 	}
 	return p.stopErr
 }
@@ -1792,6 +1885,433 @@ func TestServiceScrobbleStopKeepsSessionOpenWhenProviderStopFails(t *testing.T) 
 			t.Fatalf("timed out waiting for failed stop update: %+v", repo.scrobbleUpdates)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestServiceConfirmedStopWaitsForProviderAndReopensFailedReplacement(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "trakt",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	provider := scrobblerStub{stopErr: errors.New("stop failed")}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg)
+
+	err := service.ScrobbleStopConfirmed(context.Background(), ScrobbleEvent{
+		PlaybackSessionID: "playback-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+		HistoryID:         "history-1",
+		PositionSeconds:   120,
+	})
+	if err == nil || err.Error() != "stop failed" {
+		t.Fatalf("ScrobbleStopConfirmed error = %v, want stop failed", err)
+	}
+	if len(repo.reopenedScrobbles) != 1 {
+		t.Fatalf("reopened scrobbles = %+v, want one durable reopen", repo.reopenedScrobbles)
+	}
+	reopened := repo.reopenedScrobbles[0]
+	if reopened.positionSeconds != 120 || reopened.historyID != "history-1" {
+		t.Fatalf("reopened scrobble = %+v, want authoritative progress", reopened)
+	}
+	for _, update := range repo.scrobbleUpdates {
+		if update.stopSentAt != nil {
+			t.Fatalf("failed confirmed stop marked session closed: %+v", repo.scrobbleUpdates)
+		}
+	}
+}
+
+func TestServiceConfirmedStopRetriesImmediatelyAfterProviderFailure(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "trakt",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	var failures atomic.Int32
+	failures.Store(1)
+	provider := scrobblerStub{
+		stopEvents:   make(chan ScrobbleEvent, 2),
+		stopFailures: &failures,
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	}
+
+	if err := service.ScrobbleStopConfirmed(context.Background(), event); err == nil {
+		t.Fatal("first ScrobbleStopConfirmed unexpectedly succeeded")
+	}
+	if err := service.ScrobbleStopConfirmed(context.Background(), event); err != nil {
+		t.Fatalf("retry ScrobbleStopConfirmed: %v", err)
+	}
+	if len(provider.stopEvents) != 2 {
+		t.Fatalf("provider stop attempts = %d, want immediate retry", len(provider.stopEvents))
+	}
+}
+
+func TestServiceConfirmedStopWaitsInProviderOrder(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "simkl",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	provider := newOrderedScrobblerStub()
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	}
+	if err := service.ScrobbleStart(context.Background(), event); err != nil {
+		t.Fatalf("ScrobbleStart: %v", err)
+	}
+	if action := <-provider.started; action != "start" {
+		t.Fatalf("first dispatch = %q, want start", action)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- service.ScrobbleStopConfirmed(context.Background(), event)
+	}()
+	select {
+	case err := <-result:
+		t.Fatalf("confirmed stop returned before queued start completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	provider.release <- struct{}{}
+	if action := <-provider.started; action != "stop" {
+		t.Fatalf("second dispatch = %q, want stop", action)
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("confirmed stop returned before provider completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	provider.release <- struct{}{}
+	if err := <-result; err != nil {
+		t.Fatalf("ScrobbleStopConfirmed: %v", err)
+	}
+}
+
+func TestServiceConfirmedStopDispatchesProvidersIndependently(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.settings["watchsync.slow.client_id"] = "client-id"
+	repo.settings["watchsync.slow.client_secret"] = "client-secret"
+	repo.settings["watchsync.healthy.client_id"] = "client-id"
+	repo.settings["watchsync.healthy.client_secret"] = "client-secret"
+	repo.scrobbleConnections = []Connection{
+		{
+			ID:              "conn-slow",
+			Provider:        "slow",
+			UserID:          7,
+			ProfileID:       "profile-1",
+			ScrobbleEnabled: true,
+		},
+		{
+			ID:              "conn-healthy",
+			Provider:        "healthy",
+			UserID:          7,
+			ProfileID:       "profile-1",
+			ScrobbleEnabled: true,
+		},
+	}
+	slow := keyedScrobblerStub{
+		key: "slow",
+		scrobblerStub: scrobblerStub{
+			stopStarted: make(chan struct{}, 1),
+			stopRelease: make(chan struct{}),
+		},
+	}
+	healthy := keyedScrobblerStub{
+		key: "healthy",
+		scrobblerStub: scrobblerStub{
+			stopEvents: make(chan ScrobbleEvent, 1),
+		},
+	}
+	reg := NewRegistry()
+	if err := reg.Register(slow); err != nil {
+		t.Fatalf("Register slow provider: %v", err)
+	}
+	if err := reg.Register(healthy); err != nil {
+		t.Fatalf("Register healthy provider: %v", err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- service.ScrobbleStopConfirmed(context.Background(), event)
+	}()
+	select {
+	case <-slow.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for slow provider")
+	}
+	select {
+	case <-healthy.stopEvents:
+	case <-time.After(time.Second):
+		t.Fatal("healthy provider was starved by slow provider")
+	}
+	close(slow.stopRelease)
+	if err := <-result; err != nil {
+		t.Fatalf("ScrobbleStopConfirmed: %v", err)
+	}
+}
+
+func TestServiceConfirmedStopWaitsBehindFallbackWithoutProviderOrdering(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "trakt",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	provider := scrobblerStub{
+		stopStarted: make(chan struct{}, 2),
+		stopRelease: make(chan struct{}),
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	}
+
+	if err := service.ScrobbleStop(context.Background(), event); err != nil {
+		t.Fatalf("fallback ScrobbleStop: %v", err)
+	}
+	select {
+	case <-provider.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for fallback stop")
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- service.ScrobbleStopConfirmed(context.Background(), event)
+	}()
+	select {
+	case <-provider.stopStarted:
+		t.Fatal("confirmed stop passed the in-flight fallback")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	provider.stopRelease <- struct{}{}
+	select {
+	case <-provider.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("confirmed stop did not follow the fallback")
+	}
+	provider.stopRelease <- struct{}{}
+	if err := <-result; err != nil {
+		t.Fatalf("ScrobbleStopConfirmed: %v", err)
+	}
+}
+
+func TestServiceConfirmedStopDoesNotResendSuccessfulProvider(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "trakt",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	provider := scrobblerStub{stopEvents: make(chan ScrobbleEvent, 2)}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	}
+
+	if err := service.ScrobbleStopConfirmed(context.Background(), event); err != nil {
+		t.Fatalf("first ScrobbleStopConfirmed: %v", err)
+	}
+	if err := service.ScrobbleStopConfirmed(context.Background(), event); err != nil {
+		t.Fatalf("retry ScrobbleStopConfirmed: %v", err)
+	}
+	select {
+	case <-provider.stopEvents:
+	default:
+		t.Fatal("successful confirmed stop was not dispatched")
+	}
+	select {
+	case duplicate := <-provider.stopEvents:
+		t.Fatalf("successful provider received duplicate confirmed stop: %+v", duplicate)
+	default:
+	}
+	if len(repo.reopenedScrobbles) != 1 {
+		t.Fatalf("confirmed stop preparations = %+v, want one", repo.reopenedScrobbles)
+	}
+}
+
+func TestServiceConfirmedStopSerializesConcurrentConfirmation(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "trakt",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	provider := scrobblerStub{
+		stopStarted: make(chan struct{}, 1),
+		stopRelease: make(chan struct{}),
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	}
+
+	firstResult := make(chan error, 1)
+	go func() {
+		firstResult <- service.ScrobbleStopConfirmed(context.Background(), event)
+	}()
+	select {
+	case <-provider.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first provider stop")
+	}
+
+	secondResult := make(chan error, 1)
+	go func() {
+		secondResult <- service.ScrobbleStopConfirmed(context.Background(), event)
+	}()
+	select {
+	case err := <-secondResult:
+		t.Fatalf("concurrent confirmation returned before the first completed: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(provider.stopRelease)
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first ScrobbleStopConfirmed: %v", err)
+	}
+	if err := <-secondResult; err != nil {
+		t.Fatalf("second ScrobbleStopConfirmed: %v", err)
+	}
+	select {
+	case <-provider.stopStarted:
+		t.Fatal("concurrent confirmation dispatched a duplicate provider stop")
+	default:
+	}
+}
+
+func TestServiceConfirmedStopCannotCompleteReclaimedLease(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "trakt",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	provider := scrobblerStub{
+		stopStarted: make(chan struct{}, 1),
+		stopRelease: make(chan struct{}),
+	}
+	reg := NewRegistry()
+	if err := reg.Register(provider); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	service := NewService(repo, reg)
+	event := ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- service.ScrobbleStopConfirmed(context.Background(), event)
+	}()
+	select {
+	case <-provider.stopStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for provider stop")
+	}
+
+	key := event.PlaybackSessionID + "|conn-1"
+	repo.confirmingScrobbles[key] = time.Now().Add(time.Second)
+	close(provider.stopRelease)
+	if err := <-result; !errors.Is(err, errConfirmedStopClaimLost) {
+		t.Fatalf("stale ScrobbleStopConfirmed error = %v, want claim lost", err)
+	}
+	if repo.confirmedScrobbles[key] {
+		t.Fatal("stale provider worker marked the reclaimed stop confirmed")
+	}
+}
+
+func TestServiceConfirmedStopRejectsUnregisteredProvider(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.scrobbleConnections = []Connection{{
+		ID:              "conn-1",
+		Provider:        "temporarily-unavailable",
+		UserID:          7,
+		ProfileID:       "profile-1",
+		ScrobbleEnabled: true,
+	}}
+	service := NewService(repo, NewRegistry())
+
+	err := service.ScrobbleStopConfirmed(context.Background(), ScrobbleEvent{
+		PlaybackSessionID: "session-1",
+		UserID:            7,
+		ProfileID:         "profile-1",
+		MediaItemID:       "movie-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("ScrobbleStopConfirmed error = %v, want unregistered provider", err)
 	}
 }
 

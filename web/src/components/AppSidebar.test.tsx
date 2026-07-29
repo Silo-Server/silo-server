@@ -1,4 +1,4 @@
-// @vitest-environment node
+// @vitest-environment jsdom
 
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -12,6 +12,9 @@ import {
   getProfileMenuSide,
   groupAppNavLinks,
   isSidebarExpanded,
+  isSidebarRailCollapsed,
+  libraryRowShift,
+  sidebarSurfaceStyle,
   type AppNavLink,
 } from "./AppSidebar.logic";
 
@@ -148,6 +151,10 @@ function renderSidebar(entry: string, { collapsed = false }: { collapsed?: boole
   );
 }
 
+function parseMarkup(markup: string): Document {
+  return new DOMParser().parseFromString(markup, "text/html");
+}
+
 describe("AppSidebar", () => {
   beforeEach(() => {
     mockLogout.mockReset();
@@ -171,12 +178,45 @@ describe("AppSidebar", () => {
     expect(markup).not.toContain("▶");
   });
 
-  it("uses the icon-only mark when the sidebar is collapsed", () => {
-    const markup = renderSidebar("/", { collapsed: true });
+  it("cross-fades the wordmark and the mark instead of swapping them", () => {
+    // Both are always rendered and only their opacity differs; swapping the
+    // variant outright popped at the start of the paired transform transition.
+    const collapsed = renderSidebar("/", { collapsed: true });
+    const expanded = renderSidebar("/");
 
-    expect(markup).toContain('src="/silo-icon-1024.png"');
-    expect(markup).not.toContain('src="/silo-wordmark-sidebar.png"');
-    expect(markup).toContain("sidebar-logo flex items-center py-6 justify-center px-2");
+    for (const markup of [collapsed, expanded]) {
+      expect(markup).toContain('src="/silo-icon-1024.png"');
+      expect(markup).toContain('src="/silo-wordmark-sidebar.png"');
+    }
+    // Collapsed: the mark is the one showing, and the wordmark is out of the
+    // accessibility tree so the two images never both name the sidebar.
+    const collapsedDocument = parseMarkup(collapsed);
+    const expandedDocument = parseMarkup(expanded);
+    const collapsedWordmark = collapsedDocument
+      .querySelector('img[src="/silo-wordmark-sidebar.png"]')
+      ?.closest(".sidebar-fade");
+    const collapsedMark = collapsedDocument
+      .querySelector('img[src="/silo-icon-1024.png"]')
+      ?.closest(".sidebar-fade");
+    const expandedWordmark = expandedDocument
+      .querySelector('img[src="/silo-wordmark-sidebar.png"]')
+      ?.closest(".sidebar-fade");
+    const expandedMark = expandedDocument
+      .querySelector('img[src="/silo-icon-1024.png"]')
+      ?.closest(".sidebar-fade");
+
+    expect(collapsedWordmark?.getAttribute("aria-hidden")).toBe("true");
+    expect(collapsedWordmark?.classList.contains("left-5")).toBe(true);
+    expect(collapsedWordmark?.classList.contains("opacity-0")).toBe(true);
+    expect(collapsedMark?.getAttribute("aria-hidden")).toBe("false");
+    expect(collapsedMark?.classList.contains("left-3.5")).toBe(true);
+    expect(collapsedMark?.classList.contains("opacity-100")).toBe(true);
+    expect(expandedWordmark?.getAttribute("aria-hidden")).toBe("false");
+    expect(expandedWordmark?.classList.contains("left-5")).toBe(true);
+    expect(expandedWordmark?.classList.contains("opacity-100")).toBe(true);
+    expect(expandedMark?.getAttribute("aria-hidden")).toBe("true");
+    expect(expandedMark?.classList.contains("left-3.5")).toBe(true);
+    expect(expandedMark?.classList.contains("opacity-0")).toBe(true);
   });
 
   it("uses the cinema highlight text color for active pinned catalog destinations", () => {
@@ -214,10 +254,16 @@ describe("AppSidebar", () => {
     expect(getProfileMenuSide(true)).toBe("right");
   });
 
-  it("centers the profile trigger when the sidebar is collapsed", () => {
-    const markup = renderSidebar("/item/42", { collapsed: true });
+  it("keeps the profile trigger left-anchored and the same size in both states", () => {
+    // `mx-auto` would centre the avatar in the 260px surface — far outside the
+    // 64px rail — and any width swap would pop when the surface starts moving.
+    const collapsed = renderSidebar("/item/42", { collapsed: true });
+    const expanded = renderSidebar("/", { collapsed: false });
 
-    expect(markup).toContain("mx-auto h-10 w-10 justify-center px-0");
+    for (const markup of [collapsed, expanded]) {
+      expect(markup).toContain("flex w-full items-center gap-2.5 rounded-xl px-3 py-3");
+      expect(markup).not.toContain("mx-auto h-10 w-10 justify-center px-0");
+    }
   });
 
   it("keeps a flat Apps list when fewer than 2 distinct categories exist", () => {
@@ -274,6 +320,96 @@ describe("AppSidebar", () => {
     const hiddenHeaderCount = (markup.match(/aria-hidden="true" class="[^"]*opacity-0/g) ?? [])
       .length;
     expect(hiddenHeaderCount).toBeGreaterThan(0);
+  });
+});
+
+describe("sidebar collapse surface", () => {
+  it("keeps the surface 260px wide on a detail route and everywhere else", () => {
+    // Nothing about the sidebar's box changes between states — the frame just
+    // slides, so there is never a width to interpolate.
+    for (const markup of [renderSidebar("/"), renderSidebar("/item/42", { collapsed: true })]) {
+      const aside = markup.match(/<aside[^>]*class="([^"]*)"/)?.[1] ?? "";
+      expect(aside).toContain("w-[260px]");
+      expect(aside).toContain("overflow-hidden");
+      expect(aside).not.toContain("w-16");
+    }
+  });
+
+  it("puts the blur on the counter-translated layer, not the sliding frame", () => {
+    // The inner layer is screen-static, so its 40px backdrop is sampled from a
+    // region that never moves; on the frame it would be re-blurred per frame.
+    const markup = renderSidebar("/item/42", { collapsed: true });
+    const aside = markup.match(/<aside[^>]*class="([^"]*)"/)?.[1] ?? "";
+
+    expect(aside).not.toContain("backdrop-blur");
+    expect(markup).toContain("bg-sidebar/88 sidebar-inner");
+    expect(markup).toContain("backdrop-blur-2xl");
+  });
+
+  it("keeps the rail border on the frame so it rides along to x=64", () => {
+    const aside =
+      renderSidebar("/item/42", { collapsed: true }).match(/<aside[^>]*class="([^"]*)"/)?.[1] ?? "";
+    expect(aside).toContain("border-sidebar-border/70");
+    expect(aside).toContain("border-r");
+  });
+
+  it("marks the surface collapsed only on a detail route", () => {
+    expect(renderSidebar("/item/42", { collapsed: true })).toContain('data-collapsed="true"');
+    expect(renderSidebar("/")).not.toContain("data-collapsed");
+  });
+
+  it("keeps labels at their full layout box so the nav never reflows", () => {
+    const collapsed = renderSidebar("/item/42", { collapsed: true });
+
+    expect(collapsed).toContain("sidebar-fade max-w-[180px] truncate opacity-0");
+    // The old max-width animation relaid out the whole nav subtree per frame.
+    expect(collapsed).not.toContain("max-w-0");
+    expect(collapsed).not.toContain("transition-[opacity,max-width]");
+  });
+
+  it("reserves the library chevron slot in both states and shifts the row instead", () => {
+    const collapsed = renderSidebar("/item/42", { collapsed: true });
+    const expanded = renderSidebar("/");
+
+    for (const markup of [collapsed, expanded]) {
+      expect(markup).toContain("sidebar-row-shift flex flex-1 items-center");
+      // Mocked library 7 has a pin, so its slot is the wider chevron button.
+      expect(markup).toContain("--sidebar-row-shift:-18px");
+    }
+  });
+});
+
+describe("libraryRowShift", () => {
+  it("only shifts rows whose chevron slot pushes the icon out of the column", () => {
+    // A pinned library reserves a 30px chevron button; every other nav row
+    // starts its icon 12px in, so the row has to come back 18px.
+    expect(libraryRowShift(true)).toBe("-18px");
+    // The unpinned spacer is `w-3` with `pl-3` — border-box, so 12px total.
+    // It already lines up, and shifting it would overshoot to the left.
+    expect(libraryRowShift(false)).toBe("0px");
+  });
+});
+
+describe("isSidebarRailCollapsed", () => {
+  it("clips to the rail only when the route collapsed it and nothing holds it open", () => {
+    expect(isSidebarRailCollapsed(true, false)).toBe(true);
+    expect(isSidebarRailCollapsed(false, true)).toBe(false);
+    // Hover-to-expand and the profile menu both re-open the clip.
+    expect(isSidebarRailCollapsed(true, true)).toBe(false);
+  });
+});
+
+describe("sidebarSurfaceStyle", () => {
+  it("floats hover expansion above the page instead of resizing it", () => {
+    const style = sidebarSurfaceStyle({ collapsed: true, sidebarExpanded: true });
+
+    expect(style?.zIndex).toBe(45);
+    expect(style?.boxShadow).toContain("0 25px 50px -12px");
+  });
+
+  it("does not raise or shadow the surface in either resting state", () => {
+    expect(sidebarSurfaceStyle({ collapsed: true, sidebarExpanded: false })).toBeUndefined();
+    expect(sidebarSurfaceStyle({ collapsed: false, sidebarExpanded: true })).toBeUndefined();
   });
 });
 

@@ -219,12 +219,27 @@ type VideoTrack struct {
 	Bitrate            int    `json:"bitrate,omitempty"`
 	VideoRange         string `json:"video_range,omitempty"`
 	VideoRangeType     string `json:"video_range_type,omitempty"`
+	ColorRange         string `json:"color_range,omitempty"`
 	ColorPrimaries     string `json:"color_primaries,omitempty"`
 	ColorSpace         string `json:"color_space,omitempty"`
 	ColorTransfer      string `json:"color_transfer,omitempty"`
 	BitDepth           int    `json:"bit_depth,omitempty"`
 	PixelFormat        string `json:"pixel_format,omitempty"`
 	ReferenceFrames    int    `json:"reference_frames,omitempty"`
+	// MultiplePPS records whether an H.264 stream redefines the same
+	// pic_parameter_set_id in-band with more than one distinct content. Such
+	// streams cannot be safely stream-copied into an avc1/fMP4 HLS segment:
+	// the avcC declares a single parameter set, so strict decoders
+	// (VideoToolbox on Safari/Chrome-macOS) desync on the mid-GOP switches.
+	//
+	// This is a runtime-only field: it is computed at playback start by a
+	// bitstream scan and held in memory, never serialized to the database
+	// (`json:"-"`). nil means "not analyzed in this process yet".
+	MultiplePPS *bool `json:"-"`
+	// VideoCopyUnsafe is set when conflicting PPS data is detected or when the
+	// safety scan cannot establish that video stream-copy is safe. It is
+	// runtime-only so transient scan failures are retried on a later request.
+	VideoCopyUnsafe bool `json:"-"`
 }
 
 // AudioTrack represents a probed audio stream stored as JSONB.
@@ -415,6 +430,15 @@ type MediaItem struct {
 	CreatedAt                    time.Time
 	UpdatedAt                    time.Time
 	AddedAt                      *time.Time // populated by browse queries (MIN(mil.first_seen_at))
+}
+
+// MediaItemAlias is a provider-confirmed searchable title for a media item.
+type MediaItemAlias struct {
+	ContentID string
+	Title     string
+	Language  string
+	Kind      string
+	Provider  string
 }
 
 // Season represents a row in the seasons table.

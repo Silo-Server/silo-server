@@ -133,7 +133,10 @@ function ProviderSettingsForm({ provider }: { provider: MarkerProviderConfig }) 
   const validation = validateProvider.data;
 
   return (
-    <div className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4">
+    <fieldset
+      disabled={updateProvider.isPending || validateProvider.isPending}
+      className="border-border bg-surface max-w-2xl rounded-lg border px-5 py-4"
+    >
       <div className="mb-3 flex flex-col gap-1">
         <h3 className="text-sm font-semibold">{displayName}</h3>
         <p className="text-muted-foreground mt-1 text-xs leading-relaxed">
@@ -266,7 +269,7 @@ function ProviderSettingsForm({ provider }: { provider: MarkerProviderConfig }) 
           {updateProvider.isPending ? "Saving..." : "Save Provider Settings"}
         </Button>
       </div>
-    </div>
+    </fieldset>
   );
 }
 

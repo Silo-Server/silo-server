@@ -3,15 +3,32 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AdminSettingsLayout from "./AdminSettingsLayout";
+
+const mocks = vi.hoisted(() => ({
+  useAdminServerStatus: vi.fn(),
+}));
 
 // The layout only needs the active tab's component to render; a loading form
 // keeps every settings page on its skeleton state so no other hooks fire.
 vi.mock("@/hooks/useSettingsForm", () => ({
-  useSettingsForm: () => ({ isLoading: true }),
+  useSettingsForm: () => ({
+    isLoading: true,
+    sensitiveConfigured: [],
+    sensitiveManagedByEnv: [],
+  }),
 }));
+
+vi.mock("@/hooks/queries/admin/settings", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/hooks/queries/admin/settings")>()),
+  useAdminServerStatus: (...args: unknown[]) => mocks.useAdminServerStatus(...args),
+}));
+
+beforeEach(() => {
+  mocks.useAdminServerStatus.mockReturnValue({ data: { restart_required: false } });
+});
 
 function renderLayout(search = "") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -51,9 +68,11 @@ describe("AdminSettingsLayout", () => {
 
     for (const label of [
       "General",
+      "Branding",
       "Theming",
       "Card Overlays",
       "Scanner &amp; Matcher",
+      "Search",
       "Intro Markers",
       "Subtitles",
       "AI Services",
@@ -78,6 +97,14 @@ describe("AdminSettingsLayout", () => {
 
     expect(markup).toContain('aria-current="page"');
     expect(markup).toBe(renderLayout("?tab=general"));
+  });
+
+  it("surfaces durable restart-required state above the active tab", () => {
+    mocks.useAdminServerStatus.mockReturnValue({ data: { restart_required: true } });
+
+    const markup = renderLayout();
+
+    expect(markup).toContain("Server restart required for saved settings to take effect.");
   });
 
   it("resolves the legacy jellyfin tab alias to Compatibility Proxies", () => {

@@ -535,7 +535,7 @@ func (i *CatalogSearchIndexer) CheckConnection(ctx context.Context, settings Cat
 func catalogSearchMeilisearchSettings(embedder string, semanticEnabled, binaryQuantized bool) map[string]any {
 	settings := map[string]any{
 		"displayedAttributes":  []string{"content_id", "type"},
-		"filterableAttributes": []string{"type"},
+		"filterableAttributes": []string{"type", "library_ids"},
 		"searchableAttributes": []string{
 			"title",
 			"original_title",
@@ -613,6 +613,7 @@ type catalogSearchDocument struct {
 	Title         string               `json:"title"`
 	SortTitle     string               `json:"sort_title,omitempty"`
 	OriginalTitle string               `json:"original_title,omitempty"`
+	Aliases       []string             `json:"-"`
 	TitleVariants []string             `json:"title_variants,omitempty"`
 	Year          int                  `json:"year,omitempty"`
 	Overview      string               `json:"overview,omitempty"`
@@ -623,6 +624,7 @@ type catalogSearchDocument struct {
 	Countries     []string             `json:"countries,omitempty"`
 	Keywords      []string             `json:"keywords,omitempty"`
 	People        []string             `json:"people,omitempty"`
+	LibraryIDs    []int32              `json:"library_ids,omitempty"`
 	SchemaVersion int                  `json:"schema_version"`
 	Vectors       map[string][]float32 `json:"_vectors,omitempty"`
 }
@@ -632,19 +634,14 @@ func (i *CatalogSearchIndexer) LoadDocumentsAfter(ctx context.Context, afterCont
 		return nil, nil
 	}
 	typeFilter := normalizeCatalogSearchItemTypes(itemTypes)
-	whereClause := `
-			WHERE ($1::text = '' OR mi.content_id > $1)
-			  AND ` + catalogSearchExcludeMangaChaptersSQL
 	args := []any{afterContentID, limit}
+	typeArg := 0
 	if len(typeFilter) > 0 {
-		whereClause += `
-			  AND mi.type = ANY($3)`
+		typeArg = 3
 		args = append(args, typeFilter)
 	}
-	rows, err := i.pool.Query(ctx, catalogSearchDocumentSelectSQL(whereClause, `
-			ORDER BY mi.content_id ASC
-			LIMIT $2
-		`), args...)
+	rows, err := i.pool.Query(ctx, mixedCatalogSearchDocumentSQL(
+		`mi.content_id > $1`, `e.content_id > $1`, typeArg, "LIMIT $2"), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -666,18 +663,14 @@ func (i *CatalogSearchIndexer) LoadDocumentsByIDs(ctx context.Context, contentID
 		return nil, nil
 	}
 	typeFilter := normalizeCatalogSearchItemTypes(itemTypes)
-	whereClause := `
-			WHERE mi.content_id = ANY($1)
-			  AND ` + catalogSearchExcludeMangaChaptersSQL
 	args := []any{contentIDs}
+	typeArg := 0
 	if len(typeFilter) > 0 {
-		whereClause += `
-			  AND mi.type = ANY($2)`
+		typeArg = 2
 		args = append(args, typeFilter)
 	}
-	rows, err := i.pool.Query(ctx, catalogSearchDocumentSelectSQL(whereClause, `
-			ORDER BY mi.content_id ASC
-		`), args...)
+	rows, err := i.pool.Query(ctx, mixedCatalogSearchDocumentSQL(
+		`mi.content_id = ANY($1)`, `e.content_id = ANY($1)`, typeArg, ""), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -693,31 +686,92 @@ func (i *CatalogSearchIndexer) LoadDocumentsByIDs(ctx context.Context, contentID
 	return docs, nil
 }
 
-func catalogSearchDocumentSelectSQL(whereClause string, tailClause string) string {
-	return `
-		SELECT
-			mi.content_id,
-			mi.type,
-			COALESCE(mi.title, ''),
-			COALESCE(mi.sort_title, ''),
-			COALESCE(mi.original_title, ''),
-			COALESCE(mi.year, 0),
-			COALESCE(mi.overview, ''),
-			COALESCE(mi.tagline, ''),
-			COALESCE(mi.genres, ARRAY[]::text[]),
-			COALESCE(mi.studios, ARRAY[]::text[]),
-			COALESCE(mi.networks, ARRAY[]::text[]),
-			COALESCE(mi.countries, ARRAY[]::text[]),
-			COALESCE(mi.keywords, ARRAY[]::text[]),
-			COALESCE(array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL AND p.name <> ''), ARRAY[]::text[]) AS people
-		FROM media_items mi
-		LEFT JOIN item_people ip ON ip.content_id = mi.content_id
-		LEFT JOIN people p ON p.id = ip.person_id
-	` + whereClause + `
-		GROUP BY
-			mi.content_id, mi.type, mi.title, mi.sort_title, mi.original_title, mi.year,
-			mi.overview, mi.tagline, mi.genres, mi.studios, mi.networks, mi.countries, mi.keywords
-	` + tailClause
+// mixedCatalogSearchDocumentSQL first pages narrow IDs across both physical
+// sources, then aggregates people and library memberships only for that batch.
+// This keeps rebuild work proportional to RebuildBatchSize rather than the
+// total number of catalog rows.
+func mixedCatalogSearchDocumentSQL(mediaPredicate, episodePredicate string, typeArg int, limitClause string) string {
+	mediaTypePredicate := ""
+	episodeTypePredicate := ""
+	if typeArg > 0 {
+		mediaTypePredicate = fmt.Sprintf(" AND mi.type = ANY($%d)", typeArg)
+		episodeTypePredicate = fmt.Sprintf(" AND 'episode' = ANY($%d)", typeArg)
+	}
+	return fmt.Sprintf(`
+		WITH candidates AS (
+			SELECT mi.content_id, mi.type
+			FROM media_items mi
+			WHERE %s
+			  AND %s%s
+			UNION ALL
+			SELECT e.content_id, 'episode'::text AS type
+			FROM episodes e
+			JOIN media_items si ON si.content_id = e.series_id AND si.type = 'series'
+			WHERE %s%s
+			  AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)
+			ORDER BY content_id ASC
+			%s
+		)
+		SELECT * FROM (
+			SELECT
+				mi.content_id,
+				mi.type,
+				COALESCE(mi.title, ''),
+				COALESCE(mi.sort_title, ''),
+				COALESCE(mi.original_title, ''),
+				COALESCE(aliases.titles, ARRAY[]::text[]),
+				COALESCE(mi.year, 0),
+				COALESCE(mi.overview, ''),
+				COALESCE(mi.tagline, ''),
+				COALESCE(mi.genres, ARRAY[]::text[]),
+				COALESCE(mi.studios, ARRAY[]::text[]),
+				COALESCE(mi.networks, ARRAY[]::text[]),
+				COALESCE(mi.countries, ARRAY[]::text[]),
+				COALESCE(mi.keywords, ARRAY[]::text[]),
+				COALESCE(people.names, ARRAY[]::text[]),
+				COALESCE(libraries.ids, ARRAY[]::integer[])
+			FROM candidates c
+			JOIN media_items mi ON c.type <> 'episode' AND mi.content_id = c.content_id
+			LEFT JOIN LATERAL (
+				SELECT array_agg(DISTINCT mia.title ORDER BY mia.title) FILTER (WHERE btrim(mia.title) <> '') AS titles
+				FROM media_item_aliases mia
+				WHERE mia.content_id = mi.content_id
+			) aliases ON true
+			LEFT JOIN LATERAL (
+				SELECT array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL AND p.name <> '') AS names
+				FROM item_people ip
+				JOIN people p ON p.id = ip.person_id
+				WHERE ip.content_id = mi.content_id
+			) people ON true
+			LEFT JOIN LATERAL (
+				SELECT array_agg(DISTINCT mil.media_folder_id ORDER BY mil.media_folder_id) AS ids
+				FROM media_item_libraries mil
+				WHERE mil.content_id = mi.content_id
+			) libraries ON true
+			UNION ALL
+			SELECT
+				e.content_id,
+				'episode'::text,
+				COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text),
+				COALESCE(NULLIF(BTRIM(e.title), ''), 'Episode ' || e.episode_number::text),
+				''::text,
+				ARRAY[]::text[],
+				COALESCE(EXTRACT(YEAR FROM e.air_date)::integer, 0),
+				COALESCE(e.overview, ''),
+				''::text,
+				ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[], ARRAY[]::text[],
+				COALESCE(libraries.ids, ARRAY[]::integer[])
+			FROM candidates c
+			JOIN episodes e ON c.type = 'episode' AND e.content_id = c.content_id
+			LEFT JOIN LATERAL (
+				SELECT array_agg(DISTINCT el.media_folder_id ORDER BY el.media_folder_id) AS ids
+				FROM episode_libraries el
+				WHERE el.episode_id = e.content_id
+			) libraries ON true
+		) documents
+		ORDER BY content_id ASC`,
+		mediaPredicate, catalogSearchExcludeMangaChaptersSQL, mediaTypePredicate,
+		episodePredicate, episodeTypePredicate, limitClause)
 }
 
 func scanCatalogSearchDocuments(rows pgx.Rows) ([]catalogSearchDocument, error) {
@@ -730,6 +784,7 @@ func scanCatalogSearchDocuments(rows pgx.Rows) ([]catalogSearchDocument, error) 
 			&doc.Title,
 			&doc.SortTitle,
 			&doc.OriginalTitle,
+			&doc.Aliases,
 			&doc.Year,
 			&doc.Overview,
 			&doc.Tagline,
@@ -739,6 +794,7 @@ func scanCatalogSearchDocuments(rows pgx.Rows) ([]catalogSearchDocument, error) 
 			&doc.Countries,
 			&doc.Keywords,
 			&doc.People,
+			&doc.LibraryIDs,
 		); err != nil {
 			return nil, err
 		}
@@ -759,17 +815,18 @@ func (i *CatalogSearchIndexer) attachDocumentVectors(ctx context.Context, docs [
 	}
 	ids := make([]string, 0, len(docs))
 	for _, doc := range docs {
-		if strings.TrimSpace(doc.ContentID) != "" {
+		if doc.Type != "episode" && strings.TrimSpace(doc.ContentID) != "" {
 			ids = append(ids, doc.ContentID)
 		}
 	}
-	if len(ids) == 0 {
-		return nil
+	var vectors map[string][]float32
+	if len(ids) > 0 {
+		if vectors, err = loadCatalogSearchVectors(ctx, i.pool, ids); err != nil {
+			return err
+		}
 	}
-	vectors, err := loadCatalogSearchVectors(ctx, i.pool, ids)
-	if err != nil {
-		return err
-	}
+	// Always run the per-document pass: even an episode-only batch needs the
+	// explicit `_vectors.<embedder>: null` opt-out on every document.
 	setCatalogSearchDocumentVectors(docs, vectors, embedder)
 	return nil
 }
@@ -814,6 +871,14 @@ func setCatalogSearchDocumentVectors(docs []catalogSearchDocument, vectors map[s
 	}
 	count := 0
 	for idx := range docs {
+		if docs[idx].Type == "episode" {
+			// Episodes are keyword-only, but a userProvided embedder requires
+			// every document to either supply vectors or opt out explicitly
+			// with `_vectors.<embedder>: null`; omitting _vectors entirely
+			// fails the whole indexing task.
+			docs[idx].Vectors = map[string][]float32{embedder: nil}
+			continue
+		}
 		vector := vectors[docs[idx].ContentID]
 		docs[idx].Vectors = map[string][]float32{embedder: nil}
 		if len(vector) > 0 {
@@ -891,10 +956,17 @@ func countCatalogSearchEligibleDocuments(ctx context.Context, q coverageQuerier,
 	}
 	var count int
 	if err := q.QueryRow(ctx, `
-		SELECT COUNT(*)
-		FROM media_items mi
-		WHERE `+catalogSearchExcludeMangaChaptersSQL+`
-		  AND ($1::text[] IS NULL OR mi.type = ANY($1))
+		SELECT
+			(SELECT COUNT(*)
+			 FROM media_items mi
+			 WHERE `+catalogSearchExcludeMangaChaptersSQL+`
+			   AND ($1::text[] IS NULL OR mi.type = ANY($1)))
+			+
+			(SELECT COUNT(*)
+			 FROM episodes e
+			 JOIN media_items si ON si.content_id = e.series_id AND si.type = 'series'
+			 WHERE ($1::text[] IS NULL OR 'episode' = ANY($1))
+			   AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id))
 	`, typeArg).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count catalog search eligible documents: %w", err)
 	}
@@ -902,12 +974,16 @@ func countCatalogSearchEligibleDocuments(ctx context.Context, q coverageQuerier,
 }
 
 func catalogSearchTitleVariants(doc catalogSearchDocument) []string {
-	return compactNonEmptyStrings([]string{
+	variants := []string{
 		doc.Title,
 		doc.SortTitle,
 		doc.OriginalTitle,
 		normalizeTitleForComparison(doc.Title),
 		normalizeTitleForComparison(doc.SortTitle),
 		normalizeTitleForComparison(doc.OriginalTitle),
-	})
+	}
+	for _, alias := range doc.Aliases {
+		variants = append(variants, alias, normalizeTitleForComparison(alias))
+	}
+	return compactNonEmptyStrings(variants)
 }

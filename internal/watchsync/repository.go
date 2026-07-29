@@ -45,9 +45,22 @@ type Repository interface {
 	MarkListItemError(ctx context.Context, connectionID string, kind ListKind, mediaItemID, lastError string) error
 	ListScrobbleConnections(ctx context.Context, userID int, profileID string) ([]Connection, error)
 	UpsertScrobbleSession(ctx context.Context, event ScrobbleEvent, connectionID string, action string) error
+	PrepareConfirmedScrobbleStop(ctx context.Context, event ScrobbleEvent, connectionID string, staleBefore time.Time) (confirmedStopPreparation, time.Time, error)
+	CompleteConfirmedScrobbleStop(ctx context.Context, playbackSessionID string, connectionID string, progress float64, historyID string, claimVersion time.Time, stopSentAt time.Time) error
+	FailConfirmedScrobbleStop(ctx context.Context, playbackSessionID string, connectionID string, progress float64, historyID string, claimVersion time.Time, lastError string) error
 	UpdateScrobbleSession(ctx context.Context, playbackSessionID string, connectionID string, action string, progress float64, historyID string, lastError string, stopSentAt *time.Time) error
 	ListOpenScrobbleSessions(ctx context.Context) ([]ScrobbleSession, error)
 }
+
+type confirmedStopPreparation uint8
+
+const (
+	confirmedStopPrepared confirmedStopPreparation = iota
+	confirmedStopAlreadySent
+	confirmedStopInProgress
+)
+
+var errConfirmedStopClaimLost = errors.New("confirmed scrobble stop claim lost")
 
 // connectionColumns is the canonical select/returning column list for
 // watch_provider_connections, in the exact order scanConnection reads. Sharing
@@ -981,6 +994,113 @@ func (r *PostgresRepository) UpdateScrobbleSession(ctx context.Context, playback
 	return nil
 }
 
+func (r *PostgresRepository) PrepareConfirmedScrobbleStop(ctx context.Context, event ScrobbleEvent, connectionID string, staleBefore time.Time) (confirmedStopPreparation, time.Time, error) {
+	var claimVersion time.Time
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO watch_provider_scrobble_sessions (
+			playback_session_id, connection_id, media_item_id, provider_item_key, kind,
+			imdb_id, tmdb_id, tvdb_id, series_imdb_id, series_tmdb_id, series_tvdb_id,
+			season_number, episode_number, history_id, started_at, last_progress,
+			duration_seconds, completed, last_action, last_error, stop_sent_at
+		)
+		VALUES (
+			$1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+			$11, $12, $13, $14, $15, $16, $17, $18, 'stop_confirming', '', NULL
+		)
+		ON CONFLICT (playback_session_id, connection_id) DO NOTHING
+		RETURNING updated_at
+	`, event.PlaybackSessionID, connectionID, event.MediaItemID, event.ProviderItemKey, event.Kind,
+		event.IMDbID, event.TMDBID, event.TVDBID, event.SeriesIMDbID, event.SeriesTMDBID,
+		event.SeriesTVDBID, event.SeasonNumber, event.EpisodeNumber, event.HistoryID,
+		event.OccurredAt, event.PositionSeconds, event.DurationSeconds, event.Completed).Scan(&claimVersion)
+	if err == nil {
+		return confirmedStopPrepared, claimVersion, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return confirmedStopInProgress, time.Time{}, fmt.Errorf("insert confirmed scrobble stop: %w", err)
+	}
+
+	err = r.pool.QueryRow(ctx, `
+		UPDATE watch_provider_scrobble_sessions
+		SET last_action = 'stop_confirming',
+			last_progress = $3,
+			history_id = COALESCE(NULLIF($4, ''), history_id),
+			duration_seconds = $5,
+			completed = $6,
+			last_error = '',
+			stop_sent_at = NULL,
+			updated_at = now()
+		WHERE playback_session_id = $1 AND connection_id = $2::uuid
+			-- A non-null stop_sent_at can be the provisional ActiveEncodings
+			-- fallback. Confirmed delivery must replace it with the later
+			-- authoritative Stopped position, so last_action owns deduplication.
+			AND last_action IS DISTINCT FROM 'stop_confirmed'
+			AND (last_action IS DISTINCT FROM 'stop_confirming' OR updated_at <= $7)
+		RETURNING updated_at
+	`, event.PlaybackSessionID, connectionID, event.PositionSeconds, event.HistoryID,
+		event.DurationSeconds, event.Completed, staleBefore).Scan(&claimVersion)
+	if err == nil {
+		return confirmedStopPrepared, claimVersion, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return confirmedStopInProgress, time.Time{}, fmt.Errorf("prepare confirmed scrobble stop: %w", err)
+	}
+
+	var lastAction string
+	if err := r.pool.QueryRow(ctx, `
+		SELECT last_action
+		FROM watch_provider_scrobble_sessions
+		WHERE playback_session_id = $1 AND connection_id = $2::uuid
+	`, event.PlaybackSessionID, connectionID).Scan(&lastAction); err != nil {
+		return confirmedStopInProgress, time.Time{}, fmt.Errorf("read confirmed scrobble stop state: %w", err)
+	}
+	if lastAction == "stop_confirmed" {
+		return confirmedStopAlreadySent, time.Time{}, nil
+	}
+	return confirmedStopInProgress, time.Time{}, nil
+}
+
+func (r *PostgresRepository) CompleteConfirmedScrobbleStop(ctx context.Context, playbackSessionID string, connectionID string, progress float64, historyID string, claimVersion time.Time, stopSentAt time.Time) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_scrobble_sessions
+		SET last_action = 'stop_confirmed',
+			last_progress = $3,
+			history_id = COALESCE(NULLIF($4, ''), history_id),
+			last_error = '',
+			stop_sent_at = $5,
+			updated_at = now()
+		WHERE playback_session_id = $1 AND connection_id = $2::uuid
+			AND last_action = 'stop_confirming' AND updated_at = $6
+	`, playbackSessionID, connectionID, progress, historyID, stopSentAt, claimVersion)
+	if err != nil {
+		return fmt.Errorf("complete confirmed scrobble stop: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errConfirmedStopClaimLost
+	}
+	return nil
+}
+
+func (r *PostgresRepository) FailConfirmedScrobbleStop(ctx context.Context, playbackSessionID string, connectionID string, progress float64, historyID string, claimVersion time.Time, lastError string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE watch_provider_scrobble_sessions
+		SET last_action = 'stop_retry',
+			last_progress = $3,
+			history_id = COALESCE(NULLIF($4, ''), history_id),
+			last_error = $6,
+			updated_at = now()
+		WHERE playback_session_id = $1 AND connection_id = $2::uuid
+			AND last_action = 'stop_confirming' AND updated_at = $5
+	`, playbackSessionID, connectionID, progress, historyID, claimVersion, lastError)
+	if err != nil {
+		return fmt.Errorf("fail confirmed scrobble stop: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return errConfirmedStopClaimLost
+	}
+	return nil
+}
+
 func (r *PostgresRepository) ListOpenScrobbleSessions(ctx context.Context) ([]ScrobbleSession, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT playback_session_id, connection_id::text, media_item_id, provider_item_key, kind,
@@ -989,6 +1109,7 @@ func (r *PostgresRepository) ListOpenScrobbleSessions(ctx context.Context) ([]Sc
 			duration_seconds, completed, last_action, stop_sent_at, last_error
 		FROM watch_provider_scrobble_sessions
 		WHERE stop_sent_at IS NULL
+			AND last_action NOT IN ('stop_confirming', 'stop_retry')
 		ORDER BY started_at ASC
 	`)
 	if err != nil {

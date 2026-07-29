@@ -25,13 +25,30 @@ type TMDBExternalIDClient interface {
 	GetExternalIDs(ctx context.Context, mediaType string, id int) (*tmdb.ExternalIDs, error)
 }
 
+// TMDBCertificationClient resolves a title's content rating. Detected by type
+// assertion on the service's TMDBClient, like TMDBExternalIDClient.
+type TMDBCertificationClient interface {
+	GetCertification(ctx context.Context, mediaType string, id int) (string, error)
+}
+
 const externalIDHydrationConcurrency = 4
+
+const certificationHydrationConcurrency = 8
 
 type EntitlementResolver interface {
 	// MaxPlaybackQuality returns the requester's effective playback-quality
 	// ceiling (already combining account- and profile-level caps). Empty string
 	// means "no cap".
 	MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error)
+}
+
+// ContentRatingResolver resolves the viewer's effective parental rating
+// ceiling. Detected by type assertion on the service's EntitlementResolver so
+// existing EntitlementResolver fakes keep compiling.
+type ContentRatingResolver interface {
+	// MaxContentRating returns the profile's content-rating ceiling. Empty
+	// string means "no ceiling".
+	MaxContentRating(ctx context.Context, userID int, profileID string) (string, error)
 }
 
 // RequesterIdentityResolver resolves a requesting user id into the identity a
@@ -60,6 +77,12 @@ type DiscoverySection struct {
 	TotalPages   int           `json:"total_pages"`
 	TotalResults int           `json:"total_results"`
 	Results      []MediaResult `json:"results"`
+	// NextPage is the cursor to request for the following page, needed when
+	// rating-filter backfill consumes more than one TMDB page per request
+	// (page+1 would repeat consumed pages). 0 when there are no more pages.
+	// Additive v1 field; absent (0) also when the viewer is unrestricted and
+	// plain page+1 semantics apply.
+	NextPage int `json:"next_page,omitempty"`
 }
 
 func NewService(store Store, tmdbClient TMDBClient, presence PresenceResolver) *Service {
@@ -104,6 +127,214 @@ func (s *Service) requesterCeiling(ctx context.Context, userID int, profileID st
 		return access.PlaybackQualityStandard // fail safe: HD only
 	}
 	return q
+}
+
+// viewerContentCeiling resolves the viewer's parental rating ceiling. Empty
+// string means unrestricted. Unlike the quality ceiling this is a safety
+// filter, so a resolver error propagates instead of degrading: silently
+// treating a failed lookup as "unrestricted" would leak adult content to a
+// kid profile, and treating it as "restricted" would render every carousel
+// empty with no visible cause.
+func (s *Service) viewerContentCeiling(ctx context.Context, viewer Viewer) (string, error) {
+	resolver, ok := s.entitlements.(ContentRatingResolver)
+	if !ok {
+		return "", nil
+	}
+	return resolver.MaxContentRating(ctx, viewer.UserID, viewer.ProfileID)
+}
+
+type certKey struct {
+	mediaType MediaType
+	id        int
+}
+
+// hydrateCertifications resolves content ratings for every unique
+// (mediaType, id) pair on the page. The TMDB client caches certifications
+// title-keyed with a long TTL, so in steady state this issues no requests.
+func (s *Service) hydrateCertifications(ctx context.Context, raw *tmdb.MediaPage) (map[certKey]string, error) {
+	client, ok := s.tmdb.(TMDBCertificationClient)
+	if !ok {
+		return nil, fmt.Errorf("requests: tmdb client cannot resolve certifications")
+	}
+
+	keys := make([]certKey, 0, len(raw.Results))
+	seen := map[certKey]bool{}
+	for _, item := range raw.Results {
+		mediaType, err := normalizeMediaType(MediaType(item.MediaType))
+		if err != nil || item.ID <= 0 {
+			continue
+		}
+		key := certKey{mediaType: mediaType, id: item.ID}
+		if !seen[key] {
+			seen[key] = true
+			keys = append(keys, key)
+		}
+	}
+
+	certs := make([]string, len(keys))
+	group, gctx := errgroup.WithContext(ctx)
+	group.SetLimit(certificationHydrationConcurrency)
+	for i, key := range keys {
+		i, key := i, key
+		group.Go(func() error {
+			cert, err := client.GetCertification(gctx, tmdbMediaType(key.mediaType), key.id)
+			if err != nil {
+				return err
+			}
+			certs[i] = cert
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+
+	out := make(map[certKey]string, len(keys))
+	for i, key := range keys {
+		out[key] = certs[i]
+	}
+	return out, nil
+}
+
+// Section backfill: fail-closed filtering hides most of a TMDB section page
+// for a restricted profile (typically 15+ of 20, since unrated titles are
+// dropped), which renders as a nearly empty carousel. To compensate, a
+// restricted viewer's section page consumes consecutive TMDB pages, starting
+// at the requested page, until a page's worth of titles survives filtering or
+// the per-request budget (sectionBackfillMaxPagesPerRequest) is spent.
+//
+// Pagination stays honest through two properties: `page` keeps plain TMDB
+// cursor semantics (same as for unrestricted viewers), and the response's
+// next_page reports the cursor after the last TMDB page actually consumed.
+// Every survivor from a consumed page is returned — nothing is trimmed and no
+// consumed page is partially dropped — so resuming at next_page never skips
+// or repeats an allowed title. The budget also bounds the cold-cache cost: a
+// permissive ceiling (R/TV-MA) fills from one TMDB page and stops immediately,
+// while a strict ceiling spends at most the budget per request.
+const (
+	// Per-request TMDB page budgets. A single-section request can afford a
+	// deeper scan than the six-section DiscoverAll aggregate: on a cold
+	// certification cache each consumed page costs up to 20 cert lookups
+	// against the client's rate limiter, so DiscoverAll's worst case is
+	// 6 sections x sectionBackfillBudgetAggregate pages x 20. Keeping the
+	// aggregate budget small bounds the first-paint latency for a restricted
+	// profile; the per-section endpoint (carousel "load more") gets the
+	// deeper budget. Steady state is unaffected — certifications are cached
+	// for 7 days, shared across all profiles.
+	sectionBackfillBudgetSingle    = 5
+	sectionBackfillBudgetAggregate = 2
+	sectionResultsPerPage          = 20
+	sectionBackfillMaxPage         = 500 // TMDB hard-caps page at 500
+)
+
+func (s *Service) backfillSectionPage(ctx context.Context, section string, page, pageBudget int, ceiling string) (result *tmdb.MediaPage, nextPage int, err error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageBudget <= 0 {
+		pageBudget = 1
+	}
+
+	out := &tmdb.MediaPage{Page: page}
+	var results []tmdb.MediaResult
+	// Trending/popular orderings shift between fetches, so consecutive TMDB
+	// pages can overlap; dedupe within the request.
+	seen := map[certKey]bool{}
+	totalPages := page // until TMDB tells us the real count, assume the current page exists
+	consumed := 0
+	for next := page; consumed < pageBudget && next <= totalPages && next <= sectionBackfillMaxPage; next++ {
+		// Enough survived — stop before spending another TMDB page. Titles on
+		// unconsumed pages are not lost: next_page points at the first page
+		// this request did not consume.
+		if len(results) >= sectionResultsPerPage {
+			break
+		}
+		raw, err := s.tmdb.DiscoverSection(ctx, section, next)
+		if err != nil {
+			return nil, 0, err
+		}
+		if raw == nil {
+			break
+		}
+		consumed++
+		nextPage = next + 1
+		if raw.TotalPages > 0 {
+			totalPages = raw.TotalPages
+			out.TotalResults = raw.TotalResults
+		}
+		filtered, err := s.filterPageByCeiling(ctx, raw, ceiling)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, item := range filtered.Results {
+			key := certKey{mediaType: MediaType(item.MediaType), id: item.ID}
+			if !seen[key] {
+				seen[key] = true
+				results = append(results, item)
+			}
+		}
+	}
+	out.Results = results
+	// TotalPages/TotalResults stay TMDB's unfiltered counts — page keeps TMDB
+	// cursor semantics, and the filtered totals are unknowable without a full
+	// scan. next_page is the honest resume cursor.
+	out.TotalPages = totalPages
+	if nextPage > totalPages || nextPage > sectionBackfillMaxPage {
+		nextPage = 0 // exhausted
+	}
+	return out, nextPage, nil
+}
+
+// ensureCreateAllowedByCeiling rejects request submissions for titles above
+// the viewer's rating ceiling. List filtering alone is cosmetic — the create
+// endpoint is directly callable with a guessable TMDB id.
+func (s *Service) ensureCreateAllowedByCeiling(ctx context.Context, viewer Viewer, input CreateRequestInput) error {
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return err
+	}
+	if ceiling == "" {
+		return nil
+	}
+	client, ok := s.tmdb.(TMDBCertificationClient)
+	if !ok {
+		return fmt.Errorf("requests: tmdb client cannot resolve certifications")
+	}
+	cert, err := client.GetCertification(ctx, tmdbMediaType(input.MediaType), input.TMDBID)
+	if err != nil {
+		return err
+	}
+	if !access.RatingAllowed(cert, ceiling) {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// filterPageByCeiling drops results whose certification exceeds the ceiling,
+// failing closed on missing or unrecognized certifications. TMDB's own
+// certification.lte pre-filter (applied on browse paths) is not trusted for
+// this: it ranks "NR" below "G" and matches titles when any one of several
+// US cert entries qualifies, both of which leak over-ceiling titles.
+// TotalPages/TotalResults are intentionally left as TMDB reported them —
+// recomputing them would require scanning every page, and short pages are
+// benign for the carousel/browse UIs.
+func (s *Service) filterPageByCeiling(ctx context.Context, raw *tmdb.MediaPage, ceiling string) (*tmdb.MediaPage, error) {
+	certs, err := s.hydrateCertifications(ctx, raw)
+	if err != nil {
+		return nil, err
+	}
+	filtered := *raw
+	filtered.Results = make([]tmdb.MediaResult, 0, len(raw.Results))
+	for _, item := range raw.Results {
+		mediaType, err := normalizeMediaType(MediaType(item.MediaType))
+		if err != nil || item.ID <= 0 {
+			continue
+		}
+		if access.RatingAllowed(certs[certKey{mediaType: mediaType, id: item.ID}], ceiling) {
+			filtered.Results = append(filtered.Results, item)
+		}
+	}
+	return &filtered, nil
 }
 
 // allowedQualities returns the qualities a request may receive: 1080p always,
@@ -220,6 +451,20 @@ func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, p
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	return s.discover(ctx, viewer, section, page, sectionBackfillBudgetSingle, ceiling)
+}
+
+// discover renders one section for an already-resolved ceiling. Callers own
+// the ceiling lookup so a DiscoverAll fan-out resolves the viewer scope once,
+// not once per section per page.
+func (s *Service) discover(ctx context.Context, viewer Viewer, section string, page, backfillBudget int, ceiling string) (*DiscoverySection, error) {
+	if s == nil || s.store == nil || s.tmdb == nil {
+		return nil, fmt.Errorf("request service is not configured")
+	}
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
@@ -227,11 +472,18 @@ func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, p
 	if _, ok := discoverySectionTitles[section]; !ok {
 		return nil, fmt.Errorf("%w: invalid discovery section", ErrInvalidInput)
 	}
-	raw, err := s.tmdb.DiscoverSection(ctx, section, page)
+	var raw *tmdb.MediaPage
+	var err error
+	var nextPage int
+	if ceiling != "" {
+		raw, nextPage, err = s.backfillSectionPage(ctx, section, page, backfillBudget, ceiling)
+	} else {
+		raw, err = s.tmdb.DiscoverSection(ctx, section, page)
+	}
 	if err != nil {
 		return nil, err
 	}
-	enriched, err := s.enrichPage(ctx, viewer, raw)
+	enriched, err := s.enrichPageWithCeiling(ctx, viewer, raw, ceiling)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +494,7 @@ func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, p
 		TotalPages:   enriched.TotalPages,
 		TotalResults: enriched.TotalResults,
 		Results:      enriched.Results,
+		NextPage:     nextPage,
 	}, nil
 }
 
@@ -252,13 +505,17 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return nil, err
 	}
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
 	sections := make([]DiscoverySection, len(discoverySectionOrder))
 	group, gctx := errgroup.WithContext(ctx)
 	group.SetLimit(externalIDHydrationConcurrency)
 	for i, key := range discoverySectionOrder {
 		i, key := i, key
 		group.Go(func() error {
-			section, err := s.Discover(gctx, viewer, key, 1)
+			section, err := s.discover(gctx, viewer, key, 1, sectionBackfillBudgetAggregate, ceiling)
 			if err != nil {
 				return err
 			}
@@ -296,6 +553,30 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 	}
 	if raw == nil {
 		return nil, ErrNotFound
+	}
+
+	// Deep-linking a detail page must not bypass the discovery rating filter.
+	// The guard uses the US-only enforcement certification (GetCertification,
+	// cached), NOT raw.ContentRating: the display rating falls back to any
+	// country's cert, and a foreign "PG"/"G" is the same string as the US
+	// rating, so it would pass the US ladder. ErrNotFound rather than
+	// ErrForbidden: a restricted profile shouldn't learn the title exists.
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	if ceiling != "" {
+		client, ok := s.tmdb.(TMDBCertificationClient)
+		if !ok {
+			return nil, fmt.Errorf("requests: tmdb client cannot resolve certifications")
+		}
+		cert, err := client.GetCertification(ctx, tmdbMediaType(mediaType), tmdbID)
+		if err != nil {
+			return nil, err
+		}
+		if !access.RatingAllowed(cert, ceiling) {
+			return nil, ErrNotFound
+		}
 	}
 
 	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
@@ -362,7 +643,7 @@ func (s *Service) GetDetail(ctx context.Context, viewer Viewer, mediaType MediaT
 
 	if len(raw.Recommendations) > 0 {
 		recPage := &tmdb.MediaPage{Results: raw.Recommendations}
-		enriched, err := s.enrichPage(ctx, viewer, recPage)
+		enriched, err := s.enrichPageWithCeiling(ctx, viewer, recPage, ceiling)
 		if err != nil {
 			return nil, err
 		}
@@ -387,6 +668,9 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 	}
 	normalized, err := normalizeCreateInput(input)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureCreateAllowedByCeiling(ctx, viewer, normalized); err != nil {
 		return nil, err
 	}
 	s.enrichExternalIDs(ctx, &normalized)
@@ -759,7 +1043,15 @@ func (s *Service) GetFeatureStatus(ctx context.Context, _ Viewer) (FeatureStatus
 	if err != nil {
 		return FeatureStatus{}, err
 	}
-	return FeatureStatus{RequestsEnabled: settings.RequestsEnabled}, nil
+	// Rating enforcement is active when the wiring can resolve both a
+	// profile ceiling and per-title certifications; with either missing the
+	// server behaves like an older version, and clients should know that.
+	_, hasRatings := s.entitlements.(ContentRatingResolver)
+	_, hasCerts := s.tmdb.(TMDBCertificationClient)
+	return FeatureStatus{
+		RequestsEnabled:            settings.RequestsEnabled,
+		RatingRestrictionsEnforced: hasRatings && hasCerts,
+	}, nil
 }
 
 func (s *Service) ensureRequestsEnabled(ctx context.Context) error {
@@ -1075,8 +1367,30 @@ func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePol
 }
 
 func (s *Service) enrichPage(ctx context.Context, viewer Viewer, raw *tmdb.MediaPage) (*MediaPage, error) {
+	ceiling, err := s.viewerContentCeiling(ctx, viewer)
+	if err != nil {
+		return nil, err
+	}
+	return s.enrichPageWithCeiling(ctx, viewer, raw, ceiling)
+}
+
+// enrichPageWithCeiling is enrichPage for callers that already resolved the
+// viewer's rating ceiling (discovery, browse, detail). The production
+// resolver loads the user, profile, and policy on every call, so resolving
+// once per request instead of again per page matters — DiscoverAll otherwise
+// doubles to 12 resolutions per load.
+func (s *Service) enrichPageWithCeiling(ctx context.Context, viewer Viewer, raw *tmdb.MediaPage, ceiling string) (*MediaPage, error) {
 	if raw == nil {
 		return &MediaPage{Results: []MediaResult{}}, nil
+	}
+	var err error
+	if ceiling != "" {
+		// Filtering before the presence/active-request lookups below means
+		// those (and their external-ID hydration) only pay for surviving items.
+		raw, err = s.filterPageByCeiling(ctx, raw, ceiling)
+		if err != nil {
+			return nil, err
+		}
 	}
 	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
 	if err != nil {
@@ -1557,17 +1871,24 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		// orphan in-progress downloads. Only take the shortcut for legacy/no-live
 		// -target requests; otherwise let per-target reconcile + aggregate drive
 		// completion.
-		hasLiveTargets, err := s.hasLiveTargets(ctx, req.ID)
+		live, err := s.liveTargets(ctx, req.ID)
 		if err != nil {
 			return reconcileUnchanged, err
 		}
-		if !hasLiveTargets {
+		if len(live) == 0 {
 			if req.Status == StatusCompleted {
 				return reconcileUnchanged, nil
 			}
 			if _, err := s.store.SetStatus(ctx, req.ID, StatusCompleted, Viewer{}); err != nil {
 				return reconcileUnchanged, err
 			}
+			return reconcileCompleted, nil
+		}
+		updated, retired, err := s.retireStalledTargets(ctx, req, live)
+		if err != nil {
+			return reconcileUnchanged, err
+		}
+		if retired && updated != nil && updated.Status == StatusCompleted {
 			return reconcileCompleted, nil
 		}
 	}
@@ -1654,19 +1975,72 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 	return change, nil
 }
 
-// hasLiveTargets reports whether the request has any non-terminal (queued or
-// downloading) fulfillment target.
-func (s *Service) hasLiveTargets(ctx context.Context, requestID string) (bool, error) {
+// liveTargets returns the request's non-terminal (queued or downloading)
+// fulfillment targets.
+func (s *Service) liveTargets(ctx context.Context, requestID string) ([]Target, error) {
 	targets, err := s.store.ListTargets(ctx, requestID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	var live []Target
 	for _, t := range targets {
 		if t.Status == StatusQueued || t.Status == StatusDownloading {
-			return true, nil
+			live = append(live, t)
 		}
 	}
-	return false, nil
+	return live, nil
+}
+
+// stalledTargetHorizon is how long a queued target may go without a single
+// status transition before presence-confirmed media is allowed to retire it.
+// Reconciliation runs on a schedule measured in minutes and only writes on a
+// real status change, so a target older than this has had many chances to move
+// and has not.
+const stalledTargetHorizon = 24 * time.Hour
+
+// ExternalStatusPresenceConfirmed marks a target closed out by the presence
+// backstop rather than by a router-reported completion. Exported so clients can
+// distinguish "the arr said it finished" from "we found the media ourselves".
+const ExternalStatusPresenceConfirmed = "presence_confirmed"
+
+// retireStalledTargets is the backstop for a router that never reports
+// completion. The presence shortcut in reconcileRequest stays disabled for as
+// long as any target looks live, so a router that reports "queued" forever — a
+// buggy plugin, a connection pointing at an instance that no longer tracks the
+// item — pins the request open permanently even though the media is sitting in
+// the library.
+//
+// Targets that are actively downloading are never retired: those are exactly
+// the in-flight downloads the quality-agnostic presence check must not orphan.
+// Only targets stuck in queued past the horizon are closed out, and the request
+// status follows from the usual target aggregate. It returns the request as of
+// the last retirement, if any.
+func (s *Service) retireStalledTargets(ctx context.Context, req Request, live []Target) (*Request, bool, error) {
+	cutoff := s.now().Add(-stalledTargetHorizon)
+	var updated *Request
+	retired := false
+	for _, t := range live {
+		if t.Status != StatusQueued || t.UpdatedAt.After(cutoff) {
+			continue
+		}
+		next, err := s.store.UpdateTargetStatus(ctx, t.ID, StatusCompleted, "", ExternalStatusPresenceConfirmed, "", Viewer{})
+		if err != nil {
+			return updated, retired, err
+		}
+		updated, retired = next, true
+		slog.WarnContext(ctx, "requests: retired stalled target on presence", "component", "requests",
+			"request_id", req.ID,
+			"target_id", t.ID,
+			"media_type", req.MediaType,
+			"tmdb_id", req.TMDBID,
+			"quality", t.Quality,
+			"integration_kind", t.IntegrationKind,
+			"external_id", t.ExternalID,
+			"external_status", t.ExternalStatus,
+			"target_updated_at", t.UpdatedAt,
+		)
+	}
+	return updated, retired, nil
 }
 
 func (s *Service) requestAvailable(ctx context.Context, req Request) (bool, error) {

@@ -198,7 +198,7 @@ func TestTeardownPlaySession_DeletesNodeRecipe(t *testing.T) {
 	if !ok {
 		t.Fatal("expected play session")
 	}
-	h.teardownPlaySession(context.Background(), playSession)
+	h.teardownPlaySession(context.Background(), playSession, nil, nil)
 
 	if _, ok := recipeStore.Get("upstream-1"); ok {
 		t.Fatal("node recipe should be deleted on deliberate teardown")

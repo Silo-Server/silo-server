@@ -47,6 +47,31 @@ func TestNeedsCriticalProbeRepair_ProbedVideoMissingResolutionStillRepairs(t *te
 	}
 }
 
+func TestNeedsCriticalProbeRepair_ProbedVideoMissingColorRangeRepairsOnce(t *testing.T) {
+	now := time.Now()
+	f := &models.MediaFile{
+		ProbeSource:    "local",
+		ProbeUpdatedAt: &now,
+		Duration:       7200,
+		Container:      "mkv",
+		CodecAudio:     "aac",
+		AudioTracks:    []models.AudioTrack{{Language: "eng"}},
+		CodecVideo:     "h264",
+		Resolution:     "1080p",
+		VideoTracks:    []models.VideoTrack{{Codec: "h264"}},
+		Chapters:       []models.MediaChapter{},
+	}
+
+	if !NeedsCriticalProbeRepair(f) {
+		t.Fatal("a legacy video without color range should need probe repair")
+	}
+
+	f.VideoTracks[0].ColorRange = "unknown"
+	if NeedsCriticalProbeRepair(f) {
+		t.Fatal("a reprobed video with unknown color range should not repair again")
+	}
+}
+
 func TestNeedsCriticalProbeRepair_UnprobedFileRepairs(t *testing.T) {
 	if !NeedsCriticalProbeRepair(&models.MediaFile{}) {
 		t.Fatal("an unprobed file must need probe repair")
@@ -64,7 +89,7 @@ func implausiblyShortLargeVideoFile(probedAt time.Time) *models.MediaFile {
 		AudioTracks:    []models.AudioTrack{{Language: "eng"}},
 		CodecVideo:     "h264",
 		Resolution:     "720p",
-		VideoTracks:    []models.VideoTrack{{Codec: "h264"}},
+		VideoTracks:    []models.VideoTrack{{Codec: "h264", ColorRange: "unknown"}},
 		Chapters:       []models.MediaChapter{},
 	}
 }

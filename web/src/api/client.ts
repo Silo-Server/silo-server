@@ -1,5 +1,6 @@
 import type { ApiError, RefreshResponse } from "./types";
 import { storage } from "../utils/storage";
+import { randomUUID } from "../lib/uuid";
 
 type ProfileUnverifiedListener = () => void;
 let profileUnverifiedListener: ProfileUnverifiedListener | null = null;
@@ -82,25 +83,14 @@ export function getProfileToken(): string | null {
   return profileToken;
 }
 
-function getOrCreateDeviceId(): string | null {
+function getOrCreateDeviceId(): string {
   const existing = storage.get(storage.KEYS.DEVICE_ID);
   if (existing) {
     return existing;
   }
 
-  let nextId: string | null = null;
-  try {
-    nextId =
-      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  } catch {
-    nextId = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  }
-
-  if (nextId) {
-    storage.set(storage.KEYS.DEVICE_ID, nextId);
-  }
+  const nextId = randomUUID();
+  storage.set(storage.KEYS.DEVICE_ID, nextId);
   return nextId;
 }
 
@@ -137,10 +127,6 @@ function detectDeviceName(): string {
 
 function getDeviceHeaders(): Record<string, string> {
   const deviceId = getOrCreateDeviceId();
-  if (!deviceId) {
-    return {};
-  }
-
   return {
     "X-Silo-Device-Id": deviceId,
     "X-Silo-Device-Name": detectDeviceName(),

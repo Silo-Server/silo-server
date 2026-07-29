@@ -15,6 +15,15 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
+const (
+	testPosterPath     = "/poster.jpg"
+	testBackdropPath   = "/backdrop.jpg"
+	testTMDBProvider   = "tmdb"
+	testTVDBProvider   = "tvdb"
+	testIMDBProvider   = "imdb"
+	testMetaDBProvider = "metadb"
+)
+
 // ---------------------------------------------------------------------------
 // Fake repositories
 // ---------------------------------------------------------------------------
@@ -1008,8 +1017,8 @@ func TestSyncRefreshDebtForItemPreservesRequestedEpisodeDebt(t *testing.T) {
 		Type:                      "series",
 		Status:                    "matched",
 		Overview:                  "Complete",
-		PosterPath:                "/poster.jpg",
-		BackdropPath:              "/backdrop.jpg",
+		PosterPath:                testPosterPath,
+		BackdropPath:              testBackdropPath,
 		RatingTMDB:                &rating,
 		EpisodeMetadataIncomplete: true,
 	}
@@ -1040,6 +1049,112 @@ func TestSyncRefreshDebtForItemPreservesRequestedEpisodeDebt(t *testing.T) {
 	}
 	if _, err := debts.Get(ctx, "series-1"); !errors.Is(err, ErrRefreshDebtNotFound) {
 		t.Fatalf("Get debt after complete = %v, want ErrRefreshDebtNotFound", err)
+	}
+}
+
+func TestSyncRefreshDebtForItemClearsDebtAfterSecondaryTMDBRejected(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	debts := newFakeRefreshDebtRepo()
+	staleIDs := newFakeStaleIDRepo()
+	h.service.refreshDebtRepo = debts
+	h.service.staleIDRepo = staleIDs
+	rating := 8.0
+	h.itemRepo.items["series-1"] = &models.MediaItem{
+		ContentID:    "series-1",
+		Type:         "series",
+		Status:       "matched",
+		TvdbID:       "405851",
+		Overview:     "Complete",
+		PosterPath:   testPosterPath,
+		BackdropPath: testBackdropPath,
+		RatingTMDB:   &rating,
+	}
+	staleIDs.set("series-1", &models.StaleMediaID{
+		ContentID: "series-1", Provider: testTMDBProvider, ProviderID: "12236904",
+	})
+	debts.debts["series-1"] = &models.MetadataRefreshDebt{
+		TargetType: RefreshTargetItem, ContentID: "series-1", ReasonMask: RefreshDebtReasonStaleProviderID,
+	}
+
+	if err := h.service.syncRefreshDebtForItem(ctx, "series-1"); err != nil {
+		t.Fatalf("syncRefreshDebtForItem: %v", err)
+	}
+	if _, err := debts.Get(ctx, "series-1"); !errors.Is(err, ErrRefreshDebtNotFound) {
+		t.Fatalf("Get debt after rejected secondary tmdb = %v, want ErrRefreshDebtNotFound", err)
+	}
+}
+
+func TestSyncRefreshDebtForItemKeepsFailedCurrentProviderID(t *testing.T) {
+	h := newTestHarness()
+	ctx := context.Background()
+	debts := newFakeRefreshDebtRepo()
+	staleIDs := newFakeStaleIDRepo()
+	h.service.refreshDebtRepo = debts
+	h.service.staleIDRepo = staleIDs
+	rating := 8.0
+	h.itemRepo.items["series-1"] = &models.MediaItem{
+		ContentID:    "series-1",
+		Type:         "series",
+		Status:       "matched",
+		TvdbID:       "405851",
+		Overview:     "Complete",
+		PosterPath:   testPosterPath,
+		BackdropPath: testBackdropPath,
+		RatingTMDB:   &rating,
+	}
+	staleIDs.set("series-1", &models.StaleMediaID{
+		ContentID: "series-1", Provider: testTVDBProvider, ProviderID: "405851",
+	})
+
+	if err := h.service.syncRefreshDebtForItem(ctx, "series-1"); err != nil {
+		t.Fatalf("syncRefreshDebtForItem: %v", err)
+	}
+	debt, err := debts.Get(ctx, "series-1")
+	if err != nil {
+		t.Fatalf("Get debt: %v", err)
+	}
+	if !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonStaleProviderID) {
+		t.Fatalf("reason mask = %d, want stale provider ID", debt.ReasonMask)
+	}
+}
+
+func TestShouldReanchorProviderContentIDRequiresManualRefresh(t *testing.T) {
+	const anchoredID = "movie-tmdb-111"
+	tests := []struct {
+		name      string
+		contentID string
+		isNew     bool
+		mode      RefreshMode
+		want      bool
+	}{
+		{
+			name:      "scheduled refresh",
+			contentID: anchoredID, mode: ModeScheduledRefresh,
+		},
+		{
+			name:      "identify",
+			contentID: anchoredID, mode: ModeIdentify,
+		},
+		{
+			name:      "manual refresh",
+			contentID: anchoredID, mode: ModeManualRefresh, want: true,
+		},
+		{
+			name:      "new item never reanchors",
+			contentID: anchoredID, isNew: true, mode: ModeManualRefresh,
+		},
+		{
+			name:      "local item",
+			contentID: "local-deadbeef", mode: ModeManualRefresh,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldReanchorProviderContentID(tt.contentID, tt.isNew, tt.mode); got != tt.want {
+				t.Fatalf("shouldReanchorProviderContentID() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

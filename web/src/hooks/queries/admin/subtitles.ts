@@ -7,6 +7,7 @@ import type {
   AdminUpdateDownloadedSubtitleRequest,
   SubtitleProviderConfig,
   SubtitleProviderUpdateRequest,
+  SubtitleProviderTestRequest,
   SubtitleProviderTestResponse,
 } from "@/api/types";
 import { adminKeys } from "../keys";
@@ -101,9 +102,9 @@ export function useUpdateSubtitleProvider() {
         method: "PUT",
         body: JSON.stringify(config),
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       toast.success("Provider settings saved");
-      queryClient.invalidateQueries({
+      await queryClient.invalidateQueries({
         queryKey: adminKeys.subtitleProviders(),
       });
     },
@@ -115,9 +116,10 @@ export function useUpdateSubtitleProvider() {
 
 export function useTestSubtitleProvider() {
   return useMutation({
-    mutationFn: (provider: string) =>
+    mutationFn: ({ provider, config }: { provider: string; config: SubtitleProviderTestRequest }) =>
       api<SubtitleProviderTestResponse>(`/admin/subtitle-providers/${provider}/test`, {
         method: "POST",
+        body: JSON.stringify(config),
       }),
   });
 }

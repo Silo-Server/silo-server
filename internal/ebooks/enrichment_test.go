@@ -13,11 +13,22 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestEbookContentType(t *testing.T) {
 	if got := ebookContentType(); got != "ebook" {
 		t.Fatalf("ebookContentType() = %q, want ebook", got)
+	}
+}
+
+func TestNewEnricherPreservesNilProviderIDRepository(t *testing.T) {
+	e := NewEnricher(nil, nil, nil, nil, nil, nil)
+	if e.providerIDs != nil {
+		t.Fatal("providerIDs is a non-nil typed interface for a nil repository")
 	}
 }
 
@@ -58,9 +69,14 @@ func TestEbookEnrichWorkersFromEnv(t *testing.T) {
 		t.Fatalf("ebookEnrichWorkers() with zero = %d, want default %d", got, defaultEnrichWorkers)
 	}
 
-	t.Setenv("SILO_EBOOK_ENRICH_WORKERS", "999")
-	if got := ebookEnrichWorkers(); got != defaultEnrichBatchSize {
-		t.Fatalf("ebookEnrichWorkers() capped = %d, want %d", got, defaultEnrichBatchSize)
+	t.Setenv("SILO_EBOOK_ENRICH_WORKERS", "5000")
+	if got := ebookEnrichWorkers(); got != 5000 {
+		t.Fatalf("ebookEnrichWorkers() = %d, want 5000", got)
+	}
+
+	t.Setenv("SILO_EBOOK_ENRICH_WORKERS", "9999")
+	if got := ebookEnrichWorkers(); got != maxEnrichWorkers {
+		t.Fatalf("ebookEnrichWorkers() capped = %d, want %d", got, maxEnrichWorkers)
 	}
 }
 
@@ -168,23 +184,363 @@ func TestRunBatchSkipsFailureRecordingOnCancellation(t *testing.T) {
 	}
 }
 
-func TestClaimBatchQueryAppliesFailureBackoffAndCap(t *testing.T) {
-	// Pin the starvation guard: failing items are deprioritized, not retried
-	// at the head of every sweep, and capped items are never re-claimed.
-	if !strings.Contains(claimBatchQuery, "LEFT JOIN ebook_enrichment_state ees ON ees.content_id = mi.content_id") {
-		t.Fatalf("claimBatchQuery must read dedicated ebook enrichment failure state:\n%s", claimBatchQuery)
+func TestEnrichmentQueriesKeepEbookAndAudiobookMetadataSeparate(t *testing.T) {
+	if !strings.Contains(enqueueEnrichmentJobQuery, "mi.type = 'ebook'") {
+		t.Fatalf("enqueue query must target ebooks:\n%s", enqueueEnrichmentJobQuery)
 	}
-	if !strings.Contains(claimBatchQuery, "COALESCE(ees.failures, 0) < $2") {
-		t.Fatalf("claimBatchQuery must exclude items at the failure cap:\n%s", claimBatchQuery)
+	if !strings.Contains(enqueueEnrichmentJobQuery, "NOT EXISTS") ||
+		!strings.Contains(enqueueEnrichmentJobQuery, "manga_chapters") ||
+		!strings.Contains(enqueueEnrichmentJobQuery, "chapter_content_id") {
+		t.Fatalf("enqueue query must exclude manga chapters:\n%s", enqueueEnrichmentJobQuery)
 	}
-	if !strings.Contains(claimBatchQuery, "ORDER BY COALESCE(ees.failures, 0) ASC, mi.created_at ASC") {
-		t.Fatalf("claimBatchQuery must claim least-failed items first:\n%s", claimBatchQuery)
+	if strings.Contains(loadEnrichmentItemsQuery, "narrator") ||
+		strings.Contains(loadEnrichmentItemsQuery, "asin") {
+		t.Fatalf("ebook load query must not introduce audiobook-only fields:\n%s", loadEnrichmentItemsQuery)
 	}
-	if strings.Contains(claimBatchQuery, "refresh_failures") {
-		t.Fatalf("claimBatchQuery must not read media_items.refresh_failures (owned by the metadata refresh-debt system):\n%s", claimBatchQuery)
+	if !strings.Contains(loadEnrichmentItemsQuery, "ip.kind = 7") {
+		t.Fatalf("ebook load query must load author credits only:\n%s", loadEnrichmentItemsQuery)
 	}
-	if enrichFailureCap < 1 {
-		t.Fatalf("enrichFailureCap = %d, want >= 1", enrichFailureCap)
+	for _, field := range []string{"locked_fields", "backdrop_path", "logo_path"} {
+		if !strings.Contains(loadEnrichmentItemsQuery, field) {
+			t.Fatalf("ebook load query must load %s for protection decisions:\n%s", field, loadEnrichmentItemsQuery)
+		}
+	}
+}
+
+func TestEnricherRunTransitionsClaimedJobsByOutcome(t *testing.T) {
+	queue := &fakeEnrichmentQueue{
+		jobs: []EnrichmentJob{
+			{ContentID: "success", Token: "success-token", Attempts: 1},
+			{ContentID: "no-match", Token: "no-match-token", Attempts: 1},
+			{ContentID: "skipped", Token: "skipped-token", Attempts: 1},
+			{ContentID: "failed", Token: "failed-token", Attempts: 3},
+		},
+	}
+	items := []enrichmentItemRow{
+		{ContentID: "success"},
+		{ContentID: "no-match"},
+		{ContentID: "skipped"},
+		{ContentID: "failed"},
+	}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: len(items),
+		workers:   2,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return items, nil
+		},
+		enrichClaimedItemFn: func(_ context.Context, item enrichmentItemRow) (EnrichmentOutcome, error) {
+			switch item.ContentID {
+			case "success":
+				return EnrichmentOutcomeSuccess, nil
+			case "no-match":
+				return EnrichmentOutcomeNoMatch, nil
+			case "skipped":
+				return EnrichmentOutcomeSkipped, nil
+			default:
+				return "", errors.New("provider unavailable")
+			}
+		},
+	}
+
+	result, err := e.Run(context.Background(), EnrichmentScopeIncremental)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	want := EnrichmentRunResult{Claimed: 4, Enriched: 1, NoMatch: 1, Failed: 1, Deferred: 1}
+	if result != want {
+		t.Fatalf("Run() result = %+v, want %+v", result, want)
+	}
+	if queue.claimCalls != 1 {
+		t.Fatalf("claim calls = %d, want 1", queue.claimCalls)
+	}
+	if queue.claimLimit != e.workers || queue.leaseDuration <= 0 {
+		t.Fatalf("claim args: limit=%d lease=%s", queue.claimLimit, queue.leaseDuration)
+	}
+	for contentID, want := range map[string]EnrichmentOutcome{
+		"success":  EnrichmentOutcomeSuccess,
+		"no-match": EnrichmentOutcomeNoMatch,
+		"skipped":  EnrichmentOutcomeSkipped,
+	} {
+		if got := queue.completed[contentID]; got != want {
+			t.Fatalf("completed[%q] = %q, want %q", contentID, got, want)
+		}
+	}
+	if got := queue.failed["failed"]; got != EnrichmentErrorTransient {
+		t.Fatalf("failed class = %q, want transient", got)
+	}
+	for contentID, job := range queue.transitionedJobs {
+		if job.Token != contentID+"-token" {
+			t.Fatalf("transition for %q used token %q", contentID, job.Token)
+		}
+	}
+}
+
+func TestEnricherRunCountsRateLimitedFailureAsDeferred(t *testing.T) {
+	const retryAfter = 45 * time.Minute
+	limited, err := status.New(codes.ResourceExhausted, "provider quota exhausted").WithDetails(
+		&errdetails.RetryInfo{RetryDelay: durationpb.New(retryAfter)},
+	)
+	if err != nil {
+		t.Fatalf("attach retry info: %v", err)
+	}
+	queue := &fakeEnrichmentQueue{
+		jobs: []EnrichmentJob{{ContentID: "rate-limited", Token: "token", Attempts: 1}},
+	}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: 1,
+		workers:   1,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return []enrichmentItemRow{{ContentID: "rate-limited"}}, nil
+		},
+		enrichClaimedItemFn: func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error) {
+			return "", limited.Err()
+		},
+	}
+
+	result, runErr := e.Run(context.Background(), EnrichmentScopeIncremental)
+	if runErr != nil {
+		t.Fatalf("Run() error = %v", runErr)
+	}
+	if result.Failed != 0 || result.Deferred != 1 {
+		t.Fatalf("Run() result = %+v, want one deferred and no failures", result)
+	}
+	if got := queue.failed["rate-limited"]; got != EnrichmentErrorRateLimited {
+		t.Fatalf("failure class = %q, want rate_limited", got)
+	}
+	if got := queue.retryAfter["rate-limited"]; got != retryAfter {
+		t.Fatalf("retry after = %s, want %s", got, retryAfter)
+	}
+}
+
+func TestEnricherRunReleasesEveryLeaseOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	queue := &fakeEnrichmentQueue{
+		jobs: []EnrichmentJob{
+			{ContentID: "first", Token: "first-token", Attempts: 1},
+			{ContentID: "second", Token: "second-token", Attempts: 1},
+		},
+	}
+	items := []enrichmentItemRow{{ContentID: "first"}, {ContentID: "second"}}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: len(items),
+		workers:   1,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return items, nil
+		},
+		enrichClaimedItemFn: func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error) {
+			cancel()
+			return "", context.Canceled
+		},
+	}
+
+	_, err := e.Run(ctx, EnrichmentScopeIncremental)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	sort.Strings(queue.released)
+	if got := strings.Join(queue.released, ","); got != "first,second" {
+		t.Fatalf("released leases = %q, want first,second", got)
+	}
+	if queue.releaseSawCanceledContext {
+		t.Fatal("lease release used the canceled run context")
+	}
+	if len(queue.failed) != 0 {
+		t.Fatalf("cancellation recorded item failures: %v", queue.failed)
+	}
+}
+
+func TestEnricherRunReleasesLeaseWhenCompletionLosesContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	queue := &fakeEnrichmentQueue{
+		jobs:           []EnrichmentJob{{ContentID: "success", Token: "success-token", Attempts: 1}},
+		completeCancel: cancel,
+		completeErr:    context.Canceled,
+	}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: 1,
+		workers:   1,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return []enrichmentItemRow{{ContentID: "success"}}, nil
+		},
+		enrichClaimedItemFn: func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error) {
+			return EnrichmentOutcomeSuccess, nil
+		},
+	}
+
+	_, err := e.Run(ctx, EnrichmentScopeIncremental)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if got := strings.Join(queue.released, ","); got != "success" {
+		t.Fatalf("released leases = %q, want success", got)
+	}
+	if queue.releaseSawCanceledContext {
+		t.Fatal("lease release used the canceled transition context")
+	}
+}
+
+func TestEnricherRunDiscardsClaimedRowsThatAreNoLongerEligible(t *testing.T) {
+	queue := &fakeEnrichmentQueue{
+		jobs: []EnrichmentJob{
+			{ContentID: "became-manga", Token: "manga-token", Attempts: 1},
+			{ContentID: "folderless", Token: "folderless-token", Attempts: 1},
+		},
+	}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: 2,
+		workers:   1,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return []enrichmentItemRow{{ContentID: "folderless", FolderID: 0}}, nil
+		},
+		enrichClaimedItemFn: func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error) {
+			return EnrichmentOutcomeSkipped, nil
+		},
+	}
+
+	result, err := e.Run(context.Background(), EnrichmentScopeIncremental)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := strings.Join(queue.discarded, ","); got != "became-manga" {
+		t.Fatalf("discarded = %q, want became-manga", got)
+	}
+	if got := queue.completed["folderless"]; got != EnrichmentOutcomeSkipped {
+		t.Fatalf("folderless outcome = %q, want skipped", got)
+	}
+	if len(queue.released) != 0 {
+		t.Fatalf("ineligible rows were released back into immediate churn: %v", queue.released)
+	}
+	if result.Discarded != 1 {
+		t.Fatalf("Discarded = %d, want 1", result.Discarded)
+	}
+	if result.Deferred != 1 {
+		t.Fatalf("Deferred = %d, want 1 (the skipped completion only); a discarded row is terminal, not deferred for retry", result.Deferred)
+	}
+}
+
+func TestEnricherRunCountsUpstreamCancellationAsTransientFailure(t *testing.T) {
+	queue := &fakeEnrichmentQueue{
+		jobs: []EnrichmentJob{{ContentID: "cancel-happy", Token: "cancel-token", Attempts: 1}},
+	}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: 1,
+		workers:   1,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return []enrichmentItemRow{{ContentID: "cancel-happy"}}, nil
+		},
+		enrichClaimedItemFn: func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error) {
+			return "", context.Canceled
+		},
+	}
+
+	result, err := e.Run(context.Background(), EnrichmentScopeIncremental)
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if got := queue.failed["cancel-happy"]; got != EnrichmentErrorTransient {
+		t.Fatalf("failure class = %q, want transient", got)
+	}
+	if result.Failed != 1 {
+		t.Fatalf("Failed = %d, want 1; an uncounted claim blinds the no-progress circuit breaker", result.Failed)
+	}
+	if len(queue.released) != 0 {
+		t.Fatalf("provider-canceled work was released into immediate reclaim churn: %v", queue.released)
+	}
+}
+
+func TestEnricherRunBoundsEachItemBelowTheLease(t *testing.T) {
+	queue := &fakeEnrichmentQueue{
+		jobs: []EnrichmentJob{{ContentID: "slow", Token: "slow-token", Attempts: 1}},
+	}
+	e := &Enricher{
+		queue:       queue,
+		batchSize:   1,
+		workers:     1,
+		itemTimeout: 20 * time.Millisecond,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return []enrichmentItemRow{{ContentID: "slow"}}, nil
+		},
+		enrichClaimedItemFn: func(ctx context.Context, _ enrichmentItemRow) (EnrichmentOutcome, error) {
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	}
+
+	started := time.Now()
+	if _, err := e.Run(context.Background(), EnrichmentScopeIncremental); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("per-item timeout took %s", elapsed)
+	}
+	if got := queue.failed["slow"]; got != EnrichmentErrorTransient {
+		t.Fatalf("timeout failure class = %q, want transient", got)
+	}
+	if len(queue.released) != 0 {
+		t.Fatalf("timed-out work was released immediately due: %v", queue.released)
+	}
+	if defaultEnrichmentItemTimeout >= defaultEnrichmentLease/2 {
+		t.Fatalf("default item timeout %s is not materially shorter than lease %s", defaultEnrichmentItemTimeout, defaultEnrichmentLease)
+	}
+}
+
+func TestEnricherRunClaimsAtMostOneJobPerWorker(t *testing.T) {
+	queue := &fakeEnrichmentQueue{}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: 50,
+		workers:   4,
+		enrichClaimedItemFn: func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error) {
+			return EnrichmentOutcomeSuccess, nil
+		},
+	}
+
+	if _, err := e.Run(context.Background(), EnrichmentScopeIncremental); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if queue.claimLimit != 4 {
+		t.Fatalf("claim limit = %d, want worker count 4", queue.claimLimit)
+	}
+	if queue.leaseDuration != defaultEnrichmentLease {
+		t.Fatalf("lease duration = %s, want %s", queue.leaseDuration, defaultEnrichmentLease)
+	}
+}
+
+func TestEnricherRunInjectsExactClaimOwnershipCheck(t *testing.T) {
+	queue := &fakeEnrichmentQueue{
+		jobs:          []EnrichmentJob{{ContentID: "lost", Token: "exact-token", Attempts: 1}},
+		claimCheckErr: ErrEnrichmentLeaseLost,
+		failErr:       ErrEnrichmentLeaseLost,
+	}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: 1,
+		workers:   1,
+		loadClaimedItemsFn: func(context.Context, []EnrichmentJob) ([]enrichmentItemRow, error) {
+			return []enrichmentItemRow{{ContentID: "lost"}}, nil
+		},
+		enrichClaimedItemFn: func(ctx context.Context, _ enrichmentItemRow) (EnrichmentOutcome, error) {
+			return "", requireEnrichmentClaim(ctx)
+		},
+	}
+
+	if _, err := e.Run(context.Background(), EnrichmentScopeIncremental); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if queue.claimCheckCalls != 1 {
+		t.Fatalf("claim checks = %d, want 1", queue.claimCheckCalls)
+	}
+	if got := queue.transitionedJobs["lost"].Token; got != "exact-token" {
+		t.Fatalf("ownership check token = %q, want exact-token", got)
+	}
+	if len(queue.completed) != 0 {
+		t.Fatalf("lost claim completed: %v", queue.completed)
 	}
 }
 
@@ -204,6 +560,50 @@ func TestEnrichWithProvidersSkipsWhenNoProvidersConfigured(t *testing.T) {
 	err := e.enrichWithProviders(context.Background(), enrichmentItemRow{ContentID: "c1", FolderID: 7}, nil)
 	if !errors.Is(err, errEnrichmentSkipped) {
 		t.Fatalf("enrichWithProviders error = %v, want errEnrichmentSkipped", err)
+	}
+}
+
+func TestEnrichWithProvidersRejectsLostLeaseBeforePersistence(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider metadata.Provider
+	}{
+		{
+			name: "matched metadata",
+			provider: &fakeEbookMetadataProvider{
+				slug: "provider",
+				result: &metadata.MetadataResult{
+					HasMetadata: true,
+					Overview:    "remote overview",
+				},
+			},
+		},
+		{
+			name:     "no match timestamp",
+			provider: &fakeEbookMetadataProvider{slug: "provider"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checks := 0
+			ctx := withEnrichmentClaimCheck(context.Background(), func(context.Context) error {
+				checks++
+				return ErrEnrichmentLeaseLost
+			})
+			e := &Enricher{}
+
+			_, err := e.enrichWithProvidersOutcome(ctx, enrichmentItemRow{
+				ContentID: "lost",
+				FolderID:  7,
+			}, []metadata.Provider{tt.provider})
+			if !errors.Is(err, ErrEnrichmentLeaseLost) {
+				t.Fatalf("enrich error = %v, want ErrEnrichmentLeaseLost", err)
+			}
+			if checks != 1 {
+				t.Fatalf("claim ownership checks = %d, want 1", checks)
+			}
+		})
 	}
 }
 
@@ -274,6 +674,9 @@ func TestCollectEbookMetadataAccumulatesProviderErrors(t *testing.T) {
 	}
 	if accumulator.Overview != "found" {
 		t.Fatalf("accumulator overview = %q, want metadata from the working provider", accumulator.Overview)
+	}
+	if !accumulator.HasMetadata {
+		t.Fatal("accumulator HasMetadata = false after a provider returned metadata")
 	}
 	if ids["openlibrary"] != "OL1M" {
 		t.Fatalf("accumulated IDs = %v, want search-result openlibrary ID", ids)
@@ -588,6 +991,202 @@ func TestBuildEbookMetadataRequestCarriesAccumulatedISBN(t *testing.T) {
 	}
 }
 
+type fakeEbookProviderIDRepository struct {
+	rows  map[string][]*models.MediaItemProviderID
+	err   error
+	calls [][]string
+}
+
+func (f *fakeEbookProviderIDRepository) GetByContentIDs(
+	_ context.Context,
+	contentIDs []string,
+) (map[string][]*models.MediaItemProviderID, error) {
+	f.calls = append(f.calls, append([]string(nil), contentIDs...))
+	return f.rows, f.err
+}
+
+func (f *fakeEbookProviderIDRepository) ReplaceByContentID(context.Context, string, map[string]string) error {
+	return nil
+}
+
+func (f *fakeEbookProviderIDRepository) FindContentIDByProviderIDs(
+	context.Context,
+	map[string]string,
+	string,
+	string,
+) (string, error) {
+	return "", nil
+}
+
+func TestEnricherLoadsProviderIDsInOneBatchAndSurfacesErrors(t *testing.T) {
+	repo := &fakeEbookProviderIDRepository{
+		rows: map[string][]*models.MediaItemProviderID{
+			"ebook-1": {
+				{ContentID: "ebook-1", ItemType: "ebook", Provider: "isbn", ProviderID: "9781982173456"},
+			},
+		},
+	}
+	e := &Enricher{providerIDs: repo}
+	items := []enrichmentItemRow{{ContentID: "ebook-1"}, {ContentID: "ebook-2"}}
+
+	if err := e.loadProviderIDs(context.Background(), []string{"ebook-1", "ebook-2"}, items); err != nil {
+		t.Fatalf("loadProviderIDs() error = %v", err)
+	}
+	if len(repo.calls) != 1 || strings.Join(repo.calls[0], ",") != "ebook-1,ebook-2" {
+		t.Fatalf("GetByContentIDs() calls = %#v, want one batch", repo.calls)
+	}
+	if got := items[0].ProviderIDs["isbn"]; got != "9781982173456" {
+		t.Fatalf("items[0].ProviderIDs[isbn] = %q", got)
+	}
+
+	repo.err = errors.New("provider IDs unavailable")
+	if err := e.loadProviderIDs(context.Background(), []string{"ebook-1"}, items[:1]); err == nil {
+		t.Fatal("loadProviderIDs() error = nil, want repository error")
+	}
+}
+
+func TestPreserveDurableEbookLocalMetadataAcrossRefreshes(t *testing.T) {
+	item := enrichmentItemRow{
+		Status: "matched",
+		ProtectedFields: []string{
+			"year", "overview", "release_date", "genres", "studios", "poster_path", "authors",
+		},
+	}
+	result := &metadata.MetadataResult{
+		HasMetadata: true,
+		Year:        2022,
+		Overview:    "Remote description",
+		ReleaseDate: "2022-04-05",
+		Genres:      []string{"Remote genre"},
+		Studios:     []string{"Remote publisher"},
+		PosterPath:  "https://example.test/remote.jpg",
+		Tagline:     "Remote-only field",
+		ProviderIDs: map[string]string{"isbn": "9780306406157"},
+		People: []models.ItemPerson{
+			{Person: models.Person{Name: "Remote Author"}, Kind: models.PersonKindAuthor},
+		},
+	}
+
+	preserveEbookLocalMetadata(item, result)
+
+	if result.Year != 0 || result.Overview != "" || result.ReleaseDate != "" ||
+		len(result.Genres) != 0 || len(result.Studios) != 0 || result.PosterPath != "" ||
+		len(result.People) != 0 {
+		t.Fatalf("remote fields would overwrite scanner metadata: %+v", result)
+	}
+	if result.Tagline != "Remote-only field" {
+		t.Fatalf("empty local field was not enrichable: tagline=%q", result.Tagline)
+	}
+	if result.ProviderIDs["isbn"] != "9780306406157" {
+		t.Fatalf("provider identity was discarded: %v", result.ProviderIDs)
+	}
+}
+
+func TestPreserveEbookMetadataAllowsProviderOwnedRefreshReplacement(t *testing.T) {
+	result := &metadata.MetadataResult{
+		HasMetadata: true,
+		Year:        2022,
+		Overview:    "Corrected remote description",
+	}
+
+	preserveEbookLocalMetadata(enrichmentItemRow{
+		Status: "matched",
+	}, result)
+
+	if result.Year != 2022 || result.Overview != "Corrected remote description" {
+		t.Fatalf("controlled refresh fields were suppressed: %+v", result)
+	}
+}
+
+func TestPreserveEbookLocalPosterDuringControlledRefresh(t *testing.T) {
+	result := &metadata.MetadataResult{
+		HasMetadata:     true,
+		PosterPath:      "https://example.test/replacement.jpg",
+		PosterThumbhash: "remote-thumb",
+		BackdropPath:    "https://example.test/backdrop.jpg",
+		LogoPath:        "https://example.test/logo.png",
+		Overview:        "Corrected remote description",
+	}
+
+	preserveEbookLocalMetadata(enrichmentItemRow{
+		Status:       "matched",
+		PosterPath:   "local/ebooks/book/poster/original.webp",
+		BackdropPath: "/books/book/backdrop.jpg",
+		LogoPath:     "embedded/book/logo.png",
+	}, result)
+
+	if result.PosterPath != "" || result.PosterThumbhash != "" ||
+		result.BackdropPath != "" || result.LogoPath != "" {
+		t.Fatalf("controlled refresh would replace local poster: %+v", result)
+	}
+	if result.Overview != "Corrected remote description" {
+		t.Fatalf("non-artwork refresh field was suppressed: %+v", result)
+	}
+}
+
+func TestPreserveEbookMetadataHonorsGenericLockedFields(t *testing.T) {
+	result := &metadata.MetadataResult{
+		HasMetadata:   true,
+		Title:         "Remote title",
+		Overview:      "Remote overview",
+		Year:          2024,
+		ReleaseDate:   "2024-01-02",
+		Runtime:       500,
+		Genres:        []string{"Remote genre"},
+		Studios:       []string{"Remote publisher"},
+		ContentRating: "Teen",
+		PosterPath:    "https://example.test/poster.jpg",
+		BackdropPath:  "https://example.test/backdrop.jpg",
+		LogoPath:      "https://example.test/logo.png",
+		People: []models.ItemPerson{
+			{Person: models.Person{Name: "Remote Author"}, Kind: models.PersonKindAuthor},
+		},
+	}
+	item := enrichmentItemRow{LockedFields: []int{
+		int(metadata.FieldName),
+		int(metadata.FieldOverview),
+		int(metadata.FieldGenres),
+		int(metadata.FieldStudios),
+		int(metadata.FieldCrew),
+		int(metadata.FieldRuntime),
+		int(metadata.FieldContentRating),
+		int(metadata.FieldImages),
+		int(metadata.FieldReleaseDates),
+	}}
+
+	preserveEbookLocalMetadata(item, result)
+
+	if result.Title != "" || result.Overview != "" || result.Year != 0 || result.ReleaseDate != "" ||
+		result.Runtime != 0 || len(result.Genres) != 0 || len(result.Studios) != 0 ||
+		result.ContentRating != "" || result.PosterPath != "" || result.BackdropPath != "" ||
+		result.LogoPath != "" || len(result.People) != 0 {
+		t.Fatalf("locked metadata was not protected: %+v", result)
+	}
+}
+
+func TestPreserveEbookLocalPosterAllowsProviderOwnedReplacement(t *testing.T) {
+	for _, current := range []string{
+		"",
+		"https://provider.test/old.jpg",
+		"ebook-metadata/ebooks/book/poster/original.webp",
+	} {
+		result := &metadata.MetadataResult{
+			HasMetadata:     true,
+			PosterPath:      "https://provider.test/new.jpg",
+			PosterThumbhash: "new-thumb",
+		}
+
+		preserveEbookLocalMetadata(enrichmentItemRow{
+			Status:     "matched",
+			PosterPath: current,
+		}, result)
+
+		if result.PosterPath == "" || result.PosterThumbhash == "" {
+			t.Fatalf("provider-owned poster %q was not replaceable: %+v", current, result)
+		}
+	}
+}
+
 type fakeEbookMetadataProvider struct {
 	slug      string
 	searchErr error
@@ -627,6 +1226,178 @@ func (f *fakeEbookImageCacher) CacheImage(_ context.Context, req metadata.CacheI
 		Thumbhash: "thumb",
 		Ext:       ".webp",
 	}, nil
+}
+
+type fakeEnrichmentQueue struct {
+	mu                        sync.Mutex
+	jobs                      []EnrichmentJob
+	claimCalls                int
+	claimLimit                int
+	leaseDuration             time.Duration
+	claimScope                EnrichmentScope
+	remaining                 int
+	hasReady                  bool
+	readyCountCalls           int
+	hasReadyCalls             int
+	completed                 map[string]EnrichmentOutcome
+	failed                    map[string]EnrichmentErrorClass
+	retryAfter                map[string]time.Duration
+	released                  []string
+	discarded                 []string
+	transitionedJobs          map[string]EnrichmentJob
+	claimCheckCalls           int
+	claimCheckErr             error
+	failErr                   error
+	releaseSawCanceledContext bool
+	completeCancel            context.CancelFunc
+	completeErr               error
+}
+
+func (f *fakeEnrichmentQueue) ClaimBatch(_ context.Context, scope EnrichmentScope, limit int, leaseDuration time.Duration) ([]EnrichmentJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.claimCalls++
+	f.claimLimit = limit
+	f.leaseDuration = leaseDuration
+	f.claimScope = scope
+	return append([]EnrichmentJob(nil), f.jobs...), nil
+}
+
+func (f *fakeEnrichmentQueue) ReadyCount(_ context.Context, _ EnrichmentScope) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readyCountCalls++
+	return f.remaining, nil
+}
+
+func (f *fakeEnrichmentQueue) HasReady(_ context.Context, _ EnrichmentScope) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hasReadyCalls++
+	return f.hasReady, nil
+}
+
+func (f *fakeEnrichmentQueue) Complete(_ context.Context, job EnrichmentJob, outcome EnrichmentOutcome, _ time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.completed == nil {
+		f.completed = make(map[string]EnrichmentOutcome)
+	}
+	f.completed[job.ContentID] = outcome
+	f.recordTransition(job)
+	if f.completeCancel != nil {
+		f.completeCancel()
+	}
+	return f.completeErr
+}
+
+func (f *fakeEnrichmentQueue) Fail(_ context.Context, job EnrichmentJob, errorClass EnrichmentErrorClass, _ string, retryAfter time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failed == nil {
+		f.failed = make(map[string]EnrichmentErrorClass)
+	}
+	if f.retryAfter == nil {
+		f.retryAfter = make(map[string]time.Duration)
+	}
+	f.failed[job.ContentID] = errorClass
+	f.retryAfter[job.ContentID] = retryAfter
+	f.recordTransition(job)
+	return f.failErr
+}
+
+func (f *fakeEnrichmentQueue) Release(ctx context.Context, job EnrichmentJob) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.releaseSawCanceledContext = f.releaseSawCanceledContext || ctx.Err() != nil
+	f.released = append(f.released, job.ContentID)
+	f.recordTransition(job)
+	return nil
+}
+
+func (f *fakeEnrichmentQueue) Discard(_ context.Context, job EnrichmentJob) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.discarded = append(f.discarded, job.ContentID)
+	f.recordTransition(job)
+	return nil
+}
+
+func (f *fakeEnrichmentQueue) CheckClaim(_ context.Context, job EnrichmentJob) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.claimCheckCalls++
+	f.recordTransition(job)
+	return f.claimCheckErr
+}
+
+func TestEnricherRunLimitedEnforcesClaimLimitBelowWorkerCount(t *testing.T) {
+	queue := &fakeEnrichmentQueue{}
+	e := &Enricher{
+		queue:     queue,
+		batchSize: 50,
+		workers:   50,
+		enrichClaimedItemFn: func(context.Context, enrichmentItemRow) (EnrichmentOutcome, error) {
+			return EnrichmentOutcomeSuccess, nil
+		},
+	}
+
+	if _, err := e.RunLimited(context.Background(), EnrichmentScopeLegacy, 3); err != nil {
+		t.Fatalf("RunLimited() error = %v", err)
+	}
+	if queue.claimLimit != 3 {
+		t.Fatalf("claim limit = %d, want hard caller cap 3", queue.claimLimit)
+	}
+	if queue.readyCountCalls != 0 {
+		t.Fatalf("per-batch exact ready counts = %d, want 0", queue.readyCountCalls)
+	}
+	if queue.hasReadyCalls != 1 {
+		t.Fatalf("bounded has-ready checks = %d, want 1", queue.hasReadyCalls)
+	}
+}
+
+func TestEbookHasCompleteLocalMetadata(t *testing.T) {
+	complete := enrichmentItemRow{
+		Title:      "A Book",
+		Author:     "An Author",
+		Overview:   "A useful description.",
+		PosterPath: "/library/A Book/cover.jpg",
+	}
+	if !ebookHasCompleteLocalMetadata(complete) {
+		t.Fatal("complete embedded metadata was not recognized")
+	}
+	if missing := ebookMissingMetadataFields(complete); len(missing) != 0 {
+		t.Fatalf("complete embedded metadata missing fields = %v", missing)
+	}
+
+	for name, tc := range map[string]struct {
+		field  string
+		mutate func(*enrichmentItemRow)
+	}{
+		"title":       {field: "title", mutate: func(item *enrichmentItemRow) { item.Title = "" }},
+		"author":      {field: "author", mutate: func(item *enrichmentItemRow) { item.Author = "" }},
+		"description": {field: "description", mutate: func(item *enrichmentItemRow) { item.Overview = "" }},
+		"cover":       {field: "cover", mutate: func(item *enrichmentItemRow) { item.PosterPath = "" }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			item := complete
+			tc.mutate(&item)
+			if ebookHasCompleteLocalMetadata(item) {
+				t.Fatalf("metadata missing %s was treated as complete", name)
+			}
+			missing := ebookMissingMetadataFields(item)
+			if len(missing) != 1 || missing[0] != tc.field {
+				t.Fatalf("missing fields = %v, want [%s]", missing, tc.field)
+			}
+		})
+	}
+}
+
+func (f *fakeEnrichmentQueue) recordTransition(job EnrichmentJob) {
+	if f.transitionedJobs == nil {
+		f.transitionedJobs = make(map[string]EnrichmentJob)
+	}
+	f.transitionedJobs[job.ContentID] = job
 }
 
 func TestCleanEbookSearchTitle(t *testing.T) {
