@@ -496,6 +496,48 @@ func TestPlanPlaybackV3AudioAdaptationCopiesVideo(t *testing.T) {
 	}
 }
 
+// copyUnsafeFixtureV3 returns an SDR source that would normally take a
+// video-copy remux (its audio needs conversion, its container is not offered),
+// with the copy-safety flag settable by the caller.
+func copyUnsafeFixtureV3(multiPPS bool) (*models.MediaFile, StartRequestV3) {
+	file := detailedFixtureFileV3()
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].ColorTransfer = "bt709"
+	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
+	file.CodecAudio = "truehd"
+	file.VideoTracks[0].MultiplePPS = &multiPPS
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+	req.Capabilities.Containers = []string{"mp4"}
+	req.Capabilities.VideoDecode = []VideoDecodeCapabilityV3{{Codec: "hevc", Profiles: []string{"main 10"}, Levels: []int{153}, BitDepths: []int{10}, MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 60, MaxBitrateKbps: 80_000, Hardware: true}}
+	return file, req
+}
+
+func TestPlanPlaybackV3CopyUnsafeSourceForcesTranscode(t *testing.T) {
+	// The source carries conflicting in-band PPS, so the video stream-copy remux
+	// is disqualified and planning must fall through to a real transcode.
+	file, req := copyUnsafeFixtureV3(true)
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.PlayMethod != PlayTranscode {
+		t.Fatalf("PlayMethod = %q, want transcode; result = %s", result.PlayMethod, ExplainPlannerResultV3(result))
+	}
+	if result.Plan == nil || result.Plan.DecisionReason != "copy_routes_exhausted" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
+func TestPlanPlaybackV3CopySafeSourceStillCopies(t *testing.T) {
+	// The identical source with the copy-safety scan resolved to safe keeps the
+	// cheap video stream-copy remux.
+	file, req := copyUnsafeFixtureV3(false)
+	result := PlanPlaybackV3(PlannerInputV3{Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3()})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.TranscodeAudio || result.TargetVideoCodec != "" {
+		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestPlanPlaybackV3FallsBackFromProgressiveToHLSWithoutRepeatingKey(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"

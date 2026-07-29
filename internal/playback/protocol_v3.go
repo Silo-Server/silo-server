@@ -460,6 +460,10 @@ type SourceDescriptorV3 struct {
 	AudioCodec         string             `json:"audio_codec,omitempty"`
 	AudioChannels      int                `json:"audio_channels,omitempty"`
 	AudioLayout        string             `json:"audio_layout,omitempty"`
+	// VideoCopyUnsafe marks a source whose video stream cannot be safely
+	// stream-copied into an avc1/fMP4 segment (H.264 with conflicting in-band
+	// PPS). Copy/remux routes are disqualified for it; a real encode is used.
+	VideoCopyUnsafe bool `json:"video_copy_unsafe,omitempty"`
 
 	// Letterbox fractions describe black bars BAKED INTO the picture, as a
 	// fraction of Height. Some sources encode a 2.39:1 image inside a 1920x1080

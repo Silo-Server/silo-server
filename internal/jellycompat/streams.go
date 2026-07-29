@@ -713,7 +713,17 @@ func subtitleTrackRouteIndex(file *models.MediaFile, ordinal int, track models.S
 }
 
 func externalSubtitleRouteIndex(file *models.MediaFile, ordinal int) int {
-	return len(file.VideoTracks) + len(file.AudioTracks) + len(file.SubtitleTracks) + ordinal
+	nextIndex := len(file.VideoTracks) + len(file.AudioTracks)
+	for i, track := range file.SubtitleTracks {
+		index := subtitleTrackRouteIndex(file, i, track)
+		if index >= nextIndex {
+			nextIndex = index + 1
+		}
+	}
+	if nextIndex < 1 {
+		nextIndex = 1
+	}
+	return nextIndex + ordinal
 }
 
 func subtitleCanServeSRT(format string) bool {
