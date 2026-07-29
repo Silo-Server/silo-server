@@ -1702,13 +1702,36 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		}
 		return
 	}
-	virtualStreamURL, err := h.resolveVirtualPlayback(r, file, profileID)
+	canonicalFile := file
+	virtualStreamURL, err := h.resolveVirtualPlayback(r, canonicalFile, profileID)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "virtual_playback_failed", "Failed to resolve virtual playback")
 		return
 	}
+	virtualSource := virtualStreamURL != ""
+	virtualProbeSucceeded := false
+	// A resolved virtual URI is the effective source for capability planning.
+	// Keep the catalog row canonical, but give the legacy planner the provider
+	// URL (and transient probe metadata when available) so browsers do not
+	// accidentally receive an incompatible audio codec as direct play.
+	if virtualSource {
+		transient := *file
+		transient.FilePath = virtualStreamURL
+		file = &transient
+		if h.VirtualPlaybackSourceProber != nil {
+			probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, virtualStreamURL, file)
+			cancel()
+			if probeErr != nil {
+				slog.WarnContext(r.Context(), "legacy virtual playback source probe failed; using safe transcode fallback", "component", "playback", "file_id", req.FileID, "error", probeErr)
+			} else if probed != nil {
+				file = probed
+				virtualProbeSucceeded = true
+			}
+		}
+	}
 	if virtualStreamURL != "" {
-		h.loadVirtualPlaybackCandidates(r.Context(), file)
+		h.loadVirtualPlaybackCandidates(r.Context(), canonicalFile)
 	}
 	if virtualStreamURL == "" {
 		file = h.ensurePlaybackProbe(r.Context(), file)
@@ -1769,24 +1792,49 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		audioTrackIndex = playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)
 	}
 
-	requestedFile := file
+	requestedFile := canonicalFile
 	effectiveFile := requestedFile
+	if virtualSource {
+		effectiveFile = file
+	}
 	method := playback.PlayMethod(req.PlayMethod)
 	transcodeAudio := false
 
 	// If the client sent codec capabilities and no explicit play method,
 	// use the resolver to determine the best play strategy.
-	if virtualStreamURL == "" && method == "" && h.fileResolver != nil && len(req.CodecsVideo) > 0 {
-		effectiveFile, method, transcodeAudio, audioTrackIndex = h.resolveCapabilityPlaybackSelection(
-			r.Context(),
-			req,
-			requestedFile,
-			audioTrackIndex,
-		)
+	if method == "" && h.fileResolver != nil && len(req.CodecsVideo) > 0 {
+		if virtualSource {
+			// Never substitute a catalog sibling for a resolved provider URL: the
+			// provider URL is the only valid source for this playback attempt.
+			adminSettings := playbackAdminSettingsFromRequest(r.Context(), h.SettingsRepo, h.playbackConfig().TranscodeEnabled)
+			method, transcodeAudio = resolvePlaybackMethodForFile(effectiveFile, req, audioTrackIndex, adminSettings)
+		} else {
+			effectiveFile, method, transcodeAudio, audioTrackIndex = h.resolveCapabilityPlaybackSelection(
+				r.Context(),
+				req,
+				requestedFile,
+				audioTrackIndex,
+			)
+		}
+	}
+	if virtualSource && !virtualProbeSucceeded && strings.TrimSpace(req.PlayMethod) == "" {
+		// The legacy resolver treats unknown codecs as compatible. That is safe
+		// for a local file with no audio, but not for a provider URL: browsers can
+		// decode its video while silently rejecting EAC3/DTS/TrueHD audio.
+		method = playback.PlayTranscode
+		transcodeAudio = true
 	}
 
 	if method == "" {
-		method = playback.PlayDirect
+		if virtualSource && !virtualProbeSucceeded {
+			// Without probe evidence, copying an unknown provider audio stream is
+			// unsafe (Chrome commonly plays video while emitting no audio). The
+			// HLS path resolves the source at the server and encodes AAC.
+			method = playback.PlayTranscode
+			transcodeAudio = true
+		} else {
+			method = playback.PlayDirect
+		}
 	}
 	audioTrackIndex = normalizeAudioTrackIndex(effectiveFile, audioTrackIndex)
 	preserveDirectAudioSelection := method == playback.PlayDirect &&
@@ -2020,7 +2068,7 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 		}
 	}
 
-	if virtualStreamURL != "" {
+	if virtualStreamURL != "" && session.PlayMethod == playback.PlayDirect {
 		resp.StreamURL = virtualStreamURL
 		resp.SubtitleURLs = nil
 		resp.PlaybackInfo = &playbackInfoResult{StreamType: "external_http"}
