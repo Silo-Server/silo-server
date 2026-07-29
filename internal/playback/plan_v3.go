@@ -309,7 +309,10 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	// client's decoder claims; the validated HDR10 strip is the only eligible
 	// P7 remux recipe.
 	remuxRangeOK := rangeOK && source.DVProfile != 7
-	if videoOK && (remuxRangeOK || dvStripEligible) && (remuxSubtitleOK || hlsRemuxSubtitleOK) {
+	// A copy-unsafe source (H.264 with conflicting in-band PPS) must not take a
+	// video stream-copy route: the avc1/fMP4 segment would desync strict
+	// decoders. Skipping the remux branch drops through to the HLS transcode.
+	if videoOK && !source.VideoCopyUnsafe && (remuxRangeOK || dvStripEligible) && (remuxSubtitleOK || hlsRemuxSubtitleOK) {
 		plan := base
 		plan.Delivery = DeliveryRemuxProgressiveV3
 		plan.Engine = EngineMedia3ProgressiveRemuxV3

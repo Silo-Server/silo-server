@@ -929,7 +929,7 @@ func main() {
 		s.SetLiteraryWorkLinker(literaryWorkService)
 		s.SetEbookEnrichmentQueue(ebooks.NewEnrichmentQueue(deps.DB))
 		deps.Scanner = s
-		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, 10*time.Second)
+		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, cfg.Playback.FFmpegPath, 10*time.Second)
 		slog.Info("scanner initialized")
 	}
 
