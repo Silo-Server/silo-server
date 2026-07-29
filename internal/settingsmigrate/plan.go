@@ -275,8 +275,58 @@ func (p *Planner) Plan(in Input) Result {
 	p.planLibraryPrefs(in.LibraryPrefs, &res)
 
 	res.Rows = dedupeRows(res.Rows)
+	res.Rows = dropOrphanProfileRows(res.Rows, in.Profiles, &res)
 
 	return res
+}
+
+// dropOrphanProfileRows removes rows whose profile no longer exists.
+//
+// The legacy per-profile tables carry an ON DELETE CASCADE on (user_id,
+// profile_id) today, but rows predating that constraint survived their
+// profile's deletion — a real install had 46 such rows across 14 deleted
+// profiles. The canonical table declares the same foreign key, so copying one
+// aborts the whole migration transaction and the server cannot start.
+//
+// Dropping rather than repairing: a device override belonging to a profile
+// nobody can select is not a preference anyone can be shown or reset. They are
+// recorded as rejects rather than discarded silently, so an operator inspecting
+// user_setting_migration_rejects sees what was left behind and why.
+func dropOrphanProfileRows(rows []Row, profiles []LegacyProfile, res *Result) []Row {
+	// No profiles at all means the caller did not read them — as
+	// planAccountSettings' fan-out already assumes — so there is nothing to
+	// check against and every row passes through.
+	if len(profiles) == 0 {
+		return rows
+	}
+	known := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		known[profile.ID] = struct{}{}
+	}
+
+	kept := rows[:0]
+	for _, row := range rows {
+		if row.ProfileID == "" {
+			kept = append(kept, row) // account scope: no profile to orphan
+			continue
+		}
+		if _, ok := known[row.ProfileID]; ok {
+			kept = append(kept, row)
+			continue
+		}
+		res.Rejects = append(res.Rejects, Reject{
+			SourceTable: sourceUserDeviceSettings,
+			SourceKey:   row.Key,
+			Identity: identityJSON(map[string]any{
+				fieldProfileID: row.ProfileID,
+				"device_id":    row.DeviceID,
+				"scope":        string(row.Scope),
+			}),
+			Value:  string(row.Value),
+			Reason: "profile no longer exists; the legacy row outlived the profile it belonged to",
+		})
+	}
+	return kept
 }
 
 // dedupeRows collapses rows that landed on the same canonical identity. The

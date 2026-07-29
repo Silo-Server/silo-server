@@ -1159,16 +1159,37 @@ Order matters:
 
 1. Stop the server.
 2. Roll the schema back before re-deploying the old binary:
-   `make migrate-down-to VERSION=<last version the old binary knows>`. This is a dedicated
-   command rather than the `goose` CLI because the backfill and the DisplayPreferences move
-   are Go migrations registered in-process, which the standalone CLI cannot see or reverse.
+   `make migrate-down-to VERSION=<last version to keep>`. This is a dedicated command rather
+   than the `goose` CLI because the backfill and the DisplayPreferences move are Go
+   migrations registered in-process, which the standalone CLI cannot see or reverse.
 3. Deploy the previous binary.
+
+**`down-to` is a range, not a list, and this release is not contiguous.** The settings work
+is spread either side of migrations that belong to other features: `20260727010621`
+(settings tables) and `20260728132327` (the DisplayPreferences move) sit around
+`20260727212045_invitations` and `20260727220010_profile_onboarding`, both of which are
+older-binary migrations. Goose walks down from the newest applied version and stops at the
+one named, so it reverts everything in between — and `profile_onboarding`'s down is
+`DROP TABLE user_profile_onboarding`, which discards every profile's onboarding-tour state.
+
+So there is no version that undoes only this release:
+
+- `VERSION=20260728132326` reverts just the DisplayPreferences move — the destructive half,
+  and the one that matters for a binary rollback. Prefer this when the goal is simply
+  "let the old binary find its jellycompat rows again."
+- `VERSION=20260727212045` additionally reverts the settings tables, and takes
+  `profile_onboarding` with it. Only use it if you accept losing tour state, or if you are
+  restoring from backup anyway.
 
 Two caveats an operator has to know before upgrading:
 
 - **Take a database backup first.** The rollback path is exercised by a test
   (`internal/database/migrate_downto_test.go`), but a backup is the only recovery once the
-  follow-up migration drops the superseded columns.
+  follow-up migration drops the superseded columns — and, given the interleaving above, the
+  only way to undo this release without collateral.
+- **Rolling back discards settings written while the new binary was live.** The canonical
+  write path does not mirror into the legacy tables, so `rollbackSettingValues` drops those
+  changes; users revert to their pre-upgrade preferences rather than to defaults.
 - **The per-user SQLite backend cannot be rolled back at all.** Its migrations are
   version-numbered with no down path, and an older binary refuses to open a database newer
   than it knows (`internal/userdb/migrate.go`), so every per-user store fails to open and

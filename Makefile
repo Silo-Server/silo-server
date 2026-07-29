@@ -167,12 +167,16 @@ migrate-status:
 # Not a routine operation: it discards data. It exists because some migrations
 # are Go rather than SQL — the settings backfill and the jellycompat
 # DisplayPreferences move — and those are registered in-process, so the goose
-# CLI above cannot see or reverse them. Take a backup first regardless; the
-# per-user SQLite stores have no down path at all.
+# CLI above cannot see or reverse them.
 #
-# Usage: make migrate-down-to VERSION=20260727212045
+# This is a RANGE, not a list: everything newer than VERSION comes off, including
+# migrations belonging to other features that happen to sort in between. Check
+# `make migrate-status` and read the down of each one you are about to revert.
+# Take a backup first regardless; the per-user SQLite stores have no down path.
+#
+# Usage: make migrate-down-to VERSION=<timestamp from migrate-status>
 migrate-down-to:
-	@if [ -z "$(VERSION)" ]; then echo "usage: make migrate-down-to VERSION=20260727212045"; exit 1; fi
+	@if [ -z "$(VERSION)" ]; then echo "usage: make migrate-down-to VERSION=<timestamp from make migrate-status>"; exit 1; fi
 	go run ./cmd/silo/ --env "$(ENV_FILE)" --migrate-down-to "$(VERSION)"
 
 # Apply pending Goose migrations through Silo's bootstrapping runner.

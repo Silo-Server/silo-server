@@ -53,8 +53,11 @@ ON CONFLICT (username) DO UPDATE SET email=EXCLUDED.email RETURNING id`).Scan(&u
 		t.Fatalf("re-up: %v", err)
 	}
 
-	// Roll back to just before the displayprefs table migration.
-	if err := MigrateDownTo(ctx, pool, migrations.FS, "sql", 20260727212045); err != nil {
+	// The narrow rollback the spec recommends: revert only the
+	// DisplayPreferences pair, which is the destructive half. A wider target
+	// would also revert profile_onboarding, an older-binary migration that
+	// happens to sort in between and whose down drops its table.
+	if err := MigrateDownTo(ctx, pool, migrations.FS, "sql", 20260728132326); err != nil {
 		t.Fatalf("MigrateDownTo: %v", err)
 	}
 
@@ -67,5 +70,17 @@ ON CONFLICT (username) DO UPDATE SET email=EXCLUDED.email RETURNING id`).Scan(&u
 		t.Errorf("restored=%q want %q", restored, blob)
 	}
 	t.Logf("down-to restored the legacy row the old binary reads: %v", restored == blob)
+
+	// And it did not take an unrelated feature's migration with it — the trap
+	// that makes down-to a range rather than a list.
+	var onboarding bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables
+		 WHERE table_schema='public' AND table_name='user_profile_onboarding')`).Scan(&onboarding); err != nil {
+		t.Fatalf("checking onboarding table: %v", err)
+	}
+	if !onboarding {
+		t.Error("the narrow rollback dropped user_profile_onboarding, which belongs to another release")
+	}
+
 	_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, userID)
 }

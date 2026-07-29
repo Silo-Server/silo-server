@@ -634,3 +634,51 @@ func TestStrandedDeviceAudioLanguageIsQuarantined(t *testing.T) {
 		t.Errorf("the stranded row was dropped rather than recorded: %+v", res.Rejects)
 	}
 }
+
+// TestOrphanedProfileRowsAreDropped reproduces a real dev-server migration
+// failure: user_device_settings held rows for profiles that had been deleted —
+// 46 of them across 14 profiles, predating the cascade the legacy table now
+// carries. The canonical table declares the same foreign key, so copying one
+// aborted the migration transaction and the server could not start.
+func TestOrphanedProfileRowsAreDropped(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "live"}},
+		DeviceSettings: []LegacyDeviceSetting{
+			{ProfileID: "live", DeviceID: "d1", Key: "subtitle_appearance",
+				Value: `{"fontSize":"large"}`},
+			{ProfileID: "deleted", DeviceID: "d1", Key: "subtitle_appearance",
+				Value: `{"fontSize":"large"}`},
+		},
+	})
+
+	for _, row := range res.Rows {
+		if row.ProfileID == "deleted" {
+			t.Errorf("a row for a deleted profile survived and would trip the FK: %+v", row)
+		}
+	}
+	if !hasKey(res, "playback.subtitle_appearance") {
+		t.Error("the live profile's row was dropped along with the orphan")
+	}
+
+	// Dropped, not silently discarded: an operator has to be able to see it.
+	var recorded bool
+	for _, reject := range res.Rejects {
+		if strings.Contains(string(reject.Identity), "deleted") {
+			recorded = true
+		}
+	}
+	if !recorded {
+		t.Errorf("the orphan was dropped without a reject: %+v", res.Rejects)
+	}
+}
+
+// Account-scope rows carry no profile, so they must survive the orphan filter.
+func TestAccountScopeRowsSurviveTheOrphanFilter(t *testing.T) {
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1"}},
+		Settings: []LegacySetting{{Key: "ui_theme", Value: "cobalt-studio"}},
+	})
+	if !hasKey(res, "ui.theme") {
+		t.Errorf("the account fan-out was dropped: rows=%+v rejects=%+v", res.Rows, res.Rejects)
+	}
+}
