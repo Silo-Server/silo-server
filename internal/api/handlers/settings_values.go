@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -217,8 +218,15 @@ func (h *SettingValuesHandler) setValueAt(
 	var body struct {
 		Value json.RawMessage `json:"value"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err := decoder.Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "Body must be {\"value\": …}")
+		return
+	}
+	// The body must be exactly one JSON document: content after the envelope
+	// would mean different parsers could disagree about which mutation this is.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "bad_request", "Body must be a single JSON document")
 		return
 	}
 	if len(body.Value) == 0 {
@@ -236,8 +244,9 @@ func (h *SettingValuesHandler) setValueAt(
 	// not double-apply it, and must be able to tell "already done" from "that
 	// id means something else".
 	mutationID := strings.TrimSpace(r.Header.Get(mutationIDHeader))
+	var requestHash string
 	if mutationID != "" {
-		requestHash := hashMutationRequest(identity, normalized)
+		requestHash = hashMutationRequest(identity, normalized)
 		prior, err := store.GetSettingMutation(r.Context(), mutationID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to check the mutation id")
@@ -253,7 +262,6 @@ func (h *SettingValuesHandler) setValueAt(
 			writeRawJSON(w, http.StatusOK, prior.Result)
 			return
 		}
-		defer h.recordMutation(r, store, mutationID, requestHash, identity, normalized)
 	}
 
 	stored, err := store.UpsertSettingValue(r.Context(), identity, normalized)
@@ -266,9 +274,19 @@ func (h *SettingValuesHandler) setValueAt(
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store the setting")
 		return
 	}
+
+	response := settingValueToResponse(*stored)
+	if mutationID != "" {
+		// Recorded only now, after the write landed: a receipt written for a
+		// failed upsert would turn the client's retry of a 500 into a silent
+		// 200 replay of a write that never happened. Storing the actual
+		// response also makes the replay byte-identical — revision and
+		// updated_at included — rather than a reconstruction of the input.
+		h.recordMutation(r, store, mutationID, requestHash, response)
+	}
 	publishUserSettingsEvent(r.Context(), h.EventsHub,
 		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
-	writeJSON(w, http.StatusOK, settingValueToResponse(*stored))
+	writeJSON(w, http.StatusOK, response)
 }
 
 // HandleDeleteValue removes the explicit value at one scope, which is how a
@@ -338,6 +356,21 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 		SeriesIDs:  splitCSV(r.URL.Query().Get("series_ids")),
 	}
 
+	// A device-aware key resolved without a device identity would silently
+	// skip every stored device override and pass the profile fallback off as
+	// the effective value — a plausible wrong answer. Fail closed instead:
+	// the write path already requires the header for device overrides.
+	if rc.DeviceID == "" {
+		for _, key := range keys {
+			if def, ok := h.contract.Lookup(key); ok &&
+				def.AllowsScope(settingscontract.ScopeProfileDevice) {
+				writeError(w, http.StatusBadRequest, "bad_request",
+					"X-Silo-Device-Id header is required to resolve "+key)
+				return
+			}
+		}
+	}
+
 	resolved, err := h.resolver.Resolve(r.Context(), store, rc, keys, h.constraintsFor(r))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to resolve settings")
@@ -387,23 +420,16 @@ func (h *SettingValuesHandler) constraintsFor(r *http.Request) settingsresolve.C
 	return settingsresolve.Constraints{policyInputMaxPlaybackQuality: limit}
 }
 
-// recordMutation stores the idempotency receipt after a successful write.
+// recordMutation stores the idempotency receipt after a successful write. The
+// receipt is the response the original request returned, so a replay serves
+// exactly what the client would have received.
 func (h *SettingValuesHandler) recordMutation(
 	r *http.Request,
 	store userstore.UserStore,
 	mutationID, requestHash string,
-	identity userstore.SettingIdentity,
-	value json.RawMessage,
+	response settingValueResponse,
 ) {
-	receipt, _ := json.Marshal(settingValueResponse{
-		Key:       identity.Key,
-		Scope:     string(identity.Scope),
-		ProfileID: identity.ProfileID,
-		DeviceID:  identity.DeviceID,
-		LibraryID: identity.LibraryID,
-		SeriesID:  identity.SeriesID,
-		Value:     value,
-	})
+	receipt, _ := json.Marshal(response)
 	// Best effort: the write already succeeded, and failing the request now
 	// would tell the client the opposite of the truth. A missing receipt costs
 	// at most a duplicate write on retry, which upsert makes harmless.

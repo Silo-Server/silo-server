@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -266,6 +267,37 @@ func TestEffectiveResolvesThroughTheLadder(t *testing.T) {
 	}
 }
 
+// TestEffectiveRequiresDeviceIdentityForDeviceAwareKeys: resolving a
+// device-capable key without a device identity would silently skip stored
+// device overrides and pass the profile fallback off as effective.
+func TestEffectiveRequiresDeviceIdentityForDeviceAwareKeys(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	effective := func(query string) *httptest.ResponseRecorder {
+		req := valuesRequest(http.MethodGet, "/settings/values/effective?"+query, nil)
+		req.Header.Del(deviceIDHeader)
+		rec := httptest.NewRecorder()
+		handler.HandleGetEffective(rec, req)
+		return rec
+	}
+
+	// playback.subtitle_language allows profile_device, so it needs the header.
+	if rec := effective("keys=playback.subtitle_language"); rec.Code != http.StatusBadRequest {
+		t.Errorf("device-aware key without a device id = %d, want 400: %s",
+			rec.Code, rec.Body.String())
+	}
+	// The no-keys form resolves every remote definition, which includes
+	// device-aware ones.
+	if rec := effective(""); rec.Code != http.StatusBadRequest {
+		t.Errorf("all-keys request without a device id = %d, want 400", rec.Code)
+	}
+	// ui.custom_css is profile-only: no device identity needed.
+	if rec := effective("keys=ui.custom_css"); rec.Code != http.StatusOK {
+		t.Errorf("profile-only key without a device id = %d, want 200: %s",
+			rec.Code, rec.Body.String())
+	}
+}
+
 // TestEffectiveWithNoKeysReturnsEveryRemoteSetting, which is what a settings
 // screen opening for the first time asks for.
 func TestEffectiveWithNoKeysReturnsEveryRemoteSetting(t *testing.T) {
@@ -431,6 +463,125 @@ func TestMutationIDMakesWritesIdempotent(t *testing.T) {
 	}
 	if string(value.Value) != `"always"` {
 		t.Errorf("stored value = %s, want the first write preserved", value.Value)
+	}
+}
+
+// TestMutationReceiptReplaysTheStoredResponse: the receipt is the response the
+// original write returned, so a replay carries the real revision and
+// updated_at rather than a reconstruction of the request.
+func TestMutationReceiptReplaysTheStoredResponse(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	send := func() *httptest.ResponseRecorder {
+		req := valuesRequest(http.MethodPut,
+			"/settings/values/playback.subtitle_mode?scope=profile",
+			[]byte(`{"value":"always"}`))
+		req.Header.Set(mutationIDHeader, "mut-replay")
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("key", "playback.subtitle_mode")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+		rec := httptest.NewRecorder()
+		handler.HandleSetValue(rec, req)
+		return rec
+	}
+
+	first := send()
+	if first.Code != http.StatusOK {
+		t.Fatalf("first write = %d: %s", first.Code, first.Body.String())
+	}
+	replay := send()
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay = %d: %s", replay.Code, replay.Body.String())
+	}
+	if strings.TrimSpace(first.Body.String()) != strings.TrimSpace(replay.Body.String()) {
+		t.Errorf("replay body diverged from the original response:\n first: %s\nreplay: %s",
+			first.Body.String(), replay.Body.String())
+	}
+	var original settingValueResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &original); err != nil {
+		t.Fatalf("decoding original response: %v", err)
+	}
+	if original.Revision == 0 || original.UpdatedAt == "" {
+		t.Errorf("original response revision=%d updated_at=%q — the replayed "+
+			"receipt must carry the stored row, not the request",
+			original.Revision, original.UpdatedAt)
+	}
+}
+
+// failingUpsertStore simulates the store failing the write itself — the
+// PostgreSQL profile FK rejecting a row, a dropped connection — while every
+// other operation, the receipt lookup and insert included, works.
+type failingUpsertStore struct {
+	userstore.UserStore
+}
+
+func (failingUpsertStore) UpsertSettingValue(
+	context.Context, userstore.SettingIdentity, json.RawMessage,
+) (*userstore.SettingValue, error) {
+	return nil, errors.New("simulated write failure")
+}
+
+// TestFailedWritesLeaveNoReceipt: a receipt for a write that never landed
+// would turn the client's retry of a 500 into a silent success replay.
+func TestFailedWritesLeaveNoReceipt(t *testing.T) {
+	handler, store := newValuesTestHandler(t)
+	handler.storeProvider = testUserStoreProvider{store: failingUpsertStore{UserStore: store}}
+
+	send := func() *httptest.ResponseRecorder {
+		req := valuesRequest(http.MethodPut,
+			"/settings/values/playback.subtitle_mode?scope=profile",
+			[]byte(`{"value":"always"}`))
+		req.Header.Set(mutationIDHeader, "mut-fail")
+		routeCtx := chi.NewRouteContext()
+		routeCtx.URLParams.Add("key", "playback.subtitle_mode")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+		rec := httptest.NewRecorder()
+		handler.HandleSetValue(rec, req)
+		return rec
+	}
+
+	if rec := send(); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("failed write = %d, want 500", rec.Code)
+	}
+	prior, err := store.GetSettingMutation(context.Background(), "mut-fail")
+	if err != nil {
+		t.Fatalf("reading mutation receipt: %v", err)
+	}
+	if prior != nil {
+		t.Error("a failed write left an idempotency receipt; its retry would replay a success")
+	}
+	// And the retry actually retries: with the store healthy again it stores
+	// the value rather than replaying a phantom result.
+	handler.storeProvider = testUserStoreProvider{store: store}
+	retry := send()
+	if retry.Code != http.StatusOK {
+		t.Fatalf("retry after failure = %d: %s", retry.Code, retry.Body.String())
+	}
+	if retry.Header().Get("X-Silo-Idempotent-Replay") == "true" {
+		t.Error("the retry was served as a replay of the failed attempt")
+	}
+}
+
+// TestMutationBodyMustBeOneDocument: trailing content after the envelope means
+// different parsers could disagree about which mutation was requested.
+func TestMutationBodyMustBeOneDocument(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	rec := routeValues(t, handler, http.MethodPut, "playback.subtitle_mode",
+		"scope=profile", []byte(`{"value":"always"}{"value":"off"}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("concatenated envelopes = %d, want 400", rec.Code)
+	}
+	rec = routeValues(t, handler, http.MethodPut, "playback.subtitle_mode",
+		"scope=profile", []byte(`{"value":"always"} trailing`))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("trailing garbage = %d, want 400", rec.Code)
+	}
+	// Trailing whitespace is not content.
+	rec = routeValues(t, handler, http.MethodPut, "playback.subtitle_mode",
+		"scope=profile", []byte(`{"value":"always"}`+"\n"))
+	if rec.Code != http.StatusOK {
+		t.Errorf("trailing newline = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 }
 
