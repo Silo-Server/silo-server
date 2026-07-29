@@ -402,6 +402,8 @@ func main() {
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
+	migrateDownTo := flag.Int64("migrate-down-to", -1,
+		"roll back every migration newer than this version and exit (the version to KEEP)")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -470,6 +472,21 @@ func main() {
 			}
 			fmt.Printf("%-8s %8d %-25s %s\n", status.State, status.Version, appliedAt, source)
 		}
+		return
+	}
+
+	if *migrateDownTo >= 0 {
+		// Deliberately its own flag rather than a mode of --migrate-only: this
+		// discards data, and several of the migrations it reverses are Go ones
+		// the goose CLI cannot reach, so it is the only way to undo them
+		// short of restoring a backup.
+		migCtx, migCancel := database.MigrationContext(ctx)
+		migErr := database.MigrateDownTo(migCtx, pool, migrations.FS, "sql", *migrateDownTo)
+		migCancel()
+		if migErr != nil {
+			log.Fatalf("failed to roll back migrations: %v", migErr)
+		}
+		slog.Info("database migrations rolled back", "kept_through_version", *migrateDownTo)
 		return
 	}
 

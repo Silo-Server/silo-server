@@ -1146,6 +1146,35 @@ being held to the migration's schedule in either direction.
    clients against an old server show server-upgrade-required.
 5. No old settings route or schema remains active after the migration commits.
 
+### Rollback
+
+Reverting the binary alone is **not** sufficient, and the reason is specific: the
+DisplayPreferences move deletes the `jellycompat:*` rows from `user_settings` once it has
+copied them, and the previous binary reads exactly those rows. An older server therefore
+starts cleanly and silently serves defaults, so every Jellyfin client's saved view
+preferences look reset. The settings backfill does not have this problem — it only derives
+new rows and never touches the legacy tables.
+
+Order matters:
+
+1. Stop the server.
+2. Roll the schema back before re-deploying the old binary:
+   `make migrate-down-to VERSION=<last version the old binary knows>`. This is a dedicated
+   command rather than the `goose` CLI because the backfill and the DisplayPreferences move
+   are Go migrations registered in-process, which the standalone CLI cannot see or reverse.
+3. Deploy the previous binary.
+
+Two caveats an operator has to know before upgrading:
+
+- **Take a database backup first.** The rollback path is exercised by a test
+  (`internal/database/migrate_downto_test.go`), but a backup is the only recovery once the
+  follow-up migration drops the superseded columns.
+- **The per-user SQLite backend cannot be rolled back at all.** Its migrations are
+  version-numbered with no down path, and an older binary refuses to open a database newer
+  than it knows (`internal/userdb/migrate.go`), so every per-user store fails to open and
+  the rollback is an outage rather than a degradation. Installs on `userdb.backend: sqlite`
+  must restore from backup. The default backend is PostgreSQL.
+
 ### Post-cutover cleanup
 
 - Verify migrated counts/checksums and effective-value samples.

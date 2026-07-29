@@ -1,4 +1,4 @@
-.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all
+.PHONY: frontend build dev-frontend dev-backend dev-proxy dev-transcode lint test test-go test-web embed-stub clean jellyfin-web migrate-continuum-check verify-local-paths install-hooks migrate-create migrate-validate migrate-status migrate-up migrate-down-to settings-bindings verify-settings-bindings verify-settings-bindings-web verify-settings-bindings-all
 
 GIT_COMMON_DIR := $(strip $(shell git rev-parse --git-common-dir 2>/dev/null))
 MAIN_CHECKOUT_ROOT := $(if $(GIT_COMMON_DIR),$(abspath $(GIT_COMMON_DIR)/..))
@@ -161,6 +161,19 @@ migrate-validate:
 # Show Goose migration status through Silo's bootstrapping runner.
 migrate-status:
 	go run ./cmd/silo/ --env "$(ENV_FILE)" --migrate-status
+
+# Roll back every migration newer than VERSION (the version to KEEP).
+#
+# Not a routine operation: it discards data. It exists because some migrations
+# are Go rather than SQL — the settings backfill and the jellycompat
+# DisplayPreferences move — and those are registered in-process, so the goose
+# CLI above cannot see or reverse them. Take a backup first regardless; the
+# per-user SQLite stores have no down path at all.
+#
+# Usage: make migrate-down-to VERSION=20260727212045
+migrate-down-to:
+	@if [ -z "$(VERSION)" ]; then echo "usage: make migrate-down-to VERSION=20260727212045"; exit 1; fi
+	go run ./cmd/silo/ --env "$(ENV_FILE)" --migrate-down-to "$(VERSION)"
 
 # Apply pending Goose migrations through Silo's bootstrapping runner.
 migrate-up:
