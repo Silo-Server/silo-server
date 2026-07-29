@@ -15,7 +15,16 @@ import { resolutionScore } from "./versionRankingUtils";
 // ---------------------------------------------------------------------------
 
 export function buildQualitySummary(version: FileVersion): string {
-  if (version.file_path?.includes("results=all")) return "More results…";
+  if (version.file_path) {
+    try {
+      const parsed = new URL(version.file_path, "http://silo.local");
+      if (parsed.searchParams.get("results") === "all" && !parsed.searchParams.has("result")) {
+        return "More results…";
+      }
+    } catch {
+      // Fall through to the regular media quality summary for malformed paths.
+    }
+  }
   const parts: string[] = [];
 
   if (version.resolution) parts.push(version.resolution);
