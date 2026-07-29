@@ -5,11 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
@@ -52,18 +50,6 @@ func (f VirtualPlaybackStreamListerFunc) ListVirtualPlaybackStreams(ctx context.
 // files.
 type VirtualPlaybackStreamSink func(context.Context, *models.MediaFile, []VirtualPlaybackStream) error
 
-var (
-	jitWorkerSem     chan struct{}
-	jitWorkerSemOnce sync.Once
-)
-
-func jitSemaphore() chan struct{} {
-	jitWorkerSemOnce.Do(func() {
-		jitWorkerSem = make(chan struct{}, 8)
-	})
-	return jitWorkerSem
-}
-
 func isVirtualPlaybackFile(file *models.MediaFile) bool {
 	return file != nil && strings.HasPrefix(file.FilePath, virtualPlaybackPrefix)
 }
@@ -90,40 +76,29 @@ func (h *PlaybackHandler) loadVirtualPlaybackCandidates(ctx context.Context, fil
 	if h.VirtualPlaybackStreamLister == nil || h.VirtualPlaybackStreamSink == nil || file == nil {
 		return
 	}
-	// A profile URI is already a materialized selection (one provider result
-	// per configured quality profile). A result URI is likewise an explicit
-	// picker choice. Listing candidates here would turn either mode into the
-	// picker by persisting every provider stream beside the selected file.
+	// A result URI is already an explicit selection and its sibling results were
+	// populated when the parent profile/base URI was played. Profile URIs still
+	// need listing: the resolver has already fetched the provider response, and
+	// the plugin returns that cached response without another provider request.
 	if parsed, err := url.Parse(file.FilePath); err == nil {
 		query := parsed.Query()
-		if strings.TrimSpace(query.Get("profile")) != "" || strings.TrimSpace(query.Get("result")) != "" {
+		if strings.TrimSpace(query.Get("result")) != "" {
 			return
 		}
 	}
 	if ctx.Err() != nil {
 		return
 	}
-	sem := jitSemaphore()
-	select {
-	case sem <- struct{}{}:
-		go func(bgCtx context.Context, f *models.MediaFile) {
-			defer func() { <-sem }()
-			probeCtx, cancel := context.WithTimeout(context.WithoutCancel(bgCtx), 8*time.Second)
-			defer cancel()
-			streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(probeCtx, f.FilePath)
-			if err != nil || len(streams) == 0 {
-				if err != nil {
-					slog.Debug("list JIT virtual playback candidates", "file_id", f.ID, "error", err)
-				}
-				return
-			}
-			if err := h.VirtualPlaybackStreamSink(probeCtx, f, streams); err != nil {
-				slog.Debug("persist JIT virtual playback candidates", "file_id", f.ID, "error", err)
-			}
-		}(ctx, file)
-	default:
-		slog.Debug("skipping JIT candidate persistence: worker pool busy", "file_id", file.ID)
+	// ResolveVirtualPlayback has already performed the provider request. Keep
+	// this bounded and synchronous so the response contains the extra versions
+	// immediately; the plugin-side cache makes this listing a host-local call.
+	listCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(listCtx, file.FilePath)
+	if err != nil || len(streams) == 0 {
+		return
 	}
+	_ = h.VirtualPlaybackStreamSink(listCtx, file, streams)
 }
 
 func (h *PlaybackHandler) startVirtualPlaybackV3(r *http.Request, req playback.StartRequestV3, requestDigest string, file *models.MediaFile, streamURL string) (playback.DecisionResponseV3, *transportErrorV3) {
