@@ -1528,6 +1528,16 @@ func TestCleanEbookSearchTitle(t *testing.T) {
 		{"White Out [Badlands Thriller]", "", "White Out [Badlands Thriller]"},
 		{"Salem's Lot (2019)", "", "Salem's Lot"},
 		{"The Hobbit (Illustrated)", "", "The Hobbit (Illustrated)"},
+		// Retail edition suffixes are furniture too: providers index the work,
+		// not the storefront's packaging of it.
+		{"White Fang (AmazonClassics Edition)", "", "White Fang"},
+		{"Treasure Island (AmazonClassics Edition)", "", "Treasure Island"},
+		{"Frankenstein (Penguin Classics)", "", "Frankenstein"},
+		{"The Shell Game (Kindle Single)", "", "The Shell Game"},
+		{"Ordinary Grace (A Novel)", "", "Ordinary Grace"},
+		// ...but only as a suffix category, not a keyword hunt: an edition
+		// word mid-parenthetical is a title.
+		{"Rules (First Edition Club)", "", "Rules (First Edition Club)"},
 		{"Exit Strategy_ Murderbot Di - Martha Wells (Book 4)", "Martha Wells", "Exit Strategy Murderbot Di"},
 	}
 	for _, tc := range cases {

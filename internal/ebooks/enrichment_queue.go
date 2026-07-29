@@ -607,6 +607,15 @@ func (q *EnrichmentQueue) CheckClaim(ctx context.Context, job EnrichmentJob) err
 	return nil
 }
 
+// A no_match completion counts a real failed lookup in `failures` (attempts
+// only tracks in-cycle claim retries and always resets) and doubles the retry
+// horizon per prior failure, capped at 8x: 30d, 60d, 120d, then 240d. Titles
+// that will never match ("Front cover", bare scan numbers) stop consuming
+// daily recycler quota after a few cycles instead of returning monthly
+// forever, while a success resets the counter so a late match re-enters the
+// normal refresh cadence. `failures` in the horizon CASE reads the pre-update
+// row value (standard UPDATE semantics), so the first no_match keeps the base
+// horizon.
 var completeEnrichmentJobQuery = `
 	UPDATE ebook_enrichment_state
 	SET status = 'pending',
@@ -615,10 +624,12 @@ var completeEnrichmentJobQuery = `
 		completed_at = now(),
 		next_attempt_at = CASE
 			WHEN requeue_requested THEN now()
+			WHEN $2 = 'no_match' THEN now() + $3::interval * LEAST(POWER(2, failures), 8)
 			ELSE now() + $3::interval
 		END,
 		outcome = $2,
 		attempts = 0,
+		failures = CASE WHEN $2 = 'no_match' THEN failures + 1 ELSE 0 END,
 		priority = CASE WHEN requeue_requested THEN 100 ELSE 0 END,
 		requeue_requested = false,
 		last_error_class = NULL,

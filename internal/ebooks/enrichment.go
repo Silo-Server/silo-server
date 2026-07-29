@@ -1377,6 +1377,14 @@ var ebookTrailingGroupRE = regexp.MustCompile(`\s*[\(\[]([^\)\]]*)[\)\]]\s*$`)
 // a title, not furniture.
 var ebookSeriesNoiseRE = regexp.MustCompile(`(?i)\b(?:book|bk|vol|volume|series|part|saga|novella?)\b\.?\s*#?\s*\d{1,4}\b|#\s*\d|^\s*\d{1,4}\s*$|\b(19|20)\d{2}\b`)
 
+// ebookEditionNoiseRE flags a parenthetical as retail edition furniture that
+// providers never carry in their titles: anything ending in "Edition(s)" or
+// "Classics" ("AmazonClassics Edition", "Penguin Classics"), plus "Kindle
+// Single" and the ubiquitous "(A Novel)". Deliberately narrower than a
+// general noise filter — a lone "(Illustrated)" or "(Annotated)" survives,
+// consistent with the meaningful-parenthetical rule above.
+var ebookEditionNoiseRE = regexp.MustCompile(`(?i)^(?:[\w'&.\s-]*\b)?(?:editions?|classics)$|^kindle\s+single$|^a\s+novel$`)
+
 // ebookYearOnlyRE matches a parenthetical that is nothing but a year. Years are
 // already carried by SearchQuery.Year, so they are dropped from the text rather
 // than folded back in.
@@ -1427,6 +1435,10 @@ func cleanEbookSearchTitle(title, author string) string {
 		if ebookSeriesNoiseRE.MatchString(inner) {
 			title = base
 			continue // peel stacked markers, e.g. "(Book 4) (2019)"
+		}
+		if ebookEditionNoiseRE.MatchString(inner) {
+			title = base
+			continue // peel retail edition suffixes, e.g. "(AmazonClassics Edition)"
 		}
 		break // meaningful parenthetical — leave intact
 	}
