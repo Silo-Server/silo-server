@@ -101,9 +101,10 @@ type TranscodeSession struct {
 	stderrLineIndex      int
 	stderrWriter         *ffmpegStderrWriter
 	restartHook          func(context.Context)
-	// releaseHWDevice returns the session's multi-GPU device reservation on
-	// shutdown; idempotent, nil for sessions constructed without StartTranscode.
-	releaseHWDevice func()
+	// reserveHWDeviceOnRestart is true when StartTranscode selected and reserved
+	// one device from a multi-device QSV/VAAPI setting. Each replacement ffmpeg
+	// process reacquires that same concrete device.
+	reserveHWDeviceOnRestart bool
 }
 
 // SetRestartHook registers a callback fired after every successful Restart.
@@ -174,9 +175,10 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		opts.SegmentDuration = defaultSegmentDuration
 	}
 	opts.HWAccel = resolveEffectiveTranscodeHWAccel(opts)
-	// Resolve a multi-device hw_device list to one concrete GPU for the whole
-	// session lifetime (restarts reuse it); the reservation releases on
-	// shutdown once ffmpeg has exited.
+	configuredHWDevices := ParseHWDeviceSet(opts.HWDevice)
+	reserveHWDeviceOnRestart := configuredHWDevices.Multi() && hwAccelBalancesRenderDevices(opts.HWAccel)
+	// Resolve a multi-device hw_device list to one concrete GPU. Restarts reuse
+	// the selected device, but each ffmpeg process owns its own reservation.
 	hwDevice, releaseHWDevice := AcquireHWDevice(opts.HWDevice, opts.HWAccel)
 	opts.HWDevice = hwDevice
 
@@ -188,14 +190,14 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 
 	ctx, cancel := context.WithCancel(ctx)
 	s := &TranscodeSession{
-		cancel:               cancel,
-		opts:                 opts,
-		outputDir:            opts.OutputDir,
-		running:              true,
-		done:                 make(chan struct{}),
-		stderr:               newBoundedTailBuffer(stderrTailMaxBytes),
-		lastRequestedSegment: opts.StartSegmentNumber,
-		releaseHWDevice:      releaseHWDevice,
+		cancel:                   cancel,
+		opts:                     opts,
+		outputDir:                opts.OutputDir,
+		running:                  true,
+		done:                     make(chan struct{}),
+		stderr:                   newBoundedTailBuffer(stderrTailMaxBytes),
+		lastRequestedSegment:     opts.StartSegmentNumber,
+		reserveHWDeviceOnRestart: reserveHWDeviceOnRestart,
 	}
 
 	args := buildFFmpegArgs(opts)
@@ -228,19 +230,26 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	s.stdinPipe = stdinPipe
 	s.logFFmpegEvent(ctx, "ffmpeg process started", "")
 
-	// Monitor ffmpeg in background.
-	go func() {
-		waitErr := cmd.Wait()
-		s.flushStderr(ctx)
-		s.mu.Lock()
-		s.running = false
-		s.waitErr = waitErr
-		s.mu.Unlock()
-		s.logWaitResult(ctx, waitErr)
-		close(s.done)
-	}()
+	// Monitor ffmpeg in background. The process-specific reservation is released
+	// before done closes, so waiters can safely launch a replacement process.
+	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
 
 	return s, nil
+}
+
+func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
+	waitErr := cmd.Wait()
+	// The child no longer owns the device once Wait returns. Release before
+	// flushing/logging so slow diagnostics cannot make the allocator count a
+	// process that has already exited.
+	releaseHWDevice()
+	s.flushStderr(ctx)
+	s.mu.Lock()
+	s.running = false
+	s.waitErr = waitErr
+	s.mu.Unlock()
+	s.logWaitResult(ctx, waitErr)
+	close(done)
 }
 
 // IsMPEG2VideoCodec reports whether a probed video codec name identifies
@@ -1466,13 +1475,6 @@ func (s *TranscodeSession) shutdown(removeOutput bool) error {
 		<-s.done
 	}
 
-	// Release the GPU reservation only after ffmpeg has actually exited, so a
-	// concurrent start cannot select this device while the old process is
-	// still using it.
-	if s.releaseHWDevice != nil {
-		s.releaseHWDevice()
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1613,6 +1615,7 @@ func (s *TranscodeSession) restart(
 	}
 	s.restartCount++
 	opts := s.opts
+	reserveHWDevice := s.reserveHWDeviceOnRestart
 	s.mu.Unlock()
 
 	// Copy-mode restarts must clean stale segments so ffmpeg writes fresh
@@ -1657,8 +1660,17 @@ func (s *TranscodeSession) restart(
 	cmd.Stderr = s.newStderrWriter(ctx)
 	cmd.WaitDelay = 3 * time.Second
 
+	// The previous process released its reservation before closing done. Keep
+	// this session on the same concrete GPU while accounting for the replacement
+	// process as a new active workload.
+	releaseHWDevice := func() {}
+	if reserveHWDevice {
+		releaseHWDevice = reserveConcreteHWDevice(opts.HWDevice)
+	}
+
 	if err := cmd.Start(); err != nil {
 		cancel()
+		releaseHWDevice()
 		s.mu.Lock()
 		s.restarting = false
 		s.waitErr = err
@@ -1682,16 +1694,7 @@ func (s *TranscodeSession) restart(
 	hook := s.restartHook
 	s.mu.Unlock()
 
-	go func() {
-		waitErr := cmd.Wait()
-		s.flushStderr(ctx)
-		s.mu.Lock()
-		s.running = false
-		s.waitErr = waitErr
-		s.mu.Unlock()
-		s.logWaitResult(ctx, waitErr)
-		close(s.done)
-	}()
+	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
 
 	if hook != nil {
 		hook(ctx)

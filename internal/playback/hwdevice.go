@@ -107,6 +107,33 @@ func leastLoadedHWDeviceLocked(present []string) string {
 	return best
 }
 
+// newHWDeviceRelease returns an idempotent release for a reservation that has
+// already been added to hwDeviceLoad.
+func newHWDeviceRelease(device string) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			hwDeviceLoad.mu.Lock()
+			if hwDeviceLoad.counts[device] > 0 {
+				hwDeviceLoad.counts[device]--
+			}
+			hwDeviceLoad.mu.Unlock()
+		})
+	}
+}
+
+// reserveConcreteHWDevice reserves a device that was selected for an earlier
+// process in the same transcode session. Restarts keep device affinity rather
+// than running the least-loaded selection again.
+func reserveConcreteHWDevice(device string) func() {
+	hwDeviceLoad.mu.Lock()
+	hwDeviceLoad.counts[device]++
+	count := hwDeviceLoad.counts[device]
+	hwDeviceLoad.mu.Unlock()
+	slog.Info("GPU workload device reserved", "device", device, "active_workloads", count)
+	return newHWDeviceRelease(device)
+}
+
 var nvencMultiDeviceWarnOnce sync.Once
 
 // AcquireHWDevice resolves the configured hw_device value to exactly one
@@ -148,17 +175,7 @@ func AcquireHWDevice(configured, resolvedHWAccel string) (string, func()) {
 	hwDeviceLoad.mu.Unlock()
 	slog.Info("GPU workload device selected", "device", device, "active_workloads", count)
 
-	var once sync.Once
-	release := func() {
-		once.Do(func() {
-			hwDeviceLoad.mu.Lock()
-			if hwDeviceLoad.counts[device] > 0 {
-				hwDeviceLoad.counts[device]--
-			}
-			hwDeviceLoad.mu.Unlock()
-		})
-	}
-	return device, release
+	return device, newHWDeviceRelease(device)
 }
 
 // hwDeviceActiveCount reports the active workload count for one device; test
