@@ -57,6 +57,12 @@ func (s stubStore) UpdateProfile(context.Context, string, userstore.UpdateProfil
 }
 func (s stubStore) DeleteProfile(context.Context, string) error             { panic("unused") }
 func (s stubStore) VerifyPIN(context.Context, string, string) (bool, error) { panic("unused") }
+func (s stubStore) GetOnboardingState(context.Context, string, string) (*userstore.OnboardingState, error) {
+	panic("unused")
+}
+func (s stubStore) UpsertOnboardingState(context.Context, userstore.OnboardingState) error {
+	panic("unused")
+}
 func (s stubStore) UpdateProgress(context.Context, string, string, float64, float64, userstore.ProgressThresholds) error {
 	panic("unused")
 }
