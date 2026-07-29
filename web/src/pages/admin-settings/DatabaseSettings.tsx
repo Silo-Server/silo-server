@@ -25,6 +25,9 @@ export default function DatabaseSettings() {
   const checkConnection = useCheckAdminSettingsConnection();
   const purgeVirtual = usePurgeVirtualPlaybackItems();
   const [connectionResult, setConnectionResult] = useState<ConnectionCheckResponse | null>(null);
+  const [purgeDryRun, setPurgeDryRun] = useState(false);
+  const [purgeLibraryID, setPurgeLibraryID] = useState("");
+  const [purgeInstallationID, setPurgeInstallationID] = useState("");
   const redisUrl = form.getValue("redis.url");
   const redisManagedByEnv = form.sensitiveManagedByEnv.includes("redis.url");
   const redisConfigured = redisUrl.trim() !== "" || form.sensitiveConfigured.includes("redis.url");
@@ -166,18 +169,53 @@ export default function DatabaseSettings() {
               Remove all zero-storage virtual files and their orphaned catalog items.
             </p>
           </div>
+        </div>
+        <div className="grid gap-3 py-2 md:grid-cols-3">
+          <SettingField
+            label="Library ID (optional)"
+            type="number"
+            value={purgeLibraryID}
+            onChange={setPurgeLibraryID}
+          />
+          <SettingField
+            label="Plugin installation ID (optional)"
+            type="number"
+            value={purgeInstallationID}
+            onChange={setPurgeInstallationID}
+          />
+          <SettingField
+            label="Dry run"
+            type="toggle"
+            hint="Preview counts without deleting anything"
+            value={purgeDryRun ? "true" : "false"}
+            onChange={(value) => setPurgeDryRun(value === "true")}
+          />
+        </div>
+        <div className="flex justify-end py-2">
           <Button
             type="button"
             variant="destructive"
             size="sm"
             disabled={purgeVirtual.isPending}
             onClick={() => {
-              if (window.confirm("Purge all zero-storage virtual library items?")) {
-                purgeVirtual.mutate({});
+              const libraryId = Number.parseInt(purgeLibraryID, 10);
+              const installationId = Number.parseInt(purgeInstallationID, 10);
+              const scope =
+                libraryId > 0 || installationId > 0 ? "the selected scope" : "all virtual items";
+              if (window.confirm(`${purgeDryRun ? "Preview purge for" : "Purge"} ${scope}?`)) {
+                purgeVirtual.mutate({
+                  dryRun: purgeDryRun,
+                  libraryId: libraryId > 0 ? libraryId : undefined,
+                  installationId: installationId > 0 ? installationId : undefined,
+                });
               }
             }}
           >
-            {purgeVirtual.isPending ? "Purging..." : "Purge Virtual Items"}
+            {purgeVirtual.isPending
+              ? "Purging..."
+              : purgeDryRun
+                ? "Preview Purge"
+                : "Purge Virtual Items"}
           </Button>
         </div>
       </FieldGroup>

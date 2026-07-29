@@ -66,14 +66,14 @@ func (r *ItemRepository) PurgeVirtualPlaybackItems(ctx context.Context, opts Vir
 		CREATE TEMP TABLE purge_virtual_items ON COMMIT DROP AS
 		SELECT DISTINCT mf.content_id FROM media_files mf
 		LEFT JOIN media_items mi ON mi.content_id = mf.content_id
-		WHERE (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%')
+		WHERE (mf.container = 'virtual' OR mf.file_path LIKE 'virtual://%' OR mf.file_path LIKE 'aiostreams://%')
 		  AND ($1 = 0 OR mf.media_folder_id = $1)
 		  AND ($2 = 0 OR mi.virtual_owner_installation_id = $2)`, opts.LibraryID, opts.InstallationID); err != nil {
 		return 0, 0, fmt.Errorf("identify virtual media items: %w", err)
 	}
 	result, err := tx.Exec(ctx, `
 		DELETE FROM media_files
-		WHERE (container = 'virtual' OR file_path LIKE 'virtual://%')
+		WHERE (container = 'virtual' OR file_path LIKE 'virtual://%' OR file_path LIKE 'aiostreams://%')
 		  AND content_id IN (SELECT content_id FROM purge_virtual_items)
 		  AND ($1 = 0 OR media_folder_id = $1)`, opts.LibraryID)
 	if err != nil {
