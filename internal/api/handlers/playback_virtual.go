@@ -46,7 +46,7 @@ func (f VirtualPlaybackStreamListerFunc) ListVirtualPlaybackStreams(ctx context.
 }
 
 // VirtualPlaybackStreamSink persists JIT candidates as selectable virtual
-// files. It is called asynchronously after the first stream is resolved.
+// files.
 type VirtualPlaybackStreamSink func(context.Context, *models.MediaFile, []VirtualPlaybackStream) error
 
 func isVirtualPlaybackFile(file *models.MediaFile) bool {
@@ -67,15 +67,18 @@ func (h *PlaybackHandler) loadVirtualPlaybackCandidates(ctx context.Context, fil
 	if h.VirtualPlaybackStreamLister == nil || h.VirtualPlaybackStreamSink == nil || file == nil {
 		return
 	}
-	go func() {
-		streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(context.WithoutCancel(ctx), file.FilePath)
-		if err != nil || len(streams) == 0 {
-			return
+	probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
+	defer cancel()
+	streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(probeCtx, file.FilePath)
+	if err != nil || len(streams) == 0 {
+		if err != nil {
+			slog.Debug("list JIT virtual playback candidates", "file_id", file.ID, "error", err)
 		}
-		if err := h.VirtualPlaybackStreamSink(context.WithoutCancel(ctx), file, streams); err != nil {
-			slog.Debug("persist JIT virtual playback candidates", "file_id", file.ID, "error", err)
-		}
-	}()
+		return
+	}
+	if err := h.VirtualPlaybackStreamSink(probeCtx, file, streams); err != nil {
+		slog.Debug("persist JIT virtual playback candidates", "file_id", file.ID, "error", err)
+	}
 }
 
 func (h *PlaybackHandler) startVirtualPlaybackV3(r *http.Request, req playback.StartRequestV3, requestDigest string, file *models.MediaFile, streamURL string) (playback.DecisionResponseV3, *transportErrorV3) {
