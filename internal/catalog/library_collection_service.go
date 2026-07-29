@@ -132,6 +132,10 @@ type LibraryCollectionService struct {
 	// VirtualVariants returns configured provider-neutral profile placeholders.
 	// It must not contact an upstream streaming provider.
 	VirtualVariants func(context.Context, string, string) ([]VirtualPlaybackVariant, error)
+	// RefreshVirtualItem is invoked after a collection-only item is materialized
+	// so metadata is enriched immediately instead of waiting for the six-hour
+	// refresh-debt task.
+	RefreshVirtualItem func(context.Context, string) error
 }
 
 func NewLibraryCollectionService(
@@ -234,7 +238,22 @@ func (s *LibraryCollectionService) materializeVirtualPlayback(ctx context.Contex
 			return fmt.Errorf("getting virtual profile variants: %w", err)
 		}
 	}
-	return s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, libraryIDs, variants)
+	if err := s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, libraryIDs, variants); err != nil {
+		return err
+	}
+	s.refreshVirtualItemMetadata(ctx, item.ContentID)
+	return nil
+}
+
+func (s *LibraryCollectionService) refreshVirtualItemMetadata(ctx context.Context, contentID string) {
+	if s.RefreshVirtualItem == nil || strings.TrimSpace(contentID) == "" {
+		return
+	}
+	go func() {
+		if err := s.RefreshVirtualItem(context.WithoutCancel(ctx), contentID); err != nil {
+			slog.Warn("collection virtual metadata refresh failed", "content_id", contentID, "error", err)
+		}
+	}()
 }
 
 func (s *LibraryCollectionService) SyncCollection(ctx context.Context, collectionID string) (*models.LibraryCollectionSyncRun, error) {
@@ -1302,6 +1321,7 @@ func (s *LibraryCollectionService) createVirtualCollectionItem(ctx context.Conte
 	if err := s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, collection.LibraryIDs, variants); err != nil {
 		return nil, fmt.Errorf("materializing virtual item %q: %w", title, err)
 	}
+	s.refreshVirtualItemMetadata(ctx, item.ContentID)
 	return item, nil
 }
 

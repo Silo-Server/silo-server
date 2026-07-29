@@ -1500,6 +1500,11 @@ func NewRouter(deps Dependencies) chi.Router {
 				return out, nil
 			}
 		}
+		if refresher, ok := deps.MetadataService.(interface {
+			RefreshScheduledItem(context.Context, string) error
+		}); ok {
+			libraryCollectionService.RefreshVirtualItem = refresher.RefreshScheduledItem
+		}
 
 		// Propagate the now-wired Trakt + TMDB fetchers to the user-side sync
 		// service (constructed earlier in main.go before settingsRepo and the
