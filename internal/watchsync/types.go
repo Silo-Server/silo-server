@@ -58,6 +58,13 @@ type AuthProvider interface {
 	LookupAccount(ctx context.Context, cfg ServerConfig, conn Connection) (ProviderAccount, error)
 }
 
+// authoritativeRefreshProvider marks providers whose refreshed credentials are
+// a complete replacement rather than a patch. The unexported method keeps this
+// contract internal to watchsync until all providers can share it.
+type authoritativeRefreshProvider interface {
+	authoritativeRefreshProvider()
+}
+
 // APIKeyAuthProvider is implemented by providers that authenticate via a
 // user-supplied API key rather than an OAuth device flow. The key itself is
 // stored in Connection.AccessToken; LookupAccount and RefreshToken (no-op)

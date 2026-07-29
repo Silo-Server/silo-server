@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -283,7 +284,7 @@ func (r *serviceFakeRepo) UpsertHistoryExports(_ context.Context, exports []Hist
 				existing := r.historyExports[i]
 				export.ID = existing.ID
 				export.AttemptCount = existing.AttemptCount
-				if existing.Status == historyExportStatusSent || existing.Status == historyExportStatusSatisfiedByScrobble || existing.AttemptCount >= 5 {
+				if existing.Status == historyExportStatusSent || existing.Status == historyExportStatusSatisfiedByScrobble || existing.Status == historyExportStatusNotFound || existing.AttemptCount >= 5 {
 					export.Status = existing.Status
 				}
 				r.historyExports[i] = export
@@ -318,7 +319,7 @@ func (r *serviceFakeRepo) MarkHistoryExportStatus(_ context.Context, id string, 
 	}
 	for i := range r.historyExports {
 		if r.historyExports[i].ID == id {
-			if r.historyExports[i].Status == historyExportStatusSent || r.historyExports[i].Status == historyExportStatusSatisfiedByScrobble {
+			if r.historyExports[i].Status == historyExportStatusSent || r.historyExports[i].Status == historyExportStatusSatisfiedByScrobble || r.historyExports[i].Status == historyExportStatusNotFound {
 				return nil
 			}
 			r.historyExports[i].Status = status
@@ -336,7 +337,7 @@ func (r *serviceFakeRepo) MarkHistoryExportSatisfiedByScrobble(_ context.Context
 	}
 	for i := range r.historyExports {
 		if r.historyExports[i].ConnectionID == connectionID && r.historyExports[i].HistoryID == historyID {
-			if r.historyExports[i].Status == historyExportStatusSent {
+			if r.historyExports[i].Status == historyExportStatusSent || r.historyExports[i].Status == historyExportStatusNotFound {
 				return nil
 			}
 			r.historyExports[i].Status = historyExportStatusSatisfiedByScrobble
@@ -1428,6 +1429,43 @@ func TestServiceSyncConnectionRefreshesExpiredToken(t *testing.T) {
 	}
 	if updated.TokenExpiresAt == nil || !updated.TokenExpiresAt.Equal(refreshedExpiresAt) {
 		t.Fatalf("token expiry = %v, want %v", updated.TokenExpiresAt, refreshedExpiresAt)
+	}
+}
+
+func TestServicePluginRefreshPersistsAuthoritativeCredentialsBeforeFault(t *testing.T) {
+	repo := newServiceFakeRepo()
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(-time.Minute)
+	client := &fakeWatchSyncPluginClient{refreshResponse: &pluginv1.WatchSyncCredentialResponse{
+		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "rotated-access", TokenType: "Bearer"},
+		Fault: &pluginv1.WatchSyncFault{
+			Code:        pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
+			SafeMessage: "reconnect required",
+		},
+	}}
+	provider := testPluginProvider(t, client)
+	service := NewService(repo, NewRegistry())
+	service.now = func() time.Time { return now }
+	conn := Connection{
+		ID:             "conn-1",
+		Provider:       provider.Key(),
+		UserID:         7,
+		ProfileID:      "profile-1",
+		AccessToken:    "old-access",
+		RefreshToken:   "old-refresh",
+		TokenExpiresAt: &expiresAt,
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
+	if _, err := service.refreshConnectionIfNeeded(context.Background(), provider, ServerConfig{}, conn); !isWatchSyncInvalidCredentialError(err) {
+		t.Fatalf("error = %#v", err)
+	}
+	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
+	if updated.AccessToken != "rotated-access" || updated.RefreshToken != "" || updated.TokenExpiresAt != nil {
+		t.Fatalf("connection credentials = %#v", updated)
+	}
+	if updated.LastError != "reconnect required" {
+		t.Fatalf("LastError = %q", updated.LastError)
 	}
 }
 
@@ -2799,6 +2837,35 @@ func TestServicePluginAPIKeyConnectRejectsEmptyReturnedCredential(t *testing.T) 
 	}
 }
 
+func TestServicePluginAPIKeyReconnectClearsConnectionError(t *testing.T) {
+	repo := newServiceFakeRepo()
+	client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
+		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "new-access", TokenType: "Bearer"},
+		Account:     &pluginv1.WatchSyncAccount{ExternalSubject: "account-1", Username: "alice"},
+	}}
+	provider := testPluginProvider(t, client)
+	registry := NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	conn := Connection{
+		ID:        "conn-1",
+		Provider:  provider.Key(),
+		UserID:    7,
+		ProfileID: "profile-1",
+		LastError: "reconnect required",
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
+	updated, err := NewService(repo, registry).ConnectAPIKey(context.Background(), conn.UserID, conn.ProfileID, provider.Key(), "replacement-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AccessToken != "new-access" || updated.LastError != "" {
+		t.Fatalf("connection = %#v", updated)
+	}
+}
+
 func TestServiceSyncConnectionDefersOnRateLimit(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -2924,6 +2991,52 @@ func TestServicePluginTransportFailureLeavesExportPending(t *testing.T) {
 	}
 }
 
+func TestServicePluginInvalidCredentialLeavesExportPendingAndRecordsConnectionError(t *testing.T) {
+	repo := newServiceFakeRepo()
+	client := &fakeWatchSyncPluginClient{applyResponse: &pluginv1.WatchSyncApplyEventsResponse{
+		Fault: &pluginv1.WatchSyncFault{
+			Code:        pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
+			SafeMessage: "credential revoked",
+		},
+	}}
+	provider := testPluginProvider(t, client)
+	registry := NewRegistry()
+	if err := registry.Register(provider); err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(repo, registry)
+	conn := Connection{
+		ID:                   "conn-1",
+		Provider:             provider.Key(),
+		UserID:               7,
+		ProfileID:            "profile-1",
+		AccessToken:          "secret",
+		ExportWatchedEnabled: true,
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	err := service.processLocalWatchEvent(context.Background(), LocalWatchEvent{
+		Kind:      LocalWatchEventMarkedWatched,
+		UserID:    conn.UserID,
+		ProfileID: conn.ProfileID,
+		Plays: []LocalPlay{{
+			HistoryID:       "history-1",
+			MediaItemID:     "movie-1",
+			ProviderItemKey: "movie:tmdb:603",
+			Kind:            historyimport.KindMovie,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.historyExports) != 1 || repo.historyExports[0].Status != historyExportStatusPending || repo.historyExports[0].AttemptCount != 0 {
+		t.Fatalf("history exports = %#v", repo.historyExports)
+	}
+	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
+	if updated.LastError != "credential revoked" {
+		t.Fatalf("LastError = %q", updated.LastError)
+	}
+}
+
 func TestServiceExportLocalPlaysReturnsStatusPersistenceFailure(t *testing.T) {
 	repo := newServiceFakeRepo()
 	repo.markHistoryStatusErr = errors.New("persist failed")
@@ -2963,6 +3076,32 @@ func TestServiceFakeRepoMarkHistoryExportSatisfiedByScrobbleSkipsSent(t *testing
 	}
 }
 
+func TestServiceFakeRepoPreservesNotFoundHistoryExport(t *testing.T) {
+	repo := newServiceFakeRepo()
+	repo.historyExports = []HistoryExport{{
+		ID:           "export-1",
+		ConnectionID: "conn-1",
+		HistoryID:    "history-1",
+		Status:       historyExportStatusNotFound,
+	}}
+	if err := repo.UpsertHistoryExports(context.Background(), []HistoryExport{{
+		ConnectionID: "conn-1",
+		HistoryID:    "history-1",
+		Status:       historyExportStatusPending,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkHistoryExportStatus(context.Background(), "export-1", historyExportStatusFailed, "retry"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkHistoryExportSatisfiedByScrobble(context.Background(), "conn-1", "history-1"); err != nil {
+		t.Fatal(err)
+	}
+	if repo.historyExports[0].Status != historyExportStatusNotFound || repo.historyExports[0].AttemptCount != 0 {
+		t.Fatalf("history exports = %#v", repo.historyExports)
+	}
+}
+
 func TestServiceScrobbleRateLimitDefersConnection(t *testing.T) {
 	repo := newServiceFakeRepo()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
@@ -2991,6 +3130,33 @@ func TestServiceScrobbleRateLimitDefersConnection(t *testing.T) {
 	wantUntil := now.Add(30 * time.Minute)
 	if updated.RateLimitedUntil == nil || !updated.RateLimitedUntil.Equal(wantUntil) {
 		t.Fatalf("RateLimitedUntil = %v, want %v", updated.RateLimitedUntil, wantUntil)
+	}
+}
+
+func TestServiceScrobbleInvalidCredentialRecordsConnectionError(t *testing.T) {
+	repo := newServiceFakeRepo()
+	service := NewService(repo, NewRegistry())
+	conn := Connection{
+		ID:        "conn-1",
+		Provider:  "plugin:15:probe",
+		UserID:    7,
+		ProfileID: "profile-1",
+	}
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+	fault := watchSyncProviderFaultError{
+		code:    pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
+		message: "reconnect required",
+	}
+	err := service.dispatchScrobble(
+		context.Background(), scrobblerStub{stopErr: fault}, ServerConfig{}, conn,
+		ScrobbleEvent{PlaybackSessionID: testPlaybackSessionID}, scrobbleActionStop, nil,
+	)
+	if !isWatchSyncInvalidCredentialError(err) {
+		t.Fatalf("error = %#v", err)
+	}
+	updated := repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)]
+	if updated.LastError != fault.Error() {
+		t.Fatalf("LastError = %q, want %q", updated.LastError, fault.Error())
 	}
 }
 

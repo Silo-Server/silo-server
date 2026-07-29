@@ -95,6 +95,8 @@ func (p *PluginProvider) DisplayName() string {
 
 func (p *PluginProvider) ProviderSource() string { return providerSourcePlugin }
 
+func (p *PluginProvider) authoritativeRefreshProvider() {}
+
 func (p *PluginProvider) ExportBatchSize() int {
 	if size := int(p.descriptor.GetMaxBatchSize()); size > 0 {
 		return size
@@ -128,7 +130,11 @@ func (p *PluginProvider) ConnectWithAPIKey(ctx context.Context, apiKey string) (
 	if err != nil {
 		return TokenSet{}, ProviderAccount{}, err
 	}
-	return tokens, accountFromProto(response.GetAccount()), nil
+	account, err := accountFromProto(response.GetAccount())
+	if err != nil {
+		return TokenSet{}, ProviderAccount{}, err
+	}
+	return tokens, account, nil
 }
 
 func (p *PluginProvider) StartDeviceAuth(context.Context, ServerConfig) (DeviceAuthSession, error) {
@@ -150,10 +156,20 @@ func (p *PluginProvider) RefreshToken(ctx context.Context, _ ServerConfig, conn 
 	if err != nil {
 		return TokenSet{}, watchSyncRPCError()
 	}
-	if err := watchSyncFaultError(p.Key(), response.GetFault(), conn.AccessToken, conn.RefreshToken); err != nil {
-		return TokenSet{}, err
+	var tokens TokenSet
+	if response.GetCredentials() != nil {
+		tokens, err = tokenSetFromProto(response.GetCredentials())
+		if err != nil {
+			return TokenSet{}, err
+		}
 	}
-	return tokenSetFromProto(response.GetCredentials())
+	if err := watchSyncFaultError(p.Key(), response.GetFault(), conn.AccessToken, conn.RefreshToken, tokens.AccessToken, tokens.RefreshToken); err != nil {
+		return tokens, err
+	}
+	if response.GetCredentials() == nil {
+		return TokenSet{}, errors.New("watch sync plugin returned no access token")
+	}
+	return tokens, nil
 }
 
 func (p *PluginProvider) LookupAccount(ctx context.Context, _ ServerConfig, conn Connection) (ProviderAccount, error) {
@@ -170,7 +186,7 @@ func (p *PluginProvider) LookupAccount(ctx context.Context, _ ServerConfig, conn
 	if err := watchSyncFaultError(p.Key(), response.GetFault(), conn.AccessToken, conn.RefreshToken); err != nil {
 		return ProviderAccount{}, err
 	}
-	return accountFromProto(response.GetAccount()), nil
+	return accountFromProto(response.GetAccount())
 }
 
 func (p *PluginProvider) FetchHistory(context.Context, ServerConfig, Connection) ([]RemotePlay, error) {
@@ -433,11 +449,11 @@ func tokenSetFromProto(credentials *pluginv1.WatchSyncCredentials) (TokenSet, er
 	return TokenSet{AccessToken: credentials.GetAccessToken(), RefreshToken: credentials.GetRefreshToken(), TokenExpiresAt: expiresAt}, nil
 }
 
-func accountFromProto(account *pluginv1.WatchSyncAccount) ProviderAccount {
-	if account == nil {
-		return ProviderAccount{}
+func accountFromProto(account *pluginv1.WatchSyncAccount) (ProviderAccount, error) {
+	if account == nil || strings.TrimSpace(account.GetExternalSubject()) == "" {
+		return ProviderAccount{}, errors.New("watch sync plugin returned no provider account identity")
 	}
-	return ProviderAccount{ID: account.GetExternalSubject(), Username: account.GetUsername()}
+	return ProviderAccount{ID: account.GetExternalSubject(), Username: account.GetUsername()}, nil
 }
 
 func resultForEvent(results []*pluginv1.WatchSyncApplyResult, eventID string) *pluginv1.WatchSyncApplyResult {
@@ -481,7 +497,7 @@ func supportedWatchSyncMediaTypes(descriptor *pluginv1.WatchSyncProviderDescript
 
 func (p *PluginProvider) supportsMedia(mediaType pluginv1.WatchSyncMediaType) bool {
 	if mediaType == pluginv1.WatchSyncMediaType_WATCH_SYNC_MEDIA_TYPE_UNSPECIFIED {
-		return true
+		return false
 	}
 	_, ok := p.supportedMedia[mediaType]
 	return ok
@@ -506,15 +522,9 @@ func safeApplyMessage(result *pluginv1.WatchSyncApplyResult, secrets ...string) 
 }
 
 func sanitizeWatchSyncMessage(message string, fallback string, secrets ...string) string {
-	message = strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, message)
-	message = strings.Join(strings.Fields(message), " ")
+	message = normalizeWatchSyncText(message)
 	for _, secret := range secrets {
-		if secret = strings.TrimSpace(secret); secret != "" {
+		if secret = normalizeWatchSyncText(secret); secret != "" {
 			message = strings.ReplaceAll(message, secret, "[REDACTED]")
 		}
 	}
@@ -527,6 +537,16 @@ func sanitizeWatchSyncMessage(message string, fallback string, secrets ...string
 		message = string(runes[:maxRunes]) + "…"
 	}
 	return message
+}
+
+func normalizeWatchSyncText(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func watchSyncUnavailableError() error {
@@ -543,6 +563,11 @@ type watchSyncProviderFaultError struct {
 }
 
 func (e watchSyncProviderFaultError) Error() string { return e.message }
+
+func isWatchSyncInvalidCredentialError(err error) bool {
+	var fault watchSyncProviderFaultError
+	return errors.As(err, &fault) && fault.code == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL
+}
 
 func watchSyncFaultError(provider string, fault *pluginv1.WatchSyncFault, secrets ...string) error {
 	if fault == nil || fault.GetCode() == pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_UNSPECIFIED {

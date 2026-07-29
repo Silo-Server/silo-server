@@ -689,7 +689,7 @@ func (r *PostgresRepository) UpsertHistoryExports(ctx context.Context, exports [
 			ON CONFLICT (connection_id, history_id) DO UPDATE SET
 				provider_item_key = EXCLUDED.provider_item_key,
 				status = CASE
-					WHEN watch_provider_history_exports.status IN ('sent', 'satisfied_by_scrobble')
+					WHEN watch_provider_history_exports.status IN ('sent', 'satisfied_by_scrobble', 'not_found')
 						OR watch_provider_history_exports.attempt_count >= 5
 					THEN watch_provider_history_exports.status
 					ELSE EXCLUDED.status
@@ -758,7 +758,7 @@ func (r *PostgresRepository) MarkHistoryExportStatus(ctx context.Context, id str
 			last_error = $3,
 			updated_at = now()
 		WHERE id = $1::uuid
-		  AND status NOT IN ('sent', 'satisfied_by_scrobble')
+		  AND status NOT IN ('sent', 'satisfied_by_scrobble', 'not_found')
 	`, id, status, lastError)
 	if err != nil {
 		return fmt.Errorf("mark history export status: %w", err)
@@ -774,7 +774,7 @@ func (r *PostgresRepository) MarkHistoryExportSatisfiedByScrobble(ctx context.Co
 			last_error = '',
 			updated_at = now()
 		WHERE connection_id = $1::uuid AND history_id = $2
-		  AND status <> 'sent'
+		  AND status NOT IN ('sent', 'not_found')
 	`, connectionID, historyID)
 	if err != nil {
 		return fmt.Errorf("mark history export satisfied by scrobble: %w", err)

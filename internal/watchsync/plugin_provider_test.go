@@ -23,6 +23,8 @@ const (
 
 type fakeWatchSyncPluginClient struct {
 	exchangeResponse *pluginv1.WatchSyncCredentialResponse
+	refreshResponse  *pluginv1.WatchSyncCredentialResponse
+	accountResponse  *pluginv1.WatchSyncGetAccountResponse
 	applyResponse    *pluginv1.WatchSyncApplyEventsResponse
 	applyErr         error
 	applyRequest     *pluginv1.WatchSyncApplyEventsRequest
@@ -35,11 +37,17 @@ func (f *fakeWatchSyncPluginClient) ExchangeAPIKey(_ context.Context, _ *pluginv
 }
 func (f *fakeWatchSyncPluginClient) RefreshCredentials(_ context.Context, req *pluginv1.WatchSyncRefreshCredentialsRequest) (*pluginv1.WatchSyncCredentialResponse, error) {
 	f.refreshRequest = req
+	if f.refreshResponse != nil {
+		return f.refreshResponse, nil
+	}
 	return &pluginv1.WatchSyncCredentialResponse{}, nil
 }
 func (f *fakeWatchSyncPluginClient) GetAccount(_ context.Context, req *pluginv1.WatchSyncGetAccountRequest) (*pluginv1.WatchSyncGetAccountResponse, error) {
 	f.accountRequest = req
-	return &pluginv1.WatchSyncGetAccountResponse{}, nil
+	if f.accountResponse != nil {
+		return f.accountResponse, nil
+	}
+	return &pluginv1.WatchSyncGetAccountResponse{Account: &pluginv1.WatchSyncAccount{ExternalSubject: testProviderAccountID}}, nil
 }
 func (f *fakeWatchSyncPluginClient) ApplyEvents(_ context.Context, req *pluginv1.WatchSyncApplyEventsRequest) (*pluginv1.WatchSyncApplyEventsResponse, error) {
 	f.applyRequest = req
@@ -122,6 +130,43 @@ func TestPluginProviderConnectsAPIKeyWithoutPersistingInPluginConfig(t *testing.
 	}
 }
 
+func TestPluginProviderRejectsMissingAccountIdentity(t *testing.T) {
+	for _, subject := range []string{"", " \t\n "} {
+		client := &fakeWatchSyncPluginClient{exchangeResponse: &pluginv1.WatchSyncCredentialResponse{
+			Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "validated-token", TokenType: "Bearer"},
+			Account:     &pluginv1.WatchSyncAccount{ExternalSubject: subject, Username: "alice"},
+		}}
+		provider := testPluginProvider(t, client)
+		if _, _, err := provider.ConnectWithAPIKey(context.Background(), "input-token"); err == nil || !strings.Contains(err.Error(), "account identity") {
+			t.Fatalf("subject %q: error = %v", subject, err)
+		}
+	}
+}
+
+func TestPluginProviderRefreshReturnsCredentialsAlongsideFault(t *testing.T) {
+	client := &fakeWatchSyncPluginClient{refreshResponse: &pluginv1.WatchSyncCredentialResponse{
+		Credentials: &pluginv1.WatchSyncCredentials{AccessToken: "rotated-access", TokenType: "Bearer"},
+		Fault: &pluginv1.WatchSyncFault{
+			Code:        pluginv1.WatchSyncFaultCode_WATCH_SYNC_FAULT_CODE_INVALID_CREDENTIAL,
+			SafeMessage: "credential rotated-access rejected; reconnect required",
+		},
+	}}
+	provider := testPluginProvider(t, client)
+	tokens, err := provider.RefreshToken(context.Background(), ServerConfig{}, Connection{
+		AccessToken:  "old-access",
+		RefreshToken: "old-refresh",
+	})
+	if tokens.AccessToken != "rotated-access" || tokens.RefreshToken != "" || tokens.TokenExpiresAt != nil {
+		t.Fatalf("tokens = %#v", tokens)
+	}
+	if !isWatchSyncInvalidCredentialError(err) {
+		t.Fatalf("error = %#v", err)
+	}
+	if strings.Contains(err.Error(), "rotated-access") || !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("returned credentials were not redacted: %q", err)
+	}
+}
+
 func TestPluginProviderExportsRichEpisodeIdentity(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{}
 	client.applyResponse = &pluginv1.WatchSyncApplyEventsResponse{Results: []*pluginv1.WatchSyncApplyResult{{
@@ -161,14 +206,29 @@ func TestPluginProviderBatchesEventsInOneRPC(t *testing.T) {
 	}}}
 	provider := testPluginProvider(t, client)
 	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{
-		{HistoryID: testWatchHistoryID},
-		{HistoryID: testSecondHistoryID},
+		{HistoryID: testWatchHistoryID, Kind: historyimport.KindMovie},
+		{HistoryID: testSecondHistoryID, Kind: historyimport.KindMovie},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(client.applyRequest.GetEvents()) != 2 || len(result.Sent) != 1 || len(result.NotFound) != 1 {
 		t.Fatalf("request=%#v result=%#v", client.applyRequest, result)
+	}
+}
+
+func TestPluginProviderRejectsUnspecifiedExportMedia(t *testing.T) {
+	client := &fakeWatchSyncPluginClient{}
+	provider := testPluginProvider(t, client)
+	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: testWatchHistoryID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.applyRequest != nil {
+		t.Fatalf("unexpected apply request = %#v", client.applyRequest)
+	}
+	if result.Failed[testWatchHistoryID] != watchSyncUnsupportedMediaMessage {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -212,9 +272,9 @@ func TestPluginProviderMapsPerEventRateLimitAndKeepsSuccesses(t *testing.T) {
 	}}}
 	provider := testPluginProvider(t, client)
 	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{
-		{HistoryID: testWatchHistoryID},
-		{HistoryID: testSecondHistoryID},
-		{HistoryID: "history-3"},
+		{HistoryID: testWatchHistoryID, Kind: historyimport.KindMovie},
+		{HistoryID: testSecondHistoryID, Kind: historyimport.KindMovie},
+		{HistoryID: "history-3", Kind: historyimport.KindMovie},
 	})
 	limited, ok := AsRateLimited(err)
 	if !ok || limited.RetryAfter != 45*time.Second {
@@ -228,7 +288,7 @@ func TestPluginProviderMapsPerEventRateLimitAndKeepsSuccesses(t *testing.T) {
 func TestPluginProviderTransportFailureIsRetryableAndSanitized(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{applyErr: errors.New("rpc failed with access_token=secret")}
 	provider := testPluginProvider(t, client)
-	_, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: testWatchHistoryID}})
+	_, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: testWatchHistoryID, Kind: historyimport.KindMovie}})
 	if !isRetryableProviderError(err) || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("error = %#v", err)
 	}
@@ -243,6 +303,15 @@ func TestPluginProviderSanitizesFaultMessage(t *testing.T) {
 	}
 }
 
+func TestPluginProviderNormalizesSecretsBeforeRedaction(t *testing.T) {
+	message := safeApplyMessage(&pluginv1.WatchSyncApplyResult{Fault: &pluginv1.WatchSyncFault{
+		SafeMessage: "credential line one line two was rejected",
+	}}, "line one\nline two")
+	if strings.Contains(message, "line one line two") || !strings.Contains(message, "[REDACTED]") {
+		t.Fatalf("message was not redacted: %q", message)
+	}
+}
+
 func TestPluginProviderMapsTemporaryRetryToFailed(t *testing.T) {
 	client := &fakeWatchSyncPluginClient{applyResponse: &pluginv1.WatchSyncApplyEventsResponse{Results: []*pluginv1.WatchSyncApplyResult{{
 		EventId: testWatchHistoryID,
@@ -253,7 +322,7 @@ func TestPluginProviderMapsTemporaryRetryToFailed(t *testing.T) {
 		},
 	}}}}
 	provider := testPluginProvider(t, client)
-	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: testWatchHistoryID}})
+	result, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: testWatchHistoryID, Kind: historyimport.KindMovie}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +337,7 @@ func TestPluginProviderMapsRateLimitFault(t *testing.T) {
 		RetryAfter: durationpb.New(30 * time.Second),
 	}}}
 	provider := testPluginProvider(t, client)
-	_, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: "h", ProviderItemKey: "p"}})
+	_, err := provider.ExportHistory(context.Background(), ServerConfig{}, Connection{}, []LocalPlay{{HistoryID: "h", ProviderItemKey: "p", Kind: historyimport.KindMovie}})
 	limited, ok := AsRateLimited(err)
 	if !ok || limited.RetryAfter != 30*time.Second {
 		t.Fatalf("error = %#v", err)

@@ -592,6 +592,7 @@ func (s *Service) persistConnection(
 	conn.TokenExpiresAt = tokens.TokenExpiresAt
 	conn.ProviderAccountID = account.ID
 	conn.ProviderUsername = account.Username
+	conn.LastError = ""
 
 	return s.repo.UpsertConnection(ctx, conn)
 }
@@ -1261,20 +1262,39 @@ func (s *Service) refreshConnectionIfNeeded(ctx context.Context, provider Provid
 		return Connection{}, fmt.Errorf("provider %q does not support token refresh", conn.Provider)
 	}
 	tokens, err := authProvider.RefreshToken(ctx, cfg, conn)
+	_, authoritative := provider.(authoritativeRefreshProvider)
+	if authoritative && strings.TrimSpace(tokens.AccessToken) != "" {
+		conn.AccessToken = tokens.AccessToken
+		conn.RefreshToken = tokens.RefreshToken
+		conn.TokenExpiresAt = tokens.TokenExpiresAt
+	} else if err == nil {
+		if tokens.AccessToken != "" {
+			conn.AccessToken = tokens.AccessToken
+		}
+		if tokens.RefreshToken != "" {
+			conn.RefreshToken = tokens.RefreshToken
+		}
+		if tokens.TokenExpiresAt != nil {
+			conn.TokenExpiresAt = tokens.TokenExpiresAt
+		}
+	}
+	if err != nil && isWatchSyncInvalidCredentialError(err) {
+		conn.LastError = err.Error()
+	} else if err == nil {
+		conn.LastError = ""
+	}
+	credentialsReturned := authoritative && strings.TrimSpace(tokens.AccessToken) != ""
+	if err == nil || credentialsReturned || isWatchSyncInvalidCredentialError(err) {
+		persisted, persistErr := s.repo.UpsertConnection(ctx, conn)
+		if persistErr != nil {
+			return Connection{}, fmt.Errorf("persist refreshed %s connection: %w", conn.Provider, persistErr)
+		}
+		conn = persisted
+	}
 	if err != nil {
 		return Connection{}, fmt.Errorf("refresh %s token: %w", conn.Provider, err)
 	}
-	if tokens.AccessToken != "" {
-		conn.AccessToken = tokens.AccessToken
-	}
-	if tokens.RefreshToken != "" {
-		conn.RefreshToken = tokens.RefreshToken
-	}
-	if tokens.TokenExpiresAt != nil {
-		conn.TokenExpiresAt = tokens.TokenExpiresAt
-	}
-	conn.LastError = ""
-	return s.repo.UpsertConnection(ctx, conn)
+	return conn, nil
 }
 
 type ExportWatchedResult struct {
@@ -1369,6 +1389,9 @@ func (s *Service) ExportWatched(
 		exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
 		_, limited := AsRateLimited(err)
 		retryable := isRetryableProviderError(err)
+		if err != nil && isWatchSyncInvalidCredentialError(err) {
+			return result, errors.Join(err, s.persistConnectionError(ctx, conn, err.Error()))
+		}
 		if err != nil && !limited && !retryable {
 			var markErr error
 			for _, play := range pendingPlays {
@@ -1487,6 +1510,9 @@ func (s *Service) exportLocalPlays(
 	exportResult, err := exporter.ExportHistory(ctx, cfg, conn, pendingPlays)
 	_, limited := AsRateLimited(err)
 	retryable := isRetryableProviderError(err)
+	if err != nil && isWatchSyncInvalidCredentialError(err) {
+		return err
+	}
 	if err != nil && !limited && !retryable {
 		var markErr error
 		for _, play := range pendingPlays {
@@ -1536,6 +1562,19 @@ func (s *Service) exportLocalPlays(
 		return err
 	}
 	return nil
+}
+
+func (s *Service) persistConnectionError(ctx context.Context, conn Connection, message string) error {
+	if conn.ID != "" {
+		fresh, err := s.reloadConnection(ctx, conn)
+		if err != nil {
+			return err
+		}
+		conn = fresh
+	}
+	conn.LastError = message
+	_, err := s.repo.UpsertConnection(ctx, conn)
+	return err
 }
 
 func limitWatchedExportBatch(exporter WatchedExporter, plays []LocalPlay) ([]LocalPlay, bool) {
@@ -1987,6 +2026,10 @@ func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg
 				err = errors.Join(err, deferErr)
 			}
 		}
+		var persistErr error
+		if isWatchSyncInvalidCredentialError(err) {
+			persistErr = s.persistConnectionError(ctx, conn, err.Error())
+		}
 		if confirmedClaim != nil {
 			_ = s.repo.FailConfirmedScrobbleStop(
 				ctx, event.PlaybackSessionID, conn.ID,
@@ -1995,7 +2038,7 @@ func (s *Service) dispatchScrobble(ctx context.Context, scrobbler Scrobbler, cfg
 		} else {
 			_ = s.repo.UpdateScrobbleSession(ctx, event.PlaybackSessionID, conn.ID, action, event.PositionSeconds, event.HistoryID, err.Error(), nil)
 		}
-		return err
+		return errors.Join(err, persistErr)
 	}
 	if action == scrobbleActionStop {
 		stopSentAt := s.now()
