@@ -52,7 +52,7 @@ function validateProviderRegex(pattern: string): void {
   // preview while leaving the original pattern untouched for the plugin.
   const inlineFlags = pattern.match(/^\(\?([imsu]+)\)/i);
   const source = inlineFlags ? pattern.slice(inlineFlags[0].length) : pattern;
-  const flags = inlineFlags ? inlineFlags[1].toLowerCase() : "";
+  const flags = inlineFlags?.[1]?.toLowerCase() ?? "";
   new RegExp(source, flags);
 }
 
