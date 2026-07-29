@@ -90,6 +90,16 @@ func (h *PlaybackHandler) loadVirtualPlaybackCandidates(ctx context.Context, fil
 	if h.VirtualPlaybackStreamLister == nil || h.VirtualPlaybackStreamSink == nil || file == nil {
 		return
 	}
+	// A profile URI is already a materialized selection (one provider result
+	// per configured quality profile). A result URI is likewise an explicit
+	// picker choice. Listing candidates here would turn either mode into the
+	// picker by persisting every provider stream beside the selected file.
+	if parsed, err := url.Parse(file.FilePath); err == nil {
+		query := parsed.Query()
+		if strings.TrimSpace(query.Get("profile")) != "" || strings.TrimSpace(query.Get("result")) != "" {
+			return
+		}
+	}
 	if ctx.Err() != nil {
 		return
 	}
