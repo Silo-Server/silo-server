@@ -712,17 +712,21 @@ func strictUnmarshal(raw []byte, target any) error {
 }
 
 // languageTagPattern accepts the well-formed BCP 47 shapes real clients
-// produce: language, script, region, variants, extension singletons and
-// private use. The narrower language[-script][-region] form this started as
-// rejected tags Android and iOS emit unprompted — `Locale.toLanguageTag()`
-// appends extension subtags for a non-Gregorian calendar or non-Latin numbering
-// system (`ar-EG-u-nu-latn`), and registered variants like `ca-ES-valencia` are
-// ordinary user choices.
+// produce: language (with optional extlang), script, region, variants,
+// extension singletons and private use — including a purely private-use tag.
+// The narrower language[-script][-region] form this started as rejected tags
+// Android and iOS emit unprompted — `Locale.toLanguageTag()` appends extension
+// subtags for a non-Gregorian calendar or non-Latin numbering system
+// (`ar-EG-u-nu-latn`), registered variants like `ca-ES-valencia` are ordinary
+// user choices, and the legacy endpoint accepted `zh-cmn` (extlang) and
+// `x-private` (private use only), so rejecting them here would turn an
+// existing 204 into a 400.
 var languageTagPattern = regexp.MustCompile(
-	`^[a-zA-Z]{2,3}(-[a-zA-Z]{4})?(-([a-zA-Z]{2}|[0-9]{3}))?` +
+	`^([a-zA-Z]{2,3}(-[a-zA-Z]{3}){0,3}(-[a-zA-Z]{4})?(-([a-zA-Z]{2}|[0-9]{3}))?` +
 		`(-([0-9a-zA-Z]{5,8}|[0-9][0-9a-zA-Z]{3}))*` +
 		`(-[0-9a-wy-zA-WY-Z](-[0-9a-zA-Z]{2,8})+)*` +
-		`(-[xX](-[0-9a-zA-Z]{1,8})+)?$`)
+		`(-[xX](-[0-9a-zA-Z]{1,8})+)?` +
+		`|[xX](-[0-9a-zA-Z]{1,8})+)$`)
 
 // NormalizeLanguageTag returns the canonical BCP 47 form of a tag, or false if
 // it is not well-formed.
@@ -748,7 +752,10 @@ func NormalizeLanguageTag(tag string) (string, bool) {
 	// every client library produces: lowercase language, Titlecase script,
 	// UPPERCASE region, lowercase everything else.
 	parts[0] = strings.ToLower(parts[0])
-	inExtension := false
+	// A tag that is entirely private use ("x-whatever") has no script or
+	// region positions — everything after the leading singleton is private-use
+	// content and stays lowercase.
+	inExtension := parts[0] == "x"
 	for i := 1; i < len(parts); i++ {
 		part := parts[i]
 		switch {
@@ -761,7 +768,10 @@ func NormalizeLanguageTag(tag string) (string, bool) {
 			parts[i] = strings.ToLower(part)
 		case inExtension:
 			parts[i] = strings.ToLower(part)
-		case i == 1 && len(part) == 4 && isAlpha(part):
+		case len(part) == 4 && isAlpha(part):
+			// A script. Not necessarily at index 1: an extlang can precede it
+			// (`zh-cmn-Hans-CN`). No collision with variants — a four-character
+			// variant must begin with a digit.
 			parts[i] = strings.ToUpper(part[:1]) + strings.ToLower(part[1:])
 		case len(part) == 2 && isAlpha(part):
 			parts[i] = strings.ToUpper(part)

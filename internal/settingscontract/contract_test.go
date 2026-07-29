@@ -901,6 +901,39 @@ func TestObjectValuesValidateAgainstTheirSchema(t *testing.T) {
 		})
 	}
 
+	// Font family names are stored verbatim from the platform's font list, and
+	// they are not ASCII: Apple ships families whose canonical names are CJK.
+	for name, family := range map[string]string{
+		"stock macOS Japanese": "ヒラギノ角ゴ ProN",
+		"simplified Chinese":   "宋体",
+		"Latin-1 supplement":   "Åkzidenz Grotesk",
+		"plain ASCII":          "Helvetica Neue",
+		"generic":              "sans-serif",
+	} {
+		t.Run("font family "+name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]string{"fontFamily": family})
+			if err := def.ValueSchema.ValidateValue(raw, objSchemas); err != nil {
+				t.Errorf("family %q rejected: %v", family, err)
+			}
+		})
+	}
+	// The exclusions hold: characters that would escape a CSS interpolation
+	// or a font lookup stay rejected.
+	for name, family := range map[string]string{
+		"quote":         `Helvetica" Neue`,
+		"brace":         "family{",
+		"semicolon":     "family;",
+		"leading space": " family",
+		"backslash":     `fam\ily`,
+	} {
+		t.Run("font family rejects "+name, func(t *testing.T) {
+			raw, _ := json.Marshal(map[string]string{"fontFamily": family})
+			if err := def.ValueSchema.ValidateValue(raw, objSchemas); err == nil {
+				t.Errorf("family %q was accepted", family)
+			}
+		})
+	}
+
 	for name, invalid := range map[string]string{
 		"unknown field": `{"fontSize":"large","fontFamily":"sans-serif","fontColor":"#ffffff",
 			"backgroundColor":"#000000","backgroundStyle":"shadow","backgroundOpacity":75,
@@ -1134,6 +1167,15 @@ func TestLanguageTagsAcceptWhatClientsProduce(t *testing.T) {
 		"de-DE-u-co-phonebk": "de-DE-u-co-phonebk",
 		"es-419":             "es-419",
 		"en-US-x-private":    "en-US-x-private",
+		// Extlang and private-use-only tags: the legacy length-only validator
+		// accepted these, so the contract grammar must keep them storable.
+		"zh-cmn":         "zh-cmn",
+		"zh-yue":         "zh-yue",
+		"zh-cmn-Hans-CN": "zh-cmn-Hans-CN",
+		"zh-cmn-hans-cn": "zh-cmn-Hans-CN",
+		"x-private":      "x-private",
+		"X-Private":      "x-private",
+		"x-abcd":         "x-abcd",
 	}
 	for input, want := range wellFormed {
 		got, ok := NormalizeLanguageTag(input)
@@ -1148,7 +1190,7 @@ func TestLanguageTagsAcceptWhatClientsProduce(t *testing.T) {
 
 	// The empty string is not a language tag: "no preference" is null, which
 	// the nullable flag on each language setting expresses.
-	malformed := []string{"", " ", "e", "toolongprimary", "en-", "-US", "en--US", "123"}
+	malformed := []string{"", " ", "e", "toolongprimary", "en-", "-US", "en--US", "123", "x", "x-", "x-toolongsubtag1"}
 	for _, input := range malformed {
 		if got, ok := NormalizeLanguageTag(input); ok {
 			t.Errorf("NormalizeLanguageTag(%q) = %q, want rejection", input, got)
@@ -1379,7 +1421,13 @@ func TestObjectSchemasAcceptTheShapesClientsStore(t *testing.T) {
 		"ui.disabled_library_ids":      `[3,9]`,
 		"ui.library_order":             `[9,3,1]`,
 		"playback.subtitle_appearance": `{"fontSize":"large","position":"top"}`,
-		"ui.custom_theme_vars":         `{"color-bg":"#101014"}`,
+		// The web importer accepts computed CSS values, and multi-stop
+		// gradients routinely pass 128 characters; a stored theme with one
+		// must stay valid.
+		"ui.custom_theme_vars": `{"color-bg":"#101014","gradient-hero":` +
+			`"linear-gradient(135deg, rgba(16,16,20,0.98) 0%, rgba(28,20,44,0.94) 18%, ` +
+			`rgba(44,24,64,0.9) 36%, rgba(64,28,84,0.86) 54%, rgba(84,32,104,0.82) 72%, ` +
+			`rgba(104,36,124,0.78) 100%)"}`,
 	}
 	for key, value := range valid {
 		t.Run(key, func(t *testing.T) {

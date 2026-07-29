@@ -12,11 +12,11 @@
       "enum": ["small", "medium", "large", "xlarge", "xxlarge"]
     },
     "fontFamily": {
-      "description": "A font family name. Not an enum: the Apple clients offer every family CTFontManagerCopyAvailableFontFamilyNames reports and store the chosen name verbatim, so restricting this to the web's three generic families would invalidate the stored appearance of every user who picked a real font. The pattern bounds it to a plain family name — no separators, quotes, parentheses or braces — so a value is safe to interpolate into CSS or a platform font lookup.",
+      "description": "A font family name. Not an enum: the Apple clients offer every family CTFontManagerCopyAvailableFontFamilyNames reports and store the chosen name verbatim, so restricting this to the web's three generic families would invalidate the stored appearance of every user who picked a real font. Family names are not ASCII — ヒラギノ角ゴ ProN is a stock macOS family — so the pattern excludes rather than allowlists: no control characters, quotes, separators, parentheses or braces, which keeps a value safe to interpolate into CSS or a platform font lookup while accepting any real family name.",
       "type": "string",
       "minLength": 1,
       "maxLength": 64,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]*$"
+      "pattern": "^[^\\x00-\\x1f\"'(){};:,\\\\/ ][^\\x00-\\x1f\"'(){};:,\\\\/]*$"
     },
     "fontColor": { "$ref": "#/$defs/hexColor" },
     "backgroundColor": { "$ref": "#/$defs/hexColor" },

@@ -16,6 +16,7 @@
       "description": "Explicit render order. Empty means use the registry's own order.",
       "type": "array",
       "maxItems": 64,
+      "uniqueItems": true,
       "items": { "$ref": "#/$defs/overlayId" }
     },
     "items": {
