@@ -94,11 +94,40 @@ func TestPostgresSettingValues(t *testing.T) {
 			t.Fatalf("seed user: %v", err)
 		}
 		// user_setting_values and user_setting_mutations cascade from users.
+		// The cleanup asserts the cascade actually fired: silently discarding
+		// this error would let a dropped FK leak seeded rows into the shared
+		// test database run after run with no failure signal.
 		t.Cleanup(func() {
-			_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+			deleteUserAssertingCascade(t, pool, userID,
+				"user_setting_values", "user_setting_mutations", "user_profiles")
 		})
 		return newStore(pool, userID)
 	})
+}
+
+// deleteUserAssertingCascade removes a seeded user and fails the test if the
+// delete errors or any named child table still holds the user's rows — i.e.
+// if an ON DELETE CASCADE these cleanups rely on ever goes missing.
+func deleteUserAssertingCascade(t *testing.T, pool *pgxpool.Pool, userID int, childTables ...string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID); err != nil {
+		t.Errorf("cleanup: deleting user %d: %v", userID, err)
+		return
+	}
+	for _, table := range childTables {
+		var leaked int
+		if err := pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM `+table+` WHERE user_id = $1`, userID,
+		).Scan(&leaked); err != nil {
+			t.Errorf("cleanup: counting %s rows for user %d: %v", table, userID, err)
+			continue
+		}
+		if leaked != 0 {
+			t.Errorf("cleanup: %d %s rows survived deleting user %d — the ON DELETE CASCADE this cleanup relies on is gone",
+				leaked, table, userID)
+		}
+	}
 }
 
 // TestPostgresJellycompatDisplayPrefs runs the Jellyfin DisplayPreferences
@@ -135,9 +164,9 @@ func TestPostgresJellycompatDisplayPrefs(t *testing.T) {
 		).Scan(&userID); err != nil {
 			t.Fatalf("seed user: %v", err)
 		}
-		// jellycompat_displayprefs cascades from users.
+		// jellycompat_displayprefs cascades from users; assert it, as above.
 		t.Cleanup(func() {
-			_, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+			deleteUserAssertingCascade(t, pool, userID, "jellycompat_displayprefs")
 		})
 		return newStore(pool, userID)
 	})

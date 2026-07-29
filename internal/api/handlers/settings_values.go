@@ -63,6 +63,12 @@ const fieldRevision = "revision"
 // fieldValues is the response key wrapping a list of stored values.
 const fieldValues = "values"
 
+// maxEffectiveContentIDs bounds the combined library_ids and series_ids of one
+// effective-values request. SQLite expands each id into a bound parameter, and
+// its host-parameter budget is shared with the keys — 999 on older builds — so
+// the request boundary keeps a crafted batch from failing resolution outright.
+const maxEffectiveContentIDs = 200
+
 // settingValueResponse is one explicit stored value.
 type settingValueResponse struct {
 	Key       string          `json:"key"`
@@ -354,6 +360,16 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 		DeviceID:   deviceMetadataFromRequest(r).DeviceID,
 		LibraryIDs: parseIntCSV(r.URL.Query().Get("library_ids")),
 		SeriesIDs:  splitCSV(r.URL.Query().Get("series_ids")),
+	}
+
+	// The SQLite backend expands these into IN lists, whose host-parameter
+	// budget is finite; an unbounded request could fail the whole resolution.
+	// The bound is far above any real batch — a season view resolves a
+	// handful of series, not hundreds.
+	if len(rc.LibraryIDs)+len(rc.SeriesIDs) > maxEffectiveContentIDs {
+		writeError(w, http.StatusBadRequest, "bad_request",
+			"Too many library_ids/series_ids in one request; resolve in smaller batches")
+		return
 	}
 
 	// A device-aware key resolved without a device identity would silently

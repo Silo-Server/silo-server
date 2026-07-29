@@ -263,10 +263,11 @@ func (r *Resolver) resolveOne(
 // pickForScope returns the candidate row for one scope.
 //
 // Library and series scopes can return several rows in a batch — one per
-// library or series in the request — so the caller's context decides which is
-// the relevant one. Ties are broken by the most specific id in the request
-// order, which is why a batch must resolve per item rather than expecting one
-// answer to cover a whole season.
+// library or series in the request. A batch spanning several libraries or
+// series has no single right answer, so a caller wanting per-item values must
+// resolve per item; when several rows match anyway, the tie is broken by
+// ascending library id then series id, purely so two identical requests
+// cannot disagree.
 func pickForScope(
 	scope settingscontract.Scope,
 	candidates []userstore.SettingValue,

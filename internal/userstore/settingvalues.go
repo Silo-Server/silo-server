@@ -43,8 +43,25 @@ type SettingIdentity struct {
 // CHECK constraint on user_setting_values so an invalid identity is rejected
 // before it reaches either backend rather than surfacing as a driver error whose
 // text differs between them.
+//
+// It also rejects ids that are not in canonical (trimmed) form rather than
+// merely non-empty after trimming: the write path binds these fields verbatim,
+// while resolution queries bind their trimmed forms, so a value written under
+// " p1 " would validate, persist, and then never be found by a resolution for
+// p1 — a silently orphaned row.
 func (id SettingIdentity) Validate() error {
-	if strings.TrimSpace(id.Key) == "" {
+	for field, value := range map[string]string{
+		"key":        id.Key,
+		"profile id": id.ProfileID,
+		"device id":  id.DeviceID,
+		"series id":  id.SeriesID,
+	} {
+		if value != strings.TrimSpace(value) {
+			return fmt.Errorf("%w: %s %q has surrounding whitespace",
+				ErrInvalidSettingIdentity, field, value)
+		}
+	}
+	if id.Key == "" {
 		return fmt.Errorf("%w: key is required", ErrInvalidSettingIdentity)
 	}
 	if !id.Scope.IsRemote() {
@@ -52,7 +69,7 @@ func (id SettingIdentity) Validate() error {
 	}
 
 	needProfile := id.Scope != settingscontract.ScopeAccount
-	if needProfile && strings.TrimSpace(id.ProfileID) == "" {
+	if needProfile && id.ProfileID == "" {
 		return fmt.Errorf("%w: scope %q requires a profile id", ErrInvalidSettingIdentity, id.Scope)
 	}
 	if !needProfile && id.ProfileID != "" {
@@ -60,7 +77,7 @@ func (id SettingIdentity) Validate() error {
 	}
 
 	wantDevice := id.Scope == settingscontract.ScopeProfileDevice
-	if wantDevice && strings.TrimSpace(id.DeviceID) == "" {
+	if wantDevice && id.DeviceID == "" {
 		return fmt.Errorf("%w: scope %q requires a device id", ErrInvalidSettingIdentity, id.Scope)
 	}
 	if !wantDevice && id.DeviceID != "" {
@@ -76,7 +93,7 @@ func (id SettingIdentity) Validate() error {
 	}
 
 	wantSeries := id.Scope == settingscontract.ScopeProfileSeries
-	if wantSeries && strings.TrimSpace(id.SeriesID) == "" {
+	if wantSeries && id.SeriesID == "" {
 		return fmt.Errorf("%w: scope %q requires a series id", ErrInvalidSettingIdentity, id.Scope)
 	}
 	if !wantSeries && id.SeriesID != "" {

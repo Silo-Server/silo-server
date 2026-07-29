@@ -446,6 +446,21 @@ func testSettingValueIdentityValidation(t *testing.T, newStore func(t *testing.T
 		{"series scope without series", userstore.SettingIdentity{
 			Key: audioKey, Scope: settingscontract.ScopeProfileSeries, ProfileID: "p1",
 		}},
+		// Padded ids must be rejected, not stored: the write path binds them
+		// verbatim while resolution queries bind their trimmed forms, so a
+		// padded id would persist as a row no resolution ever finds.
+		{"padded profile id", userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.ScopeProfile, ProfileID: " p1 ",
+		}},
+		{"padded key", userstore.SettingIdentity{
+			Key: " " + audioKey, Scope: settingscontract.ScopeProfile, ProfileID: "p1",
+		}},
+		{"padded device id", userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.ScopeProfileDevice, ProfileID: "p1", DeviceID: deviceApple + " ",
+		}},
+		{"padded series id", userstore.SettingIdentity{
+			Key: audioKey, Scope: settingscontract.ScopeProfileSeries, ProfileID: "p1", SeriesID: " " + seriesOne,
+		}},
 	}
 
 	for _, tc := range invalid {
