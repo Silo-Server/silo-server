@@ -4,14 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
+	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// settingKeyDisabledLibraryIDs is the user-settings key that stores a JSON
-// array of library IDs the user has chosen to hide.
+// settingKeyDisabledLibraryIDs is the legacy account-wide user-settings key
+// that stored a JSON array of library IDs the user had chosen to hide. It is
+// read only as a fallback now: the setting moved to the profile-scoped
+// canonical key ui.disabled_library_ids, and the legacy write endpoint no
+// longer accepts this key.
 const settingKeyDisabledLibraryIDs = "disabled_library_ids"
 
 // UserRepository loads account-level access settings.
@@ -92,8 +99,8 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.ProfileVerified = verified
 	}
 
-	// Apply user-level disabled library IDs setting.
-	disabled := DisabledLibraryIDs(ctx, store)
+	// Apply the profile's disabled library IDs setting.
+	disabled := DisabledLibraryIDs(ctx, store, input.ProfileID)
 	if len(disabled) > 0 {
 		if scope.AllowedLibraryIDs != nil {
 			// Restricted user: subtract disabled IDs from the allowed set.
@@ -139,17 +146,66 @@ func VerifyProfileForRequest(
 	return profileVerified, nil
 }
 
-// DisabledLibraryIDs reads and parses the disabled_library_ids user setting.
-func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore) []int {
+// DisabledLibraryIDs resolves the libraries the acting profile has hidden from
+// its own browsing: the canonical profile-scoped ui.disabled_library_ids row,
+// else the legacy account-wide disabled_library_ids setting.
+//
+// The canonical row is what the web writes since the settings cutover — the
+// legacy endpoint rejects the unregistered key, so an account-key read alone
+// would silently ignore every edit made after the cutover. The legacy fallback
+// stays because the one-time backfill only ran on stores that existed when it
+// shipped: a store restored from a pre-backfill snapshot still carries its
+// hidden libraries only in the account key, and dropping the fallback would
+// unhide them. A stored canonical row always wins, so the fallback can never
+// override a post-cutover edit.
+func DisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) []int {
+	if ids, ok := canonicalDisabledLibraryIDs(ctx, store, profileID); ok {
+		return ids
+	}
 	raw, err := store.GetSetting(ctx, settingKeyDisabledLibraryIDs)
 	if err != nil || raw == "" {
 		return nil
 	}
+	return parseLibraryIDList(json.RawMessage(raw))
+}
+
+// canonicalDisabledLibraryIDs reads the profile-scoped canonical row. The
+// second return reports whether a stored row decided the answer: a resolution
+// that fell through to the contract default means "nothing stored", which is
+// what lets the caller consult the legacy account key.
+func canonicalDisabledLibraryIDs(ctx context.Context, store userstore.UserStore, profileID string) ([]int, bool) {
+	if store == nil || profileID == "" {
+		return nil, false
+	}
+	contract, err := settingscontract.Load()
+	if err != nil {
+		slog.WarnContext(ctx, "disabled library resolution degraded to the legacy setting: loading settings contract failed",
+			"component", "access", "profile_id", profileID, "error", err)
+		return nil, false
+	}
+	resolved, err := settingsresolve.New(contract).Resolve(ctx, store,
+		settingsresolve.Context{ProfileID: profileID},
+		[]string{settingskeys.UiDisabledLibraryIds}, nil)
+	if err != nil {
+		slog.WarnContext(ctx, "disabled library resolution degraded to the legacy setting: reading setting values failed",
+			"component", "access", "profile_id", profileID, "error", err)
+		return nil, false
+	}
+	if len(resolved) == 0 || resolved[0].Source == settingscontract.ScopeDefault {
+		return nil, false
+	}
+	// A stored null spells "no hidden libraries" and still wins over the
+	// legacy key: the row exists, so the profile has decided.
+	return parseLibraryIDList(resolved[0].Value), true
+}
+
+// parseLibraryIDList decodes a JSON library-id array, dropping anything that
+// is not a positive id. Malformed JSON reads as an empty list.
+func parseLibraryIDList(raw json.RawMessage) []int {
 	var ids []int
-	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+	if err := json.Unmarshal(raw, &ids); err != nil {
 		return nil
 	}
-	// Filter out invalid values.
 	n := 0
 	for _, id := range ids {
 		if id > 0 {

@@ -89,7 +89,7 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 		AccountRestricted:    effective.LibraryIDs != nil,
 		AccountMaxQuality:    effective.MaxPlaybackQuality,
 		AccessPolicyRevision: user.AccessPolicyRevision,
-		DisabledLibraryIDs:   access.DisabledLibraryIDs(ctx, store),
+		DisabledLibraryIDs:   access.DisabledLibraryIDs(ctx, store, input.ProfileID),
 		ProfileVerified:      profileVerified,
 		RequestTime:          time.Now().UTC().Format(time.RFC3339),
 		// ResolveInput cannot distinguish API keys from compat callers that

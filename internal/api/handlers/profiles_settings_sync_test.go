@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -198,6 +199,59 @@ func TestCreateProfileSyncsCanonicalLanguages(t *testing.T) {
 	}
 	if got := access.PreferredMetadataLanguage(context.Background(), store, created.ID); got != "fr" {
 		t.Errorf("canonical metadata language after create = %q, want %q", got, "fr")
+	}
+}
+
+// failingSettingsWriteStore fails every canonical setting write, simulating a
+// store whose user_setting_values table is unavailable while profile CRUD
+// still works.
+type failingSettingsWriteStore struct {
+	userstore.UserStore
+}
+
+func (s failingSettingsWriteStore) UpsertSettingValue(
+	context.Context, userstore.SettingIdentity, json.RawMessage,
+) (*userstore.SettingValue, error) {
+	return nil, errors.New("settings storage unavailable")
+}
+
+// TestCreateProfileCompensatesWhenSettingsSyncFails: CreateProfile has already
+// committed when the canonical sync fails, and the store interface offers no
+// cross-call transaction to roll it back. Without the compensating delete the
+// household keeps a half-configured profile whose preferences read as contract
+// defaults forever, and the client's retry hits a name-conflict 409 instead of
+// succeeding.
+func TestCreateProfileCompensatesWhenSettingsSyncFails(t *testing.T) {
+	base := newProfileTestStore(t)
+	store := failingSettingsWriteStore{UserStore: base}
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	req := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
+		`{"name":"Kids","language":"de"}`, "user", "profile-1")
+	rr := httptest.NewRecorder()
+	handler.HandleCreateProfile(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("POST = %d, want 500: %s", rr.Code, rr.Body.String())
+	}
+
+	profiles, err := base.ListProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("listing profiles: %v", err)
+	}
+	for _, p := range profiles {
+		if p.Name == "Kids" {
+			t.Fatalf("profile %q survived a failed settings sync", p.Name)
+		}
+	}
+
+	// The compensation is what lets the retry succeed once the store recovers:
+	// no leftover profile means no name-conflict 409.
+	retry := newAuthorizedProfileRequestWithRole(http.MethodPost, "/profiles",
+		`{"name":"Kids","language":"de"}`, "user", "profile-1")
+	retryRec := httptest.NewRecorder()
+	NewProfileHandler(testUserStoreProvider{store: base}).HandleCreateProfile(retryRec, retry)
+	if retryRec.Code != http.StatusCreated {
+		t.Fatalf("retry POST = %d, want 201: %s", retryRec.Code, retryRec.Body.String())
 	}
 }
 

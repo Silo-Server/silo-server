@@ -461,6 +461,93 @@ func TestResolver_DisabledLibraries_RestrictedUser(t *testing.T) {
 	}
 }
 
+func TestResolver_DisabledLibraries_CanonicalRowWins(t *testing.T) {
+	// The canonical profile-scoped ui.disabled_library_ids row wins; the
+	// legacy account key carries a decoy value that must not be read once a
+	// canonical row exists.
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		stubStoreProvider{store: stubStore{
+			profile:  &userstore.Profile{ID: "prof-1"},
+			settings: map[string]string{"disabled_library_ids": "[9]"},
+			settingValues: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key:       settingskeys.UiDisabledLibraryIds,
+					Scope:     settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`[3,5]`),
+			}},
+		}},
+		nil,
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if len(scope.DisabledLibraryIDs) != 2 || scope.DisabledLibraryIDs[0] != 3 || scope.DisabledLibraryIDs[1] != 5 {
+		t.Fatalf("DisabledLibraryIDs = %v, want canonical [3 5]", scope.DisabledLibraryIDs)
+	}
+}
+
+func TestResolver_DisabledLibraries_CanonicalNullClearsLegacy(t *testing.T) {
+	// A stored null spells "no hidden libraries" and still wins over the
+	// legacy key: the row exists, so the profile has decided.
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		stubStoreProvider{store: stubStore{
+			profile:  &userstore.Profile{ID: "prof-1"},
+			settings: map[string]string{"disabled_library_ids": "[9]"},
+			settingValues: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key:       settingskeys.UiDisabledLibraryIds,
+					Scope:     settingscontract.ScopeProfile,
+					ProfileID: "prof-1",
+				},
+				Value: json.RawMessage(`null`),
+			}},
+		}},
+		nil,
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-1"})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if len(scope.DisabledLibraryIDs) != 0 {
+		t.Fatalf("DisabledLibraryIDs = %v, want empty", scope.DisabledLibraryIDs)
+	}
+}
+
+func TestResolver_DisabledLibraries_ProfileIsolation(t *testing.T) {
+	// Profile A's canonical hidden-library list must not leak into profile B:
+	// with no canonical row of its own and no legacy key, B hides nothing.
+	resolver := NewResolver(
+		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},
+		stubStoreProvider{store: stubStore{
+			profile: &userstore.Profile{ID: "prof-b"},
+			settingValues: []userstore.SettingValue{{
+				SettingIdentity: userstore.SettingIdentity{
+					Key:       settingskeys.UiDisabledLibraryIds,
+					Scope:     settingscontract.ScopeProfile,
+					ProfileID: "prof-a",
+				},
+				Value: json.RawMessage(`[3,5]`),
+			}},
+		}},
+		nil,
+	)
+
+	scope, err := resolver.Resolve(context.Background(), ResolveInput{UserID: 1, ProfileID: "prof-b"})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if len(scope.DisabledLibraryIDs) != 0 {
+		t.Fatalf("DisabledLibraryIDs = %v, want empty for the other profile", scope.DisabledLibraryIDs)
+	}
+}
+
 func TestResolver_DisabledLibraries_NoProfile(t *testing.T) {
 	resolver := NewResolver(
 		stubUserRepo{user: &models.User{ID: 1, AccessPolicyRevision: 5}},

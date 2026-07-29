@@ -1499,7 +1499,7 @@ func (h *SectionHandler) sectionPresignURL(r *http.Request, path string, variant
 }
 
 // maybeInjectNextUp injects a SectionNextUp entry after SectionContinueWatching
-// if the user's next_up_mode setting is "separate".
+// if the profile's ui.next_up_mode setting resolves to "separate".
 func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []sections.ResolvedSection, userID int) []sections.ResolvedSection {
 	if h.StoreProvider == nil || userID <= 0 {
 		return resolved
@@ -1508,8 +1508,7 @@ func (h *SectionHandler) maybeInjectNextUp(ctx context.Context, resolved []secti
 	if err != nil {
 		return resolved
 	}
-	mode, _ := store.GetSetting(ctx, "next_up_mode")
-	if mode == "separate" {
+	if sections.NextUpMode(ctx, store, apimw.GetProfileID(ctx)) == sections.NextUpModeSeparate {
 		return injectNextUpSection(resolved)
 	}
 	return resolved

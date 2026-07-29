@@ -237,7 +237,7 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				t.Fatalf("PreferredMetadataLanguage = %q, want %q", policyScope.PreferredMetadataLanguage, tt.wantMetadataLang)
 			}
 
-			decisionInput := viewerResolverExpectedInput(tt.user, tt.profile, tt.input, policyScope.ProfileVerified, access.DisabledLibraryIDs(ctx, store), access.PreferredMetadataLanguage(ctx, store, tt.input.ProfileID))
+			decisionInput := viewerResolverExpectedInput(tt.user, tt.profile, tt.input, policyScope.ProfileVerified, access.DisabledLibraryIDs(ctx, store, tt.input.ProfileID), access.PreferredMetadataLanguage(ctx, store, tt.input.ProfileID))
 			decision, _, err := pdp.ResolveViewerScope(ctx, decisionInput)
 			if err != nil {
 				t.Fatalf("ResolveViewerScope() error: %v", err)

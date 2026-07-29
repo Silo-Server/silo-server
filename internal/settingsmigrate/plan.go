@@ -182,6 +182,9 @@ const keyPreferredQuality = "playback.preferred_quality"
 // web clients stored a v1 document the contract schema does not accept.
 const keyCardOverlays = "ui.card_overlays"
 
+// keyAudioLanguage has a device-scope quarantine: see planDeviceSettings.
+const keyAudioLanguage = "playback.audio_language"
+
 // fieldProfileID is the identity field every non-account reject carries.
 const fieldProfileID = "profile_id"
 
@@ -469,6 +472,27 @@ func (p *Planner) planDeviceSettings(devices []LegacyDeviceSetting, res *Result)
 			continue
 		}
 
+		// Device-scope audio language rows are stranded, not preferences: no
+		// pre-contract playback path ever read them (track selection used
+		// profile.Language), and migration 098 machine-fanned the account
+		// value onto every known device besides. Promoting one to a real
+		// profile_device override would make a value that never influenced
+		// playback suddenly outrank the profile language after upgrade.
+		// Quarantined rather than dropped so an operator can restore any row
+		// a user insists was a choice.
+		if key == keyAudioLanguage {
+			// An empty value is the legacy spelling of unset, which produces
+			// no row anywhere and so has nothing to quarantine.
+			if strings.TrimSpace(row.Value) != "" {
+				res.Rejects = append(res.Rejects, Reject{
+					SourceTable: sourceUserDeviceSettings, SourceKey: row.Key,
+					Identity: identity, Value: row.Value,
+					Reason: "stranded device-scope audio language: never read by playback before the contract, so promoting it would change track selection",
+				})
+			}
+			continue
+		}
+
 		def, ok := p.contract.Lookup(key)
 		if !ok {
 			res.Rejects = append(res.Rejects, Reject{
@@ -705,6 +729,10 @@ func (p *Planner) coerce(def *settingscontract.Definition, raw string) (json.Raw
 // playback speed of 0.26 are real user preferences; rejecting them at
 // migration would destroy the preference over a rounding artifact, and every
 // client's stepper was going to snap it on the next write anyway.
+// Only the grid is corrected, never the range: a value outside the declared
+// bounds was never storable through any endpoint, so clamping it would invent
+// a preference rather than preserve one. Those still fall to validation and
+// land in the rejects for an operator to see.
 func snapToStep(def *settingscontract.Definition, value float64) float64 {
 	if def.ValueSchema.Step == nil || *def.ValueSchema.Step <= 0 {
 		return value
@@ -714,14 +742,7 @@ func snapToStep(def *settingscontract.Definition, value float64) float64 {
 	if minimum, ok := def.ValueSchema.Minimum.Current(); ok {
 		base = minimum
 	}
-	snapped := base + math.Round((value-base)/step)*step
-	if maximum, ok := def.ValueSchema.Maximum.Current(); ok && snapped > maximum {
-		snapped = maximum
-	}
-	if minimum, ok := def.ValueSchema.Minimum.Current(); ok && snapped < minimum {
-		snapped = minimum
-	}
-	return snapped
+	return base + math.Round((value-base)/step)*step
 }
 
 // cardOverlayIDs mirrors the overlayId enum in

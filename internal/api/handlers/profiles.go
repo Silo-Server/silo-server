@@ -432,9 +432,21 @@ func (h *ProfileHandler) HandleCreateProfile(w http.ResponseWriter, r *http.Requ
 	// failure here is surfaced rather than swallowed — the profile exists, but
 	// a preference that silently never applies is exactly the divergence this
 	// sync exists to prevent.
+	//
+	// Surfacing it must not strand the created profile: the sync spans several
+	// store calls and the userstore interface has no cross-call transaction, so
+	// the create-then-sync pair cannot be atomic. Compensate instead — delete
+	// the profile so the client's retry does not hit a name-conflict 409
+	// against a half-configured profile whose canonical preference rows would
+	// read as contract defaults forever. If the compensating delete itself
+	// fails it is logged, and the original sync error still wins the response.
 	if err := h.applyProfileSettingsSync(r.Context(), store, userID, profileID, settingsSync); err != nil {
 		slog.ErrorContext(r.Context(), "profile create failed to sync canonical settings",
 			"component", "api", "user_id", userID, "profile_id", profileID, "error", err)
+		if deleteErr := store.DeleteProfile(r.Context(), profileID); deleteErr != nil {
+			slog.ErrorContext(r.Context(), "compensating profile delete failed after settings sync failure",
+				"component", "api", "user_id", userID, "profile_id", profileID, "error", deleteErr)
+		}
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to store profile preferences")
 		return
 	}

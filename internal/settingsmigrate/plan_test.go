@@ -601,3 +601,36 @@ func TestCardOverlaysV1DocumentsUpgrade(t *testing.T) {
 		t.Fatalf("garbage produced rows=%+v rejects=%+v, want one reject", res.Rows, res.Rejects)
 	}
 }
+
+// TestStrandedDeviceAudioLanguageIsQuarantined. The Apple clients wrote
+// playback.audio_language device rows that no pre-contract playback path ever
+// read — and migration 098 fanned the account value onto every known device
+// besides. Promoting one to a real profile_device override would make a value
+// that never influenced playback outrank the profile language after upgrade,
+// so it is recorded for an operator instead.
+func TestStrandedDeviceAudioLanguageIsQuarantined(t *testing.T) {
+	res := planner(t).Plan(Input{DeviceSettings: []LegacyDeviceSetting{
+		{ProfileID: "p1", DeviceID: "d1", Key: "playback.audio_language", Value: "ja"},
+		{ProfileID: "p1", DeviceID: "d1", Key: "playback.subtitle_language", Value: "de"},
+	}})
+
+	for _, row := range res.Rows {
+		if row.Key == "playback.audio_language" {
+			t.Errorf("a stranded device audio language became a real override: %+v", row)
+		}
+	}
+	// The other device preferences on the same device still migrate.
+	if got := string(find(t, res, "playback.subtitle_language", nil).Value); got != `"de"` {
+		t.Errorf("subtitle language = %s, want \"de\" — only audio language is quarantined", got)
+	}
+
+	var quarantined bool
+	for _, reject := range res.Rejects {
+		if reject.SourceKey == "playback.audio_language" && reject.Value == "ja" {
+			quarantined = true
+		}
+	}
+	if !quarantined {
+		t.Errorf("the stranded row was dropped rather than recorded: %+v", res.Rejects)
+	}
+}
