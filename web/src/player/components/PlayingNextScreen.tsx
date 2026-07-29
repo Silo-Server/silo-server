@@ -3,8 +3,7 @@ import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, X } from "lucide-react";
 import type { EpisodeRef } from "../types";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
-import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
-import { SETTING_KEYS } from "@/lib/settingsContract";
+import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { preferredDateLocale } from "@/lib/datetime";
@@ -35,26 +34,13 @@ export function PlayingNextScreen({
 }: PlayingNextScreenProps) {
   useDateTimeFormat();
   // -- Auto-play setting --
-  const { data: effectiveSettings } = useEffectiveSettings({
-    keys: [SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT],
-  });
-  const setValue = useSetSettingValue();
-  // Contract default is true; the effective endpoint resolves an unset key to
-  // it, so an absent answer (first paint) reads the same as a stored true.
-  const autoplay =
-    (effectiveSettings?.[SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT]?.value as boolean | undefined) ??
-    true;
+  // Shared with Settings → Playback: both surfaces edit the same profile row,
+  // so a choice made here is the one that screen shows and vice versa.
+  const { enabled: autoplay, setEnabled: setAutoplay } = useAutoPlayNextSetting();
 
   const toggleAutoplay = useCallback(() => {
-    // Turning autoplay off from the player is a choice about this screen, so it
-    // writes at profile_device — the profile keeps whatever it chose in
-    // settings, and the contract resolves the device row above it.
-    setValue.mutate({
-      key: SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT,
-      value: !autoplay,
-      identity: { scope: "profile_device" },
-    });
-  }, [autoplay, setValue]);
+    void setAutoplay(!autoplay);
+  }, [autoplay, setAutoplay]);
 
   // -- Countdown (only starts after video has ended) --
   const [secondsRemaining, setSecondsRemaining] = useState(COUNTDOWN_SECONDS);

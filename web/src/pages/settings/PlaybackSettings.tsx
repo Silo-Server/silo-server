@@ -20,6 +20,7 @@ import {
   useSetSettingValue,
   type SettingIdentity,
 } from "@/hooks/queries/settingValues";
+import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { toast } from "sonner";
 
 /**
@@ -30,10 +31,15 @@ import { toast } from "sonner";
  */
 const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 
-/** Read in one batch: the screen wants every key at once. */
+/**
+ * Read in one batch: the screen wants every key at once.
+ *
+ * playback.auto_play_next is deliberately absent — it is read and written
+ * through useAutoPlayNextSetting, shared with the post-roll toggle so the two
+ * surfaces cannot land on different scopes.
+ */
 const PLAYBACK_KEYS: SettingKey[] = [
   SETTING_KEYS.PLAYBACK_AUDIO_LANGUAGE,
-  SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT,
   SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_CREDITS,
   SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
@@ -129,6 +135,37 @@ function QualitySetting() {
             {describeQuality(resolution, bitrate)}
           </p>
         </div>
+      )}
+    />
+  );
+}
+
+/**
+ * Auto-play shares its hook with the post-roll toggle.
+ *
+ * Both surfaces render the resolved value, and the contract resolves
+ * profile_device above profile — so if this screen wrote the profile row while
+ * the player wrote the device row, this switch would save a value the device
+ * row keeps shadowing and snap straight back. The shared hook writes the
+ * profile and clears any device row, which is also the only way a migrated
+ * per-device override becomes reachable from the web UI.
+ */
+function AutoPlayNextSetting() {
+  const { enabled, setEnabled, isSaving } = useAutoPlayNextSetting();
+
+  return (
+    <SettingRow
+      label="Auto-play next episode"
+      description="Start the next episode automatically after the current one ends."
+      control={(id) => (
+        <Switch
+          id={id}
+          checked={enabled}
+          disabled={isSaving}
+          onCheckedChange={(checked) => {
+            setEnabled(checked).catch(() => toast.error("Failed to save playback setting"));
+          }}
+        />
       )}
     />
   );
@@ -304,20 +341,7 @@ export default function PlaybackSettings() {
           )}
         />
 
-        <SettingRow
-          label="Auto-play next episode"
-          description="Start the next episode automatically after the current one ends."
-          control={(id) => (
-            <Switch
-              id={id}
-              checked={read<boolean>(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT)}
-              disabled={pending}
-              onCheckedChange={(checked) =>
-                saveValue(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT, checked)
-              }
-            />
-          )}
-        />
+        <AutoPlayNextSetting />
 
         <SettingRow
           label="Next up episodes"

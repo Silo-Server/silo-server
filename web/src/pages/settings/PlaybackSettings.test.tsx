@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, cleanup, fireEvent } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EffectiveSetting, EffectiveSettingsMap } from "@/hooks/queries/settingValues";
@@ -37,6 +37,7 @@ function resolved(
 
 describe("PlaybackSettings", () => {
   let mutate: ReturnType<typeof vi.fn>;
+  let mutateAsync: ReturnType<typeof vi.fn>;
   let clearMutateAsync: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -44,10 +45,11 @@ describe("PlaybackSettings", () => {
     mocks.useSetSettingValue.mockReset();
     mocks.useClearSettingValue.mockReset();
     mutate = vi.fn();
+    mutateAsync = vi.fn().mockResolvedValue(undefined);
     clearMutateAsync = vi.fn().mockResolvedValue(undefined);
 
     mocks.useEffectiveSettings.mockReturnValue({ data: {}, isLoading: false });
-    mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutate, mutateAsync: vi.fn() });
+    mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutate, mutateAsync });
     mocks.useClearSettingValue.mockReturnValue({
       isPending: false,
       mutate: vi.fn(),
@@ -116,19 +118,63 @@ describe("PlaybackSettings", () => {
     );
   });
 
-  it("turning a default-on toggle off stores an explicit false", () => {
+  it("turning a default-on toggle off stores an explicit false", async () => {
     render(<PlaybackSettings />);
 
     fireEvent.click(screen.getByLabelText("Auto-play next episode"));
 
-    expect(mutate).toHaveBeenCalledWith(
-      expect.objectContaining({
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith({
         key: SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT,
         value: false,
         identity: { scope: "profile" },
       }),
-      expect.anything(),
     );
+  });
+
+  it("clears a shadowing device row when auto-play is saved", async () => {
+    // The player's post-roll toggle and this switch edit the same setting, and
+    // the contract resolves profile_device above profile. A device row left in
+    // place would keep shadowing this save and snap the switch back, with no
+    // other web affordance able to remove it — so the save clears it.
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: resolved(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT, false, "profile_device"),
+      isLoading: false,
+    });
+
+    render(<PlaybackSettings />);
+    expect(screen.getByLabelText("Auto-play next episode").getAttribute("aria-checked")).toBe(
+      "false",
+    );
+
+    fireEvent.click(screen.getByLabelText("Auto-play next episode"));
+
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT,
+        value: true,
+        identity: { scope: "profile" },
+      }),
+    );
+    await waitFor(() =>
+      expect(clearMutateAsync).toHaveBeenCalledWith({
+        key: SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT,
+        identity: { scope: "profile_device" },
+      }),
+    );
+  });
+
+  it("leaves other scopes alone when no device row is shadowing auto-play", async () => {
+    mocks.useEffectiveSettings.mockReturnValue({
+      data: resolved(SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT, false, "profile"),
+      isLoading: false,
+    });
+
+    render(<PlaybackSettings />);
+    fireEvent.click(screen.getByLabelText("Auto-play next episode"));
+
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
+    expect(clearMutateAsync).not.toHaveBeenCalled();
   });
 
   it("offers a reset only once the profile has stored a next-up choice", () => {

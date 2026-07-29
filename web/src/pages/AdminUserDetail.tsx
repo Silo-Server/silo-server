@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useParams, Link } from "react-router";
 import {
   type AdminDeviceSetting,
+  type AdminSettingIdentity,
   type AdminUserSettingEntry,
   useAdminUser,
   useUpdateUser,
@@ -70,7 +71,11 @@ import {
   setAssignedPermission,
 } from "@/lib/permissions";
 import { RegistrySettingControl } from "@/components/settings/RegistrySettingControl";
-import { formatSettingValue, getSettingDefinition } from "@/lib/settingsDisplay";
+import {
+  formatSettingValue,
+  getSettingDefinition,
+  isStructuredSetting,
+} from "@/lib/settingsDisplay";
 import {
   DeviceProfileTabs,
   PlatformTile,
@@ -526,6 +531,18 @@ function UserSettingsTab({ userId }: { userId: number }) {
   const { data: settings = [], isLoading } = useAdminUserSettings(userId);
   const updateSetting = useUpdateAdminUserSetting();
   const deleteSetting = useDeleteAdminUserSetting();
+  // Object-valued settings (pinned sidebar items, per-library overlays, the
+  // custom theme) have no inline widget, so they open the raw JSON editor —
+  // the same treatment the device tab gives them.
+  const [jsonEditor, setJsonEditor] = useState<{
+    entry: AdminUserSettingEntry;
+    identity: AdminSettingIdentity;
+  } | null>(null);
+  const [jsonValue, setJsonValue] = useState("");
+  const closeJsonEditor = () => {
+    setJsonEditor(null);
+    setJsonValue("");
+  };
 
   if (isLoading) {
     return (
@@ -537,6 +554,12 @@ function UserSettingsTab({ userId }: { userId: number }) {
     const definition = getSettingDefinition(entry.key);
     const label = definition?.label ?? entry.key;
     const description = definition?.description ?? "Stored preference.";
+    // A definition this build does not know, an object-valued one, or one the
+    // manifest marks as panel-edited has no inline control that could render
+    // its value truthfully. Without this the select branch would render a
+    // structured value as a one-entry "Unset" dropdown whose only option
+    // destroys it.
+    const isJsonOnly = isStructuredSetting(definition);
     // A key can be stored at several scopes (or for several profiles,
     // libraries or series) at once, so a row is identified by its full
     // identity, and every mutation addresses exactly that row.
@@ -580,7 +603,7 @@ function UserSettingsTab({ userId }: { userId: number }) {
           </p>
         </div>
         <div className="flex flex-col items-stretch gap-2 md:items-end">
-          {definition ? (
+          {definition && !isJsonOnly ? (
             <RegistrySettingControl
               definition={definition}
               value={entry.value}
@@ -595,21 +618,17 @@ function UserSettingsTab({ userId }: { userId: number }) {
               }
             />
           ) : (
-            <Input
-              key={`${rowKey}:${entry.value}`}
-              defaultValue={entry.value}
+            <Button
+              variant="outline"
+              size="sm"
               disabled={updateSetting.isPending || deleteSetting.isPending}
-              className="w-full min-w-[180px] sm:w-[220px]"
-              onBlur={(event) => {
-                if (event.currentTarget.value === entry.value) return;
-                updateSetting.mutate({
-                  userId,
-                  key: entry.key,
-                  identity,
-                  value: event.currentTarget.value,
-                });
+              onClick={() => {
+                setJsonEditor({ entry, identity });
+                setJsonValue(entry.value);
               }}
-            />
+            >
+              Edit JSON
+            </Button>
           )}
           <Button
             variant="ghost"
@@ -628,6 +647,55 @@ function UserSettingsTab({ userId }: { userId: number }) {
 
   return (
     <div className="space-y-4">
+      <Dialog
+        open={jsonEditor !== null}
+        onOpenChange={(open) => {
+          if (!open) closeJsonEditor();
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-sm">
+              {jsonEditor?.entry.key ?? "JSON"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-muted-foreground text-[12.5px]">
+              Edit the raw value. This setting has no inline control, so saving replaces the stored
+              value wholesale — clearing it entirely is what the Reset button does.
+            </p>
+            <textarea
+              spellCheck={false}
+              aria-label="Raw value"
+              className="border-border bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none"
+              value={jsonValue}
+              onChange={(event) => setJsonValue(event.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={closeJsonEditor}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  if (!jsonEditor) return;
+                  updateSetting.mutate(
+                    {
+                      userId,
+                      key: jsonEditor.entry.key,
+                      identity: jsonEditor.identity,
+                      value: jsonValue,
+                    },
+                    { onSuccess: () => closeJsonEditor() },
+                  );
+                }}
+              >
+                Save value
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="surface-panel overflow-hidden rounded-[1.8rem] border-0">
         <div className="border-border/60 flex items-center gap-3 border-b px-5 py-4">
           <div className="rounded-full border border-emerald-500/25 bg-emerald-500/10 p-2">
