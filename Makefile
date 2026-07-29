@@ -119,10 +119,16 @@ settings-bindings:
 # Fail when the committed bindings disagree with the manifest, so a manifest
 # change cannot merge without regenerating what every client reads.
 verify-settings-bindings:
-	@go run ./cmd/settingsgen -lang go > /tmp/silo-settings-go.check
-	@gofmt /tmp/silo-settings-go.check > /tmp/silo-settings-go.fmt
-	@diff -u internal/settingskeys/keys.go /tmp/silo-settings-go.fmt \
+	@CHECK_DIR=$$(mktemp -d) && trap 'rm -rf "$$CHECK_DIR"' EXIT && \
+	go run ./cmd/settingsgen -lang go | gofmt > "$$CHECK_DIR/keys.go" && \
+	diff -u internal/settingskeys/keys.go "$$CHECK_DIR/keys.go" \
 		|| { echo "::error::internal/settingskeys/keys.go is stale; run make settings-bindings"; exit 1; }
+	@CHECK_DIR=$$(mktemp -d) && trap 'rm -rf "$$CHECK_DIR"' EXIT && \
+	go run ./cmd/settingsgen -lang ts -out "$$CHECK_DIR/settingsContract.ts" && \
+	cd web && pnpm exec prettier --log-level silent --config .prettierrc \
+		--write "$$CHECK_DIR/settingsContract.ts" && cd .. && \
+	diff -u web/src/lib/settingsContract.ts "$$CHECK_DIR/settingsContract.ts" \
+		|| { echo "::error::web/src/lib/settingsContract.ts is stale; run make settings-bindings"; exit 1; }
 	@diff -u web/src/lib/settingsConformance.json contracts/settings/v1/conformance.json \
 		|| { echo "::error::web/src/lib/settingsConformance.json is stale; run make settings-bindings"; exit 1; }
 	@echo "settings bindings are current"

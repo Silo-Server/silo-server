@@ -174,7 +174,14 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  type: string;\n")
 	out.WriteString("  nullable: boolean;\n")
 	out.WriteString("  persistence: \"remote\" | \"client_local\";\n")
+	out.WriteString("  /** The manifest revision this definition first appeared in. A client\n")
+	out.WriteString("   * pinned to a newer contract than the server's advertised revision must\n")
+	out.WriteString("   * hide definitions, scopes, enum members and widened bounds introduced\n")
+	out.WriteString("   * after that revision — the server would reject them. */\n")
+	out.WriteString("  introducedIn: number;\n")
 	out.WriteString("  scopes: readonly string[];\n")
+	out.WriteString("  /** Revision each scope became writable at, aligned with scopes. */\n")
+	out.WriteString("  scopeIntroducedIn: readonly number[];\n")
 	out.WriteString("  resolutionOrder: readonly string[];\n")
 	out.WriteString("  defaultValue: unknown;\n")
 	out.WriteString("  label: string;\n")
@@ -182,11 +189,16 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 	out.WriteString("  category: string;\n")
 	out.WriteString("  control?: string;\n")
 	out.WriteString("  unit?: string;\n")
-	out.WriteString("  values?: readonly { value: unknown; label: string }[];\n")
+	out.WriteString("  values?: readonly { value: unknown; label: string; introducedIn: number }[];\n")
 	out.WriteString("  /** Present on enums whose members are ranked, so a ceiling or floor has a direction. */\n")
 	out.WriteString("  ordered?: boolean;\n")
 	out.WriteString("  minimum?: number;\n")
 	out.WriteString("  maximum?: number;\n")
+	out.WriteString("  /** Bound history, oldest first, when a bound was widened after revision 1;\n")
+	out.WriteString("   * a client filtering to an older server revision applies the newest entry\n")
+	out.WriteString("   * whose introducedIn does not exceed it. */\n")
+	out.WriteString("  minimumHistory?: readonly { value: number; introducedIn: number }[];\n")
+	out.WriteString("  maximumHistory?: readonly { value: number; introducedIn: number }[];\n")
 	out.WriteString("  step?: number;\n")
 	out.WriteString("  /** The policy input that narrows this setting, when the manifest binds one. */\n")
 	out.WriteString("  constrainedBy?: {\n")
@@ -202,7 +214,9 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		fmt.Fprintf(&out, "    type: %q,\n", def.ValueSchema.Type)
 		fmt.Fprintf(&out, "    nullable: %t,\n", def.ValueSchema.Nullable)
 		fmt.Fprintf(&out, "    persistence: %q,\n", def.Persistence)
+		fmt.Fprintf(&out, "    introducedIn: %d,\n", def.IntroducedIn)
 		fmt.Fprintf(&out, "    scopes: [%s],\n", quotedScopes(def))
+		fmt.Fprintf(&out, "    scopeIntroducedIn: [%s],\n", scopeRevisions(def))
 		fmt.Fprintf(&out, "    resolutionOrder: [%s],\n", quotedResolution(def))
 		fmt.Fprintf(&out, "    defaultValue: %s,\n", defaultLiteral(def))
 		fmt.Fprintf(&out, "    label: %s,\n", jsString(def.Label))
@@ -221,8 +235,8 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 				if err != nil {
 					return nil, err
 				}
-				fmt.Fprintf(&out, "      { value: %s, label: %s },\n",
-					encoded, jsString(member.Label))
+				fmt.Fprintf(&out, "      { value: %s, label: %s, introducedIn: %d },\n",
+					encoded, jsString(member.Label), memberRevision(def, member))
 			}
 			out.WriteString("    ],\n")
 		}
@@ -231,9 +245,15 @@ func generateTypeScript(contract *settingscontract.Manifest) ([]byte, error) {
 		}
 		if minimum, ok := def.ValueSchema.Minimum.Current(); ok {
 			fmt.Fprintf(&out, "    minimum: %s,\n", trimFloat(minimum))
+			if history := boundHistory(def, def.ValueSchema.Minimum); history != "" {
+				fmt.Fprintf(&out, "    minimumHistory: [%s],\n", history)
+			}
 		}
 		if maximum, ok := def.ValueSchema.Maximum.Current(); ok {
 			fmt.Fprintf(&out, "    maximum: %s,\n", trimFloat(maximum))
+			if history := boundHistory(def, def.ValueSchema.Maximum); history != "" {
+				fmt.Fprintf(&out, "    maximumHistory: [%s],\n", history)
+			}
 		}
 		if def.ValueSchema.Step != nil {
 			fmt.Fprintf(&out, "    step: %s,\n", trimFloat(*def.ValueSchema.Step))
@@ -363,6 +383,49 @@ func quotedScopes(def *settingscontract.Definition) string {
 	parts := make([]string, 0, len(def.AllowedScopes))
 	for _, entry := range def.AllowedScopes {
 		parts = append(parts, fmt.Sprintf("%q", entry.Scope))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// scopeRevisions emits each scope's introduction revision, aligned with
+// quotedScopes. A scope entry with no explicit tag has held since the
+// definition itself appeared.
+func scopeRevisions(def *settingscontract.Definition) string {
+	parts := make([]string, 0, len(def.AllowedScopes))
+	for _, entry := range def.AllowedScopes {
+		revision := entry.IntroducedIn
+		if revision == 0 {
+			revision = def.IntroducedIn
+		}
+		parts = append(parts, fmt.Sprintf("%d", revision))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// memberRevision is the revision an enum member became a legal value at; an
+// untagged member has existed since its definition.
+func memberRevision(def *settingscontract.Definition, member settingscontract.EnumMember) int {
+	if member.IntroducedIn != 0 {
+		return member.IntroducedIn
+	}
+	return def.IntroducedIn
+}
+
+// boundHistory renders a widened bound's full history so an ahead-of-server
+// client can recover the bound in force at an older revision. Empty when the
+// bound never changed — the flattened minimum/maximum already carries it.
+func boundHistory(def *settingscontract.Definition, bound *settingscontract.Bound) string {
+	if bound == nil || len(bound.History) < 2 {
+		return ""
+	}
+	parts := make([]string, 0, len(bound.History))
+	for _, entry := range bound.History {
+		revision := entry.IntroducedIn
+		if revision == 0 {
+			revision = def.IntroducedIn
+		}
+		parts = append(parts, fmt.Sprintf("{ value: %s, introducedIn: %d }",
+			trimFloat(entry.Value), revision))
 	}
 	return strings.Join(parts, ", ")
 }
