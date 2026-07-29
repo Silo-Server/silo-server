@@ -335,8 +335,8 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 	_, err := tx.Exec(ctx, `
 		INSERT INTO media_files(
 			content_id,episode_id,media_folder_id,file_path,file_size,container,duration,probe_source,probe_updated_at,
-			resolution,codec_video,codec_audio,hdr,bitrate,edition_raw,file_size,container,audio_tracks,subtitle_tracks
-		) VALUES($1,NULLIF($2,''),$3,$4,$12,'virtual',NULLIF($5,0),'virtual',now(),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,NULLIF($10,0),NULLIF($11,''),NULLIF($13,''),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($15::text[]) x),'[]'::jsonb),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($16::text[]) x),'[]'::jsonb))
+			resolution,codec_video,codec_audio,hdr,bitrate,edition_raw,audio_tracks,subtitle_tracks
+		) VALUES($1,NULLIF($2,''),$3,$4,$12,$13,NULLIF($5,0),'virtual',now(),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,NULLIF($10,0),NULLIF($11,''),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($15::text[]) x),'[]'::jsonb),COALESCE((SELECT jsonb_agg(jsonb_build_object('language', x)) FROM unnest($16::text[]) x),'[]'::jsonb))
 		ON CONFLICT (file_path) DO UPDATE SET 
 			content_id=EXCLUDED.content_id,
 			episode_id=EXCLUDED.episode_id,
@@ -354,7 +354,10 @@ func upsertVirtualFileVariant(ctx context.Context, tx pgx.Tx, contentID, episode
 			hdr=EXCLUDED.hdr,
 			bitrate=EXCLUDED.bitrate,
 			edition_raw=EXCLUDED.edition_raw,
-			file_size=EXCLUDED.file_size, container=EXCLUDED.container, audio_tracks=EXCLUDED.audio_tracks, subtitle_tracks=EXCLUDED.subtitle_tracks`,
+			file_size=EXCLUDED.file_size,
+			container=EXCLUDED.container,
+			audio_tracks=EXCLUDED.audio_tracks,
+			subtitle_tracks=EXCLUDED.subtitle_tracks`,
 		contentID, episodeID, folderID, v.VirtualURI, runtimeSeconds(v.RuntimeMinutes), v.Resolution, v.CodecVideo, v.CodecAudio, isHDR, v.Bitrate, v.Label, v.FileSize, v.Container, v.SourceType, v.AudioLanguages, v.SubtitleLanguages)
 	if err != nil {
 		return fmt.Errorf("upsert virtual file variant: %w", err)
