@@ -186,12 +186,17 @@ func TestPlaybackSpeedEnforcesDeclaredStep(t *testing.T) {
 			t.Errorf("on-step value %q was rejected: %v", v, err)
 		}
 	}
+	// Off-step but in-range values stay accepted on this legacy endpoint:
+	// it accepted them before the contract landed, and v1 rules forbid
+	// turning that 204 into a 400 before the coordinated cutover. Step
+	// enforcement lives on the typed mutation endpoint, and the migration
+	// snaps historical off-step values onto the grid.
 	for _, v := range []string{"0.26", "1.4372", "1.01", "2.99"} {
-		if err := validateRegisteredSetting(key, v, scopeDevice); err == nil {
-			t.Errorf("off-step value %q was accepted despite the declared 0.05 step", v)
+		if err := validateRegisteredSetting(key, v, scopeDevice); err != nil {
+			t.Errorf("in-range value %q was rejected on the legacy endpoint: %v", v, err)
 		}
 	}
-	// Range still wins where both apply.
+	// Range still enforced, as it always was.
 	for _, v := range []string{"0.2", "3.05", "abc"} {
 		if err := validateRegisteredSetting(key, v, scopeDevice); err == nil {
 			t.Errorf("out-of-range value %q was accepted", v)
@@ -200,7 +205,10 @@ func TestPlaybackSpeedEnforcesDeclaredStep(t *testing.T) {
 }
 
 // TestRegistryStepMatchesTheManifest keeps the two in lockstep: if the manifest
-// widens or narrows the step, this fails until the registry follows.
+// widens or narrows the step, this fails until the typed endpoint follows.
+// The legacy registry deliberately does not enforce the step — see the
+// player.playback_speed entry — so the check runs against the contract
+// validator the typed mutation endpoint uses.
 func TestRegistryStepMatchesTheManifest(t *testing.T) {
 	manifest, err := settingscontract.Load()
 	if err != nil {
@@ -211,7 +219,7 @@ func TestRegistryStepMatchesTheManifest(t *testing.T) {
 		t.Fatal("player.playback_speed is not in the manifest")
 	}
 	if def.ValueSchema.Step == nil {
-		t.Fatal("the manifest no longer declares a step; drop the registry check too")
+		t.Fatal("the manifest no longer declares a step; drop this check too")
 	}
 	step := *def.ValueSchema.Step
 	min, ok := def.ValueSchema.Minimum.Current()
@@ -219,10 +227,10 @@ func TestRegistryStepMatchesTheManifest(t *testing.T) {
 		t.Fatal("the manifest no longer declares a minimum for player.playback_speed")
 	}
 
-	// A value one half-step above the minimum must be rejected by the live
-	// validator for whatever step the manifest currently declares.
+	// A value one half-step above the minimum must be rejected by the typed
+	// endpoint's validator for whatever step the manifest currently declares.
 	offStep := strconv.FormatFloat(min+step/2, 'f', -1, 64)
-	if err := validateRegisteredSetting("player.playback_speed", offStep, scopeDevice); err == nil {
-		t.Errorf("%s is off the manifest's declared %g step but was accepted", offStep, step)
+	if err := def.ValueSchema.ValidateValue(json.RawMessage(offStep), nil); err == nil {
+		t.Errorf("%s is off the manifest's declared %g step but the contract accepted it", offStep, step)
 	}
 }

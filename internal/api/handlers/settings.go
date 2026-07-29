@@ -249,7 +249,12 @@ var settingsRegistry = map[string]settingSpec{
 	"player.playback_speed": {
 		Scope:        scopeDevice,
 		DefaultValue: "1",
-		Validate:     validateFloatRangeStep("player.playback_speed", 0.25, 3.0, 0.05),
+		// Range only, no step: this endpoint accepted any in-range speed
+		// before the contract landed, and v1 rules forbid turning an existing
+		// 204 into a 400 before the coordinated cutover. The typed mutation
+		// endpoint enforces the manifest's 0.05 step, and the migration snaps
+		// historical off-step values onto the grid rather than dropping them.
+		Validate: validateFloatRange("player.playback_speed", 0.25, 3.0),
 	},
 	"player.audio_sync_ms": {
 		Scope:        scopeDevice,

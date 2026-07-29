@@ -15,6 +15,7 @@ package settingsmigrate
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -671,6 +672,7 @@ func (p *Planner) coerce(def *settingscontract.Definition, raw string) (json.Raw
 		if err != nil {
 			return nil, fmt.Errorf("%q is not a number", raw)
 		}
+		parsed = snapToStep(def, parsed)
 		candidate = json.RawMessage(strconv.FormatFloat(parsed, 'g', -1, 64))
 
 	case settingscontract.TypeObject:
@@ -696,6 +698,30 @@ func (p *Planner) coerce(def *settingscontract.Definition, raw string) (json.Raw
 		return nil, err
 	}
 	return candidate, nil
+}
+
+// snapToStep rounds a legacy number onto its definition's step grid. The
+// legacy endpoint never enforced the declared step, so stored values like a
+// playback speed of 0.26 are real user preferences; rejecting them at
+// migration would destroy the preference over a rounding artifact, and every
+// client's stepper was going to snap it on the next write anyway.
+func snapToStep(def *settingscontract.Definition, value float64) float64 {
+	if def.ValueSchema.Step == nil || *def.ValueSchema.Step <= 0 {
+		return value
+	}
+	step := *def.ValueSchema.Step
+	base := 0.0
+	if minimum, ok := def.ValueSchema.Minimum.Current(); ok {
+		base = minimum
+	}
+	snapped := base + math.Round((value-base)/step)*step
+	if maximum, ok := def.ValueSchema.Maximum.Current(); ok && snapped > maximum {
+		snapped = maximum
+	}
+	if minimum, ok := def.ValueSchema.Minimum.Current(); ok && snapped < minimum {
+		snapped = minimum
+	}
+	return snapped
 }
 
 // cardOverlayIDs mirrors the overlayId enum in

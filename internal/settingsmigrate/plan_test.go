@@ -255,6 +255,21 @@ func TestLegacyStringsBecomeTypedJSON(t *testing.T) {
 	}
 }
 
+// TestOffStepNumbersSnapToTheGrid. The legacy endpoint never enforced the
+// declared step, so a stored playback speed of 0.26 is a real preference;
+// rejecting it at migration would destroy the choice over a rounding artifact.
+func TestOffStepNumbersSnapToTheGrid(t *testing.T) {
+	res := planner(t).Plan(Input{DeviceSettings: []LegacyDeviceSetting{
+		{ProfileID: "p1", DeviceID: "d1", Key: "player.playback_speed", Value: "0.26"},
+	}})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("an off-step legacy speed was rejected: %+v", res.Rejects)
+	}
+	if got := string(find(t, res, "player.playback_speed", nil).Value); got != "0.25" {
+		t.Errorf("0.26 migrated as %s, want snapped to 0.25", got)
+	}
+}
+
 // TestEmptyStringIsUnsetNotAValue. The legacy string API had no way to send
 // null, so both Android and web spell "clear my choice" as "". Storing that as
 // an empty string would make an explicitly-cleared setting outrank the default.
