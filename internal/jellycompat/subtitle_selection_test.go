@@ -110,6 +110,28 @@ func TestIsValidCompatSubtitleStreamIndex_ExcludesBitmapSubtitle(t *testing.T) {
 	}
 }
 
+func TestExternalSubtitleRouteIndexSkipsEmbeddedStreamIndexGaps(t *testing.T) {
+	file := &models.MediaFile{
+		VideoTracks: []models.VideoTrack{{Codec: "hevc"}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3"}},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 4, Codec: "subrip"},
+			{Index: 0, Codec: "hdmv_pgs_subtitle"},
+		},
+		ExternalSubtitles: []models.ExternalSubtitle{
+			{Format: "srt"},
+			{Format: "ass"},
+		},
+	}
+
+	if got := externalSubtitleRouteIndex(file, 0); got != 5 {
+		t.Fatalf("first external route index = %d, want 5", got)
+	}
+	if got := externalSubtitleRouteIndex(file, 1); got != 6 {
+		t.Fatalf("second external route index = %d, want 6", got)
+	}
+}
+
 func TestResolveSelectedSubtitleStreamIndex(t *testing.T) {
 	version := subtitleSelectionVersion()
 	const downloadedCount = 1
