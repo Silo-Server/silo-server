@@ -50,6 +50,7 @@ func SourceDescriptorFromFileV3(file *models.MediaFile, audioIndex int) SourceDe
 		source.HDR10Plus = track.HDR10Plus || strings.Contains(strings.ToLower(track.VideoRangeType), "hdr10+")
 		source.DVProfile = track.DVProfile
 		source.DVBLCompatID = track.DVBLCompatID
+		source.VideoCopyUnsafe = videoCopyUnsafeFile(file)
 		switch EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer)) {
 		case EnhancementNoneV3, EnhancementMELV3, EnhancementFELV3, EnhancementUnknownV3:
 			source.DVEnhancementLayer = EnhancementLayerV3(strings.ToLower(track.DVEnhancementLayer))

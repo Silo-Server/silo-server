@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import InvitationsTab from "./admin-settings/InvitationsTab";
 import InviteCodesTab from "./admin-settings/InviteCodesTab";
 import {
   PLAYBACK_QUALITY_OPTIONS,
@@ -183,6 +184,7 @@ export default function AdminUsers() {
       <Tabs defaultValue="users">
         <TabsList variant="line" className="border-border w-full justify-start border-b">
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="invitations">Invitations</TabsTrigger>
           <TabsTrigger value="invite-codes">Invite Codes</TabsTrigger>
         </TabsList>
         <TabsContent value="users" className="pt-4">
@@ -373,6 +375,9 @@ export default function AdminUsers() {
               </div>
             )}
           </div>
+        </TabsContent>
+        <TabsContent value="invitations" className="pt-4">
+          <InvitationsTab />
         </TabsContent>
         <TabsContent value="invite-codes" className="pt-4">
           <InviteCodesTab />

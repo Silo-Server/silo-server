@@ -166,6 +166,7 @@ func compatPlaybackClientInfo(r *http.Request) playback.ClientInfo {
 		Name:      firstMediaBrowserAuthorizationValue(r, "Client"),
 		Version:   firstMediaBrowserAuthorizationValue(r, "Version"),
 		UserAgent: r.UserAgent(),
+		IsCompat:  true,
 	}
 }
 

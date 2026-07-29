@@ -713,7 +713,17 @@ func subtitleTrackRouteIndex(file *models.MediaFile, ordinal int, track models.S
 }
 
 func externalSubtitleRouteIndex(file *models.MediaFile, ordinal int) int {
-	return len(file.VideoTracks) + len(file.AudioTracks) + len(file.SubtitleTracks) + ordinal
+	nextIndex := len(file.VideoTracks) + len(file.AudioTracks)
+	for i, track := range file.SubtitleTracks {
+		index := subtitleTrackRouteIndex(file, i, track)
+		if index >= nextIndex {
+			nextIndex = index + 1
+		}
+	}
+	if nextIndex < 1 {
+		nextIndex = 1
+	}
+	return nextIndex + ordinal
 }
 
 func subtitleCanServeSRT(format string) bool {
@@ -1402,8 +1412,9 @@ func (h *PlaybackHandler) ensureUpstreamPlayback(ctx context.Context, compatSess
 				// direct/remux fallback cards built here from scratch) carry
 				// none; the current compat request identifies the client, so
 				// the reconstructed session keeps its label and JF pill.
+				info := playback.ClientInfoFromContext(ctx)
+				card.IsJellyfinCompat = info.IsCompat
 				if card.ClientName == "" && card.ClientUserAgent == "" {
-					info := playback.ClientInfoFromContext(ctx)
 					card.ClientName, card.ClientVersion, card.ClientUserAgent = info.Name, info.Version, info.UserAgent
 				}
 				if reconstructed := h.tm.ReconstructSession(ctx, playSession.UpstreamSessionID, compatSession.StreamAppUserID, card); reconstructed != nil {

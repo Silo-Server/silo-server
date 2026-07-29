@@ -462,6 +462,12 @@ func (s *progressCountingStore) GetSetting(context.Context, string) (string, err
 	panic("unused")
 }
 func (s *progressCountingStore) SetSetting(context.Context, string, string) error { panic("unused") }
+func (s *progressCountingStore) GetOnboardingState(context.Context, string, string) (*userstore.OnboardingState, error) {
+	panic("unused")
+}
+func (s *progressCountingStore) UpsertOnboardingState(context.Context, userstore.OnboardingState) error {
+	panic("unused")
+}
 func (s *progressCountingStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
 	panic("unused")
 }

@@ -224,6 +224,12 @@ func (s stubStore) GetSetting(_ context.Context, key string) (string, error) {
 	return "", nil
 }
 func (s stubStore) SetSetting(context.Context, string, string) error { panic("unused") }
+func (s stubStore) GetOnboardingState(context.Context, string, string) (*userstore.OnboardingState, error) {
+	panic("unused")
+}
+func (s stubStore) UpsertOnboardingState(context.Context, userstore.OnboardingState) error {
+	panic("unused")
+}
 func (s stubStore) GetJellycompatDisplayPrefs(context.Context, string, string) (string, error) {
 	panic("unused")
 }

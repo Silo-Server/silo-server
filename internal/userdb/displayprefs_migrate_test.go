@@ -31,21 +31,21 @@ func runDisplayPrefsMove(t *testing.T, db *sql.DB) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := migrateToV16(tx); err != nil {
-		t.Fatalf("migrateToV16: %v", err)
+	if err := migrateToV17(tx); err != nil {
+		t.Fatalf("migrateToV17: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 }
 
-// TestMigrateToV16MovesDisplayPrefs runs the real migration against a real
+// TestMigrateToV17MovesDisplayPrefs runs the real migration against a real
 // database. The parsing rules are unit-tested in
 // internal/jellycompat/displayprefs; what this covers is the wiring — blobs
 // land verbatim in the dedicated table, user_settings comes out with no
 // jellycompat tenants, and the one unparseable row is recorded rather than
 // silently deleted.
-func TestMigrateToV16MovesDisplayPrefs(t *testing.T) {
+func TestMigrateToV17MovesDisplayPrefs(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -124,9 +124,9 @@ SELECT value, reason FROM user_setting_migration_rejects
 	})
 }
 
-// TestMigrateToV16IsAtomic: the move runs inside the caller's transaction, so
+// TestMigrateToV17IsAtomic: the move runs inside the caller's transaction, so
 // a rollback must leave the legacy rows exactly where they were.
-func TestMigrateToV16IsAtomic(t *testing.T) {
+func TestMigrateToV17IsAtomic(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -141,8 +141,8 @@ func TestMigrateToV16IsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := migrateToV16(tx); err != nil {
-		t.Fatalf("migrateToV16: %v", err)
+	if err := migrateToV17(tx); err != nil {
+		t.Fatalf("migrateToV17: %v", err)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("rollback: %v", err)

@@ -345,13 +345,7 @@ func compareStableWebVersions(left, right webStableVersion) int {
 }
 
 func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string) WebComponentStatus {
-	enabled := false
-	if cfg != nil {
-		enabled = cfg.JellyfinCompat.Enabled
-	}
-	if raw := strings.TrimSpace(settings["jellyfin_compat.enabled"]); raw != "" {
-		enabled = strings.EqualFold(raw, "true") || raw == "1" || strings.EqualFold(raw, "yes")
-	}
+	enabled := configuredCompatEnabled(cfg, settings)
 
 	configuredWebEnabled := true
 	if cfg != nil {

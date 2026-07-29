@@ -152,25 +152,31 @@ export default function DetailHero({
             {/* Poster */}
             {!hidePoster && (
               <div
-                className={`media-card-image border-border/20 border shadow-[var(--shadow-md)] ${posterSizeClass}`}
-                style={
-                  posterPlaceholder && !posterLoaded
-                    ? {
-                        backgroundImage: `url(${posterPlaceholder})`,
-                        backgroundSize: "cover",
-                        backgroundPosition: "center",
-                      }
-                    : undefined
-                }
+                className={`media-card-image border-border/20 relative border shadow-[var(--shadow-md)] ${posterSizeClass}`}
               >
                 {posterUrl ? (
-                  <img
-                    key={posterUrl}
-                    src={posterUrl}
-                    alt={title}
-                    className={`w-full object-cover ${posterAspect} transition-opacity duration-300 ${posterLoaded ? "opacity-100" : "opacity-0"}`}
-                    onLoad={onPosterLoad}
-                  />
+                  <>
+                    <img
+                      key={posterUrl}
+                      src={posterUrl}
+                      alt={title}
+                      className={`w-full object-cover ${posterAspect} ${posterLoaded ? "opacity-100" : "opacity-0"}`}
+                      onLoad={onPosterLoad}
+                    />
+                    <span
+                      key={`placeholder-${posterUrl}`}
+                      aria-hidden="true"
+                      data-testid="detail-hero-poster-placeholder"
+                      className={`bg-surface pointer-events-none absolute inset-0 bg-cover bg-center transition-opacity duration-300 ${
+                        posterLoaded ? "opacity-0" : "opacity-100"
+                      }`}
+                      style={
+                        posterPlaceholder
+                          ? { backgroundImage: `url(${posterPlaceholder})` }
+                          : undefined
+                      }
+                    />
+                  </>
                 ) : (
                   <div
                     className={`text-muted-foreground bg-surface flex items-center justify-center p-6 text-center text-sm ${posterAspect}`}

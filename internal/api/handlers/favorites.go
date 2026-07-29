@@ -155,7 +155,7 @@ func (h *PersonalDataHandler) HandleListFavorites(w http.ResponseWriter, r *http
 		return
 	}
 
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items})
+	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(favorites) == limit})
 }
 
 // HandleCheckFavorite handles GET /favorites/{item_id}.
@@ -304,6 +304,9 @@ func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list watchlist")
 		return
 	}
+	// Capture has_more from the raw store page, before hidden-series filtering
+	// shrinks it — a full page that filters down still has more to fetch.
+	watchlistHasMore := len(entries) == limit
 	entries, err = h.filterHiddenWatchlistSeries(r.Context(), store, profileID, entries)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to filter watchlist")
@@ -316,7 +319,7 @@ func (h *PersonalDataHandler) HandleListWatchlist(w http.ResponseWriter, r *http
 		return
 	}
 
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items})
+	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: watchlistHasMore})
 }
 
 // filterHiddenWatchlistSeries drops fully-watched series from a watchlist page.
@@ -479,7 +482,7 @@ func (h *PersonalDataHandler) HandleListHistory(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	writeJSON(w, http.StatusOK, itemsListResponse{Items: items})
+	writeJSON(w, http.StatusOK, itemsListResponse{Items: items, HasMore: len(entries) == limit})
 }
 
 // HandleRemoveHistory handles POST /history/remove.
@@ -552,6 +555,10 @@ func (h *PersonalDataHandler) HandleRemoveHistory(w http.ResponseWriter, r *http
 // itemsListResponse wraps a list of items for favorites/watchlist responses.
 type itemsListResponse struct {
 	Items []itemListResponse `json:"items"`
+	// HasMore lets clients paginate these personal lists. Computed from the
+	// raw store page size (== limit), not the resolved item count, so
+	// catalog-missing / hidden entries don't make a full page look final.
+	HasMore bool `json:"has_more"`
 }
 
 // resolveItems fetches full media item data for a list of entries.

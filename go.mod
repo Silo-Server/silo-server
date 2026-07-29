@@ -79,7 +79,7 @@ require (
 	github.com/oklog/run v1.1.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.60.0 // indirect
-	github.com/quic-go/webtransport-go v0.10.0 // indirect
+	github.com/quic-go/webtransport-go v0.11.1 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20250401214520-65e299d6c5c9 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect

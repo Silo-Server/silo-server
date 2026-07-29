@@ -32,7 +32,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 
 	var attempted int
 	var succeeded int
-	var failures []error
+	var failures scanFailures
 	reconcileRoots := make([]string, 0, len(folder.Paths))
 	seenPaths := make(map[string]bool)
 	for _, root := range folder.Paths {
@@ -43,7 +43,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 		if err != nil {
 			slog.WarnContext(ctx, "podcast scan: read root failed", "component", "scanner", "root", root, "error", err)
 			attempted++
-			failures = append(failures, fmt.Errorf("read root %s: %w", root, err))
+			failures.addf("read root %s: %w", root, err)
 			continue
 		}
 		reconcileRoots = append(reconcileRoots, root)
@@ -71,7 +71,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 					"path", subPath,
 					"error", err,
 				)
-				failures = append(failures, fmt.Errorf("%s: %w", subPath, err))
+				failures.addf("%s: %w", subPath, err)
 				// Continue with siblings — one bad show should not stop the scan.
 				continue
 			}
@@ -81,8 +81,8 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 			succeeded++
 		}
 	}
-	if attempted > 0 && succeeded == 0 && len(failures) > 0 {
-		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
+	if attempted > 0 && succeeded == 0 && failures.len() > 0 {
+		return fmt.Errorf("podcast scan failed for every attempted folder_id=%d: %w", folder.ID, failures.join())
 	}
 	if err := s.reconcilePodcastMissingFiles(ctx, folder, reconcileRoots, seenPaths); err != nil {
 		slog.WarnContext(ctx, "podcast scan: missing-file reconcile failed", "component", "scanner", "folder_id", folder.ID, "error", err)
@@ -93,7 +93,7 @@ func (s *Scanner) ScanPodcastFolder(ctx context.Context, folder *models.MediaFol
 func (s *Scanner) reconcilePodcastShow(ctx context.Context, folder *models.MediaFolder, folderPath string) ([]string, error) {
 	parsed, err := parsePodcastShow(ctx, s.ffprobePath, folderPath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, errFolderHasNoMedia) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("parse podcast show %s: %w", folderPath, err)

@@ -430,6 +430,16 @@ func (s *SQLiteUserStore) DeleteLibraryPlaybackPreference(_ context.Context, pro
 	return DeleteLibraryPlaybackPreference(s.db, profileID, libraryID)
 }
 
+// --- Onboarding ---
+
+func (s *SQLiteUserStore) GetOnboardingState(_ context.Context, profileID, tourID string) (*userstore.OnboardingState, error) {
+	return GetOnboardingState(s.db, profileID, tourID)
+}
+
+func (s *SQLiteUserStore) UpsertOnboardingState(_ context.Context, state userstore.OnboardingState) error {
+	return UpsertOnboardingState(s.db, state)
+}
+
 // --- Canonical typed setting values ---
 
 func (s *SQLiteUserStore) GetSettingValue(_ context.Context, id userstore.SettingIdentity) (*userstore.SettingValue, error) {

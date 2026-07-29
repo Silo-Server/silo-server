@@ -92,12 +92,12 @@ func canonicalValue(t *testing.T, db *sql.DB, key, scope string, where string, a
 	return value, true
 }
 
-// TestMigrateToV15BackfillsCanonicalValues runs the real migration against a
+// TestMigrateToV16BackfillsCanonicalValues runs the real migration against a
 // real database. The planner's rules are unit-tested in internal/settingsmigrate;
 // what this covers is the wiring — that the rows actually land, satisfy the
 // scope CHECK and the partial unique indexes, and that nothing violates the
 // json_valid constraints.
-func TestMigrateToV15BackfillsCanonicalValues(t *testing.T) {
+func TestMigrateToV16BackfillsCanonicalValues(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -112,8 +112,8 @@ func TestMigrateToV15BackfillsCanonicalValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := migrateToV15(tx); err != nil {
-		t.Fatalf("migrateToV15: %v", err)
+	if err := migrateToV16(tx); err != nil {
+		t.Fatalf("migrateToV16: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -240,11 +240,11 @@ SELECT COUNT(*) FROM user_setting_migration_rejects WHERE source_key LIKE 'jelly
 	})
 }
 
-// TestMigrateToV15IsAtomic. The migration runs inside the caller's transaction,
+// TestMigrateToV16IsAtomic. The migration runs inside the caller's transaction,
 // so a failure has to leave the database exactly as it was rather than half
 // converted — an operator's restore point is the pre-upgrade backup, and a
 // partial migration is the one state neither backup nor rollback covers.
-func TestMigrateToV15IsAtomic(t *testing.T) {
+func TestMigrateToV16IsAtomic(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -259,8 +259,8 @@ func TestMigrateToV15IsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := migrateToV15(tx); err != nil {
-		t.Fatalf("migrateToV15: %v", err)
+	if err := migrateToV16(tx); err != nil {
+		t.Fatalf("migrateToV16: %v", err)
 	}
 	if err := tx.Rollback(); err != nil {
 		t.Fatalf("rollback: %v", err)
@@ -278,9 +278,9 @@ func TestMigrateToV15IsAtomic(t *testing.T) {
 	}
 }
 
-// TestMigrateToV15OnAnEmptyDatabase: a fresh install has nothing to migrate and
+// TestMigrateToV16OnAnEmptyDatabase: a fresh install has nothing to migrate and
 // must not fail trying.
-func TestMigrateToV15OnAnEmptyDatabase(t *testing.T) {
+func TestMigrateToV16OnAnEmptyDatabase(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -294,19 +294,19 @@ func TestMigrateToV15OnAnEmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := migrateToV15(tx); err != nil {
-		t.Fatalf("migrateToV15 on an empty database: %v", err)
+	if err := migrateToV16(tx); err != nil {
+		t.Fatalf("migrateToV16 on an empty database: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
 }
 
-// TestMigrateToV15IsIdempotentUnderReRun guards the partial-unique indexes: the
+// TestMigrateToV16IsIdempotentUnderReRun guards the partial-unique indexes: the
 // migration must not be runnable twice into a conflict. runMigrations gates it
 // behind user_version, so the second call is what an operator would trigger by
 // restoring a backup over a migrated database.
-func TestMigrateToV15IsIdempotentUnderReRun(t *testing.T) {
+func TestMigrateToV16IsIdempotentUnderReRun(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -321,7 +321,7 @@ func TestMigrateToV15IsIdempotentUnderReRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := migrateToV15(tx); err != nil {
+	if err := migrateToV16(tx); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -336,7 +336,7 @@ func TestMigrateToV15IsIdempotentUnderReRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	err = migrateToV15(tx2)
+	err = migrateToV16(tx2)
 	_ = tx2.Rollback()
 	if err == nil {
 		t.Error("a second migration run was accepted; values would be duplicated")

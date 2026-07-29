@@ -74,9 +74,13 @@ func supportsDoviRPUFilter(bin string) bool {
 
 // remuxDVProfile neutralizes a Dolby Vision profile the local ffmpeg cannot
 // handle. Profile 7 is the only profile that triggers an RPU strip in
-// buildRemuxArgs; when the dovi_rpu filter is unavailable the remux must
-// still start (an unknown bitstream filter aborts ffmpeg immediately), so
-// fall back to the pre-strip behavior instead of failing playback.
+// buildRemuxArgs; when the strip is unavailable — the dovi_rpu filter is
+// missing, or this source's RPU cannot be parsed — the remux must still start
+// (an unknown bitstream filter aborts ffmpeg immediately, and a filter that
+// rejects every packet hangs the session), so fall back to the pre-strip
+// behavior instead of failing playback. Only the legacy/auto mode takes this
+// route; the explicit v3 strip recipe fails loudly instead, because it has
+// promised the client an HDR10 output it could not then produce.
 func remuxDVProfile(dvProfile int, canStripRPU bool) int {
 	if dvProfile == 7 && !canStripRPU {
 		return 0
@@ -223,7 +227,8 @@ func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, se
 	tagDVSampleEntry := false
 	switch mode {
 	case "", RemuxDVLegacyAutoV3:
-		effectiveProfile = remuxDVProfile(dvProfile, supportsDoviRPUFilter(bin))
+		effectiveProfile = remuxDVProfile(dvProfile, supportsDoviRPUFilter(bin) &&
+			(dvProfile != 7 || sharedDVRPUProbe.CanStrip(ctx, bin, filePath)))
 	case RemuxDVStripToHDR10V3:
 		if dvProfile != 7 && dvProfile != 8 {
 			cancel()
@@ -232,6 +237,17 @@ func StartRemuxWithDVMode(ctx context.Context, filePath, outputFormat string, se
 		if !supportsDoviRPUFilter(bin) {
 			cancel()
 			return nil, fmt.Errorf("Dolby Vision HDR10 remux requires the dovi_rpu bitstream filter")
+		}
+		// The planner refuses this recipe for a source that fails the probe,
+		// so reaching here means a session or stream token minted before the
+		// verdict was known. Fail definitively: copying the base layer without
+		// the strip would leave dangling RPUs (the decoder stall this recipe
+		// exists to prevent) while still claiming HDR10, and attempting the
+		// strip anyway is the per-packet rejection that hangs the session. The
+		// next start re-plans against the now-cached verdict.
+		if !sharedDVRPUProbe.CanStrip(ctx, bin, filePath) {
+			cancel()
+			return nil, fmt.Errorf("this source's Dolby Vision RPU cannot be stripped to HDR10")
 		}
 		// buildRemuxArgs uses profile 7 as the explicit strip sentinel; the
 		// filter is equally required for a compatible profile 8 base layer.

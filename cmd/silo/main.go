@@ -948,7 +948,7 @@ func main() {
 		s.SetLiteraryWorkLinker(literaryWorkService)
 		s.SetEbookEnrichmentQueue(ebooks.NewEnrichmentQueue(deps.DB))
 		deps.Scanner = s
-		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, 10*time.Second)
+		deps.ProbeEnsurer = scanner.NewPlaybackProbeEnsurer(fileRepo, ffprobePath, cfg.Playback.FFmpegPath, 10*time.Second)
 		slog.Info("scanner initialized")
 	}
 
@@ -3280,15 +3280,29 @@ type scopeEntitlementResolver struct {
 }
 
 func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
-	scope, err := r.resolver.Resolve(ctx, access.ResolveInput{
-		UserID:              userID,
-		ProfileID:           profileID,
-		SkipPINVerification: true,
-	})
+	scope, err := r.resolveScope(ctx, userID, profileID)
 	if err != nil {
 		return "", err
 	}
 	return scope.MaxPlaybackQuality, nil
+}
+
+// MaxContentRating implements mediarequests.ContentRatingResolver so request
+// discovery honors the profile's parental rating ceiling.
+func (r scopeEntitlementResolver) MaxContentRating(ctx context.Context, userID int, profileID string) (string, error) {
+	scope, err := r.resolveScope(ctx, userID, profileID)
+	if err != nil {
+		return "", err
+	}
+	return scope.MaxContentRating, nil
+}
+
+func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, profileID string) (access.Scope, error) {
+	return r.resolver.Resolve(ctx, access.ResolveInput{
+		UserID:              userID,
+		ProfileID:           profileID,
+		SkipPINVerification: true,
+	})
 }
 
 // audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which

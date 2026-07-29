@@ -1,9 +1,61 @@
+import type { CSSProperties } from "react";
+
 export function isSidebarExpanded(collapsed: boolean, hovered: boolean, profileMenuOpen: boolean) {
   return !collapsed || hovered || profileMenuOpen;
 }
 
 export function getProfileMenuSide(collapsed: boolean) {
   return collapsed ? "right" : "top";
+}
+
+/** Visible width of the collapsed rail, in px. */
+export const SIDEBAR_RAIL_WIDTH = 64;
+
+/** Physical width of the sidebar surface in every state, in px. */
+export const SIDEBAR_SURFACE_WIDTH = 260;
+
+/**
+ * True when the surface should be reduced to the rail.
+ *
+ * The `<aside>` is always {@link SIDEBAR_SURFACE_WIDTH} wide — nothing about it
+ * reflows between states. This drives `data-collapsed`, which app.css turns into
+ * paired transform animation, so the only things that move are compositor
+ * layers over a surface whose 40px backdrop blur has fixed geometry.
+ */
+export function isSidebarRailCollapsed(collapsed: boolean, sidebarExpanded: boolean) {
+  return collapsed && !sidebarExpanded;
+}
+
+/**
+ * How far a library row slides left once the surface is clipped to the rail, so
+ * its icon lines up with the rest of the icon column.
+ *
+ * The slot reserved ahead of the icon is a chevron button when the library has
+ * pins — 12px padding + a 14px glyph + 4px = 30px — and a 12px border-box
+ * spacer otherwise (`w-3` includes its own `pl-3` under Tailwind's preflight).
+ * Every other nav row starts its icon 12px into the row, so only the chevron
+ * case is out of line; the spacer already matches and must not be shifted.
+ */
+export function libraryRowShift(hasPins: boolean) {
+  return hasPins ? "-18px" : "0px";
+}
+
+/**
+ * Inline style for the sidebar surface.
+ *
+ * While hover-expanded on a detail page the sidebar floats over the page as an
+ * overlay (raised z-index + drop shadow) so expanding it never moves or resizes
+ * the main content, which stays pinned to the collapsed 64px offset.
+ */
+export function sidebarSurfaceStyle({
+  collapsed,
+  sidebarExpanded,
+}: {
+  collapsed: boolean;
+  sidebarExpanded: boolean;
+}): CSSProperties | undefined {
+  if (!collapsed || !sidebarExpanded) return undefined;
+  return { zIndex: 45, boxShadow: "0 25px 50px -12px rgb(0 0 0 / 0.5)" };
 }
 
 export interface AppNavLink {
