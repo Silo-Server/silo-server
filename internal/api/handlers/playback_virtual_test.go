@@ -25,7 +25,7 @@ func (r *recordingVirtualPlaybackResolver) ResolveVirtualPlayback(_ context.Cont
 }
 
 func TestHandleStartPlaybackVirtualLegacyReturnsExternalURL(t *testing.T) {
-	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "aiostreams://movie/tt0133093", Duration: 8160}
+	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "virtual://movie/tt0133093", Duration: 8160}
 	resolver := &recordingVirtualPlaybackResolver{streamURL: "https://stream.example/movie.mkv?token=secret"}
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
@@ -56,7 +56,7 @@ func TestHandleStartPlaybackVirtualLegacyReturnsExternalURL(t *testing.T) {
 }
 
 func TestHandleStartPlaybackVirtualV3ReturnsExternalPlan(t *testing.T) {
-	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "aiostreams://movie/tt0133093", Duration: 8160}
+	file := &models.MediaFile{ID: 42, ContentID: "movie-1", FilePath: "virtual://movie/tt0133093", Duration: 8160}
 	resolver := &recordingVirtualPlaybackResolver{streamURL: "https://stream.example/movie.mkv?token=secret"}
 	manager := playback.NewSessionManager(0, 0)
 	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})

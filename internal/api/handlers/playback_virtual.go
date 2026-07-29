@@ -14,11 +14,33 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-const virtualPlaybackPrefix = "aiostreams://"
+const virtualPlaybackPrefix = "virtual://"
 
 type VirtualPlaybackResolver interface {
 	ResolveVirtualPlayback(ctx context.Context, virtualPath string, userID int, profileID string) (string, error)
 }
+
+// VirtualPlaybackStream is the provider-neutral candidate shape used by the
+// just-in-time picker. Implementations must never expose provider URLs here.
+type VirtualPlaybackStream struct {
+	ID string `json:"id"`
+	Label string `json:"label"`
+	URI string `json:"uri"`
+	Resolution string `json:"resolution,omitempty"`
+	CodecVideo string `json:"codec_video,omitempty"`
+	CodecAudio string `json:"codec_audio,omitempty"`
+	HDR string `json:"hdr,omitempty"`
+	SourceType string `json:"source_type,omitempty"`
+	FileSize int64 `json:"file_size,omitempty"`
+}
+
+type VirtualPlaybackStreamLister interface {
+	ListVirtualPlaybackStreams(ctx context.Context, virtualPath string) ([]VirtualPlaybackStream, error)
+}
+
+// VirtualPlaybackStreamSink persists JIT candidates as selectable virtual
+// files. It is called asynchronously after the first stream is resolved.
+type VirtualPlaybackStreamSink func(context.Context, *models.MediaFile, []VirtualPlaybackStream) error
 
 func isVirtualPlaybackFile(file *models.MediaFile) bool {
 	return file != nil && strings.HasPrefix(file.FilePath, virtualPlaybackPrefix)
@@ -32,6 +54,21 @@ func (h *PlaybackHandler) resolveVirtualPlayback(r *http.Request, file *models.M
 		return "", errors.New("virtual playback resolver is not configured")
 	}
 	return h.VirtualPlaybackResolver.ResolveVirtualPlayback(r.Context(), file.FilePath, apimw.GetUserID(r.Context()), profileID)
+}
+
+func (h *PlaybackHandler) loadVirtualPlaybackCandidates(ctx context.Context, file *models.MediaFile) {
+	if h.VirtualPlaybackStreamLister == nil || h.VirtualPlaybackStreamSink == nil || file == nil {
+		return
+	}
+	go func() {
+		streams, err := h.VirtualPlaybackStreamLister.ListVirtualPlaybackStreams(context.WithoutCancel(ctx), file.FilePath)
+		if err != nil || len(streams) == 0 {
+			return
+		}
+		if err := h.VirtualPlaybackStreamSink(context.WithoutCancel(ctx), file, streams); err != nil {
+			slog.Debug("persist JIT virtual playback candidates", "file_id", file.ID, "error", err)
+		}
+	}()
 }
 
 func (h *PlaybackHandler) startVirtualPlaybackV3(r *http.Request, req playback.StartRequestV3, requestDigest string, file *models.MediaFile, streamURL string) (playback.DecisionResponseV3, *transportErrorV3) {
@@ -54,6 +91,7 @@ func (h *PlaybackHandler) startVirtualPlaybackV3(r *http.Request, req playback.S
 		abort()
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "Failed to initialize virtual playback.", cause: err}
 	}
+	h.loadVirtualPlaybackCandidates(r.Context(), file)
 	planHash := sha256.Sum256([]byte(req.PlaybackAttemptID + "\x00" + file.FilePath))
 	planID := "virtual:" + hex.EncodeToString(planHash[:8])
 	plan := playback.PlanV3{
