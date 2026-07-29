@@ -81,6 +81,25 @@ type PlaybackProbeEnsurer struct {
 	timeout     time.Duration
 }
 
+// ProbeVirtualSource probes a resolved provider URL without persisting the
+// URL or mutating the catalog row. The caller keeps the canonical virtual URI
+// in the database while using the returned technical metadata for playback
+// planning.
+func ProbeVirtualSource(ctx context.Context, ffprobePath, sourceURL string, file *models.MediaFile) (*models.MediaFile, error) {
+	if file == nil {
+		return nil, nil
+	}
+	probe, err := ProbeFile(ctx, ffprobePath, sourceURL)
+	if err != nil {
+		return file, err
+	}
+	updated := *file
+	updated.FilePath = sourceURL
+	applyProbeData(&updated, probe, "virtual")
+	updated.FilePath = sourceURL
+	return &updated, nil
+}
+
 func NewPlaybackProbeEnsurer(fileRepo *FileRepository, ffprobePath string, timeout time.Duration) *PlaybackProbeEnsurer {
 	return &PlaybackProbeEnsurer{
 		fileRepo:    fileRepo,

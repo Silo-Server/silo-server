@@ -410,27 +410,44 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 		writeV3FileError(w, err)
 		return
 	}
-	if isVirtualPlaybackFile(requestedFile) {
+	virtualSource := isVirtualPlaybackFile(requestedFile)
+	virtualStreamURL := ""
+	effectiveFile := requestedFile
+	if virtualSource {
 		streamURL, resolveErr := h.resolveVirtualPlayback(r, requestedFile, profileID)
 		if resolveErr != nil {
 			writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3("virtual_playback_failed", "Failed to resolve virtual playback.", true))
 			return
 		}
-		response, statusErr := h.startVirtualPlaybackV3(r, req, requestDigest, requestedFile, streamURL)
-		if statusErr != nil {
-			writeJSON(w, http.StatusCreated, playback.NewTerminalResponseV3(statusErr.reason, statusErr.message, statusErr.retryable))
-			return
+		virtualStreamURL = streamURL
+		transient := *requestedFile
+		transient.FilePath = streamURL
+		effectiveFile = &transient
+		if h.VirtualPlaybackSourceProber != nil {
+			probeCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			probed, probeErr := h.VirtualPlaybackSourceProber(probeCtx, streamURL, effectiveFile)
+			cancel()
+			if probeErr != nil {
+				slog.WarnContext(r.Context(), "virtual playback source probe failed; planner will use deferred metadata fallback", "component", "playback", "file_id", requestedFile.ID, "error", probeErr)
+			} else if probed != nil {
+				effectiveFile = probed
+			}
 		}
-		writeJSON(w, http.StatusCreated, response)
-		return
 	}
-	requestedFile = h.ensurePlaybackProbe(r.Context(), requestedFile)
+	// Physical files may need the persisted probe repair path. Virtual files
+	// are probed transiently above after their provider URL is resolved; never
+	// run the catalog-path probe against the canonical virtual URI.
+	if !virtualSource {
+		requestedFile = h.ensurePlaybackProbe(r.Context(), requestedFile)
+	}
 	audioIndex, err := resolveV3AudioIndex(requestedFile, req.AudioTrackID, req.AudioTrackIndex)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-	effectiveFile := requestedFile
+	if !virtualSource {
+		effectiveFile = requestedFile
+	}
 	settings := h.plannerSettingsV3(r.Context())
 	if err := preflightPlaybackFile(r.Context(), effectiveFile, h.MissingMarker, h.EventsHub); err != nil {
 		writePlaybackFilePreflightError(w, err)
@@ -438,11 +455,15 @@ func (h *PlaybackHandler) handleStartPlaybackV3(w http.ResponseWriter, r *http.R
 	}
 	result := playback.PlanPlaybackV3(playback.PlannerInputV3{
 		Request: req, RequestedFile: requestedFile, EffectiveFile: effectiveFile,
+		VirtualSource:   virtualSource,
 		AudioTrackIndex: audioIndex, Settings: settings,
 		Registry: h.transformationRegistryV3(r.Context()), HLSRegistry: h.lazyHLSPlanningRegistryV3(r.Context()), DVRPUStrippable: h.lazyDVRPUStrippableV3(r.Context(), effectiveFile), Now: time.Now(),
 		AdditionalSubtitles: h.downloadedSubtitleInventoryV3(r.Context(), effectiveFile),
 	})
-	if result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
+	if virtualSource && result.Plan != nil && result.Plan.Delivery == playback.DeliveryOriginalHTTPV3 {
+		result.Plan.Stream.URL = virtualStreamURL
+	}
+	if !virtualSource && result.Terminal != nil && result.Terminal.Reason == "no_alternate_version" && shouldTryAlternateFileV3(req.QualityPreference) {
 		if alternate, alternateErr := h.findAlternateFile(r.Context(), requestedFile); alternateErr == nil && alternate != nil {
 			effectiveFile = h.ensurePlaybackProbe(r.Context(), alternate)
 			audioIndex = remapAudioIndexV3(requestedFile, effectiveFile, audioIndex)
@@ -656,6 +677,9 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(session *playback.Session, 
 	unlock := h.tm.LockSessionLifecycle(session.ID)
 	committed := false
 	streamURL := h.playbackStreamURL(&routeSession)
+	if result.Plan != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(result.Plan.Stream.URL)), "http") {
+		streamURL = result.Plan.Stream.URL
+	}
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
 		configureProgressiveRemuxTimelineV3(result.Plan)
 		if seek := result.Plan.Timeline.StreamOriginSeconds; seek > 0 {

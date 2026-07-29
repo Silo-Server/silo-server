@@ -952,6 +952,12 @@ func NewRouter(deps Dependencies) chi.Router {
 			}
 		}
 		playbackHandler.VirtualMediaResolver = deps.PluginHTTPProxy
+		if deps.Config != nil {
+			ffprobePath := strings.Replace(deps.Config.Playback.FFmpegPath, "ffmpeg", "ffprobe", 1)
+			playbackHandler.VirtualPlaybackSourceProber = func(ctx context.Context, sourceURL string, file *models.MediaFile) (*models.MediaFile, error) {
+				return scanner.ProbeVirtualSource(ctx, ffprobePath, sourceURL, file)
+			}
+		}
 		if streamHandler != nil {
 			streamHandler.VirtualMediaResolver = deps.PluginHTTPProxy
 		}

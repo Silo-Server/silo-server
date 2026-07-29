@@ -16,9 +16,13 @@ type PlannerSettingsV3 struct {
 }
 
 type PlannerInputV3 struct {
-	Request         StartRequestV3
-	RequestedFile   *models.MediaFile
-	EffectiveFile   *models.MediaFile
+	Request       StartRequestV3
+	RequestedFile *models.MediaFile
+	EffectiveFile *models.MediaFile
+	// VirtualSource marks a provider URL backed by a canonical virtual URI.
+	// It lets incomplete transient probe metadata use the validated HLS
+	// fallback without treating the provider URL as a local catalog path.
+	VirtualSource   bool
 	AudioTrackIndex int
 	Settings        PlannerSettingsV3
 	// Registry holds the transformations the local binary can execute.
@@ -206,7 +210,7 @@ func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 		// not reject them as terminal: resolve the URI at transcode start and
 		// use the validated H.264/AAC HLS fallback. Physical files retain the
 		// strict metadata gate above.
-		if isVirtualPlaybackFileV3(file) {
+		if input.VirtualSource || isVirtualPlaybackFileV3(file) {
 			return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, "virtual_source_metadata_deferred")
 		}
 		return terminalPlannerResultV3("source_metadata_incomplete", "The source is missing video metadata required for a validated playback route.", true)

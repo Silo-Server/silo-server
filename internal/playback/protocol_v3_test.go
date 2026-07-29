@@ -382,6 +382,32 @@ func TestPlanPlaybackV3RejectsTrulyIncompleteVideoMetadata(t *testing.T) {
 	}
 }
 
+func TestPlanPlaybackV3VirtualSourceDefersIncompleteProbe(t *testing.T) {
+	file := detailedFixtureFileV3()
+	file.FilePath = "https://provider.example/stream"
+	file.Resolution = "1080p"
+	file.VideoTracks[0].Width = 1920
+	file.VideoTracks[0].Height = 1080
+	file.VideoTracks[0].BitDepth = 8
+	file.VideoTracks[0].VideoRange = "SDR"
+	file.VideoTracks[0].VideoRangeType = "SDR"
+	file.VideoTracks[0].BitDepth = 0
+	file.VideoTracks[0].PixelFormat = ""
+	file.VideoTracks[0].Profile = ""
+	req := validStartRequestV3()
+	req.ClientFeatures = append(req.ClientFeatures, FeatureDetailedDecodeV3)
+	req.ClientPlaybackContext.Features = append(req.ClientPlaybackContext.Features, FeatureDetailedDecodeV3)
+
+	result := PlanPlaybackV3(PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, VirtualSource: true,
+		AudioTrackIndex: 0, Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry: testTransformationRegistryV3(),
+	})
+	if result.Plan == nil || result.Plan.Delivery != DeliveryTranscodeHLSV3 {
+		t.Fatalf("result = %s, want deferred HLS transcode plan", ExplainPlannerResultV3(result))
+	}
+}
+
 func TestPlanPlaybackV3BlocksUltrawide4KTranscode(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.Resolution = "2160p"

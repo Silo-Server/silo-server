@@ -132,6 +132,8 @@ type VirtualMediaResolver interface {
 	ResolveVirtualMedia(ctx context.Context, virtualURI string) (string, error)
 }
 
+type VirtualPlaybackSourceProber func(context.Context, string, *models.MediaFile) (*models.MediaFile, error)
+
 // PlaybackOriginalLanguageLookup fetches the original language for a content item.
 type PlaybackOriginalLanguageLookup interface {
 	GetOriginalLanguage(ctx context.Context, contentID string) (string, error)
@@ -173,6 +175,7 @@ type PlaybackHandler struct {
 	ProbeEnsurer                PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
 	ChapterThumbnailQueuer      PlaybackChapterThumbnailQueuer
 	VirtualMediaResolver        VirtualMediaResolver
+	VirtualPlaybackSourceProber VirtualPlaybackSourceProber
 	IntroAnalyzer               IntroEpisodeAnalyzer
 	IntroRepository             PlaybackIntroEligibilityChecker
 	MarkerRegistry              *markers.Registry
