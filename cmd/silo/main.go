@@ -308,6 +308,16 @@ func maybeApplyPostgresTuning(ctx context.Context, pool *pgxpool.Pool, appMaxCon
 // still reads via the read-path pass-through, so a backfill error must never
 // block boot. The sensitive-settings pass runs first so the arr
 // resolve-then-encrypt pass sees consistent referenced settings.
+// librarySettingsCleaner wires the per-user canonical settings cleanup the
+// library delete job runs, or nil when the user store is unavailable — the
+// executor treats a nil cleaner as "skip".
+func librarySettingsCleaner(pool *pgxpool.Pool, stores userstore.UserStoreProvider) adminjob.LibrarySettingsCleaner {
+	if pool == nil || stores == nil {
+		return nil
+	}
+	return userstore.NewSettingValuesCleaner(auth.NewUserRepository(pool), stores)
+}
+
 func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
@@ -2450,7 +2460,8 @@ func main() {
 			deps.S3Private,
 			itemRefreshExecutor,
 			libraryRefreshExecutor,
-			adminjob.NewLibraryDeleteExecutor(deps.FolderRepo, sectionRepo),
+			adminjob.NewLibraryDeleteExecutor(deps.FolderRepo, sectionRepo,
+				librarySettingsCleaner(deps.DB, userStoreProvider)),
 			adminjob.NewImageCacheCleanupExecutor(deps.S3Public),
 			templateBundleApplyExecutor,
 			deps.RealtimeHub,
