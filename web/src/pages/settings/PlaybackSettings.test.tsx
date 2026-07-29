@@ -86,15 +86,14 @@ describe("PlaybackSettings", () => {
 
     fireEvent.click(screen.getByLabelText("Auto-skip intros"));
 
-    expect(mutate).toHaveBeenCalledWith(
-      {
-        key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
-        // Typed JSON, not the "true"/"false" strings the legacy endpoint took.
-        value: true,
-        identity: { scope: "profile" },
-      },
-      expect.anything(),
-    );
+    // Awaited rather than fire-and-forget: the write is followed by a clear of
+    // any device override, which has to see whether the write landed.
+    expect(mutateAsync).toHaveBeenCalledWith({
+      key: SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
+      // Typed JSON, not the "true"/"false" strings the legacy endpoint took.
+      value: true,
+      identity: { scope: "profile" },
+    });
   });
 
   it("reads a stored value in preference to the contract default", () => {

@@ -91,6 +91,12 @@ vi.mock("@/hooks/useAuth", () => ({
   useOptionalAuth: mocks.useAuth,
 }));
 
+vi.mock("@/hooks/queries/qualityPreference", () => ({
+  // The resolution cap comes from the settings contract; these tests render
+  // without a QueryClient, so the hook stands in for the resolved answer.
+  useQualityPreference: (fallback?: string | null) => fallback ?? null,
+}));
+
 vi.mock("@/hooks/useCurrentProfile", () => ({
   useCurrentProfile: mocks.useCurrentProfile,
 }));

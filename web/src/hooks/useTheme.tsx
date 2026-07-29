@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { ThemeId } from "@/lib/themes";
-import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
-import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { useEffectiveSettings } from "@/hooks/queries/settingValues";
+import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { useBranding } from "@/hooks/useBranding";
 import { appearanceCache, storage } from "@/utils/storage";
@@ -42,13 +42,17 @@ const APPEARANCE_KEYS = [
   SETTING_KEYS.UI_HIGH_CONTRAST,
 ] as const;
 
-/**
+/*
  * These keys are profile-scoped with an optional per-device override; the
- * effective read already resolves profile_device over profile, and this
- * provider's setters write the profile-wide value (there is no device-override
- * UI for appearance today).
+ * effective read already resolves profile_device over profile, and these
+ * setters write the profile-wide value. There is no device-override UI for
+ * appearance on the web, but a device row can still exist — the settings
+ * migration converts legacy user_device_settings rows into profile_device
+ * ones, other clients write them, and the admin surface can too — so the
+ * shared writer clears one alongside the profile write. Without that a
+ * migrated override would shadow every later choice with no affordance to
+ * remove it, and the control would snap straight back.
  */
-const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
 
 function applyThemeToDOM(theme: ThemeId): void {
   document.documentElement.setAttribute("data-theme", theme);
@@ -136,7 +140,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const apiTextWeight = typeof rawApiTextWeight === "string" ? rawApiTextWeight : undefined;
   const rawApiHighContrast = storedValue(SETTING_KEYS.UI_HIGH_CONTRAST);
   const apiHighContrast = typeof rawApiHighContrast === "boolean" ? rawApiHighContrast : undefined;
-  const settingMutation = useSetSettingValue();
+  const { save: saveProfileDefault } = useProfileDefaultWriter(effectiveSettings);
 
   // Admin-set server default theme applies only when the user has expressed no
   // preference of their own (no stored local choice and no profile ui.theme).
@@ -172,18 +176,55 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // the absence of a cached theme is what lets the admin default apply, so
   // writing a resolved-but-unchosen value here would silently pin them to
   // whatever the default happened to be the first time they loaded the app.
+  // The mirror runs both ways. A key the server answered for but has no stored
+  // value at — source "default" — is a key this profile has no preference for,
+  // whether it never chose one or another client just deleted it. Its cached
+  // value has to go, or a removal made elsewhere would never take effect here
+  // and the stale entry would keep winning the fallback below.
+  //
+  // Only an explicit "default" clears. A key simply absent from the response
+  // is not an answer about it, and treating silence as a deletion would drop
+  // a good warm start on any partial read. Only this owner's namespace is
+  // touched; another identity's warm start is not ours to clear.
   useEffect(() => {
     if (!loadApiTheme || effectiveSettings === undefined) return;
-    if (isValidTheme(apiTheme)) appearanceCache.set(storage.KEYS.THEME, apiTheme, cacheOwner);
-    if (apiTextScale !== undefined) {
-      appearanceCache.set(storage.KEYS.UI_TEXT_SCALE, apiTextScale, cacheOwner);
-    }
-    if (apiTextWeight !== undefined) {
-      appearanceCache.set(storage.KEYS.UI_TEXT_WEIGHT, apiTextWeight, cacheOwner);
-    }
-    if (apiHighContrast !== undefined) {
-      appearanceCache.set(storage.KEYS.UI_HIGH_CONTRAST, String(apiHighContrast), cacheOwner);
-    }
+    const mirror = (
+      key: (typeof APPEARANCE_KEYS)[number],
+      cacheKey: storage.StorageKey,
+      value: string | undefined,
+    ) => {
+      if (value !== undefined) {
+        appearanceCache.set(cacheKey, value, cacheOwner);
+        return false;
+      }
+      if (effectiveSettings[key]?.source !== "default") return false;
+      appearanceCache.remove(cacheKey, cacheOwner);
+      return true;
+    };
+    const cleared = {
+      theme: mirror(
+        SETTING_KEYS.UI_THEME,
+        storage.KEYS.THEME,
+        isValidTheme(apiTheme) ? apiTheme : undefined,
+      ),
+      textScale: mirror(SETTING_KEYS.UI_TEXT_SCALE, storage.KEYS.UI_TEXT_SCALE, apiTextScale),
+      textWeight: mirror(SETTING_KEYS.UI_TEXT_WEIGHT, storage.KEYS.UI_TEXT_WEIGHT, apiTextWeight),
+      highContrast: mirror(
+        SETTING_KEYS.UI_HIGH_CONTRAST,
+        storage.KEYS.UI_HIGH_CONTRAST,
+        apiHighContrast === undefined ? undefined : String(apiHighContrast),
+      ),
+    };
+
+    // The local state was seeded from those same cached values, and the render
+    // below falls back to it whenever the server has none — so clearing the
+    // cache alone would leave the removed value on screen until a reload.
+    // Parsing undefined yields each preference's own default, and React bails
+    // out when the value is already that, so this cannot loop.
+    if (cleared.textScale) setTextScalePreference(parseTextScale(undefined));
+    if (cleared.textWeight) setTextWeightPreference(parseTextWeight(undefined));
+    if (cleared.highContrast) setHighContrastPreference(parseHighContrast(undefined));
+    if (cleared.theme) setThemePreference(getInitialTheme(cacheOwner));
   }, [
     loadApiTheme,
     effectiveSettings,
@@ -216,13 +257,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setThemePreference(newTheme);
       applyThemeToDOM(newTheme);
       appearanceCache.set(storage.KEYS.THEME, newTheme, cacheOwner);
-      settingMutation.mutate({
-        key: SETTING_KEYS.UI_THEME,
-        value: newTheme,
-        identity: PROFILE_SCOPE,
-      });
+      void saveProfileDefault(SETTING_KEYS.UI_THEME, newTheme);
     },
-    [settingMutation, cacheOwner],
+    [saveProfileDefault, cacheOwner],
   );
 
   const previewTheme = useCallback((newTheme: ThemeId) => {
@@ -238,13 +275,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setTextScalePreference(value);
       applyTextScaleToDOM(value);
       appearanceCache.set(storage.KEYS.UI_TEXT_SCALE, value, cacheOwner);
-      settingMutation.mutate({
-        key: SETTING_KEYS.UI_TEXT_SCALE,
-        value,
-        identity: PROFILE_SCOPE,
-      });
+      void saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, value);
     },
-    [settingMutation, cacheOwner],
+    [saveProfileDefault, cacheOwner],
   );
 
   const setTextWeight = useCallback(
@@ -252,13 +285,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setTextWeightPreference(value);
       applyTextWeightToDOM(value);
       appearanceCache.set(storage.KEYS.UI_TEXT_WEIGHT, value, cacheOwner);
-      settingMutation.mutate({
-        key: SETTING_KEYS.UI_TEXT_WEIGHT,
-        value,
-        identity: PROFILE_SCOPE,
-      });
+      void saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, value);
     },
-    [settingMutation, cacheOwner],
+    [saveProfileDefault, cacheOwner],
   );
 
   const setHighContrast = useCallback(
@@ -266,13 +295,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setHighContrastPreference(value);
       applyHighContrastToDOM(value);
       appearanceCache.set(storage.KEYS.UI_HIGH_CONTRAST, String(value), cacheOwner);
-      settingMutation.mutate({
-        key: SETTING_KEYS.UI_HIGH_CONTRAST,
-        value,
-        identity: PROFILE_SCOPE,
-      });
+      void saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, value);
     },
-    [settingMutation, cacheOwner],
+    [saveProfileDefault, cacheOwner],
   );
 
   return (

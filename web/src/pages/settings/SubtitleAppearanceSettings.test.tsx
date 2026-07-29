@@ -10,6 +10,7 @@ import { DEFAULT_SUBTITLE_APPEARANCE } from "@/lib/subtitleAppearance";
 const mocks = vi.hoisted(() => ({
   useEffectiveSettings: vi.fn(),
   useSetSettingValue: vi.fn(),
+  useClearSettingValue: vi.fn(),
   useSubtitleAppearanceSetting: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock("@/hooks/queries/settingValues", async () => {
     ...actual,
     useEffectiveSettings: (...args: unknown[]) => mocks.useEffectiveSettings(...args),
     useSetSettingValue: (...args: unknown[]) => mocks.useSetSettingValue(...args),
+    useClearSettingValue: (...args: unknown[]) => mocks.useClearSettingValue(...args),
   };
 });
 
@@ -51,19 +53,29 @@ function resolved(
 
 describe("SubtitleAppearanceSettings", () => {
   let mutate: ReturnType<typeof vi.fn>;
+  let mutateAsync: ReturnType<typeof vi.fn>;
+  let clearMutateAsync: ReturnType<typeof vi.fn>;
   let save: ReturnType<typeof vi.fn>;
   let reset: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     mocks.useEffectiveSettings.mockReset();
     mocks.useSetSettingValue.mockReset();
+    mocks.useClearSettingValue.mockReset();
     mocks.useSubtitleAppearanceSetting.mockReset();
     mutate = vi.fn();
+    mutateAsync = vi.fn().mockResolvedValue(undefined);
+    clearMutateAsync = vi.fn().mockResolvedValue(undefined);
     save = vi.fn().mockResolvedValue(undefined);
     reset = vi.fn().mockResolvedValue(undefined);
 
     mocks.useEffectiveSettings.mockReturnValue({ data: {}, isLoading: false });
-    mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutate, mutateAsync: vi.fn() });
+    mocks.useSetSettingValue.mockReturnValue({ isPending: false, mutate, mutateAsync });
+    mocks.useClearSettingValue.mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+      mutateAsync: clearMutateAsync,
+    });
     mocks.useSubtitleAppearanceSetting.mockReturnValue({
       appearance: DEFAULT_SUBTITLE_APPEARANCE,
       hasDeviceOverride: false,
@@ -95,14 +107,13 @@ describe("SubtitleAppearanceSettings", () => {
     // the value the legacy profile column could not distinguish from unset.
     fireEvent.click(screen.getByLabelText("Show forced subtitles"));
 
-    expect(mutate).toHaveBeenCalledWith(
-      {
-        key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
-        value: false,
-        identity: { scope: "profile" },
-      },
-      expect.anything(),
-    );
+    // Awaited rather than fire-and-forget: the profile write is followed by a
+    // clear of any device override that would otherwise keep shadowing it.
+    expect(mutateAsync).toHaveBeenCalledWith({
+      key: SETTING_KEYS.PLAYBACK_SHOW_FORCED_SUBTITLES,
+      value: false,
+      identity: { scope: "profile" },
+    });
   });
 
   it("reads a stored forced-subtitle choice rather than the default", () => {

@@ -403,6 +403,9 @@ export function WatchPlaybackHost() {
       SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
       SETTING_KEYS.PLAYBACK_AUTO_SKIP_RECAP,
       SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
+      // The resolution cap, which the quality picker writes canonically and
+      // no longer mirrors into the profile column playback used to read.
+      SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
     ],
   });
   const request = state.request;
@@ -845,11 +848,22 @@ export function WatchPlaybackHost() {
     );
   }
 
+  const canonicalQuality = effectivePlaybackSettings?.[SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY]
+    ?.value as string | undefined;
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
     item: activeItem,
     currentProfile,
     seriesEpisodes,
+    // "original" means no cap, which every consumer already spells "auto".
+    // Undefined until the read resolves, which leaves the profile-column
+    // fallback in place rather than blocking playback on a settings fetch.
+    qualityPreference:
+      canonicalQuality === undefined
+        ? undefined
+        : canonicalQuality === "original"
+          ? "auto"
+          : canonicalQuality,
   });
   // The resolved answer already folds in the profile layer, so the props built
   // from the profile record are only the pre-resolution fallback.

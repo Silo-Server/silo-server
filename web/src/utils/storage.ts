@@ -41,6 +41,14 @@ function setRaw(key: string, value: string): void {
   }
 }
 
+function removeRaw(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Storage unavailable
+  }
+}
+
 function get(key: StorageKey): string | null {
   return getRaw(key);
 }
@@ -113,5 +121,17 @@ export const appearanceCache = {
   set(key: StorageKey, value: string, owner: string | null): void {
     setRaw(`${key}:${namespaceFor(owner)}`, value);
     if (owner !== null) setRaw(STORAGE_KEYS.UI_CACHE_OWNER, owner);
+  },
+  /**
+   * Drop `owner`'s cached value, so the next cold start falls back rather than
+   * painting a preference the server no longer holds. Needed because the
+   * server's answer is authoritative once loaded: when another client deletes
+   * an appearance setting, the effective response simply omits it, and a cache
+   * that only ever grows would keep the removed value alive on this browser
+   * forever. Deliberately scoped to one owner — clearing another identity's
+   * namespace is what the ownership tests exist to prevent.
+   */
+  remove(key: StorageKey, owner: string | null): void {
+    removeRaw(`${key}:${namespaceFor(owner)}`);
   },
 };

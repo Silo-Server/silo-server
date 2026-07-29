@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   useEffectiveSettings: vi.fn(),
   useBranding: vi.fn(),
   mutate: vi.fn(),
+  clearMutate: vi.fn(),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -19,7 +20,12 @@ vi.mock("@/hooks/useAuth", () => ({
 vi.mock("@/hooks/queries/settingValues", () => ({
   useEffectiveSettings: (options?: { keys?: readonly string[]; enabled?: boolean }) =>
     mocks.useEffectiveSettings(options),
-  useSetSettingValue: () => ({ mutate: mocks.mutate }),
+  useSetSettingValue: () => ({ mutate: mocks.mutate, mutateAsync: mocks.mutate, isPending: false }),
+  useClearSettingValue: () => ({
+    mutate: mocks.clearMutate,
+    mutateAsync: mocks.clearMutate,
+    isPending: false,
+  }),
 }));
 
 vi.mock("@/hooks/useBranding", () => ({
@@ -393,6 +399,57 @@ describe("appearance cache ownership", () => {
     expect(view.captured.theme.highContrast).toBe(true);
     expect(view.captured.custom.vars).toEqual({ "color-bg": "#ff0000" });
     expect(view.captured.custom.customCss).toBe("body { filter: invert(1); }");
+  });
+
+  it("clears the warm start when the server says the setting is unset", () => {
+    // Another client deleted this profile's appearance choices. The effective
+    // response still answers for every key, now resolving to the contract
+    // default — the removal has to reach this browser, or the cached value
+    // keeps painting a preference the server no longer holds.
+    seedAccountOneAppearance();
+    signedInAs(1, "p1");
+    mocks.useEffectiveSettings.mockReturnValue(
+      effectiveAnswer({
+        [SETTING_KEYS.UI_THEME]: { value: DEFAULT_THEME, source: "default" },
+        [SETTING_KEYS.UI_TEXT_SCALE]: { value: "default", source: "default" },
+        [SETTING_KEYS.UI_TEXT_WEIGHT]: { value: "default", source: "default" },
+        [SETTING_KEYS.UI_HIGH_CONTRAST]: { value: false, source: "default" },
+      }),
+    );
+
+    const view = renderAppearance();
+
+    expect(view.captured.theme.theme).toBe(DEFAULT_THEME);
+    expect(view.captured.theme.textScale).toBe("default");
+    expect(view.captured.theme.textWeight).toBe("default");
+    expect(view.captured.theme.highContrast).toBe(false);
+    for (const key of [
+      KEYS.THEME,
+      KEYS.UI_TEXT_SCALE,
+      KEYS.UI_TEXT_WEIGHT,
+      KEYS.UI_HIGH_CONTRAST,
+    ]) {
+      expect(appearanceCache.get(key, "1:p1")).toBeNull();
+    }
+  });
+
+  it("clears only the current identity's warm start on an unset answer", () => {
+    // The sibling's namespace is not ours to clear: the server answered about
+    // this profile, and the other identity's warm start must survive for when
+    // they sign back in.
+    seedAppearance("1:p1");
+    seedAppearance("2:p9");
+    signedInAs(1, "p1");
+    mocks.useEffectiveSettings.mockReturnValue(
+      effectiveAnswer({
+        [SETTING_KEYS.UI_THEME]: { value: DEFAULT_THEME, source: "default" },
+      }),
+    );
+
+    renderAppearance();
+
+    expect(appearanceCache.get(KEYS.THEME, "1:p1")).toBeNull();
+    expect(appearanceCache.get(KEYS.THEME, "2:p9")).toBe("cobalt-studio");
   });
 
   it("does not leak one profile's mirrored server values to a sibling profile", () => {

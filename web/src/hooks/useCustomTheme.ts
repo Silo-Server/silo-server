@@ -101,20 +101,39 @@ export function useCustomTheme(): UseCustomThemeResult {
     setIsDirty(false);
   }
 
-  // Sync stored API values into local state when they arrive
+  // Sync stored API values into local state when they arrive.
+  //
+  // A source of "default" is an answer, not silence: the profile has no stored
+  // custom theme, because it never had one or because another client just
+  // deleted it. The cached copy has to go with it, or a theme removed
+  // elsewhere would keep painting on this browser forever. An unsaved local
+  // draft is left alone — the user is mid-edit, and their work is not the
+  // server's to discard.
   useEffect(() => {
-    if (!loadApi || varsSetting === undefined || varsSetting.source === "default") return;
+    if (!loadApi || varsSetting === undefined) return;
+    if (varsSetting.source === "default") {
+      if (isDirty) return;
+      setLocalVars({});
+      appearanceCache.remove(storage.KEYS.UI_CUSTOM_THEME_VARS, cacheOwner);
+      return;
+    }
     const parsed = parseVarsValue(varsSetting.value);
     setLocalVars(parsed);
     appearanceCache.set(storage.KEYS.UI_CUSTOM_THEME_VARS, JSON.stringify(parsed), cacheOwner);
-  }, [loadApi, varsSetting, cacheOwner]);
+  }, [loadApi, varsSetting, cacheOwner, isDirty]);
 
   useEffect(() => {
-    if (!loadApi || cssSetting === undefined || cssSetting.source === "default") return;
+    if (!loadApi || cssSetting === undefined) return;
+    if (cssSetting.source === "default") {
+      if (isDirty) return;
+      setLocalCss("");
+      appearanceCache.remove(storage.KEYS.UI_CUSTOM_CSS, cacheOwner);
+      return;
+    }
     if (typeof cssSetting.value !== "string") return;
     setLocalCss(cssSetting.value);
     appearanceCache.set(storage.KEYS.UI_CUSTOM_CSS, cssSetting.value, cacheOwner);
-  }, [loadApi, cssSetting, cacheOwner]);
+  }, [loadApi, cssSetting, cacheOwner, isDirty]);
 
   const persistVars = useCallback(
     (vars: ThemeVarOverrides) => {

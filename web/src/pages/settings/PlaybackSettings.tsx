@@ -1,4 +1,3 @@
-import { ApiClientError } from "@/api/client";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SettingRow } from "@/components/settings/SettingRow";
 import { Button } from "@/components/ui/button";
@@ -14,23 +13,17 @@ import { optionsFor } from "@/lib/settingsDisplay";
 import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { QUALITY_PRESETS, describeQuality, presetById, presetIdFor } from "@/lib/qualityPresets";
-import {
-  useClearSettingValue,
-  useEffectiveSettings,
-  useSetSettingValue,
-  type SettingIdentity,
-} from "@/hooks/queries/settingValues";
+import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
+import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { toast } from "sonner";
 
 /**
  * Every preference on this screen is the profile's own choice. A device, a
  * library, or a series can override several of them, and the contract resolves
- * those above the profile row — but this screen edits the profile layer, which
- * is what "Defaults" means here.
+ * those above the profile row — so useProfileDefaultWriter writes the profile
+ * layer and clears any device override that would otherwise keep shadowing it.
  */
-const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
-
 /**
  * Read in one batch: the screen wants every key at once.
  *
@@ -64,8 +57,7 @@ function QualitySetting() {
   const { data: effective } = useEffectiveSettings({
     keys: ["playback.preferred_quality", "playback.max_bitrate_kbps"],
   });
-  const setValue = useSetSettingValue();
-  const clearValue = useClearSettingValue();
+  const { save, reset, isSaving } = useProfileDefaultWriter(effective);
 
   const resolution = effective?.["playback.preferred_quality"]?.value as string | undefined;
   const bitrate = effective?.["playback.max_bitrate_kbps"]?.value as number | null | undefined;
@@ -75,38 +67,26 @@ function QualitySetting() {
     const preset = presetById(presetId);
     if (!preset) return;
 
-    setValue.mutate(
-      {
-        key: "playback.preferred_quality",
-        value: preset.resolution,
-        identity: { scope: "profile" },
-      },
-      { onError: () => toast.error("Failed to save video quality") },
+    save("playback.preferred_quality", preset.resolution).catch(() =>
+      toast.error("Failed to save video quality"),
     );
 
     // An uncapped preset clears the bitrate rather than storing a sentinel, so
-    // "no cap" stays the absence of a value at every layer.
+    // "no cap" stays the absence of a value at every layer. Both axes are
+    // device-overridable, so the reset clears the device row too — otherwise
+    // an override would keep capping playback after the picker said it did not.
     if (preset.bitrateKbps === null) {
-      clearValue.mutate(
-        { key: "playback.max_bitrate_kbps", identity: { scope: "profile" } },
-        {
-          // Already absent is the desired state, so a 404 is success.
-          onError: () => undefined,
-        },
+      reset("playback.max_bitrate_kbps").catch(() =>
+        toast.error("Failed to clear the bitrate cap"),
       );
     } else {
-      setValue.mutate(
-        {
-          key: "playback.max_bitrate_kbps",
-          value: preset.bitrateKbps,
-          identity: { scope: "profile" },
-        },
-        { onError: () => toast.error("Failed to save maximum bitrate") },
+      save("playback.max_bitrate_kbps", preset.bitrateKbps).catch(() =>
+        toast.error("Failed to save maximum bitrate"),
       );
     }
   };
 
-  const pending = setValue.isPending || clearValue.isPending;
+  const pending = isSaving;
 
   return (
     <SettingRow
@@ -173,8 +153,11 @@ function AutoPlayNextSetting() {
 
 export default function PlaybackSettings() {
   const { data: effective } = useEffectiveSettings({ keys: PLAYBACK_KEYS });
-  const setValue = useSetSettingValue();
-  const clearValue = useClearSettingValue();
+  const {
+    save: saveProfileDefault,
+    reset: resetProfileDefault,
+    isSaving,
+  } = useProfileDefaultWriter(effective);
 
   // The effective endpoint resolves an unset key to the contract default, so
   // every control below reads its value from the same answer rather than from
@@ -182,30 +165,25 @@ export default function PlaybackSettings() {
   const read = <T,>(key: SettingKey) =>
     (effective?.[key]?.value ?? SETTING_DEFINITIONS[key].defaultValue) as T;
 
+  // Saves at profile scope and clears any device override shadowing it —
+  // several of these keys are device-overridable, and without the clear the
+  // control would snap back to the override it cannot see.
   const saveValue = (key: SettingKey, value: unknown) => {
-    setValue.mutate(
-      { key, value, identity: PROFILE_SCOPE },
-      { onError: () => toast.error("Failed to save playback setting") },
-    );
+    saveProfileDefault(key, value).catch(() => toast.error("Failed to save playback setting"));
   };
 
   const nextUpMode = read<string>(SETTING_KEYS.UI_NEXT_UP_MODE);
   // Whether the profile has actually chosen, which is what gates the reset
   // affordance: the resolved value is the default until a row exists.
   const nextUpChosen = effective?.[SETTING_KEYS.UI_NEXT_UP_MODE]?.source === "profile";
-  const pending = setValue.isPending || clearValue.isPending;
+  const pending = isSaving;
 
   async function resetNextUpMode() {
-    try {
-      await clearValue.mutateAsync({
-        key: SETTING_KEYS.UI_NEXT_UP_MODE,
-        identity: PROFILE_SCOPE,
-      });
-    } catch (error) {
-      // Nothing stored is the state a reset asks for.
-      if (error instanceof ApiClientError && error.status === 404) return;
-      toast.error("Failed to reset the next up preference");
-    }
+    // Nothing stored is the state a reset asks for, which the shared reset
+    // already treats as success.
+    await resetProfileDefault(SETTING_KEYS.UI_NEXT_UP_MODE).catch(() =>
+      toast.error("Failed to reset the next up preference"),
+    );
   }
 
   return (

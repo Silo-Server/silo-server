@@ -13,11 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useSubtitleAppearanceSetting } from "@/hooks/queries/subtitleAppearance";
-import {
-  useEffectiveSettings,
-  useSetSettingValue,
-  type SettingIdentity,
-} from "@/hooks/queries/settingValues";
+import { useEffectiveSettings } from "@/hooks/queries/settingValues";
+import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { optionsFor } from "@/lib/settingsDisplay";
 import { NAMED_LANGUAGE_OPTIONS } from "@/lib/languageOptions";
@@ -34,9 +31,7 @@ import {
 import type { SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { toast } from "sonner";
 
-/** Subtitle behavior is a profile preference; a device tunes only appearance. */
-const PROFILE_SCOPE: SettingIdentity = { scope: "profile" };
-
+/* Subtitle behavior is a profile preference; a device tunes only appearance. */
 /**
  * The behavior modes come from the contract rather than a literal list, so a
  * member added to the manifest appears here without a matching edit.
@@ -139,7 +134,7 @@ export default function SubtitleAppearanceSettings() {
     isResetting,
   } = useSubtitleAppearanceSetting();
   const { data: behavior } = useEffectiveSettings({ keys: BEHAVIOR_KEYS });
-  const setValue = useSetSettingValue();
+  const { save: saveProfileDefault, isSaving: behaviorSaving } = useProfileDefaultWriter(behavior);
 
   // The effective endpoint resolves an unset key to the contract default, so a
   // control can read its value straight off the answer without a local literal.
@@ -198,18 +193,18 @@ export default function SubtitleAppearanceSettings() {
 
   /**
    * Subtitle behavior writes at profile scope: it is the household member's
-   * choice, not the screen's, and the contract resolves a series, library, or
-   * device override above it.
+   * choice, not the screen's. A device override would otherwise keep shadowing
+   * the write and snap the control back, so the shared writer clears one when
+   * the resolved value came from this device. A library or series override
+   * still ranks above the profile row, but those are edited where the content
+   * is and stay deliberately untouched here.
    */
   function saveBehavior(key: SettingKey, value: unknown) {
-    setValue.mutate(
-      { key, value, identity: PROFILE_SCOPE },
-      { onError: () => toast.error("Failed to save subtitle setting") },
-    );
+    saveProfileDefault(key, value).catch(() => toast.error("Failed to save subtitle setting"));
   }
 
   const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(effectiveSettings);
-  const behaviorPending = setValue.isPending;
+  const behaviorPending = behaviorSaving;
   const usesTextOutline = settings.textOutline || settings.backgroundStyle === "outline";
   const isBoxStyle = settings.backgroundStyle === "box";
   const { containerStyle, cueStyle } = computeSubtitleStyles(settings);
