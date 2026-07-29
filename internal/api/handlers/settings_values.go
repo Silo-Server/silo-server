@@ -405,6 +405,19 @@ func (h *SettingValuesHandler) HandleGetEffective(w http.ResponseWriter, r *http
 				keys = append(keys, def.Key)
 			}
 		}
+	} else {
+		// A key this server's contract does not define is an error, not an
+		// omission. Dropping it silently lets a client fill the gap with its
+		// own vendored default and present a value this server would refuse to
+		// store — the same drift the contract exists to remove. The capability
+		// endpoint's revision is how a newer client learns to stop asking.
+		for _, key := range keys {
+			if _, ok := h.contract.Lookup(key); !ok {
+				writeError(w, http.StatusNotFound, "unknown_setting",
+					"No setting named "+key+" exists in this server's contract")
+				return
+			}
+		}
 	}
 
 	rc := settingsresolve.Context{

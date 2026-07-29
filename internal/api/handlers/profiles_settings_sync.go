@@ -53,7 +53,13 @@ type profileSettingSync struct {
 func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		&req.Language, &req.SubtitleLanguage, &req.PreferredMetadataLanguage,
-		&req.SubtitleMode, req.ShowForcedSubtitles)
+		&req.SubtitleMode, req.ShowForcedSubtitles,
+		profileSkipFields{
+			autoSkipIntro:       &req.AutoSkipIntro,
+			autoSkipCredits:     &req.AutoSkipCredits,
+			autoSkipRecap:       &req.AutoSkipRecap,
+			autoPlayNextPreview: &req.AutoPlayNextPreview,
+		})
 }
 
 // planUpdateProfileSettingsSync plans the canonical writes for PUT
@@ -62,12 +68,29 @@ func planCreateProfileSettingsSync(req createProfileRequest) ([]profileSettingSy
 func planUpdateProfileSettingsSync(req updateProfileRequest) ([]profileSettingSync, error) {
 	return planProfileSettingsSync(
 		req.Language, req.SubtitleLanguage, req.PreferredMetadataLanguage,
-		req.SubtitleMode, req.ShowForcedSubtitles)
+		req.SubtitleMode, req.ShowForcedSubtitles,
+		profileSkipFields{
+			autoSkipIntro:       req.AutoSkipIntro,
+			autoSkipCredits:     req.AutoSkipCredits,
+			autoSkipRecap:       req.AutoSkipRecap,
+			autoPlayNextPreview: req.AutoPlayNextPreview,
+		})
+}
+
+// profileSkipFields groups the four boolean playback toggles the profile DTO
+// carries. They travel together because they behave identically: a nil field
+// was not in the request, and a present one mirrors verbatim.
+type profileSkipFields struct {
+	autoSkipIntro       *bool
+	autoSkipCredits     *bool
+	autoSkipRecap       *bool
+	autoPlayNextPreview *bool
 }
 
 func planProfileSettingsSync(
 	audioLang, subtitleLang, metadataLang, subtitleMode *string,
 	showForced *bool,
+	skips profileSkipFields,
 ) ([]profileSettingSync, error) {
 	var out []profileSettingSync
 	var err error
@@ -85,10 +108,24 @@ func planProfileSettingsSync(
 			return nil, err
 		}
 	}
-	if showForced != nil {
+	// The booleans have no "unset" spelling on the wire — the legacy columns
+	// are NOT NULL — so a present field always writes an explicit value.
+	for _, field := range []struct {
+		key string
+		raw *bool
+	}{
+		{settingskeys.PlaybackShowForcedSubtitles, showForced},
+		{settingskeys.PlaybackAutoSkipIntro, skips.autoSkipIntro},
+		{settingskeys.PlaybackAutoSkipCredits, skips.autoSkipCredits},
+		{settingskeys.PlaybackAutoSkipRecap, skips.autoSkipRecap},
+		{settingskeys.PlaybackAutoPlayNextPreview, skips.autoPlayNextPreview},
+	} {
+		if field.raw == nil {
+			continue
+		}
 		out = append(out, profileSettingSync{
-			key:   settingskeys.PlaybackShowForcedSubtitles,
-			value: json.RawMessage(strconv.FormatBool(*showForced)),
+			key:   field.key,
+			value: json.RawMessage(strconv.FormatBool(*field.raw)),
 		})
 	}
 	return out, nil
@@ -203,9 +240,9 @@ type profilePreferences struct {
 // quality_preference has no entry: the legacy column is a single compound
 // value while the contract splits it across playback.preferred_quality and
 // playback.max_bitrate_kbps, so there is no lossless read and the field stays
-// column-backed. The auto_skip_* and auto_play_next_preview fields likewise
-// stay column-backed here — the sync path never mirrored them, so their
-// canonical rows can be older than the columns.
+// column-backed. The auto_skip_* and auto_play_next_preview fields do sync on
+// write, but this list drives the DTO's read block, whose shape the clients
+// pin; they keep reading their columns, which the sync now keeps current.
 var profilePreferenceKeys = []string{
 	settingskeys.PlaybackAudioLanguage,
 	settingskeys.CatalogMetadataLanguage,

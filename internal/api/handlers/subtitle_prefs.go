@@ -215,7 +215,9 @@ func (h *SubtitlePrefHandler) HandleDeleteSubtitlePref(w http.ResponseWriter, r 
 func planSeriesSubtitleSync(pref userstore.SubtitlePreference) ([]profileSettingSync, error) {
 	language := pref.SubtitleLanguage
 	mode := pref.SubtitleMode
-	out, err := planProfileSettingsSync(nil, &language, nil, &mode, nil)
+	// No skip fields: a series subtitle preference carries none, and the four
+	// booleans are profile-scope anyway.
+	out, err := planProfileSettingsSync(nil, &language, nil, &mode, nil, profileSkipFields{})
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { SidebarPin, SidebarPins } from "@/api/types";
 import { storage } from "@/utils/storage";
@@ -130,6 +130,20 @@ export function useToggleSidebarPin() {
   const queryClient = useQueryClient();
   const setValue = useSetSettingValue();
 
+  /**
+   * Writes are chained rather than fired concurrently.
+   *
+   * This setting is one whole document, and the server upsert is last-write-
+   * wins. Two toggles in flight at once can commit in either order, so the
+   * first request landing second restores the document from before the second
+   * toggle and silently drops it. The optimistic revision only orders the
+   * client-side rollback; it cannot order the server. Chaining keeps at most
+   * one request in flight, and because each link reads the document at the
+   * moment it runs, a queued toggle sends the latest state rather than the one
+   * it was queued with.
+   */
+  const writeChain = useRef<Promise<unknown>>(Promise.resolve());
+
   const readCachedValue = useCallback(() => {
     const cached = queryClient.getQueryData<EffectiveSettingsMap>(
       effectiveSettingsQueryKey({ keys: PINS_KEYS }),
@@ -174,43 +188,46 @@ export function useToggleSidebarPin() {
         },
       }));
       queryClient.setQueryData(revisionKey, mutation.revision);
-      setValue.mutate(
-        {
-          key: SETTING_KEYS.UI_SIDEBAR_PINS,
-          value: mutation.optimisticValue,
-          identity: PROFILE_SCOPE,
-        },
-        {
-          onError: () => {
-            const rollback = rollbackSidebarPinsOptimisticMutation({
-              currentRevision: queryClient.getQueryData<number | null>(revisionKey),
-              mutation,
-            });
+      writeChain.current = writeChain.current
+        .catch(() => undefined)
+        .then(() =>
+          // The cache already holds every optimistic toggle applied so far, so
+          // reading it here — rather than closing over this toggle's own value
+          // — means a queued write sends the newest document.
+          setValue.mutateAsync({
+            key: SETTING_KEYS.UI_SIDEBAR_PINS,
+            value: parseSidebarPins(readCachedValue()),
+            identity: PROFILE_SCOPE,
+          }),
+        )
+        .catch(() => {
+          const rollback = rollbackSidebarPinsOptimisticMutation({
+            currentRevision: queryClient.getQueryData<number | null>(revisionKey),
+            mutation,
+          });
 
-            if (!rollback) {
-              return;
+          if (!rollback) {
+            return;
+          }
+
+          queryClient.setQueryData<EffectiveSettingsMap>(pinsQueryKey, (current) => {
+            if (!current) {
+              return current;
             }
-
-            queryClient.setQueryData<EffectiveSettingsMap>(pinsQueryKey, (current) => {
-              if (!current) {
-                return current;
-              }
-              if (previousEntry === undefined) {
-                const next = { ...current };
-                delete next[SETTING_KEYS.UI_SIDEBAR_PINS];
-                return next;
-              }
-              return {
-                ...current,
-                [SETTING_KEYS.UI_SIDEBAR_PINS]: previousEntry,
-              };
-            });
-            queryClient.setQueryData(revisionKey, rollback.revision);
-          },
-        },
-      );
+            if (previousEntry === undefined) {
+              const next = { ...current };
+              delete next[SETTING_KEYS.UI_SIDEBAR_PINS];
+              return next;
+            }
+            return {
+              ...current,
+              [SETTING_KEYS.UI_SIDEBAR_PINS]: previousEntry,
+            };
+          });
+          queryClient.setQueryData(revisionKey, rollback.revision);
+        });
     },
-    [queryClient, renderValue, setValue],
+    [queryClient, readCachedValue, renderValue, setValue],
   );
 
   return { togglePin, isPinned };

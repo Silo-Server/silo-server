@@ -267,6 +267,24 @@ func TestEffectiveResolvesThroughTheLadder(t *testing.T) {
 	}
 }
 
+// TestEffectiveRejectsUnknownKeys. Omitting an unknown key silently lets a
+// client fill the gap with its own vendored default and present a value this
+// server would refuse to store.
+func TestEffectiveRejectsUnknownKeys(t *testing.T) {
+	handler, _ := newValuesTestHandler(t)
+
+	req := valuesRequest(http.MethodGet,
+		"/settings/values/effective?keys=playback.subtitle_mode,totally.invented.key", nil)
+	rec := httptest.NewRecorder()
+	handler.HandleGetEffective(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("unknown key = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "totally.invented.key") {
+		t.Errorf("the error does not name the offending key: %s", rec.Body.String())
+	}
+}
+
 // TestEffectiveRequiresDeviceIdentityForDeviceAwareKeys: resolving a
 // device-capable key without a device identity would silently skip stored
 // device overrides and pass the profile fallback off as effective.

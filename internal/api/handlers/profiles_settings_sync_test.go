@@ -150,6 +150,51 @@ func TestUpdateProfileSyncsSubtitlePreferences(t *testing.T) {
 	}
 }
 
+// TestUpdateProfileSyncsSkipPreferences. The player resolves these four keys
+// canonically, so a legacy PUT that only moved the columns would return 200
+// and change nothing about playback.
+func TestUpdateProfileSyncsSkipPreferences(t *testing.T) {
+	store := newProfileTestStore(t)
+	handler := NewProfileHandler(testUserStoreProvider{store: store})
+
+	rr := updateProfileVia(t, handler, "profile-1",
+		`{"auto_skip_intro":true,"auto_skip_credits":true,"auto_skip_recap":true,`+
+			`"auto_play_next_preview":false}`)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT = %d: %s", rr.Code, rr.Body.String())
+	}
+
+	for key, want := range map[string]string{
+		settingskeys.PlaybackAutoSkipIntro:       `true`,
+		settingskeys.PlaybackAutoSkipCredits:     `true`,
+		settingskeys.PlaybackAutoSkipRecap:       `true`,
+		settingskeys.PlaybackAutoPlayNextPreview: `false`,
+	} {
+		value := storedProfileSetting(t, store, key, "profile-1")
+		if value == nil {
+			t.Errorf("no canonical %s row after the profile update", key)
+			continue
+		}
+		if string(value.Value) != want {
+			t.Errorf("canonical %s = %s, want %s", key, value.Value, want)
+		}
+	}
+
+	// A field the request omitted must not be written: the shipped clients
+	// send single-field deltas, and an absent field is not a choice. Its own
+	// store, since the test store's DSN is derived from the test name.
+	t.Run("omitted fields are not written", func(t *testing.T) {
+		store := newProfileTestStore(t)
+		handler := NewProfileHandler(testUserStoreProvider{store: store})
+		if rr := updateProfileVia(t, handler, "profile-1", `{"auto_skip_intro":true}`); rr.Code != http.StatusOK {
+			t.Fatalf("single-field PUT = %d: %s", rr.Code, rr.Body.String())
+		}
+		if value := storedProfileSetting(t, store, settingskeys.PlaybackAutoSkipCredits, "profile-1"); value != nil {
+			t.Errorf("an omitted field wrote %s", value.Value)
+		}
+	})
+}
+
 // TestUpdateProfileRejectsInvalidLanguageBeforeWriting: a value the canonical
 // endpoint would refuse must fail the request as a no-op instead of leaving
 // the column and the canonical store disagreeing.
