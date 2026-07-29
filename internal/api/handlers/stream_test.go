@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
@@ -207,7 +208,7 @@ func TestHandleSubtitle_ExternalTrackSendsDeliveryCORS(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 
 	rr := httptest.NewRecorder()
-	handler.HandleSubtitle(rr, req)
+	apimw.StreamDeliveryCORS(http.HandlerFunc(handler.HandleSubtitle)).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())

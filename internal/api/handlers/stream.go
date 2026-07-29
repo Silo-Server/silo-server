@@ -25,23 +25,6 @@ type FilePathResolver interface {
 	GetByID(ctx context.Context, id int) (*models.MediaFile, error)
 }
 
-// setStreamDeliveryCORS sets the CORS headers a Cast receiver (the Default
-// Media Receiver) needs to fetch adaptive HLS and progressive streams. The
-// receiver runs on a Google-hosted origin, so it must be allowed to read the
-// manifest/segment/stream bytes cross-origin, to send a Range header, and to
-// read back the Content-Length/Content-Range for adaptive seeking.
-//
-// This does not widen who may fetch a session's bytes: these delivery routes
-// are still gated by session-scoped auth (a bearer/?token= JWT, or a valid
-// per-session ?st= stream token). The wildcard only removes the browser's
-// same-origin *read* restriction on responses that were already authorized.
-func setStreamDeliveryCORS(w http.ResponseWriter) {
-	h := w.Header()
-	h.Set("Access-Control-Allow-Origin", "*")
-	h.Set("Access-Control-Allow-Headers", "Range")
-	h.Set("Access-Control-Expose-Headers", "Content-Length, Content-Range")
-}
-
 // StreamHandler handles HTTP endpoints for streaming media content.
 type StreamHandler struct {
 	sessionMgr    SessionManagerInterface
@@ -97,12 +80,6 @@ func NewStreamHandler(sessionMgr SessionManagerInterface, fileResolver FilePathR
 // For remux: starts an ffmpeg remux and streams the output.
 // For transcode: returns 400 (transcode uses manifest/segment endpoints).
 func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
-	// Progressive direct-play/remux streams are Cast-reachable: the receiver
-	// fetches this URL directly, so it needs the delivery CORS headers. Set
-	// before any early return so error responses are readable cross-origin
-	// too (an opaque CORS failure hides the actual status from the receiver).
-	setStreamDeliveryCORS(w)
-
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
@@ -200,12 +177,6 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 // a playback session and serves it as WebVTT or raw ASS depending on the
 // URL extension (e.g. /subtitles/2.ass or /subtitles/2.vtt).
 func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
-	// Subtitle tracks are Cast-reachable: the Default Media Receiver fetches
-	// declared text tracks cross-origin. Set on every branch up front — the
-	// embedded streaming path sets its own ACAO, but external/downloaded
-	// tracks (ServeSubtitle) and error responses would otherwise omit it and
-	// CC silently fails on the receiver.
-	setStreamDeliveryCORS(w)
 	userID := apimw.GetUserID(r.Context())
 	if userID == 0 {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")

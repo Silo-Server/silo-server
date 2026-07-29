@@ -3414,6 +3414,7 @@ func TestHandleStartPlayback_SeekableStreamsOnly(t *testing.T) {
 		file             func(*testing.T) *models.MediaFile
 		body             string
 		transcodeEnabled bool
+		userTranscodeOff bool
 		wantMethod       playback.PlayMethod
 		wantStreamPrefix string
 	}{
@@ -3458,6 +3459,15 @@ func TestHandleStartPlayback_SeekableStreamsOnly(t *testing.T) {
 			wantStreamPrefix: "/stream/",
 		},
 		{
+			name:             "user-disabled transcoding keeps best-effort remux",
+			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "aac") },
+			body:             `{"file_id":42,"profile_id":"profile-1","seekable_streams_only":true,"codecs_video":["h264"],"codecs_audio":["aac","mp3"],"containers":["mp4"],"max_resolution":"1080p"}`,
+			transcodeEnabled: true,
+			userTranscodeOff: true,
+			wantMethod:       playback.PlayRemux,
+			wantStreamPrefix: "/stream/",
+		},
+		{
 			name:             "explicit remux request wins over the flag",
 			file:             func(t *testing.T) *models.MediaFile { return mkvFile(t, "aac") },
 			body:             `{"file_id":42,"profile_id":"profile-1","play_method":"remux","seekable_streams_only":true,"codecs_video":["h264"],"codecs_audio":["aac","mp3"],"containers":["mp4"],"max_resolution":"1080p"}`,
@@ -3470,6 +3480,11 @@ func TestHandleStartPlayback_SeekableStreamsOnly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sessionMgr := playback.NewSessionManager(0, 0)
+			if tt.userTranscodeOff {
+				sessionMgr.SetLimitProvider(func(context.Context, int) (playback.SessionLimits, error) {
+					return playback.SessionLimits{TranscodingDisabled: true}, nil
+				})
+			}
 			file := tt.file(t)
 			handler := NewPlaybackHandler(sessionMgr, mapPlaybackFileResolver{
 				files: map[int]*models.MediaFile{42: file},

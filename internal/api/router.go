@@ -1872,6 +1872,7 @@ func NewRouter(deps Dependencies) chi.Router {
 						// scoped ?st= stream token. The session ID (UUID) plus
 						// the signed ?st= card serve as the access grant.
 						r.Group(func(r chi.Router) {
+							r.Use(apimw.StreamDeliveryCORS)
 							r.Use(authMiddleware.RequireStreamAuth(handlers.NewStreamTokenAuthenticator(playbackHandler.JWTSecret)))
 							applyStreamGuards(r)
 							r.Get("/transcode/{session_id}/master.m3u8", playbackHandler.HandleGetTranscodeManifest)
@@ -1907,6 +1908,7 @@ func NewRouter(deps Dependencies) chi.Router {
 				// ?st= stream token (same access model as HLS delivery).
 				if streamHandler != nil {
 					r.Group(func(r chi.Router) {
+						r.Use(apimw.StreamDeliveryCORS)
 						r.Use(authMiddleware.RequireStreamAuth(handlers.NewStreamTokenAuthenticator(streamHandler.JWTSecret)))
 						applyStreamGuards(r)
 						r.Get("/stream/{session_id}", streamHandler.HandleStream)

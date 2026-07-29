@@ -1852,9 +1852,10 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 	// transcode session instead (its HLS manifest seeks anywhere). An explicit
 	// remux request keeps precedence, and disabled transcoding keeps the
 	// best-effort remux rather than refusing playback.
-	if req.SeekableStreamsOnly && method == playback.PlayRemux &&
+	seekableRemuxUpgraded := req.SeekableStreamsOnly && method == playback.PlayRemux &&
 		!strings.EqualFold(req.PlayMethod, string(playback.PlayRemux)) &&
-		h.playbackConfig().TranscodeEnabled {
+		h.playbackConfig().TranscodeEnabled
+	if seekableRemuxUpgraded {
 		method = playback.PlayTranscode
 	}
 	if requestedFile != nil && effectiveFile != nil && requestedFile.ID != effectiveFile.ID {
@@ -1873,26 +1874,34 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 
 	clientInfo := playbackClientInfoFromRequest(r)
 	sessionCtx := playback.WithClientInfo(r.Context(), clientInfo)
-	var session *playback.Session
-	if starter, ok := h.sessionMgr.(sessionStarterWithFilesContext); ok {
-		session, err = starter.StartSessionWithFilesContext(
-			sessionCtx,
+	startSession := func(playMethod playback.PlayMethod) (*playback.Session, error) {
+		if starter, ok := h.sessionMgr.(sessionStarterWithFilesContext); ok {
+			return starter.StartSessionWithFilesContext(
+				sessionCtx,
+				userID,
+				profileID,
+				effectiveFile.ID,
+				req.FileID,
+				playMethod,
+				transcodeAudio,
+			)
+		}
+		return h.sessionMgr.StartSessionWithFiles(
 			userID,
 			profileID,
 			effectiveFile.ID,
 			req.FileID,
-			method,
+			playMethod,
 			transcodeAudio,
 		)
-	} else {
-		session, err = h.sessionMgr.StartSessionWithFiles(
-			userID,
-			profileID,
-			effectiveFile.ID,
-			req.FileID,
-			method,
-			transcodeAudio,
-		)
+	}
+	session, err := startSession(method)
+	if seekableRemuxUpgraded && errors.Is(err, playback.ErrTranscodingDisabled) {
+		// The seekability preference is best-effort. If account policy rejects
+		// the video transcode, preserve the resolver's playable remux instead of
+		// turning an otherwise valid playback request into a 403.
+		method = playback.PlayRemux
+		session, err = startSession(method)
 	}
 	if err != nil {
 		if errors.Is(err, playback.ErrTooManyStreams) {
@@ -3584,9 +3593,6 @@ func (h *PlaybackHandler) HandleStartTranscode(w http.ResponseWriter, r *http.Re
 // HandleStartTranscode.
 func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	// HLS manifests are Cast-reachable: the Default Media Receiver fetches the
-	// adaptive manifest directly and requires CORS to read it cross-origin.
-	setStreamDeliveryCORS(w)
 	session, status, card := h.loadTranscodeServeSession(r, sessionID)
 	switch status {
 	case playback.SessionMissing:
@@ -3642,9 +3648,6 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 // Auth is optional — the session UUID serves as an access token.
 func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
-	// HLS segments are Cast-reachable: the Default Media Receiver fetches each
-	// segment directly (with Range) and requires CORS to read them cross-origin.
-	setStreamDeliveryCORS(w)
 	session, status, card := h.loadTranscodeServeSession(r, sessionID)
 	switch status {
 	case playback.SessionMissing:
