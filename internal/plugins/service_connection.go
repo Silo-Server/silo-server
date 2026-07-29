@@ -15,7 +15,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
-var ErrConnectionTestUnsupported = errors.New("plugin connection test unsupported")
+var (
+	ErrConnectionTestUnsupported = errors.New("plugin connection test unsupported")
+	ErrConnectionTestFailed      = errors.New("plugin connection test failed")
+)
 
 type ConnectionTestError struct {
 	Message string
@@ -41,10 +44,30 @@ var runPluginConnectionCheck = func(
 	client pluginClient,
 	manifest *pluginv1.PluginManifest,
 ) error {
-	capabilityID, err := metadataProviderConnectionCheckCapabilityID(manifest)
+	capabilityType, capabilityID, err := connectionCheckCapabilityID(manifest)
 	if err != nil {
 		return err
 	}
+	if capabilityType == "request_router.v1" {
+		router, err := client.RequestRouter(capabilityID)
+		if err != nil {
+			return &ConnectionTestError{Message: fmt.Sprintf("Failed to initialize the request router: %v", err), Cause: err}
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		resp, err := router.TestConnection(probeCtx, &pluginv1.TestConnectionRequest{
+			CapabilityId: capabilityID,
+			Connection:   &pluginv1.RouterConnection{Id: "global-config"},
+		})
+		if err != nil {
+			return &ConnectionTestError{Message: fmt.Sprintf("Connection check failed: %v", err), Cause: err}
+		}
+		if !resp.GetOk() {
+			return &ConnectionTestError{Message: resp.GetMessage(), Cause: ErrConnectionTestFailed}
+		}
+		return nil
+	}
+
 	capability := metadataProviderConnectionCheckCapability(manifest, capabilityID)
 	if !metadataProviderSupportsConnectionProbe(capability, "movie") {
 		slog.DebugContext(ctx,
@@ -80,6 +103,19 @@ var runPluginConnectionCheck = func(
 	}
 
 	return nil
+}
+
+func connectionCheckCapabilityID(manifest *pluginv1.PluginManifest) (string, string, error) {
+	for _, capability := range manifest.GetCapabilities() {
+		if capability.GetType() == "request_router.v1" {
+			return capability.GetType(), capability.GetId(), nil
+		}
+	}
+	capabilityID, err := metadataProviderConnectionCheckCapabilityID(manifest)
+	if err != nil {
+		return "", "", err
+	}
+	return "metadata_provider.v1", capabilityID, nil
 }
 
 func (s *Service) TestGlobalConfig(
