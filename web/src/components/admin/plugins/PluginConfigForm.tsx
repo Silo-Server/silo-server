@@ -252,11 +252,30 @@ export function PluginConfigForm({
               try {
                 const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
                 if (!Array.isArray(parsed)) throw new Error("Profiles must be a JSON array.");
+                const seen = new Set<string>();
                 const labels = parsed.map((profile, index) => {
                   if (!profile || typeof profile !== "object" || typeof profile.label !== "string" || !profile.label.trim()) {
                     throw new Error(`Profile ${index + 1} must have a label.`);
                   }
-                  return profile.label.trim();
+                  const typed = profile as Record<string, unknown>;
+                  const label = profile.label.trim();
+                  const key = label.toLowerCase();
+                  if (seen.has(key)) throw new Error(`Duplicate profile label: ${label}.`);
+                  seen.add(key);
+                  for (const regexKey of ["include_regex", "exclude_regex"]) {
+                    const regex = typed[regexKey];
+                    if (regex !== undefined && typeof regex !== "string") {
+                      throw new Error(`${regexKey} in profile ${label} must be a string.`);
+                    }
+                    if (typeof regex === "string" && regex.trim() !== "") {
+                      try {
+                        new RegExp(regex);
+                      } catch {
+                        throw new Error(`Invalid ${regexKey} in profile ${label}.`);
+                      }
+                    }
+                  }
+                  return label;
                 });
                 setProfilePreview(`Valid configuration: ${labels.join(", ")}`);
               } catch (error) {
