@@ -15,6 +15,7 @@ package settingsmigrate
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,10 @@ type LegacyProfile struct {
 	ShowForcedSubtitles       *bool
 	QualityPreference         *string
 	PreferredMetadataLanguage *string
+	AutoSkipIntro             *bool
+	AutoSkipCredits           *bool
+	AutoSkipRecap             *bool
+	AutoPlayNextPreview       *bool
 }
 
 // LegacySeriesPreference is one user_subtitle_preferences or
@@ -99,6 +104,12 @@ type Row struct {
 	LibraryID int
 	SeriesID  string
 	Value     json.RawMessage
+
+	// fromRenamedKey records that this row's source was stored under a legacy
+	// spelling in legacyKeyRenames. It exists only for the dedup pass: when a
+	// renamed row and a canonically-keyed row land on the same identity, this is
+	// how the pass knows which one the user wrote last.
+	fromRenamedKey bool
 }
 
 // Reject records a legacy value that could not be converted. It is written to
@@ -145,8 +156,9 @@ type Result struct {
 // quality_preference is the one that bites: the column defaults to 1080p while
 // the contract defaults to auto, so migrating it unconditionally would pin
 // every profile in the install to 1080p having never asked for it.
+//
+// The language column's 'en' default is deliberately absent: see planProfiles.
 const (
-	defaultLanguage          = "en"
 	defaultSubtitleMode      = "auto"
 	defaultQualityPreference = "1080p"
 )
@@ -164,6 +176,10 @@ const (
 // keyPreferredQuality is the one key with bespoke handling: it decomposes into
 // two canonical keys rather than converting to one.
 const keyPreferredQuality = "playback.preferred_quality"
+
+// keyCardOverlays needs a format upgrade rather than a plain conversion: old
+// web clients stored a v1 document the contract schema does not accept.
+const keyCardOverlays = "ui.card_overlays"
 
 // fieldProfileID is the identity field every non-account reject carries.
 const fieldProfileID = "profile_id"
@@ -254,10 +270,55 @@ func (p *Planner) Plan(in Input) Result {
 	p.planSeriesPrefs(in.SeriesPrefs, &res)
 	p.planLibraryPrefs(in.LibraryPrefs, &res)
 
+	res.Rows = dedupeRows(res.Rows)
+
 	return res
 }
 
-// planProfiles converts the six preference columns on user_profiles.
+// dedupeRows collapses rows that landed on the same canonical identity. The
+// legacy tables key on the stored spelling, so one device can legitimately hold
+// both player.next_up_prompt_seconds and playback.next_up_prompt_seconds; after
+// the rename both become one identity, and writing both would trip the unique
+// index — on SQLite that aborts NewUserDB and the user's store never opens
+// again.
+//
+// The tiebreak mirrors how the rows got there: the runtime handler writes the
+// canonical key first and only best-effort-deletes the alias, so when the alias
+// survived alongside a canonical row, the canonical row is the newer write and
+// wins. Between two rows of equal provenance the first in input order is kept,
+// which keeps the pass deterministic.
+func dedupeRows(rows []Row) []Row {
+	type identity struct {
+		key       string
+		scope     settingscontract.Scope
+		profileID string
+		deviceID  string
+		libraryID int
+		seriesID  string
+	}
+
+	kept := make(map[identity]int, len(rows))
+	out := rows[:0]
+	for _, row := range rows {
+		id := identity{
+			key: row.Key, scope: row.Scope,
+			profileID: row.ProfileID, deviceID: row.DeviceID,
+			libraryID: row.LibraryID, seriesID: row.SeriesID,
+		}
+		at, seen := kept[id]
+		if !seen {
+			kept[id] = len(out)
+			out = append(out, row)
+			continue
+		}
+		if out[at].fromRenamedKey && !row.fromRenamedKey {
+			out[at] = row
+		}
+	}
+	return out
+}
+
+// planProfiles converts the preference columns on user_profiles.
 func (p *Planner) planProfiles(profiles []LegacyProfile, res *Result) {
 	for _, profile := range profiles {
 		id := func(field string) json.RawMessage {
@@ -266,9 +327,18 @@ func (p *Planner) planProfiles(profiles []LegacyProfile, res *Result) {
 
 		// Language columns: the empty string is the legacy spelling of "no
 		// preference", and the contract spells that as the absence of a row.
+		//
+		// The audio language deliberately gets no columnDefault, unlike quality
+		// below: the column's 'en' default was the effective behavior — playback
+		// preferred English tracks for it — while the contract default is null,
+		// under which audio_select skips language matching entirely. Suppressing
+		// 'en' as "never decided" would silently change what plays for every
+		// profile that was getting English selection, chosen or not. The other
+		// language columns default to empty, which already means unset on both
+		// sides, so only this one carries behavior worth preserving.
 		p.addLanguage(res, sourceUserProfiles, id("language"),
 			"playback.audio_language", settingscontract.ScopeProfile,
-			Row{ProfileID: profile.ID}, profile.Language, defaultLanguage)
+			Row{ProfileID: profile.ID}, profile.Language, "")
 		p.addLanguage(res, sourceUserProfiles, id("subtitle_language"),
 			"playback.subtitle_language", settingscontract.ScopeProfile,
 			Row{ProfileID: profile.ID}, profile.SubtitleLanguage, "")
@@ -293,6 +363,30 @@ func (p *Planner) planProfiles(profiles []LegacyProfile, res *Result) {
 		p.addQuality(res, sourceUserProfiles, id("quality_preference"),
 			settingscontract.ScopeProfile, Row{ProfileID: profile.ID},
 			deref(profile.QualityPreference), defaultQualityPreference)
+
+		// The auto-skip switches default to false in both the columns and the
+		// contract, so only an explicit true is a decision: migrating a false
+		// would turn "never touched the switch" into a stored choice that
+		// outranks the contract default forever, the show_forced_subtitles
+		// problem mirrored.
+		//
+		//nolint:goconst // declarative table mapping columns to keys
+		for _, flag := range []struct {
+			column string
+			key    string
+			value  *bool
+		}{
+			{"auto_skip_intro", "playback.auto_skip_intro", profile.AutoSkipIntro},
+			{"auto_skip_credits", "playback.auto_skip_credits", profile.AutoSkipCredits},
+			{"auto_skip_recap", "playback.auto_skip_recap", profile.AutoSkipRecap},
+			{"auto_play_next_preview", "playback.auto_play_next_preview", profile.AutoPlayNextPreview},
+		} {
+			if flag.value != nil && *flag.value {
+				p.addValue(res, sourceUserProfiles, id(flag.column),
+					flag.key, settingscontract.ScopeProfile,
+					Row{ProfileID: profile.ID}, json.RawMessage("true"))
+			}
+		}
 	}
 }
 
@@ -354,6 +448,7 @@ func (p *Planner) planAccountSettings(
 		for _, profile := range profiles {
 			res.Rows = append(res.Rows, Row{
 				Key: key, Scope: scope, ProfileID: profile.ID, Value: value,
+				fromRenamedKey: key != setting.Key,
 			})
 		}
 	}
@@ -404,6 +499,7 @@ func (p *Planner) planDeviceSettings(devices []LegacyDeviceSetting, res *Result)
 		res.Rows = append(res.Rows, Row{
 			Key: key, Scope: settingscontract.ScopeProfileDevice,
 			ProfileID: row.ProfileID, DeviceID: row.DeviceID, Value: value,
+			fromRenamedKey: key != row.Key,
 		})
 	}
 }
@@ -580,6 +676,9 @@ func (p *Planner) coerce(def *settingscontract.Definition, raw string) (json.Raw
 	case settingscontract.TypeObject:
 		// Already a JSON document in the legacy store.
 		candidate = json.RawMessage(trimmed)
+		if def.Key == keyCardOverlays {
+			candidate = upgradeCardOverlaysV1(candidate)
+		}
 
 	case settingscontract.TypeLanguageTag:
 		normalized, ok := settingscontract.NormalizeLanguageTag(trimmed)
@@ -597,6 +696,101 @@ func (p *Planner) coerce(def *settingscontract.Definition, raw string) (json.Raw
 		return nil, err
 	}
 	return candidate, nil
+}
+
+// cardOverlayIDs mirrors the overlayId enum in
+// contracts/settings/v1/schemas/card-overlays.json. The v1 upgrade needs it to
+// drop ids the schema no longer knows: validation is all-or-nothing, so one
+// stale id left in place would quarantine the user's whole badge config.
+var cardOverlayIDs = map[string]bool{
+	"resolution": true, "hdr": true, "resolution_hdr": true,
+	"audio": true, "audio_channels": true, "video_codec": true,
+	"container": true, "aspect_ratio": true, "release_type": true,
+	"edition": true, "multi_audio": true, "multi_sub": true,
+	"rating_imdb": true, "rating_tmdb": true, "rating_rt": true,
+	"rating_rt_audience": true, "content_rating": true,
+	"year": true, "runtime": true, "original_language": true,
+	"studio": true, "network": true, "show_status": true,
+	"imdb_top_250": true, "rt_certified_fresh": true,
+}
+
+// cardOverlayPositions and cardOverlayAccent mirror the per-item constraints in
+// the same schema.
+var (
+	cardOverlayPositions = map[string]bool{
+		"top-left": true, "top-right": true, "bottom-left": true, "bottom-right": true,
+	}
+	cardOverlayAccent = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+)
+
+// looksLikeCardOverlaysV2 is web/src/lib/overlays/schema.ts's looksLikeV2
+// heuristic: v1 documents are flat overlay-id records, v2 documents carry a
+// version field or at minimum a preset string and an items object.
+func looksLikeCardOverlaysV2(doc map[string]any) bool {
+	if version, ok := doc["version"].(float64); ok && version == 2 {
+		return true
+	}
+	_, presetIsString := doc["preset"].(string)
+	_, itemsIsObject := doc["items"].(map[string]any)
+	return presetIsString && itemsIsObject
+}
+
+// upgradeCardOverlaysV1 rewrites a v1 card_overlays document into the v2 shape
+// the contract schema requires, mirroring the web client's migrateFromV1.
+//
+// Old web clients stored a flat Record<overlayId, {enabled, position}>; the web
+// parser upgrades that at read time, but the contract schema only accepts v2,
+// so without this every v1 row would be quarantined and the user's badge
+// config silently lost. The upgrade keeps what migrateFromV1 keeps — known ids,
+// the fields the v2 schema accepts, the "classic" default preset and an empty
+// order — and drops the rest. Items missing a valid enabled or position are
+// dropped whole rather than half-written: the v2 schema requires both, the
+// registry defaults that would fill them live only in the web bundle, and an
+// absent item already resolves to those same defaults at read time.
+//
+// Anything that is not an object, or already looks like v2, passes through
+// unchanged for validation to judge.
+func upgradeCardOverlaysV1(raw json.RawMessage) json.RawMessage {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return raw
+	}
+	if looksLikeCardOverlaysV2(doc) {
+		return raw
+	}
+
+	items := map[string]any{}
+	for id, entry := range doc {
+		if !cardOverlayIDs[id] {
+			continue
+		}
+		fields, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		enabled, hasEnabled := fields["enabled"].(bool)
+		position, hasPosition := fields["position"].(string)
+		if !hasEnabled || !hasPosition || !cardOverlayPositions[position] {
+			continue
+		}
+		item := map[string]any{"enabled": enabled, "position": position}
+		if accent, ok := fields["accentColor"].(string); ok && cardOverlayAccent.MatchString(accent) {
+			item["accentColor"] = accent
+		}
+		if showIcon, ok := fields["showIcon"].(bool); ok {
+			item["showIcon"] = showIcon
+		}
+		items[id] = item
+	}
+
+	upgraded, err := json.Marshal(map[string]any{
+		"version": 2, "preset": "classic", "order": []string{}, "items": items,
+	})
+	if err != nil {
+		// Maps of plain JSON values always marshal; this cannot fire.
+		return raw
+	}
+	return upgraded
 }
 
 func (p *Planner) validate(def *settingscontract.Definition, value json.RawMessage) error {

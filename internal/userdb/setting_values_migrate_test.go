@@ -14,18 +14,18 @@ func seedLegacySettings(t *testing.T, db *sql.DB) {
 	// profile, so an account row has to reach both.
 	for _, profile := range []struct {
 		id, quality, language, subtitleLang, mode string
-		forced                                    bool
+		forced, skipIntro                         bool
 	}{
-		{"p1", "1080p-high", "ja", "en", "always", false},
-		{"p2", "1080p", "en", "", "auto", true},
+		{"p1", "1080p-high", "ja", "en", "always", false, true},
+		{"p2", "1080p", "en", "", "auto", true, false},
 	} {
 		if _, err := db.Exec(`
 INSERT INTO profiles
     (id, name, quality_preference, language, subtitle_language, subtitle_mode, show_forced_subtitles,
-     created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
+     auto_skip_intro, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
 			profile.id, profile.id, profile.quality, profile.language,
-			profile.subtitleLang, profile.mode, profile.forced); err != nil {
+			profile.subtitleLang, profile.mode, profile.forced, profile.skipIntro); err != nil {
 			t.Fatalf("seeding profile %s: %v", profile.id, err)
 		}
 	}
@@ -48,6 +48,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`,
 		{"p1", "d1", "playback.preferred_quality", "720p-high"},
 		{"p1", "d1", "playback.auto_skip_intro", "true"},
 		{"p1", "d1", "player.audio_sync_ms", "-250"},
+		// Both spellings of the same key on one device: the legacy PK keys on
+		// the stored spelling, so real installs hold this pair whenever the
+		// runtime's best-effort alias cleanup failed. Migrating both would trip
+		// the canonical unique index and abort the whole migration.
+		{"p1", "d1", "player.next_up_prompt_seconds", "45"},
+		{"p1", "d1", "playback.next_up_prompt_seconds", "20"},
 	} {
 		if _, err := db.Exec(`
 INSERT INTO user_device_settings (profile_id, device_id, key, value, updated_at)
@@ -124,10 +130,37 @@ func TestMigrateToV16BackfillsCanonicalValues(t *testing.T) {
 			"profile_id = ?", "p1"); !ok || got != `"ja"` {
 			t.Errorf("p1 audio language = %q (found=%v), want \"ja\"", got, ok)
 		}
-		// p2 holds only column defaults, so it must produce nothing.
+		// p2's 'en' is the column default, but for the audio language the
+		// default was the effective behavior, so it survives as an explicit row
+		// — unlike the quality column, which p2 must not carry.
 		if got, ok := canonicalValue(t, db, "playback.audio_language", "profile",
+			"profile_id = ?", "p2"); !ok || got != `"en"` {
+			t.Errorf("p2 audio language = %q (found=%v), want the effective \"en\"", got, ok)
+		}
+		if got, ok := canonicalValue(t, db, "playback.preferred_quality", "profile",
 			"profile_id = ?", "p2"); ok {
-			t.Errorf("p2 got %q from a column still holding its default", got)
+			t.Errorf("p2 got quality %q from a column still holding its default", got)
+		}
+	})
+
+	t.Run("auto-skip columns migrate only when true", func(t *testing.T) {
+		if got, ok := canonicalValue(t, db, "playback.auto_skip_intro", "profile",
+			"profile_id = ?", "p1"); !ok || got != `true` {
+			t.Errorf("p1 auto_skip_intro = %q (found=%v), want true", got, ok)
+		}
+		if got, ok := canonicalValue(t, db, "playback.auto_skip_intro", "profile",
+			"profile_id = ?", "p2"); ok {
+			t.Errorf("p2 got auto_skip_intro %q from an untouched false column", got)
+		}
+	})
+
+	t.Run("renamed and canonical device keys collapse to one row", func(t *testing.T) {
+		// Both spellings were seeded; without the dedup pass the second insert
+		// violates the unique index and the whole migration — and with it the
+		// user's store — fails to open. The canonical-keyed value wins.
+		if got, ok := canonicalValue(t, db, "playback.next_up_prompt_seconds", "profile_device",
+			"profile_id = ? AND device_id = ?", "p1", "d1"); !ok || got != `20` {
+			t.Errorf("next_up_prompt_seconds = %q (found=%v), want the canonical-keyed 20", got, ok)
 		}
 	})
 

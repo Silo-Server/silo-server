@@ -51,22 +51,30 @@ func hasKey(res Result, key string) bool {
 // contract defaults to auto, so migrating the column unconditionally would pin
 // every profile to 1080p having never chosen it — and worse, that stored value
 // then outranks the contract default forever.
+//
+// The audio language is the deliberate exception: the column's 'en' default was
+// the effective behavior — playback preferred English tracks for it — while the
+// contract default null selects no language at all, so suppressing 'en' would
+// silently change what plays. It must survive as an explicit row.
 func TestColumnDefaultsDoNotBecomeChoices(t *testing.T) {
 	res := planner(t).Plan(Input{Profiles: []LegacyProfile{{
 		ID:                  "p1",
-		Language:            str("en"),    // the column default
+		Language:            str("en"),    // the column default, but see above
 		SubtitleMode:        str("auto"),  // the column default
 		QualityPreference:   str("1080p"), // the column default
 		ShowForcedSubtitles: boolp(true),  // the column default
 		SubtitleLanguage:    str(""),      // legacy spelling of unset
 	}}})
 
-	if len(res.Rows) != 0 {
-		t.Fatalf("a profile holding nothing but column defaults produced %d rows: %+v",
-			len(res.Rows), res.Rows)
-	}
 	if len(res.Rejects) != 0 {
 		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+	language := find(t, res, "playback.audio_language", nil)
+	if string(language.Value) != `"en"` {
+		t.Errorf("audio language = %s, want the effective \"en\" preserved", language.Value)
+	}
+	if len(res.Rows) != 1 {
+		t.Fatalf("column defaults beyond the audio language produced rows: %+v", res.Rows)
 	}
 }
 
@@ -435,5 +443,146 @@ func TestRejectIdentityIsAlwaysValidJSON(t *testing.T) {
 			t.Errorf("identity %q for %s is not a JSON object: %v",
 				reject.Identity, reject.SourceKey, err)
 		}
+	}
+}
+
+// TestRenamedAndCanonicalKeysCollapseToOneRow: the legacy device table keys on
+// the stored spelling, so one device can hold both player.next_up_prompt_seconds
+// and playback.next_up_prompt_seconds. Both become one canonical identity, and
+// planning both would trip the unique index — on SQLite that aborts NewUserDB
+// and the user's store never opens again. The canonical-keyed value must win:
+// the runtime handler writes it first and only best-effort-deletes the alias,
+// so it is the newer write.
+func TestRenamedAndCanonicalKeysCollapseToOneRow(t *testing.T) {
+	for name, ordered := range map[string][]LegacyDeviceSetting{
+		"alias first": {
+			{ProfileID: "p1", DeviceID: "d1", Key: "player.next_up_prompt_seconds", Value: "45"},
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.next_up_prompt_seconds", Value: "20"},
+		},
+		"canonical first": {
+			{ProfileID: "p1", DeviceID: "d1", Key: "playback.next_up_prompt_seconds", Value: "20"},
+			{ProfileID: "p1", DeviceID: "d1", Key: "player.next_up_prompt_seconds", Value: "45"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := planner(t).Plan(Input{DeviceSettings: ordered})
+			if len(res.Rejects) != 0 {
+				t.Fatalf("unexpected rejects: %+v", res.Rejects)
+			}
+			row := find(t, res, "playback.next_up_prompt_seconds", nil)
+			if string(row.Value) != `20` {
+				t.Errorf("surviving value = %s, want the canonical-keyed 20", row.Value)
+			}
+		})
+	}
+
+	// A different device is a different identity and must keep its own row.
+	res := planner(t).Plan(Input{DeviceSettings: []LegacyDeviceSetting{
+		{ProfileID: "p1", DeviceID: "d1", Key: "playback.next_up_prompt_seconds", Value: "20"},
+		{ProfileID: "p1", DeviceID: "d2", Key: "player.next_up_prompt_seconds", Value: "45"},
+	}})
+	if len(res.Rows) != 2 {
+		t.Fatalf("distinct devices were merged: %+v", res.Rows)
+	}
+}
+
+// TestAutoSkipColumnsMigrateOnlyWhenTrue: the four auto-skip switches default
+// to false in both the columns and the contract, so an explicit true is the
+// only decision worth carrying — a migrated false would turn "never touched"
+// into a stored choice.
+func TestAutoSkipColumnsMigrateOnlyWhenTrue(t *testing.T) {
+	res := planner(t).Plan(Input{Profiles: []LegacyProfile{{
+		ID:                  "p1",
+		AutoSkipIntro:       boolp(true),
+		AutoSkipCredits:     boolp(false),
+		AutoSkipRecap:       boolp(true),
+		AutoPlayNextPreview: boolp(false),
+	}}})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("unexpected rejects: %+v", res.Rejects)
+	}
+
+	for _, key := range []string{"playback.auto_skip_intro", "playback.auto_skip_recap"} {
+		row := find(t, res, key, nil)
+		if string(row.Value) != `true` || row.Scope != settingscontract.ScopeProfile {
+			t.Errorf("%s = %s at %s, want true at profile", key, row.Value, row.Scope)
+		}
+	}
+	for _, key := range []string{"playback.auto_skip_credits", "playback.auto_play_next_preview"} {
+		if hasKey(res, key) {
+			t.Errorf("%s became a row from a false column", key)
+		}
+	}
+}
+
+// TestCardOverlaysV1DocumentsUpgrade: old web clients stored a flat
+// Record<overlayId, config> the contract schema does not accept. The planner
+// has to upgrade it the way web/src/lib/overlays/schema.ts does at read time,
+// or every v1 row lands in the rejects table and the user's badge config is
+// silently lost.
+func TestCardOverlaysV1DocumentsUpgrade(t *testing.T) {
+	v1 := `{
+		"resolution": {"enabled": true, "position": "top-right"},
+		"rating_imdb": {"enabled": true, "position": "bottom-left", "accentColor": "#f5c518"},
+		"hdr": {"enabled": false, "position": "top-right", "showIcon": true},
+		"no_such_overlay": {"enabled": true, "position": "top-left"},
+		"year": {"enabled": true, "position": "sideways"}
+	}`
+	res := planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1"}},
+		Settings: []LegacySetting{{Key: "card_overlays", Value: v1}},
+	})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("v1 document was rejected: %+v", res.Rejects)
+	}
+
+	row := find(t, res, "ui.card_overlays", nil)
+	var doc struct {
+		Version int                       `json:"version"`
+		Preset  string                    `json:"preset"`
+		Order   []string                  `json:"order"`
+		Items   map[string]map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(row.Value, &doc); err != nil {
+		t.Fatalf("upgraded document is not JSON: %v", err)
+	}
+	if doc.Version != 2 || doc.Preset != "classic" || len(doc.Order) != 0 {
+		t.Errorf("envelope = v%d preset %q order %v, want v2 classic []",
+			doc.Version, doc.Preset, doc.Order)
+	}
+	if item := doc.Items["rating_imdb"]; item["accentColor"] != "#f5c518" {
+		t.Errorf("accentColor was dropped: %+v", item)
+	}
+	if item := doc.Items["hdr"]; item["enabled"] != false || item["showIcon"] != true {
+		t.Errorf("hdr config mangled: %+v", item)
+	}
+	if _, ok := doc.Items["no_such_overlay"]; ok {
+		t.Error("an id outside the schema enum survived and would fail validation")
+	}
+	if _, ok := doc.Items["year"]; ok {
+		t.Error("an item with an invalid position survived and would fail validation")
+	}
+
+	// A v2 document must pass through untouched rather than be re-wrapped.
+	v2 := `{"version":2,"preset":"pill","order":["hdr"],"items":{"hdr":{"enabled":true,"position":"top-left"}}}`
+	res = planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1"}},
+		Settings: []LegacySetting{{Key: "card_overlays", Value: v2}},
+	})
+	if len(res.Rejects) != 0 {
+		t.Fatalf("v2 document was rejected: %+v", res.Rejects)
+	}
+	if got := string(find(t, res, "ui.card_overlays", nil).Value); got != v2 {
+		t.Errorf("v2 document was rewritten: %s", got)
+	}
+
+	// Garbage is still garbage: the upgrade must not launder an unusable value
+	// into something that validates.
+	res = planner(t).Plan(Input{
+		Profiles: []LegacyProfile{{ID: "p1"}},
+		Settings: []LegacySetting{{Key: "card_overlays", Value: `["not","an","object"]`}},
+	})
+	if len(res.Rows) != 0 || len(res.Rejects) != 1 {
+		t.Fatalf("garbage produced rows=%+v rejects=%+v, want one reject", res.Rows, res.Rejects)
 	}
 }

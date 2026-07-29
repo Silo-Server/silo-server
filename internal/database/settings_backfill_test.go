@@ -71,6 +71,30 @@ SELECT value::text FROM user_setting_values
 		}
 	})
 
+	t.Run("auto-skip columns migrate only when true", func(t *testing.T) {
+		var value string
+		err := pool.QueryRow(ctx, `
+SELECT value::text FROM user_setting_values
+ WHERE key = 'playback.auto_skip_intro' AND scope = 'profile' AND profile_id = 'mp1'`).
+			Scan(&value)
+		if err != nil {
+			t.Fatalf("reading migrated auto_skip_intro: %v", err)
+		}
+		if value != `true` {
+			t.Errorf("auto_skip_intro = %s, want true", value)
+		}
+		// The false column is the default and must not become a stored choice.
+		var count int
+		if err := pool.QueryRow(ctx, `
+SELECT COUNT(*) FROM user_setting_values
+ WHERE key = 'playback.auto_skip_credits' AND profile_id = 'mp1'`).Scan(&count); err != nil {
+			t.Fatalf("counting auto_skip_credits rows: %v", err)
+		}
+		if count != 0 {
+			t.Error("an untouched false auto_skip_credits column became a row")
+		}
+	})
+
 	t.Run("metadata language migrates from the postgres-only column", func(t *testing.T) {
 		var value string
 		err := pool.QueryRow(ctx, `
@@ -168,8 +192,10 @@ RETURNING id`).Scan(&userID)
 	if _, err := pool.Exec(ctx, `
 INSERT INTO user_profiles
     (user_id, id, name, quality_preference, language, subtitle_language,
-     subtitle_mode, show_forced_subtitles, preferred_metadata_language)
-VALUES ($1, 'mp1', 'Migrate Me', '1080p', 'ja', 'en', 'always', false, 'fr')
+     subtitle_mode, show_forced_subtitles, preferred_metadata_language,
+     auto_skip_intro, auto_skip_credits)
+VALUES ($1, 'mp1', 'Migrate Me', '1080p', 'ja', 'en', 'always', false, 'fr',
+        true, false)
 ON CONFLICT (user_id, id) DO NOTHING`, userID); err != nil {
 		t.Fatalf("seeding profile: %v", err)
 	}

@@ -187,13 +187,15 @@ SELECT profile_id, library_id, audio_language, subtitle_language, subtitle_mode,
 func readLegacyProfiles(tx *sql.Tx) ([]settingsmigrate.LegacyProfile, error) {
 	var profiles []settingsmigrate.LegacyProfile
 	err := eachRow(tx, `
-SELECT id, quality_preference, language, subtitle_language, subtitle_mode, show_forced_subtitles
+SELECT id, quality_preference, language, subtitle_language, subtitle_mode, show_forced_subtitles,
+       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview
   FROM profiles`,
 		func(scan func(...any) error) error {
 			var profile settingsmigrate.LegacyProfile
 			var quality, language, subtitle, mode sql.NullString
-			var forced sql.NullBool
-			if err := scan(&profile.ID, &quality, &language, &subtitle, &mode, &forced); err != nil {
+			var forced, skipIntro, skipCredits, skipRecap, nextPreview sql.NullBool
+			if err := scan(&profile.ID, &quality, &language, &subtitle, &mode, &forced,
+				&skipIntro, &skipCredits, &skipRecap, &nextPreview); err != nil {
 				return err
 			}
 			profile.QualityPreference = nullString(quality)
@@ -201,6 +203,10 @@ SELECT id, quality_preference, language, subtitle_language, subtitle_mode, show_
 			profile.SubtitleLanguage = nullString(subtitle)
 			profile.SubtitleMode = nullString(mode)
 			profile.ShowForcedSubtitles = nullBool(forced)
+			profile.AutoSkipIntro = nullBool(skipIntro)
+			profile.AutoSkipCredits = nullBool(skipCredits)
+			profile.AutoSkipRecap = nullBool(skipRecap)
+			profile.AutoPlayNextPreview = nullBool(nextPreview)
 			profiles = append(profiles, profile)
 			return nil
 		})

@@ -143,14 +143,16 @@ func readLegacySettingsForUser(
 	// for catalog.metadata_language.
 	if err := eachRow(ctx, tx, `
 SELECT id, quality_preference, language, subtitle_language, subtitle_mode,
-       show_forced_subtitles, preferred_metadata_language
+       show_forced_subtitles, preferred_metadata_language,
+       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview
   FROM user_profiles WHERE user_id = $1`,
 		func(scan func(...any) error) error {
 			var profile settingsmigrate.LegacyProfile
 			var quality, language, subtitle, mode, metadata sql.NullString
-			var forced sql.NullBool
+			var forced, skipIntro, skipCredits, skipRecap, nextPreview sql.NullBool
 			if err := scan(&profile.ID, &quality, &language, &subtitle,
-				&mode, &forced, &metadata); err != nil {
+				&mode, &forced, &metadata,
+				&skipIntro, &skipCredits, &skipRecap, &nextPreview); err != nil {
 				return err
 			}
 			profile.QualityPreference = nullableString(quality)
@@ -159,6 +161,10 @@ SELECT id, quality_preference, language, subtitle_language, subtitle_mode,
 			profile.SubtitleMode = nullableString(mode)
 			profile.ShowForcedSubtitles = nullableBool(forced)
 			profile.PreferredMetadataLanguage = nullableString(metadata)
+			profile.AutoSkipIntro = nullableBool(skipIntro)
+			profile.AutoSkipCredits = nullableBool(skipCredits)
+			profile.AutoSkipRecap = nullableBool(skipRecap)
+			profile.AutoPlayNextPreview = nullableBool(nextPreview)
 			input.Profiles = append(input.Profiles, profile)
 			return nil
 		}, userID); err != nil {
