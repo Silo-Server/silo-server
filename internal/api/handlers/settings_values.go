@@ -59,6 +59,9 @@ const mutationIDHeader = "X-Silo-Mutation-Id"
 // that could be acted on names the revision it was computed at.
 const fieldRevision = "revision"
 
+// fieldValues is the response key wrapping a list of stored values.
+const fieldValues = "values"
+
 // settingValueResponse is one explicit stored value.
 type settingValueResponse struct {
 	Key       string          `json:"key"`

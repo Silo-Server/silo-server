@@ -15,28 +15,31 @@ import (
 func RunJellycompatDisplayPrefs(t *testing.T, newStore func(t *testing.T) userstore.UserStore) {
 	ctx := context.Background()
 
+	// The prefs id Jellyfin clients use for their main settings document.
+	const userSettingsID = "usersettings"
+
 	t.Run("RoundTrip", func(t *testing.T) {
 		store := newStore(t)
 
 		// Unset reads as empty, not an error.
-		if got, err := store.GetJellycompatDisplayPrefs(ctx, "usersettings", "emby"); err != nil || got != "" {
+		if got, err := store.GetJellycompatDisplayPrefs(ctx, userSettingsID, "emby"); err != nil || got != "" {
 			t.Fatalf("unset prefs = (%q, %v), want (\"\", nil)", got, err)
 		}
 
 		// The value round-trips verbatim, unusual spacing and key order intact.
 		blob := `{"SortBy":"SortName",  "CustomPrefs":{"b":"2","a":"1"}}`
-		if err := store.SetJellycompatDisplayPrefs(ctx, "usersettings", "emby", blob); err != nil {
+		if err := store.SetJellycompatDisplayPrefs(ctx, userSettingsID, "emby", blob); err != nil {
 			t.Fatalf("SetJellycompatDisplayPrefs: %v", err)
 		}
-		if got, err := store.GetJellycompatDisplayPrefs(ctx, "usersettings", "emby"); err != nil || got != blob {
+		if got, err := store.GetJellycompatDisplayPrefs(ctx, userSettingsID, "emby"); err != nil || got != blob {
 			t.Fatalf("prefs = (%q, %v), want the stored blob byte-for-byte", got, err)
 		}
 
 		// A second write replaces the first.
-		if err := store.SetJellycompatDisplayPrefs(ctx, "usersettings", "emby", `{"SortBy":"DateCreated"}`); err != nil {
+		if err := store.SetJellycompatDisplayPrefs(ctx, userSettingsID, "emby", `{"SortBy":"DateCreated"}`); err != nil {
 			t.Fatalf("overwrite: %v", err)
 		}
-		if got, _ := store.GetJellycompatDisplayPrefs(ctx, "usersettings", "emby"); got != `{"SortBy":"DateCreated"}` {
+		if got, _ := store.GetJellycompatDisplayPrefs(ctx, userSettingsID, "emby"); got != `{"SortBy":"DateCreated"}` {
 			t.Fatalf("after overwrite got %q", got)
 		}
 	})
@@ -45,12 +48,12 @@ func RunJellycompatDisplayPrefs(t *testing.T, newStore func(t *testing.T) userst
 		store := newStore(t)
 
 		writes := map[[2]string]string{
-			{"usersettings", "emby"}:         `{"n":1}`,
-			{"usersettings", "jellyfin-web"}: `{"n":2}`,
+			{userSettingsID, "emby"}:         `{"n":1}`,
+			{userSettingsID, "jellyfin-web"}: `{"n":2}`,
 			{"f137a2dd", "emby"}:             `{"n":3}`,
 			// The empty client is a real identity: Jellyfin clients may omit
 			// the query parameter entirely.
-			{"usersettings", ""}: `{"n":4}`,
+			{userSettingsID, ""}: `{"n":4}`,
 		}
 		for key, value := range writes {
 			if err := store.SetJellycompatDisplayPrefs(ctx, key[0], key[1], value); err != nil {

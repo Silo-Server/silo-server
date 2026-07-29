@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -16,7 +17,7 @@ func (s *PostgresUserStore) GetJellycompatDisplayPrefs(ctx context.Context, pref
 		 WHERE user_id = $1 AND prefs_id = $2 AND client = $3`,
 		s.userID, prefsID, client,
 	).Scan(&value)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {

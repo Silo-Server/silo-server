@@ -41,7 +41,7 @@ func (h *SettingValuesHandler) HandleAdminListUserSettingValues(w http.ResponseW
 		out = append(out, settingValueToResponse(value))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"values":      out,
+		fieldValues:   out,
 		fieldRevision: h.contract.Revision,
 	})
 }
