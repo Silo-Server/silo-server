@@ -1323,9 +1323,15 @@ function AddSourceDialog({
           // Generate the endpoint immediately and stay open: the operator still
           // needs the URL, and closing here is what previously left them to
           // hunt for a "Generate webhook URL" button on the row.
+          //
+          // On failure, stay open holding the created source rather than
+          // closing. The source exists and is enabled at this point, so
+          // dismissing the dialog would leave an enabled webhook source with no
+          // endpoint and no visible explanation. The instructions panel renders
+          // a retry when the URL is missing.
           createWebhook.mutate(created.id, {
             onSuccess: (withWebhook) => setCreatedWebhookSource(withWebhook),
-            onError: close,
+            onError: () => setCreatedWebhookSource(created),
           });
         },
       },
@@ -1365,10 +1371,37 @@ function AddSourceDialog({
         {createdWebhookSource ? (
           <div className="space-y-4">
             <StepTrail steps={stepLabels} currentIndex={stepLabels.length - 1} />
-            <WebhookInstructions
-              url={absoluteWebhookURL(createdWebhookSource.webhook_url ?? "")}
-              provider={webhookProviderOf(descriptor)}
-            />
+            {createdWebhookSource.webhook_url ? (
+              <WebhookInstructions
+                url={absoluteWebhookURL(createdWebhookSource.webhook_url)}
+                provider={webhookProviderOf(descriptor)}
+              />
+            ) : (
+              <div className="border-destructive/30 bg-destructive/10 space-y-3 rounded-md border p-3">
+                <p className="text-destructive flex items-center gap-1.5 text-sm font-medium">
+                  <AlertTriangle className="size-4 shrink-0" />
+                  Couldn&apos;t generate the webhook URL
+                </p>
+                <p className="text-muted-foreground text-xs">
+                  The source was created, but has no endpoint yet — it can&apos;t receive anything
+                  until one exists.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={createWebhook.isPending}
+                  onClick={() =>
+                    createWebhook.mutate(createdWebhookSource.id, {
+                      onSuccess: (withWebhook) => setCreatedWebhookSource(withWebhook),
+                    })
+                  }
+                >
+                  <RefreshCw />
+                  {createWebhook.isPending ? "Retrying…" : "Try again"}
+                </Button>
+              </div>
+            )}
           </div>
         ) : available.isLoading ? (
           <p className="text-muted-foreground py-4 text-sm">Loading available sources…</p>
