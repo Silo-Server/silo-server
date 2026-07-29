@@ -55,6 +55,12 @@ type EbookReaderProgressLister interface {
 	ListByContentIDs(ctx context.Context, userID int, profileID string, contentIDs []string) (map[string]EbookReaderProgress, error)
 }
 
+// VirtualPlaybackDetailRefresher expands a provider-neutral More results
+// placeholder before catalog details are returned. This keeps clients that do
+// not implement the web picker (notably Android) able to see all selectable
+// provider results.
+type VirtualPlaybackDetailRefresher func(context.Context, string, catalog.AccessFilter) (*catalog.ItemDetail, error)
+
 // ItemsHandler handles browse, search, item detail, and series endpoints.
 type ItemsHandler struct {
 	browseRepo               *catalog.BrowseRepository
@@ -73,6 +79,7 @@ type ItemsHandler struct {
 	localWatchDispatcher     LocalWatchEventDispatcher
 	ebookProgressStore       EbookReaderProgressLister
 	ebookReadStateStore      EbookReadStateStore
+	virtualPlaybackRefresher VirtualPlaybackDetailRefresher
 	EventsHub                *evt.Hub
 	UserRepo                 *auth.UserRepository
 }
@@ -144,6 +151,28 @@ func (h *ItemsHandler) SetLocalWatchEventDispatcher(dispatcher LocalWatchEventDi
 func (h *ItemsHandler) SetEbookReaderProgressStore(store EbookReaderProgressReadWriter) {
 	h.ebookProgressStore = store
 	h.ebookReadStateStore = store
+}
+
+func (h *ItemsHandler) SetVirtualPlaybackDetailRefresher(refresher VirtualPlaybackDetailRefresher) {
+	if h != nil {
+		h.virtualPlaybackRefresher = refresher
+	}
+}
+
+func (h *ItemsHandler) refreshVirtualPlaybackDetail(ctx context.Context, detail *catalog.ItemDetail, filter catalog.AccessFilter) *catalog.ItemDetail {
+	if h == nil || detail == nil || h.virtualPlaybackRefresher == nil {
+		return detail
+	}
+	for _, version := range detail.Versions {
+		if strings.Contains(version.FilePath, "results=all") && !strings.Contains(version.FilePath, "result=") {
+			refreshed, err := h.virtualPlaybackRefresher(ctx, detail.ContentID, filter)
+			if err == nil && refreshed != nil {
+				return refreshed
+			}
+			break
+		}
+	}
+	return detail
 }
 
 func (h *ItemsHandler) maybeRequestStaleDetailMetadataRefresh(ctx context.Context, detail *catalog.ItemDetail) {

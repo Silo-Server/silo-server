@@ -645,6 +645,50 @@ func NewRouter(deps Dependencies) chi.Router {
 			detailSvc,
 			providerIDRepo,
 		)
+		if deps.PluginService != nil && deps.FileRepo != nil {
+			itemsHandler.SetVirtualPlaybackDetailRefresher(func(ctx context.Context, contentID string, filter catalog.AccessFilter) (*catalog.ItemDetail, error) {
+				detail, err := detailSvc.GetItemDetail(ctx, contentID, filter)
+				if err != nil {
+					return nil, err
+				}
+				for _, version := range detail.Versions {
+					if !strings.Contains(version.FilePath, "results=all") || strings.Contains(version.FilePath, "result=") {
+						continue
+					}
+					source, sourceErr := deps.FileRepo.GetByID(ctx, version.FileID)
+					if sourceErr != nil || source == nil {
+						continue
+					}
+					streams, listErr := deps.PluginService.ListVirtualPlaybackStreams(ctx, version.FilePath)
+					if listErr != nil {
+						return detail, listErr
+					}
+					for _, stream := range streams {
+						if !strings.HasPrefix(stream.URI, "virtual://") || stream.URI == source.FilePath {
+							continue
+						}
+						fileSize := stream.FileSize
+						if fileSize < 0 {
+							fileSize = 0
+						}
+						now := time.Now()
+						if _, upsertErr := deps.FileRepo.Upsert(ctx, models.MediaFile{
+							ContentID: source.ContentID, MediaFolderID: source.MediaFolderID,
+							EpisodeID: source.EpisodeID, SeasonNumber: source.SeasonNumber,
+							EpisodeNumber: source.EpisodeNumber, FilePath: stream.URI,
+							FileSize: fileSize, Resolution: stream.Resolution,
+							CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio,
+							HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual",
+							ProbeUpdatedAt: &now,
+						}); upsertErr != nil {
+							return detail, upsertErr
+						}
+					}
+					return detailSvc.GetItemDetail(ctx, contentID, filter)
+				}
+				return detail, nil
+			})
+		}
 		if catalogSearchService != nil {
 			itemsHandler.SetCatalogSearchProvider(catalogSearchService.Provider())
 		}
