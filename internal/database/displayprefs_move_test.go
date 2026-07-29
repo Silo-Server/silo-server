@@ -291,6 +291,16 @@ INSERT INTO user_settings (user_id, key, value) VALUES ($1, $2, $3)`,
 		t.Fatalf("committing the late legacy row: %v", err)
 	}
 
+	// And it updates a row the move has already read: the delete predicate
+	// pins the value the SELECT saw, so this newer write must survive too.
+	const updatedKey = "jellycompat:displayprefs:usersettings:emby"
+	const updatedValue = `{"SortBy":"Runtime"}`
+	if _, err := pool.Exec(ctx, `
+UPDATE user_settings SET value = $3 WHERE user_id = $1 AND key = $2`,
+		userID, updatedKey, updatedValue); err != nil {
+		t.Fatalf("committing the late update: %v", err)
+	}
+
 	blockerReleased = true
 	if err := blockerTx.Rollback(); err != nil {
 		t.Fatalf("releasing blocker: %v", err)
@@ -318,6 +328,21 @@ SELECT COUNT(*) FROM user_setting_migration_rejects
 		t.Fatalf("late row gone from user_settings (copied=%d rejected=%d): "+
 			"a concurrently committed row was deleted without being moved",
 			copied, rejected)
+	}
+
+	// The concurrently updated row must also still be in user_settings, with
+	// the newer value: the move copied the old value but its delete named that
+	// old value, so it must not have matched the updated row.
+	var survivingValue string
+	if err := pool.QueryRow(ctx, `
+SELECT value FROM user_settings WHERE user_id = $1 AND key = $2`,
+		userID, updatedKey).Scan(&survivingValue); err != nil {
+		t.Fatalf("updated legacy row gone from user_settings: %v — "+
+			"a concurrently updated row was deleted with only its old value moved", err)
+	}
+	if survivingValue != updatedValue {
+		t.Errorf("surviving legacy value = %q, want the late update %q",
+			survivingValue, updatedValue)
 	}
 
 	// A re-run — which the stranded row exists to allow — picks it up.

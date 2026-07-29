@@ -47,12 +47,13 @@ func displayPrefsMoveMigration() *goose.Migration {
 // are recorded in user_setting_migration_rejects for operator inspection
 // rather than silently deleted.
 //
-// Every delete names the exact (user_id, key) pair this transaction read,
-// never the key pattern. Under READ COMMITTED each statement takes its own
-// snapshot, so a pattern delete would also catch a row an old-binary app
+// Every delete names the exact (user_id, key, value) triple this transaction
+// read, never the key pattern. Under READ COMMITTED each statement takes its
+// own snapshot, so a wider delete would also catch a row an old-binary app
 // instance committed between the SELECT and the DELETE during a rolling
-// deploy — destroying it without ever copying it. A row written after the
-// SELECT instead survives as a stranded legacy row, which a re-run picks up.
+// deploy — an insert under a new key or an update to a row already read —
+// destroying the newer value without ever copying it. Pinning the value makes
+// such a row survive as a stranded legacy row, which a re-run picks up.
 func moveDisplayPrefs(ctx context.Context, tx *sql.Tx) error {
 	type legacyRow struct {
 		userID     int
@@ -94,11 +95,11 @@ VALUES ($1, 'user_settings', $2, '{"scope":"account"}'::jsonb, $3, $4)`,
 				reject.Key, row.userID, err)
 		}
 
-		// Deleted only once its copy or reject insert succeeded, and only this
-		// exact row — see the function comment.
+		// Deleted only once its copy or reject insert succeeded, and only the
+		// exact row this transaction read — see the function comment.
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM user_settings WHERE user_id = $1 AND key = $2`,
-			row.userID, row.key,
+			`DELETE FROM user_settings WHERE user_id = $1 AND key = $2 AND value = $3`,
+			row.userID, row.key, row.value,
 		); err != nil {
 			return fmt.Errorf("deleting jellycompat row %q for user %d: %w",
 				row.key, row.userID, err)
