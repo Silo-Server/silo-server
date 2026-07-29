@@ -801,24 +801,41 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 	if len(libraryIDs) == 0 {
 		return fmt.Errorf("virtual playback item requires at least one library")
 	}
+	mediaType := strings.TrimSpace(item.Type)
+	if mediaType == "" {
+		mediaType = "movie"
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin virtual item transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Mixed collections can target both libraries. A virtual file still has a
+	// single owning folder, so select it from the item's type instead of using
+	// the first collection target.
+	wantedFolderType := "movies"
+	if mediaType == "series" {
+		wantedFolderType = "series"
+	}
+	var folderID int
+	if err := tx.QueryRow(ctx, `
+		SELECT id FROM media_folders
+		WHERE id = ANY($1::int[]) AND enabled IS NOT FALSE AND type IN ($2, 'mixed')
+		ORDER BY CASE WHEN type = $2 THEN 0 ELSE 1 END,
+		         array_position($1::int[], id)
+		LIMIT 1`, libraryIDs, wantedFolderType).Scan(&folderID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("virtual playback item has no compatible %s library among selected targets", mediaType)
+		}
+		return fmt.Errorf("selecting virtual playback library: %w", err)
+	}
 	if err := r.UpsertTx(ctx, tx, item); err != nil {
 		return err
 	}
-	for _, libraryID := range libraryIDs {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
-			VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`, item.ContentID, libraryID); err != nil {
-			return fmt.Errorf("linking virtual item to library: %w", err)
-		}
-	}
-	mediaType := strings.TrimSpace(item.Type)
-	if mediaType == "" {
-		mediaType = "movie"
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO media_item_libraries (content_id, media_folder_id, first_seen_at)
+		VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING`, item.ContentID, folderID); err != nil {
+		return fmt.Errorf("linking virtual item to library: %w", err)
 	}
 	virtualPath := "virtual://" + mediaType + "/" + strings.TrimSpace(item.ImdbID)
 	if _, err := tx.Exec(ctx, `
@@ -828,7 +845,7 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 			SELECT 1 FROM media_files
 			WHERE content_id = $1 AND left(file_path, 10) <> $4
 		)
-		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], virtualPath, "virtual://"); err != nil {
+		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, folderID, virtualPath, "virtual://"); err != nil {
 		return fmt.Errorf("creating virtual playback file: %w", err)
 	}
 	for _, variant := range variants {
@@ -840,7 +857,7 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.
 			INSERT INTO media_files (content_id, media_folder_id, file_path, file_size, resolution, codec_video, codec_audio, hdr, container)
 			SELECT $1, $2, $3, 0, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), CASE WHEN NULLIF($7,'') IS NULL THEN false ELSE true END, 'virtual'
 			WHERE NOT EXISTS (SELECT 1 FROM media_files WHERE content_id = $1 AND left(file_path, 10) <> 'virtual://')
-			ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], path, variant.Resolution, variant.CodecVideo, variant.CodecAudio, variant.HDR); err != nil {
+			ON CONFLICT (file_path) DO NOTHING`, item.ContentID, folderID, path, variant.Resolution, variant.CodecVideo, variant.CodecAudio, variant.HDR); err != nil {
 			return fmt.Errorf("creating virtual playback variant: %w", err)
 		}
 	}
