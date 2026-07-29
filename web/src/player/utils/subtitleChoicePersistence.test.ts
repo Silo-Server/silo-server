@@ -24,7 +24,7 @@ function canonicalWrites(requests: ReturnType<typeof buildSubtitleChoiceRequests
 
 /** The key one canonical write addresses, parsed back out of its path. */
 function keyOf(path: string): string {
-  return decodeURIComponent(path.slice("/settings/values/".length).split("?")[0]);
+  return decodeURIComponent(path.slice("/settings/values/".length).split("?")[0]!);
 }
 
 describe("buildSubtitleChoiceRequests", () => {
@@ -44,8 +44,8 @@ describe("buildSubtitleChoiceRequests", () => {
     for (const request of canonical) {
       expect(request.path).toContain("scope=profile_series&series_id=series-1");
     }
-    expect(canonical[0].body).toEqual({ value: "ja" });
-    expect(canonical[1].body).toEqual({ value: "always" });
+    expect(canonical[0]?.body).toEqual({ value: "ja" });
+    expect(canonical[1]?.body).toEqual({ value: "always" });
   });
 
   it("never writes show_forced_subtitles as a canonical row", () => {
@@ -78,7 +78,7 @@ describe("buildSubtitleChoiceRequests", () => {
       showForcedSubtitles: false,
     }).filter((request) => request.path.startsWith("/subtitle-prefs/"));
 
-    expect(legacy.body).toMatchObject({
+    expect(legacy?.body).toMatchObject({
       subtitle_language: "ja",
       subtitle_track_index: 0,
       subtitle_mode: "always",
@@ -91,8 +91,8 @@ describe("buildSubtitleChoiceRequests", () => {
       buildSubtitleChoiceRequests({ seriesId: "series-1", index: null, tracks: TRACKS }),
     );
 
-    expect(canonical[0].body).toEqual({ value: null });
-    expect(canonical[1].body).toEqual({ value: "off" });
+    expect(canonical[0]?.body).toEqual({ value: null });
+    expect(canonical[1]?.body).toEqual({ value: "off" });
   });
 
   it("persists nothing for an index that names no real track", () => {
@@ -133,7 +133,7 @@ describe("buildSubtitleChoiceRequests", () => {
       profileId: "profile-1",
       seriesIds: ["series-1"],
     });
-    expect(forced.value).toBe(false);
-    expect(forced.source).toBe("profile");
+    expect(forced?.value).toBe(false);
+    expect(forced?.source).toBe("profile");
   });
 });

@@ -46,7 +46,7 @@ function rowsFromInPlayerPick(seriesId: string): StoredSettingRow[] {
   return buildSubtitleChoiceRequests({ seriesId, index: 0, tracks: TRACKS })
     .filter((request) => request.path.startsWith("/settings/values/"))
     .map((request) => ({
-      key: decodeURIComponent(request.path.slice("/settings/values/".length).split("?")[0]),
+      key: decodeURIComponent(request.path.slice("/settings/values/".length).split("?")[0]!),
       scope: "profile_series" as const,
       profileId: "profile-1",
       seriesId,
@@ -68,7 +68,7 @@ describe("useDeleteSubtitlePreference", () => {
     apiMock.mockImplementation((path: string, options?: RequestInit) => {
       if (options?.method !== "DELETE") return Promise.resolve(undefined);
       if (path.startsWith("/subtitle-prefs/")) return Promise.resolve(undefined);
-      const key = decodeURIComponent(path.slice("/settings/values/".length).split("?")[0]);
+      const key = decodeURIComponent(path.slice("/settings/values/".length).split("?")[0]!);
       expect(path).toContain("scope=profile_series&series_id=series-1");
       const index = store.findIndex((row) => row.key === key);
       if (index < 0) {
@@ -95,7 +95,7 @@ describe("useDeleteSubtitlePreference", () => {
       profileId: "profile-1",
       seriesIds: ["series-1"],
     });
-    expect(language.source).toBe("default");
+    expect(language?.source).toBe("default");
   });
 
   it("treats an already-absent canonical row as success", async () => {

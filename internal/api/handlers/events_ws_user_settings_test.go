@@ -42,9 +42,9 @@ func TestEventsWebSocketDeliversUserSettingsToNonAdmins(t *testing.T) {
 		t.Fatalf("dialing events websocket: %v", err)
 	}
 	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	readFrame := func(wantType string) map[string]json.RawMessage {
 		t.Helper()

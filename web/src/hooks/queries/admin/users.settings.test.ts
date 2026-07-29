@@ -197,7 +197,7 @@ describe("admin canonical settings hooks", () => {
 
     // Only tv-1's row, and never a non-device-scoped row from the same list.
     expect(result.current.data.map((setting) => setting.key)).toEqual(["player.audio_sync_ms"]);
-    expect(result.current.data[0].device_id).toBe("tv-1");
+    expect(result.current.data[0]?.device_id).toBe("tv-1");
   });
 
   it("writes a user setting to the canonical route with a typed value", async () => {

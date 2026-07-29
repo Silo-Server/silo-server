@@ -36,10 +36,10 @@ function fakeSettingsServer(initial: StoredSettingRow[] = []) {
   const rows = [...initial];
   apiMock.mockImplementation((path: string, options?: RequestInit) => {
     if (path.startsWith("/settings/values/effective")) {
-      const [resolved] = resolveSettingValues([KEY], rows, {
+      const resolved = resolveSettingValues([KEY], rows, {
         profileId: "profile-1",
         deviceId: "device-1",
-      });
+      })[0]!;
       return Promise.resolve({
         revision: 1,
         settings: [{ key: KEY, value: resolved.value, source: resolved.source }],
@@ -47,7 +47,8 @@ function fakeSettingsServer(initial: StoredSettingRow[] = []) {
     }
     const match = /^\/settings\/values\/([^?]+)\?scope=([a-z_]+)/.exec(path);
     if (!match) return Promise.resolve(undefined);
-    const [, key, scope] = match;
+    const key = match[1]!;
+    const scope = match[2]!;
     const index = rows.findIndex((row) => row.key === key && row.scope === scope);
     if (options?.method === "DELETE") {
       if (index < 0) {
