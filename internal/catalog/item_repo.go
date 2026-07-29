@@ -820,6 +820,21 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItem(ctx context.Context, ite
 		WHERE content_id = $1`, item.ContentID); err != nil {
 		return fmt.Errorf("marking collection virtual item ownership: %w", err)
 	}
+	// Virtual items are database-only and therefore never pass through the
+	// scanner's normal metadata-refresh enqueue path.  Queue core metadata
+	// enrichment in the same transaction so a newly materialized item gets
+	// artwork, synopsis, ratings, and any missing provider IDs automatically.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO metadata_refresh_debt (
+			target_type, content_id, priority, reason_mask, next_refresh_at, updated_at
+		) VALUES ('item', $1, 150, 8, NOW(), NOW())
+		ON CONFLICT (target_type, content_id) DO UPDATE SET
+			priority = GREATEST(metadata_refresh_debt.priority, EXCLUDED.priority),
+			reason_mask = metadata_refresh_debt.reason_mask | EXCLUDED.reason_mask,
+			next_refresh_at = LEAST(metadata_refresh_debt.next_refresh_at, EXCLUDED.next_refresh_at),
+			updated_at = NOW()`, item.ContentID); err != nil {
+		return fmt.Errorf("queueing virtual item metadata refresh: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit virtual item transaction: %w", err)
 	}
