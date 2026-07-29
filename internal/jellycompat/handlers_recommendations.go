@@ -24,6 +24,7 @@ type recommendationDTO struct {
 type RecommendationsHandler struct {
 	recommender  recommendations.Recommender
 	itemRepo     *catalog.ItemRepository
+	detailSvc    *catalog.DetailService
 	content      ContentService
 	userData     UserDataService
 	codec        *ResourceIDCodec
@@ -35,6 +36,7 @@ type RecommendationsHandler struct {
 func NewRecommendationsHandler(
 	recommender recommendations.Recommender,
 	itemRepo *catalog.ItemRepository,
+	detailSvc *catalog.DetailService,
 	content ContentService,
 	userData UserDataService,
 	codec *ResourceIDCodec,
@@ -44,6 +46,7 @@ func NewRecommendationsHandler(
 	return &RecommendationsHandler{
 		recommender:  recommender,
 		itemRepo:     itemRepo,
+		detailSvc:    detailSvc,
 		content:      content,
 		userData:     userData,
 		codec:        codec,
@@ -117,6 +120,14 @@ func (h *RecommendationsHandler) HandleRecommendations(w http.ResponseWriter, r 
 	itemsByID := make(map[string]upstreamListItem, len(mediaItems))
 	for _, mi := range mediaItems {
 		itemsByID[mi.ContentID] = mediaItemToListItem(mi)
+	}
+	listItems := make([]upstreamListItem, 0, len(itemsByID))
+	for _, item := range itemsByID {
+		listItems = append(listItems, item)
+	}
+	fillListItemDurations(r.Context(), h.detailSvc, listItems)
+	for _, item := range listItems {
+		itemsByID[item.ContentID] = item
 	}
 
 	favorites, progress, err := resolveUserStateForContentIDs(r.Context(), session, h.userData, contentIDs)

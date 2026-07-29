@@ -10,6 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -639,6 +642,13 @@ func candidateTitles(candidate MatchCandidate) []string {
 }
 
 func bestCandidateTitleSimilarity(hint string, candidate MatchCandidate, year int) (float64, string) {
+	// A no-year local folder still has enough information to remove a provider's
+	// own trailing year decoration. Without this fallback, a corroborated result
+	// such as "Adventure Time (2010)" scores below an undecorated same-title
+	// competitor before the no-year consensus tie-break can run.
+	if year == 0 {
+		year = candidate.Year
+	}
 	bestScore := 0.0
 	bestTitle := ""
 	for _, title := range candidateTitles(candidate) {
@@ -986,12 +996,76 @@ func selectInitialMatchCandidate(hints *MatchHints, candidates []MatchCandidate,
 		return &best.candidate, true
 	}
 	if best.score-scoredCandidates[1].score < 15 {
+		if winner, ok := tmdbTVDBTitleConsensusWinner(hints, scoredCandidates); ok {
+			return winner, true
+		}
 		if winner, ok := duplicateTieBreakWinner(hints, scoredCandidates); ok {
 			return winner, true
 		}
 		return providerOrderExactTieBreakWinner(hints, scoredCandidates)
 	}
 	return &best.candidate, true
+}
+
+// tmdbTVDBTitleConsensusWinner resolves a narrow series-only ambiguity when
+// the local folder omits a year. It accepts only a candidate tied for the
+// existing highest score, and only when exactly one candidate has an exact
+// title match, a provider year, and independently retained TMDB and TVDB
+// identities. This deliberately does not merge any metadata or IDs from
+// competing candidates.
+func tmdbTVDBTitleConsensusWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool) {
+	if hints == nil || !strings.EqualFold(strings.TrimSpace(hints.Type), "series") || hints.Year != 0 || len(scoredCandidates) < 2 {
+		return nil, false
+	}
+
+	qualifyingIndex := -1
+	for i := range scoredCandidates {
+		candidate := scoredCandidates[i].candidate
+		if !strings.EqualFold(strings.TrimSpace(candidate.ContentType), "series") || candidate.Year == 0 {
+			continue
+		}
+		if similarity, _ := bestCandidateTitleSimilarity(hints.Title, candidate, 0); similarity != 1 {
+			continue
+		}
+		if !candidateHasSource(candidate, "tmdb") || !candidateHasSource(candidate, "tvdb") {
+			continue
+		}
+		if !candidateRetainsCanonicalProviderID(candidate, "tmdb") || !candidateRetainsCanonicalProviderID(candidate, "tvdb") {
+			continue
+		}
+		if qualifyingIndex != -1 {
+			return nil, false
+		}
+		qualifyingIndex = i
+	}
+
+	if qualifyingIndex == -1 || scoredCandidates[qualifyingIndex].score != scoredCandidates[0].score {
+		return nil, false
+	}
+	winner := scoredCandidates[qualifyingIndex].candidate
+	if !slices.Contains(winner.MatchReasons, "tmdb_tvdb_title_consensus") {
+		winner.MatchReasons = append(winner.MatchReasons, "tmdb_tvdb_title_consensus")
+	}
+	return &winner, true
+}
+
+func candidateRetainsCanonicalProviderID(candidate MatchCandidate, provider string) bool {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	for _, conflictingKey := range candidate.ConflictingProviderIDKeys {
+		if strings.EqualFold(strings.TrimSpace(conflictingKey), provider) {
+			return strings.TrimSpace(candidate.ConfirmedProviderIDs[provider]) != ""
+		}
+	}
+	return strings.TrimSpace(candidate.ProviderIDs[provider]) != ""
+}
+
+func candidateHasSource(candidate MatchCandidate, provider string) bool {
+	for _, source := range candidate.Sources {
+		if strings.EqualFold(strings.TrimSpace(source), provider) {
+			return true
+		}
+	}
+	return false
 }
 
 func providerOrderExactTieBreakWinner(hints *MatchHints, scoredCandidates []scoredMatchCandidate) (*MatchCandidate, bool) {
@@ -1183,14 +1257,97 @@ func normalizeCandidateTitleForYear(title string, year int) string {
 	}
 	yearText := strconv.Itoa(year)
 	fields := strings.Fields(normalized)
-	if len(fields) <= 1 || fields[len(fields)-1] != yearText {
+	if len(fields) <= 1 {
+		return normalized
+	}
+	// Providers frequently disambiguate a reused title by appending the release
+	// year to the title string itself ("24 stjerners julikalender (DK) (2026)").
+	// The scanner strips "(YYYY)" from the folder name into a separate year, so
+	// without this the two sides can never compare equal. Only the known year is
+	// stripped, so an unrelated trailing number stays part of the title.
+	last := fields[len(fields)-1]
+	if last != yearText && trimYearDecoration(last) != yearText {
 		return normalized
 	}
 	return strings.Join(fields[:len(fields)-1], " ")
 }
 
+// trimYearDecoration unwraps a bracketed year token — "(2026)", "[2026]" — to
+// its bare digits. Returns the input unchanged when it is not so wrapped.
+func trimYearDecoration(token string) string {
+	for _, pair := range [][2]string{{"(", ")"}, {"[", "]"}} {
+		if inner, ok := strings.CutPrefix(token, pair[0]); ok {
+			if inner, ok := strings.CutSuffix(inner, pair[1]); ok {
+				return inner
+			}
+		}
+	}
+	return token
+}
+
+// nonCombiningLetterFolds covers letters that are not decomposable combining
+// forms, so NFD alone leaves them untouched. European library folders routinely
+// carry the ASCII spelling while providers return these.
+var nonCombiningLetterFolds = strings.NewReplacer(
+	"ø", "o", "Ø", "o",
+	"æ", "ae", "Æ", "ae",
+	"œ", "oe", "Œ", "oe",
+	"ß", "ss", "ẞ", "ss",
+	"đ", "d", "Đ", "d",
+	"ł", "l", "Ł", "l",
+	"ı", "i",
+)
+
+// foldTitleDiacritics strips Latin combining marks so provider spellings that
+// differ only by accents compare equal ("Yeşilçam" vs "Yesilcam"). Combining
+// marks remain significant in other scripts, where they can change lexical
+// identity rather than decorate an otherwise equivalent Latin letter.
+// Deliberately avoids a shared chained transformer: transformers carry per-call
+// state, and this runs concurrently across episode-validation workers.
+func foldTitleDiacritics(title string) string {
+	if isASCIIOnly(title) {
+		return title
+	}
+	title = nonCombiningLetterFolds.Replace(title)
+	if isASCIIOnly(title) {
+		return title
+	}
+	decomposed := norm.NFD.String(title)
+	var builder strings.Builder
+	builder.Grow(len(decomposed))
+	var lastStarter rune
+	for _, r := range decomposed {
+		// Spacing kana marks otherwise fall through punctuation cleanup; convert
+		// them so NFC can recompose the voiced kana before title tokenization.
+		switch r {
+		case '\u309b':
+			r = '\u3099'
+		case '\u309c':
+			r = '\u309a'
+		}
+		if unicode.Is(unicode.Mn, r) && unicode.Is(unicode.Latin, lastStarter) {
+			continue
+		}
+		builder.WriteRune(r)
+		if !unicode.Is(unicode.Mn, r) {
+			lastStarter = r
+		}
+	}
+	return norm.NFC.String(builder.String())
+}
+
+func isASCIIOnly(value string) bool {
+	for i := range len(value) {
+		if value[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizeTitleForScoring(title string) string {
 	title = naming.StripComparisonSafeEditionSuffix(title)
+	title = foldTitleDiacritics(title)
 	title = strings.ToLower(strings.TrimSpace(title))
 	if title == "" {
 		return ""

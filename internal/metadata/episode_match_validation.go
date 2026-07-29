@@ -10,11 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/Silo-Server/silo-server/internal/naming"
-	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -552,8 +550,8 @@ func isDistinctiveSingleEpisodeTitle(title string) bool {
 }
 
 func episodeTitleSimilarity(left, right string) float64 {
-	leftComparable := foldEpisodeTitleDiacritics(normalizeTitleForScoring(left))
-	rightComparable := foldEpisodeTitleDiacritics(normalizeTitleForScoring(right))
+	leftComparable := normalizeTitleForScoring(left)
+	rightComparable := normalizeTitleForScoring(right)
 	if leftComparable == "" || rightComparable == "" {
 		return 0
 	}
@@ -564,14 +562,4 @@ func episodeTitleSimilarity(left, right string) float64 {
 		return 0.8
 	}
 	return 0
-}
-
-func foldEpisodeTitleDiacritics(value string) string {
-	var builder strings.Builder
-	for _, r := range norm.NFD.String(value) {
-		if !unicode.Is(unicode.Mn, r) {
-			builder.WriteRune(r)
-		}
-	}
-	return norm.NFC.String(builder.String())
 }

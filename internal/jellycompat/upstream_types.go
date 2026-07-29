@@ -55,6 +55,10 @@ type upstreamListItem struct {
 	Tagline           string                  `json:"tagline,omitempty"`
 	RatingTMDB        *float64                `json:"rating_tmdb,omitempty"`
 	UserData          *catalog.SeasonUserData `json:"user_data,omitempty"`
+	// DurationSeconds is the probed duration of the backing media file, 0 when
+	// unknown. Read-time only -- never persisted onto the item row, because one
+	// item can have several versions of different lengths.
+	DurationSeconds int `json:"-"`
 	// HasMediaFiles reports whether at least one live media file backs this
 	// item. nil means unknown (the producing query did not check); the mapper
 	// then keeps the historical LocationType=FileSystem default.
@@ -150,6 +154,10 @@ type upstreamEpisode struct {
 	SeriesID       string                  `json:"series_id,omitempty"`
 	SeriesTitle    string                  `json:"series_title,omitempty"`
 	SeasonID       string                  `json:"season_id,omitempty"`
+	// DurationSeconds is the probed duration of the backing media file, 0 when
+	// unknown. Read-time only -- never persisted onto the item row, because one
+	// item can have several versions of different lengths.
+	DurationSeconds int `json:"-"`
 	// HasMediaFiles reports whether at least one live media file backs this
 	// episode. nil means unknown; the mapper then keeps the historical
 	// LocationType=FileSystem default.

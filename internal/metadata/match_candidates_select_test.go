@@ -1,8 +1,328 @@
 package metadata
 
 import (
+	"slices"
 	"testing"
 )
+
+const (
+	adventureTimeTestTitle = "Adventure Time"
+	exampleSeriesTestTitle = "Example Series"
+	localizedEnglishTitle  = "Jubei-chan: The Ninja Girl"
+	localizedOriginalTitle = "十兵衛ちゃん"
+	localizedTVDBID        = "tvdb-series-1"
+	localizedTMDBID        = "tmdb-series-1"
+	testAlternateAliasKind = "alternate"
+	testNFOProvider        = "nfo"
+)
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestSelectInitialMatchCandidate_LocalizedPrimaryTitleMatchesEnglishAlias(t *testing.T) {
+	hints := &MatchHints{Title: localizedEnglishTitle, Year: 1999, Type: anchoredItemTypeSeries}
+	candidates := []MatchCandidate{
+		{
+			Title:         localizedOriginalTitle,
+			OriginalTitle: localizedOriginalTitle,
+			TitleAliases: []TitleAlias{
+				{Title: localizedEnglishTitle, Language: "en", Kind: testAlternateAliasKind, Provider: testTVDBProvider},
+			},
+			Year:        1999,
+			ContentType: anchoredItemTypeSeries,
+			Sources:     []string{testTVDBProvider},
+			ProviderIDs: map[string]string{testTVDBProvider: localizedTVDBID, testTMDBProvider: localizedTMDBID},
+		},
+	}
+
+	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
+	if !ok || got == nil {
+		t.Fatal("localized primary title with an exact English alias was not matched")
+	}
+	if got.MatchedTitle != localizedEnglishTitle {
+		t.Fatalf("MatchedTitle = %q, want English alias", got.MatchedTitle)
+	}
+}
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestSelectInitialMatchCandidate_MissingYearTMDBTVDBTitleConsensus(t *testing.T) {
+	hints := &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries}
+	consensus := MatchCandidate{
+		Title:       adventureTimeTestTitle,
+		Year:        2010,
+		ContentType: anchoredItemTypeSeries,
+		Sources:     []string{testTVDBProvider, testTMDBProvider},
+		ProviderIDs: map[string]string{testTMDBProvider: "15260", testTVDBProvider: "152831", testIMDBProvider: "tt1305826"},
+	}
+	competitor := MatchCandidate{
+		Title:       adventureTimeTestTitle,
+		Year:        1967,
+		ContentType: "series",
+		Sources:     []string{"tmdb"},
+		ProviderIDs: map[string]string{"tmdb": "245745"},
+	}
+
+	for _, candidates := range [][]MatchCandidate{{consensus, competitor}, {competitor, consensus}} {
+		got, ok := selectInitialMatchCandidate(hints, candidates, nil)
+		if !ok || got == nil || got.ProviderIDs["tvdb"] != "152831" {
+			t.Fatalf("ordered candidates %+v returned ok=%v candidate=%+v", candidates, ok, got)
+		}
+		if !slices.Contains(got.MatchReasons, "tmdb_tvdb_title_consensus") {
+			t.Fatalf("MatchReasons = %v, want tmdb_tvdb_title_consensus", got.MatchReasons)
+		}
+	}
+}
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestSelectInitialMatchCandidate_MissingYearConsensusStripsCandidateYearDecoration(t *testing.T) {
+	hints := &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries}
+	candidates := []MatchCandidate{
+		{
+			Title:       adventureTimeTestTitle + " (2010)",
+			Year:        2010,
+			ContentType: anchoredItemTypeSeries,
+			Sources:     []string{testTMDBProvider, testTVDBProvider},
+			ProviderIDs: map[string]string{testTMDBProvider: "15260", testTVDBProvider: "152831"},
+		},
+		{
+			Title:       adventureTimeTestTitle,
+			Year:        1967,
+			ContentType: anchoredItemTypeSeries,
+			Sources:     []string{testTMDBProvider},
+			ProviderIDs: map[string]string{testTMDBProvider: "245745"},
+		},
+	}
+
+	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
+	if !ok || got == nil || got.ProviderIDs[testTVDBProvider] != "152831" {
+		t.Fatalf("decorated corroborated candidate lost to competitor: ok=%v candidate=%+v", ok, got)
+	}
+	if !slices.Contains(got.MatchReasons, "tmdb_tvdb_title_consensus") {
+		t.Fatalf("MatchReasons = %v, want tmdb_tvdb_title_consensus", got.MatchReasons)
+	}
+}
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestSelectInitialMatchCandidate_MissingYearConsensusIsOrderIndependentAtEqualScore(t *testing.T) {
+	hints := &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeSeries}
+	consensus := MatchCandidate{
+		Title:       adventureTimeTestTitle,
+		Year:        2010,
+		ContentType: anchoredItemTypeSeries,
+		Sources:     []string{testTMDBProvider, testTVDBProvider},
+		ProviderIDs: map[string]string{testTMDBProvider: "15260", testTVDBProvider: "152831"},
+	}
+	equalScoreCompetitor := MatchCandidate{
+		Title:       adventureTimeTestTitle,
+		Year:        1967,
+		ContentType: anchoredItemTypeSeries,
+		Sources:     []string{testTMDBProvider, testTVDBProvider},
+		ProviderIDs: map[string]string{testTMDBProvider: "245745", testIMDBProvider: "tt0000001"},
+	}
+	if consensusScore, competitorScore := scoreMatchCandidate(hints, consensus), scoreMatchCandidate(hints, equalScoreCompetitor); consensusScore != competitorScore {
+		t.Fatalf("fixture scores differ: consensus=%v competitor=%v", consensusScore, competitorScore)
+	}
+
+	for _, candidates := range [][]MatchCandidate{{consensus, equalScoreCompetitor}, {equalScoreCompetitor, consensus}} {
+		got, ok := selectInitialMatchCandidate(hints, candidates, nil)
+		if !ok || got == nil || got.ProviderIDs[testTVDBProvider] != "152831" {
+			t.Fatalf("ordered candidates %+v returned ok=%v candidate=%+v", candidates, ok, got)
+		}
+	}
+}
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestSelectInitialMatchCandidate_MissingYearConsensusBeatsSameYearSingleProvider(t *testing.T) {
+	hints := &MatchHints{Title: exampleSeriesTestTitle, Type: "series"}
+	candidates := []MatchCandidate{
+		{
+			Title:       exampleSeriesTestTitle,
+			Year:        2021,
+			ContentType: "series",
+			Sources:     []string{"tmdb", "tvdb"},
+			ProviderIDs: map[string]string{"tmdb": "101", "tvdb": "201"},
+		},
+		{
+			Title:       exampleSeriesTestTitle,
+			Year:        2021,
+			ContentType: "series",
+			Sources:     []string{"tmdb"},
+			ProviderIDs: map[string]string{"tmdb": "102"},
+		},
+	}
+
+	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
+	if !ok || got == nil || got.ProviderIDs["tvdb"] != "201" {
+		t.Fatalf("same-year single-provider competitor displaced consensus: ok=%v candidate=%+v", ok, got)
+	}
+}
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestSelectInitialMatchCandidate_MissingYearConsensusAllowsResolvedCanonicalIDConflict(t *testing.T) {
+	hints := &MatchHints{Title: exampleSeriesTestTitle, Type: anchoredItemTypeSeries}
+	candidates := NormalizeCandidatesForLanguage([]SearchResult{
+		{
+			Name:     exampleSeriesTestTitle,
+			Year:     2021,
+			Provider: testTVDBProvider,
+			ProviderIDs: map[string]string{
+				testIMDBProvider: "tt0000101",
+				testTMDBProvider: "101",
+				testTVDBProvider: "201",
+			},
+		},
+		{
+			Name:     exampleSeriesTestTitle,
+			Year:     2021,
+			Provider: testTMDBProvider,
+			ProviderIDs: map[string]string{
+				testIMDBProvider: "tt0000101",
+				testTMDBProvider: "101",
+				testTVDBProvider: "999",
+			},
+		},
+		{
+			Name:        exampleSeriesTestTitle,
+			Year:        1991,
+			Provider:    testTMDBProvider,
+			ProviderIDs: map[string]string{testTMDBProvider: "102"},
+		},
+	}, anchoredItemTypeSeries, "en")
+	if len(candidates) != 2 {
+		t.Fatalf("NormalizeCandidatesForLanguage() returned %d candidates, want 2", len(candidates))
+	}
+	if candidates[0].ProviderIDs[testTVDBProvider] != "" || candidates[0].ConfirmedProviderIDs[testTVDBProvider] != "201" {
+		t.Fatalf("resolved TVDB identity = provider:%q confirmed:%q", candidates[0].ProviderIDs[testTVDBProvider], candidates[0].ConfirmedProviderIDs[testTVDBProvider])
+	}
+
+	got, ok := selectInitialMatchCandidate(hints, candidates, nil)
+	if !ok || got == nil || got.ConfirmedProviderIDs[testTVDBProvider] != "201" {
+		t.Fatalf("resolved canonical ID conflict was not retained: ok=%v candidate=%+v", ok, got)
+	}
+}
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestSelectInitialMatchCandidate_MissingYearConsensusNegativeControls(t *testing.T) {
+	baseConsensus := MatchCandidate{
+		Title:       adventureTimeTestTitle,
+		Year:        2010,
+		ContentType: "series",
+		Sources:     []string{"tmdb", "tvdb"},
+		ProviderIDs: map[string]string{"tmdb": "15260", "tvdb": "152831"},
+	}
+	baseCompetitor := MatchCandidate{
+		Title:       adventureTimeTestTitle,
+		Year:        1967,
+		ContentType: "series",
+		Sources:     []string{"tmdb"},
+		ProviderIDs: map[string]string{"tmdb": "245745"},
+	}
+
+	tests := []struct {
+		name       string
+		hints      *MatchHints
+		candidates []MatchCandidate
+	}{
+		{
+			name:  "movie content type",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: anchoredItemTypeMovie},
+			candidates: []MatchCandidate{
+				{Title: adventureTimeTestTitle, Year: 2010, ContentType: anchoredItemTypeMovie, Sources: []string{testTMDBProvider, testTVDBProvider}, ProviderIDs: map[string]string{testTMDBProvider: "1", testTVDBProvider: "2"}},
+				{Title: adventureTimeTestTitle, Year: 1967, ContentType: anchoredItemTypeMovie, Sources: []string{testTMDBProvider}, ProviderIDs: map[string]string{testTMDBProvider: "3"}},
+			},
+		},
+		{
+			name:  "one remote provider even with cross references",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
+			candidates: []MatchCandidate{
+				{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "1", "tvdb": "2"}},
+				baseCompetitor,
+			},
+		},
+		{
+			name:  "two corroborated identities",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
+			candidates: []MatchCandidate{
+				baseConsensus,
+				{Title: adventureTimeTestTitle, Year: 1967, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "3", "tvdb": "4"}},
+			},
+		},
+		{
+			name:  "coherent title is not exact",
+			hints: &MatchHints{Title: "The Real History of the World War", Type: "series"},
+			candidates: []MatchCandidate{
+				{Title: "The Real History of the World War Europe", Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "1", "tvdb": "2"}},
+				{Title: "The Real History of the World War Pacific", Year: 2010, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "3"}},
+			},
+		},
+		{
+			name:  "missing retained tvdb id",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
+			candidates: []MatchCandidate{
+				{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "1"}},
+				baseCompetitor,
+			},
+		},
+		{
+			name:  "quarantined tvdb id",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
+			candidates: []MatchCandidate{
+				{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "1", "tvdb": "2"}, ConflictingProviderIDKeys: []string{"tvdb"}},
+				baseCompetitor,
+			},
+		},
+		{
+			name:  "nfo is not a second provider",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
+			candidates: []MatchCandidate{
+				{Title: adventureTimeTestTitle, Year: 2010, ContentType: anchoredItemTypeSeries, Sources: []string{testTMDBProvider, testNFOProvider}, ProviderIDs: map[string]string{testTMDBProvider: "1", testTVDBProvider: "2"}},
+				baseCompetitor,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, ok := selectInitialMatchCandidate(tt.hints, tt.candidates, nil); ok {
+				t.Fatalf("negative control matched candidate %+v", got)
+			}
+		})
+	}
+}
+
+//nolint:goconst // Keep the production-shaped provider fixtures readable in place.
+func TestTMDBTVDBTitleConsensusWinner_NegativeControls(t *testing.T) {
+	consensus := MatchCandidate{Title: adventureTimeTestTitle, Year: 2010, ContentType: "series", Sources: []string{"tmdb", "tvdb"}, ProviderIDs: map[string]string{"tmdb": "2", "tvdb": "3"}}
+	competitor := MatchCandidate{Title: adventureTimeTestTitle, Year: 1967, ContentType: "series", Sources: []string{"tmdb"}, ProviderIDs: map[string]string{"tmdb": "1"}}
+	tests := []struct {
+		name   string
+		hints  *MatchHints
+		scored []scoredMatchCandidate
+	}{
+		{
+			name:  "hint year present",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Year: 1967, Type: "series"},
+			scored: []scoredMatchCandidate{
+				{candidate: consensus, score: 80},
+				{candidate: competitor, score: 80},
+			},
+		},
+		{
+			name:  "corroborated candidate is lower ranked",
+			hints: &MatchHints{Title: adventureTimeTestTitle, Type: "series"},
+			scored: []scoredMatchCandidate{
+				{candidate: competitor, score: 80},
+				{candidate: consensus, score: 76},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, ok := tmdbTVDBTitleConsensusWinner(tt.hints, tt.scored); ok {
+				t.Fatalf("negative control returned candidate %+v", got)
+			}
+		})
+	}
+}
 
 func TestSelectInitialMatchCandidate_LoneResultYearMatchBelow70(t *testing.T) {
 	// Exact title, matching year, NO sources, NO provider IDs => score 45+20 = 65 (<70).

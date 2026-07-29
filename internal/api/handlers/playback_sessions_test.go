@@ -103,3 +103,126 @@ func TestIsJellyfinEcosystemClient(t *testing.T) {
 		})
 	}
 }
+
+func TestPlaybackClientDisplayNameAndroidDevices(t *testing.T) {
+	const curlClientLabel = "curl"
+
+	cases := []struct {
+		name      string
+		userAgent string
+		want      string
+	}{
+		{
+			name:      "fire tv stick 4k max",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 11; AFTKRT Build/RS8180.3729N)",
+			want:      "Fire TV Stick 4K Max",
+		},
+		{
+			name:      "fire tv stick 4k",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTMM Build/PS7279)",
+			want:      "Fire TV Stick 4K",
+		},
+		{
+			name:      "fire tv stick 4k second generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 11; AFTKM Build/RS8139)",
+			want:      "Fire TV Stick 4K (2nd Gen)",
+		},
+		{
+			name:      "fire tv stick 4k max first generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTKA Build/PS7646)",
+			want:      "Fire TV Stick 4K Max (1st Gen)",
+		},
+		{
+			name:      "fire tv stick third generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTSSS Build/PS7279)",
+			want:      "Fire TV Stick (3rd Gen)",
+		},
+		{
+			name:      "fire tv stick lite first generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTSS Build/PS7279)",
+			want:      "Fire TV Stick Lite (1st Gen)",
+		},
+		{
+			name:      "fire tv stick second generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 5.1; AFTT Build/LVY48F)",
+			want:      "Fire TV Stick (2nd Gen)",
+		},
+		{
+			name:      "fire tv first generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 4.2; AFTB Build/JDQ39)",
+			want:      "Fire TV (1st Gen)",
+		},
+		{
+			name:      "fire tv second generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 5.1; AFTS Build/LVY48F)",
+			want:      "Fire TV (2nd Gen)",
+		},
+		{
+			name:      "fire tv third generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 7.1; AFTN Build/NS6265)",
+			want:      "Fire TV (3rd Gen)",
+		},
+		{
+			name:      "fire tv cube second generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 9; AFTR Build/PS7646)",
+			want:      "Fire TV Cube (2nd Gen)",
+		},
+		{
+			name:      "fire tv cube first generation",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 7.1; AFTA Build/NS6265)",
+			want:      "Fire TV Cube (1st Gen)",
+		},
+		{
+			name:      "unmapped multi-word android model preserved",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 13; Pixel 7 Build/TQ3A)",
+			want:      "Android · Pixel 7",
+		},
+		{
+			name:      "shield model",
+			userAgent: "Dalvik/2.1.0 (Linux; U; Android 11; SHIELD Android TV Build/RQ1A)",
+			want:      "NVIDIA Shield",
+		},
+		{
+			name:      "chrome remains browser label",
+			userAgent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36",
+			want:      "Chrome 120",
+		},
+		{
+			name:      "non-android build user agent keeps existing fallback",
+			userAgent: "curl/8.0 (Linux; Device Build/42)",
+			want:      curlClientLabel,
+		},
+		{
+			name:      "explicit client fallback wins over android device model",
+			userAgent: "curl/8.0 (Linux; U; Android 13; Pixel 7 Build/TQ3A)",
+			want:      curlClientLabel,
+		},
+		{
+			name:      "android substring is not an android platform token",
+			userAgent: "Dalvik/2.1.0 (Linux; U; NotAndroid 13; Pixel 7 Build/TQ3A)",
+			want:      "Dalvik",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := playbackClientDisplayName("", "", tc.userAgent)
+			if got != tc.want {
+				t.Fatalf("playbackClientDisplayName() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEnrichPlaybackSessionRowUsesCompatOrigin(t *testing.T) {
+	row := playbackSessionRow{
+		ClientName:      "Unrecognized Client",
+		ClientUserAgent: "Dalvik/2.1.0",
+		CompatOrigin:    true,
+	}
+
+	enrichPlaybackSessionRow(&row, nil)
+
+	if !row.IsJellyfinClient {
+		t.Fatal("compat-origin session must be marked as a Jellyfin client")
+	}
+}
