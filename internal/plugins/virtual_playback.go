@@ -26,6 +26,70 @@ type VirtualPlaybackVariant struct {
 	HDR        string `json:"hdr,omitempty"`
 }
 
+// VirtualPlaybackStream is a provider result exposed as a temporary, stable
+// virtual file. The provider URL is deliberately not returned or persisted;
+// it is resolved again when the selected file is played.
+type VirtualPlaybackStream struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	URI        string `json:"uri"`
+	Resolution string `json:"resolution,omitempty"`
+	CodecVideo string `json:"codec_video,omitempty"`
+	CodecAudio string `json:"codec_audio,omitempty"`
+	HDR        string `json:"hdr,omitempty"`
+	SourceType string `json:"source_type,omitempty"`
+	FileSize   int64  `json:"file_size,omitempty"`
+}
+
+// ListVirtualPlaybackStreams asks the enabled virtual playback plugin for
+// current provider candidates. It is intended for just-in-time picker
+// population at play time; collection sync must not call it.
+func (s *Service) ListVirtualPlaybackStreams(ctx context.Context, virtualPath string) ([]VirtualPlaybackStream, error) {
+	if s == nil || s.installations == nil {
+		return nil, ErrVirtualPlaybackResolverNotInstalled
+	}
+	installations, err := s.installations.ListEnabled(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list enabled plugins: %w", err)
+	}
+	for _, installation := range installations {
+		if installation == nil {
+			continue
+		}
+		caps, err := s.installations.ListCapabilities(ctx, installation.ID)
+		if err != nil {
+			continue
+		}
+		for _, cap := range caps {
+			if cap == nil || cap.Type != "http_routes.v1" || cap.ID != virtualPlaybackCapabilityID {
+				continue
+			}
+			client, err := s.HTTPRoutesClient(ctx, installation.ID, cap.ID)
+			if err != nil {
+				continue
+			}
+			response, err := client.Handle(ctx, &pluginv1.HandleHTTPRequest{
+				Method: http.MethodGet, Path: virtualPath,
+				Headers: map[string]string{"X-Silo-List-Streams": "true"},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("list virtual playback streams: %w", err)
+			}
+			if response.GetStatusCode() < 200 || response.GetStatusCode() >= 300 {
+				return nil, fmt.Errorf("virtual playback plugin returned status %d", response.GetStatusCode())
+			}
+			var payload struct {
+				Streams []VirtualPlaybackStream `json:"streams"`
+			}
+			if err := json.Unmarshal(response.GetBody(), &payload); err != nil {
+				return nil, fmt.Errorf("decode virtual playback streams: %w", err)
+			}
+			return payload.Streams, nil
+		}
+	}
+	return nil, ErrVirtualPlaybackResolverNotInstalled
+}
+
 func (s *Service) ConfiguredVirtualVariants(ctx context.Context, virtualPath, mediaType string) ([]VirtualPlaybackVariant, error) {
 	if s == nil || s.installations == nil {
 		return nil, nil

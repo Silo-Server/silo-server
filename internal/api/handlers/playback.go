@@ -147,42 +147,44 @@ type copySeekAnchorResolver func(
 
 // PlaybackHandler handles playback session HTTP endpoints.
 type PlaybackHandler struct {
-	sessionMgr              SessionManagerInterface
-	fileResolver            FilePathResolver // optional; enables stream_url in responses
-	VirtualPlaybackResolver VirtualPlaybackResolver
-	StoreProvider           userstore.UserStoreProvider // optional; enables progress/history persistence
-	WatchScrobbler          PlaybackWatchScrobbler
-	StableIdentityResolver  *watchstate.StableIdentityResolver
-	CompletionObserver      watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
-	profileStaler           ProfileStaler
-	profileRefreshRequester ProfileRefreshRequester
-	AdminStore              PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
-	SessionSyncer           PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
-	EventsHub               *evt.Hub
-	MissingMarker           MissingFileMarker
-	NodePlanner             nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
-	JWTSecret               string                    // needed for signing stream tokens
-	ItemAccess              PlaybackItemAccessChecker // optional; enables file authorization checks
-	EpisodeLookup           PlaybackEpisodeLookup     // optional; resolves episode files to their series
-	ExtraLookup             PlaybackExtraLookup       // optional; resolves extras files to their parent item
-	OriginalLangLookup      PlaybackOriginalLanguageLookup
-	SettingsRepo            PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
-	FileVersionFetcher      PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
-	ProbeEnsurer            PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
-	ChapterThumbnailQueuer  PlaybackChapterThumbnailQueuer
-	VirtualMediaResolver    VirtualMediaResolver
-	IntroAnalyzer           IntroEpisodeAnalyzer
-	IntroRepository         PlaybackIntroEligibilityChecker
-	MarkerRegistry          *markers.Registry
-	MarkerResolver          markers.ExternalIDResolver
-	MarkerUpserter          PlaybackMarkerUpserter
-	MarkerUpdateNotifier    PlaybackMarkerUpdateNotifier
-	MarkerLazyContext       context.Context
-	MarkerLazyInFlight      sync.Map
-	SubtitleRepo            subtitles.Repository // optional; enables downloaded subtitles in playback
-	RealtimeHub             *playback.RealtimeHub
-	CommandTracker          *playback.CommandTracker
-	CommandDispatcher       *playback.CommandDispatcher
+	sessionMgr                  SessionManagerInterface
+	fileResolver                FilePathResolver // optional; enables stream_url in responses
+	VirtualPlaybackResolver     VirtualPlaybackResolver
+	VirtualPlaybackStreamLister VirtualPlaybackStreamLister
+	VirtualPlaybackStreamSink   VirtualPlaybackStreamSink
+	StoreProvider               userstore.UserStoreProvider // optional; enables progress/history persistence
+	WatchScrobbler              PlaybackWatchScrobbler
+	StableIdentityResolver      *watchstate.StableIdentityResolver
+	CompletionObserver          watchstate.CompletionObserver // optional; auto-removes watched items from the watchlist
+	profileStaler               ProfileStaler
+	profileRefreshRequester     ProfileRefreshRequester
+	AdminStore                  PlaybackAdminStore    // optional; enables admin playback history/live session cleanup
+	SessionSyncer               PlaybackSessionSyncer // optional; enables immediate session sync to shared admin view
+	EventsHub                   *evt.Hub
+	MissingMarker               MissingFileMarker
+	NodePlanner                 nodepool.SessionPlanner   // optional; enables proxy/transcode node selection
+	JWTSecret                   string                    // needed for signing stream tokens
+	ItemAccess                  PlaybackItemAccessChecker // optional; enables file authorization checks
+	EpisodeLookup               PlaybackEpisodeLookup     // optional; resolves episode files to their series
+	ExtraLookup                 PlaybackExtraLookup       // optional; resolves extras files to their parent item
+	OriginalLangLookup          PlaybackOriginalLanguageLookup
+	SettingsRepo                PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
+	FileVersionFetcher          PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
+	ProbeEnsurer                PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
+	ChapterThumbnailQueuer      PlaybackChapterThumbnailQueuer
+	VirtualMediaResolver        VirtualMediaResolver
+	IntroAnalyzer               IntroEpisodeAnalyzer
+	IntroRepository             PlaybackIntroEligibilityChecker
+	MarkerRegistry              *markers.Registry
+	MarkerResolver              markers.ExternalIDResolver
+	MarkerUpserter              PlaybackMarkerUpserter
+	MarkerUpdateNotifier        PlaybackMarkerUpdateNotifier
+	MarkerLazyContext           context.Context
+	MarkerLazyInFlight          sync.Map
+	SubtitleRepo                subtitles.Repository // optional; enables downloaded subtitles in playback
+	RealtimeHub                 *playback.RealtimeHub
+	CommandTracker              *playback.CommandTracker
+	CommandDispatcher           *playback.CommandDispatcher
 	// PlaybackConfig returns the current playback config (ffmpeg path,
 	// hwaccel, transcode dir). Wired to the live config in integrated mode
 	// so admin changes apply to newly started transcodes. Read it through
@@ -1701,6 +1703,9 @@ func (h *PlaybackHandler) handleStartPlaybackLegacy(w http.ResponseWriter, r *ht
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "virtual_playback_failed", "Failed to resolve virtual playback")
 		return
+	}
+	if virtualStreamURL != "" {
+		h.loadVirtualPlaybackCandidates(r.Context(), file)
 	}
 	if virtualStreamURL == "" {
 		file = h.ensurePlaybackProbe(r.Context(), file)

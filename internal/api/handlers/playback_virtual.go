@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -23,19 +24,25 @@ type VirtualPlaybackResolver interface {
 // VirtualPlaybackStream is the provider-neutral candidate shape used by the
 // just-in-time picker. Implementations must never expose provider URLs here.
 type VirtualPlaybackStream struct {
-	ID string `json:"id"`
-	Label string `json:"label"`
-	URI string `json:"uri"`
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	URI        string `json:"uri"`
 	Resolution string `json:"resolution,omitempty"`
 	CodecVideo string `json:"codec_video,omitempty"`
 	CodecAudio string `json:"codec_audio,omitempty"`
-	HDR string `json:"hdr,omitempty"`
+	HDR        string `json:"hdr,omitempty"`
 	SourceType string `json:"source_type,omitempty"`
-	FileSize int64 `json:"file_size,omitempty"`
+	FileSize   int64  `json:"file_size,omitempty"`
 }
 
 type VirtualPlaybackStreamLister interface {
 	ListVirtualPlaybackStreams(ctx context.Context, virtualPath string) ([]VirtualPlaybackStream, error)
+}
+
+type VirtualPlaybackStreamListerFunc func(context.Context, string) ([]VirtualPlaybackStream, error)
+
+func (f VirtualPlaybackStreamListerFunc) ListVirtualPlaybackStreams(ctx context.Context, path string) ([]VirtualPlaybackStream, error) {
+	return f(ctx, path)
 }
 
 // VirtualPlaybackStreamSink persists JIT candidates as selectable virtual

@@ -48,6 +48,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	metatrakt "github.com/Silo-Server/silo-server/internal/metadata/trakt"
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
@@ -914,6 +915,30 @@ func NewRouter(deps Dependencies) chi.Router {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr, deps.FileRepo)
 			if deps.PluginService != nil {
 				playbackHandler.VirtualPlaybackResolver = deps.PluginService
+				playbackHandler.VirtualPlaybackStreamLister = handlers.VirtualPlaybackStreamListerFunc(func(ctx context.Context, path string) ([]handlers.VirtualPlaybackStream, error) {
+					streams, err := deps.PluginService.ListVirtualPlaybackStreams(ctx, path)
+					if err != nil {
+						return nil, err
+					}
+					out := make([]handlers.VirtualPlaybackStream, 0, len(streams))
+					for _, stream := range streams {
+						out = append(out, handlers.VirtualPlaybackStream{ID: stream.ID, Label: stream.Label, URI: stream.URI, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR, SourceType: stream.SourceType, FileSize: stream.FileSize})
+					}
+					return out, nil
+				})
+				playbackHandler.VirtualPlaybackStreamSink = func(ctx context.Context, source *models.MediaFile, streams []handlers.VirtualPlaybackStream) error {
+					for _, stream := range streams {
+						if !strings.HasPrefix(stream.URI, "virtual://") || stream.URI == source.FilePath {
+							continue
+						}
+						now := time.Now()
+						_, err := deps.FileRepo.Upsert(ctx, models.MediaFile{ContentID: source.ContentID, MediaFolderID: source.MediaFolderID, FilePath: stream.URI, FileSize: stream.FileSize, Resolution: stream.Resolution, CodecVideo: stream.CodecVideo, CodecAudio: stream.CodecAudio, HDR: stream.HDR != "", Container: "virtual", ProbeSource: "virtual", ProbeUpdatedAt: &now})
+						if err != nil {
+							return err
+						}
+					}
+					return nil
+				}
 			}
 			streamHandler = handlers.NewStreamHandler(deps.SessionMgr, deps.FileRepo)
 		} else {
