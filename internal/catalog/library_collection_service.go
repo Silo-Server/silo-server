@@ -129,6 +129,9 @@ type LibraryCollectionService struct {
 
 	// CollageGen is nil when S3/image processing is not configured.
 	CollageGen CollageGenerator
+	// VirtualVariants returns configured provider-neutral profile placeholders.
+	// It must not contact an upstream streaming provider.
+	VirtualVariants func(context.Context, string, string) ([]VirtualPlaybackVariant, error)
 }
 
 func NewLibraryCollectionService(
@@ -215,6 +218,23 @@ func sourceEnablesVirtualPlayback(raw json.RawMessage) bool {
 		VirtualPlayback bool `json:"virtual_playback"`
 	}
 	return json.Unmarshal(raw, &cfg) == nil && cfg.VirtualPlayback
+}
+
+func (s *LibraryCollectionService) materializeVirtualPlayback(ctx context.Context, item *models.MediaItem, libraryIDs []int) error {
+	var variants []VirtualPlaybackVariant
+	if s.VirtualVariants != nil {
+		mediaType := strings.TrimSpace(item.Type)
+		if mediaType == "" {
+			mediaType = "movie"
+		}
+		uri := "virtual://" + mediaType + "/" + strings.TrimSpace(item.ImdbID)
+		var err error
+		variants, err = s.VirtualVariants(ctx, uri, mediaType)
+		if err != nil {
+			return fmt.Errorf("getting virtual profile variants: %w", err)
+		}
+	}
+	return s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, libraryIDs, variants)
 }
 
 func (s *LibraryCollectionService) SyncCollection(ctx context.Context, collectionID string) (*models.LibraryCollectionSyncRun, error) {
@@ -331,7 +351,7 @@ func (s *LibraryCollectionService) syncMDBListCollection(ctx context.Context, co
 			if entry.ID <= 0 {
 				item.TmdbID = ""
 			}
-			if err := s.items.MaterializeVirtualPlaybackItem(ctx, item, collection.LibraryIDs); err != nil {
+			if err := s.materializeVirtualPlayback(ctx, item, collection.LibraryIDs); err != nil {
 				return nil, fmt.Errorf("materializing virtual item %q: %w", entry.Title, err)
 			}
 			movieLookup.ByIMDb[entry.IMDbID] = contentID
@@ -1267,7 +1287,19 @@ func (s *LibraryCollectionService) createVirtualCollectionItem(ctx context.Conte
 	if tvdbID > 0 {
 		item.TvdbID = fmt.Sprintf("%d", tvdbID)
 	}
-	if err := s.items.MaterializeVirtualPlaybackItem(ctx, item, collection.LibraryIDs); err != nil {
+	virtualType := "movie"
+	if itemType == "series" {
+		virtualType = "series"
+	}
+	virtualURI := "virtual://" + virtualType + "/" + strings.TrimSpace(item.ImdbID)
+	var variants []VirtualPlaybackVariant
+	if s.VirtualVariants != nil {
+		variants, err = s.VirtualVariants(ctx, virtualURI, itemType)
+		if err != nil {
+			return nil, fmt.Errorf("getting virtual profile variants: %w", err)
+		}
+	}
+	if err := s.items.MaterializeVirtualPlaybackItemWithVariants(ctx, item, collection.LibraryIDs, variants); err != nil {
 		return nil, fmt.Errorf("materializing virtual item %q: %w", title, err)
 	}
 	return item, nil

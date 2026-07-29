@@ -38,6 +38,17 @@ type VirtualPurgeOptions struct {
 	InstallationID int
 }
 
+// VirtualPlaybackVariant describes a provider-neutral profile variant. The
+// URI is resolved lazily by a virtual playback plugin when playback starts.
+type VirtualPlaybackVariant struct {
+	VirtualURI string
+	Label      string
+	Resolution string
+	CodecVideo string
+	CodecAudio string
+	HDR        string
+}
+
 // PurgeVirtualPlaybackItems removes zero-storage virtual files and any
 // catalog items that no longer have a physical or virtual file. Filters are
 // optional and make administrative cleanup safe to scope.
@@ -778,6 +789,12 @@ func nonNilStringSlice(values []string) []string {
 // the selected libraries, and adds a zero-storage playback source. Existing
 // local files always suppress creation of the virtual source.
 func (r *ItemRepository) MaterializeVirtualPlaybackItem(ctx context.Context, item *models.MediaItem, libraryIDs []int) error {
+	return r.MaterializeVirtualPlaybackItemWithVariants(ctx, item, libraryIDs, nil)
+}
+
+// MaterializeVirtualPlaybackItemWithVariants creates the base virtual source
+// and any configured profile variants without contacting a streaming provider.
+func (r *ItemRepository) MaterializeVirtualPlaybackItemWithVariants(ctx context.Context, item *models.MediaItem, libraryIDs []int, variants []VirtualPlaybackVariant) error {
 	if item == nil || item.ContentID == "" || strings.TrimSpace(item.ImdbID) == "" {
 		return fmt.Errorf("virtual playback item requires content and IMDb IDs")
 	}
@@ -813,6 +830,19 @@ func (r *ItemRepository) MaterializeVirtualPlaybackItem(ctx context.Context, ite
 		)
 		ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], virtualPath, "virtual://"); err != nil {
 		return fmt.Errorf("creating virtual playback file: %w", err)
+	}
+	for _, variant := range variants {
+		path := strings.TrimSpace(variant.VirtualURI)
+		if path == "" || path == virtualPath || !strings.HasPrefix(path, "virtual://") {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO media_files (content_id, media_folder_id, file_path, file_size, resolution, codec_video, codec_audio, hdr, container)
+			SELECT $1, $2, $3, 0, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), CASE WHEN NULLIF($7,'') IS NULL THEN false ELSE true END, 'virtual'
+			WHERE NOT EXISTS (SELECT 1 FROM media_files WHERE content_id = $1 AND left(file_path, 10) <> 'virtual://')
+			ON CONFLICT (file_path) DO NOTHING`, item.ContentID, libraryIDs[0], path, variant.Resolution, variant.CodecVideo, variant.CodecAudio, variant.HDR); err != nil {
+			return fmt.Errorf("creating virtual playback variant: %w", err)
+		}
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE media_items

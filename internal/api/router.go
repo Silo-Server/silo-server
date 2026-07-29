@@ -1462,6 +1462,19 @@ func NewRouter(deps Dependencies) chi.Router {
 				provider: watchtrakt.NewProvider(nil, ""),
 			}
 		}
+		if deps.PluginService != nil {
+			libraryCollectionService.VirtualVariants = func(ctx context.Context, virtualURI, mediaType string) ([]catalog.VirtualPlaybackVariant, error) {
+				got, err := deps.PluginService.ConfiguredVirtualVariants(ctx, virtualURI, mediaType)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]catalog.VirtualPlaybackVariant, 0, len(got))
+				for _, v := range got {
+					out = append(out, catalog.VirtualPlaybackVariant{VirtualURI: v.VirtualURI, Label: v.Label, Resolution: v.Resolution, CodecVideo: v.CodecVideo, CodecAudio: v.CodecAudio, HDR: v.HDR})
+				}
+				return out, nil
+			}
+		}
 
 		// Propagate the now-wired Trakt + TMDB fetchers to the user-side sync
 		// service (constructed earlier in main.go before settingsRepo and the

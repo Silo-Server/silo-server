@@ -1931,6 +1931,19 @@ func main() {
 		collItemRepo := catalog.NewItemRepository(deps.DB)
 		libraryItemRepo := catalog.NewLibraryItemRepository(deps.DB)
 		collectionService := catalog.NewLibraryCollectionService(collectionRepo, collItemRepo, libraryItemRepo, nil)
+		if deps.PluginService != nil {
+			collectionService.VirtualVariants = func(ctx context.Context, virtualURI, mediaType string) ([]catalog.VirtualPlaybackVariant, error) {
+				got, err := deps.PluginService.ConfiguredVirtualVariants(ctx, virtualURI, mediaType)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]catalog.VirtualPlaybackVariant, 0, len(got))
+				for _, v := range got {
+					out = append(out, catalog.VirtualPlaybackVariant{VirtualURI: v.VirtualURI, Label: v.Label, Resolution: v.Resolution, CodecVideo: v.CodecVideo, CodecAudio: v.CodecAudio, HDR: v.HDR})
+				}
+				return out, nil
+			}
+		}
 		collectionService.TMDBCollections = api.NewTMDBCollectionFetcher(cfg.TMDBAPIKey)
 		deps.CollectionService = collectionService
 		collectionSyncScheduler = catalog.NewCollectionSyncScheduler(collectionRepo, collectionService, slog.Default())
