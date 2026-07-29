@@ -8,7 +8,7 @@ import {
 import { formatFileSize, mapAudioLabel } from "@/lib/mediaFormat";
 import { videoRangeLabel } from "@/lib/videoRange";
 import { extractSourceHint } from "./versionFormatUtils";
-import { resolutionScore } from "./versionRankingUtils";
+import { audioScore, resolutionScore } from "./versionRankingUtils";
 
 // ---------------------------------------------------------------------------
 // Exported helper functions (also used by tests)
@@ -53,7 +53,11 @@ export function buildDetailLine(version: FileVersion): string {
 
 export function sortByResolution(versions: FileVersion[]): FileVersion[] {
   return [...versions].sort(
-    (a, b) => resolutionScore(b.resolution) - resolutionScore(a.resolution),
+    (a, b) =>
+      resolutionScore(b.resolution) - resolutionScore(a.resolution) ||
+      Number(b.hdr) - Number(a.hdr) ||
+      audioScore(b.codec_audio) - audioScore(a.codec_audio) ||
+      (b.file_size ?? 0) - (a.file_size ?? 0),
   );
 }
 
