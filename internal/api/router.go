@@ -2347,6 +2347,13 @@ func NewRouter(deps Dependencies) chi.Router {
 						if settingValuesHandler != nil {
 							r.Get("/contract", settingValuesHandler.HandleGetContract)
 							r.Get("/contract/capabilities", settingValuesHandler.HandleGetCapabilities)
+							// The contract spec names these paths, and a new
+							// client detects a pre-contract server by the
+							// absence of GET /settings/manifest — a 404 here
+							// would read as "this server still needs
+							// upgrading" forever.
+							r.Get("/manifest", settingValuesHandler.HandleGetContract)
+							r.Get("/capability", settingValuesHandler.HandleGetCapabilities)
 							r.Group(func(r chi.Router) {
 								r.Use(apimw.RequireProfile)
 								r.Get("/values/effective", settingValuesHandler.HandleGetEffective)

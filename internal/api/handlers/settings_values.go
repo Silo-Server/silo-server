@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/cache"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -35,6 +37,11 @@ type SettingValuesHandler struct {
 	contract      *settingscontract.Manifest
 	resolver      *settingsresolve.Resolver
 
+	// deviceSeen throttles device-registry refreshes, one upsert per
+	// deviceSeenThrottle window per (profile, device) — the same shape the
+	// legacy SettingsHandler uses.
+	deviceSeen *cache.TTLCache[struct{}]
+
 	// EventsHub, when set, receives a user_settings.changed event after every
 	// successful write or delete. Nil (as in tests) simply skips publishing.
 	EventsHub *evt.Hub
@@ -49,6 +56,7 @@ func NewSettingValuesHandler(
 		storeProvider: provider,
 		contract:      contract,
 		resolver:      settingsresolve.New(contract),
+		deviceSeen:    cache.NewTTLCache[struct{}](),
 	}
 }
 
@@ -290,9 +298,53 @@ func (h *SettingValuesHandler) setValueAt(
 		// updated_at included — rather than a reconstruction of the input.
 		h.recordMutation(r, store, mutationID, requestHash, response)
 	}
+	if identity.Scope == settingscontract.ScopeProfileDevice {
+		// A device that only ever writes canonically must still appear in
+		// ListDevices and the device-management surfaces, or it can never be
+		// discovered and forgotten. The legacy device route registers on every
+		// touch; the canonical route matches it on device writes.
+		h.registerWritingDevice(r, store, identity.ProfileID)
+	}
 	publishUserSettingsEvent(r.Context(), h.EventsHub,
 		eventUserID, identity.ProfileID, identity.Key, string(identity.Scope))
 	writeJSON(w, http.StatusOK, response)
+}
+
+// registerWritingDevice refreshes the device registry from the request's
+// device headers after a successful profile_device write. Best effort and
+// throttled: the value write already succeeded, and the registry entry is
+// discoverability metadata, not the setting itself.
+func (h *SettingValuesHandler) registerWritingDevice(
+	r *http.Request, store userstore.UserStore, profileID string,
+) {
+	device := deviceMetadataFromRequest(r)
+	if profileID == "" || device.DeviceID == "" {
+		return
+	}
+	if h.deviceSeen != nil {
+		key := profileID + "\x00" + device.DeviceID
+		if _, seen := h.deviceSeen.Get(key); seen {
+			return
+		}
+		h.deviceSeen.Set(key, struct{}{}, deviceSeenThrottle)
+	}
+	registry, ok := store.(userstore.DeviceRegistry)
+	if !ok {
+		return
+	}
+	if err := registry.RegisterDevice(r.Context(), userstore.DeviceEntry{
+		ProfileID:      profileID,
+		DeviceID:       device.DeviceID,
+		DeviceName:     device.DeviceName,
+		DevicePlatform: device.DevicePlatform,
+	}); err != nil {
+		slog.WarnContext(r.Context(), "failed to register device after canonical write",
+			"component", "api",
+			"profile_id", profileID,
+			"device_id", device.DeviceID,
+			"error", err,
+		)
+	}
 }
 
 // HandleDeleteValue removes the explicit value at one scope, which is how a

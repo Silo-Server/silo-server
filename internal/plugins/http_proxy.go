@@ -31,9 +31,11 @@ type httpProxyService interface {
 // proxy uses it to inject X-Silo-Theme on every plugin request so
 // plugin SPAs can paint in the user's theme on first byte without relying
 // on the URL ?theme= parameter (which is fragile under refresh, direct
-// links, and cross-tab sharing).
+// links, and cross-tab sharing). Theme is a profile-scoped setting under the
+// settings contract, so the lookup takes the active profile; an empty
+// profileID falls back to whatever account-level value exists.
 type UserThemeLookup interface {
-	LookupUITheme(ctx context.Context, userID int) (string, error)
+	LookupUITheme(ctx context.Context, userID int, profileID string) (string, error)
 }
 
 type HTTPProxy struct {
@@ -132,17 +134,16 @@ func (p *HTTPProxy) ServeRoute(w http.ResponseWriter, r *http.Request, installat
 		} else {
 			headers["X-Silo-User-Role"] = "user"
 		}
+		// The browser already sends X-Profile-Id for its own silo API
+		// calls; reuse that as the active profile for both lookups. Empty
+		// just means "no profile selected".
+		profileID := r.Header.Get("X-Profile-Id")
 		if p.themes != nil {
-			if theme, err := p.themes.LookupUITheme(r.Context(), userID); err == nil && theme != "" {
+			if theme, err := p.themes.LookupUITheme(r.Context(), userID, profileID); err == nil && theme != "" {
 				headers["X-Silo-Theme"] = theme
 			}
 		}
 		if p.identity != nil {
-			// The browser already sends X-Profile-Id for its own silo
-			// API calls; reuse that as the active profile. Empty value just
-			// means "no profile selected" — the lookup returns username
-			// only, primary-profile path.
-			profileID := r.Header.Get("X-Profile-Id")
 			if ident, err := p.identity.LookupIdentity(r.Context(), userID, profileID); err == nil {
 				if ident.Username != "" {
 					headers["X-Silo-User-Name"] = ident.Username
