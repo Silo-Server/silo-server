@@ -46,6 +46,16 @@ function humanizeKey(value: string) {
     .join(" ");
 }
 
+function validateProviderRegex(pattern: string): void {
+  // Provider profiles use Go/RE2 syntax. JavaScript does not support inline
+  // flags such as (?i), so translate the leading flag group for the browser
+  // preview while leaving the original pattern untouched for the plugin.
+  const inlineFlags = pattern.match(/^\(\?([imsu]+)\)/i);
+  const source = inlineFlags ? pattern.slice(inlineFlags[0].length) : pattern;
+  const flags = inlineFlags ? inlineFlags[1].toLowerCase() : "";
+  new RegExp(source, flags);
+}
+
 function parseJSONSchema(schema: PluginConfigSchema): ParsedObjectSchema {
   try {
     const parsed = JSON.parse(schema.json_schema) as {
@@ -285,7 +295,7 @@ export function PluginConfigForm({
                     }
                     if (typeof regex === "string" && regex.trim() !== "") {
                       try {
-                        new RegExp(regex);
+                        validateProviderRegex(regex);
                       } catch {
                         throw new Error(`Invalid ${regexKey} in profile ${label}.`);
                       }
