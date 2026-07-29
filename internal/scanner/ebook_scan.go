@@ -166,8 +166,8 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 		processed int64
 		failed    int64
 		skipped   int64
-		failMu    sync.Mutex
-		failures  []error
+		cancelMu  sync.Mutex
+		failures  scanFailures
 		cancelErr error
 	)
 	start := time.Now()
@@ -181,17 +181,15 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 				}
 				if err := s.reconcileEbookFile(ctx, folder, path, &skipped, groupLocks); err != nil {
 					if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-						failMu.Lock()
+						cancelMu.Lock()
 						if cancelErr == nil {
 							cancelErr = err
 						}
-						failMu.Unlock()
+						cancelMu.Unlock()
 						return
 					}
 					atomic.AddInt64(&failed, 1)
-					failMu.Lock()
-					failures = append(failures, fmt.Errorf("%s: %w", path, err))
-					failMu.Unlock()
+					failures.addf("%s: %w", path, err)
 					slog.WarnContext(ctx, "ebook scan: file failed", "component", "scanner",
 						"folder_id", folder.ID,
 						"path", path,
@@ -245,7 +243,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 		failedCount := atomic.LoadInt64(&failed)
 		skippedCount := atomic.LoadInt64(&skipped)
 		if failedCount > 0 && skippedCount == 0 && failedCount == processedCount {
-			return fmt.Errorf("ebook scan failed for every attempted folder_id=%d: %w", folder.ID, errors.Join(failures...))
+			return fmt.Errorf("ebook scan failed for every attempted folder_id=%d: %w", folder.ID, failures.join())
 		}
 	}
 

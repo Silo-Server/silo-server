@@ -2340,13 +2340,18 @@ func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Reque
 		Title       string
 		Year        int
 		ContentType string
+		Status      string
+		TmdbID      string
+		TvdbID      string
+		ImdbID      string
 		LibraryID   int
 		LibraryName string
 	}
 	items := make(map[string]itemInfo, len(contentIDs))
 
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT mi.content_id, mi.title, mi.year, mi.type,
+		SELECT mi.content_id, mi.title, mi.year, mi.type, COALESCE(mi.status, ''),
+		       COALESCE(mi.tmdb_id, ''), COALESCE(mi.tvdb_id, ''), COALESCE(mi.imdb_id, ''),
 		       COALESCE(mf_lib.folder_id, 0),
 		       COALESCE(mf_lib.folder_name, '')
 		FROM media_items mi
@@ -2367,18 +2372,31 @@ func (h *LibraryHandler) HandleListStaleIDs(w http.ResponseWriter, r *http.Reque
 	defer rows.Close()
 
 	for rows.Next() {
-		var cid, title, ctype, libName string
+		var cid, title, ctype, status, tmdbID, tvdbID, imdbID, libName string
 		var year, libID int
-		if err := rows.Scan(&cid, &title, &year, &ctype, &libID, &libName); err != nil {
+		if err := rows.Scan(&cid, &title, &year, &ctype, &status, &tmdbID, &tvdbID, &imdbID, &libID, &libName); err != nil {
 			slog.ErrorContext(r.Context(), "scanning item for stale IDs", "component", "api", "error", err)
 			continue
 		}
-		items[cid] = itemInfo{Title: title, Year: year, ContentType: ctype, LibraryID: libID, LibraryName: libName}
+		items[cid] = itemInfo{
+			Title: title, Year: year, ContentType: ctype, Status: status,
+			TmdbID: tmdbID, TvdbID: tvdbID, ImdbID: imdbID,
+			LibraryID: libID, LibraryName: libName,
+		}
 	}
 
 	resp := make([]staleMediaIDResponse, 0, len(staleIDs))
 	for _, s := range staleIDs {
 		info := items[s.ContentID]
+		if !metadata.IsActionableStaleProviderID(&models.MediaItem{
+			ContentID: s.ContentID,
+			Status:    info.Status,
+			TmdbID:    info.TmdbID,
+			TvdbID:    info.TvdbID,
+			ImdbID:    info.ImdbID,
+		}, s) {
+			continue
+		}
 		resp = append(resp, staleMediaIDResponse{
 			ContentID:   s.ContentID,
 			LibraryID:   info.LibraryID,

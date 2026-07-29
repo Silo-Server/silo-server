@@ -330,3 +330,57 @@ func TestFetchCompatEpisodeTargetsByContentIDsFallback_UsesBatchedSeriesAccess(t
 		t.Errorf("expected zero plain GetByIDs calls in the episode fallback; got %d", itemRepo.getByIDsCalls)
 	}
 }
+
+// Overlay callers already receive duration-enriched list items from the
+// content service, so fetching episode metadata must not repeat the duration
+// query. Callers that render target.Item opt into the enriched wrapper.
+func TestFetchCompatEpisodeTargetsByContentIDs_ResolvesDurationOnlyWhenRequested(t *testing.T) {
+	itemRepo := &countingItemRepo{
+		itemsByID: map[string]*models.MediaItem{
+			"series-1": {ContentID: "series-1", Type: "series", Title: "Show"},
+		},
+	}
+	episodeRepo := &countingEpisodeRepo{
+		episodesByID: map[string]*models.Episode{
+			"ep-1": {ContentID: "ep-1", SeriesID: "series-1", Title: "Pilot"},
+		},
+	}
+	durations := &countingProbedDurationSource{episodes: map[string]int{"ep-1": 1500}}
+	h := &ItemsHandler{
+		itemRepo:    itemRepo,
+		episodeRepo: episodeRepo,
+		durationSrc: durations,
+	}
+
+	metadataOnly, err := h.fetchCompatEpisodeTargetsByContentIDs(
+		context.Background(),
+		&Session{},
+		[]string{"ep-1"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("fetch metadata-only episode targets: %v", err)
+	}
+	if durations.episodeCalls != 0 {
+		t.Fatalf("metadata-only duration calls = %d, want 0", durations.episodeCalls)
+	}
+	if got := metadataOnly["ep-1"].Item.DurationSeconds; got != 0 {
+		t.Fatalf("metadata-only duration = %d, want 0", got)
+	}
+
+	withDurations, err := h.fetchCompatEpisodeTargetsByContentIDsWithDurations(
+		context.Background(),
+		&Session{},
+		[]string{"ep-1"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("fetch duration-enriched episode targets: %v", err)
+	}
+	if durations.episodeCalls != 1 {
+		t.Fatalf("duration-enriched calls = %d, want 1", durations.episodeCalls)
+	}
+	if got := withDurations["ep-1"].Item.DurationSeconds; got != 1500 {
+		t.Fatalf("duration-enriched duration = %d, want 1500", got)
+	}
+}

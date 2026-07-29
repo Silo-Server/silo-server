@@ -177,3 +177,27 @@ func TestIsProviderAnchored(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderAnchor(t *testing.T) {
+	tests := []struct {
+		contentID  string
+		provider   string
+		providerID string
+		ok         bool
+	}{
+		{contentID: "movie-tmdb-603", provider: "tmdb", providerID: "603", ok: true},
+		{contentID: "series-tvdb-405851", provider: "tvdb", providerID: "405851", ok: true},
+		{contentID: "episode-tvdb-405851-1-2", provider: "tvdb", providerID: "405851", ok: true},
+		{contentID: "local-deadbeef"},
+		{contentID: "series-tmdb-not-a-number"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.contentID, func(t *testing.T) {
+			provider, providerID, ok := ProviderAnchor(tt.contentID)
+			if provider != tt.provider || providerID != tt.providerID || ok != tt.ok {
+				t.Fatalf("ProviderAnchor(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tt.contentID, provider, providerID, ok, tt.provider, tt.providerID, tt.ok)
+			}
+		})
+	}
+}

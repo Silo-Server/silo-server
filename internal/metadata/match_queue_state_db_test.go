@@ -77,11 +77,11 @@ func TestNormalizeMatchFailureKindTreatsUnknownAsTransient(t *testing.T) {
 
 func TestMatchQueueFingerprintIncludesMatcherAndProviderConfiguration(t *testing.T) {
 	t.Parallel()
-	expression := matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language")
+	expression := matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)
 	for _, required := range []string{
 		"mf.file_path", "'movie'", "folders.metadata_language", "installation.version",
 		"chain.priority", "chain.capability_id", "plugin_runtime_configs", "config.updated_at::text",
-		fmt.Sprintf("|%d|", matcherRevision),
+		fmt.Sprintf("|%d|", movieMatcherRevision),
 	} {
 		if !strings.Contains(expression, required) {
 			t.Fatalf("fingerprint expression %q does not contain %q", expression, required)
@@ -92,10 +92,96 @@ func TestMatchQueueFingerprintIncludesMatcherAndProviderConfiguration(t *testing
 func TestSeriesMatchQueueFingerprintIncludesEpisodePathShape(t *testing.T) {
 	t.Parallel()
 	expression := seriesMatchQueueInputFingerprintSQL("q.observed_root_path", "q.media_folder_id", "folders.metadata_language")
-	for _, required := range []string{"shape_file.file_path", "shape_file.observed_root_path", "shape_file.missing_since", "shape_file.extra_id"} {
+	for _, required := range []string{"shape_file.file_path", "shape_file.observed_root_path", "shape_file.missing_since", "shape_file.extra_id", fmt.Sprintf("|%d|", seriesMatcherRevision)} {
 		if !strings.Contains(expression, required) {
 			t.Fatalf("series fingerprint expression %q does not contain %q", expression, required)
 		}
+	}
+	if movieMatcherRevision != 10 {
+		t.Fatalf("movie matcher revision = %d, want shared title-normalization revision 10", movieMatcherRevision)
+	}
+	if seriesMatcherRevision != 10 {
+		t.Fatalf("series matcher revision = %d, want consensus revision 10", seriesMatcherRevision)
+	}
+}
+
+func TestMatchQueueSharedTitleRevisionWakesMoviesAndSeries(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	ctx := context.Background()
+	previousMatcherRevision := movieMatcherRevision - 1
+
+	movieFolderID := insertTestFolder(t, pool, "movie")
+	moviePath := fmt.Sprintf("/test/revision-isolation-%d/Movie.mkv", time.Now().UnixNano())
+	var movieFileID int
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_files (media_folder_id, file_path, base_type, file_size)
+		VALUES ($1, $2, 'movie', 0) RETURNING id
+	`, movieFolderID, moviePath).Scan(&movieFileID); err != nil {
+		t.Fatalf("seed movie file: %v", err)
+	}
+	movieRepo := NewMovieMatchQueueRepository(pool, scannerrepo.NewFileRepository(pool))
+	if err := movieRepo.EnqueueMovieFile(ctx, movieFileID); err != nil {
+		t.Fatalf("EnqueueMovieFile(): %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE movie_match_queue
+		SET state = 'parked', available_at = NOW() + interval '24 hours', parked_at = NOW(),
+			matcher_revision = $2
+		WHERE media_file_id = $1
+	`, movieFileID, previousMatcherRevision); err != nil {
+		t.Fatalf("park movie row: %v", err)
+	}
+
+	seriesFolderID := insertTestFolder(t, pool, "series")
+	seriesRoot := fmt.Sprintf("/test/revision-isolation-%d/Series", time.Now().UnixNano())
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_files (
+			media_folder_id, file_path, observed_root_path, base_type,
+			season_number, episode_number, file_size
+		) VALUES ($1, $2, $3, 'series', 1, 1, 0)
+	`, seriesFolderID, seriesRoot+"/Season 01/Series S01E01.mkv", seriesRoot); err != nil {
+		t.Fatalf("seed series file: %v", err)
+	}
+	seriesRepo := NewSeriesRootMatchQueueRepository(pool)
+	if err := seriesRepo.EnqueueSeriesRoot(ctx, seriesFolderID, seriesRoot); err != nil {
+		t.Fatalf("EnqueueSeriesRoot(): %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE series_root_match_queue
+		SET state = 'parked', available_at = NOW() + interval '24 hours', parked_at = NOW(),
+			matcher_revision = $3
+		WHERE media_folder_id = $1 AND observed_root_path = $2
+	`, seriesFolderID, seriesRoot, previousMatcherRevision); err != nil {
+		t.Fatalf("seed pre-change series revision: %v", err)
+	}
+
+	if _, err := movieRepo.WakeForChangedInputs(ctx); err != nil {
+		t.Fatalf("movie WakeForChangedInputs(): %v", err)
+	}
+	var movieState string
+	var movieRevision int
+	if err := pool.QueryRow(ctx, `
+		SELECT state, matcher_revision FROM movie_match_queue WHERE media_file_id = $1
+	`, movieFileID).Scan(&movieState, &movieRevision); err != nil {
+		t.Fatalf("load movie queue row: %v", err)
+	}
+	if movieState != queueStatePending || movieRevision != movieMatcherRevision {
+		t.Fatalf("movie row was not awakened: state=%q revision=%d", movieState, movieRevision)
+	}
+
+	if _, err := seriesRepo.WakeForChangedInputs(ctx); err != nil {
+		t.Fatalf("series WakeForChangedInputs(): %v", err)
+	}
+	var seriesState string
+	var seriesRevision int
+	if err := pool.QueryRow(ctx, `
+		SELECT state, matcher_revision FROM series_root_match_queue
+		WHERE media_folder_id = $1 AND observed_root_path = $2
+	`, seriesFolderID, seriesRoot).Scan(&seriesState, &seriesRevision); err != nil {
+		t.Fatalf("load series queue row: %v", err)
+	}
+	if seriesState != queueStatePending || seriesRevision != seriesMatcherRevision {
+		t.Fatalf("series row was not awakened: state=%q revision=%d", seriesState, seriesRevision)
 	}
 }
 
@@ -249,7 +335,7 @@ func TestSeriesMatchQueueWakeForChangedInputsResetsOnlyChangedRows(t *testing.T)
 	`, folderID, root).Scan(&state, &failureKind, &lastError, &deterministicCount, &fingerprint, &revision, &availableAt, &parkedAt, &leaseToken, &rerunRequested); err != nil {
 		t.Fatalf("load woken row: %v", err)
 	}
-	if state != queueStatePending || failureKind != "" || lastError != "" || deterministicCount != 0 || fingerprint == "" || fingerprint == "old-fingerprint" || revision != matcherRevision || parkedAt != nil {
+	if state != queueStatePending || failureKind != "" || lastError != "" || deterministicCount != 0 || fingerprint == "" || fingerprint == "old-fingerprint" || revision != seriesMatcherRevision || parkedAt != nil {
 		t.Fatalf("woken row = state:%q failure:%q last:%q deterministic:%d fingerprint:%q revision:%d available:%v parked:%v", state, failureKind, lastError, deterministicCount, fingerprint, revision, availableAt, parkedAt)
 	}
 	if leaseToken != staleLeaseToken || !rerunRequested || availableAt.Before(time.Now().Add(time.Hour)) {

@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,11 +110,19 @@ type parsedAudiobookFile struct {
 //     parsedAudiobookFile with a single synthesized chapter (title =
 //     filename stem); metadata comes from the first file's tags
 //
-// Returns an error wrapping os.ErrNotExist when the folder contains zero
-// audio files, so the caller can skip it.
+// Returns an error wrapping errFolderHasNoMedia when the folder contains zero
+// audio files, so the caller can skip it. Every other error (including an
+// ffprobe binary that cannot be executed) is a real failure and must be
+// reported by the caller.
 func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath string) (*parsedAudiobook, error) {
 	entries, err := os.ReadDir(folderPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// The folder was renamed or deleted between the scan walk and
+			// this read. It holds no media now, so the caller skips it as it
+			// would an empty folder rather than counting a scan failure.
+			return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, errFolderHasNoMedia)
+		}
 		return nil, fmt.Errorf("read audiobook folder %s: %w", folderPath, err)
 	}
 
@@ -127,7 +136,7 @@ func parseAudiobookFolder(ctx context.Context, ffprobePath string, folderPath st
 		}
 	}
 	if len(audioFiles) == 0 {
-		return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, os.ErrNotExist)
+		return nil, fmt.Errorf("audiobook folder %s: %w", folderPath, errFolderHasNoMedia)
 	}
 	sort.Strings(audioFiles)
 

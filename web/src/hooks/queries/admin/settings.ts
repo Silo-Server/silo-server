@@ -10,7 +10,7 @@ import type {
   JellyfinCompatStatus,
   JellyfinCompatWebInstallRequest,
 } from "@/api/types";
-import { adminKeys, themeKeys } from "../keys";
+import { adminKeys, compatKeys, themeKeys } from "../keys";
 import { toast } from "sonner";
 
 type ServerSettings = Record<string, string>;
@@ -112,6 +112,9 @@ export function useUpdateServerSettings() {
       if (keys.some((key) => key.startsWith("jellyfin_compat."))) {
         invalidations.push(
           queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
+          // The user-facing Connect Apps card reads the same settings and
+          // caches them for minutes, so it has to drop its copy too.
+          queryClient.invalidateQueries({ queryKey: compatKeys.all }),
         );
       }
       if (keys.some((key) => key.startsWith("catalog.search."))) {
@@ -224,6 +227,9 @@ export function useUpdateJellyfinCompatSettings() {
         queryClient.invalidateQueries({ queryKey: adminKeys.jellyfinCompatStatus() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.serverSettings() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.serverStatus() }),
+        // Keeps the user-facing Connect Apps card from serving a stale
+        // address after an admin edits it.
+        queryClient.invalidateQueries({ queryKey: compatKeys.all }),
       ]);
     },
     onError: (err) => {

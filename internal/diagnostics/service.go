@@ -18,8 +18,14 @@ import (
 )
 
 const (
-	MaxManifestBytes       = int64(64 * 1024)
-	BundleContentType      = "application/gzip"
+	MaxManifestBytes  = int64(64 * 1024)
+	BundleContentType = "application/gzip"
+	// UploadChunkBytes is the fixed chunk payload size for chunked bundle
+	// uploads. Deliberately well under 1 MiB: chunked uploads exist to pass
+	// reverse proxies that keep nginx's default `client_max_body_size 1m`, so
+	// each chunk request — payload plus multipart/header overhead — must stay
+	// clearly below that floor.
+	UploadChunkBytes       = int64(768 * 1024)
 	diagnosticObjectPrefix = "diagnostics"
 
 	failedUploadCompensationTimeout = 10 * time.Second
@@ -54,6 +60,12 @@ type Status struct {
 	MaxManifestBytes       int64              `json:"max_manifest_bytes"`
 	RetentionDays          int                `json:"retention_days"`
 	ConsentNoticeVersion   int                `json:"consent_notice_version"`
+	// UploadChunkBytes advertises chunked-upload support and the fixed chunk
+	// payload size. Clients that see it may split a bundle across
+	// POST /diagnostics/reports/uploads + chunk PUTs when the single-shot
+	// upload is rejected by a reverse proxy's request-body cap. Absent/zero on
+	// older servers, which clients must treat as "chunking unsupported".
+	UploadChunkBytes int64 `json:"upload_chunk_bytes"`
 }
 
 type IngestResult struct {
@@ -306,6 +318,7 @@ func (s *Service) statusFromSettings(settings Settings) Status {
 		MaxManifestBytes:       MaxManifestBytes,
 		RetentionDays:          settings.RetentionDays,
 		ConsentNoticeVersion:   settings.ConsentNoticeVersion,
+		UploadChunkBytes:       UploadChunkBytes,
 	}
 }
 

@@ -141,7 +141,7 @@ func letterboxFFmpegBinary(ffmpegPath string) string {
 	if trimmed := strings.TrimSpace(ffmpegPath); trimmed != "" {
 		return trimmed
 	}
-	return "ffmpeg"
+	return ffmpegComponent
 }
 
 // parseCropDetect reads cropdetect's "crop=w:h:x:y" lines and converts the last

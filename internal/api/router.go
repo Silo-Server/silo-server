@@ -37,6 +37,7 @@ import (
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
+	"github.com/Silo-Server/silo-server/internal/invitations"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/logstream"
@@ -49,6 +50,7 @@ import (
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/planstore"
@@ -355,6 +357,7 @@ func NewRouter(deps Dependencies) chi.Router {
 	// Build auth handler and auth middleware if DB and config are available.
 	var userRepo *auth.UserRepository
 	var inviteCodeRepo *auth.InviteCodeRepository
+	var invitationService *invitations.Service
 	var apiKeyRepo *auth.APIKeyRepository
 	var authService *auth.Service
 	var authHandler *handlers.AuthHandler
@@ -395,6 +398,17 @@ func NewRouter(deps Dependencies) chi.Router {
 		)
 		for _, registration := range deps.AuthProviders {
 			authService.RegisterProvider(registration.Info, registration.Provider)
+		}
+		if settingsRepo != nil {
+			invitationService = invitations.NewService(
+				invitations.NewRepository(deps.DB),
+				userRepo,
+				auth.NewAccountProvisioner(userRepo, deps.UserStoreProvider),
+				authService,
+				mail.NewSMTPSender(settingsRepo),
+				settingsRepo,
+				deps.PublicURL,
+			)
 		}
 		profileTokenService = access.NewProfileTokenService(deps.Config.Auth.JWTSecret, 0)
 		deviceLoginService = auth.NewDeviceLoginService(
@@ -551,6 +565,10 @@ func NewRouter(deps Dependencies) chi.Router {
 	var catalogSearchService *catalog.CatalogSearchService
 	var webhookSyncHandler *handlers.WebhookSyncHandler
 	var requestHandler *handlers.RequestsHandler
+	var onboardingHandler *handlers.OnboardingHandler
+	// Declared here (assigned in the playback block below) so the onboarding
+	// gates closure can reference it before that block runs.
+	var watchTogetherHandler *handlers.WatchTogetherHandler
 	var autoscanHandler *handlers.AutoscanHandler
 	var ebookReaderHandler *handlers.EbookReaderHandler
 	var ebookProgressStore *handlers.PGEbookReaderProgressStore
@@ -698,6 +716,48 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
+		// Onboarding tour manifest: gates consult live state at request time
+		// so admin toggles apply without a restart. The watch-together gate
+		// reads the handler variable assigned later in this function — by the
+		// time requests are served it is settled.
+		if deps.UserStoreProvider != nil {
+			onboardingGates := onboarding.Gates{
+				Requests: func(ctx context.Context) bool {
+					settings, err := requestsRepo.GetSettings(ctx)
+					return err == nil && settings.RequestsEnabled
+				},
+				WatchTogether: func(context.Context) bool {
+					return watchTogetherHandler != nil
+				},
+				Recommendations: func(ctx context.Context) bool {
+					if settingsRepo == nil {
+						return false
+					}
+					enabled, err := settingsRepo.Get(ctx, "recommendations.enabled")
+					return err == nil && enabled == "true"
+				},
+				Notifications: func(ctx context.Context) bool {
+					// The in-app inbox always exists; the step is about the
+					// wider system, so require a configured delivery channel.
+					return settingsRepo != nil && mail.NewSMTPSender(settingsRepo).Enabled(ctx)
+				},
+				JellyfinCompat: func(ctx context.Context) bool {
+					if settingsRepo == nil {
+						return false
+					}
+					// Unset means the default applies, and the default is on
+					// (config.DefaultAdminSettings) — only an explicit "false"
+					// hides the step.
+					enabled, err := settingsRepo.Get(ctx, "jellyfin_compat.enabled")
+					if err != nil {
+						return false
+					}
+					return strings.TrimSpace(enabled) != "false"
+				},
+			}
+			onboardingHandler = handlers.NewOnboardingHandler(deps.UserStoreProvider, onboardingGates)
+		}
+
 		autoscanRepo := autoscan.NewRepository(deps.DB, deps.SecretCipher)
 		if deps.FolderRepo != nil && deps.LibraryScanQueue != nil && deps.PluginService != nil {
 			autoscanSvc := BuildAutoscanService(
@@ -837,7 +897,6 @@ func NewRouter(deps Dependencies) chi.Router {
 	var adminPlaybackControlHandler *handlers.AdminPlaybackControlHandler
 	var playbackCommandDispatcher *playback.CommandDispatcher
 	var streamHandler *handlers.StreamHandler
-	var watchTogetherHandler *handlers.WatchTogetherHandler
 	if deps.SessionMgr != nil {
 		var playbackAdminStore handlers.PlaybackAdminStore
 		if deps.DB != nil {
@@ -1703,6 +1762,19 @@ func NewRouter(deps Dependencies) chi.Router {
 			}
 			authHandler.SetOAuthRoutesAvailable(oauthHandler != nil)
 
+			if invitationService != nil {
+				invitationHandler := handlers.NewInvitationHandler(invitationService)
+				r.Route("/invitations/{token}", func(r chi.Router) {
+					if deps.RateLimitMW != nil {
+						r.With(deps.RateLimitMW.AuthEndpointHandler("invitation")).Get("/", invitationHandler.HandleLookupInvitation)
+						r.With(deps.RateLimitMW.AuthEndpointHandler("invitation")).Post("/accept", invitationHandler.HandleAcceptInvitation)
+					} else {
+						r.Get("/", invitationHandler.HandleLookupInvitation)
+						r.Post("/accept", invitationHandler.HandleAcceptInvitation)
+					}
+				})
+			}
+
 			r.Route("/auth", func(r chi.Router) {
 				r.Get("/device/capability", authHandler.HandleDeviceCapability)
 				if deps.RateLimitMW != nil {
@@ -1830,7 +1902,41 @@ func NewRouter(deps Dependencies) chi.Router {
 				r.Route("/diagnostics", func(r chi.Router) {
 					r.Get("/status", diagnosticsHandler.HandleStatus)
 					r.Post("/reports", diagnosticsHandler.HandleUpload)
+					// Chunked fallback for bundles a fronting proxy's
+					// request-body cap rejects as one request. Same
+					// ingest/validation path; see diagnostics_chunked.go.
+					r.Route("/reports/uploads", func(r chi.Router) {
+						r.Post("/", diagnosticsHandler.HandleChunkedUploadInit)
+						r.Put("/{upload_id}/chunks/{chunk_index}", diagnosticsHandler.HandleChunkedUploadChunk)
+						r.Post("/{upload_id}/complete", diagnosticsHandler.HandleChunkedUploadComplete)
+						r.Delete("/{upload_id}", diagnosticsHandler.HandleChunkedUploadAbort)
+					})
 				})
+			})
+		}
+
+		// Compatibility-listener connection details. Account-scoped like
+		// diagnostics above: the settings card that renders this describes how
+		// to sign in, so it must not depend on a profile already being chosen.
+		if authMiddleware != nil {
+			// userRepo is a concrete pointer, so it has to stay out of the
+			// interface parameter when unset — a typed nil would satisfy the
+			// handler's nil check and panic on first use.
+			var compatUsers handlers.UserRepository
+			if userRepo != nil {
+				compatUsers = userRepo
+			}
+			compatConnectInfoHandler := handlers.NewCompatConnectInfoHandler(
+				deps.Config,
+				settingsRepo,
+				compatUsers,
+			)
+			r.Group(func(r chi.Router) {
+				r.Use(authMiddleware.RequireAuth)
+				if deps.RateLimitMW != nil {
+					r.Use(deps.RateLimitMW.Handler)
+				}
+				r.Get("/compat/connect-info", compatConnectInfoHandler.HandleGetConnectInfo)
 			})
 		}
 
@@ -2180,6 +2286,16 @@ func NewRouter(deps Dependencies) chi.Router {
 						r.Get("/mine", requestHandler.HandleListMine)
 						r.Get("/{id}", requestHandler.HandleGet)
 						r.Post("/{id}/cancel", requestHandler.HandleCancel)
+					})
+				}
+
+				// Onboarding tour routes (profile-scoped).
+				if onboardingHandler != nil {
+					r.Route("/onboarding", func(r chi.Router) {
+						r.Use(apimw.RequireProfile)
+						r.Get("/flow", onboardingHandler.HandleGetFlow)
+						r.Get("/state", onboardingHandler.HandleGetState)
+						r.Post("/progress", onboardingHandler.HandlePostProgress)
 					})
 				}
 
@@ -2852,6 +2968,16 @@ func NewRouter(deps Dependencies) chi.Router {
 								})
 							}
 
+							if invitationService != nil {
+								adminInvitationHandler := handlers.NewAdminInvitationHandler(invitationService)
+								r.Route("/invitations", func(r chi.Router) {
+									r.Get("/", adminInvitationHandler.HandleListInvitations)
+									r.Post("/", adminInvitationHandler.HandleCreateInvitation)
+									r.Post("/{id}/resend", adminInvitationHandler.HandleResendInvitation)
+									r.Delete("/{id}", adminInvitationHandler.HandleRevokeInvitation)
+								})
+							}
+
 							if inviteCodeRepo != nil {
 								inviteCodeHandler := handlers.NewInviteCodeHandler(inviteCodeRepo)
 								r.Route("/invite-codes", func(r chi.Router) {
@@ -3323,15 +3449,29 @@ type scopeEntitlementResolver struct {
 }
 
 func (r scopeEntitlementResolver) MaxPlaybackQuality(ctx context.Context, userID int, profileID string) (string, error) {
-	scope, err := r.resolver.Resolve(ctx, access.ResolveInput{
-		UserID:              userID,
-		ProfileID:           profileID,
-		SkipPINVerification: true,
-	})
+	scope, err := r.resolveScope(ctx, userID, profileID)
 	if err != nil {
 		return "", err
 	}
 	return scope.MaxPlaybackQuality, nil
+}
+
+// MaxContentRating implements mediarequests.ContentRatingResolver so request
+// discovery honors the profile's parental rating ceiling.
+func (r scopeEntitlementResolver) MaxContentRating(ctx context.Context, userID int, profileID string) (string, error) {
+	scope, err := r.resolveScope(ctx, userID, profileID)
+	if err != nil {
+		return "", err
+	}
+	return scope.MaxContentRating, nil
+}
+
+func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, profileID string) (access.Scope, error) {
+	return r.resolver.Resolve(ctx, access.ResolveInput{
+		UserID:              userID,
+		ProfileID:           profileID,
+		SkipPINVerification: true,
+	})
 }
 
 // metadataAIConfigFromServer derives the metadata translation service config

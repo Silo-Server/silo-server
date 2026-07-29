@@ -34,6 +34,11 @@ type extraFileFetcher interface {
 	GetByExtraID(ctx context.Context, extraID string) ([]*models.MediaFile, error)
 }
 
+type batchDurationFetcher interface {
+	FirstDurationsByContentIDs(ctx context.Context, ids []string) (map[string]int, error)
+	FirstDurationsByEpisodeIDs(ctx context.Context, ids []string) (map[string]int, error)
+}
+
 type PlaybackProbeEnsurer interface {
 	Ensure(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error)
 }
@@ -88,6 +93,42 @@ type WorkFormatSummary struct {
 	Type      string `json:"type"`
 	ContentID string `json:"content_id"`
 	LibraryID int    `json:"library_id,omitempty"`
+}
+
+// ProbedDurationsByContentIDs resolves first-file probed durations when the
+// configured file fetcher supports the optional batch extension.
+func (s *DetailService) ProbedDurationsByContentIDs(ctx context.Context, ids []string) map[string]int {
+	if s == nil || s.fileFetcher == nil || len(ids) == 0 {
+		return nil
+	}
+	fetcher, ok := s.fileFetcher.(batchDurationFetcher)
+	if !ok {
+		return nil
+	}
+	durations, err := fetcher.FirstDurationsByContentIDs(ctx, ids)
+	if err != nil {
+		slog.Warn("failed to fetch probed content durations", "error", err, "id_count", len(ids))
+		return nil
+	}
+	return durations
+}
+
+// ProbedDurationsByEpisodeIDs resolves first-file probed durations when the
+// configured file fetcher supports the optional batch extension.
+func (s *DetailService) ProbedDurationsByEpisodeIDs(ctx context.Context, ids []string) map[string]int {
+	if s == nil || s.fileFetcher == nil || len(ids) == 0 {
+		return nil
+	}
+	fetcher, ok := s.fileFetcher.(batchDurationFetcher)
+	if !ok {
+		return nil
+	}
+	durations, err := fetcher.FirstDurationsByEpisodeIDs(ctx, ids)
+	if err != nil {
+		slog.Warn("failed to fetch probed episode durations", "error", err, "id_count", len(ids))
+		return nil
+	}
+	return durations
 }
 
 // ItemDetail is the full detail response for a single media item, including

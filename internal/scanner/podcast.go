@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,8 +30,9 @@ type parsedPodcastEpisode struct {
 // becomes one episode; tags are read from each file individually so
 // per-episode titles surface correctly.
 //
-// Returns an os.ErrNotExist-wrapped error if the folder contains zero
-// audio files.
+// Returns an errFolderHasNoMedia-wrapped error if the folder contains zero
+// audio files. Every other error (including an ffprobe binary that cannot be
+// executed) is a real failure and must be reported by the caller.
 func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string) (*parsedPodcastShow, error) {
 	audioFiles, err := listPodcastShowAudioFiles(folderPath)
 	if err != nil {
@@ -73,6 +75,11 @@ func parsePodcastShow(ctx context.Context, ffprobePath string, folderPath string
 func listPodcastShowAudioFiles(folderPath string) ([]string, error) {
 	entries, err := os.ReadDir(folderPath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Renamed or deleted between the scan walk and this read; treat
+			// it as an empty show so the caller skips instead of failing.
+			return nil, fmt.Errorf("podcast show %s: %w", folderPath, errFolderHasNoMedia)
+		}
 		return nil, fmt.Errorf("read podcast folder %s: %w", folderPath, err)
 	}
 	var audioFiles []string
@@ -85,7 +92,7 @@ func listPodcastShowAudioFiles(folderPath string) ([]string, error) {
 		}
 	}
 	if len(audioFiles) == 0 {
-		return nil, fmt.Errorf("podcast show %s: %w", folderPath, os.ErrNotExist)
+		return nil, fmt.Errorf("podcast show %s: %w", folderPath, errFolderHasNoMedia)
 	}
 	sort.Strings(audioFiles)
 	return audioFiles, nil

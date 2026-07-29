@@ -17,6 +17,15 @@ const cropDetectSample = `
 [Parsed_cropdetect_0 @ 0x600000] x1:0 x2:1919 y1:139 y2:939 w:1920 h:800 x:0 y:140 pts:12387 t:0.556 crop=1920:800:0:140
 `
 
+const (
+	letterboxTestContainer   = "mkv"
+	letterboxTestVideoCodec  = "h264"
+	letterboxTestAudioCodec  = "aac"
+	letterboxTestResolution  = "1080p"
+	letterboxTestVideoRange  = "SDR"
+	letterboxTestAudioLayout = "stereo"
+)
+
 func TestParseCropDetectReadsBarsAsFrameFractions(t *testing.T) {
 	got, ok := parseCropDetect(cropDetectSample, 1080)
 	if !ok {
@@ -260,10 +269,10 @@ func TestNilCacheIsInert(t *testing.T) {
 // route or delivery choice may alter or drop it.
 func TestPlannerPublishesLetterboxOnTheSource(t *testing.T) {
 	file := &models.MediaFile{
-		ID: 7, FilePath: "/media/scope.mkv", Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
-		Resolution: "1080p", Bitrate: 12_000, AudioChannels: 2,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24000/1001", Bitrate: 12_000, BitDepth: 8, VideoRange: "SDR", VideoRangeType: "SDR"}},
-		AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2, Layout: "stereo"}},
+		ID: 7, FilePath: "/media/scope.mkv", Container: letterboxTestContainer, CodecVideo: letterboxTestVideoCodec, CodecAudio: letterboxTestAudioCodec,
+		Resolution: letterboxTestResolution, Bitrate: 12_000, AudioChannels: 2,
+		VideoTracks: []models.VideoTrack{{Codec: letterboxTestVideoCodec, Profile: "High", Level: 40, Width: 1920, Height: 1080, FrameRate: "24", Bitrate: 12_000, BitDepth: 8, VideoRange: letterboxTestVideoRange, VideoRangeType: letterboxTestVideoRange}},
+		AudioTracks: []models.AudioTrack{{Codec: letterboxTestAudioCodec, Channels: 2, Layout: letterboxTestAudioLayout}},
 	}
 
 	result := PlanPlaybackV3(PlannerInputV3{

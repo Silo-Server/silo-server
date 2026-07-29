@@ -1,11 +1,14 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
   getProfileMenuSide,
   groupAppNavLinks,
   isSidebarExpanded,
+  isSidebarRailCollapsed,
+  libraryRowShift,
+  sidebarSurfaceStyle,
   type AppNavLink,
 } from "@/components/AppSidebar.logic";
 import { SiloBrand } from "@/components/SiloBrand";
@@ -88,13 +91,14 @@ function getLibraryIdFromPathname(pathname: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+/**
+ * Nav row label. The surface never changes width, so labels keep their full
+ * layout box in both states and only fade — the moving frame hides them. Animating
+ * `max-width` here used to reflow the whole nav subtree on every frame.
+ */
 function SidebarLabel({ children, show }: { children: ReactNode; show: boolean }) {
   return (
-    <span
-      className={`truncate transition-[opacity,max-width] duration-200 ease-out ${
-        show ? "max-w-[180px] opacity-100 delay-[50ms]" : "max-w-0 overflow-hidden opacity-0"
-      }`}
-    >
+    <span className={`sidebar-fade max-w-[180px] truncate ${show ? "opacity-100" : "opacity-0"}`}>
       {children}
     </span>
   );
@@ -115,9 +119,12 @@ function SidebarSectionHeader({
 }) {
   const textClass = "text-muted-foreground text-[10px] font-semibold tracking-[0.22em] uppercase";
 
+  // Centred on the 64px rail, not on the 260px surface. `-left-3` cancels the
+  // nav's own `px-3`, so this box starts at the sidebar's left edge and spans
+  // exactly the rail — otherwise the dash sits 12px right of centre.
   const collapsedDivider = (
     <div
-      className={`absolute inset-0 flex items-center justify-center transition-opacity duration-150 ${
+      className={`sidebar-fade absolute inset-y-0 -left-3 flex w-16 items-center justify-center ${
         show ? "pointer-events-none opacity-0" : "opacity-100"
       }`}
       aria-hidden="true"
@@ -138,7 +145,7 @@ function SidebarSectionHeader({
           aria-expanded={expanded}
           aria-label={expanded ? `Collapse ${String(children)}` : `Expand ${String(children)}`}
           tabIndex={show ? 0 : -1}
-          className={`${textClass} hover:text-sidebar-foreground flex h-5 w-full items-center gap-1 px-3 transition-opacity duration-150 ${
+          className={`${textClass} sidebar-fade hover:text-sidebar-foreground flex h-5 w-full items-center gap-1 px-3 ${
             show ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -154,7 +161,7 @@ function SidebarSectionHeader({
       {collapsedDivider}
       <div
         aria-hidden={!show}
-        className={`${textClass} flex h-5 items-center transition-opacity duration-150 ${
+        className={`${textClass} sidebar-fade flex h-5 items-center ${
           show ? "opacity-100" : "opacity-0"
         }`}
       >
@@ -252,6 +259,7 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
 
   const sidebarExpanded = isSidebarExpanded(collapsed, hovered, profileMenuOpen);
   const showLabels = sidebarExpanded;
+  const railCollapsed = isSidebarRailCollapsed(collapsed, sidebarExpanded);
   const [librariesExpanded, setLibrariesExpanded] = useState(true);
   const [expandedLibraries, setExpandedLibraries] = useState<Set<number>>(
     () =>
@@ -336,578 +344,624 @@ export default function AppSidebar({ onNavigate, collapsed = false }: AppSidebar
   );
 
   return (
+    // The surface is 260px wide in every state; `data-collapsed` only drives the
+    // moving overflow frame that narrows it to the 64px rail. The right border lives on a
+    // border box, so the border rides along and lands exactly on the rail edge.
     <aside
-      className={`border-sidebar-border/70 bg-sidebar/88 sidebar-transition fixed top-0 bottom-0 left-0 z-40 flex flex-col border-r backdrop-blur-2xl ${collapsed && !sidebarExpanded ? "w-16" : "w-[260px]"}`}
+      data-collapsed={railCollapsed ? "true" : undefined}
+      className="border-sidebar-border/70 sidebar-surface fixed top-0 bottom-0 left-0 z-40 w-[260px] overflow-hidden border-r"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      style={
-        collapsed && sidebarExpanded
-          ? { zIndex: 45, boxShadow: "0 25px 50px -12px rgb(0 0 0 / 0.5)" }
-          : undefined
-      }
+      style={sidebarSurfaceStyle({ collapsed, sidebarExpanded })}
     >
-      {/* Logo */}
-      <div
-        className={`sidebar-logo flex items-center py-6 ${showLabels ? "px-5" : "justify-center px-2"}`}
-      >
-        <SiloBrand
-          variant={showLabels ? "wordmark" : "mark"}
-          className={showLabels ? "h-12 w-[112px]" : "h-9 w-9"}
-        />
-      </div>
+      {/* Counter-translated by exactly what the frame above moves, so every
+          pixel of the sidebar stays put on screen while the frame's edge wipes
+          across it. The blur lives here rather than on the frame precisely
+          because this layer never moves relative to the viewport — its 40px
+          backdrop is sampled from a region that never changes. */}
+      <div className="bg-sidebar/88 sidebar-inner flex h-full w-[260px] flex-col backdrop-blur-2xl">
+        {/* Logo — the wordmark and the mark cross-fade in place. Swapping the
+          variant outright would pop at the very start of the collapse. */}
+        <div className="sidebar-logo relative flex h-24 items-center">
+          <span
+            aria-hidden={!showLabels}
+            className={`sidebar-fade absolute left-5 ${showLabels ? "opacity-100" : "opacity-0"}`}
+          >
+            <SiloBrand variant="wordmark" className="h-12 w-[112px]" />
+          </span>
+          <span
+            aria-hidden={showLabels}
+            className={`sidebar-fade absolute left-3.5 ${showLabels ? "opacity-0" : "opacity-100"}`}
+          >
+            <SiloBrand variant="mark" className="h-9 w-9" />
+          </span>
+        </div>
 
-      {/* Main nav */}
-      <nav
-        aria-label="Main navigation"
-        className="sidebar-nav sidebar-scroll flex-1 space-y-7 overflow-y-auto px-3 pb-5"
-      >
-        {/* Home */}
-        <ul className="list-none space-y-0.5">
-          <li>
-            <ViewTransitionLink
-              to="/"
-              onClick={onNavigate}
-              className={navLinkClass("/", true)}
-              aria-current={isActive("/", true) ? "page" : undefined}
-            >
-              {isActive("/", true) && (
-                <span
-                  className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                  style={{ background: "var(--primary)" }}
-                />
-              )}
-              <Home className="h-[18px] w-[18px] shrink-0" />
-              <SidebarLabel show={showLabels}>Home</SidebarLabel>
-            </ViewTransitionLink>
-          </li>
-        </ul>
-
-        {/* Libraries */}
-        {libraries && libraries.length > 0 && (
-          <div className="sidebar-libraries">
-            <SidebarSectionHeader
-              show={showLabels}
-              collapsible
-              expanded={librariesExpanded}
-              onToggle={() => setLibrariesExpanded((v) => !v)}
-            >
-              Libraries
-            </SidebarSectionHeader>
-            {(showLabels ? librariesExpanded : true) && (
-              <ul className="list-none space-y-0.5">
-                {libraries.map((lib) => {
-                  const baseHref = `/library/${lib.id}`;
-                  const active = activeLibraryId === lib.id;
-                  const href =
-                    active && location.pathname === baseHref
-                      ? `${baseHref}${location.search}`
-                      : baseHref;
-                  const libraryPins = pins[String(lib.id)] ?? [];
-                  const hasPins = libraryPins.length > 0;
-                  const isExpanded = hasPins && !expandedLibraries.has(lib.id);
-
-                  return (
-                    <li key={lib.id}>
-                      {/* Library row: chevron (if pins) + icon + name link */}
-                      <div
-                        className={`relative flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150 ${
-                          active
-                            ? "text-sidebar-accent-foreground bg-sidebar-accent"
-                            : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent"
-                        }`}
-                      >
-                        {active && (
-                          <span
-                            className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                            style={{ background: "var(--primary)" }}
-                          />
-                        )}
-                        {showLabels && hasPins ? (
-                          <button
-                            type="button"
-                            onClick={() => toggleLibraryExpand(lib.id)}
-                            className="flex h-full items-center py-3 pr-1 pl-3"
-                            aria-label={isExpanded ? `Collapse ${lib.name}` : `Expand ${lib.name}`}
-                            aria-expanded={isExpanded}
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-                            ) : (
-                              <ChevronRight className="h-3.5 w-3.5 opacity-60" />
-                            )}
-                          </button>
-                        ) : showLabels ? (
-                          <span className="w-3 shrink-0 pl-3" />
-                        ) : null}
-                        <ViewTransitionLink
-                          to={href}
-                          onClick={onNavigate}
-                          className={`flex items-center gap-2.5 py-2.5 ${
-                            showLabels ? "flex-1 pr-3" : "w-full px-3"
-                          }`}
-                          aria-current={active ? "page" : undefined}
-                        >
-                          <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
-                            {getLibraryIcon(lib.type)}
-                          </span>
-                          <SidebarLabel show={showLabels}>{lib.name}</SidebarLabel>
-                        </ViewTransitionLink>
-                      </div>
-
-                      {/* Pinned items under this library — hidden when collapsed */}
-                      {showLabels && hasPins && isExpanded && (
-                        <div className="border-sidebar-border ml-3 space-y-0.5 border-l pl-2">
-                          {libraryPins.map((pin) => {
-                            const pinHref =
-                              pin.type === "collection"
-                                ? buildLibraryCollectionCatalogHref(pin.id, pin.label)
-                                : buildSectionCatalogHref({
-                                    scope: "library",
-                                    libraryId: lib.id,
-                                    sectionId: pin.id,
-                                    title: pin.label,
-                                  });
-                            const pinActive = isPinnedCatalogActive(lib.id, pin);
-
-                            return (
-                              <div
-                                key={`${pin.type}-${pin.id}`}
-                                className="group/pin relative flex items-center"
-                              >
-                                <ViewTransitionLink
-                                  to={pinHref}
-                                  onClick={onNavigate}
-                                  className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[12.5px] font-medium transition-colors duration-150 ${
-                                    pinActive
-                                      ? "text-sidebar-accent-foreground bg-sidebar-accent/90"
-                                      : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
-                                  }`}
-                                >
-                                  {pin.type === "collection" ? (
-                                    <FolderOpen className="h-3.5 w-3.5 opacity-60" />
-                                  ) : (
-                                    <LayoutGrid className="h-3.5 w-3.5 opacity-60" />
-                                  )}
-                                  <span className="truncate">{pin.label}</span>
-                                </ViewTransitionLink>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    togglePin(lib.id, {
-                                      type: pin.type,
-                                      id: pin.id,
-                                      label: pin.label,
-                                    })
-                                  }
-                                  className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
-                                  title="Unpin"
-                                >
-                                  <PinOff className="h-3 w-3" />
-                                </button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {/* Discover */}
-        <div>
-          <SidebarSectionHeader show={showLabels}>Discover</SidebarSectionHeader>
+        {/* Main nav */}
+        <nav
+          aria-label="Main navigation"
+          className="sidebar-nav sidebar-scroll flex-1 space-y-7 overflow-y-auto px-3 pb-5"
+        >
+          {/* Home */}
           <ul className="list-none space-y-0.5">
             <li>
               <ViewTransitionLink
-                to={buildQueryCatalogHref()}
+                to="/"
                 onClick={onNavigate}
-                className={navLinkClassForState(isCatalogSourceActive("query"))}
-                aria-current={isCatalogSourceActive("query") ? "page" : undefined}
+                className={navLinkClass("/", true)}
+                aria-current={isActive("/", true) ? "page" : undefined}
               >
-                {isCatalogSourceActive("query") && (
+                {isActive("/", true) && (
                   <span
                     className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
                     style={{ background: "var(--primary)" }}
                   />
                 )}
-                <Search className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Search</SidebarLabel>
-                {showLabels && (
-                  <kbd className="bg-muted text-muted-foreground pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none lg:inline-flex">
+                <Home className="h-[18px] w-[18px] shrink-0" />
+                <SidebarLabel show={showLabels}>Home</SidebarLabel>
+              </ViewTransitionLink>
+            </li>
+          </ul>
+
+          {/* Libraries */}
+          {libraries && libraries.length > 0 && (
+            <div className="sidebar-libraries">
+              <SidebarSectionHeader
+                show={showLabels}
+                collapsible
+                expanded={librariesExpanded}
+                onToggle={() => setLibrariesExpanded((v) => !v)}
+              >
+                Libraries
+              </SidebarSectionHeader>
+              {(showLabels ? librariesExpanded : true) && (
+                <ul className="list-none space-y-0.5">
+                  {libraries.map((lib) => {
+                    const baseHref = `/library/${lib.id}`;
+                    const active = activeLibraryId === lib.id;
+                    const href =
+                      active && location.pathname === baseHref
+                        ? `${baseHref}${location.search}`
+                        : baseHref;
+                    const libraryPins = pins[String(lib.id)] ?? [];
+                    const hasPins = libraryPins.length > 0;
+                    const isExpanded = hasPins && !expandedLibraries.has(lib.id);
+
+                    return (
+                      <li key={lib.id}>
+                        {/* Library row: chevron (if pins) + icon + name link */}
+                        <div
+                          className={`relative flex items-center rounded-lg text-[13px] font-medium transition-colors duration-150 ${
+                            active
+                              ? "text-sidebar-accent-foreground bg-sidebar-accent"
+                              : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                          }`}
+                        >
+                          {active && (
+                            <span
+                              className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                              style={{ background: "var(--primary)" }}
+                            />
+                          )}
+                          {/* The chevron slot is reserved in both states so the
+                            row never reflows; on the rail the whole row slides
+                            left by the slot width instead, which lines the
+                            library icons up with the rest of the column. */}
+                          <div
+                            className="sidebar-row-shift flex flex-1 items-center"
+                            style={
+                              { "--sidebar-row-shift": libraryRowShift(hasPins) } as CSSProperties
+                            }
+                          >
+                            {hasPins ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleLibraryExpand(lib.id)}
+                                disabled={!showLabels}
+                                aria-hidden={!showLabels}
+                                tabIndex={showLabels ? 0 : -1}
+                                className={`sidebar-fade flex h-full items-center py-3 pr-1 pl-3 ${
+                                  showLabels ? "opacity-100" : "pointer-events-none opacity-0"
+                                }`}
+                                aria-label={
+                                  isExpanded ? `Collapse ${lib.name}` : `Expand ${lib.name}`
+                                }
+                                aria-expanded={isExpanded}
+                              >
+                                {isExpanded ? (
+                                  <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                                ) : (
+                                  <ChevronRight className="h-3.5 w-3.5 opacity-60" />
+                                )}
+                              </button>
+                            ) : (
+                              <span className="w-3 shrink-0 pl-3" />
+                            )}
+                            <ViewTransitionLink
+                              to={href}
+                              onClick={onNavigate}
+                              className="flex flex-1 items-center gap-2.5 py-2.5 pr-3"
+                              aria-current={active ? "page" : undefined}
+                            >
+                              <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
+                                {getLibraryIcon(lib.type)}
+                              </span>
+                              <SidebarLabel show={showLabels}>{lib.name}</SidebarLabel>
+                            </ViewTransitionLink>
+                          </div>
+                        </div>
+
+                        {/* Pinned items under this library — hidden when collapsed */}
+                        {showLabels && hasPins && isExpanded && (
+                          <div className="border-sidebar-border ml-3 space-y-0.5 border-l pl-2">
+                            {libraryPins.map((pin) => {
+                              const pinHref =
+                                pin.type === "collection"
+                                  ? buildLibraryCollectionCatalogHref(pin.id, pin.label)
+                                  : buildSectionCatalogHref({
+                                      scope: "library",
+                                      libraryId: lib.id,
+                                      sectionId: pin.id,
+                                      title: pin.label,
+                                    });
+                              const pinActive = isPinnedCatalogActive(lib.id, pin);
+
+                              return (
+                                <div
+                                  key={`${pin.type}-${pin.id}`}
+                                  className="group/pin relative flex items-center"
+                                >
+                                  <ViewTransitionLink
+                                    to={pinHref}
+                                    onClick={onNavigate}
+                                    className={`flex flex-1 items-center gap-2 rounded-xl px-2.5 py-2.5 text-[12.5px] font-medium transition-colors duration-150 ${
+                                      pinActive
+                                        ? "text-sidebar-accent-foreground bg-sidebar-accent/90"
+                                        : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent/70"
+                                    }`}
+                                  >
+                                    {pin.type === "collection" ? (
+                                      <FolderOpen className="h-3.5 w-3.5 opacity-60" />
+                                    ) : (
+                                      <LayoutGrid className="h-3.5 w-3.5 opacity-60" />
+                                    )}
+                                    <span className="truncate">{pin.label}</span>
+                                  </ViewTransitionLink>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      togglePin(lib.id, {
+                                        type: pin.type,
+                                        id: pin.id,
+                                        label: pin.label,
+                                      })
+                                    }
+                                    className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
+                                    title="Unpin"
+                                  >
+                                    <PinOff className="h-3 w-3" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Discover */}
+          <div>
+            <SidebarSectionHeader show={showLabels}>Discover</SidebarSectionHeader>
+            <ul className="list-none space-y-0.5">
+              <li>
+                <ViewTransitionLink
+                  to={buildQueryCatalogHref()}
+                  onClick={onNavigate}
+                  className={navLinkClassForState(isCatalogSourceActive("query"))}
+                  aria-current={isCatalogSourceActive("query") ? "page" : undefined}
+                >
+                  {isCatalogSourceActive("query") && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <Search className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Search</SidebarLabel>
+                  <kbd
+                    aria-hidden={!showLabels}
+                    className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none lg:inline-flex ${
+                      showLabels ? "opacity-100" : "opacity-0"
+                    }`}
+                  >
                     {"\u2318"}K
                   </kbd>
-                )}
-              </ViewTransitionLink>
-            </li>
-            <li>
-              <ViewTransitionLink
-                to="/recommendations"
-                onClick={onNavigate}
-                className={navLinkClass("/recommendations")}
-                aria-current={isActive("/recommendations") ? "page" : undefined}
-              >
-                {isActive("/recommendations") && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <Sparkles className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Recommendations</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-            {showRequestsNav && (
-              <li>
-                <ViewTransitionLink
-                  to="/requests"
-                  onClick={onNavigate}
-                  className={navLinkClass("/requests")}
-                  aria-current={isActive("/requests") ? "page" : undefined}
-                >
-                  {isActive("/requests") && (
-                    <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                      style={{ background: "var(--primary)" }}
-                    />
-                  )}
-                  <Send className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Requests</SidebarLabel>
                 </ViewTransitionLink>
               </li>
-            )}
-            <li>
-              <ViewTransitionLink
-                to="/calendar"
-                onClick={onNavigate}
-                className={navLinkClass("/calendar")}
-                aria-current={isActive("/calendar") ? "page" : undefined}
-              >
-                {isActive("/calendar") && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <CalendarDays className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-            {showNotificationsNav && (
               <li>
                 <ViewTransitionLink
-                  to="/notifications"
+                  to="/recommendations"
                   onClick={onNavigate}
-                  className={navLinkClass("/notifications")}
-                  aria-current={isActive("/notifications") ? "page" : undefined}
+                  className={navLinkClass("/recommendations")}
+                  aria-current={isActive("/recommendations") ? "page" : undefined}
                 >
-                  {isActive("/notifications") && (
+                  {isActive("/recommendations") && (
                     <span
                       className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
                       style={{ background: "var(--primary)" }}
                     />
                   )}
-                  <span className="relative shrink-0">
-                    <Bell className="h-[18px] w-[18px] shrink-0" />
-                    {!showLabels && (unreadNotifications ?? 0) > 0 && (
+                  <Sparkles className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Recommendations</SidebarLabel>
+                </ViewTransitionLink>
+              </li>
+              {showRequestsNav && (
+                <li>
+                  <ViewTransitionLink
+                    to="/requests"
+                    onClick={onNavigate}
+                    className={navLinkClass("/requests")}
+                    aria-current={isActive("/requests") ? "page" : undefined}
+                  >
+                    {isActive("/requests") && (
                       <span
-                        className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full"
+                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
                         style={{ background: "var(--primary)" }}
                       />
                     )}
-                  </span>
-                  <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
-                  {showLabels && (unreadNotifications ?? 0) > 0 && (
+                    <Send className="h-[18px] w-[18px] shrink-0" />
+                    <SidebarLabel show={showLabels}>Requests</SidebarLabel>
+                  </ViewTransitionLink>
+                </li>
+              )}
+              <li>
+                <ViewTransitionLink
+                  to="/calendar"
+                  onClick={onNavigate}
+                  className={navLinkClass("/calendar")}
+                  aria-current={isActive("/calendar") ? "page" : undefined}
+                >
+                  {isActive("/calendar") && (
                     <span
-                      className="ml-auto rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold"
-                      style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
-                    >
-                      {(unreadNotifications ?? 0) > 99 ? "99+" : unreadNotifications}
-                    </span>
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
                   )}
+                  <CalendarDays className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
                 </ViewTransitionLink>
               </li>
-            )}
-          </ul>
-        </div>
+              {showNotificationsNav && (
+                <li>
+                  <ViewTransitionLink
+                    to="/notifications"
+                    onClick={onNavigate}
+                    className={navLinkClass("/notifications")}
+                    aria-current={isActive("/notifications") ? "page" : undefined}
+                  >
+                    {isActive("/notifications") && (
+                      <span
+                        className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                        style={{ background: "var(--primary)" }}
+                      />
+                    )}
+                    <span className="relative shrink-0">
+                      <Bell className="h-[18px] w-[18px] shrink-0" />
+                      {(unreadNotifications ?? 0) > 0 && (
+                        <span
+                          aria-hidden="true"
+                          className={`sidebar-fade absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
+                            showLabels ? "opacity-0" : "opacity-100"
+                          }`}
+                          style={{ background: "var(--primary)" }}
+                        />
+                      )}
+                    </span>
+                    <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
+                    {(unreadNotifications ?? 0) > 0 && (
+                      <span
+                        className={`sidebar-fade ml-auto rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold ${
+                          showLabels ? "opacity-100" : "opacity-0"
+                        }`}
+                        style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+                      >
+                        {(unreadNotifications ?? 0) > 99 ? "99+" : unreadNotifications}
+                      </span>
+                    )}
+                  </ViewTransitionLink>
+                </li>
+              )}
+            </ul>
+          </div>
 
-        {/* Your Stuff */}
-        <div className="sidebar-personal">
-          <SidebarSectionHeader show={showLabels}>Your Stuff</SidebarSectionHeader>
-          <ul className="list-none space-y-0.5">
-            <li>
-              <ViewTransitionLink
-                to={buildPersonalCatalogHref("favorites")}
-                onClick={onNavigate}
-                className={navLinkClassForState(isCatalogSourceActive("favorites"))}
-                aria-current={isCatalogSourceActive("favorites") ? "page" : undefined}
-              >
-                {isCatalogSourceActive("favorites") && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <Heart className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Favorites</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-            <li>
-              <ViewTransitionLink
-                to={buildPersonalCatalogHref("watchlist")}
-                onClick={onNavigate}
-                className={navLinkClassForState(isCatalogSourceActive("watchlist"))}
-                aria-current={isCatalogSourceActive("watchlist") ? "page" : undefined}
-              >
-                {isCatalogSourceActive("watchlist") && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <List className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Watchlist</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-            <li>
-              <ViewTransitionLink
-                to="/rooms/join"
-                onClick={onNavigate}
-                className={navLinkClass("/rooms/join")}
-                aria-current={isActive("/rooms/join") ? "page" : undefined}
-              >
-                {isActive("/rooms/join") && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <UsersRound className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Watch Party</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-            <li>
-              <ViewTransitionLink
-                to="/collections"
-                onClick={onNavigate}
-                className={navLinkClass("/collections")}
-                aria-current={isActive("/collections") ? "page" : undefined}
-              >
-                {isActive("/collections") && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <FolderOpen className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Collections</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-            <li>
-              <ViewTransitionLink
-                to={buildPersonalCatalogHref("history")}
-                onClick={onNavigate}
-                className={navLinkClassForState(isCatalogSourceActive("history"))}
-                aria-current={isCatalogSourceActive("history") ? "page" : undefined}
-              >
-                {isCatalogSourceActive("history") && (
-                  <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
-                    style={{ background: "var(--primary)" }}
-                  />
-                )}
-                <Clock className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>History</SidebarLabel>
-              </ViewTransitionLink>
-            </li>
-          </ul>
-        </div>
+          {/* Your Stuff */}
+          <div className="sidebar-personal">
+            <SidebarSectionHeader show={showLabels}>Your Stuff</SidebarSectionHeader>
+            <ul className="list-none space-y-0.5">
+              <li>
+                <ViewTransitionLink
+                  to={buildPersonalCatalogHref("favorites")}
+                  onClick={onNavigate}
+                  className={navLinkClassForState(isCatalogSourceActive("favorites"))}
+                  aria-current={isCatalogSourceActive("favorites") ? "page" : undefined}
+                >
+                  {isCatalogSourceActive("favorites") && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <Heart className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Favorites</SidebarLabel>
+                </ViewTransitionLink>
+              </li>
+              <li>
+                <ViewTransitionLink
+                  to={buildPersonalCatalogHref("watchlist")}
+                  onClick={onNavigate}
+                  className={navLinkClassForState(isCatalogSourceActive("watchlist"))}
+                  aria-current={isCatalogSourceActive("watchlist") ? "page" : undefined}
+                >
+                  {isCatalogSourceActive("watchlist") && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <List className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Watchlist</SidebarLabel>
+                </ViewTransitionLink>
+              </li>
+              <li>
+                <ViewTransitionLink
+                  to="/rooms/join"
+                  onClick={onNavigate}
+                  className={navLinkClass("/rooms/join")}
+                  aria-current={isActive("/rooms/join") ? "page" : undefined}
+                >
+                  {isActive("/rooms/join") && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <UsersRound className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Watch Party</SidebarLabel>
+                </ViewTransitionLink>
+              </li>
+              <li>
+                <ViewTransitionLink
+                  to="/collections"
+                  onClick={onNavigate}
+                  className={navLinkClass("/collections")}
+                  aria-current={isActive("/collections") ? "page" : undefined}
+                >
+                  {isActive("/collections") && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <FolderOpen className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>Collections</SidebarLabel>
+                </ViewTransitionLink>
+              </li>
+              <li>
+                <ViewTransitionLink
+                  to={buildPersonalCatalogHref("history")}
+                  onClick={onNavigate}
+                  className={navLinkClassForState(isCatalogSourceActive("history"))}
+                  aria-current={isCatalogSourceActive("history") ? "page" : undefined}
+                >
+                  {isCatalogSourceActive("history") && (
+                    <span
+                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      style={{ background: "var(--primary)" }}
+                    />
+                  )}
+                  <Clock className="h-[18px] w-[18px] shrink-0" />
+                  <SidebarLabel show={showLabels}>History</SidebarLabel>
+                </ViewTransitionLink>
+              </li>
+            </ul>
+          </div>
 
-        {/* Apps (plugin-supplied user navigation), grouped by the first
+          {/* Apps (plugin-supplied user navigation), grouped by the first
             segment of the manifest's slash-delimited category when 2+
             distinct categories exist; flat list otherwise. */}
-        {pluginNavLinks.length > 0 && (
-          <div className="sidebar-apps">
-            <SidebarSectionHeader show={showLabels}>Apps</SidebarSectionHeader>
-            {pluginNavGroups ? (
-              <div className="space-y-3">
-                {pluginNavGroups.map((group) => (
-                  <div key={group.category} className="sidebar-apps-group">
-                    <SidebarSectionHeader show={showLabels}>{group.category}</SidebarSectionHeader>
-                    {renderAppNavList(group.links)}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              renderAppNavList(pluginNavLinks)
-            )}
-          </div>
-        )}
-      </nav>
+          {pluginNavLinks.length > 0 && (
+            <div className="sidebar-apps">
+              <SidebarSectionHeader show={showLabels}>Apps</SidebarSectionHeader>
+              {pluginNavGroups ? (
+                <div className="space-y-3">
+                  {pluginNavGroups.map((group) => (
+                    <div key={group.category} className="sidebar-apps-group">
+                      <SidebarSectionHeader show={showLabels}>
+                        {group.category}
+                      </SidebarSectionHeader>
+                      {renderAppNavList(group.links)}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                renderAppNavList(pluginNavLinks)
+              )}
+            </div>
+          )}
+        </nav>
 
-      {/* Footer */}
-      <div className="sidebar-footer border-sidebar-border/70 space-y-2 border-t px-3 py-3">
-        {showAdminNav && (
-          <Link
-            to="/admin"
-            onClick={onNavigate}
-            className={navLinkClass("/admin")}
-            aria-current={isActive("/admin") ? "page" : undefined}
-          >
-            <Shield className="h-[18px] w-[18px] shrink-0" />
-            <SidebarLabel show={showLabels}>Admin</SidebarLabel>
-          </Link>
-        )}
-
-        {/* User profile dropdown */}
-        <DropdownMenu
-          onOpenChange={(open) => {
-            if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-            hoverTimerRef.current = null;
-            setProfileMenuOpen(open);
-            if (!open && !collapsed) return;
-            setHovered(open);
-          }}
-        >
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={`${profile?.name ?? user?.username ?? "User"} menu`}
-              className={`hover:bg-sidebar-accent/70 flex items-center rounded-xl py-3 transition-colors duration-150 ${
-                showLabels ? "w-full gap-2.5 px-3" : "mx-auto h-10 w-10 justify-center px-0"
-              }`}
+        {/* Footer */}
+        <div className="sidebar-footer border-sidebar-border/70 space-y-2 border-t px-3 py-3">
+          {showAdminNav && (
+            <Link
+              to="/admin"
+              onClick={onNavigate}
+              className={navLinkClass("/admin")}
+              aria-current={isActive("/admin") ? "page" : undefined}
             >
-              <Avatar className="h-7 w-7 shrink-0">
-                {profile?.avatar_url ? (
-                  <AvatarImage src={profile.avatar_url} alt={profile.name} />
-                ) : null}
-                <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold shadow-[0_14px_32px_-20px_rgba(0,0,0,0.8)]">
-                  {profile?.name?.charAt(0).toUpperCase() ??
-                    user?.username?.charAt(0).toUpperCase() ??
-                    "?"}
-                </AvatarFallback>
-              </Avatar>
-              <span
-                className={`text-sidebar-foreground truncate text-[13px] font-medium transition-[opacity,max-width] duration-200 ease-out ${
-                  showLabels
-                    ? "max-w-[180px] opacity-100 delay-[50ms]"
-                    : "max-w-0 overflow-hidden opacity-0"
-                }`}
-              >
-                {profile?.name ?? user?.username ?? "User"}
-              </span>
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            side={getProfileMenuSide(collapsed)}
-            align="start"
-            className="w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl p-2"
+              <Shield className="h-[18px] w-[18px] shrink-0" />
+              <SidebarLabel show={showLabels}>Admin</SidebarLabel>
+            </Link>
+          )}
+
+          {/* User profile dropdown */}
+          <DropdownMenu
+            onOpenChange={(open) => {
+              if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+              hoverTimerRef.current = null;
+              setProfileMenuOpen(open);
+              if (!open && !collapsed) return;
+              setHovered(open);
+            }}
           >
-            <DropdownMenuLabel className="flex items-center gap-3 px-2 py-2">
-              <Avatar className="h-10 w-10">
-                {profile?.avatar_url ? (
-                  <AvatarImage src={profile.avatar_url} alt={profile.name} />
-                ) : null}
-                <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
-                  {(profile?.name ?? user?.username ?? "?").charAt(0).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex min-w-0 flex-col">
-                <span className="truncate text-[14px] font-semibold">
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`${profile?.name ?? user?.username ?? "User"} menu`}
+                // Left-anchored in both states: `mx-auto` would centre the avatar
+                // in the 260px surface, i.e. far outside the 64px rail, and any
+                // width swap here would pop at the start of the collapse.
+                className="hover:bg-sidebar-accent/70 flex w-full items-center gap-2.5 rounded-xl px-3 py-3 transition-colors duration-150"
+              >
+                {/* Same 18px slot every nav icon sits in. The avatar is 28px, so
+                    left-aligning it like an icon would push its centre 5px right
+                    of the rail's icon column; centring it on the slot lines it up
+                    with the shield above in the rail, and lines the name below up
+                    with the nav labels when expanded. */}
+                <span className="flex w-[18px] shrink-0 items-center justify-center">
+                  <Avatar className="h-7 w-7 shrink-0">
+                    {profile?.avatar_url ? (
+                      <AvatarImage src={profile.avatar_url} alt={profile.name} />
+                    ) : null}
+                    <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold shadow-[0_14px_32px_-20px_rgba(0,0,0,0.8)]">
+                      {profile?.name?.charAt(0).toUpperCase() ??
+                        user?.username?.charAt(0).toUpperCase() ??
+                        "?"}
+                    </AvatarFallback>
+                  </Avatar>
+                </span>
+                <span
+                  className={`text-sidebar-foreground sidebar-fade max-w-[180px] truncate text-[13px] font-medium ${
+                    showLabels ? "opacity-100" : "opacity-0"
+                  }`}
+                >
                   {profile?.name ?? user?.username ?? "User"}
                 </span>
-                {profile && user?.username && user.username !== profile.name && (
-                  <span className="text-muted-foreground truncate text-[11px] font-normal">
-                    {user.username}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side={getProfileMenuSide(collapsed)}
+              align="start"
+              className="w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl p-2"
+            >
+              <DropdownMenuLabel className="flex items-center gap-3 px-2 py-2">
+                <Avatar className="h-10 w-10">
+                  {profile?.avatar_url ? (
+                    <AvatarImage src={profile.avatar_url} alt={profile.name} />
+                  ) : null}
+                  <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
+                    {(profile?.name ?? user?.username ?? "?").charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate text-[14px] font-semibold">
+                    {profile?.name ?? user?.username ?? "User"}
                   </span>
+                  {profile && user?.username && user.username !== profile.name && (
+                    <span className="text-muted-foreground truncate text-[11px] font-normal">
+                      {user.username}
+                    </span>
+                  )}
+                </div>
+              </DropdownMenuLabel>
+
+              <div
+                className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-1.5"
+                role="group"
+                aria-label="Theme"
+              >
+                <span className="text-muted-foreground text-[10px] font-medium tracking-[0.14em] uppercase">
+                  Theme
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {CURATED_THEME_IDS.map((id) => {
+                    const def = THEMES[id];
+                    const isActive = theme === id;
+                    return (
+                      <DropdownMenuItem
+                        key={id}
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          setTheme(id);
+                        }}
+                        onMouseEnter={() => previewTheme(id)}
+                        onMouseLeave={resetPreviewTheme}
+                        onFocus={() => previewTheme(id)}
+                        onBlur={resetPreviewTheme}
+                        aria-label={def.label}
+                        title={def.label}
+                        className={cn(
+                          "relative h-6 w-6 flex-none cursor-pointer rounded-full border p-0 transition-transform hover:scale-110 focus:scale-110",
+                          isActive
+                            ? "ring-primary ring-offset-popover border-transparent ring-2 ring-offset-2"
+                            : "border-border/60",
+                        )}
+                        style={{ backgroundColor: def.previewBg }}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="absolute top-1/2 left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                          style={{ backgroundColor: def.previewAccent }}
+                        />
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <DropdownMenuSeparator />
+
+              <DropdownMenuItem
+                onClick={() => {
+                  navigate("/settings/playback");
+                }}
+                className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
+              >
+                <Settings className="h-[18px] w-[18px]" />
+                Settings
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator />
+
+              <div className="flex flex-col gap-1 pt-0.5">
+                {profile && (
+                  <DropdownMenuItem
+                    onClick={() => {
+                      clearProfile();
+                      navigate("/profiles");
+                    }}
+                    className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[13px] font-semibold"
+                  >
+                    <UserCircle className="h-[18px] w-[18px]" />
+                    Switch Profile
+                  </DropdownMenuItem>
                 )}
-              </div>
-            </DropdownMenuLabel>
-
-            <div
-              className="flex items-center justify-between gap-2 px-2.5 pt-1 pb-1.5"
-              role="group"
-              aria-label="Theme"
-            >
-              <span className="text-muted-foreground text-[10px] font-medium tracking-[0.14em] uppercase">
-                Theme
-              </span>
-              <div className="flex items-center gap-1.5">
-                {CURATED_THEME_IDS.map((id) => {
-                  const def = THEMES[id];
-                  const isActive = theme === id;
-                  return (
-                    <DropdownMenuItem
-                      key={id}
-                      onSelect={(event) => {
-                        event.preventDefault();
-                        setTheme(id);
-                      }}
-                      onMouseEnter={() => previewTheme(id)}
-                      onMouseLeave={resetPreviewTheme}
-                      onFocus={() => previewTheme(id)}
-                      onBlur={resetPreviewTheme}
-                      aria-label={def.label}
-                      title={def.label}
-                      className={cn(
-                        "relative h-6 w-6 flex-none cursor-pointer rounded-full border p-0 transition-transform hover:scale-110 focus:scale-110",
-                        isActive
-                          ? "ring-primary ring-offset-popover border-transparent ring-2 ring-offset-2"
-                          : "border-border/60",
-                      )}
-                      style={{ backgroundColor: def.previewBg }}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="absolute top-1/2 left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full"
-                        style={{ backgroundColor: def.previewAccent }}
-                      />
-                    </DropdownMenuItem>
-                  );
-                })}
-              </div>
-            </div>
-
-            <DropdownMenuSeparator />
-
-            <DropdownMenuItem
-              onClick={() => {
-                navigate("/settings/playback");
-              }}
-              className="gap-2.5 rounded-lg px-2.5 py-2 text-[13px]"
-            >
-              <Settings className="h-[18px] w-[18px]" />
-              Settings
-            </DropdownMenuItem>
-
-            <DropdownMenuSeparator />
-
-            <div className="flex flex-col gap-1 pt-0.5">
-              {profile && (
                 <DropdownMenuItem
-                  onClick={() => {
-                    clearProfile();
-                    navigate("/profiles");
-                  }}
+                  onClick={logout}
                   className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[13px] font-semibold"
                 >
-                  <UserCircle className="h-[18px] w-[18px]" />
-                  Switch Profile
+                  <LogOut className="h-[18px] w-[18px]" />
+                  Logout
                 </DropdownMenuItem>
-              )}
-              <DropdownMenuItem
-                onClick={logout}
-                className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[13px] font-semibold"
-              >
-                <LogOut className="h-[18px] w-[18px]" />
-                Logout
-              </DropdownMenuItem>
-            </div>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </div>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </aside>
   );

@@ -126,10 +126,24 @@ func TestListPodcastShowAudioFilesReturnsSortedAudioPaths(t *testing.T) {
 	}
 }
 
-func TestListPodcastShowAudioFilesReturnsNotExistForEmptyShow(t *testing.T) {
+func TestListPodcastShowAudioFilesReturnsNoMediaForEmptyShow(t *testing.T) {
 	_, err := listPodcastShowAudioFiles(t.TempDir())
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("empty podcast show error = %v, want os.ErrNotExist", err)
+	if !errors.Is(err, errFolderHasNoMedia) {
+		t.Fatalf("empty podcast show error = %v, want errFolderHasNoMedia", err)
+	}
+	// A missing ffprobe binary also wraps fs.ErrNotExist; the empty-folder
+	// signal must stay distinguishable from it.
+	if errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("empty podcast show error = %v, must not wrap os.ErrNotExist", err)
+	}
+}
+
+func TestListPodcastShowAudioFilesVanishedShowSignalsNoMedia(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "renamed-away")
+
+	_, err := listPodcastShowAudioFiles(gone)
+	if !errors.Is(err, errFolderHasNoMedia) {
+		t.Fatalf("vanished show error = %v, want errFolderHasNoMedia", err)
 	}
 }
 

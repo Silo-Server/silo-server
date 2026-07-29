@@ -70,7 +70,8 @@ type ProcessRequest struct {
 	// folder-scoped manual refreshes when the library's configured
 	// language differs from the item's stamp, so changing a library's
 	// metadata language actually re-fetches titles/overviews.
-	AdoptLanguage bool
+	AdoptLanguage            bool
+	recordedStaleProviderIDs providerIDValueSet
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -258,11 +259,22 @@ type MetadataResult struct {
 	// titleAliasProviders records whether each contributing provider declared
 	// its aliases to be an authoritative snapshot. False means merge-only,
 	// which is the safe default for legacy plugins and partial responses.
-	titleAliasProviders       map[string]bool
+	titleAliasProviders map[string]bool
+	// quarantinedProviderIDKeys prevents unresolved conflicting IDs from being
+	// reintroduced by later provider details or durable merge.
 	quarantinedProviderIDKeys map[string]struct{}
-	ContentRating             string
-	Ratings                   Ratings
-	People                    []models.ItemPerson
+	// replacedProviderIDKeys forces an owning-provider consensus replacement to
+	// overwrite the corresponding stored provider-ID column during merge.
+	replacedProviderIDKeys map[string]struct{}
+	// recordedStaleProviderIDs contains provider values known dead before this
+	// refresh and suppresses them when durable state is merged.
+	recordedStaleProviderIDs providerIDValueSet
+	// sameRunStaleProviderIDs contains identity values that 404ed during this
+	// refresh and prevents them from being persisted by the same operation.
+	sameRunStaleProviderIDs providerIDValueSet
+	ContentRating           string
+	Ratings                 Ratings
+	People                  []models.ItemPerson
 	// Images (S3 paths or URLs).
 	PosterPath        string
 	PosterThumbhash   string

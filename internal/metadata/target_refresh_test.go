@@ -6,20 +6,32 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/contentid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 type targetRefreshProvider struct {
+	slug             string
+	searchResults    []SearchResult
 	seasons          []SeasonResult
 	episodesBySeason map[int][]EpisodeResult
 	episodeRequests  []int
 }
 
-func (p *targetRefreshProvider) Slug() string { return "target-refresh" }
+func (p *targetRefreshProvider) Slug() string {
+	if p.slug != "" {
+		return p.slug
+	}
+	return "target-refresh"
+}
 
 func (p *targetRefreshProvider) Name() string { return "target-refresh" }
 
 func (p *targetRefreshProvider) ForTypes() []string { return []string{"series"} }
+
+func (p *targetRefreshProvider) Search(context.Context, SearchQuery) ([]SearchResult, error) {
+	return append([]SearchResult(nil), p.searchResults...), nil
+}
 
 func (p *targetRefreshProvider) GetSeasons(context.Context, SeasonsRequest) ([]SeasonResult, error) {
 	return append([]SeasonResult(nil), p.seasons...), nil
@@ -78,6 +90,37 @@ func seedTargetRefreshHarness(provider *targetRefreshProvider) (*testHarness, st
 	})
 
 	return h, seriesID, seasonID, episodeID
+}
+
+func TestResolveSeriesRefreshProviderIDsUsesStaleSuppressedSelectionIdentity(t *testing.T) {
+	const (
+		staleTMDBID       = "12345"
+		replacementTMDBID = "67890"
+	)
+	provider := &targetRefreshProvider{
+		slug: contentid.ProviderTMDB,
+		searchResults: []SearchResult{{
+			Name: "Target Refresh Show", Year: 2020, Provider: contentid.ProviderTMDB,
+			ProviderIDs: map[string]string{contentid.ProviderTMDB: replacementTMDBID},
+		}},
+	}
+	h, seriesID, _, _ := seedTargetRefreshHarness(provider)
+	series := h.itemRepo.items[seriesID]
+	series.Year = 2020
+	series.TmdbID = staleTMDBID
+	staleRepo := newFakeStaleIDRepo()
+	staleRepo.set(seriesID, &models.StaleMediaID{
+		ContentID: seriesID, Provider: contentid.ProviderTMDB, ProviderID: staleTMDBID,
+	})
+	h.service.staleIDRepo = staleRepo
+
+	providerIDs, err := h.service.resolveSeriesRefreshProviderIDs(context.Background(), series, 0, "en")
+	if err != nil {
+		t.Fatalf("resolveSeriesRefreshProviderIDs: %v", err)
+	}
+	if providerIDs[contentid.ProviderTMDB] != replacementTMDBID {
+		t.Fatalf("resolved tmdb id = %q, want %s", providerIDs[contentid.ProviderTMDB], replacementTMDBID)
+	}
 }
 
 func TestRefreshScheduledTargetEpisodePersistsOnlySelectedEpisode(t *testing.T) {

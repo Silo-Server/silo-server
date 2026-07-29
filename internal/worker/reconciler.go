@@ -44,6 +44,7 @@ type SessionSync struct {
 	PositionSeconds      float64
 	IsPaused             bool
 	HasWebSocket         bool
+	IsJellyfinCompat     bool
 }
 
 // AggregateData represents the aggregate counts for a single user that are
@@ -153,8 +154,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 client_name, client_version, client_user_agent,
 				 audio_track_index, transcode_audio, stream_bitrate_kbps, transcode_node_url,
 				 target_resolution, target_video_codec, target_audio_codec, target_bitrate_kbps,
-				 transcode_hw_accel, position_seconds, is_paused, has_websocket)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+				 transcode_hw_accel, position_seconds, is_paused, has_websocket, compat_origin)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -180,6 +181,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				position_seconds    = EXCLUDED.position_seconds,
 				is_paused           = EXCLUDED.is_paused,
 				has_websocket       = EXCLUDED.has_websocket,
+				compat_origin       = EXCLUDED.compat_origin,
 				last_sync_at        = NOW()
 		`, s.SessionID, s.UserID, s.ProfileID, s.MediaFileID, nullableInt(s.RequestedMediaFileID), s.PlayMethod,
 			sessionNode, s.StartedAt, s.UpdatedAt, nullableIP(s.ClientIP),
@@ -188,7 +190,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 			nullableString(s.TargetResolution), nullableString(s.TargetVideoCodec),
 			nullableString(s.TargetAudioCodec), nullableInt(s.TargetBitrateKbps),
 			nullableString(s.TranscodeHWAccel), normalizePositionSeconds(s.PositionSeconds),
-			s.IsPaused, s.HasWebSocket)
+			s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat)
 		if err != nil {
 			return fmt.Errorf("upserting session %s: %w", s.SessionID, err)
 		}
@@ -263,7 +265,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			updated_at,
 			COALESCE(position_seconds, 0),
 			COALESCE(is_paused, FALSE),
-			COALESCE(has_websocket, FALSE)
+			COALESCE(has_websocket, FALSE),
+			COALESCE(compat_origin, FALSE)
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -302,6 +305,7 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.PositionSeconds,
 			&s.IsPaused,
 			&s.HasWebSocket,
+			&s.IsJellyfinCompat,
 		); err != nil {
 			return nil, err
 		}
@@ -357,7 +361,8 @@ func sessionSnapshotsEqual(left, right []SessionSync) bool {
 			!left[i].UpdatedAt.Equal(right[i].UpdatedAt) ||
 			normalizePositionSeconds(left[i].PositionSeconds) != normalizePositionSeconds(right[i].PositionSeconds) ||
 			left[i].IsPaused != right[i].IsPaused ||
-			left[i].HasWebSocket != right[i].HasWebSocket {
+			left[i].HasWebSocket != right[i].HasWebSocket ||
+			left[i].IsJellyfinCompat != right[i].IsJellyfinCompat {
 			return false
 		}
 	}

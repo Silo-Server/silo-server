@@ -869,9 +869,8 @@ var mediaItemMergeSteps = []mediaItemMergeStep{
 			SELECT $2, provider, provider_id, first_seen_at, last_seen_at
 			FROM stale_media_ids
 			WHERE content_id = $1
-			ON CONFLICT (content_id, provider) DO UPDATE
-			SET provider_id = COALESCE(NULLIF(stale_media_ids.provider_id, ''), EXCLUDED.provider_id),
-			    first_seen_at = LEAST(stale_media_ids.first_seen_at, EXCLUDED.first_seen_at),
+			ON CONFLICT (content_id, provider, provider_id) DO UPDATE
+			SET first_seen_at = LEAST(stale_media_ids.first_seen_at, EXCLUDED.first_seen_at),
 			    last_seen_at = GREATEST(stale_media_ids.last_seen_at, EXCLUDED.last_seen_at)`},
 	{"delete source stale media ids", `DELETE FROM stale_media_ids WHERE content_id = $1`},
 	{"move watch provider history exports", `UPDATE watch_provider_history_exports SET media_item_id = $2, updated_at = NOW() WHERE media_item_id = $1`},

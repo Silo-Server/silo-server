@@ -855,6 +855,8 @@ func uploadErrorResponse(err error) (int, string) {
 		return http.StatusConflict, "Upload session is incomplete"
 	case errors.Is(err, uploads.ErrAlreadyCompleted):
 		return http.StatusConflict, "Upload session is already complete"
+	case errors.Is(err, uploads.ErrChunkBusy):
+		return http.StatusConflict, "This chunk is already being uploaded"
 	case errors.Is(err, uploads.ErrInvalidChunk), errors.Is(err, uploads.ErrInvalidRequest):
 		return http.StatusBadRequest, err.Error()
 	default:

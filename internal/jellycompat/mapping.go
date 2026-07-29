@@ -100,8 +100,8 @@ func (m *mapper) itemFromList(item upstreamListItem, isFavorite bool, progress *
 	if mt := jellyfinMediaType(item.Type); mt != "" {
 		dto.MediaType = mt
 	}
-	if item.Runtime > 0 {
-		dto.RunTimeTicks = minutesToTicks(item.Runtime)
+	if ticks := runtimeTicks(item.DurationSeconds, item.Runtime); ticks > 0 {
+		dto.RunTimeTicks = ticks
 	}
 	if item.Type == "movie" || item.Type == "episode" {
 		applyPlayableLocation(&dto, item.HasMediaFiles == nil || *item.HasMediaFiles)
@@ -482,7 +482,7 @@ func (m *mapper) episodeFromUpstream(ep upstreamEpisode, isFavorite bool, progre
 		Name:         ep.Title,
 		ServerID:     m.serverID,
 		Overview:     ep.Overview,
-		RunTimeTicks: minutesToTicks(ep.Runtime),
+		RunTimeTicks: runtimeTicks(ep.DurationSeconds, ep.Runtime),
 		ImageTags:    map[string]string{},
 		SeriesName:   ep.SeriesTitle,
 		UserData:     userDataDTO(m.codec.EncodeStringID(EncodedIDItem, ep.ContentID), ep.UserData, isFavorite, progress),
@@ -765,6 +765,20 @@ func minutesToTicks(minutes int) int64 {
 
 func secondsToTicks(seconds float64) int64 {
 	return int64(seconds * 10_000_000)
+}
+
+// runtimeTicks resolves RunTimeTicks probed-duration-first with the catalog
+// runtime as fallback, matching the v1 API's contentDurationSeconds. Returns
+// 0 when neither is known; RunTimeTicks is omitempty, so the field stays
+// absent rather than being emitted as a bogus 0.
+func runtimeTicks(durationSeconds, runtimeMinutes int) int64 {
+	if durationSeconds > 0 {
+		return secondsToTicks(float64(durationSeconds))
+	}
+	if runtimeMinutes > 0 {
+		return minutesToTicks(runtimeMinutes)
+	}
+	return 0
 }
 
 // clampResumeSeconds normalizes a stored resume position for client-facing

@@ -74,6 +74,7 @@ type playbackSessionRow struct {
 	AudioDecision            string    `json:"audio_decision,omitempty"`
 	EffectivePlayMethod      string    `json:"effective_play_method,omitempty"`
 	IsJellyfinClient         bool      `json:"is_jellyfin_client,omitempty"`
+	CompatOrigin             bool      `json:"-"`
 }
 
 // playbackSessionsCapabilitiesResponse advertises the additive fields of the
@@ -199,7 +200,8 @@ func (l *PlaybackSessionsLoader) Load(
 			mf.audio_channels,
 			COALESCE(mf.audio_tracks::text, '[]'),
 			COALESCE(requested_mf.codec_video, ''),
-			COALESCE(requested_mf.resolution, '')
+			COALESCE(requested_mf.resolution, ''),
+			COALESCE(s.compat_origin, FALSE)
 		 FROM playback_sessions_sync s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
@@ -241,6 +243,7 @@ func (l *PlaybackSessionsLoader) Load(
 			&s.TranscodeNodeURL, &s.TargetResolution, &s.TargetVideoCodec, &s.TargetAudioCodec, &targetBitrateKbps,
 			&s.TranscodeHWAccel, &s.SourceContainer, &sourceBitrateKbps, &s.SourceVideoCodec, &s.SourceVideoResolution,
 			&s.SourceAudioCodec, &sourceAudioChannels, &audioTracksJSON, &s.RequestedVideoCodec, &s.RequestedVideoResolution,
+			&s.CompatOrigin,
 		); err != nil {
 			return nil, fmt.Errorf("scanning playback session: %w", err)
 		}
@@ -275,7 +278,7 @@ func enrichPlaybackSessionRow(row *playbackSessionRow, audioTracksJSON []byte) {
 
 	row.VideoDecision, row.AudioDecision = sessionComponentDecision(row.PlayMethod, row.TranscodeAudio, row.TargetVideoCodec)
 	row.EffectivePlayMethod = effectivePlayMethod(row.VideoDecision, row.AudioDecision)
-	row.IsJellyfinClient = isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
+	row.IsJellyfinClient = row.CompatOrigin || isJellyfinEcosystemClient(row.ClientName, row.ClientUserAgent)
 
 	var audioTracks []models.AudioTrack
 	if len(audioTracksJSON) > 0 {
@@ -418,9 +421,8 @@ var jellyfinClientTokens = []string{
 }
 
 // isJellyfinEcosystemClient reports whether the session's client metadata
-// matches a known Jellyfin-ecosystem client. This is a heuristic: an
-// unrecognized fork simply gets no JF pill (cosmetic). Stamping a compat-origin
-// flag on the session at creation would be exact and is the eventual fix.
+// matches a known Jellyfin-ecosystem client. This heuristic remains a fallback
+// for rows created before compat-origin identity was persisted.
 func isJellyfinEcosystemClient(clientName, userAgent string) bool {
 	for _, value := range []string{clientName, userAgent} {
 		value = strings.ToLower(strings.TrimSpace(value))
@@ -508,8 +510,71 @@ func playbackClientDisplayName(name, version, userAgent string) string {
 	case strings.Contains(lower, "python-requests"):
 		return "Python requests"
 	default:
+		if label := androidDeviceLabel(userAgent); label != "" {
+			return label
+		}
 		return firstUserAgentProduct(userAgent)
 	}
+}
+
+// knownAndroidDeviceLabels maps Android / Fire OS build model codes to friendly
+// product names for the admin session view. Keys are uppercased so the lookup is
+// case-insensitive. This only affects the displayed label — the session still
+// stores the raw model code in its user agent.
+var knownAndroidDeviceLabels = map[string]string{
+	"AFTKRT":            "Fire TV Stick 4K Max",
+	"AFTMM":             "Fire TV Stick 4K",
+	"AFTKM":             "Fire TV Stick 4K (2nd Gen)",
+	"AFTKA":             "Fire TV Stick 4K Max (1st Gen)",
+	"AFTSSS":            "Fire TV Stick (3rd Gen)",
+	"AFTSS":             "Fire TV Stick Lite (1st Gen)",
+	"AFTT":              "Fire TV Stick (2nd Gen)",
+	"AFTB":              "Fire TV (1st Gen)",
+	"AFTS":              "Fire TV (2nd Gen)",
+	"AFTN":              "Fire TV (3rd Gen)",
+	"AFTR":              "Fire TV Cube (2nd Gen)",
+	"AFTA":              "Fire TV Cube (1st Gen)",
+	"SHIELD ANDROID TV": "NVIDIA Shield",
+}
+
+// androidDeviceLabel derives a friendly device label from a bare Android / Fire OS
+// user agent of the form "... (Linux; U; Android <ver>; <MODEL> Build/<build>)".
+// The model is the whole segment between the last ';' and 'Build/', so multi-word
+// models ("Pixel 7", "SHIELD Android TV") survive intact. Known model codes map to
+// a product name; anything else falls back to "Android · <MODEL>" rather than the
+// uninformative "Dalvik". Returns "" when no model can be parsed.
+func androidDeviceLabel(userAgent string) string {
+	buildIndex := strings.Index(userAgent, "Build/")
+	if buildIndex < 0 {
+		return ""
+	}
+
+	prefix := userAgent[:buildIndex]
+	separator := strings.LastIndex(prefix, ";")
+	if separator < 0 {
+		return ""
+	}
+	hasAndroidPlatform := false
+	for _, segment := range strings.Split(prefix[:separator], ";") {
+		segment = strings.TrimSpace(strings.Trim(segment, "()"))
+		if strings.HasPrefix(strings.ToLower(segment), "android ") {
+			hasAndroidPlatform = true
+			break
+		}
+	}
+	if !hasAndroidPlatform {
+		return ""
+	}
+
+	model := prefix[separator+1:]
+	model = strings.TrimSpace(strings.Trim(strings.TrimSpace(model), "();"))
+	if model == "" {
+		return ""
+	}
+	if label, ok := knownAndroidDeviceLabels[strings.ToUpper(model)]; ok {
+		return label
+	}
+	return "Android · " + model
 }
 
 func containsAny(value string, needles []string) bool {

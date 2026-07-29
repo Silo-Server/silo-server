@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 
 interface HeroBannerProps {
   items: SectionItem[];
@@ -264,13 +265,13 @@ export default function HeroBanner({
                 )}
                 {playLabel}
               </Link>
-              <Link
+              <ViewTransitionLink
                 to={buildItemHref({ contentId: current.content_id, libraryId })}
                 className="pill pill-glass transition-colors duration-[--duration-fast]"
               >
                 <Info className="h-4 w-4" />
                 More Info
-              </Link>
+              </ViewTransitionLink>
             </div>
           </div>
         </div>

@@ -97,8 +97,8 @@ func (r *MovieMatchQueueRepository) EnqueueMovieFile(ctx context.Context, fileID
 		SELECT
 			mf.id,
 			mf.media_folder_id,
-			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language")+`,
-			`+fmt.Sprintf("%d", matcherRevision)+`,
+			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
+			`+fmt.Sprintf("%d", movieMatcherRevision)+`,
 			NOW(),
 			NOW()
 		FROM media_files mf
@@ -174,8 +174,8 @@ func (r *MovieMatchQueueRepository) SyncForFolder(ctx context.Context, folderID 
 		SELECT
 			mf.id,
 			mf.media_folder_id,
-			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language")+`,
-			`+fmt.Sprintf("%d", matcherRevision)+`,
+			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
+			`+fmt.Sprintf("%d", movieMatcherRevision)+`,
 			NOW(),
 			NOW()
 		FROM media_files mf
@@ -256,8 +256,8 @@ func (r *MovieMatchQueueRepository) SyncInScope(ctx context.Context, folderID in
 		SELECT
 			mf.id,
 			mf.media_folder_id,
-			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language")+`,
-			`+fmt.Sprintf("%d", matcherRevision)+`,
+			`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+`,
+			`+fmt.Sprintf("%d", movieMatcherRevision)+`,
 			NOW(),
 			NOW()
 		FROM media_files mf
@@ -588,7 +588,7 @@ func (r *MovieMatchQueueRepository) RetryNowByFolder(ctx context.Context, folder
 	tag, err := r.pool.Exec(ctx, `
 		WITH current_inputs AS (
 			SELECT q.media_file_id, mf.media_folder_id,
-				`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language")+` AS input_fingerprint
+				`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+` AS input_fingerprint
 			FROM movie_match_queue q
 			JOIN media_files mf ON mf.id = q.media_file_id
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
@@ -601,7 +601,7 @@ func (r *MovieMatchQueueRepository) RetryNowByFolder(ctx context.Context, folder
 			failure_kind = '', failure_detail = '{}'::jsonb, last_error = '', parked_at = NULL,
 			rerun_requested = true,
 			media_folder_id = current_inputs.media_folder_id,
-			input_fingerprint = current_inputs.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", matcherRevision)+`, updated_at = NOW()
+			input_fingerprint = current_inputs.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", movieMatcherRevision)+`, updated_at = NOW()
 		FROM current_inputs
 		WHERE movie_match_queue.media_file_id = current_inputs.media_file_id
 	`, folderID)
@@ -618,7 +618,7 @@ func (r *MovieMatchQueueRepository) WakeForChangedInputs(ctx context.Context) (i
 	tag, err := r.pool.Exec(ctx, `
 		WITH changed AS (
 			SELECT q.media_file_id, mf.media_folder_id,
-				`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language")+` AS input_fingerprint
+				`+matchQueueInputFingerprintSQL("mf.file_path", "'movie'", "mf.media_folder_id", "folders.metadata_language", movieMatcherRevision)+` AS input_fingerprint
 			FROM movie_match_queue q
 			JOIN media_files mf ON mf.id = q.media_file_id
 			JOIN media_folders folders ON folders.id = mf.media_folder_id
@@ -630,10 +630,10 @@ func (r *MovieMatchQueueRepository) WakeForChangedInputs(ctx context.Context) (i
 			failure_kind = '', failure_detail = '{}'::jsonb, last_error = '', parked_at = NULL,
 			rerun_requested = true,
 			media_folder_id = changed.media_folder_id,
-			input_fingerprint = changed.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", matcherRevision)+`, updated_at = NOW()
+			input_fingerprint = changed.input_fingerprint, matcher_revision = `+fmt.Sprintf("%d", movieMatcherRevision)+`, updated_at = NOW()
 		FROM changed
 		WHERE changed.media_file_id = q.media_file_id
-		  AND (q.input_fingerprint <> changed.input_fingerprint OR q.matcher_revision <> `+fmt.Sprintf("%d", matcherRevision)+` OR q.media_folder_id <> changed.media_folder_id)
+		  AND (q.input_fingerprint <> changed.input_fingerprint OR q.matcher_revision <> `+fmt.Sprintf("%d", movieMatcherRevision)+` OR q.media_folder_id <> changed.media_folder_id)
 	`)
 	if err != nil {
 		return 0, fmt.Errorf("waking movie matches with changed inputs: %w", err)

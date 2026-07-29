@@ -6,6 +6,7 @@ import { VisuallyHidden } from "radix-ui";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useDebounce } from "@/hooks/useDebounce";
 import { buildQueryCatalogHref } from "@/pages/catalogSearchParams";
+import { useSidebarItemNavigation } from "@/components/sidebarItemNavigationContext";
 import { createEmptyQueryDefinition, type BrowseItem } from "@/api/types";
 import { createCatalogSearchState, fetchCatalogPage } from "@/hooks/queries/catalog";
 import { useSearchMediaScope } from "@/hooks/useSearchMediaScope";
@@ -111,6 +112,7 @@ export function GlobalSearch({
   const [query, setQuery] = useState(initialQuery);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const navigate = useViewTransitionNavigate();
+  const beginSidebarItemNavigation = useSidebarItemNavigation();
   const debouncedQuery = useDebounce(query.trim(), DEBOUNCE_MS);
   const tmdbDebouncedQuery = useDebounce(query.trim(), TMDB_DEBOUNCE_MS);
   const canRequest = useCanRequest();
@@ -191,11 +193,12 @@ export function GlobalSearch({
 
   const handlePickItem = useCallback(
     (contentId: string) => {
-      navigate(`/item/${encodeURIComponent(contentId)}`);
+      const href = `/item/${encodeURIComponent(contentId)}`;
+      if (!beginSidebarItemNavigation?.({ href })) navigate(href);
       setOpen(false);
       setQuery("");
     },
-    [navigate],
+    [beginSidebarItemNavigation, navigate],
   );
 
   // Reset selectedIndex when query changes

@@ -460,9 +460,12 @@ func TestNormalizeCandidates(t *testing.T) {
 				if len(candidate.ConflictingProviderIDKeys) != 1 || candidate.ConflictingProviderIDKeys[0] != "tvdb" {
 					t.Fatalf("quarantined keys = %v, want [tvdb]", candidate.ConflictingProviderIDKeys)
 				}
+				if candidate.ConfirmedProviderIDs["tvdb"] != "352440" {
+					t.Fatalf("native TVDB resolution = %q, want 352440", candidate.ConfirmedProviderIDs["tvdb"])
+				}
 				annotateCandidateMatch(&candidate, &MatchHints{Title: "A Teacher", Type: "series"})
 				if !containsString(candidate.MatchReasons, "provider_id_consensus") ||
-					!containsString(candidate.MatchReasons, "quarantined_tvdb_id") {
+					!containsString(candidate.MatchReasons, "resolved_tvdb_id") {
 					t.Fatalf("match reasons = %v", candidate.MatchReasons)
 				}
 			},
@@ -1220,5 +1223,81 @@ func TestSelectRefreshMatchCandidate_RejectsConflictingTrustedIDCandidate(t *tes
 	)
 	if ok || winner != nil {
 		t.Fatalf("expected conflicting trusted-ID candidate to be rejected")
+	}
+}
+
+func TestApplyCandidateProviderIDConsensusKeepsNonConflictingAggregatorIDs(t *testing.T) {
+	candidates := NormalizeCandidates([]SearchResult{{
+		Name:     "Example Movie",
+		Provider: "metadb",
+		ProviderIDs: map[string]string{
+			"tmdb": "999",
+			"imdb": "tt7654321",
+		},
+	}}, "movie")
+	if len(candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1", len(candidates))
+	}
+
+	ids := map[string]string{}
+	applyCandidateProviderIDConsensus(ids, &candidates[0], nil)
+	if ids["tmdb"] != "999" || ids["imdb"] != "tt7654321" {
+		t.Fatalf("aggregator provider ids = %#v, want tmdb/imdb retained", ids)
+	}
+}
+
+func TestApplyCandidateProviderIDConsensusPromotesIDsConfirmedByBothProviders(t *testing.T) {
+	candidates := NormalizeCandidates([]SearchResult{
+		{
+			Name: "Example", Provider: "tvdb",
+			ProviderIDs: map[string]string{"tvdb": "405851", "tmdb": "1234", "imdb": "tt12236904"},
+		},
+		{
+			Name: "Example", Provider: "tmdb",
+			ProviderIDs: map[string]string{"tvdb": "405851", "tmdb": "1234", "imdb": "tt12236904"},
+		},
+	}, "series")
+	if len(candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1", len(candidates))
+	}
+
+	ids := map[string]string{}
+	applyCandidateProviderIDConsensus(ids, &candidates[0], nil)
+	if ids["tvdb"] != "405851" || ids["tmdb"] != "1234" || ids["imdb"] != "tt12236904" {
+		t.Fatalf("confirmed provider ids = %#v, want tmdb/tvdb/imdb", ids)
+	}
+}
+
+func TestApplyCandidateProviderIDConsensusPrefersOwningProviderDuringConflict(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		name := "foreign cross-reference first"
+		results := []SearchResult{
+			{
+				Name: "Under the Pole", Provider: "tvdb",
+				ProviderIDs: map[string]string{"tvdb": "405851", "tmdb": "12236904", "imdb": "tt12236904"},
+			},
+			{
+				Name: "Under the Pole", Provider: "tmdb",
+				ProviderIDs: map[string]string{"tvdb": "405851", "tmdb": "987654", "imdb": "tt12236904"},
+			},
+		}
+		if reverse {
+			name = "owning provider first"
+			results[0], results[1] = results[1], results[0]
+		}
+		t.Run(name, func(t *testing.T) {
+			candidates := NormalizeCandidates(results, "series")
+			if len(candidates) != 1 {
+				t.Fatalf("candidate count = %d, want 1", len(candidates))
+			}
+			ids := map[string]string{}
+			applyCandidateProviderIDConsensus(ids, &candidates[0], nil)
+			if ids["tmdb"] != "987654" {
+				t.Fatalf("resolved tmdb id = %q, want owning-provider value 987654", ids["tmdb"])
+			}
+			if ids["tvdb"] != "405851" || ids["imdb"] != "tt12236904" {
+				t.Fatalf("resolved provider ids = %#v", ids)
+			}
+		})
 	}
 }

@@ -150,6 +150,22 @@ export interface JellyfinCompatOperationStatus {
   error?: string;
 }
 
+/** Account-facing compat connection details from GET /compat/connect-info. */
+export interface CompatConnectInfo {
+  jellyfin: {
+    /** Whether a listener is accepting connections now, not what is configured. */
+    enabled: boolean;
+    /** An admin changed the enabled setting; it applies on the next restart. */
+    pending_restart: boolean;
+    public_url: string;
+    server_name: string;
+  };
+  account: {
+    /** False for SSO/plugin-provisioned accounts, which cannot use compat login. */
+    password_login_available: boolean;
+  };
+}
+
 export interface JellyfinCompatStatus {
   enabled: boolean;
   api_state: "disabled" | "enabled" | "error";
@@ -4077,6 +4093,99 @@ export interface UpdateInviteCodeRequest {
 
 export interface TopUpInviteCodeRequest {
   additional_uses: number;
+}
+
+// Emailed invitations
+export type InvitationStatus = "pending" | "accepted" | "expired" | "revoked";
+
+export interface Invitation {
+  id: number;
+  email: string;
+  role: string;
+  access_group_id?: number;
+  library_ids?: number[];
+  create_profile: boolean;
+  show_tour: boolean;
+  note?: string;
+  invited_by: number;
+  invited_by_name?: string;
+  status: InvitationStatus;
+  expires_at: string;
+  accepted_at?: string;
+  accepted_user_id?: number;
+  created_at: string;
+}
+
+export interface CreateInvitationRequest {
+  email: string;
+  role?: string;
+  access_group_id?: number | null;
+  library_ids?: number[] | null;
+  create_profile?: boolean;
+  show_tour?: boolean;
+  note?: string;
+}
+
+export interface SendInvitationResponse {
+  invitation: Invitation;
+  email_sent: boolean;
+  /** Only readable in this response — the server stores just the token hash. */
+  claim_url?: string;
+}
+
+export interface InvitationLookupResponse {
+  email: string;
+  inviter_name?: string;
+  server_name: string;
+  expires_at: string;
+  show_tour: boolean;
+}
+
+// Onboarding tour (server-driven manifest)
+export interface OnboardingSettingOption {
+  value: string;
+  label: string;
+}
+
+export interface OnboardingSettingSpec {
+  target: "profile_field" | "setting" | "device_setting";
+  key: string;
+  control: "segmented" | "toggle" | "select";
+  options?: OnboardingSettingOption[];
+  default?: string;
+  label?: string;
+}
+
+export interface OnboardingStepLink {
+  label: string;
+  url: string;
+}
+
+export interface OnboardingStep {
+  id: string;
+  // Open string: the client renders kinds it knows and skips the rest.
+  kind: string;
+  title?: string;
+  body?: string;
+  illustration?: string;
+  setting?: OnboardingSettingSpec;
+  route?: string;
+  action_label?: string;
+  links?: OnboardingStepLink[];
+}
+
+export interface OnboardingFlow {
+  version: number;
+  tour_id: string;
+  steps: OnboardingStep[];
+}
+
+export interface OnboardingState {
+  tour_id: string;
+  last_step?: string;
+  completed_at?: string;
+  skipped_at?: string;
+  done: boolean;
 }
 
 // API Keys

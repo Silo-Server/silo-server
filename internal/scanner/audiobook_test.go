@@ -248,6 +248,43 @@ func TestParseAudiobookFolderSingleM4B(t *testing.T) {
 	}
 }
 
+func TestParseAudiobookFolderEmptyFolderSignalsNoMedia(t *testing.T) {
+	_, err := parseAudiobookFolder(context.Background(), "ffprobe", t.TempDir())
+	if !errors.Is(err, errFolderHasNoMedia) {
+		t.Fatalf("empty folder error = %v, want errFolderHasNoMedia", err)
+	}
+}
+
+// A missing or misconfigured ffprobe binary must not look like an empty
+// folder: exec wraps fs.ErrNotExist when the binary does not exist, so a
+// reconcile that skipped on os.ErrNotExist silently indexed nothing while
+// reporting processed=N failed=0.
+func TestParseAudiobookFolderUnusableFFprobeIsNotSkippable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "part1.m4b"), []byte("not really audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := parseAudiobookFolder(context.Background(), "/nonexistent/bin/ffprobe", dir)
+	if err == nil {
+		t.Fatal("parseAudiobookFolder with an unusable ffprobe returned no error")
+	}
+	if errors.Is(err, errFolderHasNoMedia) {
+		t.Fatalf("error = %v, must not be reported as an empty folder", err)
+	}
+}
+
+// A folder that disappears between the scan walk and the parse is a normal
+// mid-scan rename/delete race, not a scan failure: it must stay skippable.
+func TestParseAudiobookFolderVanishedFolderSignalsNoMedia(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "renamed-away")
+
+	_, err := parseAudiobookFolder(context.Background(), "ffprobe", gone)
+	if !errors.Is(err, errFolderHasNoMedia) {
+		t.Fatalf("vanished folder error = %v, want errFolderHasNoMedia", err)
+	}
+}
+
 func TestParseAudiobookFolderMultiFile(t *testing.T) {
 	ffprobePath := FFprobePathFromFFmpeg("ffmpeg")
 	if _, err := exec.LookPath(ffprobePath); err != nil {

@@ -32,7 +32,7 @@ func (p *idConsensusPipelineProvider) Search(context.Context, SearchQuery) ([]Se
 }
 
 func (p *idConsensusPipelineProvider) GetMetadata(_ context.Context, req MetadataRequest) (*MetadataResult, error) {
-	if req.ProviderIDs["tvdb"] != "" {
+	if req.ProviderIDs["tvdb"] != "352440" {
 		return nil, errUnexpectedQuarantinedProviderID
 	}
 	return &MetadataResult{
@@ -40,7 +40,7 @@ func (p *idConsensusPipelineProvider) GetMetadata(_ context.Context, req Metadat
 		Title:       "A Teacher",
 		Year:        2020,
 		// A provider detail response may repeat its stale cross-reference. The
-		// pipeline must not let it undo the search-phase quarantine.
+		// pipeline must not let it replace the native provider's confirmed ID.
 		ProviderIDs: map[string]string{
 			"imdb": "tt10680614", "tmdb": "103992", "tvdb": "473725",
 		},
@@ -55,7 +55,7 @@ func (*unexpectedQuarantinedProviderIDError) Error() string {
 	return "quarantined provider ID reached metadata phase"
 }
 
-func TestInitialMatchPipelineQuarantinesConflictingConsensusID(t *testing.T) {
+func TestInitialMatchPipelineResolvesConflictingConsensusIDFromOwningProvider(t *testing.T) {
 	t.Parallel()
 	harness := newTestHarness()
 	provider := &idConsensusPipelineProvider{}
@@ -77,12 +77,12 @@ func TestInitialMatchPipelineQuarantinesConflictingConsensusID(t *testing.T) {
 	if item.ImdbID != "tt10680614" || item.TmdbID != "103992" {
 		t.Fatalf("persisted consensus IDs = imdb:%q tmdb:%q", item.ImdbID, item.TmdbID)
 	}
-	if item.TvdbID != "" {
-		t.Fatalf("conflicting TVDB ID persisted as %q", item.TvdbID)
+	if item.TvdbID != "352440" {
+		t.Fatalf("native TVDB ID = %q, want 352440", item.TvdbID)
 	}
 }
 
-func TestRefreshPipelinesQuarantineStoredConflictingConsensusID(t *testing.T) {
+func TestRefreshPipelinesReplaceStoredCrossReferenceWithOwningProviderID(t *testing.T) {
 	for name, mode := range map[string]RefreshMode{"scheduled": ModeScheduledRefresh, "manual": ModeManualRefresh} {
 		mode := mode
 		t.Run(name, func(t *testing.T) {
@@ -112,8 +112,8 @@ func TestRefreshPipelinesQuarantineStoredConflictingConsensusID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load refreshed item: %v", err)
 			}
-			if item.ImdbID != "tt10680614" || item.TmdbID != "103992" || item.TvdbID != "" {
-				t.Fatalf("refreshed IDs = imdb:%q tmdb:%q tvdb:%q, want disputed TVDB ID quarantined", item.ImdbID, item.TmdbID, item.TvdbID)
+			if item.ImdbID != "tt10680614" || item.TmdbID != "103992" || item.TvdbID != "352440" {
+				t.Fatalf("refreshed IDs = imdb:%q tmdb:%q tvdb:%q, want native TVDB ID 352440", item.ImdbID, item.TmdbID, item.TvdbID)
 			}
 		})
 	}

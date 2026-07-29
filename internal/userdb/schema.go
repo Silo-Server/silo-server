@@ -182,6 +182,16 @@ CREATE TABLE IF NOT EXISTS library_playback_preferences (
     PRIMARY KEY (profile_id, library_id)
 );
 
+CREATE TABLE IF NOT EXISTS profile_onboarding (
+    profile_id TEXT NOT NULL,
+    tour_id TEXT NOT NULL,
+    last_step TEXT NOT NULL DEFAULT '',
+    completed_at TEXT,
+    skipped_at TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (profile_id, tour_id)
+);
+
 CREATE TABLE IF NOT EXISTS user_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL

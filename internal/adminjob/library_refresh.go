@@ -118,11 +118,39 @@ func (l *PGLibraryRefreshItemLister) ListLibraryItems(ctx context.Context, libra
 					COALESCE(mi.tvdb_id, '') <> ''
 					OR COALESCE(mi.imdb_id, '') <> ''
 				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM stale_media_ids rejected_tmdb
+					WHERE rejected_tmdb.content_id = mi.content_id
+					  AND LOWER(TRIM(rejected_tmdb.provider)) = 'tmdb'
+					  AND TRIM(rejected_tmdb.provider_id) <> ''
+				)
 			)
 			OR EXISTS (
 				SELECT 1
 				FROM stale_media_ids smi
 				WHERE smi.content_id = mi.content_id
+				  AND LOWER(TRIM(smi.provider)) IN ('tmdb', 'tvdb', 'imdb')
+				  AND TRIM(smi.provider_id) <> ''
+				  AND (
+					LOWER(TRIM(COALESCE(mi.status, ''))) <> 'matched'
+					OR (
+						LOWER(TRIM(smi.provider)) = 'tmdb'
+						AND TRIM(smi.provider_id) = TRIM(COALESCE(mi.tmdb_id, ''))
+					)
+					OR (
+						LOWER(TRIM(smi.provider)) = 'tvdb'
+						AND TRIM(smi.provider_id) = TRIM(COALESCE(mi.tvdb_id, ''))
+					)
+					OR (
+						LOWER(TRIM(smi.provider)) = 'imdb'
+						AND LOWER(TRIM(smi.provider_id)) = LOWER(TRIM(COALESCE(mi.imdb_id, '')))
+					)
+					OR LOWER(TRIM(mi.content_id)) =
+						'movie-' || LOWER(TRIM(smi.provider)) || '-' || LOWER(TRIM(smi.provider_id))
+					OR LOWER(TRIM(mi.content_id)) =
+						'series-' || LOWER(TRIM(smi.provider)) || '-' || LOWER(TRIM(smi.provider_id))
+				  )
 			)
 			OR (
 				COALESCE(mi.default_metadata_language, '') <> ''

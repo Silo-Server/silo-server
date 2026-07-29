@@ -8,9 +8,9 @@ describe("toMediaTime / toPlayerTime", () => {
     expect(toPlayerTime(3060, 3000)).toBe(60);
   });
 
-  it("never returns a negative time", () => {
+  it("preserves an out-of-window target before the stream origin", () => {
     expect(toMediaTime(-10, 0)).toBe(0);
-    expect(toPlayerTime(10, 3000)).toBe(0);
+    expect(toPlayerTime(10, 3000)).toBe(-2990);
   });
 });
 

@@ -302,6 +302,18 @@ type SettingEntry struct {
 	Value string `json:"value"`
 }
 
+// OnboardingState is one profile's progress through one onboarding tour.
+// Timestamps are RFC3339 strings, empty when unset, matching the store's
+// other per-profile tables.
+type OnboardingState struct {
+	ProfileID   string
+	TourID      string
+	LastStep    string
+	CompletedAt string
+	SkippedAt   string
+	UpdatedAt   string
+}
+
 // SectionOverride represents a per-profile section customization.
 type SectionOverride struct {
 	ID          string
