@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/virtual-playback-upstream
+      - feat/virtual-playback-greenfield
   workflow_dispatch:
 
 concurrency:
