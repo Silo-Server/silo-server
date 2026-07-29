@@ -14,6 +14,8 @@ import {
   initialConfigValues,
   needsConnectionStep,
   needsDeliveryChoice,
+  parseConfigValues,
+  serializeConfigValues,
 } from "./sourceDescriptor";
 
 function available(descriptor?: Partial<AutoscanScanSourceDescriptor>): AutoscanAvailableSource {
@@ -153,11 +155,74 @@ describe("initialConfigValues", () => {
         ],
       },
     });
-    expect(got).toEqual({ a: "x", b: "2" });
+    // Values stay typed here; stringifying happens once, at submit.
+    expect(got).toEqual({ a: "x", b: 2 });
   });
 
   it("returns nothing for a source with no config form", () => {
     expect(initialConfigValues(DEFAULT_DESCRIPTOR)).toEqual({});
+  });
+});
+
+describe("serializeConfigValues / parseConfigValues", () => {
+  const descriptor: AutoscanScanSourceDescriptor = {
+    delivery_modes: ["poll"],
+    connection: "none",
+    config_form: {
+      fields: [
+        {
+          key: "on",
+          label: "On",
+          control: "SWITCH",
+          required: false,
+          secret: false,
+          multiline: false,
+        },
+        {
+          key: "tags",
+          label: "Tags",
+          control: "MULTI_SELECT",
+          required: false,
+          secret: false,
+          multiline: false,
+        },
+        {
+          key: "count",
+          label: "Count",
+          control: "NUMBER",
+          required: false,
+          secret: false,
+          multiline: false,
+        },
+      ],
+    },
+  };
+
+  // Stringifying on every change turned `false` into the truthy "false" (the
+  // switch re-rendered enabled) and an array into a join the renderer read back
+  // as no selection.
+  it("round-trips a false switch without flipping it", () => {
+    const stored = serializeConfigValues({ on: false });
+    expect(stored).toEqual({ on: "false" });
+    expect(parseConfigValues(descriptor, stored).on).toBe(false);
+  });
+
+  it("round-trips a multi-select as an array", () => {
+    const stored = serializeConfigValues({ tags: ["a", "b"] });
+    expect(stored).toEqual({ tags: "a,b" });
+    expect(parseConfigValues(descriptor, stored).tags).toEqual(["a", "b"]);
+  });
+
+  it("round-trips an empty multi-select", () => {
+    expect(parseConfigValues(descriptor, { tags: "" }).tags).toEqual([]);
+  });
+
+  it("round-trips a number", () => {
+    expect(parseConfigValues(descriptor, serializeConfigValues({ count: 4 })).count).toBe(4);
+  });
+
+  it("drops null and undefined rather than writing them as text", () => {
+    expect(serializeConfigValues({ a: null, b: undefined, c: "keep" })).toEqual({ c: "keep" });
   });
 });
 

@@ -1,4 +1,4 @@
-import type { AutoscanWebhookProvider, Library } from "@/api/types";
+import type { AutoscanPathRewrite, AutoscanWebhookProvider, Library } from "@/api/types";
 
 /**
  * The arr notification triggers Silo actually consumes.
@@ -93,8 +93,22 @@ export function settingsPathFor(provider: AutoscanWebhookProvider | "auto"): str
  * paths and the operator supplies the `from` side.
  */
 export interface MappingDraft {
+  /**
+   * Stable client-side identity for React keys. Rows are reorderable and
+   * removable, so keying on array index would remap DOM nodes by position and
+   * throw focus (and IME composition) into the wrong field mid-edit.
+   */
+  id: string;
   from: string;
   to: string;
+}
+
+let mappingSeq = 0;
+
+/** Build a draft row with a fresh client-side id. */
+export function newMapping(to = "", from = ""): MappingDraft {
+  mappingSeq += 1;
+  return { id: `map-${mappingSeq}`, from, to };
 }
 
 function libraryKind(type: string): "movie" | "tv" | "mixed" | null {
@@ -118,14 +132,22 @@ function libraryKind(type: string): "movie" | "tv" | "mixed" | null {
 /**
  * Collapse paths to their shared ancestors.
  *
- * The host applies rewrites by longest matching prefix at a segment boundary
- * (see applyRewrites in internal/autoscan/rewrite.go), so a rule for
- * `/mnt/media` already covers `/mnt/media/movies/80s` and everything else
- * beneath it. Emitting a row per library path is therefore pure noise: a real
- * library of 96 paths collapses to 4 roots, 85 of them under one.
+ * A rewrite replaces a matched prefix and keeps the remaining suffix verbatim
+ * (see applyRewrites in internal/autoscan/rewrite.go), so one rule for
+ * `/mnt/media` covers `/mnt/media/movies/80s` and everything else beneath it —
+ * but only when the arr-side tree mirrors the Silo-side tree below that point.
  *
- * Only paths that are genuinely nested under another are dropped — siblings
- * survive, because no rewrite rule would otherwise cover them.
+ * That holds when a single mount is involved, which is the common case: a real
+ * install here has 96 library paths across 2 mounts, so per-path rows would be
+ * 96 lines of near-identical noise. It does NOT hold when the operator has to
+ * supply different arr-side roots per branch (`/downloads/films` for movies,
+ * `/downloads/series` for TV) — collapsing those to one row would silently
+ * mis-map one of them.
+ *
+ * The seeded rows are a starting point, not a constraint: an operator whose arr
+ * exposes each branch under a different root can delete the collapsed row and
+ * add one per branch. `expandedRootsFor` supplies that breakdown so the editor
+ * can offer it rather than making them retype paths.
  */
 export function collapseToRoots(paths: readonly string[]): string[] {
   const cleaned = paths
@@ -136,8 +158,9 @@ export function collapseToRoots(paths: readonly string[]): string[] {
   if (unique.length === 0) return [];
 
   // Group by mount point — the first two segments, e.g. "/mnt/sharedrives".
-  // Paths under different mounts are genuinely different storage and must not
-  // be merged, but everything under one mount can share a single rewrite.
+  // Paths under different mounts are separate storage and must never merge,
+  // but one mount's tree is almost always exposed to the arr as a single
+  // remapped volume, so it needs one rule rather than one per leaf.
   const groups = new Map<string, string[]>();
   for (const path of unique) {
     const segments = path.split("/").filter(Boolean);
@@ -149,9 +172,42 @@ export function collapseToRoots(paths: readonly string[]): string[] {
 
   const roots: string[] = [];
   for (const [mount, members] of groups) {
+    // A lone member is left exactly as supplied — widening it would claim more
+    // of the filesystem than the operator actually configured.
     roots.push(members.length === 1 ? members[0]! : commonAncestor(members) || mount);
   }
   return roots;
+}
+
+/**
+ * The next level down from a collapsed root: the distinct child directories the
+ * supplied paths actually live under.
+ *
+ * A rewrite keeps the suffix after the matched prefix, so one row per mount is
+ * only correct while the arr sees the same tree below that point. When it does
+ * not — `/downloads/films` for movies but `/downloads/series` for TV — the
+ * operator needs a row per branch. Offering these lets the editor expand a
+ * collapsed row instead of asking them to retype the Silo side.
+ *
+ * Returns [] when there is nothing more specific to offer.
+ */
+export function expandedRootsFor(root: string, paths: readonly string[]): string[] {
+  const prefix = root.replace(/\/+$/, "");
+  const children = new Set<string>();
+
+  for (const path of paths) {
+    const cleaned = path.trim().replace(/\/+$/, "");
+    if (!cleaned.startsWith(`${prefix}/`)) continue;
+    const rest = cleaned
+      .slice(prefix.length + 1)
+      .split("/")
+      .filter(Boolean);
+    const next = rest[0];
+    if (next) children.add(`${prefix}/${next}`);
+  }
+
+  // One child is the same rule as the root, so it is not an alternative.
+  return children.size > 1 ? [...children] : [];
 }
 
 /**
@@ -199,7 +255,7 @@ export function seedMappings(
     }
   }
 
-  return collapseToRoots(paths).map((to) => ({ from: "", to }));
+  return collapseToRoots(paths).map((to) => newMapping(to));
 }
 
 /**
@@ -207,7 +263,7 @@ export function seedMappings(
  * configured" rather than an error, so an operator can leave one blank and
  * still save the rest.
  */
-export function usableMappings(drafts: readonly MappingDraft[]): MappingDraft[] {
+export function usableMappings(drafts: readonly MappingDraft[]): AutoscanPathRewrite[] {
   return drafts
     .map((draft) => ({ from: draft.from.trim(), to: draft.to.trim() }))
     .filter((draft) => draft.from.length > 0 && draft.to.length > 0);

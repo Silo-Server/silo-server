@@ -81,12 +81,14 @@ import {
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import SourceConfigForm from "./SourceConfigForm";
 import { ChoiceCard, StepTrail } from "./ChoiceCard";
-import InlineConnectionPicker from "./InlineConnectionPicker";
+import InlineConnectionPicker, { type ConnectionOption } from "./InlineConnectionPicker";
 import { sourceTargets } from "./sourceTargets";
 import { WebhookInstructions, WebhookMappingEditor } from "./WebhookSetupStep";
 import { hasUsableMapping, seedMappings, usableMappings, type MappingDraft } from "./webhookSetup";
 import {
   connectionIsMandatory,
+  parseConfigValues,
+  serializeConfigValues,
   connectionMatchesKinds,
   defaultDeliveryMode,
   DEFAULT_DESCRIPTOR,
@@ -143,17 +145,24 @@ interface RowEdit {
   connectionId: string; // "" means no connection
   intervalStr: string; // "" means use default
   rewrites: AutoscanPathRewrite[];
-  sourceConfig: Record<string, string>;
+  /** Typed while the renderer owns them; serialized only on save. */
+  sourceConfig: Record<string, unknown>;
   label: string;
+  /** False while a required or validated config field is unsatisfied. */
+  configValid: boolean;
 }
 
-function sourceToRowEdit(source: AutoscanSource): RowEdit {
+function sourceToRowEdit(
+  source: AutoscanSource,
+  descriptor: AutoscanScanSourceDescriptor,
+): RowEdit {
   return {
     connectionId: source.connection_id ?? "",
     intervalStr: source.poll_interval_seconds != null ? String(source.poll_interval_seconds) : "",
     rewrites: source.path_rewrites.map((r) => ({ ...r })),
-    sourceConfig: sourceConfigForEdit(source),
+    sourceConfig: parseConfigValues(descriptor, sourceConfigForEdit(source)),
     label: source.label ?? "",
+    configValid: true,
   };
 }
 
@@ -170,7 +179,14 @@ function isWebhookSource(source: AutoscanSource): boolean {
  */
 function webhookProviderOf(
   descriptor: AutoscanScanSourceDescriptor,
+  sourceConfig?: Record<string, string>,
 ): AutoscanWebhookProvider | "auto" {
+  // An explicit choice in the source's own config wins: the built-in descriptor
+  // advertises both arr kinds, so relying on it alone would always yield "auto"
+  // and show combined instructions even after the operator picked one.
+  const chosen = sourceConfig?.[WEBHOOK_PROVIDER_KEY];
+  if (chosen === "sonarr" || chosen === "radarr") return chosen;
+
   const kinds = descriptor.connection_kinds ?? [];
   if (kinds.length === 1 && (kinds[0] === "sonarr" || kinds[0] === "radarr")) {
     return kinds[0];
@@ -186,8 +202,8 @@ function absoluteWebhookURL(url: string): string {
 /**
  * Legacy source_config keys that were superseded by a newer key. Rows written
  * before the rename still carry the old key, so its lines are merged into the
- * new one when the editor loads. Both keys are sent back on save, which is what
- * lets an older plugin build keep reading its original key.
+ * new one when the editor loads and the old key is dropped — the first save
+ * from this editor migrates the row forward rather than carrying both.
  */
 const LEGACY_CONFIG_KEY_ALIASES: Record<string, string> = {
   movie_nested_paths: "movie_flat_paths",
@@ -703,7 +719,7 @@ function SourceRow({
   source: AutoscanSource;
   /** Setup contract for this source's capability; drives its config fields. */
   descriptor: AutoscanScanSourceDescriptor;
-  connectionOptions: Array<{ id: string; name: string }>;
+  connectionOptions: ConnectionOption[];
   pluginDisplayNames: Map<string, string>;
   globalPollInterval: number | null;
   onDelete: (source: AutoscanSource) => void;
@@ -711,7 +727,7 @@ function SourceRow({
 }) {
   const update = useUpdateAutoscanSource();
   const libraries = useAdminLibraries();
-  const [edit, setEdit] = useState<RowEdit>(() => sourceToRowEdit(source));
+  const [edit, setEdit] = useState<RowEdit>(() => sourceToRowEdit(source, descriptor));
   const [intervalError, setIntervalError] = useState(false);
 
   const isDirty =
@@ -731,7 +747,7 @@ function SourceRow({
       enabled: source.enabled,
       poll_interval_seconds: intervalVal,
       path_rewrites,
-      source_config: normalizeSourceConfig(edit.sourceConfig),
+      source_config: normalizeSourceConfig(serializeConfigValues(edit.sourceConfig)),
       label: edit.label.trim(),
       ...overrides,
     };
@@ -789,11 +805,11 @@ function SourceRow({
     });
   }
 
-  function handleSourceConfigSave(nextConfig?: Record<string, string>) {
+  function handleSourceConfigSave(nextConfig?: Record<string, unknown>) {
     const sourceConfig = nextConfig ?? edit.sourceConfig;
     update.mutate({
       id: source.id,
-      body: fullBody({ source_config: normalizeSourceConfig(sourceConfig) }),
+      body: fullBody({ source_config: normalizeSourceConfig(serializeConfigValues(sourceConfig)) }),
     });
   }
 
@@ -929,10 +945,20 @@ function SourceRow({
     </span>
   );
 
+  // Editing must respect the same contract the add flow enforced, or an
+  // operator can unbind a `required` source, bind an incompatible kind, or
+  // attach credentials to a `none` source right after creating it correctly.
+  const rowConnectionRequired = connectionIsMandatory(descriptor, source.delivery_mode);
+  const rowEligibleConnections = connectionOptions.filter((c) =>
+    connectionMatchesKinds(descriptor, c.kind),
+  );
+
   const connectionControl = isWebhook ? (
     <span className="text-muted-foreground text-xs">
       Not needed — Sonarr/Radarr deliver directly
     </span>
+  ) : !needsConnectionStep(descriptor, source.delivery_mode) ? (
+    <span className="text-muted-foreground text-xs">Not needed — reads locally</span>
   ) : source.connection_id === null && !edit.connectionId ? (
     <div className="flex max-w-full min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
       <Select value="__none__" onValueChange={handleConnectionChange}>
@@ -943,16 +969,23 @@ function SourceRow({
           <SelectValue placeholder="No connection" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__none__">— No connection —</SelectItem>
-          {connectionOptions.map((c) => (
+          {!rowConnectionRequired && <SelectItem value="__none__">— No connection —</SelectItem>}
+          {rowEligibleConnections.map((c) => (
             <SelectItem key={c.id} value={c.id}>
               {c.name}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <Badge variant="outline" className="text-muted-foreground w-fit shrink-0">
-        No connection
+      <Badge
+        variant="outline"
+        className={
+          rowConnectionRequired
+            ? "text-destructive w-fit shrink-0"
+            : "text-muted-foreground w-fit shrink-0"
+        }
+      >
+        {rowConnectionRequired ? "Connection required" : "No connection"}
       </Badge>
     </div>
   ) : (
@@ -964,8 +997,8 @@ function SourceRow({
         <SelectValue placeholder="No connection" />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="__none__">— No connection —</SelectItem>
-        {connectionOptions.map((c) => (
+        {!rowConnectionRequired && <SelectItem value="__none__">— No connection —</SelectItem>}
+        {rowEligibleConnections.map((c) => (
           <SelectItem key={c.id} value={c.id}>
             {c.name}
           </SelectItem>
@@ -990,19 +1023,29 @@ function SourceRow({
 
   // Per-source config, rendered from the capability's declared fields. Absent
   // for sources that declare none, which is why this can be null.
-  const sourceConfigEditor = descriptor.config_form?.fields?.length ? (
+  // The built-in webhook's provider field is rendered by WebhookEndpointSection
+  // above, so exclude it here rather than showing the same control twice.
+  const rowConfigFields = (descriptor.config_form?.fields ?? []).filter(
+    (field) => !(isWebhook && field.key === WEBHOOK_PROVIDER_KEY),
+  );
+
+  const sourceConfigEditor = rowConfigFields.length ? (
     <div className="border-border mt-3 space-y-3 rounded-md border p-3">
       <SourceConfigForm
-        descriptor={descriptor}
+        descriptor={{
+          ...descriptor,
+          config_form: { ...descriptor.config_form, fields: rowConfigFields },
+        }}
         values={edit.sourceConfig}
         onChange={(next) => setEdit((ed) => ({ ...ed, sourceConfig: next }))}
+        onValidityChange={(configValid) => setEdit((ed) => ({ ...ed, configValid }))}
         idPrefix={`source-config-${source.id}`}
       />
       <Button
         type="button"
         variant="outline"
         size="sm"
-        disabled={update.isPending}
+        disabled={update.isPending || !edit.configValid}
         onClick={() => handleSourceConfigSave()}
       >
         {update.isPending ? "Saving…" : "Save configuration"}
@@ -1021,6 +1064,9 @@ function SourceRow({
         isSaving={update.isPending}
       />
       {rewriteEditor}
+      {/* Webhook sources can carry declared config too — the built-in's provider
+          is handled above, but a plugin-supplied form must still render. */}
+      {sourceConfigEditor}
     </>
   ) : (
     <>
@@ -1160,7 +1206,10 @@ interface AddSourceForm {
   deliveryMode: AutoscanDeliveryMode | "";
   connectionId: string; // "" / "__none__" means no connection
   intervalStr: string;
-  sourceConfig: Record<string, string>;
+  /** Typed while the renderer owns them; serialized only on submit. */
+  sourceConfig: Record<string, unknown>;
+  /** False while a required or validated config field is unsatisfied. */
+  configValid: boolean;
   /** Webhook-only: arr path -> Silo path rows, seeded from library paths. */
   mappings: MappingDraft[];
 }
@@ -1171,6 +1220,7 @@ const BLANK_ADD_SOURCE: AddSourceForm = {
   connectionId: "",
   intervalStr: "",
   sourceConfig: {},
+  configValid: true,
   mappings: [],
 };
 
@@ -1312,7 +1362,7 @@ function AddSourceDialog({
         delivery_mode: deliveryMode,
         poll_interval_seconds: pollInterval,
         path_rewrites: isWebhookFlow ? usableMappings(form.mappings) : [],
-        source_config: normalizeSourceConfig(form.sourceConfig),
+        source_config: normalizeSourceConfig(serializeConfigValues(form.sourceConfig)),
       },
       {
         onSuccess: (created) => {
@@ -1352,7 +1402,10 @@ function AddSourceDialog({
     (!connectionRequired || Boolean(form.connectionId && form.connectionId !== "__none__")) &&
     // A webhook source with no mapping accepts deliveries and resolves nothing,
     // so require at least one before it can be created.
-    (!isWebhookFlow || hasUsableMapping(form.mappings));
+    (!isWebhookFlow || hasUsableMapping(form.mappings)) &&
+    // The host stores source_config without interpreting it, so a plugin's
+    // required/validated fields are only enforced here.
+    form.configValid;
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? onOpenChange(true) : close())}>
@@ -1374,7 +1427,7 @@ function AddSourceDialog({
             {createdWebhookSource.webhook_url ? (
               <WebhookInstructions
                 url={absoluteWebhookURL(createdWebhookSource.webhook_url)}
-                provider={webhookProviderOf(descriptor)}
+                provider={webhookProviderOf(descriptor, createdWebhookSource.source_config)}
               />
             ) : (
               <div className="border-destructive/30 bg-destructive/10 space-y-3 rounded-md border p-3">
@@ -1470,6 +1523,7 @@ function AddSourceDialog({
               <WebhookMappingEditor
                 mappings={form.mappings}
                 onChange={(mappings) => setForm((f) => ({ ...f, mappings }))}
+                libraryPaths={(libraries.data ?? []).flatMap((library) => library.paths ?? [])}
               />
             )}
 
@@ -1512,6 +1566,7 @@ function AddSourceDialog({
                 descriptor={descriptor}
                 values={form.sourceConfig}
                 onChange={(sourceConfig) => setForm((f) => ({ ...f, sourceConfig }))}
+                onValidityChange={(configValid) => setForm((f) => ({ ...f, configValid }))}
                 idPrefix="add-source-config"
               />
             )}
@@ -1563,6 +1618,7 @@ export default function SourcesPanel() {
     id: c.id,
     name: c.name,
     kind: c.kind,
+    requestIntegrationId: c.request_integration_id ?? null,
   }));
 
   const globalPollInterval = settings.data?.default_poll_interval_seconds ?? null;

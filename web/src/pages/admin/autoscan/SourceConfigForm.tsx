@@ -22,15 +22,25 @@ export function SourceConfigForm({
   values,
   onChange,
   idPrefix = "source-config",
+  onValidityChange,
 }: {
   descriptor: AutoscanScanSourceDescriptor;
-  values: Record<string, string>;
-  onChange: (next: Record<string, string>) => void;
+  /**
+   * Live form values, typed as the renderer produced them. Booleans and arrays
+   * stay boolean and array here: stringifying on every keystroke turned `false`
+   * into the truthy `"false"` (so a switch re-rendered enabled) and an array
+   * into a comma-joined string the renderer read back as no selection.
+   * Serialization to source_config happens once, at submit.
+   */
+  values: Record<string, unknown>;
+  onChange: (next: Record<string, unknown>) => void;
   idPrefix?: string;
+  /** Reports whether every required/validated field is satisfied. */
+  onValidityChange?: (valid: boolean) => void;
 }) {
   const libraries = useAdminLibraries();
   const form = descriptor.config_form;
-  const fields = configFields(descriptor);
+  const fields = useMemo(() => configFields(descriptor), [descriptor]);
 
   // Fields that can be populated from a host-known value, paired with what that
   // value currently is. Computed together so the button can be disabled when
@@ -59,15 +69,9 @@ export function SourceConfigForm({
       <SchemaForm
         descriptor={form}
         values={values}
-        onChange={(next) => {
-          const out: Record<string, string> = {};
-          for (const [key, value] of Object.entries(next)) {
-            if (value === undefined || value === null) continue;
-            out[key] = String(value);
-          }
-          onChange(out);
-        }}
+        onChange={onChange}
         idPrefix={idPrefix}
+        onValidityChange={onValidityChange}
       />
 
       {fillable.length > 0 && (

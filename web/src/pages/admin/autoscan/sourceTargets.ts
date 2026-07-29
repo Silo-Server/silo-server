@@ -95,11 +95,16 @@ export function sourceTargets(
     return { libraries: [], unresolvable: true };
   }
 
-  const matched = libraries.filter((library) =>
-    (library.paths ?? []).some((root) => {
-      const normalizedRoot = normalizePath(root);
-      return paths.some((path) => isWithin(path, normalizedRoot));
-    }),
+  // Disabled libraries are skipped by the scanner, so counting one as a target
+  // would present a source as correctly wired while every delivery it resolves
+  // there is dropped.
+  const matched = libraries.filter(
+    (library) =>
+      library.enabled &&
+      (library.paths ?? []).some((root) => {
+        const normalizedRoot = normalizePath(root);
+        return paths.some((path) => isWithin(path, normalizedRoot));
+      }),
   );
 
   // Paths exist but match no library root. Not "unresolvable" in the sense

@@ -32,7 +32,7 @@ func TestDescriptorFromMetadataDefaultsPreserveLegacyBehavior(t *testing.T) {
 func TestDescriptorFromMetadataReadsDeclaredContract(t *testing.T) {
 	got := DescriptorFromMetadata(map[string]any{
 		"scan_source": map[string]any{
-			"delivery_modes":     []any{"webhook"},
+			"delivery_modes":     []any{"poll"},
 			"connection":         "none",
 			"connection_kinds":   []any{"sonarr", "radarr"},
 			"emits_native_paths": true,
@@ -44,8 +44,8 @@ func TestDescriptorFromMetadataReadsDeclaredContract(t *testing.T) {
 	if got.Connection != ConnectionNone {
 		t.Errorf("connection = %q, want none", got.Connection)
 	}
-	if got.SupportsDeliveryMode(DeliveryModePoll) {
-		t.Errorf("delivery modes = %v, want webhook only", got.DeliveryModes)
+	if !got.SupportsDeliveryMode(DeliveryModePoll) {
+		t.Errorf("delivery modes = %v, want poll", got.DeliveryModes)
 	}
 	if !got.EmitsNativePaths {
 		t.Error("emits_native_paths not read")
@@ -55,6 +55,53 @@ func TestDescriptorFromMetadataReadsDeclaredContract(t *testing.T) {
 	}
 	if len(got.ConnectionKinds) != 2 {
 		t.Errorf("connection kinds = %v", got.ConnectionKinds)
+	}
+}
+
+// Webhook delivery is accepted only for the host's built-in ARR identity (see
+// resolveDeliveryMode). Honouring a plugin's claim would offer a setup option
+// whose every submission is rejected with HTTP 400.
+func TestDescriptorFromMetadataIgnoresPluginDeclaredWebhook(t *testing.T) {
+	got := DescriptorFromMetadata(map[string]any{
+		"scan_source": map[string]any{"delivery_modes": []any{"webhook"}},
+	})
+	if got.SupportsDeliveryMode(DeliveryModeWebhook) {
+		t.Errorf("delivery modes = %v, plugin-declared webhook must be dropped", got.DeliveryModes)
+	}
+	if !got.SupportsDeliveryMode(DeliveryModePoll) {
+		t.Errorf("delivery modes = %v, want fallback to poll", got.DeliveryModes)
+	}
+}
+
+// The built-in identity supplies its descriptor directly rather than through
+// the metadata parser, so its webhook mode survives.
+func TestBuiltinWebhookDescriptorKeepsWebhookMode(t *testing.T) {
+	if !BuiltinArrWebhookSource().Descriptor.SupportsDeliveryMode(DeliveryModeWebhook) {
+		t.Fatal("built-in ARR identity must keep webhook delivery")
+	}
+}
+
+// Secret-marked fields are dropped: source_config is plaintext JSONB, so a
+// masked input would misrepresent how the value is stored.
+func TestConfigFormDropsSecretFields(t *testing.T) {
+	got := DescriptorFromMetadata(map[string]any{
+		"config_schema": []any{
+			map[string]any{"key": "scan_source", "admin_form": map[string]any{
+				"fields": []any{
+					map[string]any{"key": "root", "label": "Root", "control": "TEXT"},
+					map[string]any{"key": "token", "label": "Token", "control": "PASSWORD"},
+					map[string]any{"key": "other", "label": "Other", "control": "TEXT", "secret": true},
+				},
+			}},
+		},
+	})
+	if got.ConfigForm == nil {
+		t.Fatal("expected the non-secret field to survive")
+	}
+	for _, field := range got.ConfigForm.Fields {
+		if field.Key != "root" {
+			t.Errorf("secret-bearing field %q must not be collected", field.Key)
+		}
 	}
 }
 
@@ -176,6 +223,16 @@ func TestApplyCompatibilityDescriptorDoesNotOverrideManifest(t *testing.T) {
 	}
 	if got.Summary != "Plugin's own words" {
 		t.Errorf("summary = %q, manifest must win over compat", got.Summary)
+	}
+}
+
+// Capability ids are author-chosen and not unique across plugins, so both parts
+// must match before CephFS's form is applied.
+func TestApplyCompatibilityDescriptorRequiresBothIdentifiers(t *testing.T) {
+	declared := DescriptorFromMetadata(nil)
+	got := ApplyCompatibilityDescriptor("com.example.other", cephFSCapabilityID, declared)
+	if got.ConfigForm != nil {
+		t.Error("a matching capability id alone must not apply the CephFS form")
 	}
 }
 

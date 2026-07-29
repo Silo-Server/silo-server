@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 import type { MappingDraft } from "./webhookSetup";
-import { settingsPathFor, triggersFor } from "./webhookSetup";
+import { expandedRootsFor, newMapping, settingsPathFor, triggersFor } from "./webhookSetup";
 
 /**
  * The copy-the-URL-into-your-arr half of webhook setup.
@@ -114,12 +114,30 @@ export function WebhookInstructions({
 export function WebhookMappingEditor({
   mappings,
   onChange,
+  libraryPaths = [],
 }: {
   mappings: MappingDraft[];
   onChange: (next: MappingDraft[]) => void;
+  /**
+   * Every library path the seeded rows were derived from. Used to offer a
+   * per-branch breakdown when a row was collapsed to a shared root but the
+   * operator's arr exposes those branches under different roots.
+   */
+  libraryPaths?: readonly string[];
 }) {
   function update(index: number, patch: Partial<MappingDraft>) {
     onChange(mappings.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  /** Replace a collapsed row with one row per child directory. */
+  function expand(index: number, children: string[]) {
+    const row = mappings[index];
+    if (!row) return;
+    onChange([
+      ...mappings.slice(0, index),
+      ...children.map((to) => newMapping(to, row.from)),
+      ...mappings.slice(index + 1),
+    ]);
   }
 
   return (
@@ -138,45 +156,60 @@ export function WebhookMappingEditor({
         </p>
       ) : (
         <div className="space-y-2">
-          {mappings.map((row, index) => (
-            <div key={index} className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <div className="min-w-0 flex-1 space-y-1">
-                <Label htmlFor={`map-from-${index}`} className="text-muted-foreground text-xs">
-                  Path your download manager reports
-                </Label>
-                <Input
-                  id={`map-from-${index}`}
-                  placeholder="/downloads/tv"
-                  className="font-mono text-xs"
-                  value={row.from}
-                  onChange={(e) => update(index, { from: e.target.value })}
-                />
+          {mappings.map((row, index) => {
+            const children = expandedRootsFor(row.to, libraryPaths);
+            return (
+              <div key={row.id} className="space-y-1">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Label htmlFor={`map-from-${index}`} className="text-muted-foreground text-xs">
+                      Path your download manager reports
+                    </Label>
+                    <Input
+                      id={`map-from-${index}`}
+                      placeholder="/downloads/tv"
+                      className="font-mono text-xs"
+                      value={row.from}
+                      onChange={(e) => update(index, { from: e.target.value })}
+                    />
+                  </div>
+                  <span className="text-muted-foreground hidden pb-2 text-xs sm:block">→</span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <Label htmlFor={`map-to-${index}`} className="text-muted-foreground text-xs">
+                      Path Silo uses
+                    </Label>
+                    <Input
+                      id={`map-to-${index}`}
+                      placeholder="/mnt/media/tv"
+                      className="font-mono text-xs"
+                      value={row.to}
+                      onChange={(e) => update(index, { to: e.target.value })}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Remove mapping ${index + 1}`}
+                    className="sm:mb-1"
+                    onClick={() => onChange(mappings.filter((_, i) => i !== index))}
+                  >
+                    <Trash2 className="text-destructive" />
+                  </Button>
+                </div>
+                {children.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground text-xs underline-offset-4 hover:underline"
+                    onClick={() => expand(index, children)}
+                  >
+                    Does your download manager use a different folder per type? Split into{" "}
+                    {children.length} rows
+                  </button>
+                )}
               </div>
-              <span className="text-muted-foreground hidden pb-2 text-xs sm:block">→</span>
-              <div className="min-w-0 flex-1 space-y-1">
-                <Label htmlFor={`map-to-${index}`} className="text-muted-foreground text-xs">
-                  Path Silo uses
-                </Label>
-                <Input
-                  id={`map-to-${index}`}
-                  placeholder="/mnt/media/tv"
-                  className="font-mono text-xs"
-                  value={row.to}
-                  onChange={(e) => update(index, { to: e.target.value })}
-                />
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Remove mapping ${index + 1}`}
-                className="sm:mb-1"
-                onClick={() => onChange(mappings.filter((_, i) => i !== index))}
-              >
-                <Trash2 className="text-destructive" />
-              </Button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -184,7 +217,7 @@ export function WebhookMappingEditor({
         type="button"
         variant="outline"
         size="sm"
-        onClick={() => onChange([...mappings, { from: "", to: "" }])}
+        onClick={() => onChange([...mappings, newMapping()])}
       >
         <Plus />
         Add a mapping

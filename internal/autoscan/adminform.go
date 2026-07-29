@@ -1,6 +1,9 @@
 package autoscan
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // AdminForm describes per-source configuration fields for a scan source, in the
 // same shape the admin UI's generic schema renderer already consumes for plugin
@@ -50,6 +53,7 @@ const (
 	ControlText     = "TEXT"
 	ControlTextarea = "TEXTAREA"
 	ControlSelect   = "SELECT"
+	ControlPassword = "PASSWORD"
 )
 
 // Fill sources the admin UI understands for AdminFormField.FillFrom.
@@ -111,8 +115,28 @@ func adminFormFromMetadata(value any) *AdminForm {
 	if err := json.Unmarshal(raw, &form); err != nil {
 		return nil
 	}
+	form.Fields = withoutSecretFields(form.Fields)
 	if len(form.Fields) == 0 {
 		return nil
 	}
 	return &form
+}
+
+// withoutSecretFields drops fields a plugin marked as holding a credential.
+//
+// A source's values land in autoscan_sources.source_config, which is plain
+// JSONB and is returned verbatim by the source API — unlike connection API
+// keys, which go through the repository's encrypted path. Rendering a masked
+// input over a value stored in the clear would misrepresent how it is held, so
+// the host declines to collect it at all. Plugins needing a credential should
+// take a connection instead.
+func withoutSecretFields(fields []AdminFormField) []AdminFormField {
+	kept := make([]AdminFormField, 0, len(fields))
+	for _, field := range fields {
+		if field.Secret || strings.EqualFold(field.Control, ControlPassword) {
+			continue
+		}
+		kept = append(kept, field)
+	}
+	return kept
 }

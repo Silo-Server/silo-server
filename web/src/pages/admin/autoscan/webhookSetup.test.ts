@@ -4,6 +4,8 @@ import type { Library } from "@/api/types";
 
 import {
   collapseToRoots,
+  expandedRootsFor,
+  newMapping,
   hasUsableMapping,
   seedMappings,
   settingsPathFor,
@@ -114,6 +116,32 @@ describe("collapseToRoots", () => {
   });
 });
 
+describe("expandedRootsFor", () => {
+  // A collapsed row assumes the arr mirrors Silo's tree below the root. When it
+  // does not (/downloads/films vs /downloads/series), the operator needs a row
+  // per branch — these are the branches the editor offers.
+  it("offers the distinct child directories under a collapsed root", () => {
+    expect(
+      expandedRootsFor("/mnt/media", [
+        "/mnt/media/movies/00s",
+        "/mnt/media/movies/10s",
+        "/mnt/media/tv/anime",
+      ]).sort(),
+    ).toEqual(["/mnt/media/movies", "/mnt/media/tv"]);
+  });
+
+  it("offers nothing when every path shares one child", () => {
+    // Splitting here would produce the same single rule, so it is not an option.
+    expect(
+      expandedRootsFor("/mnt/media", ["/mnt/media/movies/00s", "/mnt/media/movies/10s"]),
+    ).toEqual([]);
+  });
+
+  it("ignores paths outside the root", () => {
+    expect(expandedRootsFor("/mnt/media", ["/srv/other/movies", "/srv/other/tv"])).toEqual([]);
+  });
+});
+
 describe("seedMappings", () => {
   // These libraries all sit under /mnt/media, so each provider's selection
   // collapses to that single shared root — one row, not one per library.
@@ -176,15 +204,15 @@ describe("seedMappings", () => {
 describe("usableMappings", () => {
   it("keeps only rows with both sides filled", () => {
     const got = usableMappings([
-      { from: "/downloads/tv", to: "/mnt/media/tv" },
-      { from: "", to: "/mnt/media/movies" },
-      { from: "/downloads/movies", to: "" },
+      newMapping("/mnt/media/tv", "/downloads/tv"),
+      newMapping("/mnt/media/movies", ""),
+      newMapping("", "/downloads/movies"),
     ]);
     expect(got).toEqual([{ from: "/downloads/tv", to: "/mnt/media/tv" }]);
   });
 
   it("trims surrounding whitespace", () => {
-    expect(usableMappings([{ from: "  /a  ", to: "  /b  " }])).toEqual([{ from: "/a", to: "/b" }]);
+    expect(usableMappings([newMapping("  /b  ", "  /a  ")])).toEqual([{ from: "/a", to: "/b" }]);
   });
 });
 
@@ -192,15 +220,15 @@ describe("hasUsableMapping", () => {
   // A webhook source with no mapping accepts deliveries and resolves nothing —
   // the silent failure the guided flow exists to prevent.
   it("is false when every row is incomplete", () => {
-    expect(hasUsableMapping([{ from: "", to: "/mnt/media/tv" }])).toBe(false);
+    expect(hasUsableMapping([newMapping("/mnt/media/tv", "")])).toBe(false);
     expect(hasUsableMapping([])).toBe(false);
   });
 
   it("is true once one row is complete", () => {
     expect(
       hasUsableMapping([
-        { from: "", to: "/mnt/media/movies" },
-        { from: "/downloads/tv", to: "/mnt/media/tv" },
+        newMapping("/mnt/media/movies", ""),
+        newMapping("/mnt/media/tv", "/downloads/tv"),
       ]),
     ).toBe(true);
   });

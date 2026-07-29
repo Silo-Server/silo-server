@@ -2135,7 +2135,8 @@ export interface AutoscanAvailableSource {
   capability_id: string;
   display_name: string;
   description?: string;
-  descriptor: AutoscanScanSourceDescriptor;
+  /** Optional: an older server omits it, and descriptorFor falls back. */
+  descriptor?: AutoscanScanSourceDescriptor;
 }
 
 export interface AutoscanAvailableSourcesResponse {

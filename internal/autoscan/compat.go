@@ -134,7 +134,10 @@ func ApplyCompatibilityDescriptor(pluginID, capabilityID string, declared ScanSo
 // compatibilityDescriptor returns the stopgap descriptor for a known
 // first-party plugin, if one exists.
 func compatibilityDescriptor(pluginID, capabilityID string) (ScanSourceDescriptor, bool) {
-	if pluginID == cephFSPluginID || capabilityID == cephFSCapabilityID {
+	// Both must match. Capability ids are chosen by plugin authors and are not
+	// unique across plugins, so an OR here would hand CephFS's path/exclusion
+	// form to any unrelated plugin that happened to name a capability "cephfs".
+	if pluginID == cephFSPluginID && capabilityID == cephFSCapabilityID {
 		return cephFSCompatibilityDescriptor(), true
 	}
 	return ScanSourceDescriptor{}, false

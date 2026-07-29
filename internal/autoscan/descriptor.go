@@ -129,8 +129,15 @@ func DescriptorFromMetadata(metadata map[string]any) ScanSourceDescriptor {
 		valid := make([]string, 0, len(modes))
 		for _, m := range modes {
 			switch m := strings.ToLower(strings.TrimSpace(m)); m {
-			case DeliveryModePoll, DeliveryModeWebhook:
+			case DeliveryModePoll:
 				valid = append(valid, m)
+			case DeliveryModeWebhook:
+				// Deliberately dropped for plugin capabilities. Webhook delivery
+				// is only accepted for the host's built-in ARR identity (see
+				// resolveDeliveryMode in the autoscan handler), which supplies
+				// its descriptor directly rather than through this parser.
+				// Honouring a plugin's claim here would surface a setup option
+				// whose every submission ends in HTTP 400.
 			}
 		}
 		// Only adopt the declared list when at least one mode is understood;

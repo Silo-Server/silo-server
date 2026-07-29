@@ -96,11 +96,55 @@ export function configFields(descriptor: AutoscanScanSourceDescriptor): PluginAd
  */
 export function initialConfigValues(
   descriptor: AutoscanScanSourceDescriptor,
-): Record<string, string> {
-  const out: Record<string, string> = {};
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   for (const field of configFields(descriptor)) {
     if (field.default_value === undefined || field.default_value === null) continue;
-    out[field.key] = String(field.default_value);
+    out[field.key] = field.default_value;
+  }
+  return out;
+}
+
+/**
+ * Serialize a typed form draft into the string map `source_config` stores.
+ *
+ * Done once at submit rather than per keystroke: booleans and multi-selects
+ * must stay typed while the renderer owns them, or `false` round-trips as the
+ * truthy string "false" and an array collapses into an unreadable join.
+ */
+export function serializeConfigValues(values: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined || value === null) continue;
+    out[key] = Array.isArray(value) ? value.map(String).join(",") : String(value);
+  }
+  return out;
+}
+
+/** Values as the renderer wants them, from the string map the API returns. */
+export function parseConfigValues(
+  descriptor: AutoscanScanSourceDescriptor,
+  stored: Record<string, string>,
+): Record<string, unknown> {
+  const byKey = new Map(configFields(descriptor).map((field) => [field.key, field]));
+  const out: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(stored)) {
+    switch (byKey.get(key)?.control) {
+      case "SWITCH":
+        out[key] = value === "true";
+        break;
+      case "MULTI_SELECT":
+        out[key] = value ? value.split(",").filter(Boolean) : [];
+        break;
+      case "NUMBER": {
+        const parsed = Number(value);
+        out[key] = value !== "" && Number.isFinite(parsed) ? parsed : value;
+        break;
+      }
+      default:
+        out[key] = value;
+    }
   }
   return out;
 }

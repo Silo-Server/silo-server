@@ -23,6 +23,8 @@ export interface ConnectionOption {
   id: string;
   name: string;
   kind: string;
+  /** Set when this connection is a live link to a Requests integration. */
+  requestIntegrationId?: string | null;
 }
 
 /** Sentinel values for the picker's non-connection choices. */
@@ -74,10 +76,17 @@ export function InlineConnectionPicker({
   const [reuseId, setReuseId] = useState("");
   const [testResult, setTestResult] = useState<AutoscanConnectionTestResult | null>(null);
 
-  // Requests integrations this source could bind, minus any already saved as a
-  // connection — re-offering those would create a duplicate of the same server.
-  const linkedIntegrationIds = new Set(options.map((option) => option.id));
+  // Requests integrations this source could bind, minus any already linked by a
+  // saved connection — re-offering those would create a second connection to
+  // the same server. Compare integration ids, not connection ids: they are
+  // different identifier spaces, and mixing them matches nothing.
+  const linkedIntegrationIds = new Set(
+    options.map((option) => option.requestIntegrationId).filter(Boolean),
+  );
   const reusable = (requestIntegrations.data ?? []).filter((integration) => {
+    // A disabled integration is rejected at poll time, so binding one here
+    // would produce a connection that is known-unusable the moment it is made.
+    if (!integration.enabled) return false;
     const kind = integrationKind(integration);
     if (!kind) return false;
     if (connectionKinds.length > 0 && !connectionKinds.includes(kind)) return false;
