@@ -118,14 +118,34 @@ func (r *ProviderIDRepository) AttachTMDBID(ctx context.Context, contentID, item
 	}
 
 	var existingOwnerContentID string
-	err = tx.QueryRow(ctx, `
+	ownerQuery := `
 		SELECT content_id
 		FROM media_items
-		WHERE type = $1
-		  AND tmdb_id = $2
+		WHERE tmdb_id >= $2
+		  AND type = $1
 		  AND content_id <> $3
+		  AND (tmdb_id = $2 OR tmdb_id LIKE $2 || '-%')
 		LIMIT 1
-	`, itemType, tmdbText, contentID).Scan(&existingOwnerContentID)
+	`
+	ownerArgs := []any{itemType, tmdbText, contentID}
+	// Bound ordinary slug candidates with the existing tmdb_id index. A run of
+	// nines has no same-width numeric successor, so that rare boundary uses the
+	// lower-bounded predicate above rather than an empty lexical range.
+	tmdbUpper := strconv.FormatUint(uint64(tmdbID)+1, 10)
+	if len(tmdbUpper) == len(tmdbText) {
+		ownerQuery = `
+			SELECT content_id
+			FROM media_items
+			WHERE tmdb_id >= $1
+			  AND tmdb_id < $2
+			  AND type = $3
+			  AND content_id <> $4
+			  AND (tmdb_id = $1 OR tmdb_id LIKE $1 || '-%')
+			LIMIT 1
+		`
+		ownerArgs = []any{tmdbText, tmdbUpper, itemType, contentID}
+	}
+	err = tx.QueryRow(ctx, ownerQuery, ownerArgs...).Scan(&existingOwnerContentID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("checking tmdb id owner: %w", err)
 	}
